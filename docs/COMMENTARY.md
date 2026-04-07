@@ -16,6 +16,13 @@ You asked for a **single Coinbase truth** for prices, **Alpaca only for paper fi
 - **Sentiment feature hook** `FeaturePipeline.sentiment_features()` holds the three spec slots (FinBERT, frequency, shock) until NLP is wired.
 - **Streamlit** multipage shell: `control_plane/Home.py` + `pages/` for Live, Regimes, Routes, Models, Logs, Emergency — each page is thin until you bind QuestDB/Loki.
 
+## Rolling bars + risk modes (current batch)
+
+- **`RollingMinuteBars`**: 1m OHLCV from ticks per symbol; **`enrich_bars_last_row`** matches replay.
+- **Live**: merges Polars feature row with tick **overlay** (microstructure, memory placeholders).
+- **Replay**: cumulative raw OHLCV slice → same `enrich_bars_last_row` + `run_decision_tick`; tracks position from simulated trades.
+- **FLATTEN_ALL** / **REDUCE_ONLY**: position-aware via `position_signed_qty` (`Decimal`).
+
 ## Latest batch (queue continuation)
 
 - **`run_decision_tick`** is the single decision+risk step for **live** and **replay** (`decision_engine/run_step.py`).
@@ -28,7 +35,8 @@ You asked for a **single Coinbase truth** for prices, **Alpaca only for paper fi
 
 ## Honest gaps
 
-- **Coinbase live** signed orders; **TFT** PyTorch; **Polars rolling bars** in live; **Qdrant** real embeddings in the 60s loop; **FLATTEN** with positions; **Prefect**; **Grafana/Loki** wiring.
+- **Coinbase live** signed orders; **TFT** PyTorch; **Qdrant** real embeddings in the 60s loop; **Prefect**; **Grafana/Loki** wiring.
+- **Positions** in live are in-memory from simulated fills only until adapter reconciliation exists.
 
 ## How to use the issue log
 

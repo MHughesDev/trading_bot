@@ -35,6 +35,7 @@ class RiskEngine:
         current_total_exposure_usd: float = 0.0,
         feed_last_message_at: datetime | None = None,
         product_tradable: bool = True,
+        position_signed_qty: Decimal | None = None,
     ) -> tuple[TradeAction | None, RiskState]:
         """Return None if blocked; otherwise TradeAction for execution layer.
 
@@ -76,17 +77,48 @@ class RiskEngine:
         if dd > self._settings.risk_max_drawdown_pct:
             return None, risk
 
-        if proposal is None:
-            return None, risk
-
         if not product_tradable:
             return None, risk
 
         mode = risk.mode
-        if mode == SystemMode.MAINTENANCE or mode == SystemMode.FLATTEN_ALL:
+        if mode == SystemMode.MAINTENANCE:
             return None, risk
+
+        pos = position_signed_qty if position_signed_qty is not None else Decimal(0)
+
+        if mode == SystemMode.FLATTEN_ALL:
+            if pos == 0:
+                return None, risk
+            qty_close = abs(pos)
+            side_close = OrderSide.SELL if pos > 0 else OrderSide.BUY
+            rid = proposal.route_id if proposal else RouteId.NO_TRADE
+            return (
+                TradeAction(
+                    symbol=symbol,
+                    side=side_close.value,
+                    quantity=qty_close,
+                    order_type="market",
+                    limit_price=None,
+                    stop_price=None,
+                    time_in_force="gtc",
+                    route_id=rid,
+                ),
+                risk,
+            )
+
+        if proposal is None:
+            return None, risk
+
         if mode == SystemMode.PAUSE_NEW_ENTRIES:
             return None, risk
+
+        if mode == SystemMode.REDUCE_ONLY:
+            if pos == 0:
+                return None, risk
+            if pos > 0 and proposal.direction > 0:
+                return None, risk
+            if pos < 0 and proposal.direction < 0:
+                return None, risk
 
         notional = proposal.size_fraction * self._settings.risk_max_per_symbol_usd
         if notional > self._settings.risk_max_per_symbol_usd:
@@ -99,9 +131,13 @@ class RiskEngine:
             return None, risk
 
         side = OrderSide.BUY if proposal.direction > 0 else OrderSide.SELL
-        if mode == SystemMode.REDUCE_ONLY and proposal.route_id != RouteId.NO_TRADE:
-            # reduce-only: only allow closes — V1 stub: block new risk-increasing trades
-            return None, risk
+        if mode == SystemMode.REDUCE_ONLY and pos != 0:
+            if pos > 0 and side == OrderSide.SELL:
+                qty = min(qty, pos)
+            elif pos < 0 and side == OrderSide.BUY:
+                qty = min(qty, abs(pos))
+            if qty <= 0:
+                return None, risk
 
         action = TradeAction(
             symbol=symbol,

@@ -8,10 +8,12 @@ When multiple constraints could block a trade, `RiskEngine.evaluate` applies che
 | 2 | **Data timestamp age** | `data_timestamp` vs `NM_RISK_STALE_DATA_SECONDS` |
 | 3 | **Spread** | `spread_bps` vs `NM_RISK_MAX_SPREAD_BPS` |
 | 4 | **Drawdown** | `current_drawdown_pct` vs `NM_RISK_MAX_DRAWDOWN_PCT` |
-| 5 | **No proposal** | `proposal is None` |
-| 6 | **System mode** | `MAINTENANCE`, `FLATTEN_ALL`, `PAUSE_NEW_ENTRIES` block new trades |
-| 7 | **Per-symbol / total exposure** | `NM_RISK_MAX_PER_SYMBOL_USD`, `NM_RISK_MAX_TOTAL_EXPOSURE_USD` |
-| 8 | **Quantity** | Rounded qty ≤ 0 |
-| 9 | **REDUCE_ONLY** | New risk-increasing trades blocked (position-aware closes still TODO) |
+| 5 | **No proposal** | `proposal is None` (skipped for `FLATTEN_ALL` when position ≠ 0) |
+| 6 | **MAINTENANCE** | Blocks all |
+| 7 | **FLATTEN_ALL** | If `position_signed_qty` ≠ 0, emits closing market action (ignores proposal) |
+| 8 | **PAUSE_NEW_ENTRIES** | Blocks when proposal exists |
+| 9 | **REDUCE_ONLY** | Blocks buys if long, blocks sells if short; caps qty to reduce position |
+| 10 | **Per-symbol / total exposure** | After mode checks |
+| 11 | **Quantity** | Rounded qty ≤ 0 |
 
 Live runtime should pass **`feed_last_message_at`** from `CoinbaseWebSocketClient.last_message_at` so a silent feed blocks before bar timestamps.

@@ -158,7 +158,7 @@ Embedding model version in payload; verify top-K + symbol + recency; backup note
 
 # Issue 8 — Features: Full pipeline in live path + schema_version parity with backtest
 
-**Status:** Pending
+**Status:** Completed
 
 ## Goal
 
@@ -166,13 +166,13 @@ Live loop uses `FeaturePipeline` + same code path as `backtesting/replay.py`.
 
 ## Acceptance
 
-- [x] `feature_row_from_tick` + microstructure/sentiment hooks in live path
-- [x] `tests/test_backtest_live_parity.py` — both import `run_decision_tick`
-- [ ] Polars rolling bar frame (scalar features only for now)
+- [x] `RollingMinuteBars` + `enrich_bars_last_row` in live; replay uses same helper on cumulative OHLCV
+- [x] `feature_schema_version` on enriched rows; tick overlay merged via `merge_feature_overlays`
+- [x] Parity tests import `run_decision_tick` + `enrich_bars_last_row` in both paths
 
 ## Refs
 
-`data_plane/features/pipeline.py`, `app/runtime/live_service.py`, `backtesting/replay.py`
+`data_plane/features/pipeline.py`, `app/runtime/live_service.py`, `backtesting/replay.py`, `decision_engine/feature_frame.py`
 
 ---
 
@@ -311,7 +311,7 @@ Tests assert `route_id`, `confidence`, `ranking`; action fields vs risk caps per
 
 # Issue 16 — Risk: Document limit precedence + implement FLATTEN / REDUCE_ONLY with positions
 
-**Status:** Not started
+**Status:** Pending
 
 ## Goal
 
@@ -319,8 +319,10 @@ Replace reduce-only stub with position-aware closes; document order when multipl
 
 ## Acceptance
 
-- [ ] FLATTEN_ALL issues closing orders per symbol
-- [ ] Tests for each `SystemMode`
+- [x] FLATTEN_ALL: full close market action when `position_signed_qty` ≠ 0
+- [x] REDUCE_ONLY: block adds; allow reduce side; cap qty to position
+- [x] `tests/test_risk_modes_position.py`; live loop tracks per-symbol position after fills
+- [ ] PAUSE / MAINTENANCE matrix tests; fetch real positions from adapter on startup
 
 ## Refs
 

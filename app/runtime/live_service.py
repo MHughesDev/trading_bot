@@ -13,8 +13,11 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from decimal import Decimal
+
 from app.config.settings import AppSettings, load_settings
 from app.contracts.risk import RiskState
+from data_plane.bars.rolling import RollingMinuteBars
 from data_plane.features.pipeline import FeaturePipeline
 from data_plane.ingest.coinbase_rest import CoinbaseRESTClient
 from data_plane.ingest.coinbase_ws import CoinbaseWebSocketClient
@@ -22,6 +25,7 @@ from data_plane.ingest.normalizers import OrderBookLevel2Snapshot, TickerSnapsho
 from data_plane.ingest.product_cache import ProductMetadataCache
 from data_plane.storage.questdb import QuestDBWriter
 from decision_engine.audit import decision_trace
+from decision_engine.feature_frame import enrich_bars_last_row, merge_feature_overlays
 from decision_engine.features_live import feature_row_from_tick
 from decision_engine.pipeline import DecisionPipeline
 from decision_engine.run_step import run_decision_tick
@@ -112,6 +116,9 @@ async def run_live_loop(
         _memory_tick_loop(mem, float(cfg.memory_retrieval_interval_seconds), mem_stop)
     )
 
+    rollers: dict[str, RollingMinuteBars] = {s: RollingMinuteBars(s) for s in syms}
+    positions: dict[str, Decimal] = {s: Decimal(0) for s in syms}
+
     n = 0
     try:
         async for msg in ws.stream_messages():
@@ -124,9 +131,20 @@ async def run_live_loop(
             if not symbol:
                 continue
 
-            feats = feature_row_from_tick(norm, memory=mem, pipeline=feature_pipeline)
+            px = float(getattr(norm, "price", 0.0) or 0.0)
+            ts = _tick_time(norm)
+            sz = float(getattr(norm, "size", 0.0) or 0.0) if isinstance(norm, TradeTick) else 0.0
+            rollers[symbol].on_tick(px, ts, sz)
+
+            overlay = feature_row_from_tick(norm, memory=mem, pipeline=feature_pipeline)
+            bar_df = rollers[symbol].bars_frame_with_partial()
+            bar_feats = enrich_bars_last_row(bar_df, feature_pipeline)
+            if bar_feats:
+                feats = merge_feature_overlays(bar_feats, overlay)
+            else:
+                feats = overlay
             spread_bps = _infer_spread_bps(norm)
-            data_ts = _tick_time(norm)
+            data_ts = ts
             tradable = product_cache.is_tradable(symbol) if product_cache else True
 
             regime, fc, route, proposal, trade, risk_state = run_decision_tick(
@@ -136,10 +154,11 @@ async def run_live_loop(
                 risk_state=risk_state,
                 pipeline=pipeline,
                 risk_engine=risk_engine,
-                mid_price=float(feats.get("close", 1.0)) or 1.0,
+                mid_price=float(feats.get("close", px)) or px or 1.0,
                 data_timestamp=data_ts,
                 feed_last_message_at=ws.last_message_at,
                 product_tradable=tradable,
+                position_signed_qty=positions.get(symbol, Decimal(0)),
             )
 
             oid = str(uuid.uuid4())
@@ -166,6 +185,11 @@ async def run_live_loop(
             if trade and intent:
                 try:
                     await exec_svc.submit_order(intent)
+                    q = Decimal(str(trade.quantity))
+                    if trade.side == "buy":
+                        positions[symbol] = positions.get(symbol, Decimal(0)) + q
+                    else:
+                        positions[symbol] = positions.get(symbol, Decimal(0)) - q
                 except Exception:
                     logger.exception("submit_order failed")
 

@@ -42,8 +42,8 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 
 ## 4. Feature pipeline & memory
 
-- [x] **Parity (partial):** `run_decision_tick` shared; `test_backtest_live_parity`; Polars bar frame TBD
-- [x] **Live features (partial):** `feature_row_from_tick` microstructure + sentiment placeholders
+- [x] **Parity:** `run_decision_tick` + `enrich_bars_last_row` (live rolling minute bars + replay cumulative window)
+- [x] **Live features:** Polars pipeline on rolling bars + tick overlay (`feature_schema_version`)
 - [x] **Memory (partial):** 60s asyncio task in live (placeholder mem dict); real Qdrant TBD
 
 ---
@@ -68,7 +68,7 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 
 - [x] **Precedence:** [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md)
 - [x] **Feed stale:** `feed_last_message_at` + `nm_feed_stale_blocks_total`
-- [ ] **System modes:** FLATTEN / REDUCE_ONLY position-aware
+- [x] **System modes (partial):** FLATTEN_ALL + REDUCE_ONLY position-aware; adapter reconcile TBD
 
 ---
 
