@@ -9,8 +9,7 @@ MonsterTrader is a single-file Python cryptocurrency trading bot (`main.py`) tha
 ### Dependencies
 
 - Python 3.12+ (pre-installed in the VM)
-- `alpaca-py` and `python-dotenv` — installed via `pip install alpaca-py python-dotenv`
-- `pytz` is a transitive dependency that may need explicit install if not pulled in automatically
+- Install via `pip install -r requirements.txt` (includes `alpaca-py` and `python-dotenv`)
 
 ### Running the application
 
