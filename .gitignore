@@ -1,2 +1,27 @@
 # Environment variables
 .env
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Packaging
+*.egg-info/
+.venv/
+venv/
+
+# Runtime artifacts
+logs/
+artifacts/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE / OS
+.DS_Store

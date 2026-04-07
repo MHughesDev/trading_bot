@@ -1,0 +1,138 @@
+version: "3.9"
+
+name: nautilus-monster
+
+services:
+  runtime:
+    image: python:3.12-slim
+    container_name: nautilus-runtime
+    restart: unless-stopped
+    working_dir: /app
+    command: bash -lc "pip install -q -e . && python main.py"
+    volumes:
+      - ./:/app
+    depends_on:
+      - redis
+      - questdb
+      - qdrant
+
+  questdb:
+    image: questdb/questdb:8.2.2
+    container_name: nautilus-questdb
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9009:9009"
+      - "8812:8812"
+      - "9003:9003"
+    volumes:
+      - questdb_data:/var/lib/questdb
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: nautilus-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    container_name: nautilus-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.20.2
+    container_name: nautilus-mlflow
+    restart: unless-stopped
+    command:
+      - mlflow
+      - server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --backend-store-uri
+      - sqlite:///mlflow.db
+      - --default-artifact-root
+      - /mlruns
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlruns
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: nautilus-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: nautilus-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infra/loki-config.yml:/etc/loki/local-config.yaml:ro
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: nautilus-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+      - loki
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+  api:
+    image: python:3.12-slim
+    container_name: nautilus-api
+    restart: unless-stopped
+    working_dir: /app
+    command: bash -lc "pip install -q -e . && uvicorn control_plane.api:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ./:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+      - questdb
+      - qdrant
+
+  dashboard:
+    image: python:3.12-slim
+    container_name: nautilus-dashboard
+    restart: unless-stopped
+    working_dir: /app
+    command: bash -lc "pip install -q -e . && streamlit run control_plane/dashboard.py --server.port 8501 --server.address 0.0.0.0"
+    volumes:
+      - ./:/app
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+
+volumes:
+  questdb_data:
+  redis_data:
+  qdrant_data:
+  mlflow_data:
+  grafana_data:
