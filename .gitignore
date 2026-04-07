@@ -2,5 +2,14 @@
 .env
 
 # Python
+.venv/
 __pycache__/
 *.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# Local tooling
+*.local

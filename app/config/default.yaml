@@ -1,0 +1,65 @@
+# NautilusMonster V3 — default configuration (override with NM_* env or file path)
+
+execution:
+  mode: paper # paper | live
+  live_adapter: coinbase
+  paper_adapter: alpaca
+
+market_data:
+  provider: coinbase
+  symbols:
+    - BTC-USD
+    - ETH-USD
+    - SOL-USD
+
+memory:
+  qdrant_collection: news_context_memory
+  retrieval_interval_seconds: 60
+  top_k: 10
+
+risk:
+  max_total_exposure_usd: 100000
+  max_per_symbol_usd: 40000
+  max_drawdown_pct: 0.15
+  max_spread_bps: 50
+  stale_data_seconds: 120
+
+features:
+  return_windows: [1, 3, 5, 15]
+  volatility_windows: [5, 15, 60]
+
+backtesting:
+  slippage_bps: 5.0
+
+routing:
+  # Deterministic route selector (spec §9) — thresholds in config, not code magic numbers
+  spread_trade_max_bps: 30.0
+  forecast_strength_min: 0.001
+  score_weights:
+    scalping_forecast: 3.0
+    intraday_forecast: 2.0
+    swing_forecast: 2.0
+    spread_penalty_per_bp: 0.01
+
+redis:
+  bar_ttl_seconds: 86400
+
+sentiment:
+  # FinBERT etc. wired in orchestration; V1 uses neutral stub if no model
+  use_finbert: false
+
+control_plane:
+  host: "0.0.0.0"
+  port: 8000
+
+observability:
+  log_level: INFO
+  metrics_port: 8000
+
+questdb:
+  # NM_QUESTDB_PERSIST_DECISION_TRACES=true to write JSON traces from live_service
+  persist_decision_traces: false
+
+# Set NM_RISK_SIGNING_SECRET in production so only RiskEngine-signed OrderIntents execute.
+# NM_ALLOW_UNSIGNED_EXECUTION=true only for local dev without secrets.
+# NM_CONTROL_PLANE_API_KEY protects POST /params, /system/mode, /flatten (header X-API-Key).
