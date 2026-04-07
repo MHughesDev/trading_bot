@@ -41,3 +41,5 @@ See Master Spec V3: `app/` (runtime, contracts, config), `data_plane/`, `models/
 ## Production hardening (Master Spec checklist)
 
 Track remaining work toward full spec compliance in [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md) (checkboxes, no external tracker required).
+
+**GitHub issues:** copy/paste titles and bodies from [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md), or run locally (token with `issues:write`): `bash scripts/create_github_issues.sh`
