@@ -2,6 +2,8 @@
 
 Use this as the **single checklist** to reach full spec compliance. Check items off in PRs as you complete them.
 
+**GitHub-style issue log (1–31 + epic):** [`ISSUE_LOG.md`](ISSUE_LOG.md)
+
 **Epic goal:** Behavior matches Master Spec V3: Coinbase-only market data, Alpaca paper / Coinbase live execution, identical decision path for paper and live, risk engine as final authority, auditable actions, no auto model promotion, backtest ≈ live.
 
 ---

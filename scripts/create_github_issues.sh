@@ -22,7 +22,7 @@ create() {
 
 create "Epic: Master Spec V3 — remaining work" "Parent tracker for NautilusMonster V3 spec compliance. Close when child issues are done and \`docs/PRODUCTION_HARDENING.md\` is fully checked.
 
-See: \`docs/PRODUCTION_HARDENING.md\` and \`docs/GITHUB_ISSUES.md\`"
+See: \`docs/PRODUCTION_HARDENING.md\` and \`docs/ISSUE_LOG.md\`"
 
 create "Data: Wire Coinbase WS feed health to risk (stale data)" "## Goal
 Use \`CoinbaseWebSocketClient.last_message_at\` and feed gaps with \`NM_RISK_STALE_DATA_SECONDS\`.

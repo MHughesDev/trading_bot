@@ -42,4 +42,4 @@ See Master Spec V3: `app/` (runtime, contracts, config), `data_plane/`, `models/
 
 Track remaining work toward full spec compliance in [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md) (checkboxes, no external tracker required).
 
-**GitHub issues:** copy/paste titles and bodies from [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md), or run locally (token with `issues:write`): `bash scripts/create_github_issues.sh`
+**Spec backlog (GitHub-style markdown log):** [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md) — edit **Status** as you go. Optional: push to real GitHub issues via [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md) or `bash scripts/create_github_issues.sh` (requires `gh`).
