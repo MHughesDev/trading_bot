@@ -25,7 +25,7 @@ Parent tracker for NautilusMonster V3 spec compliance. Close when all work items
 
 # Issue 1 — Data: Wire Coinbase WS feed health to risk (stale data)
 
-**Status:** Pending
+**Status:** Completed
 
 ## Goal
 
@@ -33,8 +33,8 @@ Align live feed staleness with `NM_RISK_STALE_DATA_SECONDS` using `CoinbaseWebSo
 
 ## Acceptance
 
-- [ ] Risk blocks or mode reflects stale/disconnected WS before orders
-- [ ] Metric or log when feed exceeds threshold
+- [x] Risk blocks when `feed_last_message_at` age exceeds stale threshold (`risk_engine.engine`)
+- [x] Prometheus `nm_feed_stale_blocks_total` on feed-stale block
 
 ## Refs
 
@@ -44,7 +44,7 @@ Align live feed staleness with `NM_RISK_STALE_DATA_SECONDS` using `CoinbaseWebSo
 
 # Issue 2 — Data: Harden Coinbase REST (rate limits, errors, candles for V1 symbols)
 
-**Status:** Not started
+**Status:** Pending
 
 ## Goal
 
@@ -63,7 +63,7 @@ Production-ready REST client for candles/metadata: retries, rate limits, paginat
 
 # Issue 3 — Data: Normalizer tests from recorded Coinbase WS payloads
 
-**Status:** Not started
+**Status:** Pending
 
 ## Goal
 
@@ -71,8 +71,8 @@ Contract tests using real JSON fixtures; unknown messages increment metrics, nev
 
 ## Acceptance
 
-- [ ] Fixture files under `tests/fixtures/coinbase_ws/`
-- [ ] Tests cover ticker, trades, L2, candles paths in `normalizers.py`
+- [x] Fixture under `tests/fixtures/coinbase_ws/` (ticker sample)
+- [x] `test_normalizer_fixtures.py`; unknown messages increment `NORMALIZER_UNKNOWN`
 
 ## Refs
 
@@ -82,7 +82,7 @@ Contract tests using real JSON fixtures; unknown messages increment metrics, nev
 
 # Issue 4 — Data: Product metadata cache (tick size, min size, status)
 
-**Status:** Not started
+**Status:** Completed
 
 ## Goal
 
@@ -90,8 +90,8 @@ Cache Coinbase product metadata for sizing and filters.
 
 ## Acceptance
 
-- [ ] TTL/cache invalidation strategy
-- [ ] Used by risk or execution validation before submit
+- [x] TTL in `ProductMetadataCache` (default 300s)
+- [x] `product_tradable` passed into `RiskEngine` from `live_service`
 
 ## Refs
 
@@ -101,7 +101,7 @@ Cache Coinbase product metadata for sizing and filters.
 
 # Issue 5 — Storage: QuestDB production path (batch writes, retention, decision traces)
 
-**Status:** Not started
+**Status:** Pending
 
 ## Goal
 
@@ -109,8 +109,8 @@ Batched writes, retention policy, failure handling; persist `decision_trace` row
 
 ## Acceptance
 
-- [ ] Bars + decision_traces written from live path
-- [ ] Document backup/restore expectations in `docs/`
+- [x] `insert_decision_trace_dict` + `NM_QUESTDB_PERSIST_DECISION_TRACES` from live path
+- [ ] Batched bars + backup runbook (`docs/QUESTDB_TRACES.md` partial)
 
 ## Refs
 
@@ -166,8 +166,9 @@ Live loop uses `FeaturePipeline` + same code path as `backtesting/replay.py`.
 
 ## Acceptance
 
-- [ ] `live_service` builds Polars frame / feature row from bars
-- [ ] Shared function or import test prevents drift
+- [x] `feature_row_from_tick` + microstructure/sentiment hooks in live path
+- [x] `tests/test_backtest_live_parity.py` — both import `run_decision_tick`
+- [ ] Polars rolling bar frame (scalar features only for now)
 
 ## Refs
 
@@ -204,8 +205,8 @@ Implement spec §5 microstructure and sentiment; wire FinBERT when providers exi
 
 ## Acceptance
 
-- [ ] asyncio task in live runner
-- [ ] Aggregates match spec (similarity, sentiment, recency)
+- [x] asyncio task in `live_service` (`_memory_tick_loop` — placeholder zeros until Qdrant)
+- [ ] Real Qdrant embeddings + `run_memory_retrieval_loop` wired
 
 ## Refs
 
@@ -406,7 +407,7 @@ Replace skeleton `live_service` with WS→bars→features→models→risk→Exec
 
 # Issue 21 — Runtime: Graceful shutdown + documented flatten behavior
 
-**Status:** Not started
+**Status:** Pending
 
 ## Goal
 
@@ -414,8 +415,8 @@ SIGTERM handling; cancel tasks; optional flatten-on-shutdown policy.
 
 ## Acceptance
 
-- [ ] Documented in `docs/`
-- [ ] asyncio shutdown tested
+- [x] `docs/GRACEFUL_SHUTDOWN.md`
+- [ ] Signal handling tested in CI (optional)
 
 ## Refs
 
@@ -425,7 +426,7 @@ SIGTERM handling; cancel tasks; optional flatten-on-shutdown policy.
 
 # Issue 22 — Backtest: CI test — live and replay share decision/risk entrypoints
 
-**Status:** Not started
+**Status:** Completed
 
 ## Goal
 
@@ -475,7 +476,7 @@ Spec §14 dashboard pages wired to FastAPI + state.
 
 ## Refs
 
-`control_plane/dashboard.py`, `control_plane/api.py`
+`control_plane/Home.py`, `control_plane/pages/`, `control_plane/api.py`
 
 ---
 

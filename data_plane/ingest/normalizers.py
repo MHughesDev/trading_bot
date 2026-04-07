@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.contracts.events import BarEvent
+from observability.metrics import NORMALIZER_UNKNOWN
 
 
 class TickerSnapshot(BaseModel):
@@ -94,6 +95,9 @@ def normalize_ws_message(msg: dict[str, Any]) -> (
             volume_24h=float(msg["volume_24_h"]) if msg.get("volume_24_h") is not None else None,
             raw=msg,
         )
+    ch = (msg.get("channel") or "").lower()
+    if "heartbeat" not in ch:
+        NORMALIZER_UNKNOWN.inc()
     return None
 
 
@@ -109,12 +113,14 @@ def _from_ticker_event(ev: dict[str, Any], parent: dict[str, Any]) -> TickerSnap
         if not pid or price is None:
             continue
         tm = _parse_time(t.get("time")) or _parse_time(ev.get("time")) or datetime.now(UTC)
+        bid = t.get("bid") if t.get("bid") is not None else t.get("best_bid")
+        ask = t.get("ask") if t.get("ask") is not None else t.get("best_ask")
         return TickerSnapshot(
             symbol=str(pid),
             price=float(price),
             time=tm,
-            bid=float(t["bid"]) if t.get("bid") is not None else None,
-            ask=float(t["ask"]) if t.get("ask") is not None else None,
+            bid=float(bid) if bid is not None else None,
+            ask=float(ask) if ask is not None else None,
             volume_24h=float(t["volume_24_h"]) if t.get("volume_24_h") is not None else None,
             raw={**parent, "event": ev},
         )

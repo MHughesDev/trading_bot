@@ -1,0 +1,24 @@
+{
+  "channel": "ticker",
+  "client_id": "",
+  "timestamp": "2024-01-01T00:00:00Z",
+  "sequence_num": 0,
+  "events": [
+    {
+      "type": "snapshot",
+      "tickers": [
+        {
+          "type": "snapshot",
+          "product_id": "BTC-USD",
+          "price": "50000",
+          "volume_24_h": "100",
+          "low_24_h": "49000",
+          "high_24_h": "51000",
+          "price_percent_chg_24_h": "0.01",
+          "best_bid": "49999",
+          "best_ask": "50001"
+        }
+      ]
+    }
+  ]
+}

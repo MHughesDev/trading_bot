@@ -67,6 +67,7 @@ class AppSettings(BaseSettings):
     questdb_user: str = "admin"
     questdb_password: str = "quest"
     questdb_database: str = "qdb"
+    questdb_persist_decision_traces: bool = False
 
     redis_url: str = "redis://localhost:6379/0"
 
@@ -140,6 +141,10 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     if "observability" in cfg:
         ob = cfg["observability"] or {}
         out["observability_log_level"] = ob.get("log_level", "INFO")
+    if "questdb" in cfg:
+        qd = cfg["questdb"] or {}
+        if "persist_decision_traces" in qd:
+            out["questdb_persist_decision_traces"] = qd["persist_decision_traces"]
     return out
 
 

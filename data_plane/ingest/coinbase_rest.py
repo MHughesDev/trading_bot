@@ -8,6 +8,7 @@ https://docs.cdp.coinbase.com/advanced-trade/docs/rest-api
 from __future__ import annotations
 
 import logging
+import random
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,6 +26,8 @@ class CoinbaseRESTSettings(BaseSettings):
 
     base_url: str = DEFAULT_BASE
     timeout_seconds: float = 30.0
+    max_retries: int = 4
+    retry_backoff_base_seconds: float = 0.5
 
 
 class CoinbaseProduct(BaseModel):
@@ -58,8 +61,49 @@ class CoinbaseRESTClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    async def _request_with_retry(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        import asyncio
+
+        retryable = {429, 500, 502, 503, 504}
+        last_err: BaseException | None = None
+        for attempt in range(self._settings.max_retries):
+            try:
+                r = await self._client.request(method, url, **kwargs)
+                if r.status_code in retryable:
+                    last_err = httpx.HTTPStatusError(
+                        f"HTTP {r.status_code}", request=r.request, response=r
+                    )
+                    if attempt == self._settings.max_retries - 1:
+                        break
+                    delay = self._settings.retry_backoff_base_seconds * (2**attempt)
+                    delay += random.uniform(0, 0.1 * delay)
+                    logger.warning(
+                        "Coinbase REST retry %s/%s status=%s",
+                        attempt + 1,
+                        self._settings.max_retries,
+                        r.status_code,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                return r
+            except httpx.TransportError as e:
+                last_err = e
+                if attempt == self._settings.max_retries - 1:
+                    break
+                delay = self._settings.retry_backoff_base_seconds * (2**attempt)
+                delay += random.uniform(0, 0.1 * delay)
+                logger.warning(
+                    "Coinbase REST retry %s/%s transport %s",
+                    attempt + 1,
+                    self._settings.max_retries,
+                    e,
+                )
+                await asyncio.sleep(delay)
+        assert last_err is not None
+        raise last_err
+
     async def list_products(self, limit: int = 250) -> list[CoinbaseProduct]:
-        r = await self._client.get("/products", params={"limit": limit})
+        r = await self._request_with_retry("GET", "/products", params={"limit": limit})
         r.raise_for_status()
         body = r.json()
         products = body.get("products") or body.get("data") or []
@@ -95,7 +139,7 @@ class CoinbaseRESTClient:
             "granularity": str(granularity_seconds),
         }
         path = f"/products/{product_id}/candles"
-        r = await self._client.get(path, params=params)
+        r = await self._request_with_retry("GET", path, params=params)
         r.raise_for_status()
         body = r.json()
         candles_raw = body.get("candles") or body.get("data") or body

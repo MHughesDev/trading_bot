@@ -8,6 +8,7 @@ import polars as pl
 
 from app.contracts.risk import RiskState
 from decision_engine.pipeline import DecisionPipeline
+from decision_engine.run_step import run_decision_tick
 from risk_engine.engine import RiskEngine
 
 
@@ -31,13 +32,14 @@ def replay_decisions(
             dt = ts
         else:
             dt = None
-        regime, fc, route, action = pipeline.step(symbol, feats, spread_bps, risk)
-        trade, risk = risk_engine.evaluate(
-            symbol,
-            action,
-            risk,
-            mid_price=float(row.get("close", 1.0)),
+        regime, fc, route, action, trade, risk = run_decision_tick(
+            symbol=symbol,
+            feature_row=feats,
             spread_bps=spread_bps,
+            risk_state=risk,
+            pipeline=pipeline,
+            risk_engine=risk_engine,
+            mid_price=float(row.get("close", 1.0)),
             data_timestamp=dt,
         )
         rows_out.append(

@@ -42,4 +42,4 @@ See Master Spec V3: `app/` (runtime, contracts, config), `data_plane/`, `models/
 
 Track remaining work toward full spec compliance in [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md) (checkboxes, no external tracker required).
 
-**Spec backlog:** [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md) — statuses **Not started** / **Pending** / **Completed**. Optional GitHub: [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md). **Narrative:** [`docs/COMMENTARY.md`](docs/COMMENTARY.md).
+**Spec backlog:** [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md) — statuses **Not started** / **Pending** / **Completed**. Optional GitHub: [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md). **Narrative:** [`docs/COMMENTARY.md`](docs/COMMENTARY.md). **Risk precedence:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md).

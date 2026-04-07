@@ -16,13 +16,19 @@ You asked for a **single Coinbase truth** for prices, **Alpaca only for paper fi
 - **Sentiment feature hook** `FeaturePipeline.sentiment_features()` holds the three spec slots (FinBERT, frequency, shock) until NLP is wired.
 - **Streamlit** multipage shell: `control_plane/Home.py` + `pages/` for Live, Regimes, Routes, Models, Logs, Emergency — each page is thin until you bind QuestDB/Loki.
 
-## Honest gaps (still “Not started” or shallow)
+## Latest batch (queue continuation)
 
-- **Coinbase live orders** remain unsigned / stub until CDP JWT work is done.
-- **TFT** is still a **Ridge surrogate** in code; the spec says TFT — either implement PyTorch TFT or keep an explicit deviation note in `docs/` and in the issue log.
-- **QuestDB** decision traces are **logged**, not yet **inserted** on every tick in the live runner.
-- **Prefect + MLflow** nightly flow is still a stub file; promotion must stay manual when you turn automation on.
-- **Grafana/Loki** are in compose but not fully wired to app config in code.
+- **`run_decision_tick`** is the single decision+risk step for **live** and **replay** (`decision_engine/run_step.py`).
+- **`RiskEngine`** checks **`feed_last_message_at`** first (before bar timestamp); **`nm_feed_stale_blocks_total`** counter.
+- **Coinbase REST** retries with exponential backoff on 429/5xx.
+- **`ProductMetadataCache`** + **`product_tradable`** gate in risk; **`live_service`** wires both.
+- **QuestDB:** enable **`NM_QUESTDB_PERSIST_DECISION_TRACES`** to persist full JSON traces (`docs/QUESTDB_TRACES.md`).
+- **Live loop:** `FeaturePipeline` + **`feature_row_from_tick`**, 60s memory **placeholder** task, SIGINT/SIGTERM stop (`docs/GRACEFUL_SHUTDOWN.md`).
+- **Tests:** feed-stale risk, normalizer fixture, backtest/live parity imports.
+
+## Honest gaps
+
+- **Coinbase live** signed orders; **TFT** PyTorch; **Polars rolling bars** in live; **Qdrant** real embeddings in the 60s loop; **FLATTEN** with positions; **Prefect**; **Grafana/Loki** wiring.
 
 ## How to use the issue log
 

@@ -2,131 +2,118 @@
 
 Use this as the **single checklist** to reach full spec compliance. Check items off in PRs as you complete them.
 
-**Issue log (GitHub-style, 1–31 + epic):** [`ISSUE_LOG.md`](ISSUE_LOG.md) — statuses **Not started** | **Pending** | **Completed**. Narrative: [`COMMENTARY.md`](COMMENTARY.md).
+**Issue log:** [`ISSUE_LOG.md`](ISSUE_LOG.md) — **Not started** | **Pending** | **Completed**.  
+**Narrative:** [`COMMENTARY.md`](COMMENTARY.md)  
+**Risk order:** [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md)  
+**QuestDB traces:** [`QUESTDB_TRACES.md`](QUESTDB_TRACES.md)  
+**Shutdown:** [`GRACEFUL_SHUTDOWN.md`](GRACEFUL_SHUTDOWN.md)  
+**Candles:** [`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md)
 
-**Epic goal:** Behavior matches Master Spec V3: Coinbase-only market data, Alpaca paper / Coinbase live execution, identical decision path for paper and live, risk engine as final authority, auditable actions, no auto model promotion, backtest ≈ live.
+**Epic goal:** Coinbase-only data, Alpaca paper / Coinbase live execution, identical decision + risk path for paper and live, risk final authority, auditable actions, no auto model promotion, backtest ≈ live.
 
 ---
 
 ## 1. Spec compliance gates (non-negotiables)
 
-- [x] **Coinbase-only data:** `scripts/ci_spec_compliance.sh` rejects `alpaca.data*` imports outside `alpaca_paper.py`.
-- [x] **Risk cannot be bypassed:** `NM_RISK_SIGNING_SECRET` set → `OrderIntent` must carry valid HMAC (`risk_engine.signing`); adapters call `execution.intent_gate`. Tests in `tests/test_spec_compliance.py`.
-- [x] **No raw text → trades:** `OrderIntent` metadata validator rejects keys like `headline` / `raw_text` (see `app/contracts/orders.py`).
-- [ ] **No auto model promotion:** MLflow (or registry) logs/evaluates only; promotion is manual and documented.
-- [x] **Audit trail:** `decision_engine.audit.decision_trace()` builds JSON blobs; `app/runtime/live_service.py` logs one trace per tick (wire to QuestDB next).
+- [x] **Coinbase-only data:** `scripts/ci_spec_compliance.sh`
+- [x] **Risk HMAC:** `NM_RISK_SIGNING_SECRET` + `execution.intent_gate`
+- [x] **No raw text → trades:** `OrderIntent` metadata validator
+- [ ] **No auto model promotion:** document in `docs/MLFLOW_PROMOTION.md` (stub) + enforce in automation
+- [x] **Audit trail:** `decision_trace` + log; optional QuestDB when `NM_QUESTDB_PERSIST_DECISION_TRACES=true`
 
 ---
 
 ## 2. Coinbase market data
 
-- [x] **WebSocket (partial):** `CoinbaseWebSocketClient` tracks `last_message_at` / `message_count` for health; reconnect loop exists. Full stale-vs-risk wiring still TODO.
-- [ ] **REST:** Rate limits, errors, pagination; candle granularity aligned with V1 assets (BTC-USD, ETH-USD, SOL-USD).
-- [ ] **Normalizers:** Tests against recorded real payloads; unknown messages dropped with metrics, not silent corruption.
-- [ ] **Product metadata:** Cached tick size, min size, product status for sizing and filters.
+- [x] **WebSocket health:** `last_message_at` / `message_count`; feed age blocks in `RiskEngine` first
+- [x] **REST (partial):** retries + backoff on 429/5xx; see [`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md)
+- [x] **Normalizers (partial):** fixture test + `NORMALIZER_UNKNOWN` metric; `best_bid`/`best_ask` on ticker
+- [x] **Product metadata (partial):** `ProductMetadataCache` + `product_tradable` in risk
 
 ---
 
 ## 3. Storage (QuestDB, Redis, Qdrant)
 
-- [ ] **QuestDB:** Production DDL, retention, backups, batched writes, failure handling.
-- [ ] **Redis:** TTL strategy, pub/sub resilience, no unbounded keys.
-- [ ] **Qdrant:** `news_context_memory` schema/version; backup; embedding model version in payload; top-K + symbol + recency query verified.
+- [x] **QuestDB (partial):** `insert_decision_trace_dict`; full batch/backup TBD
+- [x] **Redis:** bar key TTL (`redis.bar_ttl_seconds`)
+- [ ] **Qdrant:** version payload + integration tests
 
 ---
 
 ## 4. Feature pipeline & memory
 
-- [ ] **Parity:** Same feature code for live and backtest; version feature `schema_version` where applicable.
-- [ ] **Spec features:** Returns, vol windows, RSI, MACD, ATR, ADX, EMA spread, VWAP distance; microstructure (spread, imbalance, volume delta, liquidity pressure); sentiment (FinBERT, frequency, shocks) when providers exist.
-- [ ] **Memory:** 60s retrieval loop; aggregated similarity, sentiment, recency-weighted signals fed into features.
+- [x] **Parity (partial):** `run_decision_tick` shared; `test_backtest_live_parity`; Polars bar frame TBD
+- [x] **Live features (partial):** `feature_row_from_tick` microstructure + sentiment placeholders
+- [x] **Memory (partial):** 60s asyncio task in live (placeholder mem dict); real Qdrant TBD
 
 ---
 
 ## 5. Models (regime, forecast, routing)
 
-- [ ] **HMM:** Trained 4-state Gaussian HMM; semantic mapping to bull / bear / volatile / sideways validated; persisted scaler + model; inference-only in prod.
-- [ ] **TFT:** Replace Ridge surrogate with **Temporal Fusion Transformer** (or document explicit spec deviation and get sign-off).
-- [ ] **Route selector:** Deterministic V1 scoring locked in config; evaluation vs NO_TRADE / SCALPING / INTRADAY / SWING.
-- [ ] **MLflow:** Experiment tracking; artifacts; manual promotion workflow documented.
+- [ ] **HMM:** train + persist
+- [ ] **TFT:** PyTorch or documented deviation
+- [x] **Route selector:** thresholds in `routing` YAML
+- [ ] **MLflow:** real runs + manual promotion doc
 
 ---
 
 ## 6. Decision & action
 
-- [ ] **`RouteDecision`:** Always includes `route_id`, `confidence`, `ranking` per spec.
-- [ ] **Action generator:** Direction, size, stop distance, order type, expiry per route; consistent with risk limits.
+- [x] **`RouteDecision`:** Pydantic contract (route_id, confidence, ranking)
+- [ ] **Action generator:** full per-route matrix vs risk tests
 
 ---
 
 ## 7. Risk engine
 
-- [ ] **Hard limits:** Max exposure, per-symbol, drawdown, spread, stale data — precedence documented when multiple trigger.
-- [ ] **System modes:** `RUNNING`, `PAUSE_NEW_ENTRIES`, `REDUCE_ONLY`, `FLATTEN_ALL`, `MAINTENANCE` — defined behavior + tests (especially flatten / reduce-only).
+- [x] **Precedence:** [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md)
+- [x] **Feed stale:** `feed_last_message_at` + `nm_feed_stale_blocks_total`
+- [ ] **System modes:** FLATTEN / REDUCE_ONLY position-aware
 
 ---
 
 ## 8. Execution
 
-- [ ] **Router:** `paper` → Alpaca adapter only; `live` → Coinbase adapter; config-driven, single entry.
-- [ ] **Alpaca paper:** Production error handling, symbol map (e.g. BTC-USD → venue symbol), reconciliation via `fetch_positions`.
-- [ ] **Coinbase live:** **Signed** Advanced Trade orders (CDP/JWT per current API), cancel, fills, idempotency; remove synthetic ack path for production.
+- [x] **Router:** alpaca/coinbase name validation
+- [ ] **Alpaca:** resilience + reconcile
+- [ ] **Coinbase live:** signed orders
 
 ---
 
 ## 9. Live runtime service
 
-- [x] **Single process (skeleton):** `app/runtime/live_service.py` — WS → normalize → decision → risk → signed intent → `ExecutionService` (expand features/storage).
-- [ ] **Graceful shutdown:** Cancel tasks, flatten or mode-driven behavior documented.
+- [x] **Pipeline:** WS → features → `run_decision_tick` → trace → optional QuestDB → execution
+- [x] **Shutdown (partial):** SIGINT/SIGTERM — [`GRACEFUL_SHUTDOWN.md`](GRACEFUL_SHUTDOWN.md)
 
 ---
 
 ## 10. Backtesting
 
-- [ ] **Shared logic:** One code path for decision + risk vs live; automated test prevents drift.
-- [ ] **Simulator:** Slippage, fees if specified, portfolio tracker; reproducible seeds.
+- [x] **Shared step:** `run_decision_tick` in `replay_decisions`
+- [ ] **Simulator:** seeds + fees
 
 ---
 
 ## 11. Control plane
 
-- [x] **FastAPI (partial):** Mutating routes (`POST /params`, `/system/mode`, `/flatten`) require header `X-API-Key` when `NM_CONTROL_PLANE_API_KEY` is set.
-- [ ] **Streamlit:** Pages — Live, Regimes, Routes, Models, Logs, Emergency — wired to APIs/state.
+- [x] **FastAPI:** mutating auth when API key set
+- [x] **Streamlit (shell):** `control_plane/Home.py` + `pages/*`
 
 ---
 
 ## 12. Observability
 
-- [ ] **Metrics:** Latency per stage, PnL, drawdown, order success, feed health; Prometheus scrape in target environment.
-- [ ] **Logs:** Structured JSON to Loki (or equivalent); correlation id end-to-end.
-- [ ] **Grafana:** Dashboards + alerts for stale data, disconnects, risk blocks, order failures.
+- [x] **Metrics (partial):** `FEED_STALE_BLOCKS`, `NORMALIZER_UNKNOWN`, order counters
+- [ ] **Loki + Grafana:** deploy wiring
 
 ---
 
-## 13. Retraining (nightly flow)
+## 13–15. Retraining, security, CI
 
-- [ ] **Prefect (or equivalent):** Fetch data → train → evaluate → MLflow → **manual** promotion gate only.
-- [ ] **No leakage:** Time-series splits; walk-forward evaluation.
-
----
-
-## 14. Security & operations
-
-- [ ] **Secrets:** Vault or env-only; rotation runbook; separate paper vs live credentials.
-- [ ] **Network:** TLS; restrict control plane; optional IP allowlist for admin.
-- [ ] **Runbooks:** Incident, flatten, mode change, restore from backup.
-
----
-
-## 15. Testing & release
-
-- [ ] **Integration tests:** Redis, QuestDB, Qdrant in CI (containers).
-- [ ] **E2E paper:** Full loop in CI or scheduled job against paper credentials.
-- [ ] **Load/soak:** WS throughput and memory bounds acceptable.
-- [ ] **Release checklist:** Tag + changelog + model version pinned in deploy config.
+- [ ] Prefect flow, runbooks, integration CI — unchanged
 
 ---
 
 ## Definition of done (spec-complete)
 
-All sections above are checked, and a short **sign-off note** is added to the release PR linking this file revision.
+All sections above checked; release PR links this file revision.

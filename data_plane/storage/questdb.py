@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import UTC, datetime
 
 import psycopg
 from psycopg.rows import dict_row
@@ -71,6 +72,19 @@ class QuestDBWriter:
         VALUES (%s, %s, %s, %s, %s, %s)
         """
         await self._conn.execute(sql, (ts, symbol, route_id, regime, action, details))
+
+    async def insert_decision_trace_dict(self, trace: dict) -> None:
+        """Persist full audit blob from decision_engine.audit.decision_trace (JSON in details)."""
+        ts = datetime.now(UTC)
+        sym = str(trace.get("symbol", ""))
+        route = trace.get("route") or {}
+        route_id = str(route.get("route_id", "")) if isinstance(route, dict) else ""
+        reg = trace.get("regime") or {}
+        regime_s = str(reg.get("semantic", "")) if isinstance(reg, dict) else ""
+        allowed = trace.get("trade_allowed", False)
+        action = "trade" if allowed else "blocked"
+        details = json.dumps(trace, default=str)
+        await self.insert_decision_trace(ts, sym, route_id, regime_s, action, details)
 
     async def query_bars(
         self,

@@ -2,6 +2,8 @@ from observability.logging import configure_logging, get_logger
 from observability.metrics import (
     DECISION_LATENCY,
     DRAWDOWN_PCT,
+    FEED_STALE_BLOCKS,
+    NORMALIZER_UNKNOWN,
     ORDER_FAIL,
     ORDER_SUCCESS,
     PNL_USD,
@@ -15,4 +17,6 @@ __all__ = [
     "DRAWDOWN_PCT",
     "ORDER_SUCCESS",
     "ORDER_FAIL",
+    "FEED_STALE_BLOCKS",
+    "NORMALIZER_UNKNOWN",
 ]

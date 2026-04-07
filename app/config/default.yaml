@@ -56,6 +56,10 @@ observability:
   log_level: INFO
   metrics_port: 8000
 
+questdb:
+  # NM_QUESTDB_PERSIST_DECISION_TRACES=true to write JSON traces from live_service
+  persist_decision_traces: false
+
 # Set NM_RISK_SIGNING_SECRET in production so only RiskEngine-signed OrderIntents execute.
 # NM_ALLOW_UNSIGNED_EXECUTION=true only for local dev without secrets.
 # NM_CONTROL_PLANE_API_KEY protects POST /params, /system/mode, /flatten (header X-API-Key).

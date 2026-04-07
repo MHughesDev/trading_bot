@@ -9,6 +9,7 @@ from app.config.settings import AppSettings
 from app.contracts.decisions import ActionProposal, RouteId, TradeAction
 from app.contracts.orders import OrderIntent, OrderSide, OrderType, TimeInForce
 from app.contracts.risk import RiskState, SystemMode
+from observability.metrics import FEED_STALE_BLOCKS
 from risk_engine.signing import sign_order_intent
 
 
@@ -32,9 +33,31 @@ class RiskEngine:
         spread_bps: float,
         data_timestamp: datetime | None,
         current_total_exposure_usd: float = 0.0,
+        feed_last_message_at: datetime | None = None,
+        product_tradable: bool = True,
     ) -> tuple[TradeAction | None, RiskState]:
-        """Return None if blocked; otherwise TradeAction for execution layer."""
+        """Return None if blocked; otherwise TradeAction for execution layer.
+
+        Precedence (first match wins — see docs/RISK_PRECEDENCE.md):
+        1) Feed disconnected/stale (feed_last_message_at age)
+        2) Market data timestamp stale
+        3) Spread too wide
+        4) Drawdown limit
+        5) No proposal / mode blocks / exposure / reduce-only
+        """
         now = datetime.now(UTC)
+        if feed_last_message_at is not None:
+            flm = (
+                feed_last_message_at
+                if feed_last_message_at.tzinfo
+                else feed_last_message_at.replace(tzinfo=UTC)
+            ).astimezone(UTC)
+            feed_age = abs((now - flm).total_seconds())
+            risk = risk.model_copy(update={"data_age_seconds": feed_age, "spread_bps": spread_bps})
+            if feed_age > self._settings.risk_stale_data_seconds:
+                FEED_STALE_BLOCKS.inc()
+                return None, risk
+
         if data_timestamp is not None:
             dt = data_timestamp if data_timestamp.tzinfo else data_timestamp.replace(tzinfo=UTC)
             dt = dt.astimezone(UTC)
@@ -54,6 +77,9 @@ class RiskEngine:
             return None, risk
 
         if proposal is None:
+            return None, risk
+
+        if not product_tradable:
             return None, risk
 
         mode = risk.mode
