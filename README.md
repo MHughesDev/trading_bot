@@ -16,4 +16,22 @@ Smoke-test Coinbase public WebSocket (no API keys for public channels):
 python -m data_plane.ingest.coinbase_ws
 ```
 
-Configure secrets via `.env` (see `app/config` as it lands). Do not use Alpaca for market data.
+Configure secrets via `.env` (prefix `NM_` for app settings). **Never use Alpaca for market data.**
+
+## Control plane (FastAPI)
+
+```bash
+uvicorn control_plane.api:app --host 0.0.0.0 --port 8000
+```
+
+Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models`, `/metrics` (Prometheus).
+
+## Optional extras
+
+- Paper execution (Alpaca): `pip install -e ".[alpaca]"`
+- Dashboard: `pip install -e ".[dashboard]"` then `streamlit run control_plane/dashboard.py`
+- MLflow/Prefect: `pip install -e ".[all]"` (see `orchestration/`)
+
+## Layout
+
+See Master Spec V3: `app/` (runtime, contracts, config), `data_plane/`, `models/`, `decision_engine/`, `risk_engine/`, `execution/`, `backtesting/`, `control_plane/`, `observability/`, `infra/`.

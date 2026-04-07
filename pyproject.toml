@@ -14,14 +14,49 @@ dependencies = [
   "websockets>=12.0",
   "httpx>=0.27",
   "pyyaml>=6.0",
+  "polars>=1.0",
+  "numpy>=1.26",
+  "scikit-learn>=1.4",
+  "hmmlearn>=0.3",
+  "redis>=5.0",
+  "qdrant-client>=1.9",
+  "psycopg[binary]>=3.1",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "prometheus-client>=0.21",
+  "structlog>=24.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.4"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.4"]
+alpaca = ["alpaca-py>=0.21"]
+dashboard = ["streamlit>=1.39"]
+orchestration = ["prefect>=3.0", "mlflow>=2.16"]
+models_torch = ["torch>=2.2"]
+all = [
+  "streamlit>=1.39",
+  "prefect>=3.0",
+  "mlflow>=2.16",
+  "torch>=2.2",
+]
+
+[tool.setuptools.package-data]
+"app" = ["config/*.yaml"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*", "data_plane*", "execution*", "models*", "decision_engine*", "risk_engine*", "backtesting*", "control_plane*", "orchestration*", "observability*"]
+include = [
+  "app*",
+  "data_plane*",
+  "execution*",
+  "models*",
+  "decision_engine*",
+  "risk_engine*",
+  "backtesting*",
+  "control_plane*",
+  "orchestration*",
+  "observability*",
+]
 
 [tool.ruff]
 line-length = 100
