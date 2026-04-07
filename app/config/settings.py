@@ -46,6 +46,17 @@ class AppSettings(BaseSettings):
 
     backtesting_slippage_bps: float = 5.0
 
+    routing_spread_trade_max_bps: float = 30.0
+    routing_forecast_strength_min: float = 0.001
+    routing_score_scalping_forecast: float = 3.0
+    routing_score_intraday_forecast: float = 2.0
+    routing_score_swing_forecast: float = 2.0
+    routing_spread_penalty_per_bp: float = 0.01
+
+    redis_bar_ttl_seconds: int = 86_400
+
+    sentiment_use_finbert: bool = False
+
     control_plane_host: str = "0.0.0.0"
     control_plane_port: int = 8000
 
@@ -107,6 +118,21 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     if "backtesting" in cfg:
         bt = cfg["backtesting"] or {}
         out["backtesting_slippage_bps"] = bt.get("slippage_bps", 5.0)
+    if "routing" in cfg:
+        ro = cfg["routing"] or {}
+        out["routing_spread_trade_max_bps"] = ro.get("spread_trade_max_bps", 30.0)
+        out["routing_forecast_strength_min"] = ro.get("forecast_strength_min", 0.001)
+        sw = ro.get("score_weights") or {}
+        out["routing_score_scalping_forecast"] = sw.get("scalping_forecast", 3.0)
+        out["routing_score_intraday_forecast"] = sw.get("intraday_forecast", 2.0)
+        out["routing_score_swing_forecast"] = sw.get("swing_forecast", 2.0)
+        out["routing_spread_penalty_per_bp"] = sw.get("spread_penalty_per_bp", 0.01)
+    if "redis" in cfg:
+        rd = cfg["redis"] or {}
+        out["redis_bar_ttl_seconds"] = rd.get("bar_ttl_seconds", 86_400)
+    if "sentiment" in cfg:
+        se = cfg["sentiment"] or {}
+        out["sentiment_use_finbert"] = se.get("use_finbert", False)
     if "control_plane" in cfg:
         cp = cfg["control_plane"] or {}
         out["control_plane_host"] = cp.get("host", "0.0.0.0")

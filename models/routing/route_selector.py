@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.config.settings import AppSettings, load_settings
 from app.contracts.decisions import RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
 from app.contracts.regime import RegimeOutput, SemanticRegime
@@ -9,6 +10,11 @@ from app.contracts.risk import RiskState, SystemMode
 
 
 class DeterministicRouteSelector:
+    """Thresholds from `routing` in default.yaml / NM_ROUTING_* env."""
+
+    def __init__(self, settings: AppSettings | None = None) -> None:
+        self._settings = settings or load_settings()
+
     def decide(
         self,
         _symbol: str,
@@ -20,19 +26,25 @@ class DeterministicRouteSelector:
         if risk.mode != SystemMode.RUNNING:
             return RouteDecision(route_id=RouteId.NO_TRADE, confidence=1.0, ranking=[RouteId.NO_TRADE])
 
+        s = self._settings
         strength = abs(forecast.returns_5) + abs(forecast.returns_15) * 0.5
-        if spread_bps > 30 or strength < 0.001:
+        if spread_bps > s.routing_spread_trade_max_bps or strength < s.routing_forecast_strength_min:
             return RouteDecision(
                 route_id=RouteId.NO_TRADE,
                 confidence=0.7,
                 ranking=[RouteId.NO_TRADE, RouteId.SCALPING, RouteId.INTRADAY, RouteId.SWING],
             )
 
+        pen = s.routing_spread_penalty_per_bp
+        spread_term = spread_bps * pen
         scores: dict[RouteId, float] = {
-            RouteId.SCALPING: strength * 3.0 - spread_bps * 0.01,
-            RouteId.INTRADAY: strength * 2.0 + self._regime_bonus(regime.semantic, RouteId.INTRADAY),
-            RouteId.SWING: abs(forecast.returns_15) * 2.0
-            + self._regime_bonus(regime.semantic, RouteId.SWING),
+            RouteId.SCALPING: strength * s.routing_score_scalping_forecast - spread_term,
+            RouteId.INTRADAY: strength * s.routing_score_intraday_forecast
+            + self._regime_bonus(regime.semantic, RouteId.INTRADAY)
+            - spread_term,
+            RouteId.SWING: abs(forecast.returns_15) * s.routing_score_swing_forecast
+            + self._regime_bonus(regime.semantic, RouteId.SWING)
+            - spread_term,
             RouteId.NO_TRADE: 0.0,
         }
         ranked = sorted(scores.keys(), key=lambda r: scores[r], reverse=True)

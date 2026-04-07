@@ -37,5 +37,9 @@ class MLflowModelRegistry:
             self._mlflow.log_metrics(metrics)
 
     def promote(self, _model_name: str, _version: int) -> None:
-        """Gate promotion: never auto-promote in V1 — log only."""
-        logger.info("promotion gated: manual approval required for %s", _model_name)
+        """Master spec: no auto model promotion — human gate only; this method does not register stages."""
+        logger.info(
+            "promotion gated (spec): manual approval required for %s v%s — do not wire auto-stage in CI",
+            _model_name,
+            _version,
+        )

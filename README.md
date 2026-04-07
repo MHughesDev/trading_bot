@@ -31,7 +31,7 @@ Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models
 ## Optional extras
 
 - Paper execution (Alpaca): `pip install -e ".[alpaca]"`
-- Dashboard: `pip install -e ".[dashboard]"` then `streamlit run control_plane/dashboard.py`
+- Dashboard: `pip install -e ".[dashboard]"` then `streamlit run control_plane/Home.py`
 - MLflow/Prefect: `pip install -e ".[all]"` (see `orchestration/`)
 
 ## Layout
@@ -42,4 +42,4 @@ See Master Spec V3: `app/` (runtime, contracts, config), `data_plane/`, `models/
 
 Track remaining work toward full spec compliance in [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md) (checkboxes, no external tracker required).
 
-**Spec backlog (GitHub-style markdown log):** [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md) — edit **Status** as you go. Optional: push to real GitHub issues via [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md) or `bash scripts/create_github_issues.sh` (requires `gh`).
+**Spec backlog:** [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md) — statuses **Not started** / **Pending** / **Completed**. Optional GitHub: [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md). **Narrative:** [`docs/COMMENTARY.md`](docs/COMMENTARY.md).

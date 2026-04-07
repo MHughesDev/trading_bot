@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from app.config.settings import AppSettings, load_settings
 from app.contracts.decisions import ActionProposal, RouteDecision
 from app.contracts.forecast import ForecastOutput
 from app.contracts.regime import RegimeOutput
@@ -28,10 +29,12 @@ class DecisionPipeline:
         regime_model: GaussianHMMRegimeModel | None = None,
         forecaster: TemporalFusionForecaster | None = None,
         router: DeterministicRouteSelector | None = None,
+        settings: AppSettings | None = None,
     ) -> None:
+        self._settings = settings or load_settings()
         self.regime = regime_model or GaussianHMMRegimeModel()
         self.forecast = forecaster or TemporalFusionForecaster()
-        self.router = router or DeterministicRouteSelector()
+        self.router = router or DeterministicRouteSelector(self._settings)
 
     def step(
         self,

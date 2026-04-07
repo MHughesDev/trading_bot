@@ -10,5 +10,15 @@ from execution.adapters.coinbase_live import CoinbaseExecutionAdapter
 
 def get_execution_adapter(settings: AppSettings) -> ExecutionAdapter:
     if settings.execution_mode == "paper":
+        if settings.execution_paper_adapter.lower() != "alpaca":
+            raise ValueError(
+                f"Unsupported paper adapter {settings.execution_paper_adapter!r}; spec V1 uses alpaca"
+            )
         return AlpacaPaperExecutionAdapter(settings)
-    return CoinbaseExecutionAdapter(settings)
+    if settings.execution_mode == "live":
+        if settings.execution_live_adapter.lower() != "coinbase":
+            raise ValueError(
+                f"Unsupported live adapter {settings.execution_live_adapter!r}; spec V1 uses coinbase"
+            )
+        return CoinbaseExecutionAdapter(settings)
+    raise ValueError(f"Invalid execution_mode {settings.execution_mode!r}")

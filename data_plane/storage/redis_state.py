@@ -11,8 +11,9 @@ from app.contracts.events import BarEvent
 
 
 class RedisState:
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, bar_ttl_seconds: int = 86_400) -> None:
         self._url = url
+        self._bar_ttl = bar_ttl_seconds
         self._r: redis.Redis | None = None
 
     async def connect(self) -> None:
@@ -32,7 +33,11 @@ class RedisState:
     async def set_latest_bar(self, bar: BarEvent) -> None:
         if not self._r:
             raise RuntimeError("not connected")
-        await self._r.set(self._key_bar(bar.symbol), bar.model_dump_json())
+        await self._r.set(
+            self._key_bar(bar.symbol),
+            bar.model_dump_json(),
+            ex=self._bar_ttl,
+        )
         await self._r.publish("nm:bars", json.dumps({"symbol": bar.symbol}))
 
     async def get_latest_bar(self, symbol: str) -> BarEvent | None:

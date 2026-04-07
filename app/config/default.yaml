@@ -31,6 +31,23 @@ features:
 backtesting:
   slippage_bps: 5.0
 
+routing:
+  # Deterministic route selector (spec §9) — thresholds in config, not code magic numbers
+  spread_trade_max_bps: 30.0
+  forecast_strength_min: 0.001
+  score_weights:
+    scalping_forecast: 3.0
+    intraday_forecast: 2.0
+    swing_forecast: 2.0
+    spread_penalty_per_bp: 0.01
+
+redis:
+  bar_ttl_seconds: 86400
+
+sentiment:
+  # FinBERT etc. wired in orchestration; V1 uses neutral stub if no model
+  use_finbert: false
+
 control_plane:
   host: "0.0.0.0"
   port: 8000

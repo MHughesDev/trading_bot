@@ -116,3 +116,17 @@ class FeaturePipeline:
             "volume_delta": float(volume_delta),
             "liquidity_pressure": float(abs(imb)),
         }
+
+    def sentiment_features(
+        self,
+        *,
+        finbert_score: float = 0.0,
+        news_count_per_hour: float = 0.0,
+        sentiment_shock: float = 0.0,
+    ) -> dict[str, float]:
+        """Spec §5.3 — wire FinBERT + frequency + shocks from news pipeline."""
+        return {
+            "sent_finbert": float(finbert_score),
+            "sent_news_freq": float(news_count_per_hour),
+            "sent_shock": float(sentiment_shock),
+        }

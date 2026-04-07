@@ -1,7 +1,14 @@
 # Issue log — Master Spec V3
 
-Local tracking file in **GitHub issue style** (title + body per item).  
-**Status:** edit **Status** lines as you close items. Not synced to GitHub unless you paste there.
+Local tracking file in **GitHub issue style** (title + body per item).
+
+## Status values (pick one per item)
+
+| Status | Meaning |
+|--------|---------|
+| **Not started** | No meaningful implementation yet |
+| **Pending** | In progress, partial, or needs wiring / hardening |
+| **Completed** | Done to spec for this codebase (may still need ops/CI) |
 
 Also see: [`PRODUCTION_HARDENING.md`](PRODUCTION_HARDENING.md)
 
@@ -9,7 +16,7 @@ Also see: [`PRODUCTION_HARDENING.md`](PRODUCTION_HARDENING.md)
 
 # Epic: Master Spec V3 — remaining work
 
-**Status:** Open  
+**Status:** Pending  
 **Type:** Epic
 
 Parent tracker for NautilusMonster V3 spec compliance. Close when all work items below are done and `docs/PRODUCTION_HARDENING.md` is fully checked.
@@ -18,7 +25,7 @@ Parent tracker for NautilusMonster V3 spec compliance. Close when all work items
 
 # Issue 1 — Data: Wire Coinbase WS feed health to risk (stale data)
 
-**Status:** Open
+**Status:** Pending
 
 ## Goal
 
@@ -37,7 +44,7 @@ Align live feed staleness with `NM_RISK_STALE_DATA_SECONDS` using `CoinbaseWebSo
 
 # Issue 2 — Data: Harden Coinbase REST (rate limits, errors, candles for V1 symbols)
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -56,7 +63,7 @@ Production-ready REST client for candles/metadata: retries, rate limits, paginat
 
 # Issue 3 — Data: Normalizer tests from recorded Coinbase WS payloads
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -75,7 +82,7 @@ Contract tests using real JSON fixtures; unknown messages increment metrics, nev
 
 # Issue 4 — Data: Product metadata cache (tick size, min size, status)
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -94,7 +101,7 @@ Cache Coinbase product metadata for sizing and filters.
 
 # Issue 5 — Storage: QuestDB production path (batch writes, retention, decision traces)
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -113,7 +120,7 @@ Batched writes, retention policy, failure handling; persist `decision_trace` row
 
 # Issue 6 — Storage: Redis TTL and bounded pub/sub
 
-**Status:** Open
+**Status:** Completed
 
 ## Goal
 
@@ -132,7 +139,7 @@ TTL on `nm:bar:*` and state keys; reconnect policy; no unbounded growth.
 
 # Issue 7 — Storage: Qdrant news_context_memory — version payload + query tests
 
-**Status:** Open
+**Status:** Pending
 
 ## Goal
 
@@ -151,7 +158,7 @@ Embedding model version in payload; verify top-K + symbol + recency; backup note
 
 # Issue 8 — Features: Full pipeline in live path + schema_version parity with backtest
 
-**Status:** Open
+**Status:** Pending
 
 ## Goal
 
@@ -170,7 +177,7 @@ Live loop uses `FeaturePipeline` + same code path as `backtesting/replay.py`.
 
 # Issue 9 — Features: Microstructure + sentiment (FinBERT, frequency, shocks)
 
-**Status:** Open
+**Status:** Pending
 
 ## Goal
 
@@ -189,7 +196,7 @@ Implement spec §5 microstructure and sentiment; wire FinBERT when providers exi
 
 # Issue 10 — Memory: 60s Qdrant retrieval loop → feature vector
 
-**Status:** Open
+**Status:** Pending
 
 ## Goal
 
@@ -208,7 +215,7 @@ Implement spec §5 microstructure and sentiment; wire FinBERT when providers exi
 
 # Issue 11 — Models: Train + persist HMM regime with validated semantic mapping
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -227,7 +234,7 @@ Fit Gaussian HMM on historical features; persist scaler+model; validate bull/bea
 
 # Issue 12 — Models: Replace TFT Ridge surrogate with Temporal Fusion Transformer
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -246,7 +253,7 @@ Spec calls for TFT; implement PyTorch TFT or document formal deviation in `docs/
 
 # Issue 13 — Models: Route selector thresholds in config + route outcome tests
 
-**Status:** Open
+**Status:** Completed
 
 ## Goal
 
@@ -265,7 +272,7 @@ Move magic numbers to YAML; unit tests for route ranking edge cases.
 
 # Issue 14 — MLflow: Manual promotion only — document and enforce in code
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -284,7 +291,7 @@ No auto-promotion; documented human gate; registry stub replaced with real workf
 
 # Issue 15 — Decision: Contract tests for RouteDecision + ActionProposal vs spec
 
-**Status:** Open
+**Status:** Pending
 
 ## Goal
 
@@ -303,7 +310,7 @@ Tests assert `route_id`, `confidence`, `ranking`; action fields vs risk caps per
 
 # Issue 16 — Risk: Document limit precedence + implement FLATTEN / REDUCE_ONLY with positions
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -322,7 +329,7 @@ Replace reduce-only stub with position-aware closes; document order when multipl
 
 # Issue 17 — Execution: Enforce paper/live adapter from config in one place
 
-**Status:** Open
+**Status:** Completed
 
 ## Goal
 
@@ -341,7 +348,7 @@ Replace reduce-only stub with position-aware closes; document order when multipl
 
 # Issue 18 — Execution: Alpaca paper — errors, symbol map, reconciliation
 
-**Status:** Open
+**Status:** Pending
 
 ## Goal
 
@@ -360,7 +367,7 @@ Production-grade Alpaca adapter: retry policy, clear errors, BTC-USD→BTCUSD ma
 
 # Issue 19 — Execution: Coinbase live — signed orders, cancel, fills, idempotency
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -380,7 +387,7 @@ Remove `pending_implementation` path; implement CDP/JWT signing per current Coin
 
 # Issue 20 — Runtime: Full live pipeline + QuestDB audit persistence
 
-**Status:** Open
+**Status:** Pending
 
 ## Goal
 
@@ -399,7 +406,7 @@ Replace skeleton `live_service` with WS→bars→features→models→risk→Exec
 
 # Issue 21 — Runtime: Graceful shutdown + documented flatten behavior
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -418,7 +425,7 @@ SIGTERM handling; cancel tasks; optional flatten-on-shutdown policy.
 
 # Issue 22 — Backtest: CI test — live and replay share decision/risk entrypoints
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -436,7 +443,7 @@ Prevent drift between `replay_decisions` and live loop imports.
 
 # Issue 23 — Backtest: Simulator — fees, slippage, reproducible RNG
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -455,7 +462,7 @@ Expand `simulator.py` / `PortfolioTracker` for realistic backtests per config.
 
 # Issue 24 — Control plane: Streamlit pages (Live, Regimes, Routes, Models, Logs, Emergency)
 
-**Status:** Open
+**Status:** Pending
 
 ## Goal
 
@@ -474,7 +481,7 @@ Spec §14 dashboard pages wired to FastAPI + state.
 
 # Issue 25 — Observability: Stage latency metrics + feed health + order success
 
-**Status:** Open
+**Status:** Pending
 
 ## Goal
 
@@ -493,7 +500,7 @@ Wire Prometheus metrics for ingest, feature, model, risk, submit stages; PnL/dra
 
 # Issue 26 — Observability: Ship JSON logs to Loki + Grafana dashboards/alerts
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -511,7 +518,7 @@ Loki driver or Promtail config; dashboards for stale data, disconnects, risk blo
 
 # Issue 27 — Orchestration: Prefect nightly retrain — data → train → MLflow → manual gate
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -530,7 +537,7 @@ Replace stub with deployable flow; no auto model promotion.
 
 # Issue 28 — Ops: Secrets rotation + runbooks (incident, flatten, restore)
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -548,7 +555,7 @@ Short runbooks in `docs/` for keys, flatten procedure, QuestDB restore.
 
 # Issue 29 — CI: Integration tests — Redis, QuestDB, Qdrant containers
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -566,7 +573,7 @@ pytest integration job with services from compose or testcontainers.
 
 # Issue 30 — CI: E2E paper trade dry run (optional secrets) + release checklist
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
@@ -585,7 +592,7 @@ Optional scheduled E2E with Alpaca paper; release process tags model version in 
 
 # Issue 31 — Infra: Compose stack completeness (MLflow, Prefect, Streamlit as needed)
 
-**Status:** Open
+**Status:** Not started
 
 ## Goal
 
