@@ -4,40 +4,61 @@
 
 ### Overview
 
-MonsterTrader is a single-file Python cryptocurrency trading bot (`main.py`) that uses the [Alpaca](https://alpaca.markets/) brokerage API. It fetches historical BTCUSD market data and executes trades based on a simple open/close price comparison strategy.
+NautilusMonster V3 is an AI-driven cryptocurrency trading platform with a multi-model pipeline: TFT forecasting, Gaussian HMM regime detection, deterministic route selection, and risk-gated execution. It targets Coinbase (live) and Alpaca (paper) via adapters. The control plane is FastAPI + Streamlit.
 
 ### Dependencies
 
-- Python 3.12+ (pre-installed in the VM)
-- Install via `pip install -r requirements.txt` (includes `alpaca-py` and `python-dotenv`)
+- **Python 3.12+** (pre-installed in the VM)
+- Install via `pip install -e ".[dev,alpaca,dashboard,orchestration]"` from the repo root
+- **Docker** is required for infrastructure services (QuestDB, Redis, Qdrant, Prometheus, Grafana, Loki)
+
+### Infrastructure services
+
+Start all infrastructure with:
+```
+sudo docker compose -f infra/docker-compose.yml up -d
+```
+
+| Service | Port | Purpose |
+|---|---|---|
+| Redis | 6379 | State store, bar TTL cache |
+| QuestDB | 9000 (HTTP), 8812 (PG), 9009 (ILP) | Time-series storage |
+| Qdrant | 6333 (HTTP), 6334 (gRPC) | Vector memory for news/sentiment |
+| Prometheus | 9090 | Metrics collection |
+| Grafana | 3000 | Dashboards (admin/admin) |
+| Loki | 3100 | Log aggregation |
 
 ### Running the application
 
+**FastAPI Control Plane:**
 ```
-python3 main.py
-```
-
-Requires a `.env` file in the workspace root with:
-```
-API_KEY=<your-alpaca-api-key>
-API_SECRET=<your-alpaca-api-secret>
+uvicorn control_plane.api:app --host 0.0.0.0 --port 8000
 ```
 
-These correspond to Alpaca Paper Trading API credentials. The app defaults to paper trading (`PAPER = True` in `main.py`).
+**Streamlit Dashboard:**
+```
+python3 -m streamlit run control_plane/Home.py --server.port 8501 --server.headless true
+```
 
 ### Linting
 
-No linter is configured in the repo. Use `flake8 main.py` for basic style checks.
+```
+ruff check .
+```
+Config is in `pyproject.toml` (line-length=100, target py312).
 
 ### Testing
 
-No automated tests exist in the repo. To verify the environment is working, confirm all imports succeed:
 ```
-python3 -c "from alpaca.trading.client import TradingClient; from alpaca.data.historical import CryptoHistoricalDataClient; print('OK')"
+pytest tests/ -v
 ```
+22 tests covering contracts, risk engine, route selector, execution router, replay parity, and spec compliance. Config: `asyncio_mode = "auto"` in `pyproject.toml`.
 
 ### Key caveats
 
-- The `.env` file is gitignored. API credentials must be provided via the `API_KEY` and `API_SECRET` environment secrets.
-- Without valid Alpaca credentials, `main.py` will fail with a `ValueError` (no credentials) or a `401 Unauthorized` (invalid credentials). This is expected.
-- There is no `requirements.txt` in the repo; dependencies are listed only in `README.md`.
+- `streamlit` must be invoked as `python3 -m streamlit` rather than bare `streamlit` — the latter may not be on PATH.
+- `pytz` is a transitive dependency of `alpaca-py` that may not auto-install; `pip install -e ".[dev,alpaca,dashboard,orchestration]"` handles this.
+- Docker daemon in the VM needs `fuse-overlayfs` storage driver and `iptables-legacy` (see system-level setup).
+- The `.env` file is gitignored. For live trading, set `API_KEY` and `API_SECRET` (Alpaca) plus any Coinbase keys as environment secrets.
+- `NM_CONTROL_PLANE_API_KEY` protects mutating API endpoints; unset in dev means open access.
+- `NM_RISK_SIGNING_SECRET` enables order intent signing in production; unset in dev means unsigned execution is allowed.
