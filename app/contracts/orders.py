@@ -2,7 +2,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class OrderSide(str, Enum):
@@ -24,6 +24,11 @@ class TimeInForce(str, Enum):
     GTD = "gtd"
 
 
+_FORBIDDEN_META = frozenset(
+    {"headline", "raw_text", "news_text", "article", "body", "tweet"}
+)
+
+
 class OrderIntent(BaseModel):
     """Risk-approved intent passed to an execution adapter (not a raw exchange order)."""
 
@@ -36,3 +41,11 @@ class OrderIntent(BaseModel):
     time_in_force: TimeInForce = TimeInForce.GTC
     client_order_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("metadata")
+    @classmethod
+    def no_raw_text_in_metadata(cls, v: dict[str, Any]) -> dict[str, Any]:
+        lower = {k.lower() for k in v}
+        if lower & _FORBIDDEN_META:
+            raise ValueError("OrderIntent metadata must not carry raw news/text fields")
+        return v

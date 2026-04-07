@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -89,6 +90,18 @@ class CoinbaseWebSocketClient:
         ]
         self._settings = settings or CoinbaseWSSettings()
         self._jwt = jwt
+        self._last_message_at: datetime | None = None
+        self._message_count: int = 0
+
+    @property
+    def last_message_at(self) -> datetime | None:
+        """UTC time of last parsed JSON message (feed health / stale detection)."""
+
+        return self._last_message_at
+
+    @property
+    def message_count(self) -> int:
+        return self._message_count
 
     @property
     def product_ids(self) -> list[str]:
@@ -136,6 +149,8 @@ class CoinbaseWebSocketClient:
                     continue
                 if not isinstance(data, dict):
                     continue
+                self._last_message_at = datetime.now(UTC)
+                self._message_count += 1
                 yield data
 
 

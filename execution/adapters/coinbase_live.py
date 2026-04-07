@@ -12,6 +12,7 @@ import uuid
 from app.config.settings import AppSettings
 from app.contracts.orders import OrderIntent
 from execution.adapters.base_adapter import ExecutionAdapter, OrderAck, PositionSnapshot
+from execution.intent_gate import require_execution_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class CoinbaseExecutionAdapter(ExecutionAdapter):
         return "coinbase"
 
     async def submit_order(self, order: OrderIntent) -> OrderAck:
+        require_execution_allowed(order, self._settings)
         if not self._settings.coinbase_api_key or not self._settings.coinbase_api_secret:
             raise RuntimeError(
                 "Coinbase API credentials missing (NM_COINBASE_API_KEY / NM_COINBASE_API_SECRET)"

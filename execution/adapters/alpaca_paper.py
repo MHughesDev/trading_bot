@@ -8,6 +8,7 @@ from decimal import Decimal
 from app.config.settings import AppSettings
 from app.contracts.orders import OrderIntent
 from execution.adapters.base_adapter import ExecutionAdapter, OrderAck, PositionSnapshot
+from execution.intent_gate import require_execution_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
         return "alpaca_paper"
 
     async def submit_order(self, order: OrderIntent) -> OrderAck:
+        require_execution_allowed(order, self._settings)
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
 

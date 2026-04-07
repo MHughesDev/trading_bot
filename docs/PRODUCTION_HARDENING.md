@@ -8,17 +8,17 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 
 ## 1. Spec compliance gates (non-negotiables)
 
-- [ ] **Coinbase-only data:** No Alpaca (or other) market data in any code path; add CI guard (grep / import tests).
-- [ ] **Risk cannot be bypassed:** All orders go through `RiskEngine.evaluate`; tests prove direct adapter calls from outside are impossible or rejected.
-- [ ] **No raw text → trades:** News/headlines only into features/Qdrant; `OrderIntent` never carries raw text; contract test.
+- [x] **Coinbase-only data:** `scripts/ci_spec_compliance.sh` rejects `alpaca.data*` imports outside `alpaca_paper.py`.
+- [x] **Risk cannot be bypassed:** `NM_RISK_SIGNING_SECRET` set → `OrderIntent` must carry valid HMAC (`risk_engine.signing`); adapters call `execution.intent_gate`. Tests in `tests/test_spec_compliance.py`.
+- [x] **No raw text → trades:** `OrderIntent` metadata validator rejects keys like `headline` / `raw_text` (see `app/contracts/orders.py`).
 - [ ] **No auto model promotion:** MLflow (or registry) logs/evaluates only; promotion is manual and documented.
-- [ ] **Audit trail:** Structured JSON decision trace for every evaluation that could lead to an order (inputs, regime, forecast, route, risk outcome, intent id, adapter response).
+- [x] **Audit trail:** `decision_engine.audit.decision_trace()` builds JSON blobs; `app/runtime/live_service.py` logs one trace per tick (wire to QuestDB next).
 
 ---
 
 ## 2. Coinbase market data
 
-- [ ] **WebSocket:** Production reconnect, subscription health, gap/stale detection aligned with `risk.stale_data_seconds`.
+- [x] **WebSocket (partial):** `CoinbaseWebSocketClient` tracks `last_message_at` / `message_count` for health; reconnect loop exists. Full stale-vs-risk wiring still TODO.
 - [ ] **REST:** Rate limits, errors, pagination; candle granularity aligned with V1 assets (BTC-USD, ETH-USD, SOL-USD).
 - [ ] **Normalizers:** Tests against recorded real payloads; unknown messages dropped with metrics, not silent corruption.
 - [ ] **Product metadata:** Cached tick size, min size, product status for sizing and filters.
@@ -74,7 +74,7 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 
 ## 9. Live runtime service
 
-- [ ] **Single process:** Coinbase WS → normalize → bars/features → models → decision → risk → execution → storage traces.
+- [x] **Single process (skeleton):** `app/runtime/live_service.py` — WS → normalize → decision → risk → signed intent → `ExecutionService` (expand features/storage).
 - [ ] **Graceful shutdown:** Cancel tasks, flatten or mode-driven behavior documented.
 
 ---
@@ -88,7 +88,7 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 
 ## 11. Control plane
 
-- [ ] **FastAPI:** All spec endpoints hardened: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models`; **auth** (API key or mTLS) for mutating routes.
+- [x] **FastAPI (partial):** Mutating routes (`POST /params`, `/system/mode`, `/flatten`) require header `X-API-Key` when `NM_CONTROL_PLANE_API_KEY` is set.
 - [ ] **Streamlit:** Pages — Live, Regimes, Routes, Models, Logs, Emergency — wired to APIs/state.
 
 ---

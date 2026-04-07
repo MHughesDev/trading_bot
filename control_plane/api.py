@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi import status as http_status
 from fastapi.responses import PlainTextResponse
+from fastapi.security import APIKeyHeader
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.config.settings import load_settings
@@ -19,9 +21,24 @@ modes = ModeManager(state)
 
 app = FastAPI(title="NautilusMonster Control Plane", version="0.1.0")
 
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def require_mutate_key(x_api_key: Annotated[str | None, Depends(_api_key_header)]) -> None:
+    """Mutating endpoints require NM_CONTROL_PLANE_API_KEY when set."""
+    expected = (
+        settings.control_plane_api_key.get_secret_value()
+        if settings.control_plane_api_key
+        else None
+    )
+    if not expected:
+        return
+    if x_api_key != expected:
+        raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
+
 
 @app.get("/status")
-def status() -> dict[str, Any]:
+def get_status() -> dict[str, Any]:
     return {
         "execution_mode": settings.execution_mode,
         "market_data_provider": settings.market_data_provider,
@@ -41,7 +58,10 @@ def params() -> dict[str, Any]:
 
 
 @app.post("/params")
-def set_params(body: dict[str, Any]) -> dict[str, Any]:
+def set_params(
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
     state.set_params(body)
     return state.get_params()
 
@@ -52,14 +72,17 @@ def get_mode() -> dict[str, str]:
 
 
 @app.post("/system/mode")
-def set_mode(body: dict[str, str]) -> dict[str, str]:
+def set_mode(
+    body: dict[str, str],
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, str]:
     m = SystemMode(body.get("mode", "RUNNING"))
     modes.set_mode(m)
     return {"mode": modes.get_mode().value}
 
 
 @app.post("/flatten")
-def flatten() -> dict[str, str]:
+def flatten(_: Annotated[None, Depends(require_mutate_key)]) -> dict[str, str]:
     modes.set_mode(SystemMode.FLATTEN_ALL)
     return {"mode": modes.get_mode().value, "note": "flatten requested — execution layer must honor"}
 

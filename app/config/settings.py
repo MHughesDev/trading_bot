@@ -67,6 +67,12 @@ class AppSettings(BaseSettings):
     alpaca_api_key: SecretStr | None = None
     alpaca_api_secret: SecretStr | None = None
 
+    # HMAC for OrderIntent: only RiskEngine should create submittable intents
+    risk_signing_secret: SecretStr | None = None
+    allow_unsigned_execution: bool = False
+
+    control_plane_api_key: SecretStr | None = None
+
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}

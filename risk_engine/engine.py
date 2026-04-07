@@ -9,6 +9,7 @@ from app.config.settings import AppSettings
 from app.contracts.decisions import ActionProposal, RouteId, TradeAction
 from app.contracts.orders import OrderIntent, OrderSide, OrderType, TimeInForce
 from app.contracts.risk import RiskState, SystemMode
+from risk_engine.signing import sign_order_intent
 
 
 class RiskEngine:
@@ -89,7 +90,7 @@ class RiskEngine:
         return action, risk
 
     def to_order_intent(self, action: TradeAction) -> OrderIntent:
-        return OrderIntent(
+        intent = OrderIntent(
             symbol=action.symbol,
             side=OrderSide(action.side),
             quantity=action.quantity,
@@ -99,3 +100,11 @@ class RiskEngine:
             time_in_force=TimeInForce.GTC,
             metadata={"route_id": action.route_id.value},
         )
+        secret = (
+            self._settings.risk_signing_secret.get_secret_value()
+            if self._settings.risk_signing_secret
+            else None
+        )
+        if secret:
+            return sign_order_intent(intent, secret)
+        return intent
