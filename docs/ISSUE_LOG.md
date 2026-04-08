@@ -670,3 +670,22 @@ Short reference for how `fee_bps`, `slippage_bps`, and `slippage_noise_bps` comb
 ## Refs
 
 `backtesting/simulator.py`, `app/config/default.yaml` (`backtesting:`)
+
+---
+
+# Issue 35 — Data: Coinbase Advanced Trade REST auth for candles/products
+
+**Status:** Not started
+
+## Goal
+
+`CoinbaseRESTClient` public candle/product calls return **401** without JWT in some environments. Either sign requests with CDP keys (read-only) or document that market data uses Exchange public API until signed.
+
+## Acceptance
+
+- [ ] Document behavior in `COINBASE_GRANULARITY.md` or REST module docstring
+- [ ] Optional: JWT helper reusing `NM_COINBASE_*` for `/products` and candles
+
+## Refs
+
+`data_plane/ingest/coinbase_rest.py`, `scripts/smoke_credentials.py`
