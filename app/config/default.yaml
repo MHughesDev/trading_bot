@@ -33,6 +33,10 @@ features:
 
 backtesting:
   slippage_bps: 5.0
+  fee_bps: 10.0 # round-trip style fee on notional (per fill)
+  slippage_noise_bps: 0.0 # set >0 for stochastic slippage; use rng_seed for reproducibility
+  rng_seed: null # e.g. 42 for deterministic noise; null = process-global Random
+  initial_cash_usd: 100000
 
 routing:
   # Deterministic route selector (spec §9) — thresholds in config, not code magic numbers

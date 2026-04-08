@@ -91,7 +91,10 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 ## 10. Backtesting
 
 - [x] **Shared step:** `run_decision_tick` in `replay_decisions`
-- [ ] **Simulator:** seeds + fees
+- [x] **Simulator (partial):** fees + slippage + optional noise from YAML; `track_portfolio` in replay; seeded RNG for noise
+- [ ] **Multi-symbol portfolio replay:** Issue 32
+- [ ] **Risk vs solvency in replay:** Issue 33
+- [ ] **Simulator semantics doc:** Issue 34
 
 ---
 

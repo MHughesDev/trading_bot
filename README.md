@@ -46,6 +46,10 @@ Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models
 
 See Master Spec V3: `app/` (runtime, contracts, config), `data_plane/`, `models/`, `decision_engine/`, `risk_engine/`, `execution/`, `backtesting/`, `control_plane/`, `observability/`, `infra/`.
 
+## Backtesting (simulated fees / slippage)
+
+`backtesting.replay_decisions` supports optional portfolio accounting: set `track_portfolio=True` to apply `slippage_bps`, `fee_bps`, optional `slippage_noise_bps` with `rng_seed` for reproducibility, and `initial_cash_usd` from `app/config/default.yaml` under `backtesting:` (or `NM_BACKTESTING_*`). Default `track_portfolio=False` keeps prior behavior (position qty only).
+
 ## Production hardening (Master Spec checklist)
 
 Track remaining work toward full spec compliance in [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md) (checkboxes, no external tracker required).

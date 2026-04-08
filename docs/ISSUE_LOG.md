@@ -450,7 +450,7 @@ Prevent drift between `replay_decisions` and live loop imports.
 
 # Issue 23 — Backtest: Simulator — fees, slippage, reproducible RNG
 
-**Status:** Not started
+**Status:** Completed
 
 ## Goal
 
@@ -458,12 +458,13 @@ Expand `simulator.py` / `PortfolioTracker` for realistic backtests per config.
 
 ## Acceptance
 
-- [ ] Seed-controlled runs
-- [ ] Config from `backtesting_slippage_bps`
+- [x] Seed-controlled slippage noise via `backtesting.rng_seed` / `NM_BACKTESTING_RNG_SEED` (`make_replay_rng`)
+- [x] Slippage + fee from YAML: `slippage_bps`, `fee_bps`, `slippage_noise_bps`, `initial_cash_usd`
+- [x] `replay_decisions(..., track_portfolio=True)` applies fills + fees + optional equity columns
 
 ## Refs
 
-`backtesting/simulator.py`, `backtesting/portfolio.py`
+`backtesting/simulator.py`, `backtesting/portfolio.py`, `backtesting/replay.py`, `backtesting/execution_params.py`
 
 ---
 
@@ -613,3 +614,59 @@ Align `infra/docker-compose.yml` with spec services you run in dev/prod (MLflow,
 ## Refs
 
 `infra/docker-compose.yml`
+
+---
+
+# Issue 32 — Backtest: Multi-symbol replay with one shared portfolio
+
+**Status:** Not started
+
+## Goal
+
+`replay_decisions` is single-symbol today; for portfolio-level backtests, run multiple symbols against one `PortfolioTracker` without double-counting cash or splitting logic ad hoc.
+
+## Acceptance
+
+- [ ] API design (e.g. `replay_multi` or explicit `portfolio` + per-symbol bar frames)
+- [ ] Tests with two symbols and non-overlapping trade times
+
+## Refs
+
+`backtesting/replay.py`, `backtesting/portfolio.py`
+
+---
+
+# Issue 33 — Backtest: RiskEngine vs simulated solvency
+
+**Status:** Not started
+
+## Goal
+
+Replay uses simulated cash for fees/slippage, but `RiskEngine` does not see wallet balance — trades can be simulated even if insolvent. Align or document (e.g. optional cash check in replay, or separate “paper equity” risk mode).
+
+## Acceptance
+
+- [ ] Document current behavior in `docs/` or README backtest section
+- [ ] Optional: pass `available_cash` into risk evaluation for replay-only runs
+
+## Refs
+
+`backtesting/replay.py`, `risk_engine/engine.py`
+
+---
+
+# Issue 34 — Docs: Backtest simulator semantics (fee model)
+
+**Status:** Not started
+
+## Goal
+
+Short reference for how `fee_bps`, `slippage_bps`, and `slippage_noise_bps` combine (per-fill fee on notional, half-spread slippage).
+
+## Acceptance
+
+- [ ] `docs/BACKTESTING_SIMULATOR.md` or section in README
+
+## Refs
+
+`backtesting/simulator.py`, `app/config/default.yaml` (`backtesting:`)

@@ -46,6 +46,12 @@ You asked for a **single Coinbase truth** for prices, **Alpaca only for paper fi
 - **`live_service`:** optional **position reconcile** in paper mode (`NM_POSITION_RECONCILE_ENABLED` / `execution.position_reconcile_*`): startup fetch + periodic refresh from Alpaca so `position_signed_qty` matches the broker when enabled. In-memory updates after fills still apply when reconcile is off.
 - **README:** documents `python -m app.runtime.live_service` and reconcile env vars.
 
+## Latest batch (backtest simulator — Issue 23)
+
+- **`backtesting`:** `fee_bps`, `slippage_noise_bps`, `rng_seed`, `initial_cash_usd` in config (`NM_BACKTESTING_*`).
+- **`replay_decisions(..., track_portfolio=True)`** applies simulated fill prices (slippage ± optional noise with seeded `Random`), fees on notional, and updates `PortfolioTracker`; rows include `portfolio_cash`, `equity_mark`, etc.
+- **New gaps logged:** Issues **32** (multi-symbol replay), **33** (risk vs cash solvency), **34** (fee/slippage doc).
+
 ## How to use the issue log
 
 `docs/ISSUE_LOG.md` uses **Not started**, **Pending**, **Completed**. Move items as you merge work. The epic stays **Pending** until everything that matters for your definition of V1 is **Completed**.

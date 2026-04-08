@@ -47,6 +47,10 @@ class AppSettings(BaseSettings):
     features_volatility_windows: list[int] = Field(default_factory=lambda: [5, 15, 60])
 
     backtesting_slippage_bps: float = 5.0
+    backtesting_fee_bps: float = 10.0
+    backtesting_slippage_noise_bps: float = 0.0
+    backtesting_rng_seed: int | None = None
+    backtesting_initial_cash_usd: float = 100_000.0
 
     routing_spread_trade_max_bps: float = 30.0
     routing_forecast_strength_min: float = 0.001
@@ -125,6 +129,15 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     if "backtesting" in cfg:
         bt = cfg["backtesting"] or {}
         out["backtesting_slippage_bps"] = bt.get("slippage_bps", 5.0)
+        if "fee_bps" in bt:
+            out["backtesting_fee_bps"] = bt["fee_bps"]
+        if "slippage_noise_bps" in bt:
+            out["backtesting_slippage_noise_bps"] = bt["slippage_noise_bps"]
+        if "rng_seed" in bt:
+            v = bt["rng_seed"]
+            out["backtesting_rng_seed"] = None if v is None else int(v)
+        if "initial_cash_usd" in bt:
+            out["backtesting_initial_cash_usd"] = float(bt["initial_cash_usd"])
     if "routing" in cfg:
         ro = cfg["routing"] or {}
         out["routing_spread_trade_max_bps"] = ro.get("spread_trade_max_bps", 30.0)
