@@ -52,8 +52,8 @@ See Master Spec V3: `app/` (runtime, contracts, config), `data_plane/`, `models/
 
 `backtesting.replay_decisions` supports optional portfolio accounting: set `track_portfolio=True` to apply `slippage_bps`, `fee_bps`, optional `slippage_noise_bps` with `rng_seed` for reproducibility, and `initial_cash_usd` from `app/config/default.yaml` under `backtesting:` (or `NM_BACKTESTING_*`). Default `track_portfolio=False` keeps prior behavior (position qty only).
 
-## Production hardening (Master Spec checklist)
+## Master Spec roadmap (checklist + backlog + narrative)
 
-Track remaining work toward full spec compliance in [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md) (checkboxes, no external tracker required).
+**Single doc:** [`docs/MASTER_SPEC_ROADMAP.md`](docs/MASTER_SPEC_ROADMAP.md) — production checklist, numbered issues (**Not started** / **Pending** / **Completed**), narrative commentary, and optional GitHub issue sync.
 
-**Spec backlog:** [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md) — statuses **Not started** / **Pending** / **Completed**. Optional GitHub: [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md). **Narrative:** [`docs/COMMENTARY.md`](docs/COMMENTARY.md). **Risk precedence:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md).
+**Reference:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md) (risk order). Short stubs [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md), [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md), [`docs/COMMENTARY.md`](docs/COMMENTARY.md), [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md) redirect to the roadmap.
