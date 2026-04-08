@@ -4,6 +4,9 @@ execution:
   mode: paper # paper | live
   live_adapter: coinbase
   paper_adapter: alpaca
+  # Paper only: periodically replace in-memory positions with Alpaca fetch_positions (Issue 16/18)
+  position_reconcile_enabled: false
+  position_reconcile_interval_seconds: 60
 
 market_data:
   provider: coinbase

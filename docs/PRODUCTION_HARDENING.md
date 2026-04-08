@@ -68,14 +68,15 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 
 - [x] **Precedence:** [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md)
 - [x] **Feed stale:** `feed_last_message_at` + `nm_feed_stale_blocks_total`
-- [x] **System modes (partial):** FLATTEN_ALL + REDUCE_ONLY position-aware; adapter reconcile TBD
+- [x] **System modes (partial):** FLATTEN_ALL + REDUCE_ONLY position-aware; PAUSE/MAINTENANCE tests TBD
+- [x] **Positions (paper, partial):** optional Alpaca `fetch_positions` on startup + interval when `position_reconcile_enabled`
 
 ---
 
 ## 8. Execution
 
 - [x] **Router:** alpaca/coinbase name validation
-- [ ] **Alpaca:** resilience + reconcile
+- [x] **Alpaca (partial):** submit/cancel/fetch retries + safe logs + symbol map tests; optional CI vs paper API TBD
 - [ ] **Coinbase live:** signed orders
 
 ---

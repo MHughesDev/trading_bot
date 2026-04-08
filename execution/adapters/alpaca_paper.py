@@ -2,20 +2,40 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from decimal import Decimal
 
 from app.config.settings import AppSettings
 from app.contracts.orders import OrderIntent
 from execution.adapters.base_adapter import ExecutionAdapter, OrderAck, PositionSnapshot
+from execution.alpaca_util import from_alpaca_crypto_symbol, safe_exc_message, to_alpaca_crypto_symbol
 from execution.intent_gate import require_execution_allowed
 
 logger = logging.getLogger(__name__)
 
+# Transient Alpaca/network failures — bounded retries with jitter
+_RETRYABLE_EXCEPTION_NAMES = frozenset(
+    {
+        "ConnectionError",
+        "TimeoutError",
+        "ReadTimeout",
+        "ConnectTimeout",
+        "HTTPError",
+        "APIError",
+    }
+)
 
-def _to_alpaca_crypto_symbol(product_id: str) -> str:
-    """Map BTC-USD → BTCUSD for Alpaca crypto routing."""
-    return product_id.replace("-", "")
+
+def _is_retryable(exc: BaseException) -> bool:
+    name = type(exc).__name__
+    if name in _RETRYABLE_EXCEPTION_NAMES:
+        return True
+    # alpaca-py often wraps remote errors
+    if "429" in str(exc) or "503" in str(exc) or "502" in str(exc):
+        return True
+    return False
 
 
 class AlpacaPaperExecutionAdapter(ExecutionAdapter):
@@ -45,13 +65,34 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
     def name(self) -> str:
         return "alpaca_paper"
 
+    async def _with_retries(self, fn, *, max_attempts: int = 4, base_delay_s: float = 0.5):
+        last: BaseException | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await asyncio.to_thread(fn)
+            except BaseException as e:
+                last = e
+                if attempt >= max_attempts or not _is_retryable(e):
+                    raise
+                delay = base_delay_s * (2 ** (attempt - 1)) + random.uniform(0, 0.15)
+                logger.warning(
+                    "alpaca transient error (attempt %s/%s): %s — retry in %.2fs",
+                    attempt,
+                    max_attempts,
+                    safe_exc_message(e),
+                    delay,
+                )
+                await asyncio.sleep(delay)
+        assert last is not None
+        raise last
+
     async def submit_order(self, order: OrderIntent) -> OrderAck:
         require_execution_allowed(order, self._settings)
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
 
         client = self._ensure_client()
-        sym = _to_alpaca_crypto_symbol(order.symbol)
+        sym = to_alpaca_crypto_symbol(order.symbol)
         side = OrderSide.BUY if order.side.value == "buy" else OrderSide.SELL
         req = MarketOrderRequest(
             symbol=sym,
@@ -59,9 +100,11 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
             side=side,
             time_in_force=TimeInForce.GTC,
         )
-        import asyncio
 
-        order_resp = await asyncio.to_thread(client.submit_order, req)
+        def _submit():
+            return client.submit_order(req)
+
+        order_resp = await self._with_retries(_submit)
         return OrderAck(
             adapter=self.name,
             order_id=str(order_resp.id),
@@ -71,26 +114,30 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
 
     async def cancel_order(self, order_id: str) -> bool:
         client = self._ensure_client()
-        import asyncio
 
-        await asyncio.to_thread(client.cancel_order_by_id, order_id)
+        def _cancel():
+            return client.cancel_order_by_id(order_id)
+
+        await self._with_retries(_cancel)
         return True
 
     async def fetch_positions(self) -> list[PositionSnapshot]:
         client = self._ensure_client()
-        import asyncio
 
-        positions = await asyncio.to_thread(client.get_all_positions)
+        def _list():
+            return client.get_all_positions()
+
+        positions = await self._with_retries(_list)
         out: list[PositionSnapshot] = []
         for p in positions:
             sym = getattr(p, "symbol", "")
             qty = Decimal(str(getattr(p, "qty", "0")))
             out.append(
                 PositionSnapshot(
-                    symbol=sym,
+                    symbol=from_alpaca_crypto_symbol(sym),
                     quantity=qty,
                     avg_entry_price=Decimal(str(getattr(p, "avg_entry_price", "0") or "0")),
-                    raw={"symbol": sym},
+                    raw={"symbol": sym, "alpaca_symbol": sym},
                 )
             )
         return out

@@ -25,6 +25,8 @@ class AppSettings(BaseSettings):
     execution_mode: Literal["paper", "live"] = "paper"
     execution_live_adapter: str = "coinbase"
     execution_paper_adapter: str = "alpaca"
+    position_reconcile_enabled: bool = False
+    position_reconcile_interval_seconds: int = 60
 
     market_data_provider: str = "coinbase"
     market_data_symbols: list[str] = Field(
@@ -93,6 +95,10 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         out["execution_mode"] = ex.get("mode", "paper")
         out["execution_live_adapter"] = ex.get("live_adapter", "coinbase")
         out["execution_paper_adapter"] = ex.get("paper_adapter", "alpaca")
+        if "position_reconcile_enabled" in ex:
+            out["position_reconcile_enabled"] = ex["position_reconcile_enabled"]
+        if "position_reconcile_interval_seconds" in ex:
+            out["position_reconcile_interval_seconds"] = int(ex["position_reconcile_interval_seconds"])
     if "market_data" in cfg:
         md = cfg["market_data"] or {}
         out["market_data_provider"] = md.get("provider", "coinbase")

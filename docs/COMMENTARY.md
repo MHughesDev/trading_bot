@@ -36,7 +36,15 @@ You asked for a **single Coinbase truth** for prices, **Alpaca only for paper fi
 ## Honest gaps
 
 - **Coinbase live** signed orders; **TFT** PyTorch; **Qdrant** real embeddings in the 60s loop; **Prefect**; **Grafana/Loki** wiring.
-- **Positions** in live are in-memory from simulated fills only until adapter reconciliation exists.
+- **Risk modes:** PAUSE / MAINTENANCE matrix tests still outstanding (Issue 16).
+- **Alpaca paper:** retries + symbol helpers + optional venue reconcile are in code; optional CI integration against the paper API still not added (Issue 18).
+
+## Latest batch (Alpaca paper + live reconcile)
+
+- **`execution/alpaca_util.py`:** `to_alpaca_crypto_symbol` / `from_alpaca_crypto_symbol`, `redact_secrets_for_log` for safe retry logs.
+- **`AlpacaPaperExecutionAdapter`:** bounded retries with exponential backoff + jitter on transient failures; `fetch_positions` maps Alpaca symbols back to Coinbase-style `BTC-USD` keys.
+- **`live_service`:** optional **position reconcile** in paper mode (`NM_POSITION_RECONCILE_ENABLED` / `execution.position_reconcile_*`): startup fetch + periodic refresh from Alpaca so `position_signed_qty` matches the broker when enabled. In-memory updates after fills still apply when reconcile is off.
+- **README:** documents `python -m app.runtime.live_service` and reconcile env vars.
 
 ## How to use the issue log
 

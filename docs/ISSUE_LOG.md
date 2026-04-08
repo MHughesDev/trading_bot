@@ -322,11 +322,12 @@ Replace reduce-only stub with position-aware closes; document order when multipl
 - [x] FLATTEN_ALL: full close market action when `position_signed_qty` ≠ 0
 - [x] REDUCE_ONLY: block adds; allow reduce side; cap qty to position
 - [x] `tests/test_risk_modes_position.py`; live loop tracks per-symbol position after fills
-- [ ] PAUSE / MAINTENANCE matrix tests; fetch real positions from adapter on startup
+- [x] Fetch positions from Alpaca on startup + periodic reconcile when `execution.position_reconcile_enabled` (paper)
+- [ ] PAUSE / MAINTENANCE matrix tests
 
 ## Refs
 
-`risk_engine/engine.py`, execution adapters
+`risk_engine/engine.py`, execution adapters, `app/runtime/live_service.py`
 
 ---
 
@@ -359,12 +360,15 @@ Production-grade Alpaca adapter: retry policy, clear errors, BTC-USD→BTCUSD ma
 
 ## Acceptance
 
+- [x] Retry with backoff on transient Alpaca/network errors (`submit_order`, `cancel_order`, `fetch_positions`)
+- [x] Symbol map helpers + unit tests (`execution/alpaca_util.py`, `tests/test_alpaca_util.py`)
+- [x] Log lines use redacted exception text (`safe_exc_message`)
+- [x] Optional `position_reconcile_enabled` + interval: startup + periodic `fetch_positions` → `positions` in `live_service` (paper mode)
 - [ ] Integration test with paper API optional in CI (secret)
-- [ ] Logs redact secrets
 
 ## Refs
 
-`execution/adapters/alpaca_paper.py`
+`execution/adapters/alpaca_paper.py`, `execution/alpaca_util.py`, `app/runtime/live_service.py`
 
 ---
 
@@ -398,8 +402,8 @@ Replace skeleton `live_service` with WS→bars→features→models→risk→Exec
 
 ## Acceptance
 
-- [ ] One runnable entrypoint documented in README
-- [ ] Decision traces persisted, not only logged
+- [x] Runnable entrypoint: `python -m app.runtime.live_service` (documented in README)
+- [x] Decision traces persisted when `NM_QUESTDB_PERSIST_DECISION_TRACES=true` / YAML questdb flag
 
 ## Refs
 

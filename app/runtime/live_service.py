@@ -29,10 +29,19 @@ from decision_engine.feature_frame import enrich_bars_last_row, merge_feature_ov
 from decision_engine.features_live import feature_row_from_tick
 from decision_engine.pipeline import DecisionPipeline
 from decision_engine.run_step import run_decision_tick
+from execution.adapters.base_adapter import PositionSnapshot
 from execution.service import ExecutionService
 from risk_engine.engine import RiskEngine
 
 logger = logging.getLogger(__name__)
+
+
+def _positions_from_snapshots(
+    snapshots: list[PositionSnapshot], symbols: list[str]
+) -> dict[str, Decimal]:
+    """Venue snapshot → per-symbol signed qty; missing symbols → 0."""
+    by_sym = {s.symbol: s.quantity for s in snapshots}
+    return {s: by_sym.get(s, Decimal(0)) for s in symbols}
 
 
 def _infer_spread_bps(norm: Any) -> float:
@@ -51,6 +60,30 @@ def _tick_time(norm: Any) -> datetime:
     if isinstance(norm, (TickerSnapshot, TradeTick)):
         return norm.time if norm.time.tzinfo else norm.time.replace(tzinfo=UTC)
     return datetime.now(UTC)
+
+
+async def _position_reconcile_loop(
+    exec_svc: ExecutionService,
+    positions: dict[str, Decimal],
+    symbols: list[str],
+    interval: float,
+    stop: asyncio.Event,
+) -> None:
+    """Replace in-memory positions with venue truth (paper Alpaca → Coinbase product ids)."""
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+            return
+        except TimeoutError:
+            pass
+        try:
+            snaps = await exec_svc.adapter.fetch_positions()
+            merged = _positions_from_snapshots(snaps, symbols)
+            positions.clear()
+            positions.update(merged)
+            logger.info("position_reconcile %s", {k: str(v) for k, v in positions.items()})
+        except Exception:
+            logger.exception("position_reconcile failed")
 
 
 async def _memory_tick_loop(
@@ -118,6 +151,26 @@ async def run_live_loop(
 
     rollers: dict[str, RollingMinuteBars] = {s: RollingMinuteBars(s) for s in syms}
     positions: dict[str, Decimal] = {s: Decimal(0) for s in syms}
+
+    reconcile_stop: asyncio.Event | None = None
+    reconcile_task: asyncio.Task[None] | None = None
+    if cfg.execution_mode == "paper" and cfg.position_reconcile_enabled:
+        try:
+            snaps = await exec_svc.adapter.fetch_positions()
+            positions.update(_positions_from_snapshots(snaps, syms))
+            logger.info("initial positions from venue %s", {k: str(v) for k, v in positions.items()})
+        except Exception:
+            logger.exception("initial position fetch failed; using zeros until reconcile")
+        reconcile_stop = asyncio.Event()
+        reconcile_task = asyncio.create_task(
+            _position_reconcile_loop(
+                exec_svc,
+                positions,
+                syms,
+                float(cfg.position_reconcile_interval_seconds),
+                reconcile_stop,
+            )
+        )
 
     n = 0
     try:
@@ -197,6 +250,14 @@ async def run_live_loop(
             if max_iterations is not None and n >= max_iterations:
                 break
     finally:
+        if reconcile_stop is not None:
+            reconcile_stop.set()
+        if reconcile_task is not None:
+            reconcile_task.cancel()
+            try:
+                await reconcile_task
+            except asyncio.CancelledError:
+                pass
         mem_stop.set()
         mem_task.cancel()
         try:
