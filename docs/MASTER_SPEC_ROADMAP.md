@@ -41,7 +41,7 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 ## 2. Coinbase market data
 
 - [x] **WebSocket health:** `last_message_at` / `message_count`; feed age blocks in `RiskEngine` first
-- [x] **REST (partial):** retries + backoff on 429/5xx; see [`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md)
+- [x] **REST (partial):** retries + backoff on 429/5xx; **401/403 → Exchange public API** fallback for products/candles; see [`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md)
 - [x] **Normalizers (partial):** fixture test + `NORMALIZER_UNKNOWN` metric; `best_bid`/`best_ask` on ticker
 - [x] **Product metadata (partial):** `ProductMetadataCache` + `product_tradable` in risk
 
@@ -107,7 +107,7 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 
 - [x] **Shared step:** `run_decision_tick` in `replay_decisions`
 - [x] **Simulator (partial):** fees + slippage + optional noise from YAML; `track_portfolio` in replay; seeded RNG for noise
-- [ ] **Multi-symbol portfolio replay:** Issue 32
+- [x] **Multi-symbol portfolio replay:** `replay_multi_asset_decisions` + tests (Issue 32)
 - [x] **Risk vs solvency in replay:** replay-layer cash check + `solvency_blocked` (`NM_BACKTESTING_ENFORCE_SOLVENCY`, `backtesting.enforce_solvency`)
 - [x] **Simulator semantics doc:** [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md)
 
@@ -256,7 +256,8 @@ Production-ready REST client for candles/metadata: retries, rate limits, paginat
 ## Acceptance
 
 - [ ] BTC-USD, ETH-USD, SOL-USD candle fetch validated against live or recorded fixtures
-- [ ] Documented granularity mapping for bar pipeline
+- [x] Documented granularity mapping for bar pipeline ([`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md))
+- [x] 401/403 handling + Exchange fallback + unit tests (`tests/test_coinbase_rest_fallback.py`)
 
 ## Refs
 
@@ -823,7 +824,7 @@ Align `infra/docker-compose.yml` with spec services you run in dev/prod (MLflow,
 
 ### Issue 32 — Backtest: Multi-symbol replay with one shared portfolio
 
-**Status:** Not started
+**Status:** Completed
 
 ## Goal
 
@@ -831,8 +832,8 @@ Align `infra/docker-compose.yml` with spec services you run in dev/prod (MLflow,
 
 ## Acceptance
 
-- [ ] API design (e.g. `replay_multi` or explicit `portfolio` + per-symbol bar frames)
-- [ ] Tests with two symbols and non-overlapping trade times
+- [x] `replay_multi_asset_decisions(bars_by_symbol, ...)` — shared `RiskState` + optional shared `PortfolioTracker`
+- [x] Tests: two symbols same bar time + staggered timestamps (`tests/test_replay_multi_asset.py`)
 
 ## Refs
 
@@ -880,7 +881,7 @@ Short reference for how `fee_bps`, `slippage_bps`, and `slippage_noise_bps` comb
 
 ### Issue 35 — Data: Coinbase Advanced Trade REST auth for candles/products
 
-**Status:** Not started
+**Status:** Completed
 
 ## Goal
 
@@ -888,8 +889,9 @@ Short reference for how `fee_bps`, `slippage_bps`, and `slippage_noise_bps` comb
 
 ## Acceptance
 
-- [ ] Document behavior in `COINBASE_GRANULARITY.md` or REST module docstring
-- [ ] Optional: JWT helper reusing `NM_COINBASE_*` for `/products` and candles
+- [x] Document behavior in [`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md) + module docstring
+- [x] Automatic fallback to Exchange public `/products` and `/products/{id}/candles` on 401/403
+- [ ] Optional: JWT helper reusing `NM_COINBASE_*` for Advanced Trade (stay on brokerage API)
 
 ## Refs
 

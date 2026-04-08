@@ -17,6 +17,10 @@ This describes how **`backtesting/simulator.py`** and **`replay_decisions(..., t
 
 When **`track_portfolio`** is enabled and **`backtesting.enforce_solvency`** is true (default), a simulated **buy** is **not** applied if `portfolio.cash + cash_delta < 0` after fees. The row sets **`solvency_blocked: true`** and **`trade: null`** for that bar; position and cash are unchanged. **`RiskEngine`** is unchanged—solvency is a **replay accounting** layer only (Issue 33).
 
+## Multi-symbol replay (`replay_multi_asset_decisions`)
+
+**`backtesting.replay.replay_multi_asset_decisions`** walks a **merged timeline** of bars for multiple symbols. It uses **one** shared `RiskState`, and with `track_portfolio=True` **one** `PortfolioTracker` and RNG (same fee/slippage settings as single-symbol replay). Symbols are processed in **sorted name order** at each timestamp for deterministic cash usage. Output rows look like `{ "timestamp", "symbols": { "BTC-USD": { ... }, ... }, "portfolio_cash", ... }`.
+
 ## Config
 
 See **`app/config/default.yaml`** → `backtesting:` and env **`NM_BACKTESTING_*`**.

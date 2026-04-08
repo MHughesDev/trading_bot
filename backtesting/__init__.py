@@ -1,6 +1,6 @@
 from backtesting.execution_params import BacktestExecutionParams
 from backtesting.portfolio import PortfolioTracker
-from backtesting.replay import replay_decisions
+from backtesting.replay import replay_decisions, replay_multi_asset_decisions
 from backtesting.simulator import (
     apply_slippage,
     cash_delta_for_trade,
@@ -15,6 +15,7 @@ __all__ = [
     "BacktestExecutionParams",
     "PortfolioTracker",
     "replay_decisions",
+    "replay_multi_asset_decisions",
     "apply_slippage",
     "cash_delta_for_trade",
     "effective_slippage_bps",
