@@ -76,7 +76,7 @@ def replay_decisions(
         else:
             dt = None
         mid = float(row.get("close", 1.0))
-        regime, fc, route, action, trade, risk = run_decision_tick(
+        regime, fc, route, proposal, trade_action, risk = run_decision_tick(
             symbol=symbol,
             feature_row=feats,
             spread_bps=spread_bps,
@@ -90,32 +90,44 @@ def replay_decisions(
         fill_price: float | None = None
         fee_paid: Decimal | None = None
         cash_delta: Decimal | None = None
+        solvency_blocked = False
+        executed = trade_action
 
-        if trade is not None and portfolio is not None and execp is not None and rng is not None:
-            q = Decimal(str(trade.quantity))
+        if trade_action is not None and portfolio is not None and execp is not None and rng is not None:
+            q = Decimal(str(trade_action.quantity))
             fill_price = fill_price_with_slippage(
                 mid,
-                trade.side,
+                trade_action.side,
                 slippage_bps=execp.slippage_bps,
                 slippage_noise_bps=execp.slippage_noise_bps,
                 rng=rng,
             )
             cd, fee = cash_delta_for_trade(
-                side=trade.side,
+                side=trade_action.side,
                 qty=q,
                 fill_price=fill_price,
                 fee_bps=execp.fee_bps,
             )
-            portfolio.apply_trade(symbol, q, trade.side, cd)
-            fee_paid = fee
-            cash_delta = cd
-            if trade.side == "buy":
-                pos += q
+            solvency_ok = True
+            if execp.enforce_solvency and trade_action.side == "buy" and portfolio.cash + cd < 0:
+                solvency_ok = False
+                solvency_blocked = True
+            if solvency_ok:
+                portfolio.apply_trade(symbol, q, trade_action.side, cd)
+                fee_paid = fee
+                cash_delta = cd
+                if trade_action.side == "buy":
+                    pos += q
+                else:
+                    pos -= q
             else:
-                pos -= q
-        elif trade is not None:
-            q = Decimal(str(trade.quantity))
-            if trade.side == "buy":
+                executed = None
+                fill_price = None
+                fee_paid = None
+                cash_delta = None
+        elif trade_action is not None:
+            q = Decimal(str(trade_action.quantity))
+            if trade_action.side == "buy":
                 pos += q
             else:
                 pos -= q
@@ -124,7 +136,8 @@ def replay_decisions(
             "timestamp": ts,
             "route": route.route_id.value,
             "regime": regime.semantic.value,
-            "trade": trade.model_dump() if trade else None,
+            "trade": executed.model_dump() if executed else None,
+            "solvency_blocked": solvency_blocked,
         }
         if track_portfolio and portfolio is not None:
             row_dict["portfolio_cash"] = str(portfolio.cash)

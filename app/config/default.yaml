@@ -37,6 +37,8 @@ backtesting:
   slippage_noise_bps: 0.0 # set >0 for stochastic slippage; use rng_seed for reproducibility
   rng_seed: null # e.g. 42 for deterministic noise; null = process-global Random
   initial_cash_usd: 100000
+  # When track_portfolio=True in replay: block buys if cash + fees would go negative
+  enforce_solvency: true
 
 routing:
   # Deterministic route selector (spec §9) — thresholds in config, not code magic numbers

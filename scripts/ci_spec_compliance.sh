@@ -11,6 +11,7 @@ while IFS= read -r line; do
 done < <(
   grep -R -n -E 'alpaca\.(data|data\.historical|data\.live)' --include='*.py' . \
     --exclude-dir='.git' \
+    --exclude-dir='legacy' \
     --exclude='alpaca_paper.py' \
     2>/dev/null || true
 )

@@ -33,7 +33,7 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 - [x] **Coinbase-only data:** `scripts/ci_spec_compliance.sh`
 - [x] **Risk HMAC:** `NM_RISK_SIGNING_SECRET` + `execution.intent_gate`
 - [x] **No raw text → trades:** `OrderIntent` metadata validator
-- [ ] **No auto model promotion:** document in `docs/MLFLOW_PROMOTION.md` (stub) + enforce in automation
+- [x] **No auto model promotion:** [`MLFLOW_PROMOTION.md`](MLFLOW_PROMOTION.md) + `scripts/ci_mlflow_promotion_policy.sh` (blocks `transition_model_version_stage` / `set_registered_model_alias` in `.py`)
 - [x] **Audit trail:** `decision_trace` + log; optional QuestDB when `NM_QUESTDB_PERSIST_DECISION_TRACES=true`
 
 ---
@@ -68,14 +68,14 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 - [ ] **HMM:** train + persist
 - [ ] **TFT:** PyTorch or documented deviation
 - [x] **Route selector:** thresholds in `routing` YAML
-- [ ] **MLflow:** real runs + manual promotion doc
+- [ ] **MLflow:** real training runs + artifact logging (manual promotion policy documented; registry still stub)
 
 ---
 
 ## 6. Decision & action
 
 - [x] **`RouteDecision`:** Pydantic contract (route_id, confidence, ranking)
-- [ ] **Action generator:** full per-route matrix vs risk tests
+- [x] **Action generator:** per-route `propose_action` tests (`tests/test_action_generator_routes.py`); risk caps still in `RiskEngine` tests
 
 ---
 
@@ -83,7 +83,7 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 
 - [x] **Precedence:** [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md)
 - [x] **Feed stale:** `feed_last_message_at` + `nm_feed_stale_blocks_total`
-- [x] **System modes (partial):** FLATTEN_ALL + REDUCE_ONLY position-aware; PAUSE/MAINTENANCE tests TBD
+- [x] **System modes:** FLATTEN_ALL + REDUCE_ONLY + PAUSE_NEW_ENTRIES + MAINTENANCE (`tests/test_risk_modes_position.py`)
 - [x] **Positions (paper, partial):** optional Alpaca `fetch_positions` on startup + interval when `position_reconcile_enabled`
 
 ---
@@ -108,8 +108,8 @@ Use this as the **single checklist** to reach full spec compliance. Check items 
 - [x] **Shared step:** `run_decision_tick` in `replay_decisions`
 - [x] **Simulator (partial):** fees + slippage + optional noise from YAML; `track_portfolio` in replay; seeded RNG for noise
 - [ ] **Multi-symbol portfolio replay:** Issue 32
-- [ ] **Risk vs solvency in replay:** Issue 33
-- [ ] **Simulator semantics doc:** Issue 34
+- [x] **Risk vs solvency in replay:** replay-layer cash check + `solvency_blocked` (`NM_BACKTESTING_ENFORCE_SOLVENCY`, `backtesting.enforce_solvency`)
+- [x] **Simulator semantics doc:** [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md)
 
 ---
 
@@ -177,7 +177,7 @@ You asked for a **single Coinbase truth** for prices, **Alpaca only for paper fi
 ## Honest gaps
 
 - **Coinbase live** signed orders; **TFT** PyTorch; **Qdrant** real embeddings in the 60s loop; **Prefect**; **Grafana/Loki** wiring.
-- **Risk modes:** PAUSE / MAINTENANCE matrix tests still outstanding (Issue 16).
+- **Risk modes:** PAUSE / MAINTENANCE covered in `tests/test_risk_modes_position.py` (Issue 16 partial).
 - **Alpaca paper:** retries + symbol helpers + optional venue reconcile are in code; optional CI integration against the paper API still not added (Issue 18).
 
 ## Latest batch (Alpaca paper + live reconcile)
@@ -476,7 +476,7 @@ Move magic numbers to YAML; unit tests for route ranking edge cases.
 
 ### Issue 14 — MLflow: Manual promotion only — document and enforce in code
 
-**Status:** Not started
+**Status:** Pending
 
 ## Goal
 
@@ -484,8 +484,9 @@ No auto-promotion; documented human gate; registry stub replaced with real workf
 
 ## Acceptance
 
-- [ ] `models/registry/mlflow_registry.py` behavior matches policy
-- [ ] `docs/` describes promotion steps
+- [x] `models/registry/mlflow_registry.py` — `promote()` no-op; no staging APIs
+- [x] `docs/MLFLOW_PROMOTION.md` + `scripts/ci_mlflow_promotion_policy.sh`
+- [ ] Real logged runs from orchestration (still stub)
 
 ## Refs
 
@@ -503,8 +504,8 @@ Tests assert `route_id`, `confidence`, `ranking`; action fields vs risk caps per
 
 ## Acceptance
 
-- [ ] pytest covers each `RouteId`
-- [ ] Documented mapping route → order type / expiry
+- [x] pytest covers `propose_action` for SCALPING / INTRADAY / SWING / NO_TRADE (`tests/test_action_generator_routes.py`)
+- [ ] RouteDecision ranking / full risk matrix per route
 
 ## Refs
 
@@ -526,7 +527,7 @@ Replace reduce-only stub with position-aware closes; document order when multipl
 - [x] REDUCE_ONLY: block adds; allow reduce side; cap qty to position
 - [x] `tests/test_risk_modes_position.py`; live loop tracks per-symbol position after fills
 - [x] Fetch positions from Alpaca on startup + periodic reconcile when `execution.position_reconcile_enabled` (paper)
-- [ ] PAUSE / MAINTENANCE matrix tests
+- [x] PAUSE_NEW_ENTRIES + MAINTENANCE tests (`tests/test_risk_modes_position.py`)
 
 ## Refs
 
@@ -841,7 +842,7 @@ Align `infra/docker-compose.yml` with spec services you run in dev/prod (MLflow,
 
 ### Issue 33 — Backtest: RiskEngine vs simulated solvency
 
-**Status:** Not started
+**Status:** Pending
 
 ## Goal
 
@@ -849,8 +850,9 @@ Replay uses simulated cash for fees/slippage, but `RiskEngine` does not see wall
 
 ## Acceptance
 
-- [ ] Document current behavior in `docs/` or README backtest section
-- [ ] Optional: pass `available_cash` into risk evaluation for replay-only runs
+- [x] Document in [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md) and README backtest blurb
+- [x] Replay-layer cash check when `enforce_solvency` (default `backtesting.enforce_solvency` / `NM_BACKTESTING_ENFORCE_SOLVENCY`); row flag `solvency_blocked`
+- [ ] Optional: pass `available_cash` into `RiskEngine` for replay-only runs
 
 ## Refs
 
@@ -860,7 +862,7 @@ Replay uses simulated cash for fees/slippage, but `RiskEngine` does not see wall
 
 ### Issue 34 — Docs: Backtest simulator semantics (fee model)
 
-**Status:** Not started
+**Status:** Completed
 
 ## Goal
 
@@ -868,7 +870,7 @@ Short reference for how `fee_bps`, `slippage_bps`, and `slippage_noise_bps` comb
 
 ## Acceptance
 
-- [ ] `docs/BACKTESTING_SIMULATOR.md` or section in README
+- [x] [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md) + README pointer
 
 ## Refs
 
@@ -916,3 +918,4 @@ These are **not** duplicate backlogs; they document behavior and precedence.
 - [`GRACEFUL_SHUTDOWN.md`](GRACEFUL_SHUTDOWN.md)
 - [`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md)
 - [`MLFLOW_PROMOTION.md`](MLFLOW_PROMOTION.md)
+- [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md)

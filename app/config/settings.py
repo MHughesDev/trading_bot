@@ -51,6 +51,7 @@ class AppSettings(BaseSettings):
     backtesting_slippage_noise_bps: float = 0.0
     backtesting_rng_seed: int | None = None
     backtesting_initial_cash_usd: float = 100_000.0
+    backtesting_enforce_solvency: bool = True
 
     routing_spread_trade_max_bps: float = 30.0
     routing_forecast_strength_min: float = 0.001
@@ -138,6 +139,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["backtesting_rng_seed"] = None if v is None else int(v)
         if "initial_cash_usd" in bt:
             out["backtesting_initial_cash_usd"] = float(bt["initial_cash_usd"])
+        if "enforce_solvency" in bt:
+            out["backtesting_enforce_solvency"] = bool(bt["enforce_solvency"])
     if "routing" in cfg:
         ro = cfg["routing"] or {}
         out["routing_spread_trade_max_bps"] = ro.get("spread_trade_max_bps", 30.0)

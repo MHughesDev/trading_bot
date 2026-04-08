@@ -17,6 +17,7 @@ class BacktestExecutionParams:
     slippage_noise_bps: float = 0.0
     rng_seed: int | None = None
     initial_cash: Decimal = Decimal("100000")
+    enforce_solvency: bool = True
 
     @classmethod
     def from_settings(cls, s: AppSettings) -> BacktestExecutionParams:
@@ -26,4 +27,5 @@ class BacktestExecutionParams:
             slippage_noise_bps=s.backtesting_slippage_noise_bps,
             rng_seed=s.backtesting_rng_seed,
             initial_cash=Decimal(str(s.backtesting_initial_cash_usd)),
+            enforce_solvency=s.backtesting_enforce_solvency,
         )
