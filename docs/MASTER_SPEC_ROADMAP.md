@@ -2,6 +2,8 @@
 
 This is the **single place** for Master Spec V3 work: production checklist, narrative gaps, numbered issues, and optional GitHub sync. Deep links for risk order, QuestDB, shutdown, and candles remain in separate short docs (see bottom).
 
+**Gap summary (what’s not done yet):** [`MASTER_SPEC_GAPS.md`](MASTER_SPEC_GAPS.md)
+
 ---
 
 ## Contents
@@ -921,3 +923,4 @@ These are **not** duplicate backlogs; they document behavior and precedence.
 - [`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md)
 - [`MLFLOW_PROMOTION.md`](MLFLOW_PROMOTION.md)
 - [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md)
+- [`MASTER_SPEC_GAPS.md`](MASTER_SPEC_GAPS.md) — high-level remaining work vs spec

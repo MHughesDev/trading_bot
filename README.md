@@ -54,6 +54,6 @@ See Master Spec V3: `app/` (runtime, contracts, config), `data_plane/`, `models/
 
 ## Master Spec roadmap (checklist + backlog + narrative)
 
-**Single doc:** [`docs/MASTER_SPEC_ROADMAP.md`](docs/MASTER_SPEC_ROADMAP.md) — production checklist, numbered issues (**Not started** / **Pending** / **Completed**), narrative commentary, and optional GitHub issue sync.
+**Single doc:** [`docs/MASTER_SPEC_ROADMAP.md`](docs/MASTER_SPEC_ROADMAP.md) — production checklist, numbered issues (**Not started** / **Pending** / **Completed**), narrative commentary, and optional GitHub issue sync. **What’s left vs the full spec:** [`docs/MASTER_SPEC_GAPS.md`](docs/MASTER_SPEC_GAPS.md).
 
 **Reference:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md) (risk order). Short stubs [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md), [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md), [`docs/COMMENTARY.md`](docs/COMMENTARY.md), [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md) redirect to the roadmap.
