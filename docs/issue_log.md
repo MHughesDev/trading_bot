@@ -54,6 +54,5 @@ When resolved, move to **Resolved** or remove and reference the commit/PR.
 
 ## Quick links
 
-- [`features_backlog.md`](features_backlog.md) — gaps vs target architecture (code-derived)  
-- [`PRODUCTION_HARDENING.md`](PRODUCTION_HARDENING.md) — checklist  
+- [`features_backlog.md`](features_backlog.md) — features, hardening gates, platform work  
 - [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md) · [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md)

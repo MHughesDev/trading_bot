@@ -20,9 +20,9 @@ create() {
     gh issue create -R "$REPO" --title "$title" --body "$body"
 }
 
-create "Epic: NautilusMonster — remaining work" "Parent tracker for NautilusMonster. Close when \`docs/PRODUCTION_HARDENING.md\` is fully checked and \`docs/features_backlog.md\` major gaps are addressed.
+create "Epic: NautilusMonster — remaining work" "Parent tracker for NautilusMonster. Close when \`docs/features_backlog.md\` release gates (§2) and P0–P1 items are addressed.
 
-See: \`docs/features_backlog.md\`, \`docs/PRODUCTION_HARDENING.md\`"
+See: \`docs/features_backlog.md\`"
 
 create "Data: Wire Coinbase WS feed health to risk (stale data)" "## Goal
 Use \`CoinbaseWebSocketClient.last_message_at\` and feed gaps with \`NM_RISK_STALE_DATA_SECONDS\`.

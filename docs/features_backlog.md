@@ -1,119 +1,191 @@
 # Features backlog
 
-**Purpose:** Things we **want to add** — gaps between **this repository today** and the **target NautilusMonster V3 architecture** (Coinbase-only market data, Alpaca paper, shared decision + risk path, typed contracts, backtest ≈ live). Items are derived from **code inspection** and product intent, not from a separate spec document.
+Structured backlog for **all planned work**: new capabilities, production hardening, reliability, docs, and spikes. **Operational bugs** live in [`issue_log.md`](issue_log.md).
 
-**Related:** [`issue_log.md`](issue_log.md) (bugs and fixes in flight) · [`PRODUCTION_HARDENING.md`](PRODUCTION_HARDENING.md) (checklist stub) · [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md)
-
----
-
-## Target architecture (summary)
-
-Multi-route AI stack: **Coinbase** → Polars features → **HMM regime** → **Qdrant memory** → **TFT forecast** → route selector → action generator → **risk engine** → execution (**Alpaca paper** | **Coinbase live**). Storage: QuestDB, Redis, Qdrant. Control: FastAPI + Streamlit. Ops: MLflow, Prefect, Prometheus/Grafana/Loki. **Rules:** Coinbase-only data; Alpaca never for data; risk cannot be bypassed; no raw news text → orders; manual model promotion only.
+**References:** [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md) · [`QUESTDB_TRACES.md`](QUESTDB_TRACES.md) · [`GRACEFUL_SHUTDOWN.md`](GRACEFUL_SHUTDOWN.md) · [`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md) · [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md)
 
 ---
 
-## Execution
+## 1. Conventions
 
-| ID | Gap (code / intent) | Pointer |
-|----|---------------------|---------|
-| FB-X1 | **Coinbase live orders** — `CoinbaseExecutionAdapter` returns synthetic `OrderAck` with `status=pending_implementation`; no CDP/JWT signing, real submit/cancel/fills, or idempotency. | `execution/adapters/coinbase_live.py` |
-| FB-X2 | **Cancel / positions on Coinbase live** — `cancel_order` logs stub; `fetch_positions` returns `[]`. | same |
-| FB-X3 | **Single adapter factory** — ensure one construction path for paper/live in `ExecutionService` and tests (avoid drift). | `execution/service.py`, `execution/router.py` |
+### Request types
 
-## Models
+| Type | Meaning |
+|------|---------|
+| **Feature** | New user- or operator-visible capability |
+| **Hardening** | Production readiness: compliance gates, security, correctness under load |
+| **Improvement** | Deeper implementation of something that already exists (models, metrics, UI) |
+| **Reliability** | Ops: runbooks, backups, DR, on-call clarity |
+| **Platform** | Infra & CI: compose, workflows, test environments |
+| **Tech debt** | Refactors, deduplication, cleanup |
+| **Spike** | Time-boxed research; outcome may be a Feature or “won’t do” |
 
-| ID | Gap | Pointer |
-|----|-----|---------|
-| FB-ML1 | **HMM not trained in production path** — `GaussianHMMRegimeModel.predict_proba_last` uses **unfitted** HMM → fixed SIDEWAYS + uniform probs until `fit()` is called with real data; no persisted artifact load in `DecisionPipeline`. | `models/regime/hmm_regime.py`, `decision_engine/pipeline.py` |
-| FB-ML2 | **Forecast is Ridge surrogate, not TFT** — docstring states PyTorch TFT optional; core behavior is **sklearn Ridge** per horizon, not Temporal Fusion Transformer. | `models/forecast/tft_forecast.py` |
-| FB-ML3 | **MLflow** — `MLflowModelRegistry` logs if mlflow installed; **`promote()`** is intentional no-op; no orchestrated train → evaluate → register workflow. | `models/registry/mlflow_registry.py`, `orchestration/nightly_retrain.py` |
-| FB-ML4 | **Nightly retrain** — `nightly_flow_stub()` only logs; no Prefect deployment, data pull, or evaluation gate. | `orchestration/nightly_retrain.py` |
+### Priority
 
-## Memory (Qdrant)
+| P | Meaning |
+|---|---------|
+| **P0** | Blocks safe or correct production use |
+| **P1** | Needed for credible production / launch |
+| **P2** | Important but can follow launch |
+| **P3** | Nice-to-have |
 
-| ID | Gap | Pointer |
-|----|-----|---------|
-| FB-M1 | **Embeddings are placeholders** — Qdrant helpers expect vectors; live loop uses **zeros / placeholders** until a news encoder exists. | `data_plane/memory/qdrant_memory.py`, `data_plane/memory/retrieval_loop.py` |
-| FB-M2 | **60s loop not feeding real memory features** — `run_memory_retrieval_loop` documents placeholder query embedding; must wire symbol filter, top-K, recency, aggregated features into `FeaturePipeline`. | `app/runtime/live_service.py`, `retrieval_loop.py` |
-| FB-M3 | **Payload versioning & tests** — collection schema, embedding model version in payload, integration tests against Qdrant in CI. | `data_plane/memory/` |
+### Status
 
-## Features & data
-
-| ID | Gap | Pointer |
-|----|-----|---------|
-| FB-F1 | **Sentiment** — `FeaturePipeline.sentiment_features()` returns **stub keys** (defaults 0) until FinBERT + news frequency + shocks are wired from `news_ingest`. | `data_plane/features/pipeline.py`, `data_plane/ingest/news_ingest.py` |
-| FB-F2 | **News ingest** — `fetch_news_stub`; real sources + NLP pipeline TBD. | `news_ingest.py` |
-| FB-F3 | **REST validation** — expand automated tests / fixtures for V1 symbols (BTC-USD, ETH-USD, SOL-USD) beyond smoke script. | `data_plane/ingest/coinbase_rest.py`, `scripts/smoke_credentials.py` |
-| FB-F4 | **BarEvent-style strict schemas** — optional end-to-end `schema_version` + `source` on all bar-like events if we want spec-style contracts everywhere. | `app/contracts/`, ingest |
-
-## Storage (QuestDB)
-
-| ID | Gap | Pointer |
-|----|-----|---------|
-| FB-S1 | **QuestDB production path** — `insert_decision_trace_dict` exists; batching, retention policy, backup/restore runbooks still thin. | `data_plane/storage/questdb.py`, `docs/QUESTDB_TRACES.md` |
-
-## Observability
-
-| ID | Gap | Pointer |
-|----|-----|---------|
-| FB-O1 | **Metrics** — partial counters (feed stale, normalizer); missing full **stage latency**, PnL/drawdown gauges, order success rates as first-class series. | `observability/metrics.py` |
-| FB-O2 | **Loki / Grafana wiring** — images exist in `infra/docker-compose.yml` but **no Promtail/driver** shipping app JSON logs to Loki; Grafana dashboards/alerts not checked in as code. | `infra/docker-compose.yml`, `observability/logging.py` |
-
-## Control plane
-
-| ID | Gap | Pointer |
-|----|-----|---------|
-| FB-C1 | **Streamlit** — multipage shell exists; pages are **thin** until bound to QuestDB, Loki, and mutating API for emergency actions. | `control_plane/` |
-
-## Infra & CI
-
-| ID | Gap | Pointer |
-|----|-----|---------|
-| FB-I1 | **Compose** — QuestDB, Redis, Qdrant, Prometheus, Grafana, Loki present; **MLflow and Prefect** not in compose; ports/docs may drift from README. | `infra/docker-compose.yml` |
-| FB-I2 | **CI** — no `.github/workflows` in repo; integration tests (Redis, QuestDB, Qdrant) and optional E2E paper dry run not automated here. | — |
-| FB-I3 | **Runbooks** — secrets rotation, incident, flatten, QuestDB restore — operational docs TBD. | `docs/` |
-
-## Backtesting
-
-| ID | Gap | Pointer |
-|----|-----|---------|
-| FB-B1 | **RiskEngine + replay cash** — solvency enforced in replay layer; optional pass **`available_cash`** into `RiskEngine` for replay-only alignment. | `backtesting/replay.py`, `risk_engine/engine.py` |
-
-## Tests & tooling
-
-| ID | Gap | Pointer |
-|----|-----|---------|
-| FB-T1 | **Alpaca paper CI** — optional integration test against live paper API (secrets). | `execution/adapters/alpaca_paper.py` |
-| FB-T2 | **Shutdown tests** — SIGINT/SIGTERM handling not exercised in CI. | `app/runtime/live_service.py`, `docs/GRACEFUL_SHUTDOWN.md` |
-
-## Nice-to-haves (out of V1 scope)
-
-| ID | Note |
-|----|------|
-| FB-N1 | Multi-exchange execution |
-| FB-N2 | RL controllers |
-| FB-N3 | Portfolio optimization |
+| Status | Meaning |
+|--------|---------|
+| **Open** | Not started |
+| **In progress** | Active |
+| **Done** | Shipped / verified — keep for history or move to §7 |
 
 ---
 
-## What is already in good shape (short)
+## 2. Compliance & release gates (hardening)
 
-- Shared **`run_decision_tick`** for live and replay; **`replay_decisions`** / **`replay_multi_asset_decisions`** with portfolio + solvency options.
-- **Alpaca paper** adapter with retries, symbol mapping, optional position reconcile.
-- **Coinbase WS + REST** (including Advanced Trade → Exchange fallback on 401/403).
-- **Feature pipeline** implements RSI, MACD, ATR, ADX, EMA spread, VWAP distance, microstructure helper; sentiment hooks exist but need real inputs.
-- **Risk engine** modes, HMAC gate, CI guards (`ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`).
-- **Control plane FastAPI** + **Prometheus** scrape on metrics route.
-- **`infra/docker-compose.yml`** — core data stores + Prometheus + Grafana + Loki images.
+These are **non-functional requirements** tracked as hardening items. Release “done” when all **Open** gates here are closed or explicitly waived.
+
+| ID | Type | P | Status | Summary | Verify |
+|----|------|---|--------|---------|--------|
+| HG-01 | Hardening | — | Done | Coinbase-only market data — no Alpaca data imports outside paper adapter | `scripts/ci_spec_compliance.sh` |
+| HG-02 | Hardening | — | Done | Risk HMAC + intent gate when signing enabled | `execution/intent_gate.py`, `NM_RISK_SIGNING_SECRET` |
+| HG-03 | Hardening | — | Done | No raw text → trades — `OrderIntent` metadata rules | contracts + validators |
+| HG-04 | Hardening | — | Done | No automatic MLflow model stage promotion in code | `scripts/ci_mlflow_promotion_policy.sh`, `docs/MLFLOW_PROMOTION.md` |
+| HG-05 | Hardening | P0 | Open | Coinbase **live**: real signed orders, cancel, fills, idempotency (not synthetic ack) | `execution/adapters/coinbase_live.py` → same as FB-X1 |
+| HG-06 | Hardening | P1 | Open | Full sentiment + news pipeline wired (not stubs) | `data_plane/features/pipeline.py`, `news_ingest.py` → FB-F1/F2 |
+| HG-07 | Hardening | P1 | Open | Qdrant: real embeddings, versioned payloads, integration tests | → FB-M1–M3 |
+| HG-08 | Hardening | P1 | Open | HMM trained, persisted, loaded in inference | → FB-ML1 |
+| HG-09 | Hardening | P1 | Open | Forecast: TFT or explicit production substitute + training path | → FB-ML2 |
+| HG-10 | Hardening | P1 | Open | Orchestrated train → evaluate → MLflow → manual promotion (Prefect path) | → FB-ML3/ML4 |
+| HG-11 | Hardening | P1 | Open | Stage latency + PnL metrics; ship logs to Loki; Grafana dashboards as code | → FB-O1/O2 |
+| HG-12 | Hardening | P2 | Open | Runbooks: secrets, incident, flatten, QuestDB restore | → FB-I3 |
+| HG-13 | Hardening | P2 | Open | CI integration tests: Redis, QuestDB, Qdrant | → FB-I2 |
+
+**Definition of release-ready:** all **Open** rows in §2 and §3 that are **P0–P1** are **Done** or waived in writing; release notes reference commit.
 
 ---
 
-## How to add an item
+## 3. Backlog by area
 
-1. Add a row with the next **FB-** id.  
-2. Point to **files or symbols** so the gap is verifiable.  
-3. When done, move the row to a **Done** subsection or delete it.
+Columns: **ID** | **Type** | **P** | **Status** | **Summary** | **Pointer**
+
+### Execution & routing
+
+| ID | Type | P | Status | Summary | Pointer |
+|----|------|---|--------|---------|---------|
+| FB-X1 | Feature | P0 | Open | Coinbase live: CDP/JWT signing, real submit/cancel/fills, idempotency | `execution/adapters/coinbase_live.py` |
+| FB-X2 | Improvement | P1 | Open | Coinbase live: `cancel_order` / `fetch_positions` real impl | same |
+| FB-X3 | Tech debt | P2 | Open | Single adapter factory for paper/live in `ExecutionService` + tests | `execution/service.py`, `execution/router.py` |
+
+### Models & orchestration
+
+| ID | Type | P | Status | Summary | Pointer |
+|----|------|---|--------|---------|---------|
+| FB-ML1 | Feature | P1 | Open | HMM: fit on data, persist artifact, load in `DecisionPipeline` (no unfitted default path) | `models/regime/hmm_regime.py`, `decision_engine/pipeline.py` |
+| FB-ML2 | Feature | P1 | Open | TFT: PyTorch model or explicit substitute + training pipeline | `models/forecast/tft_forecast.py` |
+| FB-ML3 | Feature | P1 | Open | MLflow: real training runs, artifacts; registry workflow (promote stays manual) | `models/registry/mlflow_registry.py` |
+| FB-ML4 | Feature | P1 | Open | Prefect: nightly retrain job (replace `nightly_flow_stub`) | `orchestration/nightly_retrain.py` |
+
+### Memory (Qdrant)
+
+| ID | Type | P | Status | Summary | Pointer |
+|----|------|---|--------|---------|---------|
+| FB-M1 | Improvement | P1 | Open | Real embedding vectors for memory (not zeros/placeholders) | `data_plane/memory/qdrant_memory.py` |
+| FB-M2 | Feature | P1 | Open | 60s loop: top-K, symbol filter, recency → feature vector in pipeline | `retrieval_loop.py`, `app/runtime/live_service.py` |
+| FB-M3 | Hardening | P2 | Open | Payload schema version + integration tests vs Qdrant in CI | `data_plane/memory/` |
+
+### Features & data
+
+| ID | Type | P | Status | Summary | Pointer |
+|----|------|---|--------|---------|---------|
+| FB-F1 | Feature | P1 | Open | Sentiment: FinBERT + frequency + shocks wired into `sentiment_features()` | `data_plane/features/pipeline.py` |
+| FB-F2 | Feature | P2 | Open | News ingest: replace `fetch_news_stub` with real sources + dedup | `data_plane/ingest/news_ingest.py` |
+| FB-F3 | Improvement | P2 | Open | REST: more tests/fixtures for BTC/ETH/SOL candles | `data_plane/ingest/coinbase_rest.py` |
+| FB-F4 | Spike | P3 | Open | Optional strict `BarEvent` schema (`schema_version`, `source`) end-to-end | `app/contracts/` |
+
+### Storage
+
+| ID | Type | P | Status | Summary | Pointer |
+|----|------|---|--------|---------|---------|
+| FB-S1 | Reliability | P2 | Open | QuestDB: batching, retention, backup/restore runbooks | `data_plane/storage/questdb.py` |
+
+### Observability
+
+| ID | Type | P | Status | Summary | Pointer |
+|----|------|---|--------|---------|---------|
+| FB-O1 | Feature | P1 | Open | Metrics: stage latency, PnL/drawdown, order success rate | `observability/metrics.py` |
+| FB-O2 | Platform | P1 | Open | Promtail (or equivalent) → Loki; Grafana dashboards in repo | `infra/docker-compose.yml`, `observability/logging.py` |
+
+### Control plane
+
+| ID | Type | P | Status | Summary | Pointer |
+|----|------|---|--------|---------|---------|
+| FB-C1 | Feature | P2 | Open | Streamlit: bind pages to API + QuestDB/Loki + emergency actions | `control_plane/` |
+
+### Platform & CI
+
+| ID | Type | P | Status | Summary | Pointer |
+|----|------|---|--------|---------|---------|
+| FB-I1 | Platform | P2 | Open | Compose: add MLflow/Prefect or document omission; align ports with README | `infra/docker-compose.yml` |
+| FB-I2 | Platform | P2 | Open | GitHub Actions: lint, pytest, spec scripts; integration job for Redis/QuestDB/Qdrant | `.github/workflows/` |
+| FB-I3 | Reliability | P2 | Open | Runbooks (secrets, incident, flatten, QuestDB) | `docs/` |
+
+### Backtesting
+
+| ID | Type | P | Status | Summary | Pointer |
+|----|------|---|--------|---------|---------|
+| FB-B1 | Improvement | P3 | Open | Optional `available_cash` in `RiskEngine` for replay solvency | `backtesting/replay.py`, `risk_engine/engine.py` |
+
+### Quality & tests
+
+| ID | Type | P | Status | Summary | Pointer |
+|----|------|---|--------|---------|---------|
+| FB-T1 | Platform | P3 | Open | Optional CI: Alpaca paper API smoke (secrets) | `execution/adapters/alpaca_paper.py` |
+| FB-T2 | Hardening | P3 | Open | SIGINT/SIGTERM shutdown tests | `app/runtime/live_service.py` |
+
+### Out of scope (reference)
+
+| ID | Type | Status | Summary |
+|----|------|--------|---------|
+| FB-N1 | Feature | — | Multi-exchange execution |
+| FB-N2 | Feature | — | RL controllers |
+| FB-N3 | Feature | — | Portfolio optimization |
 
 ---
 
-*Backlog maintained against the codebase; update when architecture or code changes.*
+## 4. How to add a request
+
+1. Pick **Type** and **Priority** using §1.  
+2. Add a row in §3 (or §2 if it is a **gate**). Use the next **FB-** or **HG-** id.  
+3. Link **code paths** or tickets.  
+4. When **Done**, set status; optionally move to §7 or keep for audit.
+
+---
+
+## 5. Bugs and incidents
+
+Do **not** track production incidents here — use [`issue_log.md`](issue_log.md). Link backlog IDs when a bug blocks an item (e.g. “IL-012 blocks FB-X1”).
+
+---
+
+## 6. What is already in good shape
+
+- Shared **`run_decision_tick`**; **`replay_decisions`** / **`replay_multi_asset_decisions`** with portfolio + solvency.  
+- **Alpaca paper** adapter (retries, symbol map, optional reconcile).  
+- **Coinbase WS + REST** (retry, Advanced Trade → Exchange fallback on 401/403).  
+- **Feature pipeline:** RSI, MACD, ATR, ADX, EMA spread, VWAP, microstructure helper.  
+- **Risk** modes + HMAC gate + **CI guards** (`ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`).  
+- **FastAPI** control plane + **Prometheus** metrics route.  
+- **Compose:** QuestDB, Redis, Qdrant, Prometheus, Grafana, Loki images.
+
+---
+
+## 7. Completed (optional archive)
+
+*Move rows here when done, or rely on git history.*
+
+| ID | Completed | Notes |
+|----|-------------|-------|
+| — | — | — |
+
+---
+
+*Last structure update: single backlog for features + hardening + platform; replaces standalone production-hardening checklist.*

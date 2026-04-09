@@ -54,4 +54,4 @@ Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models
 
 ## Roadmap & logs
 
-**Gaps vs target architecture (code-derived):** [`docs/features_backlog.md`](docs/features_backlog.md) — what we want to add next. **Operational issues:** [`docs/issue_log.md`](docs/issue_log.md). **Production checklist:** [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md). **Reference:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md) (risk order). Redirect: [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md).
+**Backlog (features, hardening gates, platform):** [`docs/features_backlog.md`](docs/features_backlog.md). **Operational issues:** [`docs/issue_log.md`](docs/issue_log.md). **Reference:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md) (risk order). Redirect: [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md).
