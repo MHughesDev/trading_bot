@@ -2,7 +2,8 @@
 
 This is the **single place** for Master Spec V3 work: production checklist, narrative gaps, numbered issues, and optional GitHub sync. Deep links for risk order, QuestDB, shutdown, and candles remain in separate short docs (see bottom).
 
-**Gap summary (what’s not done yet):** [`MASTER_SPEC_GAPS.md`](MASTER_SPEC_GAPS.md)
+**Gap summary (what’s not done yet):** [`MASTER_SPEC_GAPS.md`](MASTER_SPEC_GAPS.md)  
+**Working logs:** [`features_backlog.md`](features_backlog.md) (want to add) · [`issue_log.md`](issue_log.md) (need to fix)
 
 ---
 

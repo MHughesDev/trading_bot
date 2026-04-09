@@ -1,5 +1,5 @@
-# Issue log — Master Spec V3
+# Issue log (redirect)
 
-The numbered issue log now lives in **[`MASTER_SPEC_ROADMAP.md`](MASTER_SPEC_ROADMAP.md#issue-log)** (single roadmap for checklist, narrative, and GitHub sync notes).
-
-Edit that file so the backlog stays in one place.
+- **Operational issues (things to fix):** [`issue_log.md`](issue_log.md)
+- **Features backlog (things to add):** [`features_backlog.md`](features_backlog.md)
+- **Master Spec Issues 1–35 (full text):** [`MASTER_SPEC_ROADMAP.md`](MASTER_SPEC_ROADMAP.md#issue-log)

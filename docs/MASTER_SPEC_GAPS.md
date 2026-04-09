@@ -3,6 +3,7 @@
 This file records **what is not yet done** relative to the NautilusMonster V3 Master Spec (Coinbase data + Alpaca paper + shared decision/risk path). It is a **high-level gap summary** for planning and onboarding.
 
 **Canonical backlog** (checkboxes + numbered Issues 1–35): [`MASTER_SPEC_ROADMAP.md`](MASTER_SPEC_ROADMAP.md).  
+**Feature ideas / fix queue:** [`features_backlog.md`](features_backlog.md) · [`issue_log.md`](issue_log.md).  
 When you close work, update the roadmap first, then adjust this file if the gap list changes.
 
 ---
@@ -103,5 +104,6 @@ Spec §19 rules are largely enforced in code + CI (Coinbase-only data grep, inte
 ## Related docs
 
 - [`MASTER_SPEC_ROADMAP.md`](MASTER_SPEC_ROADMAP.md) — full checklist + Issues 1–35  
+- [`features_backlog.md`](features_backlog.md), [`issue_log.md`](issue_log.md) — planning + operational logs  
 - [`COMMENTARY.md`](COMMENTARY.md) — stub; narrative lives in roadmap  
 - [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md), [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md)
