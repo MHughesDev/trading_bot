@@ -1,5 +1,7 @@
 # GitHub issues (optional)
 
-Instructions for syncing to GitHub now live in **[`MASTER_SPEC_ROADMAP.md`](MASTER_SPEC_ROADMAP.md#optional-github-issues)** under the same roadmap as the issue log.
+Use **[`features_backlog.md`](features_backlog.md)** for planned work and **[`issue_log.md`](issue_log.md)** for operational issues.
 
-Edit [`MASTER_SPEC_ROADMAP.md`](MASTER_SPEC_ROADMAP.md) so the backlog stays in one place.
+To create GitHub issues from the embedded script definitions, run `scripts/create_github_issues.sh` (requires `gh` CLI). Update the script bodies if backlog items change.
+
+**Commentary:** [`COMMENTARY.md`](COMMENTARY.md)

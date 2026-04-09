@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create GitHub issues for Master Spec V3 from embedded definitions.
+# Create GitHub issues from embedded definitions (see docs/features_backlog.md).
 # Prerequisites: gh CLI, auth with repo scope: gh auth login
 # Usage: bash scripts/create_github_issues.sh
 #        REPO=owner/repo bash scripts/create_github_issues.sh
@@ -20,9 +20,9 @@ create() {
     gh issue create -R "$REPO" --title "$title" --body "$body"
 }
 
-create "Epic: Master Spec V3 — remaining work" "Parent tracker for NautilusMonster V3 spec compliance. Close when child issues are done and the checklist in \`docs/MASTER_SPEC_ROADMAP.md\` is fully checked.
+create "Epic: NautilusMonster — remaining work" "Parent tracker for NautilusMonster. Close when \`docs/PRODUCTION_HARDENING.md\` is fully checked and \`docs/features_backlog.md\` major gaps are addressed.
 
-See: \`docs/MASTER_SPEC_ROADMAP.md\`"
+See: \`docs/features_backlog.md\`, \`docs/PRODUCTION_HARDENING.md\`"
 
 create "Data: Wire Coinbase WS feed health to risk (stale data)" "## Goal
 Use \`CoinbaseWebSocketClient.last_message_at\` and feed gaps with \`NM_RISK_STALE_DATA_SECONDS\`.

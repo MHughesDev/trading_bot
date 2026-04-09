@@ -46,14 +46,12 @@ Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models
 
 ## Layout
 
-See Master Spec V3: `app/` (runtime, contracts, config), `data_plane/`, `models/`, `decision_engine/`, `risk_engine/`, `execution/`, `backtesting/`, `control_plane/`, `observability/`, `infra/`.
+`app/` (runtime, contracts, config), `data_plane/`, `models/`, `decision_engine/`, `risk_engine/`, `execution/`, `backtesting/`, `control_plane/`, `observability/`, `infra/`.
 
 ## Backtesting (simulated fees / slippage)
 
 `backtesting.replay_decisions` supports optional portfolio accounting: set `track_portfolio=True` to apply `slippage_bps`, `fee_bps`, optional `slippage_noise_bps` with `rng_seed` for reproducibility, and `initial_cash_usd` from `app/config/default.yaml` under `backtesting:` (or `NM_BACKTESTING_*`). Default `track_portfolio=False` keeps prior behavior (position qty only). With `track_portfolio`, optional **`enforce_solvency`** (default true) skips buys that would drive simulated cash negative. **`replay_multi_asset_decisions`** runs multiple symbols on one portfolio timeline (see [`docs/BACKTESTING_SIMULATOR.md`](docs/BACKTESTING_SIMULATOR.md)). Semantics: same doc.
 
-## Master Spec roadmap (checklist + backlog + narrative)
+## Roadmap & logs
 
-**Single doc:** [`docs/MASTER_SPEC_ROADMAP.md`](docs/MASTER_SPEC_ROADMAP.md) — production checklist, numbered issues (**Not started** / **Pending** / **Completed**), narrative commentary, and optional GitHub issue sync. **What’s left vs the full spec:** [`docs/MASTER_SPEC_GAPS.md`](docs/MASTER_SPEC_GAPS.md).
-
-**Working logs:** [`docs/features_backlog.md`](docs/features_backlog.md) (things we want to add) · [`docs/issue_log.md`](docs/issue_log.md) (current issues to fix). **Reference:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md) (risk order). Stubs [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md), [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md), [`docs/COMMENTARY.md`](docs/COMMENTARY.md), [`docs/GITHUB_ISSUES.md`](docs/GITHUB_ISSUES.md) point to the roadmap or the logs above.
+**Gaps vs target architecture (code-derived):** [`docs/features_backlog.md`](docs/features_backlog.md) — what we want to add next. **Operational issues:** [`docs/issue_log.md`](docs/issue_log.md). **Production checklist:** [`docs/PRODUCTION_HARDENING.md`](docs/PRODUCTION_HARDENING.md). **Reference:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md) (risk order). Redirect: [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md).

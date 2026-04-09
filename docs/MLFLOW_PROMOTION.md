@@ -1,4 +1,4 @@
-# MLflow — manual promotion only (Master Spec)
+# MLflow — manual promotion only
 
 - Training/orchestration jobs may **log** metrics and artifacts to MLflow.
 - **Do not** configure automatic transition to Production stage in CI.

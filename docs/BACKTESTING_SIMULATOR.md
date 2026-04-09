@@ -1,6 +1,6 @@
 # Backtest simulator semantics
 
-This describes how **`backtesting/simulator.py`** and **`replay_decisions(..., track_portfolio=True)`** apply fills for Master Spec V3 alignment with live `run_decision_tick`.
+This describes how **`backtesting/simulator.py`** and **`replay_decisions(..., track_portfolio=True)`** apply fills in alignment with live `run_decision_tick`.
 
 ## Slippage
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fail if MLflow auto-promotion APIs appear (Master Spec: manual promotion only).
+# Fail if MLflow auto-promotion APIs appear (manual promotion only).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

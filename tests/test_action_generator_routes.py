@@ -1,4 +1,4 @@
-"""Per-route action proposal coverage (Master Spec Issue 15)."""
+"""Per-route action proposal coverage."""
 
 from __future__ import annotations
 
