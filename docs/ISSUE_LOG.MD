@@ -6,43 +6,59 @@
 
 ---
 
+## Priority levels
+
+| Level | Meaning |
+|-------|---------|
+| **HIGH** | Blocks or severely misrepresents production behavior; safety, correctness, or core pipeline integrity. |
+| **MEDIUM** | Important gaps in observability, ops, UX, or data quality that do not block basic paper/sandbox use. |
+| **LOW** | Test coverage, polish, or minor verification gaps. |
+
+---
+
 ## Conventions
 
 | Field | Meaning |
 |-------|---------|
 | **ID** | `IL-###` (local) |
-| **Severity** | Blocker / High / Medium / Low |
 | **Area** | data, models, execution, risk, runtime, backtest, control_plane, observability, ops, ci |
 | **Status** | Open / In progress / Done |
 
-When you close an item: set **Status** to **Done**, add **Resolved** date + commit/PR in **Resolved (recent)**, or remove the row if you prefer a minimal open list.
+When you close an item: set **Status** to **Done**, add **Resolved** date + commit/PR in **Resolved (recent)**, or remove the row.
 
 ---
 
-## Open — system-wide
+## HIGH priority (open)
 
-| ID | Severity | Area | Summary |
-|----|----------|------|---------|
-| IL-001 | High | execution | Coinbase live: real signed orders; remove `pending_implementation` synthetic acks (`execution/adapters/coinbase_live.py`). |
-| IL-002 | High | models | HMM never fitted in default pipeline — regime defaults to SIDEWAYS uniform until training + load path exists. |
-| IL-003 | High | models | Forecast is Ridge surrogate, not production TFT; training pipeline missing. |
-| IL-004 | High | memory | Qdrant embeddings placeholder; 60s memory loop does not feed real vectors into features. |
-| IL-005 | Medium | features | Sentiment / FinBERT / news pipeline returns zeros or stubs end-to-end. |
-| IL-006 | Medium | storage | QuestDB: batching, retention, backup runbooks incomplete vs production needs. |
-| IL-007 | Medium | observability | Loki: no Promtail (or equivalent) wiring from app logs; Grafana dashboards not as code. |
-| IL-008 | High | orchestration | `nightly_flow_stub` only — no Prefect deployment or real retrain. |
-| IL-009 | Medium | control_plane | Streamlit pages thin vs live API + storage. |
-| IL-010 | Medium | ci | No GitHub Actions workflow; integration tests for Redis/QuestDB/Qdrant not in repo CI. |
-| IL-011 | Low | runtime | `NotImplementedError` handler paths in `live_service` — verify coverage. |
+| ID | Area | Summary |
+|----|------|---------|
+| IL-001 | execution | Coinbase live: real signed orders; remove `pending_implementation` synthetic acks (`execution/adapters/coinbase_live.py`). |
+| IL-002 | models | HMM never fitted in default pipeline — regime defaults to SIDEWAYS uniform until training + load path exists. |
+| IL-003 | models | Forecast is Ridge surrogate, not production TFT; training pipeline missing. |
+| IL-004 | memory | Qdrant embeddings placeholder; 60s memory loop does not feed real vectors into features. |
+| IL-008 | orchestration | `nightly_flow_stub` only — no Prefect deployment or real retrain. |
 
 ---
 
-## Open — data & ingest
+## MEDIUM priority (open)
 
-| ID | Severity | Summary |
-|----|----------|---------|
-| IL-101 | Medium | `news_ingest`: `fetch_news_stub` only — no live news pipeline. |
-| IL-102 | Low | Expand WS normalizer fixtures beyond current samples. |
+| ID | Area | Summary |
+|----|------|---------|
+| IL-005 | features | Sentiment / FinBERT / news pipeline returns zeros or stubs end-to-end. |
+| IL-006 | storage | QuestDB: batching, retention, backup runbooks incomplete vs production needs. |
+| IL-007 | observability | Loki: no Promtail (or equivalent) wiring from app logs; Grafana dashboards not as code. |
+| IL-009 | control_plane | Streamlit pages thin vs live API + storage. |
+| IL-010 | ci | No GitHub Actions workflow; integration tests for Redis/QuestDB/Qdrant not in repo CI. |
+| IL-101 | data | `news_ingest`: `fetch_news_stub` only — no live news pipeline. |
+
+---
+
+## LOW priority (open)
+
+| ID | Area | Summary |
+|----|------|---------|
+| IL-011 | runtime | `NotImplementedError` handler paths in `live_service` — verify coverage. |
+| IL-102 | data | Expand WS normalizer fixtures beyond current samples. |
 
 ---
 

@@ -6,28 +6,29 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 ---
 
+## Priority levels
+
+| Level | Maps from | Meaning |
+|-------|-----------|---------|
+| **HIGH** | P0, P1 | Blocks credible production / launch, or core product promises (live execution, models, memory, observability baseline). |
+| **MEDIUM** | P2 | Important after launch: polish, platform, broader CI, runbooks, Streamlit depth. |
+| **LOW** | P3 | Nice-to-have, experiments, optional CI smokes, minor replay ergonomics. |
+
+---
+
 ## 1. Conventions
 
 ### Request types
 
 | Type | Meaning |
-|------|---------|
+|------|--------|
 | **Feature** | New user- or operator-visible capability |
 | **Hardening** | Production readiness: compliance gates, security, correctness under load |
-| **Improvement** | Deeper implementation of something that already exists (models, metrics, UI) |
-| **Reliability** | Ops: runbooks, backups, DR, on-call clarity |
-| **Platform** | Infra & CI: compose, workflows, test environments |
-| **Tech debt** | Refactors, deduplication, cleanup |
-| **Spike** | Time-boxed research; outcome may be a Feature or “won’t do” |
-
-### Priority
-
-| P | Meaning |
-|---|---------|
-| **P0** | Blocks safe or correct production use |
-| **P1** | Needed for credible production / launch |
-| **P2** | Important but can follow launch |
-| **P3** | Nice-to-have |
+| **Improvement** | Deeper implementation of something that already exists |
+| **Reliability** | Ops: runbooks, backups, DR |
+| **Platform** | Infra & CI: compose, workflows |
+| **Tech debt** | Refactors, deduplication |
+| **Spike** | Time-boxed research |
 
 ### Status
 
@@ -35,157 +36,133 @@ Structured backlog for **all planned work**: new capabilities, production harden
 |--------|---------|
 | **Open** | Not started |
 | **In progress** | Active |
-| **Done** | Shipped / verified — keep for history or move to §7 |
+| **Done** | Shipped / verified |
 
 ---
 
-## 2. Compliance & release gates (hardening)
+## 2. HIGH priority
 
-These are **non-functional requirements** tracked as hardening items. Release “done” when all **Open** gates here are closed or explicitly waived.
+*P0 / P1 — release-critical and core architecture.*
 
-| ID | Type | P | Status | Summary | Verify |
-|----|------|---|--------|---------|--------|
-| HG-01 | Hardening | — | Done | Coinbase-only market data — no Alpaca data imports outside paper adapter | `scripts/ci_spec_compliance.sh` |
-| HG-02 | Hardening | — | Done | Risk HMAC + intent gate when signing enabled | `execution/intent_gate.py`, `NM_RISK_SIGNING_SECRET` |
-| HG-03 | Hardening | — | Done | No raw text → trades — `OrderIntent` metadata rules | contracts + validators |
-| HG-04 | Hardening | — | Done | No automatic MLflow model stage promotion in code | `scripts/ci_mlflow_promotion_policy.sh`, `docs/MLFLOW_PROMOTION.MD` |
-| HG-05 | Hardening | P0 | Open | Coinbase **live**: real signed orders, cancel, fills, idempotency (not synthetic ack) | `execution/adapters/coinbase_live.py` → same as FB-X1 |
-| HG-06 | Hardening | P1 | Open | Full sentiment + news pipeline wired (not stubs) | `data_plane/features/pipeline.py`, `news_ingest.py` → FB-F1/F2 |
-| HG-07 | Hardening | P1 | Open | Qdrant: real embeddings, versioned payloads, integration tests | → FB-M1–M3 |
-| HG-08 | Hardening | P1 | Open | HMM trained, persisted, loaded in inference | → FB-ML1 |
-| HG-09 | Hardening | P1 | Open | Forecast: TFT or explicit production substitute + training path | → FB-ML2 |
-| HG-10 | Hardening | P1 | Open | Orchestrated train → evaluate → MLflow → manual promotion (Prefect path) | → FB-ML3/ML4 |
-| HG-11 | Hardening | P1 | Open | Stage latency + PnL metrics; ship logs to Loki; Grafana dashboards as code | → FB-O1/O2 |
-| HG-12 | Hardening | P2 | Open | Runbooks: secrets, incident, flatten, QuestDB restore | → FB-I3 |
-| HG-13 | Hardening | P2 | Open | CI integration tests: Redis, QuestDB, Qdrant | → FB-I2 |
+### Compliance & release gates (open)
 
-**Definition of release-ready:** all **Open** rows in §2 and §3 that are **P0–P1** are **Done** or waived in writing; release notes reference commit.
+| ID | Type | Status | Summary | Verify / pointer |
+|----|------|--------|---------|------------------|
+| HG-05 | Hardening | Open | Coinbase **live**: real signed orders, cancel, fills, idempotency (not synthetic ack) | `execution/adapters/coinbase_live.py` |
+| HG-06 | Hardening | Open | Full sentiment + news pipeline wired (not stubs) | `data_plane/features/pipeline.py`, `news_ingest.py` |
+| HG-07 | Hardening | Open | Qdrant: real embeddings, versioned payloads, integration tests | `data_plane/memory/` |
+| HG-08 | Hardening | Open | HMM trained, persisted, loaded in inference | `models/regime/`, `decision_engine/pipeline.py` |
+| HG-09 | Hardening | Open | Forecast: TFT or explicit production substitute + training path | `models/forecast/tft_forecast.py` |
+| HG-10 | Hardening | Open | Orchestrated train → evaluate → MLflow → manual promotion (Prefect path) | `orchestration/`, `models/registry/` |
+| HG-11 | Hardening | Open | Stage latency + PnL metrics; ship logs to Loki; Grafana dashboards as code | `observability/`, `infra/` |
 
----
+### Backlog items (open)
 
-## 3. Backlog by area
+| ID | Type | Status | Summary | Pointer |
+|----|------|--------|---------|---------|
+| FB-X1 | Feature | Open | Coinbase live: CDP/JWT signing, real submit/cancel/fills, idempotency | `execution/adapters/coinbase_live.py` |
+| FB-X2 | Improvement | Open | Coinbase live: `cancel_order` / `fetch_positions` real impl | same |
+| FB-ML1 | Feature | Open | HMM: fit, persist artifact, load in `DecisionPipeline` | `models/regime/hmm_regime.py`, `decision_engine/pipeline.py` |
+| FB-ML2 | Feature | Open | TFT: PyTorch or explicit substitute + training pipeline | `models/forecast/tft_forecast.py` |
+| FB-ML3 | Feature | Open | MLflow: real training runs, artifacts; registry workflow | `models/registry/mlflow_registry.py` |
+| FB-ML4 | Feature | Open | Prefect: nightly retrain job (replace stub) | `orchestration/nightly_retrain.py` |
+| FB-M1 | Improvement | Open | Real embedding vectors for memory | `data_plane/memory/qdrant_memory.py` |
+| FB-M2 | Feature | Open | 60s loop: top-K, symbol filter, recency → feature vector | `retrieval_loop.py`, `app/runtime/live_service.py` |
+| FB-F1 | Feature | Open | Sentiment: FinBERT + frequency + shocks in `sentiment_features()` | `data_plane/features/pipeline.py` |
+| FB-O1 | Feature | Open | Metrics: stage latency, PnL/drawdown, order success rate | `observability/metrics.py` |
+| FB-O2 | Platform | Open | Promtail → Loki; Grafana dashboards in repo | `infra/docker-compose.yml`, `observability/logging.py` |
 
-Columns: **ID** | **Type** | **P** | **Status** | **Summary** | **Pointer**
-
-### Execution & routing
-
-| ID | Type | P | Status | Summary | Pointer |
-|----|------|---|--------|---------|---------|
-| FB-X1 | Feature | P0 | Open | Coinbase live: CDP/JWT signing, real submit/cancel/fills, idempotency | `execution/adapters/coinbase_live.py` |
-| FB-X2 | Improvement | P1 | Open | Coinbase live: `cancel_order` / `fetch_positions` real impl | same |
-| FB-X3 | Tech debt | P2 | Open | Single adapter factory for paper/live in `ExecutionService` + tests | `execution/service.py`, `execution/router.py` |
-
-### Models & orchestration
-
-| ID | Type | P | Status | Summary | Pointer |
-|----|------|---|--------|---------|---------|
-| FB-ML1 | Feature | P1 | Open | HMM: fit on data, persist artifact, load in `DecisionPipeline` (no unfitted default path) | `models/regime/hmm_regime.py`, `decision_engine/pipeline.py` |
-| FB-ML2 | Feature | P1 | Open | TFT: PyTorch model or explicit substitute + training pipeline | `models/forecast/tft_forecast.py` |
-| FB-ML3 | Feature | P1 | Open | MLflow: real training runs, artifacts; registry workflow (promote stays manual) | `models/registry/mlflow_registry.py` |
-| FB-ML4 | Feature | P1 | Open | Prefect: nightly retrain job (replace `nightly_flow_stub`) | `orchestration/nightly_retrain.py` |
-
-### Memory (Qdrant)
-
-| ID | Type | P | Status | Summary | Pointer |
-|----|------|---|--------|---------|---------|
-| FB-M1 | Improvement | P1 | Open | Real embedding vectors for memory (not zeros/placeholders) | `data_plane/memory/qdrant_memory.py` |
-| FB-M2 | Feature | P1 | Open | 60s loop: top-K, symbol filter, recency → feature vector in pipeline | `retrieval_loop.py`, `app/runtime/live_service.py` |
-| FB-M3 | Hardening | P2 | Open | Payload schema version + integration tests vs Qdrant in CI | `data_plane/memory/` |
-
-### Features & data
-
-| ID | Type | P | Status | Summary | Pointer |
-|----|------|---|--------|---------|---------|
-| FB-F1 | Feature | P1 | Open | Sentiment: FinBERT + frequency + shocks wired into `sentiment_features()` | `data_plane/features/pipeline.py` |
-| FB-F2 | Feature | P2 | Open | News ingest: replace `fetch_news_stub` with real sources + dedup | `data_plane/ingest/news_ingest.py` |
-| FB-F3 | Improvement | P2 | Open | REST: more tests/fixtures for BTC/ETH/SOL candles | `data_plane/ingest/coinbase_rest.py` |
-| FB-F4 | Spike | P3 | Open | Optional strict `BarEvent` schema (`schema_version`, `source`) end-to-end | `app/contracts/` |
-
-### Storage
-
-| ID | Type | P | Status | Summary | Pointer |
-|----|------|---|--------|---------|---------|
-| FB-S1 | Reliability | P2 | Open | QuestDB: batching, retention, backup/restore runbooks | `data_plane/storage/questdb.py` |
-
-### Observability
-
-| ID | Type | P | Status | Summary | Pointer |
-|----|------|---|--------|---------|---------|
-| FB-O1 | Feature | P1 | Open | Metrics: stage latency, PnL/drawdown, order success rate | `observability/metrics.py` |
-| FB-O2 | Platform | P1 | Open | Promtail (or equivalent) → Loki; Grafana dashboards in repo | `infra/docker-compose.yml`, `observability/logging.py` |
-
-### Control plane
-
-| ID | Type | P | Status | Summary | Pointer |
-|----|------|---|--------|---------|---------|
-| FB-C1 | Feature | P2 | Open | Streamlit: bind pages to API + QuestDB/Loki + emergency actions | `control_plane/` |
-
-### Platform & CI
-
-| ID | Type | P | Status | Summary | Pointer |
-|----|------|---|--------|---------|---------|
-| FB-I1 | Platform | P2 | Open | Compose: add MLflow/Prefect or document omission; align ports with README | `infra/docker-compose.yml` |
-| FB-I2 | Platform | P2 | Open | GitHub Actions: lint, pytest, spec scripts; integration job for Redis/QuestDB/Qdrant | `.github/workflows/` |
-| FB-I3 | Reliability | P2 | Open | Runbooks (secrets, incident, flatten, QuestDB) | `docs/` |
-
-### Backtesting
-
-| ID | Type | P | Status | Summary | Pointer |
-|----|------|---|--------|---------|---------|
-| FB-B1 | Improvement | P3 | Open | Optional `available_cash` in `RiskEngine` for replay solvency | `backtesting/replay.py`, `risk_engine/engine.py` |
-
-### Quality & tests
-
-| ID | Type | P | Status | Summary | Pointer |
-|----|------|---|--------|---------|---------|
-| FB-T1 | Platform | P3 | Open | Optional CI: Alpaca paper API smoke (secrets) | `execution/adapters/alpaca_paper.py` |
-| FB-T2 | Hardening | P3 | Open | SIGINT/SIGTERM shutdown tests | `app/runtime/live_service.py` |
-
-### Out of scope (reference)
+### Completed gates (reference)
 
 | ID | Type | Status | Summary |
 |----|------|--------|---------|
-| FB-N1 | Feature | — | Multi-exchange execution |
-| FB-N2 | Feature | — | RL controllers |
-| FB-N3 | Feature | — | Portfolio optimization |
+| HG-01 | Hardening | Done | Coinbase-only market data (CI) |
+| HG-02 | Hardening | Done | Risk HMAC + intent gate |
+| HG-03 | Hardening | Done | No raw text → trades |
+| HG-04 | Hardening | Done | No auto MLflow promotion in code (CI guard) |
+
+**Release-ready (definition):** all **Open** rows in **HIGH** are **Done** or waived in writing.
 
 ---
 
-## 4. How to add a request
+## 3. MEDIUM priority
 
-1. Pick **Type** and **Priority** using §1.  
-2. Add a row in §3 (or §2 if it is a **gate**). Use the next **FB-** or **HG-** id.  
-3. Link **code paths** or tickets.  
-4. When **Done**, set status; optionally move to §7 or keep for audit.
+*P2 — important after initial launch.*
+
+### Compliance & gates (open)
+
+| ID | Type | Status | Summary | Pointer |
+|----|------|--------|---------|---------|
+| HG-12 | Hardening | Open | Runbooks: secrets, incident, flatten, QuestDB restore | `docs/` |
+| HG-13 | Hardening | Open | CI integration tests: Redis, QuestDB, Qdrant | `.github/workflows/` |
+
+### Backlog (open)
+
+| ID | Type | Status | Summary | Pointer |
+|----|------|--------|---------|---------|
+| FB-X3 | Tech debt | Open | Single adapter factory for paper/live | `execution/service.py`, `execution/router.py` |
+| FB-M3 | Hardening | Open | Qdrant payload schema version + CI integration tests | `data_plane/memory/` |
+| FB-F2 | Feature | Open | News ingest: real sources + dedup | `data_plane/ingest/news_ingest.py` |
+| FB-F3 | Improvement | Open | REST: more tests/fixtures for BTC/ETH/SOL candles | `data_plane/ingest/coinbase_rest.py` |
+| FB-S1 | Reliability | Open | QuestDB: batching, retention, backup/restore runbooks | `data_plane/storage/questdb.py` |
+| FB-C1 | Feature | Open | Streamlit: bind pages to API + QuestDB/Loki + emergency | `control_plane/` |
+| FB-I1 | Platform | Open | Compose: MLflow/Prefect or document omission; README ports | `infra/docker-compose.yml` |
+| FB-I2 | Platform | Open | GitHub Actions: lint, pytest, spec scripts, integration job | `.github/workflows/` |
+| FB-I3 | Reliability | Open | Runbooks (secrets, incident, flatten, QuestDB) | `docs/` |
 
 ---
 
-## 5. Bugs and incidents
+## 4. LOW priority
 
-Do **not** track bugs or “fix this component” items here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when a bug blocks a feature (e.g. “IL-001 blocks FB-X1”).
+*P3 — optional experiments and polish.*
+
+| ID | Type | Status | Summary | Pointer |
+|----|------|--------|---------|---------|
+| FB-F4 | Spike | Open | Optional strict `BarEvent` schema end-to-end | `app/contracts/` |
+| FB-B1 | Improvement | Open | Optional `available_cash` in `RiskEngine` for replay solvency | `backtesting/replay.py`, `risk_engine/engine.py` |
+| FB-T1 | Platform | Open | Optional CI: Alpaca paper API smoke (secrets) | `execution/adapters/alpaca_paper.py` |
+| FB-T2 | Hardening | Open | SIGINT/SIGTERM shutdown tests | `app/runtime/live_service.py` |
+
+### Out of scope (not prioritized)
+
+| ID | Summary |
+|----|---------|
+| FB-N1 | Multi-exchange execution |
+| FB-N2 | RL controllers |
+| FB-N3 | Portfolio optimization |
 
 ---
 
-## 6. What is already in good shape
+## 5. How to add a request
 
-- Shared **`run_decision_tick`**; **`replay_decisions`** / **`replay_multi_asset_decisions`** with portfolio + solvency.  
-- **Alpaca paper** adapter (retries, symbol map, optional reconcile).  
-- **Coinbase WS + REST** (retry, Advanced Trade → Exchange fallback on 401/403).  
-- **Feature pipeline:** RSI, MACD, ATR, ADX, EMA spread, VWAP, microstructure helper.  
-- **Risk** modes + HMAC gate + **CI guards** (`ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`).  
-- **FastAPI** control plane + **Prometheus** metrics route.  
-- **Compose:** QuestDB, Redis, Qdrant, Prometheus, Grafana, Loki images.
+1. Assign **HIGH** / **MEDIUM** / **LOW** using §Priority levels (and P0–P3 mapping).  
+2. Add a row in §2, §3, or §4. Use the next **FB-** or **HG-** id.  
+3. Link **code paths** or tickets.
 
 ---
 
-## 7. Completed (optional archive)
+## 6. Bugs and incidents
 
-*Move rows here when done, or rely on git history.*
+Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when a bug blocks a feature (e.g. “IL-001 blocks FB-X1”).
+
+---
+
+## 7. What is already in good shape
+
+- Shared **`run_decision_tick`**; **`replay_decisions`** / **`replay_multi_asset_decisions`**.  
+- **Alpaca paper** adapter; **Coinbase WS + REST** (retry, fallback).  
+- **Feature pipeline** (RSI, MACD, ATR, ADX, VWAP, microstructure).  
+- **Risk** + HMAC + CI guards.  
+- **FastAPI** + **Prometheus**; **Compose** core services.
+
+---
+
+## 8. Completed archive (optional)
 
 | ID | Completed | Notes |
 |----|-------------|-------|
-| — | — | — |
+| — | — | *Move done FB/HG rows here or rely on git history.* |
 
 ---
 
-*Last structure update: single backlog for features + hardening + platform; replaces standalone production-hardening checklist.*
+*Priority mapping: HIGH = P0/P1, MEDIUM = P2, LOW = P3.*
