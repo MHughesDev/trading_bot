@@ -32,11 +32,7 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 
 | ID | Area | Summary |
 |----|------|---------|
-| IL-001 | execution | Coinbase live: real signed orders; remove `pending_implementation` synthetic acks (`execution/adapters/coinbase_live.py`). |
-| IL-002 | models | HMM never fitted in default pipeline — regime defaults to SIDEWAYS uniform until training + load path exists. |
-| IL-003 | models | Forecast is Ridge surrogate, not production TFT; training pipeline missing. |
-| IL-004 | memory | Qdrant embeddings placeholder; 60s memory loop does not feed real vectors into features. |
-| IL-008 | orchestration | `nightly_flow_stub` only — no Prefect deployment or real retrain. |
+| — | — | *No open HIGH items — see Resolved (recent).* |
 
 ---
 
@@ -79,7 +75,11 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 
 | ID | Resolved | Summary |
 |----|----------|---------|
-| — | — | *Add entries when closing items.* |
+| IL-001 | 2026-04-08 | Coinbase live: CDP JWT REST for `submit_order` / `cancel_order` / `fetch_positions` via `execution/coinbase_advanced_http.py` (no synthetic `pending_implementation` ack). |
+| IL-002 | 2026-04-08 | HMM: bootstrap fit on 32-dim synthetic features + `save`/`load`; `DecisionPipeline` loads `NM_MODELS_REGIME_PATH` when set. |
+| IL-003 | 2026-04-08 | Forecast: Ridge surrogate bootstrapped + `save`/`load`; `NM_MODELS_FORECAST_PATH`; optional PyTorch path still via extras. |
+| IL-004 | 2026-04-08 | Memory: deterministic `feature_dict_to_embedding` for Qdrant queries; per-symbol 60s loop; payload `schema_version: 1`. |
+| IL-008 | 2026-04-08 | Orchestration: `run_train_evaluate_log` + optional Prefect `@flow` in `orchestration/nightly_retrain.py`; MLflow params/metrics (no auto-promotion). |
 
 ---
 

@@ -25,6 +25,8 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "prometheus-client>=0.21",
   "structlog>=24.0",
+  "coinbase-advanced-py>=1.8.0",
+  "joblib>=1.4",
 ]
 
 [project.optional-dependencies]
@@ -33,11 +35,13 @@ alpaca = ["alpaca-py>=0.21"]
 dashboard = ["streamlit>=1.39", "httpx>=0.27"]
 orchestration = ["prefect>=3.0", "mlflow>=2.16"]
 models_torch = ["torch>=2.2"]
+sentiment_nlp = ["transformers>=4.40", "torch>=2.2"]
 all = [
   "streamlit>=1.39",
   "prefect>=3.0",
   "mlflow>=2.16",
   "torch>=2.2",
+  "transformers>=4.40",
 ]
 
 [tool.setuptools.package-data]

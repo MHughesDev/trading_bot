@@ -16,21 +16,23 @@ logger = logging.getLogger(__name__)
 async def run_memory_retrieval_loop(
     settings: AppSettings,
     symbol: str,
-    query_embedding: list[float],
     on_features: Callable[[dict[str, float]], object],
     *,
+    query_embedding: list[float] | None = None,
+    query_embedding_fn: Callable[[], list[float]] | None = None,
     memory: QdrantNewsMemory | None = None,
 ) -> None:
     """
     Every `memory_retrieval_interval_seconds`, query Qdrant and pass merged memory features downstream.
-    Query embedding is placeholder until news encoder is wired (zeros or last bar embedding).
+    Pass either `query_embedding` or `query_embedding_fn` (preferred for live: embedding from last bar).
     """
     mem = memory or QdrantNewsMemory(settings.qdrant_url, settings.memory_qdrant_collection)
     interval = float(settings.memory_retrieval_interval_seconds)
     while True:
         try:
+            qe = query_embedding_fn() if query_embedding_fn is not None else (query_embedding or [0.0] * 64)
             hits = mem.query_top_k(
-                query_embedding,
+                qe,
                 symbol,
                 top_k=settings.memory_top_k,
             )

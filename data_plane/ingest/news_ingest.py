@@ -30,3 +30,30 @@ class ScoredNews(BaseModel):
 def fetch_news_stub(_symbols: list[str]) -> list[NewsItem]:
     """Return empty list until a provider is configured."""
     return []
+
+
+def aggregate_sentiment_for_symbols(
+    symbols: list[str],
+    *,
+    use_finbert: bool,
+) -> dict[str, float]:
+    """
+    FinBERT + frequency + shock from `fetch_news_stub` items.
+    When no items or FinBERT unavailable, returns neutral zeros (features still wired).
+    """
+    import numpy as np
+
+    from data_plane.ingest.sentiment_nlp import score_headline_finbert
+
+    items = fetch_news_stub(symbols)
+    if not items:
+        return {"finbert_score": 0.0, "news_count_per_hour": 0.0, "sentiment_shock": 0.0}
+    scores: list[float] = []
+    for it in items:
+        scores.append(score_headline_finbert(it.headline) if use_finbert else 0.0)
+    arr = np.array(scores, dtype=np.float64)
+    return {
+        "finbert_score": float(np.mean(arr)),
+        "news_count_per_hour": float(len(items)),
+        "sentiment_shock": float(np.std(arr)) if arr.size > 1 else 0.0,
+    }

@@ -65,8 +65,20 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
+      - loki
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: nm-promtail
+    volumes:
+      - ./promtail/promtail.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["-config.file=/etc/promtail/config.yml"]
+    depends_on:
+      - loki
 
   loki:
     image: grafana/loki:3.2.1

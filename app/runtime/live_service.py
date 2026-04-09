@@ -19,6 +19,10 @@ from app.config.settings import AppSettings, load_settings
 from app.contracts.risk import RiskState
 from data_plane.bars.rolling import RollingMinuteBars
 from data_plane.features.pipeline import FeaturePipeline
+from data_plane.ingest.news_ingest import aggregate_sentiment_for_symbols
+from data_plane.memory.embeddings import feature_dict_to_embedding
+from data_plane.memory.qdrant_memory import QdrantNewsMemory
+from data_plane.memory.retrieval_loop import run_memory_retrieval_loop
 from data_plane.ingest.coinbase_rest import CoinbaseRESTClient
 from data_plane.ingest.coinbase_ws import CoinbaseWebSocketClient
 from data_plane.ingest.normalizers import OrderBookLevel2Snapshot, TickerSnapshot, TradeTick, normalize_ws_message
@@ -86,20 +90,31 @@ async def _position_reconcile_loop(
             logger.exception("position_reconcile failed")
 
 
-async def _memory_tick_loop(
-    mem: dict[str, float],
+async def _sentiment_refresh_loop(
+    sentiment: dict[str, float],
+    symbols: list[str],
+    settings: AppSettings,
     interval: float,
     stop: asyncio.Event,
 ) -> None:
-    """Placeholder 60s memory features until Qdrant encoder is wired."""
+    try:
+        agg = aggregate_sentiment_for_symbols(symbols, use_finbert=settings.sentiment_use_finbert)
+        sentiment.clear()
+        sentiment.update(agg)
+    except Exception:
+        logger.exception("initial sentiment aggregate failed")
     while not stop.is_set():
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval)
             return
         except TimeoutError:
-            mem["mem_sim_mean"] = 0.0
-            mem["mem_sent_mean"] = 0.0
-            mem["mem_shock"] = 0.0
+            pass
+        try:
+            agg = aggregate_sentiment_for_symbols(symbols, use_finbert=settings.sentiment_use_finbert)
+            sentiment.clear()
+            sentiment.update(agg)
+        except Exception:
+            logger.exception("sentiment refresh failed")
 
 
 async def run_live_loop(
@@ -120,7 +135,9 @@ async def run_live_loop(
     risk_engine = RiskEngine(cfg)
     exec_svc = ExecutionService(cfg)
     risk_state = RiskState()
-    mem: dict[str, float] = {}
+    mem_by_symbol: dict[str, dict[str, float]] = {s: {} for s in syms}
+    sentiment_overlay: dict[str, float] = {}
+    last_feature_row: dict[str, dict[str, float]] = {s: {} for s in syms}
     stop = stop_event or asyncio.Event()
 
     qdb: QuestDBWriter | None = None
@@ -144,9 +161,43 @@ async def run_live_loop(
         logger.exception("product metadata cache failed — tradable defaults to True")
         product_cache = None
 
-    mem_stop = asyncio.Event()
-    mem_task = asyncio.create_task(
-        _memory_tick_loop(mem, float(cfg.memory_retrieval_interval_seconds), mem_stop)
+    sentiment_stop = asyncio.Event()
+    qdrant_mem: QdrantNewsMemory | None = None
+    try:
+        qdrant_mem = QdrantNewsMemory(cfg.qdrant_url, cfg.memory_qdrant_collection)
+    except Exception:
+        logger.warning("Qdrant client unavailable; memory features default to neutral")
+
+    def _on_mem(sym: str):
+        def _merge(mapped: dict[str, float]) -> None:
+            mem_by_symbol[sym] = mapped
+
+        return _merge
+
+    mem_tasks: list[asyncio.Task[None]] = []
+    if qdrant_mem is not None:
+        for sym in syms:
+            mem_tasks.append(
+                asyncio.create_task(
+                    run_memory_retrieval_loop(
+                        cfg,
+                        sym,
+                        _on_mem(sym),
+                        query_embedding_fn=lambda s=sym: feature_dict_to_embedding(
+                            last_feature_row.get(s, {}), dim=qdrant_mem.vector_size
+                        ),
+                        memory=qdrant_mem,
+                    )
+                )
+            )
+    sentiment_task = asyncio.create_task(
+        _sentiment_refresh_loop(
+            sentiment_overlay,
+            syms,
+            cfg,
+            float(cfg.memory_retrieval_interval_seconds),
+            sentiment_stop,
+        )
     )
 
     rollers: dict[str, RollingMinuteBars] = {s: RollingMinuteBars(s) for s in syms}
@@ -189,7 +240,13 @@ async def run_live_loop(
             sz = float(getattr(norm, "size", 0.0) or 0.0) if isinstance(norm, TradeTick) else 0.0
             rollers[symbol].on_tick(px, ts, sz)
 
-            overlay = feature_row_from_tick(norm, memory=mem, pipeline=feature_pipeline)
+            overlay = feature_row_from_tick(
+                norm,
+                memory=mem_by_symbol.get(symbol),
+                sentiment=sentiment_overlay or None,
+                pipeline=feature_pipeline,
+            )
+            last_feature_row[symbol] = overlay
             bar_df = rollers[symbol].bars_frame_with_partial()
             bar_feats = enrich_bars_last_row(bar_df, feature_pipeline)
             if bar_feats:
@@ -258,10 +315,17 @@ async def run_live_loop(
                 await reconcile_task
             except asyncio.CancelledError:
                 pass
-        mem_stop.set()
-        mem_task.cancel()
+        sentiment_stop.set()
+        for t in mem_tasks:
+            t.cancel()
+        for t in mem_tasks:
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+        sentiment_task.cancel()
         try:
-            await mem_task
+            await sentiment_task
         except asyncio.CancelledError:
             pass
         if qdb:

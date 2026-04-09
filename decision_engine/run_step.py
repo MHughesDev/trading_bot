@@ -7,6 +7,7 @@ so drift is visible in one place.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from decimal import Decimal
 
@@ -15,6 +16,7 @@ from app.contracts.forecast import ForecastOutput
 from app.contracts.regime import RegimeOutput
 from app.contracts.risk import RiskState
 from decision_engine.pipeline import DecisionPipeline
+from observability.metrics import DECISION_LATENCY
 from risk_engine.engine import RiskEngine
 
 
@@ -33,6 +35,7 @@ def run_decision_tick(
     product_tradable: bool = True,
     position_signed_qty: Decimal | None = None,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, TradeAction | None, RiskState]:
+    t0 = time.perf_counter()
     regime, fc, route, proposal = pipeline.step(symbol, feature_row, spread_bps, risk_state)
     trade, risk_state = risk_engine.evaluate(
         symbol,
@@ -46,4 +49,5 @@ def run_decision_tick(
         product_tradable=product_tradable,
         position_signed_qty=position_signed_qty,
     )
+    DECISION_LATENCY.observe(time.perf_counter() - t0)
     return regime, fc, route, proposal, trade, risk_state

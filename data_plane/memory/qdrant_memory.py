@@ -20,6 +20,10 @@ class QdrantNewsMemory:
         self._collection = collection
         self._vector_size = vector_size
 
+    @property
+    def vector_size(self) -> int:
+        return self._vector_size
+
     def ensure_collection(self) -> None:
         names = [c.name for c in self._client.get_collections().collections]
         if self._collection not in names:
@@ -41,6 +45,7 @@ class QdrantNewsMemory:
     ) -> None:
         self.ensure_collection()
         payload: dict[str, Any] = {
+            "schema_version": 1,
             "timestamp": timestamp.isoformat(),
             "symbol": symbol,
             "sentiment": sentiment,

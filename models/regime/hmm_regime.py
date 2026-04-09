@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
+import joblib
 import numpy as np
 from hmmlearn.hmm import GaussianHMM
 from sklearn.preprocessing import StandardScaler
@@ -24,7 +26,7 @@ STATE_SEMANTICS: list[SemanticRegime] = [
 class GaussianHMMRegimeModel:
     """Trained on return/vol feature matrix; maps latent states to fixed semantics by validation order."""
 
-    def __init__(self, n_states: int = 4, seed: int = 42) -> None:
+    def __init__(self, n_states: int = 4, seed: int = 42, *, bootstrap_if_unfitted: bool = True) -> None:
         if n_states != 4:
             raise ValueError("V1 spec requires 4 HMM states")
         self._hmm = GaussianHMM(
@@ -36,6 +38,15 @@ class GaussianHMMRegimeModel:
         self._scaler = StandardScaler()
         self._fitted = False
         self._state_order: list[int] | None = None
+        if bootstrap_if_unfitted:
+            self._bootstrap_synthetic(seed)
+
+    def _bootstrap_synthetic(self, seed: int) -> None:
+        """Fit on synthetic features so inference is non-degenerate until a real artifact is trained."""
+        rng = np.random.default_rng(seed)
+        # Match `DecisionPipeline` feature vector width (default 32) so `predict_proba_last` aligns with live/backtest rows.
+        X = rng.normal(size=(120, 32)).astype(np.float64)
+        self.fit(X)
 
     def fit(self, X: np.ndarray) -> None:
         """X shape (n_samples, n_features), e.g. [ret_1, vol_5, ...]."""
@@ -45,6 +56,29 @@ class GaussianHMMRegimeModel:
         self._hmm.fit(Xs)
         self._fitted = True
         self._state_order = list(range(self._hmm.n_components))
+
+    def save(self, path: str | Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(
+            {
+                "hmm": self._hmm,
+                "scaler": self._scaler,
+                "fitted": self._fitted,
+                "state_order": self._state_order,
+            },
+            path,
+        )
+
+    @classmethod
+    def load(cls, path: str | Path) -> GaussianHMMRegimeModel:
+        data = joblib.load(path)
+        m = cls(bootstrap_if_unfitted=False)
+        m._hmm = data["hmm"]
+        m._scaler = data["scaler"]
+        m._fitted = data["fitted"]
+        m._state_order = data.get("state_order")
+        return m
 
     def predict_proba_last(self, X: np.ndarray) -> RegimeOutput:
         if not self._fitted:

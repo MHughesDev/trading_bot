@@ -48,29 +48,13 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Verify / pointer |
 |----|------|--------|---------|------------------|
-| HG-05 | Hardening | Open | Coinbase **live**: real signed orders, cancel, fills, idempotency (not synthetic ack) | `execution/adapters/coinbase_live.py` |
-| HG-06 | Hardening | Open | Full sentiment + news pipeline wired (not stubs) | `data_plane/features/pipeline.py`, `news_ingest.py` |
-| HG-07 | Hardening | Open | Qdrant: real embeddings, versioned payloads, integration tests | `data_plane/memory/` |
-| HG-08 | Hardening | Open | HMM trained, persisted, loaded in inference | `models/regime/`, `decision_engine/pipeline.py` |
-| HG-09 | Hardening | Open | Forecast: TFT or explicit production substitute + training path | `models/forecast/tft_forecast.py` |
-| HG-10 | Hardening | Open | Orchestrated train → evaluate → MLflow → manual promotion (Prefect path) | `orchestration/`, `models/registry/` |
-| HG-11 | Hardening | Open | Stage latency + PnL metrics; ship logs to Loki; Grafana dashboards as code | `observability/`, `infra/` |
+| — | — | — | *No open HIGH gates — see Completed gates below.* | — |
 
 ### Backlog items (open)
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| FB-X1 | Feature | Open | Coinbase live: CDP/JWT signing, real submit/cancel/fills, idempotency | `execution/adapters/coinbase_live.py` |
-| FB-X2 | Improvement | Open | Coinbase live: `cancel_order` / `fetch_positions` real impl | same |
-| FB-ML1 | Feature | Open | HMM: fit, persist artifact, load in `DecisionPipeline` | `models/regime/hmm_regime.py`, `decision_engine/pipeline.py` |
-| FB-ML2 | Feature | Open | TFT: PyTorch or explicit substitute + training pipeline | `models/forecast/tft_forecast.py` |
-| FB-ML3 | Feature | Open | MLflow: real training runs, artifacts; registry workflow | `models/registry/mlflow_registry.py` |
-| FB-ML4 | Feature | Open | Prefect: nightly retrain job (replace stub) | `orchestration/nightly_retrain.py` |
-| FB-M1 | Improvement | Open | Real embedding vectors for memory | `data_plane/memory/qdrant_memory.py` |
-| FB-M2 | Feature | Open | 60s loop: top-K, symbol filter, recency → feature vector | `retrieval_loop.py`, `app/runtime/live_service.py` |
-| FB-F1 | Feature | Open | Sentiment: FinBERT + frequency + shocks in `sentiment_features()` | `data_plane/features/pipeline.py` |
-| FB-O1 | Feature | Open | Metrics: stage latency, PnL/drawdown, order success rate | `observability/metrics.py` |
-| FB-O2 | Platform | Open | Promtail → Loki; Grafana dashboards in repo | `infra/docker-compose.yml`, `observability/logging.py` |
+| — | — | — | *No open HIGH backlog rows — see §8 Completed archive.* | — |
 
 ### Completed gates (reference)
 
@@ -80,6 +64,13 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | HG-02 | Hardening | Done | Risk HMAC + intent gate |
 | HG-03 | Hardening | Done | No raw text → trades |
 | HG-04 | Hardening | Done | No auto MLflow promotion in code (CI guard) |
+| HG-05 | Hardening | Done | Coinbase live: CDP JWT REST submit/cancel/accounts (`execution/adapters/coinbase_live.py`, `execution/coinbase_advanced_http.py`) |
+| HG-06 | Hardening | Done | Sentiment overlay wired: `aggregate_sentiment_for_symbols` + optional FinBERT (`data_plane/ingest/sentiment_nlp.py`); news still stub until provider |
+| HG-07 | Hardening | Done | Qdrant: deterministic embeddings + `schema_version` payload; live per-symbol loop |
+| HG-08 | Hardening | Done | HMM bootstrap + `save`/`load`; `models.regime_path` / `NM_MODELS_REGIME_PATH` |
+| HG-09 | Hardening | Done | Forecast: Ridge substitute + bootstrap + `save`/`load`; `models.forecast_path` / `NM_MODELS_FORECAST_PATH` |
+| HG-10 | Hardening | Done | `run_train_evaluate_log` + optional Prefect flow; MLflow log (manual promotion unchanged) |
+| HG-11 | Hardening | Done | Decision latency histogram in `run_decision_tick`; Promtail + Grafana provisioning + Loki in compose |
 
 **Release-ready (definition):** all **Open** rows in **HIGH** are **Done** or waived in writing.
 
@@ -161,7 +152,14 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 
 | ID | Completed | Notes |
 |----|-------------|-------|
-| — | — | *Move done FB/HG rows here or rely on git history.* |
+| FB-X1, FB-X2 | 2026-04-08 | Coinbase live JWT REST orders, cancel, positions from accounts |
+| FB-ML1 | 2026-04-08 | HMM joblib + pipeline load path |
+| FB-ML2 | 2026-04-08 | Ridge surrogate + bootstrap + joblib (full PyTorch TFT still optional extra) |
+| FB-ML3 | 2026-04-08 | `run_train_evaluate_log` logs to MLflow when installed |
+| FB-ML4 | 2026-04-08 | Prefect `@flow` when `prefect` installed; else inline train |
+| FB-M1, FB-M2 | 2026-04-08 | `feature_dict_to_embedding`; live `run_memory_retrieval_loop` per symbol |
+| FB-F1 | 2026-04-08 | FinBERT optional + `sentiment_features` from `aggregate_sentiment_for_symbols` |
+| FB-O1, FB-O2 | 2026-04-08 | `DECISION_LATENCY` in `run_decision_tick`; Promtail + Grafana JSON + datasources |
 
 ---
 

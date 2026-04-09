@@ -92,6 +92,10 @@ class AppSettings(BaseSettings):
 
     control_plane_api_key: SecretStr | None = None
 
+    # Optional persisted model artifacts (joblib); env overrides YAML
+    models_regime_path: str | None = None
+    models_forecast_path: str | None = None
+
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
@@ -167,6 +171,12 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         qd = cfg["questdb"] or {}
         if "persist_decision_traces" in qd:
             out["questdb_persist_decision_traces"] = qd["persist_decision_traces"]
+    if "models" in cfg:
+        mo = cfg["models"] or {}
+        if "regime_path" in mo:
+            out["models_regime_path"] = mo["regime_path"]
+        if "forecast_path" in mo:
+            out["models_forecast_path"] = mo["forecast_path"]
     return out
 
 

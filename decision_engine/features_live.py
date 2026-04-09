@@ -12,6 +12,7 @@ def feature_row_from_tick(
     norm: Any,
     *,
     memory: dict[str, float] | None = None,
+    sentiment: dict[str, float] | None = None,
     pipeline: FeaturePipeline | None = None,
 ) -> dict[str, float]:
     """Scalar features for DecisionPipeline until rolling bar frame exists."""
@@ -40,5 +41,8 @@ def feature_row_from_tick(
 
     if memory:
         row.update(memory)
-    row.update(pipe.sentiment_features())
+    if sentiment:
+        row.update(pipe.sentiment_features(**sentiment))
+    else:
+        row.update(pipe.sentiment_features())
     return row

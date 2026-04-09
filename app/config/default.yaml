@@ -69,6 +69,11 @@ questdb:
   # NM_QUESTDB_PERSIST_DECISION_TRACES=true to write JSON traces from live_service
   persist_decision_traces: false
 
+# Optional: load trained HMM / forecast surrogates from disk (joblib)
+# models:
+#   regime_path: models/artifacts/regime.joblib
+#   forecast_path: models/artifacts/forecast.joblib
+
 # Set NM_RISK_SIGNING_SECRET in production so only RiskEngine-signed OrderIntents execute.
 # NM_ALLOW_UNSIGNED_EXECUTION=true only for local dev without secrets.
 # NM_CONTROL_PLANE_API_KEY protects POST /params, /system/mode, /flatten (header X-API-Key).
