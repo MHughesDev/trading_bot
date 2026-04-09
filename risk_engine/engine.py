@@ -39,7 +39,7 @@ class RiskEngine:
     ) -> tuple[TradeAction | None, RiskState]:
         """Return None if blocked; otherwise TradeAction for execution layer.
 
-        Precedence (first match wins — see docs/RISK_PRECEDENCE.md):
+        Precedence (first match wins — see docs/RISK_PRECEDENCE.MD):
         1) Feed disconnected/stale (feed_last_message_at age)
         2) Market data timestamp stale
         3) Spread too wide

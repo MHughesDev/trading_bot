@@ -50,8 +50,8 @@ Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models
 
 ## Backtesting (simulated fees / slippage)
 
-`backtesting.replay_decisions` supports optional portfolio accounting: set `track_portfolio=True` to apply `slippage_bps`, `fee_bps`, optional `slippage_noise_bps` with `rng_seed` for reproducibility, and `initial_cash_usd` from `app/config/default.yaml` under `backtesting:` (or `NM_BACKTESTING_*`). Default `track_portfolio=False` keeps prior behavior (position qty only). With `track_portfolio`, optional **`enforce_solvency`** (default true) skips buys that would drive simulated cash negative. **`replay_multi_asset_decisions`** runs multiple symbols on one portfolio timeline (see [`docs/BACKTESTING_SIMULATOR.md`](docs/BACKTESTING_SIMULATOR.md)). Semantics: same doc.
+`backtesting.replay_decisions` supports optional portfolio accounting: set `track_portfolio=True` to apply `slippage_bps`, `fee_bps`, optional `slippage_noise_bps` with `rng_seed` for reproducibility, and `initial_cash_usd` from `app/config/default.yaml` under `backtesting:` (or `NM_BACKTESTING_*`). Default `track_portfolio=False` keeps prior behavior (position qty only). With `track_portfolio`, optional **`enforce_solvency`** (default true) skips buys that would drive simulated cash negative. **`replay_multi_asset_decisions`** runs multiple symbols on one portfolio timeline (see [`docs/BACKTESTING_SIMULATOR.MD`](docs/BACKTESTING_SIMULATOR.MD)). Semantics: same doc.
 
 ## Roadmap & logs
 
-**Backlog (features, hardening gates, platform):** [`docs/features_backlog.md`](docs/features_backlog.md). **Issues to fix (existing code):** [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md). **Reference:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md) (risk order).
+**Backlog (features, hardening gates, platform):** [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD). **Issues to fix (existing code):** [`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD). **Reference:** [`docs/RISK_PRECEDENCE.MD`](docs/RISK_PRECEDENCE.MD) (risk order).

@@ -2,7 +2,7 @@
 
 **Purpose:** A single place for **things we need to fix** on **existing** functions and components — bugs, incorrect behavior, stubs that break contracts, missing wiring in code paths that already exist, and operational/debt items that are **fixes**, not new capabilities.
 
-**Not here:** new features, greenfield work, or release gates — use **[`features_backlog.md`](features_backlog.md)** only. No duplicate line items between this file and the backlog.
+**Not here:** new features, greenfield work, or release gates — use **[`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD)** only. No duplicate line items between this file and the backlog.
 
 ---
 
@@ -69,5 +69,5 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 
 ## Related
 
-- [`features_backlog.md`](features_backlog.md) — planned work only (no overlap with rows above)  
-- [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md) · [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md)
+- [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD) — planned work only (no overlap with rows above)  
+- [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD)

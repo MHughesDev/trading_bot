@@ -1,8 +1,8 @@
 # Features backlog
 
-Structured backlog for **all planned work**: new capabilities, production hardening, reliability, docs, and spikes. **Fixes to existing behavior** — separate list — live in [`ISSUE_LOG.md`](ISSUE_LOG.md) only.
+Structured backlog for **all planned work**: new capabilities, production hardening, reliability, docs, and spikes. **Fixes to existing behavior** — separate list — live in [`ISSUE_LOG.MD`](ISSUE_LOG.MD) only.
 
-**References:** [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md) · [`QUESTDB_TRACES.md`](QUESTDB_TRACES.md) · [`GRACEFUL_SHUTDOWN.md`](GRACEFUL_SHUTDOWN.md) · [`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md) · [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md)
+**References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD)
 
 ---
 
@@ -48,7 +48,7 @@ These are **non-functional requirements** tracked as hardening items. Release �
 | HG-01 | Hardening | — | Done | Coinbase-only market data — no Alpaca data imports outside paper adapter | `scripts/ci_spec_compliance.sh` |
 | HG-02 | Hardening | — | Done | Risk HMAC + intent gate when signing enabled | `execution/intent_gate.py`, `NM_RISK_SIGNING_SECRET` |
 | HG-03 | Hardening | — | Done | No raw text → trades — `OrderIntent` metadata rules | contracts + validators |
-| HG-04 | Hardening | — | Done | No automatic MLflow model stage promotion in code | `scripts/ci_mlflow_promotion_policy.sh`, `docs/MLFLOW_PROMOTION.md` |
+| HG-04 | Hardening | — | Done | No automatic MLflow model stage promotion in code | `scripts/ci_mlflow_promotion_policy.sh`, `docs/MLFLOW_PROMOTION.MD` |
 | HG-05 | Hardening | P0 | Open | Coinbase **live**: real signed orders, cancel, fills, idempotency (not synthetic ack) | `execution/adapters/coinbase_live.py` → same as FB-X1 |
 | HG-06 | Hardening | P1 | Open | Full sentiment + news pipeline wired (not stubs) | `data_plane/features/pipeline.py`, `news_ingest.py` → FB-F1/F2 |
 | HG-07 | Hardening | P1 | Open | Qdrant: real embeddings, versioned payloads, integration tests | → FB-M1–M3 |
@@ -162,7 +162,7 @@ Columns: **ID** | **Type** | **P** | **Status** | **Summary** | **Pointer**
 
 ## 5. Bugs and incidents
 
-Do **not** track bugs or “fix this component” items here — use [`ISSUE_LOG.md`](ISSUE_LOG.md). Link IDs when a bug blocks a feature (e.g. “IL-001 blocks FB-X1”).
+Do **not** track bugs or “fix this component” items here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when a bug blocks a feature (e.g. “IL-001 blocks FB-X1”).
 
 ---
 

@@ -17,7 +17,7 @@ done < <(
 )
 
 if [[ "$violations" -gt 0 ]]; then
-  echo "Remove MLflow staging/alias APIs; use manual promotion (docs/MLFLOW_PROMOTION.md)."
+  echo "Remove MLflow staging/alias APIs; use manual promotion (docs/MLFLOW_PROMOTION.MD)."
   exit 1
 fi
 
