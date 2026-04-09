@@ -54,4 +54,4 @@ Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models
 
 ## Roadmap & logs
 
-**Backlog (features, hardening gates, platform):** [`docs/features_backlog.md`](docs/features_backlog.md). **Operational issues:** [`docs/issue_log.md`](docs/issue_log.md). **Reference:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md) (risk order). Redirect: [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md).
+**Backlog (features, hardening gates, platform):** [`docs/features_backlog.md`](docs/features_backlog.md). **Issues to fix (existing code):** [`docs/ISSUE_LOG.md`](docs/ISSUE_LOG.md). **Reference:** [`docs/RISK_PRECEDENCE.md`](docs/RISK_PRECEDENCE.md) (risk order).

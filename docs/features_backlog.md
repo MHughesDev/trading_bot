@@ -1,6 +1,6 @@
 # Features backlog
 
-Structured backlog for **all planned work**: new capabilities, production hardening, reliability, docs, and spikes. **Operational bugs** live in [`issue_log.md`](issue_log.md).
+Structured backlog for **all planned work**: new capabilities, production hardening, reliability, docs, and spikes. **Fixes to existing behavior** — separate list — live in [`ISSUE_LOG.md`](ISSUE_LOG.md) only.
 
 **References:** [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md) · [`QUESTDB_TRACES.md`](QUESTDB_TRACES.md) · [`GRACEFUL_SHUTDOWN.md`](GRACEFUL_SHUTDOWN.md) · [`COINBASE_GRANULARITY.md`](COINBASE_GRANULARITY.md) · [`BACKTESTING_SIMULATOR.md`](BACKTESTING_SIMULATOR.md)
 
@@ -162,7 +162,7 @@ Columns: **ID** | **Type** | **P** | **Status** | **Summary** | **Pointer**
 
 ## 5. Bugs and incidents
 
-Do **not** track production incidents here — use [`issue_log.md`](issue_log.md). Link backlog IDs when a bug blocks an item (e.g. “IL-012 blocks FB-X1”).
+Do **not** track bugs or “fix this component” items here — use [`ISSUE_LOG.md`](ISSUE_LOG.md). Link IDs when a bug blocks a feature (e.g. “IL-001 blocks FB-X1”).
 
 ---
 

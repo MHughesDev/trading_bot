@@ -1,5 +1,5 @@
 # Commentary
 
-Narrative notes about **where the codebase stands** vs the target architecture live in **[`features_backlog.md`](features_backlog.md)** (what we want to add) and **[`issue_log.md`](issue_log.md)** (what we need to fix).
+Architecture and gap narrative: **[`features_backlog.md`](features_backlog.md)** (what we plan to build) and **[`ISSUE_LOG.md`](ISSUE_LOG.md)** (what we need to fix in what already exists).
 
-For risk ordering and shutdown behavior, see [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md) and [`GRACEFUL_SHUTDOWN.md`](GRACEFUL_SHUTDOWN.md).
+For risk ordering and shutdown: [`RISK_PRECEDENCE.md`](RISK_PRECEDENCE.md), [`GRACEFUL_SHUTDOWN.md`](GRACEFUL_SHUTDOWN.md).
