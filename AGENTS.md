@@ -79,13 +79,32 @@ Agents working here should:
 2. **Trace** contracts and settings (`app/config/settings.py`, `app/config/default.yaml`, `NM_*` env).
 3. **Find tests** under `tests/` for the module; add or extend if behavior changes.
 4. **Make the smallest change** that satisfies the task; no unrelated refactors.
-5. Run **ruff** and **pytest** (see §8).
-6. Update **docs** if behavior, env vars, or operator steps changed (see §9).
-7. **Handoff** using the format in §11.
+5. Run **ruff** and **pytest** (see §9).
+6. Update **docs** if behavior, env vars, or operator steps changed (see §10).
+7. **Handoff** using the format in §12.
 
 ---
 
-## 7. Engineering patterns (repo-specific)
+## 7. Branch lifecycle (mandatory)
+
+**Goal:** `main` stays current and correct; feature branches do **not** pile up on the remote.
+
+When work uses a **feature branch** (e.g. `cursor/<task>-42e8`):
+
+1. **Branch from `main`** — `git fetch origin main && git checkout -b <branch-name> main` (or equivalent).
+2. **Implement and commit** on that branch.
+3. **Test before merge** — from repo root, run the full checks in **§9** (`ruff`, `pytest`, `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`). **Do not merge into `main` if tests fail** unless the task explicitly documents an exception and the risk.
+4. **Merge into `main` only after tests pass** — e.g. `git checkout main && git merge <branch-name>` (or merge via PR in GitHub, then pull `main` locally).
+5. **Push `main`** — `git push origin main` so the default branch is fully updated.
+6. **Delete the feature branch** so it does not accumulate:
+   - **Local:** `git branch -d <branch-name>` (use `-D` only if you intend to discard unmerged work).
+   - **Remote:** `git push origin --delete <branch-name>` after the merge is on `main`.
+
+**Rule:** One short-lived branch per task is fine; **stale `cursor/*` branches that are already merged should be deleted** on `origin` to avoid clutter.
+
+---
+
+## 8. Engineering patterns (repo-specific)
 
 - **Shared decision step:** `decision_engine/run_step.run_decision_tick` — keep live and replay calling this for parity.
 - **Settings:** Pydantic `AppSettings` with `NM_` prefix; defaults in `app/config/default.yaml`.
@@ -96,7 +115,7 @@ Agents working here should:
 
 ---
 
-## 8. Testing and validation
+## 9. Testing and validation
 
 **Expectations**
 
@@ -118,7 +137,7 @@ Optional extras: `pip install -e ".[alpaca]"` for Alpaca adapter tests; `[dashbo
 
 ---
 
-## 9. Documentation rules
+## 10. Documentation rules
 
 Update **when** the change affects:
 
@@ -129,7 +148,7 @@ Do **not** duplicate long narratives across files; link to `docs/` instead.
 
 ---
 
-## 10. Sensitive areas (extra caution)
+## 11. Sensitive areas (extra caution)
 
 | Area | Why |
 |------|-----|
@@ -142,7 +161,7 @@ Prefer minimal edits; document assumptions in the handoff.
 
 ---
 
-## 11. Task archetypes
+## 12. Task archetypes
 
 **Bug fix:** Reproduce via test or trace; smallest fix; regression test if possible.
 
@@ -154,7 +173,7 @@ Prefer minimal edits; document assumptions in the handoff.
 
 ---
 
-## 12. Required handoff format
+## 13. Required handoff format
 
 When finishing work, report:
 
@@ -167,7 +186,7 @@ When finishing work, report:
 
 ---
 
-## 13. Local environment (Cursor / VM)
+## 14. Local environment (Cursor / VM)
 
 - **Docker:** `docker compose -f infra/docker-compose.yml up -d` — QuestDB, Redis, Qdrant, Prometheus, Grafana, Loki (see `README.md` for ports).
 - **Control plane:** `uvicorn control_plane.api:app --host 0.0.0.0 --port 8000`
