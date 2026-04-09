@@ -1,64 +1,176 @@
 # AGENTS.md
 
-## Cursor Cloud specific instructions
+Operational control for autonomous or semi-autonomous coding agents. **Not** general onboarding: boundaries, procedures, and verification.
 
-### Overview
+---
 
-NautilusMonster V3 is an AI-driven cryptocurrency trading platform with a multi-model pipeline: TFT forecasting, Gaussian HMM regime detection, deterministic route selection, and risk-gated execution. It targets Coinbase (live) and Alpaca (paper) via adapters. The control plane is FastAPI + Streamlit.
+## 1. Repository purpose
 
-### Dependencies
+**NautilusMonster** is a Python **multi-route AI crypto trading** codebase: Coinbase for **all market data**, Alpaca for **paper execution only**, shared **decision + risk** path for live and replay, typed contracts (`app/contracts/`), and adapters under `execution/adapters/`.
 
-- **Python 3.12+** (pre-installed in the VM)
-- Install via `pip install -e ".[dev,alpaca,dashboard,orchestration]"` from the repo root
-- **Docker** is required for infrastructure services (QuestDB, Redis, Qdrant, Prometheus, Grafana, Loki)
+**This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, `docs/*.MD` (backlog, issue log, reference notes), `scripts/` (CI guards, smoke tests).
 
-### Infrastructure services
+**This repo does not own:** your brokerage accounts, cloud secrets stores, production deployment pipelines (unless added here), or external ERP/CRM. **Do not** assume access to live keys or paid APIs beyond what `.env` provides.
 
-Start all infrastructure with:
-```
-sudo docker compose -f infra/docker-compose.yml up -d
-```
+---
 
-| Service | Port | Purpose |
-|---|---|---|
-| Redis | 6379 | State store, bar TTL cache |
-| QuestDB | 9000 (HTTP), 8812 (PG), 9009 (ILP) | Time-series storage |
-| Qdrant | 6333 (HTTP), 6334 (gRPC) | Vector memory for news/sentiment |
-| Prometheus | 9090 | Metrics collection |
-| Grafana | 3000 | Dashboards (admin/admin) |
-| Loki | 3100 | Log aggregation |
+## 2. Agent mission
 
-### Running the application
+Agents working here should:
 
-**FastAPI Control Plane:**
-```
-uvicorn control_plane.api:app --host 0.0.0.0 --port 8000
-```
+- Implement **scoped** features and fixes aligned with [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD) or [`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD) when the task references them.
+- Preserve **non-negotiable rules** below unless the user task explicitly overrides.
+- Keep **live vs replay** behavior aligned where the architecture expects it (`decision_engine/run_step.py` is the shared decision step).
+- Update **docs** when behavior, env vars, or operator-facing flows change.
+- Prefer **small diffs**; match existing style and patterns in touched modules.
 
-**Streamlit Dashboard:**
-```
-python3 -m streamlit run control_plane/Home.py --server.port 8501 --server.headless true
-```
+---
 
-### Linting
+## 3. Non-negotiable rules
 
-```
+- **Coinbase-only market data:** do not import Alpaca **data** clients outside the Alpaca **execution** adapter. Enforced by `scripts/ci_spec_compliance.sh` (excludes `legacy/`). If you touch market data ingestion, run that script.
+- **Risk is final:** `OrderIntent` execution goes through the risk/signing path described in `execution/intent_gate.py` and settings — do not bypass for “quick tests” in production paths.
+- **No raw text → trades:** keep metadata rules on `OrderIntent` consistent with existing validators.
+- **No automatic MLflow model promotion** in code: do not add `transition_model_version_stage` / `set_registered_model_alias`; `scripts/ci_mlflow_promotion_policy.sh` enforces this.
+- **Do not commit secrets:** `.env` is gitignored; never paste real API keys into code or docs.
+- **Do not change `legacy/`** except to fix clear bugs in the snapshot; do not merge legacy patterns into the main V3 tree.
+- **Dependency changes:** add to `pyproject.toml` with intent; avoid drive-by upgrades unrelated to the task.
+
+---
+
+## 4. Source of truth (priority when information conflicts)
+
+1. **Explicit user / task instructions** for the current change.
+2. **Tests** (`tests/`) and **runtime behavior** of the code being changed.
+3. **[`README.md`](README.md)** for commands and layout.
+4. **[`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD)** and **[`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD)** for planned work vs fixes (do not treat as executable spec unless task says so).
+5. Other **[`docs/*.MD`](docs/)** reference files (risk precedence, shutdown, Coinbase granularity, etc.).
+6. Older comments or stale markdown — verify against code.
+
+**Note:** All documentation filenames under `docs/` use **`.MD`** (uppercase extension).
+
+---
+
+## 5. Repository map
+
+| Path | Role |
+|------|------|
+| `app/` | Runtime (`live_service`), config (`app/config/`), contracts |
+| `data_plane/` | Ingest (Coinbase WS/REST, normalizers), bars, features, memory, storage |
+| `models/` | Regime, forecast, routing, MLflow registry stubs |
+| `decision_engine/` | Pipeline, `run_step` (shared tick), action generator |
+| `risk_engine/` | `RiskEngine`, signing |
+| `execution/` | Router, service, **adapters** (Alpaca paper, Coinbase live) |
+| `backtesting/` | Replay, simulator, portfolio |
+| `control_plane/` | FastAPI `api.py`, Streamlit pages |
+| `observability/` | Metrics, logging |
+| `orchestration/` | Nightly retrain stub |
+| `infra/` | `docker-compose.yml`, Prometheus config |
+| `scripts/` | `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`, `smoke_credentials.py`, `create_github_issues.sh` |
+| `tests/` | Pytest suite |
+| `docs/` | `FEATURES_BACKLOG.MD`, `ISSUE_LOG.MD`, reference `.MD` files |
+| `legacy/cryptobot/` | Frozen snapshot; not part of main pipeline |
+
+---
+
+## 6. Required change workflow
+
+1. **Identify** entry points: runtime (`app/runtime/live_service.py`), replay (`backtesting/replay.py`), or APIs (`control_plane/api.py`) as relevant.
+2. **Trace** contracts and settings (`app/config/settings.py`, `app/config/default.yaml`, `NM_*` env).
+3. **Find tests** under `tests/` for the module; add or extend if behavior changes.
+4. **Make the smallest change** that satisfies the task; no unrelated refactors.
+5. Run **ruff** and **pytest** (see §8).
+6. Update **docs** if behavior, env vars, or operator steps changed (see §9).
+7. **Handoff** using the format in §11.
+
+---
+
+## 7. Engineering patterns (repo-specific)
+
+- **Shared decision step:** `decision_engine/run_step.run_decision_tick` — keep live and replay calling this for parity.
+- **Settings:** Pydantic `AppSettings` with `NM_` prefix; defaults in `app/config/default.yaml`.
+- **Execution:** venue logic stays in adapters; router validates adapter names.
+- **Features:** Polars in `data_plane/features/pipeline.py`; enrich bars consistently for live vs replay.
+- **Imports:** follow existing package layout (`app`, `data_plane`, …) as in `pyproject.toml` `packages.find`.
+- **Streamlit:** run as `python3 -m streamlit run control_plane/Home.py` (bare `streamlit` may not be on PATH in some environments).
+
+---
+
+## 8. Testing and validation
+
+**Expectations**
+
+- Run tests after logical changes to touched areas.
+- For bug fixes, add or tighten a test when feasible.
+- Do not weaken tests to greenwash failures.
+
+**Commands** (from repo root, Python ≥3.11):
+
+```bash
+pip install -e ".[dev]"
 ruff check .
+python3 -m pytest tests/ -q
+bash scripts/ci_spec_compliance.sh
+bash scripts/ci_mlflow_promotion_policy.sh
 ```
-Config is in `pyproject.toml` (line-length=100, target py312).
 
-### Testing
+Optional extras: `pip install -e ".[alpaca]"` for Alpaca adapter tests; `[dashboard]` for Streamlit.
 
-```
-pytest tests/ -v
-```
-22 tests covering contracts, risk engine, route selector, execution router, replay parity, and spec compliance. Config: `asyncio_mode = "auto"` in `pyproject.toml`.
+---
 
-### Key caveats
+## 9. Documentation rules
 
-- `streamlit` must be invoked as `python3 -m streamlit` rather than bare `streamlit` — the latter may not be on PATH.
-- `pytz` is a transitive dependency of `alpaca-py` that may not auto-install; `pip install -e ".[dev,alpaca,dashboard,orchestration]"` handles this.
-- Docker daemon in the VM needs `fuse-overlayfs` storage driver and `iptables-legacy` (see system-level setup).
-- The `.env` file is gitignored. For live trading, set `API_KEY` and `API_SECRET` (Alpaca) plus any Coinbase keys as environment secrets.
-- `NM_CONTROL_PLANE_API_KEY` protects mutating API endpoints; unset in dev means open access.
-- `NM_RISK_SIGNING_SECRET` enables order intent signing in production; unset in dev means unsigned execution is allowed.
+Update **when** the change affects:
+
+- Operator-visible behavior, new/changed **`NM_*`** or config keys, or smoke/CI steps → **[`README.md`](README.md)** and/or relevant **[`docs/*.MD`](docs/)**.
+- Backlog or fix tracking → **[`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD)** or **[`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD)** (only if the task is to record work; otherwise a short PR/summary may suffice).
+
+Do **not** duplicate long narratives across files; link to `docs/` instead.
+
+---
+
+## 10. Sensitive areas (extra caution)
+
+| Area | Why |
+|------|-----|
+| `execution/adapters/` | Real money paths; Coinbase live is partially stubbed — do not fake production safety. |
+| `risk_engine/` | Capital and gating logic; changes affect all execution. |
+| `app/config/`, `NM_*` secrets | Misconfiguration can expose unsigned execution or break venues. |
+| `infra/docker-compose.yml` | Binds ports and services; coordinate README if ports change. |
+
+Prefer minimal edits; document assumptions in the handoff.
+
+---
+
+## 11. Task archetypes
+
+**Bug fix:** Reproduce via test or trace; smallest fix; regression test if possible.
+
+**Feature:** Check [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD) for ID alignment; extend existing patterns; update tests and README/docs as needed.
+
+**Refactor:** Behavior-preserving only; run full test suite; do not mix with feature work in the same commit when avoidable.
+
+**Docs-only:** Keep [`docs/*.MD`](docs/) links and filenames consistent (`.MD` extension).
+
+---
+
+## 12. Required handoff format
+
+When finishing work, report:
+
+1. **What changed** (one short paragraph).
+2. **Why** (tie to task).
+3. **Files touched** (list).
+4. **Assumptions / risks** (e.g. untested integration paths).
+5. **Validation run** (`ruff`, `pytest`, CI scripts — state what passed).
+6. **Follow-ups** (optional, only if clearly needed).
+
+---
+
+## 13. Local environment (Cursor / VM)
+
+- **Docker:** `docker compose -f infra/docker-compose.yml up -d` — QuestDB, Redis, Qdrant, Prometheus, Grafana, Loki (see `README.md` for ports).
+- **Control plane:** `uvicorn control_plane.api:app --host 0.0.0.0 --port 8000`
+- **`.env`:** gitignored; never commit.
+
+This section is **operational**, not cultural: it prevents repeated setup mistakes.
