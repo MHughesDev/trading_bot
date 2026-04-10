@@ -125,7 +125,6 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | FB-FR-PG8 | Improvement | Open | **Drift monitoring (features/targets):** statistical checks vs training reference; optional auto-abstention hooks to `ForecastGuard` | `forecaster_model/inference/guards.py`, batch or streaming stats |
 | FB-FR-PG9 | Hardening | Open | **Fault-injection tests:** simulated model failure mid-tick → verify fallback to surrogate and no silent trade | `tests/` |
 | FB-PL-PG8 | Spike | Open | **Conservative offline RL:** behavior cloning or pessimistic value if training purely on historical replay before live shadow | `policy_model/training/` |
-| FB-PL-PG9 | Reliability | Open | **Operator runbook extensions:** model rollback procedure, disable neural forecaster / RL policy flags, “known good” artifact pins | [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) |
 
 ### Out of scope (not prioritized)
 
@@ -197,6 +196,7 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-HS-03 | 2026-04-11 | Human spec methodology in code: forecaster VSN→CNN→multi-res RNN→fusion→quantiles; causal norm; `X_known`; conformal + guards; policy multi-branch MLP + reward + RL protocol |
 | FB-HS-04 | 2026-04-10 | **Literal spec layout:** `forecaster_model/models/{vsn,latent_encoder,xlstm_cell,multi_resolution_xlstm,fusion,decoder,forecaster_model}.py`, `config/{schema,defaults.yaml}`, `losses/quantile.py`; `policy_model/objects/*` per §8, `RiskGate`/`PolicySystem` names per §28–29, `env/rewards.py`, `config/defaults.yaml`; see [`docs/Specs/FORECASTER_AND_POLICY.MD`](Specs/FORECASTER_AND_POLICY.MD) |
 | FB-FR-PG1 | 2026-04-11 | **Authoritative routing:** `models.decision_forecast_routing_source` (`ridge` default, `packet` uses `forecast_packet_to_forecast_output`); packet built when diagnostics enabled or routing is `packet`; tests `test_forecast_packet_adapter.py`, `test_pipeline_forecast_packet.py` |
+| FB-PL-PG9 | 2026-04-11 | **Runbook:** model artifact paths + `decision_forecast_routing_source` + packet diagnostics — [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) § Model artifacts and forecast routing |
 
 ---
 

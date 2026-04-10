@@ -29,3 +29,9 @@
 ## CI integration tests
 
 - Optional: `NM_INTEGRATION_SERVICES=1` with Redis, QuestDB, Qdrant running (`docker compose -f infra/docker-compose.yml up -d`). See `tests/test_integration_optional_services.py`.
+
+## Model artifacts and forecast routing (FB-PL-PG9)
+
+- **Regime / Ridge forecast joblib:** point `NM_MODELS_REGIME_PATH` and `NM_MODELS_FORECAST_PATH` at known-good `.joblib` files (or clear the env vars to use in-process bootstrap models). Restart the runtime after changing paths.
+- **Routing source:** `NM_MODELS_DECISION_FORECAST_ROUTING_SOURCE` = `ridge` (default) uses the Ridge surrogate `ForecastOutput` for routing; `packet` derives routing from the methodology `ForecastPacket` (see `decision_engine/forecast_packet_adapter.py`). Use `ridge` to “roll back” behavior if packet routing misbehaves.
+- **Forecast packet diagnostics:** `NM_MODELS_DECISION_FORECAST_PACKET_ENABLED=true` builds a `ForecastPacket` each pipeline step for logging/policy experiments without changing routing (unless `routing_source` is `packet`).
