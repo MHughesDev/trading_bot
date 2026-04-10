@@ -8,7 +8,8 @@ from execution.adapters.base_adapter import ExecutionAdapter
 from execution.adapters.coinbase_live import CoinbaseExecutionAdapter
 
 
-def get_execution_adapter(settings: AppSettings) -> ExecutionAdapter:
+def create_execution_adapter(settings: AppSettings) -> ExecutionAdapter:
+    """Single factory for venue adapters (paper Alpaca vs live Coinbase)."""
     if settings.execution_mode == "paper":
         if settings.execution_paper_adapter.lower() != "alpaca":
             raise ValueError(
@@ -22,3 +23,7 @@ def get_execution_adapter(settings: AppSettings) -> ExecutionAdapter:
             )
         return CoinbaseExecutionAdapter(settings)
     raise ValueError(f"Invalid execution_mode {settings.execution_mode!r}")
+
+
+def get_execution_adapter(settings: AppSettings) -> ExecutionAdapter:
+    return create_execution_adapter(settings)

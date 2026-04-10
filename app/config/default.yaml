@@ -39,6 +39,8 @@ backtesting:
   initial_cash_usd: 100000
   # When track_portfolio=True in replay: block buys if cash + fees would go negative
   enforce_solvency: true
+  # When true and track_portfolio: pass simulated cash into risk as available_cash_usd
+  replay_available_cash: false
 
 routing:
   # Deterministic route selector (spec §9) — thresholds in config, not code magic numbers
@@ -56,6 +58,9 @@ redis:
 sentiment:
   # FinBERT etc. wired in orchestration; V1 uses neutral stub if no model
   use_finbert: false
+  # RSS/Atom URLs for headline fetch (optional). Empty = neutral sentiment features.
+  rss_feeds: []
+  fetch_timeout_seconds: 15
 
 control_plane:
   host: "0.0.0.0"
@@ -68,6 +73,8 @@ observability:
 questdb:
   # NM_QUESTDB_PERSIST_DECISION_TRACES=true to write JSON traces from live_service
   persist_decision_traces: false
+  batch_max_rows: 500
+  flush_interval_seconds: 2.0
 
 # Optional: load trained HMM / forecast surrogates from disk (joblib)
 # models:

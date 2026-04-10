@@ -52,6 +52,7 @@ class AppSettings(BaseSettings):
     backtesting_rng_seed: int | None = None
     backtesting_initial_cash_usd: float = 100_000.0
     backtesting_enforce_solvency: bool = True
+    backtesting_replay_available_cash: bool = False
 
     routing_spread_trade_max_bps: float = 30.0
     routing_forecast_strength_min: float = 0.001
@@ -63,6 +64,8 @@ class AppSettings(BaseSettings):
     redis_bar_ttl_seconds: int = 86_400
 
     sentiment_use_finbert: bool = False
+    news_rss_feeds: list[str] = Field(default_factory=list)
+    news_fetch_timeout_seconds: float = 15.0
 
     control_plane_host: str = "0.0.0.0"
     control_plane_port: int = 8000
@@ -75,6 +78,8 @@ class AppSettings(BaseSettings):
     questdb_password: str = "quest"
     questdb_database: str = "qdb"
     questdb_persist_decision_traces: bool = False
+    questdb_batch_max_rows: int = 500
+    questdb_flush_interval_seconds: float = 2.0
 
     redis_url: str = "redis://localhost:6379/0"
 
@@ -145,6 +150,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["backtesting_initial_cash_usd"] = float(bt["initial_cash_usd"])
         if "enforce_solvency" in bt:
             out["backtesting_enforce_solvency"] = bool(bt["enforce_solvency"])
+        if "replay_available_cash" in bt:
+            out["backtesting_replay_available_cash"] = bool(bt["replay_available_cash"])
     if "routing" in cfg:
         ro = cfg["routing"] or {}
         out["routing_spread_trade_max_bps"] = ro.get("spread_trade_max_bps", 30.0)
@@ -160,6 +167,10 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     if "sentiment" in cfg:
         se = cfg["sentiment"] or {}
         out["sentiment_use_finbert"] = se.get("use_finbert", False)
+        if "rss_feeds" in se:
+            out["news_rss_feeds"] = list(se["rss_feeds"] or [])
+        if "fetch_timeout_seconds" in se:
+            out["news_fetch_timeout_seconds"] = float(se["fetch_timeout_seconds"])
     if "control_plane" in cfg:
         cp = cfg["control_plane"] or {}
         out["control_plane_host"] = cp.get("host", "0.0.0.0")
@@ -171,6 +182,10 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         qd = cfg["questdb"] or {}
         if "persist_decision_traces" in qd:
             out["questdb_persist_decision_traces"] = qd["persist_decision_traces"]
+        if "batch_max_rows" in qd:
+            out["questdb_batch_max_rows"] = int(qd["batch_max_rows"])
+        if "flush_interval_seconds" in qd:
+            out["questdb_flush_interval_seconds"] = float(qd["flush_interval_seconds"])
     if "models" in cfg:
         mo = cfg["models"] or {}
         if "regime_path" in mo:

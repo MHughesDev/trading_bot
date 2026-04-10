@@ -2,7 +2,7 @@
 
 Structured backlog for **all planned work**: new capabilities, production hardening, reliability, docs, and spikes. **Fixes to existing behavior** — separate list — live in [`ISSUE_LOG.MD`](ISSUE_LOG.MD) only.
 
-**References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD)
+**References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD)
 
 ---
 
@@ -21,7 +21,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 ### Request types
 
 | Type | Meaning |
-|------|--------|
+|------|---------|
 | **Feature** | New user- or operator-visible capability |
 | **Hardening** | Production readiness: compliance gates, security, correctness under load |
 | **Improvement** | Deeper implementation of something that already exists |
@@ -65,7 +65,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | HG-03 | Hardening | Done | No raw text → trades |
 | HG-04 | Hardening | Done | No auto MLflow promotion in code (CI guard) |
 | HG-05 | Hardening | Done | Coinbase live: CDP JWT REST submit/cancel/accounts (`execution/adapters/coinbase_live.py`, `execution/coinbase_advanced_http.py`) |
-| HG-06 | Hardening | Done | Sentiment overlay wired: `aggregate_sentiment_for_symbols` + optional FinBERT (`data_plane/ingest/sentiment_nlp.py`); news still stub until provider |
+| HG-06 | Hardening | Done | Sentiment overlay wired: `aggregate_sentiment_for_symbols_async` + optional FinBERT (`data_plane/ingest/sentiment_nlp.py`); RSS in `news_ingest.py` |
 | HG-07 | Hardening | Done | Qdrant: deterministic embeddings + `schema_version` payload; live per-symbol loop |
 | HG-08 | Hardening | Done | HMM bootstrap + `save`/`load`; `models.regime_path` / `NM_MODELS_REGIME_PATH` |
 | HG-09 | Hardening | Done | Forecast: Ridge substitute + bootstrap + `save`/`load`; `models.forecast_path` / `NM_MODELS_FORECAST_PATH` |
@@ -84,22 +84,13 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| HG-12 | Hardening | Open | Runbooks: secrets, incident, flatten, QuestDB restore | `docs/` |
-| HG-13 | Hardening | Open | CI integration tests: Redis, QuestDB, Qdrant | `.github/workflows/` |
+| — | — | — | *No open items — see §8 Completed archive.* | — |
 
 ### Backlog (open)
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| FB-X3 | Tech debt | Open | Single adapter factory for paper/live | `execution/service.py`, `execution/router.py` |
-| FB-M3 | Hardening | Open | Qdrant payload schema version + CI integration tests | `data_plane/memory/` |
-| FB-F2 | Feature | Open | News ingest: real sources + dedup | `data_plane/ingest/news_ingest.py` |
-| FB-F3 | Improvement | Open | REST: more tests/fixtures for BTC/ETH/SOL candles | `data_plane/ingest/coinbase_rest.py` |
-| FB-S1 | Reliability | Open | QuestDB: batching, retention, backup/restore runbooks | `data_plane/storage/questdb.py` |
-| FB-C1 | Feature | Open | Streamlit: bind pages to API + QuestDB/Loki + emergency | `control_plane/` |
-| FB-I1 | Platform | Open | Compose: MLflow/Prefect or document omission; README ports | `infra/docker-compose.yml` |
-| FB-I2 | Platform | Open | GitHub Actions: lint, pytest, spec scripts, integration job | `.github/workflows/` |
-| FB-I3 | Reliability | Open | Runbooks (secrets, incident, flatten, QuestDB) | `docs/` |
+| — | — | — | *No open items — see §8 Completed archive.* | — |
 
 ---
 
@@ -109,10 +100,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| FB-F4 | Spike | Open | Optional strict `BarEvent` schema end-to-end | `app/contracts/` |
-| FB-B1 | Improvement | Open | Optional `available_cash` in `RiskEngine` for replay solvency | `backtesting/replay.py`, `risk_engine/engine.py` |
-| FB-T1 | Platform | Open | Optional CI: Alpaca paper API smoke (secrets) | `execution/adapters/alpaca_paper.py` |
-| FB-T2 | Hardening | Open | SIGINT/SIGTERM shutdown tests | `app/runtime/live_service.py` |
+| — | — | — | *No open items — see §8 Completed archive.* | — |
 
 ### Out of scope (not prioritized)
 
@@ -158,8 +146,21 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-ML3 | 2026-04-08 | `run_train_evaluate_log` logs to MLflow when installed |
 | FB-ML4 | 2026-04-08 | Prefect `@flow` when `prefect` installed; else inline train |
 | FB-M1, FB-M2 | 2026-04-08 | `feature_dict_to_embedding`; live `run_memory_retrieval_loop` per symbol |
-| FB-F1 | 2026-04-08 | FinBERT optional + `sentiment_features` from `aggregate_sentiment_for_symbols` |
+| FB-F1 | 2026-04-08 | FinBERT optional + `sentiment_features` from aggregates |
 | FB-O1, FB-O2 | 2026-04-08 | `DECISION_LATENCY` in `run_decision_tick`; Promtail + Grafana JSON + datasources |
+| HG-12, FB-I3 | 2026-04-10 | Runbooks: [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) |
+| HG-13, FB-I2 | 2026-04-10 | `.github/workflows/ci.yml`; optional integration (`workflow_dispatch` or `NM_INTEGRATION_SERVICES=1`) |
+| FB-X3 | 2026-04-10 | `create_execution_adapter` in `execution/router.py` (used by `ExecutionService`) |
+| FB-M3 | 2026-04-10 | Qdrant `schema_version: 1` in payload; CI integration test in `test_integration_optional_services.py` |
+| FB-F2 | 2026-04-10 | RSS fetch + dedup (`rss_news.py`, `news_ingest.py`); `NM_NEWS_RSS_FEEDS` via YAML/env |
+| FB-F3 | 2026-04-10 | `test_coinbase_rest_candles_multi.py` (BTC/ETH/SOL Exchange fallback path) |
+| FB-S1 | 2026-04-10 | QuestDB batch flush + runbooks |
+| FB-C1 | 2026-04-10 | Streamlit + `streamlit_util` API and observability links |
+| FB-I1 | 2026-04-10 | README: MLflow/Prefect not in default compose; use `[all]` / orchestration docs |
+| FB-F4 | 2026-04-10 | Strict `BarEvent` OHLC validation (`app/contracts/events.py`) |
+| FB-B1 | 2026-04-10 | `available_cash_usd` in `RiskEngine` + `run_decision_tick`; `backtesting.replay_available_cash` |
+| FB-T1 | 2026-04-10 | Alpaca smoke: `scripts/smoke_credentials.py` (no secrets in default CI) |
+| FB-T2 | 2026-04-10 | `register_shutdown_signals` + `tests/test_live_service_signals.py` |
 
 ---
 

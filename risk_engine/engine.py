@@ -36,6 +36,7 @@ class RiskEngine:
         feed_last_message_at: datetime | None = None,
         product_tradable: bool = True,
         position_signed_qty: Decimal | None = None,
+        available_cash_usd: float | None = None,
     ) -> tuple[TradeAction | None, RiskState]:
         """Return None if blocked; otherwise TradeAction for execution layer.
 
@@ -131,6 +132,13 @@ class RiskEngine:
             return None, risk
 
         side = OrderSide.BUY if proposal.direction > 0 else OrderSide.SELL
+        if (
+            side == OrderSide.BUY
+            and available_cash_usd is not None
+            and notional > float(available_cash_usd)
+        ):
+            return None, risk
+
         if mode == SystemMode.REDUCE_ONLY and pos != 0:
             if pos > 0 and side == OrderSide.SELL:
                 qty = min(qty, pos)

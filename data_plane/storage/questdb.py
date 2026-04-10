@@ -20,11 +20,15 @@ class QuestDBWriter:
         user: str,
         password: str,
         database: str = "qdb",
+        *,
+        batch_max_rows: int = 500,
     ) -> None:
         self._conninfo = (
             f"host={host} port={port} user={user} password={password} dbname={database}"
         )
         self._conn: psycopg.AsyncConnection | None = None
+        self._batch_max_rows = max(1, int(batch_max_rows))
+        self._trace_buffer: list[dict] = []
 
     async def connect(self) -> None:
         self._conn = await psycopg.AsyncConnection.connect(self._conninfo, autocommit=True)
@@ -32,6 +36,7 @@ class QuestDBWriter:
 
     async def aclose(self) -> None:
         if self._conn:
+            await self.flush_decision_traces()
             await self._conn.close()
             self._conn = None
 
@@ -73,8 +78,7 @@ class QuestDBWriter:
         """
         await self._conn.execute(sql, (ts, symbol, route_id, regime, action, details))
 
-    async def insert_decision_trace_dict(self, trace: dict) -> None:
-        """Persist full audit blob from decision_engine.audit.decision_trace (JSON in details)."""
+    def _row_from_trace_dict(self, trace: dict) -> tuple:
         ts = datetime.now(UTC)
         sym = str(trace.get("symbol", ""))
         route = trace.get("route") or {}
@@ -84,7 +88,27 @@ class QuestDBWriter:
         allowed = trace.get("trade_allowed", False)
         action = "trade" if allowed else "blocked"
         details = json.dumps(trace, default=str)
-        await self.insert_decision_trace(ts, sym, route_id, regime_s, action, details)
+        return (ts, sym, route_id, regime_s, action, details)
+
+    async def insert_decision_trace_dict(self, trace: dict) -> None:
+        """Buffer trace rows; flush when batch is full (see ``flush_decision_traces``)."""
+        self._trace_buffer.append(trace)
+        if len(self._trace_buffer) >= self._batch_max_rows:
+            await self.flush_decision_traces()
+
+    async def flush_decision_traces(self) -> None:
+        """Write buffered decision traces (call from shutdown or a periodic task)."""
+        if not self._conn or not self._trace_buffer:
+            return
+        batch = self._trace_buffer
+        self._trace_buffer = []
+        sql = """
+        INSERT INTO decision_traces (ts, symbol, route_id, regime, action, details)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        rows = [self._row_from_trace_dict(t) for t in batch]
+        async with self._conn.cursor() as cur:
+            await cur.executemany(sql, rows)
 
     async def query_bars(
         self,

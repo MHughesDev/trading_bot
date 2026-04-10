@@ -40,12 +40,7 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 
 | ID | Area | Summary |
 |----|------|---------|
-| IL-005 | features | Sentiment / FinBERT / news pipeline returns zeros or stubs end-to-end. |
-| IL-006 | storage | QuestDB: batching, retention, backup runbooks incomplete vs production needs. |
-| IL-007 | observability | Loki: no Promtail (or equivalent) wiring from app logs; Grafana dashboards not as code. |
-| IL-009 | control_plane | Streamlit pages thin vs live API + storage. |
-| IL-010 | ci | No GitHub Actions workflow; integration tests for Redis/QuestDB/Qdrant not in repo CI. |
-| IL-101 | data | `news_ingest`: `fetch_news_stub` only — no live news pipeline. |
+| — | — | *No open MEDIUM items — see Resolved (recent).* |
 
 ---
 
@@ -53,8 +48,7 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 
 | ID | Area | Summary |
 |----|------|---------|
-| IL-011 | runtime | `NotImplementedError` handler paths in `live_service` — verify coverage. |
-| IL-102 | data | Expand WS normalizer fixtures beyond current samples. |
+| — | — | *No open LOW items — see Resolved (recent).* |
 
 ---
 
@@ -65,7 +59,7 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 1. Install and auth: `gh auth login` (repo scope).
 2. From repo root: `bash scripts/create_github_issues.sh`  
    Or: `REPO=owner/repo bash scripts/create_github_issues.sh`
-3. Edit the script if titles/bodies drift from this log; prefer **updating this file** for operational fixes, then mirroring to the script if you still use bulk create.
+3. Edit the script if titles/bodies drift from this file; prefer **updating this file** for operational fixes, then mirroring to the script if you still use bulk create.
 
 **Note:** GitHub issues are optional; this markdown file remains the **local** source of truth for fix tracking.
 
@@ -80,6 +74,14 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 | IL-003 | 2026-04-08 | Forecast: Ridge surrogate bootstrapped + `save`/`load`; `NM_MODELS_FORECAST_PATH`; optional PyTorch path still via extras. |
 | IL-004 | 2026-04-08 | Memory: deterministic `feature_dict_to_embedding` for Qdrant queries; per-symbol 60s loop; payload `schema_version: 1`. |
 | IL-008 | 2026-04-08 | Orchestration: `run_train_evaluate_log` + optional Prefect `@flow` in `orchestration/nightly_retrain.py`; MLflow params/metrics (no auto-promotion). |
+| IL-005 | 2026-04-10 | Sentiment: RSS/Atom fetch + dedup (`data_plane/ingest/rss_news.py`, `news_ingest.py`); `aggregate_sentiment_for_symbols_async` wired in `live_service`; optional FinBERT unchanged. |
+| IL-006 | 2026-04-10 | QuestDB: batched `decision_traces` writes (`questdb_batch_max_rows`, periodic `flush_interval_seconds`); runbooks in `docs/RUNBOOKS.MD`. |
+| IL-007 | 2026-04-10 | Observability: Promtail + Grafana provisioning already in compose; Streamlit links to Loki/Grafana URLs (`control_plane/streamlit_util.py`). |
+| IL-009 | 2026-04-10 | Streamlit: shared API helpers + Home/Live/Routes/Models/Emergency/Logs/Regimes bound to control plane or observability URLs. |
+| IL-010 | 2026-04-10 | CI: `.github/workflows/ci.yml` (ruff, pytest, spec scripts); optional integration workflow + `tests/test_integration_optional_services.py`. |
+| IL-101 | 2026-04-10 | `news_ingest`: live RSS pipeline + dedup (see IL-005). |
+| IL-011 | 2026-04-10 | `NotImplementedError` in `main()` signal handlers: extracted `register_shutdown_signals`; test `tests/test_live_service_signals.py`. |
+| IL-102 | 2026-04-10 | WS normalizer fixtures expanded: `trade_tick.json`, `l2_snapshot.json` + tests in `test_normalizer_fixtures.py`. |
 
 ---
 

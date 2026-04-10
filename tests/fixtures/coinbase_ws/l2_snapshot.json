@@ -1,0 +1,25 @@
+{
+  "channel": "level2",
+  "client_id": "",
+  "timestamp": "2024-01-01T00:00:00Z",
+  "sequence_num": 2,
+  "events": [
+    {
+      "type": "snapshot",
+      "updates": [
+        {
+          "product_id": "SOL-USD",
+          "side": "bid",
+          "price": "100.0",
+          "size": "1.5"
+        },
+        {
+          "product_id": "SOL-USD",
+          "side": "offer",
+          "price": "100.5",
+          "size": "2.0"
+        }
+      ]
+    }
+  ]
+}

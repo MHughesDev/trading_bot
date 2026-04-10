@@ -6,7 +6,7 @@ from app.config.settings import AppSettings
 from app.contracts.orders import OrderIntent
 from execution.adapters.base_adapter import ExecutionAdapter, OrderAck
 from execution.intent_gate import require_execution_allowed
-from execution.router import get_execution_adapter
+from execution.router import create_execution_adapter
 
 
 class ExecutionService:
@@ -14,7 +14,7 @@ class ExecutionService:
 
     def __init__(self, settings: AppSettings, adapter: ExecutionAdapter | None = None) -> None:
         self._settings = settings
-        self._adapter = adapter or get_execution_adapter(settings)
+        self._adapter = adapter or create_execution_adapter(settings)
 
     @property
     def adapter(self) -> ExecutionAdapter:

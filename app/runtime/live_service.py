@@ -19,7 +19,7 @@ from app.config.settings import AppSettings, load_settings
 from app.contracts.risk import RiskState
 from data_plane.bars.rolling import RollingMinuteBars
 from data_plane.features.pipeline import FeaturePipeline
-from data_plane.ingest.news_ingest import aggregate_sentiment_for_symbols
+from data_plane.ingest.news_ingest import aggregate_sentiment_for_symbols_async
 from data_plane.memory.embeddings import feature_dict_to_embedding
 from data_plane.memory.qdrant_memory import QdrantNewsMemory
 from data_plane.memory.retrieval_loop import run_memory_retrieval_loop
@@ -38,6 +38,20 @@ from execution.service import ExecutionService
 from risk_engine.engine import RiskEngine
 
 logger = logging.getLogger(__name__)
+
+
+def register_shutdown_signals(stop: asyncio.Event) -> None:
+    """Register SIGINT/SIGTERM to set ``stop``. No-op on platforms without signal handlers."""
+
+    def _sig(*_: Any) -> None:
+        stop.set()
+
+    loop = asyncio.get_running_loop()
+    try:
+        loop.add_signal_handler(signal.SIGINT, _sig)
+        loop.add_signal_handler(signal.SIGTERM, _sig)
+    except NotImplementedError:
+        pass
 
 
 def _positions_from_snapshots(
@@ -98,7 +112,12 @@ async def _sentiment_refresh_loop(
     stop: asyncio.Event,
 ) -> None:
     try:
-        agg = aggregate_sentiment_for_symbols(symbols, use_finbert=settings.sentiment_use_finbert)
+        agg = await aggregate_sentiment_for_symbols_async(
+            symbols,
+            use_finbert=settings.sentiment_use_finbert,
+            rss_feeds=settings.news_rss_feeds,
+            fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
+        )
         sentiment.clear()
         sentiment.update(agg)
     except Exception:
@@ -110,7 +129,12 @@ async def _sentiment_refresh_loop(
         except TimeoutError:
             pass
         try:
-            agg = aggregate_sentiment_for_symbols(symbols, use_finbert=settings.sentiment_use_finbert)
+            agg = await aggregate_sentiment_for_symbols_async(
+                symbols,
+                use_finbert=settings.sentiment_use_finbert,
+                rss_feeds=settings.news_rss_feeds,
+                fetch_timeout_seconds=settings.news_fetch_timeout_seconds,
+            )
             sentiment.clear()
             sentiment.update(agg)
         except Exception:
@@ -148,6 +172,7 @@ async def run_live_loop(
             cfg.questdb_user,
             cfg.questdb_password,
             cfg.questdb_database,
+            batch_max_rows=cfg.questdb_batch_max_rows,
         )
         await qdb.connect()
 
@@ -199,6 +224,26 @@ async def run_live_loop(
             sentiment_stop,
         )
     )
+
+    qdb_flush_stop = asyncio.Event()
+    qdb_flush_task: asyncio.Task[None] | None = None
+    if qdb is not None and cfg.questdb_flush_interval_seconds > 0:
+        async def _flush_loop() -> None:
+            while not qdb_flush_stop.is_set():
+                try:
+                    await asyncio.wait_for(
+                        qdb_flush_stop.wait(),
+                        timeout=float(cfg.questdb_flush_interval_seconds),
+                    )
+                    return
+                except TimeoutError:
+                    pass
+                try:
+                    await qdb.flush_decision_traces()
+                except Exception:
+                    logger.exception("questdb periodic flush failed")
+
+        qdb_flush_task = asyncio.create_task(_flush_loop())
 
     rollers: dict[str, RollingMinuteBars] = {s: RollingMinuteBars(s) for s in syms}
     positions: dict[str, Decimal] = {s: Decimal(0) for s in syms}
@@ -307,6 +352,13 @@ async def run_live_loop(
             if max_iterations is not None and n >= max_iterations:
                 break
     finally:
+        qdb_flush_stop.set()
+        if qdb_flush_task is not None:
+            qdb_flush_task.cancel()
+            try:
+                await qdb_flush_task
+            except asyncio.CancelledError:
+                pass
         if reconcile_stop is not None:
             reconcile_stop.set()
         if reconcile_task is not None:
@@ -340,17 +392,7 @@ def main() -> None:
 
     async def _run() -> None:
         stop = asyncio.Event()
-
-        def _sig(*_: Any) -> None:
-            stop.set()
-
-        loop = asyncio.get_running_loop()
-        try:
-            loop.add_signal_handler(signal.SIGINT, _sig)
-            loop.add_signal_handler(signal.SIGTERM, _sig)
-        except NotImplementedError:
-            pass
-
+        register_shutdown_signals(stop)
         await run_live_loop(stop_event=stop)
 
     asyncio.run(_run())

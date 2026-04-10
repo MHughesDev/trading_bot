@@ -57,8 +57,9 @@ def replay_decisions(
     execp: BacktestExecutionParams | None = None
     rng = None
     portfolio: PortfolioTracker | None = None
+    app_s = load_settings()
     if track_portfolio:
-        execp = execution_params or BacktestExecutionParams.from_settings(load_settings())
+        execp = execution_params or BacktestExecutionParams.from_settings(app_s)
         rng = make_replay_rng(execp.rng_seed)
         portfolio = PortfolioTracker(execp.initial_cash)
 
@@ -77,6 +78,9 @@ def replay_decisions(
         else:
             dt = None
         mid = float(row.get("close", 1.0))
+        avail: float | None = None
+        if track_portfolio and portfolio is not None and app_s.backtesting_replay_available_cash:
+            avail = float(portfolio.cash)
         regime, fc, route, proposal, trade_action, risk = run_decision_tick(
             symbol=symbol,
             feature_row=feats,
@@ -87,6 +91,7 @@ def replay_decisions(
             mid_price=mid,
             data_timestamp=dt,
             position_signed_qty=pos,
+            available_cash_usd=avail,
         )
         fill_price: float | None = None
         fee_paid: Decimal | None = None
@@ -204,8 +209,9 @@ def replay_multi_asset_decisions(
     execp: BacktestExecutionParams | None = None
     rng = None
     portfolio: PortfolioTracker | None = None
+    app_s = load_settings()
     if track_portfolio:
-        execp = execution_params or BacktestExecutionParams.from_settings(load_settings())
+        execp = execution_params or BacktestExecutionParams.from_settings(app_s)
         rng = make_replay_rng(execp.rng_seed)
         portfolio = PortfolioTracker(execp.initial_cash)
 
@@ -237,6 +243,10 @@ def replay_multi_asset_decisions(
             sp = spread_map.get(symbol, default_spread_bps)
             pos = positions.get(symbol, Decimal(0))
 
+            avail_m: float | None = None
+            if track_portfolio and portfolio is not None and app_s.backtesting_replay_available_cash:
+                avail_m = float(portfolio.cash)
+
             regime, fc, route, proposal, trade_action, risk = run_decision_tick(
                 symbol=symbol,
                 feature_row=feats,
@@ -247,6 +257,7 @@ def replay_multi_asset_decisions(
                 mid_price=mid,
                 data_timestamp=dt,
                 position_signed_qty=pos,
+                available_cash_usd=avail_m,
             )
 
             fill_price: float | None = None

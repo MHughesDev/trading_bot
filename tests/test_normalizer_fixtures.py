@@ -12,3 +12,21 @@ def test_ticker_fixture_normalizes():
     assert out.symbol == "BTC-USD"
     assert out.price == 50000.0
     assert out.bid is not None and out.ask is not None
+
+
+def test_trade_fixture_normalizes():
+    p = Path(__file__).parent / "fixtures" / "coinbase_ws" / "trade_tick.json"
+    msg = json.loads(p.read_text(encoding="utf-8"))
+    out = normalize_ws_message(msg)
+    assert out is not None
+    assert out.symbol == "ETH-USD"
+    assert out.price == 3000.5
+
+
+def test_l2_fixture_normalizes():
+    p = Path(__file__).parent / "fixtures" / "coinbase_ws" / "l2_snapshot.json"
+    msg = json.loads(p.read_text(encoding="utf-8"))
+    out = normalize_ws_message(msg)
+    assert out is not None
+    assert out.symbol == "SOL-USD"
+    assert out.bids and out.asks

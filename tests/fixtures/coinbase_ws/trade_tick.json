@@ -1,0 +1,21 @@
+{
+  "channel": "market_trades",
+  "client_id": "",
+  "timestamp": "2024-01-01T00:00:00Z",
+  "sequence_num": 1,
+  "events": [
+    {
+      "type": "update",
+      "trades": [
+        {
+          "trade_id": "t1",
+          "product_id": "ETH-USD",
+          "price": "3000.5",
+          "size": "0.1",
+          "time": "2024-01-01T00:00:01Z",
+          "side": "BUY"
+        }
+      ]
+    }
+  ]
+}

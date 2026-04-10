@@ -34,6 +34,7 @@ def run_decision_tick(
     feed_last_message_at: datetime | None = None,
     product_tradable: bool = True,
     position_signed_qty: Decimal | None = None,
+    available_cash_usd: float | None = None,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, TradeAction | None, RiskState]:
     t0 = time.perf_counter()
     regime, fc, route, proposal = pipeline.step(symbol, feature_row, spread_bps, risk_state)
@@ -48,6 +49,7 @@ def run_decision_tick(
         feed_last_message_at=feed_last_message_at,
         product_tradable=product_tradable,
         position_signed_qty=position_signed_qty,
+        available_cash_usd=available_cash_usd,
     )
     DECISION_LATENCY.observe(time.perf_counter() - t0)
     return regime, fc, route, proposal, trade, risk_state
