@@ -1,0 +1,13 @@
+# Forecaster logical schema — mirrors human `FORECASTER_MODEL_ARCHITECTURE_SPEC.MD` §6.
+# Runtime: use `ForecasterConfig` in `forecaster_model.config` and NM_* overrides as wired in AppSettings.
+
+system:
+  name: forecaster_model
+  version: 1.0
+
+data:
+  base_interval_seconds: 60
+  history_length: 64
+  forecast_horizon: 4
+  quantiles: [0.1, 0.5, 0.9]
+  target: log_return

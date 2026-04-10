@@ -1,0 +1,17 @@
+# Policy logical schema — human `POLICY_MODEL_ARCHITECTURE_SPEC.MD` §6.
+# Runtime wiring uses `AppSettings` and `policy_model.bridge`; this file is the spec mirror.
+
+policy:
+  continuous_target_exposure: true
+  multi_branch_encoder: true
+  actor_critic: true
+  risk_gate_outside_actor: true
+
+reward:
+  net_pnl_minus_costs: true
+  drawdown_penalty: true
+  churn_penalty: true
+
+training:
+  walk_forward: true
+  precomputed_forecast_packets: true

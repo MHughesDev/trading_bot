@@ -6,8 +6,13 @@ Full deep learning stack is tracked in `docs/FEATURES_BACKLOG.MD` (FB-FR-*).
 """
 
 from forecaster_model.config import ForecasterConfig
+from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
 from forecaster_model.inference.stub import build_forecast_packet_stub
+from forecaster_model.models.forecaster_model import ForecasterModel
 
-# Training utilities: forecaster_model.training (walkforward, metrics, checkpoint)
-
-__all__ = ["ForecasterConfig", "build_forecast_packet_stub"]
+__all__ = [
+    "ForecasterConfig",
+    "ForecasterModel",
+    "build_forecast_packet_stub",
+    "build_forecast_packet_methodology",
+]

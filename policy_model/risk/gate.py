@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from app.contracts.forecast_packet import ForecastPacket
 from policy_model.objects import (
     ApprovedTarget,
     ExecutionState,
-    PolicyRiskEnvelope,
+    ForecastPacket,
     PortfolioState,
+    RiskState,
     TargetPosition,
 )
 
 
-class PolicyRiskGate:
+class RiskGate:
     def evaluate(
         self,
         target: TargetPosition,
         forecast_packet: ForecastPacket,
         portfolio_state: PortfolioState,
         execution_state: ExecutionState,
-        risk_state: PolicyRiskEnvelope,
+        risk_state: RiskState,
     ) -> ApprovedTarget:
         reasons: list[str] = []
         clamps: list[str] = []

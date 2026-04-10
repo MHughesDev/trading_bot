@@ -1,4 +1,4 @@
-"""YAML-friendly forecaster configuration (subset of human spec §6)."""
+"""Forecaster configuration (human forecaster spec §6)."""
 
 from __future__ import annotations
 
@@ -16,3 +16,6 @@ class ForecasterConfig:
     calibration_enabled: bool = False
     ensemble_members: int = 1
     extra: dict[str, object] = field(default_factory=dict)
+
+
+__all__ = ["ForecasterConfig"]

@@ -1,19 +1,13 @@
-"""Heuristic policy: edge / uncertainty → target exposure (placeholder for RL actor)."""
+"""Heuristic policy: edge / uncertainty → target exposure (baseline actor before RL training)."""
 
 from __future__ import annotations
 
 from app.contracts.forecast_packet import ForecastPacket
-from policy_model.objects import (
-    PolicyAction,
-    PolicyObservation,
-    PolicyRiskEnvelope,
-    PortfolioState,
-    TargetPosition,
-)
+from policy_model.objects import PolicyAction, PolicyObservation, PortfolioState, RiskState
 
 
 class HeuristicTargetPolicy:
-    """Maps forecast median path vs interval width to [-1, 1] target exposure."""
+    """Maps forecast median path vs interval width to [-1, 1] target exposure (spec §11 canonical action)."""
 
     def __init__(self, edge_scale: float = 100.0) -> None:
         self._edge_scale = edge_scale
@@ -24,16 +18,16 @@ class HeuristicTargetPolicy:
         *,
         forecast_packet: ForecastPacket,
         portfolio_state: PortfolioState,
-        risk_state: PolicyRiskEnvelope,
+        risk_state: RiskState,
         deterministic: bool = True,
     ) -> PolicyAction:
+        _ = obs
         _ = deterministic
         med = forecast_packet.q_med
         width = forecast_packet.interval_width
         edge = sum(med) / max(len(med), 1)
         unc = sum(width) / max(len(width), 1) + 1e-9
         raw = self._edge_scale * edge / unc
-        # shrink toward current position to reduce churn
         churn = 0.2 * portfolio_state.position_fraction
         a = raw - churn
         m = risk_state.max_abs_position_fraction
@@ -41,25 +35,4 @@ class HeuristicTargetPolicy:
         return PolicyAction(
             target_exposure=a,
             action_diagnostics={"edge": edge, "unc": unc},
-        )
-
-
-class ActionProjector:
-    def project(
-        self,
-        action: PolicyAction,
-        portfolio_state: PortfolioState,
-        risk_state: PolicyRiskEnvelope,
-    ) -> TargetPosition:
-        tf = action.target_exposure * risk_state.max_abs_position_fraction
-        if not risk_state.allow_short:
-            tf = max(0.0, tf)
-        if not risk_state.allow_long:
-            tf = min(0.0, tf)
-        return TargetPosition(
-            target_fraction=tf,
-            target_units=None,
-            target_notional=None,
-            target_leverage=portfolio_state.current_leverage,
-            reason_codes=["heuristic_policy"],
         )

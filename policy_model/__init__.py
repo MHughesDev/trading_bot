@@ -12,10 +12,12 @@ from policy_model.objects import (
     PolicyObservation,
     PolicyRiskEnvelope,
     PortfolioState,
+    RiskState,
     TargetPosition,
 )
 from policy_model.observation.builder import PolicyObservationBuilder
 from policy_model.policy.heuristic import HeuristicTargetPolicy
+from policy_model.policy.policy_network import PolicyNetwork
 from policy_model.system import PolicySystem
 
 __all__ = [
@@ -25,9 +27,11 @@ __all__ = [
     "PolicyAction",
     "PolicyObservation",
     "PolicyRiskEnvelope",
+    "RiskState",
     "PortfolioState",
     "TargetPosition",
     "PolicyObservationBuilder",
     "HeuristicTargetPolicy",
+    "PolicyNetwork",
     "PolicySystem",
 ]

@@ -1,10 +1,10 @@
-"""Map `AppSettings` + `RiskState` → `PolicyRiskEnvelope` for policy stack integration (FB-PL-P2)."""
+"""Map `AppSettings` + app `RiskState` → policy-layer `RiskState` (spec §8.4) for `PolicySystem`."""
 
 from __future__ import annotations
 
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState, SystemMode
-from policy_model.objects import PolicyRiskEnvelope
+from policy_model.objects import RiskState as PolicyRiskState
 
 
 def policy_envelope_from_app_settings(
@@ -14,7 +14,7 @@ def policy_envelope_from_app_settings(
     max_position_delta_per_step: float = 0.25,
     min_trade_notional: float = 10.0,
     cooldown_steps_remaining: int = 0,
-) -> PolicyRiskEnvelope:
+) -> PolicyRiskState:
     """
     Derive policy-layer limits from production risk settings and runtime `RiskState`.
 
@@ -37,7 +37,7 @@ def policy_envelope_from_app_settings(
         allow_long = True
         allow_short = True
 
-    return PolicyRiskEnvelope(
+    return PolicyRiskState(
         max_abs_position_fraction=max_frac,
         max_position_delta_per_step=max_position_delta_per_step,
         max_leverage=1.0,
