@@ -55,8 +55,21 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
 | FB-FR-P0 | Feature | Open | Full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD): leakage-safe dataset, VSN, latent CNN, multi-res xLSTM, regime fusion, quantile head, conformal, ensemble | `forecaster_model/` |
+| FB-FR-PG1 | Hardening | Open | **Authoritative forecast path:** one clear rule for what drives routing/risk (neural `ForecastPacket` vs Ridge surrogate); deterministic fallback chain; integration tests | `decision_engine/pipeline.py`, `app/config/` |
+| FB-FR-PG2 | Improvement | Open | **PyTorch forecaster training stack:** trainer, validation split, early stopping, export checkpoints → MLflow or disk registry (manual promotion per CI policy); prerequisite for closing FB-FR-P0 in production | `forecaster_model/training/`, `models/` |
+| FB-FR-PG3 | Feature | Open | **Conformal calibrator lifecycle:** persist/restore sliding-window state across restarts; documented refresh/reset policy; wired in inference path | `forecaster_model/calibration/`, `forecaster_model/inference/` |
 
-**Open vs human spec:** **`FB-FR-P0`** / **`FB-PL-P0`** track **training/runtime** pieces from the human specs not yet implemented end-to-end (full PyTorch trainer, replay buffers, `TradingPolicyEnvironment` concrete env, nightly job wiring). **Module layout and reference forward paths** are aligned to [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) / [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD); xLSTM cell uses **LSTM** forward per forecaster spec §12.7 until a native xLSTM is integrated.
+### Backlog items (open) — policy production readiness
+
+| ID | Type | Status | Summary | Pointer |
+|----|------|--------|---------|---------|
+| FB-PL-PG1 | Feature | Open | **Concrete `TradingPolicyEnvironment`:** `reset` / `step` over replay or paper loop; costs and slippage consistent with `backtesting`/execution assumptions | `policy_model/env/` |
+| FB-PL-PG2 | Improvement | Open | **RL training runtime:** replay buffer (or on-policy rollouts), actor–critic updates, walk-forward schedules, save/load policy weights + obs normalizer state | `policy_model/training/` |
+| FB-PL-PG3 | Hardening | Open | **Policy shadow / canary:** compute and log RL policy actions (and deltas vs baseline) without sending orders until sign-off | `policy_model/`, `observability/`, optional `NM_*` flag |
+
+**Open vs human spec:** **`FB-FR-P0`** / **`FB-PL-P0`** remain the **umbrella** end-state from the human specs. **`FB-FR-PG*`** / **`FB-PL-PG*`** decompose **production-grade** delivery (single-machine scope: no multi-tenant auth or API rate limits). **Module layout and reference forward paths** align to [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) / [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD); **xLSTM** uses **LSTM** forward per forecaster spec §12.7 until **`FB-FR-PG7`** resolves native xLSTM vs signed-off substitute.
+
+**Recommended sequencing (dependencies):** **FB-FR-PG1** (contract for what is “live”) → **FB-FR-PG4** + **FB-FR-PG2** (data + train) → **FB-FR-PG3** + **FB-FR-PG5** (calibration + ensemble) → **FB-PL-PG1** → **FB-PL-PG2** → **FB-PL-PG3** → **FB-PL-PG6** (nightly automation). Run **FB-FR-PG6**, **FB-PL-PG5**, **FB-PL-PG7** in parallel once a candidate model exists.
 
 ### Completed gates (reference)
 
@@ -93,6 +106,14 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
 | FB-PL-P0 | Feature | Open | RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD): `TradingPolicyEnvironment`, actor-critic, replay buffer, precomputed `ForecastPacket` mode, reward/cost model | `policy_model/` |
+| FB-FR-PG4 | Improvement | Open | **Frozen training dataset builder:** versioned manifests (raw bars → windows → log-return targets); leakage checks; reproducible train/val splits | `forecaster_model/data/`, `data_plane/` |
+| FB-FR-PG5 | Feature | Open | **Forecast ensemble (production):** multiple trained members, aggregation, `ensemble_variance` and diagnostics end-to-end in `ForecastPacket` | `forecaster_model/models/`, `app/contracts/forecast_packet.py` |
+| FB-FR-PG6 | Reliability | Open | **Inference robustness:** timeouts, NaN/Inf guards, abstention metrics; Prometheus counters for latency and fallback rate | `forecaster_model/inference/`, `observability/` |
+| FB-FR-PG7 | Spike | Open | **xLSTM decision:** ship native xLSTM / third-party cell, or formal **LSTM baseline** with ablation sign-off per spec §27 | `forecaster_model/models/xlstm_cell.py` |
+| FB-PL-PG4 | Improvement | Open | **Reward and transaction-cost calibration:** tune decomposition weights; replay-based evaluation; regime stress harness | `policy_model/env/reward.py`, `backtesting/` |
+| FB-PL-PG5 | Hardening | Open | **Execution parity tests:** `ExecutionPlanner` + risk gate outputs vs Alpaca/Coinbase adapter constraints (min notional, step size, reduce-only) | `policy_model/execution/`, `execution/adapters/`, `tests/` |
+| FB-PL-PG6 | Platform | Open | **Scheduled training jobs:** nightly or off-hours forecaster + RL train/eval (cron, systemd timer, or Prefect); write artifacts + metrics; no auto-promotion | `orchestration/`, `docs/RUNBOOKS.MD` |
+| FB-PL-PG7 | Reliability | Open | **Model-aware dashboards/metrics:** version tags, calibration error proxy, target vs actual exposure drift | `observability/`, Grafana, `control_plane/` |
 
 ---
 
@@ -102,7 +123,10 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| — | — | — | *No open LOW items — see §8 Completed archive.* | — |
+| FB-FR-PG8 | Improvement | Open | **Drift monitoring (features/targets):** statistical checks vs training reference; optional auto-abstention hooks to `ForecastGuard` | `forecaster_model/inference/guards.py`, batch or streaming stats |
+| FB-FR-PG9 | Hardening | Open | **Fault-injection tests:** simulated model failure mid-tick → verify fallback to surrogate and no silent trade | `tests/` |
+| FB-PL-PG8 | Spike | Open | **Conservative offline RL:** behavior cloning or pessimistic value if training purely on historical replay before live shadow | `policy_model/training/` |
+| FB-PL-PG9 | Reliability | Open | **Operator runbook extensions:** model rollback procedure, disable neural forecaster / RL policy flags, “known good” artifact pins | [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) |
 
 ### Out of scope (not prioritized)
 
@@ -120,6 +144,8 @@ Structured backlog for **all planned work**: new capabilities, production harden
 1. Assign **HIGH** / **MEDIUM** / **LOW** using §Priority levels (and P0–P3 mapping).  
 2. Add a row in §2, §3, or §4. Use the next **FB-** or **HG-** id.  
 3. Link **code paths** or tickets.
+
+**Forecaster / policy production tracks:** **`FB-FR-PG*`** (forecaster production-grade) and **`FB-PL-PG*`** (policy production-grade) complement **`FB-FR-P0`** and **`FB-PL-P0`** (full human-spec stacks). Close PG items incrementally; P0 may remain open until PG + architecture work complete.
 
 ---
 
