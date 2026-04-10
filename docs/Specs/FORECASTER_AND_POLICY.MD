@@ -15,6 +15,7 @@
 
 - **`decision_engine/pipeline.py`** still uses **`TemporalFusionForecaster`** (Ridge surrogate) and **`ForecastOutput`** for routing — unchanged.
 - The new **`ForecastPacket`** + `forecaster_model` / `policy_model` stack is a **parallel** architecture for the human-provided specs; wiring into `run_decision_tick` is backlog (**`FB-PL-P1`** in [`FEATURES_BACKLOG.MD`](../FEATURES_BACKLOG.MD)).
+- **`policy_model.risk_bridge.risk_state_to_policy_envelope`** converts shared **`RiskState`** + exposure limits from **`AppSettings`** into **`PolicyRiskEnvelope`** for `PolicySystem` / `PolicyRiskGate` (use when integrating the policy stack with live or replay).
 
 ## Dependencies
 

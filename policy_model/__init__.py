@@ -16,6 +16,7 @@ from policy_model.objects import (
 )
 from policy_model.observation.builder import PolicyObservationBuilder
 from policy_model.policy.heuristic import HeuristicTargetPolicy
+from policy_model.risk_bridge import risk_state_to_policy_envelope
 from policy_model.system import PolicySystem
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "PolicyObservationBuilder",
     "HeuristicTargetPolicy",
     "PolicySystem",
+    "risk_state_to_policy_envelope",
 ]

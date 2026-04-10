@@ -102,7 +102,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| FB-PL-P2 | Tech debt | Open | Unify or bridge `PolicyRiskEnvelope` vs `app.contracts.risk.RiskState` when wiring live | `policy_model/`, `app/contracts/` |
+| — | — | — | *No open LOW items — see §8 Completed archive.* | — |
 
 ### Out of scope (not prioritized)
 
@@ -166,6 +166,7 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-T2 | 2026-04-10 | `register_shutdown_signals` + `tests/test_live_service_signals.py` |
 | FB-HS-01 | 2026-04-10 | Human specs added to repo; `ForecastPacket`; `forecaster_model` stub + OHLC features + soft regime; `policy_model` objects + heuristic `PolicySystem`; tests `test_forecaster_policy_stubs.py` |
 | FB-HS-02 | 2026-04-10 | `docs/Specs/FORECASTER_AND_POLICY.MD` — as-built map for new packages |
+| FB-PL-P2 | 2026-04-10 | `policy_model.risk_bridge.risk_state_to_policy_envelope` maps `RiskState` + `AppSettings` → `PolicyRiskEnvelope`; tests `test_policy_risk_bridge.py` |
 
 ---
 
