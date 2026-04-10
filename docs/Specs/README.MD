@@ -1,0 +1,36 @@
+# Codebase specs (derived)
+
+This folder holds **specifications that describe the repository as implemented**. They are maintained to stay aligned with the code; when behavior changes, update the relevant file here (or ask an agent to).
+
+**Not product marketing** — these are engineer-facing maps: modules, responsibilities, main entry points, and boundaries (e.g. Coinbase-only market data, Alpaca paper execution only).
+
+## How this relates to other docs
+
+| Location | Role |
+|----------|------|
+| **`docs/Specs/`** (this folder) | What the code **is** and **does** today |
+| **`docs/Human Provided Specs/`** | What **you** want; agents compare to code + Specs and update backlog / implementation |
+| **`docs/FEATURES_BACKLOG.MD`** | Planned work and completed archive |
+| **`docs/ISSUE_LOG.MD`** | Fixes and debt on existing behavior |
+| **`docs/*.MD` reference docs** | Deep dives (risk order, backtesting semantics, QuestDB, etc.) |
+
+## Index
+
+| File | Scope |
+|------|--------|
+| [`SYSTEM_OVERVIEW.MD`](SYSTEM_OVERVIEW.MD) | Product boundaries, repository map, tech stack |
+| [`APP_CONFIG_AND_CONTRACTS.MD`](APP_CONFIG_AND_CONTRACTS.MD) | `app/config/`, `NM_*`, `app/contracts/` |
+| [`DATA_PLANE.MD`](DATA_PLANE.MD) | Ingest, bars, features, memory, storage |
+| [`DECISION_PIPELINE.MD`](DECISION_PIPELINE.MD) | `decision_engine/` — shared tick path |
+| [`RISK_ENGINE.MD`](RISK_ENGINE.MD) | `risk_engine/` — constraints, signing |
+| [`EXECUTION_LAYER.MD`](EXECUTION_LAYER.MD) | `execution/` — router, adapters, CDP REST |
+| [`BACKTESTING.MD`](BACKTESTING.MD) | `backtesting/` — replay parity with live |
+| [`CONTROL_PLANE.MD`](CONTROL_PLANE.MD) | FastAPI + Streamlit |
+| [`MODELS_AND_ORCHESTRATION.MD`](MODELS_AND_ORCHESTRATION.MD) | Regime, forecast, routing, retrain |
+| [`OBSERVABILITY_AND_INFRA.MD`](OBSERVABILITY_AND_INFRA.MD) | Metrics, logging, `infra/docker-compose.yml` |
+| [`TESTING_AND_CI.MD`](TESTING_AND_CI.MD) | `tests/`, `scripts/`, GitHub Actions |
+
+## Naming convention
+
+- Files use **`.MD`** (uppercase), consistent with `docs/` in this repo.
+- Specs are **topic-based**, not one file per Python module (avoids churn).
