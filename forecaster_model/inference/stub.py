@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 import numpy as np
 
 from app.contracts.forecast_packet import ForecastPacket
 from forecaster_model.config import ForecasterConfig
-from forecaster_model.features.ohlc import build_observed_feature_matrix, log_returns
-from forecaster_model.regime.soft import soft_regime_from_returns
+from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
 
 
 def ohlc_arrays_from_feature_row(
@@ -44,62 +43,10 @@ def build_forecast_packet_stub(
     now: datetime | None = None,
 ) -> ForecastPacket:
     """
-    Heuristic quantile forecasts from recent momentum/vol (no learned weights).
+    Delegates to `build_forecast_packet_methodology` (VSN → CNN → multi-res RNN → fusion → quantiles).
 
-    Integrates with the same `ForecastPacket` contract as the future neural forecaster.
+    Kept name for backward compatibility with callers.
     """
-    cfg = cfg or ForecasterConfig()
-    c = np.asarray(close, dtype=np.float64).ravel()
-    if len(c) < 8:
-        h = cfg.forecast_horizon
-        z = [0.0] * h
-        return ForecastPacket(
-            timestamp=now or datetime.now(UTC),
-            horizons=list(range(1, h + 1)),
-            q_low=z.copy(),
-            q_med=z.copy(),
-            q_high=z.copy(),
-            interval_width=z.copy(),
-            regime_vector=[0.25, 0.25, 0.25, 0.25],
-            confidence_score=0.0,
-            ensemble_variance=z.copy(),
-            ood_score=1.0,
-            forecast_diagnostics={"stub": True, "reason": "insufficient_history"},
-        )
-
-    lr = log_returns(c)
-    L = min(cfg.history_length, len(c))
-    sl = slice(-L, None)
-    x_obs = build_observed_feature_matrix(
-        open_[sl], high[sl], low[sl], close[sl], volume[sl], windows=cfg.feature_windows
-    )
-    # Last row summary → scalar edge
-    edge = float(np.mean(x_obs[-1, : min(8, x_obs.shape[1])]))
-    vol = float(np.std(lr[-32:])) + 1e-12
-    H = cfg.forecast_horizon
-    q_med = [edge / (1.0 + j * 0.1) for j in range(H)]
-    width = [1.645 * vol * (1.0 + 0.05 * j) for j in range(H)]
-    q_low = [m - w for m, w in zip(q_med, width, strict=True)]
-    q_high = [m + w for m, w in zip(q_med, width, strict=True)]
-    iv = [qh - ql for qh, ql in zip(q_high, q_low, strict=True)]
-    regime = soft_regime_from_returns(lr, num_regimes=cfg.num_regime_dims).tolist()
-    conf = float(abs(edge) / (vol + 1e-9))
-    ens_var = [1e-8 * (j + 1) for j in range(H)]
-
-    return ForecastPacket(
-        timestamp=now or datetime.now(UTC),
-        horizons=list(range(1, H + 1)),
-        q_low=q_low,
-        q_med=q_med,
-        q_high=q_high,
-        interval_width=iv,
-        regime_vector=regime,
-        confidence_score=conf,
-        ensemble_variance=ens_var,
-        ood_score=0.0 if vol < 0.05 else min(1.0, vol),
-        forecast_diagnostics={
-            "stub": True,
-            "x_obs_shape": list(x_obs.shape),
-            "feature_dim": int(x_obs.shape[1]),
-        },
+    return build_forecast_packet_methodology(
+        open_, high, low, close, volume, cfg=cfg, now=now, seed=42
     )

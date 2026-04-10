@@ -5,6 +5,24 @@ from __future__ import annotations
 import numpy as np
 
 
+class RuleBasedRegimeEstimator:
+    """Implements `RegimeEstimatorProtocol`: stateless rule-based soft regime."""
+
+    def __init__(self, num_regimes: int = 4, vol_window: int = 32) -> None:
+        self._k = num_regimes
+        self._vw = vol_window
+
+    def fit(self, features: np.ndarray) -> None:
+        _ = features
+
+    def update(self, feature_row: np.ndarray) -> None:
+        _ = feature_row
+
+    def predict_proba(self, feature_row: np.ndarray) -> np.ndarray:
+        lr = np.asarray(feature_row, dtype=np.float64).ravel()
+        return soft_regime_from_returns(lr, num_regimes=self._k, vol_window=self._vw)
+
+
 def soft_regime_from_returns(
     log_returns: np.ndarray,
     *,
