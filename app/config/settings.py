@@ -101,6 +101,9 @@ class AppSettings(BaseSettings):
     models_regime_path: str | None = None
     models_forecast_path: str | None = None
 
+    # When true, attach a `ForecastPacket` (stub/heuristic) to pipeline step output for diagnostics
+    decision_forecast_packet_enabled: bool = False
+
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
@@ -192,6 +195,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["models_regime_path"] = mo["regime_path"]
         if "forecast_path" in mo:
             out["models_forecast_path"] = mo["forecast_path"]
+        if "decision_forecast_packet_enabled" in mo:
+            out["decision_forecast_packet_enabled"] = bool(mo["decision_forecast_packet_enabled"])
     return out
 
 

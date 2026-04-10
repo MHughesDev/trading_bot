@@ -7,14 +7,14 @@
 
 | Package | Role today |
 |---------|------------|
-| `forecaster_model/` | Config (`ForecasterConfig`), OHLC-derived features (`features/ohlc.py`), soft regime vector (`regime/soft.py`), **stub** inference producing `ForecastPacket` (`inference/stub.py`) |
-| `policy_model/` | Dataclasses for forecast-conditioned policy (`objects.py`), `PolicyObservationBuilder`, heuristic target policy, `PolicyRiskGate`, `ExecutionPlanner`, **`PolicySystem`** end-to-end stub (`system.py`) |
+| `forecaster_model/` | Config (`ForecasterConfig`), OHLC-derived features (`features/ohlc.py`), soft regime vector (`regime/soft.py`), **stub** inference producing `ForecastPacket` (`inference/stub.py`), **training** helpers: walk-forward indices, pinball loss, JSON checkpoints (`training/`) |
+| `policy_model/` | Dataclasses (`objects.py`), `PolicyObservationBuilder`, heuristic policy, `PolicyRiskGate`, `ExecutionPlanner`, **`PolicySystem`**, **`bridge.policy_envelope_from_app_settings`** (`AppSettings` + `RiskState` → `PolicyRiskEnvelope`) |
 | `app/contracts/forecast_packet.py` | **`ForecastPacket`** — shared contract for forecaster output and policy input |
 
 ## Relationship to existing V3 pipeline
 
-- **`decision_engine/pipeline.py`** still uses **`TemporalFusionForecaster`** (Ridge surrogate) and **`ForecastOutput`** for routing — unchanged.
-- The new **`ForecastPacket`** + `forecaster_model` / `policy_model` stack is a **parallel** architecture for the human-provided specs; wiring into `run_decision_tick` is backlog (**`FB-PL-P1`** in [`FEATURES_BACKLOG.MD`](../FEATURES_BACKLOG.MD)).
+- **`decision_engine/pipeline.py`** still uses **`TemporalFusionForecaster`** (Ridge surrogate) and **`ForecastOutput`** for routing.
+- When **`models.decision_forecast_packet_enabled`** is true, each **`pipeline.step`** also computes a heuristic **`ForecastPacket`** (stub) exposed as **`DecisionPipeline.last_forecast_packet`** for diagnostics / downstream policy experiments.
 
 ## Dependencies
 

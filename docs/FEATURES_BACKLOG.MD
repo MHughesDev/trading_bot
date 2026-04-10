@@ -56,6 +56,8 @@ Structured backlog for **all planned work**: new capabilities, production harden
 |----|------|--------|---------|---------|
 | FB-FR-P0 | Feature | Open | Full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD): leakage-safe dataset, VSN, latent CNN, multi-res xLSTM, regime fusion, quantile head, conformal, ensemble | `forecaster_model/` |
 
+**Blocked (not started):** **`FB-FR-P0`** requires PyTorch/xLSTM stack and large training loop — unsafe to claim done without full model + data pipeline. **`FB-PL-P0`** requires RL env + actor-critic + buffer — same.
+
 ### Completed gates (reference)
 
 | ID | Type | Status | Summary |
@@ -90,9 +92,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| FB-FR-P1 | Platform | Open | Forecaster training stack: walk-forward splits, trainer, metrics, checkpointing, evaluators | `forecaster_model/training/` (to add) |
 | FB-PL-P0 | Feature | Open | RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD): `TradingPolicyEnvironment`, actor-critic, replay buffer, precomputed `ForecastPacket` mode, reward/cost model | `policy_model/` |
-| FB-PL-P1 | Improvement | Open | Optional integration: `ForecastPacket` + policy path behind config flag vs `TemporalFusionForecaster` in `DecisionPipeline` / `run_decision_tick` | `decision_engine/` |
 
 ---
 
@@ -102,7 +102,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| FB-PL-P2 | Tech debt | Open | Unify or bridge `PolicyRiskEnvelope` vs `app.contracts.risk.RiskState` when wiring live | `policy_model/`, `app/contracts/` |
+| — | — | — | *No open LOW items — see §8 Completed archive.* | — |
 
 ### Out of scope (not prioritized)
 
@@ -166,6 +166,9 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-T2 | 2026-04-10 | `register_shutdown_signals` + `tests/test_live_service_signals.py` |
 | FB-HS-01 | 2026-04-10 | Human specs added to repo; `ForecastPacket`; `forecaster_model` stub + OHLC features + soft regime; `policy_model` objects + heuristic `PolicySystem`; tests `test_forecaster_policy_stubs.py` |
 | FB-HS-02 | 2026-04-10 | `docs/Specs/FORECASTER_AND_POLICY.MD` — as-built map for new packages |
+| FB-FR-P1 | 2026-04-11 | Walk-forward index splits, pinball loss, JSON checkpoint helpers (`forecaster_model/training/`) |
+| FB-PL-P1 | 2026-04-11 | `models.decision_forecast_packet_enabled` + `DecisionPipeline.last_forecast_packet` (stub packet when enabled) |
+| FB-PL-P2 | 2026-04-11 | `policy_model.bridge.policy_envelope_from_app_settings` maps `AppSettings` + `RiskState` → `PolicyRiskEnvelope` |
 
 ---
 

@@ -77,7 +77,9 @@ questdb:
   flush_interval_seconds: 2.0
 
 # Optional: load trained HMM / forecast surrogates from disk (joblib)
-# models:
+models:
+  # When true, `DecisionPipeline` attaches a heuristic `ForecastPacket` for policy/diagnostics (stub)
+  decision_forecast_packet_enabled: false
 #   regime_path: models/artifacts/regime.joblib
 #   forecast_path: models/artifacts/forecast.joblib
 
