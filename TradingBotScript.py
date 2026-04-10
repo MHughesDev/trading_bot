@@ -1,19 +1,25 @@
-import requests
-import numpy as np
-from datetime import datetime, timezone, timedelta
+import os
 import time
-import talib
-import pandas as pd
+from datetime import datetime, timezone, timedelta
 
-# API Keys for paper trading
-API_KEY = "PKP8DTXB6HUI4KB8592J"
-API_SECRET_KEY = "2ngUrKMyUvt00M732LQPBtBcqyPg6WiUP9NwITpA"
+import pandas as pd
+import requests
+import talib
+
+# Use same env vars as the main stack; never commit real keys.
+API_KEY = os.environ.get("NM_ALPACA_API_KEY", "")
+API_SECRET_KEY = os.environ.get("NM_ALPACA_API_SECRET", "")
 
 BASE_URL = "https://paper-api.alpaca.markets/v2"
-HEADERS = {
-    "APCA-API-KEY-ID": API_KEY,
-    "APCA-API-SECRET-KEY": API_SECRET_KEY
-}
+
+
+def _headers() -> dict[str, str]:
+    if not API_KEY or not API_SECRET_KEY:
+        raise RuntimeError("Set NM_ALPACA_API_KEY and NM_ALPACA_API_SECRET in the environment.")
+    return {
+        "APCA-API-KEY-ID": API_KEY,
+        "APCA-API-SECRET-KEY": API_SECRET_KEY,
+    }
 
 def place_order(symbol, balance, holdings, side):
     """Place a buy or sell order."""
@@ -27,7 +33,7 @@ def place_order(symbol, balance, holdings, side):
         "time_in_force": "gtc"
     }
 
-    response = requests.post(endpoint, headers=HEADERS, json=payload)
+    response = requests.post(endpoint, headers=_headers(), json=payload)
     if response.status_code == 200:
         print(f"{side.upper()} order placed: {symbol} ${amount}")
         return response.json()
@@ -48,7 +54,7 @@ def fetch_crypto_data(symbol, intervals):
     }
     
     try:
-        response = requests.get(base_url, headers=HEADERS, params=params)
+        response = requests.get(base_url, headers=_headers(), params=params)
         response.raise_for_status()
         data = response.json()
         if "bars" in data and symbol in data["bars"]:
@@ -72,7 +78,7 @@ def compute_indicators(data):
 def fetch_account_balance():
     """Fetch account balance."""
     endpoint = f"{BASE_URL}/account"
-    response = requests.get(endpoint, headers=HEADERS)
+    response = requests.get(endpoint, headers=_headers())
     if response.status_code == 200:
         account_data = response.json()
         return float(account_data.get("cash", 0))
@@ -83,7 +89,7 @@ def fetch_account_balance():
 def fetch_holdings(symbol):
     """Fetch current holdings of a crypto asset."""
     endpoint = f"{BASE_URL}/positions"
-    response = requests.get(endpoint, headers=HEADERS)
+    response = requests.get(endpoint, headers=_headers())
     if response.status_code == 200:
         positions = response.json()
         for position in positions:
