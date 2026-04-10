@@ -55,7 +55,6 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
 | FB-FR-P0 | Feature | Open | Full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD): leakage-safe dataset, VSN, latent CNN, multi-res xLSTM, regime fusion, quantile head, conformal, ensemble | `forecaster_model/` |
-| FB-FR-PG1 | Hardening | Open | **Authoritative forecast path:** one clear rule for what drives routing/risk (neural `ForecastPacket` vs Ridge surrogate); deterministic fallback chain; integration tests | `decision_engine/pipeline.py`, `app/config/` |
 | FB-FR-PG2 | Improvement | Open | **PyTorch forecaster training stack:** trainer, validation split, early stopping, export checkpoints → MLflow or disk registry (manual promotion per CI policy); prerequisite for closing FB-FR-P0 in production | `forecaster_model/training/`, `models/` |
 | FB-FR-PG3 | Feature | Open | **Conformal calibrator lifecycle:** persist/restore sliding-window state across restarts; documented refresh/reset policy; wired in inference path | `forecaster_model/calibration/`, `forecaster_model/inference/` |
 
@@ -69,7 +68,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 **Open vs human spec:** **`FB-FR-P0`** / **`FB-PL-P0`** remain the **umbrella** end-state from the human specs. **`FB-FR-PG*`** / **`FB-PL-PG*`** decompose **production-grade** delivery (single-machine scope: no multi-tenant auth or API rate limits). **Module layout and reference forward paths** align to [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) / [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD); **xLSTM** uses **LSTM** forward per forecaster spec §12.7 until **`FB-FR-PG7`** resolves native xLSTM vs signed-off substitute.
 
-**Recommended sequencing (dependencies):** **FB-FR-PG1** (contract for what is “live”) → **FB-FR-PG4** + **FB-FR-PG2** (data + train) → **FB-FR-PG3** + **FB-FR-PG5** (calibration + ensemble) → **FB-PL-PG1** → **FB-PL-PG2** → **FB-PL-PG3** → **FB-PL-PG6** (nightly automation). Run **FB-FR-PG6**, **FB-PL-PG5**, **FB-PL-PG7** in parallel once a candidate model exists.
+**Recommended sequencing (dependencies):** **FB-FR-PG4** + **FB-FR-PG2** (data + train) → **FB-FR-PG3** + **FB-FR-PG5** (calibration + ensemble) → **FB-PL-PG1** → **FB-PL-PG2** → **FB-PL-PG3** → **FB-PL-PG6** (nightly automation). Run **FB-FR-PG6**, **FB-PL-PG5**, **FB-PL-PG7** in parallel once a candidate model exists. (**FB-FR-PG1** done: `models.decision_forecast_routing_source` = `ridge` \| `packet`.)
 
 ### Completed gates (reference)
 
@@ -197,6 +196,7 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-PL-P2 | 2026-04-11 | `policy_model.bridge.policy_envelope_from_app_settings` maps `AppSettings` + app `RiskState` → policy-layer `RiskState` (spec §8.4; alias `PolicyRiskEnvelope`) |
 | FB-HS-03 | 2026-04-11 | Human spec methodology in code: forecaster VSN→CNN→multi-res RNN→fusion→quantiles; causal norm; `X_known`; conformal + guards; policy multi-branch MLP + reward + RL protocol |
 | FB-HS-04 | 2026-04-10 | **Literal spec layout:** `forecaster_model/models/{vsn,latent_encoder,xlstm_cell,multi_resolution_xlstm,fusion,decoder,forecaster_model}.py`, `config/{schema,defaults.yaml}`, `losses/quantile.py`; `policy_model/objects/*` per §8, `RiskGate`/`PolicySystem` names per §28–29, `env/rewards.py`, `config/defaults.yaml`; see [`docs/Specs/FORECASTER_AND_POLICY.MD`](Specs/FORECASTER_AND_POLICY.MD) |
+| FB-FR-PG1 | 2026-04-11 | **Authoritative routing:** `models.decision_forecast_routing_source` (`ridge` default, `packet` uses `forecast_packet_to_forecast_output`); packet built when diagnostics enabled or routing is `packet`; tests `test_forecast_packet_adapter.py`, `test_pipeline_forecast_packet.py` |
 
 ---
 

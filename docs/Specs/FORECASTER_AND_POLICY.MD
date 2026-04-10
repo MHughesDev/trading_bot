@@ -41,8 +41,7 @@ VSN → Latent CNN → Multi-Resolution xLSTM → Regime-Conditioned Fusion → 
 
 ## Relationship to V3 runtime
 
-- `decision_engine/pipeline.py` still uses **`TemporalFusionForecaster`** (Ridge surrogate) for routing unless extended.
-- When **`models.decision_forecast_packet_enabled`** is true, each tick can attach a **`ForecastPacket`** for diagnostics / policy experiments.
+- **`DecisionPipeline`** uses **`TemporalFusionForecaster`** (Ridge) for **`ForecastOutput`** by default. Set **`models.decision_forecast_routing_source: packet`** (or **`NM_MODELS_DECISION_FORECAST_ROUTING_SOURCE=packet`**) to derive **`ForecastOutput`** from the built **`ForecastPacket`** via **`decision_engine/forecast_packet_adapter.py`** (FB-FR-PG1). A packet is built when **`decision_forecast_packet_enabled`** is true **or** when routing source is **`packet`**.
 
 ## Dependencies
 

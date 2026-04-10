@@ -26,6 +26,8 @@ For **Alpaca paper**, set `NM_ALPACA_API_KEY` / `NM_ALPACA_API_SECRET`. To align
 
 Configure secrets via `.env` (prefix `NM_` for app settings). **Never use Alpaca for market data.**
 
+**Forecast routing (optional):** `NM_MODELS_DECISION_FORECAST_ROUTING_SOURCE` = `ridge` (default) or `packet` — when `packet`, `DecisionPipeline` derives `ForecastOutput` for routing from the methodology `ForecastPacket` instead of the Ridge surrogate (`app/config/default.yaml` under `models:`).
+
 **Production:** set `NM_RISK_SIGNING_SECRET` so only `RiskEngine`-signed `OrderIntent`s reach venues; optional `NM_CONTROL_PLANE_API_KEY` for mutating control-plane routes. For local dev without signing, `NM_ALLOW_UNSIGNED_EXECUTION=true` (not for production).
 
 **Verify API connectivity (no orders placed):** put keys in `.env` (`NM_ALPACA_*`, optional `NM_COINBASE_*`), then `pip install -e ".[alpaca]"` and `python scripts/smoke_credentials.py`. Coinbase Advanced Trade REST may require JWT for some routes; the script falls back to the public Exchange ticker when unauthenticated candle calls fail.

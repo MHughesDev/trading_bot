@@ -13,6 +13,7 @@ from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.regime import RegimeOutput
 from app.contracts.risk import RiskState
 from decision_engine.action_generator import propose_action
+from decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
 from forecaster_model.inference.stub import build_forecast_packet_stub, ohlc_arrays_from_feature_row
 from models.forecast.tft_forecast import TemporalFusionForecaster
 from models.regime.hmm_regime import GaussianHMMRegimeModel
@@ -65,7 +66,7 @@ class DecisionPipeline:
 
     @property
     def last_forecast_packet(self) -> ForecastPacket | None:
-        """Set when `models.decision_forecast_packet_enabled` is true — heuristic `ForecastPacket` for policy/diagnostics."""
+        """Set when a packet is built: diagnostics flag and/or `decision_forecast_routing_source=packet` (FB-FR-PG1)."""
         return self._last_forecast_packet
 
     def step(
@@ -77,13 +78,26 @@ class DecisionPipeline:
     ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None]:
         X = _feature_vector(feature_row).reshape(1, -1)
         regime_out = self.regime.predict_proba_last(X)
-        fc = self.forecast.predict(_feature_vector(feature_row))
-        route = self.router.decide(symbol, fc, regime_out, spread_bps, risk)
-        action = propose_action(symbol, route.route_id, fc)
+        fc_ridge = self.forecast.predict(_feature_vector(feature_row))
+
         self._last_forecast_packet = None
-        if self._settings.decision_forecast_packet_enabled:
+        pkt: ForecastPacket | None = None
+        need_packet = self._settings.decision_forecast_packet_enabled or (
+            self._settings.decision_forecast_routing_source == "packet"
+        )
+        if need_packet:
             o, h, lo, cl, vo = ohlc_arrays_from_feature_row(feature_row)
             pkt = build_forecast_packet_stub(o, h, lo, cl, vo)
             pkt.forecast_diagnostics["symbol"] = symbol
+            pkt.forecast_diagnostics["routing_source"] = self._settings.decision_forecast_routing_source
             self._last_forecast_packet = pkt
+
+        if self._settings.decision_forecast_routing_source == "packet":
+            assert pkt is not None  # built above when routing uses packet
+            fc = forecast_packet_to_forecast_output(pkt)
+        else:
+            fc = fc_ridge
+
+        route = self.router.decide(symbol, fc, regime_out, spread_bps, risk)
+        action = propose_action(symbol, route.route_id, fc)
         return regime_out, fc, route, action
