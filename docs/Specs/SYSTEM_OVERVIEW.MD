@@ -21,6 +21,8 @@
 | `observability/` | Prometheus metrics, structured logging |
 | `orchestration/` | Nightly retrain stub, optional Prefect/MLflow |
 | `infra/` | `docker-compose.yml`, Prometheus/Grafana/Promtail/Loki configs |
+| `forecaster_model/` | Human-spec forecaster package (stub + features; full neural stack backlog) |
+| `policy_model/` | Human-spec forecast-conditioned policy (heuristic + gate + planner stubs) |
 | `tests/` | Pytest suite |
 | `scripts/` | CI guards, smoke scripts |
 | `legacy/cryptobot/` | Frozen snapshot — not part of the V3 pipeline |

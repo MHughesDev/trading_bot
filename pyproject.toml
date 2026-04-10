@@ -60,6 +60,8 @@ include = [
   "control_plane*",
   "orchestration*",
   "observability*",
+  "forecaster_model*",
+  "policy_model*",
 ]
 
 [tool.pytest.ini_options]

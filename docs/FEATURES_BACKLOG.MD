@@ -2,7 +2,7 @@
 
 Structured backlog for **all planned work**: new capabilities, production hardening, reliability, docs, and spikes. **Fixes to existing behavior** — separate list — live in [`ISSUE_LOG.MD`](ISSUE_LOG.MD) only.
 
-**References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD)
+**References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
 
 ---
 
@@ -54,7 +54,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| — | — | — | *No open HIGH backlog rows — see §8 Completed archive.* | — |
+| FB-FR-P0 | Feature | Open | Full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD): leakage-safe dataset, VSN, latent CNN, multi-res xLSTM, regime fusion, quantile head, conformal, ensemble | `forecaster_model/` |
 
 ### Completed gates (reference)
 
@@ -90,7 +90,9 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| — | — | — | *No open items — see §8 Completed archive.* | — |
+| FB-FR-P1 | Platform | Open | Forecaster training stack: walk-forward splits, trainer, metrics, checkpointing, evaluators | `forecaster_model/training/` (to add) |
+| FB-PL-P0 | Feature | Open | RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD): `TradingPolicyEnvironment`, actor-critic, replay buffer, precomputed `ForecastPacket` mode, reward/cost model | `policy_model/` |
+| FB-PL-P1 | Improvement | Open | Optional integration: `ForecastPacket` + policy path behind config flag vs `TemporalFusionForecaster` in `DecisionPipeline` / `run_decision_tick` | `decision_engine/` |
 
 ---
 
@@ -100,15 +102,16 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| — | — | — | *No open items — see §8 Completed archive.* | — |
+| FB-PL-P2 | Tech debt | Open | Unify or bridge `PolicyRiskEnvelope` vs `app.contracts.risk.RiskState` when wiring live | `policy_model/`, `app/contracts/` |
 
 ### Out of scope (not prioritized)
 
 | ID | Summary |
 |----|---------|
 | FB-N1 | Multi-exchange execution |
-| FB-N2 | RL controllers |
-| FB-N3 | Portfolio optimization |
+| FB-N3 | Portfolio optimization (generic portfolio optimization libs) |
+
+*Note:* **Forecast-conditioned RL** is **in scope** via [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD) (track **`FB-PL-P0`**).
 
 ---
 
@@ -161,6 +164,8 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-B1 | 2026-04-10 | `available_cash_usd` in `RiskEngine` + `run_decision_tick`; `backtesting.replay_available_cash` |
 | FB-T1 | 2026-04-10 | Alpaca smoke: `scripts/smoke_credentials.py` (no secrets in default CI) |
 | FB-T2 | 2026-04-10 | `register_shutdown_signals` + `tests/test_live_service_signals.py` |
+| FB-HS-01 | 2026-04-10 | Human specs added to repo; `ForecastPacket`; `forecaster_model` stub + OHLC features + soft regime; `policy_model` objects + heuristic `PolicySystem`; tests `test_forecaster_policy_stubs.py` |
+| FB-HS-02 | 2026-04-10 | `docs/Specs/FORECASTER_AND_POLICY.MD` — as-built map for new packages |
 
 ---
 

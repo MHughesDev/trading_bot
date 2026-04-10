@@ -7,6 +7,14 @@ This folder holds **documents you supply** (product intent, external requirement
 1. **Source of intent** — What you want the system to become or enforce, independent of current implementation.
 2. **Diff driver** — When an agent (or you) compares these files to **`docs/Specs/`** (as-built) and to the code, gaps become backlog items (e.g. new rows in **`docs/FEATURES_BACKLOG.MD`**) or issue log entries (**`docs/ISSUE_LOG.MD`**).
 
+## Files in this repo
+
+| File | Description |
+|------|-------------|
+| [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) | Full forecaster: VSN, latent CNN, multi-resolution xLSTM, quantiles, conformal, ensemble |
+| [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](POLICY_MODEL_ARCHITECTURE_SPEC.MD) | Forecast-conditioned RL policy: observation, target exposure, risk gate, execution plan |
+| [`TEMPLATE_HUMAN_SPEC.MD`](TEMPLATE_HUMAN_SPEC.MD) | Blank template for new documents |
+
 ## Workflow (recommended)
 
 1. Add or edit a file here (use **`TEMPLATE_HUMAN_SPEC.MD`** or your own naming).

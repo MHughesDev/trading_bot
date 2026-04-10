@@ -51,7 +51,7 @@ Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models
 ## Documentation map
 
 - **As-built specs (code-aligned):** [`docs/Specs/README.MD`](docs/Specs/README.MD) — topic specs that mirror the current codebase.
-- **Human-provided intent:** [`docs/Human Provided Specs/README.MD`](docs/Human%20Provided%20Specs/README.MD) — your requirements; reconcile against `docs/Specs/` and the repo to drive [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD) / [`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD).
+- **Human-provided intent:** [`docs/Human Provided Specs/README.MD`](docs/Human%20Provided%20Specs/README.MD) — includes **forecaster** and **policy** architecture specs; reconcile against `docs/Specs/` and the repo to drive [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD) / [`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD).
 - **Backlog & issues, runbooks, deep dives:** other files under [`docs/`](docs/).
 
 ## Backtesting (simulated fees / slippage)

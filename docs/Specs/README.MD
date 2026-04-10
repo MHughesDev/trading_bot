@@ -29,6 +29,7 @@ This folder holds **specifications that describe the repository as implemented**
 | [`MODELS_AND_ORCHESTRATION.MD`](MODELS_AND_ORCHESTRATION.MD) | Regime, forecast, routing, retrain |
 | [`OBSERVABILITY_AND_INFRA.MD`](OBSERVABILITY_AND_INFRA.MD) | Metrics, logging, `infra/docker-compose.yml` |
 | [`TESTING_AND_CI.MD`](TESTING_AND_CI.MD) | `tests/`, `scripts/`, GitHub Actions |
+| [`FORECASTER_AND_POLICY.MD`](FORECASTER_AND_POLICY.MD) | `forecaster_model/`, `policy_model/`, `ForecastPacket` |
 
 ## Naming convention
 
