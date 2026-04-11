@@ -68,7 +68,6 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | FB-FR-P0-03 | Feature | Open | **Train:** end-to-end PyTorch training loop, checkpoints, optional `[models_torch]` / `NM_MODELS_TORCH_DEVICE` | `forecaster_model/training/torch_trainer.py` |
 | FB-FR-P0-04 | Feature | Open | **Calibrate:** conformal + ensemble integration on trained outputs (not RNG reference only) | `forecaster_model/calibration/`, `forecaster_model/models/ensemble.py` |
 | FB-FR-P0-05 | Feature | Open | **Serve:** export path from trained checkpoint to hot path (extends NPZ reference / replaces RNG-only) | `decision_engine/pipeline.py`, `forecaster_model/inference/` |
-| FB-SPEC-06 | Platform | In progress | **Model registry / versioned artifacts:** MLflow logging + `POST /models/version` + `model_artifacts` + manual promotion policy — documented in [`RUNBOOKS.MD`](RUNBOOKS.MD) § Model registry; full promotion workflow + champion/candidate still **FB-AUDIT-03** | `models/registry/`, `control_plane/api.py`, `docs/RUNBOOKS.MD` |
 | FB-SPEC-07 | Feature | Open | **Multi-asset portfolio coordination:** cross-symbol capital allocation, correlation-aware or risk-parity style sizing, or documented limits when running many `market_data_symbols` (beyond independent per-symbol ticks) | `risk_engine/`, `decision_engine/`, `docs/Specs/` |
 
 *Parent epic:* full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD). **Close epic** when **FB-FR-P0-01 … FB-FR-P0-05** are Done or explicitly waived.
@@ -115,7 +114,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 *Parent epic:* RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Sub-rows FB-PL-P0-01 … FB-PL-P0-04 Done 2026-04-11** (NumPy stubs + offline env; full PyTorch RL remains future hardening).
 
-*See also §2 HIGH (**FB-FR-P0-***, **FB-SPEC-06**, **FB-SPEC-07**).*
+*See also §2 HIGH (**FB-FR-P0-***, **FB-SPEC-07**); **FB-SPEC-06** closed — §8.*
 
 ---
 
@@ -288,7 +287,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-SPEC-03 | pipeline | 2026-04-11 | `model_artifact_contract` + `GET /status` |
 | FB-SPEC-04 | pipeline | 2026-04-11 | Real-candle training campaign |
 | FB-SPEC-05 | pipeline | 2026-04-11 | PyTorch `resolve_torch_device` |
-| FB-SPEC-06 | pipeline | 2026-04-11 | Filesystem `active_model_set.json` + drift |
+| FB-SPEC-06 | platform | 2026-04-11 | **Closed:** filesystem active model set + drift vs env, `GET /status` → `model_artifacts`, optional MLflow `MLflowModelRegistry.log_params_metrics` (no auto-promote), `POST /models/version` → `nm_model_version_info`; champion/candidate automation remains **FB-AUDIT-03** |
 | FB-SPEC-07 | pipeline | 2026-04-11 | `MULTI_ASSET_PORTFOLIO.MD` |
 | FB-SPEC-08 | pipeline | 2026-04-11 | Preflight script + API |
 | FB-T1 | test | 2026-04-10 | `smoke_credentials.py` |
