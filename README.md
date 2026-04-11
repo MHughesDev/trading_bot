@@ -48,6 +48,28 @@ uvicorn control_plane.api:app --host 0.0.0.0 --port 8000
 
 Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models`, `/metrics` (Prometheus).
 
+## Service scaffolds (Phase 1)
+
+Monorepo microservice entrypoints now exist under `services/` with baseline health endpoints (`/healthz`, `/readyz`, `/status`). Run any scaffold service, for example:
+
+```bash
+uvicorn services.market_data_service.main:app --host 0.0.0.0 --port 8101
+```
+
+Shared event envelope/topic contracts are under `shared/messaging/`, along with a Phase 2 in-memory bus (`InMemoryMessageBus`) and a Redis Streams adapter baseline (publish + explicit poll).
+
+A local Phase 3 handoff wiring helper is available at `services/pipeline_handoff.py` for in-memory topic flow (`features -> decision -> risk -> execution`) during incremental extraction.
+
+A milestone combined service is available at `services/decision_risk_service/main.py` with `POST /simulate` to smoke-test decision→risk→execution handoff.
+
+A runtime bridge helper is available at `services/runtime_bridge.py` to route feature payloads through the microservice handoff path for incremental runtime integration.
+
+Set `NM_MICROSERVICES_RUNTIME_BRIDGE_ENABLED=true` to enable runtime shadow handoff publishing from the live loop.
+
+Execution gateway service exposes `POST /ingest/risk-accepted` and `GET /events/recent` for externalized handoff smoke tests.
+Risk service exposes `POST /ingest/decision-proposal` and `GET /events/recent` for proposal gating smoke tests.
+Decision service exposes `POST /ingest/features-row` and `GET /events/recent` for feature-to-proposal smoke tests.
+
 ## Optional extras
 
 - Paper execution (Alpaca): `pip install -e ".[alpaca]"`
@@ -64,6 +86,7 @@ Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models
 - **End-to-end walkthrough (live, paper, live venue, backtest):** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) — uses default **`spec_policy`** pipeline unless noted.
 - **Human-provided intent:** [`docs/Human Provided Specs/README.MD`](docs/Human%20Provided%20Specs/README.MD) — includes **forecaster** and **policy** architecture specs; reconcile against `docs/Specs/` and the repo to drive [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD) / [`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD).
 - **Backlog & issues, runbooks, deep dives:** other files under [`docs/`](docs/).
+- **Microservice migration blueprint (monorepo-first):** [`docs/MICROSERVICES_SPLIT_PLAN.MD`](docs/MICROSERVICES_SPLIT_PLAN.MD).
 
 ## Backtesting (simulated fees / slippage)
 

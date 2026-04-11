@@ -118,6 +118,8 @@ class AppSettings(BaseSettings):
     # Optional JSON: operator "active model set" (FB-SPEC-06); merged into GET /status model_artifacts
     models_active_registry_path: str | None = None
 
+    microservices_runtime_bridge_enabled: bool = False
+
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
@@ -207,6 +209,10 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["questdb_batch_max_rows"] = int(qd["batch_max_rows"])
         if "flush_interval_seconds" in qd:
             out["questdb_flush_interval_seconds"] = float(qd["flush_interval_seconds"])
+    if "microservices" in cfg:
+        ms = cfg["microservices"] or {}
+        if "runtime_bridge_enabled" in ms:
+            out["microservices_runtime_bridge_enabled"] = bool(ms["runtime_bridge_enabled"])
     if "models" in cfg:
         mo = cfg["models"] or {}
         if "forecaster_checkpoint_id" in mo:

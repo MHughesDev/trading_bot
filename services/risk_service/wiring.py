@@ -1,0 +1,56 @@
+"""Dependency wiring for risk service."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from fastapi import FastAPI
+
+from services.common import build_scaffold_app
+from services.risk_service.handlers import RiskServiceHandlers
+from shared.messaging import topics
+from shared.messaging.envelope import EventEnvelope
+from shared.messaging.in_memory import InMemoryMessageBus
+
+
+@dataclass
+class RiskServiceState:
+    handler: RiskServiceHandlers
+    accepted: list[dict] = field(default_factory=list)
+    blocked: list[dict] = field(default_factory=list)
+
+
+def create_app() -> FastAPI:
+    app = build_scaffold_app("risk_service")
+    bus = InMemoryMessageBus()
+    handler = RiskServiceHandlers(bus)
+    handler.register()
+
+    state = RiskServiceState(handler=handler)
+
+    def _capture_accepted(env: EventEnvelope) -> None:
+        state.accepted.append(env.payload)
+
+    def _capture_blocked(env: EventEnvelope) -> None:
+        state.blocked.append(env.payload)
+
+    bus.subscribe(topics.RISK_INTENT_ACCEPTED_V1, _capture_accepted)
+    bus.subscribe(topics.RISK_INTENT_BLOCKED_V1, _capture_blocked)
+
+    @app.post("/ingest/decision-proposal")
+    def ingest_decision_proposal(payload: dict) -> dict[str, int]:
+        env = EventEnvelope(
+            event_type="decision.proposal.created",
+            trace_id=str(payload.get("trace_id", "manual")),
+            producer_service="decision_service",
+            symbol=payload.get("symbol"),
+            payload=payload,
+        )
+        bus.publish(topics.DECISION_PROPOSAL_CREATED_V1, env)
+        return {"accepted": len(state.accepted), "blocked": len(state.blocked)}
+
+    @app.get("/events/recent")
+    def events_recent() -> dict[str, list[dict]]:
+        return {"accepted": list(state.accepted), "blocked": list(state.blocked)}
+
+    return app
