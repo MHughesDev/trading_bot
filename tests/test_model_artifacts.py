@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 def test_contract_training_disclaimer_names_joblib() -> None:
     c = model_artifact_contract(AppSettings())
+    assert "active_model_set" in c
     assert TRAINING_QUANTILE_FORECASTER_JOBLIB in c["training"]["note"]
     assert c["serving"]["forecaster_forward"] == "numpy_rng"
     assert c["serving"]["policy_actor"] == "heuristic"

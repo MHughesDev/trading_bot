@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config.settings import AppSettings
+from models.registry.active_set import active_model_set_status
 from models.registry.store import merge_registry_into_serving_view, read_active_model_set
 
 # Campaign / nightly training default filename (sklearn QuantileRegressor) — not loaded by DecisionPipeline.
@@ -40,6 +41,7 @@ def model_artifact_contract(settings: AppSettings) -> dict[str, Any]:
     )
 
     return {
+        "active_model_set": active_model_set_status(settings),
         "serving": {
             "lineage_checkpoint_id": settings.models_forecaster_checkpoint_id,
             "conformal_state_path": conf,

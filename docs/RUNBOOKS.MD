@@ -46,6 +46,7 @@
 
 ## Model artifacts (master pipeline)
 
+- **Active model set (FB-SPEC-06):** point **`NM_MODELS_ACTIVE_SET_PATH`** at a JSON file whose keys mirror `models:` in `default.yaml` (`forecaster_checkpoint_id`, `forecaster_conformal_state_path`, `forecaster_weights_path`, `policy_mlp_path`). When the file exists, those fields **override** the corresponding `NM_MODELS_*` values for this process (after YAML + env). Optional **`label`** and integer **`version`** in the JSON are echoed in **`GET /status` → `model_artifacts.active_model_set`**. Optional env-only labels: `NM_MODELS_ACTIVE_SET_LABEL`, `NM_MODELS_ACTIVE_SET_MANIFEST_VERSION`.
 - **Serving lineage:** set `NM_MODELS_FORECASTER_CHECKPOINT_ID` to label `ForecastPacket.source_checkpoint_id` (operator-visible lineage).
 - **Conformal on hot path:** set `NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH` to a JSON file produced by `forecaster_model.calibration.conformal.save_conformal_state` after offline calibration; `DecisionPipeline` enables calibration when this path exists.
 - **NumPy forecaster weights (FB-SPEC-02):** set `NM_MODELS_FORECASTER_WEIGHTS_PATH` to an **NPZ** produced with `forecaster_model.models.forecaster_weights.save_forecaster_weights` (e.g. from `capture_forecaster_weights_from_seed` after training selection). When present and readable, the hot path uses **fixed weights** instead of per-forward RNG draws; `forecast_diagnostics.weight_source` is `checkpoint`.
@@ -68,7 +69,7 @@ Before upgrading binaries or large config changes: copy **`models/artifacts_trai
 
 ## Unified model artifacts (FB-SPEC-03)
 
-- **`GET /status` → `model_artifacts`**: single JSON object describing **serving** paths (`NM_MODELS_*` for NPZ, conformal JSON, lineage id) with **`file_exists`** flags, plus a **training** note that `forecaster_quantile_real.joblib` is **campaign-only** (sklearn QuantileRegressor), not the NumPy hot path. Implemented in `app/config/model_artifacts.py`.
+- **`GET /status` → `model_artifacts`**: single JSON object with **`active_model_set`** (manifest path / existence / label / version from `models/registry/active_set.py`), **serving** paths (`NM_MODELS_*` for NPZ, conformal JSON, lineage id) with **`file_exists`** flags, plus a **training** note that `forecaster_quantile_real.joblib` is **campaign-only** (sklearn QuantileRegressor), not the NumPy hot path. Implemented in `app/config/model_artifacts.py`.
 
 ## Active model set file (FB-SPEC-06)
 

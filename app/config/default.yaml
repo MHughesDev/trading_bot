@@ -91,6 +91,10 @@ models:
   forecaster_torch_path: null
   # Optional NPZ: multi-branch MLP policy actor (`policy_model.policy.mlp_actor.MultiBranchMLPPolicy`)
   policy_mlp_path: null
+  # Optional JSON path: promoted serving paths override NM_* for keys present (FB-SPEC-06)
+  active_set_path: null
+  active_set_label: null
+  active_set_manifest_version: null
   # PyTorch forecaster training (and future torch inference): auto | cpu | cuda | cuda:0
   torch_device: auto
   # Optional JSON: declared active model paths (see models/registry/) — FB-SPEC-06
