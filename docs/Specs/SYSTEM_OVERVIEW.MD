@@ -4,6 +4,7 @@
 
 - **Market data:** Coinbase only (WebSocket + REST). No Alpaca (or other venues) for market data in the main tree; CI enforces this (`scripts/ci_spec_compliance.sh`).
 - **Execution:** Config-driven — **paper** → Alpaca paper adapter; **live** → Coinbase Advanced Trade (CDP JWT) adapter. Shared **decision + risk** path for live and replay.
+- **Decision default:** **`models.decision_pipeline_mode: spec_policy`** — **`ForecastPacket`** (`forecaster_model`) + **`PolicySystem`** (`policy_model`) → **`ActionProposal`**; set **`legacy`** for Ridge + router + `propose_action` ([`MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD)).
 - **Risk:** `OrderIntent` execution is gated (HMAC signing, `execution/intent_gate.py`) per settings — not bypassed in production paths.
 
 ## Top-level packages (Python)
@@ -12,7 +13,7 @@
 |---------|------|
 | `app/` | Config (`AppSettings`, `default.yaml`), typed contracts, runtime (`live_service` and helpers) |
 | `data_plane/` | Coinbase ingest, rolling bars, Polars features, Qdrant memory, QuestDB/Redis storage |
-| `decision_engine/` | `run_decision_tick` (shared with backtest), pipeline, routing, audit |
+| `decision_engine/` | `run_decision_tick` (shared with backtest), `DecisionPipeline` (default **spec_policy**), audit |
 | `risk_engine/` | `RiskEngine`, order signing |
 | `execution/` | `ExecutionService`, router, Alpaca paper + Coinbase live adapters, CDP HTTP client |
 | `backtesting/` | Replay and portfolio simulation vs same decision step |

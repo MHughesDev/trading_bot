@@ -302,6 +302,7 @@ async def run_live_loop(
             data_ts = ts
             tradable = product_cache.is_tradable(symbol) if product_cache else True
 
+            mid = float(feats.get("close", px)) or px or 1.0
             regime, fc, route, proposal, trade, risk_state = run_decision_tick(
                 symbol=symbol,
                 feature_row=feats,
@@ -309,11 +310,12 @@ async def run_live_loop(
                 risk_state=risk_state,
                 pipeline=pipeline,
                 risk_engine=risk_engine,
-                mid_price=float(feats.get("close", px)) or px or 1.0,
+                mid_price=mid,
                 data_timestamp=data_ts,
                 feed_last_message_at=ws.last_message_at,
                 product_tradable=tradable,
                 position_signed_qty=positions.get(symbol, Decimal(0)),
+                portfolio_equity_usd=risk_engine.current_equity,
             )
 
             oid = str(uuid.uuid4())

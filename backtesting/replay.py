@@ -81,6 +81,9 @@ def replay_decisions(
         avail: float | None = None
         if track_portfolio and portfolio is not None and app_s.backtesting_replay_available_cash:
             avail = float(portfolio.cash)
+        eq_usd: float | None = None
+        if track_portfolio and portfolio is not None:
+            eq_usd = float(portfolio.market_value({symbol: mid}))
         regime, fc, route, proposal, trade_action, risk = run_decision_tick(
             symbol=symbol,
             feature_row=feats,
@@ -92,6 +95,7 @@ def replay_decisions(
             data_timestamp=dt,
             position_signed_qty=pos,
             available_cash_usd=avail,
+            portfolio_equity_usd=eq_usd,
         )
         fill_price: float | None = None
         fee_paid: Decimal | None = None
@@ -246,6 +250,11 @@ def replay_multi_asset_decisions(
             avail_m: float | None = None
             if track_portfolio and portfolio is not None and app_s.backtesting_replay_available_cash:
                 avail_m = float(portfolio.cash)
+            eq_m: float | None = None
+            if track_portfolio and portfolio is not None:
+                px = dict(last_mid)
+                px[symbol] = mid
+                eq_m = float(portfolio.market_value(px))
 
             regime, fc, route, proposal, trade_action, risk = run_decision_tick(
                 symbol=symbol,
@@ -258,6 +267,7 @@ def replay_multi_asset_decisions(
                 data_timestamp=dt,
                 position_signed_qty=pos,
                 available_cash_usd=avail_m,
+                portfolio_equity_usd=eq_m,
             )
 
             fill_price: float | None = None

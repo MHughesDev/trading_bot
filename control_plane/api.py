@@ -10,6 +10,8 @@ from fastapi.responses import PlainTextResponse
 from fastapi.security import APIKeyHeader
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from observability.forecaster_metrics import MODEL_VERSION_INFO
+
 from app.config.settings import load_settings
 from app.contracts.risk import SystemMode
 from app.runtime.mode_manager import ModeManager
@@ -90,6 +92,18 @@ def flatten(_: Annotated[None, Depends(require_mutate_key)]) -> dict[str, str]:
 @app.get("/models")
 def models() -> dict[str, list[str]]:
     return {"models": ["gaussian_hmm_regime", "tft_surrogate_ridge", "deterministic_router"]}
+
+
+@app.post("/models/version")
+def set_model_version(
+    body: dict[str, str],
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, str]:
+    """Expose model version labels to Prometheus (FB-PL-PG7)."""
+    component = body.get("component", "forecaster")
+    version = body.get("version", "unknown")
+    MODEL_VERSION_INFO.labels(component=component, version=version).set(1)
+    return {"component": component, "version": version}
 
 
 @app.get("/metrics", response_class=PlainTextResponse)

@@ -35,9 +35,21 @@ def run_decision_tick(
     product_tradable: bool = True,
     position_signed_qty: Decimal | None = None,
     available_cash_usd: float | None = None,
+    portfolio_equity_usd: float | None = None,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, TradeAction | None, RiskState]:
     t0 = time.perf_counter()
-    regime, fc, route, proposal = pipeline.step(symbol, feature_row, spread_bps, risk_state)
+    eq = portfolio_equity_usd
+    if eq is None:
+        eq = risk_engine.current_equity
+    regime, fc, route, proposal = pipeline.step(
+        symbol,
+        feature_row,
+        spread_bps,
+        risk_state,
+        mid_price=mid_price,
+        portfolio_equity_usd=eq,
+        position_signed_qty=position_signed_qty,
+    )
     trade, risk_state = risk_engine.evaluate(
         symbol,
         proposal,

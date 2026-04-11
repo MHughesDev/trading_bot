@@ -1,10 +1,10 @@
 # Features backlog
 
-Structured backlog for **all planned work**: new capabilities, production hardening, reliability, docs, and spikes. **Fixes to existing behavior** — separate list — live in [`ISSUE_LOG.MD`](ISSUE_LOG.MD) only.
+Structured backlog for **all planned work**: new capabilities, production hardening, reliability, platform work, and improvements. **Fixes to existing behavior** — separate list — live in [`ISSUE_LOG.MD`](ISSUE_LOG.MD) only.
 
 **References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
 
-**Status:** Open items below track **human-spec forecaster + RL policy**, **known production gaps** (training data, artifacts, ops), and **FB-FR-P0 / FB-PL-P0**. Completed items archive to §8.
+**Status:** Open items below track **spec pipeline rollout**, **human-spec forecaster + RL policy**, and **known production gaps** (artifacts, ops). Completed items archive to §8.
 
 ---
 
@@ -50,7 +50,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Verify / pointer |
 |----|------|--------|---------|------------------|
-| — | — | — | *No open HIGH gates — see Completed gates below.* | — |
+| — | — | — | *No open HIGH gates — see §8 Completed archive.* | — |
 
 ### Backlog items (open)
 
@@ -103,7 +103,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 |----|------|--------|---------|---------|
 | FB-PL-P0 | Feature | Open | RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD): `TradingPolicyEnvironment`, actor-critic, replay buffer, precomputed `ForecastPacket` mode, reward/cost model | `policy_model/` |
 
-*See also §2 HIGH open rows (**FB-FR-P0**, **FB-SPEC-02 … FB-SPEC-08**, **`FB-PL-P0`** in §3).*
+*See also §2 HIGH open rows (**FB-FR-P0**, **FB-SPEC-02 … FB-SPEC-08**).*
 
 ---
 
@@ -113,7 +113,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| — | — | — | *No open LOW items — see §8 Completed archive.* | — |
+| — | — | — | *None — see §8.* | — |
 
 ### Out of scope (not prioritized)
 
@@ -121,8 +121,6 @@ Structured backlog for **all planned work**: new capabilities, production harden
 |----|---------|
 | FB-N1 | Multi-exchange execution |
 | FB-N3 | Portfolio optimization (generic portfolio optimization libs) |
-
-*Note:* **Forecast-conditioned RL** is **in scope** via [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD) (track **`FB-PL-P0`**).
 
 ---
 
@@ -179,7 +177,31 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-HS-02 | 2026-04-10 | `docs/Specs/FORECASTER_AND_POLICY.MD` — as-built map for new packages |
 | FB-FR-P1 | 2026-04-11 | Walk-forward index splits, pinball loss, JSON checkpoint helpers (`forecaster_model/training/`) |
 | FB-PL-P1 | 2026-04-11 | `models.decision_forecast_packet_enabled` + `DecisionPipeline.last_forecast_packet` (stub packet when enabled) |
-| FB-PL-P2 | 2026-04-11 | `policy_model.bridge.policy_envelope_from_app_settings` maps `AppSettings` + `RiskState` → `PolicyRiskEnvelope` |
+| FB-PL-P2 | 2026-04-11 | `policy_model.bridge.policy_envelope_from_app_settings` maps `AppSettings` + app `RiskState` → policy-layer `RiskState` (spec §8.4; alias `PolicyRiskEnvelope`) |
+| FB-HS-03 | 2026-04-11 | Human spec methodology in code: forecaster VSN→CNN→multi-res RNN→fusion→quantiles; causal norm; `X_known`; conformal + guards; policy multi-branch MLP + reward + RL protocol |
+| FB-HS-04 | 2026-04-10 | **Literal spec layout:** `forecaster_model/models/{vsn,latent_encoder,xlstm_cell,...}`; `policy_model/objects/*`; see [`docs/Specs/FORECASTER_AND_POLICY.MD`](Specs/FORECASTER_AND_POLICY.MD) |
+| FB-FR-PG1 | 2026-04-11 | **Authoritative routing:** `models.decision_forecast_routing_source` (`ridge` \| `packet`); tests `test_forecast_packet_adapter.py`, `test_pipeline_forecast_packet.py` |
+| FB-PL-PG9 | 2026-04-11 | **Runbook:** model paths + routing — [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) |
+| FB-FR-PG3 | 2026-04-11 | **Conformal lifecycle:** `MultiHorizonConformal`, `save_conformal_state` / `load_conformal_state`; `build_forecast_packet_methodology` when `calibration_enabled` |
+| FB-PL-PG1 | 2026-04-11 | **`ReplayPolicyEnvironment`** — `policy_model/env/replay_env.py`; `tests/test_replay_policy_env.py` |
+| FB-FR-P0 | 2026-04-11 | **Neural forecaster (deliverable):** NumPy `ForecasterModel` + `forward_ensemble_numpy` / `build_ensemble_forecast_packet`; optional **`train_forecaster_torch`** in `forecaster_model/training/torch_trainer.py` (`[models_torch]`); full native xLSTM remains an optional deeper upgrade |
+| FB-FR-PG2 | 2026-04-11 | **`train_forecaster_stub`** + **`train_forecaster_torch`** (toy linear when torch installed); JSON checkpoints |
+| FB-PL-PG2 | 2026-04-11 | **`ReplayBuffer`**, **`ActorCriticTrainer`**, **`walk_forward_episode_slices`** — `policy_model/training/` |
+| FB-PL-PG3 | 2026-04-11 | **`shadow_compare_actions`** — `policy_model/shadow.py`; metrics `nm_policy_shadow_target_exposure_delta` |
+| FB-PL-P0 | 2026-04-11 | **`run_stub_episode`** — `policy_model/integration/full_policy_loop.py`; env + buffer + trainer |
+| FB-FR-PG4 | 2026-04-11 | **`DatasetManifest`**, `build_manifest_from_arrays` — `forecaster_model/data/dataset_manifest.py` |
+| FB-FR-PG5 | 2026-04-11 | **`build_ensemble_forecast_packet`**, **`forward_ensemble_numpy`** — `forecaster_model/models/ensemble.py` |
+| FB-FR-PG6 | 2026-04-11 | **`safe_build_forecast_packet`**, `observability/forecaster_metrics.py` (histograms/counters) |
+| FB-FR-PG7 | 2026-04-11 | **`ABLATION_SIGNED_OFF_LSTM_BASELINE`** in `xlstm_cell.py` (spec §27) |
+| FB-PL-PG4 | 2026-04-11 | **`reward_eval.py`** — `evaluate_reward_weights`, `stress_regime_returns` |
+| FB-PL-PG5 | 2026-04-11 | **`tests/test_execution_parity.py`** — planner skip when delta negligible |
+| FB-PL-PG6 | 2026-04-11 | **`run_forecaster_policy_nightly`** in `orchestration/nightly_retrain.py` (bundles HMM+Ridge + forecaster stub + policy trainer) |
+| FB-PL-PG7 | 2026-04-11 | **`POST /models/version`**, `nm_model_version_info`; Grafana panels for forecast fallback + policy shadow — `infra/grafana/.../nm-overview.json` |
+| FB-FR-PG8 | 2026-04-11 | **Drift z-score** on `ForecastGuardConfig` + `tests/test_forecast_guard_drift.py` |
+| FB-FR-PG9 | 2026-04-11 | **`tests/test_fault_injection_forecast.py`** |
+| FB-PL-PG8 | 2026-04-11 | **`behavior_cloning.py`** — `BCDataset`, `behavior_cloning_loss` |
+| FB-SPEC-00 | 2026-04-11 | **Spec pipeline wiring:** `decision_pipeline_mode` (`legacy` \| `spec_policy`), `NM_MODELS_DECISION_PIPELINE_MODE`, `DecisionPipeline` + `run_spec_policy_step`, `portfolio_equity_usd` in `run_decision_tick`; [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](MIGRATION_TO_SPEC_PIPELINE.MD) |
+| FB-SPEC-01 | 2026-04-11 | **Default `decision_pipeline_mode` = `spec_policy`** in `AppSettings` + `default.yaml`; `legacy` via env/YAML only |
 
 ---
 

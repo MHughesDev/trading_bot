@@ -7,11 +7,7 @@ from datetime import UTC, datetime
 import numpy as np
 
 from forecaster_model.inference.stub import build_forecast_packet_stub
-from policy_model.objects import (
-    ExecutionState,
-    PolicyRiskEnvelope,
-    PortfolioState,
-)
+from policy_model.objects import ExecutionState, PortfolioState, RiskState
 from policy_model.system import PolicySystem
 
 
@@ -59,7 +55,7 @@ def test_policy_system_runs() -> None:
         latency_proxy=0.01,
         volatility_proxy=0.02,
     )
-    re = PolicyRiskEnvelope(
+    re = RiskState(
         max_abs_position_fraction=0.25,
         max_position_delta_per_step=0.1,
         max_leverage=2.0,

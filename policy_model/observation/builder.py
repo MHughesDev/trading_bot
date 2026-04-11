@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from app.contracts.forecast_packet import ForecastPacket
 from policy_model.objects import (
     ExecutionState,
+    ForecastPacket,
     PolicyObservation,
-    PolicyRiskEnvelope,
     PortfolioState,
+    RiskState,
 )
 
 
@@ -17,7 +17,7 @@ class PolicyObservationBuilder:
         forecast_packet: ForecastPacket,
         portfolio_state: PortfolioState,
         execution_state: ExecutionState,
-        risk_state: PolicyRiskEnvelope,
+        risk_state: RiskState,
         history_context: dict | None = None,
     ) -> PolicyObservation:
         ff: list[float] = []

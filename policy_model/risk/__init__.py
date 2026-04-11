@@ -1,3 +1,5 @@
-from policy_model.risk.gate import PolicyRiskGate
+from policy_model.risk.gate import RiskGate
 
-__all__ = ["PolicyRiskGate"]
+PolicyRiskGate = RiskGate
+
+__all__ = ["RiskGate", "PolicyRiskGate"]

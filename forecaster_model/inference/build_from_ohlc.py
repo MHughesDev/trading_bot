@@ -11,6 +11,7 @@ from forecaster_model.config import ForecasterConfig
 from forecaster_model.features.normalization import rolling_zscore_causal
 from forecaster_model.features.ohlc import build_observed_feature_matrix
 from forecaster_model.features.time_future import known_future_features
+from forecaster_model.calibration.conformal import MultiHorizonConformal, load_conformal_state
 from forecaster_model.models.numpy_reference import forward_numpy_reference
 from forecaster_model.regime.soft import soft_regime_from_returns
 
@@ -25,6 +26,8 @@ def build_forecast_packet_methodology(
     cfg: ForecasterConfig | None = None,
     now: datetime | None = None,
     seed: int = 42,
+    conformal_bundle: MultiHorizonConformal | None = None,
+    conformal_state_path: str | None = None,
 ) -> ForecastPacket:
     """
     End-to-end reference path aligned with human forecaster spec (NumPy reference model).
@@ -33,6 +36,8 @@ def build_forecast_packet_methodology(
     - Soft regime from log returns
     - Known-future cyclical features
     - VSN → CNN → multi-res RNN → fusion → quantile decoder
+    - Optional **conformal** widening of quantile bands when `calibration_enabled` (FB-FR-PG3):
+      load state from `conformal_state_path` if set, else in-memory bundle or fresh calibrators.
     """
     cfg = cfg or ForecasterConfig()
     c = np.asarray(close, dtype=np.float64).ravel()
@@ -64,7 +69,7 @@ def build_forecast_packet_methodology(
     conf = float(np.mean(np.abs(q_md)) / (np.mean(iv) + 1e-9))
     ens = [1e-8 * (i + 1) for i in range(H)]
 
-    return ForecastPacket(
+    pkt = ForecastPacket(
         timestamp=anchor,
         horizons=list(range(1, H + 1)),
         q_low=q_lo,
@@ -77,6 +82,22 @@ def build_forecast_packet_methodology(
         ood_score=min(1.0, vol),
         forecast_diagnostics={"methodology": "numpy_reference", **diag},
     )
+    if cfg.calibration_enabled:
+        bundle = conformal_bundle
+        if bundle is None and conformal_state_path:
+            try:
+                bundle = load_conformal_state(conformal_state_path)
+            except OSError:
+                bundle = None
+        if bundle is None:
+            bundle = MultiHorizonConformal.create(
+                H,
+                alpha=cfg.conformal_alpha,
+                window_size=cfg.conformal_window_size,
+            )
+        pkt = bundle.apply_to_packet(pkt)
+        pkt.forecast_diagnostics["conformal_state_source"] = conformal_state_path or "ephemeral"
+    return pkt
 
 
 def _empty_packet(cfg: ForecasterConfig, now: datetime | None) -> ForecastPacket:

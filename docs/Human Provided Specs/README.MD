@@ -31,6 +31,7 @@ This folder holds **documents you supply** (product intent, external requirement
 | Folder | Owner | Content |
 |--------|--------|---------|
 | **`docs/Specs/`** | Maintained with the code | What **is** implemented |
+| **`docs/Specs/FORECASTER_AND_POLICY.MD`** | Maintained with the code | Path-by-path map from these human specs (§26 forecaster, §27 policy) to `forecaster_model/` and `policy_model/` |
 | **`docs/Human Provided Specs/`** (here) | You | What **should** be true or what **you** assert |
 
 ## Do not commit secrets

@@ -37,6 +37,36 @@
       ],
       "title": "PnL (gauge)",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "rate(nm_forecast_build_fallback_total[5m])",
+          "legendFormat": "forecast fallback rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Forecast build fallback / abstain (rate)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(nm_policy_shadow_target_exposure_delta_bucket[5m])) by (le))",
+          "legendFormat": "p95 policy shadow delta",
+          "refId": "A"
+        }
+      ],
+      "title": "Policy shadow |Δexposure| (p95)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

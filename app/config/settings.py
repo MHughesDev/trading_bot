@@ -101,8 +101,12 @@ class AppSettings(BaseSettings):
     models_regime_path: str | None = None
     models_forecast_path: str | None = None
 
-    # When true, attach a `ForecastPacket` (stub/heuristic) to pipeline step output for diagnostics
+    # When true, build a `ForecastPacket` (methodology stub) each pipeline step
     decision_forecast_packet_enabled: bool = False
+    # What drives routing + `propose_action`: Ridge `ForecastOutput` vs derived from `ForecastPacket`
+    decision_forecast_routing_source: Literal["ridge", "packet"] = "ridge"
+    # `legacy` = Ridge + router + propose_action; `spec_policy` = ForecastPacket + PolicySystem → proposal
+    decision_pipeline_mode: Literal["legacy", "spec_policy"] = "spec_policy"
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -197,6 +201,14 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["models_forecast_path"] = mo["forecast_path"]
         if "decision_forecast_packet_enabled" in mo:
             out["decision_forecast_packet_enabled"] = bool(mo["decision_forecast_packet_enabled"])
+        if "decision_forecast_routing_source" in mo:
+            src = str(mo["decision_forecast_routing_source"]).lower().strip()
+            if src in ("ridge", "packet"):
+                out["decision_forecast_routing_source"] = src
+        if "decision_pipeline_mode" in mo:
+            m = str(mo["decision_pipeline_mode"]).lower().strip()
+            if m in ("legacy", "spec_policy"):
+                out["decision_pipeline_mode"] = m
     return out
 
 
