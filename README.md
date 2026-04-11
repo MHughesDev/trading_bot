@@ -19,7 +19,7 @@ From the repo root in **cmd.exe** or PowerShell:
 1. **`setup.bat`** — creates `.venv`, installs **`[dev,dashboard]`**, optionally starts Docker Compose, copies `.env.example` → `.env` if missing.
 2. **`run.bat`** — starts the **control plane API** (port **8000**), a **power supervisor** that launches the Kraken **live runtime** on port **8208** when **system power** is ON (see Streamlit sidebar and `GET/POST /system/power`), and the **Streamlit dashboard** (default **8501**). Set **`NM_POWER_SUPERVISOR_ENABLED=false`** to run only API + dashboard without auto-starting the live loop. Edit **`.env`** before first real use.
 
-Operator UI roadmap (paper/live switch, positions, P&L, future `.exe`): **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. Tracked as **FB-UI-*** / **FB-DASH-*** in [`docs/QUEUE.MD`](docs/QUEUE.MD) (§2).
+Operator UI roadmap (paper/live switch, positions, P&L, future `.exe`): **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. Tracked as **FB-UI-*** / **FB-DASH-*** in [`docs/QUEUE.MD`](docs/QUEUE.MD) (§2). Switching **to live** in Streamlit opens a confirmation dialog (type **`LIVE`**); set **`NM_STREAMLIT_LIVE_CONFIRM=false`** to skip (dev/automation only). Live checklist: **[`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD)** (Execution mode → Live trading checklist).
 
 Market data uses **Kraken** public APIs (no keys for read). Bar buckets default to **1 second** (`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`).
 

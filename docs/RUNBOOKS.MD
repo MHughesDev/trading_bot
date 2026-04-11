@@ -14,6 +14,16 @@
 - **After Apply:** restart **uvicorn** (control plane), **`python -m app.runtime.power_supervisor`** / **`run.bat`**, and any **`live_service_app`** / **`python -m app.runtime.live_service`** so all processes reload settings.
 - **Streamlit:** sidebar **Execution mode** — same POST; watch **restart required** until you restart.
 
+### Live trading checklist (mirrors dashboard guardrails, FB-DASH-06)
+
+Before switching **to live** from paper (or any non-live active mode), complete the same checks the Streamlit UI expects:
+
+1. **Preflight:** `python scripts/preflight_check.py` or **`GET /status`** → **`preflight`** / **`production_preflight`** — resolve blocking issues (signing secret, `NM_ALLOW_UNSIGNED_EXECUTION`, venue keys for live).
+2. **Secrets:** `NM_COINBASE_API_KEY` / `NM_COINBASE_API_SECRET` (CDP) for Coinbase live; **`NM_RISK_SIGNING_SECRET`** set; **`NM_ALLOW_UNSIGNED_EXECUTION=false`** for production-like operation.
+3. **Control plane:** if **`NM_CONTROL_PLANE_API_KEY`** is set, mutating POSTs (including execution profile) require **`X-API-Key`** — the Streamlit app sends it when **`NM_CONTROL_PLANE_API_KEY`** is in the dashboard process environment.
+4. **Dashboard confirmation:** selecting **live** and **Apply** opens a **Confirm live execution** dialog: accept the risk checkbox and type **`LIVE`** (uppercase). Re-applying while the active mode is already **live** does not require the phrase again. Set **`NM_STREAMLIT_LIVE_CONFIRM=false`** only for automation/dev (not recommended for operators).
+5. **Restart** all runtime processes after Apply so **`NM_EXECUTION_MODE=live`** loads; verify **`GET /status` → `execution_profile`** shows no unexpected **pending** mismatch.
+
 ## Preflight (before live or production-like paper)
 
 - Run: `python scripts/preflight_check.py` — exits **1** if blocking issues (e.g. `execution_mode=live` without `NM_RISK_SIGNING_SECRET`, or `NM_ALLOW_UNSIGNED_EXECUTION=true` in live).
