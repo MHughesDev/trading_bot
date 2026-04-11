@@ -17,3 +17,4 @@ build/
 # Runtime operator state (per machine)
 data/system_power.json
 data/execution_profile.json
+data/pnl_ledger.jsonl

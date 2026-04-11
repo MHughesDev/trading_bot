@@ -57,7 +57,7 @@ Outputs under `NM_TRAINING_ARTIFACT_DIR` (default `models/artifacts_training/`):
 uvicorn control_plane.api:app --host 0.0.0.0 --port 8000
 ```
 
-Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/system/power`, `/system/execution-profile` (GET/POST — paper/live intent + config patch; restart to apply), `/portfolio/positions` (open positions via execution adapter), `/flatten`, `/models`, `/metrics` (Prometheus), `/microservices/health` (optional scaffold process probes; see `infra/docker-compose.microservices.yml`).
+Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/system/power`, `/system/execution-profile` (GET/POST — paper/live intent + config patch; restart to apply), `/portfolio/positions` (open positions via execution adapter), **`/pnl/summary?range=`** (realized from `data/pnl_ledger.jsonl`, unrealized from positions — [`docs/PNL_LEDGER.MD`](docs/PNL_LEDGER.MD)), `/flatten`, `/models`, `/metrics` (Prometheus), `/microservices/health` (optional scaffold process probes; see `infra/docker-compose.microservices.yml`).
 
 ## Service scaffolds (Phase 1)
 
