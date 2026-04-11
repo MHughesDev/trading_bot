@@ -62,3 +62,29 @@ def test_status_includes_model_artifacts(monkeypatch: pytest.MonkeyPatch) -> Non
     assert "model_artifacts" in body
     ma = body["model_artifacts"]
     assert "serving" in ma and "training" in ma and "registry" in ma
+
+
+def test_post_models_version_requires_key_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FB-SPEC-06: mutating label endpoint respects control plane API key."""
+    monkeypatch.setattr(api, "settings", AppSettings(control_plane_api_key="cp-secret"))
+    client = TestClient(api.app)
+    r = client.post("/models/version", json={"component": "forecaster", "version": "v9"})
+    assert r.status_code == 401
+
+
+def test_post_models_version_sets_prometheus_gauge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FB-SPEC-06: operator labels flow to nm_model_version_info."""
+    from prometheus_client import REGISTRY, generate_latest
+
+    monkeypatch.setattr(api, "settings", AppSettings(control_plane_api_key="cp-secret"))
+    client = TestClient(api.app)
+    r = client.post(
+        "/models/version",
+        json={"component": "policy", "version": "build-42"},
+        headers={"X-API-Key": "cp-secret"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"component": "policy", "version": "build-42"}
+
+    payload = generate_latest(REGISTRY).decode()
+    assert 'nm_model_version_info{component="policy",version="build-42"} 1.0' in payload
