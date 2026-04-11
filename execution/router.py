@@ -8,6 +8,7 @@ from app.config.settings import AppSettings
 from execution.adapters.alpaca_paper import AlpacaPaperExecutionAdapter
 from execution.adapters.base_adapter import ExecutionAdapter
 from execution.adapters.coinbase_live import CoinbaseExecutionAdapter
+from execution.adapters.mock_alpaca_paper import MockAlpacaPaperExecutionAdapter
 from execution.adapters.stub import StubExecutionAdapter
 
 
@@ -16,6 +17,8 @@ def create_execution_adapter(settings: AppSettings) -> ExecutionAdapter:
     adapter = os.getenv("NM_EXECUTION_ADAPTER", "").strip().lower()
     if adapter == "stub":
         return StubExecutionAdapter(settings)
+    if adapter in ("mock_alpaca_paper", "mock_alpaca"):
+        return MockAlpacaPaperExecutionAdapter(settings)
     if settings.execution_mode == "paper":
         if settings.execution_paper_adapter.lower() != "alpaca":
             raise ValueError(

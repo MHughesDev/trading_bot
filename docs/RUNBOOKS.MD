@@ -38,7 +38,7 @@
 
 ## CI integration tests
 
-- Optional: `NM_INTEGRATION_SERVICES=1` with Redis, QuestDB, Qdrant running (`docker compose -f infra/docker-compose.yml up -d`). See `tests/test_integration_optional_services.py` and `tests/test_integration_microservices_redis.py` (Redis + subprocess execution gateway; skips if Redis is down).
+- Optional: `NM_INTEGRATION_SERVICES=1` with Redis, QuestDB, Qdrant running (`docker compose -f infra/docker-compose.yml up -d`). See `tests/test_integration_optional_services.py` and `tests/test_integration_microservices_redis.py` (Redis + subprocess execution gateway; includes **stub** and **`mock_alpaca_paper`** paper-path checks; skips if Redis is down).
 
 ## Market data gaps / flat synthetic OHLC
 

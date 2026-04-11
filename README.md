@@ -103,6 +103,8 @@ GitHub Actions (`.github/workflows/ci.yml`): **ruff**, **pytest**, `ci_spec_comp
 
 **Microservices dev (optional):** `docker compose -f infra/docker-compose.yml -f infra/docker-compose.microservices.yml up -d redis execution_gateway` starts Redis and a **stub** execution gateway on port **8202** (first start installs deps in the container).
 
+**Paper execution path (no broker keys):** set **`NM_EXECUTION_ADAPTER=mock_alpaca_paper`** on the execution gateway to exercise the same **`ExecutionService` → adapter** path as Alpaca paper (symbol mapping via `execution/alpaca_util.py`, synthetic fills). For real Alpaca paper, install **`[alpaca]`**, set **`NM_ALPACA_API_KEY`** / **`NM_ALPACA_API_SECRET`**, and use default **`NM_EXECUTION_MODE=paper`** (omit `NM_EXECUTION_ADAPTER` or use **`alpaca`** implicitly).
+
 ## Operations
 
 Runbooks (secrets, incident, flatten, QuestDB backup): [`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD).

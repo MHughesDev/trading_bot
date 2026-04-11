@@ -149,3 +149,107 @@ def test_redis_runtime_bridge_external_gateway_subprocess() -> None:
         err = proc.stderr.read().decode() if proc.stderr else ""
         if proc.returncode not in (0, -15) and err:
             pytest.fail(f"uvicorn stderr: {err[:2000]}")
+
+
+def test_redis_external_gateway_mock_alpaca_paper_path() -> None:
+    """Paper execution path without Alpaca SDK: mock_alpaca_paper adapter + OrderIntent signing."""
+    redis_url = os.getenv("NM_REDIS_URL", "redis://127.0.0.1:6379/0")
+    try:
+        import redis as redis_mod
+
+        redis_mod.Redis.from_url(redis_url, socket_connect_timeout=2).ping()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"Redis not reachable at {redis_url!r}: {exc}")
+
+    secret = "integration-mock-alpaca-secret-32b!!"
+
+    gw_env = os.environ.copy()
+    gw_env.update(
+        {
+            "NM_MESSAGING_BACKEND": "redis_streams",
+            "NM_REDIS_URL": redis_url,
+            "NM_RISK_SIGNING_SECRET": secret,
+            "NM_EXECUTION_GATEWAY_SUBMIT": "true",
+            "NM_EXECUTION_ADAPTER": "mock_alpaca_paper",
+            "NM_EXECUTION_MODE": "paper",
+            "NM_ALLOW_UNSIGNED_EXECUTION": "false",
+        }
+    )
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "services.execution_gateway_service.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "18766",
+        ],
+        env=gw_env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        _wait_http("http://127.0.0.1:18766/healthz")
+
+        prod_env = os.environ.copy()
+        prod_env.update(
+            {
+                "NM_MESSAGING_BACKEND": "redis_streams",
+                "NM_REDIS_URL": redis_url,
+                "NM_RISK_SIGNING_SECRET": secret,
+            }
+        )
+        _keys = list(prod_env.keys())
+        _saved = {k: os.environ.get(k) for k in _keys}
+        try:
+            os.environ.update(prod_env)
+            bridge = RuntimeHandoffBridge(
+                create_message_bus(),
+                execution_gateway_mode="external",
+            )
+            bridge.process_feature_row(
+                {
+                    "symbol": "BTC-USD",
+                    "direction": 1,
+                    "size_fraction": 0.1,
+                    "route_id": "SCALPING",
+                    "mid_price": 50_000.0,
+                    "spread_bps": 5.0,
+                }
+            )
+        finally:
+            for k in _keys:
+                v = _saved.get(k)
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        deadline = time.monotonic() + 20.0
+        recent: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            r = httpx.get("http://127.0.0.1:18766/events/recent", timeout=2.0)
+            r.raise_for_status()
+            recent = r.json()
+            if recent.get("submitted_orders"):
+                break
+            time.sleep(0.2)
+
+        assert recent.get("submitted_orders")
+        first = recent["submitted_orders"][0]
+        assert isinstance(first, dict)
+        assert "ack" in first
+        assert first["ack"]["adapter"] == "mock_alpaca_paper"
+        assert first["ack"]["order_id"].startswith("mock-")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        err = proc.stderr.read().decode() if proc.stderr else ""
+        if proc.returncode not in (0, -15) and err:
+            pytest.fail(f"uvicorn stderr: {err[:2000]}")

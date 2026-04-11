@@ -22,7 +22,8 @@ It is intentionally implementation-oriented so work can be executed as small, te
 - ✅ Microservice risk path uses **`RiskEngine.evaluate`** + **`to_order_intent`** so quantities match the monolith risk rules (with optional `mid_price`, `spread_bps`, etc. on the proposal payload).
 - ✅ Optional integration: **`tests/test_integration_microservices_redis.py`** with `NM_INTEGRATION_SERVICES=1` — Redis + subprocess **`uvicorn` execution gateway** + **`RuntimeHandoffBridge`** (external mode) + stub submit.
 - ✅ Compose overlay **`infra/docker-compose.microservices.yml`** runs **`execution_gateway`** beside Redis (stub adapter; port 8202).
-- ⏭️ Next step: end-to-end **paper** path (Alpaca) with real keys, or extend overlay with live_service / risk containers.
+- ✅ **Paper path without Alpaca SDK / keys:** `NM_EXECUTION_ADAPTER=mock_alpaca_paper` uses **`MockAlpacaPaperExecutionAdapter`** (symbol map + synthetic `OrderAck`, no network). Integration test in **`tests/test_integration_microservices_redis.py`** (with `NM_INTEGRATION_SERVICES=1`).
+- ⏭️ Next step: optional **real Alpaca paper** smoke with `NM_ALPACA_*` + `pip install -e ".[alpaca]"`, or compose services for **`live_service`** + Redis + gateway.
 
 ---
 
