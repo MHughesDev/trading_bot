@@ -56,13 +56,11 @@ Structured backlog for **all planned work**: new capabilities, production harden
 |----|------|--------|---------|---------|
 | FB-FR-P0 | Feature | Open | Full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD): leakage-safe dataset, VSN, latent CNN, multi-res xLSTM, regime fusion, quantile head, conformal, ensemble | `forecaster_model/` |
 | FB-FR-PG2 | Improvement | Open | **PyTorch forecaster training stack:** trainer, validation split, early stopping, export checkpoints → MLflow or disk registry (manual promotion per CI policy); prerequisite for closing FB-FR-P0 in production | `forecaster_model/training/`, `models/` |
-| FB-FR-PG3 | Feature | Open | **Conformal calibrator lifecycle:** persist/restore sliding-window state across restarts; documented refresh/reset policy; wired in inference path | `forecaster_model/calibration/`, `forecaster_model/inference/` |
 
 ### Backlog items (open) — policy production readiness
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| FB-PL-PG1 | Feature | Open | **Concrete `TradingPolicyEnvironment`:** `reset` / `step` over replay or paper loop; costs and slippage consistent with `backtesting`/execution assumptions | `policy_model/env/` |
 | FB-PL-PG2 | Improvement | Open | **RL training runtime:** replay buffer (or on-policy rollouts), actor–critic updates, walk-forward schedules, save/load policy weights + obs normalizer state | `policy_model/training/` |
 | FB-PL-PG3 | Hardening | Open | **Policy shadow / canary:** compute and log RL policy actions (and deltas vs baseline) without sending orders until sign-off | `policy_model/`, `observability/`, optional `NM_*` flag |
 
@@ -197,6 +195,8 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-HS-04 | 2026-04-10 | **Literal spec layout:** `forecaster_model/models/{vsn,latent_encoder,xlstm_cell,multi_resolution_xlstm,fusion,decoder,forecaster_model}.py`, `config/{schema,defaults.yaml}`, `losses/quantile.py`; `policy_model/objects/*` per §8, `RiskGate`/`PolicySystem` names per §28–29, `env/rewards.py`, `config/defaults.yaml`; see [`docs/Specs/FORECASTER_AND_POLICY.MD`](Specs/FORECASTER_AND_POLICY.MD) |
 | FB-FR-PG1 | 2026-04-11 | **Authoritative routing:** `models.decision_forecast_routing_source` (`ridge` default, `packet` uses `forecast_packet_to_forecast_output`); packet built when diagnostics enabled or routing is `packet`; tests `test_forecast_packet_adapter.py`, `test_pipeline_forecast_packet.py` |
 | FB-PL-PG9 | 2026-04-11 | **Runbook:** model artifact paths + `decision_forecast_routing_source` + packet diagnostics — [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) § Model artifacts and forecast routing |
+| FB-FR-PG3 | 2026-04-11 | **Conformal lifecycle:** `MultiHorizonConformal`, `save_conformal_state` / `load_conformal_state`; `ForecasterConfig` gains `conformal_alpha` / `conformal_window_size`; `build_forecast_packet_methodology(..., conformal_bundle=, conformal_state_path=)` when `calibration_enabled`; tests `tests/test_conformal_lifecycle.py` |
+| FB-PL-PG1 | 2026-04-11 | **`ReplayPolicyEnvironment`** (`policy_model/env/replay_env.py`): `reset` / `step` over close series, `DecisionPipeline` + `ForecastPacket`, reward from `one_step_reward` + settings bps; test `tests/test_replay_policy_env.py` |
 
 ---
 
