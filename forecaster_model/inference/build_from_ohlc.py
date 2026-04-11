@@ -33,6 +33,8 @@ def build_forecast_packet_methodology(
     conformal_bundle: MultiHorizonConformal | None = None,
     conformal_state_path: str | None = None,
     weight_bundle: ForecasterWeightBundle | None = None,
+    torch_model: object | None = None,
+    torch_device: object | None = None,
 ) -> ForecastPacket:
     """
     End-to-end reference path aligned with human forecaster spec (NumPy reference model).
@@ -64,9 +66,23 @@ def build_forecast_packet_methodology(
     r_cur = soft_regime_from_returns(lr, num_regimes=cfg.num_regime_dims)
     anchor = now or datetime.now(UTC)
     x_known = known_future_features(anchor, cfg.forecast_horizon, base_interval_seconds=cfg.base_interval_seconds)
-    y_hat, diag = forward_numpy_reference(
-        x_obs, x_known, r_cur, cfg, seed=seed, weight_bundle=weight_bundle
-    )
+    if torch_model is not None and torch_device is not None:
+        from forecaster_model.inference.torch_infer import forward_torch_quantiles
+
+        y_hat = forward_torch_quantiles(
+            x_obs, x_known, r_cur, model=torch_model, device=torch_device
+        )
+        diag = {
+            "weights": "torch_checkpoint",
+            "methodology": "pytorch_mlp",
+            "vsn_gate_mean": float("nan"),
+            "fusion_alpha": [],
+            "branch_scales": [],
+        }
+    else:
+        y_hat, diag = forward_numpy_reference(
+            x_obs, x_known, r_cur, cfg, seed=seed, weight_bundle=weight_bundle
+        )
     H = cfg.forecast_horizon
     q_lo = [float(y_hat[h, 0]) for h in range(H)]
     q_md = [float(y_hat[h, 1]) for h in range(H)]
@@ -76,6 +92,7 @@ def build_forecast_packet_methodology(
     conf = float(np.mean(np.abs(q_md)) / (np.mean(iv) + 1e-9))
     ens = [1e-8 * (i + 1) for i in range(H)]
 
+    meth = "pytorch_mlp" if torch_model is not None else "numpy_reference"
     pkt = ForecastPacket(
         timestamp=anchor,
         horizons=list(range(1, H + 1)),
@@ -88,7 +105,7 @@ def build_forecast_packet_methodology(
         ensemble_variance=ens,
         ood_score=min(1.0, vol),
         forecast_diagnostics={
-            "methodology": "numpy_reference",
+            "methodology": meth,
             "weight_source": diag.get("weights", "rng"),
             **{k: v for k, v in diag.items() if k != "weights"},
         },
