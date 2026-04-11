@@ -45,3 +45,12 @@ def test_scaffold_endpoints(service_name: str, app) -> None:
     assert body["service"] == service_name
     assert body["phase"] == "microservice_scaffold"
     assert "timestamp_utc" in body
+
+    if service_name == "observability_writer_service":
+        ev = client.get("/events/recent")
+        assert ev.status_code == 200
+        payload = ev.json()
+        assert "execution_acks" in payload and "risk_blocked" in payload
+        msg = client.get("/messaging")
+        assert msg.status_code == 200
+        assert "messaging_backend" in msg.json()
