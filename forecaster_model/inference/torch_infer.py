@@ -64,8 +64,8 @@ def forward_torch_quantiles(
 
     model.eval()
     with torch.no_grad():
-        xo = torch.from_numpy(np.asarray(x_obs, dtype=np.float64)).unsqueeze(0).to(device)
-        xk = torch.from_numpy(np.asarray(x_known, dtype=np.float64)).unsqueeze(0).to(device)
-        rr = torch.from_numpy(np.asarray(r_cur, dtype=np.float64).reshape(1, -1)).to(device)
+        xo = torch.from_numpy(np.asarray(x_obs, dtype=np.float32)).float().unsqueeze(0).to(device)
+        xk = torch.from_numpy(np.asarray(x_known, dtype=np.float32)).float().unsqueeze(0).to(device)
+        rr = torch.from_numpy(np.asarray(r_cur, dtype=np.float32).reshape(1, -1)).float().to(device)
         out = model(xo, xk, rr)
-        return out.squeeze(0).detach().cpu().numpy().astype(np.float64)
+        return out.squeeze(0).detach().cpu().numpy().astype(np.float64, copy=False)

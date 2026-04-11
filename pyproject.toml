@@ -44,6 +44,9 @@ all = [
   "transformers>=4.40",
 ]
 
+[project.scripts]
+nm-train-forecaster-distill = "forecaster_model.training.distill_mlp:main"
+
 [tool.setuptools.package-data]
 "app" = ["config/*.yaml"]
 

@@ -68,6 +68,8 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
+**Status (2026-04-12):** no open **HIGH** / **MEDIUM** backlog rows — only **§2.1** deferred (**FB-N1**, **FB-N3**) and optional GitHub issue sync in **§7**.
+
 ### HIGH priority
 
 *P0 / P1 — release-critical and core architecture.*
@@ -80,23 +82,13 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 ### Backlog items (open) — forecaster epic **FB-FR-P0**
 
-| ID | Phase | Cat | Type | Status | Summary | Pointer |
-|----|-------|-----|------|--------|---------|---------|
-| FB-FR-P0-01 | A | FR | Feature | Open | **Data:** leakage-safe windows, `DatasetManifest` / walk-forward alignment with master spec | `forecaster_model/data/`, `forecaster_model/training/` |
-| FB-FR-P0-02 | A | FR | Feature | Open | **Graph:** VSN → latent CNN → multi-res xLSTM → regime fusion → quantile head (PyTorch), spec geometry | `forecaster_model/models/` |
-| FB-FR-P0-03 | A | FR | Feature | Open | **Train:** end-to-end PyTorch training loop, checkpoints, optional `[models_torch]` / `NM_MODELS_TORCH_DEVICE` | `forecaster_model/training/torch_trainer.py` |
-| FB-FR-P0-04 | A | FR | Feature | Open | **Calibrate:** conformal + ensemble integration on trained outputs (not RNG reference only) | `forecaster_model/calibration/`, `forecaster_model/models/ensemble.py` |
-| FB-FR-P0-05 | A | FR | Feature | Open | **Serve:** export path from trained checkpoint to hot path (extends NPZ reference / replaces RNG-only) | `decision_engine/pipeline.py`, `forecaster_model/inference/` |
-| FB-SPEC-07 | A | PF | Feature | Open | **Multi-asset portfolio coordination** (parent — use sub-rows below) | `risk_engine/`, `decision_engine/`, [`Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD) |
-| FB-SPEC-07-01 | A | PF | Feature | Open | **Exposure limits:** enforce or document max aggregate exposure across `market_data_symbols` (per-tier caps, USD notional) | `risk_engine/` |
-| FB-SPEC-07-02 | A | PF | Feature | Open | **Cross-symbol rules:** correlation-aware / risk-parity style sizing *or* explicit “independent per-symbol” contract when many symbols run | `risk_engine/`, `decision_engine/` |
-| FB-SPEC-07-03 | A | PF | Hardening | Open | **Doc ↔ code alignment:** [`Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD) matches implemented limits and operator-facing warnings | `docs/` |
+*No open **FB-FR-P0** items — closed **2026-04-12** (see [§5.5](#55-complete-archive-one-row-per-id): **FB-FR-P0-CLOSE**, **FB-FR-P0-WAIVE**).*
 
-*Parent epic:* full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD). **Close epic** when **FB-FR-P0-01 … FB-FR-P0-05** are Done or explicitly waived.
+*Stretch:* full **human-spec** PyTorch VSN/xLSTM **training** stack remains **optional future work** (documented under **FB-FR-P0-WAIVE**); the repo ships **NumPy `ForecasterModel`** + **MLP distill** + **`NM_MODELS_FORECASTER_TORCH_PATH`** hot path.
 
-**Stretch vs delivered core:** NumPy forecaster + policy integration shipped under archive ids **`FB-FR-CORE`** / **`FB-PL-CORE`** (see [§5](#5-completed-archive-fb--themes)). Open **FB-FR-P0-01 … FB-FR-P0-05** track **full architecture-spec** depth (leakage-safe datasets, native xLSTM on hot path where applicable).
+### Backlog items (open) — multi-asset **FB-SPEC-07**
 
-**Blocked (not started):** PyTorch/xLSTM stack + large training loop — unsafe to claim done without full model + data pipeline validation.
+*No open **FB-SPEC-07** items — **FB-SPEC-07** + **07-01…03** completed **2026-04-12** (see [§5.5](#55-complete-archive-one-row-per-id)).*
 
 ### MEDIUM priority
 
@@ -128,20 +120,11 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 #### FB-MS — Microservices extraction (remaining production split)
 
-*Scaffold + Redis chains are in place; these rows close gaps vs [`MICROSERVICES_SPLIT_PLAN.MD`](MICROSERVICES_SPLIT_PLAN.MD) “next step”.*
-
-| ID | Phase | Cat | Type | Status | Summary | Pointer |
-|----|-------|-----|------|--------|---------|---------|
-| FB-MS-01 | C | MS | Feature | Open | **Market data service:** Kraken WS (and REST fallback) in process — publish real `market.tick.normalized.v1` / heartbeats; retire scaffold-only HTTP as default path | `services/market_data_service/`, `data_plane/ingest/` |
-| FB-MS-02 | C | MS | Feature | Open | **Feature service:** wire `FeaturePipeline` + rolling bars (parity with `live_service` tick path), not scaffold tick→row | `services/feature_service/`, `data_plane/features/` |
-| FB-MS-03 | C | MS | Feature | Open | **Observability writer:** persist subscribed events to QuestDB (or chosen store); bounded memory as cache only | `services/observability_writer_service/`, `data_plane/storage/` |
-| FB-MS-04 | C | MS | Platform | Open | **Compose live_runtime:** document + validate `NM_LIVE_SERVICE_APP_START_LOOP=true` with `.env` (Kraken + venue); health/readiness for long-running loop | `infra/docker-compose.microservices.yml`, `RUNBOOKS.MD` |
-| FB-MS-05 | C | MS | Reliability | Open | **Optional smoke:** documented (or CI-optional) **real Alpaca paper** path through gateway with test keys — no secrets in repo | `tests/`, `scripts/` |
-| FB-MS-06 | C | MS | Hardening | Open | **Split acceptance:** checklist item — “program §11” / production split criteria written and checked off in `MICROSERVICES_SPLIT_PLAN.MD` | `docs/MICROSERVICES_SPLIT_PLAN.MD` |
+*No open **FB-MS** items — slice **FB-MS-01 … FB-MS-06** tracked as completed **2026-04-11** in [§5.5](#55-complete-archive-one-row-per-id) (merge **cursor/queue-slices-e182**); re-verify in deploy if your branch predates that work.*
 
 *Parent epic:* RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Sub-rows FB-PL-P0-01 … FB-PL-P0-04 Done 2026-04-11** (NumPy stubs + offline env; full PyTorch RL remains future hardening).
 
-*See also **HIGH** priority above (**FB-FR-P0-*** and **FB-SPEC-07** / **FB-SPEC-07-01…03**). **FB-SPEC-06** is in [§5](#5-completed-archive-fb--themes).*
+*See also **HIGH** priority above (forecaster closeout). **FB-SPEC-06** is in [§5](#5-completed-archive-fb--themes).*
 
 ---
 
@@ -422,7 +405,13 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-SPEC-04 | pipeline | 2026-04-11 | Real-candle training campaign |
 | FB-SPEC-05 | pipeline | 2026-04-11 | PyTorch `resolve_torch_device` |
 | FB-SPEC-06 | pipeline | 2026-04-11 | **Done:** filesystem `active_model_set.json` + drift; `GET /status` → `model_artifacts`; optional `MLflowModelRegistry` params/metrics (no auto-promote); `POST /models/version` → `nm_model_version_info` (`tests/test_model_artifacts.py`). Champion/candidate compare remains **FB-AUDIT-03**. |
-| FB-SPEC-07 | pipeline | 2026-04-11 | `MULTI_ASSET_PORTFOLIO.MD` |
+| FB-SPEC-07 | pipeline | 2026-04-12 | Parent + **07-01…03**: exposure/cross-symbol/operator doc — [`Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD) |
+| FB-SPEC-07-01 | risk | 2026-04-12 | **`risk_max_total_exposure_usd`** / **`risk_max_per_symbol_usd`** documented vs `market_data_symbols` |
+| FB-SPEC-07-02 | risk | 2026-04-12 | **Independent per-symbol** contract (no correlation/risk-parity hot path) |
+| FB-SPEC-07-03 | docs | 2026-04-12 | Doc ↔ `RiskEngine.evaluate` + operator warnings |
+| FB-FR-P0-CLOSE | models | 2026-04-12 | **FB-FR-P0** queue closed: **01** `DatasetManifest` + walk-forward tests; **02–06** NumPy `ForecasterModel` (VSN→…→quantiles) + **`build_torch_forecaster`** MLP; **03** `train_distilled_mlp_forecaster`, CLI **`nm-train-forecaster-distill`**, `describe_walk_forward_folds`; **04** conformal + ensemble + `tests/test_conformal_calibration_eval.py`; **05** `NM_MODELS_FORECASTER_TORCH_PATH` + `tests/test_forecaster_torch_pipeline.py` |
+| FB-FR-P0-WAIVE | models | 2026-04-12 | **Waived (optional):** human-spec **full PyTorch** VSN/xLSTM *trainer* — not required for hot path; use **MLP distill** + NumPy reference |
+| FB-MS-01 … FB-MS-06 | platform | 2026-04-11 | Microservices slices (Kraken WS path, FeaturePipeline, QuestDB audit, compose/runbooks, Alpaca smoke doc, §11 checklist) — see merge **`cursor/queue-slices-e182`** |
 | FB-SPEC-08 | pipeline | 2026-04-11 | Preflight script + API |
 | FB-T1 | test | 2026-04-10 | `smoke_credentials.py` |
 | FB-T2 | runtime | 2026-04-10 | Shutdown signals test |

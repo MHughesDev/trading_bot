@@ -9,6 +9,7 @@ import numpy as np
 
 from forecaster_model.training.checkpoint import load_json_checkpoint, save_json_checkpoint
 from forecaster_model.training.metrics import mean_pinball_loss, pinball_loss
+from forecaster_model.training.walk_forward_torch import describe_walk_forward_folds
 from forecaster_model.training.walkforward import WalkForwardConfig, walk_forward_indices
 
 
@@ -29,6 +30,12 @@ def test_walk_forward_indices() -> None:
     assert len(splits) >= 1
     tr, va = splits[0]
     assert tr.stop <= va.start
+
+
+def test_describe_walk_forward_folds() -> None:
+    folds = describe_walk_forward_folds(30, train_len=10, val_len=5, step=5)
+    assert folds
+    assert folds[0]["train"][1] <= folds[0]["val"][0]
 
 
 def test_json_checkpoint_roundtrip() -> None:
