@@ -14,11 +14,11 @@
 
 | Setting | Values | Meaning |
 |---------|--------|---------|
-| **`models.decision_pipeline_mode`** | **`legacy`** (default) \| **`spec_policy`** | **`legacy`**: Ridge + router + `propose_action`. **`spec_policy`**: packet-driven forecast + **`PolicySystem`** + plan → proposal. |
+| **`models.decision_pipeline_mode`** | **`spec_policy`** (default) \| **`legacy`** | **`spec_policy`** (default): **`ForecastPacket`** + **`PolicySystem`** + plan → proposal. **`legacy`**: Ridge + router + `propose_action` (escape hatch). |
 | `models.decision_forecast_routing_source` | `ridge` \| `packet` | In **`spec_policy`** mode, **`ForecastOutput`** is **always** derived from **`ForecastPacket`** (packet is always built). In **`legacy`**, same as before. |
 | `models.decision_forecast_packet_enabled` | bool | In **`legacy`**, optional diagnostics packet. In **`spec_policy`**, implied on. |
 
-**Environment:** `NM_MODELS_DECISION_PIPELINE_MODE=legacy|spec_policy`
+**Environment:** `NM_MODELS_DECISION_PIPELINE_MODE=spec_policy` (default) or `legacy` to revert.
 
 ## Code touchpoints
 
@@ -28,8 +28,7 @@
 
 ## Migration checklist (operator)
 
-1. Enable shadow / replay comparison with **`spec_policy`** in a **paper** environment.
-2. Set **`NM_MODELS_DECISION_PIPELINE_MODE=spec_policy`** when ready.
+1. Default is **`spec_policy`** — use **`NM_MODELS_DECISION_PIPELINE_MODE=legacy`** only to revert to Ridge + router during investigation.
 3. Keep **`NM_MODELS_FORECAST_PATH`** Ridge artifact only as **fallback** if you reintroduce a dual path; default spec path does not require Ridge for routing.
 4. Train and load **torch** forecaster weights when replacing NumPy reference (separate backlog / training jobs).
 

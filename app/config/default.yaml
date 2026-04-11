@@ -83,7 +83,7 @@ models:
   # `decision_pipeline_mode`: legacy (Ridge + router + propose_action) vs spec_policy (ForecastPacket + PolicySystem). See docs/MIGRATION_TO_SPEC_PIPELINE.MD
   decision_forecast_packet_enabled: false
   decision_forecast_routing_source: ridge # ridge | packet
-  decision_pipeline_mode: legacy # legacy | spec_policy
+  decision_pipeline_mode: spec_policy # legacy | spec_policy — default: human-spec ForecastPacket + PolicySystem
 #   regime_path: models/artifacts/regime.joblib
 #   forecast_path: models/artifacts/forecast.joblib
 

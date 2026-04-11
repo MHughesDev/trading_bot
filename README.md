@@ -28,7 +28,7 @@ Configure secrets via `.env` (prefix `NM_` for app settings). **Never use Alpaca
 
 **Forecast routing (optional):** `NM_MODELS_DECISION_FORECAST_ROUTING_SOURCE` = `ridge` (default) or `packet` — when `packet`, `DecisionPipeline` derives `ForecastOutput` for routing from the methodology `ForecastPacket` instead of the Ridge surrogate (`app/config/default.yaml` under `models:`).
 
-**Spec pipeline (human forecaster + RL policy):** `NM_MODELS_DECISION_PIPELINE_MODE` = `legacy` (default) or `spec_policy` — when `spec_policy`, decisions use **`ForecastPacket` + `PolicySystem`** (see [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](docs/MIGRATION_TO_SPEC_PIPELINE.MD)).
+**Spec pipeline (human forecaster + RL policy):** Default is **`spec_policy`** — **`ForecastPacket` + `PolicySystem`**. Set `NM_MODELS_DECISION_PIPELINE_MODE=legacy` to use Ridge + router + `propose_action` (see [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](docs/MIGRATION_TO_SPEC_PIPELINE.MD)).
 
 **Production:** set `NM_RISK_SIGNING_SECRET` so only `RiskEngine`-signed `OrderIntent`s reach venues; optional `NM_CONTROL_PLANE_API_KEY` for mutating control-plane routes. For local dev without signing, `NM_ALLOW_UNSIGNED_EXECUTION=true` (not for production).
 

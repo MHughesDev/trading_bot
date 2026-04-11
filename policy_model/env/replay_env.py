@@ -59,8 +59,8 @@ def _minimal_execution(mid: float, spread_bps: float, settings: AppSettings) -> 
     )
 
 
-def _settings_with_forecast_packet(base: AppSettings) -> AppSettings:
-    """Ensure pipeline emits `ForecastPacket` each step for this environment."""
+def _settings_for_replay_env(base: AppSettings) -> AppSettings:
+    """Replay env needs ForecastPacket each step; harmless if already spec_policy default."""
     d = base.model_dump()
     d["decision_forecast_packet_enabled"] = True
     return AppSettings(**d)
@@ -89,7 +89,7 @@ class ReplayPolicyEnvironment:
         self._symbol = symbol
         self._spread_bps = float(spread_bps)
         base = settings or load_settings()
-        self._settings = _settings_with_forecast_packet(base)
+        self._settings = _settings_for_replay_env(base)
         self._pipeline = pipeline or DecisionPipeline(settings=self._settings)
         self._initial_equity = float(initial_equity)
         self._idx = 0
@@ -116,7 +116,15 @@ class ReplayPolicyEnvironment:
     def _build_obs_at_index(self) -> PolicyObservation:
         mid = float(self._closes[self._idx])
         feats = self._feature_row()
-        self._pipeline.step(self._symbol, feats, self._spread_bps, self._risk_app)
+        self._pipeline.step(
+            self._symbol,
+            feats,
+            self._spread_bps,
+            self._risk_app,
+            mid_price=mid,
+            portfolio_equity_usd=self._initial_equity,
+            position_signed_qty=None,
+        )
         pkt = self._pipeline.last_forecast_packet
         if pkt is None:
             raise RuntimeError("DecisionPipeline did not set last_forecast_packet (check settings)")

@@ -4,6 +4,7 @@
 
 - **Market data:** Coinbase only (WebSocket + REST). No Alpaca (or other venues) for market data in the main tree; CI enforces this (`scripts/ci_spec_compliance.sh`).
 - **Execution:** Config-driven — **paper** → Alpaca paper adapter; **live** → Coinbase Advanced Trade (CDP JWT) adapter. Shared **decision + risk** path for live and replay.
+- **Decision default:** **`models.decision_pipeline_mode: spec_policy`** — **`ForecastPacket`** (`forecaster_model`) + **`PolicySystem`** (`policy_model`) → **`ActionProposal`**; set **`legacy`** for Ridge + router + `propose_action` ([`MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD)).
 - **Risk:** `OrderIntent` execution is gated (HMAC signing, `execution/intent_gate.py`) per settings — not bypassed in production paths.
 
 ## Top-level packages (Python)

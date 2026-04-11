@@ -7,6 +7,10 @@ from app.contracts.risk import RiskState
 from decision_engine.pipeline import DecisionPipeline
 
 
+def test_default_settings_use_spec_policy():
+    assert AppSettings().decision_pipeline_mode == "spec_policy"
+
+
 def test_legacy_mode_unchanged():
     s = AppSettings(decision_pipeline_mode="legacy")
     pipe = DecisionPipeline(settings=s)

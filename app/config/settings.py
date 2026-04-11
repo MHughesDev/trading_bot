@@ -106,7 +106,7 @@ class AppSettings(BaseSettings):
     # What drives routing + `propose_action`: Ridge `ForecastOutput` vs derived from `ForecastPacket`
     decision_forecast_routing_source: Literal["ridge", "packet"] = "ridge"
     # `legacy` = Ridge + router + propose_action; `spec_policy` = ForecastPacket + PolicySystem → proposal
-    decision_pipeline_mode: Literal["legacy", "spec_policy"] = "legacy"
+    decision_pipeline_mode: Literal["legacy", "spec_policy"] = "spec_policy"
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
