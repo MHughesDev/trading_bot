@@ -17,7 +17,7 @@ From the repo root in **cmd.exe** or PowerShell:
 1. **`setup.bat`** — creates `.venv`, installs **`[dev,dashboard]`**, optionally starts Docker Compose, copies `.env.example` → `.env` if missing.
 2. **`run.bat`** — starts the **control plane API** (port **8000**), a **power supervisor** that launches the Kraken **live runtime** on port **8208** when **system power** is ON (see Streamlit sidebar and `GET/POST /system/power`), and the **Streamlit dashboard** (default **8501**). Set **`NM_POWER_SUPERVISOR_ENABLED=false`** to run only API + dashboard without auto-starting the live loop. Edit **`.env`** before first real use.
 
-Operator UI roadmap (paper/live switch, positions, P&L, future `.exe`): **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. Tracked as **FB-UI-*** / **FB-DASH-*** in [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD).
+Operator UI roadmap (paper/live switch, positions, P&L, future `.exe`): **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. Tracked as **FB-UI-*** / **FB-DASH-*** in [`docs/QUEUE_LOG.MD`](docs/QUEUE_LOG.MD) (§2).
 
 Market data uses **Kraken** public APIs (no keys for read). Bar buckets default to **1 second** (`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`).
 
@@ -98,7 +98,7 @@ Decision service exposes `POST /ingest/features-row` and `GET /events/recent` fo
 
 - **As-built specs (code-aligned):** [`docs/Specs/README.MD`](docs/Specs/README.MD) — topic specs that mirror the current codebase.
 - **End-to-end walkthrough (live, paper, live venue, backtest):** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) — uses default **`spec_policy`** pipeline unless noted.
-- **Human-provided intent:** [`docs/Human Provided Specs/README.MD`](docs/Human%20Provided%20Specs/README.MD) — includes **forecaster** and **policy** architecture specs; reconcile against `docs/Specs/` and the repo to drive [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD) / [`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD).
+- **Human-provided intent:** [`docs/Human Provided Specs/README.MD`](docs/Human%20Provided%20Specs/README.MD) — includes **forecaster** and **policy** architecture specs; reconcile against `docs/Specs/` and the repo to drive [`docs/QUEUE_LOG.MD`](docs/QUEUE_LOG.MD).
 - **Backlog & issues, runbooks, deep dives:** other files under [`docs/`](docs/).
 - **Microservice migration blueprint (monorepo-first):** [`docs/MICROSERVICES_SPLIT_PLAN.MD`](docs/MICROSERVICES_SPLIT_PLAN.MD).
 
@@ -122,4 +122,4 @@ Runbooks (secrets, incident, flatten, QuestDB backup): [`docs/RUNBOOKS.MD`](docs
 
 ## Roadmap & logs
 
-**Backlog (features, hardening gates, platform):** [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD). **Issues to fix (existing code):** [`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD). **Reference:** [`docs/RISK_PRECEDENCE.MD`](docs/RISK_PRECEDENCE.MD) (risk order).
+**Work queue (features, fixes `IL-*`, gates `HG-*`, archive):** [`docs/QUEUE_LOG.MD`](docs/QUEUE_LOG.MD). **Reference:** [`docs/RISK_PRECEDENCE.MD`](docs/RISK_PRECEDENCE.MD) (risk order).

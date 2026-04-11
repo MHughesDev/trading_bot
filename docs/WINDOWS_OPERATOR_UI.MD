@@ -1,6 +1,6 @@
 # Windows operator UI — architecture and roadmap
 
-This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat`), a future **desktop shell** (`.exe`), and a **unified trading dashboard** (paper/live switch, positions, P&L by timeframe). It ties to backlog ids **FB-UI-*** and **FB-DASH-*** in [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD).
+This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat`), a future **desktop shell** (`.exe`), and a **unified trading dashboard** (paper/live switch, positions, P&L by timeframe). It ties to backlog ids **FB-UI-*** and **FB-DASH-*** in [`QUEUE_LOG.MD`](QUEUE_LOG.MD) (§2).
 
 ---
 
@@ -58,7 +58,7 @@ This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat
 
 ## 4. Checklist cross-reference
 
-See **§3 — operator UI / Windows** in [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD) (**FB-UI-01-01**, **FB-DASH-01-01**, etc.) for granular tracked work. Readiness checklist slices: **FB-DASH-01-01** (single operator page) and **FB-DASH-01-02** (cross-links from `README`, `RUNBOOKS`, `.env.example`).
+See **§2 — Open queue → MEDIUM → operator UI / Windows** in [`QUEUE_LOG.MD`](QUEUE_LOG.MD) (**FB-UI-01-01**, **FB-DASH-01-01**, etc.) for granular tracked work. Readiness checklist slices: **FB-DASH-01-01** (single operator page) and **FB-DASH-01-02** (cross-links from `README`, `RUNBOOKS`, `.env.example`).
 
 ---
 

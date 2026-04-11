@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create GitHub issues from embedded definitions (see docs/FEATURES_BACKLOG.MD).
+# Create GitHub issues from embedded definitions (see docs/QUEUE_LOG.MD).
 # Prerequisites: gh CLI, auth with repo scope: gh auth login
 # Usage: bash scripts/create_github_issues.sh
 #        REPO=owner/repo bash scripts/create_github_issues.sh
@@ -20,9 +20,9 @@ create() {
     gh issue create -R "$REPO" --title "$title" --body "$body"
 }
 
-create "Epic: NautilusMonster — remaining work" "Parent tracker for NautilusMonster. Close when \`docs/FEATURES_BACKLOG.MD\` release gates (§2) and P0–P1 items are addressed.
+create "Epic: NautilusMonster — remaining work" "Parent tracker for NautilusMonster. Close when \`docs/QUEUE_LOG.MD\` open HIGH priority and P0–P1 items are addressed.
 
-See: \`docs/FEATURES_BACKLOG.MD\`"
+See: \`docs/QUEUE_LOG.MD\`"
 
 create "Data: Wire Coinbase WS feed health to risk (stale data)" "## Goal
 Use \`CoinbaseWebSocketClient.last_message_at\` and feed gaps with \`NM_RISK_STALE_DATA_SECONDS\`.

@@ -18,7 +18,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 Agents working here should:
 
-- Implement **scoped** features and fixes aligned with [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD) or [`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD) when the task references them.
+- Implement **scoped** features and fixes aligned with [`docs/QUEUE_LOG.MD`](docs/QUEUE_LOG.MD) when the task references them.
 - Preserve **non-negotiable rules** below unless the user task explicitly overrides.
 - Keep **live vs replay** behavior aligned where the architecture expects it (`decision_engine/run_step.py` is the shared decision step).
 - Update **docs** when behavior, env vars, or operator-facing flows change.
@@ -43,7 +43,7 @@ Agents working here should:
 1. **Explicit user / task instructions** for the current change.
 2. **Tests** (`tests/`) and **runtime behavior** of the code being changed.
 3. **[`README.md`](README.md)** for commands and layout.
-4. **[`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD)** and **[`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD)** for planned work vs fixes (do not treat as executable spec unless task says so).
+4. **[`docs/QUEUE_LOG.MD`](docs/QUEUE_LOG.MD)** for planned work, fixes, and archive (do not treat as executable spec unless task says so).
 5. Other **[`docs/*.MD`](docs/)** reference files (risk precedence, shutdown, Coinbase granularity, etc.).
 6. Older comments or stale markdown — verify against code.
 
@@ -68,7 +68,7 @@ Agents working here should:
 | `infra/` | `docker-compose.yml`, Prometheus config |
 | `scripts/` | `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`, `smoke_credentials.py`, `create_github_issues.sh` |
 | `tests/` | Pytest suite |
-| `docs/` | `FEATURES_BACKLOG.MD`, `ISSUE_LOG.MD`, reference `.MD` files |
+| `docs/` | `QUEUE_LOG.MD`, reference `.MD` files |
 | `legacy/cryptobot/` | Frozen snapshot; not part of main pipeline |
 
 ---
@@ -142,7 +142,7 @@ Optional extras: `pip install -e ".[alpaca]"` for Alpaca adapter tests; `[dashbo
 Update **when** the change affects:
 
 - Operator-visible behavior, new/changed **`NM_*`** or config keys, or smoke/CI steps → **[`README.md`](README.md)** and/or relevant **[`docs/*.MD`](docs/)**.
-- Backlog or fix tracking → **[`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD)** or **[`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD)** (only if the task is to record work; otherwise a short PR/summary may suffice).
+- Queue / fix tracking → **[`docs/QUEUE_LOG.MD`](docs/QUEUE_LOG.MD)** (only if the task is to record work; otherwise a short PR/summary may suffice).
 
 Do **not** duplicate long narratives across files; link to `docs/` instead.
 
@@ -165,7 +165,7 @@ Prefer minimal edits; document assumptions in the handoff.
 
 **Bug fix:** Reproduce via test or trace; smallest fix; regression test if possible.
 
-**Feature:** Check [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD) for ID alignment; extend existing patterns; update tests and README/docs as needed.
+**Feature:** Check [`docs/QUEUE_LOG.MD`](docs/QUEUE_LOG.MD) for ID alignment; extend existing patterns; update tests and README/docs as needed.
 
 **Refactor:** Behavior-preserving only; run full test suite; do not mix with feature work in the same commit when avoidable.
 
