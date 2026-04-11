@@ -13,7 +13,7 @@
 |---------|------|
 | `app/` | Config (`AppSettings`, `default.yaml`), typed contracts, runtime (`live_service` and helpers) |
 | `data_plane/` | Coinbase ingest, rolling bars, Polars features, Qdrant memory, QuestDB/Redis storage |
-| `decision_engine/` | `run_decision_tick` (shared with backtest), pipeline, routing, audit |
+| `decision_engine/` | `run_decision_tick` (shared with backtest), `DecisionPipeline` (default **spec_policy**), audit |
 | `risk_engine/` | `RiskEngine`, order signing |
 | `execution/` | `ExecutionService`, router, Alpaca paper + Coinbase live adapters, CDP HTTP client |
 | `backtesting/` | Replay and portfolio simulation vs same decision step |

@@ -26,9 +26,9 @@ For **Alpaca paper**, set `NM_ALPACA_API_KEY` / `NM_ALPACA_API_SECRET`. To align
 
 Configure secrets via `.env` (prefix `NM_` for app settings). **Never use Alpaca for market data.**
 
-**Forecast routing (optional):** `NM_MODELS_DECISION_FORECAST_ROUTING_SOURCE` = `ridge` (default) or `packet` — when `packet`, `DecisionPipeline` derives `ForecastOutput` for routing from the methodology `ForecastPacket` instead of the Ridge surrogate (`app/config/default.yaml` under `models:`).
+**Spec pipeline (default):** `NM_MODELS_DECISION_PIPELINE_MODE=spec_policy` — **`ForecastPacket` + `PolicySystem`** (see [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD)). Set `NM_MODELS_DECISION_PIPELINE_MODE=legacy` for Ridge + router + `propose_action` ([`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](docs/MIGRATION_TO_SPEC_PIPELINE.MD)).
 
-**Spec pipeline (human forecaster + RL policy):** Default is **`spec_policy`** — **`ForecastPacket` + `PolicySystem`**. Set `NM_MODELS_DECISION_PIPELINE_MODE=legacy` to use Ridge + router + `propose_action` (see [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](docs/MIGRATION_TO_SPEC_PIPELINE.MD)).
+**Legacy-only forecast routing:** when `decision_pipeline_mode=legacy`, `NM_MODELS_DECISION_FORECAST_ROUTING_SOURCE` is `ridge` (default) or `packet` — with `packet`, `ForecastOutput` for routing comes from the `ForecastPacket` adapter instead of the Ridge surrogate (`app/config/default.yaml` under `models:`).
 
 **Production:** set `NM_RISK_SIGNING_SECRET` so only `RiskEngine`-signed `OrderIntent`s reach venues; optional `NM_CONTROL_PLANE_API_KEY` for mutating control-plane routes. For local dev without signing, `NM_ALLOW_UNSIGNED_EXECUTION=true` (not for production).
 
@@ -55,6 +55,7 @@ Endpoints: `/status`, `/routes`, `/params`, `/system/mode`, `/flatten`, `/models
 ## Documentation map
 
 - **As-built specs (code-aligned):** [`docs/Specs/README.MD`](docs/Specs/README.MD) — topic specs that mirror the current codebase.
+- **End-to-end walkthrough (live, paper, live venue, backtest):** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) — uses default **`spec_policy`** pipeline unless noted.
 - **Human-provided intent:** [`docs/Human Provided Specs/README.MD`](docs/Human%20Provided%20Specs/README.MD) — includes **forecaster** and **policy** architecture specs; reconcile against `docs/Specs/` and the repo to drive [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD) / [`docs/ISSUE_LOG.MD`](docs/ISSUE_LOG.MD).
 - **Backlog & issues, runbooks, deep dives:** other files under [`docs/`](docs/).
 
