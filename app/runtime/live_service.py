@@ -37,6 +37,8 @@ from decision_engine.run_step import run_decision_tick
 from execution.adapters.base_adapter import PositionSnapshot
 from execution.service import ExecutionService
 from risk_engine.engine import RiskEngine
+from services.runtime_bridge import RuntimeHandoffBridge
+from shared.messaging.factory import create_message_bus
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +166,15 @@ async def run_live_loop(
     sentiment_overlay: dict[str, float] = {}
     last_feature_row: dict[str, dict[str, float]] = {s: {} for s in syms}
     stop = stop_event or asyncio.Event()
+
+    runtime_bridge: RuntimeHandoffBridge | None = None
+    if cfg.microservices_runtime_bridge_enabled:
+        try:
+            runtime_bridge = RuntimeHandoffBridge(create_message_bus())
+            logger.info("microservice runtime bridge enabled (shadow handoff)")
+        except Exception:
+            logger.exception("microservice runtime bridge init failed; continuing without bridge")
+            runtime_bridge = None
 
     qdb: QuestDBWriter | None = None
     if cfg.questdb_persist_decision_traces:
@@ -321,6 +332,21 @@ async def run_live_loop(
                 position_signed_qty=positions.get(symbol, Decimal(0)),
                 portfolio_equity_usd=risk_engine.current_equity,
             )
+
+            if runtime_bridge is not None:
+                try:
+                    direction = int(proposal.direction) if proposal is not None else 0
+                    size_fraction = float(proposal.size_fraction) if proposal is not None else 0.0
+                    runtime_bridge.process_feature_row(
+                        {
+                            "symbol": symbol,
+                            "direction": direction,
+                            "size_fraction": size_fraction,
+                            "route_id": proposal.route_id.value if proposal is not None else "NO_TRADE",
+                        }
+                    )
+                except Exception:
+                    logger.exception("runtime bridge shadow handoff failed")
 
             oid = str(uuid.uuid4())
             intent = risk_engine.to_order_intent(trade) if trade else None
