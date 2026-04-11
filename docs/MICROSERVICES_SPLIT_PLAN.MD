@@ -29,6 +29,7 @@ It is intentionally implementation-oriented so work can be executed as small, te
 - ✅ **Market data service** publishes **`market.tick.normalized.v1`** via **`POST /ingest/raw-tick`** (scaffold); **`GET /messaging`**. Five-process chain: **`test_redis_five_process_market_data_through_gateway_chain`**. Compose port **8206**.
 - ✅ **Control plane** **`GET /microservices/health`** aggregates best-effort **`/healthz`** for default scaffold ports (`NM_MICROSERVICES_HEALTH_HOST`, optional **`NM_MICROSERVICES_HEALTH_PORTS`** override).
 - ✅ **Observability writer service** (Phase 7 scaffold): subscribes to execution ack/fill/reject/position + **`risk.intent.blocked`** on the shared bus; **`GET /events/recent`** returns bounded in-memory buffers; Redis poll loop when **`NM_MESSAGING_BACKEND=redis_streams`**. Compose **8207**; included in **`GET /microservices/health`** default ports. QuestDB persistence remains future work.
+- ✅ Six-process Redis integration (**market_data → feature → decision → risk → gateway + observability_writer**): **`test_redis_six_process_chain_includes_observability_writer`** in **`tests/test_integration_microservices_redis.py`** (`NM_INTEGRATION_SERVICES=1`).
 - ⏭️ Next step (program §11 not yet met): optional **real Alpaca paper** smoke, **`live_service`** in compose, or full **Kraken WS** in `market_data_service` — production split remains future work.
 
 ---
