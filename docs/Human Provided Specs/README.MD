@@ -13,6 +13,8 @@ This folder holds **documents you supply** (product intent, external requirement
 |------|-------------|
 | [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) | Full forecaster: VSN, latent CNN, multi-resolution xLSTM, quantiles, conformal, ensemble |
 | [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](POLICY_MODEL_ARCHITECTURE_SPEC.MD) | Forecast-conditioned RL policy: observation, target exposure, risk gate, execution plan |
+| [`NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD`](NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD) | Nightly forecaster + RL maintenance cadence, seeds, budgets, promotion gates |
+| [`INITIAL_OFFLINE_TRAINING_CAMPAIGN_SPEC.MD`](INITIAL_OFFLINE_TRAINING_CAMPAIGN_SPEC.MD) | First offline bootstrap: walk-forward splits, campaign scale, PPO+SAC targets |
 | [`TEMPLATE_HUMAN_SPEC.MD`](TEMPLATE_HUMAN_SPEC.MD) | Blank template for new documents |
 
 ## Workflow (recommended)

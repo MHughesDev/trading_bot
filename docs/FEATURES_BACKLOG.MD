@@ -59,7 +59,6 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | FB-FR-P0 | Feature | Open | Full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD): leakage-safe dataset, VSN, latent CNN, multi-res xLSTM, regime fusion, quantile head, conformal, ensemble | `forecaster_model/` |
 | FB-SPEC-02 | Improvement | Open | **Trained weights on hot path:** load PyTorch **forecaster** (xLSTM when available) and **RL policy** checkpoints in `DecisionPipeline` / `PolicySystem` instead of NumPy / heuristic-only (implementation detail of **`FB-FR-P0`** + **`FB-PL-P0`**) | `forecaster_model/`, `policy_model/`, `models/` |
 | FB-SPEC-03 | Tech debt | Open | **Unified artifact wiring:** one clear settings contract for `spec_policy` (forecaster packet builder + policy actor) vs legacy HMM+Ridge only; avoid operator confusion where `NM_MODELS_*` affects legacy path but not stub packet/heuristic policy | `app/config/settings.py`, `decision_engine/pipeline.py`, `docs/RUNBOOKS.MD` |
-| FB-SPEC-04 | Feature | Open | **Real historical training pipeline:** replace or supplement `_synthetic_training_data` in `run_train_evaluate_log` with bar/feature ETL, labels, and reproducible dataset manifests for production retrains | `orchestration/nightly_retrain.py`, `forecaster_model/data/`, `backtesting/` |
 | FB-SPEC-05 | Improvement | Open | **Optional GPU/CUDA for PyTorch:** device selection (train + infer) when `torch` is installed; document defaults (CPU) and CUDA requirements | `forecaster_model/training/torch_trainer.py`, `pyproject.toml` `[models_torch]` |
 | FB-SPEC-06 | Platform | Open | **Model registry / versioned artifacts:** filesystem or MLflow-backed promotion workflow, version labels, and single operator-facing “active model set” beyond ad-hoc paths | `models/registry/`, `control_plane/api.py`, `docs/RUNBOOKS.MD` |
 | FB-SPEC-07 | Feature | Open | **Multi-asset portfolio coordination:** cross-symbol capital allocation, correlation-aware or risk-parity style sizing, or documented limits when running many `market_data_symbols` (beyond independent per-symbol ticks) | `risk_engine/`, `decision_engine/`, `docs/Specs/` |
@@ -195,13 +194,14 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-FR-PG7 | 2026-04-11 | **`ABLATION_SIGNED_OFF_LSTM_BASELINE`** in `xlstm_cell.py` (spec §27) |
 | FB-PL-PG4 | 2026-04-11 | **`reward_eval.py`** — `evaluate_reward_weights`, `stress_regime_returns` |
 | FB-PL-PG5 | 2026-04-11 | **`tests/test_execution_parity.py`** — planner skip when delta negligible |
-| FB-PL-PG6 | 2026-04-11 | **`run_forecaster_policy_nightly`** in `orchestration/nightly_retrain.py` (bundles HMM+Ridge + forecaster stub + policy trainer) |
+| FB-PL-PG6 | 2026-04-11 | **`run_training_campaign`** in `orchestration/training_campaign.py` via `orchestration/nightly_retrain.py` (real candles + quantile forecaster + heuristic RL eval) |
 | FB-PL-PG7 | 2026-04-11 | **`POST /models/version`**, `nm_model_version_info`; Grafana panels for forecast fallback + policy shadow — `infra/grafana/.../nm-overview.json` |
 | FB-FR-PG8 | 2026-04-11 | **Drift z-score** on `ForecastGuardConfig` + `tests/test_forecast_guard_drift.py` |
 | FB-FR-PG9 | 2026-04-11 | **`tests/test_fault_injection_forecast.py`** |
 | FB-PL-PG8 | 2026-04-11 | **`behavior_cloning.py`** — `BCDataset`, `behavior_cloning_loss` |
 | FB-SPEC-00 | 2026-04-11 | **Spec pipeline wiring:** `decision_pipeline_mode` (`legacy` \| `spec_policy`), `NM_MODELS_DECISION_PIPELINE_MODE`, `DecisionPipeline` + `run_spec_policy_step`, `portfolio_equity_usd` in `run_decision_tick`; [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](MIGRATION_TO_SPEC_PIPELINE.MD) |
 | FB-SPEC-01 | 2026-04-11 | **Default `decision_pipeline_mode` = `spec_policy`** in `AppSettings` + `default.yaml`; `legacy` via env/YAML only |
+| FB-SPEC-04 | 2026-04-11 | **Real historical training:** `orchestration/training_campaign.py` + `real_data_bars.py` fetch Coinbase candles only; walk-forward triple splits; `forecaster_model/training/real_data_fit.py` QuantileRegressor; `rl_real_data_eval.py` heuristic rollout; human specs in `docs/Human Provided Specs/NIGHTLY_*` + `INITIAL_*` |
 
 ---
 
