@@ -4,6 +4,8 @@ Multi-route AI crypto trading stack: **Kraken** for all market data (REST + WebS
 
 ## Quick start
 
+**Full operator checklist (new machine):** **[`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD)**.
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
@@ -96,6 +98,7 @@ Decision service exposes `POST /ingest/features-row` and `GET /events/recent` fo
 
 ## Documentation map
 
+- **Ready to run (checklist):** [`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD) — venv, `.env`, Docker, preflight, venues, `run.bat`.
 - **As-built specs (code-aligned):** [`docs/Specs/README.MD`](docs/Specs/README.MD) — topic specs that mirror the current codebase.
 - **End-to-end walkthrough (live, paper, live venue, backtest):** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) — uses default **`spec_policy`** pipeline unless noted.
 - **Human-provided intent:** [`docs/Human Provided Specs/README.MD`](docs/Human%20Provided%20Specs/README.MD) — includes **forecaster** and **policy** architecture specs; reconcile against `docs/Specs/` and the repo to drive [`docs/QUEUE.MD`](docs/QUEUE.MD).

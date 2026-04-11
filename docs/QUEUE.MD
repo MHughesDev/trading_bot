@@ -131,8 +131,6 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 | ID | Phase | Cat | Type | Status | Summary | Pointer |
 |----|-------|-----|------|--------|---------|---------|
-| FB-DASH-01-01 | B | DS | Feature | Open | **Operator “ready to run” page:** single checklist (venv, `pip install`, `.env`, Docker stack, preflight, venue keys vs mode) | New or extend `docs/`, link from README |
-| FB-DASH-01-02 | B | DS | Feature | Open | **Cross-links:** README + `RUNBOOKS.MD` + `.env.example` point to that checklist; no duplicate prose | `README.md`, `RUNBOOKS.MD` |
 | FB-DASH-02-01 | B | DS | Feature | Open | **Control plane:** read current `execution_mode` + mutating route or file write for **intent** to switch paper/live (validates + persists for next process start) | `control_plane/api.py`, `app/config/` |
 | FB-DASH-02-02 | B | DS | Feature | Open | **Streamlit:** dropdown + “Apply” that calls mutate endpoint and shows **restart required** until live loop/supervisor picks up config | `control_plane/pages/` or `Home.py` |
 | FB-DASH-02-03 | B | DS | Reliability | Open | **Runbook:** explicit steps to restart `live_service` / `power_supervisor` after mode change (no hot-swap venue) | `RUNBOOKS.MD` |
@@ -334,6 +332,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-O1, FB-O2 | 2026-04-08 | Decision latency metric; Promtail + Grafana |
 | FB-S1 | 2026-04-10 | QuestDB batch flush + runbooks |
 | FB-C1 | 2026-04-10 | Streamlit + `streamlit_util` |
+| FB-DASH-01-01, FB-DASH-01-02 | 2026-04-11 | Operator **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** checklist; README + RUNBOOKS + `.env.example` cross-links |
 | FB-I1, FB-I2, HG-13 | 2026-04-10 | README orchestration note; CI workflow + optional integration |
 | FB-B1 | 2026-04-10 | `available_cash_usd` / replay cash |
 | FB-T1, FB-T2 | 2026-04-10 | Alpaca smoke; shutdown signals |
@@ -360,6 +359,8 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-AUDIT-14 | ops | 2026-04-11 | Rollback bundle runbook |
 | FB-B1 | risk | 2026-04-10 | `available_cash_usd` + replay |
 | FB-C1 | control_plane | 2026-04-10 | Streamlit + API helpers |
+| FB-DASH-01-01 | docs | 2026-04-11 | **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** — single operator checklist (venv, `.env`, Docker, preflight, venues, `run.bat`) |
+| FB-DASH-01-02 | docs | 2026-04-11 | Cross-links: [`README.md`](../README.md) quick start + doc map, [`RUNBOOKS.MD`](RUNBOOKS.MD) intro, [`.env.example`](../.env.example) header → `READY_TO_RUN.MD` |
 | FB-F1 | data | 2026-04-08 | FinBERT optional + sentiment aggregates |
 | FB-F2 | data | 2026-04-10 | RSS + dedup; `NM_NEWS_RSS_FEEDS` |
 | FB-F3 | data | 2026-04-10 | Multi-symbol market data tests *(historical: Coinbase REST; current: Kraken)* |
