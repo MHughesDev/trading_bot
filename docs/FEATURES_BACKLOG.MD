@@ -112,7 +112,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| — | — | — | *None — see §8.* | — |
+| — | — | — | *No open LOW items — see §8.* | — |
 
 ### Out of scope (not prioritized)
 
@@ -202,6 +202,7 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-SPEC-00 | 2026-04-11 | **Spec pipeline wiring:** `decision_pipeline_mode` (`legacy` \| `spec_policy`), `NM_MODELS_DECISION_PIPELINE_MODE`, `DecisionPipeline` + `run_spec_policy_step`, `portfolio_equity_usd` in `run_decision_tick`; [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](MIGRATION_TO_SPEC_PIPELINE.MD) |
 | FB-SPEC-01 | 2026-04-11 | **Default `decision_pipeline_mode` = `spec_policy`** in `AppSettings` + `default.yaml`; `legacy` via env/YAML only |
 | FB-SPEC-04 | 2026-04-11 | **Real historical training:** `orchestration/training_campaign.py` + `real_data_bars.py` fetch Coinbase candles only; walk-forward triple splits; `forecaster_model/training/real_data_fit.py` QuantileRegressor; `rl_real_data_eval.py` heuristic rollout; human specs in `docs/Human Provided Specs/NIGHTLY_*` + `INITIAL_*` |
+| FB-PL-P2b | 2026-04-10 | **`policy_model.risk_bridge`:** `risk_state_to_policy_envelope` maps `RiskState` + `AppSettings` → `PolicyRiskEnvelope`; tests `test_policy_risk_bridge.py` |
 
 ---
 

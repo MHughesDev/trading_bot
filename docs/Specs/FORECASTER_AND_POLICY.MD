@@ -35,6 +35,7 @@ VSN → Latent CNN → Multi-Resolution xLSTM → Regime-Conditioned Fusion → 
 | `observation/builder.py` | `policy_model/observation/builder.py` — `PolicyObservationBuilder` |
 | `policy/encoders.py`, `actor.py`, `critic.py`, `action_projection.py`, `policy_network.py` | Present; actor is `MultiBranchMLPPolicy` (`mlp_actor.py`); `ValueCritic` stub in `critic.py`; `PolicyNetwork` wraps actor + `update` stub |
 | `risk/gate.py` | `policy_model/risk/gate.py` — class **`RiskGate`** (alias `PolicyRiskGate`) |
+| `risk_bridge.py` | `policy_model.risk_bridge.risk_state_to_policy_envelope` — maps shared `RiskState` + `AppSettings` limits → `PolicyRiskEnvelope` for `PolicySystem` / gate |
 | `env/rewards.py` | `policy_model/env/rewards.py` → `one_step_reward` in `env/reward.py` |
 | `env/environment.py` | `policy_model/env/environment.py` — `TradingPolicyEnvironment` Protocol; **`replay_env.ReplayPolicyEnvironment`** concrete replay loop |
 | `training/protocol.py` | `RLPolicyAlgorithm` Protocol |
