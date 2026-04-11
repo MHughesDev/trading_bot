@@ -26,7 +26,9 @@ It is intentionally implementation-oriented so work can be executed as small, te
 - ✅ **Decision + Risk services** use **`create_message_bus()`** (same env as gateway) with **`redis_stream_poll_lifespan`** for Redis Streams; **`GET /messaging`** on both. Multi-process chain: **`POST decision /ingest/features-row` → risk → gateway** verified in **`tests/test_integration_microservices_redis.py::test_redis_three_process_decision_risk_gateway_chain`**.
 - ✅ Compose overlay includes **decision_service** (8203), **risk_service** (8204), **execution_gateway** (8202) — see **`infra/docker-compose.microservices.yml`**.
 - ✅ **Feature service** consumes **`market.tick.normalized.v1`**, publishes **`features.row.generated.v1`** (scaffold tick→row mapping); **`POST /ingest/market-tick`**, **`GET /messaging`**. Four-process chain test: **`test_redis_four_process_feature_decision_risk_gateway_chain`**.
-- ⏭️ Next step (program §11 not yet met): optional **real Alpaca paper** smoke, **`live_service`** in compose, or **control plane** per-service aggregation — full production split remains future work.
+- ✅ **Market data service** publishes **`market.tick.normalized.v1`** via **`POST /ingest/raw-tick`** (scaffold); **`GET /messaging`**. Five-process chain: **`test_redis_five_process_market_data_through_gateway_chain`**. Compose port **8206**.
+- ✅ **Control plane** **`GET /microservices/health`** aggregates best-effort **`/healthz`** for default scaffold ports (`NM_MICROSERVICES_HEALTH_HOST`, optional **`NM_MICROSERVICES_HEALTH_PORTS`** override).
+- ⏭️ Next step (program §11 not yet met): optional **real Alpaca paper** smoke, **`live_service`** in compose, or full **Kraken WS** in `market_data_service` — production split remains future work.
 
 ---
 

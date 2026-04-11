@@ -18,6 +18,7 @@ from control_plane.preflight import preflight_report
 from app.contracts.risk import SystemMode
 from app.runtime.mode_manager import ModeManager
 from app.runtime.state_manager import StateManager
+from control_plane.microservice_health import probe_microservices_health
 
 settings = load_settings()
 state = StateManager()
@@ -86,6 +87,12 @@ def get_status() -> dict[str, Any]:
         "production_preflight": production_preflight_payload(settings),
         "model_artifacts": model_artifact_contract(settings),
     }
+
+
+@app.get("/microservices/health")
+def microservices_health() -> dict[str, Any]:
+    """Best-effort probes for optional scaffold processes (see infra/docker-compose.microservices.yml)."""
+    return probe_microservices_health()
 
 
 @app.get("/routes")

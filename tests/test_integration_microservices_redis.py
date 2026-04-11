@@ -443,3 +443,108 @@ def test_redis_four_process_feature_decision_risk_gateway_chain() -> None:
             err = p.stderr.read().decode() if p.stderr else ""
             if p.returncode not in (0, -15) and err:
                 pytest.fail(f"uvicorn stderr: {err[:1500]}")
+
+
+def test_redis_five_process_market_data_through_gateway_chain() -> None:
+    """Market data → Feature → Decision → Risk → Gateway (raw tick on market_data service)."""
+    redis_url = os.getenv("NM_REDIS_URL", "redis://127.0.0.1:6379/0")
+    try:
+        import redis as redis_mod
+
+        redis_mod.Redis.from_url(redis_url, socket_connect_timeout=2).ping()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"Redis not reachable at {redis_url!r}: {exc}")
+
+    secret = "integration-5proc-chain-secret-32chars!!"
+    base = {
+        "NM_MESSAGING_BACKEND": "redis_streams",
+        "NM_REDIS_URL": redis_url,
+        "NM_RISK_SIGNING_SECRET": secret,
+        "NM_EXECUTION_GATEWAY_SUBMIT": "true",
+        "NM_EXECUTION_ADAPTER": "stub",
+        "NM_ALLOW_UNSIGNED_EXECUTION": "false",
+    }
+
+    md_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.market_data_service.main:app", "--host", "127.0.0.1", "--port", "18791"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    feature_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.feature_service.main:app", "--host", "127.0.0.1", "--port", "18792"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    decision_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.decision_service.main:app", "--host", "127.0.0.1", "--port", "18793"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    risk_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.risk_service.main:app", "--host", "127.0.0.1", "--port", "18794"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    gw_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.execution_gateway_service.main:app", "--host", "127.0.0.1", "--port", "18795"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        for port in (18791, 18792, 18793, 18794, 18795):
+            _wait_http(f"http://127.0.0.1:{port}/healthz")
+
+        for url, name in (
+            ("http://127.0.0.1:18791/messaging", "market_data"),
+            ("http://127.0.0.1:18792/messaging", "feature"),
+            ("http://127.0.0.1:18793/messaging", "decision"),
+            ("http://127.0.0.1:18794/messaging", "risk"),
+            ("http://127.0.0.1:18795/messaging", "gateway"),
+        ):
+            r = httpx.get(url, timeout=2.0)
+            r.raise_for_status()
+            assert r.json().get("messaging_backend") == "redis_streams", name
+
+        r = httpx.post(
+            "http://127.0.0.1:18791/ingest/raw-tick",
+            json={
+                "symbol": "BTC-USD",
+                "direction": 1,
+                "size_fraction": 0.1,
+                "route_id": "SCALPING",
+                "mid_price": 50_000.0,
+                "spread_bps": 5.0,
+            },
+            timeout=5.0,
+        )
+        r.raise_for_status()
+
+        deadline = time.monotonic() + 35.0
+        recent: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            recent = httpx.get("http://127.0.0.1:18795/events/recent", timeout=2.0).json()
+            if recent.get("submitted_orders"):
+                break
+            time.sleep(0.2)
+
+        assert recent.get("submitted_orders"), f"gateway empty: {recent!r}"
+        first = recent["submitted_orders"][0]
+        if isinstance(first, dict) and "order_intent" in first:
+            assert first["order_intent"]["symbol"] == "BTC-USD"
+    finally:
+        for p in (gw_proc, risk_proc, decision_proc, feature_proc, md_proc):
+            p.terminate()
+        for p in (gw_proc, risk_proc, decision_proc, feature_proc, md_proc):
+            try:
+                p.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        for p in (gw_proc, risk_proc, decision_proc, feature_proc, md_proc):
+            err = p.stderr.read().decode() if p.stderr else ""
+            if p.returncode not in (0, -15) and err:
+                pytest.fail(f"uvicorn stderr: {err[:1500]}")
