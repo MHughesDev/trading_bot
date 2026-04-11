@@ -12,6 +12,7 @@ _DEFAULT_PROBES: tuple[tuple[str, int], ...] = (
     ("decision_service", 8203),
     ("risk_service", 8204),
     ("execution_gateway_service", 8202),
+    ("observability_writer_service", 8207),
 )
 
 
