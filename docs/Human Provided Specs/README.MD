@@ -5,7 +5,7 @@ This folder holds **documents you supply** (product intent, external requirement
 ## Purpose
 
 1. **Source of intent** — What you want the system to become or enforce, independent of current implementation.
-2. **Diff driver** — When an agent (or you) compares these files to **`docs/Specs/`** (as-built) and to the code, gaps become queue items (e.g. new rows in **`docs/QUEUE_LOG.MD`**).
+2. **Diff driver** — When an agent (or you) compares these files to **`docs/Specs/`** (as-built) and to the code, gaps become queue items (e.g. new rows in **`docs/QUEUE.MD`**).
 
 ## Files in this repo
 
