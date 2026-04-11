@@ -1,0 +1,151 @@
+"""
+Optional cross-process microservice handoff: Redis Streams + execution gateway (subprocess).
+
+Requires Redis (e.g. ``docker compose -f infra/docker-compose.yml up -d redis``).
+
+Run with: ``NM_INTEGRATION_SERVICES=1 python -m pytest tests/test_integration_microservices_redis.py -q``
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import time
+from typing import Any
+
+import pytest
+
+pytest.importorskip("httpx")
+
+import httpx
+
+from services.runtime_bridge import RuntimeHandoffBridge
+from shared.messaging.factory import create_message_bus
+
+
+def _integration_enabled() -> bool:
+    return os.getenv("NM_INTEGRATION_SERVICES", "").lower() in ("1", "true", "yes")
+
+
+pytestmark = pytest.mark.skipif(
+    not _integration_enabled(),
+    reason="Set NM_INTEGRATION_SERVICES=1 and start Redis (see infra/docker-compose.yml)",
+)
+
+
+def _wait_http(url: str, *, timeout_s: float = 15.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    last_exc: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            r = httpx.get(url, timeout=1.0)
+            if r.status_code == 200:
+                return
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+        time.sleep(0.15)
+    raise AssertionError(f"HTTP {url} did not become ready: {last_exc!r}")
+
+
+def test_redis_runtime_bridge_external_gateway_subprocess() -> None:
+    """Producer publishes handoff to Redis; separate uvicorn gateway consumes and submits (stub)."""
+    redis_url = os.getenv("NM_REDIS_URL", "redis://127.0.0.1:6379/0")
+    try:
+        import redis as redis_mod
+
+        redis_mod.Redis.from_url(redis_url, socket_connect_timeout=2).ping()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"Redis not reachable at {redis_url!r}: {exc}")
+
+    secret = "integration-test-risk-secret-32chars!!"
+
+    gw_env = os.environ.copy()
+    gw_env.update(
+        {
+            "NM_MESSAGING_BACKEND": "redis_streams",
+            "NM_REDIS_URL": redis_url,
+            "NM_RISK_SIGNING_SECRET": secret,
+            "NM_EXECUTION_GATEWAY_SUBMIT": "true",
+            "NM_EXECUTION_ADAPTER": "stub",
+            "NM_ALLOW_UNSIGNED_EXECUTION": "false",
+        }
+    )
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "services.execution_gateway_service.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "18765",
+        ],
+        env=gw_env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        _wait_http("http://127.0.0.1:18765/healthz")
+
+        prod_env = os.environ.copy()
+        prod_env.update(
+            {
+                "NM_MESSAGING_BACKEND": "redis_streams",
+                "NM_REDIS_URL": redis_url,
+                "NM_RISK_SIGNING_SECRET": secret,
+            }
+        )
+        _keys = list(prod_env.keys())
+        _saved = {k: os.environ.get(k) for k in _keys}
+        try:
+            os.environ.update(prod_env)
+            bridge = RuntimeHandoffBridge(
+                create_message_bus(),
+                execution_gateway_mode="external",
+            )
+            bridge.process_feature_row(
+                {
+                    "symbol": "BTC/USD",
+                    "direction": 1,
+                    "size_fraction": 0.1,
+                    "route_id": "SCALPING",
+                    "mid_price": 50_000.0,
+                    "spread_bps": 5.0,
+                }
+            )
+        finally:
+            for k in _keys:
+                v = _saved.get(k)
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        deadline = time.monotonic() + 20.0
+        recent: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            r = httpx.get("http://127.0.0.1:18765/events/recent", timeout=2.0)
+            r.raise_for_status()
+            recent = r.json()
+            if recent.get("submitted_orders"):
+                break
+            time.sleep(0.2)
+
+        assert recent.get("submitted_orders"), f"gateway saw no orders: {recent!r}"
+        first = recent["submitted_orders"][0]
+        if isinstance(first, dict) and "order_intent" in first:
+            assert first["order_intent"]["symbol"] == "BTC/USD"
+        else:
+            assert first.get("symbol") == "BTC/USD"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        err = proc.stderr.read().decode() if proc.stderr else ""
+        if proc.returncode not in (0, -15) and err:
+            pytest.fail(f"uvicorn stderr: {err[:2000]}")

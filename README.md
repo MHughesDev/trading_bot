@@ -99,7 +99,9 @@ Decision service exposes `POST /ingest/features-row` and `GET /events/recent` fo
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`): **ruff**, **pytest**, `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`. Optional integration job against Redis / QuestDB / Qdrant is **manual** (`workflow_dispatch`) or run locally with `NM_INTEGRATION_SERVICES=1` after `docker compose -f infra/docker-compose.yml up -d`.
+GitHub Actions (`.github/workflows/ci.yml`): **ruff**, **pytest**, `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`. Optional integration job against Redis / QuestDB / Qdrant is **manual** (`workflow_dispatch`) or run locally with `NM_INTEGRATION_SERVICES=1` after `docker compose -f infra/docker-compose.yml up -d`. That job also runs **`tests/test_integration_microservices_redis.py`** (Redis + subprocess `uvicorn` execution gateway + stub submit).
+
+**Microservices dev (optional):** `docker compose -f infra/docker-compose.yml -f infra/docker-compose.microservices.yml up -d redis execution_gateway` starts Redis and a **stub** execution gateway on port **8202** (first start installs deps in the container).
 
 ## Operations
 

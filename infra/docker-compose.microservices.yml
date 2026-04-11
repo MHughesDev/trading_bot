@@ -1,0 +1,33 @@
+# Optional overlay: run execution_gateway beside Redis (dev convenience).
+#
+# From repository root:
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.microservices.yml up -d redis execution_gateway
+#
+# Gateway: http://localhost:8202/healthz — uses Redis at service hostname ``redis``.
+# First start runs ``pip install -e ".[dev]"`` (slow); prefer host ``uvicorn`` for tight loops.
+
+services:
+  execution_gateway:
+    image: python:3.12-slim-bookworm
+    container_name: nm-execution-gateway
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+    ports:
+      - "8202:8202"
+    environment:
+      NM_MESSAGING_BACKEND: redis_streams
+      NM_REDIS_URL: redis://redis:6379/0
+      NM_EXECUTION_GATEWAY_SUBMIT: "true"
+      NM_EXECUTION_ADAPTER: stub
+      NM_RISK_SIGNING_SECRET: dev-risk-secret
+      NM_ALLOW_UNSIGNED_EXECUTION: "false"
+    command:
+      - sh
+      - -c
+      - |
+        pip install -q -e ".[dev]" && \
+        python -m uvicorn services.execution_gateway_service.main:app --host 0.0.0.0 --port 8202
+    depends_on:
+      redis:
+        condition: service_healthy

@@ -52,4 +52,6 @@ jobs:
       - name: Integration tests
         env:
           NM_INTEGRATION_SERVICES: "1"
-        run: python -m pytest tests/test_integration_optional_services.py -q
+        run: |
+          python -m pytest tests/test_integration_optional_services.py -q
+          python -m pytest tests/test_integration_microservices_redis.py -q
