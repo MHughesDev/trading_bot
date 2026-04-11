@@ -123,7 +123,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 | ID | Phase | Cat | Type | Status | Summary | Pointer |
 |----|-------|-----|------|--------|---------|---------|
 | FB-UI-01-01 | B | UI | Platform | Open | **PyInstaller (or cx_Freeze) spec** + one build script that mirrors `run.bat` (API + supervisor + Streamlit) | `setup.bat`, `run.bat`, repo root |
-| FB-UI-01-02 | B | UI | Reliability | Open | **Windows distribution notes:** AV false positives, optional code signing, bundle size — short section in [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) | `docs/` |
+| FB-UI-01-02 | B | UI | Reliability | Done | **Windows distribution notes:** AV false positives, optional code signing, bundle size — short section in [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) | `docs/` — Done 2026-04-11 |
 | FB-UI-02-01 | B | UI | Spike | Open | **Shell choice:** time-boxed comparison Electron vs Tauri vs PyInstaller-webview for loading `http://127.0.0.1:8501` | [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) |
 | FB-UI-02-02 | B | UI | Platform | Open | **Desktop shell MVP:** single-window host opening the Streamlit URL (no React rewrite) | `docs/`, optional `packaging/` |
 
@@ -131,11 +131,11 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 | ID | Phase | Cat | Type | Status | Summary | Pointer |
 |----|-------|-----|------|--------|---------|---------|
-| FB-DASH-01-01 | B | DS | Feature | Open | **Operator “ready to run” page:** single checklist (venv, `pip install`, `.env`, Docker stack, preflight, venue keys vs mode) | New or extend `docs/`, link from README |
-| FB-DASH-01-02 | B | DS | Feature | Open | **Cross-links:** README + `RUNBOOKS.MD` + `.env.example` point to that checklist; no duplicate prose | `README.md`, `RUNBOOKS.MD` |
+| FB-DASH-01-01 | B | DS | Feature | Done | **Operator “ready to run” page:** single checklist (venv, `pip install`, `.env`, Docker stack, preflight, venue keys vs mode) | [`OPERATOR_READY_CHECKLIST.MD`](OPERATOR_READY_CHECKLIST.MD) — Done 2026-04-11 |
+| FB-DASH-01-02 | B | DS | Feature | Done | **Cross-links:** README + `RUNBOOKS.MD` + `.env.example` point to that checklist; no duplicate prose | Done 2026-04-11 |
 | FB-DASH-02-01 | B | DS | Feature | Open | **Control plane:** read current `execution_mode` + mutating route or file write for **intent** to switch paper/live (validates + persists for next process start) | `control_plane/api.py`, `app/config/` |
 | FB-DASH-02-02 | B | DS | Feature | Open | **Streamlit:** dropdown + “Apply” that calls mutate endpoint and shows **restart required** until live loop/supervisor picks up config | `control_plane/pages/` or `Home.py` |
-| FB-DASH-02-03 | B | DS | Reliability | Open | **Runbook:** explicit steps to restart `live_service` / `power_supervisor` after mode change (no hot-swap venue) | `RUNBOOKS.MD` |
+| FB-DASH-02-03 | B | DS | Reliability | Done | **Runbook:** explicit steps to restart `live_service` / `power_supervisor` after mode change (no hot-swap venue) | [`RUNBOOKS.MD`](RUNBOOKS.MD) — Done 2026-04-11 |
 | FB-DASH-03-01 | B | DS | Feature | Open | **Positions DTO:** normalize `fetch_positions` across Alpaca paper / Coinbase into one contract | `execution/adapters/`, `app/contracts/` |
 | FB-DASH-03-02 | B | DS | Feature | Open | **`GET /portfolio/positions`** on control plane (aggregates adapter; handles errors per symbol) | `control_plane/api.py` |
 | FB-DASH-03-03 | B | DS | Feature | Open | **Streamlit sidebar:** collapsible positions panel, poll interval, empty/error states | `control_plane/` |
@@ -145,7 +145,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 | FB-DASH-05-02 | B | DS | Feature | Open | **`GET /pnl/summary?range=`** (hour, day, month, year, all) with realized/unrealized split | `control_plane/api.py` |
 | FB-DASH-05-03 | B | DS | Feature | Open | **Streamlit:** timeframe selector + aggregate P&L panel | `control_plane/` |
 | FB-DASH-06-01 | B | DS | Hardening | Open | **UI guardrail:** modal + optional “type LIVE” before applying live execution profile | `control_plane/` |
-| FB-DASH-06-02 | B | DS | Reliability | Open | **RUNBOOKS:** live trading checklist mirrors UI guardrails | `RUNBOOKS.MD` |
+| FB-DASH-06-02 | B | DS | Reliability | Done | **RUNBOOKS:** live trading checklist mirrors UI guardrails | [`RUNBOOKS.MD`](RUNBOOKS.MD) — Done 2026-04-11 |
 
 #### FB-MS — Microservices extraction (remaining production split)
 
@@ -360,6 +360,10 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-AUDIT-14 | ops | 2026-04-11 | Rollback bundle runbook |
 | FB-B1 | risk | 2026-04-10 | `available_cash_usd` + replay |
 | FB-C1 | control_plane | 2026-04-10 | Streamlit + API helpers |
+| FB-DASH-01-01 | docs | 2026-04-11 | [`OPERATOR_READY_CHECKLIST.MD`](OPERATOR_READY_CHECKLIST.MD) — ready-to-run checklist |
+| FB-DASH-01-02 | docs | 2026-04-11 | README + `RUNBOOKS.MD` + `.env.example` cross-links to checklist |
+| FB-DASH-02-03 | ops | 2026-04-11 | Restart after mode/venue change (`RUNBOOKS.MD`) |
+| FB-DASH-06-02 | ops | 2026-04-11 | Live trading checklist (manual; mirrors future UI guardrails) |
 | FB-F1 | data | 2026-04-08 | FinBERT optional + sentiment aggregates |
 | FB-F2 | data | 2026-04-10 | RSS + dedup; `NM_NEWS_RSS_FEEDS` |
 | FB-F3 | data | 2026-04-10 | Multi-symbol market data tests *(historical: Coinbase REST; current: Kraken)* |
@@ -420,6 +424,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-SPEC-08 | pipeline | 2026-04-11 | Preflight script + API |
 | FB-T1 | test | 2026-04-10 | `smoke_credentials.py` |
 | FB-T2 | runtime | 2026-04-10 | Shutdown signals test |
+| FB-UI-01-02 | docs | 2026-04-11 | Windows distribution notes (AV, signing, bundle size) in `WINDOWS_OPERATOR_UI.MD` |
 | FB-X1 | execution | 2026-04-08 | Coinbase live JWT orders |
 | FB-X2 | execution | 2026-04-08 | Cancel + positions |
 | FB-X3 | execution | 2026-04-10 | `create_execution_adapter` in router |

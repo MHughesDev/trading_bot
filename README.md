@@ -96,6 +96,7 @@ Decision service exposes `POST /ingest/features-row` and `GET /events/recent` fo
 
 ## Documentation map
 
+- **Operator ready-to-run checklist:** [`docs/OPERATOR_READY_CHECKLIST.MD`](docs/OPERATOR_READY_CHECKLIST.MD) — venv, install, `.env`, Docker, preflight, venue keys vs mode (**FB-DASH-01-01** / **FB-DASH-01-02**).
 - **As-built specs (code-aligned):** [`docs/Specs/README.MD`](docs/Specs/README.MD) — topic specs that mirror the current codebase.
 - **End-to-end walkthrough (live, paper, live venue, backtest):** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) — uses default **`spec_policy`** pipeline unless noted.
 - **Human-provided intent:** [`docs/Human Provided Specs/README.MD`](docs/Human%20Provided%20Specs/README.MD) — includes **forecaster** and **policy** architecture specs; reconcile against `docs/Specs/` and the repo to drive [`docs/QUEUE.MD`](docs/QUEUE.MD).
