@@ -4,7 +4,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 **References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
 
-**Status (2026-04-11):** All previously tracked **FB-** items are **archived** in §8. Add new rows below when scope expands.
+**Status:** Open items below track **spec pipeline rollout** (human forecaster + RL policy as production path). Completed items archive to §8.
 
 ---
 
@@ -56,13 +56,13 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| — | — | — | *None — see §8.* | — |
+| FB-SPEC-01 | Hardening | Open | **Default to spec pipeline:** after shadow/paper validation, set **`models.decision_pipeline_mode`** default to **`spec_policy`** (today default remains **`legacy`** for safety) | [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](MIGRATION_TO_SPEC_PIPELINE.MD), `app/config/default.yaml` |
 
 ### Backlog items (open) — policy production readiness
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| — | — | — | *None — see §8.* | — |
+| FB-SPEC-02 | Improvement | Open | **Trained weights on hot path:** load PyTorch **forecaster** (xLSTM when available) and **RL policy** checkpoints in `DecisionPipeline` / `PolicySystem` instead of NumPy / heuristic-only | `forecaster_model/`, `policy_model/`, `models/` |
 
 ### Completed gates (reference)
 
@@ -195,6 +195,7 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-FR-PG8 | 2026-04-11 | **Drift z-score** on `ForecastGuardConfig` + `tests/test_forecast_guard_drift.py` |
 | FB-FR-PG9 | 2026-04-11 | **`tests/test_fault_injection_forecast.py`** |
 | FB-PL-PG8 | 2026-04-11 | **`behavior_cloning.py`** — `BCDataset`, `behavior_cloning_loss` |
+| FB-SPEC-00 | 2026-04-11 | **Spec pipeline wiring:** `decision_pipeline_mode` (`legacy` \| `spec_policy`), `NM_MODELS_DECISION_PIPELINE_MODE`, `DecisionPipeline` + `run_spec_policy_step`, `portfolio_equity_usd` in `run_decision_tick`; [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](MIGRATION_TO_SPEC_PIPELINE.MD) |
 
 ---
 

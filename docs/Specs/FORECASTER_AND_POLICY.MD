@@ -48,7 +48,9 @@ VSN → Latent CNN → Multi-Resolution xLSTM → Regime-Conditioned Fusion → 
 
 ## Relationship to V3 runtime
 
-- **`DecisionPipeline`** uses **`TemporalFusionForecaster`** (Ridge) for **`ForecastOutput`** by default. Set **`models.decision_forecast_routing_source: packet`** (or **`NM_MODELS_DECISION_FORECAST_ROUTING_SOURCE=packet`**) to derive **`ForecastOutput`** from the built **`ForecastPacket`** via **`decision_engine/forecast_packet_adapter.py`** (FB-FR-PG1). A packet is built when **`decision_forecast_packet_enabled`** is true **or** when routing source is **`packet`**.
+- **Legacy mode (default):** **`DecisionPipeline`** uses **`TemporalFusionForecaster`** (Ridge surrogate) + router + **`propose_action`**.
+- **Spec policy mode:** Set **`models.decision_pipeline_mode: spec_policy`** (or **`NM_MODELS_DECISION_PIPELINE_MODE=spec_policy`**) — **`ForecastPacket`** from **`forecaster_model`** drives **`PolicySystem`**, and **`ExecutionPlan`** maps to **`ActionProposal`** for **`RiskEngine`**. See [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD).
+- **Packet-only routing (legacy mode):** **`decision_forecast_routing_source: packet`** derives **`ForecastOutput`** from **`ForecastPacket`** via **`decision_engine/forecast_packet_adapter.py`** without switching the full policy path.
 
 ## Dependencies
 

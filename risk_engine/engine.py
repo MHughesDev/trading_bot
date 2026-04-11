@@ -23,6 +23,11 @@ class RiskEngine:
         self._current_equity = equity
         self._peak_equity = max(self._peak_equity, equity)
 
+    @property
+    def current_equity(self) -> float:
+        """Mark-to-market equity for policy / portfolio sizing (spec pipeline mode)."""
+        return self._current_equity
+
     def evaluate(
         self,
         symbol: str,

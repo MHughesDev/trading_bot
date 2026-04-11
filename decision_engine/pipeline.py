@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from pathlib import Path
+
 import numpy as np
 
 from app.config.settings import AppSettings, load_settings
@@ -14,6 +16,7 @@ from app.contracts.regime import RegimeOutput
 from app.contracts.risk import RiskState
 from decision_engine.action_generator import propose_action
 from decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
+from decision_engine.spec_policy_proposal import run_spec_policy_step
 from forecaster_model.inference.stub import build_forecast_packet_stub, ohlc_arrays_from_feature_row
 from models.forecast.tft_forecast import TemporalFusionForecaster
 from models.regime.hmm_regime import GaussianHMMRegimeModel
@@ -75,6 +78,10 @@ class DecisionPipeline:
         feature_row: dict[str, float],
         spread_bps: float,
         risk: RiskState,
+        *,
+        mid_price: float | None = None,
+        portfolio_equity_usd: float | None = None,
+        position_signed_qty: Decimal | None = None,
     ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None]:
         X = _feature_vector(feature_row).reshape(1, -1)
         regime_out = self.regime.predict_proba_last(X)
@@ -82,18 +89,38 @@ class DecisionPipeline:
 
         self._last_forecast_packet = None
         pkt: ForecastPacket | None = None
-        need_packet = self._settings.decision_forecast_packet_enabled or (
-            self._settings.decision_forecast_routing_source == "packet"
+        spec_mode = self._settings.decision_pipeline_mode == "spec_policy"
+        need_packet = (
+            spec_mode
+            or self._settings.decision_forecast_packet_enabled
+            or (self._settings.decision_forecast_routing_source == "packet")
         )
         if need_packet:
             o, h, lo, cl, vo = ohlc_arrays_from_feature_row(feature_row)
             pkt = build_forecast_packet_stub(o, h, lo, cl, vo)
             pkt.forecast_diagnostics["symbol"] = symbol
             pkt.forecast_diagnostics["routing_source"] = self._settings.decision_forecast_routing_source
+            pkt.forecast_diagnostics["pipeline_mode"] = self._settings.decision_pipeline_mode
             self._last_forecast_packet = pkt
 
+        if spec_mode:
+            assert pkt is not None
+            mp = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
+            eq = float(portfolio_equity_usd) if portfolio_equity_usd is not None else 100_000.0
+            fc, route, action = run_spec_policy_step(
+                symbol,
+                pkt,
+                settings=self._settings,
+                app_risk=risk,
+                mid_price=mp,
+                spread_bps=spread_bps,
+                portfolio_equity_usd=eq,
+                position_signed_qty=position_signed_qty,
+            )
+            return regime_out, fc, route, action
+
         if self._settings.decision_forecast_routing_source == "packet":
-            assert pkt is not None  # built above when routing uses packet
+            assert pkt is not None
             fc = forecast_packet_to_forecast_output(pkt)
         else:
             fc = fc_ridge

@@ -30,6 +30,7 @@ This folder holds **specifications that describe the repository as implemented**
 | [`OBSERVABILITY_AND_INFRA.MD`](OBSERVABILITY_AND_INFRA.MD) | Metrics, logging, `infra/docker-compose.yml` |
 | [`TESTING_AND_CI.MD`](TESTING_AND_CI.MD) | `tests/`, `scripts/`, GitHub Actions |
 | [`FORECASTER_AND_POLICY.MD`](FORECASTER_AND_POLICY.MD) | `forecaster_model/`, `policy_model/`, `ForecastPacket` |
+| [`../MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD) | Switching default decision path from Ridge+router to ForecastPacket+PolicySystem |
 
 ## Naming convention
 

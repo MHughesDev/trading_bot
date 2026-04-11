@@ -80,8 +80,10 @@ questdb:
 models:
   # When true, `DecisionPipeline` builds a `ForecastPacket` each step (for diagnostics / policy).
   # `decision_forecast_routing_source` controls whether routing uses Ridge `ForecastOutput` or values derived from the packet (FB-FR-PG1).
+  # `decision_pipeline_mode`: legacy (Ridge + router + propose_action) vs spec_policy (ForecastPacket + PolicySystem). See docs/MIGRATION_TO_SPEC_PIPELINE.MD
   decision_forecast_packet_enabled: false
   decision_forecast_routing_source: ridge # ridge | packet
+  decision_pipeline_mode: legacy # legacy | spec_policy
 #   regime_path: models/artifacts/regime.joblib
 #   forecast_path: models/artifacts/forecast.joblib
 
