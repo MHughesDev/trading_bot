@@ -83,8 +83,8 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 | IL-011 | 2026-04-10 | `NotImplementedError` in `main()` signal handlers: extracted `register_shutdown_signals`; test `tests/test_live_service_signals.py`. |
 | IL-102 | 2026-04-10 | WS normalizer fixtures expanded: `trade_tick.json`, `l2_snapshot.json` + tests in `test_normalizer_fixtures.py`. |
 | IL-104 | 2026-04-11 | **Nightly/orchestration training:** removed `_synthetic_training_data` / Ridge-only `run_train_evaluate_log`; `orchestration/nightly_retrain.py` now drives **real Coinbase candle** fetch + walk-forward quantile forecaster + real-data heuristic RL eval per human training specs (`orchestration/training_campaign.py`). |
-| IL-103 | 2026-04-11 | **Spec stub/heuristic visibility:** one-time WARNING at `DecisionPipeline` init when `decision_pipeline_mode=spec_policy` (`build_forecast_packet_stub` + `HeuristicTargetPolicy` until FB-SPEC-02 / FB-FR-P0 / FB-PL-P0); runbook paragraph in [`docs/RUNBOOKS.MD`](RUNBOOKS.MD). |
-| IL-105 | 2026-04-11 | **Production preflight:** `GET /status` includes `production_preflight` (signing secret, unsigned flag, venue keys vs execution mode); documented in [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) (complements FB-SPEC-08). |
+| IL-103 | 2026-04-11 | **Spec stub/heuristic visibility:** one-time WARNING at `DecisionPipeline` init when `decision_pipeline_mode=spec_policy` (`build_forecast_packet_stub` + `HeuristicTargetPolicy` until FB-SPEC-02 / FB-FR-P0 / FB-PL-P0); runbook paragraph in [`docs/RUNBOOKS.MD`](RUNBOOKS.MD). Commit `6be117f`. |
+| IL-105 | 2026-04-11 | **Production preflight:** `GET /status` includes `production_preflight` (signing secret, unsigned flag, venue keys vs execution mode); documented in [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) (complements FB-SPEC-08). Commit `6be117f`. |
 
 ---
 
