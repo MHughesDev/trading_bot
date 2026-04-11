@@ -40,8 +40,11 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 
 | ID | Area | Summary |
 |----|------|---------|
-| IL-103 | models | **Spec pipeline vs trained weights:** default `spec_policy` still builds `ForecastPacket` via stub + `HeuristicTargetPolicy` until **FB-SPEC-02** / **FB-FR-P0** / **FB-PL-P0** land; operators may assume neural weights are live — fix by **explicit README/RUNBOOKS callouts** and/or **one-line startup log** when stub/heuristic path is active (`decision_engine/pipeline.py`, `policy_model/system.py`, [`docs/RUNBOOKS.MD`](RUNBOOKS.MD)) |
-| IL-104 | ops | **Nightly train uses synthetic data:** `run_train_evaluate_log` (`orchestration/nightly_retrain.py`) fits HMM+Ridge on `_synthetic_training_data` unless replaced — add **prominent WARNING log** (and doc pointer to **FB-SPEC-04**) so operators are not misled about production readiness |
+| IL-103 | models | **Runtime vs trained artifacts:** hot path uses NumPy `ForecasterModel` methodology + `HeuristicTargetPolicy` (not campaign quantile joblib / not PyTorch weights) until **FB-SPEC-02** — fix by **explicit README/RUNBOOKS callouts** and/or **one-line startup log** when non-checkpoint policy/forecaster is active (`decision_engine/pipeline.py`, `policy_model/system.py`, [`docs/RUNBOOKS.MD`](RUNBOOKS.MD)) |
+| IL-106 | docs | **Resolved/issue text drift:** [`ISSUE_LOG.MD`](ISSUE_LOG.MD) “Resolved” rows **IL-002**, **IL-003** still describe HMM + Ridge `NM_MODELS_*` paths **removed** by master pipeline work — rewrite resolved summaries so history matches current code (or archive note) |
+| IL-107 | observability | **Conformal load silent fallback:** `build_forecast_packet_methodology` catches `OSError` on `load_conformal_state` and continues without conformal — add **visible log line** (WARNING) when path set but load fails so operators do not assume calibration is active (`forecaster_model/inference/build_from_ohlc.py`) |
+| IL-108 | ops | **`.env.example` drift:** file uses raw `API_KEY` / `API_SECRET` names; app expects **`NM_*`** (`NM_ALPACA_*`, etc.) per `AppSettings` — audit and align example + short comment to avoid single-machine misconfiguration |
+| IL-109 | runtime | **`execution_plan_to_proposal` scaling:** `size_fraction = min(1, abs(delta)*4)` in `decision_engine/spec_policy_proposal.py` is undocumented magic; audit behavior for tiny/large equity and document or replace with explicit sizing from master spec (`decision_engine/spec_policy_proposal.py`) |
 
 ---
 
@@ -50,6 +53,7 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 | ID | Area | Summary |
 |----|------|---------|
 | IL-105 | ops | **Production preflight gap:** no first-class automated check that signing/secrets/adapter config match policy before live trade (complements **FB-SPEC-08**); optional smoke script or `/status` extension |
+| IL-110 | control_plane | **Local bind / API key:** default `control_plane_host=0.0.0.0` exposes FastAPI on all interfaces; for single-machine untrusted LAN use **`127.0.0.1`** + keep **`NM_CONTROL_PLANE_API_KEY`** for mutating routes — document in [`RUNBOOKS.MD`](RUNBOOKS.MD) (light security hygiene) |
 
 ---
 
@@ -89,5 +93,5 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 
 ## Related
 
-- [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD) — planned work; **FB-SPEC-02 … FB-SPEC-08** cover trained weights, wiring, training data, GPU, registry, multi-asset, preflight (no duplicate rows: issues here are **fixes** / operator-misleading behavior)  
+- [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD) — planned work; **FB-SPEC-02 … FB-SPEC-08** and **FB-AUDIT-*** (post-audit follow-ups) cover trained weights, wiring, parity, ops (no duplicate rows: issues here are **fixes** / operator-misleading behavior)  
 - [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD)
