@@ -1,5 +1,5 @@
 """
-Live trading loop: Coinbase WS → features → decision → risk → audit → optional QuestDB → execution.
+Live trading loop: Kraken WS → features → decision → risk → audit → optional QuestDB → execution.
 
 Uses `run_decision_tick` (same path as `backtesting/replay.py`). Passes `feed_last_message_at` from WS.
 """
@@ -17,15 +17,16 @@ from decimal import Decimal
 
 from app.config.settings import AppSettings, load_settings
 from app.contracts.risk import RiskState
-from data_plane.bars.rolling import RollingMinuteBars
+from data_plane.bars.rolling import RollingBars
 from data_plane.features.pipeline import FeaturePipeline
 from data_plane.ingest.news_ingest import aggregate_sentiment_for_symbols_async
 from data_plane.memory.embeddings import feature_dict_to_embedding
 from data_plane.memory.qdrant_memory import QdrantNewsMemory
 from data_plane.memory.retrieval_loop import run_memory_retrieval_loop
-from data_plane.ingest.coinbase_rest import CoinbaseRESTClient
-from data_plane.ingest.coinbase_ws import CoinbaseWebSocketClient
-from data_plane.ingest.normalizers import OrderBookLevel2Snapshot, TickerSnapshot, TradeTick, normalize_ws_message
+from data_plane.ingest.kraken_normalizers import normalize_kraken_ws_message
+from data_plane.ingest.kraken_rest import KrakenRESTClient
+from data_plane.ingest.kraken_ws import KrakenWebSocketClient
+from data_plane.ingest.normalizers import OrderBookLevel2Snapshot, TickerSnapshot, TradeTick
 from data_plane.ingest.product_cache import ProductMetadataCache
 from data_plane.storage.questdb import QuestDBWriter
 from decision_engine.audit import decision_trace
@@ -87,7 +88,7 @@ async def _position_reconcile_loop(
     interval: float,
     stop: asyncio.Event,
 ) -> None:
-    """Replace in-memory positions with venue truth (paper Alpaca → Coinbase product ids)."""
+    """Replace in-memory positions with venue truth (paper Alpaca → configured symbols)."""
     while not stop.is_set():
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval)
@@ -150,7 +151,7 @@ async def run_live_loop(
 ) -> None:
     cfg = settings or load_settings()
     syms = symbols or cfg.market_data_symbols
-    ws = CoinbaseWebSocketClient(syms)
+    ws = KrakenWebSocketClient(syms)
     feature_pipeline = FeaturePipeline(
         return_windows=cfg.features_return_windows,
         volatility_windows=cfg.features_volatility_windows,
@@ -176,10 +177,10 @@ async def run_live_loop(
         )
         await qdb.connect()
 
-    rest_client: CoinbaseRESTClient | None = None
+    rest_client: KrakenRESTClient | None = None
     product_cache: ProductMetadataCache | None = None
     try:
-        rest_client = CoinbaseRESTClient()
+        rest_client = KrakenRESTClient()
         product_cache = ProductMetadataCache(rest_client)
         await product_cache.refresh_if_stale()
     except Exception:
@@ -245,7 +246,10 @@ async def run_live_loop(
 
         qdb_flush_task = asyncio.create_task(_flush_loop())
 
-    rollers: dict[str, RollingMinuteBars] = {s: RollingMinuteBars(s) for s in syms}
+    bar_sec = max(1, int(cfg.market_data_bar_interval_seconds))
+    rollers: dict[str, RollingBars] = {
+        s: RollingBars(s, interval_seconds=bar_sec) for s in syms
+    }
     positions: dict[str, Decimal] = {s: Decimal(0) for s in syms}
 
     reconcile_stop: asyncio.Event | None = None
@@ -273,7 +277,7 @@ async def run_live_loop(
         async for msg in ws.stream_messages():
             if stop.is_set():
                 break
-            norm = normalize_ws_message(msg)
+            norm = normalize_kraken_ws_message(msg)
             if norm is None:
                 continue
             symbol = getattr(norm, "symbol", None)

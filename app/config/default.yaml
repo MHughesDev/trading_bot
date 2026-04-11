@@ -9,7 +9,10 @@ execution:
   position_reconcile_interval_seconds: 60
 
 market_data:
-  provider: coinbase
+  provider: kraken
+  bar_interval_seconds: 1 # live WS tick roll-up bucket size (seconds)
+  # Offline training bar size (seconds). Kraken OHLC supports 60,300,…; other values use /Trades (slow for large lookbacks). Set to 1 for second bars on short windows.
+  training_granularity_seconds: 60
   symbols:
     - BTC-USD
     - ETH-USD
@@ -84,6 +87,8 @@ models:
   forecaster_conformal_state_path: null
   # Optional NPZ: serialized NumPy forecaster weights (`forecaster_model.models.forecaster_weights`)
   forecaster_weights_path: null
+  # Optional PyTorch checkpoint (forecaster_model.training.train_torch_forecaster_distill)
+  forecaster_torch_path: null
   # Optional NPZ: multi-branch MLP policy actor (`policy_model.policy.mlp_actor.MultiBranchMLPPolicy`)
   policy_mlp_path: null
   # PyTorch forecaster training (and future torch inference): auto | cpu | cuda | cuda:0

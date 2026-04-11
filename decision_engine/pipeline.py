@@ -71,6 +71,9 @@ class DecisionPipeline:
         self._settings = settings or load_settings()
         self._last_forecast_packet: ForecastPacket | None = None
         self._forecaster_weight_bundle = _load_forecaster_bundle_if_configured(self._settings)
+        self._torch_model, self._torch_device, self._torch_cfg = _load_torch_forecaster_if_configured(
+            self._settings
+        )
         self._policy_system: PolicySystem | None = _load_policy_system_if_configured(self._settings)
 
     @staticmethod
@@ -80,14 +83,22 @@ class DecisionPipeline:
             return
         _serving_mode_logged = True
         fw = settings.models_forecaster_weights_path
+        ft = settings.models_forecaster_torch_path
         pp = settings.models_policy_mlp_path
-        has_f = bool(fw and Path(fw).is_file())
+        has_torch = bool(ft and Path(ft).is_file())
+        has_npz = bool(fw and Path(fw).is_file())
         has_p = bool(pp and Path(pp).is_file())
+        if has_torch:
+            fmode = "pytorch_mlp"
+        elif has_npz:
+            fmode = "npz_weights"
+        else:
+            fmode = "numpy_rng"
         logger.info(
             "decision pipeline serving mode: forecaster=%s policy=%s "
-            "(NumPy ForecasterModel + PolicySystem; PyTorch optional for training-only); "
+            "(ForecastPacket + PolicySystem; optional PyTorch/NPZ); "
             "NM_MODELS_FORECASTER_CHECKPOINT_ID=%s",
-            "npz_weights" if has_f else "numpy_rng",
+            fmode,
             "mlp_npz" if has_p else "heuristic",
             settings.models_forecaster_checkpoint_id or "(unset)",
         )
@@ -112,7 +123,15 @@ class DecisionPipeline:
         self._log_serving_mode_once(self._settings)
 
         conf_path = self._settings.models_forecaster_conformal_state_path
-        cfg = _forecaster_config_from_env(conf_path)
+        base_cfg = _forecaster_config_from_env(conf_path)
+        if self._torch_model is not None and self._torch_cfg is not None:
+            cfg = self._torch_cfg
+            if conf_path and Path(conf_path).is_file():
+                cfg.calibration_enabled = True
+        else:
+            cfg = base_cfg
+        bar_sec = max(1, int(self._settings.market_data_bar_interval_seconds))
+        cfg.base_interval_seconds = bar_sec
         o, h, lo, cl, vo = ohlc_arrays_from_feature_row(feature_row, history_len=cfg.history_length)
         pkt = build_forecast_packet_methodology(
             o,
@@ -122,7 +141,9 @@ class DecisionPipeline:
             vo,
             cfg=cfg,
             conformal_state_path=conf_path,
-            weight_bundle=self._forecaster_weight_bundle,
+            weight_bundle=self._forecaster_weight_bundle if self._torch_model is None else None,
+            torch_model=self._torch_model,
+            torch_device=self._torch_device,
         )
         pkt.forecast_diagnostics["symbol"] = symbol
         pkt.forecast_diagnostics["pipeline"] = "master_spec"
@@ -146,6 +167,25 @@ class DecisionPipeline:
             policy_system=self._policy_system,
         )
         return regime_out, fc, route, action
+
+
+def _load_torch_forecaster_if_configured(settings: AppSettings):
+    p = settings.models_forecaster_torch_path
+    if not p or not Path(p).is_file():
+        return None, None, None
+    try:
+        from forecaster_model.inference.torch_infer import load_torch_forecaster_checkpoint
+
+        model, dev, tcfg = load_torch_forecaster_checkpoint(p)
+        return model, dev, tcfg
+    except ImportError:
+        logger.warning(
+            "NM_MODELS_FORECASTER_TORCH_PATH set but torch not installed — ignoring PyTorch forecaster"
+        )
+        return None, None, None
+    except OSError as exc:
+        logger.warning("PyTorch forecaster not loaded from %s (%s)", p, exc)
+        return None, None, None
 
 
 def _load_forecaster_bundle_if_configured(settings: AppSettings):

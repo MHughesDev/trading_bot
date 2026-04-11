@@ -6,7 +6,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 ## 1. Repository purpose
 
-**NautilusMonster** is a Python **multi-route AI crypto trading** codebase: Coinbase for **all market data**, Alpaca for **paper execution only**, shared **decision + risk** path for live and replay, typed contracts (`app/contracts/`), and adapters under `execution/adapters/`.
+**NautilusMonster** is a Python **multi-route AI crypto trading** codebase: **Kraken** for **all market data**, Alpaca for **paper execution only**, shared **decision + risk** path for live and replay, typed contracts (`app/contracts/`), and adapters under `execution/adapters/`. **Coinbase** appears only in the **live execution** adapter when configured — not for market data ingestion.
 
 **This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, `docs/*.MD` (backlog, issue log, reference notes), `scripts/` (CI guards, smoke tests).
 
@@ -28,7 +28,7 @@ Agents working here should:
 
 ## 3. Non-negotiable rules
 
-- **Coinbase-only market data:** do not import Alpaca **data** clients outside the Alpaca **execution** adapter. Enforced by `scripts/ci_spec_compliance.sh` (excludes `legacy/`). If you touch market data ingestion, run that script.
+- **Kraken-only market data:** do not import Alpaca **data** clients outside the Alpaca **execution** adapter. Enforced by `scripts/ci_spec_compliance.sh` (excludes `legacy/`). If you touch market data ingestion, run that script.
 - **Risk is final:** `OrderIntent` execution goes through the risk/signing path described in `execution/intent_gate.py` and settings — do not bypass for “quick tests” in production paths.
 - **No raw text → trades:** keep metadata rules on `OrderIntent` consistent with existing validators.
 - **No automatic MLflow model promotion** in code: do not add `transition_model_version_stage` / `set_registered_model_alias`; `scripts/ci_mlflow_promotion_policy.sh` enforces this.
@@ -56,7 +56,7 @@ Agents working here should:
 | Path | Role |
 |------|------|
 | `app/` | Runtime (`live_service`), config (`app/config/`), contracts |
-| `data_plane/` | Ingest (Coinbase WS/REST, normalizers), bars, features, memory, storage |
+| `data_plane/` | Ingest (Kraken WS/REST, normalizers), bars, features, memory, storage |
 | `models/` | Regime, forecast, routing, MLflow registry stubs |
 | `decision_engine/` | Pipeline, `run_step` (shared tick), action generator |
 | `risk_engine/` | `RiskEngine`, signing |

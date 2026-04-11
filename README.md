@@ -1,6 +1,6 @@
 # NautilusMonster V3
 
-Multi-route AI crypto trading stack: **Coinbase** for all market data; **Alpaca** for paper execution only; typed contracts and execution adapters.
+Multi-route AI crypto trading stack: **Kraken** for all market data (REST + WebSocket); **Alpaca** for paper execution only; typed contracts and execution adapters. Live execution may still use **Coinbase** when `execution.live_adapter: coinbase` (orders only — not market data).
 
 ## Quick start
 
@@ -10,13 +10,9 @@ pip install -e ".[dev]"
 docker compose -f infra/docker-compose.yml up -d
 ```
 
-Smoke-test Coinbase public WebSocket (no API keys for public channels):
+Market data uses **Kraken** public APIs (no keys for read). Bar buckets default to **1 second** (`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`).
 
-```bash
-python -m data_plane.ingest.coinbase_ws
-```
-
-**Live decision loop (paper or live execution per config):** connects Coinbase WS → rolling bars → `run_decision_tick` → optional QuestDB traces → venue submit. Run as a module:
+**Live decision loop (paper or live execution per config):** connects Kraken WS → rolling bars → `run_decision_tick` → optional QuestDB traces → venue submit. Run as a module:
 
 ```bash
 python -m app.runtime.live_service
@@ -26,15 +22,15 @@ For **Alpaca paper**, set `NM_ALPACA_API_KEY` / `NM_ALPACA_API_SECRET`. To align
 
 Configure secrets via `.env` (prefix `NM_` for app settings — see [`.env.example`](.env.example)). **Never use Alpaca for market data.**
 
-**Decision pipeline (only path):** master spec — **`forecaster_model`** (xLSTM stack) → **`ForecastPacket`** → **`PolicySystem`** → risk / execution (see [`docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](docs/Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) and [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD)). Default: **NumPy** forecaster forward with **RNG-drawn** weights per layer unless you set **`NM_MODELS_FORECASTER_WEIGHTS_PATH`** (NPZ); policy defaults to **heuristic** unless **`NM_MODELS_POLICY_MLP_PATH`** (NPZ). Startup logs `decision pipeline serving mode:` with `numpy_rng`/`npz_weights` and `heuristic`/`mlp_npz`. Optional: `NM_MODELS_FORECASTER_CHECKPOINT_ID` (lineage), `NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH` (conformal JSON), **`NM_MODELS_TORCH_DEVICE`** for PyTorch **training** toy loops (`auto` uses CUDA when available). Full PyTorch forecaster on the hot path remains **FB-FR-P0**. Historical note: [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](docs/MIGRATION_TO_SPEC_PIPELINE.MD).
+**Decision pipeline (only path):** master spec — **`forecaster_model`** → **`ForecastPacket`** → **`PolicySystem`** → risk / execution (see [`docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](docs/Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) and [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD)). **Forecaster quantiles:** optional **`NM_MODELS_FORECASTER_TORCH_PATH`** (`forecaster_torch.pt` from `train_torch_forecaster_distill`) else **`NM_MODELS_FORECASTER_WEIGHTS_PATH`** (NPZ) else NumPy RNG. Policy: **`NM_MODELS_POLICY_MLP_PATH`** (NPZ) else heuristic. Logs `decision pipeline serving mode:` (`pytorch_mlp` / `npz_weights` / `numpy_rng`). Optional: `NM_MODELS_FORECASTER_CHECKPOINT_ID`, `NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH`, **`NM_MODELS_TORCH_DEVICE`**. Train PyTorch distill: `pip install -e ".[models_torch]"` then `forecaster_model.training.train_torch_forecaster`. Historical note: [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](docs/MIGRATION_TO_SPEC_PIPELINE.MD).
 
 **Production:** set `NM_RISK_SIGNING_SECRET` so only `RiskEngine`-signed `OrderIntent`s reach venues; optional `NM_CONTROL_PLANE_API_KEY` for mutating control-plane routes. For local dev without signing, `NM_ALLOW_UNSIGNED_EXECUTION=true` (not for production).
 
 **Preflight (live/paper):** `python scripts/preflight_check.py` (exit 1 if blocking issues) or `GET /status` on the control plane — includes `preflight` JSON (**IL-105** / **FB-SPEC-08**).
 
-**Verify API connectivity (no orders placed):** put keys in `.env` (`NM_ALPACA_*`, optional `NM_COINBASE_*`), then `pip install -e ".[alpaca]"` and `python scripts/smoke_credentials.py`. Coinbase Advanced Trade REST may require JWT for some routes; the script falls back to the public Exchange ticker when unauthenticated candle calls fail.
+**Verify API connectivity (no orders placed):** `pip install -e ".[alpaca]"` and `python scripts/smoke_credentials.py` (Kraken public OHLC + optional Alpaca). `NM_COINBASE_*` only matters for **live Coinbase execution**, not data.
 
-**Offline training (real candles only):** fetches historical 1m OHLCV from Coinbase public REST, walk-forward splits, quantile forecaster fit, then heuristic policy evaluation on the same real path (PPO/SAC are backlog). Run:
+**Offline training (real candles only):** fetches historical OHLC from **Kraken** (`NM_TRAINING_DATA_GRANULARITY_SECONDS`, default 60s); sub-minute or non-standard sizes use **Trades** aggregation (slow for long lookbacks). Walk-forward splits, quantile forecaster fit, then heuristic policy evaluation (PPO/SAC are backlog). Run:
 
 ```bash
 python -m orchestration.nightly_retrain --mode nightly

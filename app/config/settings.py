@@ -28,7 +28,9 @@ class AppSettings(BaseSettings):
     position_reconcile_enabled: bool = False
     position_reconcile_interval_seconds: int = 60
 
-    market_data_provider: str = "coinbase"
+    market_data_provider: str = "kraken"
+    market_data_bar_interval_seconds: int = 1
+    training_data_granularity_seconds: int = 1
     market_data_symbols: list[str] = Field(
         default_factory=lambda: ["BTC-USD", "ETH-USD", "SOL-USD"]
     )
@@ -103,6 +105,8 @@ class AppSettings(BaseSettings):
     models_forecaster_conformal_state_path: str | None = None
     # Optional NPZ: full NumPy `ForecasterWeightBundle` for deterministic forecaster forward (FB-SPEC-02)
     models_forecaster_weights_path: str | None = None
+    # Optional PyTorch: `forecaster_torch.pt` from `train_torch_forecaster_distill` (FB-FR-P0); overrides NPZ/RNG quantiles when file exists
+    models_forecaster_torch_path: str | None = None
     # Optional NPZ: `MultiBranchMLPPolicy` weights for PolicySystem actor (FB-SPEC-02)
     models_policy_mlp_path: str | None = None
     # PyTorch forecaster training / future torch inference: auto (CUDA if available) | cpu | cuda | cuda:N
@@ -124,7 +128,11 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["position_reconcile_interval_seconds"] = int(ex["position_reconcile_interval_seconds"])
     if "market_data" in cfg:
         md = cfg["market_data"] or {}
-        out["market_data_provider"] = md.get("provider", "coinbase")
+        out["market_data_provider"] = md.get("provider", "kraken")
+        if "bar_interval_seconds" in md:
+            out["market_data_bar_interval_seconds"] = int(md["bar_interval_seconds"])
+        if "training_granularity_seconds" in md:
+            out["training_data_granularity_seconds"] = int(md["training_granularity_seconds"])
         if "symbols" in md:
             out["market_data_symbols"] = md["symbols"]
     if "memory" in cfg:
@@ -206,6 +214,9 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         if "forecaster_weights_path" in mo:
             v = mo["forecaster_weights_path"]
             out["models_forecaster_weights_path"] = None if v is None else str(v)
+        if "forecaster_torch_path" in mo:
+            v = mo["forecaster_torch_path"]
+            out["models_forecaster_torch_path"] = None if v is None else str(v)
         if "policy_mlp_path" in mo:
             v = mo["policy_mlp_path"]
             out["models_policy_mlp_path"] = None if v is None else str(v)

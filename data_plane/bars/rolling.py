@@ -1,4 +1,4 @@
-"""In-memory 1-minute OHLCV roll-up from tick/stream prices (live path)."""
+"""In-memory OHLCV roll-up from tick/stream prices (live path). Bucket size configurable in seconds (default 1s)."""
 
 from __future__ import annotations
 
@@ -7,26 +7,30 @@ from datetime import UTC, datetime
 import polars as pl
 
 
-class RollingMinuteBars:
-    """Builds minute buckets from ticks; exposes Polars frame for FeaturePipeline."""
+class RollingBars:
+    """Builds fixed-interval buckets from ticks; exposes Polars frame for FeaturePipeline."""
 
-    def __init__(self, symbol: str, max_completed: int = 512) -> None:
+    def __init__(self, symbol: str, *, interval_seconds: int = 1, max_completed: int = 512) -> None:
+        if interval_seconds < 1:
+            raise ValueError("interval_seconds must be >= 1")
         self.symbol = symbol
+        self.interval_seconds = interval_seconds
         self.max_completed = max_completed
         self._completed: list[dict] = []
         self._bucket_start: datetime | None = None
         self._o = self._h = self._l = self._c = 0.0
         self._v = 0.0
 
-    @staticmethod
-    def _minute_floor(ts: datetime) -> datetime:
+    def _bucket_floor(self, ts: datetime) -> datetime:
         t = ts if ts.tzinfo else ts.replace(tzinfo=UTC)
         t = t.astimezone(UTC)
-        return t.replace(second=0, microsecond=0)
+        epoch = int(t.timestamp())
+        floored = epoch - (epoch % self.interval_seconds)
+        return datetime.fromtimestamp(floored, tz=UTC)
 
     def on_tick(self, price: float, ts: datetime, size: float = 0.0) -> None:
-        """Update current minute or roll to a new bar."""
-        b = self._minute_floor(ts)
+        """Update current bucket or roll to a new bar."""
+        b = self._bucket_floor(ts)
         if self._bucket_start is None:
             self._bucket_start = b
             self._o = self._h = self._l = self._c = float(price)
@@ -68,7 +72,7 @@ class RollingMinuteBars:
         }
 
     def bars_frame_with_partial(self) -> pl.DataFrame:
-        """Completed bars + in-progress minute (for feature enrichment)."""
+        """Completed bars + in-progress bucket (for feature enrichment)."""
         rows = list(self._completed)
         partial = self.current_partial_row()
         if partial:
@@ -85,3 +89,10 @@ class RollingMinuteBars:
                 }
             )
         return pl.DataFrame(rows).sort("timestamp")
+
+
+class RollingMinuteBars(RollingBars):
+    """Backward-compatible 60-second buckets."""
+
+    def __init__(self, symbol: str, max_completed: int = 512) -> None:
+        super().__init__(symbol, interval_seconds=60, max_completed=max_completed)

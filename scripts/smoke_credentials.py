@@ -2,7 +2,7 @@
 """
 Smoke-test external APIs without placing orders or printing secrets.
 
-- Coinbase: public REST candles (no auth). If NM_COINBASE_API_KEY is set, reports presence only.
+- Kraken: public REST OHLC (no auth). Live execution may still use Coinbase CDP keys separately.
 - Alpaca paper: fetch_positions() (read-only) when NM_ALPACA_* are set.
 
 Usage (from repo root, with .env or exported NM_* vars):
@@ -17,45 +17,24 @@ import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
 
-import httpx
-
 from app.config.settings import load_settings
-from data_plane.ingest.coinbase_rest import CoinbaseRESTClient
+from data_plane.ingest.kraken_rest import KrakenRESTClient
+from data_plane.ingest.kraken_symbols import kraken_rest_pair
 
 
-async def _coinbase_public() -> tuple[bool, str]:
-    """
-    Try Advanced Trade public candles first. Some environments return 401 without JWT;
-    then fall back to legacy Exchange public ticker (no auth) to prove reachability.
-    """
+async def _kraken_public() -> tuple[bool, str]:
+    """GET /0/public/OHLC for BTC/USD (no auth)."""
     end = datetime.now(UTC)
     start = end - timedelta(hours=2)
-    client = CoinbaseRESTClient()
+    client = KrakenRESTClient()
     try:
-        candles = await client.get_public_candles(
-            "BTC-USD",
-            start=start,
-            end=end,
-            granularity_seconds=3600,
-        )
-        if candles:
-            return True, "Advanced Trade REST candles OK"
-    except Exception as e:
-        if "401" in str(e) or "403" in str(e):
-            pass  # fall through to Exchange
-        else:
-            raise
+        pair = kraken_rest_pair("BTC-USD")
+        rows, _last = await client.ohlc(pair, interval_minutes=60, since=int(start.timestamp()))
+        if rows:
+            return True, f"Kraken REST OHLC OK ({len(rows)} row(s) for {pair})"
+        return False, "no OHLC rows returned"
     finally:
         await client.aclose()
-
-    # Legacy Coinbase Exchange API — public, widely available
-    url = "https://api.exchange.coinbase.com/products/BTC-USD/ticker"
-    async with httpx.AsyncClient(timeout=30.0) as h:
-        r = await h.get(url)
-        r.raise_for_status()
-        body = r.json()
-    price = body.get("price")
-    return bool(price), f"Exchange public ticker OK (last ~{price}) [Advanced Trade may require JWT]"
 
 
 async def _alpaca_positions() -> tuple[bool, str]:
@@ -73,20 +52,18 @@ async def main() -> int:
     settings = load_settings()
     print("NautilusMonster — credential / connectivity smoke test\n")
 
-    # Coinbase connectivity (public path; keys not required for read in Exchange API)
     try:
-        ok, detail = await _coinbase_public()
-        print(f"Coinbase market data: {'OK' if ok else 'WARN'} — {detail}")
+        ok, detail = await _kraken_public()
+        print(f"Kraken market data: {'OK' if ok else 'WARN'} — {detail}")
     except Exception as e:
-        print(f"Coinbase market data: FAIL — {type(e).__name__}: {e}")
+        print(f"Kraken market data: FAIL — {type(e).__name__}: {e}")
         return 1
 
     if settings.coinbase_api_key and settings.coinbase_api_secret:
-        print("Coinbase API key/secret: present (private JWT order path not exercised here)")
+        print("Coinbase API key/secret: present (live Coinbase execution adapter only; not used for market data)")
     else:
-        print("Coinbase API key/secret: not set (public data only; live orders need CDP signing in adapter)")
+        print("Coinbase API key/secret: not set (OK if not using live Coinbase execution)")
 
-    # Alpaca paper
     try:
         ran, msg = await _alpaca_positions()
         if ran:

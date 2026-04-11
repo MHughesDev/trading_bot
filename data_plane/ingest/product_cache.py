@@ -1,45 +1,34 @@
-"""TTL cache of Coinbase product metadata for tick/min size validation."""
+"""TTL cache of Kraken asset-pair metadata for tradable checks."""
 
 from __future__ import annotations
 
 import time
 
-from data_plane.ingest.coinbase_rest import CoinbaseProduct, CoinbaseRESTClient
+from data_plane.ingest.kraken_rest import KrakenRESTClient
+from data_plane.ingest.kraken_symbols import kraken_pair_from_symbol
 
 
 class ProductMetadataCache:
-    def __init__(self, client: CoinbaseRESTClient, ttl_seconds: float = 300.0) -> None:
+    def __init__(self, client: KrakenRESTClient, ttl_seconds: float = 300.0) -> None:
         self._client = client
         self._ttl = ttl_seconds
-        self._products: dict[str, CoinbaseProduct] = {}
+        self._wsname_tradable: dict[str, bool] = {}
         self._fetched_at: float = 0.0
 
     async def refresh_if_stale(self) -> None:
         now = time.monotonic()
-        if now - self._fetched_at < self._ttl and self._products:
+        if now - self._fetched_at < self._ttl and self._wsname_tradable:
             return
-        products = await self._client.list_products()
-        self._products = {p.product_id: p for p in products}
+        pairs = await self._client.list_asset_pairs()
+        self._wsname_tradable = {}
+        for _k, ap in pairs.items():
+            name = ap.wsname
+            if not name:
+                continue
+            st = (ap.raw.get("status") or "online").lower()
+            self._wsname_tradable[name] = st in ("online", "reduce_only")
         self._fetched_at = now
 
-    def get(self, product_id: str) -> CoinbaseProduct | None:
-        return self._products.get(product_id)
-
-    def quote_increment(self, product_id: str) -> float | None:
-        p = self.get(product_id)
-        if not p:
-            return None
-        raw = p.raw
-        for key in ("quote_increment", "quoteIncrement", "base_increment", "baseIncrement"):
-            if key in raw and raw[key] is not None:
-                try:
-                    return float(raw[key])
-                except (TypeError, ValueError):
-                    continue
-        return None
-
-    def is_tradable(self, product_id: str) -> bool:
-        p = self.get(product_id)
-        if not p or not p.status:
-            return True
-        return p.status.lower() in ("online", "active", "trading")
+    def is_tradable(self, symbol: str) -> bool:
+        pair = kraken_pair_from_symbol(symbol)
+        return self._wsname_tradable.get(pair, True)

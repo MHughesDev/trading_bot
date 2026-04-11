@@ -1,7 +1,7 @@
 """
 Real-data-only training driver (initial offline + nightly maintenance specs).
 
-No synthetic arrays. Fetches Coinbase candles, walk-forward splits, fits quantile forecaster,
+No synthetic arrays. Fetches Kraken OHLC/trades (see ``real_data_bars``), walk-forward splits, fits quantile forecaster,
 runs heuristic policy rollout with real returns (RL placeholder until PPO/SAC).
 
 **Offline vs live forecaster:** this path fits **sklearn `QuantileRegressor`** and saves
@@ -66,11 +66,11 @@ def _cfg_from_spec(
     offline pinball / quantile fit windows align with `build_forecast_packet_methodology`
     (FB-AUDIT-01). Initial and nightly both use full campaign horizon/history from spec constants.
     """
-    _ = settings
+    base_sec = max(1, int(settings.training_data_granularity_seconds))
     return ForecasterConfig(
         history_length=CAMPAIGN_HISTORY_LENGTH,
         forecast_horizon=CAMPAIGN_FORECAST_HORIZON,
-        base_interval_seconds=60,
+        base_interval_seconds=base_sec,
         feature_windows=(4, 16, 64),
         num_regime_dims=4,
         quantiles=(0.1, 0.5, 0.9),
@@ -126,20 +126,25 @@ def run_training_campaign(
     artifact_dir: Path | None = None,
     settings: AppSettings | None = None,
     lookback_days: int = 120,
-    granularity_seconds: int = 60,
+    granularity_seconds: int | None = None,
 ) -> dict[str, Any]:
     """
     Execute real-data training per spec. Writes artifacts under artifact_dir.
     """
     s = settings or load_settings()
     sym = symbol or (s.market_data_symbols[0] if s.market_data_symbols else "BTC-USD")
+    gsec = (
+        int(granularity_seconds)
+        if granularity_seconds is not None
+        else max(1, int(s.training_data_granularity_seconds))
+    )
     out = Path(artifact_dir or Path("models/artifacts_training"))
     out.mkdir(parents=True, exist_ok=True)
     cfg = _cfg_from_spec(mode, settings=s)
 
     end = datetime.now(UTC)
     start = end - timedelta(days=lookback_days)
-    snap_id = dataset_snapshot_id(sym, start, end, granularity_seconds)
+    snap_id = dataset_snapshot_id(sym, start, end, gsec)
     manifest_path = out / f"data_snapshot_{snap_id}.json"
     write_snapshot_manifest(
         manifest_path,
@@ -147,12 +152,12 @@ def run_training_campaign(
             "symbol": sym,
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "granularity_seconds": granularity_seconds,
+            "granularity_seconds": gsec,
             "snapshot_id": snap_id,
         },
     )
     logger.info("fetching real candles %s %s → %s", sym, start, end)
-    bars = fetch_symbol_bars_sync(sym, start, end, granularity_seconds=granularity_seconds)
+    bars = fetch_symbol_bars_sync(sym, start, end, granularity_seconds=gsec)
     bars.write_parquet(out / "bars.parquet")
 
     n = bars.height
@@ -250,7 +255,7 @@ def run_training_campaign(
         "best_forecaster_aggregate_score": best_score,
         "rl_runs": rl_results,
         "spec_notes": {
-            "forecaster": "quantile_ohlc_v1 sklearn on real Coinbase candles only",
+            "forecaster": "quantile_ohlc_v1 sklearn on real Kraken candles/trades only",
             "rl": "heuristic policy rollout on real returns; PPO/SAC backlog",
         },
     }

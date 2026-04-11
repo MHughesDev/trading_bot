@@ -2,8 +2,8 @@
 
 ## Ingest
 
-- **`coinbase_ws.py`** — WebSocket client; feeds rolling bars and tick normalization
-- **`coinbase_rest.py`** — Advanced Trade public REST; **fallback** to Coinbase Exchange public API on 401/403 (unauthenticated candle/product calls)
+- **`kraken_ws.py`** — Kraken WebSocket v1; feeds rolling bars and tick normalization
+- **`kraken_rest.py`** — Kraken public REST (`/0/public/OHLC`, `/Trades`, `AssetPairs`); training uses `orchestration/real_data_bars.py`
 - **`normalizers.py`** — Maps WS JSON to `TickerSnapshot`, `TradeTick`, `OrderBookLevel2Snapshot`, optional `BarEvent`
 - **`product_cache.py`** — Product metadata (e.g. tradable flag) from REST
 - **`news_ingest.py`** — RSS-backed headline fetch (when feeds configured), dedup, `aggregate_sentiment_for_symbols_async` with optional FinBERT (`sentiment_nlp.py`)
@@ -11,7 +11,7 @@
 
 ## Bars and features
 
-- **`bars/rolling.py`** — Rolling minute bars per symbol
+- **`bars/rolling.py`** — Rolling OHLCV bars per symbol (bucket size in seconds, default 1s in live)
 - **`bars/aggregator.py`** — Aggregation helpers
 - **`features/pipeline.py`** — Polars feature pipeline (RSI, MACD, ATR, etc.)
 
@@ -29,4 +29,4 @@
 
 ## Policy
 
-All **market data** for the trading pipeline is sourced from **Coinbase** paths above; Alpaca is **not** used for market data in the main package tree.
+All **market data** for the trading pipeline is sourced from **Kraken** paths above; Alpaca is **not** used for market data in the main package tree.

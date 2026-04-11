@@ -3,7 +3,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
-SourceLiteral = Literal["coinbase"]
+SourceLiteral = Literal["kraken", "coinbase"]
 
 
 class BarEvent(BaseModel):
@@ -16,7 +16,7 @@ class BarEvent(BaseModel):
     low: float
     close: float
     volume: float
-    source: SourceLiteral = "coinbase"
+    source: SourceLiteral = "kraken"
     schema_version: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")

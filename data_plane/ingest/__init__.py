@@ -1,9 +1,9 @@
-from data_plane.ingest.coinbase_rest import CoinbaseRESTClient, CoinbaseRESTSettings
-from data_plane.ingest.coinbase_ws import CoinbaseWebSocketClient, CoinbaseWSSettings
+from data_plane.ingest.kraken_rest import KrakenRESTClient, KrakenRESTSettings
+from data_plane.ingest.kraken_ws import KrakenWebSocketClient, KrakenWSSettings
 
 __all__ = [
-    "CoinbaseRESTClient",
-    "CoinbaseRESTSettings",
-    "CoinbaseWebSocketClient",
-    "CoinbaseWSSettings",
+    "KrakenRESTClient",
+    "KrakenRESTSettings",
+    "KrakenWebSocketClient",
+    "KrakenWSSettings",
 ]
