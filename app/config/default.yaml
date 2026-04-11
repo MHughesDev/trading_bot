@@ -82,6 +82,8 @@ models:
   forecaster_checkpoint_id: null
   # Optional JSON path: MultiHorizonConformal state for calibrated quantiles on the hot path
   forecaster_conformal_state_path: null
+  # PyTorch forecaster training (and future torch inference): auto | cpu | cuda | cuda:0
+  torch_device: auto
 
 # Set NM_RISK_SIGNING_SECRET in production so only RiskEngine-signed OrderIntents execute.
 # NM_ALLOW_UNSIGNED_EXECUTION=true only for local dev without secrets.

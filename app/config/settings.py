@@ -101,6 +101,8 @@ class AppSettings(BaseSettings):
     models_forecaster_checkpoint_id: str | None = None
     # Optional JSON path for `MultiHorizonConformal` state (forecaster calibration on hot path)
     models_forecaster_conformal_state_path: str | None = None
+    # PyTorch forecaster training / future torch inference: auto (CUDA if available) | cpu | cuda | cuda:N
+    models_torch_device: str = "auto"
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -195,6 +197,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         if "forecaster_conformal_state_path" in mo:
             v = mo["forecaster_conformal_state_path"]
             out["models_forecaster_conformal_state_path"] = None if v is None else str(v)
+        if "torch_device" in mo:
+            out["models_torch_device"] = str(mo["torch_device"])
     return out
 
 

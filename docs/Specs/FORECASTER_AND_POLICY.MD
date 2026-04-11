@@ -19,7 +19,7 @@ This document tracks **only** how the repository maps to those two files. Where 
 | `inference/*` | `forecaster_model/inference/` — `build_from_ohlc.py`, `guards.py` (incl. drift), `robust.py`, `stub.py` |
 | `data/dataset_manifest.py` | Versioned manifests + SHA256 — `forecaster_model/data/dataset_manifest.py` |
 | `models/ensemble.py` | `build_ensemble_forecast_packet`, `forward_ensemble_numpy` |
-| `training/torch_trainer.py` | `train_forecaster_stub`, optional `train_forecaster_torch` (`[models_torch]`) |
+| `training/torch_trainer.py`, `training/device.py` | `train_forecaster_stub`, optional `train_forecaster_torch` (`[models_torch]`); `resolve_torch_device` + `NM_MODELS_TORCH_DEVICE` |
 
 **Canonical pipeline (human §30 short form):**  
 VSN → Latent CNN → Multi-Resolution xLSTM → Regime-Conditioned Fusion → Quantile Decoder — implemented in `ForecasterModel.forward` and `forward_numpy_reference`.
