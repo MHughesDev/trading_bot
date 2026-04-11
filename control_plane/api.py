@@ -12,6 +12,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from observability.forecaster_metrics import MODEL_VERSION_INFO
 
+from app.config.model_artifacts import model_artifact_contract
 from app.config.settings import AppSettings, load_settings
 from control_plane.preflight import preflight_report
 from app.contracts.risk import SystemMode
@@ -83,6 +84,7 @@ def get_status() -> dict[str, Any]:
         "mode": modes.get_mode().value,
         "preflight": preflight_report(settings),
         "production_preflight": production_preflight_payload(settings),
+        "model_artifacts": model_artifact_contract(settings),
     }
 
 

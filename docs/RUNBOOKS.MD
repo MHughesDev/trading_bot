@@ -65,3 +65,7 @@ Before upgrading binaries or large config changes: copy **`models/artifacts_trai
 ## Status payload: preflight (IL-105 / FB-SPEC-08)
 
 - **`GET /status`** returns **`preflight`** (blocking issues: signing vs live, unsigned execution, adapter names, credentials) and **`production_preflight`** (signing secret, unsigned flag, venue API keys vs `execution_mode`). Use both before live trading; CLI: `python scripts/preflight_check.py`.
+
+## Unified model artifacts (FB-SPEC-03)
+
+- **`GET /status` → `model_artifacts`**: single JSON object describing **serving** paths (`NM_MODELS_*` for NPZ, conformal JSON, lineage id) with **`file_exists`** flags, plus a **training** note that `forecaster_quantile_real.joblib` is **campaign-only** (sklearn QuantileRegressor), not the NumPy hot path. Implemented in `app/config/model_artifacts.py`.
