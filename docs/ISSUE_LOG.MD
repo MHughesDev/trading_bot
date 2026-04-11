@@ -34,10 +34,13 @@
 | Field | Meaning |
 |-------|---------|
 | **ID** | `IL-###` (local); **IL-1xx** reserved for data/ingest/memory cluster |
+| **Sub-IDs** | For one logical incident split across PRs, use **`IL-###-01`**, **`IL-###-02`** in the **Summary** (same §3 row until all slices ship, or separate rows if easier to close independently). Prefer **separate `IL-###` rows** when fixes are unrelated. |
 | **Area** | `data`, `models`, `execution`, `risk`, `runtime`, `backtest`, `control_plane`, `observability`, `ops`, `ci` |
 | **Status** | Open / In progress / Done |
 
 When you close an item: set **Status** to **Done**, add **Resolved** date + short note in **§5** under the right **Area** subsection, or remove the row from open tables.
+
+**Granularity rule:** one **open** row should describe a **single verifiable fix** (e.g. “return 422 on invalid payload” not “improve API”). If a fix needs design + code + docs, either one row with **checklist sub-bullets** in the summary or **IL-###-01 / -02** sub-IDs.
 
 ---
 
@@ -160,5 +163,5 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 
 ## 6. Related
 
-- [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD) — planned work; **FB-** items cover capabilities (no duplicate fix rows here)
+- [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD) — planned work; **FB-** items cover capabilities (no duplicate fix rows here). **FB-** rows may use **-01 / -02** sub-IDs for shippable slices (e.g. **FB-DASH-03-01**); **IL-** issues stay fix-shaped and should not mirror those epics line-for-line.
 - [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD)

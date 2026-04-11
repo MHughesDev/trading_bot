@@ -58,7 +58,7 @@ This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat
 
 ## 4. Checklist cross-reference
 
-See **§ “Operator: Windows + dashboard”** in [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD) (FB-UI-*, FB-DASH-*) for tracked work. Readiness items from the earlier “ready to run” list are folded into **FB-DASH-01** (API prerequisites) and existing docs (`README`, `RUNBOOKS`, `.env.example`).
+See **§3 — operator UI / Windows** in [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD) (**FB-UI-01-01**, **FB-DASH-01-01**, etc.) for granular tracked work. Readiness checklist slices: **FB-DASH-01-01** (single operator page) and **FB-DASH-01-02** (cross-links from `README`, `RUNBOOKS`, `.env.example`).
 
 ---
 

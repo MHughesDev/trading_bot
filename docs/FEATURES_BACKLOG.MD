@@ -14,7 +14,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 |---|---------|
 | [§1](#1-conventions) | Conventions (types, status) |
 | [§2](#2-high-priority) | HIGH — open items + gates |
-| [§3](#3-medium-priority) | MEDIUM — open items |
+| [§3](#3-medium-priority) | MEDIUM — open items (UI/DASH, microservices) |
 | [§4](#4-low-priority) | LOW + out of scope |
 | [§5–§7](#5-how-to-add-a-request) | How to add, bugs policy, healthy areas |
 | [§8](#8-completed-archive-optional) | Completed archive (by theme) |
@@ -46,6 +46,8 @@ Structured backlog for **all planned work**: new capabilities, production harden
 ### ID granularity
 
 - **Epic rows** (`FB-FR-P0`, `FB-PL-P0`) are decomposed into **sub-rows** (`FB-FR-P0-01` …) so work can be tracked and closed incrementally without losing the parent goal in [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) / [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD).
+- **Operator UI / dashboard** items use **`FB-UI-##-##`** and **`FB-DASH-##-##`** when a single row would hide multiple shippable slices (API vs Streamlit vs docs).
+- **Microservice extraction** follow-ups use **`FB-MS-##`** (see §3); details stay in [`MICROSERVICES_SPLIT_PLAN.MD`](MICROSERVICES_SPLIT_PLAN.MD).
 
 ---
 
@@ -68,7 +70,10 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | FB-FR-P0-03 | Feature | Open | **Train:** end-to-end PyTorch training loop, checkpoints, optional `[models_torch]` / `NM_MODELS_TORCH_DEVICE` | `forecaster_model/training/torch_trainer.py` |
 | FB-FR-P0-04 | Feature | Open | **Calibrate:** conformal + ensemble integration on trained outputs (not RNG reference only) | `forecaster_model/calibration/`, `forecaster_model/models/ensemble.py` |
 | FB-FR-P0-05 | Feature | Open | **Serve:** export path from trained checkpoint to hot path (extends NPZ reference / replaces RNG-only) | `decision_engine/pipeline.py`, `forecaster_model/inference/` |
-| FB-SPEC-07 | Feature | Open | **Multi-asset portfolio coordination:** cross-symbol capital allocation, correlation-aware or risk-parity style sizing, or documented limits when running many `market_data_symbols` (beyond independent per-symbol ticks) | `risk_engine/`, `decision_engine/`, `docs/Specs/` |
+| FB-SPEC-07 | Feature | Open | **Multi-asset portfolio coordination** (parent — use sub-rows below) | `risk_engine/`, `decision_engine/`, [`Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD) |
+| FB-SPEC-07-01 | Feature | Open | **Exposure limits:** enforce or document max aggregate exposure across `market_data_symbols` (per-tier caps, USD notional) | `risk_engine/` |
+| FB-SPEC-07-02 | Feature | Open | **Cross-symbol rules:** correlation-aware / risk-parity style sizing *or* explicit “independent per-symbol” contract when many symbols run | `risk_engine/`, `decision_engine/` |
+| FB-SPEC-07-03 | Hardening | Open | **Doc ↔ code alignment:** [`Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD) matches implemented limits and operator-facing warnings | `docs/` |
 
 *Parent epic:* full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD). **Close epic** when **FB-FR-P0-01 … FB-FR-P0-05** are Done or explicitly waived.
 
@@ -112,22 +117,55 @@ Structured backlog for **all planned work**: new capabilities, production harden
 |----|------|--------|---------|---------|
 | — | — | — | *No open sub-rows — see §8.* | — |
 
-### Backlog items (open) — operator UI / Windows (FB-UI-*, FB-DASH-*)
+### Backlog items (open) — operator UI / Windows
+
+*Shorthand: **FB-UI** = launcher/shell; **FB-DASH** = dashboard features. Sub-IDs are independently closable slices.*
+
+#### FB-UI — Launcher & desktop shell
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| FB-UI-01 | Platform | Open | **Windows one-click:** `setup.bat` / `run.bat` shipped; extend with optional **PyInstaller** `.exe` launcher (same backend as `run.bat`) | `setup.bat`, `run.bat`, [`docs/WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) |
-| FB-UI-02 | Platform | Open | **Desktop shell:** single-window host for dashboard (Electron/Tauri or PyInstaller) loading Streamlit or future React UI | [`docs/WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) |
-| FB-DASH-01 | Feature | Open | **Dashboard prerequisites doc:** fold “ready to run” checklist (venv, `.env`, Docker, preflight, Alpaca/Coinbase, signing) into operator doc + link from README | `README.md`, `RUNBOOKS.MD`, `.env.example` |
-| FB-DASH-02 | Feature | Open | **Paper / live mode in UI:** dropdown bound to `NM_EXECUTION_MODE` with **safe apply** (config + restart live loop; never hot-swap venue without restart) | `control_plane/`, `app/config/` |
-| FB-DASH-03 | Feature | Open | **Positions sidebar:** collapsible panel listing **open positions** per symbol with qty; poll **`GET /portfolio/positions`** (to be added) backed by adapter `fetch_positions` | `control_plane/api.py`, `execution/adapters/` |
-| FB-DASH-04 | Feature | Open | **Per-position unrealized P&L** (green/red) using mark price + avg entry where adapters expose them | `execution/adapters/`, Kraken mid or venue quote |
-| FB-DASH-05 | Feature | Open | **Aggregate P&L by timeframe** (hour, day, month, year, all-time): requires **fills/ledger** (QuestDB, Alpaca activity, or new store) + **`GET /pnl/summary?range=`** | `data_plane/storage/`, `control_plane/api.py` |
-| FB-DASH-06 | Hardening | Open | **Live mode guardrails:** confirm step before enabling Coinbase live path from UI | `control_plane/`, `RUNBOOKS.MD` |
+| FB-UI-01-01 | Platform | Open | **PyInstaller (or cx_Freeze) spec** + one build script that mirrors `run.bat` (API + supervisor + Streamlit) | `setup.bat`, `run.bat`, repo root |
+| FB-UI-01-02 | Reliability | Open | **Windows distribution notes:** AV false positives, optional code signing, bundle size — short section in [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) | `docs/` |
+| FB-UI-02-01 | Spike | Open | **Shell choice:** time-boxed comparison Electron vs Tauri vs PyInstaller-webview for loading `http://127.0.0.1:8501` | [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) |
+| FB-UI-02-02 | Platform | Open | **Desktop shell MVP:** single-window host opening the Streamlit URL (no React rewrite) | `docs/`, optional `packaging/` |
+
+#### FB-DASH — Dashboard & operator UX
+
+| ID | Type | Status | Summary | Pointer |
+|----|------|--------|---------|---------|
+| FB-DASH-01-01 | Feature | Open | **Operator “ready to run” page:** single checklist (venv, `pip install`, `.env`, Docker stack, preflight, venue keys vs mode) | New or extend `docs/`, link from README |
+| FB-DASH-01-02 | Feature | Open | **Cross-links:** README + `RUNBOOKS.MD` + `.env.example` point to that checklist; no duplicate prose | `README.md`, `RUNBOOKS.MD` |
+| FB-DASH-02-01 | Feature | Open | **Control plane:** read current `execution_mode` + mutating route or file write for **intent** to switch paper/live (validates + persists for next process start) | `control_plane/api.py`, `app/config/` |
+| FB-DASH-02-02 | Feature | Open | **Streamlit:** dropdown + “Apply” that calls mutate endpoint and shows **restart required** until live loop/supervisor picks up config | `control_plane/pages/` or `Home.py` |
+| FB-DASH-02-03 | Reliability | Open | **Runbook:** explicit steps to restart `live_service` / `power_supervisor` after mode change (no hot-swap venue) | `RUNBOOKS.MD` |
+| FB-DASH-03-01 | Feature | Open | **Positions DTO:** normalize `fetch_positions` across Alpaca paper / Coinbase into one contract | `execution/adapters/`, `app/contracts/` |
+| FB-DASH-03-02 | Feature | Open | **`GET /portfolio/positions`** on control plane (aggregates adapter; handles errors per symbol) | `control_plane/api.py` |
+| FB-DASH-03-03 | Feature | Open | **Streamlit sidebar:** collapsible positions panel, poll interval, empty/error states | `control_plane/` |
+| FB-DASH-04-01 | Feature | Open | **Mark price source:** define Kraken mid vs venue quote precedence per mode | `data_plane/`, `execution/` |
+| FB-DASH-04-02 | Feature | Open | **Unrealized P&L:** extend position DTO + green/red in UI when avg entry + mark available | `execution/adapters/`, Streamlit |
+| FB-DASH-05-01 | Feature | Open | **Ledger design:** choose source of truth for fills (QuestDB tables vs Alpaca activity API vs hybrid) | `data_plane/storage/`, `docs/` |
+| FB-DASH-05-02 | Feature | Open | **`GET /pnl/summary?range=`** (hour, day, month, year, all) with realized/unrealized split | `control_plane/api.py` |
+| FB-DASH-05-03 | Feature | Open | **Streamlit:** timeframe selector + aggregate P&L panel | `control_plane/` |
+| FB-DASH-06-01 | Hardening | Open | **UI guardrail:** modal + optional “type LIVE” before applying live execution profile | `control_plane/` |
+| FB-DASH-06-02 | Reliability | Open | **RUNBOOKS:** live trading checklist mirrors UI guardrails | `RUNBOOKS.MD` |
+
+#### FB-MS — Microservices extraction (remaining production split)
+
+*Scaffold + Redis chains are in place; these rows close gaps vs [`MICROSERVICES_SPLIT_PLAN.MD`](MICROSERVICES_SPLIT_PLAN.MD) “next step”.*
+
+| ID | Type | Status | Summary | Pointer |
+|----|------|--------|---------|---------|
+| FB-MS-01 | Feature | Open | **Market data service:** Kraken WS (and REST fallback) in process — publish real `market.tick.normalized.v1` / heartbeats; retire scaffold-only HTTP as default path | `services/market_data_service/`, `data_plane/ingest/` |
+| FB-MS-02 | Feature | Open | **Feature service:** wire `FeaturePipeline` + rolling bars (parity with `live_service` tick path), not scaffold tick→row | `services/feature_service/`, `data_plane/features/` |
+| FB-MS-03 | Feature | Open | **Observability writer:** persist subscribed events to QuestDB (or chosen store); bounded memory as cache only | `services/observability_writer_service/`, `data_plane/storage/` |
+| FB-MS-04 | Platform | Open | **Compose live_runtime:** document + validate `NM_LIVE_SERVICE_APP_START_LOOP=true` with `.env` (Kraken + venue); health/readiness for long-running loop | `infra/docker-compose.microservices.yml`, `RUNBOOKS.MD` |
+| FB-MS-05 | Reliability | Open | **Optional smoke:** documented (or CI-optional) **real Alpaca paper** path through gateway with test keys — no secrets in repo | `tests/`, `scripts/` |
+| FB-MS-06 | Hardening | Open | **Split acceptance:** checklist item — “program §11” / production split criteria written and checked off in `MICROSERVICES_SPLIT_PLAN.MD` | `docs/MICROSERVICES_SPLIT_PLAN.MD` |
 
 *Parent epic:* RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Sub-rows FB-PL-P0-01 … FB-PL-P0-04 Done 2026-04-11** (NumPy stubs + offline env; full PyTorch RL remains future hardening).
 
-*See also §2 HIGH (**FB-FR-P0-*** and **FB-SPEC-07**). **FB-SPEC-06** is archived in §8.*
+*See also §2 HIGH (**FB-FR-P0-*** and **FB-SPEC-07** / **FB-SPEC-07-01…03**). **FB-SPEC-06** is archived in §8.*
 
 ---
 
