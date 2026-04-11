@@ -51,6 +51,8 @@ all = [
 where = ["."]
 include = [
   "app*",
+  "services*",
+  "shared*",
   "data_plane*",
   "execution*",
   "models*",

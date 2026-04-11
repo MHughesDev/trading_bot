@@ -7,6 +7,7 @@ from typing import Any
 
 # Default ports match infra/docker-compose.microservices.yml when using host networking from the host.
 _DEFAULT_PROBES: tuple[tuple[str, int], ...] = (
+    ("live_runtime", 8208),
     ("market_data_service", 8206),
     ("feature_service", 8205),
     ("decision_service", 8203),

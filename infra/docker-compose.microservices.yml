@@ -3,11 +3,28 @@
 # From repository root:
 #   docker compose -f infra/docker-compose.yml -f infra/docker-compose.microservices.yml up -d redis market_data_service feature_service decision_service risk_service execution_gateway
 #
-# Ports: market_data 8206, feature 8205, decision 8203, risk 8204, gateway 8202, observability_writer 8207.
+# Ports: live_runtime 8208 (HTTP-only by default), market_data 8206, feature 8205, decision 8203,
+# risk 8204, gateway 8202, observability_writer 8207.
 # POST /ingest/raw-tick on market_data (8206) or /ingest/market-tick on feature (8205).
+# **live_runtime** serves /healthz; set NM_LIVE_SERVICE_APP_START_LOOP=true to run the real Kraken loop (needs keys/network).
 # First start runs pip install per container (slow).
 
 services:
+  live_runtime:
+    image: python:3.12-slim-bookworm
+    container_name: nm-live-runtime
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+    ports:
+      - "8208:8208"
+    environment:
+      NM_LIVE_SERVICE_APP_START_LOOP: "false"
+    command:
+      - sh
+      - -c
+      - pip install -q -e ".[dev]" && python -m uvicorn services.live_service_app:app --host 0.0.0.0 --port 8208
+
   market_data_service:
     image: python:3.12-slim-bookworm
     container_name: nm-market-data-service

@@ -30,7 +30,9 @@ It is intentionally implementation-oriented so work can be executed as small, te
 - ✅ **Control plane** **`GET /microservices/health`** aggregates best-effort **`/healthz`** for default scaffold ports (`NM_MICROSERVICES_HEALTH_HOST`, optional **`NM_MICROSERVICES_HEALTH_PORTS`** override).
 - ✅ **Observability writer service** (Phase 7 scaffold): subscribes to execution ack/fill/reject/position + **`risk.intent.blocked`** on the shared bus; **`GET /events/recent`** returns bounded in-memory buffers; Redis poll loop when **`NM_MESSAGING_BACKEND=redis_streams`**. Compose **8207**; included in **`GET /microservices/health`** default ports. QuestDB persistence remains future work.
 - ✅ Six-process Redis integration (**market_data → feature → decision → risk → gateway + observability_writer**): **`test_redis_six_process_chain_includes_observability_writer`** in **`tests/test_integration_microservices_redis.py`** (`NM_INTEGRATION_SERVICES=1`).
-- ⏭️ Next step (program §11 not yet met): optional **real Alpaca paper** smoke, **`live_service`** in compose, or full **Kraken WS** in `market_data_service` — production split remains future work.
+- ✅ **`services/live_service_app.py`**: `uvicorn` ASGI wrapping **`run_live_loop`** with **/healthz** (optional **NM_LIVE_SERVICE_APP_START_LOOP**; default true for standalone, false in compose). Compose **8208** (`NM_LIVE_SERVICE_APP_START_LOOP=false` = probes only).
+- ✅ **`pyproject.toml`**: setuptools includes **`services*`** and **`shared*`** for packaged installs.
+- ⏭️ Next step (program §11 not yet met): optional **real Alpaca paper** smoke, enable **live_runtime** loop in compose with credentials, or full **Kraken WS** in scaffold `market_data_service` — production split remains future work.
 
 ---
 
