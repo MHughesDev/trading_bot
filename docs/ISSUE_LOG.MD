@@ -40,7 +40,8 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 
 | ID | Area | Summary |
 |----|------|---------|
-| — | — | *No open MEDIUM items — see Resolved (recent).* |
+| IL-103 | models | **Spec pipeline vs trained weights:** default `spec_policy` still builds `ForecastPacket` via stub + `HeuristicTargetPolicy` until **FB-SPEC-02** / **FB-FR-P0** / **FB-PL-P0** land; operators may assume neural weights are live — fix by **explicit README/RUNBOOKS callouts** and/or **one-line startup log** when stub/heuristic path is active (`decision_engine/pipeline.py`, `policy_model/system.py`, [`docs/RUNBOOKS.MD`](RUNBOOKS.MD)) |
+| IL-104 | ops | **Nightly train uses synthetic data:** `run_train_evaluate_log` (`orchestration/nightly_retrain.py`) fits HMM+Ridge on `_synthetic_training_data` unless replaced — add **prominent WARNING log** (and doc pointer to **FB-SPEC-04**) so operators are not misled about production readiness |
 
 ---
 
@@ -48,7 +49,7 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 
 | ID | Area | Summary |
 |----|------|---------|
-| — | — | *No open LOW items — see Resolved (recent).* |
+| IL-105 | ops | **Production preflight gap:** no first-class automated check that signing/secrets/adapter config match policy before live trade (complements **FB-SPEC-08**); optional smoke script or `/status` extension |
 
 ---
 
@@ -87,5 +88,5 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 
 ## Related
 
-- [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD) — planned work only (no overlap with rows above)  
+- [`FEATURES_BACKLOG.MD`](FEATURES_BACKLOG.MD) — planned work; **FB-SPEC-02 … FB-SPEC-08** cover trained weights, wiring, training data, GPU, registry, multi-asset, preflight (no duplicate rows: issues here are **fixes** / operator-misleading behavior)  
 - [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD)
