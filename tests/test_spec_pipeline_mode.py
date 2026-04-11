@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState
 from decision_engine.pipeline import DecisionPipeline
@@ -28,6 +30,18 @@ def test_legacy_mode_unchanged():
         position_signed_qty=None,
     )
     assert proposal is not None or route.route_id is not None
+
+
+def test_spec_policy_stub_path_warning_logged_once(caplog):
+    DecisionPipeline._stub_spec_path_logged = False
+    caplog.set_level(logging.WARNING)
+    s = AppSettings(decision_pipeline_mode="spec_policy")
+    _ = DecisionPipeline(settings=s)
+    msgs = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("build_forecast_packet_stub" in m and "HeuristicTargetPolicy" in m for m in msgs)
+    caplog.clear()
+    _ = DecisionPipeline(settings=s)
+    assert not any("build_forecast_packet_stub" in r.message for r in caplog.records)
 
 
 def test_spec_policy_mode_returns_proposal_or_none():

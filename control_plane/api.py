@@ -12,7 +12,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from observability.forecaster_metrics import MODEL_VERSION_INFO
 
-from app.config.settings import load_settings
+from app.config.settings import AppSettings, load_settings
 from app.contracts.risk import SystemMode
 from app.runtime.mode_manager import ModeManager
 from app.runtime.state_manager import StateManager
@@ -24,6 +24,40 @@ modes = ModeManager(state)
 app = FastAPI(title="NautilusMonster Control Plane", version="0.1.0")
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def production_preflight_payload(s: AppSettings) -> dict[str, Any]:
+    """Signing + venue credentials vs execution mode (IL-105 / FB-SPEC-08 complement)."""
+    secret_val = (
+        s.risk_signing_secret.get_secret_value().strip() if s.risk_signing_secret else ""
+    )
+    signing_configured = bool(secret_val)
+    unsigned_allowed = s.allow_unsigned_execution
+    alpaca_ok = bool(
+        s.alpaca_api_key
+        and s.alpaca_api_secret
+        and s.alpaca_api_key.get_secret_value().strip()
+        and s.alpaca_api_secret.get_secret_value().strip()
+    )
+    coinbase_ok = bool(
+        s.coinbase_api_key
+        and s.coinbase_api_secret
+        and s.coinbase_api_key.get_secret_value().strip()
+        and s.coinbase_api_secret.get_secret_value().strip()
+    )
+    venue_credentials_ok = alpaca_ok if s.execution_mode == "paper" else coinbase_ok
+    ok = (
+        signing_configured
+        and not unsigned_allowed
+        and venue_credentials_ok
+    )
+    return {
+        "ok": ok,
+        "signing_secret_configured": signing_configured,
+        "unsigned_execution_allowed": unsigned_allowed,
+        "venue_credentials_configured": venue_credentials_ok,
+        "execution_mode": s.execution_mode,
+    }
 
 
 def require_mutate_key(x_api_key: Annotated[str | None, Depends(_api_key_header)]) -> None:
@@ -46,6 +80,7 @@ def get_status() -> dict[str, Any]:
         "market_data_provider": settings.market_data_provider,
         "symbols": settings.market_data_symbols,
         "mode": modes.get_mode().value,
+        "production_preflight": production_preflight_payload(settings),
     }
 
 

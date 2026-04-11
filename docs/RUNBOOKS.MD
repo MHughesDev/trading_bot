@@ -37,3 +37,8 @@
 - **Forecast packet diagnostics:** `NM_MODELS_DECISION_FORECAST_PACKET_ENABLED=true` builds a `ForecastPacket` each pipeline step for logging/policy experiments without changing routing (unless `routing_source` is `packet`).
 - **Conformal state (offline):** `ForecasterConfig.calibration_enabled` with `build_forecast_packet_methodology(..., conformal_state_path=...)` loads persisted JSON from `forecaster_model.calibration.conformal.load_conformal_state`; use `save_conformal_state` after training-window updates (FB-FR-PG3).
 - **Spec decision pipeline (default):** **`ForecastPacket` + `PolicySystem`** — `NM_MODELS_DECISION_PIPELINE_MODE=spec_policy` (default). Set to **`legacy`** to revert to Ridge + router (see [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](MIGRATION_TO_SPEC_PIPELINE.MD)).
+- **Trained weights vs stub/heuristic (IL-103):** In **`spec_policy`** mode the hot path still uses **`build_forecast_packet_stub`** for the packet and **`HeuristicTargetPolicy`** in `PolicySystem` until **FB-SPEC-02** / **FB-FR-P0** / **FB-PL-P0** load PyTorch checkpoints. The runtime logs a **WARNING** once at `DecisionPipeline` startup when `spec_policy` is active. Do not assume neural ensemble weights are live without configuring those artifacts.
+
+## Production preflight (IL-105)
+
+- **GET `/status`** includes **`production_preflight`**: signing secret present, unsigned execution disallowed for live, and venue API keys present for the configured execution mode. Use it before enabling live trading; see **FB-SPEC-08** for broader deployment checks.

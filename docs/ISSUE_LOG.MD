@@ -40,8 +40,7 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 
 | ID | Area | Summary |
 |----|------|---------|
-| IL-103 | models | **Spec pipeline vs trained weights:** default `spec_policy` still builds `ForecastPacket` via stub + `HeuristicTargetPolicy` until **FB-SPEC-02** / **FB-FR-P0** / **FB-PL-P0** land; operators may assume neural weights are live — fix by **explicit README/RUNBOOKS callouts** and/or **one-line startup log** when stub/heuristic path is active (`decision_engine/pipeline.py`, `policy_model/system.py`, [`docs/RUNBOOKS.MD`](RUNBOOKS.MD)) |
-| IL-104 | ops | **Nightly train uses synthetic data:** `run_train_evaluate_log` (`orchestration/nightly_retrain.py`) fits HMM+Ridge on `_synthetic_training_data` unless replaced — add **prominent WARNING log** (and doc pointer to **FB-SPEC-04**) so operators are not misled about production readiness |
+| — | — | *No open MEDIUM items — see Resolved (recent).* |
 
 ---
 
@@ -49,7 +48,7 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 
 | ID | Area | Summary |
 |----|------|---------|
-| IL-105 | ops | **Production preflight gap:** no first-class automated check that signing/secrets/adapter config match policy before live trade (complements **FB-SPEC-08**); optional smoke script or `/status` extension |
+| — | — | *No open LOW items — see Resolved (recent).* |
 
 ---
 
@@ -84,6 +83,8 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 | IL-011 | 2026-04-10 | `NotImplementedError` in `main()` signal handlers: extracted `register_shutdown_signals`; test `tests/test_live_service_signals.py`. |
 | IL-102 | 2026-04-10 | WS normalizer fixtures expanded: `trade_tick.json`, `l2_snapshot.json` + tests in `test_normalizer_fixtures.py`. |
 | IL-104 | 2026-04-11 | **Nightly/orchestration training:** removed `_synthetic_training_data` / Ridge-only `run_train_evaluate_log`; `orchestration/nightly_retrain.py` now drives **real Coinbase candle** fetch + walk-forward quantile forecaster + real-data heuristic RL eval per human training specs (`orchestration/training_campaign.py`). |
+| IL-103 | 2026-04-11 | **Spec stub/heuristic visibility:** one-time WARNING at `DecisionPipeline` init when `decision_pipeline_mode=spec_policy` (`build_forecast_packet_stub` + `HeuristicTargetPolicy` until FB-SPEC-02 / FB-FR-P0 / FB-PL-P0); runbook paragraph in [`docs/RUNBOOKS.MD`](RUNBOOKS.MD). |
+| IL-105 | 2026-04-11 | **Production preflight:** `GET /status` includes `production_preflight` (signing secret, unsigned flag, venue keys vs execution mode); documented in [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) (complements FB-SPEC-08). |
 
 ---
 

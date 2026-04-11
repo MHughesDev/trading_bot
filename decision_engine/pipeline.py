@@ -54,6 +54,8 @@ def _load_forecast(settings: AppSettings) -> TemporalFusionForecaster:
 
 
 class DecisionPipeline:
+    _stub_spec_path_logged: bool = False
+
     def __init__(
         self,
         regime_model: GaussianHMMRegimeModel | None = None,
@@ -66,6 +68,17 @@ class DecisionPipeline:
         self.forecast = forecaster or _load_forecast(self._settings)
         self.router = router or DeterministicRouteSelector(self._settings)
         self._last_forecast_packet: ForecastPacket | None = None
+        if (
+            not DecisionPipeline._stub_spec_path_logged
+            and self._settings.decision_pipeline_mode == "spec_policy"
+        ):
+            DecisionPipeline._stub_spec_path_logged = True
+            logger.warning(
+                "decision pipeline mode is spec_policy: ForecastPacket is built via the methodology "
+                "stub (`build_forecast_packet_stub`); PolicySystem uses HeuristicTargetPolicy until "
+                "trained forecaster/RL weights are wired (FB-SPEC-02, FB-FR-P0, FB-PL-P0). "
+                "See docs/RUNBOOKS.MD — model artifacts and forecast routing."
+            )
 
     @property
     def last_forecast_packet(self) -> ForecastPacket | None:
