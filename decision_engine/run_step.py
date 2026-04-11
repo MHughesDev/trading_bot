@@ -11,10 +11,11 @@ import time
 from datetime import datetime
 from decimal import Decimal
 
-from app.contracts.decisions import ActionProposal, RouteDecision, TradeAction
+from app.contracts.decisions import ActionProposal, RouteDecision, RouteId, TradeAction
 from app.contracts.forecast import ForecastOutput
-from app.contracts.regime import RegimeOutput
+from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState
+from app.runtime.system_power import is_on, sync_from_disk
 from decision_engine.pipeline import DecisionPipeline
 from observability.metrics import DECISION_LATENCY
 from risk_engine.engine import RiskEngine
@@ -38,9 +39,43 @@ def run_decision_tick(
     portfolio_equity_usd: float | None = None,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, TradeAction | None, RiskState]:
     t0 = time.perf_counter()
+    sync_from_disk()
     eq = portfolio_equity_usd
     if eq is None:
         eq = risk_engine.current_equity
+    if not is_on():
+        regime = RegimeOutput(
+            state_index=0,
+            semantic=SemanticRegime.SIDEWAYS,
+            probabilities=[1.0, 0.0, 0.0, 0.0],
+            confidence=0.0,
+        )
+        fc = ForecastOutput(
+            returns_1=0.0,
+            returns_3=0.0,
+            returns_5=0.0,
+            returns_15=0.0,
+            volatility=0.0,
+            uncertainty=1.0,
+        )
+        route = RouteDecision(route_id=RouteId.NO_TRADE, confidence=0.0, ranking=[])
+        proposal = None
+        trade, risk_state = risk_engine.evaluate(
+            symbol,
+            proposal,
+            risk_state,
+            mid_price=mid_price,
+            spread_bps=spread_bps,
+            data_timestamp=data_timestamp,
+            current_total_exposure_usd=current_total_exposure_usd,
+            feed_last_message_at=feed_last_message_at,
+            product_tradable=False,
+            position_signed_qty=position_signed_qty,
+            available_cash_usd=available_cash_usd,
+        )
+        DECISION_LATENCY.observe(time.perf_counter() - t0)
+        return regime, fc, route, proposal, trade, risk_state
+
     regime, fc, route, proposal = pipeline.step(
         symbol,
         feature_row,

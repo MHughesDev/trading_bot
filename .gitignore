@@ -13,3 +13,6 @@ build/
 
 # Local tooling
 *.local
+
+# Runtime operator state (per machine)
+data/system_power.json

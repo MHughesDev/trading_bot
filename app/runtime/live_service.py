@@ -18,6 +18,7 @@ from decimal import Decimal
 
 from app.config.settings import AppSettings, load_settings
 from app.contracts.risk import RiskState
+from app.runtime.system_power import is_on, sync_from_disk
 from data_plane.bars.rolling import RollingBars
 from data_plane.features.pipeline import FeaturePipeline
 from data_plane.ingest.news_ingest import aggregate_sentiment_for_symbols_async
@@ -300,6 +301,10 @@ async def run_live_loop(
     try:
         async for msg in ws.stream_messages():
             if stop.is_set():
+                break
+            sync_from_disk()
+            if not is_on():
+                logger.info("system power off — exiting live loop")
                 break
             norm = normalize_kraken_ws_message(msg)
             if norm is None:

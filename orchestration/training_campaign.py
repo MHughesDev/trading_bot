@@ -23,6 +23,7 @@ import numpy as np
 import polars as pl
 
 from app.config.settings import AppSettings, load_settings
+from app.runtime.system_power import is_on, sync_from_disk
 from forecaster_model.config import ForecasterConfig
 from forecaster_model.training.metrics import mean_pinball_loss
 from forecaster_model.training.real_data_fit import (
@@ -131,6 +132,10 @@ def run_training_campaign(
     """
     Execute real-data training per spec. Writes artifacts under artifact_dir.
     """
+    sync_from_disk()
+    if not is_on():
+        logger.warning("system power OFF — skipping training campaign")
+        return {"skipped": True, "reason": "system_power_off"}
     s = settings or load_settings()
     sym = symbol or (s.market_data_symbols[0] if s.market_data_symbols else "BTC-USD")
     gsec = (

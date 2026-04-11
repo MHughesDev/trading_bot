@@ -18,6 +18,7 @@ from control_plane.preflight import preflight_report
 from app.contracts.risk import SystemMode
 from app.runtime.mode_manager import ModeManager
 from app.runtime.state_manager import StateManager
+from app.runtime.system_power import get_power, set_power
 from control_plane.microservice_health import probe_microservices_health
 
 settings = load_settings()
@@ -83,10 +84,28 @@ def get_status() -> dict[str, Any]:
         "market_data_provider": settings.market_data_provider,
         "symbols": settings.market_data_symbols,
         "mode": modes.get_mode().value,
+        "system_power": get_power(),
         "preflight": preflight_report(settings),
         "production_preflight": production_preflight_payload(settings),
         "model_artifacts": model_artifact_contract(settings),
     }
+
+
+@app.get("/system/power")
+def get_system_power() -> dict[str, str]:
+    """Global ON/OFF: OFF stops inference, trading, and offline training (see app/runtime/system_power.py)."""
+    return {"power": get_power()}
+
+
+@app.post("/system/power")
+def post_system_power(
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, str]:
+    """Set power to ``on`` or ``off``. Persists to data/system_power.json."""
+    raw = str(body.get("power", body.get("state", "on"))).strip().lower()
+    p = "off" if raw in ("off", "false", "0") else "on"
+    return {"power": set_power(p)}
 
 
 @app.get("/microservices/health")
