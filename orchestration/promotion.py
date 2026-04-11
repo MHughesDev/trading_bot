@@ -1,7 +1,8 @@
-"""Champion vs candidate bookkeeping (FB-AUDIT-03 / FB-SPEC-06 stub).
+"""Champion vs candidate bookkeeping (FB-AUDIT-03 / FB-SPEC-06).
 
 Writes `promotion_decision.json` next to `training_report.json` after a campaign.
-Full gates from master spec §14–15 remain future work; this records a structured decision.
+When `NM_PREVIOUS_FORECASTER_CHAMPION_PATH` points at a prior run (dir, `training_report.json`,
+or `.joblib`), compares `best_forecaster_aggregate_score` and promotes only if candidate is strictly better.
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
+
+from app.config.model_artifacts import load_training_report_score, resolve_champion_training_report_path
 
 Component = Literal["forecaster", "policy"]
 
@@ -45,21 +48,64 @@ def decide_forecaster_promotion_stub(
     previous_champion_path: str | None = None,
 ) -> PromotionDecision:
     """
-    Stub: keep champion if a prior artifact path exists and new score is not strictly better.
+    Compare candidate vs prior champion using `best_forecaster_aggregate_score` when available.
 
-    Operators can replace this with real gates; output is still useful for audit trails.
+    - No prior path → **promote** (first artifact).
+    - Prior path but no parsable champion score → **keep_champion** (safe default per spec §15).
+    - Candidate score strictly greater than champion → **promote**; else **keep_champion**.
     """
     best = float(report.get("best_forecaster_aggregate_score", float("nan")))
     candidate_id = str(report.get("forecaster_artifact", "unknown"))
     reasons: list[str] = []
-    metrics = {"best_forecaster_aggregate_score": best, "stub": True}
+    metrics: dict[str, Any] = {
+        "best_forecaster_aggregate_score": best,
+        "candidate_score": best,
+    }
 
-    if previous_champion_path and Path(previous_champion_path).is_file():
-        decision: Literal["promote", "keep_champion", "no_decision"] = "keep_champion"
-        reasons.append("stub: prior champion artifact exists — manual review recommended before promote")
+    if not previous_champion_path or not str(previous_champion_path).strip():
+        reasons.append("no prior champion path — candidate is first serving artifact")
+        return PromotionDecision(
+            component="forecaster",
+            current_champion_id=None,
+            candidate_id=candidate_id,
+            decision="promote",
+            reasons=reasons,
+            comparison_metrics=metrics,
+            timestamp=datetime.now(UTC).isoformat(),
+        )
+
+    champ_report_path = resolve_champion_training_report_path(previous_champion_path.strip())
+    champion_score: float | None = None
+    if champ_report_path is not None:
+        champion_score = load_training_report_score(champ_report_path)
+        metrics["champion_training_report"] = str(champ_report_path)
+    metrics["champion_score"] = champion_score
+
+    if champion_score is None or champion_score != champion_score:  # NaN
+        reasons.append(
+            "keep champion: could not read champion `best_forecaster_aggregate_score` "
+            f"from {previous_champion_path!r} (point to dir with training_report.json, the report file, or joblib)"
+        )
+        return PromotionDecision(
+            component="forecaster",
+            current_champion_id=previous_champion_path,
+            candidate_id=candidate_id,
+            decision="keep_champion",
+            reasons=reasons,
+            comparison_metrics=metrics,
+            timestamp=datetime.now(UTC).isoformat(),
+        )
+
+    if best > champion_score:
+        reasons.append(
+            f"candidate score {best} > champion score {champion_score} — promote per nightly compare"
+        )
+        decision: Literal["promote", "keep_champion", "no_decision"] = "promote"
     else:
-        decision = "promote"
-        reasons.append("stub: no prior champion path — candidate is first serving artifact")
+        reasons.append(
+            f"keep champion: candidate score {best} <= champion score {champion_score}"
+        )
+        decision = "keep_champion"
 
     return PromotionDecision(
         component="forecaster",

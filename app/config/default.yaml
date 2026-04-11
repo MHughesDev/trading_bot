@@ -88,6 +88,8 @@ models:
   policy_mlp_path: null
   # PyTorch forecaster training (and future torch inference): auto | cpu | cuda | cuda:0
   torch_device: auto
+  # Optional JSON: declared active model paths (see models/registry/) — FB-SPEC-06
+  active_registry_path: null
 
 # Set NM_RISK_SIGNING_SECRET in production so only RiskEngine-signed OrderIntents execute.
 # NM_ALLOW_UNSIGNED_EXECUTION=true only for local dev without secrets.

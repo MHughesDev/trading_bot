@@ -18,7 +18,7 @@
 | `execution/` | `ExecutionService`, router, Alpaca paper + Coinbase live adapters, CDP HTTP client |
 | `backtesting/` | Replay and portfolio simulation vs same decision step |
 | `control_plane/` | FastAPI `api.py`, Streamlit multipage app |
-| `models/` | Optional MLflow registry helpers (`models/registry/`) |
+| `models/` | Optional MLflow helpers + **filesystem active model set** (`models/registry/active_model_set.json`, FB-SPEC-06) |
 | `observability/` | Prometheus metrics, structured logging |
 | `orchestration/` | Nightly retrain stub, optional Prefect/MLflow |
 | `infra/` | `docker-compose.yml`, Prometheus/Grafana/Promtail/Loki configs |

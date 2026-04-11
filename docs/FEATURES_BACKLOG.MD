@@ -57,8 +57,6 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
 | FB-FR-P0 | Feature | Open | Full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD): leakage-safe dataset, VSN, latent CNN, multi-res xLSTM, regime fusion, quantile head, conformal, ensemble | `forecaster_model/` |
-| FB-SPEC-06 | Platform | Open | **Model registry / versioned artifacts:** filesystem or MLflow-backed promotion workflow, version labels, and single operator-facing “active model set” beyond ad-hoc paths | `models/registry/`, `control_plane/api.py`, `docs/RUNBOOKS.MD` |
-| FB-SPEC-07 | Feature | Open | **Multi-asset portfolio coordination:** cross-symbol capital allocation, correlation-aware or risk-parity style sizing, or documented limits when running many `market_data_symbols` (beyond independent per-symbol ticks) | `risk_engine/`, `decision_engine/`, `docs/Specs/` |
 
 **Blocked (not started):** **`FB-FR-P0`** requires PyTorch/xLSTM stack and large training loop — unsafe to claim done without full model + data pipeline. **`FB-PL-P0`** requires RL env + actor-critic + buffer — same.
 
@@ -97,9 +95,8 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
 | FB-PL-P0 | Feature | Open | RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD): `TradingPolicyEnvironment`, actor-critic, replay buffer, precomputed `ForecastPacket` mode, reward/cost model | `policy_model/` |
-| FB-AUDIT-03 | Feature | Open | **Champion vs candidate promotion:** implement master [`MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) §14–§15 (nightly compare, `PromotionDecision`, keep champion on failure) — extends **FB-SPEC-06** | `orchestration/` |
 
-*See also §2 HIGH open rows (**FB-FR-P0**, **FB-SPEC-06**–**FB-SPEC-07**).*
+*See also §2 HIGH open rows (**FB-FR-P0** only).*
 
 ---
 
@@ -217,6 +214,9 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-SPEC-05 | 2026-04-11 | **PyTorch device:** `resolve_torch_device`, `train_forecaster_torch(..., device=...)`, `AppSettings.models_torch_device` / `NM_MODELS_TORCH_DEVICE` / `models.torch_device`; docs in README, `.env.example`, `pyproject.toml` `[models_torch]` |
 | FB-AUDIT-05 | 2026-04-11 | **Golden tests:** `tests/test_forecaster_golden_regression.py` + fixture; `tests/test_forecast_packet_golden.py` alternate OHLC slice |
 | FB-SPEC-03 | 2026-04-11 | **`model_artifact_contract`:** `app/config/model_artifacts.py`; **`GET /status` → `model_artifacts`**; RUNBOOKS section |
+| FB-SPEC-06 | 2026-04-11 | **Filesystem active model set:** `models/registry/store.py`, default `models/registry/active_model_set.json`, **`NM_MODELS_ACTIVE_REGISTRY_PATH`**, drift vs env in **`model_artifacts.registry`**; MLflow wrapper unchanged (`models/registry/mlflow_registry.py`) |
+| FB-SPEC-07 | 2026-04-11 | **Multi-asset documented:** [`docs/Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD) — independent ticks + shared risk caps; no cross-symbol optimizer |
+| FB-AUDIT-03 | 2026-04-11 | **Promotion compare:** `decide_forecaster_promotion_stub` uses `training_report.json` scores vs `NM_PREVIOUS_FORECASTER_CHAMPION_PATH`; `tests/test_promotion_decision.py` |
 
 ---
 

@@ -107,6 +107,8 @@ class AppSettings(BaseSettings):
     models_policy_mlp_path: str | None = None
     # PyTorch forecaster training / future torch inference: auto (CUDA if available) | cpu | cuda | cuda:N
     models_torch_device: str = "auto"
+    # Optional JSON: operator "active model set" (FB-SPEC-06); merged into GET /status model_artifacts
+    models_active_registry_path: str | None = None
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -209,6 +211,9 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["models_policy_mlp_path"] = None if v is None else str(v)
         if "torch_device" in mo:
             out["models_torch_device"] = str(mo["torch_device"])
+        if "active_registry_path" in mo:
+            v = mo["active_registry_path"]
+            out["models_active_registry_path"] = None if v is None else str(v)
     return out
 
 

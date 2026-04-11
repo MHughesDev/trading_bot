@@ -69,3 +69,12 @@ Before upgrading binaries or large config changes: copy **`models/artifacts_trai
 ## Unified model artifacts (FB-SPEC-03)
 
 - **`GET /status` → `model_artifacts`**: single JSON object describing **serving** paths (`NM_MODELS_*` for NPZ, conformal JSON, lineage id) with **`file_exists`** flags, plus a **training** note that `forecaster_quantile_real.joblib` is **campaign-only** (sklearn QuantileRegressor), not the NumPy hot path. Implemented in `app/config/model_artifacts.py`.
+
+## Active model set file (FB-SPEC-06)
+
+- Default **`models/registry/active_model_set.json`** — declare intended paths / lineage; **`model_artifacts.registry`** compares to live **`NM_*`** and lists **`drift_vs_env`** when they differ.
+- Override path: **`NM_MODELS_ACTIVE_REGISTRY_PATH`**.
+
+## Multi-symbol runtime (FB-SPEC-07)
+
+- See [`docs/Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD): independent per-symbol ticks with **shared** risk caps — no built-in cross-symbol optimizer.

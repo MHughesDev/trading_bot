@@ -60,4 +60,4 @@ def test_status_includes_model_artifacts(monkeypatch: pytest.MonkeyPatch) -> Non
     body = r.json()
     assert "model_artifacts" in body
     ma = body["model_artifacts"]
-    assert "serving" in ma and "training" in ma
+    assert "serving" in ma and "training" in ma and "registry" in ma

@@ -31,6 +31,7 @@ This folder holds **specifications that describe the repository as implemented**
 | [`TESTING_AND_CI.MD`](TESTING_AND_CI.MD) | `tests/`, `scripts/`, GitHub Actions |
 | [`FORECASTER_AND_POLICY.MD`](FORECASTER_AND_POLICY.MD) | `forecaster_model/`, `policy_model/`, `ForecastPacket` |
 | [`MASTER_SPEC_RISK_STATE_GAP.MD`](MASTER_SPEC_RISK_STATE_GAP.MD) | App vs policy `RiskState` vs master spec §12 (FB-AUDIT-12) |
+| [`MULTI_ASSET_PORTFOLIO.MD`](MULTI_ASSET_PORTFOLIO.MD) | Independent ticks vs shared risk caps; no cross-symbol optimizer (FB-SPEC-07) |
 | [`../MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD) | Historical note: legacy Ridge path removed; single master pipeline |
 | [`../SYSTEM_WALKTHROUGH.MD`](../SYSTEM_WALKTHROUGH.MD) | Step-by-step: live, paper, live execution, backtest (master pipeline) |
 | [`../Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](../Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) | Authoritative end-to-end system spec |
