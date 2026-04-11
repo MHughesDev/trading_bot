@@ -1,52 +1,46 @@
-# NautilusMonster V3 — default configuration (override with NM_* env or file path)
-
 execution:
-  mode: paper # paper | live
+  mode: live
   live_adapter: coinbase
   paper_adapter: alpaca
-  # Paper only: periodically replace in-memory positions with Alpaca fetch_positions (Issue 16/18)
   position_reconcile_enabled: false
   position_reconcile_interval_seconds: 60
-
 market_data:
   provider: kraken
-  bar_interval_seconds: 1 # live WS tick roll-up bucket size (seconds)
-  # Offline training bar size (seconds). Kraken OHLC supports 60,300,…; other values use /Trades (slow for large lookbacks). Set to 1 for second bars on short windows.
+  bar_interval_seconds: 1
   training_granularity_seconds: 60
   symbols:
-    - BTC-USD
-    - ETH-USD
-    - SOL-USD
-
+  - BTC-USD
+  - ETH-USD
+  - SOL-USD
 memory:
   qdrant_collection: news_context_memory
   retrieval_interval_seconds: 60
   top_k: 10
-
 risk:
   max_total_exposure_usd: 100000
   max_per_symbol_usd: 40000
   max_drawdown_pct: 0.15
   max_spread_bps: 50
   stale_data_seconds: 120
-
 features:
-  return_windows: [1, 3, 5, 15]
-  volatility_windows: [5, 15, 60]
-
+  return_windows:
+  - 1
+  - 3
+  - 5
+  - 15
+  volatility_windows:
+  - 5
+  - 15
+  - 60
 backtesting:
   slippage_bps: 5.0
-  fee_bps: 10.0 # round-trip style fee on notional (per fill)
-  slippage_noise_bps: 0.0 # set >0 for stochastic slippage; use rng_seed for reproducibility
-  rng_seed: null # e.g. 42 for deterministic noise; null = process-global Random
+  fee_bps: 10.0
+  slippage_noise_bps: 0.0
+  rng_seed: null
   initial_cash_usd: 100000
-  # When track_portfolio=True in replay: block buys if cash + fees would go negative
   enforce_solvency: true
-  # When true and track_portfolio: pass simulated cash into risk as available_cash_usd
   replay_available_cash: false
-
 routing:
-  # Deterministic route selector (spec §9) — thresholds in config, not code magic numbers
   spread_trade_max_bps: 30.0
   forecast_strength_min: 0.001
   score_weights:
@@ -54,59 +48,33 @@ routing:
     intraday_forecast: 2.0
     swing_forecast: 2.0
     spread_penalty_per_bp: 0.01
-
 redis:
   bar_ttl_seconds: 86400
-
 sentiment:
-  # FinBERT etc. wired in orchestration; V1 uses neutral stub if no model
   use_finbert: false
-  # RSS/Atom URLs for headline fetch (optional). Empty = neutral sentiment features.
   rss_feeds: []
   fetch_timeout_seconds: 15
-
 control_plane:
-  host: "0.0.0.0"
+  host: 0.0.0.0
   port: 8000
-
 observability:
   log_level: INFO
   metrics_port: 8000
-
 questdb:
-  # NM_QUESTDB_PERSIST_DECISION_TRACES=true to write JSON traces from live_service
   persist_decision_traces: false
   batch_max_rows: 500
   flush_interval_seconds: 2.0
-
-# Master pipeline (see docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD)
 models:
-  # Optional label for `ForecastPacket.source_checkpoint_id` (serving lineage)
   forecaster_checkpoint_id: null
-  # Optional JSON path: MultiHorizonConformal state for calibrated quantiles on the hot path
   forecaster_conformal_state_path: null
-  # Optional NPZ: serialized NumPy forecaster weights (`forecaster_model.models.forecaster_weights`)
   forecaster_weights_path: null
-  # Optional PyTorch checkpoint (forecaster_model.training.train_torch_forecaster_distill)
   forecaster_torch_path: null
-  # Optional NPZ: multi-branch MLP policy actor (`policy_model.policy.mlp_actor.MultiBranchMLPPolicy`)
   policy_mlp_path: null
-  # Optional JSON path: promoted serving paths override NM_* for keys present (FB-SPEC-06)
   active_set_path: null
   active_set_label: null
   active_set_manifest_version: null
-  # PyTorch forecaster training (and future torch inference): auto | cpu | cuda | cuda:0
   torch_device: auto
-  # Optional JSON: declared active model paths (see models/registry/) — FB-SPEC-06
   active_registry_path: null
-
-# Set NM_RISK_SIGNING_SECRET in production so only RiskEngine-signed OrderIntents execute.
-# NM_ALLOW_UNSIGNED_EXECUTION=true only for local dev without secrets.
-# NM_CONTROL_PLANE_API_KEY protects POST /params, /system/mode, /flatten (header X-API-Key).
-
-
 microservices:
   runtime_bridge_enabled: false
-  # in_process: shadow handoff runs execution handler in the live process.
-  # external: Redis Streams + separate execution_gateway_service (skip in-process submit_order when bridge is on).
   execution_gateway_mode: in_process

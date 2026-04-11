@@ -7,6 +7,13 @@
 - Default **`NM_CONTROL_PLANE_HOST=0.0.0.0`** listens on all interfaces. On a single machine behind an untrusted LAN, prefer **`NM_CONTROL_PLANE_HOST=127.0.0.1`** so the API is only reachable from localhost.
 - Keep **`NM_CONTROL_PLANE_API_KEY`** set for mutating routes (`POST /params`, `/system/mode`, `/flatten`) whenever the control plane is reachable beyond localhost.
 
+## Execution mode (paper vs live)
+
+- **`NM_EXECUTION_MODE`** is read at **process start** from environment (and `default.yaml` via `load_settings`). It is **not** hot-swapped while `live_service` runs.
+- **Operator flow:** `GET /status` includes **`execution_profile`** (`active_execution_mode`, `pending_execution_mode`, `restart_required`). `POST /system/execution-profile` with `{"execution_mode":"paper"|"live"}` records intent and, by default, patches **`app/config/default.yaml`** and **`.env`** (`NM_EXECUTION_MODE=...`) when those files exist.
+- **After Apply:** restart **uvicorn** (control plane), **`python -m app.runtime.power_supervisor`** / **`run.bat`**, and any **`live_service_app`** / **`python -m app.runtime.live_service`** so all processes reload settings.
+- **Streamlit:** sidebar **Execution mode** — same POST; watch **restart required** until you restart.
+
 ## Preflight (before live or production-like paper)
 
 - Run: `python scripts/preflight_check.py` — exits **1** if blocking issues (e.g. `execution_mode=live` without `NM_RISK_SIGNING_SECRET`, or `NM_ALLOW_UNSIGNED_EXECUTION=true` in live).

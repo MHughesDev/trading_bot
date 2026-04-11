@@ -19,6 +19,11 @@ from app.contracts.risk import SystemMode
 from app.runtime.mode_manager import ModeManager
 from app.runtime.state_manager import StateManager
 from app.runtime.system_power import get_power, set_power
+from control_plane.execution_profile import (
+    apply_intent_to_config_files,
+    profile_payload,
+    write_pending_intent,
+)
 from control_plane.microservice_health import probe_microservices_health
 
 settings = load_settings()
@@ -88,6 +93,7 @@ def get_status() -> dict[str, Any]:
         "preflight": preflight_report(settings),
         "production_preflight": production_preflight_payload(settings),
         "model_artifacts": model_artifact_contract(settings),
+        "execution_profile": profile_payload(settings.execution_mode),
     }
 
 
@@ -95,6 +101,38 @@ def get_status() -> dict[str, Any]:
 def get_system_power() -> dict[str, str]:
     """Global ON/OFF: OFF stops inference, trading, and offline training (see app/runtime/system_power.py)."""
     return {"power": get_power()}
+
+
+@app.get("/system/execution-profile")
+def get_execution_profile() -> dict[str, Any]:
+    """Active vs pending ``NM_EXECUTION_MODE``; pending is set by POST until processes restart."""
+    return profile_payload(settings.execution_mode)
+
+
+@app.post("/system/execution-profile")
+def post_execution_profile(
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """Record operator intent (paper/live). Optionally patch ``app/config/default.yaml`` and ``.env`` — **restart** API + live processes to load."""
+    raw = str(body.get("execution_mode", "")).strip().lower()
+    if raw not in ("paper", "live"):
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="execution_mode must be paper or live",
+        )
+    intent: Any = raw
+    apply_files = bool(body.get("apply_to_config_files", True))
+    files_updated: dict[str, bool] = {}
+    if apply_files:
+        files_updated = apply_intent_to_config_files(intent)
+    write_pending_intent(intent, settings.execution_mode)
+    out: dict[str, Any] = {
+        **profile_payload(settings.execution_mode),
+        "config_files_updated": files_updated,
+        "note": "Restart control plane, live_service / live_service_app, and power_supervisor (or close and re-run run.bat) so all processes load the new mode.",
+    }
+    return out
 
 
 @app.post("/system/power")

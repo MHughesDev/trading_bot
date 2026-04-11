@@ -55,6 +55,45 @@ with col_b:
 
 st.sidebar.markdown(f"**Current:** `{power_state}`")
 
+st.sidebar.divider()
+st.sidebar.subheader("Execution mode (paper / live)")
+st.sidebar.caption(
+    "Apply writes intent + updates default.yaml and .env when present. "
+    "Restart API and live runtime (or re-run run.bat) to load NM_EXECUTION_MODE."
+)
+try:
+    st_data = api_get_json("/status")
+    prof = st_data.get("execution_profile") or {}
+    active = prof.get("active_execution_mode", "?")
+    pending = prof.get("pending_execution_mode")
+    need_restart = bool(prof.get("restart_required"))
+except Exception as e:
+    st.sidebar.error(f"Cannot read status: {e}")
+    active, pending, need_restart = "?", None, False
+
+mode_choice = st.sidebar.selectbox(
+    "Target mode",
+    options=["paper", "live"],
+    index=0 if str(active).lower() != "live" else 1,
+    key="exec_mode_select",
+)
+if st.sidebar.button("Apply execution mode", use_container_width=True):
+    try:
+        api_post_json(
+            "/system/execution-profile",
+            {"execution_mode": mode_choice, "apply_to_config_files": True},
+        )
+        st.sidebar.success(f"Intent set to **{mode_choice}**. Restart processes to activate.")
+        st.rerun()
+    except Exception as e:
+        st.sidebar.error(str(e))
+
+st.sidebar.markdown(f"**Active (process):** `{active}`")
+if pending:
+    st.sidebar.markdown(f"**Pending:** `{pending}`")
+if need_restart:
+    st.sidebar.warning("Restart required — stop and start control plane + live runtime.")
+
 st.markdown(
     """
 Use the sidebar to open **Live**, **Regimes**, **Routes**, **Models**, **Logs**, **Emergency**.

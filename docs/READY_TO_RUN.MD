@@ -78,6 +78,7 @@ python -m streamlit run control_plane/Home.py
 
 - [ ] **`NM_CONTROL_PLANE_URL`** (Streamlit) defaults to `http://127.0.0.1:8000`.
 - [ ] **System power** — sidebar on Home or **`GET/POST /system/power`**; OFF stops inference, training, and supervised live loop.
+- [ ] **Paper vs live** — sidebar **Execution mode** + **`POST /system/execution-profile`** (or `GET /status` → `execution_profile`). After changing mode, **restart** API + live processes (see [`RUNBOOKS.MD`](RUNBOOKS.MD) — no hot-swap).
 
 ---
 
