@@ -119,6 +119,9 @@ class AppSettings(BaseSettings):
     models_active_registry_path: str | None = None
 
     microservices_runtime_bridge_enabled: bool = False
+    # in_process: bridge runs decision→risk→execution handlers in-process (shadow).
+    # external: bridge publishes through Redis; execution_gateway_service consumes risk.intent.accepted.
+    microservices_execution_gateway_mode: Literal["in_process", "external"] = "in_process"
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -213,6 +216,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         ms = cfg["microservices"] or {}
         if "runtime_bridge_enabled" in ms:
             out["microservices_runtime_bridge_enabled"] = bool(ms["runtime_bridge_enabled"])
+        if "execution_gateway_mode" in ms:
+            out["microservices_execution_gateway_mode"] = str(ms["execution_gateway_mode"])
     if "models" in cfg:
         mo = cfg["models"] or {}
         if "forecaster_checkpoint_id" in mo:

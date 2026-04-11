@@ -44,3 +44,13 @@ def test_runtime_bridge_redis_poll_handoff() -> None:
     )
     assert bridge.submitted_orders
     assert bridge.submitted_orders[-1]["symbol"] == "ETH/USD"
+
+
+def test_runtime_bridge_external_mode_does_not_consume_risk_stream() -> None:
+    """External execution gateway: accepted intents stay on stream for another process."""
+    bus = RedisStreamsMessageBus("redis://unused", client=_FakeRedis())
+    bridge = RuntimeHandoffBridge(bus, execution_gateway_mode="external")
+    bridge.process_feature_row(
+        {"symbol": "BTC/USD", "direction": 1, "size_fraction": 0.1, "route_id": "SCALPING"}
+    )
+    assert bridge.submitted_orders == []

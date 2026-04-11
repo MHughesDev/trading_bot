@@ -17,7 +17,8 @@ It is intentionally implementation-oriented so work can be executed as small, te
 - ✅ Execution gateway service now exposes `/ingest/risk-accepted` and `/events/recent` for externalized handoff smoke testing.
 - ✅ Risk service now exposes `/ingest/decision-proposal` and `/events/recent` for externalized proposal->risk smoke testing.
 - ✅ Decision service now exposes `/ingest/features-row` and `/events/recent` for externalized feature->proposal smoke testing.
-- ⏭️ Next step: replace API-chain smoke with runtime-wired chain and validate end-to-end paper execution against real adapter path with externalized execution gateway and Redis transport (production integration gate).
+- ✅ Runtime bridge can run with **external execution gateway**: set `NM_MICROSERVICES_EXECUTION_GATEWAY_MODE=external`, `NM_MICROSERVICES_RUNTIME_BRIDGE_ENABLED=true`, `NM_MESSAGING_BACKEND=redis_streams`, and `NM_REDIS_URL` (matches `NM_REDIS_URL` / compose Redis). Live loop skips in-process `submit_order` when external mode is on; run `uvicorn services.execution_gateway_service.main:app` (polls `risk.intent.accepted.v1`) for the venue path.
+- ⏭️ Next step: wire **real** `ExecutionService.submit_order` inside `execution_gateway_service` handlers (replace scaffold ack/fill) and run paper integration with Redis + live loop + gateway process.
 
 ---
 

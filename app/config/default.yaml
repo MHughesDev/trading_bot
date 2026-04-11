@@ -107,3 +107,6 @@ models:
 
 microservices:
   runtime_bridge_enabled: false
+  # in_process: shadow handoff runs execution handler in the live process.
+  # external: Redis Streams + separate execution_gateway_service (skip in-process submit_order when bridge is on).
+  execution_gateway_mode: in_process

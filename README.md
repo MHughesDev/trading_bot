@@ -64,9 +64,12 @@ A milestone combined service is available at `services/decision_risk_service/mai
 
 A runtime bridge helper is available at `services/runtime_bridge.py` to route feature payloads through the microservice handoff path for incremental runtime integration.
 
-Set `NM_MICROSERVICES_RUNTIME_BRIDGE_ENABLED=true` to enable runtime shadow handoff publishing from the live loop.
+Set `NM_MICROSERVICES_RUNTIME_BRIDGE_ENABLED=true` to enable runtime handoff publishing from the live loop.
 
-Execution gateway service exposes `POST /ingest/risk-accepted` and `GET /events/recent` for externalized handoff smoke tests.
+- **Shadow (default):** `NM_MICROSERVICES_EXECUTION_GATEWAY_MODE=in_process` — decision→risk→execution handlers run inside the live process (duplicate of real execution unless you disable submit).
+- **External gateway:** `NM_MICROSERVICES_EXECUTION_GATEWAY_MODE=external` with `NM_MESSAGING_BACKEND=redis_streams` and `NM_REDIS_URL` — live publishes the handoff chain to Redis and **skips** in-process `submit_order`; run the execution gateway service separately to consume `risk.intent.accepted.v1`.
+
+Execution gateway service exposes `POST /ingest/risk-accepted`, `GET /events/recent`, and `GET /messaging` (backend hint). With Redis, it runs a background poll loop on `risk.intent.accepted.v1`.
 Risk service exposes `POST /ingest/decision-proposal` and `GET /events/recent` for proposal gating smoke tests.
 Decision service exposes `POST /ingest/features-row` and `GET /events/recent` for feature-to-proposal smoke tests.
 

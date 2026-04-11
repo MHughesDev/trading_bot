@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import uuid
 from datetime import UTC, datetime
@@ -168,13 +169,25 @@ async def run_live_loop(
     stop = stop_event or asyncio.Event()
 
     runtime_bridge: RuntimeHandoffBridge | None = None
+    use_external_execution_gateway = False
     if cfg.microservices_runtime_bridge_enabled:
         try:
-            runtime_bridge = RuntimeHandoffBridge(create_message_bus())
-            logger.info("microservice runtime bridge enabled (shadow handoff)")
+            if cfg.microservices_execution_gateway_mode == "external":
+                os.environ["NM_MESSAGING_BACKEND"] = "redis_streams"
+                os.environ["NM_REDIS_URL"] = cfg.redis_url
+                use_external_execution_gateway = True
+            runtime_bridge = RuntimeHandoffBridge(
+                create_message_bus(),
+                execution_gateway_mode=cfg.microservices_execution_gateway_mode,
+            )
+            logger.info(
+                "microservice runtime bridge enabled (mode=%s)",
+                cfg.microservices_execution_gateway_mode,
+            )
         except Exception:
             logger.exception("microservice runtime bridge init failed; continuing without bridge")
             runtime_bridge = None
+            use_external_execution_gateway = False
 
     qdb: QuestDBWriter | None = None
     if cfg.questdb_persist_decision_traces:
@@ -371,15 +384,21 @@ async def run_live_loop(
                     logger.exception("questdb insert_decision_trace failed")
 
             if trade and intent:
-                try:
-                    await exec_svc.submit_order(intent)
-                    q = Decimal(str(trade.quantity))
-                    if trade.side == "buy":
-                        positions[symbol] = positions.get(symbol, Decimal(0)) + q
-                    else:
-                        positions[symbol] = positions.get(symbol, Decimal(0)) - q
-                except Exception:
-                    logger.exception("submit_order failed")
+                if runtime_bridge is not None and use_external_execution_gateway:
+                    logger.info(
+                        "external execution gateway: skipping in-process submit_order for %s",
+                        symbol,
+                    )
+                else:
+                    try:
+                        await exec_svc.submit_order(intent)
+                        q = Decimal(str(trade.quantity))
+                        if trade.side == "buy":
+                            positions[symbol] = positions.get(symbol, Decimal(0)) + q
+                        else:
+                            positions[symbol] = positions.get(symbol, Decimal(0)) - q
+                    except Exception:
+                        logger.exception("submit_order failed")
 
             n += 1
             if max_iterations is not None and n >= max_iterations:

@@ -1,15 +1,35 @@
 from __future__ import annotations
 
 from services.pipeline_handoff import wire_phase3_handoff
+from services.execution_gateway_service.handlers import ExecutionGatewayHandlers
 from shared.messaging import topics
 from shared.messaging.envelope import EventEnvelope
 from shared.messaging.in_memory import InMemoryMessageBus
 from shared.messaging.trace import new_trace_id
 
 
+def test_wire_phase3_without_execution_registers_decision_risk_only() -> None:
+    bus = InMemoryMessageBus()
+    accepted: list[EventEnvelope] = []
+    bus.subscribe(topics.RISK_INTENT_ACCEPTED_V1, accepted.append)
+    execution = wire_phase3_handoff(bus, register_execution=False)
+    assert execution is None
+    feature = EventEnvelope(
+        event_type="features.row.generated",
+        trace_id=new_trace_id(),
+        producer_service="feature_service",
+        symbol="BTC/USD",
+        payload={"symbol": "BTC/USD", "direction": 1, "size_fraction": 0.1, "route_id": "SCALPING"},
+    )
+    bus.publish(topics.FEATURES_ROW_GENERATED_V1, feature)
+    assert len(accepted) == 1
+    assert accepted[0].payload.get("signed_intent")
+
+
 def test_feature_to_execution_ack_handoff() -> None:
     bus = InMemoryMessageBus()
     execution = wire_phase3_handoff(bus)
+    assert isinstance(execution, ExecutionGatewayHandlers)
 
     acks: list[EventEnvelope] = []
     bus.subscribe(topics.EXECUTION_ORDER_ACK_V1, acks.append)

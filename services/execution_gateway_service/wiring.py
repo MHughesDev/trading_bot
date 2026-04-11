@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 
 from services.common import build_scaffold_app
+from services.execution_gateway_bus import create_execution_gateway_bus
 from services.execution_gateway_service.handlers import ExecutionGatewayHandlers
 from shared.messaging import topics
 from shared.messaging.envelope import EventEnvelope
-from shared.messaging.in_memory import InMemoryMessageBus
+from shared.messaging.redis_streams import RedisStreamsMessageBus
 
 
 @dataclass
@@ -23,8 +27,7 @@ class ExecutionGatewayState:
 
 
 def create_app() -> FastAPI:
-    app = build_scaffold_app("execution_gateway_service")
-    bus = InMemoryMessageBus()
+    bus = create_execution_gateway_bus()
     handler = ExecutionGatewayHandlers(bus)
     handler.register()
 
@@ -47,6 +50,31 @@ def create_app() -> FastAPI:
     bus.subscribe(topics.EXECUTION_ORDER_REJECTED_V1, _capture_rejected)
     bus.subscribe(topics.EXECUTION_POSITION_SNAPSHOT_V1, _capture_position)
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.bus = bus
+        poll_task: asyncio.Task[None] | None = None
+        poll_stop: asyncio.Event | None = None
+        if isinstance(bus, RedisStreamsMessageBus):
+            poll_stop = asyncio.Event()
+
+            async def _poll_loop() -> None:
+                assert poll_stop is not None
+                while not poll_stop.is_set():
+                    bus.poll_once(topics.RISK_INTENT_ACCEPTED_V1)
+                    await asyncio.sleep(0.05)
+
+            poll_task = asyncio.create_task(_poll_loop())
+        try:
+            yield
+        finally:
+            if poll_stop is not None:
+                poll_stop.set()
+            if poll_task is not None:
+                await poll_task
+
+    app = build_scaffold_app("execution_gateway_service", lifespan=lifespan)
+
     @app.post("/ingest/risk-accepted")
     def ingest_risk_accepted(payload: dict) -> dict[str, int]:
         env = EventEnvelope(
@@ -57,6 +85,8 @@ def create_app() -> FastAPI:
             payload=payload,
         )
         bus.publish(topics.RISK_INTENT_ACCEPTED_V1, env)
+        if isinstance(bus, RedisStreamsMessageBus):
+            bus.poll_once(topics.RISK_INTENT_ACCEPTED_V1)
         return {
             "submitted_orders": len(state.handler.submitted_orders),
             "acks": len(state.order_acks),
@@ -74,5 +104,10 @@ def create_app() -> FastAPI:
             "positions": list(state.position_snapshots),
             "rejections": list(state.order_rejections),
         }
+
+    @app.get("/messaging")
+    def messaging_info() -> dict[str, str]:
+        backend = "redis_streams" if isinstance(bus, RedisStreamsMessageBus) else "in_memory"
+        return {"messaging_backend": backend}
 
     return app
