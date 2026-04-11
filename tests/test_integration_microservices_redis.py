@@ -345,3 +345,101 @@ def test_redis_three_process_decision_risk_gateway_chain() -> None:
             err = p.stderr.read().decode() if p.stderr else ""
             if p.returncode not in (0, -15) and err:
                 pytest.fail(f"uvicorn stderr: {err[:1500]}")
+
+
+def test_redis_four_process_feature_decision_risk_gateway_chain() -> None:
+    """Feature → Decision → Risk → Gateway (market tick ingest on feature service)."""
+    redis_url = os.getenv("NM_REDIS_URL", "redis://127.0.0.1:6379/0")
+    try:
+        import redis as redis_mod
+
+        redis_mod.Redis.from_url(redis_url, socket_connect_timeout=2).ping()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"Redis not reachable at {redis_url!r}: {exc}")
+
+    secret = "integration-4proc-chain-secret-32chars!!"
+    base = {
+        "NM_MESSAGING_BACKEND": "redis_streams",
+        "NM_REDIS_URL": redis_url,
+        "NM_RISK_SIGNING_SECRET": secret,
+        "NM_EXECUTION_GATEWAY_SUBMIT": "true",
+        "NM_EXECUTION_ADAPTER": "stub",
+        "NM_ALLOW_UNSIGNED_EXECUTION": "false",
+    }
+
+    feature_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.feature_service.main:app", "--host", "127.0.0.1", "--port", "18781"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    decision_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.decision_service.main:app", "--host", "127.0.0.1", "--port", "18782"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    risk_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.risk_service.main:app", "--host", "127.0.0.1", "--port", "18783"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    gw_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.execution_gateway_service.main:app", "--host", "127.0.0.1", "--port", "18784"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        for port in (18781, 18782, 18783, 18784):
+            _wait_http(f"http://127.0.0.1:{port}/healthz")
+
+        for url, name in (
+            ("http://127.0.0.1:18781/messaging", "feature"),
+            ("http://127.0.0.1:18782/messaging", "decision"),
+            ("http://127.0.0.1:18783/messaging", "risk"),
+            ("http://127.0.0.1:18784/messaging", "gateway"),
+        ):
+            r = httpx.get(url, timeout=2.0)
+            r.raise_for_status()
+            assert r.json().get("messaging_backend") == "redis_streams", name
+
+        r = httpx.post(
+            "http://127.0.0.1:18781/ingest/market-tick",
+            json={
+                "symbol": "BTC-USD",
+                "direction": 1,
+                "size_fraction": 0.1,
+                "route_id": "SCALPING",
+                "mid_price": 50_000.0,
+                "spread_bps": 5.0,
+            },
+            timeout=5.0,
+        )
+        r.raise_for_status()
+
+        deadline = time.monotonic() + 30.0
+        recent: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            recent = httpx.get("http://127.0.0.1:18784/events/recent", timeout=2.0).json()
+            if recent.get("submitted_orders"):
+                break
+            time.sleep(0.2)
+
+        assert recent.get("submitted_orders"), f"gateway empty: {recent!r}"
+        first = recent["submitted_orders"][0]
+        if isinstance(first, dict) and "order_intent" in first:
+            assert first["order_intent"]["symbol"] == "BTC-USD"
+    finally:
+        for p in (gw_proc, risk_proc, decision_proc, feature_proc):
+            p.terminate()
+        for p in (gw_proc, risk_proc, decision_proc, feature_proc):
+            try:
+                p.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        for p in (gw_proc, risk_proc, decision_proc, feature_proc):
+            err = p.stderr.read().decode() if p.stderr else ""
+            if p.returncode not in (0, -15) and err:
+                pytest.fail(f"uvicorn stderr: {err[:1500]}")
