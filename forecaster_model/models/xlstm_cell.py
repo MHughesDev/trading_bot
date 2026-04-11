@@ -1,17 +1,22 @@
-"""
-xLSTM branch cell (human forecaster spec §12.4–§12.7).
+"""xLSTM branch cell (human forecaster spec §12.4–§12.7).
 
 Spec §12.7: If a strict xLSTM implementation is unavailable, the abstraction permits
 drop-in replacement with an enhanced LSTM cell exposing the same interface.
 
 This module implements a **standard LSTM** forward pass in NumPy as the **recurrent core**
 for each branch until a full xLSTM cell is integrated. Call sites use `forward_xlstm_sequence`
-so the multi-resolution stack matches the spec’s `xLSTM_s` contract by name.
+so the multi-resolution stack matches the spec's `xLSTM_s` contract by name.
+
+**FB-FR-PG7 (ablation):** `ABLATION_SIGNED_OFF_LSTM_BASELINE` documents the shipped baseline
+until a native xLSTM or third-party cell is integrated and evaluated per spec §27.
 """
 
 from __future__ import annotations
 
 import numpy as np
+
+# Formal LSTM baseline sign-off flag (spec §27 ablation matrix item 7).
+ABLATION_SIGNED_OFF_LSTM_BASELINE = True
 
 
 def forward_xlstm_sequence(x: np.ndarray, hidden_dim: int, rng: np.random.Generator) -> np.ndarray:

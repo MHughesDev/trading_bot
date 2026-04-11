@@ -2,6 +2,7 @@
 
 from forecaster_model.training.checkpoint import load_json_checkpoint, save_json_checkpoint
 from forecaster_model.training.metrics import mean_pinball_loss, pinball_loss
+from forecaster_model.training.torch_trainer import train_forecaster_stub, train_forecaster_torch
 from forecaster_model.training.walkforward import WalkForwardConfig, walk_forward_indices
 
 __all__ = [
@@ -11,4 +12,6 @@ __all__ = [
     "mean_pinball_loss",
     "save_json_checkpoint",
     "load_json_checkpoint",
+    "train_forecaster_stub",
+    "train_forecaster_torch",
 ]

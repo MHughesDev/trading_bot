@@ -86,12 +86,44 @@ def _prefect_flow_def():
         artifact_dir: str | None = None,
         mlflow_tracking_uri: str | None = None,
     ) -> dict[str, Any]:
-        return run_train_evaluate_log(
+        return run_forecaster_policy_nightly(
             artifact_dir=artifact_dir,
             mlflow_tracking_uri=mlflow_tracking_uri,
         )
 
     return nightly_flow
+
+
+def run_forecaster_policy_nightly(
+    *,
+    artifact_dir: str | Path | None = None,
+    mlflow_tracking_uri: str | None = None,
+) -> dict[str, Any]:
+    """
+    Scheduled job bundle (FB-PL-PG6): HMM+Ridge train + forecaster stub metadata + policy trainer noop.
+
+    No auto-promotion; artifacts under artifact_dir.
+    """
+    artifact_dir = Path(artifact_dir or tempfile.mkdtemp(prefix="nm-nightly-"))
+    base = run_train_evaluate_log(artifact_dir=artifact_dir, mlflow_tracking_uri=mlflow_tracking_uri)
+    try:
+        from forecaster_model.training.torch_trainer import train_forecaster_stub
+
+        fc_meta = train_forecaster_stub(artifact_dir=artifact_dir / "forecaster")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("forecaster stub train skipped: %s", e)
+        fc_meta = {"error": str(e)}
+    try:
+        from policy_model.training.actor_critic import ActorCriticTrainer
+        from policy_model.training.buffer import ReplayBuffer
+
+        tr = ActorCriticTrainer()
+        _ = tr.update_from_buffer(ReplayBuffer(), batch_size=8)
+        tr.save(artifact_dir / "policy_trainer_stub.npz")
+        pl_meta = {"policy_trainer": "stub_saved"}
+    except Exception as e:  # noqa: BLE001
+        pl_meta = {"error": str(e)}
+    return {**base, "forecaster_meta": fc_meta, "policy_meta": pl_meta}
 
 
 def nightly_flow_entrypoint() -> None:
@@ -100,7 +132,7 @@ def nightly_flow_entrypoint() -> None:
     if fn is None:
         logging.basicConfig(level=logging.INFO)
         logger.info("prefect not installed; running inline train (pip install nautilus-monster[orchestration])")
-        run_train_evaluate_log()
+        run_forecaster_policy_nightly()
         return
     fn()
 

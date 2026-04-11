@@ -16,7 +16,10 @@ This document tracks **only** how the repository maps to those two files. Where 
 | `losses/quantile.py` | `forecaster_model/losses/quantile.py` (pinball); `forecaster_model/training/metrics.py` re-exports usage |
 | `calibration/conformal.py` | `forecaster_model/calibration/conformal.py` — `SlidingConformalCalibrator`, `MultiHorizonConformal`, JSON `save_conformal_state` / `load_conformal_state`; optional apply in `build_forecast_packet_methodology` when `ForecasterConfig.calibration_enabled` |
 | `training/*` | `forecaster_model/training/` — walk-forward, metrics, checkpoint |
-| `inference/*` | `forecaster_model/inference/` — `build_from_ohlc.py`, `guards.py`, `stub.py` |
+| `inference/*` | `forecaster_model/inference/` — `build_from_ohlc.py`, `guards.py` (incl. drift), `robust.py`, `stub.py` |
+| `data/dataset_manifest.py` | Versioned manifests + SHA256 — `forecaster_model/data/dataset_manifest.py` |
+| `models/ensemble.py` | `build_ensemble_forecast_packet`, `forward_ensemble_numpy` |
+| `training/torch_trainer.py` | `train_forecaster_stub`, optional `train_forecaster_torch` (`[models_torch]`) |
 
 **Canonical pipeline (human §30 short form):**  
 VSN → Latent CNN → Multi-Resolution xLSTM → Regime-Conditioned Fusion → Quantile Decoder — implemented in `ForecasterModel.forward` and `forward_numpy_reference`.
@@ -35,6 +38,10 @@ VSN → Latent CNN → Multi-Resolution xLSTM → Regime-Conditioned Fusion → 
 | `env/rewards.py` | `policy_model/env/rewards.py` → `one_step_reward` in `env/reward.py` |
 | `env/environment.py` | `policy_model/env/environment.py` — `TradingPolicyEnvironment` Protocol; **`replay_env.ReplayPolicyEnvironment`** concrete replay loop |
 | `training/protocol.py` | `RLPolicyAlgorithm` Protocol |
+| `training/buffer.py`, `actor_critic.py`, `behavior_cloning.py` | Replay buffer, walk-forward slices, BC loss |
+| `shadow.py` | `shadow_compare_actions` (canary vs primary) |
+| `integration/full_policy_loop.py` | `run_stub_episode` — end-to-end stub |
+| `env/replay_env.py` | `ReplayPolicyEnvironment` |
 | Top-level `PolicySystem` §28 | `policy_model/system.py` — `policy_algorithm`, `action_projector`, `risk_gate`, `execution_planner` |
 
 **Bridge:** `policy_model/bridge.py` maps `AppSettings` + app `RiskState` → policy-layer `RiskState` (spec §8.4).
