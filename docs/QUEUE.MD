@@ -129,15 +129,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 #### FB-DASH — Dashboard & operator UX
 
-| ID | Phase | Cat | Type | Status | Summary | Pointer |
-|----|-------|-----|------|--------|---------|---------|
-| FB-DASH-04-01 | B | DS | Feature | Open | **Mark price source:** define Kraken mid vs venue quote precedence per mode | `data_plane/`, `execution/` |
-| FB-DASH-04-02 | B | DS | Feature | Open | **Unrealized P&L:** extend position DTO + green/red in UI when avg entry + mark available | `execution/adapters/`, Streamlit |
-| FB-DASH-05-01 | B | DS | Feature | Open | **Ledger design:** choose source of truth for fills (QuestDB tables vs Alpaca activity API vs hybrid) | `data_plane/storage/`, `docs/` |
-| FB-DASH-05-02 | B | DS | Feature | Open | **`GET /pnl/summary?range=`** (hour, day, month, year, all) with realized/unrealized split | `control_plane/api.py` |
-| FB-DASH-05-03 | B | DS | Feature | Open | **Streamlit:** timeframe selector + aggregate P&L panel | `control_plane/` |
-| FB-DASH-06-01 | B | DS | Hardening | Open | **UI guardrail:** modal + optional “type LIVE” before applying live execution profile | `control_plane/` |
-| FB-DASH-06-02 | B | DS | Reliability | Open | **RUNBOOKS:** live trading checklist mirrors UI guardrails | `RUNBOOKS.MD` |
+*No open **FB-DASH** items — completed rows are in [§5.4](#54-ui-observability-ci-backtesting-summary) / [§5.5](#55-complete-archive-one-row-per-id).*
 
 #### FB-MS — Microservices extraction (remaining production split)
 
@@ -328,6 +320,9 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-C1 | 2026-04-10 | Streamlit + `streamlit_util` |
 | FB-DASH-02-01 … FB-DASH-02-03 | 2026-04-11 | **`GET/POST /system/execution-profile`**, `execution_profile` on **`GET /status`**; Streamlit sidebar; RUNBOOKS + README; `data/execution_profile.json` pending intent |
 | FB-DASH-03-01 … FB-DASH-03-03 | 2026-04-11 | **`PortfolioPositionRow`**, **`GET /portfolio/positions`**, Streamlit **Open positions** expander + refresh |
+| FB-DASH-04-01 … FB-DASH-04-02 | 2026-04-11 | Kraken vs venue mark policy; positions **`mark_price`**; green/red uPnL |
+| FB-DASH-05-01 … FB-DASH-05-03 | 2026-04-11 | **[`PNL_LEDGER.MD`](PNL_LEDGER.MD)**; **`GET /pnl/summary`**; **`pnl_panel`** on Home |
+| FB-DASH-06-01 … FB-DASH-06-02 | 2026-04-11 | Live **`st.dialog`** + type **LIVE**; **[`RUNBOOKS.MD`](RUNBOOKS.MD)** live checklist |
 | FB-DASH-01-01, FB-DASH-01-02 | 2026-04-11 | Operator **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** checklist; README + RUNBOOKS + `.env.example` cross-links |
 | FB-I1, FB-I2, HG-13 | 2026-04-10 | README orchestration note; CI workflow + optional integration |
 | FB-B1 | 2026-04-10 | `available_cash_usd` / replay cash |
@@ -361,6 +356,13 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-DASH-03-01 | contracts | 2026-04-11 | **`app/contracts/portfolio.py`** — `PortfolioPositionRow` + `position_snapshot_to_row` |
 | FB-DASH-03-02 | control_plane | 2026-04-11 | **`GET /portfolio/positions`** — `execution/portfolio_positions.fetch_portfolio_positions` |
 | FB-DASH-03-03 | control_plane | 2026-04-11 | **`control_plane/positions_panel.py`** — collapsible sidebar, optional 30s refresh |
+| FB-DASH-04-01 | data_plane | 2026-04-11 | **`KrakenRESTClient.ticker_mid`**, **`portfolio_mark_price_source_*`**, **`execution/mark_price.py`** |
+| FB-DASH-04-02 | control_plane | 2026-04-11 | **`enrich_row_with_mark`**; **`mark_price`** / **`mark_price_policy`** on **`GET /portfolio/positions`** |
+| FB-DASH-05-01 | docs | 2026-04-11 | **[`PNL_LEDGER.MD`](PNL_LEDGER.MD)** — hybrid JSONL + adapter positions |
+| FB-DASH-05-02 | control_plane | 2026-04-11 | **`GET /pnl/summary?range=`** — **`execution/pnl_ledger.py`** + **`execution/pnl_summary.py`** |
+| FB-DASH-05-03 | control_plane | 2026-04-11 | **`control_plane/pnl_panel.py`** — aggregate P&L on Home |
+| FB-DASH-06-01 | control_plane | 2026-04-11 | **`control_plane/live_confirm.py`** + **`st.dialog`** — **`NM_STREAMLIT_LIVE_CONFIRM`** |
+| FB-DASH-06-02 | ops | 2026-04-11 | **[`RUNBOOKS.MD`](RUNBOOKS.MD)** — **Live trading checklist** |
 | FB-DASH-01-01 | docs | 2026-04-11 | **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** — single operator checklist (venv, `.env`, Docker, preflight, venues, `run.bat`) |
 | FB-DASH-01-02 | docs | 2026-04-11 | Cross-links: [`README.md`](../README.md) quick start + doc map, [`RUNBOOKS.MD`](RUNBOOKS.MD) intro, [`.env.example`](../.env.example) header → `READY_TO_RUN.MD` |
 | FB-F1 | data | 2026-04-08 | FinBERT optional + sentiment aggregates |

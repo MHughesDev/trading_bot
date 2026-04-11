@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import streamlit as st
 
+from control_plane.live_confirm import (
+    LIVE_CONFIRM_PHRASE,
+    live_apply_allowed,
+    requires_live_confirmation,
+)
+from control_plane.pnl_panel import render_pnl_panel
 from control_plane.positions_panel import render_positions_sidebar
 from control_plane.streamlit_util import (
     api_get_json,
@@ -62,6 +68,10 @@ st.sidebar.caption(
     "Apply writes intent + updates default.yaml and .env when present. "
     "Restart API and live runtime (or re-run run.bat) to load NM_EXECUTION_MODE."
 )
+st.sidebar.caption(
+    f"Switching **to live** opens a confirmation dialog (type `{LIVE_CONFIRM_PHRASE}`). "
+    "Set `NM_STREAMLIT_LIVE_CONFIRM=false` to skip (not recommended)."
+)
 try:
     st_data = api_get_json("/status")
     prof = st_data.get("execution_profile") or {}
@@ -78,16 +88,54 @@ mode_choice = st.sidebar.selectbox(
     index=0 if str(active).lower() != "live" else 1,
     key="exec_mode_select",
 )
+
+
+@st.dialog("Confirm live execution")
+def _dialog_apply_live() -> None:
+    st.warning(
+        "**Live** mode is intended for **real** venue execution (e.g. Coinbase Advanced Trade). "
+        "Verify **`GET /status` → preflight** and venue API keys before continuing."
+    )
+    ack = st.checkbox("I understand and accept the risk of live orders.", value=False)
+    phrase = st.text_input(f"Type **{LIVE_CONFIRM_PHRASE}** to confirm", value="", key="live_phrase_input")
+    col_x, col_y = st.columns(2)
+    with col_x:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun()
+    with col_y:
+        if st.button("Apply LIVE", type="primary", use_container_width=True):
+            if not live_apply_allowed(
+                "live",
+                str(active),
+                acknowledge_risk=ack,
+                typed_phrase=phrase,
+            ):
+                st.error(f"Enable the checkbox and type {LIVE_CONFIRM_PHRASE} exactly (uppercase).")
+                return
+            try:
+                api_post_json(
+                    "/system/execution-profile",
+                    {"execution_mode": "live", "apply_to_config_files": True},
+                )
+                st.success("Intent set to **live**. Restart processes to activate.")
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
+
+
 if st.sidebar.button("Apply execution mode", use_container_width=True):
-    try:
-        api_post_json(
-            "/system/execution-profile",
-            {"execution_mode": mode_choice, "apply_to_config_files": True},
-        )
-        st.sidebar.success(f"Intent set to **{mode_choice}**. Restart processes to activate.")
-        st.rerun()
-    except Exception as e:
-        st.sidebar.error(str(e))
+    if mode_choice == "live" and requires_live_confirmation(mode_choice, str(active)):
+        _dialog_apply_live()
+    else:
+        try:
+            api_post_json(
+                "/system/execution-profile",
+                {"execution_mode": mode_choice, "apply_to_config_files": True},
+            )
+            st.sidebar.success(f"Intent set to **{mode_choice}**. Restart processes to activate.")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(str(e))
 
 st.sidebar.markdown(f"**Active (process):** `{active}`")
 if pending:
@@ -96,6 +144,8 @@ if need_restart:
     st.sidebar.warning("Restart required — stop and start control plane + live runtime.")
 
 render_positions_sidebar()
+
+render_pnl_panel()
 
 st.markdown(
     """
