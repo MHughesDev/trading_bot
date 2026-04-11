@@ -25,6 +25,7 @@ from control_plane.execution_profile import (
     write_pending_intent,
 )
 from control_plane.microservice_health import probe_microservices_health
+from execution.portfolio_positions import fetch_portfolio_positions
 
 settings = load_settings()
 state = StateManager()
@@ -144,6 +145,12 @@ def post_system_power(
     raw = str(body.get("power", body.get("state", "on"))).strip().lower()
     p = "off" if raw in ("off", "false", "0") else "on"
     return {"power": set_power(p)}
+
+
+@app.get("/portfolio/positions")
+async def get_portfolio_positions() -> dict[str, Any]:
+    """Open positions from the configured execution adapter (paper Alpaca / live Coinbase / stub)."""
+    return await fetch_portfolio_positions(settings)
 
 
 @app.get("/microservices/health")

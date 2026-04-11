@@ -131,9 +131,6 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 | ID | Phase | Cat | Type | Status | Summary | Pointer |
 |----|-------|-----|------|--------|---------|---------|
-| FB-DASH-03-01 | B | DS | Feature | Open | **Positions DTO:** normalize `fetch_positions` across Alpaca paper / Coinbase into one contract | `execution/adapters/`, `app/contracts/` |
-| FB-DASH-03-02 | B | DS | Feature | Open | **`GET /portfolio/positions`** on control plane (aggregates adapter; handles errors per symbol) | `control_plane/api.py` |
-| FB-DASH-03-03 | B | DS | Feature | Open | **Streamlit sidebar:** collapsible positions panel, poll interval, empty/error states | `control_plane/` |
 | FB-DASH-04-01 | B | DS | Feature | Open | **Mark price source:** define Kraken mid vs venue quote precedence per mode | `data_plane/`, `execution/` |
 | FB-DASH-04-02 | B | DS | Feature | Open | **Unrealized P&L:** extend position DTO + green/red in UI when avg entry + mark available | `execution/adapters/`, Streamlit |
 | FB-DASH-05-01 | B | DS | Feature | Open | **Ledger design:** choose source of truth for fills (QuestDB tables vs Alpaca activity API vs hybrid) | `data_plane/storage/`, `docs/` |
@@ -330,6 +327,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-S1 | 2026-04-10 | QuestDB batch flush + runbooks |
 | FB-C1 | 2026-04-10 | Streamlit + `streamlit_util` |
 | FB-DASH-02-01 … FB-DASH-02-03 | 2026-04-11 | **`GET/POST /system/execution-profile`**, `execution_profile` on **`GET /status`**; Streamlit sidebar; RUNBOOKS + README; `data/execution_profile.json` pending intent |
+| FB-DASH-03-01 … FB-DASH-03-03 | 2026-04-11 | **`PortfolioPositionRow`**, **`GET /portfolio/positions`**, Streamlit **Open positions** expander + refresh |
 | FB-DASH-01-01, FB-DASH-01-02 | 2026-04-11 | Operator **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** checklist; README + RUNBOOKS + `.env.example` cross-links |
 | FB-I1, FB-I2, HG-13 | 2026-04-10 | README orchestration note; CI workflow + optional integration |
 | FB-B1 | 2026-04-10 | `available_cash_usd` / replay cash |
@@ -360,6 +358,9 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-DASH-02-01 | control_plane | 2026-04-11 | **`GET/POST /system/execution-profile`**, **`execution_profile`** on **`GET /status`**, patch `default.yaml` + `.env` |
 | FB-DASH-02-02 | control_plane | 2026-04-11 | Streamlit **Execution mode** sidebar + Apply → POST |
 | FB-DASH-02-03 | ops | 2026-04-11 | **[`RUNBOOKS.MD`](RUNBOOKS.MD)** — execution mode section (restart after change) |
+| FB-DASH-03-01 | contracts | 2026-04-11 | **`app/contracts/portfolio.py`** — `PortfolioPositionRow` + `position_snapshot_to_row` |
+| FB-DASH-03-02 | control_plane | 2026-04-11 | **`GET /portfolio/positions`** — `execution/portfolio_positions.fetch_portfolio_positions` |
+| FB-DASH-03-03 | control_plane | 2026-04-11 | **`control_plane/positions_panel.py`** — collapsible sidebar, optional 30s refresh |
 | FB-DASH-01-01 | docs | 2026-04-11 | **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** — single operator checklist (venv, `.env`, Docker, preflight, venues, `run.bat`) |
 | FB-DASH-01-02 | docs | 2026-04-11 | Cross-links: [`README.md`](../README.md) quick start + doc map, [`RUNBOOKS.MD`](RUNBOOKS.MD) intro, [`.env.example`](../.env.example) header → `READY_TO_RUN.MD` |
 | FB-F1 | data | 2026-04-08 | FinBERT optional + sentiment aggregates |
