@@ -107,12 +107,9 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
-| FB-PL-P0-01 | Feature | Open | **Env:** `TradingPolicyEnvironment` + replay parity with live feature contract | `policy_model/env/` |
-| FB-PL-P0-02 | Feature | Open | **RL core:** replay buffer, actor–critic (or spec algorithm), training loop hooks | `policy_model/training/` |
-| FB-PL-P0-03 | Feature | Open | **Forecast conditioning:** precomputed `ForecastPacket` / batch mode for offline RL | `policy_model/integration/` |
-| FB-PL-P0-04 | Feature | Open | **Reward & cost:** canonical reward decomposition + execution cost model per spec | `policy_model/` |
+| — | — | — | *No open sub-rows — see §8.* | — |
 
-*Parent epic:* RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Close epic** when **FB-PL-P0-01 … FB-PL-P0-04** are Done or waived.
+*Parent epic:* RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Sub-rows FB-PL-P0-01 … FB-PL-P0-04 Done 2026-04-11** (NumPy stubs + offline env; full PyTorch RL remains future hardening).
 
 *See also §2 HIGH (**FB-FR-P0-**\*).*
 
@@ -184,7 +181,8 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-ML1–ML4 | 2026-04-08 | HMM / Ridge / MLflow / Prefect orchestration *(historical paths; master pipeline superseded HMM/Ridge runtime)* |
 | FB-FR-P0 | 2026-04-11 | **Partial deliverable** (superseded by §2 **FB-FR-P0-01…**): NumPy `ForecasterModel` + ensemble + optional `train_forecaster_torch` |
 | FB-FR-P1 | 2026-04-11 | Walk-forward splits, pinball, JSON checkpoints (`forecaster_model/training/`) |
-| FB-PL-P0 | 2026-04-11 | **Partial:** `run_stub_episode` (`policy_model/integration/full_policy_loop.py`); full RL = §3 **FB-PL-P0-01…** |
+| FB-PL-P0 | 2026-04-11 | Epic parent: `run_stub_episode`; sub-rows **FB-PL-P0-01…04** completed 2026-04-11 — §8.5 |
+| FB-PL-P0-01 … FB-PL-P0-04 | 2026-04-11 | Protocol runtime check, offline `ForecastPacket` env, buffer/trainer + reward tests — `tests/test_policy_pl_p0.py` |
 
 ### 8.3 Spec pipeline, master path, ops (summary)
 
@@ -262,7 +260,11 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-ML4 | models | 2026-04-08 | Prefect flow |
 | FB-O1 | observability | 2026-04-08 | `DECISION_LATENCY` |
 | FB-O2 | observability | 2026-04-08 | Promtail + Grafana provisioning |
-| FB-PL-P0 | models | 2026-04-11 | `run_stub_episode` *(full RL = §3 sub-items)* |
+| FB-PL-P0 | models | 2026-04-11 | `run_stub_episode`; **FB-PL-P0-01…04** closed 2026-04-11 |
+| FB-PL-P0-01 | models | 2026-04-11 | `@runtime_checkable` `TradingPolicyEnvironment` + `assert_trading_policy_environment` |
+| FB-PL-P0-02 | models | 2026-04-11 | `ReplayBuffer` + `ActorCriticTrainer` coverage in `tests/test_policy_pl_p0.py` |
+| FB-PL-P0-03 | models | 2026-04-11 | `OfflineForecastPacketEnvironment` — precomputed packets + aligned mids |
+| FB-PL-P0-04 | models | 2026-04-11 | `one_step_reward` λ-term regression in `tests/test_policy_pl_p0.py` |
 | FB-PL-P1 | models | 2026-04-11 | Forecast packet enabled + `last_forecast_packet` *(historical flag)* |
 | FB-PL-P2 | models | 2026-04-11 | `policy_envelope_from_app_settings` |
 | FB-PL-P2b | models | 2026-04-10 | `risk_state_to_policy_envelope` |
