@@ -331,6 +331,7 @@ async def run_live_loop(
                 order_intent=intent,
                 block_reason=None if trade else "risk_blocked_or_no_trade",
                 correlation_id=oid,
+                forecast_packet=pipeline.last_forecast_packet,
             )
             logger.info("decision_trace %s", trace)
             if qdb:

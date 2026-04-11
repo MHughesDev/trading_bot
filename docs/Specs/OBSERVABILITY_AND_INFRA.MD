@@ -4,6 +4,9 @@
 
 - **`metrics.py`** — Prometheus metrics (e.g. decision latency, feed stale blocks, normalizer unknowns)
 - **`logging.py`** — Structured logging setup
+- **`forecaster_metrics.py`** — `nm_forecast_build_*`, `nm_forecast_packet_abstain_total`, `nm_policy_shadow_*`, `nm_model_version_info`
+
+**Grafana `nm-overview.json`** panels use `nm_decision_latency_seconds`, `nm_pnl_usd`, `nm_forecast_build_fallback_total`, `nm_policy_shadow_target_exposure_delta` — aligned with metric names above (FB-AUDIT-08).
 
 ## Infrastructure (`infra/`)
 

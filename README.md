@@ -30,6 +30,8 @@ Configure secrets via `.env` (prefix `NM_` for app settings — see [`.env.examp
 
 **Production:** set `NM_RISK_SIGNING_SECRET` so only `RiskEngine`-signed `OrderIntent`s reach venues; optional `NM_CONTROL_PLANE_API_KEY` for mutating control-plane routes. For local dev without signing, `NM_ALLOW_UNSIGNED_EXECUTION=true` (not for production).
 
+**Preflight (live/paper):** `python scripts/preflight_check.py` (exit 1 if blocking issues) or `GET /status` on the control plane — includes `preflight` JSON (**IL-105** / **FB-SPEC-08**).
+
 **Verify API connectivity (no orders placed):** put keys in `.env` (`NM_ALPACA_*`, optional `NM_COINBASE_*`), then `pip install -e ".[alpaca]"` and `python scripts/smoke_credentials.py`. Coinbase Advanced Trade REST may require JWT for some routes; the script falls back to the public Exchange ticker when unauthenticated candle calls fail.
 
 **Offline training (real candles only):** fetches historical 1m OHLCV from Coinbase public REST, walk-forward splits, quantile forecaster fit, then heuristic policy evaluation on the same real path (PPO/SAC are backlog). Run:

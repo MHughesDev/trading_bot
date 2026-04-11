@@ -13,6 +13,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from observability.forecaster_metrics import MODEL_VERSION_INFO
 
 from app.config.settings import load_settings
+from control_plane.preflight import preflight_report
 from app.contracts.risk import SystemMode
 from app.runtime.mode_manager import ModeManager
 from app.runtime.state_manager import StateManager
@@ -46,6 +47,7 @@ def get_status() -> dict[str, Any]:
         "market_data_provider": settings.market_data_provider,
         "symbols": settings.market_data_symbols,
         "mode": modes.get_mode().value,
+        "preflight": preflight_report(settings),
     }
 
 

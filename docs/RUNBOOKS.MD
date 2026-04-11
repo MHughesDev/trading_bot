@@ -5,6 +5,11 @@
 - Default **`NM_CONTROL_PLANE_HOST=0.0.0.0`** listens on all interfaces. On a single machine behind an untrusted LAN, prefer **`NM_CONTROL_PLANE_HOST=127.0.0.1`** so the API is only reachable from localhost.
 - Keep **`NM_CONTROL_PLANE_API_KEY`** set for mutating routes (`POST /params`, `/system/mode`, `/flatten`) whenever the control plane is reachable beyond localhost.
 
+## Preflight (before live or production-like paper)
+
+- Run: `python scripts/preflight_check.py` — exits **1** if blocking issues (e.g. `execution_mode=live` without `NM_RISK_SIGNING_SECRET`, or `NM_ALLOW_UNSIGNED_EXECUTION=true` in live).
+- Or call **`GET /status`** on the control plane — response includes **`preflight`** with `ok`, `severity`, `issues`, `warnings`.
+
 ## Secrets
 
 - Store **only** in `.env` or your secret manager; never commit keys. Prefix application settings with `NM_` (see `app/config/settings.py`).
@@ -34,6 +39,10 @@
 ## CI integration tests
 
 - Optional: `NM_INTEGRATION_SERVICES=1` with Redis, QuestDB, Qdrant running (`docker compose -f infra/docker-compose.yml up -d`). See `tests/test_integration_optional_services.py`.
+
+## Market data gaps / flat synthetic OHLC
+
+- The decision pipeline builds a **`ForecastPacket`** from **`ohlc_arrays_from_feature_row`**: if only the latest `close`/`volume` are present, history is **synthetic flat bars** — forecasts still run, but are **not** a substitute for a full rolling bar window after long WS outages. Prefer healthy WS + `enrich_bars_last_row` feature rows for production-like behavior.
 
 ## Model artifacts (master pipeline)
 

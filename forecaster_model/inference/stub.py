@@ -17,7 +17,10 @@ def ohlc_arrays_from_feature_row(
     history_len: int = 64,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Build constant synthetic OHLCV bars from the latest feature row (for stub packet in pipeline).
+    Build synthetic OHLCV bars from the latest feature row when full bar history is not threaded.
+
+    Repeats near-flat OHLC levels for `history_len` bars — sufficient for NumPy forecaster forward;
+    **not** a substitute for real rolling bars when WS gaps matter (see RUNBOOKS / FB-AUDIT-06).
 
     When only `close` (and optional `volume`) are present, repeats levels to fill history.
     """

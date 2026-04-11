@@ -62,7 +62,6 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | FB-SPEC-05 | Improvement | Open | **Optional GPU/CUDA for PyTorch:** device selection (train + infer) when `torch` is installed; document defaults (CPU) and CUDA requirements | `forecaster_model/training/torch_trainer.py`, `pyproject.toml` `[models_torch]` |
 | FB-SPEC-06 | Platform | Open | **Model registry / versioned artifacts:** filesystem or MLflow-backed promotion workflow, version labels, and single operator-facing “active model set” beyond ad-hoc paths | `models/registry/`, `control_plane/api.py`, `docs/RUNBOOKS.MD` |
 | FB-SPEC-07 | Feature | Open | **Multi-asset portfolio coordination:** cross-symbol capital allocation, correlation-aware or risk-parity style sizing, or documented limits when running many `market_data_symbols` (beyond independent per-symbol ticks) | `risk_engine/`, `decision_engine/`, `docs/Specs/` |
-| FB-SPEC-08 | Reliability | Open | **Deployment preflight:** scripted or API checks for required secrets, signing enabled, unsigned execution disallowed in prod, adapter health — complement [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) | `scripts/`, `control_plane/api.py` |
 
 **Blocked (not started):** **`FB-FR-P0`** requires PyTorch/xLSTM stack and large training loop — unsafe to claim done without full model + data pipeline. **`FB-PL-P0`** requires RL env + actor-critic + buffer — same.
 
@@ -101,20 +100,10 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
 | FB-PL-P0 | Feature | Open | RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD): `TradingPolicyEnvironment`, actor-critic, replay buffer, precomputed `ForecastPacket` mode, reward/cost model | `policy_model/` |
-| FB-AUDIT-01 | Improvement | Open | **Training/runtime `ForecasterConfig` parity:** `orchestration/training_campaign._cfg_from_spec` uses different geometry for **nightly** (`forecast_horizon=4`, `history_length=min(64,128)`) than runtime defaults (`ForecasterConfig`: horizon **8**, history **128**) — align dimensions or document why evaluation windows differ | `orchestration/training_campaign.py`, `forecaster_model/config/__init__.py` |
-| FB-AUDIT-02 | Tech debt | Open | **Campaign forecaster vs runtime forecaster:** training saves `forecaster_quantile_real.joblib` (sklearn quantile) but `DecisionPipeline` always builds packets via **`build_forecast_packet_methodology`** (NumPy `ForecasterModel`) — wire loader when ready (**FB-SPEC-02**) or document that **offline metrics do not equal live packet distribution** | `orchestration/training_campaign.py`, `decision_engine/pipeline.py`, `forecaster_model/training/real_data_fit.py` |
 | FB-AUDIT-03 | Feature | Open | **Champion vs candidate promotion:** implement master [`MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) §14–§15 (nightly compare, `PromotionDecision`, keep champion on failure) — extends **FB-SPEC-06** | `orchestration/` |
-| FB-AUDIT-04 | Tech debt | Open | **Archive row cleanup:** completed backlog rows (**FB-PL-P1**, **FB-FR-PG1**, **FB-SPEC-00**, **FB-SPEC-01**) still name removed `decision_pipeline_mode` / Ridge routing — add “pre–master-pipeline” note or shorten archive text | `docs/FEATURES_BACKLOG.MD` §8 |
 | FB-AUDIT-05 | Improvement | Open | **Golden regression tests:** fixed-seed + fixed OHLC slice snapshots of `ForecastPacket` diagnostics / quantiles to detect silent `ForecasterModel` drift | `tests/` |
-| FB-AUDIT-06 | Reliability | Open | **Sparse or flat bars:** document and harden behavior for WS gaps or near-constant OHLC from `ohlc_arrays_from_feature_row` (empty packet path, guards, policy abstention) | `app/runtime/`, `forecaster_model/inference/` |
-| FB-AUDIT-07 | Improvement | Open | **QuestDB trace completeness:** audit `decision_traces` payload for post-mortems (symbol, packet summary, risk outcome) without secrets/PII | `data_plane/storage/questdb.py`, `app/runtime/live_service.py` |
-| FB-AUDIT-08 | Platform | Open | **Grafana ↔ Prometheus audit:** verify dashboard JSON panels match current metric names after observability renames | `infra/grafana/`, `observability/` |
-| FB-AUDIT-11 | Improvement | Open | **Property / invariant tests:** quantile ordering, risk clamp monotonicity, replay env `reset`/`step` contracts | `tests/` |
-| FB-AUDIT-12 | Spike | Open | **`RiskState` vs master spec §12:** field parity (`concentration_limit`, `daily_loss_limit_remaining`, etc.) between `app/contracts`, `policy_model`, and master spec | `app/contracts/risk.py`, `policy_model/objects/risk_state.py` |
-| FB-AUDIT-13 | Tech debt | Open | **Optional dependency pins:** `[models_torch]`, `[alpaca]` major versions for reproducible single-machine installs | `pyproject.toml` |
-| FB-AUDIT-14 | Reliability | Open | **Rollback bundle:** RUNBOOKS section for copying `models/artifacts_training/`, conformal JSON, and QuestDB volume before upgrades | `docs/RUNBOOKS.MD` |
 
-*See also §2 HIGH open rows (**FB-FR-P0**, **FB-SPEC-02 … FB-SPEC-08**). Post-audit line items **FB-AUDIT-*** track 2026-04-11 master-pipeline review follow-ups.*
+*See also §2 HIGH open rows (**FB-FR-P0**, **FB-SPEC-02**–**FB-SPEC-07**).*
 
 ---
 
@@ -213,11 +202,21 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-PL-PG8 | 2026-04-11 | **`behavior_cloning.py`** — `BCDataset`, `behavior_cloning_loss` |
 | FB-SPEC-00 | 2026-04-11 | **Spec pipeline wiring:** `decision_pipeline_mode` (`legacy` \| `spec_policy`), `NM_MODELS_DECISION_PIPELINE_MODE`, `DecisionPipeline` + `run_spec_policy_step`, `portfolio_equity_usd` in `run_decision_tick`; [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](MIGRATION_TO_SPEC_PIPELINE.MD) |
 | FB-SPEC-01 | 2026-04-11 | **Default `decision_pipeline_mode` = `spec_policy`** in `AppSettings` + `default.yaml`; `legacy` via env/YAML only |
-| FB-SPEC-04 | 2026-04-11 | **Real historical training:** `orchestration/training_campaign.py` + `real_data_bars.py` fetch Coinbase candles only; walk-forward triple splits; `forecaster_model/training/real_data_fit.py` QuantileRegressor; `rl_real_data_eval.py` heuristic rollout; human specs in `docs/Human Provided Specs/NIGHTLY_*` + `INITIAL_*` |
+| FB-SPEC-04 | 2026-04-11 | **Real historical training:** `orchestration/training_campaign.py` + `real_data_bars.py` fetch Coinbase candles only; walk-forward triple splits; `forecaster_model/training/real_data_fit.py` QuantileRegressor; `rl_real_data_eval.py` heuristic rollout; human specs in `docs/Human Provided Specs/NIGHTLY_*` + `INITIAL_*` *(pre–master-pipeline routing names in older rows are historical)* |
 | FB-PL-P2b | 2026-04-10 | **`policy_model.risk_bridge`:** `risk_state_to_policy_envelope` maps `RiskState` + `AppSettings` → `PolicyRiskEnvelope`; tests `test_policy_risk_bridge.py` |
 | FB-AUDIT-09 | 2026-04-11 | **Single-host alerting:** minimal metrics pointers in [`RUNBOOKS.MD`](RUNBOOKS.MD) (formal alert rules still optional) |
 | FB-AUDIT-10 | 2026-04-11 | **Integration test cadence:** documented in [`TESTING_AND_CI.MD`](Specs/TESTING_AND_CI.MD) — run `NM_INTEGRATION_SERVICES=1` + compose before release |
 | FB-AUDIT-14 | 2026-04-11 | **Rollback bundle:** RUNBOOKS section for artifacts + QuestDB volume ([`RUNBOOKS.MD`](RUNBOOKS.MD)) |
+| FB-SPEC-08 | 2026-04-11 | **Preflight:** `control_plane/preflight.py`, `GET /status` → `preflight`, `scripts/preflight_check.py`; RUNBOOKS + README |
+| FB-AUDIT-01 | 2026-04-11 | **`ForecasterConfig` parity:** `_cfg_from_spec` uses full campaign geometry for initial + nightly (`orchestration/training_campaign.py`); `tests/test_training_campaign_config.py` |
+| FB-AUDIT-02 | 2026-04-11 | **Campaign vs runtime:** module docstring in `training_campaign.py` (quantile joblib vs NumPy hot path) |
+| FB-AUDIT-04 | 2026-04-11 | **Archive note:** legacy `decision_pipeline_mode` rows are **pre–master-pipeline** (see [`MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD)) |
+| FB-AUDIT-06 | 2026-04-11 | **Flat OHLC:** RUNBOOKS “Market data gaps” + `ohlc_arrays_from_feature_row` docstring |
+| FB-AUDIT-07 | 2026-04-11 | **`forecast_packet_summary`** on `decision_trace` + live_service wiring; `tests/test_audit_forecast_packet.py` |
+| FB-AUDIT-08 | 2026-04-11 | **Grafana metrics:** verified `nm-overview.json` exprs match `observability/*.py`; doc in [`OBSERVABILITY_AND_INFRA.MD`](Specs/OBSERVABILITY_AND_INFRA.MD) |
+| FB-AUDIT-11 | 2026-04-11 | **`test_property_invariants.py`** — quantile monotonicity + risk gate monotonicity |
+| FB-AUDIT-12 | 2026-04-11 | **RiskState gap doc:** [`MASTER_SPEC_RISK_STATE_GAP.MD`](Specs/MASTER_SPEC_RISK_STATE_GAP.MD) |
+| FB-AUDIT-13 | 2026-04-11 | **`torch~=2.2`**, **`alpaca-py~=0.21`** in `pyproject.toml` optional extras |
 
 ---
 

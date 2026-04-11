@@ -48,7 +48,7 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 
 | ID | Area | Summary |
 |----|------|---------|
-| IL-105 | ops | **Production preflight gap:** no first-class automated check that signing/secrets/adapter config match policy before live trade (complements **FB-SPEC-08**); optional smoke script or `/status` extension |
+| — | — | *No open LOW items — see Resolved (recent).* |
 
 ---
 
@@ -89,6 +89,7 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 | IL-108 | 2026-04-11 | **`.env.example`:** aligned to `NM_*` variables + pointer to `AppSettings` (`.env.example`). |
 | IL-109 | 2026-04-11 | **`SPEC_POLICY_DELTA_TO_SIZE_FRACTION_SCALE`** + docstring in `decision_engine/spec_policy_proposal.py` for delta→`size_fraction` mapping. |
 | IL-110 | 2026-04-11 | **Control plane bind:** RUNBOOKS section for `NM_CONTROL_PLANE_HOST` / API key on untrusted LAN ([`RUNBOOKS.MD`](RUNBOOKS.MD)). |
+| IL-105 | 2026-04-11 | **Preflight:** `preflight_report` + `GET /status` → `preflight`, `scripts/preflight_check.py` (exit 1 on block); RUNBOOKS + README — complements **FB-SPEC-08** |
 
 ---
 

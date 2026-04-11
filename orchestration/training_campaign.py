@@ -3,6 +3,12 @@ Real-data-only training driver (initial offline + nightly maintenance specs).
 
 No synthetic arrays. Fetches Coinbase candles, walk-forward splits, fits quantile forecaster,
 runs heuristic policy rollout with real returns (RL placeholder until PPO/SAC).
+
+**Offline vs live forecaster:** this path fits **sklearn `QuantileRegressor`** and saves
+`forecaster_quantile_real.joblib`. Runtime **`DecisionPipeline`** builds **`ForecastPacket`**
+via **NumPy `ForecasterModel`** (`build_forecast_packet_methodology`) — not the same weights.
+Pinball metrics here **do not** equal live packet distribution until **FB-SPEC-02** wires
+checkpoints or a shared artifact.
 """
 
 from __future__ import annotations
@@ -53,19 +59,15 @@ def _cfg_from_spec(
     *,
     settings: AppSettings,
 ) -> ForecasterConfig:
-    if mode == "initial":
-        return ForecasterConfig(
-            history_length=CAMPAIGN_HISTORY_LENGTH,
-            forecast_horizon=CAMPAIGN_FORECAST_HORIZON,
-            base_interval_seconds=60,
-            feature_windows=(4, 16, 64),
-            num_regime_dims=4,
-            quantiles=(0.1, 0.5, 0.9),
-        )
-    # nightly: smaller horizon for faster refresh (spec allows configured window)
+    """
+    Geometry matches runtime `ForecasterConfig` defaults (`forecaster_model/config`) so
+    offline pinball / quantile fit windows align with `build_forecast_packet_methodology`
+    (FB-AUDIT-01). Initial and nightly both use full campaign horizon/history from spec constants.
+    """
+    _ = settings
     return ForecasterConfig(
-        history_length=min(64, CAMPAIGN_HISTORY_LENGTH),
-        forecast_horizon=4,
+        history_length=CAMPAIGN_HISTORY_LENGTH,
+        forecast_horizon=CAMPAIGN_FORECAST_HORIZON,
         base_interval_seconds=60,
         feature_windows=(4, 16, 64),
         num_regime_dims=4,
