@@ -25,6 +25,9 @@ class AppSettings(BaseSettings):
     execution_mode: Literal["paper", "live"] = "paper"
     execution_live_adapter: str = "coinbase"
     execution_paper_adapter: str = "alpaca"
+    # Paper: Kraken mid is default (venue may not quote every product). Live: venue_only default.
+    portfolio_mark_price_source_paper: Literal["kraken_mid", "venue_only"] = "kraken_mid"
+    portfolio_mark_price_source_live: Literal["kraken_mid", "venue_only"] = "venue_only"
     position_reconcile_enabled: bool = False
     position_reconcile_interval_seconds: int = 60
 
@@ -131,6 +134,10 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         out["execution_mode"] = ex.get("mode", "paper")
         out["execution_live_adapter"] = ex.get("live_adapter", "coinbase")
         out["execution_paper_adapter"] = ex.get("paper_adapter", "alpaca")
+        if "portfolio_mark_price_source_paper" in ex:
+            out["portfolio_mark_price_source_paper"] = str(ex["portfolio_mark_price_source_paper"])
+        if "portfolio_mark_price_source_live" in ex:
+            out["portfolio_mark_price_source_live"] = str(ex["portfolio_mark_price_source_live"])
         if "position_reconcile_enabled" in ex:
             out["position_reconcile_enabled"] = ex["position_reconcile_enabled"]
         if "position_reconcile_interval_seconds" in ex:

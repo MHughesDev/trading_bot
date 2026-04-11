@@ -2,6 +2,8 @@ execution:
   mode: live
   live_adapter: coinbase
   paper_adapter: alpaca
+  portfolio_mark_price_source_paper: kraken_mid
+  portfolio_mark_price_source_live: venue_only
   position_reconcile_enabled: false
   position_reconcile_interval_seconds: 60
 market_data:

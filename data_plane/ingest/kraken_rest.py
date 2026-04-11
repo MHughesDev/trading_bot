@@ -156,6 +156,31 @@ class KrakenRESTClient:
         last_int = int(last) if last is not None else None
         return out, last_int
 
+    async def ticker_mid(self, pair: str) -> float | None:
+        """
+        GET /Ticker — best bid/ask mid for ``pair`` (REST pair name, e.g. ``XBTUSD``).
+
+        Returns ``None`` if the pair is missing or bid/ask cannot be parsed.
+        """
+        body = await self._request("/0/public/Ticker", {"pair": pair})
+        result = body.get("result") or {}
+        for k, v in result.items():
+            if k == "last" or not isinstance(v, dict):
+                continue
+            a = v.get("a")
+            b = v.get("b")
+            if not isinstance(a, (list, tuple)) or not isinstance(b, (list, tuple)):
+                continue
+            if len(a) < 1 or len(b) < 1:
+                continue
+            try:
+                ask = float(a[0])
+                bid = float(b[0])
+            except (TypeError, ValueError):
+                continue
+            return (ask + bid) / 2.0
+        return None
+
 
 def granularity_to_kraken_ohlc_interval_minutes(granularity_seconds: int) -> int | None:
     """

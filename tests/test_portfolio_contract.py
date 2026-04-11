@@ -23,3 +23,5 @@ def test_position_snapshot_to_row():
     assert d["avg_entry_price"] == "90000"
     assert d["unrealized_pnl"] == "12.34"
     assert d["venue_adapter"] == "alpaca_paper"
+    assert d.get("mark_price") is None
+    assert d.get("mark_price_source") is None

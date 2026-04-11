@@ -24,3 +24,4 @@ def test_portfolio_positions_ok_stub(client_stub_adapter):
     assert body["positions"] == []
     assert body["adapter"] == "stub"
     assert body["execution_mode"] == "paper"
+    assert body["mark_price_policy"]["source"] == "kraken_mid"

@@ -51,6 +51,31 @@ async def test_ohlc_parses_rows(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ticker_mid_bid_ask(monkeypatch) -> None:
+    body = {
+        "error": [],
+        "result": {
+            "XXBTZUSD": {
+                "a": ["73600.0", "1", "1.0"],
+                "b": ["73500.0", "1", "1.0"],
+            }
+        },
+    }
+    ok = MagicMock()
+    ok.status_code = 200
+    ok.json.return_value = body
+    ok.raise_for_status = MagicMock()
+
+    client = KrakenRESTClient()
+    monkeypatch.setattr(client._client, "get", AsyncMock(return_value=ok))
+
+    mid = await client.ticker_mid("XBTUSD")
+    await client.aclose()
+
+    assert mid == pytest.approx(73550.0)
+
+
+@pytest.mark.asyncio
 async def test_fetch_ohlc_range_filters_window(monkeypatch) -> None:
     from data_plane.ingest.kraken_rest import fetch_ohlc_range
 
