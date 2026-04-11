@@ -10,10 +10,23 @@ This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat
 |-------|------|
 | **`setup.bat`** | Creates `.venv`, `pip install -e ".[dev,dashboard]"`, optional `docker compose` for `infra/docker-compose.yml`, copies `.env.example` → `.env` if missing. Full operator checklist: [`READY_TO_RUN.MD`](READY_TO_RUN.MD). |
 | **`run.bat`** | Starts **FastAPI** control plane (`:8000`), **`python -m app.runtime.power_supervisor`** (starts/stops **`services.live_service_app`** on **:8208** when global power is ON/OFF), and **Streamlit** (`control_plane/Home.py`). |
+| **`packaging/windows/build_operator_bundle.bat`** | After **`setup.bat`**, installs PyInstaller and builds **`nm_operator_launcher.exe`** (see **`packaging/windows/nm_operator_launcher.spec`**). The frozen exe is a **thin launcher** only: it does **not** embed the venv or app — it finds the repo root (directory containing **`setup.bat`**) and spawns **`.venv\Scripts\python.exe`** with the same commands as **`run.bat`**. Output: **`dist/nm_operator_launcher/`** — copy that folder beside **`setup.bat`** or run from the repo root. |
 | **System power** | **`GET/POST /system/power`** and sidebar on **Home** — persists `data/system_power.json`. OFF stops inference/training (code paths) and exits the Kraken loop; the supervisor terminates the live runtime process. |
 | **Streamlit** | Multipage app under `control_plane/`; calls **`NM_CONTROL_PLANE_URL`** (default `http://127.0.0.1:8000`). |
 
-**Not started:** native `.exe`, paper/live dropdown wired to runtime mode, collapsible positions pane, aggregate P&amp;L by timeframe.
+**Shipped (partial):** **`nm_operator_launcher`** PyInstaller bundle (FB-UI-01-01) — launcher exe only; full stack still requires **`setup.bat`** + **`.venv`**.
+
+---
+
+## 1.1 Windows distribution (PyInstaller)
+
+**FB-UI-01-02** — practical notes for shipping **`nm_operator_launcher.exe`**:
+
+- **Antivirus:** PyInstaller one-file/one-folder bundles are often flagged heuristically (false positives). Prefer distributing the **folder** build with a checksum manifest, or code-sign the exe if your org requires it.
+- **Code signing:** Optional Authenticode signing reduces SmartScreen warnings; not automated in-repo.
+- **Size:** The launcher is small (~MB); the **real** install size is still the **clone + `.venv`** from **`setup.bat`** — do not expect a single tiny portable binary for the whole trading stack.
+- **Secrets:** Never bake **`.env`** or API keys into the bundle; operators keep **`.env`** beside **`setup.bat`** as today.
+- **Python path:** The exe resolves the repo root by searching upward for **`setup.bat`** from the current working directory or the exe directory (when frozen). Running from the repo root after **`setup.bat`** is the supported path.
 
 ---
 
