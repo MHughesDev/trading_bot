@@ -68,9 +68,12 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | FB-FR-P0-03 | Feature | Open | **Train:** end-to-end PyTorch training loop, checkpoints, optional `[models_torch]` / `NM_MODELS_TORCH_DEVICE` | `forecaster_model/training/torch_trainer.py` |
 | FB-FR-P0-04 | Feature | Open | **Calibrate:** conformal + ensemble integration on trained outputs (not RNG reference only) | `forecaster_model/calibration/`, `forecaster_model/models/ensemble.py` |
 | FB-FR-P0-05 | Feature | Open | **Serve:** export path from trained checkpoint to hot path (extends NPZ reference / replaces RNG-only) | `decision_engine/pipeline.py`, `forecaster_model/inference/` |
+| FB-SPEC-06 | Platform | In progress | **Model registry / versioned artifacts:** MLflow logging + `POST /models/version` + `model_artifacts` + manual promotion policy — documented in [`RUNBOOKS.MD`](RUNBOOKS.MD) § Model registry; full promotion workflow + champion/candidate still **FB-AUDIT-03** | `models/registry/`, `control_plane/api.py`, `docs/RUNBOOKS.MD` |
 | FB-SPEC-07 | Feature | Open | **Multi-asset portfolio coordination:** cross-symbol capital allocation, correlation-aware or risk-parity style sizing, or documented limits when running many `market_data_symbols` (beyond independent per-symbol ticks) | `risk_engine/`, `decision_engine/`, `docs/Specs/` |
 
 *Parent epic:* full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD). **Close epic** when **FB-FR-P0-01 … FB-FR-P0-05** are Done or explicitly waived.
+
+**Stretch vs delivered core:** NumPy forecaster + policy integration shipped under archive ids **`FB-FR-CORE`** / **`FB-PL-CORE`** (see §8). Open **FB-FR-P0-01 … FB-FR-P0-05** track **full architecture-spec** depth (leakage-safe datasets, native xLSTM on hot path where applicable).
 
 **Blocked (not started):** PyTorch/xLSTM stack + large training loop — unsafe to claim done without full model + data pipeline validation.
 
@@ -112,7 +115,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 *Parent epic:* RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Sub-rows FB-PL-P0-01 … FB-PL-P0-04 Done 2026-04-11** (NumPy stubs + offline env; full PyTorch RL remains future hardening).
 
-*See also §2 HIGH (**FB-FR-P0-***, **FB-SPEC-07**).*
+*See also §2 HIGH (**FB-FR-P0-***, **FB-SPEC-06**, **FB-SPEC-07**).*
 
 ---
 
@@ -152,7 +155,7 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | Area | Notes |
 |------|--------|
 | **Decision** | Shared **`run_decision_tick`**; **`replay_decisions`** / **`replay_multi_asset_decisions`**. |
-| **Execution** | **Alpaca paper** adapter; **Coinbase WS + REST** (retry, fallback). |
+| **Execution** | **Alpaca paper** adapter; **Coinbase live** execution adapter (orders only). **Market data:** Kraken REST + WebSocket. |
 | **Features** | **Feature pipeline** (RSI, MACD, ATR, ADX, VWAP, microstructure). |
 | **Risk** | **Risk** + HMAC + CI guards. |
 | **Control / observability** | **FastAPI** + **Prometheus**; **Compose** core services. |
@@ -192,7 +195,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-SPEC-00 | 2026-04-11 | Spec pipeline wiring (`decision_pipeline_mode` — **removed** later; see [`MIGRATION_TO_SPEC_PIPELINE.MD`](MIGRATION_TO_SPEC_PIPELINE.MD)) |
 | FB-SPEC-01 | 2026-04-11 | Default `spec_policy` *(historical row)* |
 | FB-SPEC-02–08 | 2026-04-11 | NPZ hot path, artifact contract, torch device, registry, multi-asset doc, preflight |
-| FB-SPEC-04 | 2026-04-11 | Real historical training (`training_campaign`, Coinbase-only) |
+| FB-SPEC-04 | 2026-04-11 | Real historical training (`training_campaign`, Kraken OHLC/trades) |
 | FB-HS-01–04 | 2026-04-10 / 11 | Human specs, methodology, layout |
 | FB-PL-P2b | 2026-04-10 | `policy_model.risk_bridge` |
 | HG-12, FB-I3 | 2026-04-10 | Runbooks [`RUNBOOKS.MD`](RUNBOOKS.MD) |
@@ -232,7 +235,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-C1 | control_plane | 2026-04-10 | Streamlit + API helpers |
 | FB-F1 | data | 2026-04-08 | FinBERT optional + sentiment aggregates |
 | FB-F2 | data | 2026-04-10 | RSS + dedup; `NM_NEWS_RSS_FEEDS` |
-| FB-F3 | data | 2026-04-10 | Multi-symbol Coinbase REST test |
+| FB-F3 | data | 2026-04-10 | Multi-symbol market data tests *(historical: Coinbase REST; current: Kraken)* |
 | FB-F4 | data | 2026-04-10 | Strict `BarEvent` OHLC |
 | FB-FR-P0 | models | 2026-04-11 | NumPy forecaster + ensemble + toy torch trainer *(full graph = §2 sub-items)* |
 | FB-FR-P1 | models | 2026-04-11 | Walk-forward, pinball, JSON checkpoints |

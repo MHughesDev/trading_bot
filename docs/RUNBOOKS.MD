@@ -52,7 +52,7 @@
 - **NumPy forecaster weights (FB-SPEC-02):** set `NM_MODELS_FORECASTER_WEIGHTS_PATH` to an **NPZ** produced with `forecaster_model.models.forecaster_weights.save_forecaster_weights` (e.g. from `capture_forecaster_weights_from_seed` after training selection). When present and readable, the hot path uses **fixed weights** instead of per-forward RNG draws; `forecast_diagnostics.weight_source` is `checkpoint`.
 - **Policy MLP weights:** set `NM_MODELS_POLICY_MLP_PATH` to an NPZ from `MultiBranchMLPPolicy.save` / `PolicyNetwork.save`; `DecisionPipeline` then uses **`PolicyNetwork`** instead of **`HeuristicTargetPolicy`**.
 - **Offline training artifacts:** `orchestration.nightly_retrain` / `training_campaign` write under `NM_TRAINING_ARTIFACT_DIR` (quantile forecaster joblib, reports). See [`docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD).
-- **Runtime vs training:** campaign **QuantileRegressor** joblib is still **not** the same object as the NumPy `ForecasterModel` forward; NPZ weights align the **reference** forecaster with a saved draw. **PyTorch** checkpoints remain training-side until a torch export path is added (**FB-FR-P0**). On startup, look for log line `decision pipeline serving mode:` (`numpy_rng` vs `npz_weights`, `heuristic` vs `mlp_npz`; see [`README.md`](../README.md)).
+- **Runtime vs training:** campaign **QuantileRegressor** joblib is still **not** the same object as the NumPy `ForecasterModel` forward; NPZ weights align the **reference** forecaster with a saved draw. **PyTorch** checkpoints remain training-side until a torch export path is added (**FB-FR-P0**; delivered NumPy path: **FB-FR-CORE**). On startup, look for log line `decision pipeline serving mode:` (`numpy_rng` vs `npz_weights`, `heuristic` vs `mlp_npz`; see [`README.md`](../README.md)).
 
 ## Rollback bundle (single host)
 
@@ -76,6 +76,13 @@ Before upgrading binaries or large config changes: copy **`models/artifacts_trai
 - Default **`models/registry/active_model_set.json`** — declare intended paths / lineage; **`model_artifacts.registry`** compares to live **`NM_*`** and lists **`drift_vs_env`** when they differ.
 - Override path: **`NM_MODELS_ACTIVE_REGISTRY_PATH`**.
 
+## Model registry and version labels (FB-SPEC-06 — partial)
+
+- **In-repo today:** `models/registry/mlflow_registry.py` — optional MLflow **params/metrics** logging when `mlflow` is installed; **`promote()` is intentionally a no-op** (manual promotion only; aligns with CI “no auto MLflow stage” policy). Training campaigns can log under your tracking URI; there is **no** automated “champion vs candidate” pipeline yet (**FB-AUDIT-03**).
+- **Operator-facing labels:** set **`NM_MODELS_FORECASTER_CHECKPOINT_ID`** for `ForecastPacket` lineage; use **`POST /models/version`** on the control plane to expose **`component` + `version`** to Prometheus (`nm_model_version_info`). Together with **`model_artifacts`** and artifact paths, this is the current “active model set” surface — a single MLflow-backed promotion workflow remains backlog.
+
 ## Multi-symbol runtime (FB-SPEC-07)
 
 - See [`docs/Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD): independent per-symbol ticks with **shared** risk caps — no built-in cross-symbol optimizer.
+- **As implemented:** `market_data_symbols` drives **independent per-symbol** decision ticks (shared `RiskEngine` / capital where wired, but **no** cross-symbol correlation-aware allocator or risk-parity layer). Adding many symbols increases load and concurrent exposure; size each symbol’s risk budget explicitly in config and monitor aggregate notional.
+- **Stretch (open in backlog, overlaps FB-SPEC-07 epic):** cross-symbol capital allocation, correlation-aware sizing, or formal risk-parity — requires `risk_engine/` / `decision_engine/` work.

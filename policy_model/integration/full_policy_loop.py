@@ -1,5 +1,5 @@
 """
-End-to-end RL policy loop stub (FB-PL-P0): env → buffer → trainer.
+End-to-end RL policy loop stub (FB-PL-CORE; full spec RL policy training: FB-PL-P0): env → buffer → trainer.
 
 Uses `ReplayPolicyEnvironment`, `MultiBranchMLPPolicy`, `ReplayBuffer`, `ActorCriticTrainer`.
 """

@@ -1,5 +1,5 @@
 """
-PyTorch forecaster training stack (FB-FR-PG2 / FB-FR-P0).
+PyTorch forecaster training stack (FB-FR-PG2; full hot-path torch: **FB-FR-P0**, delivered NumPy path: **FB-FR-CORE**).
 
 Optional dependency: `torch`. When unavailable, `train_forecaster_stub` documents the contract
 and writes a JSON checkpoint only (no neural weights).
@@ -31,7 +31,7 @@ def train_forecaster_stub(
         "trainer": "stub",
         "epochs": epochs,
         "early_stopping_patience": patience,
-        "note": "Install torch and extend train_forecaster_torch for full FB-FR-P0",
+        "note": "Install torch and extend train_forecaster_torch toward full FB-FR-P0 (architecture-spec hot path)",
     }
     save_json_checkpoint(artifact_dir / "forecaster_train_meta.json", meta)
     return meta
