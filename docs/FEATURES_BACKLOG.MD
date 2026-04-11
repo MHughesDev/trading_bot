@@ -112,6 +112,19 @@ Structured backlog for **all planned work**: new capabilities, production harden
 |----|------|--------|---------|---------|
 | — | — | — | *No open sub-rows — see §8.* | — |
 
+### Backlog items (open) — operator UI / Windows (FB-UI-*, FB-DASH-*)
+
+| ID | Type | Status | Summary | Pointer |
+|----|------|--------|---------|---------|
+| FB-UI-01 | Platform | Open | **Windows one-click:** `setup.bat` / `run.bat` shipped; extend with optional **PyInstaller** `.exe` launcher (same backend as `run.bat`) | `setup.bat`, `run.bat`, [`docs/WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) |
+| FB-UI-02 | Platform | Open | **Desktop shell:** single-window host for dashboard (Electron/Tauri or PyInstaller) loading Streamlit or future React UI | [`docs/WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) |
+| FB-DASH-01 | Feature | Open | **Dashboard prerequisites doc:** fold “ready to run” checklist (venv, `.env`, Docker, preflight, Alpaca/Coinbase, signing) into operator doc + link from README | `README.md`, `RUNBOOKS.MD`, `.env.example` |
+| FB-DASH-02 | Feature | Open | **Paper / live mode in UI:** dropdown bound to `NM_EXECUTION_MODE` with **safe apply** (config + restart live loop; never hot-swap venue without restart) | `control_plane/`, `app/config/` |
+| FB-DASH-03 | Feature | Open | **Positions sidebar:** collapsible panel listing **open positions** per symbol with qty; poll **`GET /portfolio/positions`** (to be added) backed by adapter `fetch_positions` | `control_plane/api.py`, `execution/adapters/` |
+| FB-DASH-04 | Feature | Open | **Per-position unrealized P&L** (green/red) using mark price + avg entry where adapters expose them | `execution/adapters/`, Kraken mid or venue quote |
+| FB-DASH-05 | Feature | Open | **Aggregate P&L by timeframe** (hour, day, month, year, all-time): requires **fills/ledger** (QuestDB, Alpaca activity, or new store) + **`GET /pnl/summary?range=`** | `data_plane/storage/`, `control_plane/api.py` |
+| FB-DASH-06 | Hardening | Open | **Live mode guardrails:** confirm step before enabling Coinbase live path from UI | `control_plane/`, `RUNBOOKS.MD` |
+
 *Parent epic:* RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Sub-rows FB-PL-P0-01 … FB-PL-P0-04 Done 2026-04-11** (NumPy stubs + offline env; full PyTorch RL remains future hardening).
 
 *See also §2 HIGH (**FB-FR-P0-*** and **FB-SPEC-07**). **FB-SPEC-06** is archived in §8.*

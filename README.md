@@ -10,6 +10,15 @@ pip install -e ".[dev]"
 docker compose -f infra/docker-compose.yml up -d
 ```
 
+### Windows (low setup time)
+
+From the repo root in **cmd.exe** or PowerShell:
+
+1. **`setup.bat`** — creates `.venv`, installs **`[dev,dashboard]`**, optionally starts Docker Compose, copies `.env.example` → `.env` if missing.
+2. **`run.bat`** — starts the **control plane API** (port **8000**) and **Streamlit dashboard** (default **8501**) in separate windows. Edit **`.env`** before first real use.
+
+Operator UI roadmap (paper/live switch, positions, P&L, future `.exe`): **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. Tracked as **FB-UI-*** / **FB-DASH-*** in [`docs/FEATURES_BACKLOG.MD`](docs/FEATURES_BACKLOG.MD).
+
 Market data uses **Kraken** public APIs (no keys for read). Bar buckets default to **1 second** (`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`).
 
 **Live decision loop (paper or live execution per config):** connects Kraken WS → rolling bars → `run_decision_tick` → optional QuestDB traces → venue submit. Run as a module:
