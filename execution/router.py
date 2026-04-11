@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import os
+
 from app.config.settings import AppSettings
 from execution.adapters.alpaca_paper import AlpacaPaperExecutionAdapter
 from execution.adapters.base_adapter import ExecutionAdapter
 from execution.adapters.coinbase_live import CoinbaseExecutionAdapter
+from execution.adapters.stub import StubExecutionAdapter
 
 
 def create_execution_adapter(settings: AppSettings) -> ExecutionAdapter:
     """Single factory for venue adapters (paper Alpaca vs live Coinbase)."""
+    adapter = os.getenv("NM_EXECUTION_ADAPTER", "").strip().lower()
+    if adapter == "stub":
+        return StubExecutionAdapter(settings)
     if settings.execution_mode == "paper":
         if settings.execution_paper_adapter.lower() != "alpaca":
             raise ValueError(

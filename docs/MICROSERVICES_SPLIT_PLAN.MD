@@ -18,7 +18,9 @@ It is intentionally implementation-oriented so work can be executed as small, te
 - ✅ Risk service now exposes `/ingest/decision-proposal` and `/events/recent` for externalized proposal->risk smoke testing.
 - ✅ Decision service now exposes `/ingest/features-row` and `/events/recent` for externalized feature->proposal smoke testing.
 - ✅ Runtime bridge can run with **external execution gateway**: set `NM_MICROSERVICES_EXECUTION_GATEWAY_MODE=external`, `NM_MICROSERVICES_RUNTIME_BRIDGE_ENABLED=true`, `NM_MESSAGING_BACKEND=redis_streams`, and `NM_REDIS_URL` (matches `NM_REDIS_URL` / compose Redis). Live loop skips in-process `submit_order` when external mode is on; run `uvicorn services.execution_gateway_service.main:app` (polls `risk.intent.accepted.v1`) for the venue path.
-- ⏭️ Next step: wire **real** `ExecutionService.submit_order` inside `execution_gateway_service` handlers (replace scaffold ack/fill) and run paper integration with Redis + live loop + gateway process.
+- ✅ Execution gateway calls **`ExecutionService.submit_order`** when `NM_EXECUTION_GATEWAY_SUBMIT=true` (default). Use **`NM_EXECUTION_ADAPTER=stub`** for tests/no-network; paper Alpaca / live Coinbase otherwise. Accepted events carry **`order_intent`** (full `OrderIntent` JSON) + **`message_signature`** (HMAC over the dict, same secret as risk envelope). Legacy **`signed_intent` + `risk_signature`** (dict signing) is still accepted for smoke/manual ingest.
+- ✅ Microservice risk path uses **`RiskEngine.evaluate`** + **`to_order_intent`** so quantities match the monolith risk rules (with optional `mid_price`, `spread_bps`, etc. on the proposal payload).
+- ⏭️ Next step: end-to-end **paper** integration test (Redis + live loop + gateway process) or Docker Compose profile for the four processes.
 
 ---
 

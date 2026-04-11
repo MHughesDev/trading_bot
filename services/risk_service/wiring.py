@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 from fastapi import FastAPI
 
+from app.config.settings import load_settings
+
 from services.common import build_scaffold_app
 from services.risk_service.handlers import RiskServiceHandlers
 from shared.messaging import topics
@@ -23,7 +25,7 @@ class RiskServiceState:
 def create_app() -> FastAPI:
     app = build_scaffold_app("risk_service")
     bus = InMemoryMessageBus()
-    handler = RiskServiceHandlers(bus)
+    handler = RiskServiceHandlers(bus, settings=load_settings())
     handler.register()
 
     state = RiskServiceState(handler=handler)

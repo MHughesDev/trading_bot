@@ -25,8 +25,8 @@ def test_risk_service_accepts_nonzero_direction() -> None:
     payload = events.json()
     assert payload["accepted"]
     accepted = payload["accepted"][-1]
-    assert "signed_intent" in accepted
-    assert "risk_signature" in accepted
+    assert "order_intent" in accepted
+    assert "message_signature" in accepted
 
 
 def test_risk_service_blocks_zero_direction() -> None:

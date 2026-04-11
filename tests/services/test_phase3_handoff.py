@@ -23,7 +23,7 @@ def test_wire_phase3_without_execution_registers_decision_risk_only() -> None:
     )
     bus.publish(topics.FEATURES_ROW_GENERATED_V1, feature)
     assert len(accepted) == 1
-    assert accepted[0].payload.get("signed_intent")
+    assert accepted[0].payload.get("order_intent")
 
 
 def test_feature_to_execution_ack_handoff() -> None:

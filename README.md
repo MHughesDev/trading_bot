@@ -70,6 +70,8 @@ Set `NM_MICROSERVICES_RUNTIME_BRIDGE_ENABLED=true` to enable runtime handoff pub
 - **External gateway:** `NM_MICROSERVICES_EXECUTION_GATEWAY_MODE=external` with `NM_MESSAGING_BACKEND=redis_streams` and `NM_REDIS_URL` — live publishes the handoff chain to Redis and **skips** in-process `submit_order`; run the execution gateway service separately to consume `risk.intent.accepted.v1`.
 
 Execution gateway service exposes `POST /ingest/risk-accepted`, `GET /events/recent`, and `GET /messaging` (backend hint). With Redis, it runs a background poll loop on `risk.intent.accepted.v1`.
+
+**Execution path:** with `NM_EXECUTION_GATEWAY_SUBMIT=true` (default), the gateway verifies the envelope and calls **`ExecutionService.submit_order`**. Set **`NM_EXECUTION_GATEWAY_SUBMIT=false`** for scaffold-only ack/fill (used by default in unit tests). **`NM_EXECUTION_ADAPTER=stub`** selects the in-process stub adapter (no venue); omit for normal paper/live adapters.
 Risk service exposes `POST /ingest/decision-proposal` and `GET /events/recent` for proposal gating smoke tests.
 Decision service exposes `POST /ingest/features-row` and `GET /events/recent` for feature-to-proposal smoke tests.
 
