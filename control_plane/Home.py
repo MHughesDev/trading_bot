@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from control_plane.pnl_panel import render_pnl_panel
 from control_plane.positions_panel import render_positions_sidebar
 from control_plane.streamlit_util import (
     api_get_json,
@@ -96,6 +97,8 @@ if need_restart:
     st.sidebar.warning("Restart required — stop and start control plane + live runtime.")
 
 render_positions_sidebar()
+
+render_pnl_panel()
 
 st.markdown(
     """

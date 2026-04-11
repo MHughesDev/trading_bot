@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi import status as http_status
 from fastapi.responses import PlainTextResponse
 from fastapi.security import APIKeyHeader
@@ -25,6 +25,7 @@ from control_plane.execution_profile import (
     write_pending_intent,
 )
 from control_plane.microservice_health import probe_microservices_health
+from execution.pnl_summary import compute_pnl_summary
 from execution.portfolio_positions import fetch_portfolio_positions
 
 settings = load_settings()
@@ -151,6 +152,20 @@ def post_system_power(
 async def get_portfolio_positions() -> dict[str, Any]:
     """Open positions from the configured execution adapter (paper Alpaca / live Coinbase / stub)."""
     return await fetch_portfolio_positions(settings)
+
+
+@app.get("/pnl/summary")
+async def get_pnl_summary(
+    range_key: Annotated[
+        Literal["hour", "day", "month", "year", "all"],
+        Query(
+            alias="range",
+            description="Rolling window for realized P&L from local ledger (hour/day/month/year) or all time",
+        ),
+    ] = "day",
+) -> dict[str, Any]:
+    """Aggregate realized (local JSONL ledger) + unrealized (open positions) P&L. See docs/PNL_LEDGER.MD."""
+    return await compute_pnl_summary(settings, range_key)
 
 
 @app.get("/microservices/health")
