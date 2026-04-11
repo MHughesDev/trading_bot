@@ -426,6 +426,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-SPEC-08 | pipeline | 2026-04-11 | Preflight script + API |
 | FB-T1 | test | 2026-04-10 | `smoke_credentials.py` |
 | FB-T2 | runtime | 2026-04-10 | Shutdown signals test |
+| FB-UI-01-02 | docs | 2026-04-11 | Windows distribution notes (AV, signing, bundle size) in `WINDOWS_OPERATOR_UI.MD` |
 | FB-X1 | execution | 2026-04-08 | Coinbase live JWT orders |
 | FB-X2 | execution | 2026-04-08 | Cancel + positions |
 | FB-X3 | execution | 2026-04-10 | `create_execution_adapter` in router |

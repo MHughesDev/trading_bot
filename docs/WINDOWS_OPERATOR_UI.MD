@@ -84,7 +84,7 @@ This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat
 
 ## 4. Checklist cross-reference
 
-See **§2 — Open queue → MEDIUM → operator UI / Windows** in [`QUEUE.MD`](QUEUE.MD) (**FB-UI-01-01**, **FB-DASH-01-01**, etc.) for granular tracked work. Readiness checklist slices: **FB-DASH-01-01** (single operator page) and **FB-DASH-01-02** (cross-links from `README`, `RUNBOOKS`, `.env.example`).
+See **§2 — Open queue → MEDIUM → operator UI / Windows** in [`QUEUE.MD`](QUEUE.MD) (**FB-UI-01-01**, etc.) for granular tracked work. **Ready-to-run checklist:** [`OPERATOR_READY_CHECKLIST.MD`](OPERATOR_READY_CHECKLIST.MD) (**FB-DASH-01-01** / **FB-DASH-01-02** — Done 2026-04-11).
 
 ---
 
@@ -93,3 +93,15 @@ See **§2 — Open queue → MEDIUM → operator UI / Windows** in [`QUEUE.MD`](
 - `control_plane/api.py` — extend with positions/PnL when ready.
 - `execution/adapters/*` — `fetch_positions`, future fills/history.
 - `app/runtime/live_service.py` — live loop; mode from settings.
+
+---
+
+## 6. Windows distribution notes (FB-UI-01-02)
+
+Packaging the stack with **PyInstaller** or **cx_Freeze** (see backlog **FB-UI-01-01**) is convenient for operators but has predictable friction:
+
+- **Antivirus false positives:** one-file bundles that unpack a Python runtime are often flagged heuristically. Prefer **signed** binaries when distributing outside a trusted lab, document the vendor allowlist path for IT, or ship **`run.bat` + venv** (smaller AV surface) as the supported enterprise path.
+- **Optional code signing:** Windows Authenticode signing does not eliminate heuristics but reduces SmartScreen warnings; budget for a cert + timestamping if you distribute broadly.
+- **Bundle size:** embedding CPython + NumPy/Polars/Torch (if included) yields **hundreds of MB**. Document expected size, use optional extras (`[dashboard]` vs full `[all]`) in the spec, and consider **directory** layouts over one giant `.exe` when size matters.
+
+Operator checklist for any install path: [`OPERATOR_READY_CHECKLIST.MD`](OPERATOR_READY_CHECKLIST.MD).

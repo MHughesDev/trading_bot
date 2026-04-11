@@ -1,6 +1,6 @@
 # Operations runbooks (HG-12 / FB-I3)
 
-**First-time setup:** see **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** (checklist: venv, `.env`, Docker, preflight, venues).
+**First-time setup:** see **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** (checklist: venv, `.env`, Docker, preflight, venues). This file adds secrets, incident response, and execution-mode restart detail beyond that checklist.
 
 ## Control plane bind address
 
@@ -43,6 +43,19 @@ Before switching **to live** from paper (or any non-live active mode), complete 
 2. **Flatten:** POST `/flatten` or set mode `FLATTEN_ALL` via `/system/mode`.
 3. **Stop runtime:** SIGTERM/SIGINT to `python -m app.runtime.live_service` (graceful shutdown depends on platform signal support).
 4. **Review traces:** QuestDB `decision_traces` table when `NM_QUESTDB_PERSIST_DECISION_TRACES=true`; Grafana/Loki for logs.
+
+## Restart after config change (execution mode / venue)
+
+Execution mode and venue credentials are read from **`AppSettings`** at process start. There is **no hot-swap** of paper vs live or of Alpaca vs Coinbase adapters while a long-lived loop is running.
+
+After changing **`NM_EXECUTION_MODE`**, **`NM_EXECUTION_ADAPTER`**, or venue API keys in **`.env`**:
+
+1. **Stop** the live decision loop: the process running `python -m app.runtime.live_service` or `uvicorn services.live_service_app:app` with **`NM_LIVE_SERVICE_APP_START_LOOP=true`** (SIGTERM/SIGINT).
+2. If you use **`python -m app.runtime.power_supervisor`**, restart it so it spawns a fresh **`live_service_app`** with the new environment (or toggle system power OFF then ON after updating `.env`).
+3. **Restart** the execution gateway or any service that caches `load_settings()` if you run split microservices.
+4. Re-run **preflight:** `python scripts/preflight_check.py` or **`GET /status`** (`preflight`, `production_preflight`).
+
+Streamlit and the control plane API can often stay up, but **`GET /status`** reflects what the **API process** loaded; the **live loop** must restart to trade under the new mode.
 
 ## QuestDB backup / restore
 
@@ -99,6 +112,17 @@ Before upgrading binaries or large config changes: copy **`models/artifacts_trai
 
 - **In-repo today:** `models/registry/mlflow_registry.py` — optional MLflow **params/metrics** logging when `mlflow` is installed; **`promote()` is intentionally a no-op** (manual promotion only; aligns with CI “no auto MLflow stage” policy). Training campaigns can log under your tracking URI; there is **no** automated “champion vs candidate” pipeline yet (**FB-AUDIT-03**).
 - **Operator-facing labels:** set **`NM_MODELS_FORECASTER_CHECKPOINT_ID`** for `ForecastPacket` lineage; use **`POST /models/version`** on the control plane to expose **`component` + `version`** to Prometheus (`nm_model_version_info`). Together with **`model_artifacts`** and artifact paths, this is the current “active model set” surface — a single MLflow-backed promotion workflow remains backlog.
+
+## Live trading checklist (mirrors UI guardrails — FB-DASH-06-02)
+
+Future Streamlit/UI flows may require typing **LIVE** before enabling live execution (**FB-DASH-06-01**). Until that ships, use this **manual** checklist before **`NM_EXECUTION_MODE=live`** and Coinbase (or any live venue):
+
+1. Complete **[`OPERATOR_READY_CHECKLIST.MD`](OPERATOR_READY_CHECKLIST.MD)** (venv, `.env`, Docker if needed).
+2. **`NM_RISK_SIGNING_SECRET`** set; **`NM_ALLOW_UNSIGNED_EXECUTION=false`** for production-like runs.
+3. **`python scripts/preflight_check.py`** exits **0**; review **`GET /status`** → `preflight` + `production_preflight`.
+4. **Venue keys** match intent: Coinbase CDP keys for live adapter; not using Alpaca for market data.
+5. **Restart** the live loop after any mode or key change (see [Restart after config change](#restart-after-config-change-execution-mode--venue)).
+6. **Monitor** first session: Grafana/Loki, `nm_decision_latency_seconds`, adapter errors.
 
 ## Multi-symbol runtime (FB-SPEC-07)
 
