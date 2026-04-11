@@ -61,3 +61,7 @@ Before upgrading binaries or large config changes: copy **`models/artifacts_trai
 
 - **Forecast guard / abstain:** monitor `nm_forecast_packet_abstain_total` or logs for repeated guard failures after deploys.
 - **Execution errors:** watch adapter logs and `nm_decision_latency_seconds` spikes; tune thresholds for your host (see **FB-AUDIT-09** in backlog for formal rules).
+
+## Status payload: preflight (IL-105 / FB-SPEC-08)
+
+- **`GET /status`** returns **`preflight`** (blocking issues: signing vs live, unsigned execution, adapter names, credentials) and **`production_preflight`** (signing secret, unsigned flag, venue API keys vs `execution_mode`). Use both before live trading; CLI: `python scripts/preflight_check.py`.

@@ -83,13 +83,13 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 | IL-011 | 2026-04-10 | `NotImplementedError` in `main()` signal handlers: extracted `register_shutdown_signals`; test `tests/test_live_service_signals.py`. |
 | IL-102 | 2026-04-10 | WS normalizer fixtures expanded: `trade_tick.json`, `l2_snapshot.json` + tests in `test_normalizer_fixtures.py`. |
 | IL-104 | 2026-04-11 | **Nightly/orchestration training:** removed `_synthetic_training_data` / Ridge-only `run_train_evaluate_log`; `orchestration/nightly_retrain.py` now drives **real Coinbase candle** fetch + walk-forward quantile forecaster + real-data heuristic RL eval per human training specs (`orchestration/training_campaign.py`). |
-| IL-103 | 2026-04-11 | **Serving mode clarity:** README + RUNBOOKS state NumPy/heuristic until **FB-SPEC-02**; `DecisionPipeline` logs `decision pipeline serving mode:` once per process (`decision_engine/pipeline.py`). |
+| IL-103 | 2026-04-11 | **Serving mode clarity:** README + RUNBOOKS; `DecisionPipeline` logs `decision pipeline serving mode:` once per process (`decision_engine/pipeline.py`). |
 | IL-106 | 2026-04-11 | **Resolved-row drift:** IL-002 / IL-003 summaries rewritten (superseded-by-master-pipeline note). |
 | IL-107 | 2026-04-11 | **Conformal load:** WARNING log when `conformal_state_path` set but `load_conformal_state` fails (`forecaster_model/inference/build_from_ohlc.py`). |
 | IL-108 | 2026-04-11 | **`.env.example`:** aligned to `NM_*` variables + pointer to `AppSettings` (`.env.example`). |
 | IL-109 | 2026-04-11 | **`SPEC_POLICY_DELTA_TO_SIZE_FRACTION_SCALE`** + docstring in `decision_engine/spec_policy_proposal.py` for delta→`size_fraction` mapping. |
 | IL-110 | 2026-04-11 | **Control plane bind:** RUNBOOKS section for `NM_CONTROL_PLANE_HOST` / API key on untrusted LAN ([`RUNBOOKS.MD`](RUNBOOKS.MD)). |
-| IL-105 | 2026-04-11 | **Preflight:** `preflight_report` + `GET /status` → `preflight`, `scripts/preflight_check.py` (exit 1 on block); RUNBOOKS + README — complements **FB-SPEC-08** |
+| IL-105 | 2026-04-11 | **Preflight:** `preflight_report` + `GET /status` → **`preflight`** (adapter names, signing policy), **`production_preflight`** (signing + venue keys vs mode); `scripts/preflight_check.py`; RUNBOOKS + README — **FB-SPEC-08** |
 
 ---
 
