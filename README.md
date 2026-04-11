@@ -30,6 +30,16 @@ Configure secrets via `.env` (prefix `NM_` for app settings). **Never use Alpaca
 
 **Verify API connectivity (no orders placed):** put keys in `.env` (`NM_ALPACA_*`, optional `NM_COINBASE_*`), then `pip install -e ".[alpaca]"` and `python scripts/smoke_credentials.py`. Coinbase Advanced Trade REST may require JWT for some routes; the script falls back to the public Exchange ticker when unauthenticated candle calls fail.
 
+**Offline training (real candles only):** fetches historical 1m OHLCV from Coinbase public REST, walk-forward splits, quantile forecaster fit, then heuristic policy evaluation on the same real path (PPO/SAC are backlog). Run:
+
+```bash
+python -m orchestration.nightly_retrain --mode nightly
+# or full initial campaign (longer lookback, more jobs):
+python -m orchestration.nightly_retrain --mode initial --lookback-days 180
+```
+
+Outputs under `NM_TRAINING_ARTIFACT_DIR` (default `models/artifacts_training/`): `bars.parquet`, `forecaster_quantile_real.joblib`, `training_report.json`. Specs: [`docs/Human Provided Specs/NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD`](docs/Human%20Provided%20Specs/NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD), [`docs/Human Provided Specs/INITIAL_OFFLINE_TRAINING_CAMPAIGN_SPEC.MD`](docs/Human%20Provided%20Specs/INITIAL_OFFLINE_TRAINING_CAMPAIGN_SPEC.MD).
+
 ## Control plane (FastAPI)
 
 ```bash

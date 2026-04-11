@@ -55,6 +55,12 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
 | FB-FR-P0 | Feature | Open | Full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD): leakage-safe dataset, VSN, latent CNN, multi-res xLSTM, regime fusion, quantile head, conformal, ensemble | `forecaster_model/` |
+| FB-SPEC-02 | Improvement | Open | **Trained weights on hot path:** load PyTorch **forecaster** (xLSTM when available) and **RL policy** checkpoints in `DecisionPipeline` / `PolicySystem` instead of NumPy / heuristic-only (implementation detail of **`FB-FR-P0`** + **`FB-PL-P0`**) | `forecaster_model/`, `policy_model/`, `models/` |
+| FB-SPEC-03 | Tech debt | Open | **Unified artifact wiring:** one clear settings contract for `spec_policy` (forecaster packet builder + policy actor) vs legacy HMM+Ridge only; avoid operator confusion where `NM_MODELS_*` affects legacy path but not stub packet/heuristic policy | `app/config/settings.py`, `decision_engine/pipeline.py`, `docs/RUNBOOKS.MD` |
+| FB-SPEC-05 | Improvement | Open | **Optional GPU/CUDA for PyTorch:** device selection (train + infer) when `torch` is installed; document defaults (CPU) and CUDA requirements | `forecaster_model/training/torch_trainer.py`, `pyproject.toml` `[models_torch]` |
+| FB-SPEC-06 | Platform | Open | **Model registry / versioned artifacts:** filesystem or MLflow-backed promotion workflow, version labels, and single operator-facing “active model set” beyond ad-hoc paths | `models/registry/`, `control_plane/api.py`, `docs/RUNBOOKS.MD` |
+| FB-SPEC-07 | Feature | Open | **Multi-asset portfolio coordination:** cross-symbol capital allocation, correlation-aware or risk-parity style sizing, or documented limits when running many `market_data_symbols` (beyond independent per-symbol ticks) | `risk_engine/`, `decision_engine/`, `docs/Specs/` |
+| FB-SPEC-08 | Reliability | Open | **Deployment preflight:** scripted or API checks for required secrets, signing enabled, unsigned execution disallowed in prod, adapter health — complement [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) | `scripts/`, `control_plane/api.py` |
 
 **Blocked (not started):** **`FB-FR-P0`** requires PyTorch/xLSTM stack and large training loop — unsafe to claim done without full model + data pipeline. **`FB-PL-P0`** requires RL env + actor-critic + buffer — same.
 
@@ -93,6 +99,8 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
 | FB-PL-P0 | Feature | Open | RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD): `TradingPolicyEnvironment`, actor-critic, replay buffer, precomputed `ForecastPacket` mode, reward/cost model | `policy_model/` |
+
+*See also §2 HIGH open rows (**FB-FR-P0**, **FB-SPEC-02** … **FB-SPEC-08**).*
 
 ---
 
@@ -169,6 +177,7 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-FR-P1 | 2026-04-11 | Walk-forward index splits, pinball loss, JSON checkpoint helpers (`forecaster_model/training/`) |
 | FB-PL-P1 | 2026-04-11 | `models.decision_forecast_packet_enabled` + `DecisionPipeline.last_forecast_packet` (stub packet when enabled) |
 | FB-PL-P2 | 2026-04-11 | `policy_model.bridge.policy_envelope_from_app_settings` maps `AppSettings` + `RiskState` → `PolicyRiskEnvelope` |
+| FB-SPEC-04 | 2026-04-11 | **Real historical training:** `orchestration/training_campaign.py` + `real_data_bars.py` fetch Coinbase candles only; walk-forward triple splits; `forecaster_model/training/real_data_fit.py` QuantileRegressor; `rl_real_data_eval.py` heuristic rollout; human specs in `docs/Human Provided Specs/NIGHTLY_*` + `INITIAL_*` |
 
 ---
 

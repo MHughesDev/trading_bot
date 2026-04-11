@@ -1,0 +1,29 @@
+"""
+Constants from `docs/Human Provided Specs/NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD` and
+`INITIAL_OFFLINE_TRAINING_CAMPAIGN_SPEC.MD` (training cadence only; no fake data).
+"""
+
+# --- Nightly (maintenance) ---
+NIGHTLY_FORECASTER_SEEDS = (101, 202)
+NIGHTLY_RL_SEEDS = (111, 222)
+NIGHTLY_FORECASTER_RUNS = 2
+NIGHTLY_RL_RUNS = 2
+NIGHTLY_MAX_EPOCHS = 20
+NIGHTLY_EARLY_STOPPING_PATIENCE = 5
+NIGHTLY_RL_ENV_STEPS_PREFERRED = 500_000
+NIGHTLY_RL_ENV_STEPS_MIN = 250_000
+NIGHTLY_RL_ENV_STEPS_MAX = 1_000_000
+
+# --- Initial offline campaign (default serious run) ---
+CAMPAIGN_WALK_FORWARD_SPLITS = 3
+CAMPAIGN_FORECASTER_SEEDS = (101, 202, 303)
+CAMPAIGN_RL_SEEDS = (111, 222, 333)
+CAMPAIGN_FORECASTER_RUNS = 9  # 3 splits × 3 seeds
+CAMPAIGN_RL_RUNS = 18  # 2 alg × 3 splits × 3 seeds (stubs use heuristic family × seeds × splits)
+CAMPAIGN_MAX_EPOCHS = 50
+CAMPAIGN_EARLY_STOPPING_PATIENCE = 10
+CAMPAIGN_RL_ENV_STEPS_MIN = 1_000_000
+
+# Forecaster geometry (initial campaign §3.1) — also default `ForecasterConfig`
+CAMPAIGN_HISTORY_LENGTH = 128
+CAMPAIGN_FORECAST_HORIZON = 8
