@@ -8,9 +8,11 @@ from fastapi import FastAPI
 
 from services.common import build_scaffold_app
 from services.decision_service.handlers import DecisionServiceHandlers
+from services.redis_poll_lifespan import redis_stream_poll_lifespan
 from shared.messaging import topics
 from shared.messaging.envelope import EventEnvelope
-from shared.messaging.in_memory import InMemoryMessageBus
+from shared.messaging.factory import create_message_bus
+from shared.messaging.redis_streams import RedisStreamsMessageBus
 
 
 @dataclass
@@ -20,8 +22,7 @@ class DecisionServiceState:
 
 
 def create_app() -> FastAPI:
-    app = build_scaffold_app("decision_service")
-    bus = InMemoryMessageBus()
+    bus = create_message_bus()
     handler = DecisionServiceHandlers(bus)
     handler.register()
 
@@ -31,6 +32,9 @@ def create_app() -> FastAPI:
         state.proposals.append(env.payload)
 
     bus.subscribe(topics.DECISION_PROPOSAL_CREATED_V1, _capture_proposal)
+
+    lifespan = redis_stream_poll_lifespan(bus, [topics.FEATURES_ROW_GENERATED_V1])
+    app = build_scaffold_app("decision_service", lifespan=lifespan)
 
     @app.post("/ingest/features-row")
     def ingest_features_row(payload: dict) -> dict[str, int]:
@@ -42,10 +46,17 @@ def create_app() -> FastAPI:
             payload=payload,
         )
         bus.publish(topics.FEATURES_ROW_GENERATED_V1, env)
+        if isinstance(bus, RedisStreamsMessageBus):
+            bus.poll_once(topics.FEATURES_ROW_GENERATED_V1)
         return {"proposals": len(state.proposals)}
 
     @app.get("/events/recent")
     def events_recent() -> dict[str, list[dict]]:
         return {"proposals": list(state.proposals)}
+
+    @app.get("/messaging")
+    def messaging_info() -> dict[str, str]:
+        backend = "redis_streams" if isinstance(bus, RedisStreamsMessageBus) else "in_memory"
+        return {"messaging_backend": backend}
 
     return app

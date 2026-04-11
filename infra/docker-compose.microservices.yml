@@ -1,12 +1,52 @@
-# Optional overlay: run execution_gateway beside Redis (dev convenience).
+# Optional overlay: Redis + decision / risk / execution gateway (dev convenience).
 #
 # From repository root:
-#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.microservices.yml up -d redis execution_gateway
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.microservices.yml up -d redis decision_service risk_service execution_gateway
 #
-# Gateway: http://localhost:8202/healthz — uses Redis at service hostname ``redis``.
-# First start runs ``pip install -e ".[dev]"`` (slow); prefer host ``uvicorn`` for tight loops.
+# Ports: decision 8203, risk 8204, gateway 8202. Each service exposes /healthz and /messaging.
+# First start runs pip install per container (slow).
 
 services:
+  decision_service:
+    image: python:3.12-slim-bookworm
+    container_name: nm-decision-service
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+    ports:
+      - "8203:8203"
+    environment:
+      NM_MESSAGING_BACKEND: redis_streams
+      NM_REDIS_URL: redis://redis:6379/0
+      NM_RISK_SIGNING_SECRET: dev-risk-secret
+    command:
+      - sh
+      - -c
+      - pip install -q -e ".[dev]" && python -m uvicorn services.decision_service.main:app --host 0.0.0.0 --port 8203
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  risk_service:
+    image: python:3.12-slim-bookworm
+    container_name: nm-risk-service
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+    ports:
+      - "8204:8204"
+    environment:
+      NM_MESSAGING_BACKEND: redis_streams
+      NM_REDIS_URL: redis://redis:6379/0
+      NM_RISK_SIGNING_SECRET: dev-risk-secret
+    command:
+      - sh
+      - -c
+      - pip install -q -e ".[dev]" && python -m uvicorn services.risk_service.main:app --host 0.0.0.0 --port 8204
+    depends_on:
+      redis:
+        condition: service_healthy
+
   execution_gateway:
     image: python:3.12-slim-bookworm
     container_name: nm-execution-gateway
@@ -25,9 +65,7 @@ services:
     command:
       - sh
       - -c
-      - |
-        pip install -q -e ".[dev]" && \
-        python -m uvicorn services.execution_gateway_service.main:app --host 0.0.0.0 --port 8202
+      - pip install -q -e ".[dev]" && python -m uvicorn services.execution_gateway_service.main:app --host 0.0.0.0 --port 8202
     depends_on:
       redis:
         condition: service_healthy

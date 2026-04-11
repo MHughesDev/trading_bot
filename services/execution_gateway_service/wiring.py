@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import AsyncIterator
 
 from fastapi import FastAPI
 
 from services.common import build_scaffold_app
 from services.execution_gateway_bus import create_execution_gateway_bus
 from services.execution_gateway_service.handlers import ExecutionGatewayHandlers
+from services.redis_poll_lifespan import redis_stream_poll_lifespan
 from shared.messaging import topics
 from shared.messaging.envelope import EventEnvelope
 from shared.messaging.redis_streams import RedisStreamsMessageBus
@@ -50,29 +48,7 @@ def create_app() -> FastAPI:
     bus.subscribe(topics.EXECUTION_ORDER_REJECTED_V1, _capture_rejected)
     bus.subscribe(topics.EXECUTION_POSITION_SNAPSHOT_V1, _capture_position)
 
-    @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.bus = bus
-        poll_task: asyncio.Task[None] | None = None
-        poll_stop: asyncio.Event | None = None
-        if isinstance(bus, RedisStreamsMessageBus):
-            poll_stop = asyncio.Event()
-
-            async def _poll_loop() -> None:
-                assert poll_stop is not None
-                while not poll_stop.is_set():
-                    bus.poll_once(topics.RISK_INTENT_ACCEPTED_V1)
-                    await asyncio.sleep(0.05)
-
-            poll_task = asyncio.create_task(_poll_loop())
-        try:
-            yield
-        finally:
-            if poll_stop is not None:
-                poll_stop.set()
-            if poll_task is not None:
-                await poll_task
-
+    lifespan = redis_stream_poll_lifespan(bus, [topics.RISK_INTENT_ACCEPTED_V1])
     app = build_scaffold_app("execution_gateway_service", lifespan=lifespan)
 
     @app.post("/ingest/risk-accepted")

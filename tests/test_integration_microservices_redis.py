@@ -253,3 +253,95 @@ def test_redis_external_gateway_mock_alpaca_paper_path() -> None:
         err = proc.stderr.read().decode() if proc.stderr else ""
         if proc.returncode not in (0, -15) and err:
             pytest.fail(f"uvicorn stderr: {err[:2000]}")
+
+
+def test_redis_three_process_decision_risk_gateway_chain() -> None:
+    """Decision → Risk → Execution gateway as separate uvicorn processes (Redis only)."""
+    redis_url = os.getenv("NM_REDIS_URL", "redis://127.0.0.1:6379/0")
+    try:
+        import redis as redis_mod
+
+        redis_mod.Redis.from_url(redis_url, socket_connect_timeout=2).ping()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"Redis not reachable at {redis_url!r}: {exc}")
+
+    secret = "integration-3proc-chain-secret-32chars!!"
+    base = {
+        "NM_MESSAGING_BACKEND": "redis_streams",
+        "NM_REDIS_URL": redis_url,
+        "NM_RISK_SIGNING_SECRET": secret,
+        "NM_EXECUTION_GATEWAY_SUBMIT": "true",
+        "NM_EXECUTION_ADAPTER": "stub",
+        "NM_ALLOW_UNSIGNED_EXECUTION": "false",
+    }
+
+    decision_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.decision_service.main:app", "--host", "127.0.0.1", "--port", "18771"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    risk_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.risk_service.main:app", "--host", "127.0.0.1", "--port", "18772"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    gw_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "services.execution_gateway_service.main:app", "--host", "127.0.0.1", "--port", "18773"],
+        env={**os.environ, **base},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        _wait_http("http://127.0.0.1:18771/healthz")
+        _wait_http("http://127.0.0.1:18772/healthz")
+        _wait_http("http://127.0.0.1:18773/healthz")
+
+        for url, name in (
+            ("http://127.0.0.1:18771/messaging", "decision"),
+            ("http://127.0.0.1:18772/messaging", "risk"),
+            ("http://127.0.0.1:18773/messaging", "gateway"),
+        ):
+            r = httpx.get(url, timeout=2.0)
+            r.raise_for_status()
+            assert r.json().get("messaging_backend") == "redis_streams", name
+
+        r = httpx.post(
+            "http://127.0.0.1:18771/ingest/features-row",
+            json={
+                "symbol": "BTC-USD",
+                "direction": 1,
+                "size_fraction": 0.1,
+                "route_id": "SCALPING",
+                "mid_price": 50_000.0,
+                "spread_bps": 5.0,
+            },
+            timeout=5.0,
+        )
+        r.raise_for_status()
+
+        deadline = time.monotonic() + 25.0
+        recent: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            recent = httpx.get("http://127.0.0.1:18773/events/recent", timeout=2.0).json()
+            if recent.get("submitted_orders"):
+                break
+            time.sleep(0.2)
+
+        assert recent.get("submitted_orders"), f"gateway empty: {recent!r}"
+        first = recent["submitted_orders"][0]
+        if isinstance(first, dict) and "order_intent" in first:
+            assert first["order_intent"]["symbol"] == "BTC-USD"
+    finally:
+        for p in (gw_proc, risk_proc, decision_proc):
+            p.terminate()
+        for p in (gw_proc, risk_proc, decision_proc):
+            try:
+                p.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        for p in (gw_proc, risk_proc, decision_proc):
+            err = p.stderr.read().decode() if p.stderr else ""
+            if p.returncode not in (0, -15) and err:
+                pytest.fail(f"uvicorn stderr: {err[:1500]}")

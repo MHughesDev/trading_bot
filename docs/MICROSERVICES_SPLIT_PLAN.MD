@@ -23,7 +23,9 @@ It is intentionally implementation-oriented so work can be executed as small, te
 - ✅ Optional integration: **`tests/test_integration_microservices_redis.py`** with `NM_INTEGRATION_SERVICES=1` — Redis + subprocess **`uvicorn` execution gateway** + **`RuntimeHandoffBridge`** (external mode) + stub submit.
 - ✅ Compose overlay **`infra/docker-compose.microservices.yml`** runs **`execution_gateway`** beside Redis (stub adapter; port 8202).
 - ✅ **Paper path without Alpaca SDK / keys:** `NM_EXECUTION_ADAPTER=mock_alpaca_paper` uses **`MockAlpacaPaperExecutionAdapter`** (symbol map + synthetic `OrderAck`, no network). Integration test in **`tests/test_integration_microservices_redis.py`** (with `NM_INTEGRATION_SERVICES=1`).
-- ⏭️ Next step: optional **real Alpaca paper** smoke with `NM_ALPACA_*` + `pip install -e ".[alpaca]"`, or compose services for **`live_service`** + Redis + gateway.
+- ✅ **Decision + Risk services** use **`create_message_bus()`** (same env as gateway) with **`redis_stream_poll_lifespan`** for Redis Streams; **`GET /messaging`** on both. Multi-process chain: **`POST decision /ingest/features-row` → risk → gateway** verified in **`tests/test_integration_microservices_redis.py::test_redis_three_process_decision_risk_gateway_chain`**.
+- ✅ Compose overlay includes **decision_service** (8203), **risk_service** (8204), **execution_gateway** (8202) — see **`infra/docker-compose.microservices.yml`**.
+- ⏭️ Next step: optional **real Alpaca paper** smoke with `NM_ALPACA_*` + `pip install -e ".[alpaca]"`, or **`live_service`** in compose for full data-plane integration.
 
 ---
 

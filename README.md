@@ -101,7 +101,7 @@ Decision service exposes `POST /ingest/features-row` and `GET /events/recent` fo
 
 GitHub Actions (`.github/workflows/ci.yml`): **ruff**, **pytest**, `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`. Optional integration job against Redis / QuestDB / Qdrant is **manual** (`workflow_dispatch`) or run locally with `NM_INTEGRATION_SERVICES=1` after `docker compose -f infra/docker-compose.yml up -d`. That job also runs **`tests/test_integration_microservices_redis.py`** (Redis + subprocess `uvicorn` execution gateway + stub submit).
 
-**Microservices dev (optional):** `docker compose -f infra/docker-compose.yml -f infra/docker-compose.microservices.yml up -d redis execution_gateway` starts Redis and a **stub** execution gateway on port **8202** (first start installs deps in the container).
+**Microservices dev (optional):** `docker compose -f infra/docker-compose.yml -f infra/docker-compose.microservices.yml up -d redis decision_service risk_service execution_gateway` starts Redis plus **decision** (8203), **risk** (8204), and **execution gateway** (8202) with Redis Streams (first start installs deps in each container). POST a feature row to `http://localhost:8203/ingest/features-row` and poll `http://localhost:8202/events/recent` on the gateway.
 
 **Paper execution path (no broker keys):** set **`NM_EXECUTION_ADAPTER=mock_alpaca_paper`** on the execution gateway to exercise the same **`ExecutionService` → adapter** path as Alpaca paper (symbol mapping via `execution/alpaca_util.py`, synthetic fills). For real Alpaca paper, install **`[alpaca]`**, set **`NM_ALPACA_API_KEY`** / **`NM_ALPACA_API_SECRET`**, and use default **`NM_EXECUTION_MODE=paper`** (omit `NM_EXECUTION_ADAPTER` or use **`alpaca`** implicitly).
 
