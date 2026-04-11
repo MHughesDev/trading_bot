@@ -57,8 +57,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
 | FB-FR-P0 | Feature | Open | Full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD): leakage-safe dataset, VSN, latent CNN, multi-res xLSTM, regime fusion, quantile head, conformal, ensemble | `forecaster_model/` |
-| FB-SPEC-02 | Improvement | Open | **Trained weights on hot path:** load PyTorch **forecaster** (xLSTM when available) and **RL policy** checkpoints in `DecisionPipeline` / `PolicySystem` instead of NumPy / heuristic-only (implementation detail of **`FB-FR-P0`** + **`FB-PL-P0`**) | `forecaster_model/`, `policy_model/`, `models/` |
-| FB-SPEC-03 | Tech debt | Open | **Unified artifact wiring:** one clear settings contract for forecaster packet builder + policy actor + optional conformal/checkpoint IDs (**FB-SPEC-02**); avoid operator confusion vs training-only joblib artifacts (`forecaster_quantile_real.joblib`) | `app/config/settings.py`, `decision_engine/pipeline.py`, `docs/RUNBOOKS.MD` |
+| FB-SPEC-03 | Tech debt | Open | **Unified artifact wiring:** one clear settings contract for forecaster packet builder + policy actor + optional conformal/checkpoint IDs; avoid operator confusion vs training-only joblib artifacts (`forecaster_quantile_real.joblib`) | `app/config/settings.py`, `decision_engine/pipeline.py`, `docs/RUNBOOKS.MD` |
 | FB-SPEC-05 | Improvement | Open | **Optional GPU/CUDA for PyTorch:** device selection (train + infer) when `torch` is installed; document defaults (CPU) and CUDA requirements | `forecaster_model/training/torch_trainer.py`, `pyproject.toml` `[models_torch]` |
 | FB-SPEC-06 | Platform | Open | **Model registry / versioned artifacts:** filesystem or MLflow-backed promotion workflow, version labels, and single operator-facing “active model set” beyond ad-hoc paths | `models/registry/`, `control_plane/api.py`, `docs/RUNBOOKS.MD` |
 | FB-SPEC-07 | Feature | Open | **Multi-asset portfolio coordination:** cross-symbol capital allocation, correlation-aware or risk-parity style sizing, or documented limits when running many `market_data_symbols` (beyond independent per-symbol ticks) | `risk_engine/`, `decision_engine/`, `docs/Specs/` |
@@ -101,9 +100,8 @@ Structured backlog for **all planned work**: new capabilities, production harden
 |----|------|--------|---------|---------|
 | FB-PL-P0 | Feature | Open | RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD): `TradingPolicyEnvironment`, actor-critic, replay buffer, precomputed `ForecastPacket` mode, reward/cost model | `policy_model/` |
 | FB-AUDIT-03 | Feature | Open | **Champion vs candidate promotion:** implement master [`MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) §14–§15 (nightly compare, `PromotionDecision`, keep champion on failure) — extends **FB-SPEC-06** | `orchestration/` |
-| FB-AUDIT-05 | Improvement | Open | **Golden regression tests:** fixed-seed + fixed OHLC slice snapshots of `ForecastPacket` diagnostics / quantiles to detect silent `ForecasterModel` drift | `tests/` |
 
-*See also §2 HIGH open rows (**FB-FR-P0**, **FB-SPEC-02**–**FB-SPEC-07**).*
+*See also §2 HIGH open rows (**FB-FR-P0**, **FB-SPEC-03**–**FB-SPEC-07**).*
 
 ---
 
@@ -217,6 +215,8 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-AUDIT-11 | 2026-04-11 | **`test_property_invariants.py`** — quantile monotonicity + risk gate monotonicity |
 | FB-AUDIT-12 | 2026-04-11 | **RiskState gap doc:** [`MASTER_SPEC_RISK_STATE_GAP.MD`](Specs/MASTER_SPEC_RISK_STATE_GAP.MD) |
 | FB-AUDIT-13 | 2026-04-11 | **`torch~=2.2`**, **`alpaca-py~=0.21`** in `pyproject.toml` optional extras |
+| FB-SPEC-02 | 2026-04-11 | **Hot path NPZ weights:** `NM_MODELS_FORECASTER_WEIGHTS_PATH` / `NM_MODELS_POLICY_MLP_PATH`; shared-weight `ForecasterModel` forward; `capture_forecaster_weights_from_seed` + `tests/test_hot_path_weights.py`; PyTorch export still **FB-FR-P0** |
+| FB-AUDIT-05 | 2026-04-11 | **`tests/test_forecaster_golden_regression.py`** + `tests/fixtures/forecaster_golden_packet.json` |
 
 ---
 

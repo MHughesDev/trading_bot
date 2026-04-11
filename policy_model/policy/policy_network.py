@@ -28,7 +28,7 @@ class PolicyNetwork(RLPolicyAlgorithm):
         return {"loss": 0.0}
 
     def save(self, path: str) -> None:
-        _ = path
+        self._actor.save(path)
 
     def load(self, path: str) -> None:
-        _ = path
+        self._actor.load(path)

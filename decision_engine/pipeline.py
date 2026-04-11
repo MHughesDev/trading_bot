@@ -23,10 +23,13 @@ from decision_engine.spec_policy_proposal import run_spec_policy_step
 from forecaster_model.config import ForecasterConfig
 from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
 from forecaster_model.inference.stub import ohlc_arrays_from_feature_row
+from forecaster_model.models.forecaster_weights import load_forecaster_weights
+from policy_model.policy.policy_network import PolicyNetwork
+from policy_model.system import PolicySystem
 
 logger = logging.getLogger(__name__)
 
-# Log once per process: hot path is NumPy reference + heuristic policy until FB-SPEC-02.
+# Log once per process: serving mode (RNG vs NPZ weights).
 _serving_mode_logged = False
 
 
@@ -67,6 +70,8 @@ class DecisionPipeline:
     def __init__(self, settings: AppSettings | None = None) -> None:
         self._settings = settings or load_settings()
         self._last_forecast_packet: ForecastPacket | None = None
+        self._forecaster_weight_bundle = _load_forecaster_bundle_if_configured(self._settings)
+        self._policy_system: PolicySystem | None = _load_policy_system_if_configured(self._settings)
 
     @staticmethod
     def _log_serving_mode_once(settings: AppSettings) -> None:
@@ -74,10 +79,16 @@ class DecisionPipeline:
         if _serving_mode_logged:
             return
         _serving_mode_logged = True
+        fw = settings.models_forecaster_weights_path
+        pp = settings.models_policy_mlp_path
+        has_f = bool(fw and Path(fw).is_file())
+        has_p = bool(pp and Path(pp).is_file())
         logger.info(
-            "decision pipeline serving mode: NumPy ForecasterModel + heuristic PolicySystem "
-            "(no PyTorch/checkpoint weights on hot path until FB-SPEC-02); "
+            "decision pipeline serving mode: forecaster=%s policy=%s "
+            "(NumPy ForecasterModel + PolicySystem; PyTorch optional for training-only); "
             "NM_MODELS_FORECASTER_CHECKPOINT_ID=%s",
+            "npz_weights" if has_f else "numpy_rng",
+            "mlp_npz" if has_p else "heuristic",
             settings.models_forecaster_checkpoint_id or "(unset)",
         )
 
@@ -111,6 +122,7 @@ class DecisionPipeline:
             vo,
             cfg=cfg,
             conformal_state_path=conf_path,
+            weight_bundle=self._forecaster_weight_bundle,
         )
         pkt.forecast_diagnostics["symbol"] = symbol
         pkt.forecast_diagnostics["pipeline"] = "master_spec"
@@ -131,5 +143,32 @@ class DecisionPipeline:
             spread_bps=spread_bps,
             portfolio_equity_usd=eq,
             position_signed_qty=position_signed_qty,
+            policy_system=self._policy_system,
         )
         return regime_out, fc, route, action
+
+
+def _load_forecaster_bundle_if_configured(settings: AppSettings):
+    p = settings.models_forecaster_weights_path
+    if not p or not Path(p).is_file():
+        return None
+    try:
+        conf = settings.models_forecaster_conformal_state_path
+        cfg = _forecaster_config_from_env(conf)
+        return load_forecaster_weights(p, cfg=cfg)
+    except OSError as exc:
+        logger.warning("forecaster weights not loaded from %s (%s); using RNG forward", p, exc)
+        return None
+
+
+def _load_policy_system_if_configured(settings: AppSettings) -> PolicySystem | None:
+    p = settings.models_policy_mlp_path
+    if not p or not Path(p).is_file():
+        return None
+    try:
+        net = PolicyNetwork()
+        net.load(p)
+        return PolicySystem(policy_algorithm=net)
+    except OSError as exc:
+        logger.warning("policy MLP weights not loaded from %s (%s); using heuristic actor", p, exc)
+        return None

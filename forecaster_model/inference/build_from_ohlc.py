@@ -13,6 +13,7 @@ from forecaster_model.features.normalization import rolling_zscore_causal
 from forecaster_model.features.ohlc import build_observed_feature_matrix
 from forecaster_model.features.time_future import known_future_features
 from forecaster_model.calibration.conformal import MultiHorizonConformal, load_conformal_state
+from forecaster_model.models.forecaster_weights import ForecasterWeightBundle
 from forecaster_model.models.numpy_reference import forward_numpy_reference
 from forecaster_model.regime.soft import soft_regime_from_returns
 
@@ -31,6 +32,7 @@ def build_forecast_packet_methodology(
     seed: int = 42,
     conformal_bundle: MultiHorizonConformal | None = None,
     conformal_state_path: str | None = None,
+    weight_bundle: ForecasterWeightBundle | None = None,
 ) -> ForecastPacket:
     """
     End-to-end reference path aligned with human forecaster spec (NumPy reference model).
@@ -62,7 +64,9 @@ def build_forecast_packet_methodology(
     r_cur = soft_regime_from_returns(lr, num_regimes=cfg.num_regime_dims)
     anchor = now or datetime.now(UTC)
     x_known = known_future_features(anchor, cfg.forecast_horizon, base_interval_seconds=cfg.base_interval_seconds)
-    y_hat, diag = forward_numpy_reference(x_obs, x_known, r_cur, cfg, seed=seed)
+    y_hat, diag = forward_numpy_reference(
+        x_obs, x_known, r_cur, cfg, seed=seed, weight_bundle=weight_bundle
+    )
     H = cfg.forecast_horizon
     q_lo = [float(y_hat[h, 0]) for h in range(H)]
     q_md = [float(y_hat[h, 1]) for h in range(H)]
@@ -83,7 +87,11 @@ def build_forecast_packet_methodology(
         confidence_score=conf,
         ensemble_variance=ens,
         ood_score=min(1.0, vol),
-        forecast_diagnostics={"methodology": "numpy_reference", **diag},
+        forecast_diagnostics={
+            "methodology": "numpy_reference",
+            "weight_source": diag.get("weights", "rng"),
+            **{k: v for k, v in diag.items() if k != "weights"},
+        },
         packet_schema_version=1,
         source_checkpoint_id=None,
     )

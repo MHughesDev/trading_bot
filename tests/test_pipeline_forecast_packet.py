@@ -26,7 +26,10 @@ def test_serving_mode_logged_once(caplog: pytest.LogCaptureFixture) -> None:
     pipe = DecisionPipeline(settings=AppSettings())
     risk = RiskState()
     pipe.step("BTC-USD", _features(), spread_bps=5.0, risk=risk, mid_price=50_000.0, portfolio_equity_usd=100_000.0)
-    assert any("decision pipeline serving mode" in r.message for r in caplog.records)
+    assert any(
+        "decision pipeline serving mode" in r.message and "numpy_rng" in r.message and "heuristic" in r.message
+        for r in caplog.records
+    )
 
 
 def test_pipeline_always_has_forecast_packet() -> None:

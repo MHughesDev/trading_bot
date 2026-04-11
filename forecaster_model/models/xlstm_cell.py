@@ -30,6 +30,23 @@ def forward_xlstm_sequence(x: np.ndarray, hidden_dim: int, rng: np.random.Genera
     W_f = rng.normal(0, 0.05, size=(Fin + hidden_dim, hidden_dim))
     W_o = rng.normal(0, 0.05, size=(Fin + hidden_dim, hidden_dim))
     W_c = rng.normal(0, 0.05, size=(Fin + hidden_dim, hidden_dim))
+    return forward_xlstm_sequence_weights(x, hidden_dim, W_i, W_f, W_o, W_c)
+
+
+def forward_xlstm_sequence_weights(
+    x: np.ndarray,
+    hidden_dim: int,
+    W_i: np.ndarray,
+    W_f: np.ndarray,
+    W_o: np.ndarray,
+    W_c: np.ndarray,
+) -> np.ndarray:
+    """LSTM forward with fixed gate weights (FB-SPEC-02)."""
+    L, Fin = x.shape
+    exp = (Fin + hidden_dim, hidden_dim)
+    for name, W in (("W_i", W_i), ("W_f", W_f), ("W_o", W_o), ("W_c", W_c)):
+        if W.shape != exp:
+            raise ValueError(f"{name} shape {W.shape} expected {exp}")
     h = np.zeros(hidden_dim)
     c = np.zeros(hidden_dim)
     out = np.zeros((L, hidden_dim))

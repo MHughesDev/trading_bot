@@ -22,6 +22,20 @@ def forward_regime_conditioned_fusion(
     L, Hdim = branch_outputs[scales[0]].shape
     S = len(scales)
     W = rng.normal(0, 0.1, size=(len(r_cur), S))
+    return forward_regime_conditioned_fusion_weights(branch_outputs, r_cur, W)
+
+
+def forward_regime_conditioned_fusion_weights(
+    branch_outputs: dict[int, np.ndarray],
+    r_cur: np.ndarray,
+    W: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fusion with fixed `W` [R, S] (FB-SPEC-02)."""
+    scales = sorted(branch_outputs.keys())
+    L, Hdim = branch_outputs[scales[0]].shape
+    S = len(scales)
+    if W.shape != (len(r_cur), S):
+        raise ValueError(f"fusion W shape {W.shape} expected ({len(r_cur)}, {S})")
     alpha = _softmax(r_cur @ W)
     fused = np.zeros((L, Hdim))
     for i, s in enumerate(scales):

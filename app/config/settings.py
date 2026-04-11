@@ -101,6 +101,10 @@ class AppSettings(BaseSettings):
     models_forecaster_checkpoint_id: str | None = None
     # Optional JSON path for `MultiHorizonConformal` state (forecaster calibration on hot path)
     models_forecaster_conformal_state_path: str | None = None
+    # Optional NPZ: full NumPy `ForecasterWeightBundle` for deterministic forecaster forward (FB-SPEC-02)
+    models_forecaster_weights_path: str | None = None
+    # Optional NPZ: `MultiBranchMLPPolicy` weights for PolicySystem actor (FB-SPEC-02)
+    models_policy_mlp_path: str | None = None
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -195,6 +199,12 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         if "forecaster_conformal_state_path" in mo:
             v = mo["forecaster_conformal_state_path"]
             out["models_forecaster_conformal_state_path"] = None if v is None else str(v)
+        if "forecaster_weights_path" in mo:
+            v = mo["forecaster_weights_path"]
+            out["models_forecaster_weights_path"] = None if v is None else str(v)
+        if "policy_mlp_path" in mo:
+            v = mo["policy_mlp_path"]
+            out["models_policy_mlp_path"] = None if v is None else str(v)
     return out
 
 

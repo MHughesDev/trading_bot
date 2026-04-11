@@ -18,6 +18,14 @@ def forward_vsn(x: np.ndarray, rng: np.random.Generator) -> tuple[np.ndarray, np
     """
     L, F = x.shape
     W = rng.normal(0, 0.05, size=(F, F))
+    return forward_vsn_weights(x, W)
+
+
+def forward_vsn_weights(x: np.ndarray, W: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Deterministic VSN when `W` is fixed (FB-SPEC-02 checkpoint path)."""
+    L, F = x.shape
+    if W.shape != (F, F):
+        raise ValueError(f"VSN W shape {W.shape} incompatible with x F_obs={F}")
     gates = np.zeros((L, F))
     for t in range(L):
         gates[t] = _softmax(W @ x[t])

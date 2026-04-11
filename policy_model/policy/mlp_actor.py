@@ -6,6 +6,8 @@ Encodes forecast / portfolio / execution / risk groups separately, concatenates,
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 from policy_model.objects import PolicyAction, PolicyObservation
@@ -15,11 +17,13 @@ class MultiBranchMLPPolicy:
     def __init__(self, seed: int = 0) -> None:
         self._rng = np.random.default_rng(seed)
         d_f, d_p, d_e, d_r = 64, 32, 16, 16
-        self._w_f = self._rng.normal(0, 0.1, size=(d_f, 32))
-        self._w_p = self._rng.normal(0, 0.1, size=(d_p, 32))
-        self._w_e = self._rng.normal(0, 0.1, size=(d_e, 32))
-        self._w_r = self._rng.normal(0, 0.1, size=(d_r, 32))
-        self._w_out = self._rng.normal(0, 0.1, size=(128, 1))
+        self._d_f, self._d_p, self._d_e, self._d_r = d_f, d_p, d_e, d_r
+        self._hidden = 32
+        self._w_f = self._rng.normal(0, 0.1, size=(d_f, self._hidden))
+        self._w_p = self._rng.normal(0, 0.1, size=(d_p, self._hidden))
+        self._w_e = self._rng.normal(0, 0.1, size=(d_e, self._hidden))
+        self._w_r = self._rng.normal(0, 0.1, size=(d_r, self._hidden))
+        self._w_out = self._rng.normal(0, 0.1, size=(4 * self._hidden, 1))
 
     def _enc(self, x: np.ndarray, W: np.ndarray) -> np.ndarray:
         if len(x) < W.shape[0]:
@@ -46,3 +50,34 @@ class MultiBranchMLPPolicy:
         if not deterministic:
             a = float(np.clip(a + self._rng.normal(0, 0.05), -1, 1))
         return PolicyAction(target_exposure=a, action_diagnostics={"deterministic": deterministic})
+
+    def save(self, path: str | Path) -> None:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            p,
+            w_f=self._w_f,
+            w_p=self._w_p,
+            w_e=self._w_e,
+            w_r=self._w_r,
+            w_out=self._w_out,
+            d_f=self._d_f,
+            d_p=self._d_p,
+            d_e=self._d_e,
+            d_r=self._d_r,
+            hidden=self._hidden,
+        )
+
+    def load(self, path: str | Path) -> None:
+        p = Path(path)
+        with np.load(p, allow_pickle=False) as z:
+            self._w_f = np.asarray(z["w_f"])
+            self._w_p = np.asarray(z["w_p"])
+            self._w_e = np.asarray(z["w_e"])
+            self._w_r = np.asarray(z["w_r"])
+            self._w_out = np.asarray(z["w_out"])
+            self._d_f = int(z["d_f"])
+            self._d_p = int(z["d_p"])
+            self._d_e = int(z["d_e"])
+            self._d_r = int(z["d_r"])
+            self._hidden = int(z["hidden"])

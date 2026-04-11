@@ -19,8 +19,23 @@ def forward_quantile_decoder(
     H, Fk = x_known.shape
     Qn = len(quantiles)
     D = len(h_fused_last)
-    out = np.zeros((H, Qn))
     W = rng.normal(0, 0.05, size=(D + Fk, Qn))
+    return forward_quantile_decoder_weights(h_fused_last, x_known, quantiles, W)
+
+
+def forward_quantile_decoder_weights(
+    h_fused_last: np.ndarray,
+    x_known: np.ndarray,
+    quantiles: tuple[float, ...],
+    W: np.ndarray,
+) -> np.ndarray:
+    """Quantile head with fixed `W` (FB-SPEC-02)."""
+    H, Fk = x_known.shape
+    Qn = len(quantiles)
+    D = len(h_fused_last)
+    out = np.zeros((H, Qn))
+    if W.shape != (D + Fk, Qn):
+        raise ValueError(f"decoder W shape {W.shape} expected ({D + Fk}, {Qn})")
     for h in range(H):
         inp = np.concatenate([h_fused_last, x_known[h]])
         q = inp @ W

@@ -46,10 +46,12 @@
 
 ## Model artifacts (master pipeline)
 
-- **Serving lineage:** set `NM_MODELS_FORECASTER_CHECKPOINT_ID` to label `ForecastPacket.source_checkpoint_id` (operator-visible lineage; does not load weights by itself — see backlog FB-SPEC-02).
+- **Serving lineage:** set `NM_MODELS_FORECASTER_CHECKPOINT_ID` to label `ForecastPacket.source_checkpoint_id` (operator-visible lineage).
 - **Conformal on hot path:** set `NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH` to a JSON file produced by `forecaster_model.calibration.conformal.save_conformal_state` after offline calibration; `DecisionPipeline` enables calibration when this path exists.
+- **NumPy forecaster weights (FB-SPEC-02):** set `NM_MODELS_FORECASTER_WEIGHTS_PATH` to an **NPZ** produced with `forecaster_model.models.forecaster_weights.save_forecaster_weights` (e.g. from `capture_forecaster_weights_from_seed` after training selection). When present and readable, the hot path uses **fixed weights** instead of per-forward RNG draws; `forecast_diagnostics.weight_source` is `checkpoint`.
+- **Policy MLP weights:** set `NM_MODELS_POLICY_MLP_PATH` to an NPZ from `MultiBranchMLPPolicy.save` / `PolicyNetwork.save`; `DecisionPipeline` then uses **`PolicyNetwork`** instead of **`HeuristicTargetPolicy`**.
 - **Offline training artifacts:** `orchestration.nightly_retrain` / `training_campaign` write under `NM_TRAINING_ARTIFACT_DIR` (quantile forecaster joblib, reports). See [`docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD).
-- **Runtime vs training:** live `DecisionPipeline` uses **NumPy `ForecasterModel`** + **`HeuristicTargetPolicy`** until **FB-SPEC-02** loads checkpoints; campaign joblib is **not** wired to the hot path. On startup, look for log line `decision pipeline serving mode:` (see also [`README.md`](../README.md)).
+- **Runtime vs training:** campaign **QuantileRegressor** joblib is still **not** the same object as the NumPy `ForecasterModel` forward; NPZ weights align the **reference** forecaster with a saved draw. **PyTorch** checkpoints remain training-side until a torch export path is added (**FB-FR-P0**). On startup, look for log line `decision pipeline serving mode:` (`numpy_rng` vs `npz_weights`, `heuristic` vs `mlp_npz`; see [`README.md`](../README.md)).
 
 ## Rollback bundle (single host)
 

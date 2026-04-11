@@ -14,6 +14,7 @@ checkpoints or a shared artifact.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -49,6 +50,7 @@ from orchestration.training_spec_constants import (
     NIGHTLY_RL_RUNS,
     NIGHTLY_RL_SEEDS,
 )
+from orchestration.promotion import decide_forecaster_promotion_stub, write_promotion_sidecar
 from orchestration.walkforward_triple import triple_splits
 
 logger = logging.getLogger(__name__)
@@ -253,7 +255,16 @@ def run_training_campaign(
         },
     }
     save_training_report(out / "training_report.json", report)
-    logger.info("training complete: forecaster=%s report=%s", fc_path, out / "training_report.json")
+    prev = os.environ.get("NM_PREVIOUS_FORECASTER_CHAMPION_PATH")
+    prom = decide_forecaster_promotion_stub(report=report, previous_champion_path=prev)
+    prom_path = write_promotion_sidecar(out, prom)
+    report["promotion_decision"] = prom.to_dict()
+    logger.info(
+        "training complete: forecaster=%s report=%s promotion=%s",
+        fc_path,
+        out / "training_report.json",
+        prom_path,
+    )
     return report
 
 
