@@ -105,6 +105,8 @@ class AppSettings(BaseSettings):
     models_forecaster_weights_path: str | None = None
     # Optional NPZ: `MultiBranchMLPPolicy` weights for PolicySystem actor (FB-SPEC-02)
     models_policy_mlp_path: str | None = None
+    # PyTorch forecaster training / future torch inference: auto (CUDA if available) | cpu | cuda | cuda:N
+    models_torch_device: str = "auto"
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -205,6 +207,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         if "policy_mlp_path" in mo:
             v = mo["policy_mlp_path"]
             out["models_policy_mlp_path"] = None if v is None else str(v)
+        if "torch_device" in mo:
+            out["models_torch_device"] = str(mo["torch_device"])
     return out
 
 

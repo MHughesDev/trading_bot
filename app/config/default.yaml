@@ -86,6 +86,8 @@ models:
   forecaster_weights_path: null
   # Optional NPZ: multi-branch MLP policy actor (`policy_model.policy.mlp_actor.MultiBranchMLPPolicy`)
   policy_mlp_path: null
+  # PyTorch forecaster training (and future torch inference): auto | cpu | cuda | cuda:0
+  torch_device: auto
 
 # Set NM_RISK_SIGNING_SECRET in production so only RiskEngine-signed OrderIntents execute.
 # NM_ALLOW_UNSIGNED_EXECUTION=true only for local dev without secrets.
