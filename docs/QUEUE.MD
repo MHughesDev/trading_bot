@@ -80,23 +80,59 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 ### Backlog items (open) — forecaster epic **FB-FR-P0**
 
+*Parent epic:* full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD). **Close epic** when every **open** row below is **Done** or explicitly **waived** (with rationale in archive).
+
+**ID scheme:** coarse milestones **FB-FR-P0-02 … 05** are decomposed into **FB-FR-P0-0X-YY** slices (independently closable). Mark a coarse milestone done only when its **-YY** children are done or waived.
+
+**Stretch vs delivered core:** NumPy forecaster + policy integration shipped under archive ids **`FB-FR-CORE`** / **`FB-PL-CORE`** (see [§5](#5-completed-archive-fb--themes)). **FB-FR-P0-01 Done 2026-04-11** — `DatasetManifest` leakage checks + walk-forward ordering tests (`tests/test_dataset_manifest.py`).
+
+#### FB-FR-P0-02 — **Graph** (PyTorch module stack)
+
 | ID | Phase | Cat | Type | Status | Summary | Pointer |
 |----|-------|-----|------|--------|---------|---------|
-| FB-FR-P0-01 | A | FR | Feature | Open | **Data:** leakage-safe windows, `DatasetManifest` / walk-forward alignment with master spec | `forecaster_model/data/`, `forecaster_model/training/` |
-| FB-FR-P0-02 | A | FR | Feature | Open | **Graph:** VSN → latent CNN → multi-res xLSTM → regime fusion → quantile head (PyTorch), spec geometry | `forecaster_model/models/` |
-| FB-FR-P0-03 | A | FR | Feature | Open | **Train:** end-to-end PyTorch training loop, checkpoints, optional `[models_torch]` / `NM_MODELS_TORCH_DEVICE` | `forecaster_model/training/torch_trainer.py` |
-| FB-FR-P0-04 | A | FR | Feature | Open | **Calibrate:** conformal + ensemble integration on trained outputs (not RNG reference only) | `forecaster_model/calibration/`, `forecaster_model/models/ensemble.py` |
-| FB-FR-P0-05 | A | FR | Feature | Open | **Serve:** export path from trained checkpoint to hot path (extends NPZ reference / replaces RNG-only) | `decision_engine/pipeline.py`, `forecaster_model/inference/` |
-| FB-SPEC-07 | A | PF | Feature | Open | **Multi-asset portfolio coordination** (parent — use sub-rows below) | `risk_engine/`, `decision_engine/`, [`Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD) |
-| FB-SPEC-07-01 | A | PF | Feature | Open | **Exposure limits:** enforce or document max aggregate exposure across `market_data_symbols` (per-tier caps, USD notional) | `risk_engine/` |
-| FB-SPEC-07-02 | A | PF | Feature | Open | **Cross-symbol rules:** correlation-aware / risk-parity style sizing *or* explicit “independent per-symbol” contract when many symbols run | `risk_engine/`, `decision_engine/` |
-| FB-SPEC-07-03 | A | PF | Hardening | Open | **Doc ↔ code alignment:** [`Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD) matches implemented limits and operator-facing warnings | `docs/` |
+| FB-FR-P0-02 | A | FR | Feature | Open | **(Epic)** VSN → latent CNN → multi-res xLSTM → regime fusion → quantile head; spec geometry | `forecaster_model/models/`, spec §tensor contracts |
+| FB-FR-P0-02-01 | A | FR | Hardening | Open | **Tensor / config contracts:** `ForecasterConfig` + batch shapes documented and asserted at module boundaries | `forecaster_model/config/schema.py`, `forecaster_model/schemas.py` |
+| FB-FR-P0-02-02 | A | FR | Feature | Open | **VSN:** variable selection block matches spec; unit tests on masked weights / dims | `forecaster_model/models/vsn.py` |
+| FB-FR-P0-02-03 | A | FR | Feature | Open | **Latent encoder:** CNN / patch encoder outputs align to downstream LSTM dims | `forecaster_model/models/latent_encoder.py` |
+| FB-FR-P0-02-04 | A | FR | Feature | Open | **Multi-res xLSTM:** stack + `xLSTMCell` integration; no training yet — forward-only | `forecaster_model/models/multi_resolution_xlstm.py`, `forecaster_model/models/xlstm_cell.py` |
+| FB-FR-P0-02-05 | A | FR | Feature | Open | **Regime fusion:** soft regime + fusion block wired to backbone output | `forecaster_model/models/fusion.py`, `forecaster_model/regime/` |
+| FB-FR-P0-02-06 | A | FR | Feature | Open | **Decoder + quantile head:** output ranks match `losses/quantile` and `ForecastPacket` consumers | `forecaster_model/models/decoder.py`, `forecaster_model/losses/quantile.py` |
+| FB-FR-P0-02-07 | A | FR | Feature | Open | **`TorchForecasterNet` (or equivalent):** single module composing 02-02…06; `forward()` test on synthetic batch | `forecaster_model/models/torch_forecaster_net.py` |
+| FB-FR-P0-02-08 | A | FR | Platform | Open | **Smoke:** export/import `state_dict` round-trip; dtype/device (`cpu`/`cuda`) forward | `tests/` (new) |
 
-*Parent epic:* full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD). **Close epic** when **FB-FR-P0-01 … FB-FR-P0-05** are Done or explicitly waived.
+#### FB-FR-P0-03 — **Train** (loop, checkpoints, device)
 
-**Stretch vs delivered core:** NumPy forecaster + policy integration shipped under archive ids **`FB-FR-CORE`** / **`FB-PL-CORE`** (see [§5](#5-completed-archive-fb--themes)). Open **FB-FR-P0-01 … FB-FR-P0-05** track **full architecture-spec** depth (leakage-safe datasets, native xLSTM on hot path where applicable).
+| ID | Phase | Cat | Type | Status | Summary | Pointer |
+|----|-------|-----|------|--------|---------|---------|
+| FB-FR-P0-03 | A | FR | Feature | Open | **(Epic)** End-to-end training loop, checkpoints, `[models_torch]` / `NM_MODELS_TORCH_DEVICE` | `forecaster_model/training/torch_trainer.py` |
+| FB-FR-P0-03-01 | A | FR | Feature | Open | **DataModule:** OHLC / manifest → `(batch, seq, feat)` batches; collate + pad; train/val split respects manifest | `forecaster_model/data/`, `forecaster_model/features/ohlc.py` |
+| FB-FR-P0-03-02 | A | FR | Feature | Open | **Train step:** quantile loss, backward, grad clip, optimizer; logging hooks | `forecaster_model/training/torch_trainer.py`, `forecaster_model/losses/` |
+| FB-FR-P0-03-03 | A | FR | Feature | Open | **Checkpointing:** save/load compatible with `training/checkpoint.py`; resume from step | `forecaster_model/training/checkpoint.py` |
+| FB-FR-P0-03-04 | A | FR | Feature | Open | **Walk-forward trainer:** fold driver using `walk_forward_indices` + no leakage between folds | `forecaster_model/training/walkforward.py`, `forecaster_model/training/torch_trainer.py` |
+| FB-FR-P0-03-05 | A | FR | Platform | Open | **Metrics + CLI:** `training/metrics.py` wired; minimal `python -m forecaster_model.training...` or script entry | `forecaster_model/training/metrics.py`, `pyproject.toml` `[project.scripts]` optional |
+| FB-FR-P0-03-06 | A | FR | Platform | Open | **Extras / device:** `[models_torch]` in `pyproject.toml`; `NM_MODELS_TORCH_DEVICE` + `training/device.py` used in trainer | `pyproject.toml`, `forecaster_model/training/device.py` |
 
-**Blocked (not started):** PyTorch/xLSTM stack + large training loop — unsafe to claim done without full model + data pipeline validation.
+#### FB-FR-P0-04 — **Calibrate** (conformal + ensemble on trained outputs)
+
+| ID | Phase | Cat | Type | Status | Summary | Pointer |
+|----|-------|-----|------|--------|---------|---------|
+| FB-FR-P0-04 | A | FR | Feature | Open | **(Epic)** Conformal + ensemble on **trained** forwards (not RNG reference) | `forecaster_model/calibration/`, `forecaster_model/models/ensemble.py` |
+| FB-FR-P0-04-01 | A | FR | Feature | Open | **Residuals → conformal state:** fit/save JSON compatible with hot-path loader | `forecaster_model/calibration/conformal.py` |
+| FB-FR-P0-04-02 | A | FR | Feature | Open | **Ensemble:** multiple members + aggregation; deterministic forward for tests | `forecaster_model/models/ensemble.py` |
+| FB-FR-P0-04-03 | A | FR | Test | Open | **Calibration eval:** coverage / pinball on held-out fold (small synthetic or real slice) | `tests/` |
+
+#### FB-FR-P0-05 — **Serve** (checkpoint → decision hot path)
+
+| ID | Phase | Cat | Type | Status | Summary | Pointer |
+|----|-------|-----|------|--------|---------|---------|
+| FB-FR-P0-05 | A | FR | Feature | Open | **(Epic)** Export path from checkpoint to `DecisionPipeline` / `ForecastPacket` | `decision_engine/pipeline.py`, `forecaster_model/inference/` |
+| FB-FR-P0-05-01 | A | FR | Feature | Open | **Export bundle:** `.pt` + manifest JSON (schema version, horizons, normalization) | `forecaster_model/inference/` or `scripts/` |
+| FB-FR-P0-05-02 | A | FR | Feature | Open | **Inference API:** `torch_infer.py` / `build_from_ohlc.py` match training normalization | `forecaster_model/inference/torch_infer.py`, `build_from_ohlc.py` |
+| FB-FR-P0-05-03 | A | FR | Feature | Open | **`DecisionPipeline` integration:** `NM_MODELS_FORECASTER_TORCH_PATH` loads torch bundle; precedence vs NPZ / RNG documented | `decision_engine/pipeline.py` |
+| FB-FR-P0-05-04 | A | FR | Hardening | Open | **Guards + fallback:** `inference/guards.py` abstain behavior; README / RUNBOOKS operator table (torch vs NPZ vs RNG) | `forecaster_model/inference/guards.py`, `README.md`, `docs/RUNBOOKS.MD` |
+| FB-FR-P0-05-05 | A | FR | Test | Open | **Integration test:** load stub checkpoint → `ForecastPacket` or equivalent contract in pipeline | `tests/` |
+
+**Blocked (not started):** full PyTorch/xLSTM training at scale — treat **FB-FR-P0-03-04** and **FB-FR-P0-04-03** as gates before claiming production-ready calibration.
 
 ### MEDIUM priority
 
@@ -128,20 +164,11 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 #### FB-MS — Microservices extraction (remaining production split)
 
-*Scaffold + Redis chains are in place; these rows close gaps vs [`MICROSERVICES_SPLIT_PLAN.MD`](MICROSERVICES_SPLIT_PLAN.MD) “next step”.*
-
-| ID | Phase | Cat | Type | Status | Summary | Pointer |
-|----|-------|-----|------|--------|---------|---------|
-| FB-MS-01 | C | MS | Feature | Open | **Market data service:** Kraken WS (and REST fallback) in process — publish real `market.tick.normalized.v1` / heartbeats; retire scaffold-only HTTP as default path | `services/market_data_service/`, `data_plane/ingest/` |
-| FB-MS-02 | C | MS | Feature | Open | **Feature service:** wire `FeaturePipeline` + rolling bars (parity with `live_service` tick path), not scaffold tick→row | `services/feature_service/`, `data_plane/features/` |
-| FB-MS-03 | C | MS | Feature | Open | **Observability writer:** persist subscribed events to QuestDB (or chosen store); bounded memory as cache only | `services/observability_writer_service/`, `data_plane/storage/` |
-| FB-MS-04 | C | MS | Platform | Open | **Compose live_runtime:** document + validate `NM_LIVE_SERVICE_APP_START_LOOP=true` with `.env` (Kraken + venue); health/readiness for long-running loop | `infra/docker-compose.microservices.yml`, `RUNBOOKS.MD` |
-| FB-MS-05 | C | MS | Reliability | Open | **Optional smoke:** documented (or CI-optional) **real Alpaca paper** path through gateway with test keys — no secrets in repo | `tests/`, `scripts/` |
-| FB-MS-06 | C | MS | Hardening | Open | **Split acceptance:** checklist item — “program §11” / production split criteria written and checked off in `MICROSERVICES_SPLIT_PLAN.MD` | `docs/MICROSERVICES_SPLIT_PLAN.MD` |
+*No open **FB-MS** items — slice **FB-MS-01 … FB-MS-06** completed 2026-04-11 (see [§5.5](#55-complete-archive-one-row-per-id)).*
 
 *Parent epic:* RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Sub-rows FB-PL-P0-01 … FB-PL-P0-04 Done 2026-04-11** (NumPy stubs + offline env; full PyTorch RL remains future hardening).
 
-*See also **HIGH** priority above (**FB-FR-P0-*** and **FB-SPEC-07** / **FB-SPEC-07-01…03**). **FB-SPEC-06** is in [§5](#5-completed-archive-fb--themes).*
+*See also **HIGH** priority above (**FB-FR-P0-***). **FB-SPEC-06** is in [§5](#5-completed-archive-fb--themes).*
 
 ---
 
