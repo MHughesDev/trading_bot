@@ -105,6 +105,10 @@ class AppSettings(BaseSettings):
     models_forecaster_weights_path: str | None = None
     # Optional NPZ: `MultiBranchMLPPolicy` weights for PolicySystem actor (FB-SPEC-02)
     models_policy_mlp_path: str | None = None
+    # Optional JSON: promoted serving paths (overrides env for keys present; FB-SPEC-06)
+    models_active_set_path: str | None = None
+    models_active_set_label: str | None = None
+    models_active_set_manifest_version: int | None = None
     # PyTorch forecaster training / future torch inference: auto (CUDA if available) | cpu | cuda | cuda:N
     models_torch_device: str = "auto"
 
@@ -207,6 +211,18 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         if "policy_mlp_path" in mo:
             v = mo["policy_mlp_path"]
             out["models_policy_mlp_path"] = None if v is None else str(v)
+        if "active_set_path" in mo:
+            v = mo["active_set_path"]
+            out["models_active_set_path"] = None if v is None else str(v)
+        if "active_set_label" in mo:
+            v = mo["active_set_label"]
+            out["models_active_set_label"] = None if v is None else str(v)
+        if "active_set_manifest_version" in mo:
+            v = mo["active_set_manifest_version"]
+            if v is None:
+                out["models_active_set_manifest_version"] = None
+            else:
+                out["models_active_set_manifest_version"] = int(v)
         if "torch_device" in mo:
             out["models_torch_device"] = str(mo["torch_device"])
     return out
@@ -220,4 +236,8 @@ def load_settings(path: Path | None = None) -> AppSettings:
         with open(p, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
         kwargs.update(_yaml_to_kwargs(cfg))
-    return AppSettings(**kwargs)
+    base = AppSettings(**kwargs)
+    # Optional JSON manifest overrides serving paths (FB-SPEC-06); applied after env.
+    from models.registry.active_set import apply_active_model_set
+
+    return apply_active_model_set(base)

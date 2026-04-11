@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config.settings import AppSettings
+from models.registry.active_set import active_model_set_status
 
 # Campaign / nightly training default filename (sklearn QuantileRegressor) — not loaded by DecisionPipeline.
 TRAINING_QUANTILE_FORECASTER_JOBLIB = "forecaster_quantile_real.joblib"
@@ -26,6 +27,7 @@ def model_artifact_contract(settings: AppSettings) -> dict[str, Any]:
     pp = settings.models_policy_mlp_path
     conf = settings.models_forecaster_conformal_state_path
     return {
+        "active_model_set": active_model_set_status(settings),
         "serving": {
             "lineage_checkpoint_id": settings.models_forecaster_checkpoint_id,
             "conformal_state_path": conf,
