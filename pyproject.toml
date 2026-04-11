@@ -17,7 +17,6 @@ dependencies = [
   "polars>=1.0",
   "numpy>=1.26",
   "scikit-learn>=1.4",
-  "hmmlearn>=0.3",
   "redis>=5.0",
   "qdrant-client>=1.9",
   "psycopg[binary]>=3.1",

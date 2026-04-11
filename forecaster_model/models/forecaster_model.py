@@ -41,10 +41,12 @@ class ForecasterModel:
         _ = x_static
         _ = regime_seq
         x_vsn, gates = forward_vsn(x_obs, self._rng)
-        z_seq = forward_latent_encoder(x_vsn, self._rng)
+        z_seq = forward_latent_encoder(x_vsn, self._rng, latent_dim=self.cfg.latent_width)
         L = z_seq.shape[0]
-        scales = (1, 4, 16) if L >= 16 else (1,)
-        branches = forward_multi_resolution_xlstm(z_seq, scales, hidden_dim=32, rng=self._rng)
+        scales = tuple(s for s in self.cfg.branch_scales if s <= L) or (1,)
+        branches = forward_multi_resolution_xlstm(
+            z_seq, scales, hidden_dim=self.cfg.recurrent_hidden_width, rng=self._rng
+        )
         fused, alpha = forward_regime_conditioned_fusion(branches, r_cur, self._rng)
         h_last = fused[-1]
         y_hat_q = forward_quantile_decoder(h_last, x_known, self.cfg.quantiles, self._rng)

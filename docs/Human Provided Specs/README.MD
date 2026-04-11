@@ -11,6 +11,7 @@ This folder holds **documents you supply** (product intent, external requirement
 
 | File | Description |
 |------|-------------|
+| [`MASTER_SYSTEM_PIPELINE_SPEC.MD`](MASTER_SYSTEM_PIPELINE_SPEC.MD) | **End-to-end** system: runtime order, training, nightly refresh, objects, promotion gates |
 | [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) | Full forecaster: VSN, latent CNN, multi-resolution xLSTM, quantiles, conformal, ensemble |
 | [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](POLICY_MODEL_ARCHITECTURE_SPEC.MD) | Forecast-conditioned RL policy: observation, target exposure, risk gate, execution plan |
 | [`NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD`](NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD) | Nightly forecaster + RL maintenance cadence, seeds, budgets, promotion gates |

@@ -36,6 +36,8 @@ def build_ensemble_forecast_packet(packets: list[ForecastPacket]) -> ForecastPac
         ensemble_variance=ens_var,
         ood_score=base.ood_score,
         forecast_diagnostics=diag,
+        packet_schema_version=base.packet_schema_version,
+        source_checkpoint_id=base.source_checkpoint_id,
     )
 
 

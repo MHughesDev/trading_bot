@@ -91,7 +91,13 @@ def flatten(_: Annotated[None, Depends(require_mutate_key)]) -> dict[str, str]:
 
 @app.get("/models")
 def models() -> dict[str, list[str]]:
-    return {"models": ["gaussian_hmm_regime", "tft_surrogate_ridge", "deterministic_router"]}
+    return {
+        "models": [
+            "forecaster_xlstm_reference",
+            "policy_system_mlp_heuristic",
+            "risk_engine_hmac",
+        ]
+    }
 
 
 @app.post("/models/version")

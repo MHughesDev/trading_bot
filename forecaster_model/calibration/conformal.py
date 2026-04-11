@@ -98,6 +98,8 @@ class MultiHorizonConformal:
             ensemble_variance=list(pkt.ensemble_variance),
             ood_score=pkt.ood_score,
             forecast_diagnostics=diag,
+            packet_schema_version=pkt.packet_schema_version,
+            source_checkpoint_id=pkt.source_checkpoint_id,
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -225,6 +225,8 @@ def predict_quantile_forecast_packet(
             "data_snapshot_id": artifact.data_snapshot_id,
             "config": artifact.config_snapshot,
         },
+        packet_schema_version=1,
+        source_checkpoint_id=None,
     )
 
 

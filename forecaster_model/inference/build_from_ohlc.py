@@ -81,6 +81,8 @@ def build_forecast_packet_methodology(
         ensemble_variance=ens,
         ood_score=min(1.0, vol),
         forecast_diagnostics={"methodology": "numpy_reference", **diag},
+        packet_schema_version=1,
+        source_checkpoint_id=None,
     )
     if cfg.calibration_enabled:
         bundle = conformal_bundle
@@ -115,4 +117,6 @@ def _empty_packet(cfg: ForecasterConfig, now: datetime | None) -> ForecastPacket
         ensemble_variance=z.copy(),
         ood_score=1.0,
         forecast_diagnostics={"methodology": "empty", "reason": "insufficient_history"},
+        packet_schema_version=1,
+        source_checkpoint_id=None,
     )

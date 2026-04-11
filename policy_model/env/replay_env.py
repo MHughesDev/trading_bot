@@ -1,7 +1,7 @@
 """
 Replay-based `TradingPolicyEnvironment` (FB-PL-PG1).
 
-Steps a close-price series; each step runs `DecisionPipeline` (with `ForecastPacket` enabled),
+Steps a close-price series; each step runs `DecisionPipeline` (master-spec `ForecastPacket`),
 builds `PolicyObservation`, and returns reward from `one_step_reward` using the prior bar
 return and turnover/cost terms aligned with `AppSettings` backtesting fee/slippage.
 """
@@ -60,10 +60,8 @@ def _minimal_execution(mid: float, spread_bps: float, settings: AppSettings) -> 
 
 
 def _settings_for_replay_env(base: AppSettings) -> AppSettings:
-    """Replay env needs ForecastPacket each step; harmless if already spec_policy default."""
-    d = base.model_dump()
-    d["decision_forecast_packet_enabled"] = True
-    return AppSettings(**d)
+    """Replay uses the same `DecisionPipeline` as live (always builds `ForecastPacket`)."""
+    return base
 
 
 class ReplayPolicyEnvironment:

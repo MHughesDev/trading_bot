@@ -27,6 +27,9 @@ class ForecastPacket:
     ensemble_variance: list[float]
     ood_score: float
     forecast_diagnostics: dict[str, Any] = field(default_factory=dict)
+    # Master system pipeline spec (§8): versioned packet + training/serving lineage
+    packet_schema_version: int = 1
+    source_checkpoint_id: str | None = None
 
     def __post_init__(self) -> None:
         h = len(self.horizons)

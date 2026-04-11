@@ -8,7 +8,7 @@ from app.contracts.forecast_packet import ForecastPacket
 
 def forecast_packet_to_forecast_output(pkt: ForecastPacket) -> ForecastOutput:
     """
-    Derive TFT-style horizons from quantile medians and packet uncertainty.
+    Derive compact `ForecastOutput` horizons from quantile medians and packet uncertainty.
 
     Horizons 1/3/5/15 bar steps: use q_med indices when present; shorter horizons
     fall back to the nearest available index (packet may have H < 15).

@@ -76,16 +76,12 @@ questdb:
   batch_max_rows: 500
   flush_interval_seconds: 2.0
 
-# Optional: load trained HMM / forecast surrogates from disk (joblib)
+# Master pipeline (see docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD)
 models:
-  # When true, `DecisionPipeline` builds a `ForecastPacket` each step (for diagnostics / policy).
-  # `decision_forecast_routing_source` controls whether routing uses Ridge `ForecastOutput` or values derived from the packet (FB-FR-PG1).
-  # `decision_pipeline_mode`: legacy (Ridge + router + propose_action) vs spec_policy (ForecastPacket + PolicySystem). See docs/MIGRATION_TO_SPEC_PIPELINE.MD
-  decision_forecast_packet_enabled: false
-  decision_forecast_routing_source: ridge # ridge | packet
-  decision_pipeline_mode: spec_policy # legacy | spec_policy — default: human-spec ForecastPacket + PolicySystem
-#   regime_path: models/artifacts/regime.joblib
-#   forecast_path: models/artifacts/forecast.joblib
+  # Optional label for `ForecastPacket.source_checkpoint_id` (serving lineage)
+  forecaster_checkpoint_id: null
+  # Optional JSON path: MultiHorizonConformal state for calibrated quantiles on the hot path
+  forecaster_conformal_state_path: null
 
 # Set NM_RISK_SIGNING_SECRET in production so only RiskEngine-signed OrderIntents execute.
 # NM_ALLOW_UNSIGNED_EXECUTION=true only for local dev without secrets.

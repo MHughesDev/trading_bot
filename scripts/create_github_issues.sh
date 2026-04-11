@@ -88,24 +88,6 @@ create "Memory: 60s Qdrant retrieval loop into features" "## Goal
 ## Refs
 \`data_plane/memory/\`"
 
-create "Models: Train + persist HMM with validated semantic mapping" "## Goal
-Persist artifacts; inference-only in prod.
-
-## Refs
-\`models/regime/hmm_regime.py\`"
-
-create "Models: TFT — replace Ridge surrogate (or document deviation)" "## Goal
-PyTorch TFT per spec.
-
-## Refs
-\`models/forecast/tft_forecast.py\`"
-
-create "Models: Route selector thresholds from config + tests" "## Goal
-No magic numbers; YAML-driven.
-
-## Refs
-\`models/routing/route_selector.py\`"
-
 create "MLflow: Manual promotion only — document + enforce" "## Goal
 No auto-promote in automation.
 

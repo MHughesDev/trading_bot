@@ -1,7 +1,7 @@
 # Forecaster and policy packages (as implemented)
 
 **Human source of truth (verbatim filenames):**  
-[`docs/Human Provided Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](../Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) · [`docs/Human Provided Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD`](../Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD)
+[`MASTER_SYSTEM_PIPELINE_SPEC.MD`](../Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) · [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](../Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) · [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](../Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD)
 
 This document tracks **only** how the repository maps to those two files. Where the human spec gives an illustrative package layout (§26 forecaster, §27 policy), the code follows that layout **by path and module name**. Training stacks (full PyTorch trainer, replay buffers, nightly jobs) are separate backlog items (`FB-FR-P0`, `FB-PL-P0`).
 
@@ -49,9 +49,7 @@ VSN → Latent CNN → Multi-Resolution xLSTM → Regime-Conditioned Fusion → 
 
 ## Relationship to V3 runtime
 
-- **Spec policy mode (default):** **`models.decision_pipeline_mode: spec_policy`** — **`ForecastPacket`** from **`forecaster_model`** drives **`PolicySystem`**, and **`ExecutionPlan`** maps to **`ActionProposal`** for **`RiskEngine`**. See [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD).
-- **Legacy mode:** Set **`models.decision_pipeline_mode: legacy`** (or **`NM_MODELS_DECISION_PIPELINE_MODE=legacy`**) — **`TemporalFusionForecaster`** (Ridge surrogate) + router + **`propose_action`**.
-- **Packet-only routing (legacy mode):** **`decision_forecast_routing_source: packet`** derives **`ForecastOutput`** from **`ForecastPacket`** via **`decision_engine/forecast_packet_adapter.py`** without switching the full policy path.
+- **Only path:** **`ForecastPacket`** from **`forecaster_model`** ( **`ForecasterModel`** / methodology forward) drives **`PolicySystem`**, and **`ExecutionPlan`** maps to **`ActionProposal`** for **`RiskEngine`**. `ForecastOutput` for metrics is derived from the packet via **`decision_engine/forecast_packet_adapter.py`**. Optional **`NM_MODELS_FORECASTER_CHECKPOINT_ID`** / **`NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH`** — see [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD).
 
 ## Dependencies
 

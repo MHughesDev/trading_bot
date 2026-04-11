@@ -26,9 +26,7 @@ For **Alpaca paper**, set `NM_ALPACA_API_KEY` / `NM_ALPACA_API_SECRET`. To align
 
 Configure secrets via `.env` (prefix `NM_` for app settings). **Never use Alpaca for market data.**
 
-**Spec pipeline (default):** `NM_MODELS_DECISION_PIPELINE_MODE=spec_policy` — **`ForecastPacket` + `PolicySystem`** (see [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD)). Set `NM_MODELS_DECISION_PIPELINE_MODE=legacy` for Ridge + router + `propose_action` ([`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](docs/MIGRATION_TO_SPEC_PIPELINE.MD)).
-
-**Legacy-only forecast routing:** when `decision_pipeline_mode=legacy`, `NM_MODELS_DECISION_FORECAST_ROUTING_SOURCE` is `ridge` (default) or `packet` — with `packet`, `ForecastOutput` for routing comes from the `ForecastPacket` adapter instead of the Ridge surrogate (`app/config/default.yaml` under `models:`).
+**Decision pipeline (only path):** master spec — **`forecaster_model`** (xLSTM stack) → **`ForecastPacket`** → **`PolicySystem`** → risk / execution (see [`docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](docs/Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) and [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD)). Optional: `NM_MODELS_FORECASTER_CHECKPOINT_ID`, `NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH` for packet lineage and conformal JSON. Historical note: [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](docs/MIGRATION_TO_SPEC_PIPELINE.MD).
 
 **Production:** set `NM_RISK_SIGNING_SECRET` so only `RiskEngine`-signed `OrderIntent`s reach venues; optional `NM_CONTROL_PLANE_API_KEY` for mutating control-plane routes. For local dev without signing, `NM_ALLOW_UNSIGNED_EXECUTION=true` (not for production).
 
