@@ -122,11 +122,6 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 | ID | Phase | Cat | Type | Status | Summary | Pointer |
 |----|-------|-----|------|--------|---------|---------|
-| FB-UI-01-01 | B | UI | Platform | Open | **PyInstaller (or cx_Freeze) spec** + one build script that mirrors `run.bat` (API + supervisor + Streamlit) | `setup.bat`, `run.bat`, repo root |
-| FB-UI-01-02 | B | UI | Reliability | Open | **Windows distribution notes:** AV false positives, optional code signing, bundle size — short section in [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) | `docs/` |
-| FB-UI-02-01 | B | UI | Spike | Open | **Shell choice:** time-boxed comparison Electron vs Tauri vs PyInstaller-webview for loading `http://127.0.0.1:8501` | [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) |
-| FB-UI-02-02 | B | UI | Platform | Open | **Desktop shell MVP:** single-window host opening the Streamlit URL (no React rewrite) | `docs/`, optional `packaging/` |
-
 #### FB-DASH — Dashboard & operator UX
 
 | ID | Phase | Cat | Type | Status | Summary | Pointer |
@@ -326,6 +321,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-O1, FB-O2 | 2026-04-08 | Decision latency metric; Promtail + Grafana |
 | FB-S1 | 2026-04-10 | QuestDB batch flush + runbooks |
 | FB-C1 | 2026-04-10 | Streamlit + `streamlit_util` |
+| FB-UI-02-01, FB-UI-02-02 | 2026-04-11 | **[`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD)** §2.2 shell comparison; **`operator_packaging/desktop_shell`**, **`run_desktop_dashboard.bat`**, **`pywebview`** in **`[dashboard]`** |
 | FB-DASH-02-01 … FB-DASH-02-03 | 2026-04-11 | **`GET/POST /system/execution-profile`**, `execution_profile` on **`GET /status`**; Streamlit sidebar; RUNBOOKS + README; `data/execution_profile.json` pending intent |
 | FB-DASH-03-01 … FB-DASH-03-03 | 2026-04-11 | **`PortfolioPositionRow`**, **`GET /portfolio/positions`**, Streamlit **Open positions** expander + refresh |
 | FB-DASH-01-01, FB-DASH-01-02 | 2026-04-11 | Operator **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** checklist; README + RUNBOOKS + `.env.example` cross-links |
@@ -355,6 +351,8 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-AUDIT-14 | ops | 2026-04-11 | Rollback bundle runbook |
 | FB-B1 | risk | 2026-04-10 | `available_cash_usd` + replay |
 | FB-C1 | control_plane | 2026-04-10 | Streamlit + API helpers |
+| FB-UI-02-01 | docs | 2026-04-11 | **[`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD)** — § **2.2 Desktop shell options** (pywebview vs Electron vs Tauri) |
+| FB-UI-02-02 | platform | 2026-04-11 | **`operator_packaging/desktop_shell/streamlit_desktop_host.py`**, **`run_desktop_dashboard.bat`**, **`pywebview`** in **`[dashboard]`** |
 | FB-DASH-02-01 | control_plane | 2026-04-11 | **`GET/POST /system/execution-profile`**, **`execution_profile`** on **`GET /status`**, patch `default.yaml` + `.env` |
 | FB-DASH-02-02 | control_plane | 2026-04-11 | Streamlit **Execution mode** sidebar + Apply → POST |
 | FB-DASH-02-03 | ops | 2026-04-11 | **[`RUNBOOKS.MD`](RUNBOOKS.MD)** — execution mode section (restart after change) |

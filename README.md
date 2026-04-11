@@ -19,6 +19,10 @@ From the repo root in **cmd.exe** or PowerShell:
 1. **`setup.bat`** — creates `.venv`, installs **`[dev,dashboard]`**, optionally starts Docker Compose, copies `.env.example` → `.env` if missing.
 2. **`run.bat`** — starts the **control plane API** (port **8000**), a **power supervisor** that launches the Kraken **live runtime** on port **8208** when **system power** is ON (see Streamlit sidebar and `GET/POST /system/power`), and the **Streamlit dashboard** (default **8501**). Set **`NM_POWER_SUPERVISOR_ENABLED=false`** to run only API + dashboard without auto-starting the live loop. Edit **`.env`** before first real use.
 
+3. **Optional — `nm_operator_launcher.exe`** — after **`setup.bat`**, run **`packaging\windows\build_operator_bundle.bat`** to build a thin PyInstaller launcher that mirrors **`run.bat`**. See **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)** (distribution notes).
+
+4. **Optional — desktop window for Streamlit** — with **`[dashboard]`** installed, keep **`run.bat`** running and launch **`run_desktop_dashboard.bat`** or **`python -m operator_packaging.desktop_shell`** to open a **pywebview** window (default **`http://127.0.0.1:8501`**; set **`NM_STREAMLIT_DESKTOP_URL`** if needed). Technology comparison: **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)** §2.2.
+
 Operator UI roadmap (paper/live switch, positions, P&L, future `.exe`): **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. Tracked as **FB-UI-*** / **FB-DASH-*** in [`docs/QUEUE.MD`](docs/QUEUE.MD) (§2).
 
 Market data uses **Kraken** public APIs (no keys for read). Bar buckets default to **1 second** (`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`).
