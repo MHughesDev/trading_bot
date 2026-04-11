@@ -114,7 +114,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 
 *Parent epic:* RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Sub-rows FB-PL-P0-01 … FB-PL-P0-04 Done 2026-04-11** (NumPy stubs + offline env; full PyTorch RL remains future hardening).
 
-*See also §2 HIGH (**FB-FR-P0-*** and **FB-SPEC-07**).*
+*See also §2 HIGH (**FB-FR-P0-*** and **FB-SPEC-07**). **FB-SPEC-06** is archived in §8.*
 
 ---
 
@@ -287,7 +287,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-SPEC-03 | pipeline | 2026-04-11 | `model_artifact_contract` + `GET /status` |
 | FB-SPEC-04 | pipeline | 2026-04-11 | Real-candle training campaign |
 | FB-SPEC-05 | pipeline | 2026-04-11 | PyTorch `resolve_torch_device` |
-| FB-SPEC-06 | pipeline | 2026-04-11 | Filesystem `active_model_set.json` + drift; `GET /status` → `model_artifacts`; optional `MLflowModelRegistry` params/metrics; `POST /models/version` → `nm_model_version_info` (regression tests in `tests/test_model_artifacts.py`). Champion/candidate compare remains **FB-AUDIT-03**. |
+| FB-SPEC-06 | pipeline | 2026-04-11 | **Done:** filesystem `active_model_set.json` + drift; `GET /status` → `model_artifacts`; optional `MLflowModelRegistry` params/metrics (no auto-promote); `POST /models/version` → `nm_model_version_info` (`tests/test_model_artifacts.py`). Champion/candidate compare remains **FB-AUDIT-03**. |
 | FB-SPEC-07 | pipeline | 2026-04-11 | `MULTI_ASSET_PORTFOLIO.MD` |
 | FB-SPEC-08 | pipeline | 2026-04-11 | Preflight script + API |
 | FB-T1 | test | 2026-04-10 | `smoke_credentials.py` |
