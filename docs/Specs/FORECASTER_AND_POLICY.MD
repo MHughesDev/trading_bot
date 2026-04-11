@@ -3,7 +3,7 @@
 **Human source of truth (verbatim filenames):**  
 [`MASTER_SYSTEM_PIPELINE_SPEC.MD`](../Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) · [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](../Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) · [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](../Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD)
 
-This document tracks **only** how the repository maps to those two files. Where the human spec gives an illustrative package layout (§26 forecaster, §27 policy), the code follows that layout **by path and module name**. Training stacks (full PyTorch trainer, replay buffers, nightly jobs) are separate backlog items (`FB-FR-P0`, `FB-PL-P0`).
+This document tracks **only** how the repository maps to those two files. Where the human spec gives an illustrative package layout (§26 forecaster, §27 policy), the code follows that layout **by path and module name**. Delivered NumPy forecaster + policy integration is tracked as **`FB-FR-CORE`** / **`FB-PL-CORE`** in [`FEATURES_BACKLOG.MD`](../FEATURES_BACKLOG.MD); open **`FB-FR-P0`** / **`FB-PL-P0`** track full architecture-spec training stacks.
 
 ## Forecaster (`forecaster_model/`) — alignment with human §26
 

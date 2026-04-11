@@ -57,10 +57,9 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | ID | Type | Status | Summary | Pointer |
 |----|------|--------|---------|---------|
 | FB-FR-P0 | Feature | Open | Full neural forecaster per [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD): leakage-safe dataset, VSN, latent CNN, multi-res xLSTM, regime fusion, quantile head, conformal, ensemble | `forecaster_model/` |
-| FB-SPEC-06 | Platform | Open | **Model registry / versioned artifacts:** filesystem or MLflow-backed promotion workflow, version labels, and single operator-facing “active model set” beyond ad-hoc paths | `models/registry/`, `control_plane/api.py`, `docs/RUNBOOKS.MD` |
-| FB-SPEC-07 | Feature | Open | **Multi-asset portfolio coordination:** cross-symbol capital allocation, correlation-aware or risk-parity style sizing, or documented limits when running many `market_data_symbols` (beyond independent per-symbol ticks) | `risk_engine/`, `decision_engine/`, `docs/Specs/` |
+| FB-SPEC-06 | Platform | In progress | **Model registry / versioned artifacts:** MLflow logging + `POST /models/version` + `model_artifacts` + manual promotion policy — documented in [`RUNBOOKS.MD`](RUNBOOKS.MD) § Model registry; full promotion workflow + champion/candidate still **FB-AUDIT-03** | `models/registry/`, `control_plane/api.py`, `docs/RUNBOOKS.MD` |
 
-**Blocked (not started):** **`FB-FR-P0`** requires PyTorch/xLSTM stack and large training loop — unsafe to claim done without full model + data pipeline. **`FB-PL-P0`** requires RL env + actor-critic + buffer — same.
+**Stretch vs delivered core:** NumPy forecaster + policy integration shipped under archive ids **`FB-FR-CORE`** / **`FB-PL-CORE`** (see §8). Open **`FB-FR-P0`** / **`FB-PL-P0`** rows track **full architecture-spec** training (leakage-safe datasets, native xLSTM on hot path where applicable, full RL policy training loop) — large, unsafe to claim done in a maintenance pass.
 
 ### Completed gates (reference)
 
@@ -99,7 +98,7 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | FB-PL-P0 | Feature | Open | RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD): `TradingPolicyEnvironment`, actor-critic, replay buffer, precomputed `ForecastPacket` mode, reward/cost model | `policy_model/` |
 | FB-AUDIT-03 | Feature | Open | **Champion vs candidate promotion:** implement master [`MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) §14–§15 (nightly compare, `PromotionDecision`, keep champion on failure) — extends **FB-SPEC-06** | `orchestration/` |
 
-*See also §2 HIGH open rows (**FB-FR-P0**, **FB-SPEC-06**–**FB-SPEC-07**).*
+*See also §2 HIGH open rows (**FB-FR-P0**, **FB-SPEC-06**).*
 
 ---
 
@@ -180,11 +179,11 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-PL-PG9 | 2026-04-11 | **Runbook:** model paths + routing — [`docs/RUNBOOKS.MD`](RUNBOOKS.MD) |
 | FB-FR-PG3 | 2026-04-11 | **Conformal lifecycle:** `MultiHorizonConformal`, `save_conformal_state` / `load_conformal_state`; `build_forecast_packet_methodology` when `calibration_enabled` |
 | FB-PL-PG1 | 2026-04-11 | **`ReplayPolicyEnvironment`** — `policy_model/env/replay_env.py`; `tests/test_replay_policy_env.py` |
-| FB-FR-P0 | 2026-04-11 | **Neural forecaster (deliverable):** NumPy `ForecasterModel` + `forward_ensemble_numpy` / `build_ensemble_forecast_packet`; optional **`train_forecaster_torch`** in `forecaster_model/training/torch_trainer.py` (`[models_torch]`); full native xLSTM remains an optional deeper upgrade |
+| FB-FR-CORE | 2026-04-11 | **Neural forecaster (deliverable):** NumPy `ForecasterModel` + `forward_ensemble_numpy` / `build_ensemble_forecast_packet`; optional **`train_forecaster_torch`** in `forecaster_model/training/torch_trainer.py` (`[models_torch]`); full native xLSTM remains an optional deeper upgrade — open **`FB-FR-P0`** tracks full spec pipeline |
 | FB-FR-PG2 | 2026-04-11 | **`train_forecaster_stub`** + **`train_forecaster_torch`** (toy linear when torch installed); JSON checkpoints |
 | FB-PL-PG2 | 2026-04-11 | **`ReplayBuffer`**, **`ActorCriticTrainer`**, **`walk_forward_episode_slices`** — `policy_model/training/` |
 | FB-PL-PG3 | 2026-04-11 | **`shadow_compare_actions`** — `policy_model/shadow.py`; metrics `nm_policy_shadow_target_exposure_delta` |
-| FB-PL-P0 | 2026-04-11 | **`run_stub_episode`** — `policy_model/integration/full_policy_loop.py`; env + buffer + trainer |
+| FB-PL-CORE | 2026-04-11 | **`run_stub_episode`** — `policy_model/integration/full_policy_loop.py`; env + buffer + trainer — open **`FB-PL-P0`** tracks full RL policy per architecture spec |
 | FB-FR-PG4 | 2026-04-11 | **`DatasetManifest`**, `build_manifest_from_arrays` — `forecaster_model/data/dataset_manifest.py` |
 | FB-FR-PG5 | 2026-04-11 | **`build_ensemble_forecast_packet`**, **`forward_ensemble_numpy`** — `forecaster_model/models/ensemble.py` |
 | FB-FR-PG6 | 2026-04-11 | **`safe_build_forecast_packet`**, `observability/forecaster_metrics.py` (histograms/counters) |
@@ -213,10 +212,11 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-AUDIT-11 | 2026-04-11 | **`test_property_invariants.py`** — quantile monotonicity + risk gate monotonicity |
 | FB-AUDIT-12 | 2026-04-11 | **RiskState gap doc:** [`MASTER_SPEC_RISK_STATE_GAP.MD`](Specs/MASTER_SPEC_RISK_STATE_GAP.MD) |
 | FB-AUDIT-13 | 2026-04-11 | **`torch~=2.2`**, **`alpaca-py~=0.21`** in `pyproject.toml` optional extras |
-| FB-SPEC-02 | 2026-04-11 | **Hot path NPZ weights:** `NM_MODELS_FORECASTER_WEIGHTS_PATH` / `NM_MODELS_POLICY_MLP_PATH`; shared-weight `ForecasterModel` forward; `capture_forecaster_weights_from_seed` + `tests/test_hot_path_weights.py`; PyTorch export still **FB-FR-P0** |
+| FB-SPEC-02 | 2026-04-11 | **Hot path NPZ weights:** `NM_MODELS_FORECASTER_WEIGHTS_PATH` / `NM_MODELS_POLICY_MLP_PATH`; shared-weight `ForecasterModel` forward; `capture_forecaster_weights_from_seed` + `tests/test_hot_path_weights.py`; PyTorch export to hot path still **FB-FR-P0** (delivered NumPy path: **FB-FR-CORE**) |
 | FB-SPEC-05 | 2026-04-11 | **PyTorch device:** `resolve_torch_device`, `train_forecaster_torch(..., device=...)`, `AppSettings.models_torch_device` / `NM_MODELS_TORCH_DEVICE` / `models.torch_device`; docs in README, `.env.example`, `pyproject.toml` `[models_torch]` |
 | FB-AUDIT-05 | 2026-04-11 | **Golden tests:** `tests/test_forecaster_golden_regression.py` + fixture; `tests/test_forecast_packet_golden.py` alternate OHLC slice |
 | FB-SPEC-03 | 2026-04-11 | **`model_artifact_contract`:** `app/config/model_artifacts.py`; **`GET /status` → `model_artifacts`**; RUNBOOKS section |
+| FB-SPEC-07 | 2026-04-11 | **Documented operator limits:** `market_data_symbols` = independent per-symbol ticks; no cross-symbol allocator — stretch scope remains open; see [`RUNBOOKS.MD`](RUNBOOKS.MD) § Multi-symbol portfolio limits |
 
 ---
 

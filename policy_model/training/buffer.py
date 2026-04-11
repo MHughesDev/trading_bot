@@ -1,4 +1,4 @@
-"""Simple replay buffer for RL transitions (FB-PL-PG2 / FB-PL-P0)."""
+"""Simple replay buffer for RL transitions (FB-PL-PG2 / FB-PL-CORE deliverable)."""
 
 from __future__ import annotations
 
