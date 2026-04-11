@@ -11,10 +11,11 @@
 | § | Section |
 |---|---------|
 | [§1](#1-priority-levels) | Priority levels |
+| [§1.5](#15-phases--categories-for-issues) | **Phases & categories** (open + resolved) |
 | [§2](#2-conventions) | Conventions (ID, area, status) |
 | [§3](#3-open-issues-by-priority) | Open issues (HIGH/MEDIUM/LOW) |
 | [§4](#4-syncing-to-github-issues-optional) | GitHub sync |
-| [§5](#5-resolved-recent) | Resolved (recent), by area |
+| [§5](#5-resolved-recent) | Resolved (recent), by area / category |
 | [§6](#6-related) | Related docs |
 
 ---
@@ -29,16 +30,48 @@
 
 ---
 
+## 1.5 Phases & categories (for issues)
+
+**Phases** (fix urgency — use on **open** rows in §3; optional on resolved rows for analytics):
+
+| Phase | Maps to priority | Meaning |
+|-------|------------------|---------|
+| **P1** | HIGH | Correctness, safety, or pipeline integrity — fix before trusting production paths. |
+| **P2** | MEDIUM | Important gaps in observability, ops, or data quality for sandbox/paper. |
+| **P3** | LOW | Tests, polish, minor verification. |
+
+**Categories** (subsystem — stable codes; aligns with **Area**):
+
+| Cat | Area | Typical paths |
+|-----|------|----------------|
+| **EX** | `execution` | `execution/adapters/`, venues |
+| **RK** | `risk` | `risk_engine/`, signing |
+| **DP** | `data` | `data_plane/ingest/`, WS normalizers, memory |
+| **MD** | `models` | `forecaster_model/`, `models/`, serving |
+| **RT** | `runtime` | `app/runtime/`, live loop, signals |
+| **BT** | `backtest` | `backtesting/` |
+| **CP** | `control_plane` | `control_plane/`, FastAPI, Streamlit |
+| **OB** | `observability` | metrics, QuestDB traces, Grafana/Loki |
+| **OP** | `ops` | orchestration, training drivers, runbooks |
+| **CI** | `ci` | workflows, integration test harness |
+| **CFG** | *(contracts/config)* | `.env.example`, `app/contracts/`, mapping constants |
+
+*Resolved issues:* §5 subsections are labeled with **(Cat)**; **[§5.0](#50-resolved-index-by-category)** lists all IDs by category.
+
+---
+
 ## 2. Conventions
 
 | Field | Meaning |
 |-------|---------|
 | **ID** | `IL-###` (local); **IL-1xx** reserved for data/ingest/memory cluster |
 | **Sub-IDs** | For one logical incident split across PRs, use **`IL-###-01`**, **`IL-###-02`** in the **Summary** (same §3 row until all slices ship, or separate rows if easier to close independently). Prefer **separate `IL-###` rows** when fixes are unrelated. |
-| **Area** | `data`, `models`, `execution`, `risk`, `runtime`, `backtest`, `control_plane`, `observability`, `ops`, `ci` |
+| **Area** | `data`, `models`, `execution`, `risk`, `runtime`, `backtest`, `control_plane`, `observability`, `ops`, `ci` — each maps to a **Cat** code in [§1.5](#15-phases--categories-for-issues). |
+| **Cat** | Category code (**EX**, **DP**, …) — set from Area; use **CFG** when the fix is primarily config/contracts. |
+| **Phase** | **P1** / **P2** / **P3** — same meaning as in [§1.5](#15-phases--categories-for-issues). |
 | **Status** | Open / In progress / Done |
 
-When you close an item: set **Status** to **Done**, add **Resolved** date + short note in **§5** under the right **Area** subsection, or remove the row from open tables.
+When you close an item: set **Status** to **Done**, add **Resolved** date + short note in **§5** under the right **Area** subsection (or **CFG** for config/contract fixes), update **[§5.0](#50-resolved-index-by-category)** if you maintain it, or remove the row from open tables.
 
 **Granularity rule:** one **open** row should describe a **single verifiable fix** (e.g. “return 422 on invalid payload” not “improve API”). If a fix needs design + code + docs, either one row with **checklist sub-bullets** in the summary or **IL-###-01 / -02** sub-IDs.
 
@@ -46,23 +79,25 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + shor
 
 ## 3. Open issues (by priority)
 
-### HIGH priority (open)
+*Template columns: **Phase** = P1|P2|P3, **Cat** = category code, **Area** = machine area string.*
 
-| ID | Area | Summary |
-|----|------|---------|
-| — | — | *No open HIGH items — see §5.* |
+### HIGH priority (open) — Phase P1
 
-### MEDIUM priority (open)
+| ID | Phase | Cat | Area | Summary |
+|----|-------|-----|------|---------|
+| — | — | — | — | *No open HIGH items — see §5.* |
 
-| ID | Area | Summary |
-|----|------|---------|
-| — | — | *No open MEDIUM items — see §5.* |
+### MEDIUM priority (open) — Phase P2
 
-### LOW priority (open)
+| ID | Phase | Cat | Area | Summary |
+|----|-------|-----|------|---------|
+| — | — | — | — | *No open MEDIUM items — see §5.* |
 
-| ID | Area | Summary |
-|----|------|---------|
-| — | — | *No open LOW items — see §5.* |
+### LOW priority (open) — Phase P3
+
+| ID | Phase | Cat | Area | Summary |
+|----|-------|-----|------|---------|
+| — | — | — | — | *No open LOW items — see §5.* |
 
 ---
 
@@ -81,83 +116,87 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 
 ## 5. Resolved (recent)
 
-*Grouped by **Area** for scanning. Within each subsection, roughly **newest last** (append new resolutions at the bottom of the subsection).*
+*Grouped by **Area** (with **Cat** code). Within each subsection, roughly **newest last** (append new resolutions at the bottom of the subsection).*
 
-### 5.1 execution
+### 5.0 Resolved index by category
 
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-001 | 2026-04-08 | Coinbase live: CDP JWT REST for `submit_order` / `cancel_order` / `fetch_positions` via `execution/coinbase_advanced_http.py` (no synthetic `pending_implementation` ack). |
+| Cat | IDs |
+|-----|-----|
+| **EX** | IL-001 |
+| **MD** | IL-002, IL-003, IL-103, IL-106, IL-107 |
+| **DP** | IL-004, IL-005, IL-101, IL-102 |
+| **OB** | IL-006, IL-007 |
+| **CP** | IL-009, IL-105, IL-110 |
+| **CI** | IL-010 |
+| **OP** | IL-008, IL-104 |
+| **RT** | IL-011 |
+| **CFG** | IL-108, IL-109 |
 
-### 5.2 models
+### 5.1 execution **(EX)**
 
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-002 | 2026-04-08 | *(Superseded 2026-04-11.)* Historical: HMM regime + `NM_MODELS_REGIME_PATH` — **removed** with master pipeline; regime now derived from `ForecastPacket` soft vector. |
-| IL-003 | 2026-04-08 | *(Superseded 2026-04-11.)* Historical: Ridge `TemporalFusionForecaster` + `NM_MODELS_FORECAST_PATH` — **removed**; forecaster is `forecaster_model` / `ForecastPacket` path only. |
+| ID | Phase | Resolved | Summary |
+|----|-------|----------|---------|
+| IL-001 | P1 | 2026-04-08 | Coinbase live: CDP JWT REST for `submit_order` / `cancel_order` / `fetch_positions` via `execution/coinbase_advanced_http.py` (no synthetic `pending_implementation` ack). |
 
-### 5.3 data
+### 5.2 models **(MD)**
 
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-004 | 2026-04-08 | Memory: deterministic `feature_dict_to_embedding` for Qdrant queries; per-symbol 60s loop; payload `schema_version: 1`. |
-| IL-005 | 2026-04-10 | Sentiment: RSS/Atom fetch + dedup (`data_plane/ingest/rss_news.py`, `news_ingest.py`); `aggregate_sentiment_for_symbols_async` wired in `live_service`; optional FinBERT unchanged. |
-| IL-101 | 2026-04-10 | `news_ingest`: live RSS pipeline + dedup (see IL-005). |
-| IL-102 | 2026-04-10 | WS normalizer fixtures expanded: `trade_tick.json`, `l2_snapshot.json` + tests in `test_normalizer_fixtures.py`. |
+| ID | Phase | Resolved | Summary |
+|----|-------|----------|---------|
+| IL-002 | P3 | 2026-04-08 | *(Superseded 2026-04-11.)* Historical: HMM regime + `NM_MODELS_REGIME_PATH` — **removed** with master pipeline; regime now derived from `ForecastPacket` soft vector. |
+| IL-003 | P3 | 2026-04-08 | *(Superseded 2026-04-11.)* Historical: Ridge `TemporalFusionForecaster` + `NM_MODELS_FORECAST_PATH` — **removed**; forecaster is `forecaster_model` / `ForecastPacket` path only. |
+| IL-103 | P2 | 2026-04-11 | **Serving mode:** README + RUNBOOKS; `DecisionPipeline` logs `decision pipeline serving mode:` once per process (`decision_engine/pipeline.py`). |
+| IL-106 | P3 | 2026-04-11 | **Doc hygiene:** IL-002 / IL-003 summaries rewritten (superseded-by-master-pipeline note). |
+| IL-107 | P2 | 2026-04-11 | **Conformal load:** WARNING log when `conformal_state_path` set but `load_conformal_state` fails (`forecaster_model/inference/build_from_ohlc.py`). |
 
-### 5.4 observability
+### 5.3 data **(DP)**
 
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-006 | 2026-04-10 | QuestDB: batched `decision_traces` writes (`questdb_batch_max_rows`, periodic `flush_interval_seconds`); runbooks in `docs/RUNBOOKS.MD`. |
-| IL-007 | 2026-04-10 | Observability: Promtail + Grafana provisioning already in compose; Streamlit links to Loki/Grafana URLs (`control_plane/streamlit_util.py`). |
+| ID | Phase | Resolved | Summary |
+|----|-------|----------|---------|
+| IL-004 | P2 | 2026-04-08 | Memory: deterministic `feature_dict_to_embedding` for Qdrant queries; per-symbol 60s loop; payload `schema_version: 1`. |
+| IL-005 | P2 | 2026-04-10 | Sentiment: RSS/Atom fetch + dedup (`data_plane/ingest/rss_news.py`, `news_ingest.py`); `aggregate_sentiment_for_symbols_async` wired in `live_service`; optional FinBERT unchanged. |
+| IL-101 | P2 | 2026-04-10 | `news_ingest`: live RSS pipeline + dedup (see IL-005). |
+| IL-102 | P3 | 2026-04-10 | WS normalizer fixtures expanded: `trade_tick.json`, `l2_snapshot.json` + tests in `test_normalizer_fixtures.py`. |
 
-### 5.5 control_plane
+### 5.4 observability **(OB)**
 
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-009 | 2026-04-10 | Streamlit: shared API helpers + Home/Live/Routes/Models/Emergency/Logs/Regimes bound to control plane or observability URLs. |
-| IL-110 | 2026-04-11 | **Bind address:** RUNBOOKS section for `NM_CONTROL_PLANE_HOST` / API key on untrusted LAN ([`RUNBOOKS.MD`](RUNBOOKS.MD)). |
+| ID | Phase | Resolved | Summary |
+|----|-------|----------|---------|
+| IL-006 | P2 | 2026-04-10 | QuestDB: batched `decision_traces` writes (`questdb_batch_max_rows`, periodic `flush_interval_seconds`); runbooks in `docs/RUNBOOKS.MD`. |
+| IL-007 | P2 | 2026-04-10 | Observability: Promtail + Grafana provisioning already in compose; Streamlit links to Loki/Grafana URLs (`control_plane/streamlit_util.py`). |
 
-### 5.6 ci
+### 5.5 control_plane **(CP)**
 
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-010 | 2026-04-10 | CI: `.github/workflows/ci.yml` (ruff, pytest, spec scripts); optional integration workflow + `tests/test_integration_optional_services.py`. |
+| ID | Phase | Resolved | Summary |
+|----|-------|----------|---------|
+| IL-009 | P2 | 2026-04-10 | Streamlit: shared API helpers + Home/Live/Routes/Models/Emergency/Logs/Regimes bound to control plane or observability URLs. |
+| IL-105 | P2 | 2026-04-11 | **Preflight:** `preflight_report` + `GET /status` → **`preflight`** (adapter names, signing policy), **`production_preflight`** (signing + venue keys vs mode); `scripts/preflight_check.py`; RUNBOOKS + README — complements **FB-SPEC-08** |
+| IL-110 | P2 | 2026-04-11 | **Bind address:** RUNBOOKS section for `NM_CONTROL_PLANE_HOST` / API key on untrusted LAN ([`RUNBOOKS.MD`](RUNBOOKS.MD)). |
 
-### 5.7 ops
+### 5.6 ci **(CI)**
 
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-008 | 2026-04-08 | Orchestration: `run_train_evaluate_log` + optional Prefect `@flow` in `orchestration/nightly_retrain.py`; MLflow params/metrics (no auto-promotion). |
-| IL-104 | 2026-04-11 | **Training pipeline:** removed `_synthetic_training_data` / Ridge-only `run_train_evaluate_log`; `orchestration/nightly_retrain.py` drives **real Coinbase candle** fetch + walk-forward quantile forecaster + real-data heuristic RL eval (`orchestration/training_campaign.py`). |
+| ID | Phase | Resolved | Summary |
+|----|-------|----------|---------|
+| IL-010 | P2 | 2026-04-10 | CI: `.github/workflows/ci.yml` (ruff, pytest, spec scripts); optional integration workflow + `tests/test_integration_optional_services.py`. |
 
-### 5.8 runtime
+### 5.7 ops **(OP)**
 
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-011 | 2026-04-10 | `NotImplementedError` in `main()` signal handlers: extracted `register_shutdown_signals`; test `tests/test_live_service_signals.py`. |
+| ID | Phase | Resolved | Summary |
+|----|-------|----------|---------|
+| IL-008 | P2 | 2026-04-08 | Orchestration: `run_train_evaluate_log` + optional Prefect `@flow` in `orchestration/nightly_retrain.py`; MLflow params/metrics (no auto-promotion). |
+| IL-104 | P1 | 2026-04-11 | **Training pipeline:** removed `_synthetic_training_data` / Ridge-only `run_train_evaluate_log`; `orchestration/nightly_retrain.py` drives **real Coinbase candle** fetch + walk-forward quantile forecaster + real-data heuristic RL eval (`orchestration/training_campaign.py`). |
 
-### 5.9 models / pipeline (serving clarity)
+### 5.8 runtime **(RT)**
 
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-103 | 2026-04-11 | **Serving mode:** README + RUNBOOKS; `DecisionPipeline` logs `decision pipeline serving mode:` once per process (`decision_engine/pipeline.py`). |
-| IL-106 | 2026-04-11 | **Doc hygiene:** IL-002 / IL-003 summaries rewritten (superseded-by-master-pipeline note). |
-| IL-107 | 2026-04-11 | **Conformal load:** WARNING log when `conformal_state_path` set but `load_conformal_state` fails (`forecaster_model/inference/build_from_ohlc.py`). |
+| ID | Phase | Resolved | Summary |
+|----|-------|----------|---------|
+| IL-011 | P2 | 2026-04-10 | `NotImplementedError` in `main()` signal handlers: extracted `register_shutdown_signals`; test `tests/test_live_service_signals.py`. |
 
-### 5.10 config / contracts
+### 5.9 config / contracts **(CFG)**
 
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-108 | 2026-04-11 | **`.env.example`:** aligned to `NM_*` variables + pointer to `AppSettings` (`.env.example`). |
-| IL-109 | 2026-04-11 | **`SPEC_POLICY_DELTA_TO_SIZE_FRACTION_SCALE`** + docstring in `decision_engine/spec_policy_proposal.py` for delta→`size_fraction` mapping. |
-
-### 5.11 control_plane — preflight
-
-| ID | Resolved | Summary |
-|----|----------|---------|
-| IL-105 | 2026-04-11 | **Preflight:** `preflight_report` + `GET /status` → **`preflight`** (adapter names, signing policy), **`production_preflight`** (signing + venue keys vs mode); `scripts/preflight_check.py`; RUNBOOKS + README — complements **FB-SPEC-08** |
+| ID | Phase | Resolved | Summary |
+|----|-------|----------|---------|
+| IL-108 | P2 | 2026-04-11 | **`.env.example`:** aligned to `NM_*` variables + pointer to `AppSettings` (`.env.example`). |
+| IL-109 | P2 | 2026-04-11 | **`SPEC_POLICY_DELTA_TO_SIZE_FRACTION_SCALE`** + docstring in `decision_engine/spec_policy_proposal.py` for delta→`size_fraction` mapping. |
 
 ---
 
