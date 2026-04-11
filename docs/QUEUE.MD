@@ -1,6 +1,6 @@
 # Queue
 
-**Single source of truth** for work items: **fixes**, **changes**, **new features**, **hardening**, **platform**, and **completed history**. This file supersedes `FEATURES_BACKLOG.MD` and `ISSUE_LOG.MD` (stubs remain as redirects).
+**Single source of truth** for work items: **fixes**, **changes**, **new features**, **hardening**, **platform**, and **completed history**.
 
 **References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD) · [`MICROSERVICES_SPLIT_PLAN.MD`](MICROSERVICES_SPLIT_PLAN.MD) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
 

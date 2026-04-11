@@ -8,7 +8,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 **NautilusMonster** is a Python **multi-route AI crypto trading** codebase: **Kraken** for **all market data**, Alpaca for **paper execution only**, shared **decision + risk** path for live and replay, typed contracts (`app/contracts/`), and adapters under `execution/adapters/`. **Coinbase** appears only in the **live execution** adapter when configured — not for market data ingestion.
 
-**This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, `docs/*.MD` (backlog, issue log, reference notes), `scripts/` (CI guards, smoke tests).
+**This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, `docs/*.MD` (work queue: [`docs/QUEUE.MD`](docs/QUEUE.MD), plus reference notes), `scripts/` (CI guards, smoke tests).
 
 **This repo does not own:** your brokerage accounts, cloud secrets stores, production deployment pipelines (unless added here), or external ERP/CRM. **Do not** assume access to live keys or paid APIs beyond what `.env` provides.
 
