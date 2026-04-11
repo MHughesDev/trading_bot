@@ -64,6 +64,7 @@ observability:
   metrics_port: 8000
 questdb:
   persist_decision_traces: false
+  persist_microservice_events: false
   batch_max_rows: 500
   flush_interval_seconds: 2.0
 models:

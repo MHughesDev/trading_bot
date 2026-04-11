@@ -3,8 +3,14 @@
 ## As implemented
 
 - **`market_data_symbols`** drives multiple independent **decision ticks** (one stream per symbol in `live_service` / replay loops).
-- **`RiskEngine`** enforces **global** caps (`risk_max_total_exposure_usd`, `risk_max_per_symbol_usd`, drawdown, stale data) shared across symbols — there is **no** explicit cross-symbol correlation or portfolio optimizer in the hot path.
+- **Aggregate exposure (FB-SPEC-07-01):** `RiskEngine.evaluate` applies **`risk_max_total_exposure_usd`** as a **portfolio-wide** ceiling on *new* notional (`current_total_exposure_usd + proposed_notional`), and **`risk_max_per_symbol_usd`** per symbol. Configure both in `default.yaml` under `risk:` or via **`NM_RISK_MAX_TOTAL_EXPOSURE_USD`** / **`NM_RISK_MAX_PER_SYMBOL_USD`**. There is no separate “per-tier” cap beyond these two knobs.
+- **Cross-symbol policy (FB-SPEC-07-02):** the hot path uses an **independent per-symbol** contract — no correlation matrix, shared factor risk, or risk-parity allocator. Decision ticks do not coordinate entries across symbols beyond the shared global/per-symbol USD caps above.
 - **`Position reconcile`** (if enabled) is per adapter account; multi-symbol positions are still subject to the same risk limits.
+
+## Operator warnings
+
+- Increasing **`len(market_data_symbols)`** multiplies concurrent risk checks but **does not** add cross-asset hedging or netting logic in the decision layer.
+- **`replay_multi_asset_decisions`** (backtesting) can simulate one portfolio timeline; live remains per-symbol loops + shared **`RiskEngine`** limits unless you add custom orchestration.
 
 ## Limits vs backlog
 

@@ -32,7 +32,10 @@ It is intentionally implementation-oriented so work can be executed as small, te
 - ✅ Six-process Redis integration (**market_data → feature → decision → risk → gateway + observability_writer**): **`test_redis_six_process_chain_includes_observability_writer`** in **`tests/test_integration_microservices_redis.py`** (`NM_INTEGRATION_SERVICES=1`).
 - ✅ **`services/live_service_app.py`**: `uvicorn` ASGI wrapping **`run_live_loop`** with **/healthz** (optional **NM_LIVE_SERVICE_APP_START_LOOP**; default true for standalone, false in compose). Compose **8208** (`NM_LIVE_SERVICE_APP_START_LOOP=false` = probes only).
 - ✅ **`pyproject.toml`**: setuptools includes **`services*`** and **`shared*`** for packaged installs.
-- ⏭️ Next step (program §11 not yet met): optional **real Alpaca paper** smoke, enable **live_runtime** loop in compose with credentials, or full **Kraken WS** in scaffold `market_data_service` — production split remains future work.
+- ✅ **Kraken WS path (dev):** `market_data_service` can run **`NM_MARKET_DATA_KRAKEN_WS=true`** to publish **`market.tick.normalized.v1`** + periodic **`market.heartbeat.v1`**; manual **`POST /ingest/raw-tick`** remains for tests.
+- ✅ **Feature parity:** `feature_service` defaults to **`RollingBars` + `FeaturePipeline`** (toggle **`NM_FEATURE_SERVICE_USE_PIPELINE`**).
+- ✅ **Observability persistence (optional):** `observability_writer` can append to QuestDB **`microservice_events`** when **`NM_QUESTDB_PERSIST_MICROSERVICE_EVENTS=true`**.
+- ⏭️ Next step (program §11 not yet met): full production split — all live paths exclusively via inter-service contracts, isolated credentials, replay parity on every release — see **§11** checklist below.
 
 ---
 
@@ -414,6 +417,17 @@ This migration is considered complete when:
 4. Control plane surfaces per-service health, mode, and lag.
 5. Replay parity checks pass on every release.
 
+### 11.1 Progress checklist (operator review)
+
+| Criterion | Status |
+|-----------|--------|
+| Inter-service message contracts (Redis Streams topics + `EventEnvelope`) for market → features → decision → risk → execution | Partial — scaffolds + integration tests; monolith `live_service` still default for production-like single-host |
+| Risk signing only at risk service / gateway boundary | Partial — `RiskEngine.evaluate` + HMAC path verified in gateway tests |
+| Execution credentials only in execution gateway process | Partial — compose uses stub/mock; live venues require env in gateway |
+| Control plane **`GET /microservices/health`** | Done — best-effort probe ports |
+| Replay / CI parity gates | Partial — pytest + optional Redis chains; full release gate TBD |
+
+**Note:** Marking every row **Done** is a **program** milestone, not a single PR. The table above is the acceptance record for **FB-MS-06**; update it when criteria are fully satisfied.
 
 ---
 
