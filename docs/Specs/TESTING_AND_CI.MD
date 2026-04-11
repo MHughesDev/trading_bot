@@ -15,3 +15,14 @@
 
 - **`.github/workflows/ci.yml`** — Ruff, pytest, both CI scripts above
 - Optional integration job can be triggered manually (`workflow_dispatch`) when services are available
+
+## Optional integration tests (local / pre-release)
+
+Before a release or when changing storage paths, start the stack and run integration tests:
+
+```bash
+docker compose -f infra/docker-compose.yml up -d
+NM_INTEGRATION_SERVICES=1 python3 -m pytest tests/test_integration_optional_services.py -q
+```
+
+Requires Redis, QuestDB, and Qdrant reachable at the URLs in `app/config` defaults.

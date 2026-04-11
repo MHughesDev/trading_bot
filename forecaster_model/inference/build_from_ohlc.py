@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 import numpy as np
@@ -14,6 +15,8 @@ from forecaster_model.features.time_future import known_future_features
 from forecaster_model.calibration.conformal import MultiHorizonConformal, load_conformal_state
 from forecaster_model.models.numpy_reference import forward_numpy_reference
 from forecaster_model.regime.soft import soft_regime_from_returns
+
+logger = logging.getLogger(__name__)
 
 
 def build_forecast_packet_methodology(
@@ -89,7 +92,13 @@ def build_forecast_packet_methodology(
         if bundle is None and conformal_state_path:
             try:
                 bundle = load_conformal_state(conformal_state_path)
-            except OSError:
+            except OSError as exc:
+                logger.warning(
+                    "conformal state not loaded from %s (%s); using ephemeral calibrators — "
+                    "quantile bands may differ from offline training",
+                    conformal_state_path,
+                    exc,
+                )
                 bundle = None
         if bundle is None:
             bundle = MultiHorizonConformal.create(

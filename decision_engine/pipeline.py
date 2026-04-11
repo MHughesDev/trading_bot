@@ -26,6 +26,9 @@ from forecaster_model.inference.stub import ohlc_arrays_from_feature_row
 
 logger = logging.getLogger(__name__)
 
+# Log once per process: hot path is NumPy reference + heuristic policy until FB-SPEC-02.
+_serving_mode_logged = False
+
 
 def _feature_vector(values: dict[str, float], dim: int = 32) -> np.ndarray:
     vec = np.zeros(dim, dtype=np.float64)
@@ -65,6 +68,19 @@ class DecisionPipeline:
         self._settings = settings or load_settings()
         self._last_forecast_packet: ForecastPacket | None = None
 
+    @staticmethod
+    def _log_serving_mode_once(settings: AppSettings) -> None:
+        global _serving_mode_logged
+        if _serving_mode_logged:
+            return
+        _serving_mode_logged = True
+        logger.info(
+            "decision pipeline serving mode: NumPy ForecasterModel + heuristic PolicySystem "
+            "(no PyTorch/checkpoint weights on hot path until FB-SPEC-02); "
+            "NM_MODELS_FORECASTER_CHECKPOINT_ID=%s",
+            settings.models_forecaster_checkpoint_id or "(unset)",
+        )
+
     @property
     def last_forecast_packet(self) -> ForecastPacket | None:
         """Last `ForecastPacket` built on the hot path (master spec §5)."""
@@ -82,6 +98,7 @@ class DecisionPipeline:
         position_signed_qty: Decimal | None = None,
     ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None]:
         _ = _feature_vector(feature_row)  # reserved for future feature-cache alignment
+        self._log_serving_mode_once(self._settings)
 
         conf_path = self._settings.models_forecaster_conformal_state_path
         cfg = _forecaster_config_from_env(conf_path)

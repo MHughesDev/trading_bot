@@ -40,11 +40,7 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 
 | ID | Area | Summary |
 |----|------|---------|
-| IL-103 | models | **Runtime vs trained artifacts:** hot path uses NumPy `ForecasterModel` methodology + `HeuristicTargetPolicy` (not campaign quantile joblib / not PyTorch weights) until **FB-SPEC-02** — fix by **explicit README/RUNBOOKS callouts** and/or **one-line startup log** when non-checkpoint policy/forecaster is active (`decision_engine/pipeline.py`, `policy_model/system.py`, [`docs/RUNBOOKS.MD`](RUNBOOKS.MD)) |
-| IL-106 | docs | **Resolved/issue text drift:** [`ISSUE_LOG.MD`](ISSUE_LOG.MD) “Resolved” rows **IL-002**, **IL-003** still describe HMM + Ridge `NM_MODELS_*` paths **removed** by master pipeline work — rewrite resolved summaries so history matches current code (or archive note) |
-| IL-107 | observability | **Conformal load silent fallback:** `build_forecast_packet_methodology` catches `OSError` on `load_conformal_state` and continues without conformal — add **visible log line** (WARNING) when path set but load fails so operators do not assume calibration is active (`forecaster_model/inference/build_from_ohlc.py`) |
-| IL-108 | ops | **`.env.example` drift:** file uses raw `API_KEY` / `API_SECRET` names; app expects **`NM_*`** (`NM_ALPACA_*`, etc.) per `AppSettings` — audit and align example + short comment to avoid single-machine misconfiguration |
-| IL-109 | runtime | **`execution_plan_to_proposal` scaling:** `size_fraction = min(1, abs(delta)*4)` in `decision_engine/spec_policy_proposal.py` is undocumented magic; audit behavior for tiny/large equity and document or replace with explicit sizing from master spec (`decision_engine/spec_policy_proposal.py`) |
+| — | — | *No open MEDIUM items — see Resolved (recent).* |
 
 ---
 
@@ -53,7 +49,6 @@ When you close an item: set **Status** to **Done**, add **Resolved** date + comm
 | ID | Area | Summary |
 |----|------|---------|
 | IL-105 | ops | **Production preflight gap:** no first-class automated check that signing/secrets/adapter config match policy before live trade (complements **FB-SPEC-08**); optional smoke script or `/status` extension |
-| IL-110 | control_plane | **Local bind / API key:** default `control_plane_host=0.0.0.0` exposes FastAPI on all interfaces; for single-machine untrusted LAN use **`127.0.0.1`** + keep **`NM_CONTROL_PLANE_API_KEY`** for mutating routes — document in [`RUNBOOKS.MD`](RUNBOOKS.MD) (light security hygiene) |
 
 ---
 
@@ -75,8 +70,8 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 | ID | Resolved | Summary |
 |----|----------|---------|
 | IL-001 | 2026-04-08 | Coinbase live: CDP JWT REST for `submit_order` / `cancel_order` / `fetch_positions` via `execution/coinbase_advanced_http.py` (no synthetic `pending_implementation` ack). |
-| IL-002 | 2026-04-08 | HMM: bootstrap fit on 32-dim synthetic features + `save`/`load`; `DecisionPipeline` loads `NM_MODELS_REGIME_PATH` when set. |
-| IL-003 | 2026-04-08 | Forecast: Ridge surrogate bootstrapped + `save`/`load`; `NM_MODELS_FORECAST_PATH`; optional PyTorch path still via extras. |
+| IL-002 | 2026-04-08 | *(Superseded 2026-04-11.)* Historical: HMM regime + `NM_MODELS_REGIME_PATH` — **removed** with master pipeline; regime now derived from `ForecastPacket` soft vector. |
+| IL-003 | 2026-04-08 | *(Superseded 2026-04-11.)* Historical: Ridge `TemporalFusionForecaster` + `NM_MODELS_FORECAST_PATH` — **removed**; forecaster is `forecaster_model` / `ForecastPacket` path only. |
 | IL-004 | 2026-04-08 | Memory: deterministic `feature_dict_to_embedding` for Qdrant queries; per-symbol 60s loop; payload `schema_version: 1`. |
 | IL-008 | 2026-04-08 | Orchestration: `run_train_evaluate_log` + optional Prefect `@flow` in `orchestration/nightly_retrain.py`; MLflow params/metrics (no auto-promotion). |
 | IL-005 | 2026-04-10 | Sentiment: RSS/Atom fetch + dedup (`data_plane/ingest/rss_news.py`, `news_ingest.py`); `aggregate_sentiment_for_symbols_async` wired in `live_service`; optional FinBERT unchanged. |
@@ -88,6 +83,12 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 | IL-011 | 2026-04-10 | `NotImplementedError` in `main()` signal handlers: extracted `register_shutdown_signals`; test `tests/test_live_service_signals.py`. |
 | IL-102 | 2026-04-10 | WS normalizer fixtures expanded: `trade_tick.json`, `l2_snapshot.json` + tests in `test_normalizer_fixtures.py`. |
 | IL-104 | 2026-04-11 | **Nightly/orchestration training:** removed `_synthetic_training_data` / Ridge-only `run_train_evaluate_log`; `orchestration/nightly_retrain.py` now drives **real Coinbase candle** fetch + walk-forward quantile forecaster + real-data heuristic RL eval per human training specs (`orchestration/training_campaign.py`). |
+| IL-103 | 2026-04-11 | **Serving mode clarity:** README + RUNBOOKS state NumPy/heuristic until **FB-SPEC-02**; `DecisionPipeline` logs `decision pipeline serving mode:` once per process (`decision_engine/pipeline.py`). |
+| IL-106 | 2026-04-11 | **Resolved-row drift:** IL-002 / IL-003 summaries rewritten (superseded-by-master-pipeline note). |
+| IL-107 | 2026-04-11 | **Conformal load:** WARNING log when `conformal_state_path` set but `load_conformal_state` fails (`forecaster_model/inference/build_from_ohlc.py`). |
+| IL-108 | 2026-04-11 | **`.env.example`:** aligned to `NM_*` variables + pointer to `AppSettings` (`.env.example`). |
+| IL-109 | 2026-04-11 | **`SPEC_POLICY_DELTA_TO_SIZE_FRACTION_SCALE`** + docstring in `decision_engine/spec_policy_proposal.py` for delta→`size_fraction` mapping. |
+| IL-110 | 2026-04-11 | **Control plane bind:** RUNBOOKS section for `NM_CONTROL_PLANE_HOST` / API key on untrusted LAN ([`RUNBOOKS.MD`](RUNBOOKS.MD)). |
 
 ---
 

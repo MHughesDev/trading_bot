@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
+import pytest
+
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState
 from decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
+from decision_engine import pipeline as pipeline_mod
 from decision_engine.pipeline import DecisionPipeline
 
 
@@ -13,6 +18,15 @@ def _features(close: float = 50_000.0) -> dict[str, float]:
     feats["close"] = close
     feats["volume"] = 1e6
     return feats
+
+
+def test_serving_mode_logged_once(caplog: pytest.LogCaptureFixture) -> None:
+    pipeline_mod._serving_mode_logged = False
+    caplog.set_level(logging.INFO)
+    pipe = DecisionPipeline(settings=AppSettings())
+    risk = RiskState()
+    pipe.step("BTC-USD", _features(), spread_bps=5.0, risk=risk, mid_price=50_000.0, portfolio_equity_usd=100_000.0)
+    assert any("decision pipeline serving mode" in r.message for r in caplog.records)
 
 
 def test_pipeline_always_has_forecast_packet() -> None:

@@ -14,6 +14,11 @@ from policy_model.bridge import policy_envelope_from_app_settings
 from policy_model.objects import ExecutionState, PortfolioState, RiskState as PolicyRiskState
 from policy_model.system import PolicySystem
 
+# Maps |required_delta_fraction| ∈ [0,1] to RiskEngine `size_fraction` ∈ (0,1].
+# Chosen so a full delta to max position maps to size_fraction=1; aligns with legacy
+# `propose_action` slot semantics (see `decision_engine/action_generator.py`).
+SPEC_POLICY_DELTA_TO_SIZE_FRACTION_SCALE = 4.0
+
 
 def build_portfolio_state_for_spec(
     *,
@@ -73,8 +78,7 @@ def execution_plan_to_proposal(
     direction = 1 if delta > 0 else -1 if delta < 0 else 0
     if direction == 0:
         return None
-    # Map delta magnitude to size_fraction (same slot semantics as legacy propose_action)
-    size_fraction = min(1.0, abs(delta) * 4.0)
+    size_fraction = min(1.0, abs(delta) * SPEC_POLICY_DELTA_TO_SIZE_FRACTION_SCALE)
     if size_fraction <= 0:
         return None
     stop_pct = max(0.002, min(0.05, float(fc.volatility) * 2.0))

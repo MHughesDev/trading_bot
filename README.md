@@ -24,9 +24,9 @@ python -m app.runtime.live_service
 
 For **Alpaca paper**, set `NM_ALPACA_API_KEY` / `NM_ALPACA_API_SECRET`. To align in-memory positions with the broker periodically (recommended), set `NM_POSITION_RECONCILE_ENABLED=true` (see `execution.position_reconcile_*` in `app/config/default.yaml`).
 
-Configure secrets via `.env` (prefix `NM_` for app settings). **Never use Alpaca for market data.**
+Configure secrets via `.env` (prefix `NM_` for app settings — see [`.env.example`](.env.example)). **Never use Alpaca for market data.**
 
-**Decision pipeline (only path):** master spec — **`forecaster_model`** (xLSTM stack) → **`ForecastPacket`** → **`PolicySystem`** → risk / execution (see [`docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](docs/Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) and [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD)). Optional: `NM_MODELS_FORECASTER_CHECKPOINT_ID`, `NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH` for packet lineage and conformal JSON. Historical note: [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](docs/MIGRATION_TO_SPEC_PIPELINE.MD).
+**Decision pipeline (only path):** master spec — **`forecaster_model`** (xLSTM stack) → **`ForecastPacket`** → **`PolicySystem`** → risk / execution (see [`docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](docs/Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) and [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD)). At runtime this uses the **NumPy reference forecaster** and **heuristic policy** until trained weights load (**FB-SPEC-02**); startup logs `decision pipeline serving mode:`. Optional: `NM_MODELS_FORECASTER_CHECKPOINT_ID` (lineage label only), `NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH` (conformal JSON). Historical note: [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](docs/MIGRATION_TO_SPEC_PIPELINE.MD).
 
 **Production:** set `NM_RISK_SIGNING_SECRET` so only `RiskEngine`-signed `OrderIntent`s reach venues; optional `NM_CONTROL_PLANE_API_KEY` for mutating control-plane routes. For local dev without signing, `NM_ALLOW_UNSIGNED_EXECUTION=true` (not for production).
 

@@ -109,8 +109,6 @@ Structured backlog for **all planned work**: new capabilities, production harden
 | FB-AUDIT-06 | Reliability | Open | **Sparse or flat bars:** document and harden behavior for WS gaps or near-constant OHLC from `ohlc_arrays_from_feature_row` (empty packet path, guards, policy abstention) | `app/runtime/`, `forecaster_model/inference/` |
 | FB-AUDIT-07 | Improvement | Open | **QuestDB trace completeness:** audit `decision_traces` payload for post-mortems (symbol, packet summary, risk outcome) without secrets/PII | `data_plane/storage/questdb.py`, `app/runtime/live_service.py` |
 | FB-AUDIT-08 | Platform | Open | **Grafana ↔ Prometheus audit:** verify dashboard JSON panels match current metric names after observability renames | `infra/grafana/`, `observability/` |
-| FB-AUDIT-09 | Reliability | Open | **Single-host alerting:** document 1–2 actionable thresholds (forecast guard abstain rate, execution errors) in RUNBOOKS or minimal alert rules | `docs/RUNBOOKS.MD`, `infra/` |
-| FB-AUDIT-10 | Platform | Open | **Integration test cadence:** document when to run `NM_INTEGRATION_SERVICES=1` + compose (e.g. pre-release) | `README.md` or `docs/Specs/TESTING_AND_CI.MD` |
 | FB-AUDIT-11 | Improvement | Open | **Property / invariant tests:** quantile ordering, risk clamp monotonicity, replay env `reset`/`step` contracts | `tests/` |
 | FB-AUDIT-12 | Spike | Open | **`RiskState` vs master spec §12:** field parity (`concentration_limit`, `daily_loss_limit_remaining`, etc.) between `app/contracts`, `policy_model`, and master spec | `app/contracts/risk.py`, `policy_model/objects/risk_state.py` |
 | FB-AUDIT-13 | Tech debt | Open | **Optional dependency pins:** `[models_torch]`, `[alpaca]` major versions for reproducible single-machine installs | `pyproject.toml` |
@@ -217,6 +215,9 @@ Do **not** track bugs here — use [`ISSUE_LOG.MD`](ISSUE_LOG.MD). Link IDs when
 | FB-SPEC-01 | 2026-04-11 | **Default `decision_pipeline_mode` = `spec_policy`** in `AppSettings` + `default.yaml`; `legacy` via env/YAML only |
 | FB-SPEC-04 | 2026-04-11 | **Real historical training:** `orchestration/training_campaign.py` + `real_data_bars.py` fetch Coinbase candles only; walk-forward triple splits; `forecaster_model/training/real_data_fit.py` QuantileRegressor; `rl_real_data_eval.py` heuristic rollout; human specs in `docs/Human Provided Specs/NIGHTLY_*` + `INITIAL_*` |
 | FB-PL-P2b | 2026-04-10 | **`policy_model.risk_bridge`:** `risk_state_to_policy_envelope` maps `RiskState` + `AppSettings` → `PolicyRiskEnvelope`; tests `test_policy_risk_bridge.py` |
+| FB-AUDIT-09 | 2026-04-11 | **Single-host alerting:** minimal metrics pointers in [`RUNBOOKS.MD`](RUNBOOKS.MD) (formal alert rules still optional) |
+| FB-AUDIT-10 | 2026-04-11 | **Integration test cadence:** documented in [`TESTING_AND_CI.MD`](Specs/TESTING_AND_CI.MD) — run `NM_INTEGRATION_SERVICES=1` + compose before release |
+| FB-AUDIT-14 | 2026-04-11 | **Rollback bundle:** RUNBOOKS section for artifacts + QuestDB volume ([`RUNBOOKS.MD`](RUNBOOKS.MD)) |
 
 ---
 
