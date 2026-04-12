@@ -54,3 +54,22 @@ def kraken_rest_pair(symbol: str) -> str:
 def kraken_ws_pair(symbol: str) -> str:
     """Pair for Kraken WebSocket v1 ``pair`` field — use wsname ``XBT/USD``."""
     return kraken_pair_from_symbol(symbol)
+
+
+def canonical_symbol_from_kraken_pair(pair: str) -> str:
+    """
+    Inverse of ``kraken_pair_from_symbol`` for WS/REST **pair** strings.
+
+    Kraken messages use ``wsname`` (e.g. ``XBT/USD``); config and QuestDB use ``BTC-USD``.
+    Unknown pairs fall back to ``BASE-QUOTE`` with ``XBT`` → ``BTC``.
+    """
+    s = pair.strip()
+    for canon, wsname in _KNOWN_WS.items():
+        if wsname == s:
+            return canon
+    if "/" not in s:
+        return s
+    base, quote = s.split("/", 1)
+    if base.upper() == "XBT":
+        base = "BTC"
+    return f"{base.upper()}-{quote.upper()}"
