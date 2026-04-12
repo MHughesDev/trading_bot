@@ -23,6 +23,10 @@ Optional **server-side sessions** in the same SQLite file (`operator_sessions` t
 
 On **Home**, a row above holdings/PnL summarizes **`GET /status`**: **preflight** (severity, issues/warnings), **production_preflight** (signing / unsigned / venue credentials flags), **execution profile** (legacy API off → default mode + per-asset note). Implemented in **`control_plane/health_strip.py`**.
 
+## Dashboard CSV export (FB-UX-011)
+
+On **Home**, **Download positions (CSV)** builds UTF-8 CSV from the same **`GET /portfolio/positions`** JSON used for the holdings table (one row per position, plus adapter/mode columns; if the venue call fails, one row records **`ok=false`** and the error). **Download P&L summary (CSV)** exports **`GET /pnl/summary`** for the selected timeframe (flattened window, realized/unrealized, ledger path). No server-side CSV route — client-side only.
+
 ## Init pipeline monitor (FB-UX-009)
 
 After **Initialize** on an **Asset** page, **Home** shows an **Init pipeline** panel: **symbol**, **job_id**, **`GET /assets/init/jobs/{id}`** status, and last completed step. It polls until the job reaches **`succeeded`** or **`failed`**. Use **Stop following** to clear the panel (or wait for a terminal state and dismiss). Implemented in **`control_plane/init_monitor.py`**.
