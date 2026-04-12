@@ -53,6 +53,15 @@ docker run --rm -p 8000:8000 trading-bot:local api
 
 Entrypoint commands: **`api`** (default, uvicorn `control_plane.api:app` on **8000**), **`streamlit`** (**8501**), **`live`** (`python -m app.runtime.live_service`), **`shell`**. Use **one process per container** and Compose to run API + UI + live side by side (**FB-CONT-P0** / **`docs/QUEUE.MD`**).
 
+**Compose overlay (FB-CONT-002)** — data plane + app:
+
+```bash
+# From repo root; requires `.env` (copy from `.env.example`)
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.app.yml up -d --build
+```
+
+Publishes **8000** (API + `/metrics`), **8501** (Streamlit). Mounts **`./data`** into the app containers for manifests, SQLite sidecars, and JSONL files. Sets **`NM_QUESTDB_HOST=questdb`**, **`NM_REDIS_URL`**, **`NM_QDRANT_URL`** for in-network services. Optional live loop: add **`--profile live`**.
+
 ---
 
 ## 🪟 Windows

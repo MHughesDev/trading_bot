@@ -2,6 +2,16 @@
 
 **First-time setup:** see **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** (checklist: venv, `.env`, Docker, preflight, venues). This file adds secrets, incident response, and execution-mode restart detail beyond that checklist.
 
+## Docker Compose — app + data stack (FB-CONT-002)
+
+Merge **`infra/docker-compose.yml`** (QuestDB, Redis, Qdrant, observability) with **`infra/docker-compose.app.yml`** (control plane + Streamlit, optional **`live`** profile). From the repo root, with **`.env`** present (gitignored; copy **`.env.example`**):
+
+```bash
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.app.yml up -d --build
+```
+
+**Ports:** **8000** FastAPI (**`GET /status`**, **`GET /metrics`**), **8501** Streamlit. **`NM_CONTROL_PLANE_URL`** for the Streamlit container defaults to **`http://trading-bot-api:8000`**. Host bind mounts **`./data`** → **`/app/data`** for registry, lifecycle, PnL ledger, and universe SQLite paths. Kraken and venue keys remain **only** via **`NM_*`** in **`.env`** — nothing in the image.
+
 ## Per-asset model registry (FB-AP-001 / FB-AP-002)
 
 Persisted manifests and HTTP API: **[`PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD)**. **`GET /status`** includes **`asset_model_registry.initialized_symbols`**. Mutating routes require **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set.
