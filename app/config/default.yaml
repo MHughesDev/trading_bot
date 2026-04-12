@@ -106,3 +106,4 @@ auth:
   session_cookie_name: tb_operator_session
   session_cookie_secure: false
   session_cookie_samesite: lax
+  venue_credentials_master_secret: null
