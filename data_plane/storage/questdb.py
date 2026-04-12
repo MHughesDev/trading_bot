@@ -44,20 +44,22 @@ class QuestDBWriter:
         if not self._conn:
             raise RuntimeError("not connected")
         sql = """
-        INSERT INTO bars (ts, symbol, open, high, low, close, volume, source)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO canonical_bars (ts, symbol, interval_seconds, open, high, low, close, volume, source, schema_version)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         await self._conn.execute(
             sql,
             (
                 bar.timestamp,
                 bar.symbol,
+                bar.interval_seconds,
                 bar.open,
                 bar.high,
                 bar.low,
                 bar.close,
                 bar.volume,
                 bar.source,
+                bar.schema_version,
             ),
         )
 

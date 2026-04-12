@@ -21,6 +21,7 @@ import polars as pl
 
 from app.config.settings import AppSettings
 from data_plane.features.pipeline import FeaturePipeline
+from data_plane.storage.canonical_bars import CANONICAL_BAR_PARQUET_COLUMNS
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ def write_init_feature_artifacts(
     cleaned_bars: pl.DataFrame,
     settings: AppSettings,
     feature_pipeline: FeaturePipeline | None = None,
+    canonical_interval_seconds: int | None = None,
 ) -> tuple[Path, Path, dict[str, Any]]:
     """
     Enrich bars with ``FeaturePipeline``, persist Parquet + manifest.
@@ -54,9 +56,18 @@ def write_init_feature_artifacts(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     sym = symbol.strip()
+    gran = canonical_interval_seconds
+    if gran is None:
+        if "interval_seconds" in cleaned_bars.columns:
+            gran = int(cleaned_bars["interval_seconds"][0])
+        else:
+            raise ValueError("cleaned_bars must include interval_seconds or pass canonical_interval_seconds")
     bars_with_sym = cleaned_bars.with_columns(pl.lit(sym).alias("symbol"))
+    # FB-AP-014: enforce column order for canonical Parquet
+    ordered = [c for c in CANONICAL_BAR_PARQUET_COLUMNS if c in bars_with_sym.columns]
+    bars_canonical = bars_with_sym.select(ordered)
     bars_path = run_dir / "bars_clean.parquet"
-    bars_with_sym.write_parquet(bars_path)
+    bars_canonical.write_parquet(bars_path)
 
     fp = feature_pipeline or FeaturePipeline(
         return_windows=settings.features_return_windows,
@@ -74,6 +85,7 @@ def write_init_feature_artifacts(
     manifest: dict[str, Any] = {
         "symbol": sym,
         "job_id": job_id,
+        "canonical_interval_seconds": gran,
         "bars_rows": int(bars_with_sym.height),
         "features_rows": int(enriched.height),
         "feature_columns": cols,
@@ -101,6 +113,7 @@ def init_features_detail_payload(manifest: dict[str, Any]) -> dict[str, Any]:
     """Subset for job step ``meta=`` JSON (avoid huge column lists)."""
     return {
         "symbol": manifest.get("symbol"),
+        "canonical_interval_seconds": manifest.get("canonical_interval_seconds"),
         "bars_rows": manifest.get("bars_rows"),
         "features_rows": manifest.get("features_rows"),
         "n_feature_columns": manifest.get("n_feature_columns"),

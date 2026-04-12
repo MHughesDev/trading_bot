@@ -195,6 +195,7 @@ def _from_candle_event(ev: dict[str, Any], parent: dict[str, Any]) -> BarEvent |
             low=float(c["low"]),
             close=float(c["close"]),
             volume=float(c.get("volume", 0)),
+            interval_seconds=60,
             source="coinbase",
             schema_version=1,
         )

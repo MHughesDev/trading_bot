@@ -57,6 +57,14 @@ def test_dedup_keeps_last() -> None:
     assert r.duplicates_removed == 1
     assert r.output_rows == 1
     assert float(r.cleaned["close"][0]) == 2.0
+    assert r.cleaned["interval_seconds"].to_list() == [60]
+
+
+def test_cleaned_includes_interval_seconds_fb_ap_014() -> None:
+    t = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    df = pl.DataFrame([_row(t, 1.0, 1.0, 1.0, 1.0, 1.0)])
+    r = validate_and_clean_init_bootstrap_bars(df, granularity_seconds=120)
+    assert r.cleaned["interval_seconds"].to_list() == [120]
 
 
 def test_gap_detection() -> None:

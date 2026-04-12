@@ -28,6 +28,9 @@ CANONICAL_BAR_COLUMNS: tuple[str, ...] = (
     "volume",
 )
 
+# After validate/clean, ``interval_seconds`` matches bootstrap granularity (FB-AP-014).
+CANONICAL_BAR_COLUMNS_WITH_INTERVAL: tuple[str, ...] = CANONICAL_BAR_COLUMNS + ("interval_seconds",)
+
 
 @dataclass(frozen=True)
 class InitBootstrapValidationResult:
@@ -111,6 +114,8 @@ def validate_and_clean_init_bootstrap_bars(
 
     if work.height == 0:
         raise ValueError("no rows left after removing invalid bootstrap bars")
+
+    work = work.with_columns(pl.lit(gran).alias("interval_seconds"))
 
     gap_intervals = 0
     max_gap_seconds: float | None = None
