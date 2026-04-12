@@ -1,0 +1,131 @@
+# Code review audit — functionality, correctness, quality, consistency
+
+**Audit passes:** **2026-04-17** (initial), **2026-04-17** (second pass — coverage expansion below)  
+**Scope:** Static review of critical paths, security-relevant defaults, dependency and subprocess usage, alignment with `AGENTS.md`. **Not** performance tuning, new features, load testing, or full penetration testing. **Not** exhaustive line-by-line coverage of the whole repo (~400 test files / full tree).
+
+**Method (pass 1):** Read `execution/intent_gate.py`, `execution/service.py`, `control_plane/api.py` (auth, CORS), `decision_engine/run_step.py`, `control_plane/preflight.py`; pattern scan `except Exception`, TODO/FIXME.
+
+**Method (pass 2):** `rg` for `CORSMiddleware` / `allow_origins`, `shell=True`, `eval(`, dangerous `pickle`, `subprocess` usage; spot-check `bare except` / `pass` in hot paths; verify audit doc completeness (out-of-scope list, sign-off, backlog).
+
+---
+
+## Executive summary
+
+| Theme | Assessment |
+|-------|------------|
+| **Trading path** | **Strong:** `RiskEngine` → signed `OrderIntent` → `ExecutionService.submit_order` → `require_execution_allowed` → adapter. |
+| **Live vs replay** | **Strong:** `run_decision_tick` is the shared decision step; `system_power` consulted early. |
+| **Operator safety** | **Mixed:** Preflight and `/status` expose configuration health; **API** can run **without** API key in dev (see A-1); **CORS** is fully permissive (see A-6). |
+| **Maintainability** | **Mixed:** Broad `except Exception` and bare `pass` in several modules — resilience vs debuggability tradeoff. |
+| **Repo policy** | **Enforced in CI:** Kraken-only market data (`ci_spec_compliance.sh`), MLflow promotion (`ci_mlflow_promotion_policy.sh`). |
+
+---
+
+## What this audit does **not** cover (explicit)
+
+- Performance profiling, latency SLOs, memory leaks  
+- Full security audit (OWASP-style), dependency CVE scan (use `pip-audit` / GitHub Dependabot separately)  
+- Coinbase / Alpaca API correctness against live vendor docs  
+- QuestDB / Redis / Qdrant data durability under failure  
+- Streamlit UX beyond error-handling patterns  
+- Contents of `legacy/` except to note policy: **frozen snapshot** per `AGENTS.md`
+
+---
+
+## Strengths
+
+| Area | Notes |
+|------|--------|
+| **Execution gate** | `require_execution_allowed` centralizes HMAC checks; `ExecutionService.submit_order` always invokes it before adapters. |
+| **Shared decision step** | `run_decision_tick` documented as shared live/replay path; `system_power` sync early. |
+| **Preflight** | Live mode flags missing signing secret and unsigned execution; adapter name validation. |
+| **Per-asset execution** | `adapter_for_symbol` / `_adapter_for_intent` keep routing aligned with `OrderIntent.symbol`. |
+| **Tests** | Large `tests/` suite; CI scripts enforce Kraken market-data policy and MLflow promotion policy. |
+| **Subprocess hygiene** | `power_supervisor` uses `subprocess.run` with argument list (no `shell=True` in sampled code). |
+| **Multi-tenant context** | `TenantContextMiddleware` + `ContextVar` for request-scoped user id (FB-UX-007 pattern). |
+
+---
+
+## Issues found
+
+| ID | Severity | Topic | Description |
+|----|----------|--------|-------------|
+| A-1 | **Medium** | Control plane auth | When **`NM_CONTROL_PLANE_API_KEY`** is **unset** and **`NM_AUTH_SESSION_ENABLED`** is false, **`require_mutate_operator`** allows mutating routes **without** credentials. Intentional for local dev; **unsafe** if the API is exposed without TLS + firewall or another auth layer. |
+| A-2 | **Low** | Error handling | Many **`except Exception:`** blocks across `live_service.py`, Streamlit, ingestion, and adapters. Reduces crashes but can **hide** programming errors; logs may not always include enough context. |
+| A-3 | **Low** | Intent gate semantics | If **`risk_signing_secret`** is **unset**, **`execution_allowed`** returns **True** (gate open) even when **`allow_unsigned_execution`** is false — because the “no secret” branch short-circuits. Preflight warns for **live**; still easy to misread. |
+| A-4 | **Info** | Queue maintenance | **`docs/QUEUE_STACK.csv`** must stay aligned with **`QUEUE.MD`** **Open** rows — **drift** if only one file is edited. |
+| A-5 | **Info** | Default config | **`app/config/default.yaml`** uses **`execution.mode: live`** — safe operation depends on **`.env`** and operator discipline. |
+| A-6 | **Medium** | CORS | **`control_plane/api.py`** registers **`CORSMiddleware`** with **`allow_origins=["*"]`** (and permissive methods/headers) for Streamlit/SSE (FB-AP-034). Correct for **LAN dev**; for **public** or **multi-tenant** deployment, **narrow origins** and review headers. |
+| A-7 | **Low** | Dependency hygiene | No automated **CVE** scan called out in-repo in this audit — rely on **`pip-audit`**, lockfiles, or GitHub **Dependabot** for ongoing supply-chain review. |
+
+---
+
+## Non-issues / verified (pass 2)
+
+| Check | Result |
+|-------|--------|
+| **`shell=True` in subprocess** | No problematic hits in sampled `rg` (PyTorch `model.eval()` is unrelated). |
+| **`eval(` / unsafe `pickle`** | No `eval(` in app paths from quick scan; no `pickle.loads` flagged in this pass. |
+| **`power_supervisor` terminate** | Uses `taskkill` with fixed args on Windows; `logger.exception` on failure — reasonable. |
+| **Kraken market data policy** | Documented in `AGENTS.md`; enforced by **`scripts/ci_spec_compliance.sh`**. |
+
+---
+
+## Recommended changes (not implemented by this audit doc)
+
+1. **A-1 / A-6:** Document in **`README.md`** / **`RUNBOOKS.MD`**: production **must** use **TLS**, **firewall**, **`NM_CONTROL_PLANE_API_KEY`** and/or **session auth**, and **restrict CORS origins** when exposing the API beyond localhost. Optional: env-driven `allow_origins` list defaulting to `["*"]` only in dev.
+2. **A-2:** Prefer **`logging.exception`** or structured logs in hot paths; narrow exceptions where the failure mode is known.
+3. **A-3:** Add a short comment in **`intent_gate.py`** explaining the “no secret → allow” branch vs preflight.
+4. **A-4:** Ensure **`AGENTS.md`** §10 or contributor checklist mentions **`QUEUE_STACK.csv`** when editing queue workflow (may already be partially covered).
+5. **A-5:** Product decision: default **`execution.mode: paper`** in `default.yaml` for safer first clone — optional.
+6. **A-7:** Add optional **`pip-audit`** or document it in **`README.md`** CI / operator section.
+
+---
+
+## Files reviewed (cumulative, non-exhaustive)
+
+- `execution/intent_gate.py`, `execution/service.py`, `execution/router.py` (indirect)  
+- `control_plane/api.py` (auth, CORS, middleware order)  
+- `control_plane/preflight.py`  
+- `decision_engine/run_step.py`  
+- `app/runtime/power_supervisor.py` (subprocess sample)  
+- `app/config/default.yaml` (spot)  
+- Pattern scans: `except Exception`, `pass`, `CORSMiddleware`, `shell=True`
+
+---
+
+## Sign-off
+
+| Item | Status |
+|------|--------|
+| Critical trading path (risk → signed intent → gate → adapter) | **Reviewed** (architecture consistent) |
+| Control plane exposure (auth + CORS) | **Reviewed** — **action items** for production deployment |
+| CI policy scripts | **Referenced** — not re-run as part of this document |
+| **Residual risk** | Operators **must** configure secrets and network boundaries; codebase assumes **trusted network** unless configured otherwise. |
+
+---
+
+## Granular backlog (candidate queue items — **do not** add to `QUEUE.MD` until prioritized)
+
+*Optional IDs for future **`QUEUE_STACK.csv` / §2** rows.*
+
+| ID | Theme | Suggestion |
+|----|-------|------------|
+| DOC-A1 | Docs | “Production API hardening”: API key + TLS + CORS origins; link from README. |
+| OPS-A1 | Ops | Startup warning if `control_plane_api_key` unset **and** bind is non-loopback. |
+| QA-A1 | Quality | Pass over `except Exception` in `app/runtime/live_service.py` — ensure logging + symbol context. |
+| QA-A2 | Quality | Same for `control_plane/asset_page.py`, `streamlit_util.py`. |
+| CODE-A1 | Code | Comment in `intent_gate.py` for “no secret → allow”. |
+| CI-A1 | CI | Optional: validate `QUEUE_STACK.csv` vs `QUEUE.MD` Open rows. |
+| SEC-A1 | Security | Env-configurable CORS allowlist; default strict outside dev. |
+| SEC-A2 | Security | Document `NM_AUTH_SESSION_COOKIE_SECURE` for HTTPS deployments. |
+| SEC-A3 | Security | Add **`pip-audit`** (or document) in dev / CI docs. |
+| TEST-A1 | Tests | Coverage for `require_mutate_operator` wrong/missing key when key required. |
+| DEBT-A1 | Tech debt | Inventory `except: pass` / silent `pass` after exceptions; replace with logging. |
+| DATA-A1 | Data plane | Periodic review: QuestDB writer errors surfaced to operators (metrics/alerts). |
+| MT-A1 | Multi-tenant | Review all file paths use tenant prefix when `NM_MULTI_TENANT_DATA_SCOPING=true`. |
+| LEGACY-A1 | Legacy | Ensure `legacy/` imports stay out of main V3 tree (CI already helps for Alpaca data). |
+
+---
+
+*This file is an audit artifact; it does not change runtime behavior. Update this document after major architecture or auth changes.*
