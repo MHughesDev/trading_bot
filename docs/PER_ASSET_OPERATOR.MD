@@ -71,5 +71,6 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 
 ## Related
 
+- [`ADR_CANONICAL_BAR_STORAGE.MD`](ADR_CANONICAL_BAR_STORAGE.MD) — canonical bar storage decision (FB-AP-013).
 - [`RUNBOOKS.MD`](RUNBOOKS.MD) — execution and preflight.
 - [`QUEUE.MD`](QUEUE.MD) **FB-AP-P0** — remaining per-asset UI, init pipeline, guards in `DecisionPipeline`.
