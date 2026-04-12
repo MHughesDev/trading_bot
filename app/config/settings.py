@@ -91,6 +91,8 @@ class AppSettings(BaseSettings):
     questdb_persist_decision_traces: bool = False
     questdb_persist_canonical_bars: bool = False
     questdb_persist_microservice_events: bool = False
+    # FB-AP-018: on live loop start, compare QuestDB max(ts) to last closed bucket for initialized symbols
+    questdb_startup_gap_detection: bool = False
     questdb_batch_max_rows: int = 500
     questdb_flush_interval_seconds: float = 2.0
 
@@ -236,6 +238,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["questdb_persist_decision_traces"] = qd["persist_decision_traces"]
         if "persist_canonical_bars" in qd:
             out["questdb_persist_canonical_bars"] = bool(qd["persist_canonical_bars"])
+        if "startup_gap_detection" in qd:
+            out["questdb_startup_gap_detection"] = bool(qd["startup_gap_detection"])
         if "persist_microservice_events" in qd:
             out["questdb_persist_microservice_events"] = bool(qd["persist_microservice_events"])
         if "batch_max_rows" in qd:

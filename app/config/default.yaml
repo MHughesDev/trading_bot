@@ -70,6 +70,7 @@ observability:
 questdb:
   persist_decision_traces: false
   persist_canonical_bars: false
+  startup_gap_detection: false
   persist_microservice_events: false
   batch_max_rows: 500
   flush_interval_seconds: 2.0

@@ -75,5 +75,6 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 - **FB-AP-014** — logical schema: bucket-start UTC `timestamp`, `interval_seconds`, OHLCV; Parquet `bars_clean.parquet` column order in `data_plane.storage.canonical_bars`.
 - **FB-AP-015** — dedupe key ``(symbol, timestamp, interval_seconds)``; last-write-wins in Polars merge helpers; QuestDB `insert_bar` is idempotent (delete-then-insert).
 - **FB-AP-016 (live loop)** — Kraken WS messages are normalized to ticks; **`RollingBars`** rolls OHLCV by **`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`** (default 1s). **Persisted** rows are **closed buckets only** (last-write-wins per FB-AP-015). Enable with **`NM_QUESTDB_PERSIST_CANONICAL_BARS=true`** (requires QuestDB connection settings). Pair strings from Kraken (e.g. `XBT/USD`) map to canonical symbols (`BTC-USD`) for rollers and storage.
+- **FB-AP-018 (startup)** — With **`NM_QUESTDB_STARTUP_GAP_DETECTION=true`** and QuestDB reachable, the live loop compares **`max(ts)`** in **`canonical_bars`** (per manifest symbol, same **`interval_seconds`** as live bars) to the **last closed** UTC bucket; logs **`canonical_bar_gap`** when behind or empty (**FB-AP-019** fills gaps).
 - [`RUNBOOKS.MD`](RUNBOOKS.MD) — execution and preflight.
 - [`QUEUE.MD`](QUEUE.MD) **FB-AP-P0** — remaining per-asset UI, init pipeline, guards in `DecisionPipeline`.
