@@ -15,7 +15,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(nm_decision_latency_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(tb_decision_latency_seconds_bucket[5m])) by (le))",
           "legendFormat": "p95 decision latency",
           "refId": "A"
         }
@@ -30,7 +30,7 @@
       "id": 2,
       "targets": [
         {
-          "expr": "nm_pnl_usd",
+          "expr": "tb_pnl_usd",
           "legendFormat": "PnL USD",
           "refId": "A"
         }
@@ -45,7 +45,7 @@
       "id": 3,
       "targets": [
         {
-          "expr": "rate(nm_forecast_build_fallback_total[5m])",
+          "expr": "rate(tb_forecast_build_fallback_total[5m])",
           "legendFormat": "forecast fallback rate",
           "refId": "A"
         }
@@ -60,7 +60,7 @@
       "id": 4,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(nm_policy_shadow_target_exposure_delta_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(tb_policy_shadow_target_exposure_delta_bucket[5m])) by (le))",
           "legendFormat": "p95 policy shadow delta",
           "refId": "A"
         }
@@ -72,13 +72,13 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["nautilus-monster"],
+  "tags": ["trading-bot"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
-  "title": "NautilusMonster overview",
-  "uid": "nm-overview",
+  "title": "Trading Bot overview",
+  "uid": "tb-overview",
   "version": 1,
   "weekStart": ""
 }

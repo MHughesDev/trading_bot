@@ -12,12 +12,14 @@
 |---|---------|
 | [§1](#1-conventions) | Conventions (Kind, IDs, priority, phase, category) |
 | [§2](#2-open-queue) | **Open** queue (roadmap + deferred) |
+| [§2.2](#22-per-asset-product-epic-fb-ap-p0) | **FB-AP-P0** — per-asset product (registry, UI, data, scheduling) |
 | [§3](#3-resolved-fixes-il) | Resolved **fixes** (`IL-*`) |
 | [§4](#4-completed-compliance-gates-hg) | Completed **gates** (`HG-*`) |
 | [§5](#5-completed-archive-fb--themes) | Completed **archive** (`FB-*`) |
 | [§6](#6-what-is-already-in-good-shape) | Healthy areas |
 | [§7](#7-github-sync-optional) | GitHub sync |
 | [§8](#8-how-to-add-an-entry) | How to add an entry |
+| — | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) — agent prompt: slice → tests → PR → merge → prune |
 
 ---
 
@@ -56,7 +58,30 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 **Phase (for `FB-*` open work):** **A** — core trading intelligence; **B** — operator product; **C** — distributed platform; **D** — deferred.
 
+**Batch (for `FB-AP-*` and similar epics):** Short **theme code** so multiple rows can belong to the same initiative without being duplicates. Batch is **not** a sprint calendar; it is a **grouping key** for related line items.
+
+| Batch | Theme (FB-AP-P0) |
+|-------|-------------------|
+| **AP-ALL** | Epic umbrella / cross-cutting |
+| **AP-PAM** | Per-asset manifest + registry + tests |
+| **AP-ENF** | Enforcement guards + active watch loop |
+| **AP-STA** | Per-asset state machine |
+| **AP-INI** | Initialization pipeline (orchestrator + steps + register) |
+| **AP-DAT** | Canonical storage, rollups, dedup, ADR |
+| **AP-WS** | WebSocket → canonical bars |
+| **AP-BF** | Startup gap detection + Kraken backfill |
+| **AP-UNI** | Alpaca/Coinbase universe + cross-ref + search API |
+| **AP-API** | Symbol-scoped HTTP (chart, fills, docs) |
+| **AP-UI-D** | Dashboard |
+| **AP-UI-A** | Asset Page + chrome (routes, chart, markers, buttons, menu) |
+| **AP-EX** | Execution (flatten on stop, adapters) |
+| **AP-RT** | Realtime push to UI |
+| **AP-SCH** | Schedulers (nightly, app-as-master) |
+| **AP-REM** | Removal of global power / global live-paper |
+
 **Category:** **FR**, **PF**, **UI**, **DS**, **MS**, **XX** (roadmap); **EX**, **MD**, **DP**, **RT**, **CP**, **OB**, **OP**, **CI**, **CFG** (fixes / §3).
+
+**Affected files (open-queue tables):** Pipe-separated **primary** paths or globs the implementer expects to touch; **non-exhaustive** — use for navigation, not as a complete dependency closure.
 
 **Fix urgency (`IL-*`):** **P1** / **P2** / **P3**.
 
@@ -68,11 +93,63 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-12):** no open **HIGH** / **MEDIUM** backlog rows — only **§2.1** deferred (**FB-N1**, **FB-N3**) and optional GitHub issue sync in **§7**.
+**Status (2026-04-12):** open **HIGH** backlog — **§2.2 [FB-AP-P0](#22-per-asset-product-epic-fb-ap-p0)** (per-asset product: strict model separation, two-page UI, universe search, canonical bars, scheduling). Still deferred: **§2.1** (**FB-N1**, **FB-N3**) and optional GitHub sync **§7**.
 
 ### HIGH priority
 
 *P0 / P1 — release-critical and core architecture.*
+
+### 2.2 Per-asset product epic (**FB-AP-P0**)
+
+**Brief:** Deliver **strict per-asset model ownership** (dedicated Forecaster and RL **lifecycle and artifacts** per symbol, **no shared ambiguous model state**), an **asset initialization pipeline** separate from live loops (Kraken REST historical → validate → features → initial forecaster + RL train/init → registered ready state), **tradable-universe** sync from **Alpaca** and **Coinbase** with cross-reference and **in-app search**, **symbol-scoped** data load and APIs (no global preload of other symbols’ series), **unified canonical bar storage** for REST backfill and WS-derived updates (seconds-resolution canonical table per asset as the single source of truth; higher intervals derived or materialized for charts and training), **startup backfill** of gaps for initialized assets, **two primary pages only** — **Dashboard** (holdings list + **PnL-only** chart with timeframe dropdown; **no** global hard start/stop) and **Asset Page** (one symbol: OHLC/candlestick chart with intervals **second / minute / hour / day / week / month**, buy/sell markers, per-asset **Paper/Live** dropdown, top-right **Initialize / Start / Stop** reflecting real state, **Stop** halts active watch and **flattens position**), **application running** as master for nightly jobs (when app is off, nothing runs), **nightly forecaster retrain** for every **initialized** asset, **RL retrain only when** that asset had **trading activity** in the prior period (skip RL on no-trade days; still run forecaster), **left slide-in menu** listing **active** (watching) assets with navigation to Asset Page, **low-latency chart updates** via push (WebSocket/SSE) scoped to the selected symbol, **remove** application-wide live/paper toggle and **remove** global system power hard stop. **Enforcement:** runtime and config must **enumerate** symbol → model instance and refuse cross-symbol reuse without explicit binding.
+
+**Table columns:** **Batch** = theme group; **Phase** = [§1.3](#13-priority-phase-category-status); **Affected files** = primary touch list.
+
+| ID | Batch | Phase | Cat | Kind | Pri | Status | Summary | Affected files |
+|----|-------|-------|-----|------|-----|--------|---------|----------------|
+| FB-AP-P0 | AP-ALL | B | XX | feature | HIGH | Open | **(Epic parent)** Owns end-to-end delivery of the per-asset operator product described in the **Brief** above: registry and enforcement for one Forecaster and one RL stack per traded asset; initialization pipeline; universe discovery; canonical historical storage and backfill; two-page UI; per-asset execution mode and lifecycle buttons; scheduling rules; removal of legacy global controls. Sub-rows **FB-AP-001**… are independently closable slices; implement in batch order where dependencies exist (registry before runtime wiring, storage contract before UI chart queries). | `docs/QUEUE.MD`, `app/`, `control_plane/`, `data_plane/`, `decision_engine/`, `execution/`, `forecaster_model/`, `models/`, `orchestration/`, `risk_engine/`, `tests/` |
+| FB-AP-001 | AP-PAM | B | PF | feature | HIGH | Open | **Per-asset model manifest schema:** Define a versioned contract (JSON or DB row) that binds **exactly one canonical symbol** to **forecaster artifact paths** (weights, conformal, config), **RL/policy artifact paths**, optional **runtime instance id**, and **last trained** metadata. No global single `NM_MODELS_*` path may remain the only source of truth for multi-symbol operation; manifest must be the operator-visible enumeration of which model files belong to which asset. Include validation on load: symbol in manifest must match request symbol. | `app/config/`, `app/contracts/`, `data/` (e.g. `data/asset_model_registry/`), `docs/` |
+| FB-AP-002 | AP-PAM | B | PF | feature | HIGH | Open | **Registry persistence and CRUD:** Implement durable storage for the per-asset manifest (filesystem with atomic writes or SQLite/QuestDB table — pick one in design). Support create/update on successful initialization, read on runtime startup, and listing for UI (all initialized assets). Must survive process restarts and support concurrent read during trading. | `data_plane/storage/` or `app/runtime/`, `control_plane/` (indirect), `tests/` |
+| FB-AP-003 | AP-ENF | B | FR | hardening | HIGH | Open | **Runtime guard — Forecaster binding:** In `DecisionPipeline` (or equivalent), loading a forecaster for a tick must assert `manifest.symbol == decision_symbol`; refuse or abstain if a global fallback path would mix symbols. Log explicit error with symbol and manifest id. Prevents silent reuse of one checkpoint across multiple assets. | `decision_engine/pipeline.py`, `forecaster_model/inference/`, `app/contracts/` |
+| FB-AP-004 | AP-ENF | B | MD | hardening | HIGH | Open | **Runtime guard — RL / policy binding:** Policy inference and training artifact resolution must be keyed by the same per-asset manifest; no shared policy weights applied to a different symbol without an explicit multi-head design (out of scope — forbidden for V1 of this epic). | `models/policy/`, `decision_engine/`, `orchestration/` |
+| FB-AP-005 | AP-STA | B | RT | feature | HIGH | Open | **Per-asset state machine:** Define states `uninitialized`, `initialized_not_active`, `active` (watching: inference + decision loop on schedule for this symbol only). Transitions: user **Initialize** runs init pipeline → `initialized_not_active`; **Start** → `active`; **Stop** from `active` → `initialized_not_active` and triggers flatten rule. Persist state per asset; expose via API for UI button labels (**Initialize** / **Start** / **Stop**). | `app/runtime/` (new module), `control_plane/api.py`, `tests/` |
+| FB-AP-006 | AP-INI | B | DS | feature | HIGH | Open | **Init pipeline orchestrator:** A dedicated job runner (async task queue or subprocess) that executes the initialization sequence **only** for one symbol at a time per job: orchestrates Kraken fetch, validation, features, forecaster train, RL init — **not** mixed into the live WebSocket tick loop. Report progress and failure reasons to UI/API. | `orchestration/` (new `asset_init_pipeline.py` or similar), `app/runtime/` |
+| FB-AP-007 | AP-INI | B | DP | feature | HIGH | Open | **Init step — Kraken historical pull:** Fetch bootstrap history for the asset from **Kraken REST** (market data source of truth per repo policy), parameterized range and granularity appropriate for first train. Handle rate limits and pair mapping (internal pair vs display symbol). | `data_plane/ingest/`, `orchestration/real_data_bars.py`, `KrakenRESTClient` usage |
+| FB-AP-008 | AP-INI | B | DP | feature | HIGH | Open | **Init step — clean and validate:** Schema validation, duplicate timestamp removal, gap detection logged, outlier policy (documented). Output aligned with canonical bar format used by storage (see FB-AP-DAT rows). | `data_plane/`, `orchestration/` |
+| FB-AP-009 | AP-INI | B | FR | feature | HIGH | Open | **Init step — features and preprocessing:** Run existing `FeaturePipeline` / bar enrichment for the init window; outputs fed to training; all scoped to **one** symbol per job. | `data_plane/features/`, `decision_engine/feature_frame.py` |
+| FB-AP-010 | AP-INI | B | FR | feature | HIGH | Open | **Init step — initial Forecaster training:** Train or distill forecaster into **asset-specific** output directory referenced from manifest; no writing to a shared global artifact path unless symlinked per asset. Wire `tb-train-forecaster-distill` or successor with symbol-scoped `--artifact-dir`. | `forecaster_model/training/`, `orchestration/` |
+| FB-AP-011 | AP-INI | B | MD | feature | HIGH | Open | **Init step — RL train or initialize:** Create or train initial RL/policy artifacts under **asset-specific** paths; align with existing policy env contracts. Register paths in manifest. | `models/`, `orchestration/training_campaign.py`, `policy` stubs |
+| FB-AP-012 | AP-INI | B | PF | feature | HIGH | Open | **Init completion — register initialized:** On success, write manifest row, set state `initialized_not_active`, emit event for UI. On partial failure, deterministic cleanup or retry policy documented. | `data/asset_model_registry/` (or chosen store), `app/runtime/asset_state.py` (suggested), `control_plane/api.py` |
+| FB-AP-013 | AP-DAT | B | DS | spike | HIGH | Open | **Storage evaluation spike:** Document current bar storage (files, QuestDB, Parquet, etc.) vs requirements: long retention, fast range reads for charts, sequential reads for training, incremental append, deduplication. **Decision:** keep extend vs replace; if replace, migration plan for initialized assets. Deliver short **ADR** in `docs/`. | `data_plane/storage/`, `docs/*.MD` |
+| FB-AP-014 | AP-DAT | B | DS | feature | HIGH | Open | **Canonical per-asset bar table (seconds resolution):** Implement or standardize **one** logical schema per symbol for OHLCV at **1-second** (or sub-second bucket if product chooses; document) bars as the **authoritative** series. REST history and WS-derived aggregates **must** land in the same schema to avoid dual histories. | `data_plane/`, `data_plane/storage/schemas.py`, QuestDB DDL or Parquet layout |
+| FB-AP-015 | AP-DAT | B | DP | feature | HIGH | Open | **Idempotent merge and dedup:** Upsert or merge logic so backfill replays and live inserts never create duplicate keys `(symbol, ts)`; support **last-write-wins** or explicit conflict rules for OHLC. | `data_plane/storage/`, `tests/` |
+| FB-AP-016 | AP-WS | B | DP | feature | HIGH | Open | **WebSocket → canonical bars:** Ingest Kraken WS ticks/trades per symbol, aggregate **in process** into **1-second** (or chosen canonical) OHLC buckets **before** persist, matching REST bar format (same columns, same timezone). Document aggregation rules (partial bar updates). | `data_plane/ingest/`, `services/market_data_service/` or `live_service` path |
+| FB-AP-017 | AP-DAT | B | DS | feature | MEDIUM | Open | **Derived intervals for chart and training:** Materialized views or on-the-fly resample: **minute, hour, day, week, month** from canonical seconds (and **second** as native). Ensure chart API and training use these consistently; no duplicate conflicting rollups in different modules. | `data_plane/bars/`, API layer |
+| FB-AP-018 | AP-BF | B | DP | feature | HIGH | Open | **Startup gap detection:** On app launch, for each **initialized** asset, read **max stored timestamp**; if behind wall-clock or last close, compute gap range. | `app/runtime/`, `data_plane/storage/` (canonical bars per FB-AP-014) |
+| FB-AP-019 | AP-BF | B | DP | feature | HIGH | Open | **Startup Kraken backfill:** For each gap, fetch missing history from Kraken REST, validate, merge via FB-AP-015, update **current through** timestamp in registry or sidecar. Runs before resuming active watch loops for that symbol. | `orchestration/real_data_bars.py`, `data_plane/ingest/` |
+| FB-AP-020 | AP-UNI | B | EX | feature | MEDIUM | Open | **Alpaca tradable universe sync:** Periodic job lists **tradable** assets from Alpaca API, persists to local store (SQLite/JSON), refresh on schedule and on demand. Stores metadata needed for search (symbol, name, class). | `execution/adapters/` (Alpaca client), `data/` or `data_plane/`, `control_plane/api.py` |
+| FB-AP-021 | AP-UNI | B | EX | feature | MEDIUM | Open | **Coinbase tradable universe sync:** Same pattern for Coinbase list products; persist separately with sync timestamps. | `execution/adapters/coinbase_live.py`, `execution/coinbase_advanced_http.py`, `data/` |
+| FB-AP-022 | AP-UNI | B | PF | feature | MEDIUM | Open | **Cross-reference and supported set:** Define rule (intersection vs union vs “either lists as tradable”) to produce **platform_supported_symbols**; version the rule in docs. Build filtered list used **only** for search and eligibility — not for Kraken pair mapping (Kraken remains data path). | `docs/`, `app/config/`, registry module |
+| FB-AP-023 | AP-UNI | B | UI | feature | MEDIUM | Open | **Search API:** HTTP endpoint returning paginated/filtered symbols from **FB-AP-022** set; no loading of OHLC for all symbols — metadata only until user selects one. | `control_plane/api.py`, `tests/` |
+| FB-AP-024 | AP-API | B | CP | feature | HIGH | Open | **Symbol-scoped chart API:** GET bars for **one** symbol and interval + time range; reject or ignore requests that omit symbol. No endpoint returns all symbols’ series in one call for chart use. | `control_plane/api.py`, `data_plane/storage/` |
+| FB-AP-025 | AP-API | B | CP | feature | HIGH | Open | **Symbol-scoped fills / trade markers:** API for buy/sell points to overlay on Asset Page chart (from paper/live fills or intents — define source of truth). | `execution/`, `control_plane/api.py`, QuestDB or ledger |
+| FB-AP-026 | AP-UI-D | B | UI | change | HIGH | Open | **Dashboard redesign:** Single **PnL** chart with **timeframe dropdown** (align with existing PnL ledger time buckets); list **current holdings**; **remove** global hard start/stop controls and **remove** application-wide live vs paper toggle. | `control_plane/Home.py`, `control_plane/pnl_panel.py`, `docs/` |
+| FB-AP-027 | AP-UI-A | B | UI | feature | HIGH | Open | **Asset Page — routing:** Only two primary routes: **Dashboard** and **Asset Page** (`/asset/<symbol>` or equivalent); deep links from search and slide menu. | `control_plane/`, `operator_packaging/` launch URL |
+| FB-AP-028 | AP-UI-A | B | UI | feature | HIGH | Open | **Asset Page — candlestick chart:** OHLC visualization; interval selector: **second, minute, hour, day, week, month** (week/month from derived rollups). Lazy-fetch data **only for active symbol** when page loads or interval changes. | `control_plane/asset_page.py` (suggested), `control_plane/api.py` (chart endpoints) |
+| FB-AP-029 | AP-UI-A | B | UI | feature | HIGH | Open | **Asset Page — buy/sell markers:** Overlay entry/exit points from FB-AP-025 on chart; legend and tooltip. | `control_plane/` |
+| FB-AP-030 | AP-UI-A | B | UI | feature | HIGH | Open | **Per-asset Paper/Live dropdown:** Persists per symbol (manifest or sidecar); execution adapter selection for **that symbol’s** orders only; remove reliance on single global `NM_EXECUTION_MODE` for UI-driven mode (env may remain for defaults). | `execution/router.py`, `app/config/settings.py`, `control_plane/` |
+| FB-AP-031 | AP-UI-A | B | UI | feature | HIGH | Open | **Initialize / Start / Stop button:** Top-right control bound to **FB-AP-005** state: show **Initialize** if uninitialized, **Start** if initialized but not active, **Stop** if active (watching). Disable illegal transitions; show loading during init job. | `control_plane/` |
+| FB-AP-032 | AP-EX | B | EX | feature | HIGH | Open | **Stop behavior — flatten:** When **Stop** from active state, cancel/stop watch loop **immediately**, submit **sell/close** for open position per venue rules (paper vs live), handle partial fills; update state to `initialized_not_active`. Document order type (market vs limit) in runbook. | `execution/`, `app/runtime/`, `risk_engine/` |
+| FB-AP-033 | AP-UI-A | B | UI | feature | MEDIUM | Open | **Left slide-in menu:** Lists **active** assets (symbols in `active` state); click navigates to Asset Page; available from both Dashboard and Asset Page; static chrome requirement. | `control_plane/` (session state / components) |
+| FB-AP-034 | AP-RT | B | CP | feature | MEDIUM | Open | **Low-latency chart push:** WebSocket or SSE subscription **per open Asset Page symbol** streaming new bars or last-price updates from canonical store or ingest path; unsubscribe on navigation away. | `control_plane/api.py` (WS route), `uvicorn`, frontend loop |
+| FB-AP-035 | AP-SCH | B | OP | feature | HIGH | Open | **App runtime as master:** Background schedulers (nightly train, universe refresh) register only when **application process** is running; no training when `.exe` closed. Document behavior. | `orchestration/nightly_retrain.py`, `app/runtime/` |
+| FB-AP-036 | AP-SCH | B | OP | feature | HIGH | Open | **Nightly forecaster retrain:** For every **initialized** asset (including those not **active**), run forecaster retrain on schedule while app is up. Per-asset artifact paths from manifest. | `orchestration/nightly_retrain.py`, `forecaster_model/training/`, per-asset dirs under `data/` |
+| FB-AP-037 | AP-SCH | B | MD | feature | HIGH | Open | **Nightly RL conditional:** Run RL retrain **only** if that asset had **at least one trade** (or defined activity signal) in the prior day/session; **skip** RL on **zero-trade** days; **still** run forecaster nightly. Persist criterion in config. | `orchestration/nightly_retrain.py`, `data/` trade log |
+| FB-AP-038 | AP-ENF | B | RT | feature | HIGH | Open | **Active watch loop — per symbol:** When `active`, run inference/decision/risk on **this symbol only** on configured cadence (e.g. per minute); no global loop iterating all symbols unless isolated tasks per symbol. | `app/runtime/live_service.py` or successor, task scheduler |
+| FB-AP-039 | AP-REM | B | UI | change | HIGH | Open | **Remove global system power / hard stop:** Delete or hide UI and API for **system-wide** power off that halted all trading/inference; replace mental model with **app open = schedulers allowed**, **per-asset Stop** for trading watch. Align `GET /system/power` or remove if obsolete. | `control_plane/`, `control_plane/api.py`, `app/runtime/power_supervisor.py` |
+| FB-AP-040 | AP-REM | B | CFG | change | HIGH | Open | **Remove app-wide live/paper switch:** Eliminate Streamlit/API control that sets **single** execution mode for whole system; execution mode comes from **per-asset** setting (FB-AP-030) with migration note for existing `.env` users. | `control_plane/Home.py`, `app/config/settings.py`, `docs/` |
+| FB-AP-041 | AP-API | B | CP | reliability | MEDIUM | Open | **Operator docs and RUNBOOKS:** Update `README.md`, `docs/RUNBOOKS.MD`, and new **`docs/PER_ASSET_OPERATOR.MD`** (or similar) describing states, init pipeline, backfill, nightly rules, storage ADR, per-asset paper/live, Stop+flatten. | `docs/`, `README.md` |
+| FB-AP-042 | AP-PAM | B | CI | feature | MEDIUM | Open | **Integration tests:** Cover manifest round-trip, state transitions, guard rails rejecting wrong symbol, chart API scoped query, merge idempotency for duplicate timestamps. | `tests/` |
 
 ### Compliance & release gates (open)
 
@@ -136,7 +213,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 | FB-FR-P0-05-04 | A | FR | Hardening | Waived | **Guards + fallback:** `inference/guards.py` abstain behavior; README / RUNBOOKS operator table (torch vs NPZ vs RNG) | `forecaster_model/inference/guards.py`, `README.md`, `docs/RUNBOOKS.MD` |
 | FB-FR-P0-05-05 | A | FR | Test | Waived | **Integration test:** load stub checkpoint → `ForecastPacket` or equivalent contract in pipeline | `tests/` |
 
-*Note:* **Superseded** in part by shipped **`train_distilled_mlp_forecaster`**, **`nm-train-forecaster-distill`**, **`describe_walk_forward_folds`**, conformal tests, and **`tests/test_forecaster_torch_pipeline.py`** — see **FB-FR-P0-CLOSE** in [§5.5](#55-complete-archive-one-row-per-id).
+*Note:* **Superseded** in part by shipped **`train_distilled_mlp_forecaster`**, **`tb-train-forecaster-distill`**, **`describe_walk_forward_folds`**, conformal tests, and **`tests/test_forecaster_torch_pipeline.py`** — see **FB-FR-P0-CLOSE** in [§5.5](#55-complete-archive-one-row-per-id).
 
 ### Backlog items (open) — multi-asset **FB-SPEC-07**
 
@@ -350,7 +427,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-O1, FB-O2 | 2026-04-08 | Decision latency metric; Promtail + Grafana |
 | FB-S1 | 2026-04-10 | QuestDB batch flush + runbooks |
 | FB-C1 | 2026-04-10 | Streamlit + `streamlit_util` |
-| FB-UI-01-01, FB-UI-01-02 | 2026-04-11 | **`packaging/windows/`** — PyInstaller **`nm_operator_launcher`**, **`build_operator_bundle.bat`**; **[`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD)** §1.1 distribution |
+| FB-UI-01-01, FB-UI-01-02 | 2026-04-11 | **`packaging/windows/`** — PyInstaller **`trading_bot_operator_launcher`**, **`build_operator_bundle.bat`**; **[`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD)** §1.1 distribution |
 | FB-UI-02-01, FB-UI-02-02 | 2026-04-11 | **[`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD)** §2.2 shell comparison; **`operator_packaging/desktop_shell`**, **`run_desktop_dashboard.bat`**, **`pywebview`** in **`[dashboard]`** |
 | FB-DASH-02-01 … FB-DASH-02-03 | 2026-04-11 | **`GET/POST /system/execution-profile`**, `execution_profile` on **`GET /status`**; Streamlit sidebar; RUNBOOKS + README; `data/execution_profile.json` pending intent |
 | FB-DASH-03-01 … FB-DASH-03-03 | 2026-04-11 | **`PortfolioPositionRow`**, **`GET /portfolio/positions`**, Streamlit **Open positions** expander + refresh |
@@ -384,7 +461,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-AUDIT-14 | ops | 2026-04-11 | Rollback bundle runbook |
 | FB-B1 | risk | 2026-04-10 | `available_cash_usd` + replay |
 | FB-C1 | control_plane | 2026-04-10 | Streamlit + API helpers |
-| FB-UI-01-01 | platform | 2026-04-11 | **`packaging/windows/nm_operator_launcher.spec`** + **`nm_operator_launcher.py`** + **`build_operator_bundle.bat`** — mirrors **`run.bat`** |
+| FB-UI-01-01 | platform | 2026-04-11 | **`packaging/windows/trading_bot_operator_launcher.spec`** + **`trading_bot_operator_launcher.py`** + **`build_operator_bundle.bat`** — mirrors **`run.bat`** |
 | FB-UI-01-02 | docs | 2026-04-11 | **[`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD)** — § **1.1 Windows distribution (PyInstaller)** |
 | FB-UI-02-01 | docs | 2026-04-11 | **[`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD)** — § **2.2 Desktop shell options** (pywebview vs Electron vs Tauri) |
 | FB-UI-02-02 | platform | 2026-04-11 | **`operator_packaging/desktop_shell/streamlit_desktop_host.py`**, **`run_desktop_dashboard.bat`**, **`pywebview`** in **`[dashboard]`** |
@@ -465,12 +542,12 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-SPEC-03 | pipeline | 2026-04-11 | `model_artifact_contract` + `GET /status` |
 | FB-SPEC-04 | pipeline | 2026-04-11 | Real-candle training campaign |
 | FB-SPEC-05 | pipeline | 2026-04-11 | PyTorch `resolve_torch_device` |
-| FB-SPEC-06 | pipeline | 2026-04-11 | **Done:** filesystem `active_model_set.json` + drift; `GET /status` → `model_artifacts`; optional `MLflowModelRegistry` params/metrics (no auto-promote); `POST /models/version` → `nm_model_version_info` (`tests/test_model_artifacts.py`). Champion/candidate compare remains **FB-AUDIT-03**. |
+| FB-SPEC-06 | pipeline | 2026-04-11 | **Done:** filesystem `active_model_set.json` + drift; `GET /status` → `model_artifacts`; optional `MLflowModelRegistry` params/metrics (no auto-promote); `POST /models/version` → `tb_model_version_info` (`tests/test_model_artifacts.py`). Champion/candidate compare remains **FB-AUDIT-03**. |
 | FB-SPEC-07 | pipeline | 2026-04-12 | Parent + **07-01…03**: exposure/cross-symbol/operator doc — [`Specs/MULTI_ASSET_PORTFOLIO.MD`](Specs/MULTI_ASSET_PORTFOLIO.MD) |
 | FB-SPEC-07-01 | risk | 2026-04-12 | **`risk_max_total_exposure_usd`** / **`risk_max_per_symbol_usd`** + **`NM_RISK_MAX_*`** vs `market_data_symbols` |
 | FB-SPEC-07-02 | risk | 2026-04-12 | **Independent per-symbol** contract (no correlation/risk-parity hot path) |
 | FB-SPEC-07-03 | docs | 2026-04-12 | Doc ↔ `RiskEngine.evaluate` + operator warnings |
-| FB-FR-P0-CLOSE | models | 2026-04-12 | **FB-FR-P0** queue closed: **01** `DatasetManifest` + walk-forward tests; **02–06** NumPy `ForecasterModel` (VSN→…→quantiles) + **`build_torch_forecaster`** MLP; **03** `train_distilled_mlp_forecaster`, CLI **`nm-train-forecaster-distill`**, `describe_walk_forward_folds`; **04** conformal + ensemble + `tests/test_conformal_calibration_eval.py`; **05** `NM_MODELS_FORECASTER_TORCH_PATH` + `tests/test_forecaster_torch_pipeline.py` |
+| FB-FR-P0-CLOSE | models | 2026-04-12 | **FB-FR-P0** queue closed: **01** `DatasetManifest` + walk-forward tests; **02–06** NumPy `ForecasterModel` (VSN→…→quantiles) + **`build_torch_forecaster`** MLP; **03** `train_distilled_mlp_forecaster`, CLI **`tb-train-forecaster-distill`**, `describe_walk_forward_folds`; **04** conformal + ensemble + `tests/test_conformal_calibration_eval.py`; **05** `NM_MODELS_FORECASTER_TORCH_PATH` + `tests/test_forecaster_torch_pipeline.py` |
 | FB-FR-P0-WAIVE | models | 2026-04-12 | **Waived (optional):** human-spec **full PyTorch** VSN/xLSTM *trainer* — not required for hot path; use **MLP distill** + NumPy reference |
 | FB-MS-01 … FB-MS-06 | platform | 2026-04-11 | Microservices slices (Kraken WS path, FeaturePipeline, QuestDB audit, compose/runbooks, Alpaca smoke doc, §11 checklist) |
 | FB-N1-S1 | execution | 2026-04-13 | **`execution/adapter_registry`**, **`GET /status` → `execution_adapters`**, [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) |
@@ -517,7 +594,8 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 1. Pick a **Kind** from [§1.1](#11-kind-work-type).
 2. Assign **HIGH** / **MEDIUM** / **LOW** (maps to P0–P3).  
 3. Set **Phase** (**A** / **B** / **C** / **D**) and **Category** per [§1.3](#13-priority-phase-category-status).  
-4. Add a row in [§2](#2-open-queue) (roadmap), [§3](#3-resolved-fixes-il) (fixes), or note completed gates in [§4](#4-completed-compliance-gates-hg). Use the next **FB-** or **HG-** id; for large epics prefer **-01, -02** sub-ids.  
-5. Link **code paths** or tickets.
+4. For multi-row epics (e.g. **FB-AP-P0**), assign a **Batch** code ([§1.3](#13-priority-phase-category-status)) and add **Affected files** (pipe-separated primary paths).
+5. Add a row in [§2](#2-open-queue) (roadmap), [§3](#3-resolved-fixes-il) (fixes), or note completed gates in [§4](#4-completed-compliance-gates-hg). Use the next **FB-** or **HG-** id; for large epics prefer **-01, -02** sub-ids.  
+6. Link **code paths** or tickets.
 
 ---

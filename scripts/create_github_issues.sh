@@ -20,7 +20,7 @@ create() {
     gh issue create -R "$REPO" --title "$title" --body "$body"
 }
 
-create "Epic: NautilusMonster — remaining work" "Parent tracker for NautilusMonster. Close when \`docs/QUEUE.MD\` open HIGH priority and P0–P1 items are addressed.
+create "Epic: Trading Bot — remaining work" "Parent tracker for Trading Bot. Close when \`docs/QUEUE.MD\` open HIGH priority and P0–P1 items are addressed.
 
 See: \`docs/QUEUE.MD\`"
 

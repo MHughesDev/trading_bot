@@ -1,7 +1,7 @@
 apiVersion: 1
 
 providers:
-  - name: NautilusMonster
+  - name: Trading Bot
     orgId: 1
     folder: ""
     type: file

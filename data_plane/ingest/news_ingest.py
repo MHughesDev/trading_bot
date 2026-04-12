@@ -79,7 +79,7 @@ async def fetch_news_for_symbols(
     upper_syms = [s.replace("-", "").upper() for s in symbols]
     out: list[NewsItem] = []
     async with httpx.AsyncClient(
-        headers={"User-Agent": "NautilusMonster/3 (news ingest)"},
+        headers={"User-Agent": "TradingBot/3 (news ingest)"},
         follow_redirects=True,
     ) as client:
         for url in rss_feeds:

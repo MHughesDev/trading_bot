@@ -1,4 +1,4 @@
-"""Operator launcher finds repo root (packaging/windows/nm_operator_launcher.py)."""
+"""Operator launcher finds repo root (packaging/windows/trading_bot_operator_launcher.py)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from pathlib import Path
 
 def _load_launcher():
     root = Path(__file__).resolve().parents[1]
-    path = root / "packaging" / "windows" / "nm_operator_launcher.py"
-    spec = importlib.util.spec_from_file_location("nm_operator_launcher", path)
+    path = root / "packaging" / "windows" / "trading_bot_operator_launcher.py"
+    spec = importlib.util.spec_from_file_location("trading_bot_operator_launcher", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

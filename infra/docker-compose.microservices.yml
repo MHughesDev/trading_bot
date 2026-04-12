@@ -14,7 +14,7 @@
 services:
   live_runtime:
     image: python:3.12-slim-bookworm
-    container_name: nm-live-runtime
+    container_name: tb-live-runtime
     working_dir: /workspace
     volumes:
       - ..:/workspace
@@ -30,7 +30,7 @@ services:
 
   market_data_service:
     image: python:3.12-slim-bookworm
-    container_name: nm-market-data-service
+    container_name: tb-market-data-service
     working_dir: /workspace
     volumes:
       - ..:/workspace
@@ -52,7 +52,7 @@ services:
 
   feature_service:
     image: python:3.12-slim-bookworm
-    container_name: nm-feature-service
+    container_name: tb-feature-service
     working_dir: /workspace
     volumes:
       - ..:/workspace
@@ -72,7 +72,7 @@ services:
 
   decision_service:
     image: python:3.12-slim-bookworm
-    container_name: nm-decision-service
+    container_name: tb-decision-service
     working_dir: /workspace
     volumes:
       - ..:/workspace
@@ -92,7 +92,7 @@ services:
 
   risk_service:
     image: python:3.12-slim-bookworm
-    container_name: nm-risk-service
+    container_name: tb-risk-service
     working_dir: /workspace
     volumes:
       - ..:/workspace
@@ -112,7 +112,7 @@ services:
 
   execution_gateway:
     image: python:3.12-slim-bookworm
-    container_name: nm-execution-gateway
+    container_name: tb-execution-gateway
     working_dir: /workspace
     volumes:
       - ..:/workspace
@@ -135,7 +135,7 @@ services:
 
   observability_writer:
     image: python:3.12-slim-bookworm
-    container_name: nm-observability-writer
+    container_name: tb-observability-writer
     working_dir: /workspace
     volumes:
       - ..:/workspace

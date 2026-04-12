@@ -24,7 +24,7 @@ def _pipeline():
             device=-1,
         )
     except Exception:
-        logger.warning("FinBERT pipeline unavailable (install nautilus-monster[sentiment_nlp])")
+        logger.warning("FinBERT pipeline unavailable (install trading-bot[sentiment_nlp])")
         return None
 
 

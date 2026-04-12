@@ -10,18 +10,18 @@ This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat
 |-------|------|
 | **`setup.bat`** | Creates `.venv`, `pip install -e ".[dev,dashboard]"`, optional `docker compose` for `infra/docker-compose.yml`, copies `.env.example` → `.env` if missing. Full operator checklist: [`READY_TO_RUN.MD`](READY_TO_RUN.MD). |
 | **`run.bat`** | Starts **FastAPI** control plane (`:8000`), **`python -m app.runtime.power_supervisor`** (starts/stops **`services.live_service_app`** on **:8208** when global power is ON/OFF), and **Streamlit** (`control_plane/Home.py`). |
-| **`packaging/windows/build_operator_bundle.bat`** | After **`setup.bat`**, installs PyInstaller and builds **`nm_operator_launcher.exe`** (see **`packaging/windows/nm_operator_launcher.spec`**). The frozen exe is a **thin launcher** only: it does **not** embed the venv or app — it finds the repo root (directory containing **`setup.bat`**) and spawns **`.venv\Scripts\python.exe`** with the same commands as **`run.bat`**. Output: **`dist/nm_operator_launcher/`** — copy that folder beside **`setup.bat`** or run from the repo root. |
+| **`packaging/windows/build_operator_bundle.bat`** | After **`setup.bat`**, installs PyInstaller and builds **`trading_bot_operator_launcher.exe`** (see **`packaging/windows/trading_bot_operator_launcher.spec`**). The frozen exe is a **thin launcher** only: it does **not** embed the venv or app — it finds the repo root (directory containing **`setup.bat`**) and spawns **`.venv\Scripts\python.exe`** with the same commands as **`run.bat`**. Output: **`dist/trading_bot_operator_launcher/`** — copy that folder beside **`setup.bat`** or run from the repo root. |
 | **`run_desktop_dashboard.bat`** / **`python -m operator_packaging.desktop_shell`** | Optional **pywebview** window for Streamlit (**`NM_STREAMLIT_DESKTOP_URL`**, default **`http://127.0.0.1:8501`**). Requires **`pip install -e ".[dashboard]"`**. Start **`run.bat`** first. |
 | **System power** | **`GET/POST /system/power`** and sidebar on **Home** — persists `data/system_power.json`. OFF stops inference/training (code paths) and exits the Kraken loop; the supervisor terminates the live runtime process. |
 | **Streamlit** | Multipage app under `control_plane/`; calls **`NM_CONTROL_PLANE_URL`** (default `http://127.0.0.1:8000`). |
 
-**Shipped:** execution profile UI, positions, P&amp;L panels, live confirm dialog, optional **`nm_operator_launcher`**, optional **pywebview** desktop shell (§2.2). Full stack still requires **`setup.bat`** + **`.venv`**. **Not started:** Electron/Tauri-native shells beyond pywebview.
+**Shipped:** execution profile UI, positions, P&amp;L panels, live confirm dialog, optional **`trading_bot_operator_launcher`**, optional **pywebview** desktop shell (§2.2). Full stack still requires **`setup.bat`** + **`.venv`**. **Not started:** Electron/Tauri-native shells beyond pywebview.
 
 ---
 
 ## 1.1 Windows distribution (PyInstaller)
 
-**FB-UI-01-02** — practical notes for shipping **`nm_operator_launcher.exe`**:
+**FB-UI-01-02** — practical notes for shipping **`trading_bot_operator_launcher.exe`**:
 
 - **Antivirus:** PyInstaller one-file/one-folder bundles are often flagged heuristically (false positives). Prefer distributing the **folder** build with a checksum manifest, or code-sign the exe if your org requires it.
 - **Code signing:** Optional Authenticode signing reduces SmartScreen warnings; not automated in-repo.
@@ -40,7 +40,7 @@ This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat
   - **B — Tauri / Electron shell:** thin window loading `http://127.0.0.1:8501`. *Pros:* small exe. *Cons:* still need Python backend or remote API.
   - **C — Keep `run.bat` + default browser:** no exe; document as “supported path” for enterprise.
 
-- **Recommendation:** Phase 1 = **`run.bat` + browser** (done). Phase 2 = **PyInstaller** wrapper that runs the same commands and opens the browser, optional (**FB-UI-01-01** — `nm_operator_launcher`). Phase 3 = optional **pywebview** window around the same URL (**FB-UI-02-02**).
+- **Recommendation:** Phase 1 = **`run.bat` + browser** (done). Phase 2 = **PyInstaller** wrapper that runs the same commands and opens the browser, optional (**FB-UI-01-01** — `trading_bot_operator_launcher`). Phase 3 = optional **pywebview** window around the same URL (**FB-UI-02-02**).
 
 ### 2.2 Desktop shell options (spike outcome — FB-UI-02-01)
 
@@ -52,7 +52,7 @@ This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat
 
 **Decision for MVP (FB-UI-02-02):** ship **`python -m operator_packaging.desktop_shell`** behind **`[dashboard]`** (adds **pywebview**). Operators run **`run.bat`** (or **`run_desktop_dashboard.bat`** after Streamlit is up) to open a **dedicated window** instead of a browser tab. Override URL with **`NM_STREAMLIT_DESKTOP_URL`** if Streamlit is not on **8501**.
 
-**Not in scope:** bundling the shell into a standalone `.exe` (use **PyInstaller** on `streamlit_desktop_host.py` similarly to **`nm_operator_launcher`** if needed later).
+**Not in scope:** bundling the shell into a standalone `.exe` (use **PyInstaller** on `streamlit_desktop_host.py` similarly to **`trading_bot_operator_launcher`** if needed later).
 
 ### 2.3 Main dashboard
 

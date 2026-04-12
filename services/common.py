@@ -16,7 +16,7 @@ def build_scaffold_app(
     lifespan: Callable[[FastAPI], AbstractAsyncContextManager[Any]] | None = None,
 ) -> FastAPI:
     """Create a minimal service app with health/readiness/status endpoints."""
-    kwargs: dict[str, Any] = {"title": f"NautilusMonster {service_name}", "version": "0.1.0"}
+    kwargs: dict[str, Any] = {"title": f"Trading Bot {service_name}", "version": "0.1.0"}
     if lifespan is not None:
         kwargs["lifespan"] = lifespan
     app = FastAPI(**kwargs)

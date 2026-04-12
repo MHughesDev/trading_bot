@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
-echo === NautilusMonster — setup ===
+echo === Trading Bot — setup ===
 echo Repo: %CD%
 echo.
 

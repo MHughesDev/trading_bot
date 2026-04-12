@@ -73,7 +73,7 @@ def test_post_models_version_requires_key_when_configured(monkeypatch: pytest.Mo
 
 
 def test_post_models_version_sets_prometheus_gauge(monkeypatch: pytest.MonkeyPatch) -> None:
-    """FB-SPEC-06: operator labels flow to nm_model_version_info."""
+    """FB-SPEC-06: operator labels flow to tb_model_version_info."""
     from prometheus_client import REGISTRY, generate_latest
 
     monkeypatch.setattr(api, "settings", AppSettings(control_plane_api_key="cp-secret"))
@@ -87,4 +87,4 @@ def test_post_models_version_sets_prometheus_gauge(monkeypatch: pytest.MonkeyPat
     assert r.json() == {"component": "policy", "version": "build-42"}
 
     payload = generate_latest(REGISTRY).decode()
-    assert 'nm_model_version_info{component="policy",version="build-42"} 1.0' in payload
+    assert 'tb_model_version_info{component="policy",version="build-42"} 1.0' in payload

@@ -14,7 +14,7 @@ ROOT = os.path.abspath(os.path.join(_spec_dir, "..", ".."))
 block_cipher = None
 
 a = Analysis(
-    [os.path.join(ROOT, "packaging", "windows", "nm_operator_launcher.py")],
+    [os.path.join(ROOT, "packaging", "windows", "trading_bot_operator_launcher.py")],
     pathex=[ROOT],
     binaries=[],
     datas=[],
@@ -38,7 +38,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="nm_operator_launcher",
+    name="trading_bot_operator_launcher",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

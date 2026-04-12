@@ -16,7 +16,7 @@ from shared.messaging import topics
 from shared.messaging.envelope import EventEnvelope
 from shared.messaging.trace import new_trace_id
 
-app = FastAPI(title="NautilusMonster decision_risk_service", version="0.1.0")
+app = FastAPI(title="Trading Bot decision_risk_service", version="0.1.0")
 _bus = create_bus()
 _execution = wire_phase3_handoff(_bus)
 

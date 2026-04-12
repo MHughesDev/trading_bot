@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="NautilusMonster live runtime",
+        title="Trading Bot live runtime",
         version="0.1.0",
         lifespan=lifespan,
     )

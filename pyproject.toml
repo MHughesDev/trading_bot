@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nautilus-monster"
+name = "trading-bot"
 version = "0.1.0"
-description = "NautilusMonster V3 — Coinbase data, Alpaca paper execution, AI trading pipeline"
+description = "Trading Bot — Kraken market data, Alpaca paper / Coinbase live execution, AI trading pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -45,7 +45,7 @@ all = [
 ]
 
 [project.scripts]
-nm-train-forecaster-distill = "forecaster_model.training.distill_mlp:main"
+tb-train-forecaster-distill = "forecaster_model.training.distill_mlp:main"
 
 [tool.setuptools.package-data]
 "app" = ["config/*.yaml"]

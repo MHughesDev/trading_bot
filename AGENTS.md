@@ -6,7 +6,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 ## 1. Repository purpose
 
-**NautilusMonster** is a Python **multi-route AI crypto trading** codebase: **Kraken** for **all market data**, Alpaca for **paper execution only**, shared **decision + risk** path for live and replay, typed contracts (`app/contracts/`), and adapters under `execution/adapters/`. **Coinbase** appears only in the **live execution** adapter when configured — not for market data ingestion.
+**Trading Bot** (this repository) is a Python **multi-route AI crypto trading** codebase: **Kraken** for **all market data**, Alpaca for **paper execution only**, shared **decision + risk** path for live and replay, typed contracts (`app/contracts/`), and adapters under `execution/adapters/`. **Coinbase** appears only in the **live execution** adapter when configured — not for market data ingestion.
 
 **This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, `docs/*.MD` (work queue: [`docs/QUEUE.MD`](docs/QUEUE.MD), plus reference notes), `scripts/` (CI guards, smoke tests).
 
