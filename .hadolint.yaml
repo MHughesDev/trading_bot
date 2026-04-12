@@ -1,0 +1,4 @@
+# FB-CONT-003 — hadolint in CI; keep ignores minimal (see Dockerfile comments)
+ignored:
+  - DL3008  # apt packages: bookworm pins move with image rebuilds
+  - DL3013  # pip install uses pyproject.toml dependency ranges
