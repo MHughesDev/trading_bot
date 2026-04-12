@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 
 from app.config.settings import AppSettings, load_settings
+from app.runtime.asset_model_registry import list_symbols as list_manifest_symbols
 
 from orchestration.training_campaign import run_training_campaign
 
@@ -28,13 +29,47 @@ def run_nightly_training_job(
     lookback_days: int | None = None,
 ) -> dict:
     """
-    Single **nightly** real-data training run (FB-AP-035 / CLI).
+    **Nightly** real-data training (FB-AP-035 / FB-AP-036).
 
-    Used by the in-process app scheduler when the control plane process is running.
+    When ``scheduler_nightly_per_asset_forecaster`` is true (default), runs **one** nightly
+    campaign per **initialized** asset (symbols with a manifest). Artifacts go under
+    ``<base>/nightly/<canonical_symbol>/``. Otherwise runs a single campaign for the first
+    configured market symbol (legacy behavior).
     """
     p = artifact_dir or Path(os.environ.get("NM_TRAINING_ARTIFACT_DIR", "models/artifacts_training"))
     s = settings or load_settings()
     lb = lookback_days if lookback_days is not None else int(os.environ.get("NM_TRAINING_LOOKBACK_DAYS", "90"))
+
+    if s.scheduler_nightly_per_asset_forecaster:
+        syms = sorted(list_manifest_symbols())
+        if not syms:
+            logger.info("nightly training: no initialized assets (empty manifest registry)")
+            return {
+                "mode": "nightly",
+                "skipped": True,
+                "reason": "no_manifest_symbols",
+                "symbols": [],
+                "reports": {},
+            }
+        base = p.resolve()
+        reports: dict[str, dict] = {}
+        for sym in syms:
+            out_dir = base / "nightly" / sym
+            logger.info("nightly training: symbol=%s artifact_dir=%s", sym, out_dir)
+            reports[sym] = run_training_campaign(
+                mode="nightly",
+                symbol=sym,
+                artifact_dir=out_dir,
+                settings=s,
+                lookback_days=lb,
+            )
+        return {
+            "mode": "nightly",
+            "per_asset": True,
+            "symbols": syms,
+            "reports": reports,
+        }
+
     return run_training_campaign(
         mode="nightly",
         artifact_dir=p,
