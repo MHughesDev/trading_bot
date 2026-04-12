@@ -43,6 +43,7 @@ from decision_engine.pipeline import DecisionPipeline
 from decision_engine.run_step import run_decision_tick
 from execution.adapters.base_adapter import PositionSnapshot
 from execution.service import ExecutionService
+from execution.trade_markers import TradeMarker, append_marker
 from risk_engine.engine import RiskEngine
 from services.runtime_bridge import RuntimeHandoffBridge
 from shared.messaging.factory import create_message_bus
@@ -463,6 +464,20 @@ async def run_live_loop(
                 else:
                     try:
                         await exec_svc.submit_order(intent)
+                        try:
+                            append_marker(
+                                TradeMarker(
+                                    ts=datetime.now(UTC),
+                                    symbol=str(intent.symbol),
+                                    side=intent.side.value,
+                                    quantity=str(intent.quantity),
+                                    source="intent_submit",
+                                    correlation_id=oid,
+                                    execution_mode=cfg.execution_mode,
+                                )
+                            )
+                        except Exception:
+                            logger.exception("trade marker append failed")
                         q = Decimal(str(trade.quantity))
                         if trade.side == "buy":
                             positions[symbol] = positions.get(symbol, Decimal(0)) + q
