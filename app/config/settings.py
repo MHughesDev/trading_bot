@@ -121,6 +121,10 @@ class AppSettings(BaseSettings):
     models_torch_device: str = "auto"
     # Optional JSON: operator "active model set" (FB-SPEC-06); merged into GET /status model_artifacts
     models_active_registry_path: str | None = None
+    # Per-asset manifest (FB-AP-001/002): directory of `<symbol_slug>.json` manifests
+    asset_model_registry_path: str | None = None
+    # Optional single-file manifest (FB-AP-001): when set, used for binding checks (typical single-symbol deploy)
+    asset_model_manifest_path: str | None = None
 
     microservices_runtime_bridge_enabled: bool = False
     # in_process: bridge runs decision→risk→execution handlers in-process (shadow).
@@ -262,6 +266,12 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         if "active_registry_path" in mo:
             v = mo["active_registry_path"]
             out["models_active_registry_path"] = None if v is None else str(v)
+        if "asset_model_registry_path" in mo:
+            v = mo["asset_model_registry_path"]
+            out["asset_model_registry_path"] = None if v is None else str(v)
+        if "asset_model_manifest_path" in mo:
+            v = mo["asset_model_manifest_path"]
+            out["asset_model_manifest_path"] = None if v is None else str(v)
     return out
 
 

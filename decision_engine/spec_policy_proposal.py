@@ -108,6 +108,15 @@ def run_spec_policy_step(
     """
     Human-spec path: PolicySystem + ExecutionPlan → proposal; `ForecastOutput` from packet for metrics.
     """
+    if forecast_packet.forecast_diagnostics.get("methodology") == "abstain":
+        fc = forecast_packet_to_forecast_output(forecast_packet)
+        route = RouteDecision(
+            route_id=RouteId.NO_TRADE,
+            confidence=0.0,
+            ranking=[RouteId.NO_TRADE],
+        )
+        return fc, route, None
+
     fc = forecast_packet_to_forecast_output(forecast_packet)
     ps = build_portfolio_state_for_spec(
         equity_usd=portfolio_equity_usd,

@@ -8,6 +8,7 @@ PolicySystem → RiskEngine contracts.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState
+from data_plane.storage.asset_model_registry import resolve_manifest_for_symbol
 from decision_engine.spec_policy_proposal import run_spec_policy_step
 from forecaster_model.config import ForecasterConfig
 from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
@@ -39,6 +41,39 @@ def _feature_vector(values: dict[str, float], dim: int = 32) -> np.ndarray:
     for i, k in enumerate(keys[:dim]):
         vec[i] = float(values[k])
     return vec
+
+
+def _abstain_forecast_packet(
+    *,
+    symbol: str,
+    reason: str,
+    manifest_id: str | None,
+) -> ForecastPacket:
+    """Neutral packet when manifest binding fails (FB-AP-003) — no trade via downstream policy."""
+    cfg = ForecasterConfig()
+    h = cfg.forecast_horizon
+    z = [0.0] * h
+    return ForecastPacket(
+        timestamp=datetime.now(UTC),
+        horizons=list(range(1, h + 1)),
+        q_low=z.copy(),
+        q_med=z.copy(),
+        q_high=z.copy(),
+        interval_width=z.copy(),
+        regime_vector=[0.25] * cfg.num_regime_dims,
+        confidence_score=0.0,
+        ensemble_variance=z.copy(),
+        ood_score=1.0,
+        forecast_diagnostics={
+            "methodology": "abstain",
+            "reason": reason,
+            "symbol": symbol,
+            "manifest_binding": manifest_id,
+            "pipeline": "master_spec",
+        },
+        packet_schema_version=1,
+        source_checkpoint_id=None,
+    )
 
 
 def _regime_output_from_packet(pkt: ForecastPacket) -> RegimeOutput:
@@ -122,6 +157,43 @@ class DecisionPipeline:
         _ = _feature_vector(feature_row)  # reserved for future feature-cache alignment
         self._log_serving_mode_once(self._settings)
 
+        manifest = resolve_manifest_for_symbol(self._settings, symbol)
+        if manifest is not None:
+            try:
+                manifest.assert_matches_decision_symbol(symbol)
+            except ValueError as exc:
+                logger.error(
+                    "forecaster manifest binding failed: %s (decision_symbol=%r manifest_id=%r)",
+                    exc,
+                    symbol,
+                    manifest.manifest_id,
+                )
+                pkt = _abstain_forecast_packet(
+                    symbol=symbol,
+                    reason="manifest_symbol_mismatch",
+                    manifest_id=manifest.manifest_id,
+                )
+                pkt.forecast_diagnostics["pipeline"] = "master_spec"
+                pkt.packet_schema_version = 1
+                cid = self._settings.models_forecaster_checkpoint_id
+                pkt.source_checkpoint_id = cid
+                self._last_forecast_packet = pkt
+                regime_out = _regime_output_from_packet(pkt)
+                mp = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
+                eq = float(portfolio_equity_usd) if portfolio_equity_usd is not None else 100_000.0
+                fc, route, action = run_spec_policy_step(
+                    symbol,
+                    pkt,
+                    settings=self._settings,
+                    app_risk=risk,
+                    mid_price=mp,
+                    spread_bps=spread_bps,
+                    portfolio_equity_usd=eq,
+                    position_signed_qty=position_signed_qty,
+                    policy_system=self._policy_system,
+                )
+                return regime_out, fc, route, action
+
         conf_path = self._settings.models_forecaster_conformal_state_path
         base_cfg = _forecaster_config_from_env(conf_path)
         if self._torch_model is not None and self._torch_cfg is not None:
@@ -147,6 +219,8 @@ class DecisionPipeline:
         )
         pkt.forecast_diagnostics["symbol"] = symbol
         pkt.forecast_diagnostics["pipeline"] = "master_spec"
+        if manifest is not None:
+            pkt.forecast_diagnostics["asset_manifest_id"] = manifest.manifest_id
         pkt.packet_schema_version = 1
         cid = self._settings.models_forecaster_checkpoint_id
         pkt.source_checkpoint_id = cid
