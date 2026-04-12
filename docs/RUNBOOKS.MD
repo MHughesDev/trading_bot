@@ -99,12 +99,63 @@ After changing **`NM_EXECUTION_MODE`**, **`NM_EXECUTION_ADAPTER`**, or venue API
 
 Streamlit and the control plane API can often stay up, but **`GET /status`** reflects what the **API process** loaded; the **live loop** must restart to trade under the new mode.
 
-## QuestDB backup / restore
+## Stateful Docker volumes — backup & restore (FB-CONT-005)
 
-- **Data path:** Docker volume `questdb_data` (see `infra/docker-compose.yml`).
-- **Backup:** stop or snapshot the volume; copy QuestDB’s data directory for the container (`/var/lib/questdb` in the official image).
-- **Restore:** replace the volume data with a consistent backup while QuestDB is stopped; restart the container.
-- **Retention:** QuestDB partition-by-day tables — set external retention policy (snapshot + drop old partitions) per your compliance needs; not automated in-repo.
+Compose file **`infra/docker-compose.yml`** declares named volumes: **`questdb_data`**, **`redis_data`**, **`qdrant_data`** (plus observability volumes). Docker names them **`<project>_<volume>`** — set a fixed project name so backup scripts stay stable:
+
+```bash
+export COMPOSE_PROJECT_NAME=trading-bot
+docker compose -f infra/docker-compose.yml --project-directory . config >/dev/null
+```
+
+**Cold backup (simple, copy-paste)** — stop writers, archive volume contents, restart:
+
+```bash
+export COMPOSE_PROJECT_NAME=trading-bot
+cd /path/to/repo
+mkdir -p backup/archives
+
+docker compose -f infra/docker-compose.yml stop questdb redis qdrant
+
+docker run --rm \
+  -v trading-bot_questdb_data:/data:ro \
+  -v "$(pwd)/backup/archives:/out" \
+  alpine:3.20 \
+  tar czf "/out/questdb-$(date -u +%Y%m%dT%H%MZ).tgz" -C /data .
+
+docker run --rm \
+  -v trading-bot_redis_data:/data:ro \
+  -v "$(pwd)/backup/archives:/out" \
+  alpine:3.20 \
+  tar czf "/out/redis-$(date -u +%Y%m%dT%H%MZ).tgz" -C /data .
+
+docker run --rm \
+  -v trading-bot_qdrant_data:/data:ro \
+  -v "$(pwd)/backup/archives:/out" \
+  alpine:3.20 \
+  tar czf "/out/qdrant-$(date -u +%Y%m%dT%H%MZ).tgz" -C /data .
+
+docker compose -f infra/docker-compose.yml start questdb redis qdrant
+```
+
+If your host uses a different **`COMPOSE_PROJECT_NAME`**, replace **`trading-bot_*`** with the names from **`docker volume ls`**.
+
+**Restore drill (same host)** — **destructive** on the target volume; use a staging VM or copy volumes first.
+
+1. **`docker compose -f infra/docker-compose.yml stop questdb`** (or redis / qdrant).
+2. Clear the volume *or* `docker volume rm …` and recreate by **`compose up`** once (empty).
+3. **`docker run --rm -v trading-bot_questdb_data:/data -v "$(pwd)/backup/archives:/in" alpine:3.20 tar xzf /in/questdb-YYYYMMDD…tgz -C /data`** (adjust archive name).
+4. **`docker compose … start questdb`**. Repeat pattern for Redis / Qdrant.
+
+**Order:** restore **QuestDB** / **Redis** / **Qdrant** before starting app processes that depend on them (**`infra/docker-compose.app.yml`**).
+
+**Object storage:** upload **`backup/archives/*.tgz`** to your S3-compatible bucket (SSE-KMS, versioning, lifecycle rules — no secrets in object keys). **Retention:** keep at least **7** daily and **4** weekly copies per compliance comfort; **test restore** at least **quarterly** on a non-prod host.
+
+**QuestDB note:** tables are partition-oriented — cold **`tar`** of **`/var/lib/questdb`** is acceptable when the **questdb** container is **stopped** so files are consistent.
+
+**Redis note:** with **`appendonly yes`**, the AOF under the Redis volume is included in the archive; restore replaces full history for that instance.
+
+**Qdrant note:** snapshot is the volume **`storage`** tree; large collections → expect large archives.
 
 ## Grafana / Loki
 
