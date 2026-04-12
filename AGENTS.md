@@ -2,6 +2,8 @@
 
 Operational control for autonomous or semi-autonomous coding agents. **Not** general onboarding: boundaries, procedures, and verification.
 
+**Human-facing landing page:** [`README.md`](README.md) — short overview, quick start, and links into [`docs/*.MD`](docs/). This file is the **agent/operator contract** (rules, map, CI, handoff).
+
 ---
 
 ## 1. Repository purpose
@@ -42,7 +44,7 @@ Agents working here should:
 
 1. **Explicit user / task instructions** for the current change.
 2. **Tests** (`tests/`) and **runtime behavior** of the code being changed.
-3. **[`README.md`](README.md)** for commands and layout.
+3. **[`README.md`](README.md)** — default entry (commands, stack summary); deep detail lives in **`docs/`**.
 4. **[`docs/QUEUE.MD`](docs/QUEUE.MD)** for planned work, fixes, and archive (do not treat as executable spec unless task says so).
 5. Other **[`docs/*.MD`](docs/)** reference files (risk precedence, shutdown, Coinbase granularity, etc.).
 6. Older comments or stale markdown — verify against code.
