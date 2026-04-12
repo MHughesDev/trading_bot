@@ -27,6 +27,7 @@ dependencies = [
   "coinbase-advanced-py>=1.8.0",
   "joblib>=1.4",
   "argon2-cffi>=23.1",
+  "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]

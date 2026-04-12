@@ -161,6 +161,8 @@ class AppSettings(BaseSettings):
     auth_session_cookie_name: str = "tb_operator_session"
     auth_session_cookie_secure: bool = False
     auth_session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    # FB-UX-006: Fernet key derived from this secret for per-user Alpaca/Coinbase blobs in SQLite
+    auth_venue_credentials_master_secret: SecretStr | None = None
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -317,6 +319,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             ss = str(au["session_cookie_samesite"]).lower()
             if ss in ("lax", "strict", "none"):
                 out["auth_session_cookie_samesite"] = ss  # type: ignore[assignment]
+        if "venue_credentials_master_secret" in au and au["venue_credentials_master_secret"]:
+            out["auth_venue_credentials_master_secret"] = SecretStr(str(au["venue_credentials_master_secret"]))
     if "models" in cfg:
         mo = cfg["models"] or {}
         if "forecaster_checkpoint_id" in mo:

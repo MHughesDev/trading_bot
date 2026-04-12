@@ -21,6 +21,7 @@ from app.contracts.asset_model_manifest import AssetModelManifest
 from app.contracts.asset_lifecycle import AssetLifecycleState
 from app.contracts.auth_login import AuthUserResponse, LoginRequest
 from app.contracts.user_registration import RegisterRequest, RegisterResponse
+from app.contracts.user_venue_credentials import VenueCredentialsPut, VenueCredentialsResponse
 from app.runtime.asset_execution_mode import (
     delete_mode_override,
     list_mode_overrides,
@@ -45,6 +46,7 @@ from app.runtime.asset_model_registry import (
 from app.runtime import asset_execution_mode as asset_execution_mode_mod
 from app.runtime import operator_sessions as operator_sessions_mod
 from app.runtime import user_store as user_store_mod
+from app.runtime import user_venue_credentials as user_venue_credentials_mod
 from app.runtime.user_store import UserRecord
 from execution.adapter_registry import supported_adapters_for_settings
 from control_plane.chart_bars import query_canonical_bars_for_chart
@@ -154,6 +156,14 @@ def require_user(user: Annotated[UserRecord | None, Depends(get_current_user)]) 
     if user is None:
         raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return user
+
+
+def _venue_credentials_master_secret_value() -> str | None:
+    s = settings.auth_venue_credentials_master_secret
+    if not s:
+        return None
+    v = s.get_secret_value().strip()
+    return v or None
 
 
 def require_mutate_operator(
@@ -275,6 +285,53 @@ def post_login(request: Request, response: Response, body: LoginRequest) -> Auth
 def get_me(user: Annotated[UserRecord, Depends(require_user)]) -> AuthUserResponse:
     """Current user from session cookie (requires ``NM_AUTH_SESSION_ENABLED``)."""
     return AuthUserResponse(id=user.id, email=user.email, created_at=user.created_at)
+
+
+@app.get("/auth/venue-credentials", response_model=VenueCredentialsResponse)
+def get_venue_credentials(user: Annotated[UserRecord, Depends(require_user)]) -> VenueCredentialsResponse:
+    """Masked Alpaca / Coinbase credential presence (FB-UX-006). Requires ``NM_AUTH_VENUE_CREDENTIALS_MASTER_SECRET``."""
+    master = _venue_credentials_master_secret_value()
+    if not master:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Per-user venue credentials are not configured (set NM_AUTH_VENUE_CREDENTIALS_MASTER_SECRET)",
+        )
+    data = user_venue_credentials_mod.load_masked(settings.auth_users_db_path, master, user.id)
+    return VenueCredentialsResponse(**data)
+
+
+@app.put("/auth/venue-credentials", response_model=VenueCredentialsResponse)
+def put_venue_credentials(
+    body: VenueCredentialsPut,
+    user: Annotated[UserRecord, Depends(require_user)],
+) -> VenueCredentialsResponse:
+    """Encrypt and store per-user venue API keys (FB-UX-006)."""
+    master = _venue_credentials_master_secret_value()
+    if not master:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Per-user venue credentials are not configured (set NM_AUTH_VENUE_CREDENTIALS_MASTER_SECRET)",
+        )
+
+    def _nz(v: str | None) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
+
+    user_venue_credentials_mod.save_credentials(
+        settings.auth_users_db_path,
+        master,
+        user.id,
+        alpaca_api_key=_nz(body.alpaca_api_key),
+        alpaca_api_secret=_nz(body.alpaca_api_secret),
+        coinbase_api_key=_nz(body.coinbase_api_key),
+        coinbase_api_secret=_nz(body.coinbase_api_secret),
+        clear_alpaca=body.clear_alpaca,
+        clear_coinbase=body.clear_coinbase,
+    )
+    data = user_venue_credentials_mod.load_masked(settings.auth_users_db_path, master, user.id)
+    return VenueCredentialsResponse(**data)
 
 
 @app.post("/auth/logout")
