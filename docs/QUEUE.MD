@@ -120,7 +120,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-17):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Next:** reprioritize new work, add rows per [**§8**](#8-how-to-add-an-entry), pick **Out of scope** (**FB-N1**, **FB-N3**, LOW), or optional GitHub sync [**§7**](#7-github-sync-optional). Agents: when **HIGH** **Open** is empty, see [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+**Status (2026-04-17):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Next:** reprioritize new work or add rows per [**§8**](#8-how-to-add-an-entry); optional GitHub sync [**§7**](#7-github-sync-optional). Agents: when **§2** has **no** **Open** rows, see [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
 
 ### 2.1 Queue snapshot (open by priority)
 
@@ -128,15 +128,17 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 |----------|------------|-----|
 | **HIGH** | **0** | — |
 | **MEDIUM** | **0** | — |
-| **LOW** | **2** | [**FB-N1**](#out-of-scope-not-prioritized), [**FB-N3**](#out-of-scope-not-prioritized) (deferred; full rows in table below) |
+| **LOW** | **0** | — |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
+
+*Deferred **FB-N1** / **FB-N3** are **Done** (closed for now); see [**Out of scope**](#out-of-scope-not-prioritized).*
 
 ### HIGH priority
 
 *P0 / P1 — release-critical and core architecture.*
 
-*No **Open** rows with **Pri** **HIGH** — roadmap epics above are **Done**. Remaining **Open** items are **LOW** deferred in [**Out of scope**](#out-of-scope-not-prioritized) (**FB-N1**, **FB-N3**).*
+*No **Open** rows with **Pri** **HIGH** — roadmap epics above are **Done**. **§2** has **no** **Open** rows (deferred **FB-N1** / **FB-N3** are **closed for now** — [**Out of scope**](#out-of-scope-not-prioritized)).*
 
 ### 2.2 Per-asset product epic (**FB-AP-P0**)
 
@@ -350,10 +352,10 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 | ID | Kind | Phase | Cat | Pri | Status | Summary |
 |----|------|-------|-----|-----|--------|---------|
-| FB-N1 | deferred | D | XX | LOW | Open | Multi-exchange execution — **first slice Done 2026-04-13:** [`execution/adapter_registry.py`](../execution/adapter_registry.py), **`GET /status` → `execution_adapters`**, [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N1 |
-| FB-N3 | deferred | D | XX | LOW | Open | Portfolio optimization — **first slice Done 2026-04-13:** [`risk_engine/equal_weight.py`](../risk_engine/equal_weight.py), tests, [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N3 |
+| FB-N1 | deferred | D | XX | LOW | Done | Multi-exchange execution — **first slice Done 2026-04-13** (**FB-N1-S1** in [§5.5](#55-complete-archive-one-row-per-id)). **Closed for now 2026-04-17** — full multi-venue scope remains future; reopen via [**§8**](#8-how-to-add-an-entry) or reprioritize. [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N1 |
+| FB-N3 | deferred | D | XX | LOW | Done | Portfolio optimization — **first slice Done 2026-04-13** (**FB-N3-S1** in [§5.5](#55-complete-archive-one-row-per-id)). **Closed for now 2026-04-17** — full optimizer scope remains future; reopen via [**§8**](#8-how-to-add-an-entry) or reprioritize. [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N3 |
 
-*Full multi-venue / optimizer work remains deferred; see [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD).*
+*Rows retained for traceability. Full multi-venue / optimizer work remains **out of scope** until reprioritized; see [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD).*
 
 ---
 
@@ -473,6 +475,8 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 |----|-------------|-------|
 | FB-X1, FB-X2 | 2026-04-08 | Coinbase live JWT REST orders, cancel, positions from accounts |
 | FB-X3 | 2026-04-10 | `create_execution_adapter` in `execution/router.py` (used by `ExecutionService`) |
+| FB-N1 | 2026-04-17 | Deferred epic **closed for now** — first slice **FB-N1-S1** (registry + `GET /status` → `execution_adapters`); full multi-venue execution → [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N1 |
+| FB-N3 | 2026-04-17 | Deferred epic **closed for now** — first slice **FB-N3-S1** (`risk_engine/equal_weight`); full portfolio optimization → [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N3 |
 | FB-F3 | 2026-04-10 | `test_coinbase_rest_candles_multi.py` (BTC/ETH/SOL Exchange fallback path) |
 | FB-M1, FB-M2 | 2026-04-08 | `feature_dict_to_embedding`; live `run_memory_retrieval_loop` per symbol |
 | FB-M3 | 2026-04-10 | Qdrant `schema_version: 1` in payload; CI integration test in `test_integration_optional_services.py` |
@@ -631,7 +635,9 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-FR-P0-CLOSE | models | 2026-04-12 | **FB-FR-P0** queue closed: **01** `DatasetManifest` + walk-forward tests; **02–06** NumPy `ForecasterModel` (VSN→…→quantiles) + **`build_torch_forecaster`** MLP; **03** `train_distilled_mlp_forecaster`, CLI **`tb-train-forecaster-distill`**, `describe_walk_forward_folds`; **04** conformal + ensemble + `tests/test_conformal_calibration_eval.py`; **05** `NM_MODELS_FORECASTER_TORCH_PATH` + `tests/test_forecaster_torch_pipeline.py` |
 | FB-FR-P0-WAIVE | models | 2026-04-12 | **Waived (optional):** human-spec **full PyTorch** VSN/xLSTM *trainer* — not required for hot path; use **MLP distill** + NumPy reference |
 | FB-MS-01 … FB-MS-06 | platform | 2026-04-11 | Microservices slices (Kraken WS path, FeaturePipeline, QuestDB audit, compose/runbooks, Alpaca smoke doc, §11 checklist) |
+| FB-N1 | deferred | 2026-04-17 | Epic **closed for now** — first slice **FB-N1-S1**; full multi-venue execution → [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N1 |
 | FB-N1-S1 | execution | 2026-04-13 | **`execution/adapter_registry`**, **`GET /status` → `execution_adapters`**, [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) |
+| FB-N3 | deferred | 2026-04-17 | Epic **closed for now** — first slice **FB-N3-S1**; full portfolio optimization → [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N3 |
 | FB-N3-S1 | risk | 2026-04-13 | **`risk_engine/equal_weight`**, `tests/test_equal_weight.py`, roadmap doc |
 | FB-SPEC-08 | pipeline | 2026-04-11 | Preflight script + API |
 | FB-T1 | test | 2026-04-10 | `smoke_credentials.py` |
@@ -679,7 +685,7 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 5. Add a row in [§2](#2-open-queue) (roadmap), [§3](#3-resolved-fixes-il) (fixes), or note completed gates in [§4](#4-completed-compliance-gates-hg). Use the next **FB-** or **HG-** id; for large epics prefer **-01, -02** sub-ids.  
 6. Link **code paths** or tickets.
 
-**Empty HIGH queue:** If **§2** has **no** rows with **Status = Open** and **Pri = HIGH** (only **LOW** deferred **Open**, e.g. **FB-N1** / **FB-N3**), agents asked to take the “next **HIGH** open item” have **nothing to implement** until you **add** a new row in **§2**, or **reprioritize** (e.g. set **Pri** to **HIGH** and **Open** on a deferred row, with an agreed scope).
+**Empty open queue:** If **§2** has **no** rows with **Status = Open** (including no **Open** **HIGH** rows), agents asked to take the “next **HIGH** open item” have **nothing to implement** until you **add** a new row in **§2**, or **reprioritize** closed deferred work (e.g. reopen **FB-N1** / **FB-N3** with an agreed scope — see [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD)).
 
 **Cursor Agent:** For a structured checklist aligned with §1–§2, use the project skill **Add to Queue** at [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) (invoke with `/add-to-queue` or attach `@add-to-queue` when available).
 

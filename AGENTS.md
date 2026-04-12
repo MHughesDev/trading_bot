@@ -20,7 +20,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 Agents working here should:
 
-- Implement **scoped** features and fixes aligned with [`docs/QUEUE.MD`](docs/QUEUE.MD) when the task references them. If the task asks for the **next Open HIGH** row and **§2** has **no** such row (only **LOW** deferred, e.g. **FB-N1** / **FB-N3**), **stop** and report — do not implement deferred work without explicit reprioritization; see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+- Implement **scoped** features and fixes aligned with [`docs/QUEUE.MD`](docs/QUEUE.MD) when the task references them. If the task asks for the **next Open HIGH** row and **§2** has **no** **Open** rows (or no **Open** **HIGH** rows), **stop** and report — add or reprioritize work per [**§8**](docs/QUEUE.MD#8-how-to-add-an-entry); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
 - Preserve **non-negotiable rules** below unless the user task explicitly overrides.
 - Keep **live vs replay** behavior aligned where the architecture expects it (`decision_engine/run_step.py` is the shared decision step).
 - Update **docs** when behavior, env vars, or operator-facing flows change.
