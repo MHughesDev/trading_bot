@@ -30,6 +30,14 @@ Each **initialized** tradable symbol can have a **manifest** that lists **foreca
 
 Pydantic model: `app.contracts.asset_model_manifest.AssetModelManifest`.
 
+## Runtime binding (FB-AP-003 / FB-AP-004)
+
+`DecisionPipeline` resolves forecaster and policy weights **per tick** via `resolve_serving_paths(symbol, settings)` in `decision_engine/pipeline.py`:
+
+- **Single-symbol** `market_data_symbols` (length 1): global **`NM_MODELS_*`** paths apply as before; an optional per-asset manifest **overrides** those fields when set.
+- **Multi-symbol** and global **`NM_MODELS_*`** point at **existing model files**: those globals are **not** used for a symbol without a manifest (the tick abstains from proposals; packet diagnostics may include `binding_abstain`). Use per-asset manifests or a single-symbol config for shared global weights.
+- With a manifest in multi-symbol mode, **only manifest paths** apply for that symbol (no cross-symbol env fallback).
+
 ## Per-asset lifecycle (FB-AP-005)
 
 States: **`uninitialized`** (no manifest), **`initialized_not_active`** (manifest present, watch not started), **`active`** (operator started watch — live loop wiring is **FB-AP-038**).

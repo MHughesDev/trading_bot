@@ -8,22 +8,25 @@ PolicySystem → RiskEngine contracts.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
 import numpy as np
 
 from app.config.settings import AppSettings, load_settings
-from app.contracts.decisions import ActionProposal, RouteDecision
+from app.contracts.asset_model_manifest import AssetModelManifest
+from app.contracts.decisions import ActionProposal, RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState
+from app.runtime.asset_model_registry import load_manifest
 from decision_engine.spec_policy_proposal import run_spec_policy_step
 from forecaster_model.config import ForecasterConfig
 from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
 from forecaster_model.inference.stub import ohlc_arrays_from_feature_row
-from forecaster_model.models.forecaster_weights import load_forecaster_weights
+from forecaster_model.models.forecaster_weights import ForecasterWeightBundle, load_forecaster_weights
 from policy_model.policy.policy_network import PolicyNetwork
 from policy_model.system import PolicySystem
 
@@ -66,15 +69,149 @@ def _forecaster_config_from_env(conformal_path: str | None) -> ForecasterConfig:
     return cfg
 
 
+def _file_exists(p: str | None) -> bool:
+    return bool(p and Path(p).is_file())
+
+
+def _global_model_paths_configured(settings: AppSettings) -> bool:
+    return (
+        _file_exists(settings.models_forecaster_torch_path)
+        or _file_exists(settings.models_forecaster_weights_path)
+        or _file_exists(settings.models_policy_mlp_path)
+    )
+
+
+def _multi_symbol(settings: AppSettings) -> bool:
+    return len(settings.market_data_symbols) > 1
+
+
+@dataclass(frozen=True)
+class _ResolvedPaths:
+    """Per-tick serving paths after manifest + FB-AP-003 / FB-AP-004 binding rules."""
+
+    forecaster_torch_path: str | None
+    forecaster_weights_path: str | None
+    forecaster_conformal_state_path: str | None
+    policy_mlp_path: str | None
+    forecaster_checkpoint_id: str | None
+    manifest: AssetModelManifest | None
+    binding_abstain: bool
+    binding_reason: str | None
+
+
+def _paths_from_manifest_only(m: AssetModelManifest) -> _ResolvedPaths:
+    """Multi-asset + global NM_MODELS_* set: only manifest fields apply (no global fallback)."""
+    pol = m.policy_mlp_path or m.policy_checkpoint_path
+    return _ResolvedPaths(
+        forecaster_torch_path=m.forecaster_torch_path,
+        forecaster_weights_path=m.forecaster_weights_path,
+        forecaster_conformal_state_path=m.forecaster_conformal_state_path,
+        policy_mlp_path=pol,
+        forecaster_checkpoint_id=None,
+        manifest=m,
+        binding_abstain=False,
+        binding_reason=None,
+    )
+
+
+def _merge_manifest_and_settings(
+    manifest: AssetModelManifest | None, settings: AppSettings
+) -> _ResolvedPaths:
+    """Single-symbol or multi-symbol without global file paths: manifest overrides when present."""
+    if manifest is None:
+        return _ResolvedPaths(
+            forecaster_torch_path=settings.models_forecaster_torch_path,
+            forecaster_weights_path=settings.models_forecaster_weights_path,
+            forecaster_conformal_state_path=settings.models_forecaster_conformal_state_path,
+            policy_mlp_path=settings.models_policy_mlp_path,
+            forecaster_checkpoint_id=settings.models_forecaster_checkpoint_id,
+            manifest=None,
+            binding_abstain=False,
+            binding_reason=None,
+        )
+    m = manifest
+    pol = m.policy_mlp_path or m.policy_checkpoint_path
+    return _ResolvedPaths(
+        forecaster_torch_path=m.forecaster_torch_path or settings.models_forecaster_torch_path,
+        forecaster_weights_path=m.forecaster_weights_path or settings.models_forecaster_weights_path,
+        forecaster_conformal_state_path=m.forecaster_conformal_state_path
+        or settings.models_forecaster_conformal_state_path,
+        policy_mlp_path=pol or settings.models_policy_mlp_path,
+        forecaster_checkpoint_id=settings.models_forecaster_checkpoint_id,
+        manifest=m,
+        binding_abstain=False,
+        binding_reason=None,
+    )
+
+
+def resolve_serving_paths(symbol: str, settings: AppSettings) -> _ResolvedPaths:
+    """
+    FB-AP-003 / FB-AP-004: bind forecaster and policy artifacts to the decision symbol.
+
+    When multiple symbols are configured and global ``NM_MODELS_*`` file paths are set, refuse to
+    apply those files to any symbol without a per-asset manifest (prevents one checkpoint serving
+    every asset). When a manifest exists, only manifest paths are used in that mode (no global
+    fallback for model files).
+    """
+    sym = symbol.strip()
+    manifest = load_manifest(sym)
+    multi = _multi_symbol(settings)
+    global_files = _global_model_paths_configured(settings)
+
+    if multi and global_files:
+        if manifest is None:
+            logger.error(
+                "FB-AP-003/004 forecaster/policy binding refused: multi-symbol settings with global "
+                "model file paths require a per-asset manifest for symbol=%r (no manifest on disk). "
+                "Refusing global NM_MODELS_* weights for this tick.",
+                sym,
+            )
+            return _ResolvedPaths(
+                forecaster_torch_path=None,
+                forecaster_weights_path=None,
+                forecaster_conformal_state_path=None,
+                policy_mlp_path=None,
+                forecaster_checkpoint_id=settings.models_forecaster_checkpoint_id,
+                manifest=None,
+                binding_abstain=True,
+                binding_reason=(
+                    f"multi-symbol mode: global model paths are set but no manifest for {sym!r}"
+                ),
+            )
+        mp = _paths_from_manifest_only(manifest)
+        return _ResolvedPaths(
+            forecaster_torch_path=mp.forecaster_torch_path,
+            forecaster_weights_path=mp.forecaster_weights_path,
+            forecaster_conformal_state_path=mp.forecaster_conformal_state_path,
+            policy_mlp_path=mp.policy_mlp_path,
+            forecaster_checkpoint_id=settings.models_forecaster_checkpoint_id,
+            manifest=manifest,
+            binding_abstain=False,
+            binding_reason=None,
+        )
+
+    return _merge_manifest_and_settings(manifest, settings)
+
+
+def _resolved_paths_key(rp: _ResolvedPaths) -> tuple:
+    return (
+        rp.forecaster_torch_path,
+        rp.forecaster_weights_path,
+        rp.forecaster_conformal_state_path,
+        rp.policy_mlp_path,
+    )
+
+
 class DecisionPipeline:
     def __init__(self, settings: AppSettings | None = None) -> None:
         self._settings = settings or load_settings()
         self._last_forecast_packet: ForecastPacket | None = None
-        self._forecaster_weight_bundle = _load_forecaster_bundle_if_configured(self._settings)
-        self._torch_model, self._torch_device, self._torch_cfg = _load_torch_forecaster_if_configured(
-            self._settings
-        )
-        self._policy_system: PolicySystem | None = _load_policy_system_if_configured(self._settings)
+        self._cache_key: tuple | None = None
+        self._forecaster_weight_bundle: ForecasterWeightBundle | None = None
+        self._torch_model = None
+        self._torch_device = None
+        self._torch_cfg: ForecasterConfig | None = None
+        self._policy_system: PolicySystem | None = None
 
     @staticmethod
     def _log_serving_mode_once(settings: AppSettings) -> None:
@@ -103,6 +240,26 @@ class DecisionPipeline:
             settings.models_forecaster_checkpoint_id or "(unset)",
         )
 
+    def _ensure_artifacts(self, rp: _ResolvedPaths) -> None:
+        key = _resolved_paths_key(rp)
+        if key == self._cache_key:
+            return
+        self._cache_key = key
+        settings = self._settings
+        eff = settings.model_copy(
+            update={
+                "models_forecaster_torch_path": rp.forecaster_torch_path,
+                "models_forecaster_weights_path": rp.forecaster_weights_path,
+                "models_forecaster_conformal_state_path": rp.forecaster_conformal_state_path,
+                "models_policy_mlp_path": rp.policy_mlp_path,
+            }
+        )
+        self._forecaster_weight_bundle = _load_forecaster_bundle_if_configured(eff)
+        self._torch_model, self._torch_device, self._torch_cfg = _load_torch_forecaster_if_configured(
+            eff
+        )
+        self._policy_system = _load_policy_system_if_configured(eff)
+
     @property
     def last_forecast_packet(self) -> ForecastPacket | None:
         """Last `ForecastPacket` built on the hot path (master spec §5)."""
@@ -122,7 +279,10 @@ class DecisionPipeline:
         _ = _feature_vector(feature_row)  # reserved for future feature-cache alignment
         self._log_serving_mode_once(self._settings)
 
-        conf_path = self._settings.models_forecaster_conformal_state_path
+        rp = resolve_serving_paths(symbol, self._settings)
+        self._ensure_artifacts(rp)
+
+        conf_path = rp.forecaster_conformal_state_path
         base_cfg = _forecaster_config_from_env(conf_path)
         if self._torch_model is not None and self._torch_cfg is not None:
             cfg = self._torch_cfg
@@ -148,13 +308,39 @@ class DecisionPipeline:
         pkt.forecast_diagnostics["symbol"] = symbol
         pkt.forecast_diagnostics["pipeline"] = "master_spec"
         pkt.packet_schema_version = 1
-        cid = self._settings.models_forecaster_checkpoint_id
+        cid = rp.forecaster_checkpoint_id
         pkt.source_checkpoint_id = cid
+        if rp.manifest is not None:
+            pkt.forecast_diagnostics["asset_model_manifest_id"] = rp.manifest.canonical_symbol
+            if rp.manifest.runtime_instance_id:
+                pkt.forecast_diagnostics["asset_model_runtime_instance_id"] = (
+                    rp.manifest.runtime_instance_id
+                )
+        if rp.binding_abstain and rp.binding_reason:
+            pkt.forecast_diagnostics["binding_abstain"] = True
+            pkt.forecast_diagnostics["binding_reason"] = rp.binding_reason
         self._last_forecast_packet = pkt
 
         regime_out = _regime_output_from_packet(pkt)
         mp = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
         eq = float(portfolio_equity_usd) if portfolio_equity_usd is not None else 100_000.0
+
+        if rp.binding_abstain:
+            fc = ForecastOutput(
+                returns_1=0.0,
+                returns_3=0.0,
+                returns_5=0.0,
+                returns_15=0.0,
+                volatility=0.0,
+                uncertainty=1.0,
+            )
+            route = RouteDecision(
+                route_id=RouteId.NO_TRADE,
+                confidence=0.0,
+                ranking=[RouteId.NO_TRADE],
+            )
+            return regime_out, fc, route, None
+
         fc, route, action = run_spec_policy_step(
             symbol,
             pkt,
