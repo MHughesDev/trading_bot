@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +23,10 @@ _MARKERS_NAME = "trade_markers.jsonl"
 
 
 def markers_path(repo_root: Path | None = None) -> Path:
+    if os.getenv("NM_MULTI_TENANT_DATA_SCOPING", "").strip().lower() in ("1", "true", "yes"):
+        from app.runtime import user_data_paths as user_paths
+
+        return user_paths.trade_markers_path()
     root = repo_root or Path(__file__).resolve().parents[1]
     return root / "data" / _MARKERS_NAME
 

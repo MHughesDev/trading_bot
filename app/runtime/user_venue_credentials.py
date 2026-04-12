@@ -168,3 +168,30 @@ def load_masked(db_path: Path, master_secret: str, user_id: int) -> dict[str, An
         "coinbase_secret_masked": mask_secret(csec),
         "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
     }
+
+
+def load_decrypted_credentials(
+    db_path: Path, master_secret: str, user_id: int
+) -> dict[str, str | None]:
+    """Return plaintext key/secret fields for execution merge (FB-UX-007)."""
+    ensure_venue_schema(db_path)
+    f = _fernet(master_secret)
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT alpaca_key_enc, alpaca_secret_enc, coinbase_key_enc, coinbase_secret_enc "
+            "FROM user_venue_credentials WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    if row is None:
+        return {
+            "alpaca_api_key": None,
+            "alpaca_api_secret": None,
+            "coinbase_api_key": None,
+            "coinbase_api_secret": None,
+        }
+    return {
+        "alpaca_api_key": _dec(f, row["alpaca_key_enc"]),
+        "alpaca_api_secret": _dec(f, row["alpaca_secret_enc"]),
+        "coinbase_api_key": _dec(f, row["coinbase_key_enc"]),
+        "coinbase_api_secret": _dec(f, row["coinbase_secret_enc"]),
+    }

@@ -20,6 +20,7 @@ from typing import Any
 import polars as pl
 
 from app.config.settings import AppSettings
+from app.runtime import user_data_paths as user_paths
 from data_plane.features.pipeline import FeaturePipeline
 from data_plane.storage.canonical_bars import CANONICAL_BAR_PARQUET_COLUMNS
 
@@ -33,7 +34,8 @@ def _artifact_run_dir(base: Path, symbol: str, job_id: str) -> Path:
 
 def init_artifact_run_dir(settings: AppSettings, symbol: str, job_id: str) -> Path:
     """Directory for one init job (features, forecaster, …): ``<artifacts_dir>/<symbol>/init_<job_id>/``."""
-    return _artifact_run_dir(Path(settings.asset_init_artifacts_dir), symbol, job_id)
+    base = user_paths.asset_init_artifacts_base(Path(settings.asset_init_artifacts_dir))
+    return _artifact_run_dir(base, symbol, job_id)
 
 
 def write_init_feature_artifacts(
@@ -51,7 +53,7 @@ def write_init_feature_artifacts(
     Returns:
         (bars_path, features_path, manifest_dict)
     """
-    base = Path(settings.asset_init_artifacts_dir)
+    base = user_paths.asset_init_artifacts_base(Path(settings.asset_init_artifacts_dir))
     run_dir = _artifact_run_dir(base, symbol, job_id)
     run_dir.mkdir(parents=True, exist_ok=True)
 

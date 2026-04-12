@@ -262,10 +262,15 @@ def _pipeline_body(job_id: str, symbol: str) -> None:
     _run_step(job_id, InitPipelineStep.register, do_register)
 
 
-def _run_pipeline(job_id: str, symbol: str) -> None:
+def _run_pipeline(job_id: str, symbol: str, user_id: int | None = None) -> None:
+    from app.runtime.tenant_context import run_with_user_id
+
+    def _body() -> None:
+        _pipeline_body(job_id, symbol)
+
     _update_job(job_id, status="running", started_at=_utc_now_iso())
     try:
-        _pipeline_body(job_id, symbol)
+        run_with_user_id(user_id, _body)
         _update_job(job_id, status="succeeded", finished_at=_utc_now_iso(), error=None)
         try:
             from app.runtime.asset_lifecycle_state import set_initialized_not_active
@@ -285,7 +290,7 @@ def _run_pipeline(job_id: str, symbol: str) -> None:
         )
 
 
-def start_asset_init_job(symbol: str) -> str:
+def start_asset_init_job(symbol: str, user_id: int | None = None) -> str:
     global _pipeline_running
     with _state_lock:
         if _pipeline_running:
@@ -297,7 +302,7 @@ def start_asset_init_job(symbol: str) -> str:
     def _target() -> None:
         global _pipeline_running
         try:
-            _run_pipeline(job_id, symbol)
+            _run_pipeline(job_id, symbol, user_id=user_id)
         finally:
             with _state_lock:
                 _pipeline_running = False
@@ -306,9 +311,9 @@ def start_asset_init_job(symbol: str) -> str:
     return job_id
 
 
-def try_start_asset_init_job(symbol: str) -> str | None:
+def try_start_asset_init_job(symbol: str, user_id: int | None = None) -> str | None:
     try:
-        return start_asset_init_job(symbol)
+        return start_asset_init_job(symbol, user_id=user_id)
     except RuntimeError:
         return None
 

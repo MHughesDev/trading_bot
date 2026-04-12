@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -11,6 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from fastapi.responses import PlainTextResponse
 from fastapi.security import APIKeyHeader
+from starlette.middleware.base import BaseHTTPMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from observability.forecaster_metrics import MODEL_VERSION_INFO
@@ -45,8 +47,10 @@ from app.runtime.asset_model_registry import (
 )
 from app.runtime import asset_execution_mode as asset_execution_mode_mod
 from app.runtime import operator_sessions as operator_sessions_mod
+from app.runtime import tenant_context as tenant_ctx
 from app.runtime import user_store as user_store_mod
 from app.runtime import user_venue_credentials as user_venue_credentials_mod
+from app.runtime.execution_settings_merge import merge_settings_for_execution
 from app.runtime.user_store import UserRecord
 from execution.adapter_registry import supported_adapters_for_settings
 from control_plane.chart_bars import query_canonical_bars_for_chart
@@ -88,7 +92,27 @@ async def _lifespan(app: FastAPI):
     stop_app_background_scheduler()
 
 
+class TenantContextMiddleware(BaseHTTPMiddleware):
+    """FB-UX-007: bind ``tenant_ctx`` for the request (session → user id)."""
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        uid: int | None = None
+        if os.getenv("NM_MULTI_TENANT_DATA_SCOPING", "").strip().lower() in ("1", "true", "yes"):
+            if settings.auth_session_enabled:
+                tok = request.cookies.get(settings.auth_session_cookie_name)
+                if tok:
+                    uid = operator_sessions_mod.resolve_session_user_id(
+                        settings.auth_users_db_path, tok
+                    )
+        token = tenant_ctx.set_current_user_id_token(uid)
+        try:
+            return await call_next(request)
+        finally:
+            tenant_ctx.reset_current_user_id_token(token)
+
+
 app = FastAPI(title="Trading Bot Control Plane", version="0.1.0", lifespan=_lifespan)
+app.add_middleware(TenantContextMiddleware)
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -422,7 +446,8 @@ def post_system_power(
 @app.get("/portfolio/positions")
 async def get_portfolio_positions() -> dict[str, Any]:
     """Open positions from the configured execution adapter (paper Alpaca / live Coinbase / stub)."""
-    return await fetch_portfolio_positions(settings)
+    eff = merge_settings_for_execution(settings, tenant_ctx.get_current_user_id())
+    return await fetch_portfolio_positions(eff)
 
 
 @app.get("/pnl/summary")
@@ -436,7 +461,7 @@ async def get_pnl_summary(
     ] = "day",
 ) -> dict[str, Any]:
     """Aggregate realized (local JSONL ledger) + unrealized (open positions) P&L. See docs/PNL_LEDGER.MD."""
-    return await compute_pnl_summary(settings, range_key)
+    return await compute_pnl_summary(settings, range_key)  # merge inside pnl_summary uses tenant_ctx
 
 
 @app.get("/pnl/series")
@@ -580,13 +605,19 @@ def remove_asset_model_manifest(
 
 
 @app.post("/assets/init/{symbol}")
-def post_asset_init(symbol: str) -> dict[str, Any]:
+def post_asset_init(request: Request, symbol: str) -> dict[str, Any]:
     """
     Start per-asset initialization (FB-AP-006): Kraken REST bootstrap, validate, enrich features
     (FB-AP-009 writes Parquet under ``data/asset_init``). One global runner — 409 if busy.
     """
     sym = symbol.strip()
-    job_id = try_start_asset_init_job(sym)
+    uid: int | None = None
+    if os.getenv("NM_MULTI_TENANT_DATA_SCOPING", "").strip().lower() in ("1", "true", "yes"):
+        if settings.auth_session_enabled:
+            tok = request.cookies.get(settings.auth_session_cookie_name)
+            if tok:
+                uid = operator_sessions_mod.resolve_session_user_id(settings.auth_users_db_path, tok)
+    job_id = try_start_asset_init_job(sym, user_id=uid)
     if job_id is None:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
@@ -759,8 +790,9 @@ def post_asset_lifecycle_stop(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="not active",
         )
-    exec_svc = ExecutionService(settings)
-    flatten_report = flatten_symbol_position_sync(settings, sym, execution_service=exec_svc)
+    eff = merge_settings_for_execution(settings, tenant_ctx.get_current_user_id())
+    exec_svc = ExecutionService(eff)
+    flatten_report = flatten_symbol_position_sync(eff, sym, execution_service=exec_svc)
     if not flatten_report.get("lifecycle_continue", True):
         raise HTTPException(
             status_code=http_status.HTTP_502_BAD_GATEWAY,
