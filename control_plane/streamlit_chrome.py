@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from control_plane.streamlit_util import (
     api_get_json,
     get_api_base,
@@ -10,6 +12,14 @@ from control_plane.streamlit_util import (
     operator_logout,
 )
 from control_plane.watchlist import get_watchlist_symbols
+
+
+def _active_watching_symbols(st_data: dict[str, Any]) -> list[str]:
+    """Symbols with effective lifecycle ``active`` from ``GET /status`` → ``asset_lifecycle.states`` (FB-AP-033)."""
+    lc = st_data.get("asset_lifecycle") or {}
+    states = lc.get("states") or {}
+    out = [sym for sym, st in states.items() if str(st).strip() == "active"]
+    return sorted(out)
 
 
 def render_app_sidebar() -> None:
@@ -37,6 +47,17 @@ def render_app_sidebar() -> None:
                         label=label,
                         query_params={"symbol": label},
                     )
+        active_syms = _active_watching_symbols(st_data)
+        st.sidebar.caption("Active (watching — **FB-AP-033**)")
+        if active_syms:
+            for s in active_syms:
+                st.sidebar.page_link(
+                    "pages/Asset.py",
+                    label=f"● {s}",
+                    query_params={"symbol": s},
+                )
+        else:
+            st.sidebar.caption("No assets in **active** state.")
         wl = get_watchlist_symbols(st.session_state)
         st.sidebar.caption("Watchlist (session — **FB-UX-014**)")
         if wl:
