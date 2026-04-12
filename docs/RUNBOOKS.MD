@@ -2,6 +2,10 @@
 
 **First-time setup:** see **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** (checklist: venv, `.env`, Docker, preflight, venues). This file adds secrets, incident response, and execution-mode restart detail beyond that checklist.
 
+## Per-asset model registry (FB-AP-001 / FB-AP-002)
+
+Persisted manifests and HTTP API: **[`PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD)**. **`GET /status`** includes **`asset_model_registry.initialized_symbols`**. Mutating routes require **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set.
+
 ## Control plane bind address
 
 - Default **`NM_CONTROL_PLANE_HOST=0.0.0.0`** listens on all interfaces. On a single machine behind an untrusted LAN, prefer **`NM_CONTROL_PLANE_HOST=127.0.0.1`** so the API is only reachable from localhost.

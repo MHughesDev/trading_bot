@@ -129,4 +129,4 @@ Runbooks (secrets, incident, flatten, QuestDB backup): [`docs/RUNBOOKS.MD`](docs
 
 ## Roadmap & logs
 
-**Work queue (features, fixes `IL-*`, gates `HG-*`, archive):** [`docs/QUEUE.MD`](docs/QUEUE.MD). **Deferred (FB-N1 / FB-N3) next steps:** [`docs/DEFERRED_ROADMAP.MD`](docs/DEFERRED_ROADMAP.MD). **Reference:** [`docs/RISK_PRECEDENCE.MD`](docs/RISK_PRECEDENCE.MD) (risk order).
+**Work queue (features, fixes `IL-*`, gates `HG-*`, archive):** [`docs/QUEUE.MD`](docs/QUEUE.MD). **Per-asset model registry (manifest API):** [`docs/PER_ASSET_OPERATOR.MD`](docs/PER_ASSET_OPERATOR.MD). **Deferred (FB-N1 / FB-N3) next steps:** [`docs/DEFERRED_ROADMAP.MD`](docs/DEFERRED_ROADMAP.MD). **Reference:** [`docs/RISK_PRECEDENCE.MD`](docs/RISK_PRECEDENCE.MD) (risk order).
