@@ -73,5 +73,6 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 
 - [`ADR_CANONICAL_BAR_STORAGE.MD`](ADR_CANONICAL_BAR_STORAGE.MD) — canonical bar storage decision (FB-AP-013).
 - **FB-AP-014** — logical schema: bucket-start UTC `timestamp`, `interval_seconds`, OHLCV; Parquet `bars_clean.parquet` column order in `data_plane.storage.canonical_bars`.
+- **FB-AP-015** — dedupe key ``(symbol, timestamp, interval_seconds)``; last-write-wins in Polars merge helpers; QuestDB `insert_bar` is idempotent (delete-then-insert).
 - [`RUNBOOKS.MD`](RUNBOOKS.MD) — execution and preflight.
 - [`QUEUE.MD`](QUEUE.MD) **FB-AP-P0** — remaining per-asset UI, init pipeline, guards in `DecisionPipeline`.
