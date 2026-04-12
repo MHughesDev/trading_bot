@@ -1,0 +1,63 @@
+# FB-CONT-002 — application services (build from repo root Dockerfile)
+# Requires the data plane stack: merge with the base file.
+#
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.app.yml up -d --build
+#
+# Control plane: http://localhost:8000  ·  Streamlit: http://localhost:8501
+# Optional live loop:  docker compose -f infra/docker-compose.yml -f infra/docker-compose.app.yml --profile live up -d
+#
+# `.env` is gitignored — copy `.env.example` to `.env` at the repo root; paths below are relative to this file.
+
+services:
+  trading-bot-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: trading-bot:local
+    container_name: tb-trading-bot-api
+    env_file:
+      - ../.env
+    environment:
+      NM_QUESTDB_HOST: questdb
+      NM_REDIS_URL: redis://redis:6379/0
+      NM_QDRANT_URL: http://qdrant:6333
+    volumes:
+      - ../data:/app/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      - questdb
+      - redis
+      - qdrant
+
+  trading-bot-streamlit:
+    image: trading-bot:local
+    container_name: tb-trading-bot-streamlit
+    command: ["streamlit"]
+    env_file:
+      - ../.env
+    environment:
+      NM_CONTROL_PLANE_URL: http://trading-bot-api:8000
+    volumes:
+      - ../data:/app/data
+    ports:
+      - "8501:8501"
+    depends_on:
+      - trading-bot-api
+
+  trading-bot-live:
+    profiles:
+      - live
+    image: trading-bot:local
+    container_name: tb-trading-bot-live
+    command: ["live"]
+    env_file:
+      - ../.env
+    environment:
+      NM_QUESTDB_HOST: questdb
+      NM_REDIS_URL: redis://redis:6379/0
+      NM_QDRANT_URL: http://qdrant:6333
+    volumes:
+      - ../data:/app/data
+    depends_on:
+      - trading-bot-api
