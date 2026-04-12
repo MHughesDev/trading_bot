@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from app.config.settings import load_settings
 from control_plane.asset_chart_data import (
     Preset,
     bars_dicts_from_df,
@@ -17,6 +18,12 @@ from control_plane.asset_chart_data import (
     _bars_payload_to_df,
 )
 from control_plane.streamlit_util import get_api_base
+from data_plane.bars.derived_intervals import daily_ohlc_aligned_with_training
+
+
+def _training_granularity_seconds() -> int:
+    """Match ``AppSettings.training_data_granularity_seconds`` (FB-AP-017 chart vs training)."""
+    return max(1, int(load_settings().training_data_granularity_seconds))
 
 
 def _get_chart_json(params: dict[str, Any], *, timeout: float = 45.0) -> dict[str, Any]:
@@ -84,8 +91,30 @@ def fetch_bars_for_preset(
         data = _get_chart_json(p)
         return list(data.get("bars") or [])
 
-    # Week / month: always derive from daily bars (FB-AP-017-style rollup client-side)
+    # Week / month: derive from **daily** bars built from canonical seconds when possible,
+    # using the same training granularity as ``NM_TRAINING_DATA_GRANULARITY_SECONDS`` (FB-AP-017).
+    g_train = _training_granularity_seconds()
     if preset == "week":
+        p_1s = {
+            "symbol": sym,
+            "start": t_start.isoformat(),
+            "end": t_end.isoformat(),
+            "limit": min(50_000, max(req.limit, 8_000)),
+            "interval_seconds": 1,
+        }
+        fine = _pull(p_1s)
+        if fine:
+            df_daily = daily_ohlc_aligned_with_training(
+                _bars_payload_to_df(fine),
+                training_granularity_seconds=g_train,
+            )
+            df = resample_weekly_ohlc(df_daily)
+            note = (
+                f"weekly OHLC (from 1s canonical → daily @ {g_train}s step → week)"
+                if g_train > 1
+                else "weekly OHLC (from 1s canonical → daily → week)"
+            )
+            return bars_dicts_from_df(df), note, 604_800
         p_d = {
             "symbol": sym,
             "start": t_start.isoformat(),
@@ -97,9 +126,29 @@ def fetch_bars_for_preset(
         if not daily:
             return [], "no daily bars in QuestDB for this window — enable canonical bar persistence / backfill", 604_800
         df = resample_weekly_ohlc(_bars_payload_to_df(daily))
-        return bars_dicts_from_df(df), "weekly OHLC (aggregated from daily bars)", 604_800
+        return bars_dicts_from_df(df), "weekly OHLC (aggregated from stored daily bars)", 604_800
 
     if preset == "month":
+        p_1s = {
+            "symbol": sym,
+            "start": t_start.isoformat(),
+            "end": t_end.isoformat(),
+            "limit": min(50_000, max(req.limit, 8_000)),
+            "interval_seconds": 1,
+        }
+        fine = _pull(p_1s)
+        if fine:
+            df_daily = daily_ohlc_aligned_with_training(
+                _bars_payload_to_df(fine),
+                training_granularity_seconds=g_train,
+            )
+            df = resample_monthly_ohlc(df_daily)
+            note = (
+                f"monthly OHLC (from 1s canonical → daily @ {g_train}s step → month)"
+                if g_train > 1
+                else "monthly OHLC (from 1s canonical → daily → month)"
+            )
+            return bars_dicts_from_df(df), note, 2_592_000
         p_d = {
             "symbol": sym,
             "start": t_start.isoformat(),
@@ -111,7 +160,7 @@ def fetch_bars_for_preset(
         if not daily:
             return [], "no daily bars in QuestDB for this window — enable canonical bar persistence / backfill", 2_592_000
         df = resample_monthly_ohlc(_bars_payload_to_df(daily))
-        return bars_dicts_from_df(df), "monthly OHLC (aggregated from daily bars)", 2_592_000
+        return bars_dicts_from_df(df), "monthly OHLC (aggregated from stored daily bars)", 2_592_000
 
     params: dict[str, Any] = {
         "symbol": sym,

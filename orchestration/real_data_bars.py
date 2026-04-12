@@ -12,6 +12,7 @@ from typing import Any
 
 import polars as pl
 
+from data_plane.bars.derived_intervals import resample_ohlc as _derived_resample_ohlc_ts
 from data_plane.ingest.kraken_rest import (
     KrakenOHLCRow,
     KrakenRESTClient,
@@ -58,22 +59,15 @@ def _ohlc_rows_to_polars(rows: list[KrakenOHLCRow]) -> pl.DataFrame:
 
 
 def _resample_ohlc(df: pl.DataFrame, granularity_seconds: int) -> pl.DataFrame:
-    """Resample 1-minute (or coarser) OHLC to target bar size using Polars."""
+    """Resample OHLC to target bar size — shared rules with charts (FB-AP-017)."""
     if df.height == 0:
         return df
-    every = f"{granularity_seconds}s"
-    return (
-        df.sort("timestamp")
-        .group_by_dynamic("timestamp", every=every, closed="left")
-        .agg(
-            pl.col("open").first().alias("open"),
-            pl.col("high").max().alias("high"),
-            pl.col("low").min().alias("low"),
-            pl.col("close").last().alias("close"),
-            pl.col("volume").sum().alias("volume"),
-        )
-        .sort("timestamp")
+    out = _derived_resample_ohlc_ts(
+        df.rename({"timestamp": "ts"}),
+        bucket_seconds=granularity_seconds,
+        ts_column="ts",
     )
+    return out.rename({"ts": "timestamp"})
 
 
 def _trades_to_ohlc(
