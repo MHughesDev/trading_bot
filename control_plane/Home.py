@@ -24,16 +24,28 @@ from control_plane.streamlit_util import (
 
 st.set_page_config(page_title="Trading Bot", layout="wide")
 st.title("Trading Bot")
-st.sidebar.markdown(f"**Control plane:** `{get_api_base()}`")
-st.sidebar.markdown(f"**QuestDB:** `{get_questdb_console_url()}`")
-st.sidebar.markdown(f"**Grafana:** `{get_grafana_url()}`")
-
+st.sidebar.page_link("Home.py", label="Dashboard", icon=":material/dashboard:")
+st.sidebar.page_link("pages/Asset.py", label="Asset page", icon=":material/show_chart:")
 try:
     st_data = api_get_json("/status")
+    syms = st_data.get("symbols") or []
+    if syms:
+        st.sidebar.caption("Open asset (from config)")
+        for s in syms[:24]:
+            label = str(s).strip()
+            if label:
+                st.sidebar.page_link(
+                    "pages/Asset.py",
+                    label=label,
+                    query_params={"symbol": label},
+                )
     active = (st_data.get("execution_profile") or {}).get("active_execution_mode", "?")
 except Exception as e:
     st.sidebar.error(f"Cannot read status: {e}")
     active = "?"
+st.sidebar.markdown(f"**Control plane:** `{get_api_base()}`")
+st.sidebar.markdown(f"**QuestDB:** `{get_questdb_console_url()}`")
+st.sidebar.markdown(f"**Grafana:** `{get_grafana_url()}`")
 
 st.sidebar.caption(f"Process execution mode (env): `{active}` — change via `.env` / restart.")
 st.sidebar.divider()
