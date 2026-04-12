@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -47,6 +47,7 @@ from control_plane.execution_profile import (
 from control_plane.microservice_health import probe_microservices_health
 from execution.pnl_summary import compute_pnl_summary
 from execution.portfolio_positions import fetch_portfolio_positions
+from execution.trade_markers import iter_markers, marker_to_api_dict
 from orchestration.asset_init_pipeline import get_job as get_init_job, try_start_asset_init_job
 
 settings = load_settings()
@@ -405,6 +406,37 @@ async def get_asset_chart_bars(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+
+
+@app.get("/assets/chart/trade-markers")
+def get_asset_chart_trade_markers(
+    symbol: Annotated[str, Query(min_length=1, description="Canonical symbol (e.g. BTC-USD)")],
+    start: Annotated[datetime, Query(description="Range start (UTC ISO-8601)")],
+    end: Annotated[datetime, Query(description="Range end (UTC ISO-8601)")],
+    limit: Annotated[int, Query(ge=1, le=10_000, description="Max markers returned")] = 2000,
+) -> dict[str, Any]:
+    """Symbol-scoped buy/sell markers from append-only ``data/trade_markers.jsonl`` (FB-AP-025)."""
+    sym = symbol.strip()
+    s = start.replace(tzinfo=UTC) if start.tzinfo is None else start.astimezone(UTC)
+    e = end.replace(tzinfo=UTC) if end.tzinfo is None else end.astimezone(UTC)
+    if s >= e:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start must be before end",
+        )
+    rows = iter_markers(symbol=sym, start=s, end=e)
+    lim = min(int(limit), 10_000)
+    if len(rows) > lim:
+        rows = rows[:lim]
+    return {
+        "symbol": sym,
+        "start": s.isoformat(),
+        "end": e.isoformat(),
+        "limit": lim,
+        "count": len(rows),
+        "source": "trade_markers_jsonl",
+        "markers": [marker_to_api_dict(m) for m in rows],
+    }
 
 
 @app.post("/assets/lifecycle/{symbol}/stop")

@@ -63,6 +63,7 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 | POST | `/assets/lifecycle/{symbol}/start` | **`initialized_not_active` → `active`** (requires manifest). |
 | POST | `/assets/lifecycle/{symbol}/stop` | **`active` → `initialized_not_active`**. |
 | GET | `/assets/chart/bars` | **Chart OHLCV** (FB-AP-024): **`symbol`** (required), **`start`**, **`end`** (UTC range), optional **`interval_seconds`** (defaults to **`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`**), **`limit`**. Returns rows from QuestDB **`canonical_bars`** for that symbol only — no multi-symbol series. |
+| GET | `/assets/chart/trade-markers` | **Buy/sell markers** (FB-AP-025): **`symbol`** (required), **`start`**, **`end`**, optional **`limit`**. Reads **`data/trade_markers.jsonl`** (append-only; populated when the live loop **successfully submits** an order — **`source=intent_submit`**). |
 
 **GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`; and **`asset_lifecycle`**: `state_dir`, `states`.
 
