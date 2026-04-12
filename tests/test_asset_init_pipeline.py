@@ -11,6 +11,7 @@ import polars as pl
 from fastapi.testclient import TestClient
 
 from app.config.settings import AppSettings
+from app.runtime import asset_model_registry as reg
 from control_plane import api
 from orchestration.asset_init_pipeline import reset_asset_init_pipeline_for_tests
 
@@ -32,6 +33,9 @@ def _two_bars_df() -> pl.DataFrame:
 
 
 def test_post_assets_init_and_poll_status(monkeypatch, tmp_path: Path) -> None:
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+
     def fake_load_settings() -> AppSettings:
         return AppSettings(
             control_plane_api_key=None,
@@ -41,6 +45,7 @@ def test_post_assets_init_and_poll_status(monkeypatch, tmp_path: Path) -> None:
         )
 
     monkeypatch.setattr("app.config.settings.load_settings", fake_load_settings)
+    monkeypatch.setattr(reg, "_DEFAULT_DIR", manifest_dir)
     monkeypatch.setattr(api, "settings", AppSettings(control_plane_api_key=None))
     reset_asset_init_pipeline_for_tests()
 
@@ -100,6 +105,19 @@ def test_post_assets_init_and_poll_status(monkeypatch, tmp_path: Path) -> None:
     assert steps[3]["status"] == "done"
     fmeta = (steps[3].get("detail") or "").split("meta=", 1)[1]
     assert json.loads(fmeta).get("methodology") == "distill_mlp_synthetic_teacher"
+    assert steps[4]["step"] == "rl_init"
+    assert steps[4]["status"] == "done"
+    assert "policy_mlp_path" in (steps[4].get("detail") or "")
+    assert steps[5]["step"] == "register"
+    assert steps[5]["status"] == "done"
+    rmeta = (steps[5].get("detail") or "").split("meta=", 1)[1]
+    reg_payload = json.loads(rmeta)
+    assert reg_payload.get("manifest_path")
+    assert (Path(reg_payload["manifest_path"])).is_file()
+    loaded = reg.load_manifest("BTC-USD")
+    assert loaded is not None
+    assert loaded.forecaster_torch_path
+    assert loaded.policy_mlp_path
     reset_asset_init_pipeline_for_tests()
 
 

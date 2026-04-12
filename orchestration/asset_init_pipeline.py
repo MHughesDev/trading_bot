@@ -3,7 +3,8 @@ Per-asset initialization pipeline (FB-AP-006+).
 
 Runs **one symbol at a time** in a background thread. Steps: **kraken_fetch** (FB-AP-007),
 **validate** (FB-AP-008), **features** (FB-AP-009), **forecaster_train** (FB-AP-010 — distilled MLP
-into ``forecaster/``), then stubs for RL / register until FB-AP-011–012.
+into ``forecaster/``), **rl_init** (FB-AP-011 — ``policy/policy_mlp.npz``), **register**
+(FB-AP-012 — manifest with artifact paths).
 """
 
 from __future__ import annotations
@@ -137,6 +138,14 @@ def _pipeline_body(job_id: str, symbol: str) -> None:
         init_forecaster_detail_payload,
         run_init_forecaster_distill,
     )
+    from orchestration.init_policy_artifacts import (
+        init_policy_detail_payload,
+        run_init_policy_mlp,
+    )
+    from orchestration.init_register_manifest import (
+        init_register_detail_payload,
+        register_init_artifacts_manifest,
+    )
     from orchestration.init_kraken_historical import (
         InitKrakenHistoricalResult,
         fetch_init_bootstrap_bars,
@@ -224,10 +233,26 @@ def _pipeline_body(job_id: str, symbol: str) -> None:
         return "done", detail
 
     def do_rl() -> tuple[str, str | None]:
-        return "skipped", "FB-AP-011 (RL init) not wired yet"
+        run_dir = init_artifact_run_dir(settings, symbol, job_id)
+        ppayload = run_init_policy_mlp(run_dir=run_dir, symbol=symbol, job_id=job_id)
+        pl = init_policy_detail_payload(ppayload)
+        logger.info(
+            "init rl_init symbol=%s policy_mlp=%s",
+            symbol.strip(),
+            pl.get("policy_mlp_path"),
+        )
+        return "done", f"meta={json.dumps(pl)}"
 
     def do_register() -> tuple[str, str | None]:
-        return "skipped", "FB-AP-012 (manifest register) not wired yet"
+        run_dir = init_artifact_run_dir(settings, symbol, job_id)
+        rp = register_init_artifacts_manifest(symbol=symbol, job_id=job_id, run_dir=run_dir)
+        pl = init_register_detail_payload(rp)
+        logger.info(
+            "init register symbol=%s manifest=%s",
+            symbol.strip(),
+            pl.get("manifest_path"),
+        )
+        return "done", f"meta={json.dumps(pl)}"
 
     _run_step(job_id, InitPipelineStep.kraken_fetch, do_fetch)
     _run_step(job_id, InitPipelineStep.validate, do_validate)
