@@ -101,3 +101,8 @@ scheduler:
   nightly_rl_trade_lookback_days: null
 auth:
   users_db_path: data/users.sqlite
+  session_enabled: false
+  session_ttl_seconds: 604800
+  session_cookie_name: tb_operator_session
+  session_cookie_secure: false
+  session_cookie_samesite: lax

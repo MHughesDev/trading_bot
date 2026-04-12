@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from fastapi.responses import PlainTextResponse
 from fastapi.security import APIKeyHeader
@@ -19,6 +19,7 @@ from app.config.model_artifacts import model_artifact_contract
 from app.config.settings import AppSettings, load_settings
 from app.contracts.asset_model_manifest import AssetModelManifest
 from app.contracts.asset_lifecycle import AssetLifecycleState
+from app.contracts.auth_login import AuthUserResponse, LoginRequest
 from app.contracts.user_registration import RegisterRequest, RegisterResponse
 from app.runtime.asset_execution_mode import (
     delete_mode_override,
@@ -42,7 +43,9 @@ from app.runtime.asset_model_registry import (
     save_manifest,
 )
 from app.runtime import asset_execution_mode as asset_execution_mode_mod
+from app.runtime import operator_sessions as operator_sessions_mod
 from app.runtime import user_store as user_store_mod
+from app.runtime.user_store import UserRecord
 from execution.adapter_registry import supported_adapters_for_settings
 from control_plane.chart_bars import query_canonical_bars_for_chart
 from control_plane.preflight import preflight_report
@@ -135,6 +138,49 @@ def require_mutate_key(x_api_key: Annotated[str | None, Depends(_api_key_header)
         raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
 
 
+def get_current_user(request: Request) -> UserRecord | None:
+    """Resolved from HTTP-only session cookie when ``NM_AUTH_SESSION_ENABLED`` (FB-UX-002)."""
+    if not settings.auth_session_enabled:
+        return None
+    tok = request.cookies.get(settings.auth_session_cookie_name)
+    uid = operator_sessions_mod.resolve_session_user_id(settings.auth_users_db_path, tok)
+    if uid is None:
+        return None
+    return user_store_mod.get_user_by_id(settings.auth_users_db_path, uid)
+
+
+def require_user(user: Annotated[UserRecord | None, Depends(get_current_user)]) -> UserRecord:
+    """Future mutating routes that must be user-bound (not API-key automation)."""
+    if user is None:
+        raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return user
+
+
+def require_mutate_operator(
+    request: Request,
+    x_api_key: Annotated[str | None, Depends(_api_key_header)],
+) -> None:
+    """Mutate: valid ``X-API-Key`` when configured, else valid session cookie when ``NM_AUTH_SESSION_ENABLED``."""
+    expected = (
+        settings.control_plane_api_key.get_secret_value()
+        if settings.control_plane_api_key
+        else None
+    )
+    if expected and x_api_key == expected:
+        return
+    if settings.auth_session_enabled:
+        tok = request.cookies.get(settings.auth_session_cookie_name)
+        if operator_sessions_mod.resolve_session_user_id(settings.auth_users_db_path, tok) is not None:
+            return
+        raise HTTPException(
+            status_code=http_status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+    if not expected:
+        return
+    raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
+
+
 @app.get("/status")
 def get_status() -> dict[str, Any]:
     return {
@@ -163,7 +209,11 @@ def get_status() -> dict[str, Any]:
             "overrides": list_mode_overrides(),
         },
         "app_scheduler": scheduler_status(),
-        "user_store": user_store_mod.user_store_status(settings.auth_users_db_path),
+        "user_store": {
+            **user_store_mod.user_store_status(settings.auth_users_db_path),
+            "session_auth_enabled": settings.auth_session_enabled,
+            **operator_sessions_mod.session_status(settings.auth_users_db_path),
+        },
     }
 
 
@@ -190,6 +240,58 @@ def post_register(body: RegisterRequest) -> RegisterResponse:
     return RegisterResponse(id=rec.id, email=rec.email, created_at=rec.created_at)
 
 
+@app.post("/auth/login", response_model=AuthUserResponse)
+def post_login(request: Request, response: Response, body: LoginRequest) -> AuthUserResponse:
+    """Create server-side session and set HTTP-only cookie (FB-UX-002)."""
+    if not settings.auth_session_enabled:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Session authentication is disabled (NM_AUTH_SESSION_ENABLED=false)",
+        )
+    rec = user_store_mod.verify_password(settings.auth_users_db_path, body.email, body.password)
+    if rec is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+    sess = operator_sessions_mod.create_session(
+        settings.auth_users_db_path,
+        rec.id,
+        settings.auth_session_ttl_seconds,
+    )
+    response.set_cookie(
+        key=settings.auth_session_cookie_name,
+        value=sess.token,
+        max_age=settings.auth_session_ttl_seconds,
+        httponly=True,
+        secure=settings.auth_session_cookie_secure,
+        samesite=settings.auth_session_cookie_samesite,
+        path="/",
+    )
+    return AuthUserResponse(id=rec.id, email=rec.email, created_at=rec.created_at)
+
+
+@app.get("/auth/me", response_model=AuthUserResponse)
+def get_me(user: Annotated[UserRecord, Depends(require_user)]) -> AuthUserResponse:
+    """Current user from session cookie (requires ``NM_AUTH_SESSION_ENABLED``)."""
+    return AuthUserResponse(id=user.id, email=user.email, created_at=user.created_at)
+
+
+@app.post("/auth/logout")
+def post_logout(request: Request, response: Response) -> dict[str, bool]:
+    """Revoke session server-side and clear cookie."""
+    if not settings.auth_session_enabled:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Session authentication is disabled (NM_AUTH_SESSION_ENABLED=false)",
+        )
+    tok = request.cookies.get(settings.auth_session_cookie_name)
+    if tok:
+        operator_sessions_mod.revoke_session(settings.auth_users_db_path, tok)
+    response.delete_cookie(settings.auth_session_cookie_name, path="/")
+    return {"ok": True}
+
+
 @app.get("/system/power")
 def get_system_power() -> dict[str, Any]:
     """Legacy global power (FB-AP-039: disabled by default — always ``on`` unless ``NM_SYSTEM_POWER_LEGACY_ENABLED``)."""
@@ -214,7 +316,7 @@ def get_execution_profile() -> dict[str, Any]:
 @app.post("/system/execution-profile")
 def post_execution_profile(
     body: dict[str, Any],
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, Any]:
     """Legacy: record operator intent (paper/live). Disabled by default (FB-AP-040)."""
     if not legacy_execution_profile_api_enabled():
@@ -246,7 +348,7 @@ def post_execution_profile(
 @app.post("/system/power")
 def post_system_power(
     body: dict[str, Any],
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, str]:
     """Legacy global power (removed when ``NM_SYSTEM_POWER_LEGACY_ENABLED=false``)."""
     if not legacy_system_power_enabled():
@@ -317,7 +419,7 @@ def params() -> dict[str, Any]:
 @app.post("/params")
 def set_params(
     body: dict[str, Any],
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, Any]:
     state.set_params(body)
     return state.get_params()
@@ -331,7 +433,7 @@ def get_mode() -> dict[str, str]:
 @app.post("/system/mode")
 def set_mode(
     body: dict[str, str],
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, str]:
     m = SystemMode(body.get("mode", "RUNNING"))
     modes.set_mode(m)
@@ -339,7 +441,7 @@ def set_mode(
 
 
 @app.post("/flatten")
-def flatten(_: Annotated[None, Depends(require_mutate_key)]) -> dict[str, str]:
+def flatten(_: Annotated[None, Depends(require_mutate_operator)]) -> dict[str, str]:
     modes.set_mode(SystemMode.FLATTEN_ALL)
     return {"mode": modes.get_mode().value, "note": "flatten requested — execution layer must honor"}
 
@@ -358,7 +460,7 @@ def models() -> dict[str, list[str]]:
 @app.post("/models/version")
 def set_model_version(
     body: dict[str, str],
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, str]:
     """Expose model version labels to Prometheus (FB-PL-PG7)."""
     component = body.get("component", "forecaster")
@@ -394,7 +496,7 @@ def get_asset_model_manifest(symbol: str) -> dict[str, Any]:
 def put_asset_model_manifest(
     symbol: str,
     body: dict[str, Any],
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, Any]:
     """Create or replace manifest; path ``symbol`` must match body ``canonical_symbol`` (FB-AP-001)."""
     m = AssetModelManifest.model_validate(body)
@@ -410,7 +512,7 @@ def put_asset_model_manifest(
 @app.delete("/assets/models/{symbol}")
 def remove_asset_model_manifest(
     symbol: str,
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, Any]:
     """Remove manifest file for ``symbol`` if present."""
     ok = delete_manifest(symbol)
@@ -466,7 +568,7 @@ def get_asset_execution_mode(symbol: str) -> dict[str, Any]:
 def put_asset_execution_mode(
     symbol: str,
     body: dict[str, Any],
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, Any]:
     """Persist paper vs live for this symbol (overrides ``NM_EXECUTION_MODE`` for its orders)."""
     sym = symbol.strip()
@@ -488,7 +590,7 @@ def put_asset_execution_mode(
 @app.delete("/assets/execution-mode/{symbol}")
 def delete_asset_execution_mode(
     symbol: str,
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, Any]:
     """Remove per-symbol override; routing uses application default again."""
     sym = symbol.strip()
@@ -504,7 +606,7 @@ def delete_asset_execution_mode(
 @app.post("/assets/lifecycle/{symbol}/start")
 def post_asset_lifecycle_start(
     symbol: str,
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, Any]:
     """Start watch: ``initialized_not_active`` → ``active`` (requires manifest)."""
     sym = symbol.strip()
@@ -587,7 +689,7 @@ def get_asset_chart_trade_markers(
 @app.post("/assets/lifecycle/{symbol}/stop")
 def post_asset_lifecycle_stop(
     symbol: str,
-    _: Annotated[None, Depends(require_mutate_key)],
+    _: Annotated[None, Depends(require_mutate_operator)],
 ) -> dict[str, Any]:
     """
     Stop watch: flatten open venue position for this symbol (market close), then
