@@ -23,6 +23,10 @@ Optional **server-side sessions** in the same SQLite file (`operator_sessions` t
 
 On **Home**, a row above holdings/PnL summarizes **`GET /status`**: **preflight** (severity, issues/warnings), **production_preflight** (signing / unsigned / venue credentials flags), **execution profile** (legacy API off → default mode + per-asset note). Implemented in **`control_plane/health_strip.py`**.
 
+## In-app toasts (FB-UX-013)
+
+Optional **`st.toast`** notifications (default **on**): set **`NM_STREAMLIT_TOASTS_ENABLED=false`** to disable. **Asset** page: init complete/fail, watch start, **Stop** (flatten submitted / no position / API error). **Dashboard**: init monitor toasts when a followed job reaches **succeeded**/**failed**; nightly scheduler toasts when **`last_run_finished_utc`** advances (success summary, RL-skipped hint, or last error).
+
 ## Nightly scheduler panel (FB-UX-012)
 
 The **Dashboard** shows **Nightly scheduler** status from **`GET /scheduler/nightly`**: enabled flag, **interval** (seconds), **last tick** (job start), **last run finished**, **next run after** (approximate — first wake after start, then after each job completes), **last error**, and an expander with the **last report** JSON (same object as **`run_nightly_training_job`**). **`GET /status` → `app_scheduler`** includes the timing fields without the full report (use the detail route for JSON).

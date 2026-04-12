@@ -18,9 +18,16 @@ from control_plane.asset_lifecycle_actions import (
     poll_init_job_until_terminal,
     primary_lifecycle_action,
 )
+from control_plane.app_toasts import maybe_toast
 from control_plane.asset_manifest_card import manifest_model_rows
 from control_plane.asset_page_helpers import normalize_symbol, validate_symbol_display
-from control_plane.streamlit_util import api_delete_json, api_get_json, api_post_json, api_put_json
+from control_plane.streamlit_util import (
+    api_delete_json,
+    api_get_json,
+    api_post_json,
+    api_put_json,
+    post_mutate_response,
+)
 
 
 def _render_ohlc_chart(sym: str) -> None:
@@ -153,37 +160,68 @@ def render_asset_page(symbol: str) -> None:
                         )
                     if job.get("status") == "succeeded":
                         st.session_state[msg_key] = ("success", "Initialization finished.")
+                        maybe_toast(f"Init finished: {sym}", icon="✅")
                     else:
                         st.session_state[msg_key] = (
                             "error",
                             str(job.get("error") or "Initialization failed."),
                         )
+                        maybe_toast("Initialization failed.", icon="⚠️")
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 409:
                         st.session_state[msg_key] = (
                             "error",
                             "Another initialization job is already running.",
                         )
+                        maybe_toast("Another init job is running.", icon="⚠️")
                     else:
                         st.session_state[msg_key] = ("error", str(e))
+                        maybe_toast(str(e)[:240], icon="⚠️")
                 except Exception as e:
                     st.session_state[msg_key] = ("error", str(e))
+                    maybe_toast(str(e)[:240], icon="⚠️")
                 st.rerun()
         elif action == "start":
             if st.button("Start", type="primary", key=f"asset_lc_start_{sym}", use_container_width=True):
                 try:
                     api_post_json(f"/assets/lifecycle/{sym}/start")
                     st.session_state[msg_key] = ("success", "Watch started (active).")
+                    maybe_toast("Watch started (active).", icon="✅")
                 except Exception as e:
                     st.session_state[msg_key] = ("error", str(e))
+                    maybe_toast(str(e)[:240], icon="⚠️")
                 st.rerun()
         elif action == "stop":
             if st.button("Stop", type="primary", key=f"asset_lc_stop_{sym}", use_container_width=True):
                 try:
-                    api_post_json(f"/assets/lifecycle/{sym}/stop")
-                    st.session_state[msg_key] = ("success", "Watch stopped.")
+                    r = post_mutate_response(f"/assets/lifecycle/{sym}/stop", {})
+                    if r.status_code == 200:
+                        data = r.json()
+                        fr = data.get("flatten") if isinstance(data.get("flatten"), dict) else {}
+                        skipped = fr.get("skipped")
+                        submitted = fr.get("submitted")
+                        if skipped == "flat":
+                            msg = "Watch stopped — no open position to flatten."
+                            maybe_toast("No position to flatten.", icon="ℹ️")
+                        elif submitted:
+                            msg = "Watch stopped — flatten order submitted."
+                            maybe_toast("Flatten order submitted.", icon="✅")
+                        else:
+                            msg = "Watch stopped."
+                            maybe_toast(msg, icon="✅")
+                        st.session_state[msg_key] = ("success", msg)
+                    elif r.status_code == 502:
+                        try:
+                            detail = r.json().get("detail", r.text)
+                        except Exception:
+                            detail = r.text
+                        st.session_state[msg_key] = ("error", f"Stop failed (flatten): {detail}")
+                        maybe_toast("Flatten failed — lifecycle still active.", icon="⚠️")
+                    else:
+                        r.raise_for_status()
                 except Exception as e:
                     st.session_state[msg_key] = ("error", str(e))
+                    maybe_toast(str(e)[:240], icon="⚠️")
                 st.rerun()
         else:
             st.caption(f"`{lifecycle_state}`")

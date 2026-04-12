@@ -103,6 +103,21 @@ def _mutate_headers() -> dict[str, str]:
     return headers
 
 
+def post_mutate_response(
+    path: str,
+    body: dict[str, Any] | None = None,
+    *,
+    timeout: float = 120.0,
+) -> httpx.Response:
+    """POST with session cookie + API key (FB-UX-013 lifecycle stop may run flatten >15s)."""
+    return httpx.post(
+        f"{get_api_base()}{path}",
+        json=body or {},
+        timeout=timeout,
+        headers=_mutate_headers(),
+    )
+
+
 def api_post_json(
     path: str,
     body: dict[str, Any] | None = None,
