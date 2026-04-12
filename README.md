@@ -66,6 +66,10 @@ Publishes **8000** (API + `/metrics`), **8501** (Streamlit). Mounts **`./data`**
 
 **TLS edge (FB-CONT-004)** — optional **Caddy** reverse proxy: merge **`infra/docker-compose.edge.yml`** after the app file. Maps **https://api.localhost:8443** and **https://ui.localhost:8443** (self-signed **`tls internal`**; add **`api.localhost`** / **`ui.localhost`** to **`hosts`**). Edit **`infra/caddy/Caddyfile`** for real DNS + automatic HTTPS on the public internet.
 
+### Cloud deployment (FB-CONT-006)
+
+Primary path: **single Linux VM + Docker Compose + systemd**; alternate sketch: **AWS Fargate + EFS**. Secrets via cloud secret manager → **`.env`**; networking, disk, backups, and a second-path bullet list: **[`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD)** (see also **[`docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)**, **FB-CONT-P0**).
+
 ---
 
 ## 🪟 Windows
@@ -83,6 +87,7 @@ From the repo root: run **`setup.bat`** (venv + install + optional Docker), then
 | [`docs/QUEUE.MD`](docs/QUEUE.MD) | Backlog, fixes, roadmap |
 | [`docs/ADR_CANONICAL_BAR_STORAGE.MD`](docs/ADR_CANONICAL_BAR_STORAGE.MD) | Canonical bar storage (QuestDB / Parquet / Redis) |
 | [`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD) | Operations & live trading checklist |
+| [`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD) | Cloud VM / Fargate deployment notes (**FB-CONT-006**) |
 | [`docs/PER_ASSET_OPERATOR.MD`](docs/PER_ASSET_OPERATOR.MD) | Per-asset manifest API; Streamlit **Dashboard** + **`/Asset`** route (FB-AP-027) |
 
 **As-built specs:** [`docs/Specs/README.MD`](docs/Specs/README.MD) · **Repo layout & CI:** see [`AGENTS.md`](AGENTS.md) for contributors and automation.
