@@ -52,3 +52,22 @@ def test_pnl_summary_with_realized(client_pnl):
     assert r.status_code == 200
     body = r.json()
     assert body["realized_pnl_usd"] == "42.5"
+
+
+def test_pnl_series_endpoint(client_pnl):
+    client, ledger = client_pnl
+    append_entry(
+        RealizedLedgerEntry(
+            ts=datetime.now(tz=UTC),
+            realized_pnl_usd=Decimal("3"),
+            symbol="BTC-USD",
+            source="test",
+        ),
+        path=ledger,
+    )
+    r = client.get("/pnl/series?range=all&bucket_seconds=3600")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["range"] == "all"
+    assert len(body["points"]) >= 1
+    assert "cumulative_usd" in body["points"][-1]

@@ -3,22 +3,20 @@
     streamlit run control_plane/Home.py
 
 Pages live in `control_plane/pages/`. Set `NM_CONTROL_PLANE_URL` for API base.
+
+**FB-AP-026:** Dashboard focuses on PnL + holdings; global system power and app-wide paper/live
+controls were removed from this page (per-asset lifecycle and execution mode are tracked in
+``docs/QUEUE.MD`` — FB-AP-005 / FB-AP-030 / FB-AP-039 / FB-AP-040).
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
-from control_plane.live_confirm import (
-    LIVE_CONFIRM_PHRASE,
-    live_apply_allowed,
-    requires_live_confirmation,
-)
 from control_plane.pnl_panel import render_pnl_panel
 from control_plane.positions_panel import render_positions_sidebar
 from control_plane.streamlit_util import (
     api_get_json,
-    api_post_json,
     get_api_base,
     get_grafana_url,
     get_questdb_console_url,
@@ -30,118 +28,15 @@ st.sidebar.markdown(f"**Control plane:** `{get_api_base()}`")
 st.sidebar.markdown(f"**QuestDB:** `{get_questdb_console_url()}`")
 st.sidebar.markdown(f"**Grafana:** `{get_grafana_url()}`")
 
-st.sidebar.divider()
-st.sidebar.subheader("System power")
-st.sidebar.caption(
-    "OFF halts inference, trading, and offline training. "
-    "When using run.bat, the background live runtime stops while API + dashboard stay up."
-)
-try:
-    power_state = api_get_json("/system/power").get("power", "?")
-except Exception as e:
-    st.sidebar.error(f"Cannot read power: {e}")
-    power_state = "?"
-
-col_a, col_b = st.sidebar.columns(2)
-with col_a:
-    if st.button("ON", use_container_width=True, type="primary"):
-        try:
-            api_post_json("/system/power", {"power": "on"})
-            st.success("Power set to ON")
-            st.rerun()
-        except Exception as e:
-            st.error(str(e))
-with col_b:
-    if st.button("OFF", use_container_width=True):
-        try:
-            api_post_json("/system/power", {"power": "off"})
-            st.warning("Power set to OFF (hard stop)")
-            st.rerun()
-        except Exception as e:
-            st.error(str(e))
-
-st.sidebar.markdown(f"**Current:** `{power_state}`")
-
-st.sidebar.divider()
-st.sidebar.subheader("Execution mode (paper / live)")
-st.sidebar.caption(
-    "Apply writes intent + updates default.yaml and .env when present. "
-    "Restart API and live runtime (or re-run run.bat) to load NM_EXECUTION_MODE."
-)
-st.sidebar.caption(
-    f"Switching **to live** opens a confirmation dialog (type `{LIVE_CONFIRM_PHRASE}`). "
-    "Set `NM_STREAMLIT_LIVE_CONFIRM=false` to skip (not recommended)."
-)
 try:
     st_data = api_get_json("/status")
-    prof = st_data.get("execution_profile") or {}
-    active = prof.get("active_execution_mode", "?")
-    pending = prof.get("pending_execution_mode")
-    need_restart = bool(prof.get("restart_required"))
+    active = (st_data.get("execution_profile") or {}).get("active_execution_mode", "?")
 except Exception as e:
     st.sidebar.error(f"Cannot read status: {e}")
-    active, pending, need_restart = "?", None, False
+    active = "?"
 
-mode_choice = st.sidebar.selectbox(
-    "Target mode",
-    options=["paper", "live"],
-    index=0 if str(active).lower() != "live" else 1,
-    key="exec_mode_select",
-)
-
-
-@st.dialog("Confirm live execution")
-def _dialog_apply_live() -> None:
-    st.warning(
-        "**Live** mode is intended for **real** venue execution (e.g. Coinbase Advanced Trade). "
-        "Verify **`GET /status` → preflight** and venue API keys before continuing."
-    )
-    ack = st.checkbox("I understand and accept the risk of live orders.", value=False)
-    phrase = st.text_input(f"Type **{LIVE_CONFIRM_PHRASE}** to confirm", value="", key="live_phrase_input")
-    col_x, col_y = st.columns(2)
-    with col_x:
-        if st.button("Cancel", use_container_width=True):
-            st.rerun()
-    with col_y:
-        if st.button("Apply LIVE", type="primary", use_container_width=True):
-            if not live_apply_allowed(
-                "live",
-                str(active),
-                acknowledge_risk=ack,
-                typed_phrase=phrase,
-            ):
-                st.error(f"Enable the checkbox and type {LIVE_CONFIRM_PHRASE} exactly (uppercase).")
-                return
-            try:
-                api_post_json(
-                    "/system/execution-profile",
-                    {"execution_mode": "live", "apply_to_config_files": True},
-                )
-                st.success("Intent set to **live**. Restart processes to activate.")
-                st.rerun()
-            except Exception as e:
-                st.error(str(e))
-
-
-if st.sidebar.button("Apply execution mode", use_container_width=True):
-    if mode_choice == "live" and requires_live_confirmation(mode_choice, str(active)):
-        _dialog_apply_live()
-    else:
-        try:
-            api_post_json(
-                "/system/execution-profile",
-                {"execution_mode": mode_choice, "apply_to_config_files": True},
-            )
-            st.sidebar.success(f"Intent set to **{mode_choice}**. Restart processes to activate.")
-            st.rerun()
-        except Exception as e:
-            st.sidebar.error(str(e))
-
-st.sidebar.markdown(f"**Active (process):** `{active}`")
-if pending:
-    st.sidebar.markdown(f"**Pending:** `{pending}`")
-if need_restart:
-    st.sidebar.warning("Restart required — stop and start control plane + live runtime.")
+st.sidebar.caption(f"Process execution mode (env): `{active}` — change via `.env` / restart.")
+st.sidebar.divider()
 
 render_positions_sidebar()
 
@@ -153,6 +48,6 @@ Use the sidebar to open **Live**, **Regimes**, **Routes**, **Models**, **Logs**,
 
 Pages call the FastAPI control plane (`/status`, `/routes`, `/models`, `/flatten`) and link to observability URLs.
 
-**System power** (sidebar): global ON/OFF persisted to `data/system_power.json`. OFF stops model inference and order submission in the decision path; offline training skips; the Kraken live loop exits when power is turned OFF.
+**Per-asset** Initialize / Start / Stop and execution routing are **not** on this dashboard — see **`docs/PER_ASSET_OPERATOR.MD`** and the queue (**FB-AP-031**, **FB-AP-030**). System-wide power / hard stop removal: **FB-AP-039**.
 """
 )
