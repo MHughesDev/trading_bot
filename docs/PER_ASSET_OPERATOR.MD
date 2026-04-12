@@ -199,6 +199,12 @@ When **`NM_LIVE_WATCH_LIFECYCLE_GATE=true`**, the **`live_service`** loop runs *
 - **`GET /universe/platform-supported`** — paginated canonical symbols (`limit`, `offset`, optional `q` on symbol / Alpaca name / Coinbase base).
 - **`GET /status` → `platform_supported_universe`** — `rule_version`, `mode`, `symbol_count` (no symbol list).
 
+## Universe search (FB-AP-023)
+
+**Metadata only** — same FB-AP-022 symbol set as **`GET /universe/platform-supported`**, with Alpaca / Coinbase fields per row for UI search (no OHLC or bar series).
+
+- **`GET /universe/search`** — paginated `rows` with `canonical_symbol`, `paper_tradable` / `live_tradable` (presence in each snapshot under the current intersection or union rule), `alpaca_symbol`, `alpaca_name`, `coinbase_product_id`, `coinbase_base_name`, `coinbase_quote_name`. Query params: `limit`, `offset`, optional `q`.
+
 ## Related
 
 - [`ADR_CANONICAL_BAR_STORAGE.MD`](ADR_CANONICAL_BAR_STORAGE.MD) — canonical bar storage decision (FB-AP-013).
