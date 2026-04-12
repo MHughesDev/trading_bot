@@ -77,6 +77,7 @@ from app.runtime import coinbase_universe_store as coinbase_universe_store_mod
 from app.runtime.platform_supported_universe import (
     platform_supported_payload,
     platform_supported_status_summary,
+    universe_search_payload,
 )
 from orchestration.alpaca_universe_scheduler import (
     alpaca_universe_scheduler_status,
@@ -359,6 +360,16 @@ def get_platform_supported_universe(
 ) -> dict[str, Any]:
     """Cross-venue **platform-supported** symbols (FB-AP-022). Search/eligibility only — not Kraken data."""
     return platform_supported_payload(settings, limit=limit, offset=offset, query=q)
+
+
+@app.get("/universe/search")
+def get_universe_search(
+    limit: Annotated[int, Query(ge=1, le=10_000)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str | None, Query(description="Filter symbol/name/base (case-insensitive)")] = None,
+) -> dict[str, Any]:
+    """Paginated symbol search over the FB-AP-022 set with venue metadata only — no OHLC (FB-AP-023)."""
+    return universe_search_payload(settings, limit=limit, offset=offset, query=q)
 
 
 @app.post("/auth/register", response_model=RegisterResponse)

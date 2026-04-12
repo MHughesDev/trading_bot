@@ -11,10 +11,12 @@ from app.config.settings import AppSettings
 from app.runtime.alpaca_universe_store import replace_alpaca_universe_rows
 from app.runtime.coinbase_universe_store import replace_coinbase_universe_rows
 from app.runtime.platform_supported_universe import (
+    list_platform_supported_search_rows,
     list_platform_supported_symbols,
     platform_supported_count,
     platform_supported_payload,
     platform_supported_status_summary,
+    universe_search_payload,
 )
 
 
@@ -126,6 +128,38 @@ def test_status_summary() -> None:
     assert out["mode"] == "intersection"
 
 
+def test_search_rows_intersection(tmp_path: Path) -> None:
+    a = tmp_path / "a.sqlite"
+    c = tmp_path / "c.sqlite"
+    _seed_alpaca(a)
+    _seed_coinbase(c)
+    rows, total = list_platform_supported_search_rows(
+        a, c, mode="intersection", limit=10, offset=0
+    )
+    assert total == 1
+    assert len(rows) == 1
+    r0 = rows[0]
+    assert r0["canonical_symbol"] == "BTC-USD"
+    assert r0["paper_tradable"] is True
+    assert r0["live_tradable"] is True
+    assert r0["alpaca_symbol"] == "BTCUSD"
+    assert r0["coinbase_product_id"] == "BTC-USD"
+
+
+def test_search_rows_union_flags(tmp_path: Path) -> None:
+    a = tmp_path / "a.sqlite"
+    c = tmp_path / "c.sqlite"
+    _seed_alpaca(a)
+    _seed_coinbase(c)
+    rows, total = list_platform_supported_search_rows(a, c, mode="union", limit=10, offset=0)
+    assert total == 3
+    by_sym = {r["canonical_symbol"]: r for r in rows}
+    assert by_sym["ETH-USD"]["paper_tradable"] is False
+    assert by_sym["ETH-USD"]["live_tradable"] is True
+    assert by_sym["SOL-USD"]["paper_tradable"] is True
+    assert by_sym["SOL-USD"]["live_tradable"] is False
+
+
 @pytest.fixture()
 def client_ps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     from control_plane import api
@@ -161,3 +195,28 @@ def test_status_includes_block(client_ps: TestClient) -> None:
     b = r.json()["platform_supported_universe"]
     assert b["symbol_count"] == 1
     assert b["mode"] == "intersection"
+
+
+def test_universe_search_api(client_ps: TestClient) -> None:
+    r = client_ps.get("/universe/search")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["ok"] is True
+    assert j["total"] == 1
+    assert len(j["rows"]) == 1
+    assert j["rows"][0]["canonical_symbol"] == "BTC-USD"
+
+
+def test_universe_search_payload_respects_mode(tmp_path: Path) -> None:
+    a = tmp_path / "a.sqlite"
+    c = tmp_path / "c.sqlite"
+    _seed_alpaca(a)
+    _seed_coinbase(c)
+    s = AppSettings(
+        alpaca_universe_db_path=a,
+        coinbase_universe_db_path=c,
+        platform_supported_universe_mode="union",
+    )
+    p = universe_search_payload(s, limit=50, offset=0)
+    assert p["total"] == 3
+    assert len(p["rows"]) == 3
