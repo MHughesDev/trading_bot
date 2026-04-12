@@ -41,6 +41,18 @@ docker compose -f infra/docker-compose.yml up -d
 
 Configure secrets in **`.env`** (see [`.env.example`](.env.example)); app settings use the **`NM_`** prefix.
 
+### Container image (FB-CONT-001)
+
+The repo includes a **root `Dockerfile`**: multi-stage is not required for the default slim runtime; the image installs **`pip install -e ".[alpaca,dashboard]"`** (control plane + Streamlit + paper broker client — **not** full `torch` / `mlflow`; add a custom build stage or extra if you need GPU training inside the image).
+
+```bash
+docker build -t trading-bot:local .
+docker run --rm trading-bot:local python -c "import app; import control_plane.api"
+docker run --rm -p 8000:8000 trading-bot:local api
+```
+
+Entrypoint commands: **`api`** (default, uvicorn `control_plane.api:app` on **8000**), **`streamlit`** (**8501**), **`live`** (`python -m app.runtime.live_service`), **`shell`**. Use **one process per container** and Compose to run API + UI + live side by side (**FB-CONT-P0** / **`docs/QUEUE.MD`**).
+
 ---
 
 ## 🪟 Windows
