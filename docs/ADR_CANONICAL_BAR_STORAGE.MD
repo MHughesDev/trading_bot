@@ -18,7 +18,7 @@ The per-asset product epic requires **one authoritative time series per symbol**
 |----------|------|------------------|--------|
 | **In-process `RollingBars`** (`data_plane/bars/rolling.py`) | Live loop: rolling OHLC from ticks | Per-symbol frame in memory | Ephemeral; source of features for `DecisionPipeline`. |
 | **Redis** (`data_plane/storage/redis_state.py`) | Latest bar JSON per symbol | `BarEvent` JSON, TTL (`NM_REDIS_BAR_TTL_SECONDS`) | Fast “last bar”; **not** historical retention. |
-| **QuestDB `bars`** (`data_plane/storage/schemas.py`, `QuestDBWriter.insert_bar`) | Optional append-only persistence | `ts`, `symbol`, OHLCV, `source` SYMBOL | Partitioned by day; **no** dedupe key in DDL today; used when `questdb_persist_*` paths write bars. |
+| **QuestDB `canonical_bars`** (`QUESTDB_CANONICAL_BARS_DDL`, `QuestDBWriter.insert_bar`) | Durable canonical series (**FB-AP-014**) | `ts`, `symbol`, `interval_seconds`, OHLCV, `source`, `schema_version` | Partitioned by day; legacy `bars` table retained for existing deployments. |
 | **Init pipeline Parquet** (`NM_ASSET_INIT_ARTIFACTS_DIR`, `orchestration/init_feature_artifacts.py`) | Bootstrap + feature training artifacts | Polars DataFrame → Parquet + manifest | **Per init job**; not the live canonical store. |
 | **Backtesting / replay** | CSV or in-memory frames | Aligned with replay contracts | Separate from production ingest path. |
 

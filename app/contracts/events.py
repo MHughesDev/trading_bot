@@ -7,7 +7,12 @@ SourceLiteral = Literal["kraken", "coinbase"]
 
 
 class BarEvent(BaseModel):
-    """Canonical OHLCV bar (decision pipeline input)."""
+    """Canonical OHLCV bar (decision pipeline input).
+
+    **FB-AP-014:** ``timestamp`` is the **bucket start** in UTC. ``interval_seconds`` is the bar
+    width (default ``1`` for 1-second buckets). Durable storage keys on
+    ``(symbol, timestamp, interval_seconds)`` together with OHLCV.
+    """
 
     timestamp: datetime
     symbol: str
@@ -16,6 +21,11 @@ class BarEvent(BaseModel):
     low: float
     close: float
     volume: float
+    interval_seconds: int = Field(
+        default=1,
+        ge=1,
+        description="Bar width in seconds (bucket size; 1 = 1s bar)",
+    )
     source: SourceLiteral = "kraken"
     schema_version: int = Field(default=1, ge=1)
 

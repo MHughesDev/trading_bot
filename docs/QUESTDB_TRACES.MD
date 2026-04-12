@@ -4,4 +4,4 @@ When `NM_QUESTDB_PERSIST_DECISION_TRACES=true` (or `questdb.persist_decision_tra
 
 **Backup / restore:** follow QuestDB ops for your deployment (volume snapshots or `questdb` export). The `decision_traces.details` column holds full JSON for audit.
 
-**Bars:** bar inserts remain available via `insert_bar`; batching from the live path is a follow-up.
+**Bars:** `QuestDBWriter.insert_bar` writes to **`canonical_bars`** (FB-AP-014: `interval_seconds`, `schema_version`). Legacy **`bars`** DDL may still exist on old volumes; new inserts use **`canonical_bars`**. Batching from the live path is a follow-up.

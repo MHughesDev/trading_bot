@@ -37,6 +37,7 @@ def test_write_init_feature_artifacts_creates_parquet_and_manifest(tmp_path: Pat
         job_id="test-job-id",
         cleaned_bars=bars,
         settings=s,
+        canonical_interval_seconds=60,
     )
     assert bp.exists()
     assert fp.exists()
@@ -46,6 +47,7 @@ def test_write_init_feature_artifacts_creates_parquet_and_manifest(tmp_path: Pat
     assert loaded["symbol"] == "BTC-USD"
     assert loaded["job_id"] == "test-job-id"
     assert loaded["features_rows"] == 2
+    assert loaded["canonical_interval_seconds"] == 60
     d = init_features_detail_payload(manifest)
     assert d["schema_fingerprint"] == manifest["schema_fingerprint"]
     assert "features_parquet" in d
