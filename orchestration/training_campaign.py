@@ -24,6 +24,7 @@ import polars as pl
 
 from app.config.settings import AppSettings, load_settings
 from app.runtime.system_power import is_on, sync_from_disk
+from execution.trade_activity import symbol_had_trade_in_lookback
 from forecaster_model.config import ForecasterConfig
 from forecaster_model.training.metrics import mean_pinball_loss
 from forecaster_model.training.real_data_fit import (
@@ -221,8 +222,32 @@ def run_training_campaign(
 
     rl_results: list[dict[str, Any]] = []
     rl_idx = 0
+    rl_skipped: dict[str, Any] | None = None
+    rl_lookback = (
+        s.scheduler_nightly_rl_trade_lookback_days
+        if s.scheduler_nightly_rl_trade_lookback_days is not None
+        else lookback_days
+    )
+    if (
+        mode == "nightly"
+        and s.scheduler_nightly_rl_requires_trade
+        and not symbol_had_trade_in_lookback(sym, rl_lookback)
+    ):
+        rl_skipped = {
+            "reason": "no_trade_markers_in_lookback",
+            "lookback_days": rl_lookback,
+            "symbol": sym,
+        }
+        logger.info(
+            "nightly RL skipped: no trade markers for %s in last %s days (FB-AP-037)",
+            sym,
+            rl_lookback,
+        )
+
     # Initial campaign: 2 algorithm families × 3 splits × 3 seeds = 18 (heuristic placeholders for PPO/SAC)
     alg_tags = ("ppo_placeholder", "sac_placeholder") if mode == "initial" else ("nightly",)
+    if rl_skipped is not None:
+        alg_tags = ()
     for alg in alg_tags:
         for sp_idx, trip in enumerate(splits):
             for seed in rl_seeds:
@@ -259,6 +284,7 @@ def run_training_campaign(
         "forecaster_runs": fore_results,
         "best_forecaster_aggregate_score": best_score,
         "rl_runs": rl_results,
+        "rl_skipped": rl_skipped,
         "spec_notes": {
             "forecaster": "quantile_ohlc_v1 sklearn on real Kraken candles/trades only",
             "rl": "heuristic policy rollout on real returns; PPO/SAC backlog",
