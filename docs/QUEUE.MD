@@ -120,16 +120,17 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-16):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Next:** reprioritize new work, add rows per [**§8**](#8-how-to-add-an-entry), pick **Out of scope** (**FB-N1**, **FB-N3**, LOW), or optional GitHub sync [**§7**](#7-github-sync-optional). Agents: when **HIGH** **Open** is empty, see [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+**Status (2026-04-17):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Next:** reprioritize new work, add rows per [**§8**](#8-how-to-add-an-entry), pick **Out of scope** (**FB-N1**, **FB-N3**, LOW), or optional GitHub sync [**§7**](#7-github-sync-optional). Agents: when **HIGH** **Open** is empty, see [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **0** | — |
+| **MEDIUM** | **0** | — |
 | **LOW** | **2** | [**FB-N1**](#out-of-scope-not-prioritized), [**FB-N3**](#out-of-scope-not-prioritized) (deferred; full rows in table below) |
 
-*Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious.*
+*Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
 
 ### HIGH priority
 
