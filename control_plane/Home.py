@@ -60,6 +60,6 @@ Use the sidebar to open **Live**, **Regimes**, **Routes**, **Models**, **Logs**,
 
 Pages call the FastAPI control plane (`/status`, `/routes`, `/models`, `/flatten`) and link to observability URLs.
 
-**Per-asset** Initialize / Start / Stop and execution routing are **not** on this dashboard — see **`docs/PER_ASSET_OPERATOR.MD`** and the queue (**FB-AP-031**, **FB-AP-030**). System-wide power / hard stop removal: **FB-AP-039**.
+**Per-asset** controls (**Initialize / Start / Stop**, execution mode) are on the **Asset page** — see **`docs/PER_ASSET_OPERATOR.MD`** (**FB-AP-031**). System-wide power / hard stop removal: **FB-AP-039**.
 """
 )
