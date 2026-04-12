@@ -15,7 +15,7 @@ Follow this workflow whenever you need to **append or edit** the project work qu
 
 ## Before you edit
 
-1. **Read** [§1 Conventions](../../../docs/QUEUE.MD#1-conventions) in `QUEUE.MD` — **Kind**, **ID prefixes** (`FB-`, `IL-`, `HG-`), **Priority**, **Phase**, **Category**, **Batch** (for `FB-AP-*`), **Status**.
+1. **Read** [§1 Conventions](../../../docs/QUEUE.MD#1-conventions) in `QUEUE.MD` — **Kind**, **ID prefixes** (`FB-`, `IL-`, `HG-`), **Priority**, **Phase**, **Category**, **Batch** (for `FB-AP-*`), **Status**. If multiple agents may work concurrently, read [§1.4 Parallel agents](../../../docs/QUEUE.MD#14-parallel-agents-coordination) and epic lane notes (e.g. [FB-AP-P0 §2.2.1](../../../docs/QUEUE.MD#221-parallel-work--lanes-and-dependencies-fb-ap-p0)).
 2. **Decide the target section:**
    - **New open roadmap item** → [§2 Open queue](../../../docs/QUEUE.MD#2-open-queue) (correct subsection: HIGH/MEDIUM/LOW, epic table, or deferred §2.1).
    - **Resolved fix** → [§3 Resolved fixes](../../../docs/QUEUE.MD#3-resolved-fixes-il) (`IL-*` only).
@@ -48,6 +48,7 @@ Use the subsection template in §3: **Kind**, **Phase** (P1/P2/P3), **Resolved**
 - [ ] Correct **§** (open vs resolved vs archive).
 - [ ] **Kind** matches work type; **`IL-*`** only for fixes.
 - [ ] **Status** set (`Open` / `In progress` / `Done` / `deferred`).
+- [ ] **Parallel runs:** if claiming work for an in-progress slice, append **`Claim: …`** to the row **Summary** per [§1.4](../../../docs/QUEUE.MD#14-parallel-agents-coordination); avoid overlapping **Affected files** with another active claim.
 - [ ] **Summary** names verify steps or files where possible.
 - [ ] **Contents** table at top of `QUEUE.MD` updated if you add a **new § anchor** (rare).
 

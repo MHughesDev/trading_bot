@@ -11,8 +11,10 @@
 | § | Section |
 |---|---------|
 | [§1](#1-conventions) | Conventions (Kind, IDs, priority, phase, category) |
+| [§1.4](#14-parallel-agents-coordination) | **Parallel agents** — claims, lanes, conflicts |
 | [§2](#2-open-queue) | **Open** queue (roadmap + deferred) |
 | [§2.2](#22-per-asset-product-epic-fb-ap-p0) | **FB-AP-P0** — per-asset product (registry, UI, data, scheduling) |
+| [§2.2.1](#221-parallel-work--lanes-and-dependencies-fb-ap-p0) | **FB-AP-P0** — parallel lanes + dependency tiers |
 | [§3](#3-resolved-fixes-il) | Resolved **fixes** (`IL-*`) |
 | [§4](#4-completed-compliance-gates-hg) | Completed **gates** (`HG-*`) |
 | [§5](#5-completed-archive-fb--themes) | Completed **archive** (`FB-*`) |
@@ -88,13 +90,32 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 **Status:** Open / In progress / Done.
 
+### 1.4 Parallel agents (coordination)
+
+Multiple coding agents may work **at the same time** on different queue rows. **`docs/QUEUE.MD` stays the canonical backlog**; coordination is **process**, not a separate database.
+
+**Claim before coding**
+
+- Before starting an **Open** row, set **`Status` → `In progress`** in the table and add **`Claim: <agent-or-branch> <ISO8601 date>`** at the **end** of that row’s **Summary** cell (same cell — do not add a new column).
+- When done, set **`Status` → `Done`** (or move **`IL-*`** to §3) and replace the claim with **`Done <ISO8601>`** or remove the claim line if the summary already states completion.
+- If you abandon a slice, revert **`Status` → `Open`** and **delete** the claim line so another agent can take it.
+
+**Conflict rules**
+
+- **Never** set two different rows **`In progress`** if they share a **primary path** listed in **Affected files** (e.g. both touch `control_plane/api.py` heavily) unless the plan is **sequential** (finish one PR first).
+- Prefer **one row per PR**; if a PR closes multiple IDs, note **`Closes FB-AP-xxx, FB-AP-yyy`** in the PR body and update **all** corresponding rows.
+
+**Lanes (FB-AP-P0)**
+
+Workstreams that can proceed **in parallel** once upstream tiers are satisfied are grouped into **lanes** in [§2.2.1](#221-parallel-work--lanes-and-dependencies-fb-ap-p0). Pick **one lane per agent** (or one **Batch** within a lane) to reduce merge conflicts. **Tiers** there are **ordering constraints**, not calendar dates.
+
 ---
 
 ## 2. Open queue
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-12):** open **HIGH** backlog — **§2.2 [FB-AP-P0](#22-per-asset-product-epic-fb-ap-p0)** (per-asset product: strict model separation, two-page UI, universe search, canonical bars, scheduling). Still deferred: **§2.1** (**FB-N1**, **FB-N3**) and optional GitHub sync **§7**.
+**Status (2026-04-12):** open **HIGH** backlog — **§2.2 [FB-AP-P0](#22-per-asset-product-epic-fb-ap-p0)** (per-asset product: strict model separation, two-page UI, universe search, canonical bars, scheduling). **Parallel agents:** use [§1.4](#14-parallel-agents-coordination) + [§2.2.1](#221-parallel-work--lanes-and-dependencies-fb-ap-p0). Still deferred: **§2.1** (**FB-N1**, **FB-N3**) and optional GitHub sync **§7**.
 
 ### HIGH priority
 
@@ -103,6 +124,38 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 ### 2.2 Per-asset product epic (**FB-AP-P0**)
 
 **Brief:** Deliver **strict per-asset model ownership** (dedicated Forecaster and RL **lifecycle and artifacts** per symbol, **no shared ambiguous model state**), an **asset initialization pipeline** separate from live loops (Kraken REST historical → validate → features → initial forecaster + RL train/init → registered ready state), **tradable-universe** sync from **Alpaca** and **Coinbase** with cross-reference and **in-app search**, **symbol-scoped** data load and APIs (no global preload of other symbols’ series), **unified canonical bar storage** for REST backfill and WS-derived updates (seconds-resolution canonical table per asset as the single source of truth; higher intervals derived or materialized for charts and training), **startup backfill** of gaps for initialized assets, **two primary pages only** — **Dashboard** (holdings list + **PnL-only** chart with timeframe dropdown; **no** global hard start/stop) and **Asset Page** (one symbol: OHLC/candlestick chart with intervals **second / minute / hour / day / week / month**, buy/sell markers, per-asset **Paper/Live** dropdown, top-right **Initialize / Start / Stop** reflecting real state, **Stop** halts active watch and **flattens position**), **application running** as master for nightly jobs (when app is off, nothing runs), **nightly forecaster retrain** for every **initialized** asset, **RL retrain only when** that asset had **trading activity** in the prior period (skip RL on no-trade days; still run forecaster), **left slide-in menu** listing **active** (watching) assets with navigation to Asset Page, **low-latency chart updates** via push (WebSocket/SSE) scoped to the selected symbol, **remove** application-wide live/paper toggle and **remove** global system power hard stop. **Enforcement:** runtime and config must **enumerate** symbol → model instance and refuse cross-symbol reuse without explicit binding.
+
+#### 2.2.1 Parallel work — lanes and dependencies (**FB-AP-P0**)
+
+Use this subsection to **assign parallel agents** without editing the epic table repeatedly. **Lanes** = workstreams that can run **concurrently** when **tier** prerequisites are met. **Tiers** = **sequential** order: finish lower tiers before starting dependent rows. Rows not listed here still follow **Summary** dependencies (e.g. storage contract before chart APIs).
+
+**Lanes → row IDs** (pick one lane per agent; prefer adjacent tiers in order)
+
+| Lane | Theme | Row IDs (see §2.2 table) |
+|------|--------|---------------------------|
+| **L1 — Enforcement & runtime** | Guards, state, watch loop | FB-AP-003, FB-AP-004, FB-AP-005, FB-AP-038 |
+| **L2 — Init pipeline** | Bootstrap one symbol | FB-AP-006–012 (006 orchestrator before 007–012 steps) |
+| **L3 — Data plane & storage** | Canonical bars, merge, WS, backfill | FB-AP-013–019 |
+| **L4 — Universe & APIs** | Discovery + HTTP | FB-AP-020–025, FB-AP-023–025 |
+| **L5 — UI & removal** | Dashboard, Asset Page, chrome, global toggles | FB-AP-026–035, FB-AP-039–040, FB-AP-027–034 |
+| **L6 — Scheduling** | Nightly, app-as-master | FB-AP-035–037 |
+| **L7 — QA** | Cross-cutting tests | FB-AP-042 |
+
+**Tiers (ordering — lower number before higher)**
+
+| Tier | Scope | Notes |
+|------|--------|--------|
+| **T0** | FB-AP-P0 epic parent | Tracking only |
+| **T1** | Foundation already **Done** | FB-AP-001, FB-AP-002 (manifest + registry) |
+| **T2** | Runtime enforcement + state | FB-AP-003–005 before **T3** watch/active behavior |
+| **T3** | Init pipeline chain | FB-AP-006 first; 007–012 in sequence within **L2** |
+| **T4** | Storage spike + canonical + merge + WS | FB-AP-013 before 014–016; 015 before heavy 018–019 |
+| **T5** | Backfill + universe + APIs | FB-AP-018–025 (chart/fills APIs after canonical storage **014–017** where applicable) |
+| **T6** | UI + execution UX | FB-AP-026–034, 030–032 after **T2** state/APIs when wiring buttons |
+| **T7** | Schedulers + removal of globals | FB-AP-035–040 |
+| **T8** | Integration tests | FB-AP-042 after relevant surfaces exist |
+
+**Conflict hotspots:** merging **`control_plane/api.py`**, **`app/runtime/`**, and **`data_plane/storage/`** from multiple agents will conflict — **serialize** PRs that touch the same file or split by **Batch** and coordinate in claims ([§1.4](#14-parallel-agents-coordination)).
 
 **Table columns:** **Batch** = theme group; **Phase** = [§1.3](#13-priority-phase-category-status); **Affected files** = primary touch list.
 
@@ -598,6 +651,7 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 4. For multi-row epics (e.g. **FB-AP-P0**), assign a **Batch** code ([§1.3](#13-priority-phase-category-status)) and add **Affected files** (pipe-separated primary paths).
 5. Add a row in [§2](#2-open-queue) (roadmap), [§3](#3-resolved-fixes-il) (fixes), or note completed gates in [§4](#4-completed-compliance-gates-hg). Use the next **FB-** or **HG-** id; for large epics prefer **-01, -02** sub-ids.  
 6. Link **code paths** or tickets.
+7. **Parallel runs:** If more than one agent may pick work from the same epic, add or refresh **lane / tier** notes in the epic subsection (see [§2.2.1](#221-parallel-work--lanes-and-dependencies-fb-ap-p0) for **FB-AP-P0**) and follow [§1.4](#14-parallel-agents-coordination) for **claims**.
 
 **Cursor Agent:** For a structured checklist aligned with §1–§2, use the project skill **Add to Queue** at [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) (invoke with `/add-to-queue` or attach `@add-to-queue` when available).
 

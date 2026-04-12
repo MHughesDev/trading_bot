@@ -12,6 +12,8 @@ You are a coding agent working in the Trading Bot repo. Your job is to **complet
 
 You must follow [`AGENTS.md`](../AGENTS.md): Kraken-only market data policy, risk/signing paths, no secrets in commits, no MLflow auto-promotion, avoid unrelated refactors.
 
+**Parallel agents:** Other runs may be active at the same time. Before coding, read [`QUEUE.MD`](QUEUE.MD) [§1.4](QUEUE.MD#14-parallel-agents-coordination) (claims + conflict rules) and, for **FB-AP-P0**, [§2.2.1](QUEUE.MD#221-parallel-work--lanes-and-dependencies-fb-ap-p0) (lanes and tiers). Set **`In progress`** and a **`Claim:`** line on your **Slice** rows; avoid overlapping **Affected files** with another claimed row.
+
 ---
 
 ## Inputs (fill before each run)
@@ -26,7 +28,7 @@ You must follow [`AGENTS.md`](../AGENTS.md): Kraken-only market data policy, ris
 
 ## Phase 1 — Plan and branch
 
-1. Read **§2** of [`QUEUE.MD`](QUEUE.MD) and confirm the **Slice** rows are still **Open** and understand **Summary** + **Affected files**.
+1. Read **§2** of [`QUEUE.MD`](QUEUE.MD) and confirm the **Slice** rows are still **Open** (not claimed by another agent on the same files), understand **Summary** + **Affected files**, and apply [§1.4](QUEUE.MD#14-parallel-agents-coordination): set **`In progress`** + **`Claim:`** on those rows when you start.
 2. `git fetch origin main && git checkout main && git pull origin main`
 3. `git checkout -b <Branch>` from updated `main`.
 4. If the slice depends on another row (e.g. registry before guards), either include that dependency in the same slice or stop and report.
