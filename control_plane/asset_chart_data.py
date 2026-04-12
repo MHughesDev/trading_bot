@@ -13,6 +13,12 @@ from typing import Any, Literal
 
 import polars as pl
 
+from data_plane.bars.derived_intervals import (
+    resample_monthly_from_daily as _resample_monthly_from_daily,
+    resample_ohlc as _resample_ohlc_core,
+    resample_weekly_from_daily as _resample_weekly_from_daily,
+)
+
 Preset = Literal["second", "minute", "hour", "day", "week", "month"]
 
 
@@ -73,58 +79,18 @@ def _bars_payload_to_df(bars: list[dict[str, Any]]) -> pl.DataFrame:
 
 
 def resample_ohlc(df: pl.DataFrame, *, bucket_seconds: int) -> pl.DataFrame:
-    """OHLCV resample (left-aligned UTC buckets)."""
-    if df.height == 0:
-        return df
-    every = f"{max(1, int(bucket_seconds))}s"
-    return (
-        df.sort("ts")
-        .group_by_dynamic("ts", every=every, closed="left")
-        .agg(
-            pl.col("open").first().alias("open"),
-            pl.col("high").max().alias("high"),
-            pl.col("low").min().alias("low"),
-            pl.col("close").last().alias("close"),
-            pl.col("volume").sum().alias("volume"),
-        )
-        .sort("ts")
-    )
+    """OHLCV resample — delegates to :mod:`data_plane.bars.derived_intervals` (FB-AP-017)."""
+    return _resample_ohlc_core(df, bucket_seconds=bucket_seconds, ts_column="ts")
 
 
 def resample_weekly_ohlc(df_daily: pl.DataFrame) -> pl.DataFrame:
-    """Aggregate daily bars to calendar weeks (UTC Monday start via 7d windows)."""
-    if df_daily.height == 0:
-        return df_daily
-    return (
-        df_daily.sort("ts")
-        .group_by_dynamic("ts", every="7d", closed="left")
-        .agg(
-            pl.col("open").first().alias("open"),
-            pl.col("high").max().alias("high"),
-            pl.col("low").min().alias("low"),
-            pl.col("close").last().alias("close"),
-            pl.col("volume").sum().alias("volume"),
-        )
-        .sort("ts")
-    )
+    """Weekly from daily — shared rollup (FB-AP-017)."""
+    return _resample_weekly_from_daily(df_daily, ts_column="ts")
 
 
 def resample_monthly_ohlc(df_daily: pl.DataFrame) -> pl.DataFrame:
-    """Aggregate daily bars to calendar months."""
-    if df_daily.height == 0:
-        return df_daily
-    return (
-        df_daily.sort("ts")
-        .group_by_dynamic("ts", every="1mo", closed="left")
-        .agg(
-            pl.col("open").first().alias("open"),
-            pl.col("high").max().alias("high"),
-            pl.col("low").min().alias("low"),
-            pl.col("close").last().alias("close"),
-            pl.col("volume").sum().alias("volume"),
-        )
-        .sort("ts")
-    )
+    """Monthly from daily — shared rollup (FB-AP-017)."""
+    return _resample_monthly_from_daily(df_daily, ts_column="ts")
 
 
 def bars_dicts_from_df(df: pl.DataFrame) -> list[dict[str, Any]]:

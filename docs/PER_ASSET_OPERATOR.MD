@@ -71,7 +71,7 @@ Requires **`NM_CONTROL_PLANE_API_KEY`** on mutating routes when the API enforces
 
 ## Asset page OHLC chart (FB-AP-028)
 
-On **`/Asset`** with a symbol, the page loads **`GET /assets/chart/bars`** for the selected interval preset (second through month). **Week** and **month** aggregate from **daily** (`interval_seconds=86400`) bars in QuestDB. Install **`pip install -e ".[dashboard]"`** for Plotly candlesticks.
+On **`/Asset`** with a symbol, the page loads **`GET /assets/chart/bars`** for the selected interval preset (second through month). **Week** and **month** (**FB-AP-017**): when **1s** canonical rows exist in QuestDB, the client builds **daily** bars from them, when **`NM_TRAINING_DATA_GRANULARITY_SECONDS`** is greater than **1** and less than **86400**, charts aggregate to that bar width before daily rollup (same geometry as the training campaign), then roll up to week/month. If **1s** data is missing, the UI falls back to **stored daily** bars only. Shared Polars OHLC rules live in **`data_plane/bars/derived_intervals.py`**. Install **`pip install -e ".[dashboard]"`** for Plotly candlesticks.
 
 ## Asset page trade markers (FB-AP-029)
 
