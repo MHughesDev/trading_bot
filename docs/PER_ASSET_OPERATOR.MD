@@ -23,6 +23,10 @@ Optional **server-side sessions** in the same SQLite file (`operator_sessions` t
 
 On **Home**, a row above holdings/PnL summarizes **`GET /status`**: **preflight** (severity, issues/warnings), **production_preflight** (signing / unsigned / venue credentials flags), **execution profile** (legacy API off → default mode + per-asset note). Implemented in **`control_plane/health_strip.py`**.
 
+## Init pipeline monitor (FB-UX-009)
+
+After **Initialize** on an **Asset** page, **Home** shows an **Init pipeline** panel: **symbol**, **job_id**, **`GET /assets/init/jobs/{id}`** status, and last completed step. It polls until the job reaches **`succeeded`** or **`failed`**. Use **Stop following** to clear the panel (or wait for a terminal state and dismiss). Implemented in **`control_plane/init_monitor.py`**.
+
 ## Streamlit routes (FB-AP-027)
 
 - **Dashboard** — `streamlit run control_plane/Home.py` (main entry).

@@ -144,6 +144,8 @@ def render_asset_page(symbol: str) -> None:
                     with st.spinner("Running initialization pipeline…"):
                         r = api_post_json(f"/assets/init/{sym}")
                         jid = str(r.get("job_id") or "")
+                        if jid:
+                            st.session_state["init_monitor_job_id"] = jid
                         job = poll_init_job_until_terminal(
                             jid,
                             fetch_job=lambda j: api_get_json(f"/assets/init/jobs/{j}"),
