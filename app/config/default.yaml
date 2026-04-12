@@ -93,3 +93,4 @@ microservices:
 scheduler:
   nightly_enabled: false
   nightly_interval_seconds: 86400
+  nightly_per_asset_forecaster: true

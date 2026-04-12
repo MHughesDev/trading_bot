@@ -143,6 +143,8 @@ class AppSettings(BaseSettings):
     # FB-AP-035: background nightly training tick only while control plane process runs
     scheduler_nightly_enabled: bool = False
     scheduler_nightly_interval_seconds: int = 86_400
+    # FB-AP-036: when true, nightly job runs quantile forecaster campaign once per initialized asset (manifest)
+    scheduler_nightly_per_asset_forecaster: bool = True
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -270,6 +272,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["scheduler_nightly_enabled"] = bool(sch["nightly_enabled"])
         if "nightly_interval_seconds" in sch:
             out["scheduler_nightly_interval_seconds"] = int(sch["nightly_interval_seconds"])
+        if "nightly_per_asset_forecaster" in sch:
+            out["scheduler_nightly_per_asset_forecaster"] = bool(sch["nightly_per_asset_forecaster"])
     if "models" in cfg:
         mo = cfg["models"] or {}
         if "forecaster_checkpoint_id" in mo:
