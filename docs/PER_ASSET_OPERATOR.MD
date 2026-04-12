@@ -40,6 +40,10 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 | GET | `/assets/models/{symbol}` | Get one manifest. |
 | PUT | `/assets/models/{symbol}` | Create/replace manifest; body **`canonical_symbol`** must equal `{symbol}`. |
 | DELETE | `/assets/models/{symbol}` | Remove manifest file. |
+| POST | `/assets/init/{symbol}` | Start **background** per-asset init pipeline (FB-AP-006). Only one run globally at a time; returns **`job_id`**. |
+| GET | `/assets/init/jobs/{job_id}` | Init job status: `pending` / `running` / `succeeded` / `failed`, per-step log, `error` on failure. |
+
+**Init pipeline (FB-AP-006):** first step runs a real **Kraken REST** bar fetch (`orchestration.real_data_bars.fetch_symbol_bars_sync`); steps **validate** → **register** are stubbed until **FB-AP-007–012**. Implementation: `orchestration/asset_init_pipeline.py`.
 
 **GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`.
 

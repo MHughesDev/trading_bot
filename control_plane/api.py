@@ -36,6 +36,7 @@ from control_plane.execution_profile import (
 from control_plane.microservice_health import probe_microservices_health
 from execution.pnl_summary import compute_pnl_summary
 from execution.portfolio_positions import fetch_portfolio_positions
+from orchestration.asset_init_pipeline import get_job as get_init_job, try_start_asset_init_job
 
 settings = load_settings()
 state = StateManager()
@@ -301,3 +302,35 @@ def remove_asset_model_manifest(
     if not ok:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="no manifest")
     return {"ok": True, "symbol": symbol.strip()}
+
+
+# --- Asset init pipeline (FB-AP-006) ---
+
+
+@app.post("/assets/init/{symbol}")
+def post_asset_init(
+    symbol: str,
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """
+    Start a background per-asset init job (one global runner; Kraken fetch + stubbed downstream steps).
+
+    Poll ``GET /assets/init/jobs/{job_id}`` for progress.
+    """
+    sym = symbol.strip()
+    job_id = try_start_asset_init_job(sym)
+    if job_id is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="init pipeline already running",
+        )
+    return {"ok": True, "symbol": sym, "job_id": job_id}
+
+
+@app.get("/assets/init/jobs/{job_id}")
+def get_asset_init_job_status(job_id: str) -> dict[str, Any]:
+    """Status and per-step progress for an init job."""
+    j = get_init_job(job_id)
+    if j is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown job")
+    return j
