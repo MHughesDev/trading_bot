@@ -7,7 +7,17 @@ This document describes the **per-asset model manifest** introduced for **FB-AP-
 Multi-tenant groundwork: **SQLite** user table at **`NM_AUTH_USERS_DB_PATH`** (default **`data/users.sqlite`**, gitignored). Passwords stored as **Argon2** hashes only.
 
 - **`POST /auth/register`** — JSON **`{"email":"...","password":"..."}`** (password min length 8). Returns **`id`**, normalized **`email`**, **`created_at`**. **409** if email already exists; **422** on validation errors.
-- **`GET /status` → `user_store`** — **`db_path`**, **`user_count`** (for operators; sessions / login are **FB-UX-002**).
+- **`GET /status` → `user_store`** — **`db_path`**, **`user_count`**, **`session_auth_enabled`**, **`active_session_rows`**.
+
+## Sessions and mutating API (FB-UX-002)
+
+Optional **server-side sessions** in the same SQLite file (`operator_sessions` table). Enable with **`NM_AUTH_SESSION_ENABLED=true`** (default **false** — automation continues to use **`X-API-Key`** only when **`NM_CONTROL_PLANE_API_KEY`** is unset).
+
+- **`POST /auth/login`** — body **`{email,password}`**; sets HTTP-only cookie **`NM_AUTH_SESSION_COOKIE_NAME`** (default **`tb_operator_session`**), **`max_age`** = **`NM_AUTH_SESSION_TTL_SECONDS`**. **`Secure`** and **`SameSite`** via **`NM_AUTH_SESSION_COOKIE_SECURE`** / **`NM_AUTH_SESSION_COOKIE_SAMESITE`** (use **`Secure=true`** behind HTTPS).
+- **`POST /auth/logout`** — revokes the session row and clears the cookie.
+- **`GET /auth/me`** — current user (**401** if no valid session).
+
+**Authorization for mutating routes** (params, lifecycle, manifests, etc.): if **`NM_CONTROL_PLANE_API_KEY`** is set, **`X-API-Key`** must match **or** (when sessions are enabled) a valid session cookie. If the API key is **not** configured, mutating routes require a valid session cookie when **`NM_AUTH_SESSION_ENABLED=true`**; when sessions are **off** and no key is set, behavior stays open (development only).
 
 ## Streamlit routes (FB-AP-027)
 

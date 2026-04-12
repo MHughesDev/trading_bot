@@ -155,6 +155,12 @@ class AppSettings(BaseSettings):
 
     # FB-UX-001: operator user accounts (SQLite + Argon2); used by POST /auth/register
     auth_users_db_path: Path = Field(default=Path("data/users.sqlite"))
+    # FB-UX-002: server-side sessions (same SQLite DB); mutating routes accept cookie or API key
+    auth_session_enabled: bool = False
+    auth_session_ttl_seconds: int = 604_800  # 7 days
+    auth_session_cookie_name: str = "tb_operator_session"
+    auth_session_cookie_secure: bool = False
+    auth_session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -299,6 +305,18 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         au = cfg["auth"] or {}
         if "users_db_path" in au and au["users_db_path"]:
             out["auth_users_db_path"] = Path(str(au["users_db_path"]))
+        if "session_enabled" in au:
+            out["auth_session_enabled"] = bool(au["session_enabled"])
+        if "session_ttl_seconds" in au:
+            out["auth_session_ttl_seconds"] = int(au["session_ttl_seconds"])
+        if "session_cookie_name" in au and au["session_cookie_name"]:
+            out["auth_session_cookie_name"] = str(au["session_cookie_name"])
+        if "session_cookie_secure" in au:
+            out["auth_session_cookie_secure"] = bool(au["session_cookie_secure"])
+        if "session_cookie_samesite" in au and au["session_cookie_samesite"]:
+            ss = str(au["session_cookie_samesite"]).lower()
+            if ss in ("lax", "strict", "none"):
+                out["auth_session_cookie_samesite"] = ss  # type: ignore[assignment]
     if "models" in cfg:
         mo = cfg["models"] or {}
         if "forecaster_checkpoint_id" in mo:

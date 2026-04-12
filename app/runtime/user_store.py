@@ -147,6 +147,21 @@ def verify_password(db_path: Path, email: str, password: str) -> UserRecord | No
     return UserRecord(id=int(row["id"]), email=str(row["email"]), created_at=dt)
 
 
+def get_user_by_id(db_path: Path, user_id: int) -> UserRecord | None:
+    """Load user by primary key."""
+    ensure_schema(db_path)
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT id, email, created_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    created = str(row["created_at"])
+    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+    return UserRecord(id=int(row["id"]), email=str(row["email"]), created_at=dt)
+
+
 def user_store_status(db_path: Path) -> dict[str, Any]:
     """Payload fragment for GET /status."""
     n = count_users(db_path)
