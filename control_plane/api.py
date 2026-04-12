@@ -14,7 +14,15 @@ from observability.forecaster_metrics import MODEL_VERSION_INFO
 
 from app.config.model_artifacts import model_artifact_contract
 from app.config.settings import AppSettings, load_settings
+from app.contracts.asset_lifecycle import AssetLifecycleRecord, AssetLifecycleState
 from app.contracts.asset_model_manifest import AssetModelManifest
+from app.runtime.asset_lifecycle import (
+    effective_state,
+    lifecycle_dir,
+    list_all_tracked_symbols,
+    load_record as load_lifecycle_record,
+    save_record as save_lifecycle_record,
+)
 from app.runtime.asset_model_registry import (
     delete_manifest,
     list_symbols as list_asset_manifest_symbols,
@@ -109,6 +117,10 @@ def get_status() -> dict[str, Any]:
         "asset_model_registry": {
             "registry_dir": str(registry_dir()),
             "initialized_symbols": list_asset_manifest_symbols(),
+        },
+        "asset_lifecycle": {
+            "lifecycle_dir": str(lifecycle_dir()),
+            "tracked_symbols": list_all_tracked_symbols(),
         },
     }
 
@@ -301,3 +313,110 @@ def remove_asset_model_manifest(
     if not ok:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="no manifest")
     return {"ok": True, "symbol": symbol.strip()}
+
+
+# --- Per-asset lifecycle (FB-AP-005) ---
+
+
+def _lifecycle_payload(symbol: str) -> dict[str, Any]:
+    sym = symbol.strip()
+    rec = load_lifecycle_record(sym)
+    eff = effective_state(sym)
+    return {
+        "symbol": sym,
+        "state": eff.value,
+        "persisted": rec is not None,
+        "record": rec.model_dump(mode="json") if rec else None,
+    }
+
+
+@app.get("/assets/lifecycle")
+def list_asset_lifecycle() -> dict[str, Any]:
+    """Symbols with manifest and/or lifecycle file, with effective state per symbol."""
+    rows = []
+    for sym in list_all_tracked_symbols():
+        rows.append(
+            {
+                "symbol": sym,
+                "state": effective_state(sym).value,
+                "persisted": load_lifecycle_record(sym) is not None,
+            }
+        )
+    return {"lifecycle_dir": str(lifecycle_dir()), "symbols": rows}
+
+
+@app.get("/assets/lifecycle/{symbol}")
+def get_asset_lifecycle(symbol: str) -> dict[str, Any]:
+    """Effective lifecycle state for UI labels (Initialize / Start / Stop)."""
+    return _lifecycle_payload(symbol)
+
+
+@app.post("/assets/lifecycle/{symbol}/initialize")
+def post_asset_initialize(
+    symbol: str,
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """Transition ``uninitialized`` → ``initialized_not_active`` (init pipeline will hook here in FB-AP-006)."""
+    sym = symbol.strip()
+    cur = effective_state(sym)
+    if cur != AssetLifecycleState.uninitialized:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=f"cannot initialize from state {cur.value}",
+        )
+    rec = AssetLifecycleRecord(
+        symbol=sym,
+        state=AssetLifecycleState.initialized_not_active,
+        updated_at=AssetLifecycleRecord.bump_timestamp(),
+    )
+    save_lifecycle_record(rec)
+    return {"ok": True, **_lifecycle_payload(sym)}
+
+
+@app.post("/assets/lifecycle/{symbol}/start")
+def post_asset_start(
+    symbol: str,
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """Transition ``initialized_not_active`` → ``active`` (requires model manifest)."""
+    sym = symbol.strip()
+    cur = effective_state(sym)
+    if cur != AssetLifecycleState.initialized_not_active:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=f"cannot start from state {cur.value}",
+        )
+    if load_manifest(sym) is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="model manifest required before start",
+        )
+    rec = AssetLifecycleRecord(
+        symbol=sym,
+        state=AssetLifecycleState.active,
+        updated_at=AssetLifecycleRecord.bump_timestamp(),
+    )
+    save_lifecycle_record(rec)
+    return {"ok": True, **_lifecycle_payload(sym)}
+
+
+@app.post("/assets/lifecycle/{symbol}/stop")
+def post_asset_stop(
+    symbol: str,
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """Transition ``active`` → ``initialized_not_active`` (flatten/watch stop is FB-AP-032)."""
+    sym = symbol.strip()
+    cur = effective_state(sym)
+    if cur != AssetLifecycleState.active:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=f"cannot stop from state {cur.value}",
+        )
+    rec = AssetLifecycleRecord(
+        symbol=sym,
+        state=AssetLifecycleState.initialized_not_active,
+        updated_at=AssetLifecycleRecord.bump_timestamp(),
+    )
+    save_lifecycle_record(rec)
+    return {"ok": True, **_lifecycle_payload(sym), "note": "flatten/venue close is FB-AP-032"}

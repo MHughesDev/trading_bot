@@ -12,6 +12,12 @@ Each **initialized** tradable symbol can have a **manifest** that lists **foreca
 - **File per symbol:** `<canonical_symbol>.json` (e.g. `BTC-USD.json`).
 - Writes use **atomic replace** (temp file + `os.replace`).
 
+### Per-asset lifecycle (FB-AP-005)
+
+- **Default directory:** `data/asset_model_registry/lifecycle/` (override with **`NM_ASSET_LIFECYCLE_DIR`**).
+- **File per symbol:** `<symbol>.json` with `state` ∈ `uninitialized` | `initialized_not_active` | `active`.
+- **Effective state:** If no lifecycle file exists but a **model manifest** exists for that symbol, the effective state is **`initialized_not_active`** (so the UI can show **Start** for legacy manifests). Otherwise, with no manifest and no lifecycle file, effective state is **`uninitialized`**.
+
 ## JSON schema (v1)
 
 | Field | Type | Notes |
@@ -40,8 +46,13 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 | GET | `/assets/models/{symbol}` | Get one manifest. |
 | PUT | `/assets/models/{symbol}` | Create/replace manifest; body **`canonical_symbol`** must equal `{symbol}`. |
 | DELETE | `/assets/models/{symbol}` | Remove manifest file. |
+| GET | `/assets/lifecycle` | List tracked symbols with effective `state` and whether a lifecycle file exists. |
+| GET | `/assets/lifecycle/{symbol}` | Effective lifecycle + optional persisted record. |
+| POST | `/assets/lifecycle/{symbol}/initialize` | `uninitialized` → `initialized_not_active` (init pipeline hooks in FB-AP-006). |
+| POST | `/assets/lifecycle/{symbol}/start` | `initialized_not_active` → `active` (requires model manifest). |
+| POST | `/assets/lifecycle/{symbol}/stop` | `active` → `initialized_not_active` (flatten/venue close in FB-AP-032). |
 
-**GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`.
+**GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`; and **`asset_lifecycle`**: `lifecycle_dir`, `tracked_symbols`.
 
 ## Related
 
