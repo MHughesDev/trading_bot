@@ -56,7 +56,8 @@ Use **`.MD`** (uppercase extension) to match other docs in this repo.
 |----|------|
 | **BS-001** | [`BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD) — OCI/Linux containers, web-first deployment, cloud portability. **Promoted** to [`QUEUE.MD`](../QUEUE.MD) §2.3 **FB-CONT-P0** / **FB-CONT-001**… |
 | **BS-002** | [`BS-002_QUEUE_VS_UI_GAP_ANALYSIS.MD`](BS-002_QUEUE_VS_UI_GAP_ANALYSIS.MD) — **QUEUE** (QueueLog) vs Streamlit UI gap map for **FB-AP-P0**. |
-| **BS-003** | [`BS-003_ADDITIONAL_DASHBOARD_ASSET_UI_IDEAS.MD`](BS-003_ADDITIONAL_DASHBOARD_ASSET_UI_IDEAS.MD) — Extra Dashboard / Asset Page UI ideas beyond **FB-AP-P0** queue rows. |
+| **BS-003** | [`BS-003_ADDITIONAL_DASHBOARD_ASSET_UI_IDEAS.MD`](BS-003_ADDITIONAL_DASHBOARD_ASSET_UI_IDEAS.MD) — Extra Dashboard / Asset Page UI ideas (many **promoted** to **FB-UX-008**–**014** in **QUEUE** §2.4). |
+| **BS-004** | [`BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD`](BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD) — Multi-tenant auth, Account page, per-user PnL — **promoted** to [`QUEUE.MD`](../QUEUE.MD) §2.4 **FB-UX-P0**. |
 
 ## Related
 

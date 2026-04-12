@@ -2,7 +2,7 @@
 
 **Single source of truth** for work items: **fixes**, **changes**, **new features**, **hardening**, **platform**, and **completed history**.
 
-**References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD) · [`MICROSERVICES_SPLIT_PLAN.MD`](MICROSERVICES_SPLIT_PLAN.MD) · [`BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD) (OCI deployment brainstorm; queue **FB-CONT-P0**) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
+**References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD) · [`MICROSERVICES_SPLIT_PLAN.MD`](MICROSERVICES_SPLIT_PLAN.MD) · [`BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD) (OCI deployment brainstorm; queue **FB-CONT-P0**) · [`BRAINSTORM/BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD`](BRAINSTORM/BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD) (multi-tenant auth + Account UI; queue **FB-UX-P0**) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
 
 ---
 
@@ -14,6 +14,7 @@
 | [§2](#2-open-queue) | **Open** queue (roadmap + deferred) |
 | [§2.2](#22-per-asset-product-epic-fb-ap-p0) | **FB-AP-P0** — per-asset product (registry, UI, data, scheduling) |
 | [§2.3](#23-container--oci-cloud-deployment-fb-cont-p0) | **FB-CONT-P0** — container / OCI cloud deployment (images, compose, CI, TLS, runbooks) |
+| [§2.4](#24-multi-tenant-web-operator-ux-fb-ux-p0) | **FB-UX-P0** — multi-tenant auth, Account page, per-user PnL, dashboard UI extras |
 | [§3](#3-resolved-fixes-il) | Resolved **fixes** (`IL-*`) |
 | [§4](#4-completed-compliance-gates-hg) | Completed **gates** (`HG-*`) |
 | [§5](#5-completed-archive-fb--themes) | Completed **archive** (`FB-*`) |
@@ -81,6 +82,16 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 | **AP-SCH** | Schedulers (nightly, app-as-master) |
 | **AP-REM** | Removal of global power / global live-paper |
 
+**Batch (for `FB-UX-P0` — multi-tenant web operator UX; traceability [`BS-004`](../BRAINSTORM/BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD)):**
+
+| Batch | Theme |
+|-------|--------|
+| **UX-ALL** | Epic umbrella / cross-cutting |
+| **AP-UX-AUTH** | Users, passwords, sessions, API auth dependencies |
+| **AP-UX-ACC** | Sign-in / Account / gear / route protection |
+| **AP-UX-DAT** | Per-user PnL, positions, registry, execution credentials |
+| **AP-UX-UI** | Dashboard & Asset UI extras (preflight strip, init monitor, export, etc.) |
+
 **Batch (for `FB-CONT-P0` — container / OCI cloud deployment):**
 
 | Batch | Theme |
@@ -108,7 +119,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-12):** open **HIGH** backlog — **§2.2 [FB-AP-P0](#22-per-asset-product-epic-fb-ap-p0)** (per-asset product: strict model separation, two-page UI, universe search, canonical bars, scheduling). **§2.3 [FB-CONT-P0](#23-container--oci-cloud-deployment-fb-cont-p0)** — OCI/Linux container deployment and cloud portability (**BS-001**). Still deferred: **§2.1** (**FB-N1**, **FB-N3**) and optional GitHub sync **§7**.
+**Status (2026-04-12):** open **HIGH** backlog — **§2.2 [FB-AP-P0](#22-per-asset-product-epic-fb-ap-p0)** (per-asset product: strict model separation, two-page UI, universe search, canonical bars, scheduling). **§2.4 [FB-UX-P0](#24-multi-tenant-web-operator-ux-fb-ux-p0)** — multi-tenant users, sign-in + Account page (venue keys), per-user PnL, dashboard UI extras (**BS-004**). **§2.3 [FB-CONT-P0](#23-container--oci-cloud-deployment-fb-cont-p0)** — OCI/Linux container deployment and cloud portability (**BS-001**). Still deferred: **§2.1** (**FB-N1**, **FB-N3**) and optional GitHub sync **§7**.
 
 ### HIGH priority
 
@@ -183,6 +194,30 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 | FB-CONT-006 | CONT-CLOUD | C | CP | reliability | MEDIUM | Open | **Cloud deployment runbook:** One **opinionated** path (e.g. **single Linux VM + Docker Compose + systemd** *or* **AWS Fargate + EFS** — pick one primary) for moving the **same images** from homelab to cloud: **minimum instance size**, **networking** (security groups / firewall), **secrets** from **cloud secret manager** → runtime env, **persistent disk** mapping to Compose volumes, **egress** notes. **Second path** may be sketched as a bullet list. **Acceptance:** new subsection in **`README.md`** or **`docs/DEPLOY_CLOUD.MD`** linked from **`README.md`**; **BS-001** / **FB-CONT-P0** referenced. | `README.md`, `docs/*.MD`, `infra/` |
 | FB-CONT-007 | CONT-DOC | C | CP | change | MEDIUM | Open | **README — deployment north star:** Add a short **“Deployment models”** subsection: **(A)** Windows **`.bat`** / optional launcher (**[`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD)**) vs **(B)** **Linux OCI / Compose / cloud** (**BS-001**, **FB-CONT-P0**) — browser-only, same stack. Link **QuestDB / Redis / Qdrant** roles in one sentence each. **Acceptance:** new users understand which path they are on; no duplicate of long brainstorm text. | `README.md`, `docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD` |
 | FB-CONT-008 | CONT-ALL | C | XX | spike | LOW | Open | **Spike — managed data services vs self-hosted:** Time-boxed comparison for **cloud** deployments: **managed Redis**, **QuestDB Cloud** or **managed TSDB**, **Qdrant Cloud** vs **self-hosted containers** on one VM — **cost**, **ops load**, **network latency** to app region, **migration** from current Compose defaults. Deliver **≤2 page ADR** in **`docs/`** with **recommendation** and **follow-up queue rows** only if we adopt a managed swap. **Traceability:** **BS-001** open questions. | `docs/*.MD`, `docs/QUEUE.MD` |
+
+### 2.4 Multi-tenant web operator UX (**FB-UX-P0**)
+
+**Brief:** Add **registered users** with **standard authentication** (sign-up, sign-in, sign-out, password hashing). Each user has **isolated trading context**: **PnL ledger**, **positions**, **per-asset model registry / manifests**, and **Alpaca + Coinbase API credentials** entered on an **Account** page. **Kraken** remains the **deployment-wide** market-data provider (quotes/bars) per [`AGENTS.md`](../AGENTS.md) — **not** per-user venue keys for data ingestion. **Web UX:** a **sign-in screen** is the default for unauthenticated visitors; **deep links** (e.g. Dashboard, Asset) **redirect to sign-in** if not logged in. **Chrome:** **settings gear** opens **Account** (keys, profile). **Dashboard/Asset extras** (from **BS-003**, promoted here): preflight/health strip, init job monitor, manifest/model card on Asset Page, CSV export, scheduler status panel, toasts, watchlist. **Traceability:** [`BRAINSTORM/BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD`](BRAINSTORM/BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD).
+
+**Table columns:** **Batch** = theme group; **Phase** = [§1.3](#13-priority-phase-category-status); **Affected files** = primary touch list.
+
+| ID | Batch | Phase | Cat | Kind | Pri | Status | Summary | Affected files |
+|----|-------|-------|-----|------|-----|--------|---------|----------------|
+| FB-UX-P0 | UX-ALL | B | XX | feature | HIGH | Open | **(Epic parent)** End-to-end **multi-tenant** web operator product: auth, per-user data and venue keys, gated navigation, Account + gear, integration with **FB-AP-P0** per-asset features per user. Sub-rows **FB-UX-001**… are independently closable; implement **FB-UX-001**–**002** before protected routes and per-user data (**FB-UX-003**–**007**). | `docs/QUEUE.MD`, `app/`, `control_plane/`, `execution/`, `docs/BRAINSTORM/BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD` |
+| FB-UX-001 | AP-UX-AUTH | B | PF | feature | HIGH | Open | **User store and passwords:** Persistent **users** table (e.g. SQLite/Postgres) with **email**, **password hash** (argon2/bcrypt), **created_at**; no plaintext passwords. Registration API and validation. **Depends on:** choose DB alongside or instead of file-only stores for other per-user data. | `app/`, `control_plane/api.py`, `tests/` |
+| FB-UX-002 | AP-UX-AUTH | B | PF | hardening | HIGH | Open | **Sessions / tokens:** HTTP-only **session cookies** or signed **JWT**; secure flags; logout invalidates session. FastAPI dependencies: **`get_current_user`**, **`require_user`** for mutating routes. | `app/`, `control_plane/api.py`, `tests/` |
+| FB-UX-003 | AP-UX-ACC | B | UI | feature | HIGH | Open | **Sign-in / sign-up / sign-out UI:** Standard screens (email + password); success redirects to **Dashboard**. Wire to auth APIs. | `control_plane/`, `control_plane/api.py` |
+| FB-UX-004 | AP-UX-ACC | B | UI | feature | HIGH | Open | **Route protection:** If user opens **Dashboard**, **Asset Page**, or any app URL **without** a valid session, **redirect to sign-in** (Streamlit: gate in entry or `st.query_params` / session state; document limitations). | `control_plane/Home.py`, `control_plane/pages/`, `docs/` |
+| FB-UX-005 | AP-UX-ACC | B | UI | feature | HIGH | Open | **Settings gear:** Persistent **gear** control in app chrome linking to **Account** page. | `control_plane/` |
+| FB-UX-006 | AP-UX-ACC | B | UI | feature | HIGH | Open | **Account page — venue keys:** Form to save **Alpaca** (paper) and **Coinbase** (live) **API keys and secrets** per user; **encrypt at rest**; never echo full secrets in UI after save; validate format optionally. **Kraken** market-data keys remain **`NM_*`** deployment env — surface read-only note on page. | `control_plane/`, `app/`, `execution/`, `tests/` |
+| FB-UX-007 | AP-UX-DAT | B | PF | feature | HIGH | Open | **Per-user isolation:** Scope **PnL ledger**, **positions**, **asset model registry**, init artifacts, and **execution** adapter credentials by **`user_id`**. Migration plan for existing single-tenant `data/` layout. **Kraken** data plane unchanged (shared). | `app/`, `execution/`, `data_plane/` (paths), `control_plane/api.py`, `tests/` |
+| FB-UX-008 | AP-UX-UI | B | UI | change | MEDIUM | Open | **Dashboard preflight / health strip:** Surface `GET /status` → `preflight`, `production_preflight`, execution profile in one glanceable row. | `control_plane/`, `control_plane/pnl_panel.py` |
+| FB-UX-009 | AP-UX-UI | B | UI | feature | MEDIUM | Open | **Init pipeline monitor UI:** Panel for running **asset init** job (**symbol**, **job_id**, poll **`GET /assets/init/jobs/{id}`**). | `control_plane/` |
+| FB-UX-010 | AP-UX-UI | B | UI | feature | MEDIUM | Open | **Asset Page — manifest / model card:** Read-only block: **forecaster/policy paths**, **last trained**, from **`GET /assets/models/{symbol}`** per user. | `control_plane/` |
+| FB-UX-011 | AP-UX-UI | B | UI | change | MEDIUM | Open | **CSV export:** Download **P&L summary** and **positions** as CSV (client-side from API JSON). | `control_plane/` |
+| FB-UX-012 | AP-UX-UI | B | UI | feature | MEDIUM | Open | **Scheduler / nightly status panel:** Show next/last run and last error for nightly jobs (**FB-AP-035**–**037**), backed by a small status API or agreed source. | `control_plane/`, `orchestration/`, `control_plane/api.py` |
+| FB-UX-013 | AP-UX-UI | B | UI | feature | LOW | Open | **In-app notifications:** Toasts for init complete, train failure, flatten (**st.toast** + polling or events). | `control_plane/` |
+| FB-UX-014 | AP-UX-UI | B | UI | feature | LOW | Open | **Watchlist / favorites:** Pin symbols for quick navigation to Asset Page (session or per-user prefs). | `control_plane/` |
 
 ### Compliance & release gates (open)
 

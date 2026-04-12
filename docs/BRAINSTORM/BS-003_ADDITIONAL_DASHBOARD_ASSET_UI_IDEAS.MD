@@ -2,7 +2,7 @@
 
 **Brainstorm ID:** BS-003  
 **Scope:** multi  
-**Status:** draft  
+**Status:** superseded *(dashboard/Asset extras promoted to [`QUEUE.MD`](../QUEUE.MD) **§2.4** **FB-UX-008**–**FB-UX-014**; see [`BS-004`](BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD))*  
 
 ---
 
@@ -88,8 +88,7 @@ Extra **operator-facing** UI capabilities to consider **after or alongside** **`
 
 ## Next step
 
-- [ ] **Park** — pick items to promote into [`QUEUE.MD`](../QUEUE.MD) when **FB-AP-P0** UI milestones are clearer.  
-- [ ] **Promote** — optional **FB-AP-0xx** rows for 1–2 chosen ideas (e.g. preflight strip, init monitor).
+- [x] **Promote** — **FB-UX-008**–**FB-UX-014** in [`QUEUE.MD`](../QUEUE.MD) §2.4 (**FB-UX-P0**); brainstorm **BS-004** holds the umbrella narrative.
 
 **Child brainstorms:** —  
 
