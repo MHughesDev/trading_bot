@@ -74,6 +74,10 @@ from execution.service import ExecutionService
 from execution.trade_markers import iter_markers, marker_to_api_dict
 from app.runtime import alpaca_universe_store as alpaca_universe_store_mod
 from app.runtime import coinbase_universe_store as coinbase_universe_store_mod
+from app.runtime.platform_supported_universe import (
+    platform_supported_payload,
+    platform_supported_status_summary,
+)
 from orchestration.alpaca_universe_scheduler import (
     alpaca_universe_scheduler_status,
     start_alpaca_universe_scheduler,
@@ -270,6 +274,7 @@ def get_status() -> dict[str, Any]:
             **coinbase_universe_store_mod.coinbase_universe_status(settings.coinbase_universe_db_path),
             **coinbase_universe_scheduler_status(),
         },
+        "platform_supported_universe": platform_supported_status_summary(settings),
         "user_store": {
             **user_store_mod.user_store_status(settings.auth_users_db_path),
             "session_auth_enabled": settings.auth_session_enabled,
@@ -344,6 +349,16 @@ def post_coinbase_universe_sync(
 ) -> dict[str, Any]:
     """On-demand refresh from Coinbase Advanced Trade (mutating operator). FB-AP-021."""
     return sync_coinbase_tradable_universe(settings)
+
+
+@app.get("/universe/platform-supported")
+def get_platform_supported_universe(
+    limit: Annotated[int, Query(ge=1, le=10_000)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str | None, Query(description="Filter symbol/name/base (case-insensitive)")] = None,
+) -> dict[str, Any]:
+    """Cross-venue **platform-supported** symbols (FB-AP-022). Search/eligibility only — not Kraken data."""
+    return platform_supported_payload(settings, limit=limit, offset=offset, query=q)
 
 
 @app.post("/auth/register", response_model=RegisterResponse)

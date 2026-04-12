@@ -189,6 +189,16 @@ When **`NM_LIVE_WATCH_LIFECYCLE_GATE=true`**, the **`live_service`** loop runs *
 - Optional: **`NM_COINBASE_UNIVERSE_SYNC_ENABLED`**, **`NM_COINBASE_UNIVERSE_SYNC_INTERVAL_SECONDS`**.
 - **`GET /status` → `coinbase_universe`**.
 
+## Platform-supported cross-venue set (FB-AP-022)
+
+**Search and eligibility hints only** — not Kraken pair resolution or market-data routing.
+
+- **Rule version 1 (default):** **`intersection`** — canonical pair (e.g. `BTC-USD`) is *platform-supported* only if it appears in **both** the Alpaca tradable-crypto snapshot **and** the Coinbase SPOT snapshot (same string: Alpaca `canonical_symbol` ≡ Coinbase `product_id`).
+- **Optional:** **`union`** — symbol appears on **either** venue (`NM_PLATFORM_SUPPORTED_UNIVERSE_MODE=union` or YAML `universe.platform_supported_mode: union`). Useful for operator visibility; default remains intersection so paper **and** live routing can both target the pair.
+
+- **`GET /universe/platform-supported`** — paginated canonical symbols (`limit`, `offset`, optional `q` on symbol / Alpaca name / Coinbase base).
+- **`GET /status` → `platform_supported_universe`** — `rule_version`, `mode`, `symbol_count` (no symbol list).
+
 ## Related
 
 - [`ADR_CANONICAL_BAR_STORAGE.MD`](ADR_CANONICAL_BAR_STORAGE.MD) — canonical bar storage decision (FB-AP-013).
