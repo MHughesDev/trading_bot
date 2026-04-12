@@ -140,6 +140,10 @@ class AppSettings(BaseSettings):
     # external: bridge publishes through Redis; execution_gateway_service consumes risk.intent.accepted.
     microservices_execution_gateway_mode: Literal["in_process", "external"] = "in_process"
 
+    # FB-AP-035: background nightly training tick only while control plane process runs
+    scheduler_nightly_enabled: bool = False
+    scheduler_nightly_interval_seconds: int = 86_400
+
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
@@ -260,6 +264,12 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["microservices_runtime_bridge_enabled"] = bool(ms["runtime_bridge_enabled"])
         if "execution_gateway_mode" in ms:
             out["microservices_execution_gateway_mode"] = str(ms["execution_gateway_mode"])
+    if "scheduler" in cfg:
+        sch = cfg["scheduler"] or {}
+        if "nightly_enabled" in sch:
+            out["scheduler_nightly_enabled"] = bool(sch["nightly_enabled"])
+        if "nightly_interval_seconds" in sch:
+            out["scheduler_nightly_interval_seconds"] = int(sch["nightly_interval_seconds"])
     if "models" in cfg:
         mo = cfg["models"] or {}
         if "forecaster_checkpoint_id" in mo:

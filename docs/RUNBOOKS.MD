@@ -6,6 +6,15 @@
 
 Persisted manifests and HTTP API: **[`PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD)**. **`GET /status`** includes **`asset_model_registry.initialized_symbols`**. Mutating routes require **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set.
 
+## In-process scheduler (FB-AP-035)
+
+The **control plane** process (`uvicorn control_plane.api:app`) can run an optional **background thread** that triggers **`run_nightly_training_job`** on an interval while the API is running. When you **stop** uvicorn, the thread exits — **no** scheduled training runs with the app closed.
+
+- **Enable:** `NM_SCHEDULER_NIGHTLY_ENABLED=true` (or `scheduler.nightly_enabled: true` in `default.yaml`).
+- **Interval:** `NM_SCHEDULER_NIGHTLY_INTERVAL_SECONDS` (default **86400**; minimum **1** second in code).
+- **Status:** `GET /status` → **`app_scheduler`** (`enabled`, `interval_seconds`, `running`, `last_tick_utc`, `last_error`).
+- **Training still respects** `data/system_power.json` — if **system power** is **OFF**, `run_training_campaign` skips (**FB-AP-039** may change global power semantics).
+
 ## Per-asset Stop — flatten (FB-AP-032)
 
 **`POST /assets/lifecycle/{symbol}/stop`** (with API key when configured) first attempts a **market** close for that symbol’s **open venue position** (Alpaca paper or Coinbase live per **per-symbol execution mode** / **`NM_EXECUTION_MODE`**), then transitions **`active` → `initialized_not_active`**. If the venue **position fetch** or **submit** fails, the API returns **502** and the symbol **stays active** — fix credentials or venue outage and retry. Residual size after partial fills may require another Stop or manual flatten via **`FLATTEN_ALL`** / **`POST /flatten`** (global).

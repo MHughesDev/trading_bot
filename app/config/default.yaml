@@ -90,3 +90,6 @@ models:
 microservices:
   runtime_bridge_enabled: false
   execution_gateway_mode: in_process
+scheduler:
+  nightly_enabled: false
+  nightly_interval_seconds: 86400
