@@ -15,7 +15,7 @@ Top-right **Initialize** / **Start** / **Stop** follows **`GET /assets/lifecycle
 |-------|--------|-----|
 | `uninitialized` | **Initialize** | **`POST /assets/init/{symbol}`** then poll job until **`succeeded`** / **`failed`** (spinner during pipeline). |
 | `initialized_not_active` | **Start** | **`POST /assets/lifecycle/{symbol}/start`** |
-| `active` | **Stop** | **`POST /assets/lifecycle/{symbol}/stop`** (flatten **FB-AP-032**) |
+| `active` | **Stop** | **`POST /assets/lifecycle/{symbol}/stop`** — **market** flatten via venue (**FB-AP-032**): fetches position for that symbol, submits **SELL** (long) or **BUY** (short) for full size; then **`active` → `initialized_not_active`**. If flatten cannot run (**502**), lifecycle stays **active**. |
 
 Requires **`NM_CONTROL_PLANE_API_KEY`** on mutating routes when the API enforces it (same as other control-plane writes).
 
@@ -99,7 +99,7 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 | PUT | `/assets/execution-mode/{symbol}` | Persist **`execution_mode`** (`paper` or `live`) for routing this symbol’s orders. |
 | DELETE | `/assets/execution-mode/{symbol}` | Drop sidecar; use application default again. |
 | POST | `/assets/lifecycle/{symbol}/start` | **`initialized_not_active` → `active`** (requires manifest). |
-| POST | `/assets/lifecycle/{symbol}/stop` | **`active` → `initialized_not_active`**. |
+| POST | `/assets/lifecycle/{symbol}/stop` | **Market flatten** (if non-flat) then **`active` → `initialized_not_active`**; response includes **`flatten`** (acks / skip reason). **502** if venue fetch or submit fails — state unchanged. |
 | GET | `/assets/chart/bars` | **Chart OHLCV** (FB-AP-024): **`symbol`** (required), **`start`**, **`end`** (UTC range), optional **`interval_seconds`** (defaults to **`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`**), **`limit`**. Returns rows from QuestDB **`canonical_bars`** for that symbol only — no multi-symbol series. |
 | GET | `/assets/chart/trade-markers` | **Buy/sell markers** (FB-AP-025): **`symbol`** (required), **`start`**, **`end`**, optional **`limit`**. Reads **`data/trade_markers.jsonl`** (append-only; populated when the live loop **successfully submits** an order — **`source=intent_submit`**). |
 
