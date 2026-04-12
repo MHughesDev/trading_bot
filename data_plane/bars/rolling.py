@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import polars as pl
 
@@ -28,36 +29,41 @@ class RollingBars:
         floored = epoch - (epoch % self.interval_seconds)
         return datetime.fromtimestamp(floored, tz=UTC)
 
-    def on_tick(self, price: float, ts: datetime, size: float = 0.0) -> None:
-        """Update current bucket or roll to a new bar."""
+    def on_tick(self, price: float, ts: datetime, size: float = 0.0) -> dict[str, Any] | None:
+        """Update current bucket or roll to a new bar.
+
+        When the bucket **closes** (advance to a new interval), returns the **completed** OHLCV row
+        (``timestamp`` = bucket start UTC, same shape as bootstrap / canonical Parquet). The
+        in-progress bucket is **not** returned until it closes (**FB-AP-016**).
+        """
         b = self._bucket_floor(ts)
         if self._bucket_start is None:
             self._bucket_start = b
             self._o = self._h = self._l = self._c = float(price)
             self._v = float(size)
-            return
+            return None
         if b > self._bucket_start:
-            self._completed.append(
-                {
-                    "timestamp": self._bucket_start,
-                    "open": self._o,
-                    "high": self._h,
-                    "low": self._l,
-                    "close": self._c,
-                    "volume": self._v,
-                }
-            )
+            completed = {
+                "timestamp": self._bucket_start,
+                "open": self._o,
+                "high": self._h,
+                "low": self._l,
+                "close": self._c,
+                "volume": self._v,
+            }
+            self._completed.append(completed)
             if len(self._completed) > self.max_completed:
                 self._completed.pop(0)
             self._bucket_start = b
             self._o = self._h = self._l = self._c = float(price)
             self._v = float(size)
-        else:
-            p = float(price)
-            self._h = max(self._h, p)
-            self._l = min(self._l, p)
-            self._c = p
-            self._v += float(size)
+            return completed
+        p = float(price)
+        self._h = max(self._h, p)
+        self._l = min(self._l, p)
+        self._c = p
+        self._v += float(size)
+        return None
 
     def current_partial_row(self) -> dict | None:
         if self._bucket_start is None:

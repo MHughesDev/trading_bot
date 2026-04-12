@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from data_plane.ingest.kraken_rest import KrakenRESTClient, granularity_to_kraken_ohlc_interval_minutes
-from data_plane.ingest.kraken_symbols import kraken_rest_pair, kraken_ws_pair
+from data_plane.ingest.kraken_symbols import (
+    canonical_symbol_from_kraken_pair,
+    kraken_rest_pair,
+    kraken_ws_pair,
+)
 
 
 def test_granularity_to_interval_minutes() -> None:
@@ -20,6 +24,12 @@ def test_granularity_to_interval_minutes() -> None:
 def test_symbol_mapping() -> None:
     assert kraken_rest_pair("BTC-USD") == "XBTUSD"
     assert kraken_ws_pair("BTC-USD") == "XBT/USD"
+
+
+def test_canonical_symbol_from_kraken_pair() -> None:
+    assert canonical_symbol_from_kraken_pair("XBT/USD") == "BTC-USD"
+    assert canonical_symbol_from_kraken_pair("ETH/USD") == "ETH-USD"
+    assert canonical_symbol_from_kraken_pair("FOO/BAR") == "FOO-BAR"
 
 
 @pytest.mark.asyncio

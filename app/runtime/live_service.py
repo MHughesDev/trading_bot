@@ -17,6 +17,7 @@ from typing import Any
 from decimal import Decimal
 
 from app.config.settings import AppSettings, load_settings
+from app.contracts.events import BarEvent
 from app.contracts.risk import RiskState
 from app.runtime.system_power import is_on, sync_from_disk
 from data_plane.bars.rolling import RollingBars
@@ -27,6 +28,7 @@ from data_plane.memory.qdrant_memory import QdrantNewsMemory
 from data_plane.memory.retrieval_loop import run_memory_retrieval_loop
 from data_plane.ingest.kraken_normalizers import normalize_kraken_ws_message
 from data_plane.ingest.kraken_rest import KrakenRESTClient
+from data_plane.ingest.kraken_symbols import canonical_symbol_from_kraken_pair
 from data_plane.ingest.kraken_ws import KrakenWebSocketClient
 from data_plane.ingest.normalizers import OrderBookLevel2Snapshot, TickerSnapshot, TradeTick
 from data_plane.ingest.product_cache import ProductMetadataCache
@@ -191,7 +193,7 @@ async def run_live_loop(
             use_external_execution_gateway = False
 
     qdb: QuestDBWriter | None = None
-    if cfg.questdb_persist_decision_traces:
+    if cfg.questdb_persist_decision_traces or cfg.questdb_persist_canonical_bars:
         qdb = QuestDBWriter(
             cfg.questdb_host,
             cfg.questdb_port,
@@ -253,7 +255,11 @@ async def run_live_loop(
 
     qdb_flush_stop = asyncio.Event()
     qdb_flush_task: asyncio.Task[None] | None = None
-    if qdb is not None and cfg.questdb_flush_interval_seconds > 0:
+    if (
+        qdb is not None
+        and cfg.questdb_flush_interval_seconds > 0
+        and cfg.questdb_persist_decision_traces
+    ):
         async def _flush_loop() -> None:
             while not qdb_flush_stop.is_set():
                 try:
@@ -309,14 +315,38 @@ async def run_live_loop(
             norm = normalize_kraken_ws_message(msg)
             if norm is None:
                 continue
-            symbol = getattr(norm, "symbol", None)
-            if not symbol:
+            ws_pair = getattr(norm, "symbol", None)
+            if not ws_pair:
+                continue
+            symbol = canonical_symbol_from_kraken_pair(str(ws_pair))
+            if symbol not in rollers:
                 continue
 
             px = float(getattr(norm, "price", 0.0) or 0.0)
             ts = _tick_time(norm)
             sz = float(getattr(norm, "size", 0.0) or 0.0) if isinstance(norm, TradeTick) else 0.0
-            rollers[symbol].on_tick(px, ts, sz)
+            completed_bar = rollers[symbol].on_tick(px, ts, sz)
+            if (
+                qdb is not None
+                and cfg.questdb_persist_canonical_bars
+                and completed_bar is not None
+            ):
+                try:
+                    bar = BarEvent(
+                        timestamp=completed_bar["timestamp"],
+                        symbol=symbol,
+                        open=float(completed_bar["open"]),
+                        high=float(completed_bar["high"]),
+                        low=float(completed_bar["low"]),
+                        close=float(completed_bar["close"]),
+                        volume=float(completed_bar["volume"]),
+                        interval_seconds=bar_sec,
+                        source="kraken",
+                        schema_version=1,
+                    )
+                    await qdb.insert_bar(bar)
+                except Exception:
+                    logger.exception("questdb insert_bar failed")
 
             overlay = feature_row_from_tick(
                 norm,

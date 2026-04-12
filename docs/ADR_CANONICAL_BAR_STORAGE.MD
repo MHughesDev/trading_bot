@@ -64,7 +64,7 @@ The per-asset product epic requires **one authoritative time series per symbol**
 
 4. **If QuestDB becomes a bottleneck** — Revisit **partitioning**, **materialized views** for coarser intervals (**FB-AP-017**), or a **read replica** / **managed TSDB**; add a new ADR row in **QUEUE.MD** only if we change the primary store.
 
-**Non-goals for this ADR:** UI chart API shape (**FB-AP-024**), WebSocket aggregation details (**FB-AP-016**), exact DDL migration scripts — those belong to **FB-AP-014** and later rows.
+**Non-goals for this ADR:** UI chart API shape (**FB-AP-024**), exact DDL migration scripts — **FB-AP-014**–**016** implement schema + live WS roll-up to QuestDB; chart APIs remain separate.
 
 ---
 
