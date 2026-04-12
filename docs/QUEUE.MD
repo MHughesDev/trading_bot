@@ -86,6 +86,58 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Stretch:* full **human-spec** PyTorch VSN/xLSTM **training** stack remains **optional future work** (documented under **FB-FR-P0-WAIVE**); the repo ships **NumPy `ForecasterModel`** + **MLP distill** + **`NM_MODELS_FORECASTER_TORCH_PATH`** hot path.
 
+#### Reference — optional full-spec PyTorch decomposition (waived; not open queue)
+
+*Epic alignment:* [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD). **ID scheme:** **FB-FR-P0-0X-YY**. **Status:** all rows **Waived** with **FB-FR-P0-WAIVE** (2026-04-12) — kept only if you revisit native PyTorch training for every submodule.
+
+#### FB-FR-P0-02 — **Graph** (PyTorch module stack)
+
+| ID | Phase | Cat | Type | Status | Summary | Pointer |
+|----|-------|-----|------|--------|---------|---------|
+| FB-FR-P0-02 | A | FR | Feature | Waived | **(Epic)** VSN → latent CNN → multi-res xLSTM → regime fusion → quantile head; spec geometry | `forecaster_model/models/`, spec §tensor contracts |
+| FB-FR-P0-02-01 | A | FR | Hardening | Waived | **Tensor / config contracts:** `ForecasterConfig` + batch shapes documented and asserted at module boundaries | `forecaster_model/config/schema.py`, `forecaster_model/schemas.py` |
+| FB-FR-P0-02-02 | A | FR | Feature | Waived | **VSN:** variable selection block matches spec; unit tests on masked weights / dims | `forecaster_model/models/vsn.py` |
+| FB-FR-P0-02-03 | A | FR | Feature | Waived | **Latent encoder:** CNN / patch encoder outputs align to downstream LSTM dims | `forecaster_model/models/latent_encoder.py` |
+| FB-FR-P0-02-04 | A | FR | Feature | Waived | **Multi-res xLSTM:** stack + `xLSTMCell` integration; no training yet — forward-only | `forecaster_model/models/multi_resolution_xlstm.py`, `forecaster_model/models/xlstm_cell.py` |
+| FB-FR-P0-02-05 | A | FR | Feature | Waived | **Regime fusion:** soft regime + fusion block wired to backbone output | `forecaster_model/models/fusion.py`, `forecaster_model/regime/` |
+| FB-FR-P0-02-06 | A | FR | Feature | Waived | **Decoder + quantile head:** output ranks match `losses/quantile` and `ForecastPacket` consumers | `forecaster_model/models/decoder.py`, `forecaster_model/losses/quantile.py` |
+| FB-FR-P0-02-07 | A | FR | Feature | Waived | **`TorchForecasterNet` (or equivalent):** single module composing 02-02…06; `forward()` test on synthetic batch | `forecaster_model/models/torch_forecaster_net.py` |
+| FB-FR-P0-02-08 | A | FR | Platform | Waived | **Smoke:** export/import `state_dict` round-trip; dtype/device (`cpu`/`cuda`) forward | `tests/` (new) |
+
+#### FB-FR-P0-03 — **Train** (loop, checkpoints, device)
+
+| ID | Phase | Cat | Type | Status | Summary | Pointer |
+|----|-------|-----|------|--------|---------|---------|
+| FB-FR-P0-03 | A | FR | Feature | Waived | **(Epic)** End-to-end training loop, checkpoints, `[models_torch]` / `NM_MODELS_TORCH_DEVICE` | `forecaster_model/training/torch_trainer.py` |
+| FB-FR-P0-03-01 | A | FR | Feature | Waived | **DataModule:** OHLC / manifest → `(batch, seq, feat)` batches; collate + pad; train/val split respects manifest | `forecaster_model/data/`, `forecaster_model/features/ohlc.py` |
+| FB-FR-P0-03-02 | A | FR | Feature | Waived | **Train step:** quantile loss, backward, grad clip, optimizer; logging hooks | `forecaster_model/training/torch_trainer.py`, `forecaster_model/losses/` |
+| FB-FR-P0-03-03 | A | FR | Feature | Waived | **Checkpointing:** save/load compatible with `training/checkpoint.py`; resume from step | `forecaster_model/training/checkpoint.py` |
+| FB-FR-P0-03-04 | A | FR | Feature | Waived | **Walk-forward trainer:** fold driver using `walk_forward_indices` + no leakage between folds | `forecaster_model/training/walkforward.py`, `forecaster_model/training/torch_trainer.py` |
+| FB-FR-P0-03-05 | A | FR | Platform | Waived | **Metrics + CLI:** `training/metrics.py` wired; minimal `python -m forecaster_model.training...` or script entry | `forecaster_model/training/metrics.py`, `pyproject.toml` `[project.scripts]` optional |
+| FB-FR-P0-03-06 | A | FR | Platform | Waived | **Extras / device:** `[models_torch]` in `pyproject.toml`; `NM_MODELS_TORCH_DEVICE` + `training/device.py` used in trainer | `pyproject.toml`, `forecaster_model/training/device.py` |
+
+#### FB-FR-P0-04 — **Calibrate** (conformal + ensemble on trained outputs)
+
+| ID | Phase | Cat | Type | Status | Summary | Pointer |
+|----|-------|-----|------|--------|---------|---------|
+| FB-FR-P0-04 | A | FR | Feature | Waived | **(Epic)** Conformal + ensemble on **trained** forwards (not RNG reference) | `forecaster_model/calibration/`, `forecaster_model/models/ensemble.py` |
+| FB-FR-P0-04-01 | A | FR | Feature | Waived | **Residuals → conformal state:** fit/save JSON compatible with hot-path loader | `forecaster_model/calibration/conformal.py` |
+| FB-FR-P0-04-02 | A | FR | Feature | Waived | **Ensemble:** multiple members + aggregation; deterministic forward for tests | `forecaster_model/models/ensemble.py` |
+| FB-FR-P0-04-03 | A | FR | Test | Waived | **Calibration eval:** coverage / pinball on held-out fold (small synthetic or real slice) | `tests/` |
+
+#### FB-FR-P0-05 — **Serve** (checkpoint → decision hot path)
+
+| ID | Phase | Cat | Type | Status | Summary | Pointer |
+|----|-------|-----|------|--------|---------|---------|
+| FB-FR-P0-05 | A | FR | Feature | Waived | **(Epic)** Export path from checkpoint to `DecisionPipeline` / `ForecastPacket` | `decision_engine/pipeline.py`, `forecaster_model/inference/` |
+| FB-FR-P0-05-01 | A | FR | Feature | Waived | **Export bundle:** `.pt` + manifest JSON (schema version, horizons, normalization) | `forecaster_model/inference/` or `scripts/` |
+| FB-FR-P0-05-02 | A | FR | Feature | Waived | **Inference API:** `torch_infer.py` / `build_from_ohlc.py` match training normalization | `forecaster_model/inference/torch_infer.py`, `build_from_ohlc.py` |
+| FB-FR-P0-05-03 | A | FR | Feature | Waived | **`DecisionPipeline` integration:** `NM_MODELS_FORECASTER_TORCH_PATH` loads torch bundle; precedence vs NPZ / RNG documented | `decision_engine/pipeline.py` |
+| FB-FR-P0-05-04 | A | FR | Hardening | Waived | **Guards + fallback:** `inference/guards.py` abstain behavior; README / RUNBOOKS operator table (torch vs NPZ vs RNG) | `forecaster_model/inference/guards.py`, `README.md`, `docs/RUNBOOKS.MD` |
+| FB-FR-P0-05-05 | A | FR | Test | Waived | **Integration test:** load stub checkpoint → `ForecastPacket` or equivalent contract in pipeline | `tests/` |
+
+*Note:* **Superseded** in part by shipped **`train_distilled_mlp_forecaster`**, **`nm-train-forecaster-distill`**, **`describe_walk_forward_folds`**, conformal tests, and **`tests/test_forecaster_torch_pipeline.py`** — see **FB-FR-P0-CLOSE** in [§5.5](#55-complete-archive-one-row-per-id).
+
 ### Backlog items (open) — multi-asset **FB-SPEC-07**
 
 *No open **FB-SPEC-07** items — **FB-SPEC-07** + **07-01…03** completed **2026-04-12** (see [§5.5](#55-complete-archive-one-row-per-id)).*
