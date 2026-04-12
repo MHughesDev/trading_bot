@@ -8,7 +8,6 @@ import pytest
 
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState
-from decision_engine import pipeline as pipeline_mod
 from decision_engine.pipeline import DecisionPipeline
 
 _TORCH = importlib.util.find_spec("torch") is not None
@@ -26,10 +25,10 @@ def test_distilled_torch_checkpoint_pipeline_step(tmp_path) -> None:
         device="cpu",
     )
     wpath = out["weights"]
-    pipeline_mod._serving_mode_logged = False
     settings = AppSettings(models_forecaster_torch_path=wpath)
     pipe = DecisionPipeline(settings=settings)
-    assert pipe._torch_model is not None
+    comps = pipe._get_or_create_serving_components(settings)
+    assert comps.torch_model is not None
 
     feats = {f"f{i}": float(i) * 0.01 for i in range(32)}
     feats["close"] = 50_000.0

@@ -43,6 +43,10 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 
 **GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`.
 
+## Runtime serving (`DecisionPipeline`)
+
+When a manifest file exists for the **decision symbol**, **`decision_engine.pipeline.DecisionPipeline`** resolves **forecaster** and **policy** paths from the manifest **only** (no silent fallback to global `NM_MODELS_*` for those keys). If the manifest omits both `forecaster_torch_path` and `forecaster_weights_path`, or the files are missing, the pipeline **abstains** (no `ForecastPacket`, **NO_TRADE**). If `policy_mlp_path` is set but the file is missing, the pipeline **abstains** as well. If `policy_mlp_path` is unset, **heuristic** policy is allowed when forecaster serving succeeds.
+
 ## Related
 
 - [`RUNBOOKS.MD`](RUNBOOKS.MD) — execution and preflight.

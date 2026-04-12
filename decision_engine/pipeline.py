@@ -8,17 +8,23 @@ PolicySystem → RiskEngine contracts.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
 import numpy as np
 
 from app.config.settings import AppSettings, load_settings
-from app.contracts.decisions import ActionProposal, RouteDecision
+from app.contracts.decisions import ActionProposal, RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState
+from decision_engine.manifest_serving import (
+    forecaster_artifacts_resolved,
+    policy_manifest_path_broken,
+    resolve_manifest_serving_settings,
+)
 from decision_engine.spec_policy_proposal import run_spec_policy_step
 from forecaster_model.config import ForecasterConfig
 from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
@@ -28,9 +34,6 @@ from policy_model.policy.policy_network import PolicyNetwork
 from policy_model.system import PolicySystem
 
 logger = logging.getLogger(__name__)
-
-# Log once per process: serving mode (RNG vs NPZ weights).
-_serving_mode_logged = False
 
 
 def _feature_vector(values: dict[str, float], dim: int = 32) -> np.ndarray:
@@ -66,22 +69,70 @@ def _forecaster_config_from_env(conformal_path: str | None) -> ForecasterConfig:
     return cfg
 
 
+def _abstain_no_trade(symbol: str) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None]:
+    """Neutral forecast + NO_TRADE when per-asset guards refuse to serve (FB-AP-003 / FB-AP-004)."""
+    regime = RegimeOutput(
+        state_index=0,
+        semantic=SemanticRegime.SIDEWAYS,
+        probabilities=[1.0, 0.0, 0.0, 0.0],
+        confidence=0.0,
+    )
+    fc = ForecastOutput(
+        returns_1=0.0,
+        returns_3=0.0,
+        returns_5=0.0,
+        returns_15=0.0,
+        volatility=0.0,
+        uncertainty=1.0,
+    )
+    route = RouteDecision(route_id=RouteId.NO_TRADE, confidence=0.0, ranking=[])
+    _ = symbol  # reserved for future diagnostics
+    return regime, fc, route, None
+
+
+def _serving_cache_key(settings: AppSettings) -> str:
+    return "|".join(
+        [
+            settings.models_forecaster_torch_path or "",
+            settings.models_forecaster_weights_path or "",
+            settings.models_forecaster_conformal_state_path or "",
+            settings.models_policy_mlp_path or "",
+        ]
+    )
+
+
+@dataclass
+class _ServingComponents:
+    forecaster_weight_bundle: object | None
+    torch_model: object | None
+    torch_device: object | None
+    torch_cfg: object | None
+    policy_system: PolicySystem | None
+
+
+def _build_serving_components_cached(settings: AppSettings) -> _ServingComponents:
+    """Load torch + NPZ + policy once per distinct resolved path set (avoid triple torch load)."""
+    torch_m, torch_d, torch_c = _load_torch_forecaster_if_configured(settings)
+    return _ServingComponents(
+        forecaster_weight_bundle=_load_forecaster_bundle_if_configured(settings),
+        torch_model=torch_m,
+        torch_device=torch_d,
+        torch_cfg=torch_c,
+        policy_system=_load_policy_system_if_configured(settings),
+    )
+
+
 class DecisionPipeline:
     def __init__(self, settings: AppSettings | None = None) -> None:
         self._settings = settings or load_settings()
         self._last_forecast_packet: ForecastPacket | None = None
-        self._forecaster_weight_bundle = _load_forecaster_bundle_if_configured(self._settings)
-        self._torch_model, self._torch_device, self._torch_cfg = _load_torch_forecaster_if_configured(
-            self._settings
-        )
-        self._policy_system: PolicySystem | None = _load_policy_system_if_configured(self._settings)
+        self._serving_cache: dict[str, _ServingComponents] = {}
+        self._serving_mode_logged_keys: set[str] = set()
 
-    @staticmethod
-    def _log_serving_mode_once(settings: AppSettings) -> None:
-        global _serving_mode_logged
-        if _serving_mode_logged:
+    def _log_serving_mode_once(self, settings: AppSettings, cache_key: str) -> None:
+        if cache_key in self._serving_mode_logged_keys:
             return
-        _serving_mode_logged = True
+        self._serving_mode_logged_keys.add(cache_key)
         fw = settings.models_forecaster_weights_path
         ft = settings.models_forecaster_torch_path
         pp = settings.models_policy_mlp_path
@@ -103,6 +154,13 @@ class DecisionPipeline:
             settings.models_forecaster_checkpoint_id or "(unset)",
         )
 
+    def _get_or_create_serving_components(self, settings: AppSettings) -> _ServingComponents:
+        key = _serving_cache_key(settings)
+        if key not in self._serving_cache:
+            self._serving_cache[key] = _build_serving_components_cached(settings)
+            self._log_serving_mode_once(settings, key)
+        return self._serving_cache[key]
+
     @property
     def last_forecast_packet(self) -> ForecastPacket | None:
         """Last `ForecastPacket` built on the hot path (master spec §5)."""
@@ -120,17 +178,41 @@ class DecisionPipeline:
         position_signed_qty: Decimal | None = None,
     ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None]:
         _ = _feature_vector(feature_row)  # reserved for future feature-cache alignment
-        self._log_serving_mode_once(self._settings)
 
-        conf_path = self._settings.models_forecaster_conformal_state_path
+        effective_settings, manifest = resolve_manifest_serving_settings(self._settings, symbol)
+        if manifest is not None:
+            mid = manifest.runtime_instance_id or manifest.canonical_symbol
+            if not forecaster_artifacts_resolved(effective_settings):
+                logger.error(
+                    "per-asset model manifest %s: no resolvable forecaster torch/NPZ path for symbol %s; "
+                    "refusing global fallback — abstaining",
+                    mid,
+                    symbol,
+                )
+                self._last_forecast_packet = None
+                return _abstain_no_trade(symbol)
+            if policy_manifest_path_broken(effective_settings, manifest):
+                logger.error(
+                    "per-asset model manifest %s: policy_mlp_path %r missing on disk for symbol %s; "
+                    "abstaining",
+                    mid,
+                    manifest.policy_mlp_path,
+                    symbol,
+                )
+                self._last_forecast_packet = None
+                return _abstain_no_trade(symbol)
+
+        components = self._get_or_create_serving_components(effective_settings)
+
+        conf_path = effective_settings.models_forecaster_conformal_state_path
         base_cfg = _forecaster_config_from_env(conf_path)
-        if self._torch_model is not None and self._torch_cfg is not None:
-            cfg = self._torch_cfg
+        if components.torch_model is not None and components.torch_cfg is not None:
+            cfg = components.torch_cfg
             if conf_path and Path(conf_path).is_file():
                 cfg.calibration_enabled = True
         else:
             cfg = base_cfg
-        bar_sec = max(1, int(self._settings.market_data_bar_interval_seconds))
+        bar_sec = max(1, int(effective_settings.market_data_bar_interval_seconds))
         cfg.base_interval_seconds = bar_sec
         o, h, lo, cl, vo = ohlc_arrays_from_feature_row(feature_row, history_len=cfg.history_length)
         pkt = build_forecast_packet_methodology(
@@ -141,14 +223,14 @@ class DecisionPipeline:
             vo,
             cfg=cfg,
             conformal_state_path=conf_path,
-            weight_bundle=self._forecaster_weight_bundle if self._torch_model is None else None,
-            torch_model=self._torch_model,
-            torch_device=self._torch_device,
+            weight_bundle=components.forecaster_weight_bundle if components.torch_model is None else None,
+            torch_model=components.torch_model,
+            torch_device=components.torch_device,
         )
         pkt.forecast_diagnostics["symbol"] = symbol
         pkt.forecast_diagnostics["pipeline"] = "master_spec"
         pkt.packet_schema_version = 1
-        cid = self._settings.models_forecaster_checkpoint_id
+        cid = effective_settings.models_forecaster_checkpoint_id
         pkt.source_checkpoint_id = cid
         self._last_forecast_packet = pkt
 
@@ -158,13 +240,13 @@ class DecisionPipeline:
         fc, route, action = run_spec_policy_step(
             symbol,
             pkt,
-            settings=self._settings,
+            settings=effective_settings,
             app_risk=risk,
             mid_price=mp,
             spread_bps=spread_bps,
             portfolio_equity_usd=eq,
             position_signed_qty=position_signed_qty,
-            policy_system=self._policy_system,
+            policy_system=components.policy_system,
         )
         return regime_out, fc, route, action
 

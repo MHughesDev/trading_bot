@@ -45,8 +45,9 @@ def test_pipeline_loads_npz_weights(tmp_path: Path) -> None:
         models_forecaster_checkpoint_id="test-chk",
     )
     dp = DecisionPipeline(settings=settings)
-    assert dp._forecaster_weight_bundle is not None
-    assert dp._policy_system is not None
+    comps = dp._get_or_create_serving_components(settings)
+    assert comps.forecaster_weight_bundle is not None
+    assert comps.policy_system is not None
 
 
 def test_preflight_fixture_unchanged() -> None:

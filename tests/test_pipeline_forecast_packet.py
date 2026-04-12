@@ -9,7 +9,6 @@ import pytest
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState
 from decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
-from decision_engine import pipeline as pipeline_mod
 from decision_engine.pipeline import DecisionPipeline
 
 
@@ -21,7 +20,6 @@ def _features(close: float = 50_000.0) -> dict[str, float]:
 
 
 def test_serving_mode_logged_once(caplog: pytest.LogCaptureFixture) -> None:
-    pipeline_mod._serving_mode_logged = False
     caplog.set_level(logging.INFO)
     pipe = DecisionPipeline(settings=AppSettings())
     risk = RiskState()
