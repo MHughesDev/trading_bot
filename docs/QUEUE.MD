@@ -1,6 +1,8 @@
 # Queue
 
-**Single source of truth** for work items: **fixes**, **changes**, **new features**, **hardening**, **platform**, and **completed history**.
+**Next task:** [`QUEUE_STACK.csv`](QUEUE_STACK.csv) — smallest `stack_order` with `status=Open`; if none or `id=_QUEUE_EMPTY_` → stop, [**§8**](#8-how-to-add-an-entry).
+
+**Single source of truth** for work items: **fixes**, **changes**, **new features**, **hardening**, **platform**, and **completed history** (full tables below). Agents: read **`QUEUE_STACK.csv` first**; open this file only for detail.
 
 **References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD) · [`MICROSERVICES_SPLIT_PLAN.MD`](MICROSERVICES_SPLIT_PLAN.MD) · [`BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD) (OCI deployment brainstorm; queue **FB-CONT-P0**) · [`BRAINSTORM/BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD`](BRAINSTORM/BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD) (multi-tenant auth + Account UI; queue **FB-UX-P0**) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
 
@@ -10,6 +12,7 @@
 
 | § | Section |
 |---|---------|
+| [§0](#0-next-task-stack-machine-readable) | **Next task stack** (`QUEUE_STACK.csv`) |
 | [§1](#1-conventions) | Conventions (Kind, IDs, priority, phase, category) |
 | [§2](#2-open-queue) | **Open** queue (roadmap + deferred) |
 | [§2.1](#21-queue-snapshot-open-by-priority) | Snapshot: **Open** rows by priority |
@@ -24,6 +27,25 @@
 | [§8](#8-how-to-add-an-entry) | How to add an entry |
 | — | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) — agent prompt: slice → tests → PR → merge → prune |
 | — | Cursor skill [`.cursor/skills/add-to-queue`](../.cursor/skills/add-to-queue/SKILL.md) — **Add to Queue** workflow for agents |
+
+---
+
+## 0. Next task stack (machine-readable)
+
+**File:** [`QUEUE_STACK.csv`](QUEUE_STACK.csv) — comma-separated (UTF-8). **Purpose:** lets automation read **one row** for the next actionable item instead of scanning all of **§2**.
+
+| Column | Meaning |
+|--------|---------|
+| **`stack_order`** | Integer — **1** = top of stack. **Sort ascending** to walk the backlog. |
+| **`priority`** | **HIGH** / **MEDIUM** / **LOW** — informational; **ordering** is **`stack_order`**, not this column alone. |
+| **`phase`** | **A** / **B** / **C** / **D** (same as [§1.3](#13-priority-phase-category-status)). |
+| **`batch`** | Theme code (e.g. **AP-PAM**) or empty. |
+| **`id`** | Queue ID (e.g. **FB-AP-001**) or **`_QUEUE_EMPTY_`** when there is no **Open** work. |
+| **`status`** | **`Open`** / **`In progress`** / **`Done`** / **`empty`** (sentinel when **`_QUEUE_EMPTY_`**). |
+| **`summary_one_line`** | Short pointer; full spec stays in **§2** (or linked doc). |
+| **`anchor`** | Optional fragment to jump within this file (e.g. `#8-how-to-add-an-entry`). |
+
+**Maintenance:** When you **add** or **finish** **Open** work, update **`QUEUE_STACK.csv`** in the same PR as **`QUEUE.MD`** (see [**§8**](#8-how-to-add-an-entry)). Remove **`_QUEUE_EMPTY_`** when at least one **`Open`** row exists; restore it when **§2** has no **Open** rows.
 
 ---
 
@@ -683,7 +705,8 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 3. Set **Phase** (**A** / **B** / **C** / **D**) and **Category** per [§1.3](#13-priority-phase-category-status).  
 4. For multi-row epics (e.g. **FB-AP-P0**), assign a **Batch** code ([§1.3](#13-priority-phase-category-status)) and add **Affected files** (pipe-separated primary paths).
 5. Add a row in [§2](#2-open-queue) (roadmap), [§3](#3-resolved-fixes-il) (fixes), or note completed gates in [§4](#4-completed-compliance-gates-hg). Use the next **FB-** or **HG-** id; for large epics prefer **-01, -02** sub-ids.  
-6. Link **code paths** or tickets.
+6. Link **code paths** or tickets.  
+7. **Stack file:** If the item is **Open** (or you close one), update **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** — keep **`stack_order`** so the **next** **`Open`** row is the smallest number; use **`_QUEUE_EMPTY_`** / **`empty`** when **§2** has no **Open** rows ([§0](#0-next-task-stack-machine-readable)).
 
 **Empty open queue:** If **§2** has **no** rows with **Status = Open** (including no **Open** **HIGH** rows), agents asked to take the “next **HIGH** open item” have **nothing to implement** until you **add** a new row in **§2**, or **reprioritize** closed deferred work (e.g. reopen **FB-N1** / **FB-N3** with an agreed scope — see [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD)).
 

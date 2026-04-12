@@ -9,7 +9,8 @@ Follow this workflow whenever you need to **append or edit** the project work qu
 
 ## Source of truth
 
-- **File:** [`docs/QUEUE.MD`](../../../docs/QUEUE.MD) — single backlog + resolved history.
+- **File:** [`docs/QUEUE.MD`](../../../docs/QUEUE.MD) — single backlog + resolved history (full narrative).
+- **Next-task stack (agents read first):** [`docs/QUEUE_STACK.csv`](../../../docs/QUEUE_STACK.csv) — ordered **`stack_order`**; **`Open`** rows = backlog top to bottom. Update **`QUEUE_STACK.csv`** whenever you add/close **Open** items in **`QUEUE.MD`** (see **`QUEUE.MD` §0**).
 - **Automation / PR workflow:** [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](../../../docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD).
 - **Agent boundaries:** [`AGENTS.md`](../../../AGENTS.md) (Kraken-only market data, risk/signing, no secrets, no MLflow auto-promotion in code).
 
@@ -40,8 +41,9 @@ Use the subsection template in §3: **Kind**, **Phase** (P1/P2/P3), **Resolved**
 
 ## After editing the queue
 
-1. **Consistency:** If behavior or operator flows changed elsewhere, update **README** or the relevant **`docs/*.MD`** per `AGENTS.md`—but **do not** expand scope beyond what the user asked.
-2. **Optional GitHub sync:** §7 of `QUEUE.MD` — mirroring to GitHub issues is optional; markdown stays canonical.
+1. **Stack CSV:** Update [`QUEUE_STACK.csv`](../../../docs/QUEUE_STACK.csv) — keep **`stack_order`** monotonic with intended pull order; set finished rows to **`Done`** or remove them; use **`_QUEUE_EMPTY_`** / **`empty`** when there are no **`Open`** rows (see **`QUEUE.MD` §0**).
+2. **Consistency:** If behavior or operator flows changed elsewhere, update **README** or the relevant **`docs/*.MD`** per `AGENTS.md`—but **do not** expand scope beyond what the user asked.
+3. **Optional GitHub sync:** §7 of `QUEUE.MD` — mirroring to GitHub issues is optional; markdown stays canonical.
 
 ## Checklist
 
@@ -50,6 +52,7 @@ Use the subsection template in §3: **Kind**, **Phase** (P1/P2/P3), **Resolved**
 - [ ] **Status** set (`Open` / `In progress` / `Done` / `deferred`).
 - [ ] **Summary** names verify steps or files where possible.
 - [ ] **Contents** table at top of `QUEUE.MD` updated if you add a **new § anchor** (rare).
+- [ ] **`QUEUE_STACK.csv`** updated if **`Open`** / stack order changed.
 
 ## When not to use this skill
 

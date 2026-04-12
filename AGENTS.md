@@ -20,7 +20,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 Agents working here should:
 
-- Implement **scoped** features and fixes aligned with [`docs/QUEUE.MD`](docs/QUEUE.MD) when the task references them. If the task asks for the **next Open HIGH** row and **§2** has **no** **Open** rows (or no **Open** **HIGH** rows), **stop** and report — add or reprioritize work per [**§8**](docs/QUEUE.MD#8-how-to-add-an-entry); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+- For **next queue item** work, read **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** first (smallest `stack_order` with `status=Open`; see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Then implement **scoped** features and fixes aligned with **`QUEUE.MD`** when the task references them. If **`QUEUE_STACK.csv`** has no **`Open`** row (or `id=_QUEUE_EMPTY_`), **stop** and report — add or reprioritize per [**§8**](docs/QUEUE.MD#8-how-to-add-an-entry); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
 - Preserve **non-negotiable rules** below unless the user task explicitly overrides.
 - Keep **live vs replay** behavior aligned where the architecture expects it (`decision_engine/run_step.py` is the shared decision step).
 - Update **docs** when behavior, env vars, or operator-facing flows change.

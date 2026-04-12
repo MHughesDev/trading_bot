@@ -1,0 +1,2 @@
+stack_order,priority,phase,batch,id,status,summary_one_line,anchor
+1,LOW,B,,_QUEUE_EMPTY_,empty,"No Open rows in stack — populate when adding work (§2 + §8); agents skip implementation until an Open row exists.",#8-how-to-add-an-entry
