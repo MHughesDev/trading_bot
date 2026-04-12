@@ -14,24 +14,39 @@ import logging
 import os
 from pathlib import Path
 
-from app.config.settings import load_settings
+from app.config.settings import AppSettings, load_settings
 
 from orchestration.training_campaign import run_training_campaign
 
 logger = logging.getLogger(__name__)
 
 
+def run_nightly_training_job(
+    *,
+    settings: AppSettings | None = None,
+    artifact_dir: Path | None = None,
+    lookback_days: int | None = None,
+) -> dict:
+    """
+    Single **nightly** real-data training run (FB-AP-035 / CLI).
+
+    Used by the in-process app scheduler when the control plane process is running.
+    """
+    p = artifact_dir or Path(os.environ.get("NM_TRAINING_ARTIFACT_DIR", "models/artifacts_training"))
+    s = settings or load_settings()
+    lb = lookback_days if lookback_days is not None else int(os.environ.get("NM_TRAINING_LOOKBACK_DAYS", "90"))
+    return run_training_campaign(
+        mode="nightly",
+        artifact_dir=p,
+        settings=s,
+        lookback_days=lb,
+    )
+
+
 def nightly_flow_entrypoint() -> None:
     """CLI: `python -m orchestration.nightly_retrain` (no args — nightly defaults)."""
     logging.basicConfig(level=logging.INFO)
-    p = os.environ.get("NM_TRAINING_ARTIFACT_DIR", "models/artifacts_training")
-    settings = load_settings()
-    report = run_training_campaign(
-        mode="nightly",
-        artifact_dir=Path(p),
-        settings=settings,
-        lookback_days=int(os.environ.get("NM_TRAINING_LOOKBACK_DAYS", "90")),
-    )
+    report = run_nightly_training_job()
     logger.info("nightly training report keys: %s", list(report.keys()))
 
 

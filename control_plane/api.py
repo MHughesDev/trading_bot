@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi import status as http_status
 from fastapi.responses import PlainTextResponse
@@ -57,13 +59,27 @@ from execution.pnl_summary import compute_pnl_series, compute_pnl_summary
 from execution.portfolio_positions import fetch_portfolio_positions
 from execution.service import ExecutionService
 from execution.trade_markers import iter_markers, marker_to_api_dict
+from orchestration.app_scheduler import (
+    scheduler_status,
+    start_app_background_scheduler,
+    stop_app_background_scheduler,
+)
 from orchestration.asset_init_pipeline import get_job as get_init_job, try_start_asset_init_job
 
 settings = load_settings()
 state = StateManager()
 modes = ModeManager(state)
 
-app = FastAPI(title="Trading Bot Control Plane", version="0.1.0")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """FB-AP-035: register background schedulers only while this process runs."""
+    start_app_background_scheduler(settings)
+    yield
+    stop_app_background_scheduler()
+
+
+app = FastAPI(title="Trading Bot Control Plane", version="0.1.0", lifespan=_lifespan)
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -141,6 +157,7 @@ def get_status() -> dict[str, Any]:
             "sidecar_dir": str(asset_execution_mode_mod.mode_dir()),
             "overrides": list_mode_overrides(),
         },
+        "app_scheduler": scheduler_status(),
     }
 
 
