@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 import streamlit as st
 
+from control_plane.csv_export import (
+    csv_text_to_utf8_bytes,
+    pnl_summary_to_csv_text,
+    positions_payload_to_csv_text,
+)
 from control_plane.streamlit_util import api_get_json
 
 
@@ -42,14 +48,13 @@ def _bucket_seconds_for_range(range_key: str) -> int:
     }.get(range_key, 3600)
 
 
-def _render_holdings_main() -> None:
+def _render_holdings_main(data: dict[str, Any] | None, *, fetch_error: str | None) -> None:
     st.subheader("Current holdings")
     st.caption("Open positions from the execution adapter (same source as the legacy portfolio API).")
-    try:
-        data = api_get_json("/portfolio/positions")
-    except Exception as e:
-        st.error(f"Failed to load positions: {e}")
+    if fetch_error:
+        st.error(f"Failed to load positions: {fetch_error}")
         return
+    assert data is not None
     if not data.get("ok"):
         st.warning(data.get("error") or "positions unavailable")
         return
@@ -72,7 +77,25 @@ def _render_holdings_main() -> None:
 
 def render_pnl_panel() -> None:
     """Main dashboard: holdings + PnL timeframe + cumulative realized chart + unrealized summary."""
-    _render_holdings_main()
+    positions_payload: dict[str, Any] | None = None
+    positions_fetch_error: str | None = None
+    try:
+        positions_payload = api_get_json("/portfolio/positions")
+    except Exception as e:
+        positions_fetch_error = str(e)
+
+    _render_holdings_main(positions_payload, fetch_error=positions_fetch_error)
+
+    if positions_payload is not None:
+        pos_csv = positions_payload_to_csv_text(positions_payload)
+        st.download_button(
+            label="Download positions (CSV)",
+            data=csv_text_to_utf8_bytes(pos_csv),
+            file_name="portfolio_positions.csv",
+            mime="text/csv",
+            key="dl_positions_csv_fb011",
+            width="stretch",
+        )
 
     st.divider()
     st.subheader("P&L")
@@ -95,6 +118,16 @@ def render_pnl_panel() -> None:
     except Exception as e:
         st.error(f"Failed to load P&L summary: {e}")
         return
+
+    sum_csv = pnl_summary_to_csv_text(summary)
+    st.download_button(
+        label="Download P&L summary (CSV)",
+        data=csv_text_to_utf8_bytes(sum_csv),
+        file_name=f"pnl_summary_{choice}.csv",
+        mime="text/csv",
+        key="dl_pnl_summary_csv_fb011",
+        width="stretch",
+    )
 
     r = summary.get("realized_pnl_usd")
     u = summary.get("unrealized_pnl_usd")
