@@ -180,6 +180,15 @@ When **`NM_LIVE_WATCH_LIFECYCLE_GATE=true`**, the **`live_service`** loop runs *
 - Optional background sync: **`NM_ALPACA_UNIVERSE_SYNC_ENABLED=true`**, **`NM_ALPACA_UNIVERSE_SYNC_INTERVAL_SECONDS`** (default **86400**).
 - **`GET /status` → `alpaca_universe`** — row count, last sync time, scheduler tick / last error.
 
+## Coinbase tradable universe (FB-AP-021)
+
+**Live venue metadata only** — not Kraken market data. Snapshots **SPOT** products from Coinbase Advanced Trade **`GET /products`** (tradable: not **`trading_disabled`** / **`is_disabled`**) into **`NM_COINBASE_UNIVERSE_DB_PATH`** (default **`data/coinbase_universe.sqlite`**, gitignored). Requires **`NM_COINBASE_API_KEY`** / **`NM_COINBASE_API_SECRET`** (CDP JWT).
+
+- **`GET /universe/coinbase`** — paginated rows (`limit`, `offset`, optional `q`).
+- **`POST /universe/coinbase/sync`** — on-demand refresh (mutating operator).
+- Optional: **`NM_COINBASE_UNIVERSE_SYNC_ENABLED`**, **`NM_COINBASE_UNIVERSE_SYNC_INTERVAL_SECONDS`**.
+- **`GET /status` → `coinbase_universe`**.
+
 ## Related
 
 - [`ADR_CANONICAL_BAR_STORAGE.MD`](ADR_CANONICAL_BAR_STORAGE.MD) — canonical bar storage decision (FB-AP-013).

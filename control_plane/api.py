@@ -73,12 +73,19 @@ from execution.portfolio_positions import fetch_portfolio_positions
 from execution.service import ExecutionService
 from execution.trade_markers import iter_markers, marker_to_api_dict
 from app.runtime import alpaca_universe_store as alpaca_universe_store_mod
+from app.runtime import coinbase_universe_store as coinbase_universe_store_mod
 from orchestration.alpaca_universe_scheduler import (
     alpaca_universe_scheduler_status,
     start_alpaca_universe_scheduler,
     stop_alpaca_universe_scheduler,
 )
 from orchestration.alpaca_universe_sync import sync_alpaca_tradable_universe
+from orchestration.coinbase_universe_scheduler import (
+    coinbase_universe_scheduler_status,
+    start_coinbase_universe_scheduler,
+    stop_coinbase_universe_scheduler,
+)
+from orchestration.coinbase_universe_sync import sync_coinbase_tradable_universe
 from orchestration.app_scheduler import (
     nightly_scheduler_detail,
     scheduler_status,
@@ -97,7 +104,9 @@ async def _lifespan(app: FastAPI):
     """FB-AP-035: register background schedulers only while this process runs."""
     start_app_background_scheduler(settings)
     start_alpaca_universe_scheduler(settings)
+    start_coinbase_universe_scheduler(settings)
     yield
+    stop_coinbase_universe_scheduler()
     stop_alpaca_universe_scheduler()
     stop_app_background_scheduler()
 
@@ -257,6 +266,10 @@ def get_status() -> dict[str, Any]:
             **alpaca_universe_store_mod.alpaca_universe_status(settings.alpaca_universe_db_path),
             **alpaca_universe_scheduler_status(),
         },
+        "coinbase_universe": {
+            **coinbase_universe_store_mod.coinbase_universe_status(settings.coinbase_universe_db_path),
+            **coinbase_universe_scheduler_status(),
+        },
         "user_store": {
             **user_store_mod.user_store_status(settings.auth_users_db_path),
             "session_auth_enabled": settings.auth_session_enabled,
@@ -300,6 +313,37 @@ def post_alpaca_universe_sync(
 ) -> dict[str, Any]:
     """On-demand refresh from Alpaca Trading API (mutating operator). FB-AP-020."""
     return sync_alpaca_tradable_universe(settings)
+
+
+@app.get("/universe/coinbase")
+def get_coinbase_tradable_universe(
+    limit: Annotated[int, Query(ge=1, le=10_000)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str | None, Query(description="Filter by product_id or base name (case-insensitive)")] = None,
+) -> dict[str, Any]:
+    """Paginated Coinbase **SPOT** product snapshot (FB-AP-021). Metadata only — no OHLC."""
+    rows, total = coinbase_universe_store_mod.list_coinbase_universe_rows(
+        settings.coinbase_universe_db_path,
+        limit=limit,
+        offset=offset,
+        query=q,
+    )
+    return {
+        "ok": True,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "query": q,
+        "rows": rows,
+    }
+
+
+@app.post("/universe/coinbase/sync")
+def post_coinbase_universe_sync(
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """On-demand refresh from Coinbase Advanced Trade (mutating operator). FB-AP-021."""
+    return sync_coinbase_tradable_universe(settings)
 
 
 @app.post("/auth/register", response_model=RegisterResponse)

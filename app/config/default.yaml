@@ -103,6 +103,9 @@ universe:
   alpaca_db_path: data/alpaca_universe.sqlite
   alpaca_sync_enabled: false
   alpaca_sync_interval_seconds: 86400
+  coinbase_db_path: data/coinbase_universe.sqlite
+  coinbase_sync_enabled: false
+  coinbase_sync_interval_seconds: 86400
 auth:
   users_db_path: data/users.sqlite
   session_enabled: false

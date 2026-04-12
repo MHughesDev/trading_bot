@@ -26,3 +26,5 @@ data/users.sqlite
 data/users.sqlite-*
 data/alpaca_universe.sqlite
 data/alpaca_universe.sqlite-*
+data/coinbase_universe.sqlite
+data/coinbase_universe.sqlite-*
