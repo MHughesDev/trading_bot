@@ -10,9 +10,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi import status as http_status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from observability.forecaster_metrics import MODEL_VERSION_INFO
@@ -53,7 +54,11 @@ from app.runtime import user_venue_credentials as user_venue_credentials_mod
 from app.runtime.execution_settings_merge import merge_settings_for_execution
 from app.runtime.user_store import UserRecord
 from execution.adapter_registry import supported_adapters_for_settings
-from control_plane.chart_bars import query_canonical_bars_for_chart
+from control_plane.chart_bars import (
+    query_canonical_bars_for_chart,
+    query_latest_canonical_bar_for_chart,
+)
+from control_plane.chart_stream import sse_chart_bar_updates
 from control_plane.preflight import preflight_report
 from app.contracts.risk import SystemMode
 from app.runtime.mode_manager import ModeManager
@@ -137,6 +142,13 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(title="Trading Bot Control Plane", version="0.1.0", lifespan=_lifespan)
 app.add_middleware(TenantContextMiddleware)
+# FB-AP-034: browser EventSource (Streamlit on another origin) needs CORS on SSE + JSON
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -862,6 +874,67 @@ async def get_asset_chart_bars(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+
+
+@app.get("/assets/chart/latest-bar")
+async def get_asset_chart_latest_bar(
+    symbol: Annotated[str, Query(min_length=1, description="Canonical symbol (e.g. BTC-USD)")],
+    interval_seconds: Annotated[
+        int | None,
+        Query(
+            description="Bar width in seconds; default = NM_MARKET_DATA_BAR_INTERVAL_SECONDS",
+        ),
+    ] = None,
+) -> dict[str, Any]:
+    """Latest stored canonical bar for last-price / SSE alignment (FB-AP-034)."""
+    try:
+        bar = await query_latest_canonical_bar_for_chart(
+            settings,
+            symbol=symbol,
+            interval_seconds=interval_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    if bar is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="no canonical bar for symbol and interval",
+        )
+    return {"ok": True, "bar": bar}
+
+
+@app.get("/assets/chart/stream")
+async def get_asset_chart_stream(
+    symbol: Annotated[str, Query(min_length=1, description="Canonical symbol (e.g. BTC-USD)")],
+    interval_seconds: Annotated[
+        int | None,
+        Query(
+            description="Bar width in seconds; default = NM_MARKET_DATA_BAR_INTERVAL_SECONDS",
+        ),
+    ] = None,
+    poll_seconds: Annotated[
+        float,
+        Query(ge=0.5, le=60.0, description="Server poll interval for new bars"),
+    ] = 2.0,
+) -> StreamingResponse:
+    """Server-Sent Events: new canonical bar when QuestDB ``ts`` advances (FB-AP-034)."""
+    return StreamingResponse(
+        sse_chart_bar_updates(
+            settings,
+            symbol=symbol,
+            interval_seconds=interval_seconds,
+            poll_seconds=poll_seconds,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/assets/chart/trade-markers")

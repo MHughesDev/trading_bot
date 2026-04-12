@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import streamlit as st
 
-from control_plane.asset_chart_data import Preset
+from control_plane.asset_chart_data import Preset, preset_to_request
 from control_plane.asset_chart_fetch import (
     chart_time_window,
     fetch_bars_for_preset,
@@ -49,6 +49,18 @@ def _render_ohlc_chart(sym: str) -> None:
         key=f"asset_chart_interval_{sym}",
     )
     preset = preset_labels[choice]
+    req = preset_to_request(preset)
+    try:
+        from control_plane.streamlit_util import get_api_base
+
+        api_base = get_api_base().rstrip("/")
+        st.caption(
+            f"**FB-AP-034** — SSE push (latest bar): `{api_base}/assets/chart/stream?symbol={sym}"
+            f"&interval_seconds={req.interval_seconds}` (optional `poll_seconds`); "
+            f"single snapshot: `GET {api_base}/assets/chart/latest-bar?symbol={sym}&interval_seconds=...`"
+        )
+    except Exception:
+        pass
     try:
         bars, note, _eff = fetch_bars_for_preset(sym, preset)
     except Exception as e:
