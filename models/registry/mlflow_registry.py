@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class MLflowModelRegistry:
-    def __init__(self, tracking_uri: str | None = None, experiment: str = "nautilus-monster") -> None:
+    def __init__(self, tracking_uri: str | None = None, experiment: str = "trading-bot") -> None:
         self._tracking_uri = tracking_uri
         self._experiment = experiment
         self._mlflow: Any = None

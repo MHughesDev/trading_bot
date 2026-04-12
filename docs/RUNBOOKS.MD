@@ -100,7 +100,7 @@ For **no-network** CI, the suite uses **`NM_EXECUTION_ADAPTER=mock_alpaca_paper`
 - **NumPy forecaster weights (FB-SPEC-02):** set `NM_MODELS_FORECASTER_WEIGHTS_PATH` to an **NPZ** produced with `forecaster_model.models.forecaster_weights.save_forecaster_weights` (e.g. from `capture_forecaster_weights_from_seed` after training selection). When present and readable, the hot path uses **fixed weights** instead of per-forward RNG draws; `forecast_diagnostics.weight_source` is `checkpoint`.
 - **Policy MLP weights:** set `NM_MODELS_POLICY_MLP_PATH` to an NPZ from `MultiBranchMLPPolicy.save` / `PolicyNetwork.save`; `DecisionPipeline` then uses **`PolicyNetwork`** instead of **`HeuristicTargetPolicy`**.
 - **Offline training artifacts:** `orchestration.nightly_retrain` / `training_campaign` write under `NM_TRAINING_ARTIFACT_DIR` (quantile forecaster joblib, reports). See [`docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD).
-- **Runtime vs training:** campaign **QuantileRegressor** joblib is still **not** the same object as the NumPy `ForecasterModel` forward; NPZ weights align the **reference** forecaster with a saved draw. **PyTorch MLP** path: install **`[models_torch]`**, run **`nm-train-forecaster-distill`** (or `forecaster_model.training.distill_mlp.train_distilled_mlp_forecaster`) to write **`forecaster_torch.pt`** + manifest under your artifact dir, then set **`NM_MODELS_FORECASTER_TORCH_PATH`** — `DecisionPipeline` loads it and logs **`pytorch_mlp`** (precedence over NPZ / RNG). Full spec-depth VSN/xLSTM **PyTorch** training is optional future work beyond this MLP distill loop. On startup, look for log line `decision pipeline serving mode:` (`pytorch_mlp` vs `npz_weights` vs `numpy_rng`; see [`README.md`](../README.md)).
+- **Runtime vs training:** campaign **QuantileRegressor** joblib is still **not** the same object as the NumPy `ForecasterModel` forward; NPZ weights align the **reference** forecaster with a saved draw. **PyTorch MLP** path: install **`[models_torch]`**, run **`tb-train-forecaster-distill`** (or `forecaster_model.training.distill_mlp.train_distilled_mlp_forecaster`) to write **`forecaster_torch.pt`** + manifest under your artifact dir, then set **`NM_MODELS_FORECASTER_TORCH_PATH`** — `DecisionPipeline` loads it and logs **`pytorch_mlp`** (precedence over NPZ / RNG). Full spec-depth VSN/xLSTM **PyTorch** training is optional future work beyond this MLP distill loop. On startup, look for log line `decision pipeline serving mode:` (`pytorch_mlp` vs `npz_weights` vs `numpy_rng`; see [`README.md`](../README.md)).
 
 ## Rollback bundle (single host)
 
@@ -108,8 +108,8 @@ Before upgrading binaries or large config changes: copy **`models/artifacts_trai
 
 ## Alerting (minimal)
 
-- **Forecast guard / abstain:** monitor `nm_forecast_packet_abstain_total` or logs for repeated guard failures after deploys.
-- **Execution errors:** watch adapter logs and `nm_decision_latency_seconds` spikes; tune thresholds for your host (see **FB-AUDIT-09** in backlog for formal rules).
+- **Forecast guard / abstain:** monitor `tb_forecast_packet_abstain_total` or logs for repeated guard failures after deploys.
+- **Execution errors:** watch adapter logs and `tb_decision_latency_seconds` spikes; tune thresholds for your host (see **FB-AUDIT-09** in backlog for formal rules).
 
 ## Status payload: preflight (IL-105 / FB-SPEC-08)
 
@@ -127,7 +127,7 @@ Before upgrading binaries or large config changes: copy **`models/artifacts_trai
 ## Model registry and version labels (FB-SPEC-06 — partial)
 
 - **In-repo today:** `models/registry/mlflow_registry.py` — optional MLflow **params/metrics** logging when `mlflow` is installed; **`promote()` is intentionally a no-op** (manual promotion only; aligns with CI “no auto MLflow stage” policy). Training campaigns can log under your tracking URI; there is **no** automated “champion vs candidate” pipeline yet (**FB-AUDIT-03**).
-- **Operator-facing labels:** set **`NM_MODELS_FORECASTER_CHECKPOINT_ID`** for `ForecastPacket` lineage; use **`POST /models/version`** on the control plane to expose **`component` + `version`** to Prometheus (`nm_model_version_info`). Together with **`model_artifacts`** and artifact paths, this is the current “active model set” surface — a single MLflow-backed promotion workflow remains backlog.
+- **Operator-facing labels:** set **`NM_MODELS_FORECASTER_CHECKPOINT_ID`** for `ForecastPacket` lineage; use **`POST /models/version`** on the control plane to expose **`component` + `version`** to Prometheus (`tb_model_version_info`). Together with **`model_artifacts`** and artifact paths, this is the current “active model set” surface — a single MLflow-backed promotion workflow remains backlog.
 
 ## Live trading checklist (mirrors UI guardrails — FB-DASH-06-02)
 
@@ -138,7 +138,7 @@ Future Streamlit/UI flows may require typing **LIVE** before enabling live execu
 3. **`python scripts/preflight_check.py`** exits **0**; review **`GET /status`** → `preflight` + `production_preflight`.
 4. **Venue keys** match intent: Coinbase CDP keys for live adapter; not using Alpaca for market data.
 5. **Restart** the live loop after any mode or key change (see [Restart after config change](#restart-after-config-change-execution-mode--venue)).
-6. **Monitor** first session: Grafana/Loki, `nm_decision_latency_seconds`, adapter errors.
+6. **Monitor** first session: Grafana/Loki, `tb_decision_latency_seconds`, adapter errors.
 
 ## Multi-symbol runtime (FB-SPEC-07)
 

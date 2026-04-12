@@ -8,7 +8,7 @@ scrape_configs:
       - targets: ["localhost:9090"]
 
   # Add FastAPI /app/metrics when the control plane exposes Prometheus metrics
-  - job_name: nautilus-monster
+  - job_name: trading-bot
     static_configs:
       - targets: ["host.docker.internal:8000"]
     metrics_path: /metrics

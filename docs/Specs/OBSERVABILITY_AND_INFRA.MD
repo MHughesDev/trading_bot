@@ -4,13 +4,13 @@
 
 - **`metrics.py`** — Prometheus metrics (e.g. decision latency, feed stale blocks, normalizer unknowns)
 - **`logging.py`** — Structured logging setup
-- **`forecaster_metrics.py`** — `nm_forecast_build_*`, `nm_forecast_packet_abstain_total`, `nm_policy_shadow_*`, `nm_model_version_info`
+- **`forecaster_metrics.py`** — `tb_forecast_build_*`, `tb_forecast_packet_abstain_total`, `tb_policy_shadow_*`, `tb_model_version_info`
 
-**Grafana `nm-overview.json`** panels use `nm_decision_latency_seconds`, `nm_pnl_usd`, `nm_forecast_build_fallback_total`, `nm_policy_shadow_target_exposure_delta` — aligned with metric names above (FB-AUDIT-08).
+**Grafana `tb-overview.json`** panels use `tb_decision_latency_seconds`, `tb_pnl_usd`, `tb_forecast_build_fallback_total`, `tb_policy_shadow_target_exposure_delta` — aligned with metric names above (FB-AUDIT-08).
 
 ## Infrastructure (`infra/`)
 
-- **`docker-compose.yml`** — QuestDB, Redis, Qdrant, Prometheus, Grafana, Loki, Promtail; named network `nautilus-monster`
+- **`docker-compose.yml`** — QuestDB, Redis, Qdrant, Prometheus, Grafana, Loki, Promtail; named network `trading-bot`
 - **`prometheus/prometheus.yml`** — Scrape config
 - **`grafana/provisioning/`** — Datasources and dashboards as code
 - **`promtail/promtail.yml`** — Log shipping config

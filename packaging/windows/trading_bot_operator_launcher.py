@@ -37,8 +37,8 @@ def _find_repo_root() -> Path:
                 return p
     raise RuntimeError(
         "Could not find repository root (setup.bat). "
-        "Run this program from your NautilusMonster clone directory, "
-        "or place nm_operator_launcher.exe next to setup.bat."
+        "Run this program from your Trading Bot clone directory, "
+        "or place trading_bot_operator_launcher.exe next to setup.bat."
     )
 
 

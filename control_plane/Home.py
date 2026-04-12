@@ -24,8 +24,8 @@ from control_plane.streamlit_util import (
     get_questdb_console_url,
 )
 
-st.set_page_config(page_title="NautilusMonster V3", layout="wide")
-st.title("NautilusMonster V3")
+st.set_page_config(page_title="Trading Bot", layout="wide")
+st.title("Trading Bot")
 st.sidebar.markdown(f"**Control plane:** `{get_api_base()}`")
 st.sidebar.markdown(f"**QuestDB:** `{get_questdb_console_url()}`")
 st.sidebar.markdown(f"**Grafana:** `{get_grafana_url()}`")

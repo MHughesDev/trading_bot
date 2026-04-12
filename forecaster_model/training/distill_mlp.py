@@ -57,7 +57,7 @@ def train_distilled_mlp_forecaster(
         import torch
         import torch.nn as nn
     except ImportError as e:
-        raise ImportError("Install nautilus-monster[models_torch] for distilled MLP training") from e
+        raise ImportError("Install trading-bot[models_torch] for distilled MLP training") from e
 
     cfg = cfg or ForecasterConfig()
     artifact_dir = Path(artifact_dir)
@@ -106,7 +106,7 @@ def train_distilled_mlp_forecaster(
     torch.save(bundle, pt_path)
 
     manifest = {
-        "schema": "nm_forecaster_torch_bundle_v1",
+        "schema": "tb_forecaster_torch_bundle_v1",
         "weights_file": pt_path.name,
         "forecaster_config": {
             "history_length": cfg.history_length,

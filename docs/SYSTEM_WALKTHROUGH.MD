@@ -1,6 +1,6 @@
 # System walkthrough (AI / operator summary)
 
-This document gives a **step-by-step** picture of how NautilusMonster runs end-to-end. It reflects the **master system pipeline** ([`MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD)): **`ForecastPacket`** from **`forecaster_model`** (VSN → CNN → multi-resolution xLSTM → fusion → quantiles) + **`PolicySystem`**, **Coinbase-only market data**, and **`execution_mode = paper`** (Alpaca paper execution).
+This document gives a **step-by-step** picture of how the Trading Bot stack runs end-to-end. It reflects the **master system pipeline** ([`MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD)): **`ForecastPacket`** from **`forecaster_model`** (VSN → CNN → multi-resolution xLSTM → fusion → quantiles) + **`PolicySystem`**, **Coinbase-only market data**, and **`execution_mode = paper`** (Alpaca paper execution).
 
 ---
 

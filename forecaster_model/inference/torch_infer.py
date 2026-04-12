@@ -20,7 +20,7 @@ def load_torch_forecaster_checkpoint(
     try:
         import torch
     except ImportError as e:
-        raise ImportError("Install nautilus-monster[models_torch] for PyTorch forecaster loading") from e
+        raise ImportError("Install trading-bot[models_torch] for PyTorch forecaster loading") from e
 
     path = Path(path)
     raw: Any = torch.load(path, map_location="cpu", weights_only=False)

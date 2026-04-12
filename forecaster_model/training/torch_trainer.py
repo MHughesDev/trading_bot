@@ -53,7 +53,7 @@ def train_forecaster_torch(
         import torch
         import torch.nn as nn
     except ImportError as e:
-        raise ImportError("Install nautilus-monster[models_torch] for PyTorch forecaster training") from e
+        raise ImportError("Install trading-bot[models_torch] for PyTorch forecaster training") from e
 
     dev = torch.device(resolve_torch_device(device))
     artifact_dir = Path(artifact_dir)

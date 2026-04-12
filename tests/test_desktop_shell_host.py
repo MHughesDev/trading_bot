@@ -19,7 +19,7 @@ def test_streamlit_desktop_url_custom(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_window_title_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("NM_STREAMLIT_DESKTOP_TITLE", raising=False)
-    assert "NautilusMonster" in h.window_title()
+    assert "Trading Bot" in h.window_title()
 
 
 def test_window_title_custom(monkeypatch: pytest.MonkeyPatch) -> None:

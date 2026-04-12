@@ -20,7 +20,7 @@ class DatasetManifest:
     """Frozen manifest for forecaster training / audit."""
 
     version: str = "1"
-    schema: str = "nm_forecaster_dataset_v1"
+    schema: str = "tb_forecaster_dataset_v1"
     source_id: str = ""
     bar_count: int = 0
     feature_dim: int = 0

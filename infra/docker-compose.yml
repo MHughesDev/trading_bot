@@ -1,10 +1,10 @@
-# NautilusMonster V3 — local stack (QuestDB, Redis, Qdrant, observability)
+# Trading Bot — local stack (QuestDB, Redis, Qdrant, observability)
 # Usage: docker compose -f infra/docker-compose.yml up -d
 
 services:
   questdb:
     image: questdb/questdb:8.2.1
-    container_name: nm-questdb
+    container_name: tb-questdb
     ports:
       - "9000:9000"   # HTTP / REST / Web Console
       - "9009:9009"   # Influx line protocol
@@ -16,7 +16,7 @@ services:
 
   redis:
     image: redis:7.2-alpine
-    container_name: nm-redis
+    container_name: tb-redis
     ports:
       - "6379:6379"
     command: ["redis-server", "--appendonly", "yes"]
@@ -30,7 +30,7 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.12.5
-    container_name: nm-qdrant
+    container_name: tb-qdrant
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -41,7 +41,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.54.1
-    container_name: nm-prometheus
+    container_name: tb-prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -56,7 +56,7 @@ services:
 
   grafana:
     image: grafana/grafana:11.3.0
-    container_name: nm-grafana
+    container_name: tb-grafana
     ports:
       - "3000:3000"
     environment:
@@ -72,7 +72,7 @@ services:
 
   promtail:
     image: grafana/promtail:3.2.1
-    container_name: nm-promtail
+    container_name: tb-promtail
     volumes:
       - ./promtail/promtail.yml:/etc/promtail/config.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -82,7 +82,7 @@ services:
 
   loki:
     image: grafana/loki:3.2.1
-    container_name: nm-loki
+    container_name: tb-loki
     ports:
       - "3100:3100"
     volumes:
@@ -98,4 +98,4 @@ volumes:
 
 networks:
   default:
-    name: nautilus-monster
+    name: trading-bot

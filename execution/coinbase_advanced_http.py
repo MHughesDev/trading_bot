@@ -67,7 +67,7 @@ class CoinbaseAdvancedHTTPClient:
     async def create_order(self, order: OrderIntent) -> dict[str, Any]:
         """Submit a market order (IOC)."""
         path = "/api/v3/brokerage/orders"
-        oid = order.client_order_id or f"nm-{order.symbol}-{id(order)}"
+        oid = order.client_order_id or f"tb-{order.symbol}-{id(order)}"
         side = "BUY" if order.side == OrderSide.BUY else "SELL"
         qty = str(order.quantity)
         body: dict[str, Any] = {

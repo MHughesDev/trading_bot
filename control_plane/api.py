@@ -33,7 +33,7 @@ settings = load_settings()
 state = StateManager()
 modes = ModeManager(state)
 
-app = FastAPI(title="NautilusMonster Control Plane", version="0.1.0")
+app = FastAPI(title="Trading Bot Control Plane", version="0.1.0")
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 

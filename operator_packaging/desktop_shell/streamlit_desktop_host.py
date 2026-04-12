@@ -23,8 +23,8 @@ def streamlit_desktop_url() -> str:
 
 
 def window_title() -> str:
-    t = os.getenv("NM_STREAMLIT_DESKTOP_TITLE", "NautilusMonster — Dashboard").strip()
-    return t or "NautilusMonster — Dashboard"
+    t = os.getenv("NM_STREAMLIT_DESKTOP_TITLE", "Trading Bot — Dashboard").strip()
+    return t or "Trading Bot — Dashboard"
 
 
 def main() -> None:

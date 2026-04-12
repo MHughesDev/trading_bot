@@ -50,7 +50,7 @@ async def _alpaca_positions() -> tuple[bool, str]:
 
 async def main() -> int:
     settings = load_settings()
-    print("NautilusMonster — credential / connectivity smoke test\n")
+    print("Trading Bot — credential / connectivity smoke test\n")
 
     try:
         ok, detail = await _kraken_public()
