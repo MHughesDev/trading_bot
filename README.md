@@ -41,6 +41,17 @@ docker compose -f infra/docker-compose.yml up -d
 
 Configure secrets in **`.env`** (see [`.env.example`](.env.example)); app settings use the **`NM_`** prefix.
 
+### Deployment models (FB-CONT-007)
+
+Two supported ways to run the **same** browser-first stack (FastAPI + Streamlit + optional live loop); pick one path per environment.
+
+| | |
+|:---:|---|
+| **(A) Windows convenience** | **`setup.bat`** / **`run.bat`** from the repo root: venv, `pip install -e ".[dev]"`, optional local Docker for the data plane, then API + dashboard + optional live loop — see **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. |
+| **(B) Linux OCI / Compose / cloud** | **`Dockerfile`** + **`docker compose`** (**`infra/docker-compose*.yml`**) on Linux or a cloud VM; same **`NM_*`** config via **`.env`**. Cloud VM vs Fargate sketch: **[`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD)**. Vision notes: **[`docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)** (**BS-001**), epic **FB-CONT-P0** in **[`docs/QUEUE.MD`](docs/QUEUE.MD)**. |
+
+**Data plane (Compose stack):** **QuestDB** holds canonical OHLCV and optional DB-backed traces; **Redis** is used for pub/sub and short-lived bar cache; **Qdrant** backs optional vector memory for news context — all three in **`infra/docker-compose.yml`**.
+
 ### Container image (FB-CONT-001)
 
 The repo includes a **root `Dockerfile`**: multi-stage is not required for the default slim runtime; the image installs **`pip install -e ".[alpaca,dashboard]"`** (control plane + Streamlit + paper broker client — **not** full `torch` / `mlflow`; add a custom build stage or extra if you need GPU training inside the image).

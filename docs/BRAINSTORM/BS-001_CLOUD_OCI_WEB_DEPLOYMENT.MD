@@ -5,6 +5,8 @@
 **Status:** draft  
 **Author:** optional
 
+**See also:** **[`README.md`](../README.md)** — **Deployment models (FB-CONT-007)** — Windows **`.bat`** path vs Linux **Docker/Compose/cloud**; **[`docs/DEPLOY_CLOUD.MD`](../DEPLOY_CLOUD.MD)** for VM/Fargate notes.
+
 ---
 
 ## One-liner
