@@ -37,6 +37,10 @@ class AppSettings(BaseSettings):
     market_data_symbols: list[str] = Field(
         default_factory=lambda: ["BTC-USD", "ETH-USD", "SOL-USD"]
     )
+    # Per-asset init pipeline (FB-AP-006+) — Kraken bootstrap + artifacts under asset_init_artifacts_dir
+    asset_init_bootstrap_lookback_days: int = 14
+    asset_init_bootstrap_granularity_seconds: int | None = None
+    asset_init_artifacts_dir: Path = Field(default=Path("data/asset_init"))
 
     memory_qdrant_collection: str = "news_context_memory"
     memory_retrieval_interval_seconds: int = 60
@@ -152,6 +156,15 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["training_data_granularity_seconds"] = int(md["training_granularity_seconds"])
         if "symbols" in md:
             out["market_data_symbols"] = md["symbols"]
+    if "init_pipeline" in cfg:
+        ip = cfg["init_pipeline"] or {}
+        if "bootstrap_lookback_days" in ip:
+            out["asset_init_bootstrap_lookback_days"] = int(ip["bootstrap_lookback_days"])
+        if "bootstrap_granularity_seconds" in ip:
+            v = ip["bootstrap_granularity_seconds"]
+            out["asset_init_bootstrap_granularity_seconds"] = None if v is None else int(v)
+        if "artifacts_dir" in ip and ip["artifacts_dir"]:
+            out["asset_init_artifacts_dir"] = Path(str(ip["artifacts_dir"]))
     if "memory" in cfg:
         mem = cfg["memory"] or {}
         out["memory_qdrant_collection"] = mem.get("qdrant_collection", "news_context_memory")
