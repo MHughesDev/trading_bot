@@ -49,6 +49,25 @@ def test_post_assets_init_and_poll_status(monkeypatch, tmp_path: Path) -> None:
         lambda *_a, **_k: _two_bars_df(),
     )
 
+    def fake_distill(*, run_dir: Path, settings: AppSettings, symbol: str) -> dict:
+        fd = run_dir / "forecaster"
+        fd.mkdir(parents=True, exist_ok=True)
+        (fd / "forecaster_torch.pt").write_bytes(b"fake")
+        return {
+            "symbol": symbol,
+            "trainer": "train_distilled_mlp_forecaster",
+            "methodology": "distill_mlp_synthetic_teacher",
+            "epochs": settings.asset_init_forecaster_distill_epochs,
+            "forecaster_dir": str(fd.resolve()),
+            "forecaster_torch": str((fd / "forecaster_torch.pt").resolve()),
+            "forecaster_train_meta": str((fd / "forecaster_train_meta.json").resolve()),
+        }
+
+    monkeypatch.setattr(
+        "orchestration.init_forecaster_distill.run_init_forecaster_distill",
+        fake_distill,
+    )
+
     client = TestClient(api.app)
     r = client.post("/assets/init/BTC-USD")
     assert r.status_code == 200
@@ -77,6 +96,10 @@ def test_post_assets_init_and_poll_status(monkeypatch, tmp_path: Path) -> None:
     assert "schema_fingerprint" in payload
     feat_path = Path(payload["features_parquet"])
     assert feat_path.exists()
+    assert steps[3]["step"] == "forecaster_train"
+    assert steps[3]["status"] == "done"
+    fmeta = (steps[3].get("detail") or "").split("meta=", 1)[1]
+    assert json.loads(fmeta).get("methodology") == "distill_mlp_synthetic_teacher"
     reset_asset_init_pipeline_for_tests()
 
 
