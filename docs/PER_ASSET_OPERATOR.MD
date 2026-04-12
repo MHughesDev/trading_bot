@@ -24,6 +24,7 @@ Optional **server-side sessions** in the same SQLite file (`operator_sessions` t
 - **Dashboard** — `streamlit run control_plane/Home.py` (main entry).
 - **Sign in / Register** — **`pages/0_Login.py`** (**FB-UX-003**): email + password; **`POST /auth/login`** stores server session and keeps an opaque token in **`st.session_state`** for API **`Cookie`** headers; register uses **`POST /auth/register`**. Requires **`NM_AUTH_SESSION_ENABLED=true`** on the control plane for sign-in. **Sign out** on the Dashboard sidebar calls **`POST /auth/logout`**.
 - **Route guard (FB-UX-004)** — Optional **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=true`** (default **false**): Dashboard, Asset, and sidebar pages call **`require_streamlit_app_access()`** — redirect to **`0_Login`** if no valid session (**`GET /auth/me`**). Set **`NM_CONTROL_PLANE_API_KEY`** in the Streamlit environment to bypass (operator automation / scripts). Deep links to a page without a prior Streamlit session still require signing in once in that browser session.
+- **Account (FB-UX-005)** — Sidebar **Account** link (**`:material/settings:`**) → **`pages/7_Account.py`** (placeholder; venue key forms are **FB-UX-006**). Shared chrome: **`control_plane/streamlit_chrome.py`** **`render_app_sidebar()`**.
 - **Asset page** — multipage route **`/Asset`** (`control_plane/pages/Asset.py`): optional **`?symbol=<canonical_symbol>`** deep link; sidebar links from Home include configured **`GET /status`** symbols.
 
 ## Asset page lifecycle controls (FB-AP-031)

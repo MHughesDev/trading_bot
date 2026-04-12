@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import streamlit as st
 
+from control_plane.streamlit_chrome import render_app_sidebar
 from control_plane.streamlit_util import get_api_base, operator_login, operator_register
 
 st.set_page_config(page_title="Sign in — Trading Bot", layout="centered")
+render_app_sidebar()
 st.title("Sign in")
 
 st.caption(f"Control plane: `{get_api_base()}` — enable **`NM_AUTH_SESSION_ENABLED=true`** for password login.")

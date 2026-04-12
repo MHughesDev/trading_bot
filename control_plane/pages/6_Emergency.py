@@ -1,8 +1,10 @@
 import streamlit as st
 
+from control_plane.streamlit_chrome import render_app_sidebar
 from control_plane.streamlit_util import api_post_json, get_control_plane_key, require_streamlit_app_access
 
 require_streamlit_app_access()
+render_app_sidebar()
 st.header("Emergency")
 if st.button("Request FLATTEN (calls POST /flatten)"):
     try:
