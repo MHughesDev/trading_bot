@@ -11,6 +11,10 @@ This document describes the **per-asset model manifest** introduced for **FB-AP-
 
 On **`/Asset`** with a symbol, the page loads **`GET /assets/chart/bars`** for the selected interval preset (second through month). **Week** and **month** aggregate from **daily** (`interval_seconds=86400`) bars in QuestDB. Install **`pip install -e ".[dashboard]"`** for Plotly candlesticks.
 
+## Asset page trade markers (FB-AP-029)
+
+Overlays **`GET /assets/chart/trade-markers`** (same time window as the chart) on the candlestick figure: **green** ▲ buy, **red** ▼ sell, hover shows quantity and **`intent_submit`** metadata. Requires append-only **`data/trade_markers.jsonl`** populated by the live loop when orders submit (**FB-AP-025**).
+
 ## Purpose
 
 Each **initialized** tradable symbol can have a **manifest** that lists **forecaster** and **RL / policy** artifact paths scoped to that symbol only. The canonical binding field is **`canonical_symbol`**: it must match the symbol in the API path and runtime request.

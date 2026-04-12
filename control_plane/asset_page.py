@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import streamlit as st
 
 from control_plane.asset_chart_data import Preset
-from control_plane.asset_chart_fetch import fetch_bars_for_preset
+from control_plane.asset_chart_fetch import (
+    chart_time_window,
+    fetch_bars_for_preset,
+    fetch_trade_markers_for_window,
+)
+from control_plane.asset_chart_markers import trade_marker_buy_sell_traces
 from control_plane.asset_page_helpers import normalize_symbol, validate_symbol_display
 from control_plane.streamlit_util import api_get_json
 
@@ -34,12 +41,21 @@ def _render_ohlc_chart(sym: str) -> None:
         st.error(f"Chart data failed: {e}")
         return
     st.caption(note)
+    t_start, t_end = chart_time_window(preset)
+    markers: list[dict[str, Any]] = []
+    try:
+        markers = fetch_trade_markers_for_window(sym, t_start, t_end)
+    except Exception as e:
+        st.caption(f"Trade markers unavailable: {e}")
+    if markers:
+        st.caption(f"Trade markers in window: **{len(markers)}** (source: `data/trade_markers.jsonl`)")
     if not bars:
         st.info("No bars returned — persist canonical bars to QuestDB or run startup backfill (see docs).")
         return
     try:
         import plotly.graph_objects as go
 
+        buy_tr, sell_tr = trade_marker_buy_sell_traces(markers, bars)
         fig = go.Figure(
             data=[
                 go.Candlestick(
@@ -48,11 +64,40 @@ def _render_ohlc_chart(sym: str) -> None:
                     high=[b["high"] for b in bars],
                     low=[b["low"] for b in bars],
                     close=[b["close"] for b in bars],
-                    name=sym,
+                    name="OHLC",
                 )
             ]
         )
-        fig.update_layout(xaxis_rangeslider_visible=False, height=440, margin=dict(l=10, r=10, t=30, b=10))
+        if buy_tr["x"]:
+            fig.add_trace(
+                go.Scatter(
+                    x=buy_tr["x"],
+                    y=buy_tr["y"],
+                    mode="markers",
+                    name="Buy",
+                    marker=dict(size=11, color="#16a34a", symbol="triangle-up", line=dict(width=1, color="#14532d")),
+                    text=buy_tr["text"],
+                    hovertemplate="%{text}<extra></extra>",
+                )
+            )
+        if sell_tr["x"]:
+            fig.add_trace(
+                go.Scatter(
+                    x=sell_tr["x"],
+                    y=sell_tr["y"],
+                    mode="markers",
+                    name="Sell",
+                    marker=dict(size=11, color="#dc2626", symbol="triangle-down", line=dict(width=1, color="#7f1d1d")),
+                    text=sell_tr["text"],
+                    hovertemplate="%{text}<extra></extra>",
+                )
+            )
+        fig.update_layout(
+            xaxis_rangeslider_visible=False,
+            height=440,
+            margin=dict(l=10, r=10, t=30, b=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
         st.plotly_chart(fig, width="stretch")
     except ImportError:
         st.caption("Install **plotly** (`pip install -e \".[dashboard]\"`) for candlesticks; showing close line.")

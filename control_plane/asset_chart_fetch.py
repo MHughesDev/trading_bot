@@ -26,6 +26,44 @@ def _get_chart_json(params: dict[str, Any], *, timeout: float = 45.0) -> dict[st
     return r.json()
 
 
+def _get_markers_json(params: dict[str, Any], *, timeout: float = 30.0) -> dict[str, Any]:
+    base = get_api_base()
+    r = httpx.get(f"{base}/assets/chart/trade-markers", params=params, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def chart_time_window(
+    preset: Preset,
+    *,
+    now: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    """Same UTC window as ``fetch_bars_for_preset`` (for marker overlay alignment)."""
+    t_end = (now or datetime.now(UTC)).astimezone(UTC)
+    req = preset_to_request(preset)
+    return t_end - req.window, t_end
+
+
+def fetch_trade_markers_for_window(
+    symbol: str,
+    start: datetime,
+    end: datetime,
+    *,
+    limit: int = 2000,
+) -> list[dict[str, Any]]:
+    """FB-AP-029: ``GET /assets/chart/trade-markers`` for chart overlay."""
+    sym = symbol.strip()
+    data = _get_markers_json(
+        {
+            "symbol": sym,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "limit": min(int(limit), 10_000),
+        }
+    )
+    return list(data.get("markers") or [])
+
+
 def fetch_bars_for_preset(
     symbol: str,
     preset: Preset,
