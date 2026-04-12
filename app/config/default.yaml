@@ -18,6 +18,7 @@ init_pipeline:
   bootstrap_lookback_days: 14
   bootstrap_granularity_seconds: 60
   artifacts_dir: data/asset_init
+  forecaster_distill_epochs: 8
 memory:
   qdrant_collection: news_context_memory
   retrieval_interval_seconds: 60

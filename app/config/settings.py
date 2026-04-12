@@ -41,6 +41,8 @@ class AppSettings(BaseSettings):
     asset_init_bootstrap_lookback_days: int = 14
     asset_init_bootstrap_granularity_seconds: int | None = None
     asset_init_artifacts_dir: Path = Field(default=Path("data/asset_init"))
+    # FB-AP-010 — distilled MLP forecaster under each init run's forecaster/ subdirectory
+    asset_init_forecaster_distill_epochs: int = 8
 
     memory_qdrant_collection: str = "news_context_memory"
     memory_retrieval_interval_seconds: int = 60
@@ -165,6 +167,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["asset_init_bootstrap_granularity_seconds"] = None if v is None else int(v)
         if "artifacts_dir" in ip and ip["artifacts_dir"]:
             out["asset_init_artifacts_dir"] = Path(str(ip["artifacts_dir"]))
+        if "forecaster_distill_epochs" in ip:
+            out["asset_init_forecaster_distill_epochs"] = int(ip["forecaster_distill_epochs"])
     if "memory" in cfg:
         mem = cfg["memory"] or {}
         out["memory_qdrant_collection"] = mem.get("qdrant_collection", "news_context_memory")

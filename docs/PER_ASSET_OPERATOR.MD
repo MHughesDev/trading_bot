@@ -47,7 +47,7 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 
 ## Asset init pipeline (FB-AP-006+)
 
-**POST `/assets/init/{symbol}`** runs a background sequence: **Kraken REST** bootstrap history (**FB-AP-007**, window from **`init_pipeline`** in `default.yaml` or **`NM_ASSET_INIT_BOOTSTRAP_*`**), **validate** (**FB-AP-008**), **features** (**FB-AP-009** — `FeaturePipeline.enrich_bars` on the cleaned frame; writes Parquet under **`NM_ASSET_INIT_ARTIFACTS_DIR`** / `data/asset_init` by default), then stubbed train/register steps. Returns **409** if another init job is already running.
+**POST `/assets/init/{symbol}`** runs a background sequence: **Kraken REST** bootstrap history (**FB-AP-007**, window from **`init_pipeline`** in `default.yaml` or **`NM_ASSET_INIT_BOOTSTRAP_*`**), **validate** (**FB-AP-008**), **features** (**FB-AP-009** — `FeaturePipeline.enrich_bars` on the cleaned frame; writes Parquet under **`NM_ASSET_INIT_ARTIFACTS_DIR`** / `data/asset_init` by default), **forecaster_train** (**FB-AP-010** — distilled MLP `forecaster_torch.pt` under `<run_dir>/forecaster/` via `train_distilled_mlp_forecaster`; requires **`pip install -e ".[models_torch]"`** or the step is **skipped** with detail), then stubbed RL/register steps. Returns **409** if another init job is already running.
 
 ## Related
 

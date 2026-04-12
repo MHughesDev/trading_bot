@@ -30,6 +30,11 @@ def _artifact_run_dir(base: Path, symbol: str, job_id: str) -> Path:
     return base / safe / f"init_{job_id}"
 
 
+def init_artifact_run_dir(settings: AppSettings, symbol: str, job_id: str) -> Path:
+    """Directory for one init job (features, forecaster, …): ``<artifacts_dir>/<symbol>/init_<job_id>/``."""
+    return _artifact_run_dir(Path(settings.asset_init_artifacts_dir), symbol, job_id)
+
+
 def write_init_feature_artifacts(
     *,
     symbol: str,

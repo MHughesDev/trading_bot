@@ -2,8 +2,8 @@
 Per-asset initialization pipeline (FB-AP-006+).
 
 Runs **one symbol at a time** in a background thread. Steps: **kraken_fetch** (FB-AP-007),
-**validate** (FB-AP-008), **features** (FB-AP-009 — Parquet artifacts for training), then stubs
-for forecaster / RL / register until FB-AP-010–012.
+**validate** (FB-AP-008), **features** (FB-AP-009), **forecaster_train** (FB-AP-010 — distilled MLP
+into ``forecaster/``), then stubs for RL / register until FB-AP-011–012.
 """
 
 from __future__ import annotations
@@ -129,8 +129,13 @@ def _pipeline_body(job_id: str, symbol: str) -> None:
         validate_and_clean_init_bootstrap_bars,
     )
     from orchestration.init_feature_artifacts import (
+        init_artifact_run_dir,
         init_features_detail_payload,
         write_init_feature_artifacts,
+    )
+    from orchestration.init_forecaster_distill import (
+        init_forecaster_detail_payload,
+        run_init_forecaster_distill,
     )
     from orchestration.init_kraken_historical import (
         InitKrakenHistoricalResult,
@@ -196,7 +201,27 @@ def _pipeline_body(job_id: str, symbol: str) -> None:
         return "done", detail
 
     def do_forecaster() -> tuple[str, str | None]:
-        return "skipped", "FB-AP-010 (forecaster train) not wired yet"
+        run_dir = init_artifact_run_dir(settings, symbol, job_id)
+        try:
+            fpayload = run_init_forecaster_distill(
+                run_dir=run_dir,
+                settings=settings,
+                symbol=symbol,
+            )
+        except ImportError as e:
+            logger.warning("init forecaster_train skipped: %s", e)
+            return (
+                "skipped",
+                f"torch not installed ({e!r}); install trading-bot[models_torch] for FB-AP-010",
+            )
+        pl = init_forecaster_detail_payload(fpayload)
+        logger.info(
+            "init forecaster_train symbol=%s forecaster_torch=%s",
+            symbol.strip(),
+            pl.get("forecaster_torch"),
+        )
+        detail = f"meta={json.dumps(pl)}"
+        return "done", detail
 
     def do_rl() -> tuple[str, str | None]:
         return "skipped", "FB-AP-011 (RL init) not wired yet"
