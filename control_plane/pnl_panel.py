@@ -1,7 +1,8 @@
-"""Aggregate P&L from ``GET /pnl/summary`` (FB-DASH-05-03)."""
+"""Dashboard: PnL chart + holdings (FB-AP-026)."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 import streamlit as st
@@ -31,37 +32,86 @@ def _color_for_pnl(s: str | None) -> str:
     return "#16a34a" if v >= 0 else "#dc2626"
 
 
+def _bucket_seconds_for_range(range_key: str) -> int:
+    return {
+        "hour": 300,
+        "day": 3600,
+        "month": 86400,
+        "year": 86400,
+        "all": 86400,
+    }.get(range_key, 3600)
+
+
+def _render_holdings_main() -> None:
+    st.subheader("Current holdings")
+    st.caption("Open positions from the execution adapter (same source as the legacy portfolio API).")
+    try:
+        data = api_get_json("/portfolio/positions")
+    except Exception as e:
+        st.error(f"Failed to load positions: {e}")
+        return
+    if not data.get("ok"):
+        st.warning(data.get("error") or "positions unavailable")
+        return
+    rows = data.get("positions") or []
+    if not rows:
+        st.info("No open positions.")
+        return
+    table_rows = []
+    for p in rows:
+        table_rows.append(
+            {
+                "Symbol": p.get("symbol", "?"),
+                "Qty": str(p.get("quantity", "")),
+                "uPnL USD": p.get("unrealized_pnl") or "—",
+                "Mark": p.get("mark_price") or "—",
+            }
+        )
+    st.dataframe(table_rows, use_container_width=True, hide_index=True)
+
+
 def render_pnl_panel() -> None:
-    """Main-area panel: timeframe selector + realized / unrealized from API."""
-    st.subheader("Aggregate P&L")
+    """Main dashboard: holdings + PnL timeframe + cumulative realized chart + unrealized summary."""
+    _render_holdings_main()
+
+    st.divider()
+    st.subheader("P&L")
     st.caption(
-        "Realized sums the local ledger (`data/pnl_ledger.jsonl`). "
-        "Unrealized sums open-position uPnL from the execution adapter (same as Open positions)."
+        "Realized chart sums the local ledger (`data/pnl_ledger.jsonl`) into time buckets; "
+        "totals align with `GET /pnl/summary` for the selected window."
     )
     opts = ("hour", "day", "month", "year", "all")
-    choice = st.selectbox("Timeframe", options=opts, index=1, key="pnl_range_select")
+    choice = st.selectbox("Timeframe", options=opts, index=1, key="pnl_range_select_fb026")
+
+    bucket_sec = _bucket_seconds_for_range(choice)
     try:
-        data = api_get_json(f"/pnl/summary?range={choice}")
+        series_payload = api_get_json(f"/pnl/series?range={choice}&bucket_seconds={bucket_sec}")
+    except Exception as e:
+        st.error(f"Failed to load P&L series: {e}")
+        series_payload = None
+
+    try:
+        summary = api_get_json(f"/pnl/summary?range={choice}")
     except Exception as e:
         st.error(f"Failed to load P&L summary: {e}")
         return
 
-    r = data.get("realized_pnl_usd")
-    u = data.get("unrealized_pnl_usd")
-    w0 = data.get("window_start") or "—"
-    w1 = data.get("window_end") or "—"
-    st.caption(f"Window (UTC): `{w0}` → `{w1}` · range: `{data.get('range', '?')}`")
+    r = summary.get("realized_pnl_usd")
+    u = summary.get("unrealized_pnl_usd")
+    w0 = summary.get("window_start") or "—"
+    w1 = summary.get("window_end") or "—"
+    st.caption(f"Window (UTC): `{w0}` → `{w1}` · range: `{summary.get('range', '?')}`")
 
     c1, c2 = st.columns(2)
     with c1:
         st.markdown(
-            f"**Realized** "
+            f"**Realized (window)** "
             f'<span style="color:{_color_for_pnl(r)};font-weight:700;">{_fmt_usd(r)}</span>',
             unsafe_allow_html=True,
         )
     with c2:
         if u is None:
-            err = data.get("positions_error") or "unknown"
+            err = summary.get("positions_error") or "unknown"
             st.markdown("**Unrealized** —")
             st.warning(f"Could not sum positions: {err}")
         else:
@@ -71,5 +121,34 @@ def render_pnl_panel() -> None:
                 unsafe_allow_html=True,
             )
 
-    ledger = data.get("ledger") or {}
+    if series_payload and series_payload.get("points"):
+        pts = series_payload["points"]
+        times: list[datetime] = []
+        cum_vals: list[float] = []
+        for pt in pts:
+            raw = pt.get("bucket_start")
+            if not raw:
+                continue
+            try:
+                t = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            times.append(t)
+            try:
+                cum_vals.append(float(Decimal(str(pt.get("cumulative_usd", "0")))))
+            except Exception:
+                cum_vals.append(0.0)
+        if times:
+            st.caption("Cumulative realized P&L (USD) within the window")
+            st.line_chart(
+                {
+                    "Time": times,
+                    "Cumulative realized (USD)": cum_vals,
+                },
+                x="Time",
+                y="Cumulative realized (USD)",
+                width="stretch",
+            )
+
+    ledger = summary.get("ledger") or {}
     st.caption(f"Ledger: `{ledger.get('source_of_truth', '?')}` — {ledger.get('note', '')}")

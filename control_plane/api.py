@@ -45,7 +45,7 @@ from control_plane.execution_profile import (
     write_pending_intent,
 )
 from control_plane.microservice_health import probe_microservices_health
-from execution.pnl_summary import compute_pnl_summary
+from execution.pnl_summary import compute_pnl_series, compute_pnl_summary
 from execution.portfolio_positions import fetch_portfolio_positions
 from execution.trade_markers import iter_markers, marker_to_api_dict
 from orchestration.asset_init_pipeline import get_job as get_init_job, try_start_asset_init_job
@@ -197,6 +197,24 @@ async def get_pnl_summary(
 ) -> dict[str, Any]:
     """Aggregate realized (local JSONL ledger) + unrealized (open positions) P&L. See docs/PNL_LEDGER.MD."""
     return await compute_pnl_summary(settings, range_key)
+
+
+@app.get("/pnl/series")
+def get_pnl_series(
+    range_key: Annotated[
+        Literal["hour", "day", "month", "year", "all"],
+        Query(
+            alias="range",
+            description="Same rolling windows as /pnl/summary",
+        ),
+    ] = "day",
+    bucket_seconds: Annotated[
+        int,
+        Query(ge=60, le=86_400, description="Bucket width for ledger aggregation (seconds)"),
+    ] = 3600,
+) -> dict[str, Any]:
+    """Cumulative realized P&L time series from the local ledger (FB-AP-026 dashboard chart)."""
+    return compute_pnl_series(range_key, bucket_seconds=bucket_seconds)
 
 
 @app.get("/microservices/health")

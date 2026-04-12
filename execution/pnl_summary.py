@@ -7,7 +7,12 @@ from decimal import Decimal
 from typing import Any
 
 from app.config.settings import AppSettings
-from execution.pnl_ledger import PnlRange, sum_realized_in_window, window_for_range
+from execution.pnl_ledger import (
+    PnlRange,
+    realized_bucket_series,
+    sum_realized_in_window,
+    window_for_range,
+)
 from execution.portfolio_positions import fetch_portfolio_positions
 
 
@@ -28,6 +33,29 @@ def _sum_unrealized_from_positions_payload(payload: dict[str, Any]) -> tuple[Dec
     if not saw_any:
         return Decimal("0"), None
     return total, None
+
+
+def compute_pnl_series(
+    range_key: PnlRange,
+    *,
+    bucket_seconds: int = 3600,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Cumulative realized P&L series from the JSONL ledger (dashboard chart)."""
+    t = now or datetime.now(tz=UTC)
+    start, end = window_for_range(range_key, now=t)
+    series = realized_bucket_series(start, end, bucket_seconds=bucket_seconds)
+    return {
+        "range": range_key,
+        "bucket_seconds": max(60, int(bucket_seconds)),
+        "window_start": None if start is None else start.isoformat(),
+        "window_end": end.isoformat(),
+        "points": series,
+        "ledger": {
+            "source_of_truth": "local_jsonl",
+            "path": "data/pnl_ledger.jsonl",
+        },
+    }
 
 
 async def compute_pnl_summary(settings: AppSettings, range_key: PnlRange) -> dict[str, Any]:

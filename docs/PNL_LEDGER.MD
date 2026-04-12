@@ -24,3 +24,5 @@ Each line is JSON:
 3. **Hybrid** — venue backfill into JSONL or QuestDB; ledger remains the API-facing abstraction.
 
 **API:** `GET /pnl/summary?range=hour|day|month|year|all` — realized from JSONL, unrealized from positions.
+
+**Chart series (FB-AP-026):** `GET /pnl/series?range=...&bucket_seconds=60..86400` returns cumulative realized P&L points within the same rolling windows (bucketed sums from the JSONL ledger) for the Streamlit dashboard line chart.

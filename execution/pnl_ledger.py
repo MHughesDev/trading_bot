@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from collections import defaultdict
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,48 @@ def iter_ledger_entries(path: Path | None = None) -> list[RealizedLedgerEntry]:
             e = _parse_line(line)
             if e is not None:
                 out.append(e)
+    return out
+
+
+def realized_bucket_series(
+    start: datetime | None,
+    end: datetime,
+    *,
+    bucket_seconds: int,
+    path: Path | None = None,
+) -> list[dict[str, object]]:
+    """
+    Bucket realized P&L within ``[start, end)`` (``start`` None = no lower bound), UTC.
+
+    Returns rows sorted by bucket with incremental and cumulative USD (strings for JSON).
+    """
+    bs = max(60, int(bucket_seconds))
+    end = end.astimezone(UTC)
+    start_eff = start.astimezone(UTC) if start is not None else None
+    per_bucket: defaultdict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+    for e in iter_ledger_entries(path):
+        if e.ts >= end:
+            continue
+        if start_eff is not None and e.ts < start_eff:
+            continue
+        epoch = int(e.ts.timestamp())
+        b = epoch - (epoch % bs)
+        per_bucket[b] += e.realized_pnl_usd
+    if not per_bucket:
+        return []
+    out: list[dict[str, object]] = []
+    cum = Decimal("0")
+    for b in sorted(per_bucket.keys()):
+        inc = per_bucket[b]
+        cum += inc
+        ts = datetime.fromtimestamp(b, tz=UTC)
+        out.append(
+            {
+                "bucket_start": ts.isoformat(),
+                "incremental_usd": str(inc),
+                "cumulative_usd": str(cum),
+            }
+        )
     return out
 
 

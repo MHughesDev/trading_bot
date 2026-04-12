@@ -10,6 +10,7 @@ from execution.pnl_ledger import (
     RealizedLedgerEntry,
     append_entry,
     iter_ledger_entries,
+    realized_bucket_series,
     sum_realized_in_window,
     window_for_range,
 )
@@ -50,3 +51,31 @@ def test_sum_realized(tmp_path: Path) -> None:
     assert sum_realized_in_window(t0, mid, path=p) == Decimal("100")
     assert sum_realized_in_window(None, t0 + timedelta(days=1), path=p) == Decimal("70")
     assert len(iter_ledger_entries(path=p)) == 2
+
+
+def test_realized_bucket_series_cumulative(tmp_path: Path) -> None:
+    p = tmp_path / "l.jsonl"
+    t0 = datetime(2026, 4, 11, 10, 0, 0, tzinfo=UTC)
+    append_entry(
+        RealizedLedgerEntry(
+            ts=t0,
+            realized_pnl_usd=Decimal("10"),
+            symbol="BTC-USD",
+            source="test",
+        ),
+        path=p,
+    )
+    append_entry(
+        RealizedLedgerEntry(
+            ts=t0 + timedelta(minutes=30),
+            realized_pnl_usd=Decimal("5"),
+            symbol="BTC-USD",
+            source="test",
+        ),
+        path=p,
+    )
+    end = t0 + timedelta(hours=2)
+    series = realized_bucket_series(t0, end, bucket_seconds=3600, path=p)
+    assert len(series) == 1
+    assert series[0]["incremental_usd"] == "15"
+    assert series[0]["cumulative_usd"] == "15"
