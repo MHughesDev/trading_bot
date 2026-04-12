@@ -35,6 +35,7 @@ from data_plane.ingest.normalizers import OrderBookLevel2Snapshot, TickerSnapsho
 from data_plane.ingest.product_cache import ProductMetadataCache
 from data_plane.storage.questdb import QuestDBWriter
 from data_plane.storage.startup_gap_detection import detect_canonical_bar_gaps
+from orchestration.startup_canonical_backfill import run_startup_canonical_backfill
 from decision_engine.audit import decision_trace
 from decision_engine.feature_frame import enrich_bars_last_row, merge_feature_overlays
 from decision_engine.features_live import feature_row_from_tick
@@ -195,7 +196,12 @@ async def run_live_loop(
             use_external_execution_gateway = False
 
     qdb: QuestDBWriter | None = None
-    if cfg.questdb_persist_decision_traces or cfg.questdb_persist_canonical_bars:
+    if (
+        cfg.questdb_persist_decision_traces
+        or cfg.questdb_persist_canonical_bars
+        or cfg.questdb_startup_gap_detection
+        or cfg.questdb_startup_kraken_backfill
+    ):
         qdb = QuestDBWriter(
             cfg.questdb_host,
             cfg.questdb_port,
@@ -207,7 +213,9 @@ async def run_live_loop(
         await qdb.connect()
 
     bar_sec = max(1, int(cfg.market_data_bar_interval_seconds))
-    if qdb is not None and cfg.questdb_startup_gap_detection:
+    if qdb is not None and (
+        cfg.questdb_startup_gap_detection or cfg.questdb_startup_kraken_backfill
+    ):
         try:
             init_syms = list_asset_manifest_symbols()
             if init_syms:
@@ -216,19 +224,22 @@ async def run_live_loop(
                     symbols=init_syms,
                     interval_seconds=bar_sec,
                 )
-                for g in gaps:
-                    if g.gap_detected:
-                        logger.warning(
-                            "canonical_bar_gap %s",
-                            g.to_log_dict(),
-                        )
-                    else:
-                        logger.info(
-                            "canonical_bar_gap_ok %s",
-                            g.to_log_dict(),
-                        )
+                if cfg.questdb_startup_gap_detection:
+                    for g in gaps:
+                        if g.gap_detected:
+                            logger.warning(
+                                "canonical_bar_gap %s",
+                                g.to_log_dict(),
+                            )
+                        else:
+                            logger.info(
+                                "canonical_bar_gap_ok %s",
+                                g.to_log_dict(),
+                            )
+                if cfg.questdb_startup_kraken_backfill:
+                    await run_startup_canonical_backfill(cfg, qdb, gaps=gaps)
         except Exception:
-            logger.exception("startup canonical bar gap detection failed")
+            logger.exception("startup canonical bar gap detection / backfill failed")
 
     rest_client: KrakenRESTClient | None = None
     product_cache: ProductMetadataCache | None = None
