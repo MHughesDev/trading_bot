@@ -47,6 +47,46 @@ def get_questdb_console_url() -> str:
     return os.getenv("NM_QUESTDB_CONSOLE_URL", "http://127.0.0.1:9000").rstrip("/")
 
 
+def streamlit_route_guard_enabled() -> bool:
+    """FB-UX-004: when true, app pages require session or ``NM_CONTROL_PLANE_API_KEY`` in the Streamlit process."""
+    return os.getenv("NM_STREAMLIT_ROUTE_GUARD_ENABLED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def require_streamlit_app_access() -> None:
+    """
+    Redirect to the Login page unless guard is off, API key bypass is set, or ``GET /auth/me`` succeeds.
+
+    Call **after** ``st.set_page_config`` on pages that use it. Login page must not call this.
+    """
+    import streamlit as st
+
+    if not streamlit_route_guard_enabled():
+        return
+    if get_control_plane_key().strip():
+        return
+    if not _operator_session_token():
+        st.switch_page("pages/0_Login.py")
+        st.stop()
+    try:
+        r = httpx.get(
+            f"{get_api_base()}/auth/me",
+            timeout=12.0,
+            headers=_cookie_headers() or None,
+        )
+    except httpx.HTTPError:
+        st.session_state.pop("operator_session_token", None)
+        st.switch_page("pages/0_Login.py")
+        st.stop()
+    if r.status_code != 200:
+        st.session_state.pop("operator_session_token", None)
+        st.switch_page("pages/0_Login.py")
+        st.stop()
+
+
 def api_get_json(path: str, *, timeout: float = 10.0) -> dict[str, Any]:
     h = _cookie_headers()
     r = httpx.get(f"{get_api_base()}{path}", timeout=timeout, headers=h or None)
