@@ -99,3 +99,5 @@ scheduler:
   nightly_per_asset_forecaster: true
   nightly_rl_requires_trade: true
   nightly_rl_trade_lookback_days: null
+auth:
+  users_db_path: data/users.sqlite

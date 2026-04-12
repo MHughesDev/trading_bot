@@ -153,6 +153,9 @@ class AppSettings(BaseSettings):
     live_watch_lifecycle_gate: bool = False
     live_decision_min_interval_seconds: float = 0.0
 
+    # FB-UX-001: operator user accounts (SQLite + Argon2); used by POST /auth/register
+    auth_users_db_path: Path = Field(default=Path("data/users.sqlite"))
+
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
@@ -292,6 +295,10 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["live_watch_lifecycle_gate"] = bool(lw["lifecycle_gate"])
         if "decision_min_interval_seconds" in lw:
             out["live_decision_min_interval_seconds"] = float(lw["decision_min_interval_seconds"])
+    if "auth" in cfg:
+        au = cfg["auth"] or {}
+        if "users_db_path" in au and au["users_db_path"]:
+            out["auth_users_db_path"] = Path(str(au["users_db_path"]))
     if "models" in cfg:
         mo = cfg["models"] or {}
         if "forecaster_checkpoint_id" in mo:

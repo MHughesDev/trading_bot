@@ -19,6 +19,7 @@ from app.config.model_artifacts import model_artifact_contract
 from app.config.settings import AppSettings, load_settings
 from app.contracts.asset_model_manifest import AssetModelManifest
 from app.contracts.asset_lifecycle import AssetLifecycleState
+from app.contracts.user_registration import RegisterRequest, RegisterResponse
 from app.runtime.asset_execution_mode import (
     delete_mode_override,
     list_mode_overrides,
@@ -41,6 +42,7 @@ from app.runtime.asset_model_registry import (
     save_manifest,
 )
 from app.runtime import asset_execution_mode as asset_execution_mode_mod
+from app.runtime import user_store as user_store_mod
 from execution.adapter_registry import supported_adapters_for_settings
 from control_plane.chart_bars import query_canonical_bars_for_chart
 from control_plane.preflight import preflight_report
@@ -161,7 +163,31 @@ def get_status() -> dict[str, Any]:
             "overrides": list_mode_overrides(),
         },
         "app_scheduler": scheduler_status(),
+        "user_store": user_store_mod.user_store_status(settings.auth_users_db_path),
     }
+
+
+@app.post("/auth/register", response_model=RegisterResponse)
+def post_register(body: RegisterRequest) -> RegisterResponse:
+    """Create a user account (email + Argon2 password hash). FB-UX-001 — sessions in FB-UX-002."""
+    try:
+        rec = user_store_mod.create_user(settings.auth_users_db_path, body.email, body.password)
+    except user_store_mod.InvalidEmailError as e:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
+    except user_store_mod.InvalidPasswordError as e:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
+    except user_store_mod.DuplicateEmailError as e:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
+    return RegisterResponse(id=rec.id, email=rec.email, created_at=rec.created_at)
 
 
 @app.get("/system/power")

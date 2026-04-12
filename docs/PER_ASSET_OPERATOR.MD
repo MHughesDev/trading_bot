@@ -2,6 +2,13 @@
 
 This document describes the **per-asset model manifest** introduced for **FB-AP-001** / **FB-AP-002**. Full per-asset UI and init pipelines are tracked in [`QUEUE.MD`](QUEUE.MD) **§2.2 (FB-AP-P0)**.
 
+## Operator user accounts (FB-UX-001)
+
+Multi-tenant groundwork: **SQLite** user table at **`NM_AUTH_USERS_DB_PATH`** (default **`data/users.sqlite`**, gitignored). Passwords stored as **Argon2** hashes only.
+
+- **`POST /auth/register`** — JSON **`{"email":"...","password":"..."}`** (password min length 8). Returns **`id`**, normalized **`email`**, **`created_at`**. **409** if email already exists; **422** on validation errors.
+- **`GET /status` → `user_store`** — **`db_path`**, **`user_count`** (for operators; sessions / login are **FB-UX-002**).
+
 ## Streamlit routes (FB-AP-027)
 
 - **Dashboard** — `streamlit run control_plane/Home.py` (main entry).
