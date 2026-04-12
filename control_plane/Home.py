@@ -21,9 +21,11 @@ from control_plane.streamlit_util import (
     get_grafana_url,
     get_questdb_console_url,
     operator_logout,
+    require_streamlit_app_access,
 )
 
 st.set_page_config(page_title="Trading Bot", layout="wide")
+require_streamlit_app_access()
 st.title("Trading Bot")
 st.sidebar.page_link("Home.py", label="Dashboard", icon=":material/dashboard:")
 st.sidebar.page_link("pages/Asset.py", label="Asset page", icon=":material/show_chart:")
