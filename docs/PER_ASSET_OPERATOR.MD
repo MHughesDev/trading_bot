@@ -19,6 +19,10 @@ Optional **server-side sessions** in the same SQLite file (`operator_sessions` t
 
 **Authorization for mutating routes** (params, lifecycle, manifests, etc.): if **`NM_CONTROL_PLANE_API_KEY`** is set, **`X-API-Key`** must match **or** (when sessions are enabled) a valid session cookie. If the API key is **not** configured, mutating routes require a valid session cookie when **`NM_AUTH_SESSION_ENABLED=true`**; when sessions are **off** and no key is set, behavior stays open (development only).
 
+## Dashboard health strip (FB-UX-008)
+
+On **Home**, a row above holdings/PnL summarizes **`GET /status`**: **preflight** (severity, issues/warnings), **production_preflight** (signing / unsigned / venue credentials flags), **execution profile** (legacy API off → default mode + per-asset note). Implemented in **`control_plane/health_strip.py`**.
+
 ## Streamlit routes (FB-AP-027)
 
 - **Dashboard** — `streamlit run control_plane/Home.py` (main entry).

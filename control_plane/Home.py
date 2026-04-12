@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from control_plane.health_strip import render_dashboard_health_strip
 from control_plane.pnl_panel import render_pnl_panel
 from control_plane.positions_panel import render_positions_sidebar
 from control_plane.streamlit_chrome import render_app_sidebar
@@ -22,6 +23,8 @@ st.set_page_config(page_title="Trading Bot", layout="wide")
 require_streamlit_app_access()
 st.title("Trading Bot")
 render_app_sidebar()
+
+render_dashboard_health_strip()
 
 render_positions_sidebar()
 
