@@ -119,7 +119,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-12):** open **HIGH** backlog — **§2.2 [FB-AP-P0](#22-per-asset-product-epic-fb-ap-p0)** (per-asset product: strict model separation, two-page UI, universe search, canonical bars, scheduling). **§2.4 [FB-UX-P0](#24-multi-tenant-web-operator-ux-fb-ux-p0)** — multi-tenant users, sign-in + Account page (venue keys), per-user PnL, dashboard UI extras (**BS-004**). **§2.3 [FB-CONT-P0](#23-container--oci-cloud-deployment-fb-cont-p0)** — OCI/Linux container deployment and cloud portability (**BS-001**). Still deferred: **§2.1** (**FB-N1**, **FB-N3**) and optional GitHub sync **§7**.
+**Status (2026-04-12):** **HIGH** epic parents only (**FB-AP-P0**, **FB-UX-P0**); next implementable **FB-AP** / **FB-UX** rows are **MEDIUM** unless reprioritized. **§2.2 [FB-AP-P0](#22-per-asset-product-epic-fb-ap-p0)** — per-asset product (universe search, derived intervals, integration tests, …). **§2.4 [FB-UX-P0](#24-multi-tenant-web-operator-ux-fb-ux-p0)** — dashboard/UI follow-ons (**FB-UX-008+**). **§2.3 [FB-CONT-P0](#23-container--oci-cloud-deployment-fb-cont-p0)** — OCI/Linux (**BS-001**). Still deferred: **§2.1** (**FB-N1**, **FB-N3**) and optional GitHub sync **§7**.
 
 ### HIGH priority
 
