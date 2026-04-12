@@ -6,6 +6,10 @@
 
 Persisted manifests and HTTP API: **[`PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD)**. **`GET /status`** includes **`asset_model_registry.initialized_symbols`**. Mutating routes require **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set.
 
+## Per-asset Stop — flatten (FB-AP-032)
+
+**`POST /assets/lifecycle/{symbol}/stop`** (with API key when configured) first attempts a **market** close for that symbol’s **open venue position** (Alpaca paper or Coinbase live per **per-symbol execution mode** / **`NM_EXECUTION_MODE`**), then transitions **`active` → `initialized_not_active`**. If the venue **position fetch** or **submit** fails, the API returns **502** and the symbol **stays active** — fix credentials or venue outage and retry. Residual size after partial fills may require another Stop or manual flatten via **`FLATTEN_ALL`** / **`POST /flatten`** (global).
+
 ## Control plane bind address
 
 - Default **`NM_CONTROL_PLANE_HOST=0.0.0.0`** listens on all interfaces. On a single machine behind an untrusted LAN, prefer **`NM_CONTROL_PLANE_HOST=127.0.0.1`** so the API is only reachable from localhost.

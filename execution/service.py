@@ -22,14 +22,18 @@ class ExecutionService:
     def adapter(self) -> ExecutionAdapter:
         return self._adapter
 
-    def _adapter_for_intent(self, intent: OrderIntent) -> ExecutionAdapter:
-        """Route by per-symbol execution mode unless a fixed adapter was injected (tests/stub)."""
+    def adapter_for_symbol(self, symbol: str) -> ExecutionAdapter:
+        """Venue adapter for ``symbol`` (per-asset paper/live); same routing as ``submit_order``."""
         if self._fixed_adapter is not None:
             return self._fixed_adapter
-        mode = effective_execution_mode(intent.symbol, self._settings)
+        mode = effective_execution_mode(symbol, self._settings)
         if mode == self._settings.execution_mode:
             return self._adapter
         return create_execution_adapter(self._settings.model_copy(update={"execution_mode": mode}))
+
+    def _adapter_for_intent(self, intent: OrderIntent) -> ExecutionAdapter:
+        """Route by per-symbol execution mode unless a fixed adapter was injected (tests/stub)."""
+        return self.adapter_for_symbol(intent.symbol)
 
     async def submit_order(self, intent: OrderIntent) -> OrderAck:
         require_execution_allowed(intent, self._settings)

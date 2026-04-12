@@ -152,7 +152,7 @@ def transition_start(symbol: str) -> Path:
 
 def transition_stop(symbol: str) -> Path:
     """
-    **Stop** — ``active`` → ``initialized_not_active``. Flatten / watch teardown is FB-AP-032.
+    **Stop** — ``active`` → ``initialized_not_active`` (caller runs flatten first — FB-AP-032).
     """
     sym = symbol.strip()
     cur = effective_lifecycle_state(sym)

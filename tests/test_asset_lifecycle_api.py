@@ -43,7 +43,18 @@ def test_status_includes_asset_lifecycle(client_no_auth: TestClient) -> None:
     assert "states" in r.json()["asset_lifecycle"]
 
 
-def test_start_stop_with_mutate_key(client_with_key: TestClient) -> None:
+def test_start_stop_with_mutate_key(client_with_key: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        api,
+        "flatten_symbol_position_sync",
+        lambda *_a, **_k: {
+            "submitted": False,
+            "skipped": "flat",
+            "error": None,
+            "acks": [],
+            "lifecycle_continue": True,
+        },
+    )
     client_with_key.put(
         "/assets/models/BTC-USD",
         json={"canonical_symbol": "BTC-USD", "forecaster_torch_path": "/x.pt"},
@@ -64,6 +75,37 @@ def test_start_stop_with_mutate_key(client_with_key: TestClient) -> None:
     )
     assert r2.status_code == 200
     assert r2.json()["lifecycle_state"] == "initialized_not_active"
+
+
+def test_stop_returns_502_when_flatten_fails(
+    client_with_key: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        api,
+        "flatten_symbol_position_sync",
+        lambda *_a, **_k: {
+            "submitted": False,
+            "skipped": "fetch_positions_failed",
+            "error": "venue down",
+            "acks": [],
+            "lifecycle_continue": False,
+        },
+    )
+    client_with_key.put(
+        "/assets/models/BTC-USD",
+        json={"canonical_symbol": "BTC-USD"},
+        headers={"X-API-Key": "secret-key"},
+    )
+    client_with_key.post(
+        "/assets/lifecycle/BTC-USD/start",
+        headers={"X-API-Key": "secret-key"},
+    )
+    r = client_with_key.post(
+        "/assets/lifecycle/BTC-USD/stop",
+        headers={"X-API-Key": "secret-key"},
+    )
+    assert r.status_code == 502
+    assert client_with_key.get("/assets/lifecycle/BTC-USD").json()["lifecycle_state"] == "active"
 
 
 def test_delete_manifest_clears_lifecycle_file(client_with_key: TestClient) -> None:

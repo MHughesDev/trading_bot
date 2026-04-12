@@ -52,8 +52,10 @@ from control_plane.execution_profile import (
     write_pending_intent,
 )
 from control_plane.microservice_health import probe_microservices_health
+from execution.flatten_stop import flatten_symbol_position_sync
 from execution.pnl_summary import compute_pnl_series, compute_pnl_summary
 from execution.portfolio_positions import fetch_portfolio_positions
+from execution.service import ExecutionService
 from execution.trade_markers import iter_markers, marker_to_api_dict
 from orchestration.asset_init_pipeline import get_job as get_init_job, try_start_asset_init_job
 
@@ -521,9 +523,26 @@ def post_asset_lifecycle_stop(
     _: Annotated[None, Depends(require_mutate_key)],
 ) -> dict[str, Any]:
     """
-    Stop watch: ``active`` → ``initialized_not_active``. Position flatten is FB-AP-032.
+    Stop watch: flatten open venue position for this symbol (market close), then
+    ``active`` → ``initialized_not_active`` (FB-AP-032).
     """
     sym = symbol.strip()
+    cur = effective_lifecycle_state(sym)
+    if cur != AssetLifecycleState.active:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="not active",
+        )
+    exec_svc = ExecutionService(settings)
+    flatten_report = flatten_symbol_position_sync(settings, sym, execution_service=exec_svc)
+    if not flatten_report.get("lifecycle_continue", True):
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": "flatten failed or could not verify position — lifecycle left active",
+                "flatten": flatten_report,
+            },
+        )
     try:
         path = transition_stop(sym)
     except ValueError as exc:
@@ -536,4 +555,5 @@ def post_asset_lifecycle_stop(
         "symbol": sym,
         "lifecycle_state": AssetLifecycleState.initialized_not_active.value,
         "path": str(path),
+        "flatten": flatten_report,
     }
