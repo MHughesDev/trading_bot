@@ -19,3 +19,4 @@ data/system_power.json
 data/execution_profile.json
 data/pnl_ledger.jsonl
 data/asset_model_registry/
+data/asset_init/

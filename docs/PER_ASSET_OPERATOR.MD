@@ -40,8 +40,14 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 | GET | `/assets/models/{symbol}` | Get one manifest. |
 | PUT | `/assets/models/{symbol}` | Create/replace manifest; body **`canonical_symbol`** must equal `{symbol}`. |
 | DELETE | `/assets/models/{symbol}` | Remove manifest file. |
+| POST | `/assets/init/{symbol}` | Start per-asset init job (one global runner); returns `job_id`. |
+| GET | `/assets/init/jobs/{job_id}` | Poll job status and per-step detail. |
 
 **GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`.
+
+## Asset init pipeline (FB-AP-006+)
+
+**POST `/assets/init/{symbol}`** runs a background sequence: **Kraken REST** bootstrap history (**FB-AP-007**, window from **`init_pipeline`** in `default.yaml` or **`NM_ASSET_INIT_BOOTSTRAP_*`**), **validate** (**FB-AP-008**), **features** (**FB-AP-009** — `FeaturePipeline.enrich_bars` on the cleaned frame; writes Parquet under **`NM_ASSET_INIT_ARTIFACTS_DIR`** / `data/asset_init` by default), then stubbed train/register steps. Returns **409** if another init job is already running.
 
 ## Related
 
