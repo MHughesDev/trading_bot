@@ -26,7 +26,7 @@ You must follow [`AGENTS.md`](../AGENTS.md): Kraken-only market data policy, ris
 
 ## Phase 1 — Plan and branch
 
-1. Read **§2** of [`QUEUE.MD`](QUEUE.MD) and confirm the **Slice** rows are still **Open** and understand **Summary** + **Affected files**.
+1. Read **§2** of [`QUEUE.MD`](QUEUE.MD) and confirm the **Slice** rows are still **Open** and understand **Summary** + **Affected files**. When the operator asks for **HIGH** priority rows specifically: if **no** row in **§2** has **Status = Open** and **Pri = HIGH** (epics may be **Done** with only **LOW** deferred **Open**, e.g. **FB-N1** / **FB-N3**), **stop** — do **not** implement deferred items without explicit reprioritization; report that the **HIGH** queue is empty and point to [**§8** — How to add an entry](QUEUE.MD#8-how-to-add-an-entry) or **Out of scope** rows if the product owner wants to promote work.
 2. `git fetch origin main && git checkout main && git pull origin main`
 3. `git checkout -b <Branch>` from updated `main`.
 4. If the slice depends on another row (e.g. registry before guards), either include that dependency in the same slice or stop and report.
