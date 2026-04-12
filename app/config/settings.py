@@ -9,6 +9,8 @@ import yaml
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+PlatformSupportedUniverseMode = Literal["intersection", "union"]
+
 _DEFAULT_YAML = Path(__file__).resolve().parent / "default.yaml"
 
 
@@ -148,6 +150,8 @@ class AppSettings(BaseSettings):
     coinbase_universe_db_path: Path = Field(default=Path("data/coinbase_universe.sqlite"))
     coinbase_universe_sync_enabled: bool = False
     coinbase_universe_sync_interval_seconds: int = 86_400
+    # FB-AP-022: cross-venue symbol set for search/eligibility (not Kraken / market data)
+    platform_supported_universe_mode: PlatformSupportedUniverseMode = "intersection"
 
     # FB-AP-035: background nightly training tick only while control plane process runs
     scheduler_nightly_enabled: bool = False
@@ -320,6 +324,10 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["coinbase_universe_sync_enabled"] = bool(uni["coinbase_sync_enabled"])
         if "coinbase_sync_interval_seconds" in uni:
             out["coinbase_universe_sync_interval_seconds"] = int(uni["coinbase_sync_interval_seconds"])
+        if "platform_supported_mode" in uni and uni["platform_supported_mode"]:
+            m = str(uni["platform_supported_mode"]).lower().strip()
+            if m in ("intersection", "union"):
+                out["platform_supported_universe_mode"] = m  # type: ignore[assignment]
     if "live_watch" in cfg:
         lw = cfg["live_watch"] or {}
         if "lifecycle_gate" in lw:
