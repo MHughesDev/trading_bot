@@ -50,6 +50,12 @@ Use **`.MD`** (uppercase extension) to match other docs in this repo.
 
 **Splitting large ideas:** You may use one **`BS-NNN`** for the umbrella and **link** other **`BS-MMM`** files from **Child brainstorms** in the template — or keep everything in one file if it stays readable.
 
+## Current brainstorm files
+
+| ID | File |
+|----|------|
+| **BS-001** | [`BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD) — OCI/Linux containers, web-first deployment, cloud portability. **Promoted** to [`QUEUE.MD`](../QUEUE.MD) §2.3 **FB-CONT-P0** / **FB-CONT-001**… |
+
 ## Related
 
 - [`../QUEUE.MD`](../QUEUE.MD) — authoritative backlog  

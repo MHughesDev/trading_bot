@@ -2,7 +2,7 @@
 
 **Single source of truth** for work items: **fixes**, **changes**, **new features**, **hardening**, **platform**, and **completed history**.
 
-**References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD) · [`MICROSERVICES_SPLIT_PLAN.MD`](MICROSERVICES_SPLIT_PLAN.MD) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
+**References:** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`QUESTDB_TRACES.MD`](QUESTDB_TRACES.MD) · [`GRACEFUL_SHUTDOWN.MD`](GRACEFUL_SHUTDOWN.MD) · [`COINBASE_GRANULARITY.MD`](COINBASE_GRANULARITY.MD) · [`BACKTESTING_SIMULATOR.MD`](BACKTESTING_SIMULATOR.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD) · [`MICROSERVICES_SPLIT_PLAN.MD`](MICROSERVICES_SPLIT_PLAN.MD) · [`BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD) (OCI deployment brainstorm; queue **FB-CONT-P0**) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
 
 ---
 
@@ -13,6 +13,7 @@
 | [§1](#1-conventions) | Conventions (Kind, IDs, priority, phase, category) |
 | [§2](#2-open-queue) | **Open** queue (roadmap + deferred) |
 | [§2.2](#22-per-asset-product-epic-fb-ap-p0) | **FB-AP-P0** — per-asset product (registry, UI, data, scheduling) |
+| [§2.3](#23-container--oci-cloud-deployment-fb-cont-p0) | **FB-CONT-P0** — container / OCI cloud deployment (images, compose, CI, TLS, runbooks) |
 | [§3](#3-resolved-fixes-il) | Resolved **fixes** (`IL-*`) |
 | [§4](#4-completed-compliance-gates-hg) | Completed **gates** (`HG-*`) |
 | [§5](#5-completed-archive-fb--themes) | Completed **archive** (`FB-*`) |
@@ -80,6 +81,19 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 | **AP-SCH** | Schedulers (nightly, app-as-master) |
 | **AP-REM** | Removal of global power / global live-paper |
 
+**Batch (for `FB-CONT-P0` — container / OCI cloud deployment):**
+
+| Batch | Theme |
+|-------|--------|
+| **CONT-ALL** | Epic umbrella / optional cross-cutting (spikes, managed-service evaluation) |
+| **CONT-IMG** | App OCI image (Dockerfile, `.dockerignore`, entrypoints) |
+| **CONT-CMP** | Compose: app service wired to QuestDB, Redis, Qdrant, observability |
+| **CONT-CI** | CI: build image, optional **hadolint** / **Trivy** (no secrets in layers) |
+| **CONT-EDGE** | TLS reverse proxy (**Caddy** or **Nginx**) + optional public vs bind-local |
+| **CONT-BK** | Backup / restore / DR for stateful volumes |
+| **CONT-CLOUD** | Cloud deployment runbook (single VM + Compose or managed containers) |
+| **CONT-DOC** | Operator docs: web + OCI north star vs Windows `.bat` path |
+
 **Category:** **FR**, **PF**, **UI**, **DS**, **MS**, **XX** (roadmap); **EX**, **MD**, **DP**, **RT**, **CP**, **OB**, **OP**, **CI**, **CFG** (fixes / §3).
 
 **Affected files (open-queue tables):** Pipe-separated **primary** paths or globs the implementer expects to touch; **non-exhaustive** — use for navigation, not as a complete dependency closure.
@@ -94,7 +108,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-12):** open **HIGH** backlog — **§2.2 [FB-AP-P0](#22-per-asset-product-epic-fb-ap-p0)** (per-asset product: strict model separation, two-page UI, universe search, canonical bars, scheduling). Still deferred: **§2.1** (**FB-N1**, **FB-N3**) and optional GitHub sync **§7**.
+**Status (2026-04-12):** open **HIGH** backlog — **§2.2 [FB-AP-P0](#22-per-asset-product-epic-fb-ap-p0)** (per-asset product: strict model separation, two-page UI, universe search, canonical bars, scheduling). **§2.3 [FB-CONT-P0](#23-container--oci-cloud-deployment-fb-cont-p0)** — OCI/Linux container deployment and cloud portability (**BS-001**). Still deferred: **§2.1** (**FB-N1**, **FB-N3**) and optional GitHub sync **§7**.
 
 ### HIGH priority
 
@@ -151,6 +165,24 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 | FB-AP-040 | AP-REM | B | CFG | change | HIGH | Open | **Remove app-wide live/paper switch:** Eliminate Streamlit/API control that sets **single** execution mode for whole system; execution mode comes from **per-asset** setting (FB-AP-030) with migration note for existing `.env` users. | `control_plane/Home.py`, `app/config/settings.py`, `docs/` |
 | FB-AP-041 | AP-API | B | CP | reliability | MEDIUM | Done | **Operator docs and RUNBOOKS:** Update `README.md`, `docs/RUNBOOKS.MD`, and new **`docs/PER_ASSET_OPERATOR.MD`** (or similar) describing states, init pipeline, backfill, nightly rules, storage ADR, per-asset paper/live, Stop+flatten. **Partial Done 2026-04-12:** new **[`PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD)** (manifest schema + API + env); **`README.md`** link; **`RUNBOOKS.MD`** §Per-asset model registry. Remaining FB-AP-P0 topics (states, init pipeline, backfill, per-asset UI) still open in other rows. | `docs/PER_ASSET_OPERATOR.MD`, `README.md`, `docs/RUNBOOKS.MD` |
 | FB-AP-042 | AP-PAM | B | CI | feature | MEDIUM | Open | **Integration tests:** Cover manifest round-trip, state transitions, guard rails rejecting wrong symbol, chart API scoped query, merge idempotency for duplicate timestamps. | `tests/` |
+
+### 2.3 Container / OCI cloud deployment (**FB-CONT-P0**)
+
+**Brief:** Deliver a **browser-first**, **Linux OCI–based** deployment story so the same **images** run on a **developer laptop**, a **homelab server**, or **cloud** without rewriting the architecture. **Host OS is irrelevant** as long as a **Linux container runtime** exists (Docker Engine, Docker Desktop, Podman, etc.). **Stateful services** — **QuestDB**, **Redis**, **Qdrant**, **Prometheus**, **Grafana**, **Loki** — stay as **containers** with **named volumes** (or cloud block storage); the **application tier** (**FastAPI**, **Streamlit**, **`live_service`**, **decision/risk path**, **PyTorch / model inference**) ships in **one or more app images** with **secrets injected at runtime** (never baked into layers). **Edge:** optional **Caddy** or **Nginx** for **TLS**; optional **Tailscale** / SSH tunnel for private access. **Alignment:** [`AGENTS.md`](../AGENTS.md) — **Kraken-only market data**; **risk/signing** unchanged; no secrets in git. **Traceability:** brainstorm [`BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD). **Complements** [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) (desktop `.bat` / launcher path).
+
+**Table columns:** **Batch** = theme group; **Phase** = [§1.3](#13-priority-phase-category-status); **Affected files** = primary touch list.
+
+| ID | Batch | Phase | Cat | Kind | Pri | Status | Summary | Affected files |
+|----|-------|-------|-----|------|-----|--------|---------|----------------|
+| FB-CONT-P0 | CONT-ALL | C | XX | feature | MEDIUM | Open | **(Epic parent)** Owns the **OCI / container** deployment track described in the **Brief** above: reproducible **Linux images** for the trading app + documented **Compose** wiring to existing **`infra/docker-compose.yml`** data plane, **CI** that builds (and optionally scans) images, **TLS** edge, **backup/restore** for stateful volumes, **cloud** runbook, and **README** operator guidance distinguishing **web + containers** from **Windows** convenience scripts. Sub-rows **FB-CONT-001**… are independently closable; implement **FB-CONT-001** before **FB-CONT-002** (image before compose references it). Link **BS-001** in PRs touching deployment docs. | `docs/QUEUE.MD`, `docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`, `infra/`, `Dockerfile`, `.dockerignore`, `.github/workflows/`, `README.md`, `docs/RUNBOOKS.MD`, `control_plane/`, `app/` |
+| FB-CONT-001 | CONT-IMG | C | CP | platform | MEDIUM | Open | **App OCI image (Dockerfile):** Add a **multi-stage** `Dockerfile` at repo root (or `infra/docker/Dockerfile`) that installs Python **≥3.11**, `pip install -e ".[dev]"` or a **production** extra set (document which extras ship in prod vs dev), copies application code, sets **`PYTHONUNBUFFERED`**, and defines a clear **entrypoint** (shell script or `CMD`) that can start **uvicorn** for `control_plane.api:app`, **Streamlit** `control_plane/Home.py`, and **`live_service` / supervisor** as documented — **or** documents that operators run **one process per container** with **Compose** services if we split. Include **`.dockerignore`** to exclude `.venv`, `tests` artifacts, and secrets. **Acceptance:** `docker build` succeeds on a clean clone; image runs **`python -c "import app"`** (or equivalent smoke); **no API keys** in image layers. **Models:** PyTorch and native deps either in image or documented optional GPU tag — align with `pyproject.toml` extras. | `Dockerfile`, `.dockerignore`, `pyproject.toml`, `README.md` |
+| FB-CONT-002 | CONT-CMP | C | CP | platform | MEDIUM | Open | **Compose: `app` service:** Extend **[`infra/docker-compose.yml`](../infra/docker-compose.yml)** (or add **`infra/docker-compose.app.yml`** overlay) with an **`app`** (or `trading-bot`) service that joins the existing **`trading-bot`** network, **`depends_on`** **questdb** / **redis** / **qdrant** (with health where applicable), mounts **read-only config** as needed, injects **`env_file: .env`** (document that **`.env` is gitignored**), and publishes **control plane** / **Streamlit** / **metrics** ports explicitly. Document **volume mounts** for `data/`, model artifacts, and registry paths used by **`NM_*`**. **Acceptance:** `docker compose up` brings up **app + data stack**; **`GET /status`** responds from the app container; **Kraken / execution** still configured only via env — no behavior change to risk/signing. | `infra/docker-compose.yml`, `infra/docker-compose.app.yml` (if split), `.env.example`, `README.md`, `docs/RUNBOOKS.MD` |
+| FB-CONT-003 | CONT-CI | C | CP | platform | MEDIUM | Open | **CI: build (and scan) app image:** Add a workflow (e.g. **GitHub Actions**) on **PR** and/or **`main`** that builds the **FB-CONT-001** image, fails on build error, and optionally runs **Trivy** (filesystem or image) and/or **hadolint** on the Dockerfile. **No secrets** in CI — use dummy `NM_*` only if tests require env. **Acceptance:** failing Dockerfile breaks CI; document how operators mirror the same build locally. | `.github/workflows/`, `Dockerfile`, `docs/` |
+| FB-CONT-004 | CONT-EDGE | C | CP | platform | MEDIUM | Open | **TLS reverse proxy (optional compose service):** Provide **`infra/docker-compose.edge.yml`** (or equivalent) adding **Caddy** or **Nginx** that fronts **Streamlit** + **FastAPI** with **HTTPS**, **upstream** to app container ports, and configurable **server name** / **ACME** (Let's Encrypt) or **mounted certs** for private CA. Document **localhost-only** vs **public** deployment. **Acceptance:** operator can hit **`https://`** to the UI when enabled; default **insecure HTTP** path still documented for LAN dev. | `infra/`, `docs/RUNBOOKS.MD`, `README.md` |
+| FB-CONT-005 | CONT-BK | C | OP | reliability | MEDIUM | Open | **Backup and restore runbook — stateful volumes:** Document and optionally script **offline/consistent backup** for **QuestDB**, **Redis** (AOF), and **Qdrant** Docker volumes: **snapshot** or **vendor export** to **S3-compatible object storage**; **restore drill** steps (order of startup, volume attach). Include **retention** and **test restore** checklist. **Acceptance:** new section in [`RUNBOOKS.MD`](../RUNBOOKS.MD) with copy-paste commands; no production secrets in examples. | `docs/RUNBOOKS.MD`, `scripts/` (optional), `infra/` |
+| FB-CONT-006 | CONT-CLOUD | C | CP | reliability | MEDIUM | Open | **Cloud deployment runbook:** One **opinionated** path (e.g. **single Linux VM + Docker Compose + systemd** *or* **AWS Fargate + EFS** — pick one primary) for moving the **same images** from homelab to cloud: **minimum instance size**, **networking** (security groups / firewall), **secrets** from **cloud secret manager** → runtime env, **persistent disk** mapping to Compose volumes, **egress** notes. **Second path** may be sketched as a bullet list. **Acceptance:** new subsection in **`README.md`** or **`docs/DEPLOY_CLOUD.MD`** linked from **`README.md`**; **BS-001** / **FB-CONT-P0** referenced. | `README.md`, `docs/*.MD`, `infra/` |
+| FB-CONT-007 | CONT-DOC | C | CP | change | MEDIUM | Open | **README — deployment north star:** Add a short **“Deployment models”** subsection: **(A)** Windows **`.bat`** / optional launcher (**[`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD)**) vs **(B)** **Linux OCI / Compose / cloud** (**BS-001**, **FB-CONT-P0**) — browser-only, same stack. Link **QuestDB / Redis / Qdrant** roles in one sentence each. **Acceptance:** new users understand which path they are on; no duplicate of long brainstorm text. | `README.md`, `docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD` |
+| FB-CONT-008 | CONT-ALL | C | XX | spike | LOW | Open | **Spike — managed data services vs self-hosted:** Time-boxed comparison for **cloud** deployments: **managed Redis**, **QuestDB Cloud** or **managed TSDB**, **Qdrant Cloud** vs **self-hosted containers** on one VM — **cost**, **ops load**, **network latency** to app region, **migration** from current Compose defaults. Deliver **≤2 page ADR** in **`docs/`** with **recommendation** and **follow-up queue rows** only if we adopt a managed swap. **Traceability:** **BS-001** open questions. | `docs/*.MD`, `docs/QUEUE.MD` |
 
 ### Compliance & release gates (open)
 
