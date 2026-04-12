@@ -105,6 +105,10 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 
 **GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`; **`asset_lifecycle`**: `state_dir`, `states`; **`asset_execution_mode`**: `default_execution_mode`, `sidecar_dir`, `overrides`; and **`app_scheduler`** (optional nightly training thread while the control plane process is up — **FB-AP-035**, see **`RUNBOOKS.MD`**).
 
+## Global system power (legacy, FB-AP-039)
+
+**Default:** global **OFF** switch is **removed** — **`NM_SYSTEM_POWER_LEGACY_ENABLED=false`**: `run_decision_tick` and nightly training are **not** blocked by `data/system_power.json`. Use **per-asset** **Stop** on the Asset page. Operators who need the old behavior set **`NM_SYSTEM_POWER_LEGACY_ENABLED=true`** (then **`POST /system/power`** and the JSON file apply again).
+
 ## Live loop — active watch (FB-AP-038)
 
 When **`NM_LIVE_WATCH_LIFECYCLE_GATE=true`**, the **`live_service`** loop runs **`run_decision_tick`** (forecaster + risk + order path) **only** for symbols whose effective lifecycle is **`active`**. Ingestion (WS ticks, rollers, optional QuestDB bars) continues for all configured **`NM_MARKET_DATA_SYMBOLS`**. Optional **`NM_LIVE_DECISION_MIN_INTERVAL_SECONDS`** enforces a minimum gap between decision ticks **per symbol** (wall clock, monotonic). Defaults **false** / **0** — enable after operators use **Start** on assets to watch.

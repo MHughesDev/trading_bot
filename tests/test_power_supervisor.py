@@ -13,6 +13,7 @@ from app.runtime import system_power as sp
 
 @pytest.fixture
 def isolated_power_state(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("NM_SYSTEM_POWER_LEGACY_ENABLED", "true")
     monkeypatch.setattr(sp, "_STATE_PATH", tmp_path / "system_power.json")
     sp.set_power("on")
     yield

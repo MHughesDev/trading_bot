@@ -1,6 +1,11 @@
-"""Global system power: ON = normal operation; OFF = hard stop (no inference, trading, training).
+"""Global system power (legacy): ON = normal operation; OFF = hard stop.
 
-State is persisted under ``data/system_power.json`` so restarts and the control plane stay aligned.
+**FB-AP-039:** When ``NM_SYSTEM_POWER_LEGACY_ENABLED`` is **false** (default), this module
+always reports **on** — global power-off is removed; use **per-asset Stop** and process
+lifecycle instead. Legacy operators set **``NM_SYSTEM_POWER_LEGACY_ENABLED=true``** to restore
+``data/system_power.json`` behavior.
+
+State is persisted under ``data/system_power.json`` when legacy is enabled.
 """
 
 from __future__ import annotations
@@ -22,6 +27,17 @@ def _default_from_env() -> PowerState:
 
     v = os.getenv("NM_SYSTEM_POWER", "on").strip().lower()
     return "off" if v in ("0", "false", "off", "no") else "on"
+
+
+def legacy_system_power_enabled() -> bool:
+    """When False (default), :func:`is_on` is always True and :func:`set_power` is a no-op."""
+    import os
+
+    return os.getenv("NM_SYSTEM_POWER_LEGACY_ENABLED", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 def _load_file() -> PowerState | None:
@@ -50,17 +66,23 @@ _init()
 
 
 def get_power() -> PowerState:
-    """Return current power state (``on`` or ``off``)."""
+    """Return current power state (``on`` or ``off``). Always ``on`` when legacy is disabled."""
+    if not legacy_system_power_enabled():
+        return "on"
     with _LOCK:
         return _power
 
 
 def is_on() -> bool:
+    if not legacy_system_power_enabled():
+        return True
     return get_power() == "on"
 
 
 def set_power(power: PowerState) -> PowerState:
-    """Set power and persist. Returns the new state."""
+    """Set power and persist (legacy only). Returns ``on`` without persisting when legacy is off."""
+    if not legacy_system_power_enabled():
+        return "on"
     global _power
     with _LOCK:
         p: PowerState = "off" if str(power).lower() in ("off", "false", "0") else "on"
@@ -70,7 +92,9 @@ def set_power(power: PowerState) -> PowerState:
 
 
 def sync_from_disk() -> PowerState:
-    """Reload from disk (e.g. after external edit)."""
+    """Reload from disk (e.g. after external edit). No-op when legacy is disabled."""
+    if not legacy_system_power_enabled():
+        return "on"
     global _power
     with _LOCK:
         f = _load_file()
