@@ -119,11 +119,13 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-12):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Next:** reprioritize new work or pick deferred **§2.1** (**FB-N1**, **FB-N3**) / optional GitHub sync **§7**.
+**Status (2026-04-12):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Next:** reprioritize new work, add rows per [**§8**](#8-how-to-add-an-entry), pick **Out of scope** (**FB-N1**, **FB-N3**, LOW), or optional GitHub sync [**§7**](#7-github-sync-optional).
 
 ### HIGH priority
 
 *P0 / P1 — release-critical and core architecture.*
+
+*No **Open** rows with **Pri** **HIGH** — roadmap epics above are **Done**. Remaining **Open** items are **LOW** deferred in [**Out of scope**](#out-of-scope-not-prioritized) (**FB-N1**, **FB-N3**).*
 
 ### 2.2 Per-asset product epic (**FB-AP-P0**)
 
