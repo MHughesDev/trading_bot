@@ -170,6 +170,27 @@ class QuestDBWriter:
             rows = await cur.fetchall()
         return list(rows)
 
+    async def query_latest_bar(
+        self,
+        symbol: str,
+        *,
+        interval_seconds: int,
+    ) -> dict | None:
+        """Latest row in ``canonical_bars`` for ``symbol`` and ``interval_seconds``, or ``None``."""
+        if not self._conn:
+            raise RuntimeError("not connected")
+        sql = """
+        SELECT ts, symbol, interval_seconds, open, high, low, close, volume, source, schema_version
+        FROM canonical_bars
+        WHERE symbol = %s AND interval_seconds = %s
+        ORDER BY ts DESC
+        LIMIT 1
+        """
+        async with self._conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(sql, (symbol, interval_seconds))
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
     async def max_canonical_bar_timestamp(
         self,
         symbol: str,

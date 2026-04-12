@@ -88,3 +88,43 @@ async def query_canonical_bars_for_chart(
         "count": len(rows),
         "bars": [_row_to_json(r) for r in rows],
     }
+
+
+async def query_latest_canonical_bar_for_chart(
+    settings: AppSettings,
+    *,
+    symbol: str,
+    interval_seconds: int | None,
+) -> dict[str, Any] | None:
+    """
+    Latest ``canonical_bars`` row for ``symbol`` and bar width (FB-AP-034 / last-price tick).
+
+    Raises:
+        ValueError: empty symbol or invalid ``interval_seconds``.
+    """
+    sym = symbol.strip()
+    if not sym:
+        raise ValueError("symbol is required")
+    bar_sec = (
+        int(interval_seconds)
+        if interval_seconds is not None
+        else max(1, int(settings.market_data_bar_interval_seconds))
+    )
+    if bar_sec < 1:
+        raise ValueError("interval_seconds must be >= 1")
+    qdb = QuestDBWriter(
+        settings.questdb_host,
+        settings.questdb_port,
+        settings.questdb_user,
+        settings.questdb_password,
+        settings.questdb_database,
+        batch_max_rows=settings.questdb_batch_max_rows,
+    )
+    await qdb.connect()
+    try:
+        row = await qdb.query_latest_bar(sym, interval_seconds=bar_sec)
+    finally:
+        await qdb.aclose()
+    if not row:
+        return None
+    return _row_to_json(row)
