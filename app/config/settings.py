@@ -140,6 +140,11 @@ class AppSettings(BaseSettings):
     # external: bridge publishes through Redis; execution_gateway_service consumes risk.intent.accepted.
     microservices_execution_gateway_mode: Literal["in_process", "external"] = "in_process"
 
+    # FB-AP-020: Alpaca tradable crypto universe snapshot (SQLite; not market data)
+    alpaca_universe_db_path: Path = Field(default=Path("data/alpaca_universe.sqlite"))
+    alpaca_universe_sync_enabled: bool = False
+    alpaca_universe_sync_interval_seconds: int = 86_400
+
     # FB-AP-035: background nightly training tick only while control plane process runs
     scheduler_nightly_enabled: bool = False
     scheduler_nightly_interval_seconds: int = 86_400
@@ -297,6 +302,14 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         if "nightly_rl_trade_lookback_days" in sch:
             v = sch["nightly_rl_trade_lookback_days"]
             out["scheduler_nightly_rl_trade_lookback_days"] = None if v is None else int(v)
+    if "universe" in cfg:
+        uni = cfg["universe"] or {}
+        if "alpaca_db_path" in uni and uni["alpaca_db_path"]:
+            out["alpaca_universe_db_path"] = Path(str(uni["alpaca_db_path"]))
+        if "alpaca_sync_enabled" in uni:
+            out["alpaca_universe_sync_enabled"] = bool(uni["alpaca_sync_enabled"])
+        if "alpaca_sync_interval_seconds" in uni:
+            out["alpaca_universe_sync_interval_seconds"] = int(uni["alpaca_sync_interval_seconds"])
     if "live_watch" in cfg:
         lw = cfg["live_watch"] or {}
         if "lifecycle_gate" in lw:

@@ -99,6 +99,10 @@ scheduler:
   nightly_per_asset_forecaster: true
   nightly_rl_requires_trade: true
   nightly_rl_trade_lookback_days: null
+universe:
+  alpaca_db_path: data/alpaca_universe.sqlite
+  alpaca_sync_enabled: false
+  alpaca_sync_interval_seconds: 86400
 auth:
   users_db_path: data/users.sqlite
   session_enabled: false

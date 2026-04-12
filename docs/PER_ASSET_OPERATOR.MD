@@ -171,6 +171,15 @@ When **`NM_LIVE_WATCH_LIFECYCLE_GATE=true`**, the **`live_service`** loop runs *
 
 **POST `/assets/init/{symbol}`** runs a background sequence: **Kraken REST** bootstrap history (**FB-AP-007**), **validate** (**FB-AP-008**), **features** (**FB-AP-009**), **forecaster_train** (**FB-AP-010** — `forecaster_torch.pt` under `<run_dir>/forecaster/`; skipped if `torch` missing), **rl_init** (**FB-AP-011** — `MultiBranchMLPPolicy` saved to `<run_dir>/policy/policy_mlp.npz`), **register** (**FB-AP-012** — writes/updates per-asset **`AssetModelManifest`** with those paths under **`NM_ASSET_MODEL_REGISTRY_DIR`**). Returns **409** if another init job is already running.
 
+## Alpaca tradable universe (FB-AP-020)
+
+**Paper venue metadata only** — not Kraken market data. Snapshots **tradable** Alpaca **crypto** assets (active) into **`NM_ALPACA_UNIVERSE_DB_PATH`** (default **`data/alpaca_universe.sqlite`**, gitignored). Requires **`NM_ALPACA_API_KEY`** / **`NM_ALPACA_API_SECRET`** and **`pip install -e ".[alpaca]"`**.
+
+- **`GET /universe/alpaca`** — paginated rows (`limit`, `offset`, optional `q` filter on symbol/name); metadata only.
+- **`POST /universe/alpaca/sync`** — on-demand refresh (mutating operator: API key or session when enabled).
+- Optional background sync: **`NM_ALPACA_UNIVERSE_SYNC_ENABLED=true`**, **`NM_ALPACA_UNIVERSE_SYNC_INTERVAL_SECONDS`** (default **86400**).
+- **`GET /status` → `alpaca_universe`** — row count, last sync time, scheduler tick / last error.
+
 ## Related
 
 - [`ADR_CANONICAL_BAR_STORAGE.MD`](ADR_CANONICAL_BAR_STORAGE.MD) — canonical bar storage decision (FB-AP-013).

@@ -24,3 +24,5 @@ data/asset_init/
 data/asset_execution_mode/
 data/users.sqlite
 data/users.sqlite-*
+data/alpaca_universe.sqlite
+data/alpaca_universe.sqlite-*
