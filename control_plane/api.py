@@ -73,6 +73,7 @@ from execution.portfolio_positions import fetch_portfolio_positions
 from execution.service import ExecutionService
 from execution.trade_markers import iter_markers, marker_to_api_dict
 from orchestration.app_scheduler import (
+    nightly_scheduler_detail,
     scheduler_status,
     start_app_background_scheduler,
     stop_app_background_scheduler,
@@ -249,6 +250,12 @@ def get_status() -> dict[str, Any]:
             **operator_sessions_mod.session_status(settings.auth_users_db_path),
         },
     }
+
+
+@app.get("/scheduler/nightly")
+def get_nightly_scheduler_status() -> dict[str, Any]:
+    """Nightly in-process scheduler: last/next run, last error, last training report (FB-UX-012)."""
+    return nightly_scheduler_detail(settings)
 
 
 @app.post("/auth/register", response_model=RegisterResponse)

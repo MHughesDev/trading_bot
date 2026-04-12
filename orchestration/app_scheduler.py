@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.config.settings import AppSettings, load_settings
@@ -25,22 +25,51 @@ _stop = threading.Event()
 _state: dict[str, Any] = {
     "running": False,
     "last_tick_utc": None,
+    "last_run_finished_utc": None,
+    "next_run_after_utc": None,
     "last_report": None,
     "last_error": None,
 }
 
 
-def scheduler_status() -> dict[str, Any]:
-    """Snapshot for ``GET /status`` → ``app_scheduler``."""
+def _iso_z(dt: datetime) -> str:
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def _mark_run_finished() -> None:
+    """Record job end time and projected next wake (interval after finish). FB-UX-012."""
+    now = datetime.now(tz=UTC)
+    with _lock:
+        _state["last_run_finished_utc"] = _iso_z(now)
+        interval = max(1, int(_state.get("interval_seconds") or 60))
+        _state["next_run_after_utc"] = _iso_z(now + timedelta(seconds=interval))
+
+
+def scheduler_status(*, include_report: bool = False) -> dict[str, Any]:
+    """Snapshot for ``GET /status`` → ``app_scheduler``; optional full ``last_report`` for detail API."""
     with _lock:
         running = _thread is not None and _thread.is_alive()
-        return {
+        out: dict[str, Any] = {
             "enabled": bool(_state.get("config_enabled")),
             "interval_seconds": int(_state.get("interval_seconds") or 0),
             "running": running,
             "last_tick_utc": _state.get("last_tick_utc"),
+            "last_run_finished_utc": _state.get("last_run_finished_utc"),
+            "next_run_after_utc": _state.get("next_run_after_utc"),
             "last_error": _state.get("last_error"),
         }
+        if include_report:
+            out["last_report"] = _state.get("last_report")
+        return out
+
+
+def nightly_scheduler_detail(settings: AppSettings) -> dict[str, Any]:
+    """Payload for ``GET /scheduler/nightly`` (FB-UX-012): status + last report + RL/forecaster flags."""
+    out = dict(scheduler_status(include_report=True))
+    out["nightly_per_asset_forecaster"] = bool(settings.scheduler_nightly_per_asset_forecaster)
+    out["nightly_rl_requires_trade"] = bool(settings.scheduler_nightly_rl_requires_trade)
+    out["nightly_rl_trade_lookback_days"] = settings.scheduler_nightly_rl_trade_lookback_days
+    return out
 
 
 def _loop_body(settings: AppSettings) -> None:
@@ -56,6 +85,8 @@ def _loop_body(settings: AppSettings) -> None:
         logger.exception("scheduler nightly job failed")
         with _lock:
             _state["last_error"] = str(e)
+    finally:
+        _mark_run_finished()
 
 
 def _run(settings: AppSettings, interval_s: float) -> None:
@@ -79,9 +110,11 @@ def start_app_background_scheduler(s: AppSettings | None = None) -> None:
         with _lock:
             _state["config_enabled"] = False
             _state["interval_seconds"] = cfg.scheduler_nightly_interval_seconds
+            _state["next_run_after_utc"] = None
         logger.info("app scheduler: disabled (NM_SCHEDULER_NIGHTLY_ENABLED=false)")
         return
 
+    interval = max(1.0, float(cfg.scheduler_nightly_interval_seconds))
     with _lock:
         if _thread is not None and _thread.is_alive():
             logger.info("app scheduler: already running")
@@ -89,8 +122,7 @@ def start_app_background_scheduler(s: AppSettings | None = None) -> None:
         _state["config_enabled"] = True
         _state["interval_seconds"] = cfg.scheduler_nightly_interval_seconds
         _stop = threading.Event()
-
-    interval = max(1.0, float(cfg.scheduler_nightly_interval_seconds))
+        _state["next_run_after_utc"] = _iso_z(datetime.now(tz=UTC) + timedelta(seconds=interval))
 
     def _target() -> None:
         try:
@@ -141,6 +173,8 @@ def reset_app_scheduler_for_tests() -> None:
             {
                 "running": False,
                 "last_tick_utc": None,
+                "last_run_finished_utc": None,
+                "next_run_after_utc": None,
                 "last_report": None,
                 "last_error": None,
             }

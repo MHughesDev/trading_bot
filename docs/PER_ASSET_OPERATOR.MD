@@ -23,6 +23,10 @@ Optional **server-side sessions** in the same SQLite file (`operator_sessions` t
 
 On **Home**, a row above holdings/PnL summarizes **`GET /status`**: **preflight** (severity, issues/warnings), **production_preflight** (signing / unsigned / venue credentials flags), **execution profile** (legacy API off → default mode + per-asset note). Implemented in **`control_plane/health_strip.py`**.
 
+## Nightly scheduler panel (FB-UX-012)
+
+The **Dashboard** shows **Nightly scheduler** status from **`GET /scheduler/nightly`**: enabled flag, **interval** (seconds), **last tick** (job start), **last run finished**, **next run after** (approximate — first wake after start, then after each job completes), **last error**, and an expander with the **last report** JSON (same object as **`run_nightly_training_job`**). **`GET /status` → `app_scheduler`** includes the timing fields without the full report (use the detail route for JSON).
+
 ## Dashboard CSV export (FB-UX-011)
 
 On **Home**, **Download positions (CSV)** builds UTF-8 CSV from the same **`GET /portfolio/positions`** JSON used for the holdings table (one row per position, plus adapter/mode columns; if the venue call fails, one row records **`ok=false`** and the error). **Download P&L summary (CSV)** exports **`GET /pnl/summary`** for the selected timeframe (flattened window, realized/unrealized, ledger path). No server-side CSV route — client-side only.
