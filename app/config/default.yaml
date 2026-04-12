@@ -83,6 +83,7 @@ models:
   active_set_manifest_version: null
   torch_device: auto
   active_registry_path: null
+  use_asset_manifest_paths: false
 microservices:
   runtime_bridge_enabled: false
   execution_gateway_mode: in_process

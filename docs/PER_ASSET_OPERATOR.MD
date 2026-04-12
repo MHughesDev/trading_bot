@@ -30,6 +30,10 @@ Each **initialized** tradable symbol can have a **manifest** that lists **foreca
 
 Pydantic model: `app.contracts.asset_model_manifest.AssetModelManifest`.
 
+## Decision pipeline (optional manifest mode)
+
+When **`NM_MODELS_USE_ASSET_MANIFEST_PATHS=true`** (also **`models.use_asset_manifest_paths`** in `default.yaml`), **`DecisionPipeline`** loads forecaster and policy artifact paths **only** from the per-asset manifest for the **current decision symbol** — not from global **`NM_MODELS_FORECASTER_*`** / **`NM_MODELS_POLICY_MLP_PATH`**. If the manifest is missing, inconsistent with the symbol, or required files are absent, the pipeline **abstains** (no forecast packet, `NO_TRADE`). Default **`false`** preserves existing global-path behavior.
+
 ## Control plane API
 
 Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as other mutating routes).
