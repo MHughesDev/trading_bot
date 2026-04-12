@@ -144,6 +144,10 @@ class AppSettings(BaseSettings):
     alpaca_universe_db_path: Path = Field(default=Path("data/alpaca_universe.sqlite"))
     alpaca_universe_sync_enabled: bool = False
     alpaca_universe_sync_interval_seconds: int = 86_400
+    # FB-AP-021: Coinbase Advanced Trade SPOT products snapshot (SQLite; not market data)
+    coinbase_universe_db_path: Path = Field(default=Path("data/coinbase_universe.sqlite"))
+    coinbase_universe_sync_enabled: bool = False
+    coinbase_universe_sync_interval_seconds: int = 86_400
 
     # FB-AP-035: background nightly training tick only while control plane process runs
     scheduler_nightly_enabled: bool = False
@@ -310,6 +314,12 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["alpaca_universe_sync_enabled"] = bool(uni["alpaca_sync_enabled"])
         if "alpaca_sync_interval_seconds" in uni:
             out["alpaca_universe_sync_interval_seconds"] = int(uni["alpaca_sync_interval_seconds"])
+        if "coinbase_db_path" in uni and uni["coinbase_db_path"]:
+            out["coinbase_universe_db_path"] = Path(str(uni["coinbase_db_path"]))
+        if "coinbase_sync_enabled" in uni:
+            out["coinbase_universe_sync_enabled"] = bool(uni["coinbase_sync_enabled"])
+        if "coinbase_sync_interval_seconds" in uni:
+            out["coinbase_universe_sync_interval_seconds"] = int(uni["coinbase_sync_interval_seconds"])
     if "live_watch" in cfg:
         lw = cfg["live_watch"] or {}
         if "lifecycle_gate" in lw:

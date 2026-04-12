@@ -6,6 +6,7 @@ import json
 import logging
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from coinbase import jwt_generator
@@ -46,10 +47,15 @@ class CoinbaseAdvancedHTTPClient:
         path: str,
         *,
         json_body: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> httpx.Response:
         if not path.startswith("/api/v3/brokerage"):
             path = "/api/v3/brokerage" + path
-        token = _rest_jwt(method, path, self._api_key, self._api_secret)
+        jwt_path = path
+        if params:
+            qs = urlencode(sorted((str(k), str(v)) for k, v in params.items() if v is not None))
+            jwt_path = f"{path}?{qs}"
+        token = _rest_jwt(method, jwt_path, self._api_key, self._api_secret)
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -57,7 +63,7 @@ class CoinbaseAdvancedHTTPClient:
         }
         url = f"https://api.coinbase.com{path}"
         if method.upper() == "GET":
-            return await self._client.get(url, headers=headers)
+            return await self._client.get(url, headers=headers, params=params)
         if method.upper() == "POST":
             return await self._client.post(url, headers=headers, content=json.dumps(json_body or {}))
         if method.upper() == "DELETE":
@@ -101,6 +107,45 @@ class CoinbaseAdvancedHTTPClient:
         resp.raise_for_status()
         data = resp.json()
         return list(data.get("accounts", data) if isinstance(data, dict) else data)
+
+    async def list_spot_products_paginated(
+        self,
+        *,
+        limit: int = 250,
+        product_type: str = "SPOT",
+    ) -> list[dict[str, Any]]:
+        """
+        GET ``/products`` with pagination (cursor). FB-AP-021 — execution metadata only.
+
+        See Coinbase Advanced Trade **List Products** (``product_type`` e.g. ``SPOT``).
+        """
+        out: list[dict[str, Any]] = []
+        cursor: str | None = None
+        path = "/api/v3/brokerage/products"
+        for _page in range(500):
+            params: dict[str, Any] = {
+                "limit": max(1, min(int(limit), 1000)),
+                "product_type": product_type,
+            }
+            if cursor:
+                params["cursor"] = cursor
+            resp = await self._request("GET", path, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict):
+                break
+            batch = data.get("products") or []
+            for p in batch:
+                if isinstance(p, dict):
+                    out.append(p)
+            nxt = data.get("cursor") or data.get("next_cursor")
+            if not nxt:
+                break
+            nxt_s = str(nxt)
+            if cursor is not None and nxt_s == cursor:
+                break
+            cursor = nxt_s
+        return out
 
 
 def accounts_to_position_snapshots(accounts: list[dict[str, Any]]) -> list[Any]:
