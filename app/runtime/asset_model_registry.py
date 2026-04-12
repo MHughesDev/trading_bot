@@ -8,11 +8,14 @@ import tempfile
 from pathlib import Path
 
 from app.contracts.asset_model_manifest import AssetModelManifest
+from app.runtime import user_data_paths as user_paths
 
 _DEFAULT_DIR = Path(os.getenv("NM_ASSET_MODEL_REGISTRY_DIR", "data/asset_model_registry/manifests"))
 
 
 def registry_dir() -> Path:
+    if os.getenv("NM_MULTI_TENANT_DATA_SCOPING", "").strip().lower() in ("1", "true", "yes"):
+        return user_paths.registry_manifests_dir()
     return _DEFAULT_DIR
 
 

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Literal
 
 from app.config.settings import AppSettings
+from app.runtime import user_data_paths as user_paths
 
 _DEFAULT_DIR = Path(os.getenv("NM_ASSET_EXECUTION_MODE_DIR", "data/asset_execution_mode"))
 
@@ -24,6 +25,8 @@ ExecutionModeChoice = Literal["paper", "live"]
 
 
 def mode_dir() -> Path:
+    if os.getenv("NM_MULTI_TENANT_DATA_SCOPING", "").strip().lower() in ("1", "true", "yes"):
+        return user_paths.asset_execution_mode_dir()
     return _DEFAULT_DIR
 
 

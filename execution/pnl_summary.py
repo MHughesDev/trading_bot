@@ -7,8 +7,11 @@ from decimal import Decimal
 from typing import Any
 
 from app.config.settings import AppSettings
+from app.runtime.execution_settings_merge import merge_settings_for_execution
+from app.runtime.tenant_context import get_current_user_id
 from execution.pnl_ledger import (
     PnlRange,
+    ledger_path,
     realized_bucket_series,
     sum_realized_in_window,
     window_for_range,
@@ -45,6 +48,7 @@ def compute_pnl_series(
     t = now or datetime.now(tz=UTC)
     start, end = window_for_range(range_key, now=t)
     series = realized_bucket_series(start, end, bucket_seconds=bucket_seconds)
+    lp = ledger_path()
     return {
         "range": range_key,
         "bucket_seconds": max(60, int(bucket_seconds)),
@@ -53,7 +57,7 @@ def compute_pnl_series(
         "points": series,
         "ledger": {
             "source_of_truth": "local_jsonl",
-            "path": "data/pnl_ledger.jsonl",
+            "path": str(lp),
         },
     }
 
@@ -63,7 +67,8 @@ async def compute_pnl_summary(settings: AppSettings, range_key: PnlRange) -> dic
     now = datetime.now(tz=UTC)
     start, end = window_for_range(range_key, now=now)
     realized = sum_realized_in_window(start, end)
-    pos = await fetch_portfolio_positions(settings)
+    eff = merge_settings_for_execution(settings, get_current_user_id())
+    pos = await fetch_portfolio_positions(eff)
     unrealized, pos_err = _sum_unrealized_from_positions_payload(pos)
 
     out: dict[str, Any] = {
@@ -74,12 +79,12 @@ async def compute_pnl_summary(settings: AppSettings, range_key: PnlRange) -> dic
         "unrealized_pnl_usd": None if unrealized is None else str(unrealized),
         "ledger": {
             "source_of_truth": "local_jsonl",
-            "path": "data/pnl_ledger.jsonl",
+            "path": str(ledger_path()),
             "note": "Append-only file; future QuestDB or venue backfill — see docs/PNL_LEDGER.MD",
         },
         "unrealized_source": "execution_adapter_positions",
         "positions_ok": bool(pos.get("ok")),
         "positions_error": pos_err,
-        "execution_mode": settings.execution_mode,
+        "execution_mode": eff.execution_mode,
     }
     return out

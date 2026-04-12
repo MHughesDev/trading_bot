@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -20,6 +21,10 @@ _LEDGER_NAME = "pnl_ledger.jsonl"
 
 
 def ledger_path(repo_root: Path | None = None) -> Path:
+    if os.getenv("NM_MULTI_TENANT_DATA_SCOPING", "").strip().lower() in ("1", "true", "yes"):
+        from app.runtime import user_data_paths as user_paths
+
+        return user_paths.pnl_ledger_path()
     root = repo_root or Path(__file__).resolve().parents[1]
     return root / "data" / _LEDGER_NAME
 

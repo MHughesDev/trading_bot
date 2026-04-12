@@ -18,12 +18,15 @@ import tempfile
 from pathlib import Path
 
 from app.contracts.asset_lifecycle import AssetLifecycleState
+from app.runtime import user_data_paths as user_paths
 from app.runtime.asset_model_registry import load_manifest
 
 _DEFAULT_DIR = Path(os.getenv("NM_ASSET_LIFECYCLE_STATE_DIR", "data/asset_lifecycle_state"))
 
 
 def state_dir() -> Path:
+    if os.getenv("NM_MULTI_TENANT_DATA_SCOPING", "").strip().lower() in ("1", "true", "yes"):
+        return user_paths.lifecycle_state_dir()
     return _DEFAULT_DIR
 
 

@@ -8,12 +8,16 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.runtime import user_data_paths as user_paths
+
 _DEFAULT_DIR = Path(
     os.getenv("NM_CANONICAL_BAR_WATERMARK_DIR", "data/canonical_bar_watermarks")
 )
 
 
 def watermark_dir() -> Path:
+    if os.getenv("NM_MULTI_TENANT_DATA_SCOPING", "").strip().lower() in ("1", "true", "yes"):
+        return user_paths.canonical_bar_watermark_dir()
     return _DEFAULT_DIR
 
 
