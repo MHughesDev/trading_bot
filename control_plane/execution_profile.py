@@ -1,5 +1,9 @@
 """Operator intent for ``NM_EXECUTION_MODE`` (paper vs live): persisted for next process start.
 
+**FB-AP-040:** App-wide mode switching via API is **disabled by default**. Use **per-asset**
+``PUT /assets/execution-mode/{symbol}`` (FB-AP-030). Set **``NM_EXECUTION_PROFILE_LEGACY_API=true``**
+only if you need ``GET/POST /system/execution-profile`` and ``data/execution_profile.json``.
+
 The control plane and live runtime load settings from **environment** at startup. Changing mode
 therefore requires updating **``.env``** (or YAML) **and** restarting API / ``live_service`` /
 ``power_supervisor``. This module stores a **pending** intent in ``data/execution_profile.json``
@@ -9,17 +13,44 @@ so the UI can show *restart required* until processes pick up the new env.
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 
+from app.config.settings import AppSettings
+
 ExecutionMode = Literal["paper", "live"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _STATE_PATH = _REPO_ROOT / "data" / "execution_profile.json"
 _DEFAULT_YAML = _REPO_ROOT / "app" / "config" / "default.yaml"
+
+
+def legacy_execution_profile_api_enabled() -> bool:
+    """When False (default), ``GET/POST /system/execution-profile`` return 410."""
+    return os.getenv("NM_EXECUTION_PROFILE_LEGACY_API", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def status_execution_profile_section(settings: AppSettings) -> dict[str, Any]:
+    """Payload for ``GET /status`` → ``execution_profile``."""
+    if not legacy_execution_profile_api_enabled():
+        return {
+            "legacy_api_enabled": False,
+            "default_execution_mode": settings.execution_mode,
+            "note": "Per-asset paper/live: PUT /assets/execution-mode/{symbol}. "
+            "Set NM_EXECUTION_PROFILE_LEGACY_API=true to enable app-wide GET/POST /system/execution-profile.",
+        }
+    return {
+        **profile_payload(settings.execution_mode),
+        "legacy_api_enabled": True,
+    }
 
 
 def _ensure_parent() -> None:

@@ -28,8 +28,8 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 
 ## Execution mode (paper vs live)
 
-- **`NM_EXECUTION_MODE`** is read at **process start** from environment (and `default.yaml` via `load_settings`). It is **not** hot-swapped while `live_service` runs.
-- **Operator flow:** `GET /status` includes **`execution_profile`** (`active_execution_mode`, `pending_execution_mode`, `restart_required`). `POST /system/execution-profile` with `{"execution_mode":"paper"|"live"}` records intent and, by default, patches **`app/config/default.yaml`** and **`.env`** (`NM_EXECUTION_MODE=...`) when those files exist.
+- **`NM_EXECUTION_MODE`** remains the **process default** at startup (and `default.yaml` via `load_settings`). **Per-symbol** routing uses **`PUT /assets/execution-mode/{symbol}`** (sidecars) — **FB-AP-030** / **FB-AP-040**.
+- **Legacy app-wide profile API (optional):** With **`NM_EXECUTION_PROFILE_LEGACY_API=true`**, `GET /status` includes the full **`execution_profile`** block (`active_execution_mode`, `pending_execution_mode`, `restart_required`), and **`POST /system/execution-profile`** can patch **`default.yaml`** / **`.env`**. **Default is off** — those endpoints return **410**; use per-asset API instead.
 - **After Apply:** restart **uvicorn** (control plane), **`python -m app.runtime.power_supervisor`** / **`run.bat`**, and any **`live_service_app`** / **`python -m app.runtime.live_service`** so all processes reload settings.
 - **Streamlit:** sidebar **Execution mode** — same POST; watch **restart required** until you restart.
 
@@ -41,7 +41,7 @@ Before switching **to live** from paper (or any non-live active mode), complete 
 2. **Secrets:** `NM_COINBASE_API_KEY` / `NM_COINBASE_API_SECRET` (CDP) for Coinbase live; **`NM_RISK_SIGNING_SECRET`** set; **`NM_ALLOW_UNSIGNED_EXECUTION=false`** for production-like operation.
 3. **Control plane:** if **`NM_CONTROL_PLANE_API_KEY`** is set, mutating POSTs (including execution profile) require **`X-API-Key`** — the Streamlit app sends it when **`NM_CONTROL_PLANE_API_KEY`** is in the dashboard process environment.
 4. **Dashboard confirmation:** selecting **live** and **Apply** opens a **Confirm live execution** dialog: accept the risk checkbox and type **`LIVE`** (uppercase). Re-applying while the active mode is already **live** does not require the phrase again. Set **`NM_STREAMLIT_LIVE_CONFIRM=false`** only for automation/dev (not recommended for operators).
-5. **Restart** all runtime processes after Apply so **`NM_EXECUTION_MODE=live`** loads; verify **`GET /status` → `execution_profile`** shows no unexpected **pending** mismatch.
+5. If using **legacy** profile API, **restart** runtime processes after Apply so **`NM_EXECUTION_MODE`** loads; verify **`GET /status` → `execution_profile`** when **`legacy_api_enabled`** is true.
 
 ## Preflight (before live or production-like paper)
 
