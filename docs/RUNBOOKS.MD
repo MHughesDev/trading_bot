@@ -72,6 +72,22 @@ Streamlit and the control plane API can often stay up, but **`GET /status`** ref
 
 - Optional: `NM_INTEGRATION_SERVICES=1` with Redis, QuestDB, Qdrant running (`docker compose -f infra/docker-compose.yml up -d`). See `tests/test_integration_optional_services.py` and `tests/test_integration_microservices_redis.py` (Redis + multi-process scaffold chains; includes **stub** and **`mock_alpaca_paper`** paths; skips if Redis is down). Control plane **`GET /microservices/health`** probes default scaffold ports when processes run on the host.
 
+### Real Alpaca paper (microservices / gateway, optional smoke)
+
+No broker keys belong in the repo. To exercise **paper** against Alpaca’s API from your machine:
+
+1. `pip install -e ".[alpaca]"` and set **`NM_ALPACA_API_KEY`**, **`NM_ALPACA_API_SECRET`**, **`NM_EXECUTION_MODE=paper`**, **`NM_EXECUTION_ADAPTER=alpaca`** (or omit adapter to use paper default per settings).
+2. Run Redis + **`uvicorn services.execution_gateway_service.main:app`** with **`NM_MESSAGING_BACKEND=redis_streams`**, **`NM_REDIS_URL`**, **`NM_RISK_SIGNING_SECRET`**, and **`NM_EXECUTION_GATEWAY_SUBMIT=true`**.
+3. Drive the chain with **`tests/test_integration_microservices_redis.py`** patterns or manual **`POST`** to **`/ingest/risk-accepted`** / upstream services — expect network calls to Alpaca and real account state; use a **paper** account only.
+
+For **no-network** CI, the suite uses **`NM_EXECUTION_ADAPTER=mock_alpaca_paper`** instead (see **`test_redis_external_gateway_mock_alpaca_paper_path`**).
+
+### Microservices compose (`infra/docker-compose.microservices.yml`)
+
+- **`live_runtime` (8208):** default **`NM_LIVE_SERVICE_APP_START_LOOP=false`** — HTTP probes only. Set **`NM_LIVE_SERVICE_APP_START_LOOP=true`** and mount a configured **`.env`** when you want the full Kraken + decision loop inside the container (same requirements as host `live_service`).
+- **`market_data_service` (8206):** set **`NM_MARKET_DATA_KRAKEN_WS=true`** to publish **`market.tick.normalized.v1`** from Kraken public WebSocket (needs outbound network). **`GET /messaging`** reports **`kraken_ws`** on/off.
+- **QuestDB audit (`FB-MS-03`):** start the base stack so QuestDB is reachable, then set **`NM_QUESTDB_PERSIST_MICROSERVICE_EVENTS=true`** on **`observability_writer`** and point **`NM_QUESTDB_HOST`** (e.g. **`questdb`**) at the DB service if you join networks. Events land in **`microservice_events`** (see `data_plane/storage/schemas.py`).
+
 ## Market data gaps / flat synthetic OHLC
 
 - The decision pipeline builds a **`ForecastPacket`** from **`ohlc_arrays_from_feature_row`**: if only the latest `close`/`volume` are present, history is **synthetic flat bars** — forecasts still run, but are **not** a substitute for a full rolling bar window after long WS outages. Prefer healthy WS + `enrich_bars_last_row` feature rows for production-like behavior.

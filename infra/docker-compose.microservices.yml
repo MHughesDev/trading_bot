@@ -6,7 +6,9 @@
 # Ports: live_runtime 8208 (HTTP-only by default), market_data 8206, feature 8205, decision 8203,
 # risk 8204, gateway 8202, observability_writer 8207.
 # POST /ingest/raw-tick on market_data (8206) or /ingest/market-tick on feature (8205).
-# **live_runtime** serves /healthz; set NM_LIVE_SERVICE_APP_START_LOOP=true to run the real Kraken loop (needs keys/network).
+# **market_data_service:** set NM_MARKET_DATA_KRAKEN_WS=true to publish real Kraken WS ticks (needs outbound network).
+# **live_runtime** serves /healthz; default NM_LIVE_SERVICE_APP_START_LOOP=false in this file — set true in `.env` or
+# override below to run the full Kraken live loop (needs network + venue credentials per RUNBOOKS).
 # First start runs pip install per container (slow).
 
 services:
@@ -19,6 +21,7 @@ services:
     ports:
       - "8208:8208"
     environment:
+      # Set to "true" (and mount `.env`) to run the real Kraken + decision loop inside the container.
       NM_LIVE_SERVICE_APP_START_LOOP: "false"
     command:
       - sh
@@ -36,6 +39,9 @@ services:
     environment:
       NM_MESSAGING_BACKEND: redis_streams
       NM_REDIS_URL: redis://redis:6379/0
+      # Set true to run Kraken WS → Redis (requires outbound network from the container).
+      NM_MARKET_DATA_KRAKEN_WS: "false"
+      NM_MARKET_DATA_SYMBOLS: "BTC-USD,ETH-USD"
     command:
       - sh
       - -c
@@ -138,6 +144,8 @@ services:
     environment:
       NM_MESSAGING_BACKEND: redis_streams
       NM_REDIS_URL: redis://redis:6379/0
+      # When using `infra/docker-compose.yml` + QuestDB on the same network, set host to `questdb` and enable:
+      # NM_QUESTDB_PERSIST_MICROSERVICE_EVENTS: "true"
     command:
       - sh
       - -c

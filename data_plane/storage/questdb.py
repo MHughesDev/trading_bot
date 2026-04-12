@@ -110,6 +110,20 @@ class QuestDBWriter:
         async with self._conn.cursor() as cur:
             await cur.executemany(sql, rows)
 
+    async def insert_microservice_events_batch(
+        self,
+        rows: list[tuple[datetime, str, str, str, str | None, str]],
+    ) -> None:
+        """Append-only microservice bus audit rows (topic, envelope summary, JSON payload)."""
+        if not self._conn or not rows:
+            return
+        sql = """
+        INSERT INTO microservice_events (ts, topic, event_type, trace_id, symbol, payload)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        async with self._conn.cursor() as cur:
+            await cur.executemany(sql, rows)
+
     async def query_bars(
         self,
         symbol: str,
