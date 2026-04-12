@@ -145,6 +145,9 @@ class AppSettings(BaseSettings):
     scheduler_nightly_interval_seconds: int = 86_400
     # FB-AP-036: when true, nightly job runs quantile forecaster campaign once per initialized asset (manifest)
     scheduler_nightly_per_asset_forecaster: bool = True
+    # FB-AP-037: nightly heuristic RL skipped if no trade markers for symbol in lookback window
+    scheduler_nightly_rl_requires_trade: bool = True
+    scheduler_nightly_rl_trade_lookback_days: int | None = None
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -274,6 +277,11 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["scheduler_nightly_interval_seconds"] = int(sch["nightly_interval_seconds"])
         if "nightly_per_asset_forecaster" in sch:
             out["scheduler_nightly_per_asset_forecaster"] = bool(sch["nightly_per_asset_forecaster"])
+        if "nightly_rl_requires_trade" in sch:
+            out["scheduler_nightly_rl_requires_trade"] = bool(sch["nightly_rl_requires_trade"])
+        if "nightly_rl_trade_lookback_days" in sch:
+            v = sch["nightly_rl_trade_lookback_days"]
+            out["scheduler_nightly_rl_trade_lookback_days"] = None if v is None else int(v)
     if "models" in cfg:
         mo = cfg["models"] or {}
         if "forecaster_checkpoint_id" in mo:

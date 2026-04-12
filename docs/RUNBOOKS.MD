@@ -13,6 +13,7 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 - **Enable:** `NM_SCHEDULER_NIGHTLY_ENABLED=true` (or `scheduler.nightly_enabled: true` in `default.yaml`).
 - **Interval:** `NM_SCHEDULER_NIGHTLY_INTERVAL_SECONDS` (default **86400**; minimum **1** second in code).
 - **Per-asset forecaster (FB-AP-036):** When **`NM_SCHEDULER_NIGHTLY_PER_ASSET_FORECASTER=true`** (default), each tick runs the nightly **quantile forecaster** campaign **once per initialized symbol** (manifest in registry), writing under **`NM_TRAINING_ARTIFACT_DIR/nightly/<SYMBOL>/`**. Set to **`false`** for legacy single-symbol nightly (first market symbol only).
+- **Conditional nightly RL (FB-AP-037):** When **`NM_SCHEDULER_NIGHTLY_RL_REQUIRES_TRADE=true`** (default), the **heuristic RL** block in each nightly campaign is **skipped** if **`data/trade_markers.jsonl`** has **no** marker for that symbol in the lookback window (default window = same days as **`NM_TRAINING_LOOKBACK_DAYS`** unless **`NM_SCHEDULER_NIGHTLY_RL_TRADE_LOOKBACK_DAYS`** is set). Forecaster step still runs.
 - **Status:** `GET /status` → **`app_scheduler`** (`enabled`, `interval_seconds`, `running`, `last_tick_utc`, `last_error`).
 - **Training still respects** `data/system_power.json` — if **system power** is **OFF**, `run_training_campaign` skips (**FB-AP-039** may change global power semantics).
 

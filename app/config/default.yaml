@@ -94,3 +94,5 @@ scheduler:
   nightly_enabled: false
   nightly_interval_seconds: 86400
   nightly_per_asset_forecaster: true
+  nightly_rl_requires_trade: true
+  nightly_rl_trade_lookback_days: null
