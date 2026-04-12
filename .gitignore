@@ -21,3 +21,4 @@ data/pnl_ledger.jsonl
 data/trade_markers.jsonl
 data/asset_model_registry/
 data/asset_init/
+data/asset_execution_mode/

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import streamlit as st
 
 from control_plane.asset_chart_data import Preset
@@ -14,7 +15,7 @@ from control_plane.asset_chart_fetch import (
 )
 from control_plane.asset_chart_markers import trade_marker_buy_sell_traces
 from control_plane.asset_page_helpers import normalize_symbol, validate_symbol_display
-from control_plane.streamlit_util import api_get_json
+from control_plane.streamlit_util import api_delete_json, api_get_json, api_put_json
 
 
 def _render_ohlc_chart(sym: str) -> None:
@@ -117,6 +118,48 @@ def render_asset_page(symbol: str) -> None:
         st.markdown(f"**Lifecycle:** `{life.get('lifecycle_state', '?')}`")
     except Exception as e:
         st.warning(f"Lifecycle: {e}")
+
+    st.markdown("**Execution mode (this symbol)**")
+    try:
+        em = api_get_json(f"/assets/execution-mode/{sym}")
+        eff = str(em.get("execution_mode", "?"))
+        default_em = str(em.get("default_execution_mode", "?"))
+        st.caption(f"Application default: `{default_em}` · Effective for orders: **`{eff}`**")
+        choice = st.selectbox(
+            "Paper vs live (persisted)",
+            options=["(use default)", "paper", "live"],
+            index=(
+                1
+                if em.get("override") == "paper"
+                else 2
+                if em.get("override") == "live"
+                else 0
+            ),
+            key=f"asset_exec_mode_{sym}",
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Apply execution mode", key=f"asset_exec_apply_{sym}"):
+                try:
+                    if choice == "(use default)":
+                        try:
+                            api_delete_json(f"/assets/execution-mode/{sym}")
+                        except httpx.HTTPStatusError as e:
+                            if e.response.status_code != 404:
+                                raise
+                    else:
+                        api_put_json(
+                            f"/assets/execution-mode/{sym}",
+                            {"execution_mode": choice},
+                        )
+                    st.success("Updated.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
+        with c2:
+            st.caption("Requires **NM_CONTROL_PLANE_API_KEY** when the API enforces it.")
+    except Exception as e:
+        st.warning(f"Execution mode: {e}")
 
     try:
         m = api_get_json(f"/assets/models/{sym}")

@@ -15,6 +15,16 @@ On **`/Asset`** with a symbol, the page loads **`GET /assets/chart/bars`** for t
 
 Overlays **`GET /assets/chart/trade-markers`** (same time window as the chart) on the candlestick figure: **green** ▲ buy, **red** ▼ sell, hover shows quantity and **`intent_submit`** metadata. Requires append-only **`data/trade_markers.jsonl`** populated by the live loop when orders submit (**FB-AP-025**).
 
+## Per-asset execution mode (FB-AP-030)
+
+Paper vs live routing is **per symbol** for orders submitted through **`ExecutionService`**: sidecar JSON under **`data/asset_execution_mode/<symbol>.json`** (override directory with **`NM_ASSET_EXECUTION_MODE_DIR`**). If no sidecar exists, **`NM_EXECUTION_MODE`** / app settings apply.
+
+- **GET `/assets/execution-mode/{symbol}`** — effective mode, optional **`override`**, and **`default_execution_mode`** from settings.
+- **PUT `/assets/execution-mode/{symbol}`** — body **`{"execution_mode":"paper"|"live"}`** (mutating key when configured).
+- **DELETE `/assets/execution-mode/{symbol}`** — remove override (use default again).
+
+**Asset page** — dropdown + **Apply** (uses the same API). **`GET /status`** includes **`asset_execution_mode`** (`sidecar_dir`, `overrides` list). **`NM_EXECUTION_ADAPTER`** (e.g. stub) still wins for the whole process when set — used for tests/dry-run.
+
 ## Purpose
 
 Each **initialized** tradable symbol can have a **manifest** that lists **forecaster** and **RL / policy** artifact paths scoped to that symbol only. The canonical binding field is **`canonical_symbol`**: it must match the symbol in the API path and runtime request.
@@ -73,12 +83,15 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 | POST | `/assets/init/{symbol}` | Start per-asset init job (one global runner); returns `job_id`. |
 | GET | `/assets/init/jobs/{job_id}` | Poll job status and per-step detail. |
 | GET | `/assets/lifecycle/{symbol}` | Current **`lifecycle_state`**. |
+| GET | `/assets/execution-mode/{symbol}` | Effective paper/live for this symbol + optional persisted override (**FB-AP-030**). |
+| PUT | `/assets/execution-mode/{symbol}` | Persist **`execution_mode`** (`paper` or `live`) for routing this symbol’s orders. |
+| DELETE | `/assets/execution-mode/{symbol}` | Drop sidecar; use application default again. |
 | POST | `/assets/lifecycle/{symbol}/start` | **`initialized_not_active` → `active`** (requires manifest). |
 | POST | `/assets/lifecycle/{symbol}/stop` | **`active` → `initialized_not_active`**. |
 | GET | `/assets/chart/bars` | **Chart OHLCV** (FB-AP-024): **`symbol`** (required), **`start`**, **`end`** (UTC range), optional **`interval_seconds`** (defaults to **`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`**), **`limit`**. Returns rows from QuestDB **`canonical_bars`** for that symbol only — no multi-symbol series. |
 | GET | `/assets/chart/trade-markers` | **Buy/sell markers** (FB-AP-025): **`symbol`** (required), **`start`**, **`end`**, optional **`limit`**. Reads **`data/trade_markers.jsonl`** (append-only; populated when the live loop **successfully submits** an order — **`source=intent_submit`**). |
 
-**GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`; and **`asset_lifecycle`**: `state_dir`, `states`.
+**GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`; **`asset_lifecycle`**: `state_dir`, `states`; and **`asset_execution_mode`**: `default_execution_mode`, `sidecar_dir`, `overrides`.
 
 ## Asset init pipeline (FB-AP-006+)
 
