@@ -15,7 +15,7 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 - **Per-asset forecaster (FB-AP-036):** When **`NM_SCHEDULER_NIGHTLY_PER_ASSET_FORECASTER=true`** (default), each tick runs the nightly **quantile forecaster** campaign **once per initialized symbol** (manifest in registry), writing under **`NM_TRAINING_ARTIFACT_DIR/nightly/<SYMBOL>/`**. Set to **`false`** for legacy single-symbol nightly (first market symbol only).
 - **Conditional nightly RL (FB-AP-037):** When **`NM_SCHEDULER_NIGHTLY_RL_REQUIRES_TRADE=true`** (default), the **heuristic RL** block in each nightly campaign is **skipped** if **`data/trade_markers.jsonl`** has **no** marker for that symbol in the lookback window (default window = same days as **`NM_TRAINING_LOOKBACK_DAYS`** unless **`NM_SCHEDULER_NIGHTLY_RL_TRADE_LOOKBACK_DAYS`** is set). Forecaster step still runs.
 - **Status:** `GET /status` → **`app_scheduler`** (`enabled`, `interval_seconds`, `running`, `last_tick_utc`, `last_error`).
-- **Training still respects** `data/system_power.json` — if **system power** is **OFF**, `run_training_campaign` skips (**FB-AP-039** may change global power semantics).
+- **Legacy global system power (optional):** With **`NM_SYSTEM_POWER_LEGACY_ENABLED=true`**, **`data/system_power.json`** and **`POST /system/power`** behave as before (OFF skips `run_training_campaign` / `run_decision_tick`). **Default is off** (**FB-AP-039**) — use **per-asset Stop** instead of a global hard stop.
 
 ## Per-asset Stop — flatten (FB-AP-032)
 
@@ -70,7 +70,7 @@ Execution mode and venue credentials are read from **`AppSettings`** at process 
 After changing **`NM_EXECUTION_MODE`**, **`NM_EXECUTION_ADAPTER`**, or venue API keys in **`.env`**:
 
 1. **Stop** the live decision loop: the process running `python -m app.runtime.live_service` or `uvicorn services.live_service_app:app` with **`NM_LIVE_SERVICE_APP_START_LOOP=true`** (SIGTERM/SIGINT).
-2. If you use **`python -m app.runtime.power_supervisor`**, restart it so it spawns a fresh **`live_service_app`** with the new environment (or toggle system power OFF then ON after updating `.env`).
+2. If you use **`python -m app.runtime.power_supervisor`**, restart it so it spawns a fresh **`live_service_app`** with the new environment.
 3. **Restart** the execution gateway or any service that caches `load_settings()` if you run split microservices.
 4. Re-run **preflight:** `python scripts/preflight_check.py` or **`GET /status`** (`preflight`, `production_preflight`).
 

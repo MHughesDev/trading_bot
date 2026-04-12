@@ -77,7 +77,7 @@ python -m streamlit run control_plane/Home.py
 ```
 
 - [ ] **`NM_CONTROL_PLANE_URL`** (Streamlit) defaults to `http://127.0.0.1:8000`.
-- [ ] **System power** — sidebar on Home or **`GET/POST /system/power`**; OFF stops inference, training, and supervised live loop.
+- [ ] **Legacy system power** (optional) — set **`NM_SYSTEM_POWER_LEGACY_ENABLED=true`** to use **`GET/POST /system/power`** and `data/system_power.json`; default (**FB-AP-039**) is **off** — use **per-asset Stop** for trading watch.
 - [ ] **Paper vs live** — sidebar **Execution mode** + **`POST /system/execution-profile`** (or `GET /status` → `execution_profile`). After changing mode, **restart** API + live processes (see [`RUNBOOKS.MD`](RUNBOOKS.MD) — no hot-swap).
 
 ---
@@ -91,7 +91,7 @@ python -m streamlit run control_plane/Home.py
 
 ## 8. Offline training
 
-- [ ] System **power ON** if you use the global switch (`data/system_power.json`).
+- [ ] If **`NM_SYSTEM_POWER_LEGACY_ENABLED=true`**, ensure system **power ON** in `data/system_power.json` when you want the loop to run.
 - [ ] **`python -m orchestration.nightly_retrain --mode nightly`** (or `--mode initial` for longer campaign) — real Kraken OHLC; see README.
 
 ---
