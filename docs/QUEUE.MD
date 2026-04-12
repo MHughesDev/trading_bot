@@ -119,7 +119,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-14):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Next:** reprioritize new work, add rows per [**§8**](#8-how-to-add-an-entry), pick **Out of scope** (**FB-N1**, **FB-N3**, LOW), or optional GitHub sync [**§7**](#7-github-sync-optional). Agents: when **HIGH** **Open** is empty, see [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+**Status (2026-04-15):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Next:** reprioritize new work, add rows per [**§8**](#8-how-to-add-an-entry), pick **Out of scope** (**FB-N1**, **FB-N3**, LOW), or optional GitHub sync [**§7**](#7-github-sync-optional). Agents: when **HIGH** **Open** is empty, see [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
 
 ### HIGH priority
 
@@ -667,6 +667,8 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 4. For multi-row epics (e.g. **FB-AP-P0**), assign a **Batch** code ([§1.3](#13-priority-phase-category-status)) and add **Affected files** (pipe-separated primary paths).
 5. Add a row in [§2](#2-open-queue) (roadmap), [§3](#3-resolved-fixes-il) (fixes), or note completed gates in [§4](#4-completed-compliance-gates-hg). Use the next **FB-** or **HG-** id; for large epics prefer **-01, -02** sub-ids.  
 6. Link **code paths** or tickets.
+
+**Empty HIGH queue:** If **§2** has **no** rows with **Status = Open** and **Pri = HIGH** (only **LOW** deferred **Open**, e.g. **FB-N1** / **FB-N3**), agents asked to take the “next **HIGH** open item” have **nothing to implement** until you **add** a new row in **§2**, or **reprioritize** (e.g. set **Pri** to **HIGH** and **Open** on a deferred row, with an agreed scope).
 
 **Cursor Agent:** For a structured checklist aligned with §1–§2, use the project skill **Add to Queue** at [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) (invoke with `/add-to-queue` or attach `@add-to-queue` when available).
 
