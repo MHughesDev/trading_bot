@@ -19,6 +19,7 @@ from decimal import Decimal
 from app.config.settings import AppSettings, load_settings
 from app.contracts.events import BarEvent
 from app.contracts.risk import RiskState
+from app.runtime.asset_model_registry import list_symbols as list_asset_manifest_symbols
 from app.runtime.system_power import is_on, sync_from_disk
 from data_plane.bars.rolling import RollingBars
 from data_plane.features.pipeline import FeaturePipeline
@@ -33,6 +34,7 @@ from data_plane.ingest.kraken_ws import KrakenWebSocketClient
 from data_plane.ingest.normalizers import OrderBookLevel2Snapshot, TickerSnapshot, TradeTick
 from data_plane.ingest.product_cache import ProductMetadataCache
 from data_plane.storage.questdb import QuestDBWriter
+from data_plane.storage.startup_gap_detection import detect_canonical_bar_gaps
 from decision_engine.audit import decision_trace
 from decision_engine.feature_frame import enrich_bars_last_row, merge_feature_overlays
 from decision_engine.features_live import feature_row_from_tick
@@ -204,6 +206,30 @@ async def run_live_loop(
         )
         await qdb.connect()
 
+    bar_sec = max(1, int(cfg.market_data_bar_interval_seconds))
+    if qdb is not None and cfg.questdb_startup_gap_detection:
+        try:
+            init_syms = list_asset_manifest_symbols()
+            if init_syms:
+                gaps = await detect_canonical_bar_gaps(
+                    qdb,
+                    symbols=init_syms,
+                    interval_seconds=bar_sec,
+                )
+                for g in gaps:
+                    if g.gap_detected:
+                        logger.warning(
+                            "canonical_bar_gap %s",
+                            g.to_log_dict(),
+                        )
+                    else:
+                        logger.info(
+                            "canonical_bar_gap_ok %s",
+                            g.to_log_dict(),
+                        )
+        except Exception:
+            logger.exception("startup canonical bar gap detection failed")
+
     rest_client: KrakenRESTClient | None = None
     product_cache: ProductMetadataCache | None = None
     try:
@@ -277,7 +303,6 @@ async def run_live_loop(
 
         qdb_flush_task = asyncio.create_task(_flush_loop())
 
-    bar_sec = max(1, int(cfg.market_data_bar_interval_seconds))
     rollers: dict[str, RollingBars] = {
         s: RollingBars(s, interval_seconds=bar_sec) for s in syms
     }
