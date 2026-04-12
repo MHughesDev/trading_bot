@@ -22,3 +22,5 @@ data/trade_markers.jsonl
 data/asset_model_registry/
 data/asset_init/
 data/asset_execution_mode/
+data/users.sqlite
+data/users.sqlite-*
