@@ -78,7 +78,7 @@ python -m streamlit run control_plane/Home.py
 
 - [ ] **`NM_CONTROL_PLANE_URL`** (Streamlit) defaults to `http://127.0.0.1:8000`.
 - [ ] **Legacy system power** (optional) — set **`NM_SYSTEM_POWER_LEGACY_ENABLED=true`** to use **`GET/POST /system/power`** and `data/system_power.json`; default (**FB-AP-039**) is **off** — use **per-asset Stop** for trading watch.
-- [ ] **Paper vs live** — sidebar **Execution mode** + **`POST /system/execution-profile`** (or `GET /status` → `execution_profile`). After changing mode, **restart** API + live processes (see [`RUNBOOKS.MD`](RUNBOOKS.MD) — no hot-swap).
+- [ ] **Paper vs live** — **per-asset** on the **Asset page** / **`PUT /assets/execution-mode/{symbol}`**; process default stays **`NM_EXECUTION_MODE`** in `.env`. Optional legacy **`POST /system/execution-profile`** requires **`NM_EXECUTION_PROFILE_LEGACY_API=true`** (**FB-AP-040**).
 
 ---
 

@@ -39,15 +39,25 @@ try:
                     label=label,
                     query_params={"symbol": label},
                 )
-    active = (st_data.get("execution_profile") or {}).get("active_execution_mode", "?")
+    prof = st_data.get("execution_profile") or {}
+    if prof.get("legacy_api_enabled") is False:
+        active = prof.get("default_execution_mode", "?")
+        mode_caption = (
+            f"Default execution mode (env): `{active}` — per-asset overrides on **Asset** page "
+            f"(**FB-AP-030**). Set **NM_EXECUTION_PROFILE_LEGACY_API=true** only for app-wide API."
+        )
+    else:
+        active = prof.get("active_execution_mode", "?")
+        mode_caption = f"Process execution mode (env): `{active}` — legacy profile API enabled."
 except Exception as e:
     st.sidebar.error(f"Cannot read status: {e}")
     active = "?"
+    mode_caption = f"Process execution mode (env): `{active}` — change via `.env` / restart."
 st.sidebar.markdown(f"**Control plane:** `{get_api_base()}`")
 st.sidebar.markdown(f"**QuestDB:** `{get_questdb_console_url()}`")
 st.sidebar.markdown(f"**Grafana:** `{get_grafana_url()}`")
 
-st.sidebar.caption(f"Process execution mode (env): `{active}` — change via `.env` / restart.")
+st.sidebar.caption(mode_caption)
 st.sidebar.divider()
 
 render_positions_sidebar()

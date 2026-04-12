@@ -11,6 +11,7 @@ from control_plane import api
 
 
 def test_get_execution_profile_in_status(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("NM_EXECUTION_PROFILE_LEGACY_API", "true")
     monkeypatch.setattr(api, "settings", AppSettings(execution_mode="paper"))
     from control_plane import execution_profile as ep
 
@@ -20,11 +21,23 @@ def test_get_execution_profile_in_status(monkeypatch, tmp_path: Path):
     assert r.status_code == 200
     prof = r.json().get("execution_profile")
     assert prof is not None
+    assert prof.get("legacy_api_enabled") is True
     assert prof["active_execution_mode"] == "paper"
     assert prof["restart_required"] is False
 
 
+def test_status_execution_profile_without_legacy_api(monkeypatch):
+    monkeypatch.delenv("NM_EXECUTION_PROFILE_LEGACY_API", raising=False)
+    monkeypatch.setattr(api, "settings", AppSettings(execution_mode="paper"))
+    client = TestClient(api.app)
+    r = client.get("/status")
+    prof = r.json().get("execution_profile")
+    assert prof["legacy_api_enabled"] is False
+    assert prof["default_execution_mode"] == "paper"
+
+
 def test_post_execution_profile_sets_pending(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("NM_EXECUTION_PROFILE_LEGACY_API", "true")
     monkeypatch.setattr(api, "settings", AppSettings(execution_mode="paper", control_plane_api_key=None))
     state_path = tmp_path / "execution_profile.json"
     monkeypatch.setattr("control_plane.execution_profile._STATE_PATH", state_path)
@@ -49,6 +62,7 @@ def test_post_execution_profile_sets_pending(monkeypatch, tmp_path: Path):
 
 
 def test_post_execution_profile_requires_key_when_configured(monkeypatch):
+    monkeypatch.setenv("NM_EXECUTION_PROFILE_LEGACY_API", "true")
     monkeypatch.setattr(api, "settings", AppSettings(control_plane_api_key="k"))
     client = TestClient(api.app)
     r = client.post("/system/execution-profile", json={"execution_mode": "live"})
@@ -59,3 +73,11 @@ def test_post_execution_profile_requires_key_when_configured(monkeypatch):
         headers={"X-API-Key": "k"},
     )
     assert r2.status_code == 200
+
+
+def test_post_execution_profile_gone_when_legacy_disabled(monkeypatch):
+    monkeypatch.delenv("NM_EXECUTION_PROFILE_LEGACY_API", raising=False)
+    monkeypatch.setattr(api, "settings", AppSettings(control_plane_api_key=None))
+    client = TestClient(api.app)
+    r = client.post("/system/execution-profile", json={"execution_mode": "live"})
+    assert r.status_code == 410

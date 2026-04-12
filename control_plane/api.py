@@ -50,7 +50,9 @@ from app.runtime.state_manager import StateManager
 from app.runtime.system_power import get_power, legacy_system_power_enabled, set_power
 from control_plane.execution_profile import (
     apply_intent_to_config_files,
+    legacy_execution_profile_api_enabled,
     profile_payload,
+    status_execution_profile_section,
     write_pending_intent,
 )
 from control_plane.microservice_health import probe_microservices_health
@@ -143,7 +145,7 @@ def get_status() -> dict[str, Any]:
         "preflight": preflight_report(settings),
         "production_preflight": production_preflight_payload(settings),
         "model_artifacts": model_artifact_contract(settings),
-        "execution_profile": profile_payload(settings.execution_mode),
+        "execution_profile": status_execution_profile_section(settings),
         "execution_adapters": supported_adapters_for_settings(settings),
         "asset_model_registry": {
             "registry_dir": str(registry_dir()),
@@ -173,7 +175,13 @@ def get_system_power() -> dict[str, Any]:
 
 @app.get("/system/execution-profile")
 def get_execution_profile() -> dict[str, Any]:
-    """Active vs pending ``NM_EXECUTION_MODE``; pending is set by POST until processes restart."""
+    """Legacy app-wide mode (FB-AP-040: disabled unless ``NM_EXECUTION_PROFILE_LEGACY_API``)."""
+    if not legacy_execution_profile_api_enabled():
+        raise HTTPException(
+            status_code=http_status.HTTP_410_GONE,
+            detail="App-wide execution profile API is disabled (FB-AP-040). Use per-asset "
+            "PUT /assets/execution-mode/{symbol} or set NM_EXECUTION_PROFILE_LEGACY_API=true.",
+        )
     return profile_payload(settings.execution_mode)
 
 
@@ -182,7 +190,13 @@ def post_execution_profile(
     body: dict[str, Any],
     _: Annotated[None, Depends(require_mutate_key)],
 ) -> dict[str, Any]:
-    """Record operator intent (paper/live). Optionally patch ``app/config/default.yaml`` and ``.env`` — **restart** API + live processes to load."""
+    """Legacy: record operator intent (paper/live). Disabled by default (FB-AP-040)."""
+    if not legacy_execution_profile_api_enabled():
+        raise HTTPException(
+            status_code=http_status.HTTP_410_GONE,
+            detail="App-wide execution profile API is disabled (FB-AP-040). Use per-asset "
+            "PUT /assets/execution-mode/{symbol} or set NM_EXECUTION_PROFILE_LEGACY_API=true.",
+        )
     raw = str(body.get("execution_mode", "")).strip().lower()
     if raw not in ("paper", "live"):
         raise HTTPException(
