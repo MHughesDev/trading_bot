@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from app.config.settings import AppSettings
+from app.contracts.risk import RiskState
 from decision_engine.pipeline import DecisionPipeline
 from forecaster_model.config import ForecasterConfig
 from forecaster_model.models.forecaster_weights import capture_forecaster_weights_from_seed, save_forecaster_weights
@@ -40,11 +41,23 @@ def test_pipeline_loads_npz_weights(tmp_path: Path) -> None:
     policy.save(ppath)
 
     settings = AppSettings(
+        market_data_symbols=["BTC-USD"],
         models_forecaster_weights_path=str(wpath),
         models_policy_mlp_path=str(ppath),
         models_forecaster_checkpoint_id="test-chk",
     )
     dp = DecisionPipeline(settings=settings)
+    feats = {f"f{i}": float(i) * 0.01 for i in range(32)}
+    feats["close"] = 50_000.0
+    feats["volume"] = 1e6
+    dp.step(
+        "BTC-USD",
+        feats,
+        spread_bps=5.0,
+        risk=RiskState(),
+        mid_price=50_000.0,
+        portfolio_equity_usd=100_000.0,
+    )
     assert dp._forecaster_weight_bundle is not None
     assert dp._policy_system is not None
 

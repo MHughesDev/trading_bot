@@ -27,9 +27,11 @@ def test_distilled_torch_checkpoint_pipeline_step(tmp_path) -> None:
     )
     wpath = out["weights"]
     pipeline_mod._serving_mode_logged = False
-    settings = AppSettings(models_forecaster_torch_path=wpath)
+    settings = AppSettings(
+        market_data_symbols=["BTC-USD"],
+        models_forecaster_torch_path=wpath,
+    )
     pipe = DecisionPipeline(settings=settings)
-    assert pipe._torch_model is not None
 
     feats = {f"f{i}": float(i) * 0.01 for i in range(32)}
     feats["close"] = 50_000.0
@@ -43,6 +45,7 @@ def test_distilled_torch_checkpoint_pipeline_step(tmp_path) -> None:
         mid_price=50_000.0,
         portfolio_equity_usd=100_000.0,
     )
+    assert pipe._torch_model is not None
     pkt = pipe.last_forecast_packet
     assert pkt is not None
     assert pkt.forecast_diagnostics.get("methodology") == "pytorch_mlp"
