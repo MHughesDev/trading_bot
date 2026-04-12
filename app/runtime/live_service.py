@@ -19,7 +19,9 @@ from decimal import Decimal
 from app.config.settings import AppSettings, load_settings
 from app.contracts.events import BarEvent
 from app.contracts.risk import RiskState
+from app.runtime.asset_lifecycle_state import effective_lifecycle_state
 from app.runtime.asset_model_registry import list_symbols as list_asset_manifest_symbols
+from app.runtime.live_watch_gate import record_decision_tick, should_run_decision_tick
 from app.runtime.system_power import is_on, sync_from_disk
 from data_plane.bars.rolling import RollingBars
 from data_plane.features.pipeline import FeaturePipeline
@@ -319,6 +321,7 @@ async def run_live_loop(
         s: RollingBars(s, interval_seconds=bar_sec) for s in syms
     }
     positions: dict[str, Decimal] = {s: Decimal(0) for s in syms}
+    last_decision_monotonic: dict[str, float] = {}
 
     reconcile_stop: asyncio.Event | None = None
     reconcile_task: asyncio.Task[None] | None = None
@@ -403,20 +406,36 @@ async def run_live_loop(
             tradable = product_cache.is_tradable(symbol) if product_cache else True
 
             mid = float(feats.get("close", px)) or px or 1.0
-            regime, fc, route, proposal, trade, risk_state = run_decision_tick(
-                symbol=symbol,
-                feature_row=feats,
-                spread_bps=spread_bps,
-                risk_state=risk_state,
-                pipeline=pipeline,
-                risk_engine=risk_engine,
-                mid_price=mid,
-                data_timestamp=data_ts,
-                feed_last_message_at=ws.last_message_at,
-                product_tradable=tradable,
-                position_signed_qty=positions.get(symbol, Decimal(0)),
-                portfolio_equity_usd=risk_engine.current_equity,
+            run_decision = should_run_decision_tick(
+                symbol,
+                cfg,
+                effective_lifecycle=effective_lifecycle_state,
+                last_decision_monotonic=last_decision_monotonic,
             )
+            if run_decision:
+                regime, fc, route, proposal, trade, risk_state = run_decision_tick(
+                    symbol=symbol,
+                    feature_row=feats,
+                    spread_bps=spread_bps,
+                    risk_state=risk_state,
+                    pipeline=pipeline,
+                    risk_engine=risk_engine,
+                    mid_price=mid,
+                    data_timestamp=data_ts,
+                    feed_last_message_at=ws.last_message_at,
+                    product_tradable=tradable,
+                    position_signed_qty=positions.get(symbol, Decimal(0)),
+                    portfolio_equity_usd=risk_engine.current_equity,
+                )
+                record_decision_tick(symbol, last_decision_monotonic)
+            else:
+                logger.debug(
+                    "decision_tick_skipped symbol=%s lifecycle_gate=%s min_interval_s=%s",
+                    symbol,
+                    cfg.live_watch_lifecycle_gate,
+                    cfg.live_decision_min_interval_seconds,
+                )
+                continue
 
             if runtime_bridge is not None:
                 try:

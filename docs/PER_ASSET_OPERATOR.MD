@@ -105,6 +105,10 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 
 **GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`; **`asset_lifecycle`**: `state_dir`, `states`; **`asset_execution_mode`**: `default_execution_mode`, `sidecar_dir`, `overrides`; and **`app_scheduler`** (optional nightly training thread while the control plane process is up — **FB-AP-035**, see **`RUNBOOKS.MD`**).
 
+## Live loop — active watch (FB-AP-038)
+
+When **`NM_LIVE_WATCH_LIFECYCLE_GATE=true`**, the **`live_service`** loop runs **`run_decision_tick`** (forecaster + risk + order path) **only** for symbols whose effective lifecycle is **`active`**. Ingestion (WS ticks, rollers, optional QuestDB bars) continues for all configured **`NM_MARKET_DATA_SYMBOLS`**. Optional **`NM_LIVE_DECISION_MIN_INTERVAL_SECONDS`** enforces a minimum gap between decision ticks **per symbol** (wall clock, monotonic). Defaults **false** / **0** — enable after operators use **Start** on assets to watch.
+
 ## Asset init pipeline (FB-AP-006+)
 
 **POST `/assets/init/{symbol}`** runs a background sequence: **Kraken REST** bootstrap history (**FB-AP-007**), **validate** (**FB-AP-008**), **features** (**FB-AP-009**), **forecaster_train** (**FB-AP-010** — `forecaster_torch.pt` under `<run_dir>/forecaster/`; skipped if `torch` missing), **rl_init** (**FB-AP-011** — `MultiBranchMLPPolicy` saved to `<run_dir>/policy/policy_mlp.npz`), **register** (**FB-AP-012** — writes/updates per-asset **`AssetModelManifest`** with those paths under **`NM_ASSET_MODEL_REGISTRY_DIR`**). Returns **409** if another init job is already running.

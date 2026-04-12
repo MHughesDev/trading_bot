@@ -14,6 +14,9 @@ market_data:
   - BTC-USD
   - ETH-USD
   - SOL-USD
+live_watch:
+  lifecycle_gate: false
+  decision_min_interval_seconds: 0
 init_pipeline:
   bootstrap_lookback_days: 14
   bootstrap_granularity_seconds: 60

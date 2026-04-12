@@ -149,6 +149,10 @@ class AppSettings(BaseSettings):
     scheduler_nightly_rl_requires_trade: bool = True
     scheduler_nightly_rl_trade_lookback_days: int | None = None
 
+    # FB-AP-038: optional gate — only symbols with lifecycle `active` run decision/risk; cadence throttle
+    live_watch_lifecycle_gate: bool = False
+    live_decision_min_interval_seconds: float = 0.0
+
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
@@ -282,6 +286,12 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         if "nightly_rl_trade_lookback_days" in sch:
             v = sch["nightly_rl_trade_lookback_days"]
             out["scheduler_nightly_rl_trade_lookback_days"] = None if v is None else int(v)
+    if "live_watch" in cfg:
+        lw = cfg["live_watch"] or {}
+        if "lifecycle_gate" in lw:
+            out["live_watch_lifecycle_gate"] = bool(lw["lifecycle_gate"])
+        if "decision_min_interval_seconds" in lw:
+            out["live_decision_min_interval_seconds"] = float(lw["decision_min_interval_seconds"])
     if "models" in cfg:
         mo = cfg["models"] or {}
         if "forecaster_checkpoint_id" in mo:
