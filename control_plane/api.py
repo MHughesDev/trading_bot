@@ -72,6 +72,13 @@ from execution.pnl_summary import compute_pnl_series, compute_pnl_summary
 from execution.portfolio_positions import fetch_portfolio_positions
 from execution.service import ExecutionService
 from execution.trade_markers import iter_markers, marker_to_api_dict
+from app.runtime import alpaca_universe_store as alpaca_universe_store_mod
+from orchestration.alpaca_universe_scheduler import (
+    alpaca_universe_scheduler_status,
+    start_alpaca_universe_scheduler,
+    stop_alpaca_universe_scheduler,
+)
+from orchestration.alpaca_universe_sync import sync_alpaca_tradable_universe
 from orchestration.app_scheduler import (
     nightly_scheduler_detail,
     scheduler_status,
@@ -89,7 +96,9 @@ modes = ModeManager(state)
 async def _lifespan(app: FastAPI):
     """FB-AP-035: register background schedulers only while this process runs."""
     start_app_background_scheduler(settings)
+    start_alpaca_universe_scheduler(settings)
     yield
+    stop_alpaca_universe_scheduler()
     stop_app_background_scheduler()
 
 
@@ -244,6 +253,10 @@ def get_status() -> dict[str, Any]:
             "overrides": list_mode_overrides(),
         },
         "app_scheduler": scheduler_status(),
+        "alpaca_universe": {
+            **alpaca_universe_store_mod.alpaca_universe_status(settings.alpaca_universe_db_path),
+            **alpaca_universe_scheduler_status(),
+        },
         "user_store": {
             **user_store_mod.user_store_status(settings.auth_users_db_path),
             "session_auth_enabled": settings.auth_session_enabled,
@@ -256,6 +269,37 @@ def get_status() -> dict[str, Any]:
 def get_nightly_scheduler_status() -> dict[str, Any]:
     """Nightly in-process scheduler: last/next run, last error, last training report (FB-UX-012)."""
     return nightly_scheduler_detail(settings)
+
+
+@app.get("/universe/alpaca")
+def get_alpaca_tradable_universe(
+    limit: Annotated[int, Query(ge=1, le=10_000)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str | None, Query(description="Filter by symbol or name (case-insensitive)")] = None,
+) -> dict[str, Any]:
+    """Paginated Alpaca **tradable crypto** snapshot (FB-AP-020). Metadata only — no OHLC."""
+    rows, total = alpaca_universe_store_mod.list_alpaca_universe_rows(
+        settings.alpaca_universe_db_path,
+        limit=limit,
+        offset=offset,
+        query=q,
+    )
+    return {
+        "ok": True,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "query": q,
+        "rows": rows,
+    }
+
+
+@app.post("/universe/alpaca/sync")
+def post_alpaca_universe_sync(
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """On-demand refresh from Alpaca Trading API (mutating operator). FB-AP-020."""
+    return sync_alpaca_tradable_universe(settings)
 
 
 @app.post("/auth/register", response_model=RegisterResponse)
