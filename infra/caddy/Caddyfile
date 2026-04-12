@@ -1,0 +1,27 @@
+# FB-CONT-004 — optional TLS edge (Caddy) in front of app containers.
+#
+# Map hostnames to 127.0.0.1 (example):
+#   127.0.0.1 api.localhost ui.localhost
+#
+# HTTPS (self-signed via Caddy **internal** CA): publish container :443 as host **8443** (see docker-compose.edge.yml).
+#   https://api.localhost:8443  → FastAPI
+#   https://ui.localhost:8443   → Streamlit
+#
+# Trust: click through browser warning or install Caddy's local root (dev only).
+#
+# Production: replace hostnames with real DNS names, remove `tls internal`, configure ACME
+# (Caddy obtains Let's Encrypt certs automatically when ports 80/443 are reachable).
+
+{
+  admin off
+}
+
+https://api.localhost {
+  tls internal
+  reverse_proxy trading-bot-api:8000
+}
+
+https://ui.localhost {
+  tls internal
+  reverse_proxy trading-bot-streamlit:8501
+}

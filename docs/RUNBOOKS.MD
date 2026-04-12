@@ -12,6 +12,19 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.app.yml up -d
 
 **Ports:** **8000** FastAPI (**`GET /status`**, **`GET /metrics`**), **8501** Streamlit. **`NM_CONTROL_PLANE_URL`** for the Streamlit container defaults to **`http://trading-bot-api:8000`**. Host bind mounts **`./data`** → **`/app/data`** for registry, lifecycle, PnL ledger, and universe SQLite paths. Kraken and venue keys remain **only** via **`NM_*`** in **`.env`** — nothing in the image.
 
+## TLS edge — Caddy (FB-CONT-004)
+
+Optional **HTTPS** in front of the same API + Streamlit containers (merge **`infra/docker-compose.edge.yml`** after the app file):
+
+```bash
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.app.yml -f infra/docker-compose.edge.yml up -d
+```
+
+- **Local dev:** add **`127.0.0.1 api.localhost ui.localhost`** to **`hosts`**. Open **https://api.localhost:8443** and **https://ui.localhost:8443** — Caddy uses **`tls internal`** (self-signed); accept the browser warning or trust Caddy’s local CA (dev only). Streamlit still calls the API over the Docker network at **`http://trading-bot-api:8000`**.
+- **Public / production:** edit **`infra/caddy/Caddyfile`** with real DNS names, remove **`tls internal`**, and expose **80**/**443** (or use a host firewall) so Caddy can obtain **Let’s Encrypt** certificates automatically.
+
+**LAN without TLS** remains the default **HTTP** compose path above (ports **8000** / **8501**).
+
 ## Per-asset model registry (FB-AP-001 / FB-AP-002)
 
 Persisted manifests and HTTP API: **[`PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD)**. **`GET /status`** includes **`asset_model_registry.initialized_symbols`**. Mutating routes require **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set.

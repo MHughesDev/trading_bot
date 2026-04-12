@@ -64,6 +64,8 @@ Publishes **8000** (API + `/metrics`), **8501** (Streamlit). Mounts **`./data`**
 
 **CI (FB-CONT-003)** — GitHub Actions **`.github/workflows/ci.yml`** runs **`docker build -t trading-bot:ci .`**, a container import smoke test, **hadolint** on **`Dockerfile`**, and an informational **Trivy** filesystem scan on PRs and **`main`** pushes. Mirror locally: **`docker build -t trading-bot:local .`** (same as CI).
 
+**TLS edge (FB-CONT-004)** — optional **Caddy** reverse proxy: merge **`infra/docker-compose.edge.yml`** after the app file. Maps **https://api.localhost:8443** and **https://ui.localhost:8443** (self-signed **`tls internal`**; add **`api.localhost`** / **`ui.localhost`** to **`hosts`**). Edit **`infra/caddy/Caddyfile`** for real DNS + automatic HTTPS on the public internet.
+
 ---
 
 ## 🪟 Windows
