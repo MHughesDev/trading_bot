@@ -14,6 +14,14 @@ from observability.forecaster_metrics import MODEL_VERSION_INFO
 
 from app.config.model_artifacts import model_artifact_contract
 from app.config.settings import AppSettings, load_settings
+from app.contracts.asset_model_manifest import AssetModelManifest
+from app.runtime.asset_model_registry import (
+    delete_manifest,
+    list_symbols as list_asset_manifest_symbols,
+    load_manifest,
+    registry_dir,
+    save_manifest,
+)
 from execution.adapter_registry import supported_adapters_for_settings
 from control_plane.preflight import preflight_report
 from app.contracts.risk import SystemMode
@@ -98,6 +106,10 @@ def get_status() -> dict[str, Any]:
         "model_artifacts": model_artifact_contract(settings),
         "execution_profile": profile_payload(settings.execution_mode),
         "execution_adapters": supported_adapters_for_settings(settings),
+        "asset_model_registry": {
+            "registry_dir": str(registry_dir()),
+            "initialized_symbols": list_asset_manifest_symbols(),
+        },
     }
 
 
@@ -242,3 +254,50 @@ def set_model_version(
 @app.get("/metrics", response_class=PlainTextResponse)
 def metrics() -> PlainTextResponse:
     return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/assets/models")
+def list_asset_model_manifests() -> dict[str, Any]:
+    """List symbols with a persisted per-asset model manifest (FB-AP-002)."""
+    return {
+        "registry_dir": str(registry_dir()),
+        "symbols": list_asset_manifest_symbols(),
+    }
+
+
+@app.get("/assets/models/{symbol}")
+def get_asset_model_manifest(symbol: str) -> dict[str, Any]:
+    """Load manifest for ``symbol``; 404 if missing."""
+    m = load_manifest(symbol)
+    if m is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="no manifest")
+    return m.model_dump(mode="json")
+
+
+@app.put("/assets/models/{symbol}")
+def put_asset_model_manifest(
+    symbol: str,
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """Create or replace manifest; path ``symbol`` must match body ``canonical_symbol`` (FB-AP-001)."""
+    m = AssetModelManifest.model_validate(body)
+    if m.canonical_symbol.strip() != symbol.strip():
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="canonical_symbol must match path symbol",
+        )
+    path = save_manifest(m)
+    return {"ok": True, "path": str(path), "manifest": m.model_dump(mode="json")}
+
+
+@app.delete("/assets/models/{symbol}")
+def remove_asset_model_manifest(
+    symbol: str,
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """Remove manifest file for ``symbol`` if present."""
+    ok = delete_manifest(symbol)
+    if not ok:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="no manifest")
+    return {"ok": True, "symbol": symbol.strip()}
