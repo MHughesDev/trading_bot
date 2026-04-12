@@ -7,6 +7,18 @@ This document describes the **per-asset model manifest** introduced for **FB-AP-
 - **Dashboard** — `streamlit run control_plane/Home.py` (main entry).
 - **Asset page** — multipage route **`/Asset`** (`control_plane/pages/Asset.py`): optional **`?symbol=<canonical_symbol>`** deep link; sidebar links from Home include configured **`GET /status`** symbols.
 
+## Asset page lifecycle controls (FB-AP-031)
+
+Top-right **Initialize** / **Start** / **Stop** follows **`GET /assets/lifecycle/{symbol}`**:
+
+| State | Button | API |
+|-------|--------|-----|
+| `uninitialized` | **Initialize** | **`POST /assets/init/{symbol}`** then poll job until **`succeeded`** / **`failed`** (spinner during pipeline). |
+| `initialized_not_active` | **Start** | **`POST /assets/lifecycle/{symbol}/start`** |
+| `active` | **Stop** | **`POST /assets/lifecycle/{symbol}/stop`** (flatten **FB-AP-032**) |
+
+Requires **`NM_CONTROL_PLANE_API_KEY`** on mutating routes when the API enforces it (same as other control-plane writes).
+
 ## Asset page OHLC chart (FB-AP-028)
 
 On **`/Asset`** with a symbol, the page loads **`GET /assets/chart/bars`** for the selected interval preset (second through month). **Week** and **month** aggregate from **daily** (`interval_seconds=86400`) bars in QuestDB. Install **`pip install -e ".[dashboard]"`** for Plotly candlesticks.

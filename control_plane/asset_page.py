@@ -14,8 +14,12 @@ from control_plane.asset_chart_fetch import (
     fetch_trade_markers_for_window,
 )
 from control_plane.asset_chart_markers import trade_marker_buy_sell_traces
+from control_plane.asset_lifecycle_actions import (
+    poll_init_job_until_terminal,
+    primary_lifecycle_action,
+)
 from control_plane.asset_page_helpers import normalize_symbol, validate_symbol_display
-from control_plane.streamlit_util import api_delete_json, api_get_json, api_put_json
+from control_plane.streamlit_util import api_delete_json, api_get_json, api_post_json, api_put_json
 
 
 def _render_ohlc_chart(sym: str) -> None:
@@ -111,13 +115,77 @@ def _render_ohlc_chart(sym: str) -> None:
 def render_asset_page(symbol: str) -> None:
     """Main column: lifecycle, manifest summary, OHLC chart, API hints."""
     sym = normalize_symbol(symbol)
-    st.subheader(f"Asset · `{sym}`")
+
+    msg_key = f"asset_toast_{sym}"
+    toast = st.session_state.pop(msg_key, None)
+    if isinstance(toast, tuple) and len(toast) == 2:
+        kind, text = toast
+        if kind == "success":
+            st.success(text)
+        elif kind == "error":
+            st.error(text)
 
     try:
         life = api_get_json(f"/assets/lifecycle/{sym}")
-        st.markdown(f"**Lifecycle:** `{life.get('lifecycle_state', '?')}`")
+        lifecycle_state = str(life.get("lifecycle_state") or "uninitialized")
     except Exception as e:
         st.warning(f"Lifecycle: {e}")
+        lifecycle_state = "?"
+
+    h1, h2 = st.columns([4, 1])
+    with h1:
+        st.subheader(f"Asset · `{sym}`")
+    with h2:
+        st.caption("Control")
+        action = primary_lifecycle_action(lifecycle_state) if lifecycle_state != "?" else None
+        if action == "initialize":
+            if st.button("Initialize", type="primary", key=f"asset_lc_init_{sym}", use_container_width=True):
+                try:
+                    with st.spinner("Running initialization pipeline…"):
+                        r = api_post_json(f"/assets/init/{sym}")
+                        jid = str(r.get("job_id") or "")
+                        job = poll_init_job_until_terminal(
+                            jid,
+                            fetch_job=lambda j: api_get_json(f"/assets/init/jobs/{j}"),
+                        )
+                    if job.get("status") == "succeeded":
+                        st.session_state[msg_key] = ("success", "Initialization finished.")
+                    else:
+                        st.session_state[msg_key] = (
+                            "error",
+                            str(job.get("error") or "Initialization failed."),
+                        )
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 409:
+                        st.session_state[msg_key] = (
+                            "error",
+                            "Another initialization job is already running.",
+                        )
+                    else:
+                        st.session_state[msg_key] = ("error", str(e))
+                except Exception as e:
+                    st.session_state[msg_key] = ("error", str(e))
+                st.rerun()
+        elif action == "start":
+            if st.button("Start", type="primary", key=f"asset_lc_start_{sym}", use_container_width=True):
+                try:
+                    api_post_json(f"/assets/lifecycle/{sym}/start")
+                    st.session_state[msg_key] = ("success", "Watch started (active).")
+                except Exception as e:
+                    st.session_state[msg_key] = ("error", str(e))
+                st.rerun()
+        elif action == "stop":
+            if st.button("Stop", type="primary", key=f"asset_lc_stop_{sym}", use_container_width=True):
+                try:
+                    api_post_json(f"/assets/lifecycle/{sym}/stop")
+                    st.session_state[msg_key] = ("success", "Watch stopped.")
+                except Exception as e:
+                    st.session_state[msg_key] = ("error", str(e))
+                st.rerun()
+        else:
+            st.caption(f"`{lifecycle_state}`")
+
+    st.caption(f"**Lifecycle:** `{lifecycle_state}`")
 
     st.markdown("**Execution mode (this symbol)**")
     try:
