@@ -20,12 +20,18 @@ from control_plane.streamlit_util import (
     get_api_base,
     get_grafana_url,
     get_questdb_console_url,
+    operator_logout,
 )
 
 st.set_page_config(page_title="Trading Bot", layout="wide")
 st.title("Trading Bot")
 st.sidebar.page_link("Home.py", label="Dashboard", icon=":material/dashboard:")
 st.sidebar.page_link("pages/Asset.py", label="Asset page", icon=":material/show_chart:")
+st.sidebar.page_link("pages/0_Login.py", label="Sign in / Register", icon=":material/login:")
+if st.session_state.get("operator_session_token"):
+    if st.sidebar.button("Sign out"):
+        operator_logout()
+        st.rerun()
 try:
     st_data = api_get_json("/status")
     syms = st_data.get("symbols") or []

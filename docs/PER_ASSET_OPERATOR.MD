@@ -22,6 +22,7 @@ Optional **server-side sessions** in the same SQLite file (`operator_sessions` t
 ## Streamlit routes (FB-AP-027)
 
 - **Dashboard** — `streamlit run control_plane/Home.py` (main entry).
+- **Sign in / Register** — **`pages/0_Login.py`** (**FB-UX-003**): email + password; **`POST /auth/login`** stores server session and keeps an opaque token in **`st.session_state`** for API **`Cookie`** headers; register uses **`POST /auth/register`**. Requires **`NM_AUTH_SESSION_ENABLED=true`** on the control plane for sign-in. **Sign out** on the Dashboard sidebar calls **`POST /auth/logout`**.
 - **Asset page** — multipage route **`/Asset`** (`control_plane/pages/Asset.py`): optional **`?symbol=<canonical_symbol>`** deep link; sidebar links from Home include configured **`GET /status`** symbols.
 
 ## Asset page lifecycle controls (FB-AP-031)
