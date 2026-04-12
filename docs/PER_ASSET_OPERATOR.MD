@@ -30,6 +30,14 @@ Each **initialized** tradable symbol can have a **manifest** that lists **foreca
 
 Pydantic model: `app.contracts.asset_model_manifest.AssetModelManifest`.
 
+## Runtime binding (FB-AP-003 / FB-AP-004)
+
+`DecisionPipeline` resolves forecaster and policy artifact paths **per tick** via `resolve_serving_paths(symbol, settings)` in `decision_engine/pipeline.py`:
+
+- **Single-symbol** `market_data_symbols` (length 1): global **`NM_MODELS_*`** paths apply as today; an optional per-asset manifest **overrides** those fields when present.
+- **Multi-symbol** and global **`NM_MODELS_*`** point at **existing model files**: those globals are **not** applied to any symbol without a manifest file for that symbol (the tick **abstains** from trading proposals; `ForecastPacket.forecast_diagnostics` may include `binding_abstain` / `binding_reason`). Add manifests under **`NM_ASSET_MODEL_REGISTRY_DIR`** (or use a single-symbol deployment for shared global weights).
+- With a manifest in multi-symbol mode, **only manifest paths** are used for that symbol’s weights (no silent fallback to another symbol’s global env).
+
 ## Control plane API
 
 Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as other mutating routes).

@@ -27,7 +27,10 @@ def test_distilled_torch_checkpoint_pipeline_step(tmp_path) -> None:
     )
     wpath = out["weights"]
     pipeline_mod._serving_mode_logged = False
-    settings = AppSettings(models_forecaster_torch_path=wpath)
+    settings = AppSettings(
+        market_data_symbols=["BTC-USD"],
+        models_forecaster_torch_path=wpath,
+    )
     pipe = DecisionPipeline(settings=settings)
     assert pipe._torch_model is not None
 
