@@ -14,6 +14,9 @@ market_data:
   - BTC-USD
   - ETH-USD
   - SOL-USD
+init_pipeline:
+  bootstrap_lookback_days: 14
+  bootstrap_granularity_seconds: 60
 memory:
   qdrant_collection: news_context_memory
   retrieval_interval_seconds: 60

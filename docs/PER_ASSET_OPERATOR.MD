@@ -40,8 +40,18 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 | GET | `/assets/models/{symbol}` | Get one manifest. |
 | PUT | `/assets/models/{symbol}` | Create/replace manifest; body **`canonical_symbol`** must equal `{symbol}`. |
 | DELETE | `/assets/models/{symbol}` | Remove manifest file. |
+| POST | `/assets/init/{symbol}` | Start per-asset init job (one global runner); returns `job_id`. |
+| GET | `/assets/init/jobs/{job_id}` | Poll job status and per-step detail. |
 
 **GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`.
+
+## Asset init — Kraken bootstrap (FB-AP-007)
+
+The first pipeline step pulls OHLCV from **Kraken public REST** via the same path as training data (`orchestration/real_data_bars.fetch_symbol_bars_sync`). Configure the bootstrap window in **`default.yaml`** under **`init_pipeline`** (`bootstrap_lookback_days`, `bootstrap_granularity_seconds`) or override with **`NM_ASSET_INIT_BOOTSTRAP_LOOKBACK_DAYS`** and **`NM_ASSET_INIT_BOOTSTRAP_GRANULARITY_SECONDS`** (optional; if unset, bar size defaults to at least 60 seconds for Kraken OHLC). The job step records **display symbol**, **Kraken REST pair**, and **wsname** for traceability.
+
+## Asset init — clean and validate (FB-AP-008)
+
+The second step (`validate`) runs **`data_plane.bootstrap_bars.validate_and_clean_init_bootstrap_bars`** on the fetched frame: required columns match training/storage OHLCV, timestamps are normalized to **UTC**, duplicate **timestamps** are collapsed (last row wins), **gaps** vs the bootstrap bar size are counted (logged in job detail; the step does not fail on gaps), and structurally invalid rows (e.g. `high < low`, negative volume, open/close outside `[low, high]`) are **dropped** — see the module docstring for the full policy. The job step **`detail`** includes `meta={...}` with row counts and gap stats.
 
 ## Related
 
