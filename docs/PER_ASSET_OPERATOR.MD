@@ -30,6 +30,15 @@ Each **initialized** tradable symbol can have a **manifest** that lists **foreca
 
 Pydantic model: `app.contracts.asset_model_manifest.AssetModelManifest`.
 
+## Per-asset lifecycle (FB-AP-005)
+
+States: **`uninitialized`** (no manifest), **`initialized_not_active`** (manifest present, watch not started), **`active`** (operator started watch — live loop wiring is **FB-AP-038**).
+
+- **Storage:** `data/asset_lifecycle_state/<symbol>.json` — override with **`NM_ASSET_LIFECYCLE_STATE_DIR`**.
+- **Effective state:** If a manifest exists but no state file → **`initialized_not_active`**. If the manifest is removed, the lifecycle file for that symbol is dropped and the API reports **`uninitialized`**.
+- **Successful init** (**`POST /assets/init/{symbol}`** job **succeeded**) sets **`initialized_not_active`**.
+- **Stop** here only updates lifecycle; **flatten** and watch teardown are **FB-AP-032**.
+
 ## Control plane API
 
 Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as other mutating routes).
@@ -39,11 +48,14 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 | GET | `/assets/models` | List symbols with manifests. |
 | GET | `/assets/models/{symbol}` | Get one manifest. |
 | PUT | `/assets/models/{symbol}` | Create/replace manifest; body **`canonical_symbol`** must equal `{symbol}`. |
-| DELETE | `/assets/models/{symbol}` | Remove manifest file. |
+| DELETE | `/assets/models/{symbol}` | Remove manifest file (also clears lifecycle state for that symbol). |
 | POST | `/assets/init/{symbol}` | Start per-asset init job (one global runner); returns `job_id`. |
 | GET | `/assets/init/jobs/{job_id}` | Poll job status and per-step detail. |
+| GET | `/assets/lifecycle/{symbol}` | Current **`lifecycle_state`**. |
+| POST | `/assets/lifecycle/{symbol}/start` | **`initialized_not_active` → `active`** (requires manifest). |
+| POST | `/assets/lifecycle/{symbol}/stop` | **`active` → `initialized_not_active`**. |
 
-**GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`.
+**GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`; and **`asset_lifecycle`**: `state_dir`, `states`.
 
 ## Asset init pipeline (FB-AP-006+)
 

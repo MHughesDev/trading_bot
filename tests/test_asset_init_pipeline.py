@@ -11,6 +11,7 @@ import polars as pl
 from fastapi.testclient import TestClient
 
 from app.config.settings import AppSettings
+from app.runtime import asset_lifecycle_state as lc
 from app.runtime import asset_model_registry as reg
 from control_plane import api
 from orchestration.asset_init_pipeline import reset_asset_init_pipeline_for_tests
@@ -35,6 +36,8 @@ def _two_bars_df() -> pl.DataFrame:
 def test_post_assets_init_and_poll_status(monkeypatch, tmp_path: Path) -> None:
     manifest_dir = tmp_path / "manifests"
     manifest_dir.mkdir(parents=True, exist_ok=True)
+    lifecycle_dir = tmp_path / "lifecycle"
+    lifecycle_dir.mkdir(parents=True, exist_ok=True)
 
     def fake_load_settings() -> AppSettings:
         return AppSettings(
@@ -46,6 +49,7 @@ def test_post_assets_init_and_poll_status(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr("app.config.settings.load_settings", fake_load_settings)
     monkeypatch.setattr(reg, "_DEFAULT_DIR", manifest_dir)
+    monkeypatch.setattr(lc, "_DEFAULT_DIR", lifecycle_dir)
     monkeypatch.setattr(api, "settings", AppSettings(control_plane_api_key=None))
     reset_asset_init_pipeline_for_tests()
 
@@ -118,6 +122,7 @@ def test_post_assets_init_and_poll_status(monkeypatch, tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.forecaster_torch_path
     assert loaded.policy_mlp_path
+    assert lc.effective_lifecycle_state("BTC-USD").value == "initialized_not_active"
     reset_asset_init_pipeline_for_tests()
 
 
