@@ -37,6 +37,10 @@ After **Initialize** on an **Asset** page, **Home** shows an **Init pipeline** p
 - **Per-user data + execution (FB-UX-007)** — **`NM_MULTI_TENANT_DATA_SCOPING=true`**: control plane resolves session → **`user_id`** and stores operator state under **`data/users/<id>/...`** (mirrors `data/` layout: manifests, lifecycle, execution mode, PnL ledger, trade markers, init artifacts). Existing top-level **`data/`** files are **not** migrated automatically — copy or re-init per user. **`NM_MULTI_TENANT_EXECUTION_CREDENTIALS=true`**: **`/portfolio/positions`**, PnL summary unrealized path, and **Stop flatten** use **merged** Alpaca/Coinbase secrets from **`/auth/venue-credentials`** when set (paper → Alpaca, live → Coinbase). Kraken / QuestDB unchanged (shared).
 - **Asset page** — multipage route **`/Asset`** (`control_plane/pages/Asset.py`): optional **`?symbol=<canonical_symbol>`** deep link; sidebar links from Home include configured **`GET /status`** symbols.
 
+## Asset page — model / manifest card (FB-UX-010)
+
+Below lifecycle and execution mode, the Asset page shows a read-only **Model / manifest** table sourced from **`GET /assets/models/{symbol}`**: **last trained** timestamps (forecaster / RL), **forecaster** and **policy** artifact paths, and **runtime instance id** when set. With **`NM_MULTI_TENANT_DATA_SCOPING`**, the registry paths resolve per user (same API; see **FB-UX-007**).
+
 ## Asset page lifecycle controls (FB-AP-031)
 
 Top-right **Initialize** / **Start** / **Stop** follows **`GET /assets/lifecycle/{symbol}`**:
