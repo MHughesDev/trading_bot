@@ -15,6 +15,15 @@ from observability.forecaster_metrics import MODEL_VERSION_INFO
 from app.config.model_artifacts import model_artifact_contract
 from app.config.settings import AppSettings, load_settings
 from app.contracts.asset_model_manifest import AssetModelManifest
+from app.contracts.asset_lifecycle import AssetLifecycleState
+from app.runtime.asset_lifecycle_state import (
+    delete_lifecycle_state,
+    effective_lifecycle_state,
+    lifecycle_overview,
+    state_dir as asset_lifecycle_state_dir,
+    transition_start,
+    transition_stop,
+)
 from app.runtime.asset_model_registry import (
     delete_manifest,
     list_symbols as list_asset_manifest_symbols,
@@ -110,6 +119,10 @@ def get_status() -> dict[str, Any]:
         "asset_model_registry": {
             "registry_dir": str(registry_dir()),
             "initialized_symbols": list_asset_manifest_symbols(),
+        },
+        "asset_lifecycle": {
+            "state_dir": str(asset_lifecycle_state_dir()),
+            "states": lifecycle_overview(),
         },
     }
 
@@ -301,6 +314,7 @@ def remove_asset_model_manifest(
     ok = delete_manifest(symbol)
     if not ok:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="no manifest")
+    delete_lifecycle_state(symbol)
     return {"ok": True, "symbol": symbol.strip()}
 
 
@@ -327,3 +341,59 @@ def get_asset_init_job(job_id: str) -> dict[str, Any]:
     if j is None:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown job_id")
     return j
+
+
+@app.get("/assets/lifecycle/{symbol}")
+def get_asset_lifecycle(symbol: str) -> dict[str, Any]:
+    """Per-asset lifecycle state for UI buttons: Initialize / Start / Stop (FB-AP-005)."""
+    sym = symbol.strip()
+    return {
+        "symbol": sym,
+        "lifecycle_state": effective_lifecycle_state(sym).value,
+    }
+
+
+@app.post("/assets/lifecycle/{symbol}/start")
+def post_asset_lifecycle_start(
+    symbol: str,
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """Start watch: ``initialized_not_active`` → ``active`` (requires manifest)."""
+    sym = symbol.strip()
+    try:
+        path = transition_start(sym)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return {
+        "ok": True,
+        "symbol": sym,
+        "lifecycle_state": AssetLifecycleState.active.value,
+        "path": str(path),
+    }
+
+
+@app.post("/assets/lifecycle/{symbol}/stop")
+def post_asset_lifecycle_stop(
+    symbol: str,
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """
+    Stop watch: ``active`` → ``initialized_not_active``. Position flatten is FB-AP-032.
+    """
+    sym = symbol.strip()
+    try:
+        path = transition_stop(sym)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return {
+        "ok": True,
+        "symbol": sym,
+        "lifecycle_state": AssetLifecycleState.initialized_not_active.value,
+        "path": str(path),
+    }

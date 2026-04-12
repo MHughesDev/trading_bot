@@ -267,6 +267,14 @@ def _run_pipeline(job_id: str, symbol: str) -> None:
     try:
         _pipeline_body(job_id, symbol)
         _update_job(job_id, status="succeeded", finished_at=_utc_now_iso(), error=None)
+        try:
+            from app.runtime.asset_lifecycle_state import set_initialized_not_active
+
+            set_initialized_not_active(symbol)
+        except Exception:
+            logger.exception(
+                "asset init succeeded but lifecycle state not updated symbol=%s", symbol
+            )
     except Exception as exc:
         logger.exception("asset init pipeline failed job_id=%s symbol=%s", job_id, symbol)
         _update_job(
