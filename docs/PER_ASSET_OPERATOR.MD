@@ -39,6 +39,10 @@ On **Home**, **Download positions (CSV)** builds UTF-8 CSV from the same **`GET 
 
 After **Initialize** on an **Asset** page, **Home** shows an **Init pipeline** panel: **symbol**, **job_id**, **`GET /assets/init/jobs/{id}`** status, and last completed step. It polls until the job reaches **`succeeded`** or **`failed`**. Use **Stop following** to clear the panel (or wait for a terminal state and dismiss). Implemented in **`control_plane/init_monitor.py`**.
 
+## Watchlist / favorites (FB-UX-014)
+
+On the **Asset** page for a symbol, **Pin ★** adds it to a **session** watchlist (up to **24** symbols); **Remove ★** drops it. The sidebar lists starred symbol links to **`/Asset?symbol=…`**. Cleared when the Streamlit session ends — not persisted server-side.
+
 ## Streamlit routes (FB-AP-027)
 
 - **Dashboard** — `streamlit run control_plane/Home.py` (main entry).

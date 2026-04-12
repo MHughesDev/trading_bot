@@ -9,6 +9,7 @@ from control_plane.streamlit_util import (
     get_questdb_console_url,
     operator_logout,
 )
+from control_plane.watchlist import get_watchlist_symbols
 
 
 def render_app_sidebar() -> None:
@@ -36,6 +37,17 @@ def render_app_sidebar() -> None:
                         label=label,
                         query_params={"symbol": label},
                     )
+        wl = get_watchlist_symbols(st.session_state)
+        st.sidebar.caption("Watchlist (session — **FB-UX-014**)")
+        if wl:
+            for s in wl:
+                st.sidebar.page_link(
+                    "pages/Asset.py",
+                    label=f"★ {s}",
+                    query_params={"symbol": s},
+                )
+        else:
+            st.sidebar.caption("Pin symbols on **Asset**.")
         prof = st_data.get("execution_profile") or {}
         if prof.get("legacy_api_enabled") is False:
             active = prof.get("default_execution_mode", "?")
