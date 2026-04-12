@@ -16,6 +16,7 @@ import streamlit as st
 from control_plane.health_strip import render_dashboard_health_strip
 from control_plane.init_monitor import render_init_pipeline_monitor
 from control_plane.pnl_panel import render_pnl_panel
+from control_plane.scheduler_panel import render_scheduler_panel
 from control_plane.positions_panel import render_positions_sidebar
 from control_plane.streamlit_chrome import render_app_sidebar
 from control_plane.streamlit_util import require_streamlit_app_access
@@ -28,6 +29,8 @@ render_app_sidebar()
 render_dashboard_health_strip()
 
 render_init_pipeline_monitor()
+
+render_scheduler_panel()
 
 render_positions_sidebar()
 
