@@ -1,6 +1,6 @@
 # Cloud deployment (FB-CONT-006)
 
-Opinionated paths for running the **same** container image and Compose layout as homelab. See also **[`BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)** and the container epic **FB-CONT-P0** in **[`QUEUE.MD`](QUEUE.MD)**.
+Opinionated paths for running the **same** container image and Compose layout as homelab. See also **[`BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)** and the container epic **FB-CONT-P0** in **[`QUEUE.MD`](QUEUE.MD)**. **Managed Redis / QuestDB / Qdrant vs self-hosted:** **[`ADR_MANAGED_DATA_SERVICES.MD`](ADR_MANAGED_DATA_SERVICES.MD)** (**FB-CONT-008**).
 
 **Non-negotiable:** Kraken remains market data; venue keys and **`NM_RISK_SIGNING_SECRET`** never belong in git — load from a secret store into **`.env`** or process environment at runtime.
 

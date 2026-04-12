@@ -99,6 +99,7 @@ From the repo root: run **`setup.bat`** (venv + install + optional Docker), then
 | [`docs/ADR_CANONICAL_BAR_STORAGE.MD`](docs/ADR_CANONICAL_BAR_STORAGE.MD) | Canonical bar storage (QuestDB / Parquet / Redis) |
 | [`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD) | Operations & live trading checklist |
 | [`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD) | Cloud VM / Fargate deployment notes (**FB-CONT-006**) |
+| [`docs/ADR_MANAGED_DATA_SERVICES.MD`](docs/ADR_MANAGED_DATA_SERVICES.MD) | Managed vs self-hosted Redis / TSDB / Qdrant (**FB-CONT-008**) |
 | [`docs/PER_ASSET_OPERATOR.MD`](docs/PER_ASSET_OPERATOR.MD) | Per-asset manifest API; Streamlit **Dashboard** + **`/Asset`** route (FB-AP-027) |
 
 **As-built specs:** [`docs/Specs/README.MD`](docs/Specs/README.MD) · **Repo layout & CI:** see [`AGENTS.md`](AGENTS.md) for contributors and automation.

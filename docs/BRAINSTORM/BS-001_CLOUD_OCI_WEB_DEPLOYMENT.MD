@@ -5,7 +5,7 @@
 **Status:** draft  
 **Author:** optional
 
-**See also:** **[`README.md`](../README.md)** — **Deployment models (FB-CONT-007)** — Windows **`.bat`** path vs Linux **Docker/Compose/cloud**; **[`docs/DEPLOY_CLOUD.MD`](../DEPLOY_CLOUD.MD)** for VM/Fargate notes.
+**See also:** **[`README.md`](../README.md)** — **Deployment models (FB-CONT-007)** — Windows **`.bat`** path vs Linux **Docker/Compose/cloud**; **[`docs/DEPLOY_CLOUD.MD`](../DEPLOY_CLOUD.MD)** for VM/Fargate notes; **[`docs/ADR_MANAGED_DATA_SERVICES.MD`](../ADR_MANAGED_DATA_SERVICES.MD)** (**FB-CONT-008**) — managed vs self-hosted data services.
 
 ---
 
