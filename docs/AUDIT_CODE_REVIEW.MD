@@ -1,11 +1,13 @@
 # Code review audit — functionality, correctness, quality, consistency
 
-**Audit passes:** **2026-04-17** (initial), **2026-04-17** (second pass — coverage expansion below)  
+**Audit passes:** **2026-04-17** (initial), **2026-04-17** (second pass), **2026-04-17** (third pass — Streamlit/config/SQL/TLS spot checks)  
 **Scope:** Static review of critical paths, security-relevant defaults, dependency and subprocess usage, alignment with `AGENTS.md`. **Not** performance tuning, new features, load testing, or full penetration testing. **Not** exhaustive line-by-line coverage of the whole repo (~400 test files / full tree).
 
 **Method (pass 1):** Read `execution/intent_gate.py`, `execution/service.py`, `control_plane/api.py` (auth, CORS), `decision_engine/run_step.py`, `control_plane/preflight.py`; pattern scan `except Exception`, TODO/FIXME.
 
 **Method (pass 2):** `rg` for `CORSMiddleware` / `allow_origins`, `shell=True`, `eval(`, dangerous `pickle`, `subprocess` usage; spot-check `bare except` / `pass` in hot paths; verify audit doc completeness (out-of-scope list, sign-off, backlog).
+
+**Method (pass 3):** `control_plane/streamlit_util.py` (route guard, `NM_STREAMLIT_ROUTE_GUARD_ENABLED`, API key bypass); `app/config/settings.py` for **`yaml.safe_load`**; `rg` for **`verify=False`**, **`yaml.load(`** (unsafe), **`pickle`** in `app/`; sample **`data_plane/storage/questdb.py`** for parameterized SQL; consider **rate limiting** and **Streamlit** exposure.
 
 ---
 
@@ -16,8 +18,10 @@
 | **Trading path** | **Strong:** `RiskEngine` → signed `OrderIntent` → `ExecutionService.submit_order` → `require_execution_allowed` → adapter. |
 | **Live vs replay** | **Strong:** `run_decision_tick` is the shared decision step; `system_power` consulted early. |
 | **Operator safety** | **Mixed:** Preflight and `/status` expose configuration health; **API** can run **without** API key in dev (see A-1); **CORS** is fully permissive (see A-6). |
+| **Streamlit** | **Mixed:** **`require_streamlit_app_access`** enforces login when **`NM_STREAMLIT_ROUTE_GUARD_ENABLED`** and no **`NM_CONTROL_PLANE_API_KEY`** in the Streamlit process (see A-8); guard **off** by default — same “trusted local operator” assumption as the API. |
 | **Maintainability** | **Mixed:** Broad `except Exception` and bare `pass` in several modules — resilience vs debuggability tradeoff. |
 | **Repo policy** | **Enforced in CI:** Kraken-only market data (`ci_spec_compliance.sh`), MLflow promotion (`ci_mlflow_promotion_policy.sh`). |
+| **Config loading** | **Good:** YAML parsed with **`yaml.safe_load`** in `AppSettings` (pass 3). |
 
 ---
 
@@ -27,8 +31,11 @@
 - Full security audit (OWASP-style), dependency CVE scan (use `pip-audit` / GitHub Dependabot separately)  
 - Coinbase / Alpaca API correctness against live vendor docs  
 - QuestDB / Redis / Qdrant data durability under failure  
-- Streamlit UX beyond error-handling patterns  
-- Contents of `legacy/` except to note policy: **frozen snapshot** per `AGENTS.md`
+- Streamlit UX beyond error-handling and route-guard patterns  
+- Contents of `legacy/` except to note policy: **frozen snapshot** per `AGENTS.md`  
+- **Secrets in git history** — use `git-secrets` / pre-commit hooks separately  
+- **API rate limiting / abuse protection** — not reviewed as implemented (assume **reverse proxy** or **WAF** in production if needed)  
+- **PII / GDPR** — not applicable to this audit scope  
 
 ---
 
@@ -43,6 +50,8 @@
 | **Tests** | Large `tests/` suite; CI scripts enforce Kraken market-data policy and MLflow promotion policy. |
 | **Subprocess hygiene** | `power_supervisor` uses `subprocess.run` with argument list (no `shell=True` in sampled code). |
 | **Multi-tenant context** | `TenantContextMiddleware` + `ContextVar` for request-scoped user id (FB-UX-007 pattern). |
+| **YAML config** | `AppSettings` loads defaults via **`yaml.safe_load`** (not unsafe `yaml.load`). |
+| **SQL (sampled)** | QuestDB paths use **parameterized** `execute(sql, params)` patterns — reduces injection risk vs string concatenation. |
 
 ---
 
@@ -57,17 +66,20 @@
 | A-5 | **Info** | Default config | **`app/config/default.yaml`** uses **`execution.mode: live`** — safe operation depends on **`.env`** and operator discipline. |
 | A-6 | **Medium** | CORS | **`control_plane/api.py`** registers **`CORSMiddleware`** with **`allow_origins=["*"]`** (and permissive methods/headers) for Streamlit/SSE (FB-AP-034). Correct for **LAN dev**; for **public** or **multi-tenant** deployment, **narrow origins** and review headers. |
 | A-7 | **Low** | Dependency hygiene | No automated **CVE** scan called out in-repo in this audit — rely on **`pip-audit`**, lockfiles, or GitHub **Dependabot** for ongoing supply-chain review. |
+| A-8 | **Low** | Streamlit route guard | **`NM_STREAMLIT_ROUTE_GUARD_ENABLED`** defaults **off**; when **off**, Streamlit pages do not enforce **`require_streamlit_app_access`**. Align deployment docs: enable guard + sessions for shared or exposed UIs. **`NM_CONTROL_PLANE_API_KEY`** in the Streamlit process is a **bypass** for automation (documented in code). |
 
 ---
 
-## Non-issues / verified (pass 2)
+## Non-issues / verified (passes 2–3)
 
 | Check | Result |
 |-------|--------|
 | **`shell=True` in subprocess** | No problematic hits in sampled `rg` (PyTorch `model.eval()` is unrelated). |
-| **`eval(` / unsafe `pickle`** | No `eval(` in app paths from quick scan; no `pickle.loads` flagged in this pass. |
+| **`eval(` / unsafe `yaml.load` / `pickle` in `app/`** | No unsafe YAML load; no `pickle` in `app/` from scan; **`yaml.safe_load`** used for settings. |
+| **`verify=False` (TLS)** | No hits in `*.py` from pass 3 scan. |
 | **`power_supervisor` terminate** | Uses `taskkill` with fixed args on Windows; `logger.exception` on failure — reasonable. |
 | **Kraken market data policy** | Documented in `AGENTS.md`; enforced by **`scripts/ci_spec_compliance.sh`**. |
+| **SQLite in `platform_supported_universe`** | Static SQL strings with bound params / controlled attach path — acceptable; not user-controlled raw SQL from HTTP. |
 
 ---
 
@@ -79,6 +91,7 @@
 4. **A-4:** Ensure **`AGENTS.md`** §10 or contributor checklist mentions **`QUEUE_STACK.csv`** when editing queue workflow (may already be partially covered).
 5. **A-5:** Product decision: default **`execution.mode: paper`** in `default.yaml` for safer first clone — optional.
 6. **A-7:** Add optional **`pip-audit`** or document it in **`README.md`** CI / operator section.
+7. **A-8:** Document **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=true`** for any deployment where the dashboard is reachable beyond a single trusted operator.
 
 ---
 
@@ -87,10 +100,13 @@
 - `execution/intent_gate.py`, `execution/service.py`, `execution/router.py` (indirect)  
 - `control_plane/api.py` (auth, CORS, middleware order)  
 - `control_plane/preflight.py`  
+- `control_plane/streamlit_util.py` (route guard, pass 3)  
 - `decision_engine/run_step.py`  
+- `app/config/settings.py` (YAML `safe_load`, pass 3)  
 - `app/runtime/power_supervisor.py` (subprocess sample)  
+- `data_plane/storage/questdb.py` (SQL execute pattern, pass 3)  
 - `app/config/default.yaml` (spot)  
-- Pattern scans: `except Exception`, `pass`, `CORSMiddleware`, `shell=True`
+- Pattern scans: `except Exception`, `pass`, `CORSMiddleware`, `shell=True`, `verify=False`, `yaml.load`, `pickle`
 
 ---
 
@@ -100,6 +116,7 @@
 |------|--------|
 | Critical trading path (risk → signed intent → gate → adapter) | **Reviewed** (architecture consistent) |
 | Control plane exposure (auth + CORS) | **Reviewed** — **action items** for production deployment |
+| Streamlit vs API auth model | **Reviewed** (guard optional; document for production) |
 | CI policy scripts | **Referenced** — not re-run as part of this document |
 | **Residual risk** | Operators **must** configure secrets and network boundaries; codebase assumes **trusted network** unless configured otherwise. |
 
@@ -112,7 +129,9 @@
 | ID | Theme | Suggestion |
 |----|-------|------------|
 | DOC-A1 | Docs | “Production API hardening”: API key + TLS + CORS origins; link from README. |
+| DOC-A2 | Docs | Streamlit: when to set **`NM_STREAMLIT_ROUTE_GUARD_ENABLED`** and session env vars. |
 | OPS-A1 | Ops | Startup warning if `control_plane_api_key` unset **and** bind is non-loopback. |
+| OPS-A2 | Ops | Optional **rate limiting** (middleware or reverse proxy) for public `control_plane` exposure. |
 | QA-A1 | Quality | Pass over `except Exception` in `app/runtime/live_service.py` — ensure logging + symbol context. |
 | QA-A2 | Quality | Same for `control_plane/asset_page.py`, `streamlit_util.py`. |
 | CODE-A1 | Code | Comment in `intent_gate.py` for “no secret → allow”. |
@@ -120,11 +139,22 @@
 | SEC-A1 | Security | Env-configurable CORS allowlist; default strict outside dev. |
 | SEC-A2 | Security | Document `NM_AUTH_SESSION_COOKIE_SECURE` for HTTPS deployments. |
 | SEC-A3 | Security | Add **`pip-audit`** (or document) in dev / CI docs. |
+| SEC-A4 | Security | Review **`httpx`** calls to external APIs for timeout + TLS settings (already present in many paths; inventory). |
 | TEST-A1 | Tests | Coverage for `require_mutate_operator` wrong/missing key when key required. |
 | DEBT-A1 | Tech debt | Inventory `except: pass` / silent `pass` after exceptions; replace with logging. |
 | DATA-A1 | Data plane | Periodic review: QuestDB writer errors surfaced to operators (metrics/alerts). |
 | MT-A1 | Multi-tenant | Review all file paths use tenant prefix when `NM_MULTI_TENANT_DATA_SCOPING=true`. |
 | LEGACY-A1 | Legacy | Ensure `legacy/` imports stay out of main V3 tree (CI already helps for Alpaca data). |
+
+---
+
+## Document revision history
+
+| Date | Change |
+|------|--------|
+| 2026-04-17 | Pass 1 — initial audit (trading path, API auth, preflight, exceptions). |
+| 2026-04-17 | Pass 2 — CORS, dependency CVE note, backlog table, sign-off. |
+| 2026-04-17 | Pass 3 — Streamlit guard (A-8), YAML `safe_load`, TLS/sql/pickle spot checks, expanded non-issues, DOC-A2/OPS-A2/SEC-A4 backlog items. |
 
 ---
 
