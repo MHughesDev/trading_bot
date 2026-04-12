@@ -71,6 +71,11 @@ The per-asset product epic requires **one authoritative time series per symbol**
 ## Consequences
 
 - Implement **FB-AP-014** (schema + docs) and **FB-AP-015** (merge/dedupe) against **QuestDB + shared contracts**, not a greenfield database.
+
+### FB-AP-015 (dedupe / idempotent merge)
+
+- **Polars:** `data_plane.storage.merge_canonical_bars` — `dedupe_canonical_bars_last_wins`, `merge_canonical_bars_frames`; key ``(symbol, timestamp, interval_seconds)``, **last-write-wins**.
+- **QuestDB:** `QuestDBWriter.insert_bar` **DELETE** then **INSERT** for the same key (idempotent replay).
 - **Backup/restore** for QuestDB volumes remains the operator path for historical bars (**RUNBOOKS.MD**).
 - Optional **QuestDB Cloud** or other managed TSDB is a **future** ADR (**FB-CONT-008**-style evaluation), not required to start **FB-AP-014**.
 

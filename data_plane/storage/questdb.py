@@ -41,14 +41,23 @@ class QuestDBWriter:
             self._conn = None
 
     async def insert_bar(self, bar: BarEvent) -> None:
+        """
+        Idempotent upsert into ``canonical_bars`` (FB-AP-015): **last-write-wins** on
+        ``(symbol, ts, interval_seconds)`` — delete existing row then insert.
+        """
         if not self._conn:
             raise RuntimeError("not connected")
-        sql = """
+        delete_sql = """
+        DELETE FROM canonical_bars
+        WHERE symbol = %s AND ts = %s AND interval_seconds = %s
+        """
+        await self._conn.execute(delete_sql, (bar.symbol, bar.timestamp, bar.interval_seconds))
+        insert_sql = """
         INSERT INTO canonical_bars (ts, symbol, interval_seconds, open, high, low, close, volume, source, schema_version)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         await self._conn.execute(
-            sql,
+            insert_sql,
             (
                 bar.timestamp,
                 bar.symbol,
@@ -132,17 +141,31 @@ class QuestDBWriter:
         start: datetime,
         end: datetime,
         limit: int = 10_000,
+        *,
+        interval_seconds: int | None = None,
     ) -> list[dict]:
+        """Read from ``canonical_bars`` (FB-AP-014). Optional ``interval_seconds`` filter."""
         if not self._conn:
             raise RuntimeError("not connected")
-        sql = """
-        SELECT ts, symbol, open, high, low, close, volume, source
-        FROM bars
-        WHERE symbol = %s AND ts >= %s AND ts <= %s
-        ORDER BY ts ASC
-        LIMIT %s
-        """
+        if interval_seconds is None:
+            sql = """
+            SELECT ts, symbol, interval_seconds, open, high, low, close, volume, source, schema_version
+            FROM canonical_bars
+            WHERE symbol = %s AND ts >= %s AND ts <= %s
+            ORDER BY ts ASC
+            LIMIT %s
+            """
+            params = (symbol, start, end, limit)
+        else:
+            sql = """
+            SELECT ts, symbol, interval_seconds, open, high, low, close, volume, source, schema_version
+            FROM canonical_bars
+            WHERE symbol = %s AND ts >= %s AND ts <= %s AND interval_seconds = %s
+            ORDER BY ts ASC
+            LIMIT %s
+            """
+            params = (symbol, start, end, interval_seconds, limit)
         async with self._conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(sql, (symbol, start, end, limit))
+            await cur.execute(sql, params)
             rows = await cur.fetchall()
         return list(rows)
