@@ -60,7 +60,7 @@ Entrypoint commands: **`api`** (default, uvicorn `control_plane.api:app` on **80
 docker compose -f infra/docker-compose.yml -f infra/docker-compose.app.yml up -d --build
 ```
 
-Publishes **8000** (API + `/metrics`), **8501** (Streamlit). Mounts **`./data`** into the app containers for manifests, SQLite sidecars, and JSONL files. Sets **`NM_QUESTDB_HOST=questdb`**, **`NM_REDIS_URL`**, **`NM_QDRANT_URL`** for in-network services. Optional live loop: add **`--profile live`**.
+Publishes **8000** (API + `/metrics`), **8501** (Streamlit). Mounts **`./data`** into the app containers for manifests, SQLite sidecars, and JSONL files. Sets **`NM_QUESTDB_HOST=questdb`**, **`NM_REDIS_URL`**, **`NM_QDRANT_URL`** for in-network services. Optional live loop: add **`--profile live`**. **Backup/restore** for QuestDB / Redis / Qdrant Docker volumes: **[`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD)** (**FB-CONT-005**).
 
 **CI (FB-CONT-003)** — GitHub Actions **`.github/workflows/ci.yml`** runs **`docker build -t trading-bot:ci .`**, a container import smoke test, **hadolint** on **`Dockerfile`**, and an informational **Trivy** filesystem scan on PRs and **`main`** pushes. Mirror locally: **`docker build -t trading-bot:local .`** (same as CI).
 
