@@ -21,6 +21,7 @@ from control_plane.asset_lifecycle_actions import (
 from control_plane.app_toasts import maybe_toast
 from control_plane.asset_manifest_card import manifest_model_rows
 from control_plane.asset_page_helpers import normalize_symbol, validate_symbol_display
+from control_plane.watchlist import add_watchlist_symbol, is_pinned, remove_watchlist_symbol
 from control_plane.streamlit_util import (
     api_delete_json,
     api_get_json,
@@ -226,7 +227,24 @@ def render_asset_page(symbol: str) -> None:
         else:
             st.caption(f"`{lifecycle_state}`")
 
-    st.caption(f"**Lifecycle:** `{lifecycle_state}`")
+    wl1, wl2 = st.columns([3, 1])
+    with wl1:
+        st.caption(f"**Lifecycle:** `{lifecycle_state}`")
+    with wl2:
+        st.caption("Watchlist")
+        if is_pinned(st.session_state, sym):
+            if st.button("Remove ★", key=f"asset_wl_unpin_{sym}", use_container_width=True):
+                remove_watchlist_symbol(st.session_state, sym)
+                maybe_toast(f"Removed {sym} from watchlist.", icon="⭐")
+                st.rerun()
+        else:
+            if st.button("Pin ★", key=f"asset_wl_pin_{sym}", use_container_width=True):
+                ok, wmsg = add_watchlist_symbol(st.session_state, sym)
+                if ok:
+                    maybe_toast(f"Pinned {sym} to watchlist.", icon="⭐")
+                else:
+                    maybe_toast(wmsg, icon="⚠️")
+                st.rerun()
 
     st.markdown("**Execution mode (this symbol)**")
     try:
