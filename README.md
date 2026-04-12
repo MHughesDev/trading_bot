@@ -96,6 +96,7 @@ From the repo root: run **`setup.bat`** (venv + install + optional Docker), then
 | [`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD) | Environment, Docker, preflight, venues |
 | [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) | End-to-end system tour |
 | [`docs/QUEUE.MD`](docs/QUEUE.MD) | Backlog, fixes, roadmap |
+| [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent checklist: one queue slice → validate → PR → merge (empty **HIGH** **Open** → stop per Phase 1) |
 | [`docs/ADR_CANONICAL_BAR_STORAGE.MD`](docs/ADR_CANONICAL_BAR_STORAGE.MD) | Canonical bar storage (QuestDB / Parquet / Redis) |
 | [`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD) | Operations & live trading checklist |
 | [`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD) | Cloud VM / Fargate deployment notes (**FB-CONT-006**) |
