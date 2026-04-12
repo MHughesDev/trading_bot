@@ -18,6 +18,7 @@ from control_plane.asset_lifecycle_actions import (
     poll_init_job_until_terminal,
     primary_lifecycle_action,
 )
+from control_plane.asset_manifest_card import manifest_model_rows
 from control_plane.asset_page_helpers import normalize_symbol, validate_symbol_display
 from control_plane.streamlit_util import api_delete_json, api_get_json, api_post_json, api_put_json
 
@@ -233,8 +234,22 @@ def render_asset_page(symbol: str) -> None:
 
     try:
         m = api_get_json(f"/assets/models/{sym}")
-        st.success("Per-asset manifest is present.")
-        st.json({k: m.get(k) for k in ("canonical_symbol", "schema_version") if k in m})
+        st.markdown("**Model / manifest** (read-only)")
+        st.caption(
+            f"From **`GET /assets/models/{sym}`** — paths and **last trained** fields for this user when "
+            "**`NM_MULTI_TENANT_DATA_SCOPING`** uses per-user registry (see docs)."
+        )
+        rows = manifest_model_rows(m)
+        try:
+            import polars as pl
+
+            st.dataframe(
+                pl.DataFrame(rows),
+                hide_index=True,
+                width="stretch",
+            )
+        except Exception:
+            st.table(rows)
     except Exception:
         st.info("No manifest for this symbol (uninitialized). Use **POST /assets/init/{symbol}** from the API or operator flow.")
 
