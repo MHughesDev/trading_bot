@@ -17,6 +17,12 @@ from app.config.model_artifacts import model_artifact_contract
 from app.config.settings import AppSettings, load_settings
 from app.contracts.asset_model_manifest import AssetModelManifest
 from app.contracts.asset_lifecycle import AssetLifecycleState
+from app.runtime.asset_execution_mode import (
+    delete_mode_override,
+    list_mode_overrides,
+    to_api_dict as asset_execution_mode_to_api_dict,
+    write_mode_override,
+)
 from app.runtime.asset_lifecycle_state import (
     delete_lifecycle_state,
     effective_lifecycle_state,
@@ -32,6 +38,7 @@ from app.runtime.asset_model_registry import (
     registry_dir,
     save_manifest,
 )
+from app.runtime import asset_execution_mode as asset_execution_mode_mod
 from execution.adapter_registry import supported_adapters_for_settings
 from control_plane.chart_bars import query_canonical_bars_for_chart
 from control_plane.preflight import preflight_report
@@ -126,6 +133,11 @@ def get_status() -> dict[str, Any]:
         "asset_lifecycle": {
             "state_dir": str(asset_lifecycle_state_dir()),
             "states": lifecycle_overview(),
+        },
+        "asset_execution_mode": {
+            "default_execution_mode": settings.execution_mode,
+            "sidecar_dir": str(asset_execution_mode_mod.mode_dir()),
+            "overrides": list_mode_overrides(),
         },
     }
 
@@ -372,6 +384,52 @@ def get_asset_lifecycle(symbol: str) -> dict[str, Any]:
         "symbol": sym,
         "lifecycle_state": effective_lifecycle_state(sym).value,
     }
+
+
+@app.get("/assets/execution-mode/{symbol}")
+def get_asset_execution_mode(symbol: str) -> dict[str, Any]:
+    """Per-symbol paper/live routing for orders (FB-AP-030); falls back to default when unset."""
+    sym = symbol.strip()
+    return asset_execution_mode_to_api_dict(sym, settings)
+
+
+@app.put("/assets/execution-mode/{symbol}")
+def put_asset_execution_mode(
+    symbol: str,
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """Persist paper vs live for this symbol (overrides ``NM_EXECUTION_MODE`` for its orders)."""
+    sym = symbol.strip()
+    mode = body.get("execution_mode")
+    if mode not in ("paper", "live"):
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="execution_mode must be 'paper' or 'live'",
+        )
+    path = write_mode_override(sym, mode)
+    return {
+        "ok": True,
+        "symbol": sym,
+        "execution_mode": mode,
+        "path": str(path),
+    }
+
+
+@app.delete("/assets/execution-mode/{symbol}")
+def delete_asset_execution_mode(
+    symbol: str,
+    _: Annotated[None, Depends(require_mutate_key)],
+) -> dict[str, Any]:
+    """Remove per-symbol override; routing uses application default again."""
+    sym = symbol.strip()
+    ok = delete_mode_override(sym)
+    if not ok:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="no execution_mode sidecar for symbol",
+        )
+    return {"ok": True, "symbol": sym}
 
 
 @app.post("/assets/lifecycle/{symbol}/start")
