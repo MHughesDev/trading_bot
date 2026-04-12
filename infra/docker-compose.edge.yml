@@ -1,0 +1,24 @@
+# FB-CONT-004 — optional TLS reverse proxy (Caddy) in front of API + Streamlit
+#
+# Merge after data + app stacks (same Docker project / default **trading-bot** network):
+#
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.app.yml -f infra/docker-compose.edge.yml up -d
+#
+# HTTPS on host **8443** → container **443** (self-signed **tls internal** for **api.localhost** / **ui.localhost**).
+# Add to /etc/hosts:  127.0.0.1 api.localhost ui.localhost
+#   https://api.localhost:8443   — control plane + /metrics
+#   https://ui.localhost:8443      — Streamlit (in-process calls to API stay on http://trading-bot-api:8000)
+#
+# For public domains + Let's Encrypt, edit **infra/caddy/Caddyfile** (real DNS, drop `tls internal`).
+
+services:
+  trading-bot-edge:
+    image: caddy:2.8-alpine
+    container_name: tb-caddy-edge
+    ports:
+      - "8443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - trading-bot-api
+      - trading-bot-streamlit
