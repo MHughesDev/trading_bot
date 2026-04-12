@@ -93,6 +93,10 @@ class AppSettings(BaseSettings):
     questdb_persist_microservice_events: bool = False
     # FB-AP-018: on live loop start, compare QuestDB max(ts) to last closed bucket for initialized symbols
     questdb_startup_gap_detection: bool = False
+    # FB-AP-019: after gap detection, fetch Kraken REST for gaps and insert into canonical_bars
+    questdb_startup_kraken_backfill: bool = False
+    # When QuestDB has no rows for a symbol, cap how far back REST fetch starts (days before last closed bucket)
+    questdb_backfill_max_lookback_days: int = 14
     questdb_batch_max_rows: int = 500
     questdb_flush_interval_seconds: float = 2.0
 
@@ -240,6 +244,10 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["questdb_persist_canonical_bars"] = bool(qd["persist_canonical_bars"])
         if "startup_gap_detection" in qd:
             out["questdb_startup_gap_detection"] = bool(qd["startup_gap_detection"])
+        if "startup_kraken_backfill" in qd:
+            out["questdb_startup_kraken_backfill"] = bool(qd["startup_kraken_backfill"])
+        if "backfill_max_lookback_days" in qd:
+            out["questdb_backfill_max_lookback_days"] = int(qd["backfill_max_lookback_days"])
         if "persist_microservice_events" in qd:
             out["questdb_persist_microservice_events"] = bool(qd["persist_microservice_events"])
         if "batch_max_rows" in qd:
