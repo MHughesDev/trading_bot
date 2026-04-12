@@ -14,6 +14,7 @@ from observability.forecaster_metrics import MODEL_VERSION_INFO
 
 from app.config.model_artifacts import model_artifact_contract
 from app.config.settings import AppSettings, load_settings
+from execution.adapter_registry import supported_adapters_for_settings
 from control_plane.preflight import preflight_report
 from app.contracts.risk import SystemMode
 from app.runtime.mode_manager import ModeManager
@@ -96,6 +97,7 @@ def get_status() -> dict[str, Any]:
         "production_preflight": production_preflight_payload(settings),
         "model_artifacts": model_artifact_contract(settings),
         "execution_profile": profile_payload(settings.execution_mode),
+        "execution_adapters": supported_adapters_for_settings(settings),
     }
 
 

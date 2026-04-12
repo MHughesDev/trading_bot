@@ -192,8 +192,10 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 | ID | Kind | Phase | Cat | Pri | Status | Summary |
 |----|------|-------|-----|-----|--------|---------|
-| FB-N1 | deferred | D | XX | LOW | Open | Multi-exchange execution |
-| FB-N3 | deferred | D | XX | LOW | Open | Portfolio optimization (generic portfolio optimization libs) |
+| FB-N1 | deferred | D | XX | LOW | Open | Multi-exchange execution — **first slice Done 2026-04-13:** [`execution/adapter_registry.py`](../execution/adapter_registry.py), **`GET /status` → `execution_adapters`**, [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N1 |
+| FB-N3 | deferred | D | XX | LOW | Open | Portfolio optimization — **first slice Done 2026-04-13:** [`risk_engine/equal_weight.py`](../risk_engine/equal_weight.py), tests, [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N3 |
+
+*Full multi-venue / optimizer work remains deferred; see [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD).*
 
 ---
 
@@ -471,6 +473,8 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-FR-P0-CLOSE | models | 2026-04-12 | **FB-FR-P0** queue closed: **01** `DatasetManifest` + walk-forward tests; **02–06** NumPy `ForecasterModel` (VSN→…→quantiles) + **`build_torch_forecaster`** MLP; **03** `train_distilled_mlp_forecaster`, CLI **`nm-train-forecaster-distill`**, `describe_walk_forward_folds`; **04** conformal + ensemble + `tests/test_conformal_calibration_eval.py`; **05** `NM_MODELS_FORECASTER_TORCH_PATH` + `tests/test_forecaster_torch_pipeline.py` |
 | FB-FR-P0-WAIVE | models | 2026-04-12 | **Waived (optional):** human-spec **full PyTorch** VSN/xLSTM *trainer* — not required for hot path; use **MLP distill** + NumPy reference |
 | FB-MS-01 … FB-MS-06 | platform | 2026-04-11 | Microservices slices (Kraken WS path, FeaturePipeline, QuestDB audit, compose/runbooks, Alpaca smoke doc, §11 checklist) |
+| FB-N1-S1 | execution | 2026-04-13 | **`execution/adapter_registry`**, **`GET /status` → `execution_adapters`**, [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) |
+| FB-N3-S1 | risk | 2026-04-13 | **`risk_engine/equal_weight`**, `tests/test_equal_weight.py`, roadmap doc |
 | FB-SPEC-08 | pipeline | 2026-04-11 | Preflight script + API |
 | FB-T1 | test | 2026-04-10 | `smoke_credentials.py` |
 | FB-T2 | runtime | 2026-04-10 | Shutdown signals test |
