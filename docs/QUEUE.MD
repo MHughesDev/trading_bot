@@ -20,6 +20,7 @@
 | [§7](#7-github-sync-optional) | GitHub sync |
 | [§8](#8-how-to-add-an-entry) | How to add an entry |
 | — | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) — agent prompt: slice → tests → PR → merge → prune |
+| — | Cursor skill [`.cursor/skills/add-to-queue`](../.cursor/skills/add-to-queue/SKILL.md) — **Add to Queue** workflow for agents |
 
 ---
 
@@ -597,5 +598,7 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 4. For multi-row epics (e.g. **FB-AP-P0**), assign a **Batch** code ([§1.3](#13-priority-phase-category-status)) and add **Affected files** (pipe-separated primary paths).
 5. Add a row in [§2](#2-open-queue) (roadmap), [§3](#3-resolved-fixes-il) (fixes), or note completed gates in [§4](#4-completed-compliance-gates-hg). Use the next **FB-** or **HG-** id; for large epics prefer **-01, -02** sub-ids.  
 6. Link **code paths** or tickets.
+
+**Cursor Agent:** For a structured checklist aligned with §1–§2, use the project skill **Add to Queue** at [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) (invoke with `/add-to-queue` or attach `@add-to-queue` when available).
 
 ---
