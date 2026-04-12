@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -32,6 +33,7 @@ from app.runtime.asset_model_registry import (
     save_manifest,
 )
 from execution.adapter_registry import supported_adapters_for_settings
+from control_plane.chart_bars import query_canonical_bars_for_chart
 from control_plane.preflight import preflight_report
 from app.contracts.risk import SystemMode
 from app.runtime.mode_manager import ModeManager
@@ -373,6 +375,36 @@ def post_asset_lifecycle_start(
         "lifecycle_state": AssetLifecycleState.active.value,
         "path": str(path),
     }
+
+
+@app.get("/assets/chart/bars")
+async def get_asset_chart_bars(
+    symbol: Annotated[str, Query(min_length=1, description="Canonical symbol (e.g. BTC-USD)")],
+    start: Annotated[datetime, Query(description="Range start (UTC ISO-8601)")],
+    end: Annotated[datetime, Query(description="Range end (UTC ISO-8601)")],
+    interval_seconds: Annotated[
+        int | None,
+        Query(
+            description="Bar width in seconds; default = NM_MARKET_DATA_BAR_INTERVAL_SECONDS",
+        ),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=50_000, description="Max rows returned")] = 5000,
+) -> dict[str, Any]:
+    """Symbol-scoped OHLCV from QuestDB ``canonical_bars`` for chart use (FB-AP-024)."""
+    try:
+        return await query_canonical_bars_for_chart(
+            settings,
+            symbol=symbol,
+            start=start,
+            end=end,
+            interval_seconds=interval_seconds,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 @app.post("/assets/lifecycle/{symbol}/stop")
