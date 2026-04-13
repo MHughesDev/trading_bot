@@ -3,11 +3,11 @@
 ## Tests (`tests/`)
 
 - Pytest; **`asyncio_mode = auto`** in `pyproject.toml`
-- Coverage areas include: decision/risk, replay (single and multi-asset), rolling bars, Coinbase REST fallback, control-plane auth, routing, normalizers, QuestDB batching, integration optional (Redis/QuestDB/Qdrant when `NM_INTEGRATION_SERVICES=1`)
+- Coverage areas include: decision/risk, replay (single and multi-asset), rolling bars, Kraken REST/backfill paths, control-plane auth, routing, normalizers, QuestDB batching, integration optional (Redis/QuestDB/Qdrant when `NM_INTEGRATION_SERVICES=1`)
 
 ## Scripts (`scripts/`)
 
-- **`ci_spec_compliance.sh`** — Alpaca market-data import guard (excludes `legacy/`)
+- **`ci_spec_compliance.sh`** — Fails if `alpaca.data` / Alpaca historical data imports appear outside the paper adapter (excludes `legacy/`) — keeps market data Kraken-only
 - **`ci_mlflow_promotion_policy.sh`** — Blocks forbidden MLflow promotion APIs in main code
 - **`smoke_credentials.py`** — Optional connectivity smoke (no secrets in repo)
 

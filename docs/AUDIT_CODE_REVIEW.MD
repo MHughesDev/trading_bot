@@ -20,7 +20,7 @@
 | **Operator safety** | **Mixed:** Preflight and `/status` expose configuration health; **API** can run **without** API key in dev (see A-1); **CORS** is fully permissive (see A-6). |
 | **Streamlit** | **Mixed:** **`require_streamlit_app_access`** enforces login when **`NM_STREAMLIT_ROUTE_GUARD_ENABLED`** and no **`NM_CONTROL_PLANE_API_KEY`** in the Streamlit process (see A-8); guard **off** by default — same “trusted local operator” assumption as the API. |
 | **Maintainability** | **Mixed:** Broad `except Exception` and bare `pass` in several modules — resilience vs debuggability tradeoff. |
-| **Repo policy** | **Enforced in CI:** Kraken-only market data (`ci_spec_compliance.sh`), MLflow promotion (`ci_mlflow_promotion_policy.sh`). |
+| **Repo policy** | **Enforced in CI:** Kraken-only market data — `ci_spec_compliance.sh` blocks **Alpaca *data*** imports outside the paper adapter; MLflow promotion (`ci_mlflow_promotion_policy.sh`). |
 | **Config loading** | **Good:** YAML parsed with **`yaml.safe_load`** in `AppSettings` (pass 3). |
 
 ---
@@ -161,6 +161,7 @@ The granular backlog below is **promoted** to the live queue as **§2.5** **[`QU
 | 2026-04-17 | Pass 1 — initial audit (trading path, API auth, preflight, exceptions). |
 | 2026-04-17 | Pass 2 — CORS, dependency CVE note, backlog table, sign-off. |
 | 2026-04-17 | Pass 3 — Streamlit guard (A-8), YAML `safe_load`, TLS/sql/pickle spot checks, expanded non-issues, DOC-A2/OPS-A2/SEC-A4 backlog items. |
+| 2026-04-19 | Docs consistency: `SYSTEM_WALKTHROUGH`, `Specs/SYSTEM_OVERVIEW`, `QUEUE` HG-01, `RISK_PRECEDENCE`, `ci_spec_compliance` message — Kraken market data vs Alpaca *data* CI guard (aligned with code). |
 
 ---
 

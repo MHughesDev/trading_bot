@@ -101,7 +101,7 @@ python -m streamlit run control_plane/Home.py
 | Doc | Role |
 |-----|------|
 | [`README.md`](../README.md) | Commands, layout, CI, microservices |
-| [`RUNBOOKS.MD`](RUNBOOKS.MD) | Secrets, preflight, incident, QuestDB, bind address |
+| [`RUNBOOKS.MD`](RUNBOOKS.MD) | Secrets, preflight, production/network exposure, Streamlit guard, incident, QuestDB, bind address |
 | [`.env.example`](../.env.example) | All **`NM_`** placeholders |
 | [`QUEUE.MD`](QUEUE.MD) | Roadmap and completed work IDs |
 | [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) | Windows / future desktop UX |

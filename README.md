@@ -37,7 +37,7 @@ docker compose -f infra/docker-compose.yml up -d
 |------|---------|
 | 🖥️ Control plane API | `uvicorn control_plane.api:app --host 0.0.0.0 --port 8000` |
 | 📈 Live decision loop | `python -m app.runtime.live_service` |
-| 🧪 Lint & tests | `ruff check .` · `python3 -m pytest tests/ -q` |
+| 🧪 Lint & tests | `python3 -m ruff check .` · `python3 -m pytest tests/ -q` (or `ruff` if on `PATH`) |
 
 Configure secrets in **`.env`** (see [`.env.example`](.env.example)); app settings use the **`NM_`** prefix.
 
@@ -77,35 +77,9 @@ Publishes **8000** (API + `/metrics`), **8501** (Streamlit). Mounts **`./data`**
 
 **TLS edge (FB-CONT-004)** — optional **Caddy** reverse proxy: merge **`infra/docker-compose.edge.yml`** after the app file. Maps **https://api.localhost:8443** and **https://ui.localhost:8443** (self-signed **`tls internal`**; add **`api.localhost`** / **`ui.localhost`** to **`hosts`**). Edit **`infra/caddy/Caddyfile`** for real DNS + automatic HTTPS on the public internet.
 
-### Production control plane hardening (FB-AUD-001)
+### Control plane security (non-localhost)
 
-When the **FastAPI** app (`control_plane.api`) is reachable from anything other than a **trusted single operator on localhost**, treat it as **production-facing**:
-
-| Must-do | Why |
-|--------|-----|
-| **Set `NM_CONTROL_PLANE_API_KEY`** and send **`X-API-Key`** on mutating routes | Without a key, mutating routes accept requests when **`NM_AUTH_SESSION_ENABLED`** is false — OK for local dev only. |
-| **Or** enable **`NM_AUTH_SESSION_ENABLED`** and use **HTTP-only session cookies** for operators | Same gate as dashboard login; see **`.env.example`**. |
-| **TLS termination** | Use **Caddy** (**FB-CONT-004**), another reverse proxy, or cloud LB — do not expose plain **HTTP** to the public internet. |
-| **Firewall / security groups** | Restrict **:8000** / **:8501** to admin IPs or the proxy only. |
-| **CORS** | Defaults allow **`allow_origins=["*"]`** for LAN dev and Streamlit **EventSource**; for public or multi-tenant hosts, **narrow origins** (see **`FB-AUD-009`** in **`docs/QUEUE.MD`** §2.5). |
-
-Details: **[`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD)** — *Production / network exposure*. Audit: **[`docs/AUDIT_CODE_REVIEW.MD`](docs/AUDIT_CODE_REVIEW.MD)**.
-
-### Streamlit route guard (FB-AUD-002)
-
-**Default:** **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=false`** — anyone who can reach **:8501** can use the dashboard (same “trusted local operator” assumption as an API without a key).
-
-**Turn on** when the dashboard is shared on a **LAN**, **VPN**, or **host** reachable by others:
-
-| Set / enable | Purpose |
-|----------------|---------|
-| **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=true`** | Calls **`require_streamlit_app_access()`** on gated pages: redirect to **`pages/0_Login.py`** unless the user is allowed. |
-| **`NM_AUTH_SESSION_ENABLED=true`** | Required for **password login** in Streamlit (**`POST /auth/login`** → token in **`st.session_state`**). |
-| **`NM_CONTROL_PLANE_URL`** | Base URL for **`GET /auth/me`** (default **`http://127.0.0.1:8000`**). The Streamlit process must reach the **same** API that issued the session. |
-| Session cookie env (**`NM_AUTH_SESSION_COOKIE_*`**, **`NM_AUTH_SESSION_TTL_SECONDS`**) | Must match the **FastAPI** process (same cookie name, TTL, **Secure** / **SameSite** when using HTTPS — see **`FB-AUD-010`**). |
-| **`NM_CONTROL_PLANE_API_KEY`** in the **Streamlit** env | **Automation bypass:** if non-empty, the guard **does not** redirect (headless or scripted use). |
-
-Implementation: **`control_plane/streamlit_util.py`** — **`streamlit_route_guard_enabled()`**, **`require_streamlit_app_access()`**. Runbook: **[`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD)** — *Streamlit route guard*.
+If **:8000** / **:8501** are reachable beyond a **single trusted operator on localhost**, follow **[`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD)** — **Production / network exposure (FB-AUD-001)** (API key or sessions, TLS, firewall, CORS) and **Streamlit route guard (FB-AUD-002)** (`NM_STREAMLIT_ROUTE_GUARD_ENABLED`, session env alignment, optional **`NM_CONTROL_PLANE_API_KEY`** bypass for automation). Background: **[`docs/AUDIT_CODE_REVIEW.MD`](docs/AUDIT_CODE_REVIEW.MD)**.
 
 ### Cloud deployment (FB-CONT-006)
 
@@ -134,6 +108,8 @@ From the repo root: run **`setup.bat`** (venv + install + optional Docker), then
 | [`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD) | Cloud VM / Fargate deployment notes (**FB-CONT-006**) |
 | [`docs/ADR_MANAGED_DATA_SERVICES.MD`](docs/ADR_MANAGED_DATA_SERVICES.MD) | Managed vs self-hosted Redis / TSDB / Qdrant (**FB-CONT-008**) |
 | [`docs/PER_ASSET_OPERATOR.MD`](docs/PER_ASSET_OPERATOR.MD) | Per-asset manifest API; Streamlit **Dashboard** + **`/Asset`** route (FB-AP-027) |
+| [`docs/RISK_PRECEDENCE.MD`](docs/RISK_PRECEDENCE.MD) | `RiskEngine.evaluate` check order (staleness, spread, flatten, …) |
+| [`docs/KRAKEN_MARKET_DATA.MD`](docs/KRAKEN_MARKET_DATA.MD) | Kraken REST/WS — single market-data source for the pipeline |
 
 **As-built specs:** [`docs/Specs/README.MD`](docs/Specs/README.MD) · **Repo layout & CI:** see [`AGENTS.md`](AGENTS.md) for contributors and automation.
 

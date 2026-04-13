@@ -129,7 +129,7 @@ When work uses a **feature branch** (e.g. `cursor/<task>-42e8`):
 
 ```bash
 pip install -e ".[dev]"
-ruff check .
+python3 -m ruff check .
 python3 -m pytest tests/ -q
 bash scripts/ci_spec_compliance.sh
 bash scripts/ci_mlflow_promotion_policy.sh

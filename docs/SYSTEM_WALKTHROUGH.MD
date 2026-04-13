@@ -1,12 +1,12 @@
 # System walkthrough (AI / operator summary)
 
-This document gives a **step-by-step** picture of how the Trading Bot stack runs end-to-end. It reflects the **master system pipeline** ([`MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD)): **`ForecastPacket`** from **`forecaster_model`** (VSN → CNN → multi-resolution xLSTM → fusion → quantiles) + **`PolicySystem`**, **Coinbase-only market data**, and **`execution_mode = paper`** (Alpaca paper execution).
+This document gives a **step-by-step** picture of how the Trading Bot stack runs end-to-end. It reflects the **master system pipeline** ([`MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD)): **`ForecastPacket`** from **`forecaster_model`** (VSN → CNN → multi-resolution xLSTM → fusion → quantiles) + **`PolicySystem`**, **Kraken market data** (REST + WebSocket in the live loop; training/backfill pulls per [`KRAKEN_MARKET_DATA.MD`](KRAKEN_MARKET_DATA.MD)), and **`execution_mode = paper`** (Alpaca paper execution). **Execution** uses **Alpaca** (paper) or **Coinbase** (live) — neither venue feeds the decision pipeline as market data.
 
 ---
 
 ## 1. Concepts that apply everywhere
 
-1. **Market data** always comes from **Coinbase** (WebSocket / REST in the live loop; historical bars in replay).
+1. **Market data** always comes from **Kraken** (WebSocket + REST in `data_plane/ingest/kraken_*`; see [`KRAKEN_MARKET_DATA.MD`](KRAKEN_MARKET_DATA.MD)). **Alpaca** is **not** used for market data in the main tree (`scripts/ci_spec_compliance.sh` guards Alpaca *data* imports).
 2. **One shared decision step** — `run_decision_tick` in `decision_engine/run_step.py` — is used by **live** and **backtest** so behavior stays aligned.
 3. **Decision path** — `DecisionPipeline.step` (see `decision_engine/pipeline.py`):
    - Build OHLC history from the latest feature row and run **`build_forecast_packet_methodology`** (full **`ForecasterModel`** / xLSTM reference forward).
@@ -24,8 +24,8 @@ This document gives a **step-by-step** picture of how the Trading Bot stack runs
 **Step-by-step:**
 
 1. Load **`AppSettings`** (YAML + `NM_*` env).
-2. Open **Coinbase WebSocket** for configured symbols; create **`DecisionPipeline`**, **`RiskEngine`**, **`ExecutionService`** (adapter from `execution_mode`).
-3. Optionally: **QuestDB** for decision traces, **Qdrant** + memory retrieval, **RSS/news** sentiment refresh, **product metadata** cache for tradability.
+2. Open **Kraken WebSocket** (`KrakenWebSocketClient`) for configured symbols; create **`DecisionPipeline`**, **`RiskEngine`**, **`ExecutionService`** (adapter from `execution_mode` / per-asset mode).
+3. Optionally: **QuestDB** for decision traces, **Qdrant** + memory retrieval, **RSS/news** sentiment refresh, **Alpaca/Coinbase universe** metadata for tradability search (not Kraken quotes).
 4. For each normalized WS message:
    - Update **rolling minute bars** and build a **feature row** (tick overlay + bar features via `enrich_bars_last_row`).
    - **`run_decision_tick`** with `mid_price`, `position_signed_qty`, **`portfolio_equity_usd=risk_engine.current_equity`**, spread, timestamps, tradability.
@@ -42,7 +42,7 @@ This document gives a **step-by-step** picture of how the Trading Bot stack runs
 **Paper** here means **`execution_mode: paper`** (default in `app/config`), which routes orders to the **Alpaca paper** adapter — **not** a separate code path for decisions.
 
 - Same **`run_live_loop`** and **`run_decision_tick`** as live.
-- You still consume **Coinbase** prices/bars for signals.
+- You still consume **Kraken** prices/bars for signals (same data plane as live).
 - Set **`NM_ALPACA_API_KEY`** / **`NM_ALPACA_API_SECRET`** for Alpaca; optional **`NM_POSITION_RECONCILE_ENABLED=true`** to align positions with the broker on an interval.
 
 **Takeaway:** “Paper” is **execution venue + credentials**, not a different forecast/policy stack.
@@ -52,7 +52,7 @@ This document gives a **step-by-step** picture of how the Trading Bot stack runs
 ## 4. Live execution on Coinbase (real money path)
 
 - Set **`execution.mode`** to **`live`** (and **`NM_EXECUTION_LIVE_ADAPTER=coinbase`** per defaults).
-- **`create_execution_adapter`** returns **`CoinbaseExecutionAdapter`**; the loop is unchanged — still Coinbase data, still **`spec_policy`** decisions, still **`RiskEngine`** gating.
+- **`create_execution_adapter`** returns **`CoinbaseExecutionAdapter`**; the loop is unchanged — still **Kraken** market data, still **`spec_policy`** decisions, still **`RiskEngine`** gating.
 - Ensure **signing / risk** settings match production policy (e.g. **`NM_RISK_SIGNING_SECRET`**, never **`NM_ALLOW_UNSIGNED_EXECUTION`** in production).
 
 **Takeaway:** Switching paper → live only changes **where orders go** after the same risk-approved intent.

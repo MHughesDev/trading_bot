@@ -4,7 +4,7 @@ The repository previously supported a **dual path**: a Ridge surrogate labeled �
 
 **Current state:** that legacy path has been **removed**. The only runtime decision path is the **master system pipeline** (`docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`):
 
-**Market data → features → forecaster (VSN → latent CNN → multi-resolution xLSTM/LSTM → fusion → quantiles) → `ForecastPacket` → `PolicySystem` → risk gate → execution plan → `RiskEngine` / venues.**
+**Market data (Kraken REST + WebSocket; see [`KRAKEN_MARKET_DATA.MD`](KRAKEN_MARKET_DATA.MD)) → features → forecaster (VSN → latent CNN → multi-resolution xLSTM/LSTM → fusion → quantiles) → `ForecastPacket` → `PolicySystem` → risk gate → execution plan → `RiskEngine` / venues (Alpaca paper, Coinbase live — not market-data sources).**
 
 Configuration for serving lineage:
 

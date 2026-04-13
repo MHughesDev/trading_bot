@@ -520,7 +520,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 | ID | Type | Status | Summary |
 |----|------|--------|---------|
-| HG-01 | Hardening | Done | Coinbase-only market data (CI) |
+| HG-01 | Hardening | Done | Kraken-only market data: CI blocks Alpaca *data* imports outside paper adapter (`ci_spec_compliance.sh`) |
 | HG-02 | Hardening | Done | Risk HMAC + intent gate |
 | HG-03 | Hardening | Done | No raw text → trades |
 | HG-04 | Hardening | Done | No auto MLflow promotion in code (CI guard) |

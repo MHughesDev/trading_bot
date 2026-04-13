@@ -2,7 +2,7 @@
 
 This folder holds **specifications that describe the repository as implemented**. They are maintained to stay aligned with the code; when behavior changes, update the relevant file here (or ask an agent to).
 
-**Not product marketing** — these are engineer-facing maps: modules, responsibilities, main entry points, and boundaries (e.g. Coinbase-only market data, Alpaca paper execution only).
+**Not product marketing** — these are engineer-facing maps: modules, responsibilities, main entry points, and boundaries (e.g. Kraken-only market data, no Alpaca *data* imports outside the paper adapter, Alpaca paper / Coinbase live execution).
 
 ## How this relates to other docs
 

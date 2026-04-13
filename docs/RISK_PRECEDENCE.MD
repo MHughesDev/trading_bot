@@ -16,4 +16,4 @@ When multiple constraints could block a trade, `RiskEngine.evaluate` applies che
 | 10 | **Per-symbol / total exposure** | After mode checks |
 | 11 | **Quantity** | Rounded qty ≤ 0 |
 
-Live runtime should pass **`feed_last_message_at`** from `CoinbaseWebSocketClient.last_message_at` so a silent feed blocks before bar timestamps.
+Live runtime should pass **`feed_last_message_at`** from **`KrakenWebSocketClient.last_message_at`** (`data_plane/ingest/kraken_ws.py`) so a silent feed blocks before bar timestamps.

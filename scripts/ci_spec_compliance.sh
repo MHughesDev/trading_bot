@@ -17,8 +17,8 @@ done < <(
 )
 
 if [[ "$violations" -gt 0 ]]; then
-  echo "Coinbase-only market data: remove Alpaca data client imports from these paths."
+  echo "Kraken-only market data: remove Alpaca data client imports from these paths."
   exit 1
 fi
 
-echo "ci_spec_compliance: OK (no Alpaca market-data imports outside paper adapter)"
+echo "ci_spec_compliance: OK (Kraken-only market data — no Alpaca data imports outside paper adapter)"
