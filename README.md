@@ -91,6 +91,22 @@ When the **FastAPI** app (`control_plane.api`) is reachable from anything other 
 
 Details: **[`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD)** — *Production / network exposure*. Audit: **[`docs/AUDIT_CODE_REVIEW.MD`](docs/AUDIT_CODE_REVIEW.MD)**.
 
+### Streamlit route guard (FB-AUD-002)
+
+**Default:** **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=false`** — anyone who can reach **:8501** can use the dashboard (same “trusted local operator” assumption as an API without a key).
+
+**Turn on** when the dashboard is shared on a **LAN**, **VPN**, or **host** reachable by others:
+
+| Set / enable | Purpose |
+|----------------|---------|
+| **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=true`** | Calls **`require_streamlit_app_access()`** on gated pages: redirect to **`pages/0_Login.py`** unless the user is allowed. |
+| **`NM_AUTH_SESSION_ENABLED=true`** | Required for **password login** in Streamlit (**`POST /auth/login`** → token in **`st.session_state`**). |
+| **`NM_CONTROL_PLANE_URL`** | Base URL for **`GET /auth/me`** (default **`http://127.0.0.1:8000`**). The Streamlit process must reach the **same** API that issued the session. |
+| Session cookie env (**`NM_AUTH_SESSION_COOKIE_*`**, **`NM_AUTH_SESSION_TTL_SECONDS`**) | Must match the **FastAPI** process (same cookie name, TTL, **Secure** / **SameSite** when using HTTPS — see **`FB-AUD-010`**). |
+| **`NM_CONTROL_PLANE_API_KEY`** in the **Streamlit** env | **Automation bypass:** if non-empty, the guard **does not** redirect (headless or scripted use). |
+
+Implementation: **`control_plane/streamlit_util.py`** — **`streamlit_route_guard_enabled()`**, **`require_streamlit_app_access()`**. Runbook: **[`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD)** — *Streamlit route guard*.
+
 ### Cloud deployment (FB-CONT-006)
 
 Primary path: **single Linux VM + Docker Compose + systemd**; alternate sketch: **AWS Fargate + EFS**. Secrets via cloud secret manager → **`.env`**; networking, disk, backups, and a second-path bullet list: **[`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD)** (see also **[`docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)**, **FB-CONT-P0**).

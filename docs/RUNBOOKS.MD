@@ -59,9 +59,25 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 2. **TLS:** Terminate HTTPS in front of the API (e.g. **[TLS edge — Caddy](#tls-edge--caddy-fb-cont-004)**), cloud load balancer, or **Tailscale**/VPN — not raw **HTTP** on a public IP.
 3. **Bind / firewall:** Prefer **`NM_CONTROL_PLANE_HOST=127.0.0.1`** if only a reverse proxy on the same host connects upstream; otherwise restrict **security groups** / **iptables** so **:8000** is not world-open unless behind a proxy you control.
 4. **CORS:** FastAPI uses permissive **`CORSMiddleware`** defaults for Streamlit + SSE (**FB-AP-034**). For a **public** hostname, plan to **restrict `allow_origins`** (queue **`FB-AUD-009`**).
-5. **Streamlit:** For shared dashboards, set **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=true`** and document session env (queue **`FB-AUD-002`**).
+5. **Streamlit:** For shared dashboards, enable the **route guard** and align session env with the API — see **[Streamlit route guard (FB-AUD-002)](#streamlit-route-guard-fb-aud-002)** below.
 
-**Related:** **`README.md`** — *Production control plane hardening*; **`docs/AUDIT_CODE_REVIEW.MD`**.
+**Related:** **`README.md`** — *Production control plane hardening* · *Streamlit route guard*; **`docs/AUDIT_CODE_REVIEW.MD`**.
+
+## Streamlit route guard (FB-AUD-002)
+
+**Code:** **`control_plane/streamlit_util.py`** — **`require_streamlit_app_access()`** (called after **`st.set_page_config`** on gated pages; **`pages/0_Login.py`** must **not** call it).
+
+**When to enable:** Set **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=true`** if **:8501** is reachable beyond a **single trusted operator on localhost** (shared LAN, remote host, or dashboard behind a reverse proxy).
+
+**Behavior:**
+
+- **Guard off** (**default `false`**): no redirect — same ergonomics as an unauthenticated API in dev.
+- **Guard on** and **`NM_CONTROL_PLANE_API_KEY`** is **set** in the **Streamlit** process: guard **skips** redirect (automation / headless / scripts that use the API key on **`httpx`** calls).
+- **Guard on** and **no** API key in Streamlit: redirect to login **unless** **`st.session_state` holds an operator token** and **`GET {NM_CONTROL_PLANE_URL}/auth/me`** returns **200** with the **`Cookie`** header built from that token.
+
+**Session env (must match the FastAPI process):** **`NM_AUTH_SESSION_ENABLED=true`** for login UI; **`NM_CONTROL_PLANE_URL`** points to the API that serves **`/auth/login`** and **`/auth/me`**; **`NM_AUTH_SESSION_COOKIE_NAME`**, **`NM_AUTH_SESSION_TTL_SECONDS`**, **`NM_AUTH_SESSION_COOKIE_SECURE`**, **`NM_AUTH_SESSION_COOKIE_SAMESITE`** — see **`.env.example`**. Misaligned values cause **`/auth/me`** to fail and repeated redirects to login.
+
+**Note:** Deep links to a Streamlit app page may still show the login flow first; the UI stores the session token in **`session_state`** after **`POST /auth/login`**.
 
 ## Execution mode (paper vs live)
 

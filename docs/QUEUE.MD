@@ -159,14 +159,14 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-19):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Open:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-001**…**017** (promoted from [`AUDIT_CODE_REVIEW.MD`](AUDIT_CODE_REVIEW.MD)). **Next:** optional GitHub sync [**§7**](#7-github-sync-optional). Agents: **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** first.
+**Status (2026-04-19):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Open:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-003**…**017** (promoted from [`AUDIT_CODE_REVIEW.MD`](AUDIT_CODE_REVIEW.MD)); **FB-AUD-001** / **002** **Done**. **Next:** optional GitHub sync [**§7**](#7-github-sync-optional). Agents: **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** first.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **0** | — |
-| **MEDIUM** | **10** | **FB-AUD-002**–**004**, **007**–**013** ([§2.5](#25-post-audit-hardening-fb-aud)) |
+| **MEDIUM** | **9** | **FB-AUD-003**–**004**, **007**–**013** ([§2.5](#25-post-audit-hardening-fb-aud)) |
 | **LOW** | **6** | **FB-AUD-005**, **006**, **014**–**017** ([§2.5](#25-post-audit-hardening-fb-aud)) |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
@@ -284,7 +284,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 | ID | Batch | Phase | Cat | Kind | Pri | Status | Summary | Affected files |
 |----|-------|-------|-----|------|-----|--------|---------|----------------|
 | FB-AUD-001 | AUD-DOC | B | OP | change | MEDIUM | Done | **Production API hardening (docs):** TLS + firewall + **`NM_CONTROL_PLANE_API_KEY`** / session auth; **restrict CORS** when API is not localhost-only; link from **`README.md`** / **`RUNBOOKS.MD`**. *(Audit DOC-A1.)* **Done 2026-04-19:** **`README.md`** — subsection *Production control plane hardening*; **`RUNBOOKS.MD`** — *Production / network exposure*. | `README.md`, `docs/RUNBOOKS.MD`, `docs/AUDIT_CODE_REVIEW.MD` |
-| FB-AUD-002 | AUD-DOC | B | OP | change | MEDIUM | Open | **Streamlit route guard (docs):** when to set **`NM_STREAMLIT_ROUTE_GUARD_ENABLED`**, session env vars, and **`NM_CONTROL_PLANE_API_KEY`** bypass for automation. *(Audit DOC-A2.)* | `README.md`, `docs/RUNBOOKS.MD`, `control_plane/streamlit_util.py` |
+| FB-AUD-002 | AUD-DOC | B | OP | change | MEDIUM | Done | **Streamlit route guard (docs):** when to set **`NM_STREAMLIT_ROUTE_GUARD_ENABLED`**, session env vars, and **`NM_CONTROL_PLANE_API_KEY`** bypass for automation. *(Audit DOC-A2.)* **Done 2026-04-19:** **`README.md`** — *Streamlit route guard*; **`RUNBOOKS.MD`** — *Streamlit route guard*; **`streamlit_util.py`** docstrings. | `README.md`, `docs/RUNBOOKS.MD`, `control_plane/streamlit_util.py` |
 | FB-AUD-003 | AUD-OPS | B | OP | platform | MEDIUM | Open | **Startup warning:** log or warn when **`control_plane_api_key`** unset **and** bind address is non-loopback (misconfiguration risk). *(Audit OPS-A1.)* | `control_plane/api.py`, `docs/RUNBOOKS.MD` |
 | FB-AUD-004 | AUD-OPS | B | OP | platform | MEDIUM | Open | **Optional rate limiting** for **`control_plane`** when exposed publicly (middleware or reverse-proxy notes). *(Audit OPS-A2.)* | `control_plane/api.py`, `docs/RUNBOOKS.MD`, `infra/` |
 | FB-AUD-005 | AUD-QA | B | OP | tech_debt | LOW | Open | **Exception logging pass:** **`app/runtime/live_service.py`** — ensure **`except Exception`** paths log with **symbol** / correlation context. *(Audit QA-A1.)* | `app/runtime/live_service.py` |

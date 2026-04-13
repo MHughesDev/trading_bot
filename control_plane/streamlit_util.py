@@ -48,7 +48,14 @@ def get_questdb_console_url() -> str:
 
 
 def streamlit_route_guard_enabled() -> bool:
-    """FB-UX-004: when true, app pages require session or ``NM_CONTROL_PLANE_API_KEY`` in the Streamlit process."""
+    """Return True when ``NM_STREAMLIT_ROUTE_GUARD_ENABLED`` is truthy (1/true/yes).
+
+    When enabled, ``require_streamlit_app_access`` enforces login unless
+    ``NM_CONTROL_PLANE_API_KEY`` is set in this process (automation bypass) or
+    ``GET /auth/me`` succeeds with the session cookie. Requires
+    ``NM_AUTH_SESSION_ENABLED`` on the API for password login. See README
+    *Streamlit route guard (FB-AUD-002)* and ``docs/RUNBOOKS.MD``.
+    """
     return os.getenv("NM_STREAMLIT_ROUTE_GUARD_ENABLED", "").strip().lower() in (
         "1",
         "true",
@@ -58,7 +65,11 @@ def streamlit_route_guard_enabled() -> bool:
 
 def require_streamlit_app_access() -> None:
     """
-    Redirect to the Login page unless guard is off, API key bypass is set, or ``GET /auth/me`` succeeds.
+    Redirect to the Login page unless the guard is off, API key bypass is set,
+    or ``GET {NM_CONTROL_PLANE_URL}/auth/me`` succeeds with session cookies.
+
+    **Bypass:** non-empty ``NM_CONTROL_PLANE_API_KEY`` in the Streamlit process —
+    use for automation; do not rely on this for human multi-user dashboards.
 
     Call **after** ``st.set_page_config`` on pages that use it. Login page must not call this.
     """
