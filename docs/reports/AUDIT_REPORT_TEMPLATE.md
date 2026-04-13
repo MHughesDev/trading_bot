@@ -2,7 +2,7 @@
 
 **Report date (UTC):** `YYYY-MM-DD`  
 **Audited commit / tag:** `<SHA or tag>`  
-**Playbook:** [`docs/FULL_AUDIT.md`](../FULL_AUDIT.md) (template v3.2+)
+**Playbook:** [`docs/governance/full_audit.md`](../full_audit.md) (template v3.2+)
 
 ---
 

@@ -20,5 +20,5 @@
 
 ## Related
 
-- [`RISK_PRECEDENCE.MD`](../RISK_PRECEDENCE.MD) — risk ordering
+- [`risk_precedence.md`](../risk_precedence.md) — risk ordering
 - [`RISK_ENGINE.MD`](RISK_ENGINE.MD) — exposure caps

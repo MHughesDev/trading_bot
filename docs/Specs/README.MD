@@ -14,10 +14,10 @@ This folder holds **specifications that describe the repository as implemented**
 | **`docs/QUEUE.MD`** | Queue protocol + conventions |
 | **`docs/QUEUE_STACK.csv`** | Next tasks (`agent_task` per row) |
 | **`docs/QUEUE_ARCHIVE.MD`** | Open queue tables, resolved fixes (`IL-*`), gates (`HG-*`), archive (`FB-*`) |
-| **`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`** | Agent: one slice → PR → merge (part of queue system) |
-| **[`docs/FULL_AUDIT.md`](../FULL_AUDIT.md)** | Full-scope audit playbook; **§8** standalone report spec; skills **`draft-audit-report`**, **`audit-report-to-queue`** |
+| **`docs/queue/automation_queue_slice_prompt.md`** | Agent: one slice → PR → merge (part of queue system) |
+| **[`docs/governance/full_audit.md`](../full_audit.md)** | Full-scope audit playbook; **§8** standalone report spec; skills **`draft-audit-report`**, **`audit-report-to-queue`** |
 | **[`docs/reports/AUDIT_REPORT_TEMPLATE.md`](../reports/AUDIT_REPORT_TEMPLATE.md)** | Skeleton for **`AUDIT_REPORT_*.md`** deliverables |
-| **`docs/READY_TO_RUN.MD`** | Operator checklist (venv, `.env`, Docker, preflight, run UI) |
+| **`docs/operations/ready_to_run.md`** | Operator checklist (venv, `.env`, Docker, preflight, run UI) |
 | **`docs/*.MD` reference docs** | Deep dives (risk order, backtesting semantics, QuestDB, etc.) |
 
 ## Index
@@ -38,8 +38,8 @@ This folder holds **specifications that describe the repository as implemented**
 | [`FORECASTER_AND_POLICY.MD`](FORECASTER_AND_POLICY.MD) | `forecaster_model/`, `policy_model/`, `ForecastPacket` |
 | [`MASTER_SPEC_RISK_STATE_GAP.MD`](MASTER_SPEC_RISK_STATE_GAP.MD) | App vs policy `RiskState` vs master spec §12 (FB-AUDIT-12) |
 | [`MULTI_ASSET_PORTFOLIO.MD`](MULTI_ASSET_PORTFOLIO.MD) | Independent ticks vs shared risk caps; no cross-symbol optimizer (FB-SPEC-07) |
-| [`../MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD) | Historical note: legacy Ridge path removed; single master pipeline |
-| [`../SYSTEM_WALKTHROUGH.MD`](../SYSTEM_WALKTHROUGH.MD) | Step-by-step: live, paper, live execution, backtest (master pipeline) |
+| [`../migration_to_spec_pipeline.md`](../migration_to_spec_pipeline.md) | Historical note: legacy Ridge path removed; single master pipeline |
+| [`../system_walkthrough.md`](../system_walkthrough.md) | Step-by-step: live, paper, live execution, backtest (master pipeline) |
 | [`../Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](../Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) | Authoritative end-to-end system spec |
 
 ## Naming convention

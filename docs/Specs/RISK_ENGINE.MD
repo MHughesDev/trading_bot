@@ -4,7 +4,7 @@
 
 - Evaluates **`ActionProposal`** vs **`RiskState`** and settings (stale feed/data, spread, drawdown, mode, exposure, position).
 - Returns **`TradeAction | None`**; `None` means blocked.
-- Precedence is documented in **`docs/RISK_PRECEDENCE.MD`** (authoritative for ordering).
+- Precedence is documented in **`docs/architecture/risk_precedence.md`** (authoritative for ordering).
 
 ## Optional inputs
 

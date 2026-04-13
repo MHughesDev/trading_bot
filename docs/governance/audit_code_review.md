@@ -85,7 +85,7 @@
 
 ## Recommended changes (not implemented by this audit doc)
 
-1. **A-1 / A-6:** Document in **`README.md`** / **`RUNBOOKS.MD`**: production **must** use **TLS**, **firewall**, **`NM_CONTROL_PLANE_API_KEY`** and/or **session auth**, and **restrict CORS origins** when exposing the API beyond localhost. Optional: env-driven `allow_origins` list defaulting to `["*"]` only in dev.
+1. **A-1 / A-6:** Document in **`README.md`** / **`runbooks.md`**: production **must** use **TLS**, **firewall**, **`NM_CONTROL_PLANE_API_KEY`** and/or **session auth**, and **restrict CORS origins** when exposing the API beyond localhost. Optional: env-driven `allow_origins` list defaulting to `["*"]` only in dev.
 2. **A-2:** Prefer **`logging.exception`** or structured logs in hot paths; narrow exceptions where the failure mode is known.
 3. **A-3:** Add a short comment in **`intent_gate.py`** explaining the “no secret → allow” branch vs preflight.
 4. **A-4:** Ensure **`AGENTS.md`** §10 or contributor checklist mentions the **queue system** ([`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md)) when editing backlog workflow (may already be partially covered).
@@ -126,7 +126,7 @@
 
 The granular backlog below is **promoted** to the **queue system** as **§2.5** in **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD#25-post-audit-hardening-fb-aud)** — IDs **`FB-AUD-001`** … **`FB-AUD-017`**, with **`DOC-A1`** … **`LEGACY-A1`** traceability preserved in each row. **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** lists the same work in **`stack_order`** with self-contained **`agent_task`** (implement top to bottom unless reprioritized). Conventions: **[`QUEUE.MD`](QUEUE.MD)** · index: **[`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md)**.
 
-**Done slices:** **`FB-AUD-001`** (2026-04-19) — **`README.md`** + **`RUNBOOKS.MD`** production exposure checklist; **`FB-AUD-002`** (2026-04-19) — Streamlit route guard tables + runbook + **`streamlit_util`** docstrings; see §2.5 rows.
+**Done slices:** **`FB-AUD-001`** (2026-04-19) — **`README.md`** + **`runbooks.md`** production exposure checklist; **`FB-AUD-002`** (2026-04-19) — Streamlit route guard tables + runbook + **`streamlit_util`** docstrings; see §2.5 rows.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Documentation last reviewed:** **2026-04-13**.
 
-**Queue system:** The **queue system** is every file that implements backlog machinery — see **[`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md)** for the full list (`QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, `AUTOMATION_QUEUE_SLICE_PROMPT.MD`, **Add to Queue** skill, optional `scripts/generate_queue_stack.py`). This file (`QUEUE.MD`) holds **protocol and conventions** only.
+**Queue system:** The **queue system** is every file that implements backlog machinery — see **[`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md)** for the full list (`QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, `queue/automation_queue_slice_prompt.md`, **Add to Queue** skill, optional `scripts/generate_queue_stack.py`). This file (`QUEUE.MD`) holds **protocol and conventions** only.
 
 ---
 
@@ -15,7 +15,7 @@
 
 **Human / history:** Full tables (completed epics, `IL-*`, archive) live in **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)**. Cross-repo note: copy **`QUEUE.MD`** + **`QUEUE_STACK.csv`** schema together; see §0 column definitions.
 
-**References (background):** [`RISK_PRECEDENCE.MD`](RISK_PRECEDENCE.MD) · [`RUNBOOKS.MD`](RUNBOOKS.MD) · [`AUDIT_CODE_REVIEW.MD`](AUDIT_CODE_REVIEW.MD) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
+**References (background):** [`architecture/risk_precedence.md`](architecture/risk_precedence.md) · [`operations/runbooks.md`](operations/runbooks.md) · [`governance/audit_code_review.md`](governance/audit_code_review.md) · [`Human Provided Specs/`](Human%20Provided%20Specs/README.MD)
 
 ---
 
@@ -35,8 +35,9 @@
 |---------|---------|
 | [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) | **Index of all queue-system files** (this repo) |
 | [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) | Full §2–§5 tables (open detail, resolved fixes, gates, archive) |
-| [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) | PR / merge workflow for one slice |
+| [`queue/automation_queue_slice_prompt.md`](queue/automation_queue_slice_prompt.md) | PR / merge workflow for one slice |
 | [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) | **Add to Queue** skill |
+| [`.cursor/skills/queue-one-at-a-time/SKILL.md`](../.cursor/skills/queue-one-at-a-time/SKILL.md) | **Queue One-at-a-Time** execution skill |
 | [`scripts/generate_queue_stack.py`](../scripts/generate_queue_stack.py) | Optional CSV regenerator |
 
 ---
@@ -54,18 +55,19 @@
 | **`id`** | yes | Queue ID (e.g. **FB-AUD-003**) or **`_QUEUE_EMPTY_`** when no Open work. |
 | **`kind`** | yes | **Kind** from [§1.1](#11-kind-work-type) — e.g. `platform`, `tech_debt`, `hardening`. |
 | **`status`** | yes | **`Open`** / **`In progress`** / **`Done`** / **`empty`** (only with **`_QUEUE_EMPTY_`**). |
+| **`summary`** | yes | Short execution summary (1–2 clauses) used by agents and status snapshots; should align with `summary_one_line`. |
 | **`summary_one_line`** | yes | Short title for humans and grep. |
 | **`agent_task`** | yes | **Self-sufficient instructions:** goal, acceptance criteria, and constraints in plain text (can be long; use `\|` or newlines escaped as needed in CSV). |
 | **`affected_files`** | no | Pipe-separated **primary** paths or globs — **starting points**, not exhaustive. |
-| **`docs_refs`** | no | Pipe-separated **optional** docs for context (e.g. `docs/RUNBOOKS.MD`). |
+| **`docs_refs`** | no | Pipe-separated **optional** docs for context (e.g. `docs/operations/runbooks.md`). |
 | **`audit_id`** | no | Traceability (e.g. **OPS-A1**, **DOC-A1**) when promoted from an audit. |
 | **`anchor`** | no | Legacy anchor into `QUEUE_ARCHIVE.MD` (e.g. `#25-post-audit-hardening-fb-aud`). |
 
 **Sentinel row when backlog is empty:**
 
 ```text
-stack_order,priority,phase,batch,id,kind,status,summary_one_line,agent_task,affected_files,docs_refs,audit_id,anchor
-9999,LOW,D,,_QUEUE_EMPTY_,deferred,empty,No open queue items,N/A — add work via §6.,,,,
+stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_task,affected_files,docs_refs,audit_id,anchor
+9999,LOW,D,,_QUEUE_EMPTY_,deferred,empty,No open queue items,No open queue items,N/A — add work via §6.,,,,
 ```
 
 **Maintenance:** Any PR that adds/closes/reorders **Open** work must update **`QUEUE_STACK.csv`** and mirror status lines into **`QUEUE_ARCHIVE.MD`** where that ID has a narrative row. After editing **`scripts/generate_queue_stack.py`** `ROWS`, run **`python scripts/generate_queue_stack.py`** so the CSV matches (numbers are derived, not hand-edited in Python).
@@ -113,13 +115,13 @@ stack_order,priority,phase,batch,id,kind,status,summary_one_line,agent_task,affe
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-16):** Roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** — **Done**. **FB-DOC-024** (README Quick start first) — **Done**. **FB-SETUP-021**…**023** — **Done**. **FB-UX-015** / **FB-UX-016** — **Done**. **FB-RUN-018**…**020** — **Done**. **FB-AUD-001**…**020** and **FB-CONT-009** — **Done**. **Open stack:** empty — sentinel **`_QUEUE_EMPTY_`** in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)**.
+**Snapshot (2026-04-13):** Canonical replacement program expanded to **FB-CAN-001**…**FB-CAN-078** after another missed-details pass. Added items now cover service configuration snapshot contracts, lag/cycle metrics, weekend-mode occupancy, exchange-risk/data-integrity degradation inputs, execution latency quality terms, edge-budget monitoring thresholds, immutable run bindings, and an automated canonical acceptance audit gate. Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** 78 canonical replacement slices; next item is **FB-CAN-001**.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **0** | — |
-| **MEDIUM** | **0** | — |
-| **LOW** | **0** | — |
+| **HIGH** | **23** | FB-CAN-001..008, FB-CAN-013, FB-CAN-015..016, FB-CAN-019..021, FB-CAN-024, FB-CAN-029..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
+| **MEDIUM** | **43** | FB-CAN-009..012, FB-CAN-014, FB-CAN-017..018, FB-CAN-022..023, FB-CAN-025..028, FB-CAN-032, FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
+| **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
 **Full row text and completed history:** [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (§2 open tables, §3 fixes, §4 gates, §5 archive).
 

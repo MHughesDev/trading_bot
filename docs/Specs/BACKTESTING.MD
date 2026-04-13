@@ -9,5 +9,5 @@
 
 ## Semantics
 
-- Optional **portfolio accounting** (slippage, fees, solvency) — see **`docs/BACKTESTING_SIMULATOR.MD`** for full detail
+- Optional **portfolio accounting** (slippage, fees, solvency) — see **`docs/architecture/backtesting_simulator.md`** for full detail
 - **`backtesting_replay_available_cash`** (settings): when enabled with portfolio tracking, passes simulated cash into risk for buy cap consistency

@@ -10,7 +10,7 @@
 
 - **`Home.py`** — Dashboard (holdings, PnL, health strip, init monitor, scheduler panel)
 - **`pages/`** — **`0_Login`**, **`1_Live`**, **`2_Regimes`**, **`3_Routes`**, **`4_Models`**, **`5_Logs`**, **`6_Emergency`**, **`7_Account`**, **`Asset`** (per-symbol; query `?symbol=…`)
-- **`streamlit_util.py`** — API base (`NM_CONTROL_PLANE_URL`), mutate helpers with session cookie + **`X-API-Key`**, optional route guard (**`NM_STREAMLIT_ROUTE_GUARD_ENABLED`**) — details: [`../RUNBOOKS.MD`](../RUNBOOKS.MD) *Streamlit route guard*
+- **`streamlit_util.py`** — API base (`NM_CONTROL_PLANE_URL`), mutate helpers with session cookie + **`X-API-Key`**, optional route guard (**`NM_STREAMLIT_ROUTE_GUARD_ENABLED`**) — details: [`../runbooks.md`](../runbooks.md) *Streamlit route guard*
 
 ## Run
 

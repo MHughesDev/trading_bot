@@ -2,7 +2,7 @@
 
 **Report date (UTC):** **2026-04-13**  
 **Audited commit:** `WORKTREE_UNCOMMITTED`  
-**Playbook:** [`docs/FULL_AUDIT.md`](../FULL_AUDIT.md) (template v3.2)
+**Playbook:** [`docs/governance/full_audit.md`](../full_audit.md) (template v3.2)
 
 ---
 
@@ -30,7 +30,7 @@ This pass was executed on a CI-aligned interpreter baseline (Python 3.12), and c
 
 ### G — Governance & scope
 - **Verdict:** P  
-- **Evidence:** `AGENTS.md`, `docs/FULL_AUDIT.md`, `docs/QUEUE_SCHEMA.md`.
+- **Evidence:** `AGENTS.md`, `docs/governance/full_audit.md`, `docs/QUEUE_SCHEMA.md`.
 
 ### SEC-REPO — Secrets & repository hygiene
 - **Verdict:** PWF  
@@ -86,7 +86,7 @@ This pass was executed on a CI-aligned interpreter baseline (Python 3.12), and c
 
 ### OPS — Operational readiness & DR
 - **Verdict:** P  
-- **Evidence:** `docs/RUNBOOKS.MD` and operational scripts.
+- **Evidence:** `docs/operations/runbooks.md` and operational scripts.
 
 ### PRIV — Privacy & compliance
 - **Verdict:** N/A — no dedicated compliance evidence package assembled in this pass.

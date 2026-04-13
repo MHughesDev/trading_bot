@@ -32,7 +32,7 @@ Follow this workflow whenever you need to **append or edit** the project work qu
 
 ## Row shape (`QUEUE_STACK.csv`)
 
-Required headers include: `stack_order`, `priority`, `phase`, `batch`, `id`, `kind`, `status`, `summary_one_line`, `agent_task`, `affected_files`, `docs_refs`, `audit_id` (optional), `anchor` (optional).
+Required headers include: `stack_order`, `priority`, `phase`, `batch`, `id`, `kind`, `status`, `summary`, `summary_one_line`, `agent_task`, `affected_files`, `docs_refs`, `audit_id` (optional), `anchor` (optional).
 
 - **`agent_task`:** Goal, acceptance criteria, and constraints in plain text (quote the field if it contains commas).
 - **`stack_order`:** Smallest number among **`Open`** rows = next task. **If** you use [`scripts/generate_queue_stack.py`](../../../scripts/generate_queue_stack.py): reorder or append entries in **`ROWS`** (sentinel **`_QUEUE_EMPTY_`** last), run the script — **do not** edit numeric **`stack_order`** in the Python file. **If** you edit **`QUEUE_STACK.csv`** directly, set **`stack_order`** on each row.

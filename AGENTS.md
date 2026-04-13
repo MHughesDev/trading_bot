@@ -10,7 +10,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 **Trading Bot** (this repository) is a Python **multi-route AI crypto trading** codebase: **Kraken** for **all market data**, Alpaca for **paper execution only**, shared **decision + risk** path for live and replay, typed contracts (`app/contracts/`), and adapters under `execution/adapters/`. **Coinbase** appears only in the **live execution** adapter when configured — not for market data ingestion.
 
-**This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, **`docs/*.MD`** including the **[queue system](docs/QUEUE_SCHEMA.md)** ([`docs/QUEUE.MD`](docs/QUEUE.MD), [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv), [`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD), [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD), [`.cursor/skills/add-to-queue/SKILL.md`](.cursor/skills/add-to-queue/SKILL.md), optional [`scripts/generate_queue_stack.py`](scripts/generate_queue_stack.py)), `scripts/` (CI guards, smoke tests).
+**This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, **`docs/*.MD`** including the **[queue system](docs/QUEUE_SCHEMA.md)** ([`docs/QUEUE.MD`](docs/QUEUE.MD), [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv), [`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD), [`docs/queue/automation_queue_slice_prompt.md`](docs/queue/automation_queue_slice_prompt.md), [`.cursor/skills/add-to-queue/SKILL.md`](.cursor/skills/add-to-queue/SKILL.md), optional [`scripts/generate_queue_stack.py`](scripts/generate_queue_stack.py)), `scripts/` (CI guards, smoke tests).
 
 **This repo does not own:** your brokerage accounts, cloud secrets stores, production deployment pipelines (unless added here), or external ERP/CRM. **Do not** assume access to live keys or paid APIs beyond what `.env` provides.
 
@@ -20,7 +20,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 Agents working here should:
 
-- For **next queue item** work, read **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** first (smallest `stack_order` with `status=Open`; see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Use the row’s **`agent_task`** + **`affected_files`** — do not load the full [`QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) unless **`docs_refs`** requires it. If **`QUEUE_STACK.csv`** has no **`Open`** row (or `id=_QUEUE_EMPTY_`), **stop** and report — add or reprioritize per [**§6**](docs/QUEUE.MD#6-how-to-add-or-close-an-item); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+- For **next queue item** work, read **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** first (smallest `stack_order` with `status=Open`; see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Use the row’s **`agent_task`** + **`affected_files`** — do not load the full [`QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) unless **`docs_refs`** requires it. If **`QUEUE_STACK.csv`** has no **`Open`** row (or `id=_QUEUE_EMPTY_`), **stop** and report — add or reprioritize per [**§6**](docs/QUEUE.MD#6-how-to-add-or-close-an-item); see [`docs/queue/automation_queue_slice_prompt.md`](docs/queue/automation_queue_slice_prompt.md) **Phase 1**.
 - When updating the **queue generator** ([`scripts/generate_queue_stack.py`](scripts/generate_queue_stack.py)): **reorder or append** entries in **`ROWS`** only — **`stack_order`** is filled when you run **`python scripts/generate_queue_stack.py`** (keep **`_QUEUE_EMPTY_`** last).
 - Preserve **non-negotiable rules** below unless the user task explicitly overrides.
 - Keep **live vs replay** behavior aligned where the architecture expects it (`decision_engine/run_step.py` is the shared decision step).
@@ -71,7 +71,7 @@ Agents working here should:
 | `infra/` | `docker-compose.yml`, Prometheus config |
 | `scripts/` | `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`, `smoke_credentials.py`, `create_github_issues.sh` |
 | `tests/` | Pytest suite |
-| `docs/` | **[Queue system](docs/QUEUE_SCHEMA.md):** `QUEUE.MD`, `QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, `AUTOMATION_QUEUE_SLICE_PROMPT.MD`, `QUEUE_SCHEMA.md`; other reference `.MD` files |
+| `docs/` | **[Queue system](docs/QUEUE_SCHEMA.md):** `QUEUE.MD`, `QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, `queue/automation_queue_slice_prompt.md`, `QUEUE_SCHEMA.md`; other reference `.MD` files |
 | `legacy/cryptobot/` | Frozen snapshot; not part of main pipeline |
 
 ---
@@ -151,7 +151,7 @@ Update **when** the change affects:
 
 - Operator-visible behavior, new/changed **`NM_*`** or config keys, or smoke/CI steps → **[`README.md`](README.md)** and/or relevant **[`docs/*.MD`](docs/)**.
 - **Queue system** — backlog or process changes → keep **[`docs/QUEUE_SCHEMA.md`](docs/QUEUE_SCHEMA.md)** consistent and update **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** + **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** + **[`docs/QUEUE.MD`](docs/QUEUE.MD)** snapshot as needed (see schema); only if the task is to record work — otherwise a short PR/summary may suffice.
-- **Full-scope audit** — follow **[`docs/FULL_AUDIT.md`](docs/FULL_AUDIT.md)**; end with a **§8** report under **`docs/reports/`**; use Cursor skills **`draft-audit-report`** / **`audit-report-to-queue`** (see **[`.cursor/skills/`](.cursor/skills/)**) to polish or promote findings to **`QUEUE_STACK.csv`**.
+- **Full-scope audit** — follow **[`docs/governance/full_audit.md`](docs/governance/full_audit.md)**; end with a **§8** report under **`docs/reports/`**; use Cursor skills **`draft-audit-report`** / **`audit-report-to-queue`** (see **[`.cursor/skills/`](.cursor/skills/)**) to polish or promote findings to **`QUEUE_STACK.csv`**.
 
 Do **not** duplicate long narratives across files; link to `docs/` instead.
 

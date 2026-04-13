@@ -2,7 +2,7 @@
 
 **Brainstorm ID:** BS-006  
 **Status:** ideas only — non-binding until promoted into the **[queue system](../QUEUE_SCHEMA.md)**  
-**Related:** [`docs/FULL_AUDIT.md`](../FULL_AUDIT.md) · [`docs/reports/AUDIT_REPORT_TEMPLATE.md`](../reports/AUDIT_REPORT_TEMPLATE.md) · skills **`draft-audit-report`**, **`audit-report-to-queue`**
+**Related:** [`docs/governance/full_audit.md`](../full_audit.md) · [`docs/reports/AUDIT_REPORT_TEMPLATE.md`](../reports/AUDIT_REPORT_TEMPLATE.md) · skills **`draft-audit-report`**, **`audit-report-to-queue`**
 
 ---
 
@@ -29,7 +29,7 @@ This file is a **conversation starter** — not a spec.
 
 ## Flow *(sketch)*
 
-1. Run **`FULL_AUDIT.md`** §4 categories → fill §2 / §5 in playbook.  
+1. Run **`full_audit.md`** §4 categories → fill §2 / §5 in playbook.  
 2. Emit **§8** standalone **`AUDIT_REPORT_*.md`** (or use **`draft-audit-report`**).  
 3. **`audit-report-to-queue`:** parse **## Findings** table → append **`QUEUE_STACK.csv`** rows + mirror **`QUEUE_ARCHIVE.MD`** §2.5-style table if needed.  
 4. Implement top of stack; close rows; optional **follow-up audit** slice.
@@ -46,4 +46,4 @@ This file is a **conversation starter** — not a spec.
 
 ## Promotion
 
-When this brainstorm converges, add a short row in **`QUEUE_ARCHIVE.MD`** or a **queue system** note in **`FULL_AUDIT.md` §8** — no duplicate of this entire file in the backlog.
+When this brainstorm converges, add a short row in **`QUEUE_ARCHIVE.MD`** or a **queue system** note in **`full_audit.md` §8** — no duplicate of this entire file in the backlog.

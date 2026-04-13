@@ -1,6 +1,6 @@
 # Full-scope audit — playbook & checklist
 
-**Purpose:** A **single, repeatable**, **repository-neutral** document for running a **complete** audit pass across security, quality, performance, operations, and data. Copy this file **verbatim** into any repo (`docs/FULL_AUDIT.md`, `SECURITY/AUDIT_PLAYBOOK.md`, or `.github/AUDIT_FULL.md`)—**do not** fork per-language variants; instead fill **§0** and map tools in **§0.4**.
+**Purpose:** A **single, repeatable**, **repository-neutral** document for running a **complete** audit pass across security, quality, performance, operations, and data. Copy this file **verbatim** into any repo (`docs/governance/full_audit.md`, `SECURITY/AUDIT_PLAYBOOK.md`, or `.github/AUDIT_FULL.md`)—**do not** fork per-language variants; instead fill **§0** and map tools in **§0.4**.
 
 **Audience:** Human auditors, **AI agents**, and hybrid workflows. The **§0.3** master prompt + per-category **Audit prompt** blocks (**§4**) are the **agentic** interface.
 
@@ -818,7 +818,7 @@ Copy this block into your repo and fill it so auditors know **where** commands a
 | Container / image build *(if any)* | Root `Dockerfile`; `docker build` in CI |
 | Security / supply-chain scans in CI | Ruff, pytest, `ci_spec_compliance.sh`, `pip-audit` (informational), Trivy fs (informational), queue consistency script |
 | Integration / E2E triggers | `integration-optional` job (`workflow_dispatch`) |
-| Runbooks / ops docs | `docs/RUNBOOKS.MD`, `docs/READY_TO_RUN.MD` |
+| Runbooks / ops docs | `docs/operations/runbooks.md`, `docs/operations/ready_to_run.md` |
 | Prior audit reports *(optional)* | [`docs/reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md) |
 | **Queue system** *(if used)* | [`docs/QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) · [`QUEUE_STACK.csv`](QUEUE_STACK.csv) · [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) |
 
@@ -842,7 +842,7 @@ Create the directory if needed. **Do not** overwrite prior reports without archi
 The audit report **must** include these sections (headings at exactly this level unless your org template says otherwise):
 
 1. **`# Audit report`** — title line with **product/repo name** and **UTC date** of report completion.
-2. **`## Metadata`** — table: repository, commit SHA/tag audited, audit lead, scope (in/out), link to this **`FULL_AUDIT.md`** copy, link to **§2** row in playbook if embedded in repo.
+2. **`## Metadata`** — table: repository, commit SHA/tag audited, audit lead, scope (in/out), link to this **`full_audit.md`** copy, link to **§2** row in playbook if embedded in repo.
 3. **`## Executive summary`** — 5–15 lines: overall posture, top 3 risks, top 3 strengths, **Pass / Pass with findings / Blocked**.
 4. **`## Category results`** — one **`### <ID> — <Name>`** subsection per **§4** category executed (G, SEC-REPO, SUP, …). For each: **Verdict** (P / PWF / B / N/A), **Summary** (2–6 sentences), **Evidence** (paths, commands, CI jobs—no secrets).
 5. **`## Findings`** — unified table: **Finding ID** (e.g. `AUD-G-001`, `AUD-APPSEC-002`), **Category ID**, **Severity**, **Location**, **Summary**, **Remediation**, **Status** *(Open / Accepted risk / Fixed)*. Map 1:1 to **§5** in this playbook when both exist.

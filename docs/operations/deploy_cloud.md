@@ -1,6 +1,6 @@
 # Cloud deployment (FB-CONT-006)
 
-Opinionated paths for running the **same** container image and Compose layout as homelab. See also **[`BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)** and the container epic **FB-CONT-P0** in **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** ([queue system](QUEUE_SCHEMA.md)). **Managed Redis / QuestDB / Qdrant vs self-hosted:** **[`ADR_MANAGED_DATA_SERVICES.MD`](ADR_MANAGED_DATA_SERVICES.MD)** (**FB-CONT-008**).
+Opinionated paths for running the **same** container image and Compose layout as homelab. See also **[`BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)** and the container epic **FB-CONT-P0** in **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** ([queue system](QUEUE_SCHEMA.md)). **Managed Redis / QuestDB / Qdrant vs self-hosted:** **[`architecture/adr/managed_data_services.md`](architecture/adr/managed_data_services.md)** (**FB-CONT-008**).
 
 **Non-negotiable:** Kraken remains market data; venue keys and **`NM_RISK_SIGNING_SECRET`** never belong in git — load from a secret store into **`.env`** or process environment at runtime.
 
@@ -23,7 +23,7 @@ Opinionated paths for running the **same** container image and Compose layout as
    ```
 
 7. **systemd:** Use **`Restart=always`** **`Type=simple`** units that **`WorkingDirectory=`** the repo and **`ExecStart=`** the **`docker compose up`** line (or a small wrapper script). After **`git pull`** / image updates, **`systemctl daemon-reload && systemctl restart trading-bot-stack`** (unit names are yours to define).
-8. **Backups:** Follow **[`RUNBOOKS.MD`](RUNBOOKS.MD)** (**FB-CONT-005**) for volume **`tar`**; copy archives to **S3-compatible** storage in the same region as the VM to reduce egress charges on restore drills.
+8. **Backups:** Follow **[`runbooks.md`](runbooks.md)** (**FB-CONT-005**) for volume **`tar`**; copy archives to **S3-compatible** storage in the same region as the VM to reduce egress charges on restore drills.
 
 ---
 
@@ -50,4 +50,4 @@ This path is **more moving parts** than Path A; use it when org standards requir
 ## Related
 
 - **TLS at the edge:** **[`infra/docker-compose.edge.yml`](../infra/docker-compose.edge.yml)** + **[`infra/caddy/Caddyfile`](../infra/caddy/Caddyfile)** (**FB-CONT-004**).
-- **Volume backup commands:** **[`RUNBOOKS.MD`](RUNBOOKS.MD)** (**FB-CONT-005**).
+- **Volume backup commands:** **[`runbooks.md`](runbooks.md)** (**FB-CONT-005**).

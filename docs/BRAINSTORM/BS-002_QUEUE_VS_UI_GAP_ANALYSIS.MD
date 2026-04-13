@@ -98,7 +98,7 @@ The queue describes a **two-page** operator product (Dashboard + Asset Page), **
 ## Links
 
 - [`docs/QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) — **§2.2** **FB-AP-P0**
-- [`docs/PER_ASSET_OPERATOR.MD`](../PER_ASSET_OPERATOR.MD) — manifest + API (partial operator doc)
+- [`docs/operations/per_asset_operator.md`](../per_asset_operator.md) — manifest + API (partial operator doc)
 - [`docs/Specs/CONTROL_PLANE.MD`](../Specs/CONTROL_PLANE.MD) — short spec (may lag **FB-AP-*** additions)
 - [`control_plane/api.py`](../../control_plane/api.py) — asset routes + **`/status`**
 - [`control_plane/Home.py`](../../control_plane/Home.py) — sidebar power + execution mode

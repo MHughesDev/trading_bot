@@ -19,4 +19,4 @@ Default ports and usage: see **`README.md`**.
 
 ## Graceful shutdown
 
-- Live service registers SIGINT/SIGTERM where supported; see **`docs/GRACEFUL_SHUTDOWN.MD`** for conceptual notes and **`app/runtime/live_service.py`** for implementation
+- Live service registers SIGINT/SIGTERM where supported; see **`docs/operations/graceful_shutdown.md`** for conceptual notes and **`app/runtime/live_service.py`** for implementation

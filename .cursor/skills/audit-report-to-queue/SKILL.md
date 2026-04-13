@@ -10,7 +10,7 @@ description: Promote Open findings from a standalone audit report (FULL_AUDIT §
 ## Prerequisites
 
 1. Read **[`docs/QUEUE_SCHEMA.md`](../../../docs/QUEUE_SCHEMA.md)** and **[`docs/QUEUE.MD` §0](../../../docs/QUEUE.MD#0-next-task-stack-queue_stackcsv)** (CSV columns).
-2. Have a **completed** audit report path: e.g. **`docs/reports/AUDIT_REPORT_<date>_<slug>.md`** matching **[`FULL_AUDIT.md` §8.2](../../../docs/FULL_AUDIT.md#82-required-sections-in-order)**.
+2. Have a **completed** audit report path: e.g. **`docs/reports/AUDIT_REPORT_<date>_<slug>.md`** matching **[`full_audit.md` §8.2](../../../docs/governance/full_audit.md#82-required-sections-in-order)**.
 
 ## Inputs
 
@@ -61,6 +61,6 @@ Each CSV row **`agent_task`** must **stand alone**:
 
 ## References
 
-- [`docs/FULL_AUDIT.md`](../../../docs/FULL_AUDIT.md) — **§8** report shape, **§8.4** skills  
+- [`docs/governance/full_audit.md`](../../../docs/governance/full_audit.md) — **§8** report shape, **§8.4** skills  
 - [`docs/BRAINSTORM/BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD`](../../../docs/BRAINSTORM/BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD) — design brainstorm  
 - [`.cursor/skills/add-to-queue/SKILL.md`](../add-to-queue/SKILL.md) — queue editing checklist

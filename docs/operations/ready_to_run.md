@@ -1,6 +1,6 @@
 # Ready to run (operator checklist)
 
-Single checklist for a **new machine** or **first-time setup**. Details and deep links live in [`README.md`](../README.md), [`RUNBOOKS.MD`](RUNBOOKS.MD), and [`.env.example`](../.env.example).
+Single checklist for a **new machine** or **first-time setup**. Details and deep links live in [`README.md`](../README.md), [`runbooks.md`](runbooks.md), and [`.env.example`](../.env.example).
 
 ---
 
@@ -86,7 +86,7 @@ python -m streamlit run control_plane/Home.py
 ## 7. Live trading loop (separate from dashboard)
 
 - [ ] **`python -m app.runtime.live_service`** — Kraken WS → decision → risk → execution (requires network + config).
-- [ ] Aligns with **paper** or **live** per `NM_EXECUTION_MODE` and venue keys — **restart** after changing mode (no hot-swap). See [`RUNBOOKS.MD`](RUNBOOKS.MD).
+- [ ] Aligns with **paper** or **live** per `NM_EXECUTION_MODE` and venue keys — **restart** after changing mode (no hot-swap). See [`runbooks.md`](runbooks.md).
 
 ---
 
@@ -102,12 +102,12 @@ python -m streamlit run control_plane/Home.py
 | Doc | Role |
 |-----|------|
 | [`README.md`](../README.md) | Commands, layout, CI, microservices |
-| [`RUNBOOKS.MD`](RUNBOOKS.MD) | Secrets, preflight, production/network exposure, Streamlit guard, incident, QuestDB, bind address |
+| [`runbooks.md`](runbooks.md) | Secrets, preflight, production/network exposure, Streamlit guard, incident, QuestDB, bind address |
 | [`.env.example`](../.env.example) | All **`NM_`** placeholders |
 | [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) | **Queue system** — all backlog machinery files |
 | [`QUEUE_STACK.csv`](QUEUE_STACK.csv) | Next tasks (`agent_task` per row) |
 | [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) | Full roadmap / completed work IDs |
 | [`QUEUE.MD`](QUEUE.MD) | Queue protocol + conventions |
-| [`FULL_AUDIT.md`](FULL_AUDIT.md) | Full-scope audit playbook + **§8** report deliverable |
+| [`full_audit.md`](full_audit.md) | Full-scope audit playbook + **§8** report deliverable |
 | [`reports/AUDIT_REPORT_TEMPLATE.md`](reports/AUDIT_REPORT_TEMPLATE.md) | Audit report template |
-| [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) | Windows / future desktop UX |
+| [`windows_operator_ui.md`](windows_operator_ui.md) | Windows / future desktop UX |

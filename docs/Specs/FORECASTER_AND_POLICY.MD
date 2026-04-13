@@ -49,7 +49,7 @@ VSN → Latent CNN → Multi-Resolution xLSTM → Regime-Conditioned Fusion → 
 
 ## Relationship to V3 runtime
 
-- **Only path:** **`ForecastPacket`** from **`forecaster_model`** ( **`ForecasterModel`** / methodology forward) drives **`PolicySystem`**, and **`ExecutionPlan`** maps to **`ActionProposal`** for **`RiskEngine`**. `ForecastOutput` for metrics is derived from the packet via **`decision_engine/forecast_packet_adapter.py`**. Optional **`NM_MODELS_FORECASTER_CHECKPOINT_ID`** / **`NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH`** — see [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD).
+- **Only path:** **`ForecastPacket`** from **`forecaster_model`** ( **`ForecasterModel`** / methodology forward) drives **`PolicySystem`**, and **`ExecutionPlan`** maps to **`ActionProposal`** for **`RiskEngine`**. `ForecastOutput` for metrics is derived from the packet via **`decision_engine/forecast_packet_adapter.py`**. Optional **`NM_MODELS_FORECASTER_CHECKPOINT_ID`** / **`NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH`** — see [`docs/architecture/migration_to_spec_pipeline.md`](../migration_to_spec_pipeline.md).
 
 ## Dependencies
 

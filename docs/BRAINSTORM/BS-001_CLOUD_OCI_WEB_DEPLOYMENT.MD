@@ -5,7 +5,7 @@
 **Status:** draft  
 **Author:** optional
 
-**See also:** **[`README.md`](../README.md)** — **Deployment models (FB-CONT-007)** — Windows **`.bat`** path vs Linux **Docker/Compose/cloud**; **[`docs/DEPLOY_CLOUD.MD`](../DEPLOY_CLOUD.MD)** for VM/Fargate notes; **[`docs/ADR_MANAGED_DATA_SERVICES.MD`](../ADR_MANAGED_DATA_SERVICES.MD)** (**FB-CONT-008**) — managed vs self-hosted data services.
+**See also:** **[`README.md`](../README.md)** — **Deployment models (FB-CONT-007)** — Windows **`.bat`** path vs Linux **Docker/Compose/cloud**; **[`docs/operations/deploy_cloud.md`](../deploy_cloud.md)** for VM/Fargate notes; **[`docs/architecture/adr/managed_data_services.md`](../architecture/adr/managed_data_services.md)** (**FB-CONT-008**) — managed vs self-hosted data services.
 
 ---
 
@@ -40,7 +40,7 @@ Operators use **HTTPS** (or **VPN/private overlay** such as Tailscale) to reach 
 
 - **Risk and signing** must remain on the **OrderIntent** path — no “cloud shortcut” around `risk_engine` / `intent_gate`.
 - **Kraken-only market data** — no Alpaca data clients outside the execution adapter (existing repo rule).
-- **Mode changes** (paper/live) that affect the live loop should follow **restart / controlled rollout**, not silent hot swap (aligns with [`WINDOWS_OPERATOR_UI.MD`](../WINDOWS_OPERATOR_UI.MD) and execution profile semantics).
+- **Mode changes** (paper/live) that affect the live loop should follow **restart / controlled rollout**, not silent hot swap (aligns with [`windows_operator_ui.md`](../windows_operator_ui.md) and execution profile semantics).
 
 ### Phased rollout *(optional)*
 
@@ -101,7 +101,7 @@ Operators use **HTTPS** (or **VPN/private overlay** such as Tailscale) to reach 
 
 ### Relationship to Windows operator docs
 
-[`WINDOWS_OPERATOR_UI.MD`](../WINDOWS_OPERATOR_UI.MD) remains valid for **desktop convenience** (`.bat`, optional launcher, pywebview). **BS-001** is the **server/cloud** counterpart: **web-only**, **OCI-first**.
+[`windows_operator_ui.md`](../windows_operator_ui.md) remains valid for **desktop convenience** (`.bat`, optional launcher, pywebview). **BS-001** is the **server/cloud** counterpart: **web-only**, **OCI-first**.
 
 ---
 
@@ -178,4 +178,4 @@ Turn the **multi-workstream** vision into **actionable queue items** in the **qu
 - [`AGENTS.md`](../../AGENTS.md) — agent/operator contract  
 - [`docs/QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) — authoritative backlog tables (**FB-CONT-P0**)  
 - [`infra/docker-compose.yml`](../../infra/docker-compose.yml) — current local stack  
-- [`WINDOWS_OPERATOR_UI.MD`](../WINDOWS_OPERATOR_UI.MD) — Windows desktop / `.bat` brainstorm (complementary)
+- [`windows_operator_ui.md`](../windows_operator_ui.md) — Windows desktop / `.bat` brainstorm (complementary)

@@ -19,7 +19,7 @@
 ## What does *not* belong here
 
 - **Tracked work** — use the **[queue system](../QUEUE_SCHEMA.md)** ([`QUEUE.MD`](../QUEUE.MD) conventions + [`QUEUE_STACK.csv`](../QUEUE_STACK.csv) + [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) tables).
-- **Operator runbooks** — use [`../RUNBOOKS.MD`](../RUNBOOKS.MD) or a dedicated `docs/*.MD` once the idea ships.
+- **Operator runbooks** — use [`../runbooks.md`](../runbooks.md) or a dedicated `docs/*.MD` once the idea ships.
 - **Secrets** — never paste keys or real credentials.
 
 ## Brainstorm IDs
@@ -67,4 +67,4 @@ Use **`.MD`** (uppercase extension) to match other docs in this repo.
 
 - [`../QUEUE_SCHEMA.md`](../QUEUE_SCHEMA.md) — **queue system** (all backlog machinery)  
 - [`../QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) — authoritative narrative backlog tables  
-- [`../DEFERRED_ROADMAP.MD`](../DEFERRED_ROADMAP.MD) — deferred themes (when promoted from “someday”)
+- [`../deferred_roadmap.md`](../deferred_roadmap.md) — deferred themes (when promoted from “someday”)
