@@ -6,6 +6,31 @@ cd "$(dirname "$0")"
 ROOT="$(pwd)"
 VPY="${ROOT}/.venv/bin/python"
 
+
+print_banner() {
+  echo "🚀==============================================🚀"
+  echo "  Trading Bot Launchpad"
+  echo "🚀==============================================🚀"
+}
+
+fun_step() {
+  local label="$1"
+  printf "%s" "$label"
+  printf " ...\n"
+}
+
+require_alive() {
+  local pid="$1"
+  local name="$2"
+  sleep 1
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "ERROR: ${name} exited during startup. Check logs above for missing dependencies/config."
+    exit 1
+  fi
+}
+
+print_banner
+
 if [[ ! -x "$VPY" ]]; then
   echo "ERROR: .venv not found. Run ./setup.sh first."
   exit 1
@@ -22,13 +47,19 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+fun_step "Spinning up Control Plane API"
 "$VPY" -m uvicorn control_plane.api:app --host 127.0.0.1 --port 8000 &
 API_PID=$!
-sleep 2
+require_alive "$API_PID" "Control Plane API"
+sleep 1
+fun_step "Starting Power Supervisor"
 "$VPY" -m app.runtime.power_supervisor &
 SUP_PID=$!
+require_alive "$SUP_PID" "Power Supervisor"
+fun_step "Launching Streamlit dashboard"
 "$VPY" -m streamlit run control_plane/Home.py --server.headless true &
 UI_PID=$!
+require_alive "$UI_PID" "Streamlit dashboard"
 
 echo ""
 echo "Started (foreground — Ctrl+C stops all):"

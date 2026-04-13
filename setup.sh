@@ -5,6 +5,26 @@ set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(pwd)"
 
+
+print_banner() {
+  echo "✨==============================================✨"
+  echo "  Trading Bot Setup Wizard"
+  echo "✨==============================================✨"
+}
+
+fun_wait() {
+  local label="$1"
+  local seconds="${2:-2}"
+  local i
+  printf "%s" "$label"
+  for ((i=0; i<seconds; i++)); do
+    printf " ."
+    sleep 1
+  done
+  printf " ✅\n"
+}
+
+print_banner
 echo "=== Trading Bot — setup ==="
 echo "Repo: $ROOT"
 echo ""
@@ -13,9 +33,10 @@ if [[ "${NM_SKIP_DOCKER:-}" == "1" ]]; then
   echo "NM_SKIP_DOCKER=1 — skipping Docker steps."
 fi
 
-# --- Python 3.11+ ---
+# --- Python 3.12 preferred (CI baseline), 3.11+ supported ---
 PY=""
-if command -v python3.11 &>/dev/null; then PY="python3.11"
+if command -v python3.12 &>/dev/null; then PY="python3.12"
+elif command -v python3.11 &>/dev/null; then PY="python3.11"
 elif command -v python3 &>/dev/null; then
   ver="$(python3 -c 'import sys; print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo 0.0)"
   major="${ver%%.*}"
@@ -29,6 +50,10 @@ if [[ -z "$PY" ]]; then
 fi
 echo "Using: $PY"
 $PY --version
+selected_ver="$($PY -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
+if [[ "$selected_ver" != "3.12" ]]; then
+  echo "NOTE: CI uses Python 3.12. You selected $selected_ver (supported), which may differ from CI behavior."
+fi
 
 # --- venv ---
 if [[ ! -x ".venv/bin/python" ]]; then
@@ -39,9 +64,23 @@ else
 fi
 
 VPY="${ROOT}/.venv/bin/python"
+fun_wait "Warming up package checks" 2
+echo "Running package-index preflight ..."
+if ! "$VPY" scripts/env_preflight.py; then
+  echo "ERROR: package index is unreachable from this container. Resolve proxy/index settings, then retry."
+  exit 1
+fi
+
 "$VPY" -m pip install --upgrade pip wheel setuptools
+
 echo "Installing package with dev + dashboard (Streamlit) ..."
-"$VPY" -m pip install -e ".[dev,dashboard]"
+if ! "$VPY" -m pip install -e ".[dev,dashboard]"; then
+  echo ""
+  echo "ERROR: dependency install failed."
+  echo "If you are behind a proxy, verify HTTP(S)_PROXY and set PIP_INDEX_URL to a reachable package index."
+  echo "Then re-run ./setup.sh."
+  exit 1
+fi
 
 # --- Docker ---
 docker_compose() {
@@ -83,6 +122,7 @@ if [[ "${NM_SKIP_DOCKER:-}" != "1" ]]; then
       sleep 3
     done
     if docker info &>/dev/null; then
+      fun_wait "Docking with Docker Engine" 2
       echo "Pulling infra images (new tags after git pull) ..."
       docker_compose pull || echo "WARNING: docker compose pull failed — check network or docker login."
       echo "Starting infra stack (docker compose up -d) ..."

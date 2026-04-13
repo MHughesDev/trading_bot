@@ -21,8 +21,9 @@ Right after you clone, these scripts set up a virtualenv, install the app, bring
 git clone https://github.com/MHughesDev/trading_bot.git
 cd trading_bot
 chmod +x setup.sh run.sh    # once
-./setup.sh                  # install + infra
+./setup.sh                  # install + infra (runs package-index preflight first)
 ./run.sh                    # API + supervisor + dashboard
+./doctor.sh                 # optional env doctor (full audit readiness checks)
 ```
 
 ### 🪟 Windows
@@ -32,11 +33,13 @@ git clone https://github.com/MHughesDev/trading_bot.git
 cd trading_bot
 setup.bat
 run.bat
+doctor.bat                  REM optional env doctor
 ```
 
 **Tips**
 
 - Want to skip Docker for a run? Set **`NM_SKIP_DOCKER=1`** (venv and pip still run). See [`.env.example`](.env.example).
+- Local baseline: use **Python 3.12** for parity with CI (project minimum remains 3.11+).
 - Deeper checklist (keys, Docker, preflight): [`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD) · Windows UI notes: [`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD).
 
 ---

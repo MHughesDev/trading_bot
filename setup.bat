@@ -2,6 +2,7 @@
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
+call :banner_setup
 echo === Trading Bot — setup ===
 echo Repo: %CD%
 echo.
@@ -11,11 +12,11 @@ if /i "%NM_SKIP_DOCKER%"=="1" (
   echo NM_SKIP_DOCKER=1 — will skip Docker install / compose after Python setup.
 )
 
-REM --- Python: prefer py -3.11, then py -3, then python ---
+REM --- Python: prefer 3.12 (CI baseline), then 3.11 ---
 set "PYEXE="
 where py >nul 2>&1 && (
+  py -3.12 --version >nul 2>&1 && set "PYEXE=py -3.12" && goto :have_py
   py -3.11 --version >nul 2>&1 && set "PYEXE=py -3.11" && goto :have_py
-  py -3 --version >nul 2>&1 && set "PYEXE=py -3" && goto :have_py
 )
 where python >nul 2>&1 && set "PYEXE=python" && goto :have_py
 
@@ -26,6 +27,22 @@ exit /b 1
 :have_py
 echo Using: %PYEXE%
 %PYEXE% --version || exit /b 1
+for /f "tokens=2 delims= " %%V in ('%PYEXE% --version') do set "PYVER=%%V"
+for /f "tokens=1,2 delims=." %%A in ("%PYVER%") do (
+  set "PYMAJOR=%%A"
+  set "PYMINOR=%%B"
+)
+if not "%PYMAJOR%"=="3" (
+  echo ERROR: Python %PYVER% detected. Python 3.11+ is required.
+  exit /b 1
+)
+if %PYMINOR% LSS 11 (
+  echo ERROR: Python %PYVER% detected. Python 3.11+ is required.
+  exit /b 1
+)
+if not "%PYVER:~0,4%"=="3.12" (
+  echo NOTE: CI uses Python 3.12. You selected %PYVER% ^(supported^), which may differ from CI behavior.
+)
 
 REM --- venv ---
 if not exist ".venv\Scripts\python.exe" (
@@ -36,10 +53,24 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 set "VPY=%CD%\.venv\Scripts\python.exe"
+
+call :loading "Warming up package checks"
+echo Running package-index preflight ...
+"%VPY%" scripts\env_preflight.py || (
+  echo ERROR: package index is unreachable from this environment. Resolve proxy/index settings, then retry setup.bat.
+  exit /b 1
+)
+
 "%VPY%" -m pip install --upgrade pip wheel setuptools || exit /b 1
 
 echo Installing package with dev + dashboard ^(Streamlit for run.bat^) ...
-"%VPY%" -m pip install -e ".[dev,dashboard]" || exit /b 1
+"%VPY%" -m pip install -e ".[dev,dashboard]" || (
+  echo.
+  echo ERROR: dependency install failed.
+  echo If you are behind a proxy, verify HTTP(S)_PROXY and set PIP_INDEX_URL to a reachable package index.
+  echo Then re-run setup.bat.
+  exit /b 1
+)
 
 REM Optional: Alpaca paper (uncomment next line if you use paper trading)
 REM "%VPY%" -m pip install -e ".[alpaca]" || exit /b 1
@@ -50,6 +81,7 @@ REM --- Docker Desktop / Engine: install if missing, wait for daemon, then compo
 call :ensure_docker
 if errorlevel 1 goto :after_docker
 
+call :loading "Docking with Docker Engine"
 echo Pulling infra images ^(fetch new tags when compose.yml changes after git pull^) ...
 docker compose -f infra\docker-compose.yml pull
 if errorlevel 1 echo WARNING: docker compose pull failed — check network or `docker login` for private registries.
@@ -147,3 +179,19 @@ echo Docker Desktop was installed or updated. **Start Docker Desktop** from the 
 echo After the whale icon shows **Running**, run **setup.bat** again to pull images.
 pause
 exit /b 1
+
+:banner_setup
+echo ***********************************************
+echo *   Trading Bot Setup Wizard                 *
+echo ***********************************************
+exit /b 0
+
+:loading
+set "_msg=%~1"
+<nul set /p="%_msg%"
+for %%G in (1 2 3) do (
+  <nul set /p=" ."
+  timeout /t 1 /nobreak >nul
+)
+echo  [OK]
+exit /b 0

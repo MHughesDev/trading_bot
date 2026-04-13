@@ -104,7 +104,7 @@ Every category audit (human or agent) should end with:
 | Field | Value |
 |--------|--------|
 | **Repository / product** | **trading_bot** |
-| **Version / commit audited** | **`504bbe4dcfe290354290100b5b89eccb5f7dc6e2`** (see newer commits after follow-up work) |
+| **Version / commit audited** | **`fc39ea984587d4a513aa532326945e80d082530d`** |
 | **Full audit — last completed (UTC)** | **2026-04-13** |
 | **Full audit — lead / role** | Automated full audit (agent) |
 | **Scope notes** | Repo + CI + docs; exclude production runtime secrets |
@@ -118,8 +118,8 @@ Every category audit (human or agent) should end with:
 | Secrets & repository hygiene | SEC-REPO | 2026-04-13 | PWF | same |
 | Supply chain & dependencies | SUP | 2026-04-13 | PWF | same |
 | Static analysis & style | STATIC | 2026-04-13 | PWF | same |
-| Correctness, safety & concurrency | CORR | 2026-04-13 | P | same |
-| Testing & quality gates | TEST | 2026-04-13 | P | same |
+| Correctness, safety & concurrency | CORR | 2026-04-13 | PWF | same |
+| Testing & quality gates | TEST | 2026-04-13 | PWF | same |
 | Application & API security | APPSEC | 2026-04-13 | P | same |
 | Infrastructure & secrets management | INFRA | 2026-04-13 | P | same |
 | Container & image security | CONT | 2026-04-13 | P | same |
