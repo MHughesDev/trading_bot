@@ -30,7 +30,7 @@ except Exception:
     st.stop()
 
 st.markdown(
-    "**Kraken** (market data): not stored here — configure **`NM_*`** in `.env` (see **`docs/READY_TO_RUN.MD`**)."
+    "**Kraken** (market data): not stored here — configure **`NM_*`** in `.env` (see **`docs/operations/ready_to_run.md`**)."
 )
 
 try:

@@ -158,7 +158,7 @@ Requires **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set (same as oth
 | GET | `/assets/chart/bars` | **Chart OHLCV** (FB-AP-024): **`symbol`** (required), **`start`**, **`end`** (UTC range), optional **`interval_seconds`** (defaults to **`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`**), **`limit`**. Returns rows from QuestDB **`canonical_bars`** for that symbol only — no multi-symbol series. |
 | GET | `/assets/chart/trade-markers` | **Buy/sell markers** (FB-AP-025): **`symbol`** (required), **`start`**, **`end`**, optional **`limit`**. Reads **`data/trade_markers.jsonl`** (append-only; populated when the live loop **successfully submits** an order — **`source=intent_submit`**). |
 
-**GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`; **`asset_lifecycle`**: `state_dir`, `states`; **`asset_execution_mode`**: `default_execution_mode`, `sidecar_dir`, `overrides`; and **`app_scheduler`** (optional nightly training thread while the control plane process is up — **FB-AP-035**, see **`RUNBOOKS.MD`**).
+**GET `/status`** includes **`asset_model_registry`**: `registry_dir`, `initialized_symbols`; **`asset_lifecycle`**: `state_dir`, `states`; **`asset_execution_mode`**: `default_execution_mode`, `sidecar_dir`, `overrides`; and **`app_scheduler`** (optional nightly training thread while the control plane process is up — **FB-AP-035**, see **`runbooks.md`**).
 
 ## App-wide execution profile API (legacy, FB-AP-040)
 
@@ -212,11 +212,11 @@ When **`NM_LIVE_WATCH_LIFECYCLE_GATE=true`**, the **`live_service`** loop runs *
 
 ## Related
 
-- [`ADR_CANONICAL_BAR_STORAGE.MD`](ADR_CANONICAL_BAR_STORAGE.MD) — canonical bar storage decision (FB-AP-013).
+- [`architecture/adr/canonical_bar_storage.md`](architecture/adr/canonical_bar_storage.md) — canonical bar storage decision (FB-AP-013).
 - **FB-AP-014** — logical schema: bucket-start UTC `timestamp`, `interval_seconds`, OHLCV; Parquet `bars_clean.parquet` column order in `data_plane.storage.canonical_bars`.
 - **FB-AP-015** — dedupe key ``(symbol, timestamp, interval_seconds)``; last-write-wins in Polars merge helpers; QuestDB `insert_bar` is idempotent (delete-then-insert).
 - **FB-AP-016 (live loop)** — Kraken WS messages are normalized to ticks; **`RollingBars`** rolls OHLCV by **`NM_MARKET_DATA_BAR_INTERVAL_SECONDS`** (default 1s). **Persisted** rows are **closed buckets only** (last-write-wins per FB-AP-015). Enable with **`NM_QUESTDB_PERSIST_CANONICAL_BARS=true`** (requires QuestDB connection settings). Pair strings from Kraken (e.g. `XBT/USD`) map to canonical symbols (`BTC-USD`) for rollers and storage.
 - **FB-AP-018 (startup)** — With **`NM_QUESTDB_STARTUP_GAP_DETECTION=true`** and QuestDB reachable, the live loop compares **`max(ts)`** in **`canonical_bars`** (per manifest symbol, same **`interval_seconds`** as live bars) to the **last closed** UTC bucket; logs **`canonical_bar_gap`** when behind or empty (**FB-AP-019** fills gaps).
 - **FB-AP-019 (startup backfill)** — With **`NM_QUESTDB_STARTUP_KRAKEN_BACKFILL=true`**, after gap detection the loop fetches missing Kraken REST OHLC for each gap, validates with the same cleaner as init bootstrap, **`insert_bar`** into QuestDB (idempotent), and writes **`canonical_through_ts`** to **`data/canonical_bar_watermarks/<symbol>.json`** (override **`NM_CANONICAL_BAR_WATERMARK_DIR`**). Requires QuestDB connection (opens even if traces/canonical persist flags are off). **`questdb.backfill_max_lookback_days`** (default **14**) limits how far back REST runs when storage is empty.
-- [`RUNBOOKS.MD`](RUNBOOKS.MD) — execution and preflight.
+- [`runbooks.md`](runbooks.md) — execution and preflight.
 - [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) **FB-AP-P0** — remaining per-asset UI, init pipeline, guards in `DecisionPipeline`.

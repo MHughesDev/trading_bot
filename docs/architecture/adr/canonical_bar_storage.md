@@ -40,7 +40,7 @@ The per-asset product epic requires **one authoritative time series per symbol**
 
 1. **QuestDB as primary canonical store**  
    - *Pros:* Already in stack; time-series SQL; good range queries; append-friendly.  
-   - *Cons:* Must define **dedupe/upsert** policy (or `LATEST BY` / dedup at read); operational backup story (**RUNBOOKS.MD**).
+   - *Cons:* Must define **dedupe/upsert** policy (or `LATEST BY` / dedup at read); operational backup story (**runbooks.md**).
 
 2. **Parquet lake per symbol (object store or local `data/`)**  
    - *Pros:* Cheap bulk storage; training-friendly; easy to snapshot.  
@@ -76,7 +76,7 @@ The per-asset product epic requires **one authoritative time series per symbol**
 
 - **Polars:** `data_plane.storage.merge_canonical_bars` — `dedupe_canonical_bars_last_wins`, `merge_canonical_bars_frames`; key ``(symbol, timestamp, interval_seconds)``, **last-write-wins**.
 - **QuestDB:** `QuestDBWriter.insert_bar` **DELETE** then **INSERT** for the same key (idempotent replay).
-- **Backup/restore** for QuestDB volumes remains the operator path for historical bars (**RUNBOOKS.MD**).
+- **Backup/restore** for QuestDB volumes remains the operator path for historical bars (**runbooks.md**).
 - Optional **QuestDB Cloud** or other managed TSDB is a **future** ADR (**FB-CONT-008**-style evaluation), not required to start **FB-AP-014**.
 
 ---
@@ -86,5 +86,5 @@ The per-asset product epic requires **one authoritative time series per symbol**
 - `data_plane/storage/schemas.py` — `bars` DDL  
 - `data_plane/storage/questdb.py` — writer  
 - `data_plane/storage/redis_state.py` — latest bar cache  
-- [`PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD) — init artifact layout  
+- [`per_asset_operator.md`](per_asset_operator.md) — init artifact layout  
 - [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) **FB-AP-P0** data rows ([queue system](QUEUE_SCHEMA.md))  

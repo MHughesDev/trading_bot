@@ -1,6 +1,6 @@
 # Operations runbooks (HG-12 / FB-I3)
 
-**First-time setup:** see **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** (checklist: venv, `.env`, Docker, preflight, venues). This file adds secrets, incident response, and execution-mode restart detail beyond that checklist.
+**First-time setup:** see **[`ready_to_run.md`](ready_to_run.md)** (checklist: venv, `.env`, Docker, preflight, venues). This file adds secrets, incident response, and execution-mode restart detail beyond that checklist.
 
 **Automated setup (local dev):** **`setup.bat`** (Windows) or **`./setup.sh`** (Linux/macOS) runs venv + **`pip install -e ".[dev,dashboard]"`**, then **`docker compose pull`** and **`up -d`** for **`infra/docker-compose.yml`** (unless **`NM_SKIP_DOCKER=1`** is set in the environment for that run — not an app setting). Windows: if **`docker`** is missing, offers **winget** install of Docker Desktop or opens the download page; waits for **`docker info`**, then **`pause`** so you can sign in to Docker Hub if prompted (optional for public images).
 
@@ -33,7 +33,7 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.app.yml -f in
 
 ## Per-asset model registry (FB-AP-001 / FB-AP-002)
 
-Persisted manifests and HTTP API: **[`PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD)**. **`GET /status`** includes **`asset_model_registry.initialized_symbols`**. Mutating routes require **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set.
+Persisted manifests and HTTP API: **[`per_asset_operator.md`](per_asset_operator.md)**. **`GET /status`** includes **`asset_model_registry.initialized_symbols`**. Mutating routes require **`X-API-Key`** when **`NM_CONTROL_PLANE_API_KEY`** is set.
 
 ## In-process scheduler (FB-AP-035)
 
@@ -73,7 +73,7 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 4. **CORS:** set **`NM_CONTROL_PLANE_CORS_ALLOW_ORIGINS`** to an explicit allowlist for public hostnames (see [CORS and optional rate limit](#cors-and-optional-rate-limit-fb-aud-009--fb-aud-004)); default **`*`** is for dev + Streamlit/SSE (**FB-AP-034**).
 5. **Streamlit:** For shared dashboards, enable the **route guard** and align session env with the API — see **[Streamlit route guard (FB-AUD-002)](#streamlit-route-guard-fb-aud-002)** below.
 
-**Related:** **`README.md`** — *Production control plane hardening* · *Streamlit route guard*; **`docs/AUDIT_CODE_REVIEW.MD`**.
+**Related:** **`README.md`** — *Production control plane hardening* · *Streamlit route guard*; **`docs/governance/audit_code_review.md`**.
 
 ## Streamlit route guard (FB-AUD-002)
 
@@ -107,7 +107,7 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 - After login or sign-up (**`pages/99_Sign_up.py`**), **`require_streamlit_app_access()`** redirects to **`pages/98_Setup_API_keys.py`** until the key pair for the **current default execution mode** is stored: **Alpaca** key + secret when **`GET /status` → `execution_mode`** is **`paper`**, **Coinbase** when **`live`**.
 - **`GET /auth/me`** includes **`venue_keys_required`** and **`venue_keys_complete`** when sessions are enabled (see **`app/runtime/auth_venue_status.py`**).
 
-**Kraken** (public market data) remains **only** via deployment **`NM_*`** — not per-user on this screen. Full route list: **[`docs/PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD)** § *Streamlit routes*.
+**Kraken** (public market data) remains **only** via deployment **`NM_*`** — not per-user on this screen. Full route list: **[`docs/operations/per_asset_operator.md`](per_asset_operator.md)** § *Streamlit routes*.
 
 ## Execution mode (paper vs live)
 

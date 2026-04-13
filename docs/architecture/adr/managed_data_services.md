@@ -8,7 +8,7 @@
 
 ## Context
 
-The default stack runs **Redis**, **QuestDB**, and **Qdrant** as **containers** on one host (**`infra/docker-compose.yml`**), with **backup** guidance in **[`RUNBOOKS.MD`](RUNBOOKS.MD)** (**FB-CONT-005**). Cloud operators may consider **managed** equivalents (lower ops, higher recurring cost, different networking and latency).
+The default stack runs **Redis**, **QuestDB**, and **Qdrant** as **containers** on one host (**`infra/docker-compose.yml`**), with **backup** guidance in **[`runbooks.md`](runbooks.md)** (**FB-CONT-005**). Cloud operators may consider **managed** equivalents (lower ops, higher recurring cost, different networking and latency).
 
 ---
 
@@ -31,7 +31,7 @@ The default stack runs **Redis**, **QuestDB**, and **Qdrant** as **containers** 
 
 ## Decision
 
-**Default recommendation:** **Keep self-hosted containers** on a **single Linux VM** (or small cluster) for **homelab → first cloud** moves — lowest change risk, matches **[`DEPLOY_CLOUD.MD`](DEPLOY_CLOUD.MD)** Path A and existing code paths.
+**Default recommendation:** **Keep self-hosted containers** on a **single Linux VM** (or small cluster) for **homelab → first cloud** moves — lowest change risk, matches **[`deploy_cloud.md`](deploy_cloud.md)** Path A and existing code paths.
 
 **Consider managed** when: you need **vendor SLA**, **multi-AZ HA** without running it yourself, or **compliance** mandates managed encryption keys — **after** measuring **latency** from the app region to the managed endpoint and **pricing** at your retention size.
 
@@ -47,6 +47,6 @@ No new **QUEUE** rows unless product chooses a **managed TSDB other than QuestDB
 
 ## Related
 
-- **[`ADR_CANONICAL_BAR_STORAGE.MD`](ADR_CANONICAL_BAR_STORAGE.MD)** — why QuestDB-shaped canonical bars exist.  
-- **[`DEPLOY_CLOUD.MD`](DEPLOY_CLOUD.MD)** — VM vs Fargate sketch.  
-- **[`RUNBOOKS.MD`](RUNBOOKS.MD)** — volume backup (**FB-CONT-005**).
+- **[`architecture/adr/canonical_bar_storage.md`](architecture/adr/canonical_bar_storage.md)** — why QuestDB-shaped canonical bars exist.  
+- **[`deploy_cloud.md`](deploy_cloud.md)** — VM vs Fargate sketch.  
+- **[`runbooks.md`](runbooks.md)** — volume backup (**FB-CONT-005**).

@@ -59,7 +59,7 @@ def streamlit_route_guard_enabled() -> bool:
     ``NM_CONTROL_PLANE_API_KEY`` is set in this process (automation bypass) or
     ``GET /auth/me`` succeeds with the session cookie. Requires
     ``NM_AUTH_SESSION_ENABLED`` on the API for password login. See README
-    *Streamlit route guard (FB-AUD-002)* and ``docs/RUNBOOKS.MD``.
+    *Streamlit route guard (FB-AUD-002)* and ``docs/operations/runbooks.md``.
     """
     return os.getenv("NM_STREAMLIT_ROUTE_GUARD_ENABLED", "").strip().lower() in (
         "1",

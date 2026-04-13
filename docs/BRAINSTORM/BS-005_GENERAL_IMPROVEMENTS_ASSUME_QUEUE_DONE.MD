@@ -40,7 +40,7 @@
 |------|--------|
 | **SLO-style dashboards** | Grafana rows: “time to first bar after subscribe”, “order submit latency”, “risk reject rate” — not just raw metrics. |
 | **Synthetic checks** | Cron job hits `/status` + one read-only data probe; page if unhealthy. |
-| **Runbook-linked alerts** | Every alert annotation links to a **specific** `RUNBOOKS.MD` subsection. |
+| **Runbook-linked alerts** | Every alert annotation links to a **specific** `runbooks.md` subsection. |
 | **Cost visibility** | Rough monthly estimate doc: API call rates × venue pricing assumptions (even if approximate). |
 
 ---
@@ -105,4 +105,4 @@
 ## Links
 
 - [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) — authoritative backlog tables (this brainstorm **does not** supersede the **queue system**)  
-- [`DEFERRED_ROADMAP.MD`](../DEFERRED_ROADMAP.MD) — deferred themes  
+- [`deferred_roadmap.md`](../deferred_roadmap.md) — deferred themes  

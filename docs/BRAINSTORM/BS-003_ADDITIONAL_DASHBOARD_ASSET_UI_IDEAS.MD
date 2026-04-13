@@ -96,4 +96,4 @@ Extra **operator-facing** UI capabilities to consider **after or alongside** **`
 
 - [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) §2.2 **FB-AP-P0**  
 - [`BS-002_QUEUE_VS_UI_GAP_ANALYSIS.MD`](BS-002_QUEUE_VS_UI_GAP_ANALYSIS.MD)  
-- [`PER_ASSET_OPERATOR.MD`](../PER_ASSET_OPERATOR.MD)
+- [`per_asset_operator.md`](../per_asset_operator.md)

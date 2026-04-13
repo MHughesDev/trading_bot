@@ -338,7 +338,7 @@ def render_asset_page(symbol: str) -> None:
     st.markdown("**Chart API (read-only)**")
     st.caption(
         "OHLC: `GET /assets/chart/bars` · markers: `GET /assets/chart/trade-markers` "
-        "(see `docs/PER_ASSET_OPERATOR.MD`)."
+        "(see `docs/operations/per_asset_operator.md`)."
     )
     st.markdown(
         f"- Bars: `{api_base}/assets/chart/bars?symbol={sym}&start=<ISO>&end=<ISO>`\n"

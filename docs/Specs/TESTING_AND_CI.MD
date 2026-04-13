@@ -16,7 +16,7 @@
 - **`.github/workflows/ci.yml`** — Ruff, pytest, both CI scripts above
 - Optional integration job can be triggered manually (`workflow_dispatch`) when services are available
 
-**Systemic CI failures (all builds red):** use the formal prompt in **[`docs/CI_ROOT_CAUSE_ANALYSIS_PROMPT.md`](../CI_ROOT_CAUSE_ANALYSIS_PROMPT.md)** — single root-cause analysis aligned to this workflow.
+**Systemic CI failures (all builds red):** use the formal prompt in **[`docs/governance/ci_root_cause_analysis_prompt.md`](../governance/ci_root_cause_analysis_prompt.md)** — single root-cause analysis aligned to this workflow.
 
 ## Optional integration tests (local / pre-release)
 

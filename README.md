@@ -40,7 +40,7 @@ doctor.bat                  REM optional env doctor
 
 - Want to skip Docker for a run? Set **`NM_SKIP_DOCKER=1`** (venv and pip still run). See [`.env.example`](.env.example).
 - Local baseline: use **Python 3.12** for parity with CI (project minimum remains 3.11+).
-- Deeper checklist (keys, Docker, preflight): [`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD) · Windows UI notes: [`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD).
+- Deeper checklist (keys, Docker, preflight): [`docs/operations/ready_to_run.md`](docs/operations/ready_to_run.md) · Windows UI notes: [`docs/operations/windows_operator_ui.md`](docs/operations/windows_operator_ui.md).
 
 ---
 
@@ -70,7 +70,7 @@ Think of it as a little factory line — not every bell and whistle, just the ha
 | 📦 | Default execution mode is **paper**; go **live** only when you mean it and keys are set. |
 | 🧪 | Dev quickies: `python3 -m ruff check .` and `python3 -m pytest tests/ -q` (after `pip install -e ".[dev]"`). |
 
-**Want the full map?** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) · **Repo contract for contributors:** [`AGENTS.md`](AGENTS.md).
+**Want the full map?** [`docs/architecture/system_walkthrough.md`](docs/architecture/system_walkthrough.md) · **Repo contract for contributors:** [`AGENTS.md`](AGENTS.md).
 
 ---
 
