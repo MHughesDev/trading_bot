@@ -50,7 +50,7 @@ Two supported ways to run the **same** browser-first stack (FastAPI + Streamlit 
 
 | | |
 |:---:|---|
-| **(A) Windows convenience** | **`setup.bat`** / **`run.bat`** from the repo root: venv, `pip install -e ".[dev]"`, optional local Docker for the data plane, then API + dashboard + optional live loop — see **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. |
+| **(A) Windows convenience** | **`setup.bat`** / **`run.bat`** from the repo root: venv, `pip install -e ".[dev]"`, **`docker compose pull`** + **`up -d`** for the data-plane stack (so image updates in the repo apply after **`git pull`**), then API + dashboard + optional live loop — see **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. |
 | **(B) Linux OCI / Compose / cloud** | **`Dockerfile`** + **`docker compose`** (**`infra/docker-compose*.yml`**) on Linux or a cloud VM; same **`NM_*`** config via **`.env`**. Cloud VM vs Fargate sketch: **[`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD)**. Vision notes: **[`docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)** (**BS-001**), epic **FB-CONT-P0** in **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** ([queue system](docs/QUEUE_SCHEMA.md)). |
 
 **Data plane (Compose stack):** **QuestDB** holds canonical OHLCV and optional DB-backed traces; **Redis** is used for pub/sub and short-lived bar cache; **Qdrant** backs optional vector memory for news context — all three in **`infra/docker-compose.yml`**.

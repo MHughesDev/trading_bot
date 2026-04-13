@@ -22,7 +22,7 @@ pip install -e ".[dev]"
 
 **Windows (automated)**
 
-- [ ] Run **`setup.bat`** from the repo root — creates `.venv`, runs `pip install -e ".[dev,dashboard]"`, optionally starts Docker, copies `.env.example` → `.env` if missing.
+- [ ] Run **`setup.bat`** from the repo root — creates `.venv`, runs `pip install -e ".[dev,dashboard]"`, **`docker compose pull`** then **`up -d`** for `infra/docker-compose.yml` (so image tag changes after **`git pull`** apply without extra commands), copies `.env.example` → `.env` if missing.
 
 **Optional extras**
 
@@ -50,7 +50,7 @@ pip install -e ".[dev]"
 
 ## 4. Infrastructure (optional but typical)
 
-- [ ] **Docker**: `docker compose -f infra/docker-compose.yml up -d` — Redis, QuestDB, Qdrant, Prometheus, Grafana, Loki (ports in [`README.md`](../README.md)).
+- [ ] **Docker**: **`setup.bat`** runs pull + up for the stack; or manually: `docker compose -f infra/docker-compose.yml pull` then `up -d` — Redis, QuestDB, Qdrant, Prometheus, Grafana, Loki (ports in [`README.md`](../README.md)).
 - [ ] **Microservice scaffolds** (optional): overlay [`infra/docker-compose.microservices.yml`](../infra/docker-compose.microservices.yml) — see README “Microservices dev”.
 
 ---

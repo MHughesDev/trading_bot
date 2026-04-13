@@ -44,9 +44,12 @@ where docker >nul 2>&1
 if errorlevel 1 (
   echo WARNING: Docker not found. Skipping `docker compose`. Install Docker Desktop if you need QuestDB/Redis/Qdrant locally.
 ) else (
-  echo Starting infra stack ^(docker compose^) ...
+  echo Pulling infra images ^(fetch new tags when compose.yml changes after git pull^) ...
+  docker compose -f infra\docker-compose.yml pull
+  if errorlevel 1 echo WARNING: docker compose pull failed — continuing; check network or Docker Desktop.
+  echo Starting infra stack ^(docker compose up -d^) ...
   docker compose -f infra\docker-compose.yml up -d
-  if errorlevel 1 echo WARNING: docker compose failed — check Docker Desktop is running.
+  if errorlevel 1 echo WARNING: docker compose up failed — check Docker Desktop is running.
 )
 
 REM --- .env ---
