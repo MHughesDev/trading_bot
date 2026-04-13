@@ -2,6 +2,10 @@
 """Regenerate docs/QUEUE_STACK.csv (part of the queue system — see docs/QUEUE_SCHEMA.md).
 
 Run from repo root: python scripts/generate_queue_stack.py
+
+**stack_order:** Do not put ``stack_order`` in each ``ROWS`` dict. Order in ``ROWS`` is the
+pull order (top = next); the script assigns ``stack_order`` as 1..N for real rows and
+``9999`` for the ``_QUEUE_EMPTY_`` sentinel. Reorder or append dicts only — no renumbering.
 """
 from __future__ import annotations
 
@@ -10,7 +14,6 @@ from pathlib import Path
 
 ROWS: list[dict[str, str]] = [
     {
-        "stack_order": "1",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "DOC-UX",
@@ -25,7 +28,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "2",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "DOC-UX",
@@ -40,7 +42,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "3",
         "priority": "HIGH",
         "phase": "B",
         "batch": "SETUP-WIN",
@@ -55,7 +56,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "4",
         "priority": "HIGH",
         "phase": "B",
         "batch": "SETUP-LIN",
@@ -70,7 +70,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "5",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "SETUP-DOC",
@@ -84,7 +83,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "6",
         "priority": "HIGH",
         "phase": "B",
         "batch": "RUN-DEV",
@@ -99,7 +97,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "7",
         "priority": "HIGH",
         "phase": "B",
         "batch": "RUN-DEV",
@@ -114,7 +111,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "8",
         "priority": "MEDIUM",
         "phase": "C",
         "batch": "INF-QDR",
@@ -129,7 +125,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "9",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "UX-DOC",
@@ -144,7 +139,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#fb-ux-016-venue-onboarding-docs",
     },
     {
-        "stack_order": "10",
         "priority": "HIGH",
         "phase": "B",
         "batch": "UX-ONB",
@@ -159,7 +153,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#fb-ux-015-venue-onboarding",
     },
     {
-        "stack_order": "11",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-DOC",
@@ -174,7 +167,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "12",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-DOC",
@@ -189,7 +181,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "13",
         "priority": "MEDIUM",
         "phase": "C",
         "batch": "CONT-CI",
@@ -204,7 +195,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "14",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-OPS",
@@ -219,7 +209,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "15",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-OPS",
@@ -234,7 +223,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "16",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-QA",
@@ -249,7 +237,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "17",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-QA",
@@ -264,7 +251,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "18",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-CODE",
@@ -279,7 +265,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "19",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-CI",
@@ -294,7 +279,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "20",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -309,7 +293,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "21",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -324,7 +307,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "22",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -339,7 +321,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "23",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -354,7 +335,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "24",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-TEST",
@@ -369,7 +349,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "25",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-DEBT",
@@ -384,7 +363,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "26",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-DATA",
@@ -399,7 +377,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "27",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-MT",
@@ -414,7 +391,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "28",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-LEG",
@@ -429,7 +405,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "29",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SUP",
@@ -444,7 +419,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#full-audit-2026-04-13",
     },
     {
-        "stack_order": "30",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -459,7 +433,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#full-audit-2026-04-13",
     },
     {
-        "stack_order": "31",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-STATIC",
@@ -474,7 +447,6 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#full-audit-2026-04-13",
     },
     {
-        "stack_order": "9999",
         "priority": "LOW",
         "phase": "D",
         "batch": "",
@@ -490,6 +462,25 @@ ROWS: list[dict[str, str]] = [
     },
 
 ]
+
+
+def rows_with_stack_order() -> list[dict[str, str]]:
+    """Assign ``stack_order`` from list position (token-efficient: edit order, not numbers)."""
+    for i, row in enumerate(ROWS):
+        if (row.get("id") or "").strip() == "_QUEUE_EMPTY_" and i != len(ROWS) - 1:
+            msg = "_QUEUE_EMPTY_ sentinel must be the last entry in ROWS"
+            raise ValueError(msg)
+    out: list[dict[str, str]] = []
+    n = 0
+    for row in ROWS:
+        d = dict(row)
+        if (d.get("id") or "").strip() == "_QUEUE_EMPTY_":
+            d["stack_order"] = "9999"
+        else:
+            n += 1
+            d["stack_order"] = str(n)
+        out.append(d)
+    return out
 
 
 def main() -> None:
@@ -510,12 +501,13 @@ def main() -> None:
         "audit_id",
         "anchor",
     ]
+    rows = rows_with_stack_order()
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
         w.writeheader()
-        for row in ROWS:
+        for row in rows:
             w.writerow(row)
-    print(f"Wrote {len(ROWS)} rows to {path}")
+    print(f"Wrote {len(rows)} rows to {path}")
 
 
 if __name__ == "__main__":

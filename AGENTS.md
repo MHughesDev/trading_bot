@@ -21,6 +21,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 Agents working here should:
 
 - For **next queue item** work, read **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** first (smallest `stack_order` with `status=Open`; see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Use the row’s **`agent_task`** + **`affected_files`** — do not load the full [`QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) unless **`docs_refs`** requires it. If **`QUEUE_STACK.csv`** has no **`Open`** row (or `id=_QUEUE_EMPTY_`), **stop** and report — add or reprioritize per [**§6**](docs/QUEUE.MD#6-how-to-add-or-close-an-item); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+- When updating the **queue generator** ([`scripts/generate_queue_stack.py`](scripts/generate_queue_stack.py)): **reorder or append** entries in **`ROWS`** only — **`stack_order`** is filled when you run **`python scripts/generate_queue_stack.py`** (keep **`_QUEUE_EMPTY_`** last).
 - Preserve **non-negotiable rules** below unless the user task explicitly overrides.
 - Keep **live vs replay** behavior aligned where the architecture expects it (`decision_engine/run_step.py` is the shared decision step).
 - Update **docs** when behavior, env vars, or operator-facing flows change.

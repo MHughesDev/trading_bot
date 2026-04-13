@@ -35,7 +35,7 @@ Follow this workflow whenever you need to **append or edit** the project work qu
 Required headers include: `stack_order`, `priority`, `phase`, `batch`, `id`, `kind`, `status`, `summary_one_line`, `agent_task`, `affected_files`, `docs_refs`, `audit_id` (optional), `anchor` (optional).
 
 - **`agent_task`:** Goal, acceptance criteria, and constraints in plain text (quote the field if it contains commas).
-- **`stack_order`:** Smallest number among **`Open`** rows = next task; renumber when inserting/prioritizing.
+- **`stack_order`:** Smallest number among **`Open`** rows = next task. **If** you use [`scripts/generate_queue_stack.py`](../../../scripts/generate_queue_stack.py): reorder or append entries in **`ROWS`** (sentinel **`_QUEUE_EMPTY_`** last), run the script — **do not** edit numeric **`stack_order`** in the Python file. **If** you edit **`QUEUE_STACK.csv`** directly, set **`stack_order`** on each row.
 - **`affected_files`:** pipe-separated primary paths (`control_plane/api.py|tests/`).
 
 ## After editing
@@ -43,14 +43,14 @@ Required headers include: `stack_order`, `priority`, `phase`, `batch`, `id`, `ki
 1. **`QUEUE_STACK.csv`** — row added/updated; **`_QUEUE_EMPTY_`** sentinel removed when adding Open work, restored when backlog empty.
 2. **`QUEUE_ARCHIVE.MD`** — same ID row updated in §2 (or appropriate section) so narrative history stays aligned.
 3. **`QUEUE.MD` §2 snapshot** — update the small priority snapshot table if Open counts/IDs change.
-4. Optional: **`scripts/generate_queue_stack.py`** — only if bulk-regenerating from Python dict (maintainer tool).
+4. Optional: **`scripts/generate_queue_stack.py`** — after editing **`ROWS`**, run **`python scripts/generate_queue_stack.py`** to refresh **`QUEUE_STACK.csv`** (numbers derived from list order).
 
 ## Checklist
 
 - [ ] **`agent_task`** is self-sufficient (no mandatory external doc read).
 - [ ] **`kind`** matches work type; **`IL-*`** only for fixes in archive §3.
 - [ ] **`status`** set (`Open` / `In progress` / `Done`).
-- [ ] **`stack_order`** reflects intended pull order among Open rows.
+- [ ] Pull order is correct (**`stack_order`** in CSV, or **`ROWS`** order + regenerate script).
 - [ ] **`QUEUE_ARCHIVE.MD`** mirrored for Open items that have a §2 table row.
 - [ ] **`QUEUE.MD` §2** snapshot updated if Open set changed.
 

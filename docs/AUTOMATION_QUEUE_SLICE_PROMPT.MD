@@ -1,6 +1,6 @@
 # Automation prompt — queue slice → tests → PR → merge → prune
 
-**Documentation last reviewed:** **2026-02-06**.
+**Documentation last reviewed:** **2026-04-13**.
 
 **Queue system:** This prompt is part of the **[queue system](QUEUE_SCHEMA.md)** — see [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) for every file that implements backlog machinery.
 
@@ -40,7 +40,7 @@ You must follow [`AGENTS.md`](../AGENTS.md): Kraken-only market data policy, ris
 ## Phase 2 — Implement
 
 1. Implement **only** the agreed queue slice; match existing patterns in **`affected_files`** from the CSV row.
-2. After merging: update **`QUEUE_STACK.csv`** (**`status`** → `Done` or remove row; fix **`stack_order`**), mirror status into **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** if that ID has a §2 table row, and refresh the small snapshot in [`QUEUE.MD`](QUEUE.MD) §2 if needed.
+2. After merging: update **`QUEUE_STACK.csv`** (**`status`** → `Done` or remove row; **or** edit **`ROWS`** in **`scripts/generate_queue_stack.py`** and run **`python scripts/generate_queue_stack.py`** — no manual **`stack_order`** renumbering in Python), mirror status into **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** if that ID has a §2 table row, and refresh the small snapshot in [`QUEUE.MD`](QUEUE.MD) §2 if needed.
 3. **Do not** commit secrets; **do not** weaken tests to pass.
 
 ---

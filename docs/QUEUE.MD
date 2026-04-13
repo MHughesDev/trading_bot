@@ -47,7 +47,7 @@
 
 | Column | Required | Meaning |
 |--------|------------|---------|
-| **`stack_order`** | yes | Integer — **1** = top. Sort **ascending**; lowest `stack_order` with `status=Open` is next. |
+| **`stack_order`** | yes | Integer — **1** = top. Sort **ascending**; lowest `stack_order` with `status=Open` is next. **Maintainers:** if you use [`scripts/generate_queue_stack.py`](../scripts/generate_queue_stack.py), **do not** store `stack_order` in the `ROWS` dicts — **list order** is the stack; the script fills `stack_order` when writing the CSV. |
 | **`priority`** | yes | **HIGH** / **MEDIUM** / **LOW** — filter for “next HIGH” workflows; **pull order** is **`stack_order`**, not priority alone. |
 | **`phase`** | yes | **A** / **B** / **C** / **D** (see [§1.3](#13-priority-phase-category-status)). |
 | **`batch`** | no | Theme code (e.g. **AUD-OPS**, **AP-PAM**) — grouping only. |
@@ -68,7 +68,7 @@ stack_order,priority,phase,batch,id,kind,status,summary_one_line,agent_task,affe
 9999,LOW,D,,_QUEUE_EMPTY_,deferred,empty,No open queue items,N/A — add work via §6.,,,,
 ```
 
-**Maintenance:** Any PR that adds/closes/reorders **Open** work must update **`QUEUE_STACK.csv`** and mirror status lines into **`QUEUE_ARCHIVE.MD`** where that ID has a narrative row.
+**Maintenance:** Any PR that adds/closes/reorders **Open** work must update **`QUEUE_STACK.csv`** and mirror status lines into **`QUEUE_ARCHIVE.MD`** where that ID has a narrative row. After editing **`scripts/generate_queue_stack.py`** `ROWS`, run **`python scripts/generate_queue_stack.py`** so the CSV matches (numbers are derived, not hand-edited in Python).
 
 ---
 
@@ -162,8 +162,8 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 
 1. Use the **[Add to Queue](../.cursor/skills/add-to-queue/SKILL.md)** skill or follow the same steps manually.
 2. **Assign** Kind, priority, phase, batch (if any), unique **id**, and **status**.
-3. **Append a row to [`QUEUE_STACK.csv`](QUEUE_STACK.csv)** with a non-empty **`agent_task`** (self-sufficient) and **`affected_files`** / **`docs_refs`** as needed.
-4. **Set `stack_order`** so the next **`Open`** item has the **smallest** number among Open rows (renumber if needed). Remove **`_QUEUE_EMPTY_`** when adding Open work; insert the sentinel row when the backlog becomes empty.
+3. **Append a row to [`QUEUE_STACK.csv`](QUEUE_STACK.csv)** with a non-empty **`agent_task`** (self-sufficient) and **`affected_files`** / **`docs_refs`** as needed — **or** append a dict to **`ROWS`** in [`scripts/generate_queue_stack.py`](../scripts/generate_queue_stack.py) and run the script (preferred when bulk-updating history: **no per-row renumbering** in Python).
+4. **Set pull order:** either assign **`stack_order`** in the CSV so the next **`Open`** row has the **smallest** number among Open rows, **or** (when using the generator) **move the dict** earlier/later in **`ROWS`** — numbers are filled automatically. Remove **`_QUEUE_EMPTY_`** when adding Open work; restore the sentinel row when the backlog becomes empty (**last** row in **`ROWS`** must stay **`_QUEUE_EMPTY_`** when using the script).
 5. **Mirror** the same summary row into **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** §2 (or the right subsection) so humans can read narrative tables — **keep CSV and archive in sync**.
 6. On **close:** set **`status=Done`**, optionally remove the row after a release, and update the archive table.
 
