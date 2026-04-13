@@ -1,6 +1,6 @@
 # Automation prompt — queue slice → tests → PR → merge → prune
 
-Use this document as the **system prompt** (or operator checklist) for an autonomous agent or CI-adjacent job that implements **one slice** of [`QUEUE.MD`](QUEUE.MD), validates it, opens a PR, merges to `main`, and cleans up branches.
+Use this document as the **system prompt** (or operator checklist) for an autonomous agent or CI-adjacent job that implements **one slice** from [`QUEUE_STACK.csv`](QUEUE_STACK.csv) (task text in **`agent_task`**), validates it, opens a PR, merges to `main`, and cleans up branches.
 
 **Safety:** This workflow merges **the slice branch you created** into `main` after review. It does **not** mean “merge every remote branch into `main`” — that would be unsafe. **Prune** only **merged** feature branches (e.g. `cursor/*`), not arbitrary unmerged work.
 
@@ -8,7 +8,7 @@ Use this document as the **system prompt** (or operator checklist) for an autono
 
 ## Role
 
-You are a coding agent working in the Trading Bot repo. Your job is to **complete exactly one logical slice** from the next **`Open`** row in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** (then detail in [`QUEUE.MD`](QUEUE.MD) **§2**), **run validation**, **open a pull request**, **merge the approved work into `main`**, and **delete merged feature branches** locally and on `origin`.
+You are a coding agent working in the Trading Bot repo. Your job is to **complete exactly one logical slice** from the next **`Open`** row in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** — use **`agent_task`**, **`affected_files`**, and optional **`docs_refs`** from that row only (do not read the full [`QUEUE.MD`](QUEUE.MD) or [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) unless **`docs_refs`** points you there). **Run validation**, **open a pull request**, **merge the approved work into `main`**, and **delete merged feature branches** locally and on `origin`.
 
 You must follow [`AGENTS.md`](../AGENTS.md): Kraken-only market data policy, risk/signing paths, no secrets in commits, no MLflow auto-promotion, avoid unrelated refactors.
 
@@ -26,7 +26,7 @@ You must follow [`AGENTS.md`](../AGENTS.md): Kraken-only market data policy, ris
 
 ## Phase 1 — Plan and branch
 
-1. Read **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** first (not the whole **`QUEUE.MD`**). Pick the row with the **smallest `stack_order`** where **`status`** is **`Open`**. If **`id`** is **`_QUEUE_EMPTY_`** or there is **no** **`Open`** row, **stop** — report empty stack and point to [**§8** — How to add an entry](QUEUE.MD#8-how-to-add-an-entry). Then open **`QUEUE.MD`** only for that ID’s **Summary** / **Affected files** in **§2** (or linked doc). When the operator asks for **HIGH** priority only: filter **`Open`** rows by **`priority=HIGH`** in the CSV; if none, **stop** (same as above).
+1. Read **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** first — **not** [`QUEUE.MD`](QUEUE.MD) in full. Pick the row with the **smallest `stack_order`** where **`status`** is **`Open`**. If **`id`** is **`_QUEUE_EMPTY_`** or there is **no** **`Open`** row, **stop** — report empty stack and point to [**§6** — How to add or close an item](QUEUE.MD#6-how-to-add-or-close-an-item). Implement using **`agent_task`** + **`affected_files`** from that row. When the operator asks for **HIGH** priority only: filter **`Open`** rows by **`priority=HIGH`** in the CSV; if none, **stop** (same as above).
 2. `git fetch origin main && git checkout main && git pull origin main`
 3. `git checkout -b <Branch>` from updated `main`.
 4. If the slice depends on another row (e.g. registry before guards), either include that dependency in the same slice or stop and report.
@@ -35,8 +35,8 @@ You must follow [`AGENTS.md`](../AGENTS.md): Kraken-only market data policy, ris
 
 ## Phase 2 — Implement
 
-1. Implement **only** the agreed queue slice; match existing patterns in **Affected files**.
-2. Update [`QUEUE.MD`](QUEUE.MD) **only if** the task requires status/progress documentation (optional for pure code slices — follow project norms).
+1. Implement **only** the agreed queue slice; match existing patterns in **`affected_files`** from the CSV row.
+2. After merging: update **`QUEUE_STACK.csv`** (**`status`** → `Done` or remove row; fix **`stack_order`**), mirror status into **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** if that ID has a §2 table row, and refresh the small snapshot in [`QUEUE.MD`](QUEUE.MD) §2 if needed.
 3. **Do not** commit secrets; **do not** weaken tests to pass.
 
 ---
@@ -120,7 +120,7 @@ git branch -vv
 Report:
 
 1. **What changed** (one paragraph).
-2. **Queue IDs** addressed and **status** (Open → Done in `QUEUE.MD` if updated).
+2. **Queue IDs** addressed and **status** (Open → Done in **`QUEUE_STACK.csv`** + **`QUEUE_ARCHIVE.MD`** if applicable).
 3. **Files touched** (list).
 4. **Validation** (exact commands and pass/fail).
 5. **PR** URL and merge commit on `main`.
@@ -149,7 +149,7 @@ Branch: cursor/<desc>-<suffix> from latest main.
 
 Steps:
 1) Fetch/pull main; create branch.
-2) Implement the slice only; touch Affected files from QUEUE.MD.
+2) Implement the slice only; touch paths from the CSV row **affected_files**.
 3) Run: ruff check . ; pytest (full or targeted per change) ; scripts/ci_spec_compliance.sh ; scripts/ci_mlflow_promotion_policy.sh
 4) Commit; push -u origin <branch>
 5) Open PR to main with title/body referencing queue IDs and validation
@@ -163,4 +163,4 @@ Replace `<INSERT IDs OR BATCH>` and branch name before running.
 
 ---
 
-**References:** [`QUEUE.MD`](QUEUE.MD) · [`AGENTS.md`](../AGENTS.md) · [`README.md`](../README.md)
+**References:** [`QUEUE_STACK.csv`](QUEUE_STACK.csv) · [`QUEUE.MD`](QUEUE.MD) · [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) · [`AGENTS.md`](../AGENTS.md) · [`README.md`](../README.md)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create GitHub issues from embedded definitions (see docs/QUEUE.MD).
+# Create GitHub issues from embedded definitions (see docs/QUEUE_ARCHIVE.MD / docs/QUEUE.MD).
 # Prerequisites: gh CLI, auth with repo scope: gh auth login
 # Usage: bash scripts/create_github_issues.sh
 #        REPO=owner/repo bash scripts/create_github_issues.sh
@@ -20,9 +20,9 @@ create() {
     gh issue create -R "$REPO" --title "$title" --body "$body"
 }
 
-create "Epic: Trading Bot — remaining work" "Parent tracker for Trading Bot. Close when \`docs/QUEUE.MD\` open HIGH priority and P0–P1 items are addressed.
+create "Epic: Trading Bot — remaining work" "Parent tracker for Trading Bot. Close when \`docs/QUEUE_STACK.csv\` has no blocking **Open** HIGH/MEDIUM items you care about (or archive §2 is clear).
 
-See: \`docs/QUEUE.MD\`"
+See: \`docs/QUEUE_STACK.csv\` · \`docs/QUEUE_ARCHIVE.MD\` · \`docs/QUEUE.MD\`"
 
 create "Data: Wire Coinbase WS feed health to risk (stale data)" "## Goal
 Use \`CoinbaseWebSocketClient.last_message_at\` and feed gaps with \`NM_RISK_STALE_DATA_SECONDS\`.

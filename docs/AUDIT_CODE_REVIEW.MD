@@ -62,7 +62,7 @@
 | A-1 | **Medium** | Control plane auth | When **`NM_CONTROL_PLANE_API_KEY`** is **unset** and **`NM_AUTH_SESSION_ENABLED`** is false, **`require_mutate_operator`** allows mutating routes **without** credentials. Intentional for local dev; **unsafe** if the API is exposed without TLS + firewall or another auth layer. |
 | A-2 | **Low** | Error handling | Many **`except Exception:`** blocks across `live_service.py`, Streamlit, ingestion, and adapters. Reduces crashes but can **hide** programming errors; logs may not always include enough context. |
 | A-3 | **Low** | Intent gate semantics | If **`risk_signing_secret`** is **unset**, **`execution_allowed`** returns **True** (gate open) even when **`allow_unsigned_execution`** is false — because the “no secret” branch short-circuits. Preflight warns for **live**; still easy to misread. |
-| A-4 | **Info** | Queue maintenance | **`docs/QUEUE_STACK.csv`** must stay aligned with **`QUEUE.MD`** **Open** rows — **drift** if only one file is edited. |
+| A-4 | **Info** | Queue maintenance | **`docs/QUEUE_STACK.csv`** must stay aligned with **`QUEUE_ARCHIVE.MD`** **Open** rows (and the §2 snapshot in **`QUEUE.MD`**) — **drift** if only one file is edited. |
 | A-5 | **Info** | Default config | **`app/config/default.yaml`** uses **`execution.mode: live`** — safe operation depends on **`.env`** and operator discipline. |
 | A-6 | **Medium** | CORS | **`control_plane/api.py`** registers **`CORSMiddleware`** with **`allow_origins=["*"]`** (and permissive methods/headers) for Streamlit/SSE (FB-AP-034). Correct for **LAN dev**; for **public** or **multi-tenant** deployment, **narrow origins** and review headers. |
 | A-7 | **Low** | Dependency hygiene | No automated **CVE** scan called out in-repo in this audit — rely on **`pip-audit`**, lockfiles, or GitHub **Dependabot** for ongoing supply-chain review. |
@@ -88,7 +88,7 @@
 1. **A-1 / A-6:** Document in **`README.md`** / **`RUNBOOKS.MD`**: production **must** use **TLS**, **firewall**, **`NM_CONTROL_PLANE_API_KEY`** and/or **session auth**, and **restrict CORS origins** when exposing the API beyond localhost. Optional: env-driven `allow_origins` list defaulting to `["*"]` only in dev.
 2. **A-2:** Prefer **`logging.exception`** or structured logs in hot paths; narrow exceptions where the failure mode is known.
 3. **A-3:** Add a short comment in **`intent_gate.py`** explaining the “no secret → allow” branch vs preflight.
-4. **A-4:** Ensure **`AGENTS.md`** §10 or contributor checklist mentions **`QUEUE_STACK.csv`** when editing queue workflow (may already be partially covered).
+4. **A-4:** Ensure **`AGENTS.md`** §10 or contributor checklist mentions **`QUEUE_STACK.csv`** + **`QUEUE_ARCHIVE.MD`** when editing queue workflow (may already be partially covered).
 5. **A-5:** Product decision: default **`execution.mode: paper`** in `default.yaml` for safer first clone — optional.
 6. **A-7:** Add optional **`pip-audit`** or document it in **`README.md`** CI / operator section.
 7. **A-8:** Document **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=true`** for any deployment where the dashboard is reachable beyond a single trusted operator.
@@ -124,7 +124,7 @@
 
 ## Queue promotion (2026-04-18)
 
-The granular backlog below is **promoted** to the live queue as **§2.5** **[`QUEUE.MD`](QUEUE.MD#25-post-audit-hardening-fb-aud)** — IDs **`FB-AUD-001`** … **`FB-AUD-017`**, with **`DOC-A1`** … **`LEGACY-A1`** traceability preserved in each row. **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** lists the same work in **`stack_order`** (implement top to bottom unless reprioritized).
+The granular backlog below is **promoted** to the live queue as **§2.5** in **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD#25-post-audit-hardening-fb-aud)** — IDs **`FB-AUD-001`** … **`FB-AUD-017`**, with **`DOC-A1`** … **`LEGACY-A1`** traceability preserved in each row. **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** lists the same work in **`stack_order`** with self-contained **`agent_task`** (implement top to bottom unless reprioritized). Conventions: **[`QUEUE.MD`](QUEUE.MD)**.
 
 **Done slices:** **`FB-AUD-001`** (2026-04-19) — **`README.md`** + **`RUNBOOKS.MD`** production exposure checklist; **`FB-AUD-002`** (2026-04-19) — Streamlit route guard tables + runbook + **`streamlit_util`** docstrings; see §2.5 rows.
 

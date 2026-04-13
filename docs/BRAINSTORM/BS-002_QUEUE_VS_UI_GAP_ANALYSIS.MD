@@ -9,7 +9,7 @@
 
 ## One-liner
 
-Compare what **`docs/QUEUE.MD`** (canonical backlog; legacy name **QueueLog**) promises for **FB-AP-P0** (per-asset product) with what operators can do today in **Streamlit** (`control_plane/Home.py` + `pages/`), and surface **API-only** capabilities until the two-page UI lands.
+Compare what **`docs/QUEUE_ARCHIVE.MD`** (canonical backlog tables; legacy backlog lived in monolithic **`QUEUE.MD`**) promises for **FB-AP-P0** (per-asset product) with what operators can do today in **Streamlit** (`control_plane/Home.py` + `pages/`), and surface **API-only** capabilities until the two-page UI lands.
 
 ---
 
@@ -23,7 +23,7 @@ The queue describes a **two-page** operator product (Dashboard + Asset Page), **
 
 | Term | In this repo |
 |------|----------------|
-| **QLOG / QueueLog** | **`docs/QUEUE.MD`** only — do not create a separate `QueueLog.md` unless explicitly requested ([`.cursor/skills/add-to-queue/SKILL.md`](../../.cursor/skills/add-to-queue/SKILL.md)). |
+| **QLOG / QueueLog** | **`docs/QUEUE.MD`** + **`docs/QUEUE_STACK.csv`** + **`docs/QUEUE_ARCHIVE.MD`** — do not create a separate `QueueLog.md` unless explicitly requested ([`.cursor/skills/add-to-queue/SKILL.md`](../../.cursor/skills/add-to-queue/SKILL.md)). |
 | **UI** | **Streamlit** multipage app: `control_plane/Home.py`, `control_plane/pages/*.py`. |
 
 ---
@@ -97,7 +97,7 @@ The queue describes a **two-page** operator product (Dashboard + Asset Page), **
 
 ## Links
 
-- [`docs/QUEUE.MD`](../QUEUE.MD) — **§2.2** **FB-AP-P0**
+- [`docs/QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) — **§2.2** **FB-AP-P0**
 - [`docs/PER_ASSET_OPERATOR.MD`](../PER_ASSET_OPERATOR.MD) — manifest + API (partial operator doc)
 - [`docs/Specs/CONTROL_PLANE.MD`](../Specs/CONTROL_PLANE.MD) — short spec (may lag **FB-AP-*** additions)
 - [`control_plane/api.py`](../../control_plane/api.py) — asset routes + **`/status`**

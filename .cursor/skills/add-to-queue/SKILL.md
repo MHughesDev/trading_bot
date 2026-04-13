@@ -1,60 +1,58 @@
 ---
 name: add-to-queue
-description: Add or update work items in docs/QUEUE.MD using project conventions (Kind, IDs, Batch, Affected files). Use when the user asks to log backlog items, queue tasks, or record fixes/features in the queue.
+description: Add or update work items in docs/QUEUE_STACK.csv and mirror rows in docs/QUEUE_ARCHIVE.MD using project conventions (Kind, IDs, Batch, agent_task). Use when the user asks to log backlog items, queue tasks, or record fixes/features in the queue.
 ---
 
 # Add to Queue
 
-Follow this workflow whenever you need to **append or edit** the project work queue. The **canonical file** is **`docs/QUEUE.MD`** (uppercase `.MD`). The legacy name **QueueLog** refers to the same document—**do not** create a separate `QueueLog.md` unless the user explicitly asks to rename the file.
+Follow this workflow whenever you need to **append or edit** the project work queue.
 
-## Source of truth
+## Source of truth (two files + conventions)
 
-- **File:** [`docs/QUEUE.MD`](../../../docs/QUEUE.MD) — single backlog + resolved history (full narrative).
-- **Next-task stack (agents read first):** [`docs/QUEUE_STACK.csv`](../../../docs/QUEUE_STACK.csv) — ordered **`stack_order`**; **`Open`** rows = backlog top to bottom. Update **`QUEUE_STACK.csv`** whenever you add/close **Open** items in **`QUEUE.MD`** (see **`QUEUE.MD` §0**).
-- **Automation / PR workflow:** [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](../../../docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD).
-- **Agent boundaries:** [`AGENTS.md`](../../../AGENTS.md) (Kraken-only market data, risk/signing, no secrets, no MLflow auto-promotion in code).
+| Artifact | Role |
+|----------|------|
+| **[`docs/QUEUE.MD`](../../../docs/QUEUE.MD)** | **Conventions** (Kind, IDs, batch codes), **agent protocol**, and **how to add/close** items — small file; agents read this for rules only. |
+| **[`docs/QUEUE_STACK.csv`](../../../docs/QUEUE_STACK.csv)** | **Next-task stack** — **one row = one actionable task**. Required columns include **`agent_task`** (self-sufficient instructions), **`affected_files`**, **`docs_refs`**. |
+| **[`docs/QUEUE_ARCHIVE.MD`](../../../docs/QUEUE_ARCHIVE.MD)** | **Human-readable tables** — open-queue detail, `IL-*`, `HG-*`, completed archive. **Mirror** new/changed **Open** rows here when you add narrative tables. |
+
+**Legacy:** The monolithic `QUEUE.MD` was split (2026) — full tables live in **`QUEUE_ARCHIVE.MD`**.
 
 ## Before you edit
 
-1. **Read** [§1 Conventions](../../../docs/QUEUE.MD#1-conventions) in `QUEUE.MD` — **Kind**, **ID prefixes** (`FB-`, `IL-`, `HG-`), **Priority**, **Phase**, **Category**, **Batch** (for `FB-AP-*`), **Status**.
-2. **Decide the target section:**
-   - **New open roadmap item** → [§2 Open queue](../../../docs/QUEUE.MD#2-open-queue) (correct subsection: HIGH/MEDIUM/LOW, epic table, or deferred §2.1).
-   - **Resolved fix** → [§3 Resolved fixes](../../../docs/QUEUE.MD#3-resolved-fixes-il) (`IL-*` only).
-   - **Completed gate** → [§4](../../../docs/QUEUE.MD#4-completed-compliance-gates-hg).
-   - **Completed theme / archive row** → [§5](../../../docs/QUEUE.MD#5-completed-archive-fb--themes).
+1. **Read** [§1 Conventions](../../../docs/QUEUE.MD#1-conventions) and [§0 CSV columns](../../../docs/QUEUE.MD#0-next-task-stack-queue_stackcsv) in `QUEUE.MD`.
+2. **Decide the target section in the archive** (if mirroring):
+   - **New open roadmap item** → `QUEUE_ARCHIVE.MD` §2 (correct subsection / epic table).
+   - **Resolved fix** → §3 (`IL-*` only).
+   - **Completed gate** → §4.
+   - **Completed theme / archive row** → §5.
 3. **Pick the next ID** — do not collide with existing IDs; prefer sub-IDs (`FB-XXX-01`) for slices under an epic.
-4. **Do not** duplicate long narratives across files; **link** to `docs/*.MD` from the Summary when helpful.
+4. **`agent_task` must stand alone** — an agent implementing the row should not *need* another `.md` file. Optional **`docs_refs`** point to background only.
 
-## Row shape (FB-AP-P0 style table)
+## Row shape (`QUEUE_STACK.csv`)
 
-When adding rows to the **FB-AP-P0** epic table, use columns:
+Required headers include: `stack_order`, `priority`, `phase`, `batch`, `id`, `kind`, `status`, `summary_one_line`, `agent_task`, `affected_files`, `docs_refs`, `audit_id` (optional), `anchor` (optional).
 
-`ID | Batch | Phase | Cat | Kind | Pri | Status | Summary | Affected files`
+- **`agent_task`:** Goal, acceptance criteria, and constraints in plain text (quote the field if it contains commas).
+- **`stack_order`:** Smallest number among **`Open`** rows = next task; renumber when inserting/prioritizing.
+- **`affected_files`:** pipe-separated primary paths (`control_plane/api.py|tests/`).
 
-- **Summary:** one cell, **as detailed as needed** (requirements, pointers, acceptance hints)—long summaries are encouraged for implementers.
-- **Affected files:** pipe-separated **primary** paths or globs (`control_plane/api.py`, `tests/`, …).
-- **Batch:** use the [Batch lookup table](../../../docs/QUEUE.MD#13-priority-phase-category-status) (e.g. `AP-PAM`, `AP-INI`).
+## After editing
 
-## Row shape (fixes `IL-*`)
-
-Use the subsection template in §3: **Kind**, **Phase** (P1/P2/P3), **Resolved** date, **Summary** with code paths.
-
-## After editing the queue
-
-1. **Stack CSV:** Update [`QUEUE_STACK.csv`](../../../docs/QUEUE_STACK.csv) — keep **`stack_order`** monotonic with intended pull order; set finished rows to **`Done`** or remove them; use **`_QUEUE_EMPTY_`** / **`empty`** when there are no **`Open`** rows (see **`QUEUE.MD` §0**).
-2. **Consistency:** If behavior or operator flows changed elsewhere, update **README** or the relevant **`docs/*.MD`** per `AGENTS.md`—but **do not** expand scope beyond what the user asked.
-3. **Optional GitHub sync:** §7 of `QUEUE.MD` — mirroring to GitHub issues is optional; markdown stays canonical.
+1. **`QUEUE_STACK.csv`** — row added/updated; **`_QUEUE_EMPTY_`** sentinel removed when adding Open work, restored when backlog empty.
+2. **`QUEUE_ARCHIVE.MD`** — same ID row updated in §2 (or appropriate section) so narrative history stays aligned.
+3. **`QUEUE.MD` §2 snapshot** — update the small priority snapshot table if Open counts/IDs change.
+4. Optional: **`scripts/generate_queue_stack.py`** — only if bulk-regenerating from Python dict (maintainer tool).
 
 ## Checklist
 
-- [ ] Correct **§** (open vs resolved vs archive).
-- [ ] **Kind** matches work type; **`IL-*`** only for fixes.
-- [ ] **Status** set (`Open` / `In progress` / `Done` / `deferred`).
-- [ ] **Summary** names verify steps or files where possible.
-- [ ] **Contents** table at top of `QUEUE.MD` updated if you add a **new § anchor** (rare).
-- [ ] **`QUEUE_STACK.csv`** updated if **`Open`** / stack order changed.
+- [ ] **`agent_task`** is self-sufficient (no mandatory external doc read).
+- [ ] **`kind`** matches work type; **`IL-*`** only for fixes in archive §3.
+- [ ] **`status`** set (`Open` / `In progress` / `Done`).
+- [ ] **`stack_order`** reflects intended pull order among Open rows.
+- [ ] **`QUEUE_ARCHIVE.MD`** mirrored for Open items that have a §2 table row.
+- [ ] **`QUEUE.MD` §2** snapshot updated if Open set changed.
 
 ## When not to use this skill
 
 - **Implementing** queue items (code changes) — use normal development workflow + tests in `AGENTS.md`.
-- **Renaming** `QUEUE.MD` — requires explicit repo decision and bulk link updates.
+- **Renaming** queue files — requires explicit repo decision and bulk link updates.

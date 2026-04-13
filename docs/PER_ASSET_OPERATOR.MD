@@ -1,6 +1,6 @@
 # Per-asset model registry (operator)
 
-This document describes the **per-asset model manifest** introduced for **FB-AP-001** / **FB-AP-002**. Full per-asset UI and init pipelines are tracked in [`QUEUE.MD`](QUEUE.MD) **§2.2 (FB-AP-P0)**.
+This document describes the **per-asset model manifest** introduced for **FB-AP-001** / **FB-AP-002**. Full per-asset UI and init pipelines are tracked in [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) **§2.2 (FB-AP-P0)**.
 
 ## Operator user accounts (FB-UX-001)
 
@@ -217,4 +217,4 @@ When **`NM_LIVE_WATCH_LIFECYCLE_GATE=true`**, the **`live_service`** loop runs *
 - **FB-AP-018 (startup)** — With **`NM_QUESTDB_STARTUP_GAP_DETECTION=true`** and QuestDB reachable, the live loop compares **`max(ts)`** in **`canonical_bars`** (per manifest symbol, same **`interval_seconds`** as live bars) to the **last closed** UTC bucket; logs **`canonical_bar_gap`** when behind or empty (**FB-AP-019** fills gaps).
 - **FB-AP-019 (startup backfill)** — With **`NM_QUESTDB_STARTUP_KRAKEN_BACKFILL=true`**, after gap detection the loop fetches missing Kraken REST OHLC for each gap, validates with the same cleaner as init bootstrap, **`insert_bar`** into QuestDB (idempotent), and writes **`canonical_through_ts`** to **`data/canonical_bar_watermarks/<symbol>.json`** (override **`NM_CANONICAL_BAR_WATERMARK_DIR`**). Requires QuestDB connection (opens even if traces/canonical persist flags are off). **`questdb.backfill_max_lookback_days`** (default **14**) limits how far back REST runs when storage is empty.
 - [`RUNBOOKS.MD`](RUNBOOKS.MD) — execution and preflight.
-- [`QUEUE.MD`](QUEUE.MD) **FB-AP-P0** — remaining per-asset UI, init pipeline, guards in `DecisionPipeline`.
+- [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) **FB-AP-P0** — remaining per-asset UI, init pipeline, guards in `DecisionPipeline`.

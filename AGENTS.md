@@ -10,7 +10,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 **Trading Bot** (this repository) is a Python **multi-route AI crypto trading** codebase: **Kraken** for **all market data**, Alpaca for **paper execution only**, shared **decision + risk** path for live and replay, typed contracts (`app/contracts/`), and adapters under `execution/adapters/`. **Coinbase** appears only in the **live execution** adapter when configured — not for market data ingestion.
 
-**This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, `docs/*.MD` (work queue: [`docs/QUEUE.MD`](docs/QUEUE.MD), plus reference notes), `scripts/` (CI guards, smoke tests).
+**This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, `docs/*.MD` (queue conventions: [`docs/QUEUE.MD`](docs/QUEUE.MD); next-task detail: [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv); full tables: [`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)), `scripts/` (CI guards, smoke tests).
 
 **This repo does not own:** your brokerage accounts, cloud secrets stores, production deployment pipelines (unless added here), or external ERP/CRM. **Do not** assume access to live keys or paid APIs beyond what `.env` provides.
 
@@ -20,7 +20,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 Agents working here should:
 
-- For **next queue item** work, read **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** first (smallest `stack_order` with `status=Open`; see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Then implement **scoped** features and fixes aligned with **`QUEUE.MD`** when the task references them. If **`QUEUE_STACK.csv`** has no **`Open`** row (or `id=_QUEUE_EMPTY_`), **stop** and report — add or reprioritize per [**§8**](docs/QUEUE.MD#8-how-to-add-an-entry); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+- For **next queue item** work, read **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** first (smallest `stack_order` with `status=Open`; see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Use the row’s **`agent_task`** + **`affected_files`** — do not load the full [`QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) unless **`docs_refs`** requires it. If **`QUEUE_STACK.csv`** has no **`Open`** row (or `id=_QUEUE_EMPTY_`), **stop** and report — add or reprioritize per [**§6**](docs/QUEUE.MD#6-how-to-add-or-close-an-item); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
 - Preserve **non-negotiable rules** below unless the user task explicitly overrides.
 - Keep **live vs replay** behavior aligned where the architecture expects it (`decision_engine/run_step.py` is the shared decision step).
 - Update **docs** when behavior, env vars, or operator-facing flows change.
@@ -45,7 +45,7 @@ Agents working here should:
 1. **Explicit user / task instructions** for the current change.
 2. **Tests** (`tests/`) and **runtime behavior** of the code being changed.
 3. **[`README.md`](README.md)** — default entry (commands, stack summary); deep detail lives in **`docs/`**.
-4. **[`docs/QUEUE.MD`](docs/QUEUE.MD)** for planned work, fixes, and archive (do not treat as executable spec unless task says so).
+4. **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** for the next executable task; **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** for full backlog tables and history; **[`docs/QUEUE.MD`](docs/QUEUE.MD)** for conventions only (do not treat narrative tables as executable spec unless the task says so).
 5. Other **[`docs/*.MD`](docs/)** reference files (risk precedence, shutdown, Coinbase granularity, etc.).
 6. Older comments or stale markdown — verify against code.
 
@@ -144,7 +144,7 @@ Optional extras: `pip install -e ".[alpaca]"` for Alpaca adapter tests; `[dashbo
 Update **when** the change affects:
 
 - Operator-visible behavior, new/changed **`NM_*`** or config keys, or smoke/CI steps → **[`README.md`](README.md)** and/or relevant **[`docs/*.MD`](docs/)**.
-- Queue / fix tracking → **[`docs/QUEUE.MD`](docs/QUEUE.MD)** (only if the task is to record work; otherwise a short PR/summary may suffice).
+- Queue / fix tracking → **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** + **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** (only if the task is to record work; otherwise a short PR/summary may suffice).
 
 Do **not** duplicate long narratives across files; link to `docs/` instead.
 
@@ -167,7 +167,7 @@ Prefer minimal edits; document assumptions in the handoff.
 
 **Bug fix:** Reproduce via test or trace; smallest fix; regression test if possible.
 
-**Feature:** Check [`docs/QUEUE.MD`](docs/QUEUE.MD) for ID alignment; extend existing patterns; update tests and README/docs as needed.
+**Feature:** Check [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv) / [`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) for ID alignment; extend existing patterns; update tests and README/docs as needed.
 
 **Refactor:** Behavior-preserving only; run full test suite; do not mix with feature work in the same commit when avoidable.
 

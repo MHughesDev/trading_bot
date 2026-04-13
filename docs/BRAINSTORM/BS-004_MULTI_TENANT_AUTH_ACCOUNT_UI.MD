@@ -9,7 +9,7 @@
 
 ## One-liner
 
-**Signed-in users** with **standard authentication**, **per-user PnL and trading context**, an **Account** page for **Alpaca / Coinbase** API keys (**Kraken** remains the **shared market-data** path), **sign-in gating** with **redirect** for deep links, plus **dashboard/asset UI** enhancements previously listed in **BS-003** — tracked in [`QUEUE.MD`](../QUEUE.MD) **§2.4 `FB-UX-P0`**.
+**Signed-in users** with **standard authentication**, **per-user PnL and trading context**, an **Account** page for **Alpaca / Coinbase** API keys (**Kraken** remains the **shared market-data** path), **sign-in gating** with **redirect** for deep links, plus **dashboard/asset UI** enhancements previously listed in **BS-003** — tracked in [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) **§2.4 `FB-UX-P0`**.
 
 ---
 
@@ -59,12 +59,12 @@ The control plane today assumes a **single operator** and **global** `.env` cred
 
 ## Promotion
 
-**Promoted** to [`QUEUE.MD`](../QUEUE.MD) **§2.4 — Multi-tenant web operator UX (`FB-UX-P0`)** — rows **FB-UX-P0** (parent), **FB-UX-001**–**FB-UX-014**.
+**Promoted** to [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) **§2.4 — Multi-tenant web operator UX (`FB-UX-P0`)** — rows **FB-UX-P0** (parent), **FB-UX-001**–**FB-UX-014**.
 
 ---
 
 ## Links
 
-- [`QUEUE.MD`](../QUEUE.MD) §2.4  
+- [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) §2.4  
 - [`BS-003_ADDITIONAL_DASHBOARD_ASSET_UI_IDEAS.MD`](BS-003_ADDITIONAL_DASHBOARD_ASSET_UI_IDEAS.MD) — UI ideas partially absorbed into **FB-UX-008**–**014**  
 - [`AGENTS.md`](../../AGENTS.md)

@@ -10,7 +10,9 @@ This folder holds **specifications that describe the repository as implemented**
 |----------|------|
 | **`docs/Specs/`** (this folder) | What the code **is** and **does** today |
 | **`docs/Human Provided Specs/`** | What **you** want; agents compare to code + Specs and update backlog / implementation |
-| **`docs/QUEUE.MD`** | Open queue, resolved fixes (`IL-*`), gates (`HG-*`), completed archive (`FB-*`) |
+| **`docs/QUEUE.MD`** | Queue protocol + conventions |
+| **`docs/QUEUE_STACK.csv`** | Next tasks (`agent_task` per row) |
+| **`docs/QUEUE_ARCHIVE.MD`** | Open queue tables, resolved fixes (`IL-*`), gates (`HG-*`), archive (`FB-*`) |
 | **`docs/READY_TO_RUN.MD`** | Operator checklist (venv, `.env`, Docker, preflight, run UI) |
 | **`docs/*.MD` reference docs** | Deep dives (risk order, backtesting semantics, QuestDB, etc.) |
 

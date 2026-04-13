@@ -1,6 +1,6 @@
 # Windows operator UI — architecture and roadmap
 
-This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat`), a future **desktop shell** (`.exe`), and a **unified trading dashboard** (paper/live switch, positions, P&L by timeframe). It ties to backlog ids **FB-UI-*** and **FB-DASH-*** in [`QUEUE.MD`](QUEUE.MD) (§2).
+This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat`), a future **desktop shell** (`.exe`), and a **unified trading dashboard** (paper/live switch, positions, P&L by timeframe). It ties to backlog ids **FB-UI-*** and **FB-DASH-*** in [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (§2).
 
 ---
 
@@ -84,7 +84,7 @@ This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat
 
 ## 4. Checklist cross-reference
 
-See **§2 — Open queue → MEDIUM → operator UI / Windows** in [`QUEUE.MD`](QUEUE.MD) (**FB-UI-01-01**, etc.) for granular tracked work. **Ready-to-run checklist:** [`OPERATOR_READY_CHECKLIST.MD`](OPERATOR_READY_CHECKLIST.MD) (**FB-DASH-01-01** / **FB-DASH-01-02** — Done 2026-04-11).
+See **§2 — Open queue → MEDIUM → operator UI / Windows** in [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (**FB-UI-01-01**, etc.) for granular tracked work. **Ready-to-run checklist:** [`OPERATOR_READY_CHECKLIST.MD`](OPERATOR_READY_CHECKLIST.MD) (**FB-DASH-01-01** / **FB-DASH-01-02** — Done 2026-04-11).
 
 ---
 

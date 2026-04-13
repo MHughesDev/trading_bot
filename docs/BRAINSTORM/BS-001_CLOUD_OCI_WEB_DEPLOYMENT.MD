@@ -151,13 +151,13 @@ Pick one:
 
 **Child brainstorms:** none.
 
-**Promotion / queue IDs:** **FB-CONT-P0** (epic), **FB-CONT-001** … **FB-CONT-008** — see [`docs/QUEUE.MD`](../QUEUE.MD) §2.3.
+**Promotion / queue IDs:** **FB-CONT-P0** (epic), **FB-CONT-001** … **FB-CONT-008** — see [`docs/QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) §2.3.
 
 ---
 
 ## Converting this brainstorm to the queue
 
-**Promoted 2026-04-12** — canonical rows live in **[§2.3 — Container / OCI cloud deployment (`FB-CONT-P0`)](../QUEUE.MD#23-container--oci-cloud-deployment-fb-cont-p0)** in `QUEUE.MD`. Use **FB-CONT-001 … FB-CONT-008** for traceability; link **BS-001** from epic Summary when editing related docs.
+**Promoted 2026-04-12** — canonical rows live in **[§2.3 — Container / OCI cloud deployment (`FB-CONT-P0`)](../QUEUE_ARCHIVE.MD#23-container--oci-cloud-deployment-fb-cont-p0)** in **`QUEUE_ARCHIVE.MD`**. Use **FB-CONT-001 … FB-CONT-008** for traceability; link **BS-001** from epic Summary when editing related docs.
 
 ### Purpose
 
@@ -168,7 +168,7 @@ Turn the **multi-workstream** vision into **actionable queue items**. **Do not**
 - [ ] Each new row has **Kind**, **Pri**, **Status**, **Summary** (with acceptance hints), **Affected files**.
 - [ ] **BS-001** referenced in promoted rows for traceability.
 - [ ] If **README** or **runbooks** change, update in the **same** PR as the queue entry (per `AGENTS.md`).
-- [ ] **Contents** table in `QUEUE.MD` updated only if a **new § anchor** is added (rare).
+- [ ] **Contents** table in `QUEUE.MD` / `QUEUE_ARCHIVE.MD` updated only if a **new § anchor** is added (rare).
 
 ---
 
@@ -176,6 +176,6 @@ Turn the **multi-workstream** vision into **actionable queue items**. **Do not**
 
 - [`README.MD`](../../README.md) — quick start  
 - [`AGENTS.md`](../../AGENTS.md) — agent/operator contract  
-- [`docs/QUEUE.MD`](../QUEUE.MD) — authoritative backlog (**FB-CONT-P0**)  
+- [`docs/QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) — authoritative backlog tables (**FB-CONT-P0**)  
 - [`infra/docker-compose.yml`](../../infra/docker-compose.yml) — current local stack  
 - [`WINDOWS_OPERATOR_UI.MD`](../WINDOWS_OPERATOR_UI.MD) — Windows desktop / `.bat` brainstorm (complementary)

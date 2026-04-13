@@ -2,7 +2,7 @@
 
 **Brainstorm ID:** BS-003  
 **Scope:** multi  
-**Status:** superseded *(dashboard/Asset extras promoted to [`QUEUE.MD`](../QUEUE.MD) **§2.4** **FB-UX-008**–**FB-UX-014**; see [`BS-004`](BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD))*  
+**Status:** superseded *(dashboard/Asset extras promoted to [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) **§2.4** **FB-UX-008**–**FB-UX-014**; see [`BS-004`](BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD))*  
 
 ---
 
@@ -14,7 +14,7 @@ Extra **operator-facing** UI capabilities to consider **after or alongside** **`
 
 ## Already covered elsewhere (do not duplicate as “new”)
 
-**In [`QUEUE.MD`](../QUEUE.MD) §2.2:** symbol search API (**FB-AP-023**), chart + fills APIs (**FB-AP-024**–**025**), dashboard redesign + drop global controls (**FB-AP-026**), Asset Page routing/chart/markers (**FB-AP-027**–**029**), per-asset paper/live (**FB-AP-030**), Initialize/Start/Stop (**FB-AP-031**), slide-in active menu (**FB-AP-033**), realtime chart push (**FB-AP-034**), remove global power/mode (**FB-AP-039**–**040**).
+**In [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) §2.2:** symbol search API (**FB-AP-023**), chart + fills APIs (**FB-AP-024**–**025**), dashboard redesign + drop global controls (**FB-AP-026**), Asset Page routing/chart/markers (**FB-AP-027**–**029**), per-asset paper/live (**FB-AP-030**), Initialize/Start/Stop (**FB-AP-031**), slide-in active menu (**FB-AP-033**), realtime chart push (**FB-AP-034**), remove global power/mode (**FB-AP-039**–**040**).
 
 **Implemented today:** Home P&L + positions, sidebar power + global mode, multipage Live/Routes/Models/Regimes/Logs/Emergency, observability links.
 
@@ -88,12 +88,12 @@ Extra **operator-facing** UI capabilities to consider **after or alongside** **`
 
 ## Next step
 
-- [x] **Promote** — **FB-UX-008**–**FB-UX-014** in [`QUEUE.MD`](../QUEUE.MD) §2.4 (**FB-UX-P0**); brainstorm **BS-004** holds the umbrella narrative.
+- [x] **Promote** — **FB-UX-008**–**FB-UX-014** in [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) §2.4 (**FB-UX-P0**); brainstorm **BS-004** holds the umbrella narrative.
 
 **Child brainstorms:** —  
 
 ## Links
 
-- [`QUEUE.MD`](../QUEUE.MD) §2.2 **FB-AP-P0**  
+- [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) §2.2 **FB-AP-P0**  
 - [`BS-002_QUEUE_VS_UI_GAP_ANALYSIS.MD`](BS-002_QUEUE_VS_UI_GAP_ANALYSIS.MD)  
 - [`PER_ASSET_OPERATOR.MD`](../PER_ASSET_OPERATOR.MD)

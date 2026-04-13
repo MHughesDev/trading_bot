@@ -1,6 +1,6 @@
 # Deferred roadmap (FB-N1, FB-N3)
 
-**Queue:** Parent rows **FB-N1** / **FB-N3** in [`QUEUE.MD`](QUEUE.MD) are **Done** (**closed for now**, 2026-04-17); sub-slices **FB-N1-S1** / **FB-N3-S1** remain the delivered first steps. This file still describes **future** work if you **reopen** or add new backlog items.
+**Queue:** Parent rows **FB-N1** / **FB-N3** in [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) are **Done** (**closed for now**, 2026-04-17); sub-slices **FB-N1-S1** / **FB-N3-S1** remain the delivered first steps. This file still describes **future** work if you **reopen** or add new backlog items.
 
 Themes below are **intentionally out of scope** for full delivery in the current V1 trading stack. This file records **recommended next steps** when you promote them.
 

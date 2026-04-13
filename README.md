@@ -99,8 +99,10 @@ From the repo root: run **`setup.bat`** (venv + install + optional Docker), then
 |-----|----------------|
 | [`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD) | Environment, Docker, preflight, venues |
 | [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) | End-to-end system tour |
-| [`docs/QUEUE.MD`](docs/QUEUE.MD) | Backlog, fixes, roadmap |
-| [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv) | **Next-task stack** (read first for automation — smallest `stack_order`, `status=Open`) |
+| [`docs/QUEUE.MD`](docs/QUEUE.MD) | Queue **protocol** + conventions (small; read for rules, not full backlog) |
+| [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv) | **Next-task stack** — **`agent_task`** per row (read first for automation) |
+| [`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) | Full open/resolved/archive tables (human history) |
+| [`docs/QUEUE_SCHEMA.md`](docs/QUEUE_SCHEMA.md) | **Portable schema** — reuse queue files in other repos |
 | [`docs/AUDIT_CODE_REVIEW.MD`](docs/AUDIT_CODE_REVIEW.MD) | Periodic **code review audit** (correctness, security notes, candidate backlog — not the live queue) |
 | [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent checklist: one queue slice → validate → PR → merge (empty **HIGH** **Open** → stop per Phase 1) |
 | [`docs/ADR_CANONICAL_BAR_STORAGE.MD`](docs/ADR_CANONICAL_BAR_STORAGE.MD) | Canonical bar storage (QuestDB / Parquet / Redis) |
