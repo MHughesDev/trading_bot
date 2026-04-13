@@ -4,7 +4,7 @@
 
 **Audience:** Human auditors, **AI agents**, and hybrid workflows. The **§0.3** master prompt + per-category **Audit prompt** blocks (**§4**) are the **agentic** interface.
 
-**How this differs from narrow audits:** A “code review audit” or “CVE scan” is one *slice*. A **full audit** walks **every applicable category** in one coordinated pass (or a rotation), updates **last-run dates**, and links **evidence** (reports, dashboards, tickets).
+**How this differs from narrow audits:** A “code review audit” or “CVE scan” is one *slice*. A **full audit** walks **every applicable category** in one coordinated pass (or a rotation), updates **last-run dates**, links **evidence**, and ends with a **standalone audit report** (**[§8](#8-audit-report-deliverable-mandatory-end-state)**) — optionally polished with **`draft-audit-report`**, then promoted to **`QUEUE_STACK.csv`** with **`audit-report-to-queue`**.
 
 **Mark sections N/A** when they do not apply to your stack, but record *why* (see **§0.5**). **Never** treat N/A as “skip documentation”—state the reason in the audit record.
 
@@ -145,6 +145,7 @@ Every category audit (human or agent) should end with:
 4. **N/A discipline:** If a section does not apply, add one line: *“N/A — [reason]”* under that checklist (see **§0.5**).
 5. **Track findings:** File issues with severity, owner, and due date; link them in **§5**.
 6. **Sign-off:** Update **§2** full audit date and commit this file (or export a dated appendix).
+7. **Audit report:** Produce the **standalone deliverable** in **[§8](#8-audit-report-deliverable-mandatory-end-state)** (`docs/reports/...`); use **`draft-audit-report`** skill to polish; optionally **`audit-report-to-queue`** to promote findings to **`QUEUE_STACK.csv`**.
 
 **Automation:** Wire as many checks as practical into CI/CD; this document still captures **manual** verification (threat modeling, DR drills, SLO reviews).
 
@@ -821,16 +822,58 @@ Copy this block into your repo and fill it so auditors know **where** commands a
 
 ---
 
-## 8. Reuse in other repositories
+## 8. Audit report deliverable *(mandatory end state)*
+
+After completing **§4** categories (or a defined subset), the agent **must** produce a **standalone audit report** file—**not** only inline notes in this playbook. The report is the durable artifact for humans, PRs, and **downstream promotion** to the backlog (see **§8.4** and the **`audit-report-to-queue`** skill).
+
+### 8.1 Where to save
+
+| Convention | Path *(adapt per repo)* |
+|------------|-------------------------|
+| **Default** | `docs/reports/AUDIT_REPORT_<YYYY-MM-DD>_<short-slug>.md` |
+| **Alternative** | `reports/audit-<YYYY-MM-DD>.md` |
+
+Create the directory if needed. **Do not** overwrite prior reports without archiving or renaming.
+
+### 8.2 Required sections *(in order)*
+
+The audit report **must** include these sections (headings at exactly this level unless your org template says otherwise):
+
+1. **`# Audit report`** — title line with **product/repo name** and **UTC date** of report completion.
+2. **`## Metadata`** — table: repository, commit SHA/tag audited, audit lead, scope (in/out), link to this **`FULL_AUDIT.md`** copy, link to **§2** row in playbook if embedded in repo.
+3. **`## Executive summary`** — 5–15 lines: overall posture, top 3 risks, top 3 strengths, **Pass / Pass with findings / Blocked**.
+4. **`## Category results`** — one **`### <ID> — <Name>`** subsection per **§4** category executed (G, SEC-REPO, SUP, …). For each: **Verdict** (P / PWF / B / N/A), **Summary** (2–6 sentences), **Evidence** (paths, commands, CI jobs—no secrets).
+5. **`## Findings`** — unified table: **Finding ID** (e.g. `AUD-G-001`, `AUD-APPSEC-002`), **Category ID**, **Severity**, **Location**, **Summary**, **Remediation**, **Status** *(Open / Accepted risk / Fixed)*. Map 1:1 to **§5** in this playbook when both exist.
+6. **`## N/A categories`** — bullet list of **§4** categories marked N/A with **one-line reason** each (or *“None”*).
+7. **`## Residual gaps`** — tooling limits, missing access, time-box caveats.
+8. **`## Recommended next steps`** — ordered list: quick wins vs scheduled work; call out **promotable** items for **`audit-report-to-queue`** (**§8.4**).
+9. **`## Sign-off`** *(optional)* — same roles as **§6** in this file; can mirror or reference **§6**.
+
+### 8.3 Quality bar
+
+- **Evidence-backed:** every **High** or **Critical** finding cites a **file path**, **config key**, **workflow name**, or **repro step**.
+- **Actionable:** each finding has a **remediation** hint a developer can turn into a task.
+- **Traceable:** finding IDs stay stable if the report is split into queue rows later (**audit-report-to-queue** skill).
+
+### 8.4 Skills *(optional but recommended)*
+
+| Skill | When |
+|-------|------|
+| **`draft-audit-report`** ([`.cursor/skills/draft-audit-report`](../.cursor/skills/draft-audit-report/SKILL.md)) | Polish raw §4 outputs into the **§8.2** structure; align tone and tables before sign-off. |
+| **`audit-report-to-queue`** ([`.cursor/skills/audit-report-to-queue`](../.cursor/skills/audit-report-to-queue/SKILL.md)) | Promote **Open** findings into **`QUEUE_STACK.csv`** with **`agent_task`** rows. |
+
+---
+
+## 9. Reuse in other repositories
 
 - **Copy** this file **verbatim**—do not strip **§0**; it is what makes the playbook portable.
-- **Fill §0.2** and **§7** first; then run **§4** categories.
+- **Fill §0.2** and **§7** first; then run **§4** categories; finish with **§8** audit report.
 - **Trim** nothing from **§4** in the shared template; use **N/A** in the audit record instead. Optionally delete **§7** if you embed repo facts only in **§0.2**.
-- **Automate** what you can in CI; keep **§2** / **§5** as the durable record of dates and evidence.
+- **Automate** what you can in CI; keep **§2** / **§5** as the durable record of dates and evidence; keep **§8** reports in `docs/reports/` (or equivalent).
 - **Version:** bump the footer when you change structure so forks know they are stale.
 
 ---
 
-*Template version: 3.1 — **§7** optional queue-system row; **§0** repository profile + master agent prompt + substitution guide; **§4** category prompts unchanged across repos.*
+*Template version: 3.2 — **§8** audit report deliverable; **§9** reuse; **§0** repository profile + master agent prompt + substitution guide; **§4** category prompts unchanged across repos.*
 
-**Documentation last reviewed (this repo copy):** **2026-02-06** (queue-system cross-links).
+**Documentation last reviewed (this repo copy):** **2026-02-06** — queue-system cross-links; **§8** audit report + **`draft-audit-report`** / **`audit-report-to-queue`** skills; **`AUDIT_REPORT_TEMPLATE.md`**.

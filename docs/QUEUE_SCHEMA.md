@@ -18,6 +18,8 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) | Cursor **Add to Queue** skill for adding/updating items. |
 | [`scripts/generate_queue_stack.py`](../scripts/generate_queue_stack.py) | Optional CSV **regenerator** (maintainer tool; edit `ROWS` and run). |
 
+**Audit → backlog (optional):** [`docs/FULL_AUDIT.md`](FULL_AUDIT.md) **§8** audit report · [`.cursor/skills/draft-audit-report`](../.cursor/skills/draft-audit-report/SKILL.md) · [`.cursor/skills/audit-report-to-queue`](../.cursor/skills/audit-report-to-queue/SKILL.md) · [`docs/BRAINSTORM/BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD`](BRAINSTORM/BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD)
+
 **Related (not part of the core queue system but often updated together):** [`scripts/create_github_issues.sh`](../scripts/create_github_issues.sh) (optional GitHub mirror).
 
 ---

@@ -104,6 +104,9 @@ From the repo root: run **`setup.bat`** (venv + install + optional Docker), then
 | [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv) | **Next-task stack** — **`agent_task`** per row (read first for automation) |
 | [`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) | Full open/resolved/archive tables (human history) |
 | [`docs/AUDIT_CODE_REVIEW.MD`](docs/AUDIT_CODE_REVIEW.MD) | Periodic **code review audit** (correctness, security notes, candidate backlog — not the live queue) |
+| [`docs/FULL_AUDIT.md`](docs/FULL_AUDIT.md) | **Full-scope** audit playbook + **§8** standalone audit report spec · skills: `draft-audit-report`, `audit-report-to-queue` |
+| [`docs/reports/AUDIT_REPORT_TEMPLATE.md`](docs/reports/AUDIT_REPORT_TEMPLATE.md) | Template for **`AUDIT_REPORT_*.md`** deliverables |
+| [`docs/BRAINSTORM/BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD`](docs/BRAINSTORM/BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD) | Brainstorm: audit report → **queue stack** |
 | [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent checklist: one queue slice → validate → PR → merge (empty **HIGH** **Open** → stop per Phase 1) |
 | [`docs/ADR_CANONICAL_BAR_STORAGE.MD`](docs/ADR_CANONICAL_BAR_STORAGE.MD) | Canonical bar storage (QuestDB / Parquet / Redis) |
 | [`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD) | Operations & live trading checklist |
