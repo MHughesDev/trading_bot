@@ -1,6 +1,6 @@
 # Queue — agent protocol & conventions
 
-**Documentation last reviewed:** **2026-04-16**.
+**Documentation last reviewed:** **2026-04-13**.
 
 **Queue system:** The **queue system** is every file that implements backlog machinery — see **[`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md)** for the full list (`QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, `AUTOMATION_QUEUE_SLICE_PROMPT.MD`, **Add to Queue** skill, optional `scripts/generate_queue_stack.py`). This file (`QUEUE.MD`) holds **protocol and conventions** only.
 

@@ -1,6 +1,6 @@
 # Queue archive (historical tables)
 
-**Documentation last reviewed:** **2026-04-16**.
+**Documentation last reviewed:** **2026-04-13**.
 
 **Purpose:** Full backlog tables, resolved fixes, and completed archive moved from the slim [`QUEUE.MD`](QUEUE.MD) for token-efficient agent workflows. **Agents implementing work:** use [`QUEUE_STACK.csv`](QUEUE_STACK.csv) only — each row is self-contained.
 
@@ -15,7 +15,7 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-16):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Post-audit hardening:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-001**…**017** **Done**; **FB-CONT-009** **Done**. **Full audit 2026-04-13:** **[`docs/reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md)** — [**§2.6**](#26-full-audit-2026-04-13) **FB-AUD-018**…**020** **Done**. **FB-UX-015** / **FB-UX-016** — **Done** (see §2.4). **Setup automation:** **FB-SETUP-021** (Windows **`setup.bat`** Docker Desktop install/wait/sign-in pause + **`NM_SKIP_DOCKER`**), **FB-SETUP-022** (**`setup.sh`** / **`run.sh`**), **FB-SETUP-023** (docs) — **Done**. **README UX:** **FB-DOC-024** (Quick start section at top) — **Done**. **Earlier dev fixes:** **FB-RUN-018**…**FB-INF-020** — **Done**. **Open queue:** empty — no **`Open`** rows in **`QUEUE_STACK.csv`** (**`_QUEUE_EMPTY_`**). **Next:** optional GitHub sync [**§7**](#7-github-sync-optional).
+**Status (2026-04-13):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Post-audit hardening:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-001**…**017** **Done**; **FB-CONT-009** **Done**. **Full audit 2026-04-13:** **[`docs/reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md)** — [**§2.6**](#26-full-audit-2026-04-13) **FB-AUD-018**…**020** **Done**. **FB-UX-015** / **FB-UX-016** — **Done** (see §2.4). **Setup automation:** **FB-SETUP-021** (Windows **`setup.bat`** Docker Desktop install/wait/sign-in pause + **`NM_SKIP_DOCKER`**), **FB-SETUP-022** (**`setup.sh`** / **`run.sh`**), **FB-SETUP-023** (docs) — **Done**. **README UX:** **FB-DOC-024** (Quick start section at top) — **Done**. **Earlier dev fixes:** **FB-RUN-018**…**FB-INF-020** — **Done**. **Open queue:** empty — no **`Open`** rows in **`QUEUE_STACK.csv`** (**`_QUEUE_EMPTY_`**); **`stack_order`** is **1…31** contiguous (sentinel **9999**). **Next:** optional GitHub sync [**§7**](#7-github-sync-optional).
 
 ### 2.1 Queue snapshot (open by priority)
 
