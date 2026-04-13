@@ -1,12 +1,105 @@
 # Full-scope audit — playbook & checklist
 
-**Purpose:** A **single, repeatable** document for running a **complete** audit pass across security, quality, performance, operations, and data. Use it in **any** repository (web API, batch jobs, mobile backends, ML systems, etc.). **Mark sections N/A** when they do not apply to your stack, but record *why*.
+**Purpose:** A **single, repeatable**, **repository-neutral** document for running a **complete** audit pass across security, quality, performance, operations, and data. Copy this file **verbatim** into any repo (`docs/FULL_AUDIT.md`, `SECURITY/AUDIT_PLAYBOOK.md`, or `.github/AUDIT_FULL.md`)—**do not** fork per-language variants; instead fill **§0** and map tools in **§0.4**.
 
-**How this differs from narrow audits:** A “code review audit” or “CVE scan” is one *slice*. A **full audit** walks **every category** below in one coordinated pass (or a scheduled rotation), updates **last-run dates**, and links **evidence** (reports, dashboards, tickets).
+**Audience:** Human auditors, **AI agents**, and hybrid workflows. The **§0.3** master prompt + per-category **Audit prompt** blocks (**§4**) are the **agentic** interface.
+
+**How this differs from narrow audits:** A “code review audit” or “CVE scan” is one *slice*. A **full audit** walks **every applicable category** in one coordinated pass (or a rotation), updates **last-run dates**, and links **evidence** (reports, dashboards, tickets).
+
+**Mark sections N/A** when they do not apply to your stack, but record *why* (see **§0.5**). **Never** treat N/A as “skip documentation”—state the reason in the audit record.
 
 ---
 
-## 1. Audit record (update every full pass)
+## 0. Repository profile & agent bootstrap *(fill once per repo; copy-paste friendly)*
+
+Complete **§0.2** before the first audit. Prepend **§0.3** to every category prompt in **§4** when using an AI agent.
+
+### 0.1 What “generalized” means
+
+| Principle | Rule |
+|-----------|------|
+| **No default stack** | Do not assume web, containers, a particular cloud, or a language. Discover from the repo. |
+| **Examples ≠ requirements** | Tool names in this file are **illustrative**. Map them using **§0.4**. |
+| **N/A is explicit** | If a category does not apply, output **N/A — [reason]** and still update the **§2** row for that category with outcome **N/A**. |
+| **Evidence, not vibes** | Findings must cite **paths**, **CI jobs**, **commands**, or **tickets** (redacted where needed). |
+| **Shape-agnostic** | Applies to: libraries, CLIs, mobile apps, games, firmware, data pipelines, ML systems, static sites, internal tools. |
+
+### 0.2 Repository profile *(paste into the agent session or a ticket)*
+
+| Field | Your value |
+|-------|------------|
+| **Repository URL / name** | |
+| **Primary languages / runtimes** | |
+| **What this repo produces** | *(library, service binary, OCI image, site bundle, mobile app, mixed)* |
+| **Entry points** | *(HTTP, gRPC, CLI, worker, cron, GUI, plugin API, none)* |
+| **Data stores owned here** | *(none, files, SQLite, RDBMS, object store, queue, …)* |
+| **How configuration & secrets are provided** | *(env, files, vault, platform SM, compile-time, …)* |
+| **CI / CD** | *(vendor, key workflow paths, or “none”)* |
+| **Regulated / sensitive data** | *(none, PII, financial, health, gov, unknown)* |
+| **Exposure** | *(public internet, internal only, offline, mixed)* |
+| **Paths / subtrees excluded from this audit** | |
+| **Commit SHA / tag under audit** | |
+
+### 0.3 Master system prompt *(prepend verbatim before each §4 “Audit prompt” block)*
+
+```text
+You are an expert software and systems auditor working from a generalized playbook.
+
+Repository profile (fill from the project):
+[PASTE §0.2 TABLE OR A SHORT SUMMARY]
+
+Rules:
+1. Infer the project’s actual stack from the repository (file tree, CI configs, docs). Do not assume tools not present.
+2. If a playbook category does not apply (e.g. no containers, no ML), state N/A with a clear reason; do not force checks.
+3. Never print secrets, tokens, keys, or unredacted PII. Use placeholders and describe where they live (e.g. “environment variable X”).
+4. Tie claims to evidence: file paths, workflow names, command names, dashboard titles (non-sensitive URLs only).
+5. Map generic playbook terms to this project (e.g. “artifact” → whatever this build produces).
+6. Severity for findings: Critical / High / Medium / Low / Info.
+7. Finish with the Outputs and Evidence structure required by that category’s prompt.
+```
+
+### 0.4 Tool & artifact substitution guide *(examples only—pick what exists)*
+
+| Playbook term | Example implementations *(non-exhaustive)* |
+|---------------|---------------------------------------------|
+| Dependency manifests & locks | `package.json` + lockfile, `go.mod`, `Cargo.toml` + `Cargo.lock`, `pom.xml` / Gradle, `Gemfile.lock`, `pyproject.toml`, `composer.lock`, `uv.lock`, `flake.nix` |
+| Lint / format | ESLint, Biome, Ruff, Black, Prettier, golangci-lint, `clang-format`, RuboCop, `cargo fmt`, Spotless |
+| Type / static checks | `tsc`, `mypy`, `pyright`, Kotlin compiler, Swift strict, `go vet`, Sonar |
+| Tests | `pytest`, `npm test`, `cargo test`, `go test`, `mvn test`, `dotnet test`, XCTest |
+| Security SAST | Semgrep, CodeQL, Bandit, Brakeman, SonarQube |
+| Secret detection | gitleaks, trufflehog, git-secrets, platform-native scanning |
+| Dependency vulnerabilities | `npm audit`, `pip-audit`, `cargo audit`, OSV-Scanner, Dependabot, Renovate, Snyk |
+| Container / OCI | Dockerfile, Containerfile, Buildpacks, Ko, Nix-generated images |
+| Image / filesystem scanning | Trivy, Grype, ECR/Azure/GCR scanners |
+| Policy / config tests | conftest, OPA, Sentinel |
+| Infra as code | Terraform, Pulumi, CloudFormation, Bicep, Helm, Ansible |
+| API contracts | OpenAPI, AsyncAPI, GraphQL schema, Protobuf, WSDL |
+| Observability | OpenTelemetry, Prometheus, Grafana, Datadog, New Relic, CloudWatch, Splunk |
+| Load / perf tools | k6, Locust, JMeter, Gatling, wrk, browser perf tools |
+
+### 0.5 When a category is usually N/A *(document in §2)*
+
+| ID | Typical N/A when… |
+|----|-------------------|
+| **CONT** | No OCI/container build; pure firmware or desktop app with no container story in this repo |
+| **INFRA** | Repo is only a library or spec with no deployment or cloud config here |
+| **ML** | No models, training, prompts, or inference code in scope |
+| **DATA** | No durable state owned by this codebase |
+| **APPSEC** | No remotely reachable surface and no security-sensitive library API *(still review public API design if library)* |
+| **OBS** | Impossible only for throwaway prototypes—otherwise define **minimal** observability (even logs to stderr) |
+
+### 0.6 Standard output shape *(append to every category result)*
+
+Every category audit (human or agent) should end with:
+
+1. **Verdict:** Pass / Pass with findings / Blocked / N/A (+ reason if N/A).
+2. **Findings:** table of ID, severity, location, summary, remediation hint.
+3. **Evidence:** list of artifacts produced (report paths, CI run IDs, ticket links).
+4. **Residual gaps:** missing access, tooling, or time.
+
+---
+
+## 2. Audit record (update every full pass)
 
 | Field | Value |
 |--------|--------|
@@ -44,24 +137,28 @@
 
 ---
 
-## 2. How to run a full audit (instructions)
+## 3. How to run a full audit (instructions)
 
 1. **Schedule:** Block time; a full audit is usually **multi-hour to multi-day** depending on system size.
 2. **Freeze scope:** Decide environment(s), version/commit, and exclusions (e.g. `vendor/`, `legacy/`).
-3. **Work top to bottom:** For each **§3** category, execute checks, capture artifacts, and fill the tables in **§1**.
-4. **N/A discipline:** If a section does not apply, add one line: *“N/A — [reason]”* under that checklist.
-5. **Track findings:** File issues with severity, owner, and due date; link them in **§4**.
-6. **Sign-off:** Update **§1** full audit date and commit this file (or export a dated appendix).
+3. **Work top to bottom:** For each **§4** category, execute checks, capture artifacts, and fill the tables in **§2**.
+4. **N/A discipline:** If a section does not apply, add one line: *“N/A — [reason]”* under that checklist (see **§0.5**).
+5. **Track findings:** File issues with severity, owner, and due date; link them in **§5**.
+6. **Sign-off:** Update **§2** full audit date and commit this file (or export a dated appendix).
 
 **Automation:** Wire as many checks as practical into CI/CD; this document still captures **manual** verification (threat modeling, DR drills, SLO reviews).
 
-**Using §3 prompts:** Each category in **§3** includes (1) an **Audit prompt** block—copy into an AI agent or paste into a ticket for a human reviewer; (2) a **Procedure** for hands-on steps; (3) **Pass criteria** checkboxes; (4) **Evidence** to attach. Run categories **in order** (G first) unless you are doing a **partial** audit—then still complete **G** minimally so scope stays explicit.
+**Using §4 prompts:** Each category in **§4** includes (1) an **Audit prompt** block—prepend **§0.3**, then paste into an AI agent or ticket; (2) a **Procedure** for hands-on steps; (3) **Pass criteria** checkboxes; (4) **Evidence** to attach. Run categories **in order** (G first) unless you are doing a **partial** audit—then still complete **G** minimally so scope stays explicit.
 
 ---
 
-## 3. Categories — detailed audit prompts & procedures
+## 4. Categories — detailed audit prompts & procedures
 
-Each subsection is usable **standalone**: copy the **Audit prompt** into an AI agent or human runbook, follow **Procedure**, and attach **Evidence** to §1 and §4. **Tools** are examples—map to your stack (`eslint`, `golangci-lint`, `cargo audit`, `npm audit`, `terraform validate`, etc.).
+**Before each category:** Prepend **§0.3** (master system prompt) and inject the **§0.2** repository profile. Each **Audit prompt** is written in **neutral language**; replace illustrative tools with what **§0.4** maps to for this project.
+
+Each subsection is usable **standalone**: copy the **Audit prompt** into an AI agent or human runbook, follow **Procedure**, and attach **Evidence** to **§2** and **§5**. Finish with **§0.6** (standard output shape).
+
+**Surface-type note:** Where a prompt says **“HTTP/API”**, **“browser”**, or **“routes”**, interpret it for this repo’s actual surface (e.g. **gRPC**, **GraphQL**, **CLI flags**, **plugin ABI**, **desktop UI**, **mobile app**). If there is no network surface, pivot to **trust boundaries** and **caller-supplied input** for that component.
 
 ---
 
@@ -88,7 +185,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 2. **Inventory docs:** Open README, architecture docs, ADRs, security pages, vendor SLAs.
 3. **Boundary:** Walk from user entry points (UI, API, batch, mobile) to persistence and third parties; draw or narrate trust boundaries.
 4. **Compliance:** If the product touches regulated data, note which **controls** must appear later (encryption, access logs, subprocessors).
-5. **Sign-off prep:** Ensure §1 “Scope notes” matches this section.
+5. **Sign-off prep:** Ensure **§2** “Scope notes” matches this section.
 
 #### Pass criteria
 
@@ -111,7 +208,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 > You are auditing **secrets and repository hygiene**. Assume attackers have **read access to the repo** and **historical git history**.  
 > **Tasks:**  
 > (1) Run or describe **secret scanning** across the full tree and history (e.g. `gitleaks`, `trufflehog`, GitHub secret scanning). List every finding with **file, commit, and remediation** (rotate secret, purge history, or false positive justification).  
-> (2) Review **`.gitignore`**, **`.dockerignore`**, and CI for leaked paths (`.env`, `*.pem`, `id_rsa`, cloud keys).  
+> (2) Review **ignore files** (e.g. `.gitignore`, container ignore files, IDE exclusions) and CI for leaked paths (`.env`, `*.pem`, `id_rsa`, cloud keys).  
 > (3) Search for **high-entropy strings**, **API key patterns**, **private URLs** in code and docs.  
 > (4) Verify **pre-commit** or **CI** blocks new secrets (grep hooks, detect-secrets baseline).  
 > (5) Check **fork and clone** guidance: no instructions to copy real keys into docs.  
@@ -121,7 +218,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 #### Procedure
 
 1. Install/run scanner appropriate to org policy; include **full git history** if allowed.
-2. Manually spot-check `docker compose`, `kubernetes` YAML, and `README` for example keys—ensure they are **obviously dummy**.
+2. Manually spot-check **compose/orchestration manifests**, **CI YAML**, and `README` for example keys—ensure they are **obviously dummy**.
 3. Confirm **secret backends** (Vault, cloud SM, env-only) are the **only** runtime path documented.
 
 #### Pass criteria
@@ -215,8 +312,8 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 > **Inputs:** List of **critical paths** (auth, money movement, data deletion, admin APIs, trading, etc.).  
 > **Tasks:**  
 > (1) For each critical path, trace **happy path** and **main failure modes**; verify invariants (e.g. “balance never negative”, “idempotent webhook”).  
-> (2) Review **error handling**: broad `except`, silent `pass`, swallowed errors in security-sensitive code—flag each with severity.  
-> (3) **Concurrency:** identify shared mutable state, locks, async tasks, thread pools; check for races, deadlocks, re-entrancy.  
+> (2) Review **error handling**: swallowed errors, empty catch-all handlers, or ignored return values in security-sensitive code—flag each with severity (use language-appropriate patterns).  
+> (3) **Concurrency:** identify shared mutable state, locks, async tasks, coroutines, thread pools, or GPU/parallel sections; check for races, deadlocks, re-entrancy.  
 > (4) **Time and units:** timezone handling (UTC vs local), daylight saving, monetary rounding, integer overflow.  
 > (5) **Idempotency:** retries must not double-charge or double-apply side effects.  
 > **Outputs:** Per-path notes, list of correctness issues, recommended tests.  
@@ -225,7 +322,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 #### Procedure
 
 1. Build a **critical path list** with owners.
-2. Use `rg`/IDE search for `except Exception`, `pass`, `TODO`, `FIXME` in those modules.
+2. Use repo search / IDE for “swallow” patterns appropriate to the language (e.g. empty catch, TODO/FIXME in hot paths).
 3. For async code, verify **cancellation** and **timeout** behavior.
 4. Cross-check **unit tests** assert negative cases, not only golden paths.
 
@@ -260,7 +357,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 
 #### Procedure
 
-1. `pytest` / `npm test` / `go test ./...` as per repo.
+1. Run the project’s documented test command(s) (see **§0.2** / **§7**).
 2. Open CI workflow YAML; confirm **required checks** for merge.
 3. Spot-check **longest** or **skipped** tests for debt.
 
@@ -283,7 +380,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 
 #### Audit prompt (copy verbatim for an agent)
 
-> You are performing an **application and API security** audit. Use OWASP ASVS/API Security Top 10 as a **mental checklist**, adapted to this stack.  
+> You are performing an **application security** audit for the **actual attack surface** of this repository (HTTP APIs, gRPC, WebSockets, CLIs, libraries consumed by untrusted callers, desktop/mobile IPC, etc.). Use OWASP ASVS / API Security / **relevant** CWE categories as a **mental checklist**, adapted to this stack.  
 > **Tasks:**  
 > (1) **Authentication:** How are users/services proven? Passwords, API keys, OAuth, mTLS—document flows and storage of secrets client-side.  
 > (2) **Authorization:** Enforce **every** sensitive operation server-side; look for IDOR (object references), missing role checks, admin routes.  
@@ -293,14 +390,14 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 > (6) **Transport:** HTTPS everywhere for prod; HSTS.  
 > (7) **CORS:** restrict origins in prod; no `*` with credentials.  
 > (8) **Rate limiting / abuse:** brute force, scraping, DoS—app-level or edge.  
-> (9) **Deserialization:** no unsafe `pickle`, `yaml.load`, XML XXE.  
+> (9) **Deserialization / parsing:** no unsafe object deserialization or untrusted structured-data parsing (e.g. unsafe YAML/XML/binary) on attacker-influenced input.  
 > **Outputs:** Threat-oriented findings with severity, reproduction steps, fix guidance.
 
 #### Procedure
 
-1. Read API framework **middleware order** (auth before routes).
-2. Enumerate **all** routes (OpenAPI, router files); sample high-risk ones.
-3. For **Streamlit/SPA**, check **CSRF** and **clickjacking** if using cookies.
+1. Read framework **middleware / plugin / filter order** (auth before sensitive handlers).
+2. Enumerate **all** externally reachable operations (OpenAPI, router files, RPC services, CLI subcommands, IPC); sample high-risk ones.
+3. For **browser-based UIs** using cookies, check **CSRF** and **clickjacking**; for **native/mobile**, check **secure storage** and **deep links** per platform guidance.
 
 #### Pass criteria
 
@@ -325,7 +422,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 
 > You are auditing **infrastructure and secrets management** (cloud, Kubernetes, VMs, serverless).  
 > **Tasks:**  
-> (1) **Secrets:** Where do prod secrets live? Confirm **not** in git, not in `docker history`, not in plain env in CI logs.  
+> (1) **Secrets:** Where do prod secrets live? Confirm **not** in git, not in **build artifacts** or **image layers** (if applicable), not in plain env in CI logs.  
 > (2) **IAM:** Least privilege for deploy roles, CI OIDC vs long-lived keys, runtime service accounts.  
 > (3) **Network:** VPC/subnets, DB private-only, SSH/bastion patterns, **no public admin** ports.  
 > (4) **TLS:** Certificates from ACM/Let’s Encrypt; auto-renewal; **min TLS version**.  
@@ -348,13 +445,13 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 
 #### Evidence
 
-- Redacted architecture diagram, IAM role list, Terraform plan summary.
+- Redacted architecture diagram, IAM role list, IaC plan summary or equivalent.
 
 ---
 
 ### CONT — Container & image security
 
-**Goal:** Container images are **minimal**, **non-root**, **scanned**, and **rebuilt** on patches.
+**Goal:** OCI/container images (if any) are **minimal**, run as **non-root** where appropriate, **scanned**, and **rebuilt** on patches. **If this repo does not produce container images,** state **N/A** per **§0.5** and skip detailed checks.
 
 #### Audit prompt (copy verbatim for an agent)
 
@@ -364,13 +461,13 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 > (2) Run **Hadolint** (or policy) on Dockerfile; fix or justify ignores.  
 > (3) Build image from audited commit; run **Trivy/Grype** image scan; triage CRITICAL/HIGH.  
 > (4) Check **base image** tag strategy (`:latest` vs pinned digest).  
-> (5) Verify **no secrets** in layers (`docker history`, build args).  
+> (5) Verify **no secrets** in image layers or build args (inspect build history or equivalent).  
 > (6) **Runtime:** read-only root, `cap_drop`, seccomp/AppArmor if used.  
 > **Outputs:** Scan report, policy for failing builds, patch cadence.
 
 #### Procedure
 
-1. `docker build` with CI-equivalent flags.
+1. Build with the same **toolchain** CI uses (e.g. `docker build`, `podman`, `buildpacks`, cloud build).
 2. Compare CI **exit-code policy** for scanners (informational vs blocking).
 
 #### Pass criteria
@@ -434,7 +531,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 > (3) **Memory:** Heap snapshots or RSS monitoring over **hours/days**; leak **suspects** (unbounded caches, global lists).  
 > (4) **I/O:** DB query plans, N+1 queries, slow logs; external API latency.  
 > (5) **Caching:** Redis/CDN—correct invalidation, TTLs, stampedes.  
-> (6) **Load testing:** `k6`, Locust, JMeter—**sustained** load on critical endpoints; compare to SLO.  
+> (6) **Load testing:** use a **sustained** load tool appropriate to the surface (HTTP k6/Locust/JMeter, gRPC tooling, batch replay, game/bot simulation)—compare to SLO.  
 > (7) **Cost-performance:** largest infra line items vs **cheap** wins (batch size, connection pooling).  
 > **Outputs:** Profile summaries, bottleneck list, prioritized backlog, before/after metrics if optimizations exist.
 
@@ -454,7 +551,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 
 #### Evidence
 
-- Flame graphs, k6 summary, Grafana dashboard snapshots.
+- Flame graphs or profiles, load-test summary, metrics/dashboard snapshots (any backend).
 
 ---
 
@@ -467,7 +564,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 > You are auditing **reliability and resilience**.  
 > **Tasks:**  
 > (1) **Outbound calls:** timeouts set; retries with **jitter**; **circuit breakers** where appropriate; **idempotency keys** for retries.  
-> (2) **Graceful shutdown:** SIGTERM handling, drain period, in-flight request completion, queue consumers.  
+> (2) **Graceful shutdown:** termination signal handling for the runtime (e.g. SIGTERM, host shutdown hooks), drain period, in-flight work completion, queue consumers.  
 > (3) **Dependencies:** behavior when DB, cache, or vendor is **down**—fail closed vs open, cached data staleness.  
 > (4) **HA:** single points of failure listed; **multi-AZ/region** if claimed.  
 > (5) **Chaos / game:** optional fault injection (kill pod, network partition) **or** documented **failure mode** table.  
@@ -476,7 +573,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 #### Procedure
 
 1. Read shutdown docs; test in staging if possible.
-2. Trace **retry** logic for payment/order paths—no duplicate side effects.
+2. Trace **retry** logic for **financial / idempotent** or **side-effect** paths—no duplicate side effects.
 
 #### Pass criteria
 
@@ -500,9 +597,9 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 > You are auditing **observability and alerting**.  
 > **Tasks:**  
 > (1) **Logging:** structured logs (JSON); **correlation IDs** across services; log levels; **no secrets** in logs.  
-> (2) **Metrics:** RED (rate, errors, duration) for services; **USE** for resources; **business** metrics (orders, revenue).  
+> (2) **Metrics:** RED (rate, errors, duration) for request-style services where applicable; **USE** for resources; **business** or domain metrics (throughput, jobs completed, revenue, etc.).  
 > (3) **Tracing:** OpenTelemetry spans for critical paths if distributed.  
-> (4) **Dashboards:** Grafana/Datadog—do they cover **golden signals**?  
+> (4) **Dashboards:** do they cover **golden signals** for this stack (any vendor or self-hosted)?  
 > (5) **Alerts:** On **symptom** (error rate spike, latency) not only **cause** (pod restart); **no paging** for non-prod unless intended.  
 > (6) **Noise:** review last month’s alert volume; **top noisy** alerts fixed or tuned.  
 > **Outputs:** Dashboard links, alert inventory, gaps (e.g. missing DB metrics).
@@ -600,7 +697,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 > (1) **Architecture:** C4 or equivalent—context, containers, key components; **update** date.  
 > (2) **ADRs:** major decisions recorded with **status** (accepted/superseded).  
 > (3) **README:** clone, install, test, run, deploy—**execute** steps on clean machine **or** list friction.  
-> (4) **API docs:** OpenAPI/Swagger current; **examples** work.  
+> (4) **Public contract docs:** OpenAPI/Swagger, AsyncAPI, GraphQL schema, Rustdoc/Javadoc, CLI `--help`—**current**; **examples** work.  
 > (5) **Onboarding:** “day one” path < X hours achievable?  
 > **Outputs:** Doc freshness table, **broken links**, **drift** between code and docs.
 
@@ -640,7 +737,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 #### Procedure
 
 1. Trace **one** model from training artifact to **production** load path.
-2. Compare **Dockerfile** stages for training vs inference.
+2. If containers exist, compare **build stages** for training vs inference; otherwise compare **packages** or **artifacts**.
 
 #### Pass criteria
 
@@ -687,7 +784,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 
 ---
 
-## 4. Findings log (append each full audit)
+## 5. Findings log (append each full audit)
 
 | ID | Category | Severity | Summary | Tracking issue |
 |----|----------|----------|---------|----------------|
@@ -695,7 +792,7 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 
 ---
 
-## 5. Sign-off
+## 6. Sign-off
 
 | Role | Name | Date |
 |------|------|------|
@@ -705,30 +802,32 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 
 ---
 
-## 6. Repo-specific quick reference *(optional — customize per repository)*
+## 7. Repo-specific quick reference *(optional — customize per repository)*
 
-Copy this block into your repo and fill it so auditors know **where** commands and policies live. Remove if you keep this file 100% generic.
+Copy this block into your repo and fill it so auditors know **where** commands and policies live. **This is the only place** project-specific paths should appear—keep **§4** prompts unchanged.
 
 | Topic | This repository |
 |--------|-----------------|
-| Primary languages | e.g. Python 3.12 |
-| CI workflow | e.g. `.github/workflows/ci.yml` |
-| Lint / test commands | e.g. `ruff check .`, `pytest` |
-| Container build | e.g. `Dockerfile`, `docker compose -f infra/...` |
-| Security scans in CI | e.g. Hadolint, Trivy (fs), *add pip-audit if adopted* |
-| Integration tests | e.g. optional job, env `NM_INTEGRATION_SERVICES` |
-| Runbooks | e.g. `docs/RUNBOOKS.MD` |
-| Prior focused audit | e.g. `docs/AUDIT_CODE_REVIEW.MD` |
+| Primary languages / runtimes | |
+| CI / CD entry points | *(e.g. `.github/workflows/ci.yml`, `.gitlab-ci.yml`, Circle, Buildkite)* |
+| Lint / format / typecheck commands | |
+| Test commands | |
+| Container / image build *(if any)* | |
+| Security / supply-chain scans in CI | |
+| Integration / E2E triggers | |
+| Runbooks / ops docs | |
+| Prior audit reports *(optional)* | |
 
 ---
 
-## 7. Reuse in other repositories
+## 8. Reuse in other repositories
 
-- **Copy** this file to `docs/FULL_AUDIT.md` (or `SECURITY/FULL_AUDIT.md`).
-- **Fill §1** and **§6** first; **§3** is the universal checklist.
-- **Trim** optional sections (e.g. ML) if permanently N/A.
-- **Automate** what you can; keep this file as the **human** record of scope, dates, and evidence.
+- **Copy** this file **verbatim**—do not strip **§0**; it is what makes the playbook portable.
+- **Fill §0.2** and **§7** first; then run **§4** categories.
+- **Trim** nothing from **§4** in the shared template; use **N/A** in the audit record instead. Optionally delete **§7** if you embed repo facts only in **§0.2**.
+- **Automate** what you can in CI; keep **§2** / **§5** as the durable record of dates and evidence.
+- **Version:** bump the footer when you change structure so forks know they are stale.
 
 ---
 
-*Template version: 2.0 — includes per-category **audit prompts**, procedures, pass criteria, and evidence; portable across application types.*
+*Template version: 3.0 — **§0** repository profile + master agent prompt + substitution guide; **§4** category prompts unchanged across repos; section renumber 2–8.*
