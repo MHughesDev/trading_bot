@@ -42,7 +42,7 @@ docker compose -f infra/docker-compose.yml up -d
 | 🔒 Secret scan (local) | `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 detect --source /repo --redact` |
 | 🛡️ Bandit (High) | `bash scripts/ci_bandit.sh` (same as CI) |
 
-Configure secrets in **`.env`** (see [`.env.example`](.env.example)); app settings use the **`NM_`** prefix.
+Configure secrets in **`.env`** (see [`.env.example`](.env.example)); app settings use the **`NM_`** prefix. **`app/config/default.yaml`** defaults to **`execution.mode: paper`** (Alpaca paper); set **`NM_EXECUTION_MODE=live`** only when Coinbase keys are configured. If the live loop runs with **no venue API keys** in the environment for the active mode, it **skips `submit_order`** (one startup warning) instead of spamming errors — add keys or use Streamlit per-user onboarding when session auth is enabled.
 
 ### Deployment models (FB-CONT-007)
 

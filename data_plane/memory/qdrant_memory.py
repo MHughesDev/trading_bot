@@ -82,15 +82,16 @@ class QdrantNewsMemory:
                 FieldCondition(key="symbol", match=MatchValue(value=symbol)),
             ]
         )
-        res = self._client.search(
+        # qdrant-client 1.17+ removed `.search()`; use `query_points` (vector query).
+        qres = self._client.query_points(
             collection_name=self._collection,
-            query_vector=np.array(query_embedding, dtype=np.float32).tolist(),
+            query=np.array(query_embedding, dtype=np.float32).tolist(),
             limit=top_k,
             query_filter=flt,
             with_payload=True,
         )
         out: list[dict[str, Any]] = []
-        for hit in res:
+        for hit in qres.points:
             pl = hit.payload or {}
             ts = pl.get("timestamp")
             if ts:

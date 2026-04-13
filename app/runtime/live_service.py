@@ -44,6 +44,7 @@ from decision_engine.features_live import feature_row_from_tick
 from decision_engine.pipeline import DecisionPipeline
 from decision_engine.run_step import run_decision_tick
 from execution.adapters.base_adapter import PositionSnapshot
+from execution.credentials import venue_credentials_configured
 from execution.service import ExecutionService
 from execution.trade_markers import TradeMarker, append_marker
 from risk_engine.engine import RiskEngine
@@ -175,6 +176,13 @@ async def run_live_loop(
     risk_engine = RiskEngine(cfg)
     exec_svc = ExecutionService(cfg)
     risk_state = RiskState()
+    venue_creds_ok = venue_credentials_configured(cfg)
+    if not venue_creds_ok:
+        logger.warning(
+            "venue API credentials not set for execution_mode=%s — order submission disabled "
+            "(set NM_COINBASE_* for live or NM_ALPACA_* for paper, or use Streamlit venue onboarding)",
+            cfg.execution_mode,
+        )
     mem_by_symbol: dict[str, dict[str, float]] = {s: {} for s in syms}
     sentiment_overlay: dict[str, float] = {}
     last_feature_row: dict[str, dict[str, float]] = {s: {} for s in syms}
@@ -483,6 +491,8 @@ async def run_live_loop(
                         "external execution gateway: skipping in-process submit_order for %s",
                         symbol,
                     )
+                elif not venue_creds_ok:
+                    pass
                 else:
                     try:
                         await exec_svc.submit_order(intent)

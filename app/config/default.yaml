@@ -1,5 +1,5 @@
 execution:
-  mode: live
+  mode: paper
   live_adapter: coinbase
   paper_adapter: alpaca
   portfolio_mark_price_source_paper: kraken_mid

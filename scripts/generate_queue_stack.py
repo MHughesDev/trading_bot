@@ -11,6 +11,51 @@ from pathlib import Path
 ROWS: list[dict[str, str]] = [
     {
         "stack_order": "1",
+        "priority": "HIGH",
+        "phase": "B",
+        "batch": "RUN-DEV",
+        "id": "FB-RUN-018",
+        "kind": "fix",
+        "status": "Done",
+        "summary_one_line": "Qdrant memory: query_points for qdrant-client 1.17+",
+        "agent_task": "COMPLETED. data_plane/memory/qdrant_memory.py uses QdrantClient.query_points instead of removed .search(); fixes AttributeError on Windows run.bat.",
+        "affected_files": "data_plane/memory/qdrant_memory.py",
+        "docs_refs": "docs/RUNBOOKS.MD",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
+        "stack_order": "2",
+        "priority": "HIGH",
+        "phase": "B",
+        "batch": "RUN-DEV",
+        "id": "FB-RUN-019",
+        "kind": "fix",
+        "status": "Done",
+        "summary_one_line": "Default paper mode + skip orders when venue env creds missing",
+        "agent_task": "COMPLETED. default.yaml execution.mode paper; execution/credentials.py + live_service skip submit_order when env creds absent (one startup WARNING). Stops live loop Coinbase error spam without NM_COINBASE_*.",
+        "affected_files": "app/config/default.yaml|app/runtime/live_service.py|execution/credentials.py",
+        "docs_refs": "README.md|docs/RUNBOOKS.MD",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
+        "stack_order": "3",
+        "priority": "MEDIUM",
+        "phase": "C",
+        "batch": "INF-QDR",
+        "id": "FB-INF-020",
+        "kind": "platform",
+        "status": "Done",
+        "summary_one_line": "Docker Qdrant image v1.17.1 (align with qdrant-client)",
+        "agent_task": "COMPLETED. infra/docker-compose.yml uses qdrant/qdrant:v1.17.1 to match pip qdrant-client major/minor and reduce version skew warnings.",
+        "affected_files": "infra/docker-compose.yml",
+        "docs_refs": "docs/RUNBOOKS.MD",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
+        "stack_order": "4",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "UX-DOC",
@@ -25,7 +70,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#fb-ux-016-venue-onboarding-docs",
     },
     {
-        "stack_order": "2",
+        "stack_order": "5",
         "priority": "HIGH",
         "phase": "B",
         "batch": "UX-ONB",
@@ -40,7 +85,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#fb-ux-015-venue-onboarding",
     },
     {
-        "stack_order": "3",
+        "stack_order": "6",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-DOC",
@@ -55,7 +100,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "4",
+        "stack_order": "7",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-DOC",
@@ -70,7 +115,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "5",
+        "stack_order": "8",
         "priority": "MEDIUM",
         "phase": "C",
         "batch": "CONT-CI",
@@ -85,7 +130,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "6",
+        "stack_order": "9",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-OPS",
@@ -100,7 +145,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "7",
+        "stack_order": "10",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-OPS",
@@ -115,7 +160,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "8",
+        "stack_order": "11",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-QA",
@@ -130,7 +175,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "9",
+        "stack_order": "12",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-QA",
@@ -145,7 +190,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "10",
+        "stack_order": "13",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-CODE",
@@ -160,7 +205,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "11",
+        "stack_order": "14",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-CI",
@@ -175,7 +220,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "12",
+        "stack_order": "15",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -190,7 +235,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "13",
+        "stack_order": "16",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -205,7 +250,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "14",
+        "stack_order": "17",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -220,7 +265,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "15",
+        "stack_order": "18",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -235,7 +280,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "16",
+        "stack_order": "19",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-TEST",
@@ -250,7 +295,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "17",
+        "stack_order": "20",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-DEBT",
@@ -265,7 +310,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "18",
+        "stack_order": "21",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-DATA",
@@ -280,7 +325,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "19",
+        "stack_order": "22",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-MT",
@@ -295,7 +340,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "20",
+        "stack_order": "23",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-LEG",
@@ -310,7 +355,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "21",
+        "stack_order": "24",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SUP",
@@ -325,7 +370,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#full-audit-2026-04-13",
     },
     {
-        "stack_order": "22",
+        "stack_order": "25",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -340,7 +385,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#full-audit-2026-04-13",
     },
     {
-        "stack_order": "23",
+        "stack_order": "26",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-STATIC",
