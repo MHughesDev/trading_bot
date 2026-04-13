@@ -55,6 +55,7 @@ from app.runtime import operator_sessions as operator_sessions_mod
 from app.runtime import tenant_context as tenant_ctx
 from app.runtime import user_store as user_store_mod
 from app.runtime import user_venue_credentials as user_venue_credentials_mod
+from app.runtime.auth_venue_status import venue_keys_status_for_user
 from app.runtime.execution_settings_merge import merge_settings_for_execution
 from app.runtime.user_store import UserRecord
 from execution.adapter_registry import supported_adapters_for_settings
@@ -492,7 +493,14 @@ def post_register(body: RegisterRequest) -> RegisterResponse:
             status_code=http_status.HTTP_409_CONFLICT,
             detail=str(e),
         ) from e
-    return RegisterResponse(id=rec.id, email=rec.email, created_at=rec.created_at)
+    req, ok = venue_keys_status_for_user(settings, rec.id)
+    return RegisterResponse(
+        id=rec.id,
+        email=rec.email,
+        created_at=rec.created_at,
+        venue_keys_required=req,
+        venue_keys_complete=ok,
+    )
 
 
 @app.post("/auth/login", response_model=AuthUserResponse)
@@ -523,13 +531,27 @@ def post_login(request: Request, response: Response, body: LoginRequest) -> Auth
         samesite=settings.auth_session_cookie_samesite,
         path="/",
     )
-    return AuthUserResponse(id=rec.id, email=rec.email, created_at=rec.created_at)
+    req, ok = venue_keys_status_for_user(settings, rec.id)
+    return AuthUserResponse(
+        id=rec.id,
+        email=rec.email,
+        created_at=rec.created_at,
+        venue_keys_required=req,
+        venue_keys_complete=ok,
+    )
 
 
 @app.get("/auth/me", response_model=AuthUserResponse)
 def get_me(user: Annotated[UserRecord, Depends(require_user)]) -> AuthUserResponse:
     """Current user from session cookie (requires ``NM_AUTH_SESSION_ENABLED``)."""
-    return AuthUserResponse(id=user.id, email=user.email, created_at=user.created_at)
+    req, ok = venue_keys_status_for_user(settings, user.id)
+    return AuthUserResponse(
+        id=user.id,
+        email=user.email,
+        created_at=user.created_at,
+        venue_keys_required=req,
+        venue_keys_complete=ok,
+    )
 
 
 @app.get("/auth/venue-credentials", response_model=VenueCredentialsResponse)

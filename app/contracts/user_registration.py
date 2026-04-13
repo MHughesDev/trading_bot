@@ -16,3 +16,5 @@ class RegisterResponse(BaseModel):
     id: int
     email: str
     created_at: datetime
+    venue_keys_required: bool | None = None
+    venue_keys_complete: bool | None = None

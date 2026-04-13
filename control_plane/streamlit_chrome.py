@@ -29,7 +29,8 @@ def render_app_sidebar() -> None:
     st.sidebar.page_link("Home.py", label="Dashboard", icon=":material/dashboard:")
     st.sidebar.page_link("pages/Asset.py", label="Asset page", icon=":material/show_chart:")
     st.sidebar.page_link("pages/7_Account.py", label="Account", icon=":material/settings:")
-    st.sidebar.page_link("pages/0_Login.py", label="Sign in / Register", icon=":material/login:")
+    st.sidebar.page_link("pages/0_Login.py", label="Sign in", icon=":material/login:")
+    st.sidebar.page_link("pages/99_Sign_up.py", label="Sign up", icon=":material/person_add:")
     if st.session_state.get("operator_session_token"):
         if st.sidebar.button("Sign out"):
             operator_logout()

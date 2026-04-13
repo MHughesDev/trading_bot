@@ -113,7 +113,7 @@ stack_order,priority,phase,batch,id,kind,status,summary_one_line,agent_task,affe
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-13):** Roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** — **Done**. **FB-AUD-001**…**020** and **FB-CONT-009** — **Done** (including full-audit follow-ups **FB-AUD-018**…**020**). **Open stack:** empty — sentinel **`_QUEUE_EMPTY_`** in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)**.
+**Snapshot (2026-04-13):** Roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** — **Done**. **FB-UX-015** (sign up + venue key onboarding) — **Done**. **FB-AUD-001**…**020** and **FB-CONT-009** — **Done** (including full-audit follow-ups **FB-AUD-018**…**020**). **Open stack:** empty — sentinel **`_QUEUE_EMPTY_`** in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)**.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|

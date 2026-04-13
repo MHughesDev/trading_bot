@@ -16,3 +16,6 @@ class AuthUserResponse(BaseModel):
     id: int
     email: str
     created_at: datetime
+    # FB-UX-015: when NM_STREAMLIT_VENUE_KEYS_REQUIRED + venue master secret — gate Streamlit until keys saved
+    venue_keys_required: bool | None = None
+    venue_keys_complete: bool | None = None
