@@ -15,6 +15,8 @@ This folder holds **specifications that describe the repository as implemented**
 | **`docs/QUEUE_STACK.csv`** | Next tasks (`agent_task` per row) |
 | **`docs/QUEUE_ARCHIVE.MD`** | Open queue tables, resolved fixes (`IL-*`), gates (`HG-*`), archive (`FB-*`) |
 | **`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`** | Agent: one slice → PR → merge (part of queue system) |
+| **[`docs/FULL_AUDIT.md`](../FULL_AUDIT.md)** | Full-scope audit playbook; **§8** standalone report spec; skills **`draft-audit-report`**, **`audit-report-to-queue`** |
+| **[`docs/reports/AUDIT_REPORT_TEMPLATE.md`](../reports/AUDIT_REPORT_TEMPLATE.md)** | Skeleton for **`AUDIT_REPORT_*.md`** deliverables |
 | **`docs/READY_TO_RUN.MD`** | Operator checklist (venv, `.env`, Docker, preflight, run UI) |
 | **`docs/*.MD` reference docs** | Deep dives (risk order, backtesting semantics, QuestDB, etc.) |
 

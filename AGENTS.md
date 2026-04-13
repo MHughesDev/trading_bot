@@ -145,6 +145,7 @@ Update **when** the change affects:
 
 - Operator-visible behavior, new/changed **`NM_*`** or config keys, or smoke/CI steps → **[`README.md`](README.md)** and/or relevant **[`docs/*.MD`](docs/)**.
 - **Queue system** — backlog or process changes → keep **[`docs/QUEUE_SCHEMA.md`](docs/QUEUE_SCHEMA.md)** consistent and update **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** + **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** + **[`docs/QUEUE.MD`](docs/QUEUE.MD)** snapshot as needed (see schema); only if the task is to record work — otherwise a short PR/summary may suffice.
+- **Full-scope audit** — follow **[`docs/FULL_AUDIT.md`](docs/FULL_AUDIT.md)**; end with a **§8** report under **`docs/reports/`**; use Cursor skills **`draft-audit-report`** / **`audit-report-to-queue`** (see **[`.cursor/skills/`](.cursor/skills/)**) to polish or promote findings to **`QUEUE_STACK.csv`**.
 
 Do **not** duplicate long narratives across files; link to `docs/` instead.
 
