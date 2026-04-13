@@ -30,7 +30,7 @@ Agents working here should:
 
 ## 3. Non-negotiable rules
 
-- **Kraken-only market data:** do not import Alpaca **data** clients outside the Alpaca **execution** adapter. Enforced by `scripts/ci_spec_compliance.sh` (excludes `legacy/`). If you touch market data ingestion, run that script.
+- **Kraken-only market data:** do not import Alpaca **data** clients outside the Alpaca **execution** adapter. Enforced by `scripts/ci_spec_compliance.sh` (excludes `legacy/`). The same script also fails on **`from legacy.`** / **`import legacy.`** outside the **`legacy/`** tree. If you touch market data ingestion, run that script.
 - **Risk is final:** `OrderIntent` execution goes through the risk/signing path described in `execution/intent_gate.py` and settings — do not bypass for “quick tests” in production paths.
 - **No raw text → trades:** keep metadata rules on `OrderIntent` consistent with existing validators.
 - **No automatic MLflow model promotion** in code: do not add `transition_model_version_stage` / `set_registered_model_alias`; `scripts/ci_mlflow_promotion_policy.sh` enforces this.
@@ -132,6 +132,7 @@ pip install -e ".[dev]"
 python3 -m ruff check .
 python3 -m pytest tests/ -q
 bash scripts/ci_spec_compliance.sh
+python3 scripts/ci_queue_consistency.py
 bash scripts/ci_mlflow_promotion_policy.sh
 ```
 

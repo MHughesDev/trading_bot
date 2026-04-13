@@ -2,7 +2,7 @@
 
 ## Observability (`observability/`)
 
-- **`metrics.py`** — Prometheus metrics (e.g. decision latency, feed stale blocks, normalizer unknowns)
+- **`metrics.py`** — Prometheus metrics (e.g. decision latency, feed stale blocks, normalizer unknowns, **`tb_questdb_write_fail_total`** for QuestDB writer errors — FB-AUD-015)
 - **`logging.py`** — Structured logging setup
 - **`forecaster_metrics.py`** — `tb_forecast_build_*`, `tb_forecast_packet_abstain_total`, `tb_policy_shadow_*`, `tb_model_version_info`
 

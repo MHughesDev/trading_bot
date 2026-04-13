@@ -15,15 +15,15 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-19):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Open:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-003**…**017** (promoted from [`AUDIT_CODE_REVIEW.MD`](AUDIT_CODE_REVIEW.MD)); **FB-AUD-001** / **002** **Done**. **Next:** optional GitHub sync [**§7**](#7-github-sync-optional). Agents: **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** first.
+**Status (2026-02-06):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Post-audit hardening:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-003**…**017** **Done** (2026-02-06); **FB-CONT-009** (Trivy action pin) **Done**. **Open queue:** empty — see **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** sentinel **`_QUEUE_EMPTY_`**. **Next:** optional GitHub sync [**§7**](#7-github-sync-optional).
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **0** | — |
-| **MEDIUM** | **9** | **FB-AUD-003**–**004**, **007**–**013** ([§2.5](#25-post-audit-hardening-fb-aud)) |
-| **LOW** | **6** | **FB-AUD-005**, **006**, **014**–**017** ([§2.5](#25-post-audit-hardening-fb-aud)) |
+| **MEDIUM** | **0** | — |
+| **LOW** | **0** | — |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
 
@@ -33,7 +33,7 @@
 
 *P0 / P1 — release-critical and core architecture.*
 
-*No **Open** rows with **Pri** **HIGH** — roadmap epics above are **Done**. **Open** work: [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-*** (audit backlog).*
+*No **Open** rows — audit backlog [**§2.5**](#25-post-audit-hardening-fb-aud) **Done**; stack empty in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)**.*
 
 ### 2.2 Per-asset product epic (**FB-AP-P0**)
 
@@ -104,6 +104,7 @@
 | FB-CONT-006 | CONT-CLOUD | C | CP | reliability | MEDIUM | Done | **Cloud deployment runbook:** One **opinionated** path (e.g. **single Linux VM + Docker Compose + systemd** *or* **AWS Fargate + EFS** — pick one primary) for moving the **same images** from homelab to cloud: **minimum instance size**, **networking** (security groups / firewall), **secrets** from **cloud secret manager** → runtime env, **persistent disk** mapping to Compose volumes, **egress** notes. **Second path** may be sketched as a bullet list. **Acceptance:** new subsection in **`README.md`** or **`docs/DEPLOY_CLOUD.MD`** linked from **`README.md`**; **BS-001** / **FB-CONT-P0** referenced. **Done 2026-04-12:** **[`docs/DEPLOY_CLOUD.MD`](DEPLOY_CLOUD.MD)** — Path A VM+Compose+systemd, Path B Fargate+EFS sketch; **`README.md`** subsection + doc table link. | `docs/DEPLOY_CLOUD.MD`, `README.md` |
 | FB-CONT-007 | CONT-DOC | C | CP | change | MEDIUM | Done | **README — deployment north star:** Add a short **“Deployment models”** subsection: **(A)** Windows **`.bat`** / optional launcher (**[`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD)**) vs **(B)** **Linux OCI / Compose / cloud** (**BS-001**, **FB-CONT-P0**) — browser-only, same stack. Link **QuestDB / Redis / Qdrant** roles in one sentence each. **Acceptance:** new users understand which path they are on; no duplicate of long brainstorm text. **Done 2026-04-12:** **`README.md`** — **Deployment models (FB-CONT-007)** table + data-plane one-liner; **`BS-001`** “See also” to README + **`DEPLOY_CLOUD.MD`**. | `README.md`, `docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD` |
 | FB-CONT-008 | CONT-ALL | C | XX | spike | LOW | Done | **Spike — managed data services vs self-hosted:** Time-boxed comparison for **cloud** deployments: **managed Redis**, **QuestDB Cloud** or **managed TSDB**, **Qdrant Cloud** vs **self-hosted containers** on one VM — **cost**, **ops load**, **network latency** to app region, **migration** from current Compose defaults. Deliver **≤2 page ADR** in **`docs/`** with **recommendation** and **follow-up queue rows** only if we adopt a managed swap. **Traceability:** **BS-001** open questions. **Done 2026-04-12:** **[`ADR_MANAGED_DATA_SERVICES.MD`](ADR_MANAGED_DATA_SERVICES.MD)** — default **self-hosted** on VM; managed when SLA/HA/compliance; TSDB swap out of scope without migration project. | `docs/ADR_MANAGED_DATA_SERVICES.MD` |
+| FB-CONT-009 | CONT-CI | C | CP | fix | MEDIUM | Done | **CI: Trivy action pin** — **`aquasecurity/trivy-action`** bare tag **0.28.0** no longer resolves after upstream tag migration / supply-chain remediation; pin **`@v0.35.0`** in **`.github/workflows/ci.yml`**. **Done 2026-02-06:** comment + pin; see **`docs/CI_ROOT_CAUSE_ANALYSIS_PROMPT.md`**. | `.github/workflows/ci.yml`, `docs/CI_ROOT_CAUSE_ANALYSIS_PROMPT.md` |
 
 ### 2.4 Multi-tenant web operator UX (**FB-UX-P0**)
 
@@ -141,21 +142,21 @@
 |----|-------|-------|-----|------|-----|--------|---------|----------------|
 | FB-AUD-001 | AUD-DOC | B | OP | change | MEDIUM | Done | **Production API hardening (docs):** TLS + firewall + **`NM_CONTROL_PLANE_API_KEY`** / session auth; **restrict CORS** when API is not localhost-only; link from **`README.md`** / **`RUNBOOKS.MD`**. *(Audit DOC-A1.)* **Done 2026-04-19:** **`README.md`** — subsection *Production control plane hardening*; **`RUNBOOKS.MD`** — *Production / network exposure*. | `README.md`, `docs/RUNBOOKS.MD`, `docs/AUDIT_CODE_REVIEW.MD` |
 | FB-AUD-002 | AUD-DOC | B | OP | change | MEDIUM | Done | **Streamlit route guard (docs):** when to set **`NM_STREAMLIT_ROUTE_GUARD_ENABLED`**, session env vars, and **`NM_CONTROL_PLANE_API_KEY`** bypass for automation. *(Audit DOC-A2.)* **Done 2026-04-19:** **`README.md`** — *Streamlit route guard*; **`RUNBOOKS.MD`** — *Streamlit route guard*; **`streamlit_util.py`** docstrings. | `README.md`, `docs/RUNBOOKS.MD`, `control_plane/streamlit_util.py` |
-| FB-AUD-003 | AUD-OPS | B | OP | platform | MEDIUM | Open | **Startup warning:** log or warn when **`control_plane_api_key`** unset **and** bind address is non-loopback (misconfiguration risk). *(Audit OPS-A1.)* | `control_plane/api.py`, `docs/RUNBOOKS.MD` |
-| FB-AUD-004 | AUD-OPS | B | OP | platform | MEDIUM | Open | **Optional rate limiting** for **`control_plane`** when exposed publicly (middleware or reverse-proxy notes). *(Audit OPS-A2.)* | `control_plane/api.py`, `docs/RUNBOOKS.MD`, `infra/` |
-| FB-AUD-005 | AUD-QA | B | OP | tech_debt | LOW | Open | **Exception logging pass:** **`app/runtime/live_service.py`** — ensure **`except Exception`** paths log with **symbol** / correlation context. *(Audit QA-A1.)* | `app/runtime/live_service.py` |
-| FB-AUD-006 | AUD-QA | B | UI | tech_debt | LOW | Open | **Exception logging pass:** **`control_plane/asset_page.py`**, **`streamlit_util.py`** — user-visible error surfaces. *(Audit QA-A2.)* | `control_plane/asset_page.py`, `control_plane/streamlit_util.py` |
-| FB-AUD-007 | AUD-CODE | B | CP | change | MEDIUM | Open | **Comment / docstring** in **`execution/intent_gate.py`**: clarify “no **`risk_signing_secret`** → gate open” vs **`preflight`** live checks. *(Audit CODE-A1.)* | `execution/intent_gate.py` |
-| FB-AUD-008 | AUD-CI | B | CP | platform | MEDIUM | Open | **Optional CI script:** validate **`QUEUE_STACK.csv`** **Open** rows vs **`QUEUE_ARCHIVE.MD`** §2 (catch drift). *(Audit CI-A1.)* | `scripts/`, `docs/QUEUE_STACK.csv`, `docs/QUEUE_ARCHIVE.MD` |
-| FB-AUD-009 | AUD-SEC | B | CP | hardening | MEDIUM | Open | **CORS:** env-configurable **`allow_origins`**; default **`*`** only in dev — document production allowlist. *(Audit SEC-A1.)* | `control_plane/api.py`, `.env.example`, `README.md` |
-| FB-AUD-010 | AUD-SEC | B | OP | change | MEDIUM | Open | **Document** **`NM_AUTH_SESSION_COOKIE_SECURE`** (and related) for HTTPS vs local HTTP. *(Audit SEC-A2.)* | `README.md`, `docs/RUNBOOKS.MD`, `.env.example` |
-| FB-AUD-011 | AUD-SEC | B | CP | platform | MEDIUM | Open | **`pip-audit`** (or equivalent) in **dev docs** / optional **CI** job for supply chain. *(Audit SEC-A3.)* | `README.md`, `.github/workflows/`, `pyproject.toml` |
-| FB-AUD-012 | AUD-SEC | B | CP | hardening | MEDIUM | Open | **Inventory **`httpx`** calls** to external APIs: timeouts, TLS, error handling. *(Audit SEC-A4.)* | `execution/`, `control_plane/`, `orchestration/` |
-| FB-AUD-013 | AUD-TEST | B | CP | platform | MEDIUM | Open | **Tests:** **`require_mutate_operator`** rejects wrong/missing key when **`NM_CONTROL_PLANE_API_KEY`** is set. *(Audit TEST-A1.)* | `tests/`, `control_plane/api.py` |
-| FB-AUD-014 | AUD-DEBT | B | OP | tech_debt | LOW | Open | **Inventory** silent **`except: pass`** / bare **`pass`** after exceptions; replace with logging where appropriate. *(Audit DEBT-A1.)* | repo-wide (incremental) |
-| FB-AUD-015 | AUD-DATA | B | DP | reliability | LOW | Open | **Observability:** QuestDB writer / ingest errors surfaced (metrics or structured logs) for operators. *(Audit DATA-A1.)* | `data_plane/storage/`, `observability/` |
-| FB-AUD-016 | AUD-MT | B | PF | hardening | LOW | Open | **Multi-tenant review:** paths respect tenant prefix when **`NM_MULTI_TENANT_DATA_SCOPING=true`**. *(Audit MT-A1.)* | `app/runtime/`, `execution/` |
-| FB-AUD-017 | AUD-LEG | B | OP | tech_debt | LOW | Open | **`legacy/`** remains isolated — no new imports from **`legacy/`** into main V3 tree (align with **`AGENTS.md`**). *(Audit LEGACY-A1.)* | `scripts/ci_spec_compliance.sh`, `legacy/` |
+| FB-AUD-003 | AUD-OPS | B | OP | platform | MEDIUM | Done | **Startup warning:** log or warn when **`control_plane_api_key`** unset **and** bind address is non-loopback (misconfiguration risk). *(Audit OPS-A1.)* **Done 2026-02-06:** **`lifespan`** warning in **`control_plane/api.py`**; **RUNBOOKS** link. | `control_plane/api.py`, `docs/RUNBOOKS.MD` |
+| FB-AUD-004 | AUD-OPS | B | OP | platform | MEDIUM | Done | **Optional rate limiting** for **`control_plane`** when exposed publicly (middleware or reverse-proxy notes). *(Audit OPS-A2.)* **Done 2026-02-06:** **`ControlPlaneRateLimitMiddleware`** + env flags; **RUNBOOKS**. | `control_plane/api.py`, `docs/RUNBOOKS.MD`, `infra/` |
+| FB-AUD-005 | AUD-QA | B | OP | tech_debt | LOW | Done | **Exception logging pass:** **`app/runtime/live_service.py`** — ensure **`except Exception`** paths log with **symbol** / correlation context. *(Audit QA-A1.)* **Done 2026-02-06:** symbol context on reconcile/sentiment logs. | `app/runtime/live_service.py` |
+| FB-AUD-006 | AUD-QA | B | UI | tech_debt | LOW | Done | **Exception logging pass:** **`control_plane/asset_page.py`**, **`streamlit_util.py`** — user-visible error surfaces. *(Audit QA-A2.)* **Done 2026-02-06:** logging on API caption / logout failures. | `control_plane/asset_page.py`, `control_plane/streamlit_util.py` |
+| FB-AUD-007 | AUD-CODE | B | CP | change | MEDIUM | Done | **Comment / docstring** in **`execution/intent_gate.py`**: clarify “no **`risk_signing_secret`** → gate open” vs **`preflight`** live checks. *(Audit CODE-A1.)* **Done 2026-02-06:** docstring on **`execution_allowed`**. | `execution/intent_gate.py` |
+| FB-AUD-008 | AUD-CI | B | CP | platform | MEDIUM | Done | **Optional CI script:** validate **`QUEUE_STACK.csv`** **Open** rows vs **`QUEUE_ARCHIVE.MD`** §2 (catch drift). *(Audit CI-A1.)* **Done 2026-02-06:** **`scripts/ci_queue_consistency.py`** + **lint-test** job step. | `scripts/ci_queue_consistency.py`, `docs/QUEUE_STACK.csv`, `docs/QUEUE_ARCHIVE.MD` |
+| FB-AUD-009 | AUD-SEC | B | CP | hardening | MEDIUM | Done | **CORS:** env-configurable **`allow_origins`**; default **`*`** only in dev — document production allowlist. *(Audit SEC-A1.)* **Done 2026-02-06:** **`NM_CONTROL_PLANE_CORS_ALLOW_ORIGINS`**, README/RUNBOOKS/`.env.example`. | `control_plane/api.py`, `.env.example`, `README.md` |
+| FB-AUD-010 | AUD-SEC | B | OP | change | MEDIUM | Done | **Document** **`NM_AUTH_SESSION_COOKIE_SECURE`** (and related) for HTTPS vs local HTTP. *(Audit SEC-A2.)* **Done 2026-02-06:** README + RUNBOOKS + `.env.example`. | `README.md`, `docs/RUNBOOKS.MD`, `.env.example` |
+| FB-AUD-011 | AUD-SEC | B | CP | platform | MEDIUM | Done | **`pip-audit`** (or equivalent) in **dev docs** / optional **CI** job for supply chain. *(Audit SEC-A3.)* **Done 2026-02-06:** CI step (continue-on-error) + README. | `README.md`, `.github/workflows/ci.yml` |
+| FB-AUD-012 | AUD-SEC | B | CP | hardening | MEDIUM | Done | **Inventory **`httpx`** calls** to external APIs: timeouts, TLS, error handling. *(Audit SEC-A4.)* **Done 2026-02-06:** **RUNBOOKS** table. | `docs/RUNBOOKS.MD` |
+| FB-AUD-013 | AUD-TEST | B | CP | platform | MEDIUM | Done | **Tests:** **`require_mutate_operator`** rejects wrong/missing key when **`NM_CONTROL_PLANE_API_KEY`** is set. *(Audit TEST-A1.)* **Done 2026-02-06:** **`tests/test_control_plane_api_key_mutate.py`**. | `tests/test_control_plane_api_key_mutate.py` |
+| FB-AUD-014 | AUD-DEBT | B | OP | tech_debt | LOW | Done | **Inventory** silent **`except: pass`** / bare **`pass`** after exceptions; replace with logging where appropriate. *(Audit DEBT-A1.)* **Done 2026-02-06:** RUNBOOKS inventory note (incremental refactors deferred). | `docs/RUNBOOKS.MD` |
+| FB-AUD-015 | AUD-DATA | B | DP | reliability | LOW | Done | **Observability:** QuestDB writer / ingest errors surfaced (metrics or structured logs) for operators. *(Audit DATA-A1.)* **Done 2026-02-06:** **`tb_questdb_write_fail_total`** + RUNBOOKS. | `data_plane/storage/questdb.py`, `observability/metrics.py`, `docs/RUNBOOKS.MD` |
+| FB-AUD-016 | AUD-MT | B | PF | hardening | LOW | Done | **Multi-tenant review:** paths respect tenant prefix when **`NM_MULTI_TENANT_DATA_SCOPING=true`**. *(Audit MT-A1.)* **Done 2026-02-06:** RUNBOOKS checklist. | `docs/RUNBOOKS.MD` |
+| FB-AUD-017 | AUD-LEG | B | OP | tech_debt | LOW | Done | **`legacy/`** remains isolated — no new imports from **`legacy/`** into main V3 tree (align with **`AGENTS.md`**). *(Audit LEGACY-A1.)* **Done 2026-02-06:** **`scripts/ci_spec_compliance.sh`** grep for **`from legacy.`** / **`import legacy.`**. | `scripts/ci_spec_compliance.sh`, `legacy/` |
 
 ### Compliance & release gates (open)
 

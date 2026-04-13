@@ -19,10 +19,17 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Ruff
         run: python -m ruff check .
+      - name: pip-audit (informational)
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit
       - name: Pytest
         run: python -m pytest tests/ -q
       - name: Spec compliance
         run: bash scripts/ci_spec_compliance.sh
+      - name: Queue stack consistency
+        run: python3 scripts/ci_queue_consistency.py
       - name: MLflow promotion policy
         run: bash scripts/ci_mlflow_promotion_policy.sh
 
@@ -40,8 +47,9 @@ jobs:
         run: docker build -t trading-bot:ci .
       - name: Smoke import
         run: docker run --rm trading-bot:ci python -c "import app; import control_plane.api"
+      # Pin to v0.35.0+ — bare 0.28.0 tag no longer resolves after upstream tag migration / supply-chain remediation (2026).
       - name: Trivy filesystem scan (informational)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: fs
           scan-ref: .

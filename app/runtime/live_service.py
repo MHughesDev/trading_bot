@@ -114,7 +114,10 @@ async def _position_reconcile_loop(
             positions.update(merged)
             logger.info("position_reconcile %s", {k: str(v) for k, v in positions.items()})
         except Exception:
-            logger.exception("position_reconcile failed")
+            logger.exception(
+                "position_reconcile failed symbols=%s",
+                ",".join(symbols),
+            )
 
 
 async def _sentiment_refresh_loop(
@@ -134,7 +137,7 @@ async def _sentiment_refresh_loop(
         sentiment.clear()
         sentiment.update(agg)
     except Exception:
-        logger.exception("initial sentiment aggregate failed")
+        logger.exception("initial sentiment aggregate failed symbols=%s", ",".join(symbols))
     while not stop.is_set():
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval)
@@ -151,7 +154,7 @@ async def _sentiment_refresh_loop(
             sentiment.clear()
             sentiment.update(agg)
         except Exception:
-            logger.exception("sentiment refresh failed")
+            logger.exception("sentiment refresh failed symbols=%s", ",".join(symbols))
 
 
 async def run_live_loop(

@@ -82,6 +82,11 @@ class AppSettings(BaseSettings):
 
     control_plane_host: str = "0.0.0.0"
     control_plane_port: int = 8000
+    # Comma-separated origins for CORSMiddleware, or "*" (default) for dev + Streamlit/SSE
+    control_plane_cors_allow_origins: str = "*"
+    # Optional abuse protection when API is exposed (per client IP, sliding 60s window)
+    control_plane_rate_limit_enabled: bool = False
+    control_plane_rate_limit_per_minute: int = 120
 
     observability_log_level: str = "INFO"
 
@@ -270,6 +275,12 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         cp = cfg["control_plane"] or {}
         out["control_plane_host"] = cp.get("host", "0.0.0.0")
         out["control_plane_port"] = cp.get("port", 8000)
+        if "cors_allow_origins" in cp and cp["cors_allow_origins"] is not None:
+            out["control_plane_cors_allow_origins"] = str(cp["cors_allow_origins"])
+        if "rate_limit_enabled" in cp:
+            out["control_plane_rate_limit_enabled"] = bool(cp["rate_limit_enabled"])
+        if "rate_limit_per_minute" in cp:
+            out["control_plane_rate_limit_per_minute"] = int(cp["rate_limit_per_minute"])
     if "observability" in cfg:
         ob = cfg["observability"] or {}
         out["observability_log_level"] = ob.get("log_level", "INFO")

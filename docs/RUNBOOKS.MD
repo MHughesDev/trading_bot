@@ -49,6 +49,12 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 - Default **`NM_CONTROL_PLANE_HOST=0.0.0.0`** listens on all interfaces. On a single machine behind an untrusted LAN, prefer **`NM_CONTROL_PLANE_HOST=127.0.0.1`** so the API is only reachable from localhost.
 - Keep **`NM_CONTROL_PLANE_API_KEY`** set for mutating routes (`POST /params`, `/system/mode`, `/flatten`) whenever the control plane is reachable beyond localhost.
 
+## CORS and optional rate limit (FB-AUD-009 / FB-AUD-004)
+
+- **`NM_CONTROL_PLANE_CORS_ALLOW_ORIGINS`**: comma-separated browser origins, or **`*`** (default) for permissive dev + Streamlit/SSE (**FB-AP-034**). **Public deployments:** set explicit origins (e.g. `https://dashboard.example.com`) and terminate TLS at **[TLS edge — Caddy](#tls-edge--caddy-fb-cont-004)** or your LB.
+- **`NM_CONTROL_PLANE_RATE_LIMIT_ENABLED`** / **`NM_CONTROL_PLANE_RATE_LIMIT_PER_MINUTE`**: when enabled, applies a **per-client-IP** sliding window before handlers (429 when exceeded). Default **off** for localhost; use **on** when the API is exposed without an edge limiter, or prefer **Caddy/Nginx `rate_limit`** in **`infra/docker-compose.edge.yml`**.
+- **Startup warning (FB-AUD-003):** if **`NM_CONTROL_PLANE_API_KEY`** is unset, **`NM_AUTH_SESSION_ENABLED`** is false, and the bind address is **not** loopback-only, uvicorn logs a **WARNING** at startup — fix before exposing the API.
+
 ## Production / network exposure (FB-AUD-001)
 
 **Threat model:** The control plane can **start training**, change **params**, **flatten** positions, and drive **lifecycle** APIs. If **`NM_CONTROL_PLANE_API_KEY`** is **unset** and **`NM_AUTH_SESSION_ENABLED`** is **false**, **mutating** routes still succeed (local-dev ergonomics). **Do not** expose that configuration to the internet or an untrusted LAN.
@@ -58,7 +64,7 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 1. **Authentication:** Set **`NM_CONTROL_PLANE_API_KEY`** (clients send **`X-API-Key`**) **or** enable **`NM_AUTH_SESSION_ENABLED`** with operator accounts and session cookies (see **`.env.example`**).
 2. **TLS:** Terminate HTTPS in front of the API (e.g. **[TLS edge — Caddy](#tls-edge--caddy-fb-cont-004)**), cloud load balancer, or **Tailscale**/VPN — not raw **HTTP** on a public IP.
 3. **Bind / firewall:** Prefer **`NM_CONTROL_PLANE_HOST=127.0.0.1`** if only a reverse proxy on the same host connects upstream; otherwise restrict **security groups** / **iptables** so **:8000** is not world-open unless behind a proxy you control.
-4. **CORS:** FastAPI uses permissive **`CORSMiddleware`** defaults for Streamlit + SSE (**FB-AP-034**). For a **public** hostname, plan to **restrict `allow_origins`** (queue **`FB-AUD-009`**).
+4. **CORS:** set **`NM_CONTROL_PLANE_CORS_ALLOW_ORIGINS`** to an explicit allowlist for public hostnames (see [CORS and optional rate limit](#cors-and-optional-rate-limit-fb-aud-009--fb-aud-004)); default **`*`** is for dev + Streamlit/SSE (**FB-AP-034**).
 5. **Streamlit:** For shared dashboards, enable the **route guard** and align session env with the API — see **[Streamlit route guard (FB-AUD-002)](#streamlit-route-guard-fb-aud-002)** below.
 
 **Related:** **`README.md`** — *Production control plane hardening* · *Streamlit route guard*; **`docs/AUDIT_CODE_REVIEW.MD`**.
@@ -76,6 +82,8 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 - **Guard on** and **no** API key in Streamlit: redirect to login **unless** **`st.session_state` holds an operator token** and **`GET {NM_CONTROL_PLANE_URL}/auth/me`** returns **200** with the **`Cookie`** header built from that token.
 
 **Session env (must match the FastAPI process):** **`NM_AUTH_SESSION_ENABLED=true`** for login UI; **`NM_CONTROL_PLANE_URL`** points to the API that serves **`/auth/login`** and **`/auth/me`**; **`NM_AUTH_SESSION_COOKIE_NAME`**, **`NM_AUTH_SESSION_TTL_SECONDS`**, **`NM_AUTH_SESSION_COOKIE_SECURE`**, **`NM_AUTH_SESSION_COOKIE_SAMESITE`** — see **`.env.example`**. Misaligned values cause **`/auth/me`** to fail and repeated redirects to login.
+
+**HTTPS vs HTTP:** set **`NM_AUTH_SESSION_COOKIE_SECURE=true`** when the operator uses **HTTPS** (reverse proxy or TLS edge) so browsers only send the cookie over TLS. For **localhost HTTP** development, **`false`** is typical. **`SameSite=lax`** is the default; use **`none`** only with **`Secure`** and HTTPS.
 
 **Note:** Deep links to a Streamlit app page may still show the login flow first; the UI stores the session token in **`session_state`** after **`POST /auth/login`**.
 
@@ -186,6 +194,26 @@ If your host uses a different **`COMPOSE_PROJECT_NAME`**, replace **`trading-bot
 **Redis note:** with **`appendonly yes`**, the AOF under the Redis volume is included in the archive; restore replaces full history for that instance.
 
 **Qdrant note:** snapshot is the volume **`storage`** tree; large collections → expect large archives.
+
+## Outbound HTTP (`httpx`) — timeouts and TLS (FB-AUD-012)
+
+| Area | Notes |
+|------|--------|
+| **Streamlit → API** (`control_plane/streamlit_util.py`, chart fetch helpers) | Explicit **`timeout=`** on requests (typically **15–60s**). Default TLS **`verify=True`**. |
+| **Coinbase Advanced** (`execution/coinbase_advanced_http.py`) | **`httpx.AsyncClient(timeout=...)`** from settings — do not disable verify for production. |
+| **Edge** | For public APIs, prefer **reverse-proxy** rate limits + TLS over tuning client timeouts alone. |
+
+## QuestDB writer failures — metrics (FB-AUD-015)
+
+- Prometheus counter **`tb_questdb_write_fail_total`** with label **`operation`** (`insert_bar`, `insert_decision_trace`, `flush_decision_traces`) increments when the QuestDB writer raises. The live loop still logs **`questdb insert_bar failed`** with stack traces; **`GET /metrics`** exposes the counter for alerting.
+
+## Multi-tenant data scoping (`NM_MULTI_TENANT_DATA_SCOPING`) — review checklist (FB-AUD-016)
+
+- When **true**, session-bound **`tenant_ctx`** scopes paths under **`data/users/<user_id>/`** (registry, lifecycle, PnL, markers, watermarks). **Kraken** shared data plane stays deployment-wide per **AGENTS.md**. When adding new persisted artifacts, resolve paths through **`app/runtime/tenant_context`** (or equivalent) so tenant **A** never reads tenant **B** files.
+
+## Silent `except` patterns — inventory note (FB-AUD-014)
+
+- Broad **`except: pass`** hides failures; prefer **`logger.exception`** on unexpected errors. Quick inventory: `rg "except\\s*:" --glob '*.py' app control_plane execution` and review. Hot paths (live loop) already log most failures; treat **`pass`** only for optional UX (e.g. best-effort logout).
 
 ## Grafana / Loki
 

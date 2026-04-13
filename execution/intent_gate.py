@@ -8,7 +8,13 @@ from risk_engine.signing import verify_order_intent
 
 
 def execution_allowed(intent: OrderIntent, settings: AppSettings) -> bool:
-    """True if this intent may be sent to a venue."""
+    """True if this intent may be sent to a venue.
+
+    Semantics vs preflight: ``NM_ALLOW_UNSIGNED_EXECUTION=true`` bypasses verification here
+    (and in ``require_execution_allowed``). When **no** ``risk_signing_secret`` is configured,
+    this gate **allows** submission (same as unsigned) — **preflight** may still warn in live
+    mode because missing signing is a deployment risk; the gate does not block on that alone.
+    """
     if settings.allow_unsigned_execution:
         return True
     secret = (

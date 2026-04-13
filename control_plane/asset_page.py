@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
@@ -29,6 +30,8 @@ from control_plane.streamlit_util import (
     api_put_json,
     post_mutate_response,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _render_ohlc_chart(sym: str) -> None:
@@ -60,7 +63,7 @@ def _render_ohlc_chart(sym: str) -> None:
             f"single snapshot: `GET {api_base}/assets/chart/latest-bar?symbol={sym}&interval_seconds=...`"
         )
     except Exception:
-        pass
+        logger.warning("asset_page: could not resolve API base for chart hints symbol=%s", sym, exc_info=True)
     try:
         bars, note, _eff = fetch_bars_for_preset(sym, preset)
     except Exception as e:

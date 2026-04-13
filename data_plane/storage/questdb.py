@@ -10,6 +10,7 @@ from psycopg.rows import dict_row
 
 from app.contracts.events import BarEvent
 from data_plane.storage.schemas import ensure_questdb_schema
+from observability.metrics import QUESTDB_WRITE_FAIL
 
 
 class QuestDBWriter:
@@ -47,30 +48,34 @@ class QuestDBWriter:
         """
         if not self._conn:
             raise RuntimeError("not connected")
-        delete_sql = """
-        DELETE FROM canonical_bars
-        WHERE symbol = %s AND ts = %s AND interval_seconds = %s
-        """
-        await self._conn.execute(delete_sql, (bar.symbol, bar.timestamp, bar.interval_seconds))
-        insert_sql = """
-        INSERT INTO canonical_bars (ts, symbol, interval_seconds, open, high, low, close, volume, source, schema_version)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        await self._conn.execute(
-            insert_sql,
-            (
-                bar.timestamp,
-                bar.symbol,
-                bar.interval_seconds,
-                bar.open,
-                bar.high,
-                bar.low,
-                bar.close,
-                bar.volume,
-                bar.source,
-                bar.schema_version,
-            ),
-        )
+        try:
+            delete_sql = """
+            DELETE FROM canonical_bars
+            WHERE symbol = %s AND ts = %s AND interval_seconds = %s
+            """
+            await self._conn.execute(delete_sql, (bar.symbol, bar.timestamp, bar.interval_seconds))
+            insert_sql = """
+            INSERT INTO canonical_bars (ts, symbol, interval_seconds, open, high, low, close, volume, source, schema_version)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            await self._conn.execute(
+                insert_sql,
+                (
+                    bar.timestamp,
+                    bar.symbol,
+                    bar.interval_seconds,
+                    bar.open,
+                    bar.high,
+                    bar.low,
+                    bar.close,
+                    bar.volume,
+                    bar.source,
+                    bar.schema_version,
+                ),
+            )
+        except Exception:
+            QUESTDB_WRITE_FAIL.labels("insert_bar").inc()
+            raise
 
     async def insert_decision_trace(
         self,
@@ -87,7 +92,11 @@ class QuestDBWriter:
         INSERT INTO decision_traces (ts, symbol, route_id, regime, action, details)
         VALUES (%s, %s, %s, %s, %s, %s)
         """
-        await self._conn.execute(sql, (ts, symbol, route_id, regime, action, details))
+        try:
+            await self._conn.execute(sql, (ts, symbol, route_id, regime, action, details))
+        except Exception:
+            QUESTDB_WRITE_FAIL.labels("insert_decision_trace").inc()
+            raise
 
     def _row_from_trace_dict(self, trace: dict) -> tuple:
         ts = datetime.now(UTC)
@@ -118,8 +127,13 @@ class QuestDBWriter:
         VALUES (%s, %s, %s, %s, %s, %s)
         """
         rows = [self._row_from_trace_dict(t) for t in batch]
-        async with self._conn.cursor() as cur:
-            await cur.executemany(sql, rows)
+        try:
+            async with self._conn.cursor() as cur:
+                await cur.executemany(sql, rows)
+        except Exception:
+            self._trace_buffer = batch + self._trace_buffer
+            QUESTDB_WRITE_FAIL.labels("flush_decision_traces").inc()
+            raise
 
     async def insert_microservice_events_batch(
         self,

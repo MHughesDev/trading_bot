@@ -38,6 +38,7 @@ docker compose -f infra/docker-compose.yml up -d
 | 🖥️ Control plane API | `uvicorn control_plane.api:app --host 0.0.0.0 --port 8000` |
 | 📈 Live decision loop | `python -m app.runtime.live_service` |
 | 🧪 Lint & tests | `python3 -m ruff check .` · `python3 -m pytest tests/ -q` (or `ruff` if on `PATH`) |
+| 🔎 Dependency audit | `pip install pip-audit && pip-audit` (informational in CI — see **`.github/workflows/ci.yml`**) |
 
 Configure secrets in **`.env`** (see [`.env.example`](.env.example)); app settings use the **`NM_`** prefix.
 
@@ -79,7 +80,7 @@ Publishes **8000** (API + `/metrics`), **8501** (Streamlit). Mounts **`./data`**
 
 ### Control plane security (non-localhost)
 
-If **:8000** / **:8501** are reachable beyond a **single trusted operator on localhost**, follow **[`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD)** — **Production / network exposure (FB-AUD-001)** (API key or sessions, TLS, firewall, CORS) and **Streamlit route guard (FB-AUD-002)** (`NM_STREAMLIT_ROUTE_GUARD_ENABLED`, session env alignment, optional **`NM_CONTROL_PLANE_API_KEY`** bypass for automation). Background: **[`docs/AUDIT_CODE_REVIEW.MD`](docs/AUDIT_CODE_REVIEW.MD)**. For a **full-scope** audit playbook (security, performance, data durability, ops, etc.), see **[`docs/FULL_AUDIT.md`](docs/FULL_AUDIT.md)**.
+If **:8000** / **:8501** are reachable beyond a **single trusted operator on localhost**, follow **[`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD)** — **Production / network exposure (FB-AUD-001)** (API key or sessions, TLS, firewall, CORS via **`NM_CONTROL_PLANE_CORS_ALLOW_ORIGINS`**, optional **`NM_CONTROL_PLANE_RATE_LIMIT_ENABLED`**) and **Streamlit route guard (FB-AUD-002)** (`NM_STREAMLIT_ROUTE_GUARD_ENABLED`, session env alignment, optional **`NM_CONTROL_PLANE_API_KEY`** bypass for automation). Background: **[`docs/AUDIT_CODE_REVIEW.MD`](docs/AUDIT_CODE_REVIEW.MD)**. For a **full-scope** audit playbook (security, performance, data durability, ops, etc.), see **[`docs/FULL_AUDIT.md`](docs/FULL_AUDIT.md)**.
 
 ### Cloud deployment (FB-CONT-006)
 

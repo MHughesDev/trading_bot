@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
+import logging
 import os
+import time
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -104,14 +108,95 @@ from orchestration.app_scheduler import (
 )
 from orchestration.asset_init_pipeline import get_job as get_init_job, try_start_asset_init_job
 
+logger = logging.getLogger(__name__)
+
 settings = load_settings()
 state = StateManager()
 modes = ModeManager(state)
 
 
+def _control_plane_bind_loopback_only(host: str) -> bool:
+    """True when the HTTP bind address is loopback-only (no API key warning needed)."""
+    h = (host or "").strip().lower()
+    if h in ("127.0.0.1", "localhost", "::1"):
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def _cors_allow_origins_list(s: AppSettings) -> list[str]:
+    raw = (s.control_plane_cors_allow_origins or "").strip()
+    if raw == "*" or not raw:
+        return ["*"]
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+class _SlidingWindowRateLimiter:
+    """Per-key sliding window (monotonic clock) for optional abuse protection."""
+
+    def __init__(self, window_seconds: float = 60.0) -> None:
+        self._window = float(window_seconds)
+        self._hits: dict[str, list[float]] = defaultdict(list)
+
+    def allow(self, key: str, max_requests: int) -> bool:
+        cap = max(1, int(max_requests))
+        now = time.monotonic()
+        cutoff = now - self._window
+        buf = self._hits[key]
+        while buf and buf[0] < cutoff:
+            buf.pop(0)
+        if len(buf) >= cap:
+            return False
+        buf.append(now)
+        return True
+
+
+_rate_limiter = _SlidingWindowRateLimiter(60.0)
+
+
+def _client_ip(request: Request) -> str:
+    xf = request.headers.get("x-forwarded-for")
+    if xf:
+        return xf.split(",")[0].strip() or "unknown"
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+class ControlPlaneRateLimitMiddleware(BaseHTTPMiddleware):
+    """Optional per-IP request cap when ``NM_CONTROL_PLANE_RATE_LIMIT_ENABLED``."""
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        if not settings.control_plane_rate_limit_enabled:
+            return await call_next(request)
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        if not _rate_limiter.allow(
+            _client_ip(request), settings.control_plane_rate_limit_per_minute
+        ):
+            raise HTTPException(
+                status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded",
+            )
+        return await call_next(request)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """FB-AP-035: register background schedulers only while this process runs."""
+    if (
+        settings.control_plane_api_key is None
+        and not settings.auth_session_enabled
+        and not _control_plane_bind_loopback_only(settings.control_plane_host)
+    ):
+        logger.warning(
+            "control_plane: NM_CONTROL_PLANE_API_KEY is unset and session auth is off while "
+            "bind host is %s — mutating routes are reachable without auth on the network. "
+            "Set NM_CONTROL_PLANE_API_KEY, enable NM_AUTH_SESSION_ENABLED, or bind loopback-only.",
+            settings.control_plane_host,
+        )
     start_app_background_scheduler(settings)
     start_alpaca_universe_scheduler(settings)
     start_coinbase_universe_scheduler(settings)
@@ -142,10 +227,13 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(title="Trading Bot Control Plane", version="0.1.0", lifespan=_lifespan)
 app.add_middleware(TenantContextMiddleware)
+app.add_middleware(ControlPlaneRateLimitMiddleware)
 # FB-AP-034: browser EventSource (Streamlit on another origin) needs CORS on SSE + JSON
+_cors_origins = _cors_allow_origins_list(settings)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=bool(settings.auth_session_enabled and _cors_origins != ["*"]),
     allow_methods=["*"],
     allow_headers=["*"],
 )

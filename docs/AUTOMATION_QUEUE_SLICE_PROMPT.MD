@@ -54,6 +54,7 @@ pip install -e ".[dev]"
 ruff check .
 python3 -m pytest tests/ -q
 bash scripts/ci_spec_compliance.sh
+python3 scripts/ci_queue_consistency.py
 bash scripts/ci_mlflow_promotion_policy.sh
 ```
 

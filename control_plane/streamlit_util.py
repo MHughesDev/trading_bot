@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 import httpx
 
 from control_plane.auth_cookie import session_cookie_name, session_token_from_httpx_response
+
+logger = logging.getLogger(__name__)
 
 
 def _operator_session_token() -> str | None:
@@ -212,7 +215,7 @@ def operator_logout() -> None:
             headers=h or None,
         )
     except httpx.HTTPError:
-        pass
+        logger.warning("operator_logout: POST /auth/logout failed", exc_info=True)
     st.session_state.pop("operator_session_token", None)
 
 

@@ -21,3 +21,8 @@ NORMALIZER_UNKNOWN = Counter(
     "tb_normalizer_unknown_messages_total",
     "WebSocket messages that did not normalize to a known contract",
 )
+QUESTDB_WRITE_FAIL = Counter(
+    "tb_questdb_write_fail_total",
+    "QuestDB writer failures (bars, traces, flush)",
+    ["operation"],
+)
