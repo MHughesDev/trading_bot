@@ -77,7 +77,7 @@
 
 Pick one:
 
-- [ ] **Promote** — add row(s) to [`QUEUE.MD`](../QUEUE.MD); note ID(s) below *(one epic row + sub-rows is fine for large ideas)*  
+- [ ] **Promote** — add row(s) to the **[queue system](../QUEUE_SCHEMA.md)** (`QUEUE_STACK.csv` + `QUEUE_ARCHIVE.MD` per `QUEUE.MD` §6); note ID(s) below *(one epic row + sub-rows is fine for large ideas)*  
 - [ ] **Spike** — time-box, success criteria, which workstream first  
 - [ ] **Park** — no action for now  
 - [ ] **Drop** — idea not pursued; link to reason if useful  

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create GitHub issues from embedded definitions (see docs/QUEUE_ARCHIVE.MD / docs/QUEUE.MD).
+# Create GitHub issues from embedded definitions (see docs/QUEUE_SCHEMA.md queue system, QUEUE_ARCHIVE.MD, QUEUE.MD).
 # Prerequisites: gh CLI, auth with repo scope: gh auth login
 # Usage: bash scripts/create_github_issues.sh
 #        REPO=owner/repo bash scripts/create_github_issues.sh

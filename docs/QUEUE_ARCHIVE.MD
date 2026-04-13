@@ -1,6 +1,10 @@
 # Queue archive (historical tables)
 
+**Documentation last reviewed:** **2026-02-06**.
+
 **Purpose:** Full backlog tables, resolved fixes, and completed archive moved from the slim [`QUEUE.MD`](QUEUE.MD) for token-efficient agent workflows. **Agents implementing work:** use [`QUEUE_STACK.csv`](QUEUE_STACK.csv) only — each row is self-contained.
+
+**Queue system:** This file is part of the **[queue system](QUEUE_SCHEMA.md)** (see [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) for all machinery files).
 
 **Parent:** [`QUEUE.MD`](QUEUE.MD) — conventions and how to add items.
 
@@ -589,7 +593,7 @@ Embedded issue titles and bodies for `gh issue create` live in **`scripts/create
 1. Install and auth: `gh auth login` (repo scope).
 2. From repo root: `bash scripts/create_github_issues.sh`  
    Or: `REPO=owner/repo bash scripts/create_github_issues.sh`
-3. Edit the script if titles/bodies drift from `QUEUE.MD`; prefer **updating `QUEUE.MD`** for operational fixes, then mirroring to the script if you still use bulk create.
+3. Edit the script if titles/bodies drift from the **queue system** (`QUEUE_ARCHIVE.MD` / `QUEUE_STACK.csv`); prefer **updating those** for operational truth, then mirroring to the script if you still use bulk create.
 
 **Note:** GitHub issues are optional; this markdown file remains the **local** source of truth for fix tracking.
 

@@ -1,13 +1,15 @@
 ---
 name: add-to-queue
-description: Add or update work items in docs/QUEUE_STACK.csv and mirror rows in docs/QUEUE_ARCHIVE.MD using project conventions (Kind, IDs, Batch, agent_task). Use when the user asks to log backlog items, queue tasks, or record fixes/features in the queue.
+description: Add or update work items in the queue system (QUEUE_STACK.csv, QUEUE_ARCHIVE.MD, QUEUE.MD per docs/QUEUE_SCHEMA.md). Use when the user asks to log backlog items, queue tasks, or record fixes/features in the queue.
 ---
 
 # Add to Queue
 
+**Queue system:** Follow [`docs/QUEUE_SCHEMA.md`](../../../docs/QUEUE_SCHEMA.md) — this skill touches **`QUEUE_STACK.csv`**, **`QUEUE_ARCHIVE.MD`**, and the **`QUEUE.MD`** snapshot.
+
 Follow this workflow whenever you need to **append or edit** the project work queue.
 
-## Source of truth (two files + conventions)
+## Source of truth (queue system files)
 
 | Artifact | Role |
 |----------|------|

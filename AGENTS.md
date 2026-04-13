@@ -10,7 +10,7 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 **Trading Bot** (this repository) is a Python **multi-route AI crypto trading** codebase: **Kraken** for **all market data**, Alpaca for **paper execution only**, shared **decision + risk** path for live and replay, typed contracts (`app/contracts/`), and adapters under `execution/adapters/`. **Coinbase** appears only in the **live execution** adapter when configured — not for market data ingestion.
 
-**This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, `docs/*.MD` (queue conventions: [`docs/QUEUE.MD`](docs/QUEUE.MD); next-task detail: [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv); full tables: [`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)), `scripts/` (CI guards, smoke tests).
+**This repo owns:** application code (runtime, data plane, models, decision/risk engines, backtesting, control plane, observability helpers), `infra/docker-compose.yml` for local stack, **`docs/*.MD`** including the **[queue system](docs/QUEUE_SCHEMA.md)** ([`docs/QUEUE.MD`](docs/QUEUE.MD), [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv), [`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD), [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD), [`.cursor/skills/add-to-queue/SKILL.md`](.cursor/skills/add-to-queue/SKILL.md), optional [`scripts/generate_queue_stack.py`](scripts/generate_queue_stack.py)), `scripts/` (CI guards, smoke tests).
 
 **This repo does not own:** your brokerage accounts, cloud secrets stores, production deployment pipelines (unless added here), or external ERP/CRM. **Do not** assume access to live keys or paid APIs beyond what `.env` provides.
 
@@ -70,7 +70,7 @@ Agents working here should:
 | `infra/` | `docker-compose.yml`, Prometheus config |
 | `scripts/` | `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`, `smoke_credentials.py`, `create_github_issues.sh` |
 | `tests/` | Pytest suite |
-| `docs/` | `QUEUE.MD`, reference `.MD` files |
+| `docs/` | **[Queue system](docs/QUEUE_SCHEMA.md):** `QUEUE.MD`, `QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, `AUTOMATION_QUEUE_SLICE_PROMPT.MD`, `QUEUE_SCHEMA.md`; other reference `.MD` files |
 | `legacy/cryptobot/` | Frozen snapshot; not part of main pipeline |
 
 ---
@@ -144,7 +144,7 @@ Optional extras: `pip install -e ".[alpaca]"` for Alpaca adapter tests; `[dashbo
 Update **when** the change affects:
 
 - Operator-visible behavior, new/changed **`NM_*`** or config keys, or smoke/CI steps → **[`README.md`](README.md)** and/or relevant **[`docs/*.MD`](docs/)**.
-- Queue / fix tracking → **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** + **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** (only if the task is to record work; otherwise a short PR/summary may suffice).
+- **Queue system** — backlog or process changes → keep **[`docs/QUEUE_SCHEMA.md`](docs/QUEUE_SCHEMA.md)** consistent and update **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** + **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** + **[`docs/QUEUE.MD`](docs/QUEUE.MD)** snapshot as needed (see schema); only if the task is to record work — otherwise a short PR/summary may suffice.
 
 Do **not** duplicate long narratives across files; link to `docs/` instead.
 
@@ -167,7 +167,7 @@ Prefer minimal edits; document assumptions in the handoff.
 
 **Bug fix:** Reproduce via test or trace; smallest fix; regression test if possible.
 
-**Feature:** Check [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv) / [`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) for ID alignment; extend existing patterns; update tests and README/docs as needed.
+**Feature:** Check the **[queue system](docs/QUEUE_SCHEMA.md)** (`QUEUE_STACK.csv` / `QUEUE_ARCHIVE.MD`) for ID alignment; extend existing patterns; update tests and README/docs as needed.
 
 **Refactor:** Behavior-preserving only; run full test suite; do not mix with feature work in the same commit when avoidable.
 

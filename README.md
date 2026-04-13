@@ -48,7 +48,7 @@ Two supported ways to run the **same** browser-first stack (FastAPI + Streamlit 
 | | |
 |:---:|---|
 | **(A) Windows convenience** | **`setup.bat`** / **`run.bat`** from the repo root: venv, `pip install -e ".[dev]"`, optional local Docker for the data plane, then API + dashboard + optional live loop — see **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. |
-| **(B) Linux OCI / Compose / cloud** | **`Dockerfile`** + **`docker compose`** (**`infra/docker-compose*.yml`**) on Linux or a cloud VM; same **`NM_*`** config via **`.env`**. Cloud VM vs Fargate sketch: **[`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD)**. Vision notes: **[`docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)** (**BS-001**), epic **FB-CONT-P0** in **[`docs/QUEUE.MD`](docs/QUEUE.MD)**. |
+| **(B) Linux OCI / Compose / cloud** | **`Dockerfile`** + **`docker compose`** (**`infra/docker-compose*.yml`**) on Linux or a cloud VM; same **`NM_*`** config via **`.env`**. Cloud VM vs Fargate sketch: **[`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD)**. Vision notes: **[`docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)** (**BS-001**), epic **FB-CONT-P0** in **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** ([queue system](docs/QUEUE_SCHEMA.md)). |
 
 **Data plane (Compose stack):** **QuestDB** holds canonical OHLCV and optional DB-backed traces; **Redis** is used for pub/sub and short-lived bar cache; **Qdrant** backs optional vector memory for news context — all three in **`infra/docker-compose.yml`**.
 
@@ -62,7 +62,7 @@ docker run --rm trading-bot:local python -c "import app; import control_plane.ap
 docker run --rm -p 8000:8000 trading-bot:local api
 ```
 
-Entrypoint commands: **`api`** (default, uvicorn `control_plane.api:app` on **8000**), **`streamlit`** (**8501**), **`live`** (`python -m app.runtime.live_service`), **`shell`**. Use **one process per container** and Compose to run API + UI + live side by side (**FB-CONT-P0** / **`docs/QUEUE.MD`**).
+Entrypoint commands: **`api`** (default, uvicorn `control_plane.api:app` on **8000**), **`streamlit`** (**8501**), **`live`** (`python -m app.runtime.live_service`), **`shell`**. Use **one process per container** and Compose to run API + UI + live side by side (**FB-CONT-P0** — see **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** · [queue system](docs/QUEUE_SCHEMA.md)).
 
 **Compose overlay (FB-CONT-002)** — data plane + app:
 
@@ -99,10 +99,10 @@ From the repo root: run **`setup.bat`** (venv + install + optional Docker), then
 |-----|----------------|
 | [`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD) | Environment, Docker, preflight, venues |
 | [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) | End-to-end system tour |
+| **Queue system** | **[`docs/QUEUE_SCHEMA.md`](docs/QUEUE_SCHEMA.md)** — index of all backlog machinery (`QUEUE.MD`, `QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, automation prompt, Add-to-Queue skill, optional scripts) |
 | [`docs/QUEUE.MD`](docs/QUEUE.MD) | Queue **protocol** + conventions (small; read for rules, not full backlog) |
 | [`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv) | **Next-task stack** — **`agent_task`** per row (read first for automation) |
 | [`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) | Full open/resolved/archive tables (human history) |
-| [`docs/QUEUE_SCHEMA.md`](docs/QUEUE_SCHEMA.md) | **Portable schema** — reuse queue files in other repos |
 | [`docs/AUDIT_CODE_REVIEW.MD`](docs/AUDIT_CODE_REVIEW.MD) | Periodic **code review audit** (correctness, security notes, candidate backlog — not the live queue) |
 | [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent checklist: one queue slice → validate → PR → merge (empty **HIGH** **Open** → stop per Phase 1) |
 | [`docs/ADR_CANONICAL_BAR_STORAGE.MD`](docs/ADR_CANONICAL_BAR_STORAGE.MD) | Canonical bar storage (QuestDB / Parquet / Redis) |

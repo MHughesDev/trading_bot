@@ -8,7 +8,7 @@
 
 ## One-liner
 
-**Cross-cutting** quality and product ideas for **after** (or alongside) today’s **[`QUEUE.MD`](../QUEUE.MD)** roadmap — written as if **FB-AP-P0**, **FB-CONT-P0**, and **FB-UX-P0** are **already shipped**, so this file does **not** repeat per-asset UI, multi-tenant auth, container deployment, canonical bars, or other **already-queued** themes.
+**Cross-cutting** quality and product ideas for **after** (or alongside) today’s **[queue system](../QUEUE_SCHEMA.md)** roadmap — written as if **FB-AP-P0**, **FB-CONT-P0**, and **FB-UX-P0** are **already shipped**, so this file does **not** repeat per-asset UI, multi-tenant auth, container deployment, canonical bars, or other **already-queued** themes.
 
 ---
 
@@ -91,7 +91,7 @@
 ## Open questions
 
 - Which **two** themes from this list matter most after **FB-AP-P0** + **FB-UX-P0** stability?  
-- Should any item be promoted to [`QUEUE.MD`](../QUEUE.MD) as its own **FB-** row, or stay **parked** here?
+- Should any item be promoted into the **[queue system](../QUEUE_SCHEMA.md)** (`QUEUE_STACK.csv` / `QUEUE_ARCHIVE.MD`) as its own **FB-** row, or stay **parked** here?
 
 ---
 
@@ -104,5 +104,5 @@
 
 ## Links
 
-- [`QUEUE.MD`](../QUEUE.MD) — authoritative backlog (this brainstorm **does not** supersede it)  
+- [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) — authoritative backlog tables (this brainstorm **does not** supersede the **queue system**)  
 - [`DEFERRED_ROADMAP.MD`](../DEFERRED_ROADMAP.MD) — deferred themes  

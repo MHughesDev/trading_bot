@@ -1,5 +1,11 @@
 # Queue — agent protocol & conventions
 
+**Documentation last reviewed:** **2026-02-06**.
+
+**Queue system:** The **queue system** is every file that implements backlog machinery — see **[`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md)** for the full list (`QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, `AUTOMATION_QUEUE_SLICE_PROMPT.MD`, **Add to Queue** skill, optional `scripts/generate_queue_stack.py`). This file (`QUEUE.MD`) holds **protocol and conventions** only.
+
+---
+
 ## Agent protocol (read first — token-efficient)
 
 1. **Do not** read this whole file to pick work. Open **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** only.
@@ -25,11 +31,13 @@
 | [§5](#5-github-sync-optional) | GitHub sync (optional) |
 | [§6](#6-how-to-add-or-close-an-item) | How to add or close an item |
 
-| Related | Purpose |
+| Related (queue system) | Purpose |
 |---------|---------|
+| [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) | **Index of all queue-system files** (this repo) |
 | [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) | Full §2–§5 tables (open detail, resolved fixes, gates, archive) |
 | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) | PR / merge workflow for one slice |
 | [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) | **Add to Queue** skill |
+| [`scripts/generate_queue_stack.py`](../scripts/generate_queue_stack.py) | Optional CSV regenerator |
 
 ---
 
@@ -105,7 +113,7 @@ stack_order,priority,phase,batch,id,kind,status,summary_one_line,agent_task,affe
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-19):** Roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** — **Done**. **Open** work: **FB-AUD-003** … **FB-AUD-017** (post-audit backlog). **Done:** FB-AUD-001, FB-AUD-002.
+**Snapshot (2026-02-06; backlog unchanged since 2026-04-19):** Roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** — **Done**. **Open** work: **FB-AUD-003** … **FB-AUD-017** (post-audit backlog). **Done:** FB-AUD-001, FB-AUD-002.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|

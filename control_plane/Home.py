@@ -6,7 +6,7 @@ Pages live in `control_plane/pages/`. Set `NM_CONTROL_PLANE_URL` for API base.
 
 **FB-AP-026:** Dashboard focuses on PnL + holdings; global system power and app-wide paper/live
 controls were removed from this page (per-asset lifecycle and execution mode are tracked in
-``docs/QUEUE.MD`` — FB-AP-005 / FB-AP-030 / FB-AP-039 / FB-AP-040).
+``docs/QUEUE_ARCHIVE.MD`` (queue system: ``docs/QUEUE_SCHEMA.md``) — FB-AP-005 / FB-AP-030 / FB-AP-039 / FB-AP-040).
 """
 
 from __future__ import annotations

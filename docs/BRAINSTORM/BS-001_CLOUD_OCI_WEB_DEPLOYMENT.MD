@@ -144,7 +144,7 @@ Operators use **HTTPS** (or **VPN/private overlay** such as Tailscale) to reach 
 
 Pick one:
 
-- [x] **Promote** — row(s) added to [`QUEUE.MD`](../QUEUE.MD) as **FB-CONT-P0** and **FB-CONT-001 … FB-CONT-008** (see **Converting this brainstorm to the queue** below).
+- [x] **Promote** — row(s) added to the **[queue system](../QUEUE_SCHEMA.md)** ([`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD)) as **FB-CONT-P0** and **FB-CONT-001 … FB-CONT-008** (see **Converting this brainstorm to the queue** below).
 - [ ] **Spike** — prototype **one** `Dockerfile` for `control_plane` + minimal runtime smoke test.
 - [ ] **Park** — no action for now.
 - [ ] **Drop** — idea not pursued.
@@ -161,7 +161,7 @@ Pick one:
 
 ### Purpose
 
-Turn the **multi-workstream** vision into **actionable queue items**. **Do not** duplicate the full brainstorm in `QUEUE.MD` — one row per slice with a pointer to **BS-001** or this file.
+Turn the **multi-workstream** vision into **actionable queue items** in the **queue system** ([`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) / [`QUEUE_STACK.csv`](../QUEUE_STACK.csv)). **Do not** duplicate the full brainstorm — one row per slice with a pointer to **BS-001** or this file.
 
 ### Checklist after future splits
 

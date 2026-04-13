@@ -103,6 +103,7 @@ python -m streamlit run control_plane/Home.py
 | [`README.md`](../README.md) | Commands, layout, CI, microservices |
 | [`RUNBOOKS.MD`](RUNBOOKS.MD) | Secrets, preflight, production/network exposure, Streamlit guard, incident, QuestDB, bind address |
 | [`.env.example`](../.env.example) | All **`NM_`** placeholders |
+| [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) | **Queue system** — all backlog machinery files |
 | [`QUEUE_STACK.csv`](QUEUE_STACK.csv) | Next tasks (`agent_task` per row) |
 | [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) | Full roadmap / completed work IDs |
 | [`QUEUE.MD`](QUEUE.MD) | Queue protocol + conventions |

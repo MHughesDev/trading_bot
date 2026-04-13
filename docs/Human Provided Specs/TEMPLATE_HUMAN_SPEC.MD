@@ -39,4 +39,4 @@ What this document explicitly does **not** cover.
 *Optional — for agents or humans: what was checked against the codebase and when.*
 
 - [ ] Compared to `docs/Specs/SYSTEM_OVERVIEW.MD`
-- [ ] Gaps filed in `docs/QUEUE_STACK.csv` / `docs/QUEUE_ARCHIVE.MD` (per `docs/QUEUE.MD` §6)
+- [ ] Gaps filed in the **queue system** (`docs/QUEUE_STACK.csv` / `docs/QUEUE_ARCHIVE.MD` per `docs/QUEUE.MD` §6; see `docs/QUEUE_SCHEMA.md`)

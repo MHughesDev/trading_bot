@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""One-off helper: regenerate docs/QUEUE_STACK.csv with self-contained agent_task columns.
-   Run from repo root: python scripts/generate_queue_stack.py"""
+"""Regenerate docs/QUEUE_STACK.csv (part of the queue system — see docs/QUEUE_SCHEMA.md).
+
+Run from repo root: python scripts/generate_queue_stack.py
+"""
 from __future__ import annotations
 
 import csv

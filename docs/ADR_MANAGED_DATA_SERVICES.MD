@@ -1,7 +1,7 @@
 # ADR: Managed vs self-hosted data services (FB-CONT-008)
 
 **Status:** Accepted (2026-04-12)  
-**Queue:** [`QUEUE.MD`](QUEUE.MD) **FB-CONT-008** · traceability **[`BS-001`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)**  
+**Queue system:** [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) · **FB-CONT-008** in [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) · traceability **[`BS-001`](BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)**  
 **Scope:** Redis, time-series / QuestDB-shaped storage, Qdrant for **cloud** deployments — **not** a mandate to change `infra/docker-compose.yml` defaults.
 
 ---

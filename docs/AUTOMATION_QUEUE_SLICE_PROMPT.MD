@@ -1,5 +1,9 @@
 # Automation prompt — queue slice → tests → PR → merge → prune
 
+**Documentation last reviewed:** **2026-02-06**.
+
+**Queue system:** This prompt is part of the **[queue system](QUEUE_SCHEMA.md)** — see [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) for every file that implements backlog machinery.
+
 Use this document as the **system prompt** (or operator checklist) for an autonomous agent or CI-adjacent job that implements **one slice** from [`QUEUE_STACK.csv`](QUEUE_STACK.csv) (task text in **`agent_task`**), validates it, opens a PR, merges to `main`, and cleans up branches.
 
 **Safety:** This workflow merges **the slice branch you created** into `main` after review. It does **not** mean “merge every remote branch into `main`” — that would be unsafe. **Prune** only **merged** feature branches (e.g. `cursor/*`), not arbitrary unmerged work.
@@ -163,4 +167,4 @@ Replace `<INSERT IDs OR BATCH>` and branch name before running.
 
 ---
 
-**References:** [`QUEUE_STACK.csv`](QUEUE_STACK.csv) · [`QUEUE.MD`](QUEUE.MD) · [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) · [`AGENTS.md`](../AGENTS.md) · [`README.md`](../README.md)
+**References:** [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) (queue system) · [`QUEUE_STACK.csv`](QUEUE_STACK.csv) · [`QUEUE.MD`](QUEUE.MD) · [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) · [`AGENTS.md`](../AGENTS.md) · [`README.md`](../README.md)

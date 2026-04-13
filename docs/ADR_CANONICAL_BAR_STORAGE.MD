@@ -1,7 +1,7 @@
 # ADR: Canonical bar storage strategy (FB-AP-013)
 
 **Status:** Accepted (2026-04-12)  
-**Queue:** [`QUEUE.MD`](QUEUE.MD) **FB-AP-013** · follow-on **FB-AP-014**–**019**  
+**Queue system:** [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) · **FB-AP-013** in [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) · follow-on **FB-AP-014**–**019**  
 **Scope:** Where OHLCV history lives for charts, training, and backfill — **not** execution or risk.
 
 ---
@@ -87,4 +87,4 @@ The per-asset product epic requires **one authoritative time series per symbol**
 - `data_plane/storage/questdb.py` — writer  
 - `data_plane/storage/redis_state.py` — latest bar cache  
 - [`PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD) — init artifact layout  
-- [`QUEUE.MD`](QUEUE.MD) **FB-AP-P0** data rows  
+- [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) **FB-AP-P0** data rows ([queue system](QUEUE_SCHEMA.md))  

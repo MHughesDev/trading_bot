@@ -1,6 +1,8 @@
 # BRAINSTORM
 
-**Ideas and rough plans only.** Everything here is **non-binding** until it moves into [`../QUEUE.MD`](../QUEUE.MD) or another official doc.
+**Documentation last reviewed:** **2026-02-06**.
+
+**Ideas and rough plans only.** Everything here is **non-binding** until it moves into the **[queue system](../QUEUE_SCHEMA.md)** ([`QUEUE_STACK.csv`](../QUEUE_STACK.csv) / [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD)) or another official doc.
 
 ## What belongs here
 
@@ -16,7 +18,7 @@
 
 ## What does *not* belong here
 
-- **Tracked work** — use [`../QUEUE.MD`](../QUEUE.MD) (IDs, status, owners).
+- **Tracked work** — use the **[queue system](../QUEUE_SCHEMA.md)** ([`QUEUE.MD`](../QUEUE.MD) conventions + [`QUEUE_STACK.csv`](../QUEUE_STACK.csv) + [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) tables).
 - **Operator runbooks** — use [`../RUNBOOKS.MD`](../RUNBOOKS.MD) or a dedicated `docs/*.MD` once the idea ships.
 - **Secrets** — never paste keys or real credentials.
 
@@ -26,7 +28,7 @@ Each idea file gets a stable **`BS-NNN`** id (e.g. **`BS-001`**, **`BS-007`**):
 
 - Assign the **next free** number when you create a file from the template (search this folder for `**Brainstorm ID:** BS-` or the string `BS-` in `.MD` files to find the highest in use).
 - Put the id in the **metadata line** at the top of the file (see template). **Optional:** repeat it in the filename, e.g. `BS-012_IDEA_KRAKEN_FUTURES.MD`, so lists sort by id.
-- When you **promote** to [`QUEUE.MD`](../QUEUE.MD), you may reference **`BS-NNN`** in the queue Summary or Affected files for traceability.
+- When you **promote** into the **queue system**, you may reference **`BS-NNN`** in the **`agent_task`** / Summary / **affected_files** for traceability.
 
 IDs are **not** the same as **`FB-*` / `IL-*`** queue IDs.
 
@@ -62,5 +64,6 @@ Use **`.MD`** (uppercase extension) to match other docs in this repo.
 
 ## Related
 
-- [`../QUEUE.MD`](../QUEUE.MD) — authoritative backlog  
+- [`../QUEUE_SCHEMA.md`](../QUEUE_SCHEMA.md) — **queue system** (all backlog machinery)  
+- [`../QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) — authoritative narrative backlog tables  
 - [`../DEFERRED_ROADMAP.MD`](../DEFERRED_ROADMAP.MD) — deferred themes (when promoted from “someday”)

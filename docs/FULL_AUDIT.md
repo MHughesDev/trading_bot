@@ -817,6 +817,7 @@ Copy this block into your repo and fill it so auditors know **where** commands a
 | Integration / E2E triggers | |
 | Runbooks / ops docs | |
 | Prior audit reports *(optional)* | |
+| **Queue system** *(if used)* | e.g. `docs/QUEUE_SCHEMA.md` + `QUEUE_STACK.csv` + `QUEUE_ARCHIVE.MD` + automation prompt + skill |
 
 ---
 
@@ -830,4 +831,6 @@ Copy this block into your repo and fill it so auditors know **where** commands a
 
 ---
 
-*Template version: 3.0 — **§0** repository profile + master agent prompt + substitution guide; **§4** category prompts unchanged across repos; section renumber 2–8.*
+*Template version: 3.1 — **§7** optional queue-system row; **§0** repository profile + master agent prompt + substitution guide; **§4** category prompts unchanged across repos.*
+
+**Documentation last reviewed (this repo copy):** **2026-02-06** (queue-system cross-links).
