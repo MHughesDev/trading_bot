@@ -11,6 +11,33 @@
 
 ---
 
+## 🚀 Quick start — run this first
+
+**Use these commands right after `git clone` or `git pull`.** They create the venv, install the app, pull/start the Docker data plane (QuestDB, Redis, Qdrant, …), and copy **`.env.example`** → **`.env`** when missing.
+
+| OS | ① Setup (install + infra) | ② Run (API + supervisor + dashboard) |
+|----|----------------------------|----------------------------------------|
+| **Windows** | **`setup.bat`** | **`run.bat`** |
+| **Linux / macOS** | **`chmod +x setup.sh run.sh`** (once), then **`./setup.sh`** | **`./run.sh`** |
+
+- Set **`NM_SKIP_DOCKER=1`** in the environment for that run to **skip Docker only** (venv + `pip` still run). See [`.env.example`](.env.example) comment.
+- Full checklist (Docker, keys, preflight): **[`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD)** · Windows details: **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)** · Linux: install **Docker Engine** + Compose (or [Docker Desktop for Linux](https://docs.docker.com/desktop/install/linux-install/)); if **`docker info`** fails, add your user to the **`docker`** group or use **`sudo`** per Docker’s docs.
+
+<details>
+<summary><strong>Manual setup</strong> (without <code>setup.bat</code> / <code>setup.sh</code>)</summary>
+
+```bash
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+docker compose -f infra/docker-compose.yml pull && docker compose -f infra/docker-compose.yml up -d
+```
+
+Then start **uvicorn**, **power_supervisor**, and **Streamlit** yourself, or use **`run.bat`** / **`run.sh`** after a manual venv install.
+
+</details>
+
+---
+
 ## ✨ What this is
 
 | | |
@@ -23,22 +50,7 @@
 
 ---
 
-## 🚀 Quick start
-
-```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-docker compose -f infra/docker-compose.yml up -d
-```
-
-**One-command setup (recommended after `git clone` / `git pull`):**
-
-| OS | Command |
-|----|---------|
-| **Windows** | **`setup.bat`** — venv + install + Docker Desktop install/wait (if needed) + **`docker compose pull`** + **`up -d`**. Set **`NM_SKIP_DOCKER=1`** to skip Docker only. |
-| **Linux / macOS** | **`chmod +x setup.sh run.sh && ./setup.sh`** — same Python + compose flow; **`NM_SKIP_DOCKER=1`** skips Docker. Then **`./run.sh`** (API + supervisor + Streamlit in one terminal). |
-
-**New machine checklist:** [`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD)
+### Common commands (after setup)
 
 | Goal | Command |
 |------|---------|
@@ -97,16 +109,6 @@ If **:8000** / **:8501** are reachable beyond a **single trusted operator on loc
 ### Cloud deployment (FB-CONT-006)
 
 Primary path: **single Linux VM + Docker Compose + systemd**; alternate sketch: **AWS Fargate + EFS**. Secrets via cloud secret manager → **`.env`**; networking, disk, backups, and a second-path bullet list: **[`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD)** (see also **[`docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)**, **FB-CONT-P0**).
-
----
-
-## 🪟 Windows
-
-From the repo root: run **`setup.bat`** (venv + install + Docker Desktop if needed + compose pull/up), then **`run.bat`** (API, dashboard, optional live loop). Details: [`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD).
-
-## 🐧 Linux / macOS (developer host)
-
-From the repo root: **`chmod +x setup.sh run.sh`**, then **`./setup.sh`**, then **`./run.sh`**. Requires **Docker Engine** + Compose plugin (or **`docker-compose`**) for the data plane — install from your distro or [Docker Desktop for Linux](https://docs.docker.com/desktop/install/linux-install/). If **`docker info`** fails, add your user to the **`docker`** group or use **`sudo`** per Docker’s docs.
 
 ---
 
