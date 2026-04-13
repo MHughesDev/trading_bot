@@ -16,13 +16,14 @@ Single checklist for a **new machine** or **first-time setup**. Details and deep
 **Unix / macOS / Linux**
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+chmod +x setup.sh run.sh && ./setup.sh
 ```
+
+Or manually: `python -m venv .venv && source .venv/bin/activate` and `pip install -e ".[dev]"`.
 
 **Windows (automated)**
 
-- [ ] Run **`setup.bat`** from the repo root — creates `.venv`, runs `pip install -e ".[dev,dashboard]"`, **`docker compose pull`** then **`up -d`** for `infra/docker-compose.yml` (so image tag changes after **`git pull`** apply without extra commands), copies `.env.example` → `.env` if missing.
+- [ ] Run **`setup.bat`** from the repo root — creates `.venv`, runs `pip install -e ".[dev,dashboard]"`, installs or waits for **Docker Desktop** (winget or browser if needed), **`docker compose pull`** then **`up -d`** for `infra/docker-compose.yml`, copies `.env.example` → `.env` if missing. Set **`NM_SKIP_DOCKER=1`** for that run to skip Docker only.
 
 **Optional extras**
 
@@ -50,7 +51,7 @@ pip install -e ".[dev]"
 
 ## 4. Infrastructure (optional but typical)
 
-- [ ] **Docker**: **`setup.bat`** runs pull + up for the stack; or manually: `docker compose -f infra/docker-compose.yml pull` then `up -d` — Redis, QuestDB, Qdrant, Prometheus, Grafana, Loki (ports in [`README.md`](../README.md)).
+- [ ] **Docker**: **`setup.bat`** / **`./setup.sh`** run pull + up for **`infra/docker-compose.yml`** — Redis, QuestDB, Qdrant, Prometheus, Grafana, Loki (ports in [`README.md`](../README.md)). Linux: install Docker Engine + Compose first; **`./setup.sh`** waits for **`docker info`** or can skip with **`NM_SKIP_DOCKER=1`**.
 - [ ] **Microservice scaffolds** (optional): overlay [`infra/docker-compose.microservices.yml`](../infra/docker-compose.microservices.yml) — see README “Microservices dev”.
 
 ---

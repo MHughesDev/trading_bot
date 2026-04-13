@@ -31,6 +31,13 @@ pip install -e ".[dev]"
 docker compose -f infra/docker-compose.yml up -d
 ```
 
+**One-command setup (recommended after `git clone` / `git pull`):**
+
+| OS | Command |
+|----|---------|
+| **Windows** | **`setup.bat`** — venv + install + Docker Desktop install/wait (if needed) + **`docker compose pull`** + **`up -d`**. Set **`NM_SKIP_DOCKER=1`** to skip Docker only. |
+| **Linux / macOS** | **`chmod +x setup.sh run.sh && ./setup.sh`** — same Python + compose flow; **`NM_SKIP_DOCKER=1`** skips Docker. Then **`./run.sh`** (API + supervisor + Streamlit in one terminal). |
+
 **New machine checklist:** [`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD)
 
 | Goal | Command |
@@ -50,8 +57,9 @@ Two supported ways to run the **same** browser-first stack (FastAPI + Streamlit 
 
 | | |
 |:---:|---|
-| **(A) Windows convenience** | **`setup.bat`** / **`run.bat`** from the repo root: venv, `pip install -e ".[dev]"`, **`docker compose pull`** + **`up -d`** for the data-plane stack (so image updates in the repo apply after **`git pull`**), then API + dashboard + optional live loop — see **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. |
-| **(B) Linux OCI / Compose / cloud** | **`Dockerfile`** + **`docker compose`** (**`infra/docker-compose*.yml`**) on Linux or a cloud VM; same **`NM_*`** config via **`.env`**. Cloud VM vs Fargate sketch: **[`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD)**. Vision notes: **[`docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)** (**BS-001**), epic **FB-CONT-P0** in **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** ([queue system](docs/QUEUE_SCHEMA.md)). |
+| **(A) Windows convenience** | **`setup.bat`** / **`run.bat`**: venv, `pip install -e ".[dev,dashboard]"`, optional **Docker Desktop** install via **winget** (or browser) if **`docker`** is missing, wait for Docker Engine, prompt to finish Docker Hub sign-in if needed, then **`docker compose pull`** + **`up -d`**. Set **`NM_SKIP_DOCKER=1`** to skip Docker only. See **[`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD)**. |
+| **(B) Linux / macOS host** | **`./setup.sh`** / **`./run.sh`** — same automation as **`setup.bat`** / **`run.bat`** (Python venv, compose pull+up, **`.env`**; Docker must be installed separately — script waits for **`docker info`** or offers skip). **`NM_SKIP_DOCKER=1`** skips Docker. |
+| **(C) Linux OCI / Compose / cloud** | **`Dockerfile`** + **`docker compose`** (**`infra/docker-compose*.yml`**) on Linux or a cloud VM; same **`NM_*`** config via **`.env`**. Cloud VM vs Fargate sketch: **[`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD)**. Vision notes: **[`docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)** (**BS-001**), epic **FB-CONT-P0** in **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** ([queue system](docs/QUEUE_SCHEMA.md)). |
 
 **Data plane (Compose stack):** **QuestDB** holds canonical OHLCV and optional DB-backed traces; **Redis** is used for pub/sub and short-lived bar cache; **Qdrant** backs optional vector memory for news context — all three in **`infra/docker-compose.yml`**.
 
@@ -94,7 +102,11 @@ Primary path: **single Linux VM + Docker Compose + systemd**; alternate sketch: 
 
 ## 🪟 Windows
 
-From the repo root: run **`setup.bat`** (venv + install + optional Docker), then **`run.bat`** (API, dashboard, optional live loop). Details: [`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD).
+From the repo root: run **`setup.bat`** (venv + install + Docker Desktop if needed + compose pull/up), then **`run.bat`** (API, dashboard, optional live loop). Details: [`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD).
+
+## 🐧 Linux / macOS (developer host)
+
+From the repo root: **`chmod +x setup.sh run.sh`**, then **`./setup.sh`**, then **`./run.sh`**. Requires **Docker Engine** + Compose plugin (or **`docker-compose`**) for the data plane — install from your distro or [Docker Desktop for Linux](https://docs.docker.com/desktop/install/linux-install/). If **`docker info`** fails, add your user to the **`docker`** group or use **`sudo`** per Docker’s docs.
 
 ---
 

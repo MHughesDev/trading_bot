@@ -2,6 +2,8 @@
 
 **First-time setup:** see **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** (checklist: venv, `.env`, Docker, preflight, venues). This file adds secrets, incident response, and execution-mode restart detail beyond that checklist.
 
+**Automated setup (local dev):** **`setup.bat`** (Windows) or **`./setup.sh`** (Linux/macOS) runs venv + **`pip install -e ".[dev,dashboard]"`**, then **`docker compose pull`** and **`up -d`** for **`infra/docker-compose.yml`** (unless **`NM_SKIP_DOCKER=1`** is set in the environment for that run — not an app setting). Windows: if **`docker`** is missing, offers **winget** install of Docker Desktop or opens the download page; waits for **`docker info`**, then **`pause`** so you can sign in to Docker Hub if prompted (optional for public images).
+
 ## Docker Compose — app + data stack (FB-CONT-002)
 
 Merge **`infra/docker-compose.yml`** (QuestDB, Redis, Qdrant, observability) with **`infra/docker-compose.app.yml`** (control plane + Streamlit, optional **`live`** profile). From the repo root, with **`.env`** present (gitignored; copy **`.env.example`**):
@@ -12,7 +14,7 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.app.yml up -d
 
 **Ports:** **8000** FastAPI (**`GET /status`**, **`GET /metrics`**), **8501** Streamlit. **`NM_CONTROL_PLANE_URL`** for the Streamlit container defaults to **`http://trading-bot-api:8000`**. Host bind mounts **`./data`** → **`/app/data`** for registry, lifecycle, PnL ledger, and universe SQLite paths. Kraken and venue keys remain **only** via **`NM_*`** in **`.env`** — nothing in the image.
 
-**Qdrant image vs Python client:** **`infra/docker-compose.yml`** pins **`qdrant/qdrant:v1.17.1`** to stay close to **`qdrant-client`** from **`pip`** (1.17.x). After pulling repo changes, run **`docker compose -f infra/docker-compose.yml pull qdrant`** (or **`up -d --force-recreate`**) so the container matches the client. Vector memory code uses **`QdrantClient.query_points`** (qdrant-client 1.17+ API).
+**Qdrant image vs Python client:** **`infra/docker-compose.yml`** pins **`qdrant/qdrant:v1.17.1`** to stay close to **`qdrant-client`** from **`pip`** (1.17.x). **`setup.bat`** / **`setup.sh`** run **`docker compose pull`** before **`up -d`**, so new tags apply after **`git pull`**. Vector memory code uses **`QdrantClient.query_points`** (qdrant-client 1.17+ API).
 
 **Default execution mode:** **`app/config/default.yaml`** sets **`execution.mode: paper`**. Use **`NM_EXECUTION_MODE=live`** only when **`NM_COINBASE_API_KEY`** / **`NM_COINBASE_API_SECRET`** are set (or per-user keys are wired for the runtime process). The in-process live loop **skips `submit_order`** when env credentials for the active mode are missing (one **`WARNING`** at startup) instead of logging repeated failures.
 
