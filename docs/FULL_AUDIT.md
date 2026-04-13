@@ -103,35 +103,35 @@ Every category audit (human or agent) should end with:
 
 | Field | Value |
 |--------|--------|
-| **Repository / product** | `[NAME]` |
-| **Version / commit audited** | `[GIT_SHA or TAG]` |
-| **Full audit — last completed (UTC)** | **`YYYY-MM-DD`** — *(initial: not yet run)* |
-| **Full audit — lead / role** | `[Name, team]` |
-| **Scope notes** | *(e.g. production only, staging + prod, exclude `legacy/`)* |
-| **Overall outcome** | ☐ Pass ☐ Pass with findings ☐ Blocked |
+| **Repository / product** | **trading_bot** |
+| **Version / commit audited** | **`504bbe4dcfe290354290100b5b89eccb5f7dc6e2`** (see newer commits after follow-up work) |
+| **Full audit — last completed (UTC)** | **2026-04-13** |
+| **Full audit — lead / role** | Automated full audit (agent) |
+| **Scope notes** | Repo + CI + docs; exclude production runtime secrets |
+| **Overall outcome** | ☑ Pass with findings ☐ Pass ☐ Blocked |
 
 **Per-category last run (optional but recommended):** Update when you execute that category as part of *any* audit (full or partial). During a **full audit**, set each category’s date to the full-audit date if you completed it.
 
 | Category | ID | Last run (UTC) | Outcome (P / PWF / B) | Evidence link / path |
 |----------|----|----------------|------------------------|----------------------|
-| Governance & scope | G | | | |
-| Secrets & repository hygiene | SEC-REPO | | | |
-| Supply chain & dependencies | SUP | | | |
-| Static analysis & style | STATIC | | | |
-| Correctness, safety & concurrency | CORR | | | |
-| Testing & quality gates | TEST | | | |
-| Application & API security | APPSEC | | | |
-| Infrastructure & secrets management | INFRA | | | |
-| Container & image security | CONT | | | |
-| Data durability, backup & recovery | DATA | | | |
-| Performance & capacity | PERF | | | |
-| Reliability & resilience | REL | | | |
-| Observability & alerting | OBS | | | |
-| Operational readiness & DR | OPS | | | |
-| Privacy & compliance | PRIV | | | |
-| Documentation & architecture | DOC | | | |
-| ML / AI / model governance *(if applicable)* | ML | | | |
-| Release, change & incident process | RLS | | | |
+| Governance & scope | G | 2026-04-13 | P | [`reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md) |
+| Secrets & repository hygiene | SEC-REPO | 2026-04-13 | PWF | same |
+| Supply chain & dependencies | SUP | 2026-04-13 | PWF | same |
+| Static analysis & style | STATIC | 2026-04-13 | PWF | same |
+| Correctness, safety & concurrency | CORR | 2026-04-13 | P | same |
+| Testing & quality gates | TEST | 2026-04-13 | P | same |
+| Application & API security | APPSEC | 2026-04-13 | P | same |
+| Infrastructure & secrets management | INFRA | 2026-04-13 | P | same |
+| Container & image security | CONT | 2026-04-13 | P | same |
+| Data durability, backup & recovery | DATA | 2026-04-13 | P | same |
+| Performance & capacity | PERF | 2026-04-13 | N/A | same |
+| Reliability & resilience | REL | 2026-04-13 | P | same |
+| Observability & alerting | OBS | 2026-04-13 | P | same |
+| Operational readiness & DR | OPS | 2026-04-13 | P | same |
+| Privacy & compliance | PRIV | 2026-04-13 | N/A | same |
+| Documentation & architecture | DOC | 2026-04-13 | P | same |
+| ML / AI / model governance *(if applicable)* | ML | 2026-04-13 | PWF | same |
+| Release, change & incident process | RLS | 2026-04-13 | P | same |
 
 *(Outcome: **P** = Pass, **PWF** = Pass with findings, **B** = Blocked.)*
 
@@ -789,7 +789,9 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 
 | ID | Category | Severity | Summary | Tracking issue |
 |----|----------|----------|---------|----------------|
-| | | | | |
+| AUD-SUP-001 | SUP | Medium | pip-audit non-blocking in CI — document or enforce policy | [`FB-AUD-018`](../QUEUE_STACK.csv) |
+| AUD-SEC-REPO-001 | SEC-REPO | Medium | No secret scanner in CI | [`FB-AUD-019`](../QUEUE_STACK.csv) |
+| AUD-STATIC-001 | STATIC | Low | No Bandit in CI / dev docs | [`FB-AUD-020`](../QUEUE_STACK.csv) |
 
 ---
 
@@ -809,16 +811,16 @@ Copy this block into your repo and fill it so auditors know **where** commands a
 
 | Topic | This repository |
 |--------|-----------------|
-| Primary languages / runtimes | |
-| CI / CD entry points | *(e.g. `.github/workflows/ci.yml`, `.gitlab-ci.yml`, Circle, Buildkite)* |
-| Lint / format / typecheck commands | |
-| Test commands | |
-| Container / image build *(if any)* | |
-| Security / supply-chain scans in CI | |
-| Integration / E2E triggers | |
-| Runbooks / ops docs | |
-| Prior audit reports *(optional)* | |
-| **Queue system** *(if used)* | e.g. `docs/QUEUE_SCHEMA.md` + `QUEUE_STACK.csv` + `QUEUE_ARCHIVE.MD` + automation prompt + skill |
+| Primary languages / runtimes | Python ≥3.11 |
+| CI / CD entry points | `.github/workflows/ci.yml` |
+| Lint / format / typecheck commands | `python3 -m ruff check .` |
+| Test commands | `python3 -m pytest tests/ -q` |
+| Container / image build *(if any)* | Root `Dockerfile`; `docker build` in CI |
+| Security / supply-chain scans in CI | Ruff, pytest, `ci_spec_compliance.sh`, `pip-audit` (informational), Trivy fs (informational), queue consistency script |
+| Integration / E2E triggers | `integration-optional` job (`workflow_dispatch`) |
+| Runbooks / ops docs | `docs/RUNBOOKS.MD`, `docs/READY_TO_RUN.MD` |
+| Prior audit reports *(optional)* | [`docs/reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md) |
+| **Queue system** *(if used)* | [`docs/QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) · [`QUEUE_STACK.csv`](QUEUE_STACK.csv) · [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) |
 
 ---
 
@@ -876,4 +878,4 @@ The audit report **must** include these sections (headings at exactly this level
 
 *Template version: 3.2 — **§8** audit report deliverable; **§9** reuse; **§0** repository profile + master agent prompt + substitution guide; **§4** category prompts unchanged across repos.*
 
-**Documentation last reviewed (this repo copy):** **2026-02-06** — queue-system cross-links; **§8** audit report + **`draft-audit-report`** / **`audit-report-to-queue`** skills; **`AUDIT_REPORT_TEMPLATE.md`**.
+**Documentation last reviewed (this repo copy):** **2026-04-13** — **§2** audit record + **§5** findings log updated from [`reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md); **§7** quick reference filled.

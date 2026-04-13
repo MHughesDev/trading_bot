@@ -1,6 +1,6 @@
 # Queue — agent protocol & conventions
 
-**Documentation last reviewed:** **2026-02-06**.
+**Documentation last reviewed:** **2026-04-13**.
 
 **Queue system:** The **queue system** is every file that implements backlog machinery — see **[`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md)** for the full list (`QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, `AUTOMATION_QUEUE_SLICE_PROMPT.MD`, **Add to Queue** skill, optional `scripts/generate_queue_stack.py`). This file (`QUEUE.MD`) holds **protocol and conventions** only.
 
@@ -113,13 +113,13 @@ stack_order,priority,phase,batch,id,kind,status,summary_one_line,agent_task,affe
 
 ## 2. Open queue status
 
-**Snapshot (2026-02-06):** Roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** — **Done**. Post-audit **FB-AUD-003**…**017** and **FB-CONT-009** — **Done**. **Open stack:** empty (**`_QUEUE_EMPTY_`** in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)**).
+**Snapshot (2026-04-13):** Roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** — **Done**. Post-audit **FB-AUD-001**…**017** and **FB-CONT-009** — **Done**. **Open:** **FB-AUD-018**…**020** from **[full audit 2026-04-13](reports/AUDIT_REPORT_2026-04-13_full.md)** — see **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** (`stack_order` **1**–**3**).
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **0** | — |
-| **MEDIUM** | **0** | — |
-| **LOW** | **0** | — |
+| **MEDIUM** | **2** | **FB-AUD-018**, **FB-AUD-019** |
+| **LOW** | **1** | **FB-AUD-020** |
 
 **Full row text and completed history:** [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (§2 open tables, §3 fixes, §4 gates, §5 archive).
 

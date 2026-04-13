@@ -9,8 +9,54 @@ import csv
 from pathlib import Path
 
 ROWS: list[dict[str, str]] = [
+
     {
         "stack_order": "1",
+        "priority": "MEDIUM",
+        "phase": "B",
+        "batch": "AUD-SUP",
+        "id": "FB-AUD-018",
+        "kind": "platform",
+        "status": "Open",
+        "summary_one_line": "pip-audit CI: fail on HIGH/CRITICAL or document policy",
+        "agent_task": "Goal: supply chain findings are visible and actionable. Today pip-audit runs with continue-on-error in .github/workflows/ci.yml. Either (A) remove continue-on-error and fix/ignore with documented policy, or (B) keep non-blocking but add README/RUNBOOKS line stating team policy and when to treat pip-audit as release-blocking. Acceptance: CI behavior matches documented policy; no silent ignore. Traceability: AUD-SUP-001 from AUDIT_REPORT_2026-04-13_full.md.",
+        "affected_files": ".github/workflows/ci.yml|README.md",
+        "docs_refs": "docs/reports/AUDIT_REPORT_2026-04-13_full.md",
+        "audit_id": "AUD-SUP-001",
+        "anchor": "#full-audit-2026-04-13",
+    },
+    {
+        "stack_order": "2",
+        "priority": "MEDIUM",
+        "phase": "B",
+        "batch": "AUD-SEC",
+        "id": "FB-AUD-019",
+        "kind": "platform",
+        "status": "Open",
+        "summary_one_line": "Optional secret scan in CI (gitleaks or trufflehog)",
+        "agent_task": "Goal: reduce risk of accidental credential commits. Add an optional or scheduled CI step running gitleaks or trufflehog on the repo (full history optional; at least HEAD). Document in README or AGENTS.md how to run locally. Do not print secrets in logs. Acceptance: workflow step exists; false-positive handling documented. Traceability: AUD-SEC-REPO-001 from AUDIT_REPORT_2026-04-13_full.md.",
+        "affected_files": ".github/workflows/",
+        "docs_refs": "docs/reports/AUDIT_REPORT_2026-04-13_full.md|AGENTS.md",
+        "audit_id": "AUD-SEC-REPO-001",
+        "anchor": "#full-audit-2026-04-13",
+    },
+    {
+        "stack_order": "3",
+        "priority": "LOW",
+        "phase": "B",
+        "batch": "AUD-STATIC",
+        "id": "FB-AUD-020",
+        "kind": "tech_debt",
+        "status": "Open",
+        "summary_one_line": "Optional Python SAST (bandit) in CI or dev docs",
+        "agent_task": "Goal: catch common Python security patterns (eval, subprocess, weak crypto). Add bandit to dev docs (pip install bandit; bandit -r .) and/or an optional CI job with sensible skips for tests/ if needed. Acceptance: documented command; CI optional/non-blocking unless team wants strict. Traceability: AUD-STATIC-001 from AUDIT_REPORT_2026-04-13_full.md.",
+        "affected_files": "README.md|.github/workflows/ci.yml",
+        "docs_refs": "docs/reports/AUDIT_REPORT_2026-04-13_full.md",
+        "audit_id": "AUD-STATIC-001",
+        "anchor": "#full-audit-2026-04-13",
+    },
+    {
+        "stack_order": "4",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-DOC",
@@ -25,7 +71,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "2",
+        "stack_order": "5",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-DOC",
@@ -40,7 +86,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "3",
+        "stack_order": "6",
         "priority": "MEDIUM",
         "phase": "C",
         "batch": "CONT-CI",
@@ -55,7 +101,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "4",
+        "stack_order": "7",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-OPS",
@@ -70,7 +116,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "5",
+        "stack_order": "8",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-OPS",
@@ -85,7 +131,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "6",
+        "stack_order": "9",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-QA",
@@ -100,7 +146,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "7",
+        "stack_order": "10",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-QA",
@@ -115,7 +161,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "8",
+        "stack_order": "11",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-CODE",
@@ -130,7 +176,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "9",
+        "stack_order": "12",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-CI",
@@ -145,7 +191,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "10",
+        "stack_order": "13",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -160,7 +206,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "11",
+        "stack_order": "14",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -175,7 +221,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "12",
+        "stack_order": "15",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -190,7 +236,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "13",
+        "stack_order": "16",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -205,7 +251,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "14",
+        "stack_order": "17",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-TEST",
@@ -220,7 +266,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "15",
+        "stack_order": "18",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-DEBT",
@@ -235,7 +281,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "16",
+        "stack_order": "19",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-DATA",
@@ -250,7 +296,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "17",
+        "stack_order": "20",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-MT",
@@ -265,7 +311,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "18",
+        "stack_order": "21",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-LEG",
@@ -278,21 +324,6 @@ ROWS: list[dict[str, str]] = [
         "docs_refs": "docs/AUDIT_CODE_REVIEW.MD|AGENTS.md",
         "audit_id": "LEGACY-A1",
         "anchor": "#25-post-audit-hardening-fb-aud",
-    },
-    {
-        "stack_order": "9999",
-        "priority": "LOW",
-        "phase": "D",
-        "batch": "",
-        "id": "_QUEUE_EMPTY_",
-        "kind": "deferred",
-        "status": "empty",
-        "summary_one_line": "No open queue items",
-        "agent_task": "N/A — add work via QUEUE.MD §6.",
-        "affected_files": "",
-        "docs_refs": "",
-        "audit_id": "",
-        "anchor": "",
     },
 ]
 

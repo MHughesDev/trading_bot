@@ -1,6 +1,6 @@
 # Queue archive (historical tables)
 
-**Documentation last reviewed:** **2026-02-06**.
+**Documentation last reviewed:** **2026-04-13**.
 
 **Purpose:** Full backlog tables, resolved fixes, and completed archive moved from the slim [`QUEUE.MD`](QUEUE.MD) for token-efficient agent workflows. **Agents implementing work:** use [`QUEUE_STACK.csv`](QUEUE_STACK.csv) only — each row is self-contained.
 
@@ -15,15 +15,15 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-02-06):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Post-audit hardening:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-003**…**017** **Done** (2026-02-06); **FB-CONT-009** (Trivy action pin) **Done**. **Open queue:** empty — see **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** sentinel **`_QUEUE_EMPTY_`**. **Next:** optional GitHub sync [**§7**](#7-github-sync-optional).
+**Status (2026-04-13):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Post-audit hardening:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-001**…**017** **Done**; **FB-CONT-009** **Done**. **Full audit 2026-04-13:** **[`docs/reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md)** — **Open:** **FB-AUD-018**…**020** (supply chain policy, secret scan, bandit). **Next:** optional GitHub sync [**§7**](#7-github-sync-optional).
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **0** | — |
-| **MEDIUM** | **0** | — |
-| **LOW** | **0** | — |
+| **MEDIUM** | **2** | **FB-AUD-018**, **FB-AUD-019** ([§2.6](#26-full-audit-2026-04-13)) |
+| **LOW** | **1** | **FB-AUD-020** ([§2.6](#26-full-audit-2026-04-13)) |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
 
@@ -157,6 +157,16 @@
 | FB-AUD-015 | AUD-DATA | B | DP | reliability | LOW | Done | **Observability:** QuestDB writer / ingest errors surfaced (metrics or structured logs) for operators. *(Audit DATA-A1.)* **Done 2026-02-06:** **`tb_questdb_write_fail_total`** + RUNBOOKS. | `data_plane/storage/questdb.py`, `observability/metrics.py`, `docs/RUNBOOKS.MD` |
 | FB-AUD-016 | AUD-MT | B | PF | hardening | LOW | Done | **Multi-tenant review:** paths respect tenant prefix when **`NM_MULTI_TENANT_DATA_SCOPING=true`**. *(Audit MT-A1.)* **Done 2026-02-06:** RUNBOOKS checklist. | `docs/RUNBOOKS.MD` |
 | FB-AUD-017 | AUD-LEG | B | OP | tech_debt | LOW | Done | **`legacy/`** remains isolated — no new imports from **`legacy/`** into main V3 tree (align with **`AGENTS.md`**). *(Audit LEGACY-A1.)* **Done 2026-02-06:** **`scripts/ci_spec_compliance.sh`** grep for **`from legacy.`** / **`import legacy.`**. | `scripts/ci_spec_compliance.sh`, `legacy/` |
+
+### 2.6 Full audit 2026-04-13 (**FB-AUD-018**…**020**)
+
+**Traceability:** [`docs/FULL_AUDIT.md`](FULL_AUDIT.md) §2 / §5 · [`docs/reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md)
+
+| ID | Batch | Phase | Cat | Kind | Pri | Status | Summary | Affected files |
+|----|-------|-------|-----|------|-----|--------|---------|----------------|
+| FB-AUD-018 | AUD-SUP | B | CP | platform | MEDIUM | Open | **pip-audit CI policy:** `continue-on-error` on pip-audit — enforce or document release-blocking rule. *(AUD-SUP-001.)* | `.github/workflows/ci.yml`, `README.md` |
+| FB-AUD-019 | AUD-SEC | B | CP | platform | MEDIUM | Open | **Secret scanning in CI:** gitleaks or trufflehog + local run docs. *(AUD-SEC-REPO-001.)* | `.github/workflows/`, `AGENTS.md` |
+| FB-AUD-020 | AUD-STATIC | B | CP | tech_debt | LOW | Open | **Bandit (Python SAST):** dev docs and/or optional CI. *(AUD-STATIC-001.)* | `README.md`, `.github/workflows/ci.yml` |
 
 ### Compliance & release gates (open)
 
