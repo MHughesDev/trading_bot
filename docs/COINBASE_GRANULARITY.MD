@@ -1,5 +1,3 @@
-# Deprecated: Coinbase market data
+# moved
 
-Market data ingestion **no longer uses Coinbase**. See **[`KRAKEN_MARKET_DATA.MD`](KRAKEN_MARKET_DATA.MD)** for bar sizes, REST/WebSocket, and training pulls.
-
-Coinbase remains relevant only for **live execution** (`execution/adapters/coinbase_live.py`) when configured.
+This document moved to [docs/architecture/coinbase_granularity.md](docs/architecture/coinbase_granularity.md).

@@ -15,15 +15,15 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-13):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Post-audit hardening:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-001**…**017** **Done**; **FB-CONT-009** **Done**. **Full audit 2026-04-13:** **[`docs/reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md)** — [**§2.6**](#26-full-audit-2026-04-13) **FB-AUD-018**…**020** **Done**. **FB-UX-015** / **FB-UX-016** — **Done** (see §2.4). **Setup automation:** **FB-SETUP-021** (Windows **`setup.bat`** Docker Desktop install/wait/sign-in pause + **`NM_SKIP_DOCKER`**), **FB-SETUP-022** (**`setup.sh`** / **`run.sh`**), **FB-SETUP-023** (docs) — **Done**. **README UX:** **FB-DOC-024** (Quick start section at top) — **Done**. **Earlier dev fixes:** **FB-RUN-018**…**FB-INF-020** — **Done**. **Open queue:** empty — no **`Open`** rows in **`QUEUE_STACK.csv`** (**`_QUEUE_EMPTY_`**); **`stack_order`** in the CSV is **1…N** for history rows (sentinel **9999**) — assigned by **`scripts/generate_queue_stack.py`** from **`ROWS`** list order. **Next:** optional GitHub sync [**§7**](#7-github-sync-optional).
+**Status (2026-04-13):** **Canonical replacement program expanded** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-078** are **Open** and define the hard repo-to-canonical migration + reconfiguration + deletion track, including repeated missed-items passes for state/trigger/auction/execution/governance coverage gaps and final canonical-detail closure tasks. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **0** | — |
-| **MEDIUM** | **0** | — |
-| **LOW** | **0** | — |
+| **HIGH** | **23** | FB-CAN-001..008, FB-CAN-013, FB-CAN-015..016, FB-CAN-019..021, FB-CAN-024, FB-CAN-029..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
+| **MEDIUM** | **43** | FB-CAN-009..012, FB-CAN-014, FB-CAN-017..018, FB-CAN-022..023, FB-CAN-025..028, FB-CAN-032, FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
+| **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
 
@@ -169,6 +169,91 @@
 | FB-AUD-018 | AUD-SUP | B | CP | platform | MEDIUM | Done | **pip-audit CI policy:** `scripts/ci_pip_audit.sh` + dedicated `.audit-venv/`; release-blocking in CI; `requests>=2.33`, `jwcrypto>=1.5.7`. *(AUD-SUP-001.)* **Done 2026-04-13.** | `scripts/ci_pip_audit.sh`, `.github/workflows/ci.yml`, `pyproject.toml` |
 | FB-AUD-019 | AUD-SEC | B | CP | platform | MEDIUM | Done | **Gitleaks in CI:** Docker job `zricethezav/gitleaks:v8.21.2`; local one-liner in AGENTS/RUNBOOKS. *(AUD-SEC-REPO-001.)* **Done 2026-04-13.** | `.github/workflows/ci.yml`, `AGENTS.md`, `docs/RUNBOOKS.MD` |
 | FB-AUD-020 | AUD-STATIC | B | CP | tech_debt | LOW | Done | **Bandit:** `scripts/ci_bandit.sh`, `[tool.bandit]` in `pyproject.toml`, CI step; reviewed `nosec` on RSS/torch. *(AUD-STATIC-001.)* **Done 2026-04-13.** | `scripts/ci_bandit.sh`, `pyproject.toml`, `.github/workflows/ci.yml` |
+
+### 2.7 Canonical replacement program (**FB-CAN-***)
+
+**Brief:** Hard replacement from current architecture to canonical specs in `docs/Human Provided Specs/new_specs/canonical/`. This program explicitly replaces conflicting legacy abstractions (DecisionPipeline/ForecastPacket/PolicySystem-centric flow, classic hard-gate risk, thin execution service, and old config/doc surfaces) rather than preserving dual paths.
+
+| ID | Batch | Phase | Cat | Kind | Pri | Status | Summary | Affected files |
+|----|-------|-------|-----|------|-----|--------|---------|----------------|
+| FB-CAN-001 | CAN-AUD | A | XX | platform | HIGH | Open | Produce authoritative repo-vs-canonical gap audit artifact with exact delete/create/refactor plan and queue mapping. | `docs/reports/REPO_VS_CANONICAL_SPECS_GAP_AUDIT.md`, core runtime modules |
+| FB-CAN-002 | CAN-DOC | A | OP | change | HIGH | Open | Adopt canonical docs as source-of-truth and de-canonicalize conflicting `docs/Specs` / historical specs. | `README.md`, `docs/Specs/`, `docs/Human Provided Specs/` |
+| FB-CAN-003 | CAN-CFG | A | CFG | feature | HIGH | Open | Overhaul settings/config into canonical domains with immutable versioning and replay fidelity. | `app/config/settings.py`, `app/config/default.yaml`, tests/docs |
+| FB-CAN-004 | CAN-STATE | A | FR | feature | HIGH | Open | Implement canonical state/regime/degradation engine and downstream propagation. | `decision_engine/`, `models/`, contracts/tests |
+| FB-CAN-005 | CAN-TRIG | A | FR | feature | HIGH | Open | Implement canonical 3-stage trigger/timing engine with explicit suppression and confidence handling. | `decision_engine/`, contracts, replay/tests |
+| FB-CAN-006 | CAN-AUCT | A | FR | feature | HIGH | Open | Implement opportunity auction scoring/constraints/top-N selection replacing direct single-proposal flow. | `decision_engine/`, contracts/tests |
+| FB-CAN-007 | CAN-RISK | A | RT | feature | HIGH | Open | Replace legacy risk engine with canonical sizing/concentration/edge-budget/degradation-aware model. | `risk_engine/`, contracts/tests |
+| FB-CAN-008 | CAN-EXEC | A | EX | feature | HIGH | Open | Replace thin execution service with canonical execution-confidence/style/stress/partial-fill logic and feedback. | `execution/`, contracts/tests |
+| FB-CAN-009 | CAN-REPL | A | DS | feature | MEDIUM | Open | Align replay/simulation with canonical event contracts and deterministic stress/fault profiles. | `backtesting/`, `decision_engine/run_step.py`, tests |
+| FB-CAN-010 | CAN-MON | B | OB | feature | MEDIUM | Open | Implement canonical monitoring + alerting metric families and operator outputs. | `observability/`, `control_plane/`, `infra/`, docs |
+| FB-CAN-011 | CAN-GOV | B | OP | platform | MEDIUM | Open | Implement release gating lifecycle and experiment registry linkage for promotion governance. | `models/`, `orchestration/`, `scripts/`, docs/tests |
+| FB-CAN-012 | CAN-DEL | A | CP | tech_debt | MEDIUM | Open | Hard-delete obsolete modules/docs/config paths after canonical replacements are active. | `decision_engine/`, `risk_engine/`, `execution/`, `app/config/`, `docs/Specs/`, tests |
+| FB-CAN-013 | CAN-TEST | B | CI | platform | HIGH | Open | Replace legacy tests and CI assertions with canonical contracts and release-evidence gates. | `tests/`, `scripts/`, `.github/workflows/ci.yml` |
+| FB-CAN-014 | CAN-CLEAN | B | OP | change | MEDIUM | Open | Finalize canonical module map/docs cleanup and remove contradictory guidance. | `README.md`, `docs/`, core modules |
+| FB-CAN-015 | CAN-DATA | A | DP | feature | HIGH | Open | Build canonical input contract layer for market/structural/safety/execution/config snapshots at decision boundaries. | `app/contracts/`, `decision_engine/`, `data_plane/`, tests |
+| FB-CAN-016 | CAN-NORM | A | DP | feature | HIGH | Open | Refactor ingest/feature normalization to canonical freshness/reliability/confidence family semantics. | `data_plane/ingest/`, `data_plane/features/`, `app/contracts/`, tests |
+| FB-CAN-017 | CAN-STR | A | FR | feature | MEDIUM | Open | Replace legacy ForecastPacket-centric structure output contracts with canonical structure outputs. | `app/contracts/forecast_packet.py`, `decision_engine/pipeline.py`, `forecaster_model/`, tests |
+| FB-CAN-018 | CAN-CARRY | A | FR | feature | MEDIUM | Open | Implement explicit carry sleeve module and integrate with risk/replay/monitoring contracts. | `carry_sleeve/`, `decision_engine/`, `risk_engine/`, `backtesting/`, tests |
+| FB-CAN-019 | CAN-DEL-DEC | A | CP | tech_debt | HIGH | Open | Delete obsolete decision_engine legacy flow modules after canonical orchestrator cutover. | `decision_engine/`, tests |
+| FB-CAN-020 | CAN-DEL-RISK | A | CP | tech_debt | HIGH | Open | Delete obsolete risk branches/contracts conflicting with canonical risk architecture while retaining safety invariants. | `risk_engine/`, `app/contracts/risk.py`, `app/contracts/decisions.py`, tests |
+| FB-CAN-021 | CAN-DEL-EXEC | A | CP | tech_debt | HIGH | Open | Delete obsolete thin execution-only paths after canonical execution modules land. | `execution/`, tests |
+| FB-CAN-022 | CAN-DEL-CFG | A | CFG | tech_debt | MEDIUM | Open | Delete superseded legacy config keys/env mappings after canonical config migration window. | `app/config/`, README/docs |
+| FB-CAN-023 | CAN-DEL-DOC | B | OP | tech_debt | MEDIUM | Open | Delete/archive conflicting docs/Specs and add non-canonical tombstones/redirects. | `docs/Specs/`, `docs/Human Provided Specs/`, README/docs |
+| FB-CAN-024 | CAN-DEL-TEST | B | CI | tech_debt | HIGH | Open | Delete legacy-architecture tests and replace with canonical domain tests in same slices. | `tests/`, decision/risk/execution modules |
+| FB-CAN-025 | CAN-CI | B | CI | platform | MEDIUM | Open | Add CI gates for canonical contract compliance, replay determinism, and legacy-removal cutover checks. | `scripts/`, `.github/workflows/ci.yml`, tests/docs |
+| FB-CAN-026 | CAN-REL | B | OP | platform | MEDIUM | Open | Implement config/logic version diffing and release evidence bundles for promotion/rollback governance. | `models/`, `orchestration/`, `control_plane/`, `scripts/`, docs |
+| FB-CAN-027 | CAN-EXP | B | DS | feature | MEDIUM | Open | Implement experiment registry CRUD/lifecycle and release-candidate linkage with required canonical fields. | `research/`, `models/`, `control_plane/`, docs/tests |
+| FB-CAN-028 | CAN-MON-ALRT | B | OB | feature | MEDIUM | Open | Build canonical alert policies and dashboards for decision quality, degradation, execution, and governance health. | `observability/`, `infra/`, `control_plane/`, docs |
+| FB-CAN-029 | CAN-RUNTIME | A | RT | feature | HIGH | Open | Refactor live/runtime orchestration to explicit canonical domain sequence and remove hidden legacy coupling. | `app/runtime/live_service.py`, `decision_engine/run_step.py`, decision/risk/execution modules |
+| FB-CAN-030 | CAN-REPLAY-DELTA | A | DS | feature | HIGH | Open | Enforce deterministic live-vs-replay equivalence harness and promotion-blocking divergence policy. | `backtesting/`, `decision_engine/run_step.py`, tests/scripts/docs |
+| FB-CAN-031 | CAN-TRIG-MISSED | A | FR | feature | HIGH | Open | Implement missed-move handling and false-positive memory penalties across trigger and auction domains. | `decision_engine/trigger_engine.py`, `decision_engine/auction_engine.py`, contracts/replay/tests |
+| FB-CAN-032 | CAN-SIGNAL-FAM | A | CFG | feature | MEDIUM | Open | Implement per-signal confidence/decay families and feature-family enable flags required by canonical config. | `app/config/`, `data_plane/features/`, `decision_engine/`, tests |
+| FB-CAN-033 | CAN-STATE-OVR | A | RT | feature | HIGH | Open | Implement hard override taxonomy and degradation transition logging with deterministic event records. | `decision_engine/state_engine.py`, `risk_engine/`, `observability/`, contracts/tests |
+| FB-CAN-034 | CAN-AUCT-CORR | A | FR | feature | MEDIUM | Open | Add candidate correlation/thesis clustering penalties and deterministic metadata in auction outputs. | `decision_engine/auction_engine.py`, contracts/replay/tests |
+| FB-CAN-035 | CAN-EXEC-FEED | A | EX | feature | MEDIUM | Open | Implement execution feedback memory that updates future decision/execution quality penalties deterministically. | `execution/`, `decision_engine/`, `data_plane/memory/`, replay/tests |
+| FB-CAN-036 | CAN-DEC-REC | B | DP | feature | MEDIUM | Open | Implement canonical decision-record and suppression/safety event output contracts with explicit reason codes. | `app/contracts/`, `decision_engine/`, `risk_engine/`, `control_plane/api.py`, tests |
+| FB-CAN-037 | CAN-FAULT | B | DS | feature | MEDIUM | Open | Add canonical fault-injection profiles for replay/simulation and release evidence requirements. | `backtesting/`, `orchestration/`, `scripts/`, tests/docs |
+| FB-CAN-038 | CAN-SHADOW | B | OP | platform | MEDIUM | Open | Implement shadow environment comparison thresholds/probation windows and promotion/rollback evidence APIs. | `orchestration/`, `models/`, `control_plane/`, `scripts/`, tests |
+| FB-CAN-039 | CAN-MON-DRIFT | B | OB | feature | MEDIUM | Open | Implement calibration/drift monitoring and alert escalation policies for edge erosion/divergence. | `observability/`, `infra/`, `control_plane/`, tests/docs |
+| FB-CAN-040 | CAN-DOC-GLOSS | B | OP | change | LOW | Open | Publish canonical glossary and old->new naming map to eliminate ambiguity during migration. | `docs/`, `README.md`, `.github/`, tests |
+| FB-CAN-041 | CAN-STATE-REGIME | A | RT | feature | HIGH | Open | Implement full 5-class regime probability vector and transition confidence math. | `decision_engine/state_engine.py`, contracts/replay/tests |
+| FB-CAN-042 | CAN-STATE-HEAT | A | RT | feature | MEDIUM | Open | Implement novelty/heat/reflexivity score stack and downstream propagation. | `decision_engine/state_engine.py`, trigger/risk/observability/tests |
+| FB-CAN-043 | CAN-TRIG-STAGE | A | FR | feature | MEDIUM | Open | Implement explicit Setup/Pre-Trigger/Confirm stage records with latency metrics and reason codes. | `decision_engine/trigger_engine.py`, contracts/observability/replay/tests |
+| FB-CAN-044 | CAN-AUCT-TOPN | A | FR | feature | MEDIUM | Open | Implement auction throughput bounds, top-N saturation controls, and deterministic tie-breakers. | `decision_engine/auction_engine.py`, contracts/observability/tests |
+| FB-CAN-045 | CAN-RISK-SIZE | A | RT | feature | HIGH | Open | Implement canonical sizing formula stack (inertia/asymmetry/degradation/edge-budget terms). | `risk_engine/`, contracts/tests |
+| FB-CAN-046 | CAN-RISK-THESIS | A | RT | feature | MEDIUM | Open | Implement thesis-aware concentration and overlap risk constraints with offense/defense posture handling. | `risk_engine/`, `decision_engine/auction_engine.py`, contracts/tests |
+| FB-CAN-047 | CAN-EXEC-STYLE | A | EX | feature | HIGH | Open | Implement execution style policy (passive/aggressive/staggered/twap) with urgency + remaining-edge logic. | `execution/`, contracts/observability/tests |
+| FB-CAN-048 | CAN-EXEC-PFILL | A | EX | feature | MEDIUM | Open | Implement partial-fill reconciliation and residual-intent handling logic for live and replay. | `execution/`, `backtesting/`, contracts/tests |
+| FB-CAN-049 | CAN-DATA-STRUCT | A | DP | feature | MEDIUM | Open | Implement structural signal families (funding/OI/basis/liquidations/divergence) with confidence/freshness normalization. | `data_plane/ingest/`, `data_plane/features/`, contracts/tests |
+| FB-CAN-050 | CAN-DATA-OPTIONS | A | DP | feature | MEDIUM | Open | Implement options-context and stablecoin-flow proxy feature families and monitoring availability rates. | `data_plane/features/`, `decision_engine/`, observability/config/tests |
+| FB-CAN-051 | CAN-GOV-OBJ | B | OP | platform | MEDIUM | Open | Implement release-object model (config/logic/model-family/feature-family/combined). | `models/`, `orchestration/`, `control_plane/`, contracts/tests |
+| FB-CAN-052 | CAN-GOV-ENV | B | OP | platform | MEDIUM | Open | Implement research/simulation/shadow/live stage-enforcement rules for promotion flow. | `orchestration/`, `scripts/`, `models/`, docs/tests |
+| FB-CAN-053 | CAN-GOV-ROLL | B | OP | platform | LOW | Open | Implement rollback playbooks and rollback-target validation as promotion requirements. | `docs/`, `scripts/`, `orchestration/`, `control_plane/`, tests |
+| FB-CAN-054 | CAN-EXP-METRICS | B | DS | feature | MEDIUM | Open | Enforce experiment predeclared metrics and failure-mode capture before promotion states. | `research/`, `models/`, `scripts/`, tests |
+| FB-CAN-055 | CAN-REPLAY-MODES | B | DS | feature | MEDIUM | Open | Implement canonical replay modes and required event-family coverage checks. | `backtesting/`, contracts/scripts/tests |
+| FB-CAN-056 | CAN-MON-DOMAINS | B | OB | feature | MEDIUM | Open | Implement monitoring-domain coverage checklist and CI assertions for required metric families. | `observability/`, `scripts/`, docs/tests |
+| FB-CAN-057 | CAN-CONFIG-DIFF | B | CFG | platform | LOW | Open | Implement immutable config diff audit trail and semantic-change guardrails. | `app/config/`, `models/`, `control_plane/`, scripts/tests |
+| FB-CAN-058 | CAN-DOC-TOMBS | B | OP | change | LOW | Open | Add tombstone index for removed modules/docs with canonical replacement pointers. | `docs/`, `README.md`, reports/tests |
+| FB-CAN-059 | CAN-RUNTIME-CUT | A | RT | hardening | MEDIUM | Open | Add runtime cutover guard preventing unintended legacy+canonical dual-path activation. | `app/runtime/live_service.py`, `decision_engine/run_step.py`, config/tests |
+| FB-CAN-060 | CAN-FINAL-PRUNE | B | CP | tech_debt | HIGH | Open | Final hard-prune of temporary migration shims and remaining old architecture remnants. | core modules, docs, tests |
+| FB-CAN-061 | CAN-CONFIG-META | B | CFG | feature | MEDIUM | Open | Implement canonical config metadata fields and validation rules. | `app/config/`, `models/`, `scripts/`, tests |
+| FB-CAN-062 | CAN-CONTRACT-COMMON | A | DP | feature | MEDIUM | Open | Enforce canonical contract common conventions (UTC/freshness/confidence typing and bounds). | `app/contracts/`, `decision_engine/`, `data_plane/`, tests |
+| FB-CAN-063 | CAN-SUPPRESS-TAX | B | DP | feature | MEDIUM | Open | Implement stable suppression/safety reason taxonomy and machine-readable reason codes. | contracts + decision/risk/execution/observability/tests |
+| FB-CAN-064 | CAN-CARRY-MON | B | OB | feature | LOW | Open | Implement carry-sleeve monitoring and alert families. | `carry_sleeve/`, observability/infra/control_plane/tests |
+| FB-CAN-065 | CAN-GOV-MON | B | OB | feature | LOW | Open | Implement governance/operator health monitoring domain and alerts. | observability/orchestration/models/scripts/tests |
+| FB-CAN-066 | CAN-EVIDENCE-SCHEMA | B | OP | platform | MEDIUM | Open | Define canonical evidence-package schema for promotion decisions and gate completeness. | `models/`, `orchestration/`, `scripts/`, docs/tests |
+| FB-CAN-067 | CAN-CONSTANTS | B | CP | hardening | LOW | Open | Add guardrails against hidden magic constants in canonical code paths. | scripts + core canonical modules/tests |
+| FB-CAN-068 | CAN-REPLAY-SEED | B | DS | feature | LOW | Open | Enforce deterministic seed policy and replay/sim reproducibility metadata. | `backtesting/`, scripts/models/tests/docs |
+| FB-CAN-069 | CAN-PROBATION | B | OP | platform | LOW | Open | Implement post-release probation-window monitors and automatic abort triggers. | orchestration/observability/models/scripts/tests |
+| FB-CAN-070 | CAN-COVERAGE-MAP | B | OP | change | MEDIUM | Open | Publish canonical spec section-to-queue coverage matrix and closure checklist gate. | docs/reports/scripts/QUEUE/tests |
+| FB-CAN-071 | CAN-CONFIG-SNAP | A | DP | feature | MEDIUM | Open | Implement canonical Service Configuration Snapshot contract and traceability bindings. | contracts/decision/replay/config/tests |
+| FB-CAN-072 | CAN-MON-LAG | B | OB | feature | MEDIUM | Open | Implement processing lag/event lag/decision-cycle duration metrics and alerts. | observability/runtime/decision/execution/infra/tests |
+| FB-CAN-073 | CAN-STATE-WEEKEND | A | RT | feature | LOW | Open | Implement weekend/low-liquidity mode occupancy handling and propagation. | state/risk/observability/tests |
+| FB-CAN-074 | CAN-STATE-EXRISK | A | RT | feature | MEDIUM | Open | Integrate exchange-risk flags and data-integrity warnings into degradation/override logic. | state/data/risk/contracts/tests |
+| FB-CAN-075 | CAN-EXEC-LAT | A | EX | feature | LOW | Open | Implement execution latency/reliability quality terms in execution confidence. | execution/config/replay/observability/tests |
+| FB-CAN-076 | CAN-EDGE-MON | B | OB | feature | MEDIUM | Open | Implement edge-budget proxy monitoring and alert thresholds. | decision/execution/observability/infra/tests |
+| FB-CAN-077 | CAN-BINDING-IMM | B | DS | hardening | LOW | Open | Implement immutable run-binding guard for config/logic/dataset/seed identifiers. | contracts/replay/orchestration/models/tests |
+| FB-CAN-078 | CAN-FINAL-AUDIT | B | OP | platform | MEDIUM | Open | Add automated canonical acceptance audit as final migration completion gate. | scripts/reports/tests/QUEUE |
 
 ### Compliance & release gates (open)
 
