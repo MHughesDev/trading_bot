@@ -107,4 +107,6 @@ python -m streamlit run control_plane/Home.py
 | [`QUEUE_STACK.csv`](QUEUE_STACK.csv) | Next tasks (`agent_task` per row) |
 | [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) | Full roadmap / completed work IDs |
 | [`QUEUE.MD`](QUEUE.MD) | Queue protocol + conventions |
+| [`FULL_AUDIT.md`](FULL_AUDIT.md) | Full-scope audit playbook + **§8** report deliverable |
+| [`reports/AUDIT_REPORT_TEMPLATE.md`](reports/AUDIT_REPORT_TEMPLATE.md) | Audit report template |
 | [`WINDOWS_OPERATOR_UI.MD`](WINDOWS_OPERATOR_UI.MD) | Windows / future desktop UX |
