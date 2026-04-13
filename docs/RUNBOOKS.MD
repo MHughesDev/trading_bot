@@ -49,6 +49,20 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 - Default **`NM_CONTROL_PLANE_HOST=0.0.0.0`** listens on all interfaces. On a single machine behind an untrusted LAN, prefer **`NM_CONTROL_PLANE_HOST=127.0.0.1`** so the API is only reachable from localhost.
 - Keep **`NM_CONTROL_PLANE_API_KEY`** set for mutating routes (`POST /params`, `/system/mode`, `/flatten`) whenever the control plane is reachable beyond localhost.
 
+## Production / network exposure (FB-AUD-001)
+
+**Threat model:** The control plane can **start training**, change **params**, **flatten** positions, and drive **lifecycle** APIs. If **`NM_CONTROL_PLANE_API_KEY`** is **unset** and **`NM_AUTH_SESSION_ENABLED`** is **false**, **mutating** routes still succeed (local-dev ergonomics). **Do not** expose that configuration to the internet or an untrusted LAN.
+
+**Checklist for any non-localhost deployment:**
+
+1. **Authentication:** Set **`NM_CONTROL_PLANE_API_KEY`** (clients send **`X-API-Key`**) **or** enable **`NM_AUTH_SESSION_ENABLED`** with operator accounts and session cookies (see **`.env.example`**).
+2. **TLS:** Terminate HTTPS in front of the API (e.g. **[TLS edge — Caddy](#tls-edge--caddy-fb-cont-004)**), cloud load balancer, or **Tailscale**/VPN — not raw **HTTP** on a public IP.
+3. **Bind / firewall:** Prefer **`NM_CONTROL_PLANE_HOST=127.0.0.1`** if only a reverse proxy on the same host connects upstream; otherwise restrict **security groups** / **iptables** so **:8000** is not world-open unless behind a proxy you control.
+4. **CORS:** FastAPI uses permissive **`CORSMiddleware`** defaults for Streamlit + SSE (**FB-AP-034**). For a **public** hostname, plan to **restrict `allow_origins`** (queue **`FB-AUD-009`**).
+5. **Streamlit:** For shared dashboards, set **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=true`** and document session env (queue **`FB-AUD-002`**).
+
+**Related:** **`README.md`** — *Production control plane hardening*; **`docs/AUDIT_CODE_REVIEW.MD`**.
+
 ## Execution mode (paper vs live)
 
 - **`NM_EXECUTION_MODE`** remains the **process default** at startup (and `default.yaml` via `load_settings`). **Per-symbol** routing uses **`PUT /assets/execution-mode/{symbol}`** (sidecars) — **FB-AP-030** / **FB-AP-040**.

@@ -126,6 +126,8 @@
 
 The granular backlog below is **promoted** to the live queue as **§2.5** **[`QUEUE.MD`](QUEUE.MD#25-post-audit-hardening-fb-aud)** — IDs **`FB-AUD-001`** … **`FB-AUD-017`**, with **`DOC-A1`** … **`LEGACY-A1`** traceability preserved in each row. **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** lists the same work in **`stack_order`** (implement top to bottom unless reprioritized).
 
+**Done slices:** **`FB-AUD-001`** (2026-04-19) — **`README.md`** + **`RUNBOOKS.MD`** production exposure checklist; see §2.5 row.
+
 ---
 
 ## Source table (audit IDs → queue IDs — historical)

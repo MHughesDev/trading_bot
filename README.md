@@ -77,6 +77,20 @@ Publishes **8000** (API + `/metrics`), **8501** (Streamlit). Mounts **`./data`**
 
 **TLS edge (FB-CONT-004)** — optional **Caddy** reverse proxy: merge **`infra/docker-compose.edge.yml`** after the app file. Maps **https://api.localhost:8443** and **https://ui.localhost:8443** (self-signed **`tls internal`**; add **`api.localhost`** / **`ui.localhost`** to **`hosts`**). Edit **`infra/caddy/Caddyfile`** for real DNS + automatic HTTPS on the public internet.
 
+### Production control plane hardening (FB-AUD-001)
+
+When the **FastAPI** app (`control_plane.api`) is reachable from anything other than a **trusted single operator on localhost**, treat it as **production-facing**:
+
+| Must-do | Why |
+|--------|-----|
+| **Set `NM_CONTROL_PLANE_API_KEY`** and send **`X-API-Key`** on mutating routes | Without a key, mutating routes accept requests when **`NM_AUTH_SESSION_ENABLED`** is false — OK for local dev only. |
+| **Or** enable **`NM_AUTH_SESSION_ENABLED`** and use **HTTP-only session cookies** for operators | Same gate as dashboard login; see **`.env.example`**. |
+| **TLS termination** | Use **Caddy** (**FB-CONT-004**), another reverse proxy, or cloud LB — do not expose plain **HTTP** to the public internet. |
+| **Firewall / security groups** | Restrict **:8000** / **:8501** to admin IPs or the proxy only. |
+| **CORS** | Defaults allow **`allow_origins=["*"]`** for LAN dev and Streamlit **EventSource**; for public or multi-tenant hosts, **narrow origins** (see **`FB-AUD-009`** in **`docs/QUEUE.MD`** §2.5). |
+
+Details: **[`docs/RUNBOOKS.MD`](docs/RUNBOOKS.MD)** — *Production / network exposure*. Audit: **[`docs/AUDIT_CODE_REVIEW.MD`](docs/AUDIT_CODE_REVIEW.MD)**.
+
 ### Cloud deployment (FB-CONT-006)
 
 Primary path: **single Linux VM + Docker Compose + systemd**; alternate sketch: **AWS Fargate + EFS**. Secrets via cloud secret manager → **`.env`**; networking, disk, backups, and a second-path bullet list: **[`docs/DEPLOY_CLOUD.MD`](docs/DEPLOY_CLOUD.MD)** (see also **[`docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD`](docs/BRAINSTORM/BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD)**, **FB-CONT-P0**).
