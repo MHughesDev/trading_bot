@@ -122,29 +122,33 @@
 
 ---
 
-## Granular backlog (candidate queue items — **do not** add to `QUEUE.MD` until prioritized)
+## Queue promotion (2026-04-18)
 
-*Optional IDs for future **`QUEUE_STACK.csv` / §2** rows.*
+The granular backlog below is **promoted** to the live queue as **§2.5** **[`QUEUE.MD`](QUEUE.MD#25-post-audit-hardening-fb-aud)** — IDs **`FB-AUD-001`** … **`FB-AUD-017`**, with **`DOC-A1`** … **`LEGACY-A1`** traceability preserved in each row. **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** lists the same work in **`stack_order`** (implement top to bottom unless reprioritized).
 
-| ID | Theme | Suggestion |
-|----|-------|------------|
-| DOC-A1 | Docs | “Production API hardening”: API key + TLS + CORS origins; link from README. |
-| DOC-A2 | Docs | Streamlit: when to set **`NM_STREAMLIT_ROUTE_GUARD_ENABLED`** and session env vars. |
-| OPS-A1 | Ops | Startup warning if `control_plane_api_key` unset **and** bind is non-loopback. |
-| OPS-A2 | Ops | Optional **rate limiting** (middleware or reverse proxy) for public `control_plane` exposure. |
-| QA-A1 | Quality | Pass over `except Exception` in `app/runtime/live_service.py` — ensure logging + symbol context. |
-| QA-A2 | Quality | Same for `control_plane/asset_page.py`, `streamlit_util.py`. |
-| CODE-A1 | Code | Comment in `intent_gate.py` for “no secret → allow”. |
-| CI-A1 | CI | Optional: validate `QUEUE_STACK.csv` vs `QUEUE.MD` Open rows. |
-| SEC-A1 | Security | Env-configurable CORS allowlist; default strict outside dev. |
-| SEC-A2 | Security | Document `NM_AUTH_SESSION_COOKIE_SECURE` for HTTPS deployments. |
-| SEC-A3 | Security | Add **`pip-audit`** (or document) in dev / CI docs. |
-| SEC-A4 | Security | Review **`httpx`** calls to external APIs for timeout + TLS settings (already present in many paths; inventory). |
-| TEST-A1 | Tests | Coverage for `require_mutate_operator` wrong/missing key when key required. |
-| DEBT-A1 | Tech debt | Inventory `except: pass` / silent `pass` after exceptions; replace with logging. |
-| DATA-A1 | Data plane | Periodic review: QuestDB writer errors surfaced to operators (metrics/alerts). |
-| MT-A1 | Multi-tenant | Review all file paths use tenant prefix when `NM_MULTI_TENANT_DATA_SCOPING=true`. |
-| LEGACY-A1 | Legacy | Ensure `legacy/` imports stay out of main V3 tree (CI already helps for Alpaca data). |
+---
+
+## Source table (audit IDs → queue IDs — historical)
+
+| Audit ID | Queue ID | Theme |
+|----------|------------|-------|
+| DOC-A1 | FB-AUD-001 | Production API hardening (docs) |
+| DOC-A2 | FB-AUD-002 | Streamlit route guard (docs) |
+| OPS-A1 | FB-AUD-003 | Startup warning (bind + API key) |
+| OPS-A2 | FB-AUD-004 | Rate limiting |
+| QA-A1 | FB-AUD-005 | `live_service` exception logging |
+| QA-A2 | FB-AUD-006 | Streamlit exception logging |
+| CODE-A1 | FB-AUD-007 | `intent_gate` comment |
+| CI-A1 | FB-AUD-008 | `QUEUE_STACK` vs §2 validation |
+| SEC-A1 | FB-AUD-009 | CORS allowlist |
+| SEC-A2 | FB-AUD-010 | Session cookie secure docs |
+| SEC-A3 | FB-AUD-011 | `pip-audit` |
+| SEC-A4 | FB-AUD-012 | `httpx` inventory |
+| TEST-A1 | FB-AUD-013 | `require_mutate_operator` tests |
+| DEBT-A1 | FB-AUD-014 | Silent except / pass inventory |
+| DATA-A1 | FB-AUD-015 | QuestDB observability |
+| MT-A1 | FB-AUD-016 | Multi-tenant paths |
+| LEGACY-A1 | FB-AUD-017 | `legacy/` isolation |
 
 ---
 

@@ -19,6 +19,7 @@
 | [§2.2](#22-per-asset-product-epic-fb-ap-p0) | **FB-AP-P0** — per-asset product (registry, UI, data, scheduling) |
 | [§2.3](#23-container--oci-cloud-deployment-fb-cont-p0) | **FB-CONT-P0** — container / OCI cloud deployment (images, compose, CI, TLS, runbooks) |
 | [§2.4](#24-multi-tenant-web-operator-ux-fb-ux-p0) | **FB-UX-P0** — multi-tenant auth, Account page, per-user PnL, dashboard UI extras |
+| [§2.5](#25-post-audit-hardening-fb-aud) | **FB-AUD-*** — post-audit hardening & quality (from [`AUDIT_CODE_REVIEW.MD`](AUDIT_CODE_REVIEW.MD)) |
 | [§3](#3-resolved-fixes-il) | Resolved **fixes** (`IL-*`) |
 | [§4](#4-completed-compliance-gates-hg) | Completed **gates** (`HG-*`) |
 | [§5](#5-completed-archive-fb--themes) | Completed **archive** (`FB-*`) |
@@ -128,6 +129,22 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 | **CONT-CLOUD** | Cloud deployment runbook (single VM + Compose or managed containers) |
 | **CONT-DOC** | Operator docs: web + OCI north star vs Windows `.bat` path |
 
+**Batch (for **FB-AUD-*** — post-audit hardening; see [§2.5](#25-post-audit-hardening-fb-aud)):**
+
+| Batch | Theme |
+|-------|--------|
+| **AUD-DOC** | README / RUNBOOKS / operator-facing security notes |
+| **AUD-OPS** | Startup warnings, rate limiting, deployment ergonomics |
+| **AUD-QA** | Exception logging and Streamlit error surfaces |
+| **AUD-CODE** | Small clarity in execution/risk (e.g. `intent_gate`) |
+| **AUD-CI** | Queue stack / CI validation |
+| **AUD-SEC** | CORS, cookies, supply chain, httpx inventory |
+| **AUD-TEST** | API auth tests |
+| **AUD-DEBT** | Silent except / pass inventory |
+| **AUD-DATA** | Data plane observability |
+| **AUD-MT** | Multi-tenant path review |
+| **AUD-LEG** | `legacy/` isolation |
+
 **Category:** **FR**, **PF**, **UI**, **DS**, **MS**, **XX** (roadmap); **EX**, **MD**, **DP**, **RT**, **CP**, **OB**, **OP**, **CI**, **CFG** (fixes / §3).
 
 **Affected files (open-queue tables):** Pipe-separated **primary** paths or globs the implementer expects to touch; **non-exhaustive** — use for navigation, not as a complete dependency closure.
@@ -142,15 +159,15 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-17):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Next:** reprioritize new work or add rows per [**§8**](#8-how-to-add-an-entry); optional GitHub sync [**§7**](#7-github-sync-optional). Agents: when **§2** has **no** **Open** rows, see [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+**Status (2026-04-18):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Open:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-001**…**017** (promoted from [`AUDIT_CODE_REVIEW.MD`](AUDIT_CODE_REVIEW.MD)). **Next:** optional GitHub sync [**§7**](#7-github-sync-optional). Agents: **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** first.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **0** | — |
-| **MEDIUM** | **0** | — |
-| **LOW** | **0** | — |
+| **MEDIUM** | **11** | **FB-AUD-001**–**004**, **007**–**013** ([§2.5](#25-post-audit-hardening-fb-aud)) |
+| **LOW** | **6** | **FB-AUD-005**, **006**, **014**–**017** ([§2.5](#25-post-audit-hardening-fb-aud)) |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
 
@@ -160,7 +177,7 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 
 *P0 / P1 — release-critical and core architecture.*
 
-*No **Open** rows with **Pri** **HIGH** — roadmap epics above are **Done**. **§2** has **no** **Open** rows (deferred **FB-N1** / **FB-N3** are **closed for now** — [**Out of scope**](#out-of-scope-not-prioritized)).*
+*No **Open** rows with **Pri** **HIGH** — roadmap epics above are **Done**. **Open** work: [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-*** (audit backlog).*
 
 ### 2.2 Per-asset product epic (**FB-AP-P0**)
 
@@ -255,6 +272,34 @@ Legacy **Type** column in §2 tables maps to Kind: Feature→**feature**, Harden
 | FB-UX-012 | AP-UX-UI | B | UI | feature | MEDIUM | Done | **Scheduler / nightly status panel:** Show next/last run and last error for nightly jobs (**FB-AP-035**–**037**), backed by a small status API or agreed source. **Done 2026-04-12:** **`GET /scheduler/nightly`** — full status + **`last_report`** + RL/forecaster flags; **`app_scheduler`** extended with **`last_run_finished_utc`**, **`next_run_after_utc`**; **`control_plane/scheduler_panel.py`** on **Home**. | `control_plane/`, `orchestration/`, `control_plane/api.py` |
 | FB-UX-013 | AP-UX-UI | B | UI | feature | LOW | Done | **In-app notifications:** Toasts for init complete, train failure, flatten (**st.toast** + polling or events). **Done 2026-04-12:** **`control_plane/app_toasts.py`** — **`maybe_toast`** + **`NM_STREAMLIT_TOASTS_ENABLED`**; Asset page **Initialize** / **Start** / **Stop** (flatten-aware); **init monitor** + **scheduler panel** transitions; **`post_mutate_response`** long timeout for Stop. | `control_plane/` |
 | FB-UX-014 | AP-UX-UI | B | UI | feature | LOW | Done | **Watchlist / favorites:** Pin symbols for quick navigation to Asset Page (session or per-user prefs). **Done 2026-04-12:** **`control_plane/watchlist.py`** — session **`st.session_state`** list (max 24); **Pin ★** / **Remove ★** on **Asset** page; sidebar links in **`streamlit_chrome.py`**. | `control_plane/` |
+
+### 2.5 Post-audit hardening (**FB-AUD-***)
+
+**Brief:** Action items from the **[`AUDIT_CODE_REVIEW.MD`](AUDIT_CODE_REVIEW.MD)** code review (2026-04-17 — pass 3): production **control plane** hardening (API key, TLS, CORS), **Streamlit** route-guard documentation, **ops** warnings and optional **rate limiting**, **quality** passes on broad exception handlers, small **code** clarity in **`intent_gate`**, **CI** check for **`QUEUE_STACK.csv`** vs **§2**, **security** (CORS config, session cookies, **`pip-audit`**, **httpx** review), **tests** for **`require_mutate_operator`**, **tech-debt** inventory, **data plane** observability, **multi-tenant** path review, **`legacy/`** import hygiene.
+
+**Traceability:** Audit IDs **DOC-A1**…**LEGACY-A1** map to **FB-AUD-001**…**017** (same order as [`AUDIT_CODE_REVIEW.MD`](AUDIT_CODE_REVIEW.MD) granular table). **Promoted to queue 2026-04-18.**
+
+**Table columns:** **Batch** = **AUD-*** theme; **Phase** = **B** (operator product) unless noted.
+
+| ID | Batch | Phase | Cat | Kind | Pri | Status | Summary | Affected files |
+|----|-------|-------|-----|------|-----|--------|---------|----------------|
+| FB-AUD-001 | AUD-DOC | B | OP | change | MEDIUM | Open | **Production API hardening (docs):** TLS + firewall + **`NM_CONTROL_PLANE_API_KEY`** / session auth; **restrict CORS** when API is not localhost-only; link from **`README.md`** / **`RUNBOOKS.MD`**. *(Audit DOC-A1.)* | `README.md`, `docs/RUNBOOKS.MD`, `docs/AUDIT_CODE_REVIEW.MD` |
+| FB-AUD-002 | AUD-DOC | B | OP | change | MEDIUM | Open | **Streamlit route guard (docs):** when to set **`NM_STREAMLIT_ROUTE_GUARD_ENABLED`**, session env vars, and **`NM_CONTROL_PLANE_API_KEY`** bypass for automation. *(Audit DOC-A2.)* | `README.md`, `docs/RUNBOOKS.MD`, `control_plane/streamlit_util.py` |
+| FB-AUD-003 | AUD-OPS | B | OP | platform | MEDIUM | Open | **Startup warning:** log or warn when **`control_plane_api_key`** unset **and** bind address is non-loopback (misconfiguration risk). *(Audit OPS-A1.)* | `control_plane/api.py`, `docs/RUNBOOKS.MD` |
+| FB-AUD-004 | AUD-OPS | B | OP | platform | MEDIUM | Open | **Optional rate limiting** for **`control_plane`** when exposed publicly (middleware or reverse-proxy notes). *(Audit OPS-A2.)* | `control_plane/api.py`, `docs/RUNBOOKS.MD`, `infra/` |
+| FB-AUD-005 | AUD-QA | B | OP | tech_debt | LOW | Open | **Exception logging pass:** **`app/runtime/live_service.py`** — ensure **`except Exception`** paths log with **symbol** / correlation context. *(Audit QA-A1.)* | `app/runtime/live_service.py` |
+| FB-AUD-006 | AUD-QA | B | UI | tech_debt | LOW | Open | **Exception logging pass:** **`control_plane/asset_page.py`**, **`streamlit_util.py`** — user-visible error surfaces. *(Audit QA-A2.)* | `control_plane/asset_page.py`, `control_plane/streamlit_util.py` |
+| FB-AUD-007 | AUD-CODE | B | CP | change | MEDIUM | Open | **Comment / docstring** in **`execution/intent_gate.py`**: clarify “no **`risk_signing_secret`** → gate open” vs **`preflight`** live checks. *(Audit CODE-A1.)* | `execution/intent_gate.py` |
+| FB-AUD-008 | AUD-CI | B | CP | platform | MEDIUM | Open | **Optional CI script:** validate **`QUEUE_STACK.csv`** sentinel vs **§2** **Open** rows (catch drift). *(Audit CI-A1.)* | `scripts/`, `docs/QUEUE_STACK.csv`, `docs/QUEUE.MD` |
+| FB-AUD-009 | AUD-SEC | B | CP | hardening | MEDIUM | Open | **CORS:** env-configurable **`allow_origins`**; default **`*`** only in dev — document production allowlist. *(Audit SEC-A1.)* | `control_plane/api.py`, `.env.example`, `README.md` |
+| FB-AUD-010 | AUD-SEC | B | OP | change | MEDIUM | Open | **Document** **`NM_AUTH_SESSION_COOKIE_SECURE`** (and related) for HTTPS vs local HTTP. *(Audit SEC-A2.)* | `README.md`, `docs/RUNBOOKS.MD`, `.env.example` |
+| FB-AUD-011 | AUD-SEC | B | CP | platform | MEDIUM | Open | **`pip-audit`** (or equivalent) in **dev docs** / optional **CI** job for supply chain. *(Audit SEC-A3.)* | `README.md`, `.github/workflows/`, `pyproject.toml` |
+| FB-AUD-012 | AUD-SEC | B | CP | hardening | MEDIUM | Open | **Inventory **`httpx`** calls** to external APIs: timeouts, TLS, error handling. *(Audit SEC-A4.)* | `execution/`, `control_plane/`, `orchestration/` |
+| FB-AUD-013 | AUD-TEST | B | CP | platform | MEDIUM | Open | **Tests:** **`require_mutate_operator`** rejects wrong/missing key when **`NM_CONTROL_PLANE_API_KEY`** is set. *(Audit TEST-A1.)* | `tests/`, `control_plane/api.py` |
+| FB-AUD-014 | AUD-DEBT | B | OP | tech_debt | LOW | Open | **Inventory** silent **`except: pass`** / bare **`pass`** after exceptions; replace with logging where appropriate. *(Audit DEBT-A1.)* | repo-wide (incremental) |
+| FB-AUD-015 | AUD-DATA | B | DP | reliability | LOW | Open | **Observability:** QuestDB writer / ingest errors surfaced (metrics or structured logs) for operators. *(Audit DATA-A1.)* | `data_plane/storage/`, `observability/` |
+| FB-AUD-016 | AUD-MT | B | PF | hardening | LOW | Open | **Multi-tenant review:** paths respect tenant prefix when **`NM_MULTI_TENANT_DATA_SCOPING=true`**. *(Audit MT-A1.)* | `app/runtime/`, `execution/` |
+| FB-AUD-017 | AUD-LEG | B | OP | tech_debt | LOW | Open | **`legacy/`** remains isolated — no new imports from **`legacy/`** into main V3 tree (align with **`AGENTS.md`**). *(Audit LEGACY-A1.)* | `scripts/ci_spec_compliance.sh`, `legacy/` |
 
 ### Compliance & release gates (open)
 

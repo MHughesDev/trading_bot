@@ -1,2 +1,18 @@
 stack_order,priority,phase,batch,id,status,summary_one_line,anchor
-1,LOW,B,,_QUEUE_EMPTY_,empty,"No Open rows in stack — populate when adding work (§2 + §8); agents skip implementation until an Open row exists.",#8-how-to-add-an-entry
+1,MEDIUM,B,AUD-DOC,FB-AUD-001,Open,"Production API hardening (docs): TLS firewall API key CORS — README RUNBOOKS",#25-post-audit-hardening-fb-aud
+2,MEDIUM,B,AUD-DOC,FB-AUD-002,Open,"Streamlit route guard docs: NM_STREAMLIT_ROUTE_GUARD_ENABLED session env",#25-post-audit-hardening-fb-aud
+3,MEDIUM,B,AUD-OPS,FB-AUD-003,Open,"Startup warning when API key unset and bind non-loopback",#25-post-audit-hardening-fb-aud
+4,MEDIUM,B,AUD-OPS,FB-AUD-004,Open,"Optional rate limiting for control_plane public exposure",#25-post-audit-hardening-fb-aud
+5,MEDIUM,B,AUD-QA,FB-AUD-005,Open,"Exception logging pass live_service.py symbol context",#25-post-audit-hardening-fb-aud
+6,LOW,B,AUD-QA,FB-AUD-006,Open,"Exception logging pass asset_page streamlit_util",#25-post-audit-hardening-fb-aud
+7,MEDIUM,B,AUD-CODE,FB-AUD-007,Open,"intent_gate.py comment no secret vs preflight",#25-post-audit-hardening-fb-aud
+8,MEDIUM,B,AUD-CI,FB-AUD-008,Open,"CI validate QUEUE_STACK vs QUEUE Open rows",#25-post-audit-hardening-fb-aud
+9,MEDIUM,B,AUD-SEC,FB-AUD-009,Open,"CORS env allow_origins production allowlist",#25-post-audit-hardening-fb-aud
+10,MEDIUM,B,AUD-SEC,FB-AUD-010,Open,"Document NM_AUTH_SESSION_COOKIE_SECURE HTTPS vs HTTP",#25-post-audit-hardening-fb-aud
+11,MEDIUM,B,AUD-SEC,FB-AUD-011,Open,"pip-audit in docs or CI",#25-post-audit-hardening-fb-aud
+12,MEDIUM,B,AUD-SEC,FB-AUD-012,Open,"Inventory httpx timeouts TLS",#25-post-audit-hardening-fb-aud
+13,MEDIUM,B,AUD-TEST,FB-AUD-013,Open,"Tests require_mutate_operator wrong key",#25-post-audit-hardening-fb-aud
+14,LOW,B,AUD-DEBT,FB-AUD-014,Open,"Inventory silent except pass",#25-post-audit-hardening-fb-aud
+15,LOW,B,AUD-DATA,FB-AUD-015,Open,"QuestDB writer errors observability",#25-post-audit-hardening-fb-aud
+16,LOW,B,AUD-MT,FB-AUD-016,Open,"Multi-tenant path review NM_MULTI_TENANT_DATA_SCOPING",#25-post-audit-hardening-fb-aud
+17,LOW,B,AUD-LEG,FB-AUD-017,Open,"legacy/ isolation no V3 imports",#25-post-audit-hardening-fb-aud
