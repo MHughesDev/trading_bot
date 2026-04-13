@@ -11,6 +11,21 @@ from pathlib import Path
 ROWS: list[dict[str, str]] = [
     {
         "stack_order": "1",
+        "priority": "MEDIUM",
+        "phase": "B",
+        "batch": "UX-DOC",
+        "id": "FB-UX-016",
+        "kind": "change",
+        "status": "Done",
+        "summary_one_line": "Document Streamlit venue key onboarding (README + RUNBOOKS)",
+        "agent_task": "COMPLETED. README § Control plane security: FB-UX-015/016 sign-up, NM_STREAMLIT_VENUE_KEYS_REQUIRED, pages 98/99, PER_ASSET_OPERATOR + RUNBOOKS link. RUNBOOKS: new § Streamlit venue key onboarding (FB-UX-015) — prerequisites, behavior, Kraken note.",
+        "affected_files": "README.md|docs/RUNBOOKS.MD",
+        "docs_refs": "docs/PER_ASSET_OPERATOR.MD|.env.example",
+        "audit_id": "",
+        "anchor": "#fb-ux-016-venue-onboarding-docs",
+    },
+    {
+        "stack_order": "2",
         "priority": "HIGH",
         "phase": "B",
         "batch": "UX-ONB",
@@ -25,7 +40,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#fb-ux-015-venue-onboarding",
     },
     {
-        "stack_order": "2",
+        "stack_order": "3",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-DOC",
@@ -40,7 +55,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "3",
+        "stack_order": "4",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-DOC",
@@ -55,7 +70,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "4",
+        "stack_order": "5",
         "priority": "MEDIUM",
         "phase": "C",
         "batch": "CONT-CI",
@@ -70,7 +85,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "",
     },
     {
-        "stack_order": "5",
+        "stack_order": "6",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-OPS",
@@ -85,7 +100,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "6",
+        "stack_order": "7",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-OPS",
@@ -100,7 +115,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "7",
+        "stack_order": "8",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-QA",
@@ -115,7 +130,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "8",
+        "stack_order": "9",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-QA",
@@ -130,7 +145,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "9",
+        "stack_order": "10",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-CODE",
@@ -145,7 +160,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "10",
+        "stack_order": "11",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-CI",
@@ -160,7 +175,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "11",
+        "stack_order": "12",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -175,7 +190,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "12",
+        "stack_order": "13",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -190,7 +205,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "13",
+        "stack_order": "14",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -205,7 +220,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "14",
+        "stack_order": "15",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -220,7 +235,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "15",
+        "stack_order": "16",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-TEST",
@@ -235,7 +250,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "16",
+        "stack_order": "17",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-DEBT",
@@ -250,7 +265,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "17",
+        "stack_order": "18",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-DATA",
@@ -265,7 +280,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "18",
+        "stack_order": "19",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-MT",
@@ -280,7 +295,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "19",
+        "stack_order": "20",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-LEG",
@@ -295,7 +310,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#25-post-audit-hardening-fb-aud",
     },
     {
-        "stack_order": "20",
+        "stack_order": "21",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SUP",
@@ -310,7 +325,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#full-audit-2026-04-13",
     },
     {
-        "stack_order": "21",
+        "stack_order": "22",
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "AUD-SEC",
@@ -325,7 +340,7 @@ ROWS: list[dict[str, str]] = [
         "anchor": "#full-audit-2026-04-13",
     },
     {
-        "stack_order": "22",
+        "stack_order": "23",
         "priority": "LOW",
         "phase": "B",
         "batch": "AUD-STATIC",

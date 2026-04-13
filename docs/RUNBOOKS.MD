@@ -87,6 +87,22 @@ The **control plane** process (`uvicorn control_plane.api:app`) can run an optio
 
 **Note:** Deep links to a Streamlit app page may still show the login flow first; the UI stores the session token in **`session_state`** after **`POST /auth/login`**.
 
+## Streamlit venue key onboarding (FB-UX-015)
+
+**When to enable:** Set **`NM_STREAMLIT_VENUE_KEYS_REQUIRED=true`** (API + Streamlit env) when every operator must enter **execution venue** credentials in the UI before using the dashboard — not only deployment **`NM_ALPACA_*`** / **`NM_COINBASE_*`** in **`.env`**.
+
+**Prerequisites:**
+
+- **`NM_AUTH_SESSION_ENABLED=true`** and **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=true`** (typical for shared UIs).
+- **`NM_AUTH_VENUE_CREDENTIALS_MASTER_SECRET`** — long random string; Fernet encryption for **`GET`/`PUT /auth/venue-credentials`** (same SQLite DB as users). Without it, onboarding returns **503** and users cannot complete setup.
+
+**Behavior:**
+
+- After login or sign-up (**`pages/99_Sign_up.py`**), **`require_streamlit_app_access()`** redirects to **`pages/98_Setup_API_keys.py`** until the key pair for the **current default execution mode** is stored: **Alpaca** key + secret when **`GET /status` → `execution_mode`** is **`paper`**, **Coinbase** when **`live`**.
+- **`GET /auth/me`** includes **`venue_keys_required`** and **`venue_keys_complete`** when sessions are enabled (see **`app/runtime/auth_venue_status.py`**).
+
+**Kraken** (public market data) remains **only** via deployment **`NM_*`** — not per-user on this screen. Full route list: **[`docs/PER_ASSET_OPERATOR.MD`](PER_ASSET_OPERATOR.MD)** § *Streamlit routes*.
+
 ## Execution mode (paper vs live)
 
 - **`NM_EXECUTION_MODE`** remains the **process default** at startup (and `default.yaml` via `load_settings`). **Per-symbol** routing uses **`PUT /assets/execution-mode/{symbol}`** (sidecars) — **FB-AP-030** / **FB-AP-040**.
