@@ -789,9 +789,9 @@ Each subsection is usable **standalone**: copy the **Audit prompt** into an AI a
 
 | ID | Category | Severity | Summary | Tracking issue |
 |----|----------|----------|---------|----------------|
-| AUD-SUP-001 | SUP | Medium | pip-audit non-blocking in CI — document or enforce policy | [`FB-AUD-018`](../QUEUE_STACK.csv) |
-| AUD-SEC-REPO-001 | SEC-REPO | Medium | No secret scanner in CI | [`FB-AUD-019`](../QUEUE_STACK.csv) |
-| AUD-STATIC-001 | STATIC | Low | No Bandit in CI / dev docs | [`FB-AUD-020`](../QUEUE_STACK.csv) |
+| AUD-SUP-001 | SUP | Medium | Dedicated venv pip-audit — release-blocking | Fixed 2026-04-13 — [`FB-AUD-018`](../QUEUE_STACK.csv) Done |
+| AUD-SEC-REPO-001 | SEC-REPO | Medium | Gitleaks CI job | Fixed 2026-04-13 — [`FB-AUD-019`](../QUEUE_STACK.csv) Done |
+| AUD-STATIC-001 | STATIC | Low | Bandit in CI | Fixed 2026-04-13 — [`FB-AUD-020`](../QUEUE_STACK.csv) Done |
 
 ---
 

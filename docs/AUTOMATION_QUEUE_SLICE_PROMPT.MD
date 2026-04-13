@@ -55,6 +55,8 @@ ruff check .
 python3 -m pytest tests/ -q
 bash scripts/ci_spec_compliance.sh
 python3 scripts/ci_queue_consistency.py
+bash scripts/ci_pip_audit.sh
+bash scripts/ci_bandit.sh
 bash scripts/ci_mlflow_promotion_policy.sh
 ```
 

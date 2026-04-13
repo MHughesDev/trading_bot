@@ -38,7 +38,9 @@ docker compose -f infra/docker-compose.yml up -d
 | 🖥️ Control plane API | `uvicorn control_plane.api:app --host 0.0.0.0 --port 8000` |
 | 📈 Live decision loop | `python -m app.runtime.live_service` |
 | 🧪 Lint & tests | `python3 -m ruff check .` · `python3 -m pytest tests/ -q` (or `ruff` if on `PATH`) |
-| 🔎 Dependency audit | `pip install pip-audit && pip-audit` (informational in CI — see **`.github/workflows/ci.yml`**) |
+| 🔎 Dependency audit | `bash scripts/ci_pip_audit.sh` — **release-blocking** in CI (dedicated `.audit-venv/`, not system Python) |
+| 🔒 Secret scan (local) | `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 detect --source /repo --redact` |
+| 🛡️ Bandit (High) | `bash scripts/ci_bandit.sh` (same as CI) |
 
 Configure secrets in **`.env`** (see [`.env.example`](.env.example)); app settings use the **`NM_`** prefix.
 

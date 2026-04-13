@@ -113,13 +113,13 @@ stack_order,priority,phase,batch,id,kind,status,summary_one_line,agent_task,affe
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-13):** Roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** — **Done**. Post-audit **FB-AUD-001**…**017** and **FB-CONT-009** — **Done**. **Open:** **FB-AUD-018**…**020** from **[full audit 2026-04-13](reports/AUDIT_REPORT_2026-04-13_full.md)** — see **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** (`stack_order` **1**–**3**).
+**Snapshot (2026-04-13):** Roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** — **Done**. **FB-AUD-001**…**020** and **FB-CONT-009** — **Done** (including full-audit follow-ups **FB-AUD-018**…**020**). **Open stack:** empty — sentinel **`_QUEUE_EMPTY_`** in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)**.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **0** | — |
-| **MEDIUM** | **2** | **FB-AUD-018**, **FB-AUD-019** |
-| **LOW** | **1** | **FB-AUD-020** |
+| **MEDIUM** | **0** | — |
+| **LOW** | **0** | — |
 
 **Full row text and completed history:** [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (§2 open tables, §3 fixes, §4 gates, §5 archive).
 

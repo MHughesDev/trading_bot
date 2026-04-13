@@ -19,11 +19,11 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Ruff
         run: python -m ruff check .
-      - name: pip-audit (informational)
-        continue-on-error: true
-        run: |
-          pip install pip-audit
-          pip-audit
+      # FB-AUD-018: audit **project** env only (see scripts/ci_pip_audit.sh — avoids scoring system site-packages).
+      - name: pip-audit (release-blocking)
+        run: bash scripts/ci_pip_audit.sh
+      - name: Bandit (High severity)
+        run: bash scripts/ci_bandit.sh
       - name: Pytest
         run: python -m pytest tests/ -q
       - name: Spec compliance
@@ -32,6 +32,18 @@ jobs:
         run: python3 scripts/ci_queue_consistency.py
       - name: MLflow promotion policy
         run: bash scripts/ci_mlflow_promotion_policy.sh
+
+  # FB-AUD-019 — secret scan (Docker image on ubuntu-latest)
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 \
+            detect --source /repo --verbose --redact
 
   # FB-CONT-003 — Docker image build + smoke; optional linters (no secrets / no NM_* needed)
   docker-image:

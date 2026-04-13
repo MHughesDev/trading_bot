@@ -133,8 +133,12 @@ python3 -m ruff check .
 python3 -m pytest tests/ -q
 bash scripts/ci_spec_compliance.sh
 python3 scripts/ci_queue_consistency.py
+bash scripts/ci_pip_audit.sh
+bash scripts/ci_bandit.sh
 bash scripts/ci_mlflow_promotion_policy.sh
 ```
+
+**Secret scanning (optional locally):** `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 detect --source /repo --redact` (same image as CI **gitleaks** job).
 
 Optional extras: `pip install -e ".[alpaca]"` for Alpaca adapter tests; `[dashboard]` for Streamlit.
 

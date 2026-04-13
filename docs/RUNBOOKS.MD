@@ -215,6 +215,13 @@ If your host uses a different **`COMPOSE_PROJECT_NAME`**, replace **`trading-bot
 
 - Broad **`except: pass`** hides failures; prefer **`logger.exception`** on unexpected errors. Quick inventory: `rg "except\\s*:" --glob '*.py' app control_plane execution` and review. Hot paths (live loop) already log most failures; treat **`pass`** only for optional UX (e.g. best-effort logout).
 
+## CI security checks (FB-AUD-018…020)
+
+- **`bash scripts/ci_pip_audit.sh`** — Creates **`.audit-venv/`** (gitignored), `pip install -e ".[dev]"`, runs **`pip-audit -l`** on that environment only. **Merges to `main` require this to pass** in GitHub Actions (same script). This avoids scoring unrelated **system** Python packages (e.g. apt-installed tools).
+- **`bash scripts/ci_bandit.sh`** — **Bandit** High-severity-only on application packages (`tests/` excluded). Config: **`pyproject.toml`** `[tool.bandit]`.
+- **Gitleaks** — CI runs **`zricethezav/gitleaks:v8.21.2`** in Docker on the full repo. Locally:  
+  `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 detect --source /repo --verbose --redact`
+
 ## Grafana / Loki
 
 - Default URLs (local): Grafana `http://127.0.0.1:3000`, Loki `http://127.0.0.1:3100`. Set `NM_GRAFANA_URL` / `NM_LOKI_URL` for Streamlit links.

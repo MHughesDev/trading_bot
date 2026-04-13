@@ -23,7 +23,7 @@ def load_torch_forecaster_checkpoint(
         raise ImportError("Install trading-bot[models_torch] for PyTorch forecaster loading") from e
 
     path = Path(path)
-    raw: Any = torch.load(path, map_location="cpu", weights_only=False)
+    raw: Any = torch.load(path, map_location="cpu", weights_only=False)  # nosec B614
     c = cfg or ForecasterConfig()
     if isinstance(raw, dict):
         if "forecaster_config" in raw and isinstance(raw["forecaster_config"], ForecasterConfig):

@@ -15,15 +15,15 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-13):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Post-audit hardening:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-001**…**017** **Done**; **FB-CONT-009** **Done**. **Full audit 2026-04-13:** **[`docs/reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md)** — **Open:** **FB-AUD-018**…**020** (supply chain policy, secret scan, bandit). **Next:** optional GitHub sync [**§7**](#7-github-sync-optional).
+**Status (2026-04-13):** **Epic parents closed** — **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** (all sub-rows **Done**). **Deferred epics** **FB-N1** / **FB-N3** — **closed for now** (see [**Out of scope**](#out-of-scope-not-prioritized)). **Post-audit hardening:** [**§2.5**](#25-post-audit-hardening-fb-aud) **FB-AUD-001**…**017** **Done**; **FB-CONT-009** **Done**. **Full audit 2026-04-13:** **[`docs/reports/AUDIT_REPORT_2026-04-13_full.md`](reports/AUDIT_REPORT_2026-04-13_full.md)** — [**§2.6**](#26-full-audit-2026-04-13) **FB-AUD-018**…**020** **Done**. **Open queue:** empty (**`_QUEUE_EMPTY_`**). **Next:** optional GitHub sync [**§7**](#7-github-sync-optional).
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **0** | — |
-| **MEDIUM** | **2** | **FB-AUD-018**, **FB-AUD-019** ([§2.6](#26-full-audit-2026-04-13)) |
-| **LOW** | **1** | **FB-AUD-020** ([§2.6](#26-full-audit-2026-04-13)) |
+| **MEDIUM** | **0** | — |
+| **LOW** | **0** | — |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
 
@@ -164,9 +164,9 @@
 
 | ID | Batch | Phase | Cat | Kind | Pri | Status | Summary | Affected files |
 |----|-------|-------|-----|------|-----|--------|---------|----------------|
-| FB-AUD-018 | AUD-SUP | B | CP | platform | MEDIUM | Open | **pip-audit CI policy:** `continue-on-error` on pip-audit — enforce or document release-blocking rule. *(AUD-SUP-001.)* | `.github/workflows/ci.yml`, `README.md` |
-| FB-AUD-019 | AUD-SEC | B | CP | platform | MEDIUM | Open | **Secret scanning in CI:** gitleaks or trufflehog + local run docs. *(AUD-SEC-REPO-001.)* | `.github/workflows/`, `AGENTS.md` |
-| FB-AUD-020 | AUD-STATIC | B | CP | tech_debt | LOW | Open | **Bandit (Python SAST):** dev docs and/or optional CI. *(AUD-STATIC-001.)* | `README.md`, `.github/workflows/ci.yml` |
+| FB-AUD-018 | AUD-SUP | B | CP | platform | MEDIUM | Done | **pip-audit CI policy:** `scripts/ci_pip_audit.sh` + dedicated `.audit-venv/`; release-blocking in CI; `requests>=2.33`, `jwcrypto>=1.5.7`. *(AUD-SUP-001.)* **Done 2026-04-13.** | `scripts/ci_pip_audit.sh`, `.github/workflows/ci.yml`, `pyproject.toml` |
+| FB-AUD-019 | AUD-SEC | B | CP | platform | MEDIUM | Done | **Gitleaks in CI:** Docker job `zricethezav/gitleaks:v8.21.2`; local one-liner in AGENTS/RUNBOOKS. *(AUD-SEC-REPO-001.)* **Done 2026-04-13.** | `.github/workflows/ci.yml`, `AGENTS.md`, `docs/RUNBOOKS.MD` |
+| FB-AUD-020 | AUD-STATIC | B | CP | tech_debt | LOW | Done | **Bandit:** `scripts/ci_bandit.sh`, `[tool.bandit]` in `pyproject.toml`, CI step; reviewed `nosec` on RSS/torch. *(AUD-STATIC-001.)* **Done 2026-04-13.** | `scripts/ci_bandit.sh`, `pyproject.toml`, `.github/workflows/ci.yml` |
 
 ### Compliance & release gates (open)
 

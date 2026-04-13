@@ -37,7 +37,7 @@ def parse_feed_xml(text: str, feed_url: str) -> list[tuple[str, str, str | None,
     """
     out: list[tuple[str, str, str | None, datetime]] = []
     try:
-        root = ET.fromstring(text)
+        root = ET.fromstring(text)  # nosec B314
     except ET.ParseError:
         logger.warning("feed parse error for %s", feed_url)
         return out

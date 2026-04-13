@@ -20,13 +20,13 @@
 
 ## Executive summary
 
-**Overall outcome: Pass with findings.**
+**Overall outcome: Pass with findings** *(all findings from this report **Fixed** as of 2026-04-13 follow-up — see **Findings** table).*
 
-This repository is a **Python 3.11+** trading stack with **FastAPI** (`control_plane/`), **Streamlit**, **live_service**, **QuestDB/Redis/Qdrant** integration, **Docker**, and **GitHub Actions** CI. Prior hardening work (API keys, CORS, rate limits, QuestDB metrics, spec compliance scripts) is **evident and documented**.
+This repository is a **Python 3.11+** trading stack with **FastAPI** (`control_plane/`), **Streamlit**, **live_service**, **QuestDB/Redis/Qdrant** integration, **Docker**, and **GitHub Actions** CI.
 
-**Strengths:** Ruff + pytest + spec scripts in CI; pip-audit and Trivy (informational) present; queue-system documentation is mature; Kraken-only market-data policy is enforced in CI.
+**Strengths:** Ruff + pytest + spec scripts; **release-blocking** `pip-audit` via `scripts/ci_pip_audit.sh` (dedicated `.audit-venv/`); **Gitleaks** CI job; **Bandit** (High) in CI; Trivy (informational) on Docker job; queue-system docs.
 
-**Top gaps (promoted to backlog):** (1) **pip-audit** is **non-blocking** (`continue-on-error`) — policy should be explicit. (2) No **secret-scanning** (gitleaks/trufflehog) in CI. (3) No **Bandit** (Python SAST) in CI or dev docs.
+**Resolved follow-ups:** (1) **pip-audit** policy — blocking CI + dedicated venv. (2) **Gitleaks** in CI + local Docker command. (3) **Bandit** + `pyproject.toml` config.
 
 **No Critical findings** from this documentation-and-config review. Residual gaps: no load/perf numbers, no formal pen-test.
 
@@ -144,9 +144,9 @@ This repository is a **Python 3.11+** trading stack with **FastAPI** (`control_p
 
 | Finding ID | Category ID | Severity | Location | Summary | Remediation | Status |
 |------------|---------------|----------|----------|---------|-------------|--------|
-| AUD-SUP-001 | SUP | Medium | `.github/workflows/ci.yml` | `pip-audit` uses `continue-on-error: true`, so vulnerable deps may not block merges. | Make failing the default **or** document release-blocking policy explicitly in README/RUNBOOKS. | Open |
-| AUD-SEC-REPO-001 | SEC-REPO | Medium | CI (missing) | No gitleaks/trufflehog (or equivalent) secret scan on PR/push. | Add optional CI step + local run docs in AGENTS/README. | Open |
-| AUD-STATIC-001 | STATIC | Low | CI / dev docs | No Bandit (or equivalent) Python SAST in CI. | Add `bandit` to dev docs and/or optional CI job. | Open |
+| AUD-SUP-001 | SUP | Medium | `scripts/ci_pip_audit.sh` | Dedicated `.audit-venv/` + `pip-audit -l` — **release-blocking** in CI; `requests>=2.33`, `jwcrypto>=1.5.7`. | *(Fixed 2026-04-13.)* | Fixed |
+| AUD-SEC-REPO-001 | SEC-REPO | Medium | `.github/workflows/ci.yml` (job **gitleaks**) | Gitleaks via Docker on full checkout; local one-liner in AGENTS/RUNBOOKS. | *(Fixed 2026-04-13.)* | Fixed |
+| AUD-STATIC-001 | STATIC | Low | `scripts/ci_bandit.sh`, `[tool.bandit]` | Bandit High-only in CI; dev extra `bandit[toml]`. | *(Fixed 2026-04-13.)* | Fixed |
 
 ---
 
