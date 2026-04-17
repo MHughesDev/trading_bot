@@ -40,6 +40,18 @@ Agents working here should:
 - Update **docs** when behavior, env vars, or operator-facing flows change.
 - Prefer **small diffs**; match existing style and patterns in touched modules.
 
+### 2.1 Relevant procedures, skills, and docs (each user turn)
+
+**Per turn** (for each new user request or follow-up, not only at session start): actively discover what to read before you edit code or run commands. Use whatever your environment provides for **semantic / vector similarity search** over this repository — for example **Cursor’s codebase or documentation search**, **@**-mentions of skills/rules, **embedding-based** “find similar” retrieval, or **ripgrep** with carefully chosen keywords when similarity search is unavailable.
+
+**Where to look first**
+
+- **[`.cursor/skills/`](.cursor/skills/)** — named workflows (queue, audit reports, etc.); read a skill when its description matches the task.
+- **[`docs/`](docs/)** — runbooks, specs, queue system (`QUEUE_SCHEMA.md`, `QUEUE.MD`), architecture notes.
+- **Skills / rules indexes** — if your tool lists project rules or skills, scan for matches to the user’s query.
+
+**Goal:** find **any** procedures, skills, or documentation that are **relevant to the user’s query** and incorporate them; do not rely only on memory or a single file. This **adds** to §0 (mandatory `README.md` + `AGENTS.md` at session start); it does **not** replace it.
+
 ---
 
 ## 3. Non-negotiable rules
