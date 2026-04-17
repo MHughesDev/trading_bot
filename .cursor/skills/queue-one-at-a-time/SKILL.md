@@ -26,12 +26,14 @@ Do not start item N+1 until item N is fully completed, documented, validated, an
 4. Implement exactly that row’s `agent_task`.
 5. Run relevant validation commands (and required repo checks when applicable).
 6. Update docs impacted by the change (`README.md`, `docs/*.MD`, runbooks/spec pointers as needed).
-7. Update queue artifacts:
+7. Update queue artifacts (full closure before GitHub merge):
    - set row status or adjust queue per `docs/QUEUE.MD` §6
    - mirror queue status in `docs/QUEUE_ARCHIVE.MD` when applicable
    - refresh snapshots in `docs/QUEUE.MD` if open counts change
-8. Commit changes to the current branch.
-9. Stop and report completion of that single item.
+   - run `python3 scripts/ci_queue_consistency.py` and fix until OK
+8. Commit and push **including** queue closure to the PR branch.
+9. Open or update the PR to `main` when required; **only after** queue closure is pushed to the remote branch, run **`gh pr merge --merge --delete-branch`** (with `gh` authenticated) — see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](../../../docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) Phase 6 and [`AGENTS.md`](../../../AGENTS.md) section 7.
+10. Stop and report completion of that single item.
 
 ## Constraints
 

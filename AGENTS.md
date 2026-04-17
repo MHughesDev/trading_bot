@@ -116,6 +116,14 @@ When work uses a **feature branch** (e.g. `cursor/<task>-42e8`):
    - **Local:** `git branch -d <branch-name>` (use `-D` only if you intend to discard unmerged work).
    - **Remote:** `git push origin --delete <branch-name>` after the merge is on `main`.
 
+**Queue slices (GitHub CLI):** Finish the slice on your branch first: **`QUEUE_STACK.csv`**, **`QUEUE_ARCHIVE.MD`**, and any **`QUEUE.MD`** §2 snapshot — run **`python3 scripts/ci_queue_consistency.py`**, commit, and **push**. **Only after** that queue work is on the remote PR branch, merge to `main` and delete the head branch in one step (requires `gh` auth and a mergeable PR):
+
+```bash
+gh pr merge --merge --delete-branch
+```
+
+Run from the repo root with the PR branch checked out, or pass the PR number: `gh pr merge <PR#> --merge --delete-branch`. If the PR is still a draft, run `gh pr ready` first. Do **not** merge until queue closure is pushed — otherwise `main` will lack the archived queue state for that slice. Afterward: `git fetch origin --prune`, `git checkout main && git pull`, and `git branch -d <branch-name>` locally if needed.
+
 **Rule:** One short-lived branch per task is fine; **stale `cursor/*` branches that are already merged should be deleted** on `origin` to avoid clutter.
 
 ---
