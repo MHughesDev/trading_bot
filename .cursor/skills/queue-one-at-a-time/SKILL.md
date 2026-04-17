@@ -31,7 +31,8 @@ Do not start item N+1 until item N is fully completed, documented, validated, an
    - mirror queue status in `docs/QUEUE_ARCHIVE.MD` when applicable
    - refresh snapshots in `docs/QUEUE.MD` if open counts change
 8. Commit changes to the current branch.
-9. Stop and report completion of that single item.
+9. Open a PR to `main` when required; after the slice is done and queue docs are updated on the branch, prefer **`gh pr merge --merge --delete-branch`** (with `gh` authenticated) to merge and remove the remote head branch in one step — see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](../../../docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) Phase 6 and [`AGENTS.md`](../../../AGENTS.md) section 7.
+10. Stop and report completion of that single item.
 
 ## Constraints
 

@@ -1,6 +1,6 @@
 # Automation prompt — queue slice → tests → PR → merge → prune
 
-**Documentation last reviewed:** **2026-04-17**.
+**Documentation last reviewed:** **2026-04-18**.
 
 **Queue system:** This prompt is part of the **[queue system](QUEUE_SCHEMA.md)** — see [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) for every file that implements backlog machinery.
 
@@ -93,7 +93,15 @@ Retry push on transient network errors (bounded retries with backoff).
 
 ## Phase 6 — Merge to `main`
 
-**Preferred:** Merge via **GitHub PR** (squash or merge commit per team policy) after **green checks** and review.
+**Preferred:** Merge via **GitHub PR** after **green checks** and review. Queue updates (**`QUEUE_STACK.csv`**, **`QUEUE_ARCHIVE.MD`**, **`QUEUE.MD`** snapshot if needed) should already be on the PR branch from Phase 2 / pre-merge commits.
+
+**One-step merge + delete head branch (GitHub CLI):** With `gh` installed and authenticated, from repo root (PR branch checked out) after the PR is mergeable:
+
+```bash
+gh pr merge --merge --delete-branch
+```
+
+Or: `gh pr merge <PR#> --merge --delete-branch`. Use `gh pr ready` first if the PR is draft. This merges with a merge commit and deletes the remote feature branch; then `git fetch origin --prune` and `git checkout main && git pull`, and `git branch -d <Branch>` locally if the branch still exists.
 
 **Local merge (if allowed and PR is not used):**
 
@@ -161,7 +169,7 @@ Steps:
 3) Run: ruff check . ; pytest (full or targeted per change) ; scripts/ci_spec_compliance.sh ; scripts/ci_mlflow_promotion_policy.sh
 4) Commit; push -u origin <branch>
 5) Open PR to main with title/body referencing queue IDs and validation
-6) After merge: delete slice branch locally and on origin; prune merged cursor/* if instructed
+6) After queue rows are updated on the branch: merge with `gh pr merge --merge --delete-branch` (or UI); then `git fetch origin --prune`, delete local branch if needed
 7) Handoff: summary, files, validation, PR URL, branches deleted
 
 Do not merge unrelated branches. Do not force-push main. No secrets in commits.
