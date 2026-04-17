@@ -15,6 +15,7 @@ Do not start item N+1 until item N is fully completed, documented, validated, an
 
 ## Required workflow
 
+0. Read `README.md` and `AGENTS.md` in full at the start of this session (re-read `AGENTS.md` after any context reset).
 1. Open `docs/QUEUE_STACK.csv`.
 2. Select the **first** row where:
    - `status == Open`

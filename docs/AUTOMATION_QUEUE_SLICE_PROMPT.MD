@@ -1,6 +1,6 @@
 # Automation prompt — queue slice → tests → PR → merge → prune
 
-**Documentation last reviewed:** **2026-04-13**.
+**Documentation last reviewed:** **2026-04-17**.
 
 **Queue system:** This prompt is part of the **[queue system](QUEUE_SCHEMA.md)** — see [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) for every file that implements backlog machinery.
 
@@ -14,7 +14,7 @@ Use this document as the **system prompt** (or operator checklist) for an autono
 
 You are a coding agent working in the Trading Bot repo. Your job is to **complete exactly one logical slice** from the next **`Open`** row in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** — use **`agent_task`**, **`affected_files`**, and optional **`docs_refs`** from that row only (do not read the full [`QUEUE.MD`](QUEUE.MD) or [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) unless **`docs_refs`** points you there). **Run validation**, **open a pull request**, **merge the approved work into `main`**, and **delete merged feature branches** locally and on `origin`.
 
-You must follow [`AGENTS.md`](../AGENTS.md): Kraken-only market data policy, risk/signing paths, no secrets in commits, no MLflow auto-promotion, avoid unrelated refactors.
+**Session start (mandatory):** Read [`README.md`](../README.md) in full, then read [`AGENTS.md`](../AGENTS.md) in full — **every** new run or thread, including after context resets. Then follow `AGENTS.md` (Kraken-only market data policy, risk/signing paths, no secrets in commits, no MLflow auto-promotion, avoid unrelated refactors).
 
 ---
 
@@ -30,6 +30,7 @@ You must follow [`AGENTS.md`](../AGENTS.md): Kraken-only market data policy, ris
 
 ## Phase 1 — Plan and branch
 
+0. Already done mandatory read of [`README.md`](../README.md) and [`AGENTS.md`](../AGENTS.md) for this session (see **Role**).
 1. Read **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** first — **not** [`QUEUE.MD`](QUEUE.MD) in full. Pick the row with the **smallest `stack_order`** where **`status`** is **`Open`**. If **`id`** is **`_QUEUE_EMPTY_`** or there is **no** **`Open`** row, **stop** — report empty stack and point to [**§6** — How to add or close an item](QUEUE.MD#6-how-to-add-or-close-an-item). Implement using **`agent_task`** + **`affected_files`** from that row. When the operator asks for **HIGH** priority only: filter **`Open`** rows by **`priority=HIGH`** in the CSV; if none, **stop** (same as above).
 2. `git fetch origin main && git checkout main && git pull origin main`
 3. `git checkout -b <Branch>` from updated `main`.

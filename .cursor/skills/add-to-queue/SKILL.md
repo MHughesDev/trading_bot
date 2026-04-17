@@ -21,6 +21,7 @@ Follow this workflow whenever you need to **append or edit** the project work qu
 
 ## Before you edit
 
+0. **Session start:** Read `README.md` and `AGENTS.md` in full (re-read `AGENTS.md` after any context reset).
 1. **Read** [§1 Conventions](../../../docs/QUEUE.MD#1-conventions) and [§0 CSV columns](../../../docs/QUEUE.MD#0-next-task-stack-queue_stackcsv) in `QUEUE.MD`.
 2. **Decide the target section in the archive** (if mirroring):
    - **New open roadmap item** → `QUEUE_ARCHIVE.MD` §2 (correct subsection / epic table).

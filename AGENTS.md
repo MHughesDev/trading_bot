@@ -6,6 +6,19 @@ Operational control for autonomous or semi-autonomous coding agents. **Not** gen
 
 ---
 
+## 0. Mandatory read for every agent session
+
+**Binding rule:** Any autonomous or semi-autonomous agent (Cursor Agent, cloud agent, or similar) **must not** edit this repository, run project commands, or pick up tasks until both steps below are satisfied **in the current session** (after any context reset, new thread, or new run — treat each as a fresh session):
+
+1. **Read [`README.md`](README.md) in full** — overview, quick start, stack summary, and links.
+2. **Read this file (`AGENTS.md`) in full** — non-negotiable rules, repository map, testing commands, handoff format, and queue behavior.
+
+**Re-read `AGENTS.md` every time** you start work in a new conversation or agent invocation, even if you believe you remember it. Operational detail (CI commands, queue protocol, risks) changes; memory is not a substitute for the current file.
+
+If your environment supports project rules (for example `.cursorrules`), those rules exist to reinforce this section — they do not replace reading the two files above.
+
+---
+
 ## 1. Repository purpose
 
 **Trading Bot** (this repository) is a Python **multi-route AI crypto trading** codebase: **Kraken** for **all market data**, Alpaca for **paper execution only**, shared **decision + risk** path for live and replay, typed contracts (`app/contracts/`), and adapters under `execution/adapters/`. **Coinbase** appears only in the **live execution** adapter when configured — not for market data ingestion.

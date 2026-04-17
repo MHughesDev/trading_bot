@@ -11,6 +11,12 @@
 
 ---
 
+## For AI agents and autonomous tools
+
+**Before any code changes, commands, or task work:** read this **`README.md`** in full, then read **[`AGENTS.md`](AGENTS.md)** in full. **`AGENTS.md`** is the mandatory repository contract (rules, safety boundaries, CI, queue workflow, handoff). **Re-read `AGENTS.md` at the start of every new agent session or thread** — including after context resets — not only on first clone.
+
+---
+
 ## ⚡ Easy start (do this first)
 
 Right after you clone, these scripts set up a virtualenv, install the app, bring up the local data stack (Docker), and copy **`.env.example` → `.env`** if you do not have one yet.
