@@ -15,6 +15,8 @@
 
 **Before any code changes, commands, or task work:** read this **`README.md`** in full, then read **[`AGENTS.md`](AGENTS.md)** in full. **`AGENTS.md`** is the mandatory repository contract (rules, safety boundaries, CI, queue workflow, handoff). **Re-read `AGENTS.md` at the start of every new agent session or thread** — including after context resets — not only on first clone.
 
+**Queue work:** from repo root run **`python3 scripts/print_next_queue_item.py`** — it prints the full next **`Open`** queue row to the terminal (optional **`--json`**). See [`AGENTS.md`](AGENTS.md) and [`docs/QUEUE.MD`](docs/QUEUE.MD).
+
 ---
 
 ## ⚡ Easy start (do this first)

@@ -33,12 +33,24 @@ If your environment supports project rules (for example `.cursorrules`), those r
 
 Agents working here should:
 
-- For **next queue item** work, read **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** first (smallest `stack_order` with `status=Open`; see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Use the row’s **`agent_task`** + **`affected_files`** — do not load the full [`QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) unless **`docs_refs`** requires it. If **`QUEUE_STACK.csv`** has no **`Open`** row (or `id=_QUEUE_EMPTY_`), **stop** and report — add or reprioritize per [**§6**](docs/QUEUE.MD#6-how-to-add-or-close-an-item); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+- For **next queue item** work, **run** **`python3 scripts/print_next_queue_item.py`** from repo root first (prints the full next **`Open`** row as terminal text — same selection as smallest `stack_order` with `status=Open`; optional **`--json`**). Alternatively open **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** manually (see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Use the row’s **`agent_task`** + **`affected_files`** — do not load the full [`QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) unless **`docs_refs`** requires it. If the script prints **`QUEUE_EMPTY:`** or there is no **`Open`** row, **stop** and report — add or reprioritize per [**§6**](docs/QUEUE.MD#6-how-to-add-or-close-an-item); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
 - When updating the **queue generator** ([`scripts/generate_queue_stack.py`](scripts/generate_queue_stack.py)): **reorder or append** entries in **`ROWS`** only — **`stack_order`** is filled when you run **`python scripts/generate_queue_stack.py`** (keep **`_QUEUE_EMPTY_`** last).
 - Preserve **non-negotiable rules** below unless the user task explicitly overrides.
 - Keep **live vs replay** behavior aligned where the architecture expects it (`decision_engine/run_step.py` is the shared decision step).
 - Update **docs** when behavior, env vars, or operator-facing flows change.
 - Prefer **small diffs**; match existing style and patterns in touched modules.
+
+### 2.1 Relevant procedures, skills, and docs (each user turn)
+
+**Per turn** (for each new user request or follow-up, not only at session start): actively discover what to read before you edit code or run commands. Use whatever your environment provides for **semantic / vector similarity search** over this repository — for example **Cursor’s codebase or documentation search**, **@**-mentions of skills/rules, **embedding-based** “find similar” retrieval, or **ripgrep** with carefully chosen keywords when similarity search is unavailable.
+
+**Where to look first**
+
+- **[`.cursor/skills/`](.cursor/skills/)** — named workflows (queue, audit reports, etc.); read a skill when its description matches the task.
+- **[`docs/`](docs/)** — runbooks, specs, queue system (`QUEUE_SCHEMA.md`, `QUEUE.MD`), architecture notes.
+- **Skills / rules indexes** — if your tool lists project rules or skills, scan for matches to the user’s query.
+
+**Goal:** find **any** procedures, skills, or documentation that are **relevant to the user’s query** and incorporate them; do not rely only on memory or a single file. This **adds** to §0 (mandatory `README.md` + `AGENTS.md` at session start); it does **not** replace it.
 
 ---
 

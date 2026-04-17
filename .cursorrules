@@ -4,5 +4,6 @@ Before editing files, running project commands, or executing queue tasks in this
 
 1. Read `README.md` in full (project overview and quick start).
 2. Read `AGENTS.md` in full at the start of **every** agent session or new thread. `AGENTS.md` is the binding contract; re-read it after any context reset.
+3. For queue work, run from repo root: `python3 scripts/print_next_queue_item.py` — use the printed next **`Open`** item (or `--json`) before implementing.
 
 Do not skip these steps in favor of prior memory.

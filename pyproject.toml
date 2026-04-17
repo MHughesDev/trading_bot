@@ -57,6 +57,7 @@ tb-train-forecaster-distill = "forecaster_model.training.distill_mlp:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = [
+  "scripts*",
   "app*",
   "services*",
   "shared*",

@@ -1,6 +1,6 @@
 # Queue — agent protocol & conventions
 
-**Documentation last reviewed:** **2026-04-18**.
+**Documentation last reviewed:** **2026-04-19**.
 
 **Queue system:** The **queue system** is every file that implements backlog machinery — see **[`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md)** for the full list (`QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, `AUTOMATION_QUEUE_SLICE_PROMPT.MD`, **Add to Queue** skill, optional `scripts/generate_queue_stack.py`). This file (`QUEUE.MD`) holds **protocol and conventions** only.
 
@@ -9,7 +9,7 @@
 ## Agent protocol (read first — token-efficient)
 
 0. **Every agent session:** Read **[`README.md`](../README.md)** and **[`AGENTS.md`](../AGENTS.md)** in full first — **re-read `AGENTS.md`** after any context reset or new thread. Then use the CSV for task selection (steps 1–4).
-1. **Do not** read this whole file to pick work. Open **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** only.
+1. **Do not** read this whole file to pick work. **Run** **`python3 scripts/print_next_queue_item.py`** from repo root to print the full next **`Open`** row (entire queue item as one string to stdout), or open **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** only.
 2. Sort by **`stack_order`** ascending. The **next task** is the first row where **`status`** = `Open`. If **`id`** = `_QUEUE_EMPTY_` or there is no `Open` row → **stop** (nothing to do).
 3. **Implement from one CSV row:** use **`agent_task`** (full instructions), **`affected_files`** (where to start), **`docs_refs`** (optional deeper context). You do **not** need other markdown files to understand the task.
 4. After completing work: set **`status`** to `Done` in the CSV (or remove the row), adjust **`stack_order`** for remaining Open items, mirror the status into **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** §2.5 if that ID exists there, and follow **[§6](#6-how-to-add-or-close-an-item)**. **Do not merge the PR to `main`** (e.g. `gh pr merge`) until this closure is **committed and pushed** — GitHub is updated only after the queue has been fully run through and archived on the branch. See [`AGENTS.md`](../AGENTS.md) §7 and [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) Phase 6.
