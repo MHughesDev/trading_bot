@@ -27,6 +27,7 @@ Do not start item N+1 until item N is fully completed, documented, validated, an
    - set row status or adjust queue per `docs/QUEUE.MD` §6
    - mirror queue status in `docs/QUEUE_ARCHIVE.MD` when applicable
    - refresh snapshots in `docs/QUEUE.MD` if open counts change
+   - run `python3 scripts/ci_queue_consistency.py` and fix until OK
 7. Commit and push **including** queue closure to the PR branch.
 8. Open or update the PR to `main` when required; **only after** queue closure is pushed to the remote branch, run **`gh pr merge --merge --delete-branch`** (with `gh` authenticated) — see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](../../../docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) Phase 6 and [`AGENTS.md`](../../../AGENTS.md) section 7.
 9. Stop and report completion of that single item.

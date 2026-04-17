@@ -175,8 +175,8 @@ Steps:
 3) Close queue on branch: QUEUE_STACK.csv + QUEUE_ARCHIVE.MD + QUEUE.MD snapshot if needed; python3 scripts/ci_queue_consistency.py
 4) Run: ruff check . ; pytest (full or targeted per change) ; scripts/ci_spec_compliance.sh ; scripts/ci_mlflow_promotion_policy.sh
 5) Commit (include queue closure); push -u origin <branch>
-6) Open PR to main; push again if queue docs changed after first push
-7) Only after queue closure is on the remote branch: gh pr merge --merge --delete-branch
+6) Open PR to main with title/body referencing queue IDs and validation; push again if queue docs changed after first push
+7) Only after queue closure is on the remote branch: gh pr merge --merge --delete-branch (or UI); then git fetch origin --prune, delete local branch if needed
 8) Handoff: summary, files, validation, PR URL, branches deleted
 
 Do not merge unrelated branches. Do not force-push main. No secrets in commits.
