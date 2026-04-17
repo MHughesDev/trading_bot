@@ -1,0 +1,8 @@
+# Trading Bot — mandatory reads for agents
+
+Before editing files, running project commands, or executing queue tasks in this repository:
+
+1. Read `README.md` in full (project overview and quick start).
+2. Read `AGENTS.md` in full at the start of **every** agent session or new thread. `AGENTS.md` is the binding contract; re-read it after any context reset.
+
+Do not skip these steps in favor of prior memory.
