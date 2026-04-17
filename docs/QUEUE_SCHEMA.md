@@ -8,6 +8,8 @@
 
 The **queue system** is **all artifacts that define, store, and operate the work backlog machinery** — not only `QUEUE.MD`. When editing backlog **process**, **schema**, or **next-task** behavior, touch every relevant file below so nothing drifts.
 
+**Template parity:** The canonical queue layout and filenames match the [MHughesDev/trading_bot](https://github.com/MHughesDev/trading_bot) template on GitHub (`docs/QUEUE*.MD`, `docs/QUEUE_STACK.csv`, `scripts/generate_queue_stack.py`, `scripts/ci_queue_consistency.py`, Cursor skills under `.cursor/skills/`). When changing the portable schema, keep this repo aligned with that source unless you intentionally fork behavior.
+
 | Artifact | Role |
 |----------|------|
 | [`QUEUE.MD`](QUEUE.MD) | **Agent protocol** + **conventions** (Kind, IDs, how to add/close items). Small file; read for rules, not full history. |
