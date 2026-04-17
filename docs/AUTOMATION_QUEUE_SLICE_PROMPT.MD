@@ -1,6 +1,6 @@
 # Automation prompt — queue slice → tests → PR → merge → prune
 
-**Documentation last reviewed:** **2026-04-17**.
+**Documentation last reviewed:** **2026-04-19**.
 
 **Queue system:** This prompt is part of the **[queue system](QUEUE_SCHEMA.md)** — see [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) for every file that implements backlog machinery.
 
@@ -31,7 +31,7 @@ You are a coding agent working in the Trading Bot repo. Your job is to **complet
 ## Phase 1 — Plan and branch
 
 0. Already done mandatory read of [`README.md`](../README.md) and [`AGENTS.md`](../AGENTS.md) for this session (see **Role**).
-1. Read **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** first — **not** [`QUEUE.MD`](QUEUE.MD) in full. Pick the row with the **smallest `stack_order`** where **`status`** is **`Open`**. If **`id`** is **`_QUEUE_EMPTY_`** or there is **no** **`Open`** row, **stop** — report empty stack and point to [**§6** — How to add or close an item](QUEUE.MD#6-how-to-add-or-close-an-item). Implement using **`agent_task`** + **`affected_files`** from that row. When the operator asks for **HIGH** priority only: filter **`Open`** rows by **`priority=HIGH`** in the CSV; if none, **stop** (same as above).
+1. From repo root run **`python3 scripts/print_next_queue_item.py`** — stdout is the full next **`Open`** row (smallest **`stack_order`**); use **`--json`** if you need machine parsing. Alternatively read **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** only — **not** [`QUEUE.MD`](QUEUE.MD) in full. If output is **`QUEUE_EMPTY:`** or **`id`** is **`_QUEUE_EMPTY_`**, **stop** — report empty stack and point to [**§6** — How to add or close an item](QUEUE.MD#6-how-to-add-or-close-an-item). Implement using **`agent_task`** + **`affected_files`** from that row. When the operator asks for **HIGH** priority only: if the printed row is not HIGH, **stop** or re-sort work per operator (script prints the stack order; filter CSV manually for HIGH-only).
 2. `git fetch origin main && git checkout main && git pull origin main`
 3. `git checkout -b <Branch>` from updated `main`.
 4. If the slice depends on another row (e.g. registry before guards), either include that dependency in the same slice or stop and report.
@@ -41,7 +41,7 @@ You are a coding agent working in the Trading Bot repo. Your job is to **complet
 ## Phase 2 — Implement
 
 1. Implement **only** the agreed queue slice; match existing patterns in **`affected_files`** from the CSV row.
-2. After merging: update **`QUEUE_STACK.csv`** (**`status`** → `Done` or remove row; **or** edit **`ROWS`** in **`scripts/generate_queue_stack.py`** and run **`python scripts/generate_queue_stack.py`** — no manual **`stack_order`** renumbering in Python), mirror status into **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** if that ID has a §2 table row, and refresh the small snapshot in [`QUEUE.MD`](QUEUE.MD) §2 if needed.
+2. **Before any merge to `main`** (on your feature branch): close out the queue item — update **`QUEUE_STACK.csv`** (**`status`** → `Done` or remove row; **or** edit **`ROWS`** in **`scripts/generate_queue_stack.py`** and run **`python scripts/generate_queue_stack.py`** — no manual **`stack_order`** renumbering in Python), mirror status into **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** if that ID has a §2 table row, and refresh the small snapshot in [`QUEUE.MD`](QUEUE.MD) §2 if needed. This is **not** optional for a completed slice: GitHub is updated **only after** this bookkeeping is done and pushed (see Phase 6).
 3. **Do not** commit secrets; **do not** weaken tests to pass.
 
 ---
@@ -69,6 +69,8 @@ bash scripts/ci_mlflow_promotion_policy.sh
 
 ## Phase 4 — Commit and push
 
+Include **all** slice work **and** queue closure from Phase 2 (stack + archive + `QUEUE.MD` snapshot if needed) in commits before you merge.
+
 ```bash
 git add -A
 git status   # verify no secrets / no accidental files
@@ -88,12 +90,23 @@ Retry push on transient network errors (bounded retries with backoff).
    - **Title:** imperative, includes queue IDs (e.g. `FB-AP-001: per-asset manifest schema`).
    - **Body:** what changed, why, queue reference, validation commands run and results, risks/follow-ups.
 2. If the project uses **draft PRs** by default, keep draft until validation is green; then mark ready.
+3. If queue updates were added **after** the first push, commit and **push again** so the PR shows the final **`QUEUE_STACK.csv`** / **`QUEUE_ARCHIVE.MD`** / snapshot state before you merge.
 
 ---
 
-## Phase 6 — Merge to `main`
+## Phase 6 — Merge to `main` (only after queue is closed on the branch)
 
-**Preferred:** Merge via **GitHub PR** (squash or merge commit per team policy) after **green checks** and review.
+**Order:** Implementation → validation (Phase 3) → **queue fully updated and archived on the branch** (Phase 2) → committed and pushed (Phase 4) → PR open and green (Phase 5) → **then** update GitHub’s default branch by merging.
+
+Do **not** run **`gh pr merge`** until **`QUEUE_STACK.csv`**, **`QUEUE_ARCHIVE.MD`**, and any **`QUEUE.MD`** §2 snapshot edits for this slice are **committed and pushed** to the PR branch, and **`python3 scripts/ci_queue_consistency.py`** passes locally.
+
+**One-step merge + delete head branch (GitHub CLI):** With `gh` installed and authenticated, from repo root (PR branch checked out) **after** the steps above:
+
+```bash
+gh pr merge --merge --delete-branch
+```
+
+Or: `gh pr merge <PR#> --merge --delete-branch`. Use `gh pr ready` first if the PR is draft. This merges with a merge commit and deletes the remote feature branch; then `git fetch origin --prune` and `git checkout main && git pull`, and `git branch -d <Branch>` locally if the branch still exists.
 
 **Local merge (if allowed and PR is not used):**
 
@@ -156,13 +169,15 @@ Task: Implement queue slice: <INSERT IDs OR BATCH>.
 Branch: cursor/<desc>-<suffix> from latest main.
 
 Steps:
+0) python3 scripts/print_next_queue_item.py  (or read QUEUE_STACK.csv for the next Open row)
 1) Fetch/pull main; create branch.
 2) Implement the slice only; touch paths from the CSV row **affected_files**.
-3) Run: ruff check . ; pytest (full or targeted per change) ; scripts/ci_spec_compliance.sh ; scripts/ci_mlflow_promotion_policy.sh
-4) Commit; push -u origin <branch>
-5) Open PR to main with title/body referencing queue IDs and validation
-6) After merge: delete slice branch locally and on origin; prune merged cursor/* if instructed
-7) Handoff: summary, files, validation, PR URL, branches deleted
+3) Close queue on branch: QUEUE_STACK.csv + QUEUE_ARCHIVE.MD + QUEUE.MD snapshot if needed; python3 scripts/ci_queue_consistency.py
+4) Run: ruff check . ; pytest (full or targeted per change) ; scripts/ci_spec_compliance.sh ; scripts/ci_mlflow_promotion_policy.sh
+5) Commit (include queue closure); push -u origin <branch>
+6) Open PR to main; push again if queue docs changed after first push
+7) Only after queue closure is on the remote branch: gh pr merge --merge --delete-branch
+8) Handoff: summary, files, validation, PR URL, branches deleted
 
 Do not merge unrelated branches. Do not force-push main. No secrets in commits.
 ```

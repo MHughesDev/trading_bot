@@ -33,7 +33,7 @@ If your environment supports project rules (for example `.cursorrules`), those r
 
 Agents working here should:
 
-- For **next queue item** work, read **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** first (smallest `stack_order` with `status=Open`; see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Use the row’s **`agent_task`** + **`affected_files`** — do not load the full [`QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) unless **`docs_refs`** requires it. If **`QUEUE_STACK.csv`** has no **`Open`** row (or `id=_QUEUE_EMPTY_`), **stop** and report — add or reprioritize per [**§6**](docs/QUEUE.MD#6-how-to-add-or-close-an-item); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+- For **next queue item** work, **run** **`python3 scripts/print_next_queue_item.py`** from repo root first (prints the full next **`Open`** row as terminal text — same selection as smallest `stack_order` with `status=Open`; optional **`--json`**). Alternatively open **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** manually (see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Use the row’s **`agent_task`** + **`affected_files`** — do not load the full [`QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) unless **`docs_refs`** requires it. If the script prints **`QUEUE_EMPTY:`** or there is no **`Open`** row, **stop** and report — add or reprioritize per [**§6**](docs/QUEUE.MD#6-how-to-add-or-close-an-item); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
 - When updating the **queue generator** ([`scripts/generate_queue_stack.py`](scripts/generate_queue_stack.py)): **reorder or append** entries in **`ROWS`** only — **`stack_order`** is filled when you run **`python scripts/generate_queue_stack.py`** (keep **`_QUEUE_EMPTY_`** last).
 - Preserve **non-negotiable rules** below unless the user task explicitly overrides.
 - Keep **live vs replay** behavior aligned where the architecture expects it (`decision_engine/run_step.py` is the shared decision step).
@@ -115,6 +115,14 @@ When work uses a **feature branch** (e.g. `cursor/<task>-42e8`):
 6. **Delete the feature branch** so it does not accumulate:
    - **Local:** `git branch -d <branch-name>` (use `-D` only if you intend to discard unmerged work).
    - **Remote:** `git push origin --delete <branch-name>` after the merge is on `main`.
+
+**Queue slices (GitHub CLI):** Finish the slice on your branch first: **`QUEUE_STACK.csv`**, **`QUEUE_ARCHIVE.MD`**, and any **`QUEUE.MD`** §2 snapshot — run **`python3 scripts/ci_queue_consistency.py`**, commit, and **push**. **Only after** that queue work is on the remote PR branch, merge to `main` and delete the head branch in one step (requires `gh` auth and a mergeable PR):
+
+```bash
+gh pr merge --merge --delete-branch
+```
+
+Run from the repo root with the PR branch checked out, or pass the PR number: `gh pr merge <PR#> --merge --delete-branch`. If the PR is still a draft, run `gh pr ready` first. Do **not** merge until queue closure is pushed — otherwise `main` will lack the archived queue state for that slice. Afterward: `git fetch origin --prune`, `git checkout main && git pull`, and `git branch -d <branch-name>` locally if needed.
 
 **Rule:** One short-lived branch per task is fine; **stale `cursor/*` branches that are already merged should be deleted** on `origin` to avoid clutter.
 
