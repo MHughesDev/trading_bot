@@ -27,6 +27,11 @@ from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.regime import RegimeOutput
 from app.contracts.risk import RiskState, SystemMode
+from execution.execution_logic import (
+    _execution_domain,
+    build_execution_context_from_decision,
+    build_execution_guidance,
+)
 
 
 def _ts(ts: datetime | None) -> datetime:
@@ -63,6 +68,8 @@ def build_decision_record(
     risk: RiskState,
     forecast_packet: ForecastPacket | None,
     trade: TradeAction | None,
+    feature_row: dict[str, float] | None = None,
+    mid_price: float | None = None,
 ) -> DecisionRecord:
     """Assemble §15 decision record from pipeline + risk outputs."""
     ts = _ts(data_timestamp)
@@ -125,6 +132,7 @@ def build_decision_record(
     reduce_intent: ReduceExposureIntent | None = None
     no_trade: NoTradeDecision | None = None
     suppression: SuppressionEvent | None = None
+    guid: Any | None = None
 
     if risk.mode == SystemMode.FLATTEN_ALL and trade is not None:
         outcome = DecisionOutcome.REDUCE_EXPOSURE
@@ -138,22 +146,49 @@ def build_decision_record(
         outcome = DecisionOutcome.TRADE_INTENT
         side = TradeIntentSide.LONG if proposal.direction > 0 else TradeIntentSide.SHORT
         tc = float(risk.risk_trigger_confidence or 0.0)
-        ec = float(risk.risk_execution_confidence or 0.0)
         dc = float(route.confidence)
+        fr = feature_row or {}
+        mp = float(mid_price if mid_price is not None else fr.get("close", 1.0))
+        sb = float(risk.spread_bps or 0.0)
+        xctx = build_execution_context_from_decision(
+            spread_bps=sb,
+            feature_row=fr,
+            regime=regime,
+            forecast=forecast,
+            risk=risk,
+            mid_price=mp,
+            forecast_packet=forecast_packet,
+            execution_feedback_bucket=None,
+            settings=settings,
+        )
+        xctx["_execution_policy"] = _execution_domain(settings)
+        guid = build_execution_guidance(xctx)
+        ec = float(guid.execution_confidence)
+        style_map = {
+            "passive": PreferredExecutionStyle.PASSIVE,
+            "aggressive": PreferredExecutionStyle.AGGRESSIVE,
+            "staggered": PreferredExecutionStyle.STAGGERED,
+            "twap": PreferredExecutionStyle.TWAP,
+            "suppress": PreferredExecutionStyle.SUPPRESS,
+        }
+        pstyle = style_map.get(
+            str(guid.preferred_execution_style), PreferredExecutionStyle.STAGGERED
+        )
+        urg = Urgency.HIGH if guid.urgency_high else Urgency.MEDIUM
         trade_intent = TradeIntentCanonical(
             intent_id=f"ti-{rid[:8]}",
             timestamp=ts,
             instrument_id=symbol,
             side=side,
-            urgency=Urgency.MEDIUM,
+            urgency=urg,
             size_fraction=float(proposal.size_fraction),
-            preferred_execution_style=PreferredExecutionStyle.STAGGERED,
+            preferred_execution_style=pstyle,
             decision_confidence=dc,
             trigger_confidence=tc,
             execution_confidence=ec,
             degradation_level=deg_s or "normal",
-            max_slippage_tolerance_bps=float(risk.spread_bps or 0.0) * 1.2,
-            reason_codes=["pipeline_trade_selected"],
+            max_slippage_tolerance_bps=float(guid.max_slippage_tolerance_bps),
+            reason_codes=["pipeline_trade_selected"] + list(guid.style_rationale_codes),
         )
     else:
         codes: list[str] = []
@@ -189,6 +224,8 @@ def build_decision_record(
         if isinstance(auct, dict)
         else None,
     }
+    if guid is not None:
+        diag["execution_guidance_preview"] = guid.model_dump(mode="json")
 
     return DecisionRecord(
         record_id=rid,

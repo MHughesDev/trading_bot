@@ -19,7 +19,14 @@ class ExecutionGuidance(BaseModel):
     stress_mode_flag: bool = False
     venue_preference_order: list[str] = Field(default_factory=list)
     execution_reason_codes: list[str] = Field(default_factory=list)
+    # FB-CAN-047 — deterministic style branch codes (subset of execution_reason_codes for style path)
+    style_rationale_codes: list[str] = Field(default_factory=list)
     worst_case_edge: float = 0.0
+    remaining_edge: float = Field(
+        default=0.0,
+        description="Pre-trade remaining edge proxy used for urgency / aggressive branch",
+    )
+    urgency_high: bool = False
     suppress_order: bool = False
     size_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
 

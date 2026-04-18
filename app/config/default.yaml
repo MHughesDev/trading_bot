@@ -63,6 +63,18 @@ apex_canonical:
       transition_size_multiplier_weight: 0.35
       novelty_size_multiplier_weight: 0.25
       max_transition_novelty_multiplier_weight: 0.55
+    execution:
+      high_confidence_threshold: 0.72
+      medium_confidence_threshold: 0.45
+      passive_spread_limit_bps: 18.0
+      emergency_remaining_edge_floor: 0.001
+      stress_twap_exec_conf_below: 0.25
+      suppress_exec_conf_below: 0.12
+      minimum_tradeable_edge: 0.0015
+      remaining_edge_scale: 0.9
+      urgency_trigger_strength_above: 0.55
+      urgency_trigger_confidence_above: 0.4
+      worst_case_slippage_multiplier: 2.5
     signal_confidence:
       market_microstructure:
         enabled: true

@@ -12,6 +12,17 @@ def _clip01(x: float) -> float:
     return max(0.0, min(1.0, float(x)))
 
 
+def _execution_domain(settings: Any) -> dict[str, Any]:
+    """FB-CAN-047: thresholds from ``apex_canonical.domains.execution``."""
+    if settings is None:
+        return {}
+    try:
+        ex = settings.canonical.domains.execution
+        return dict(ex) if isinstance(ex, dict) else {}
+    except Exception:
+        return {}
+
+
 def _f(ctx: dict[str, Any], key: str, default: float) -> float:
     v = ctx.get(key)
     if v is None:
@@ -82,25 +93,30 @@ def select_execution_style(
     urgency_high: bool,
     remaining_edge: float,
     stress: bool,
-) -> str:
-    """Spec §5.2 — deterministic style selection."""
-    high_t, med_t = 0.72, 0.45
-    passive_spread = 18.0
-    emergency_floor = 0.001
+    domain: dict[str, Any] | None = None,
+) -> tuple[str, list[str]]:
+    """Spec §5.2 — deterministic style selection + rationale codes (FB-CAN-047)."""
+    dom = domain or {}
+    high_t = float(dom.get("high_confidence_threshold", 0.72))
+    med_t = float(dom.get("medium_confidence_threshold", 0.45))
+    passive_spread = float(dom.get("passive_spread_limit_bps", 18.0))
+    emergency_floor = float(dom.get("emergency_remaining_edge_floor", 0.001))
+    stress_ec = float(dom.get("stress_twap_exec_conf_below", 0.25))
 
-    if stress and exec_conf < 0.25:
-        return "twap"
+    if stress and exec_conf < stress_ec:
+        return "twap", ["style_branch_stress_low_exec_conf_twap"]
     if exec_conf >= high_t and spread_bps <= passive_spread and not stress:
-        return "passive"
+        return "passive", ["style_branch_passive_high_conf_tight_spread"]
     if exec_conf >= med_t:
-        return "staggered"
+        return "staggered", ["style_branch_staggered_medium_conf"]
     if urgency_high and remaining_edge > emergency_floor:
-        return "aggressive"
-    return "twap"
+        return "aggressive", ["style_branch_aggressive_urgency_remaining_edge"]
+    return "twap", ["style_branch_default_twap"]
 
 
 def build_execution_guidance(ctx: dict[str, Any]) -> ExecutionGuidance:
     """Full guidance record for metadata + service gating."""
+    dom = ctx.get("_execution_policy") if isinstance(ctx.get("_execution_policy"), dict) else {}
     spread_bps = _f(ctx, "spread_bps", 5.0)
     exec_conf = compute_execution_confidence(ctx)
     stress, stress_reasons = compute_stress_mode(ctx)
@@ -108,22 +124,24 @@ def build_execution_guidance(ctx: dict[str, Any]) -> ExecutionGuidance:
     heat = _f(ctx, "heat_score", 0.2)
     urgency = bool(ctx.get("urgency_high", False))
     remaining_edge = _f(ctx, "remaining_edge", wce + 0.01)
+    ec_floor = float(dom.get("suppress_exec_conf_below", 0.12))
 
     reasons: list[str] = []
     reasons.extend(stress_reasons)
 
-    style = select_execution_style(
+    style, style_codes = select_execution_style(
         exec_conf=exec_conf,
         spread_bps=spread_bps,
         urgency_high=urgency,
         remaining_edge=remaining_edge,
         stress=stress,
+        domain=dom,
     )
 
-    suppress = edge_suppress or (exec_conf < 0.12 and not urgency)
+    suppress = edge_suppress or (exec_conf < ec_floor and not urgency)
     if edge_suppress:
         reasons.append("worst_case_edge_below_min")
-    if exec_conf < 0.12 and not urgency:
+    if exec_conf < ec_floor and not urgency:
         reasons.append("execution_confidence_floor")
 
     size_mult = 1.0
@@ -139,6 +157,7 @@ def build_execution_guidance(ctx: dict[str, Any]) -> ExecutionGuidance:
 
     if suppress:
         style = "suppress"
+        style_codes = ["style_branch_suppress"]
 
     return ExecutionGuidance(
         preferred_execution_style=style,
@@ -147,7 +166,10 @@ def build_execution_guidance(ctx: dict[str, Any]) -> ExecutionGuidance:
         stress_mode_flag=stress,
         venue_preference_order=list(ctx.get("venue_preference_order") or []),
         execution_reason_codes=reasons,
+        style_rationale_codes=style_codes,
         worst_case_edge=wce,
+        remaining_edge=remaining_edge,
+        urgency_high=urgency,
         suppress_order=suppress,
         size_multiplier=size_mult,
     )
@@ -207,6 +229,7 @@ def build_execution_context_from_decision(
     mid_price: float,
     forecast_packet: Any | None = None,
     execution_feedback_bucket: dict[str, float] | None = None,
+    settings: Any | None = None,
 ) -> dict[str, Any]:
     """Build `execution_context` for guidance from live/replay decision outputs."""
     close = max(float(feature_row.get("close", mid_price)), 1e-12)
@@ -237,6 +260,12 @@ def build_execution_context_from_decision(
         venue_q = _clip01(0.5 * venue_q + 0.5 * float(execution_feedback_bucket.get("venue_quality", venue_q)))
         slip_q = _clip01(0.55 * slip_q + 0.45 * float(execution_feedback_bucket.get("execution_trust", slip_q)))
 
+    ex_dom = _execution_domain(settings)
+    min_trade_edge = float(ex_dom.get("minimum_tradeable_edge", 0.0015))
+    urg_s = float(ex_dom.get("urgency_trigger_strength_above", 0.55))
+    urg_c = float(ex_dom.get("urgency_trigger_confidence_above", 0.4))
+    rem_scale = float(ex_dom.get("remaining_edge_scale", 0.9))
+
     ctx: dict[str, Any] = {
         "spread_bps": spread_bps,
         "depth_quality": depth_quality,
@@ -248,12 +277,12 @@ def build_execution_context_from_decision(
         "volatility_proxy": vol_proxy,
         "expected_edge": expected_edge,
         "expected_slippage_bps": slip_bps,
-        "worst_case_slippage_multiplier": 2.5,
+        "worst_case_slippage_multiplier": float(ex_dom.get("worst_case_slippage_multiplier", 2.5)),
         "adverse_fill_penalty": 0.001 + spread_stress * 0.002,
         "spread_risk_penalty": spread_stress * 0.004,
-        "minimum_tradeable_edge": 0.0015,
-        "remaining_edge": expected_edge * 0.9,
-        "urgency_high": trig_s > 0.55 and trig_c > 0.4,
+        "minimum_tradeable_edge": min_trade_edge,
+        "remaining_edge": max(0.0, expected_edge * rem_scale - min_trade_edge * 0.25),
+        "urgency_high": trig_s > urg_s and trig_c > urg_c,
         "liquidation_fragility": min(1.0, heat * 0.6 + vol_proxy * 2.0),
     }
     return ctx
@@ -311,6 +340,8 @@ def prepare_order_intent_for_execution(
         return ensure_risk_signature(out, settings)
 
     ctx = dict(execution_context or extract_execution_context(intent))
+    if "_execution_policy" not in ctx and settings is not None:
+        ctx["_execution_policy"] = _execution_domain(settings)
     guidance = build_execution_guidance(ctx)
     out = merge_guidance_into_intent(intent, guidance)
     if guidance.suppress_order:

@@ -493,6 +493,7 @@ async def run_live_loop(
                     mid_price=mid,
                     forecast_packet=pipeline.last_forecast_packet,
                     execution_feedback_bucket=fb,
+                    settings=cfg,
                 )
                 meta = dict(raw.metadata or {})
                 meta["execution_context"] = xctx

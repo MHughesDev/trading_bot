@@ -121,6 +121,19 @@ CANONICAL_FINAL_NOTIONAL_USD = Histogram(
     buckets=(0.0, 100.0, 500.0, 1000.0, 5000.0, 10000.0, 25000.0, 50000.0, 100000.0),
 )
 
+# --- Execution guidance (FB-CAN-047) ---
+CANONICAL_EXECUTION_STYLE = Counter(
+    "tb_canonical_execution_style_total",
+    "Selected preferred_execution_style from pre-trade guidance preview",
+    ["symbol", "style"],
+)
+CANONICAL_EXECUTION_GUIDANCE_CONFIDENCE = Histogram(
+    "tb_canonical_execution_guidance_confidence",
+    "execution_confidence from ExecutionGuidance preview on trade_intent ticks",
+    ["symbol"],
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+
 # --- Data quality proxy (spec §4.2) ---
 CANONICAL_DATA_AGE_SECONDS = Histogram(
     "tb_canonical_data_age_seconds",
@@ -297,6 +310,21 @@ def record_canonical_post_tick(
         forecast_packet=forecast_packet,
         feature_row=feature_row,
     )
+
+    dr = getattr(risk, "last_decision_record", None)
+    if isinstance(dr, dict):
+        diag = dr.get("diagnostics") or {}
+        eg = diag.get("execution_guidance_preview")
+        if isinstance(eg, dict):
+            st = eg.get("preferred_execution_style")
+            if st is not None:
+                CANONICAL_EXECUTION_STYLE.labels(symbol=sym, style=str(st)).inc()
+            ecg = eg.get("execution_confidence")
+            if ecg is not None:
+                try:
+                    CANONICAL_EXECUTION_GUIDANCE_CONFIDENCE.labels(symbol=sym).observe(float(ecg))
+                except (TypeError, ValueError):
+                    pass
 
 
 def set_active_config_version(version: str) -> None:
