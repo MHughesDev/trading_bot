@@ -125,7 +125,16 @@ def main() -> int:
             "QUEUE_EMPTY: No Open rows in QUEUE_STACK.csv "
             "(or only _QUEUE_EMPTY_ sentinel). Nothing to implement — see docs/QUEUE.MD §6."
         )
-        print(msg)
+        if args.json:
+            print(
+                json.dumps(
+                    {"queue_empty": True, "message": msg},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print(msg)
         return 0
 
     if args.json:
