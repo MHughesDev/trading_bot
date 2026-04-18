@@ -6,9 +6,11 @@ from app.contracts.execution_guidance import ExecutionFeedback
 from execution.execution_logic import (
     apply_execution_feedback,
     build_execution_context_from_decision,
+    build_execution_guidance,
     compute_execution_confidence,
     prepare_order_intent_for_execution,
     reconcile_partial_fill,
+    select_execution_style,
 )
 
 from app.config.settings import AppSettings
@@ -80,6 +82,41 @@ def test_prepare_with_context_not_suppressed():
     assert "execution_guidance" in (out.metadata or {})
 
 
+def test_select_execution_style_passive_branch():
+    style, codes = select_execution_style(
+        exec_conf=0.8,
+        spread_bps=10.0,
+        urgency_high=False,
+        remaining_edge=0.01,
+        stress=False,
+        domain={"high_confidence_threshold": 0.72, "passive_spread_limit_bps": 18.0},
+    )
+    assert style == "passive"
+    assert codes == ["style_branch_passive_high_conf_tight_spread"]
+
+
+def test_build_guidance_includes_style_rationale():
+    ctx = {
+        "depth_quality": 0.85,
+        "spread_quality": 0.85,
+        "venue_quality": 0.85,
+        "latency_quality": 0.85,
+        "slippage_quality": 0.85,
+        "spread_bps": 8.0,
+        "heat_score": 0.2,
+        "expected_edge": 0.02,
+        "expected_slippage_bps": 6.0,
+        "minimum_tradeable_edge": 0.0015,
+        "remaining_edge": 0.015,
+        "urgency_high": False,
+        "_execution_policy": {"suppress_exec_conf_below": 0.05},
+    }
+    g = build_execution_guidance(ctx)
+    assert g.preferred_execution_style == "passive"
+    assert g.style_rationale_codes
+    assert g.remaining_edge >= 0.0
+
+
 def test_build_context_from_decision():
     regime = RegimeOutput(
         state_index=0,
@@ -103,6 +140,7 @@ def test_build_context_from_decision():
         risk=RiskState(),
         mid_price=50000.0,
         forecast_packet=None,
+        settings=AppSettings(),
     )
     assert "spread_bps" in ctx
     assert ctx["spread_bps"] == 6.0

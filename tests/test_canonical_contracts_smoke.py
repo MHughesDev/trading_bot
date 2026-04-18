@@ -78,7 +78,10 @@ def test_execution_guidance_roundtrip():
         max_slippage_tolerance_bps=12.0,
         stress_mode_flag=False,
         execution_reason_codes=["ok"],
+        style_rationale_codes=["style_branch_passive_high_conf_tight_spread"],
         worst_case_edge=0.0,
+        remaining_edge=0.01,
+        urgency_high=False,
         suppress_order=False,
         size_multiplier=1.0,
     )

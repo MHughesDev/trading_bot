@@ -148,6 +148,8 @@ def run_decision_tick(
         risk=risk_state,
         forecast_packet=pipeline.last_forecast_packet,
         trade=trade,
+        feature_row=feature_row,
+        mid_price=mid_price,
     )
     risk_state = risk_state.model_copy(
         update={"last_decision_record": dr.model_dump(mode="json")},

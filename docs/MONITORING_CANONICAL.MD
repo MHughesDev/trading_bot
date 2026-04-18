@@ -16,6 +16,7 @@ All canonical slice metrics use the `tb_canonical_*` prefix (alongside existing 
 | Trigger | `tb_canonical_trigger_stage_total`, `tb_canonical_trigger_missed_move_total`, `tb_canonical_trigger_setup_to_confirm_latency_ms` | From `forecast_diagnostics["trigger"]` (**FB-CAN-043:** deterministic stage timestamps + latency on `TriggerOutput`) |
 | Auction / decision | `tb_canonical_auction_selected_score`, `tb_canonical_auction_suppressed_total`, `tb_canonical_auction_top_n_saturation`, `tb_canonical_auction_candidates_evaluated` | From `forecast_diagnostics["auction"]` (**FB-CAN-044:** throughput / top-N saturation) |
 | Risk | `tb_canonical_risk_size_multiplier`, `tb_canonical_risk_final_notional_usd` | From `RiskState` |
+| Execution (FB-CAN-047) | `tb_canonical_execution_style_total`, `tb_canonical_execution_guidance_confidence` | From `last_decision_record.diagnostics.execution_guidance_preview` when present |
 | Data quality (proxy) | `tb_canonical_data_age_seconds` | From `RiskState.data_age_seconds` |
 | Drift / calibration | `tb_canonical_forecast_ood_score` | From `ForecastPacket.ood_score` |
 | Drift / calibration (FB-CAN-039) | `tb_canonical_theoretical_edge_score`, `tb_canonical_edge_erosion_score`, `tb_canonical_trade_intent_execution_confidence` | Trade-intent ticks only; theoretical edge = `decision_confidence × trigger_confidence`, erosion = `max(0, theoretical − execution_confidence)` |

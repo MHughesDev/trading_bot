@@ -30,6 +30,7 @@ class PreferredExecutionStyle(StrEnum):
     AGGRESSIVE = "aggressive"
     STAGGERED = "staggered"
     TWAP = "twap"
+    SUPPRESS = "suppress"
 
 
 class SuppressionType(StrEnum):
