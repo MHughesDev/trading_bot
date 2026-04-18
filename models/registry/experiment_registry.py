@@ -1,8 +1,8 @@
-"""APEX research experiment registry (FB-CAN-011).
+"""APEX research experiment registry (FB-CAN-011, FB-CAN-027).
 
 Persists experiment records per
 ``docs/Human Provided Specs/new_specs/canonical/APEX_Research_Experiment_Registry_Spec_v1_0.md``.
-Links to release candidates via ``linked_release_candidate_id`` (see ``orchestration/release_gating``).
+Links to release candidates via ``linked_release_candidate`` (see ``orchestration/release_gating``).
 """
 
 from __future__ import annotations
@@ -15,6 +15,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from orchestration.release_gating import (
+    ReleaseCandidate,
+    ReleaseLedger,
+    default_release_ledger_path,
+    read_release_ledger,
+    write_release_ledger,
+)
 
 ExperimentStatus = Literal[
     "draft",
@@ -51,6 +59,29 @@ ChangeType = Literal[
     "other",
 ]
 
+# Spec §4 — allowed transitions (FB-CAN-027)
+_EXPERIMENT_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    "draft": frozenset({"running", "rejected", "archived"}),
+    "running": frozenset({"completed", "rejected", "candidate_for_shadow", "archived"}),
+    "completed": frozenset({"candidate_for_shadow", "candidate_for_release", "rejected", "archived"}),
+    "candidate_for_shadow": frozenset({"candidate_for_release", "rejected", "archived"}),
+    "candidate_for_release": frozenset({"archived"}),
+    "rejected": frozenset({"archived"}),
+    "archived": frozenset(),
+}
+
+
+def validate_experiment_transition(old_status: ExperimentStatus, new_status: ExperimentStatus) -> None:
+    """Raise ValueError if transition is not allowed."""
+    if old_status == new_status:
+        return
+    allowed = _EXPERIMENT_STATUS_TRANSITIONS.get(old_status)
+    if allowed is None or new_status not in allowed:
+        raise ValueError(
+            f"invalid status transition {old_status!r} -> {new_status!r}; "
+            f"allowed from {old_status!r}: {sorted(allowed or ())}"
+        )
+
 
 class ExperimentRecord(BaseModel):
     """Single experiment (spec §3)."""
@@ -85,6 +116,24 @@ class ExperimentRecord(BaseModel):
 
     def to_serializable_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
+
+
+def validate_experiment_record_fields(record: ExperimentRecord, *, require_non_draft_fields: bool) -> list[str]:
+    """Return human-readable validation errors (empty if ok)."""
+    errs: list[str] = []
+    if not (record.experiment_id or "").strip():
+        errs.append("experiment_id is required")
+    if not (record.title or "").strip():
+        errs.append("title is required")
+    st = record.status
+    if require_non_draft_fields or st != "draft":
+        if not (record.owner or "").strip():
+            errs.append("owner is required when status is not draft")
+        if not (record.hypothesis or "").strip():
+            errs.append("hypothesis is required when status is not draft")
+        if not record.metrics_defined_before_run:
+            errs.append("metrics_defined_before_run must be non-empty when status is not draft")
+    return errs
 
 
 class ExperimentRegistry(BaseModel):
@@ -125,12 +174,95 @@ def write_experiment_registry(reg: ExperimentRegistry, path: str | Path | None =
     return p
 
 
-def upsert_experiment(reg: ExperimentRegistry, record: ExperimentRecord) -> ExperimentRegistry:
-    """Replace by ``experiment_id`` or append."""
+def load_or_create_experiment_registry(path: str | Path | None = None) -> ExperimentRegistry:
+    """Return on-disk registry or an empty one."""
+    r = read_experiment_registry(path)
+    return r if r is not None else ExperimentRegistry()
+
+
+def sync_experiment_release_link_in_ledger(
+    *,
+    experiment_id: str,
+    release_candidate_id: str | None,
+    ledger_path: str | Path | None = None,
+) -> bool:
+    """
+    Keep ``ReleaseCandidate.linked_experiment_ids`` aligned with
+    ``ExperimentRecord.linked_release_candidate`` (FB-CAN-027).
+
+    Returns True if the ledger file was written. If ``release_candidate_id`` is set, that
+    release must already exist in the ledger (append candidates via tooling first).
+    """
+    lp = Path(ledger_path) if ledger_path is not None else default_release_ledger_path()
+    led = read_release_ledger(lp) or ReleaseLedger()
+    if release_candidate_id is not None:
+        if not any(c.release_id == release_candidate_id for c in led.candidates):
+            raise ValueError(
+                f"release candidate {release_candidate_id!r} not found in ledger {lp}; "
+                "add the ReleaseCandidate to release_ledger.json first"
+            )
+    changed = False
+    new_cands: list[ReleaseCandidate] = []
+    for c in led.candidates:
+        ids = [x for x in c.linked_experiment_ids if x != experiment_id]
+        if release_candidate_id is not None and c.release_id == release_candidate_id:
+            if experiment_id not in ids:
+                ids.append(experiment_id)
+        if ids != c.linked_experiment_ids:
+            changed = True
+        new_cands.append(c.model_copy(update={"linked_experiment_ids": ids}))
+    if changed:
+        write_release_ledger(ReleaseLedger(schema_version=led.schema_version, candidates=new_cands), lp)
+    return changed
+
+
+def upsert_experiment(
+    reg: ExperimentRegistry,
+    record: ExperimentRecord,
+    *,
+    ledger_path: str | Path | None = None,
+) -> ExperimentRegistry:
+    """Replace by ``experiment_id`` or append; validate lifecycle + required fields; sync release ledger."""
+    prev: ExperimentRecord | None = None
+    for e in reg.experiments:
+        if e.experiment_id == record.experiment_id:
+            prev = e
+            break
+    if prev is not None:
+        validate_experiment_transition(prev.status, record.status)
+    errs = validate_experiment_record_fields(record, require_non_draft_fields=False)
+    if errs:
+        raise ValueError("; ".join(errs))
+
     out = [e for e in reg.experiments if e.experiment_id != record.experiment_id]
     out.append(record)
     out.sort(key=lambda x: x.experiment_id)
-    return ExperimentRegistry(schema_version=reg.schema_version, experiments=out)
+    new_reg = ExperimentRegistry(schema_version=reg.schema_version, experiments=out)
+    sync_experiment_release_link_in_ledger(
+        experiment_id=record.experiment_id,
+        release_candidate_id=record.linked_release_candidate,
+        ledger_path=ledger_path,
+    )
+    return new_reg
+
+
+def delete_experiment(
+    reg: ExperimentRegistry,
+    experiment_id: str,
+    *,
+    ledger_path: str | Path | None = None,
+) -> ExperimentRegistry:
+    """Remove an experiment and drop it from any release candidate links."""
+    new_list = [e for e in reg.experiments if e.experiment_id != experiment_id]
+    if len(new_list) == len(reg.experiments):
+        raise KeyError(f"experiment_id not found: {experiment_id!r}")
+    new_reg = ExperimentRegistry(schema_version=reg.schema_version, experiments=new_list)
+    sync_experiment_release_link_in_ledger(
+        experiment_id=experiment_id,
+        release_candidate_id=None,
+        ledger_path=ledger_path,
+    )
+    return new_reg
 
 
 def link_experiment_to_release(
@@ -138,8 +270,9 @@ def link_experiment_to_release(
     *,
     experiment_id: str,
     release_candidate_id: str,
+    ledger_path: str | Path | None = None,
 ) -> ExperimentRegistry:
-    """Set ``linked_release_candidate`` on a record."""
+    """Set ``linked_release_candidate`` on a record and mirror on the release ledger."""
     found = False
     new_list: list[ExperimentRecord] = []
     for e in reg.experiments:
@@ -152,7 +285,13 @@ def link_experiment_to_release(
             new_list.append(e)
     if not found:
         raise KeyError(f"experiment_id not found: {experiment_id!r}")
-    return ExperimentRegistry(schema_version=reg.schema_version, experiments=new_list)
+    new_reg = ExperimentRegistry(schema_version=reg.schema_version, experiments=new_list)
+    sync_experiment_release_link_in_ledger(
+        experiment_id=experiment_id,
+        release_candidate_id=release_candidate_id,
+        ledger_path=ledger_path,
+    )
+    return new_reg
 
 
 def query_experiments(

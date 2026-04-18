@@ -12,7 +12,7 @@ from typing import Annotated, Any, Literal
 
 from contextlib import asynccontextmanager
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi import status as http_status
@@ -114,6 +114,17 @@ from orchestration.release_evidence import (
     build_release_evidence_bundle,
     diff_canonical_runtime,
     resolve_canonical_from_yaml_text,
+)
+from models.registry.experiment_registry import (
+    ChangeType,
+    ExperimentDomain,
+    ExperimentRecord,
+    ExperimentStatus,
+    delete_experiment,
+    load_or_create_experiment_registry,
+    query_experiments,
+    upsert_experiment,
+    write_experiment_registry,
 )
 
 logger = logging.getLogger(__name__)
@@ -765,6 +776,76 @@ def post_release_evidence_diff(body: ReleaseEvidenceDiffRequest) -> dict[str, An
     baseline = resolve_canonical_from_yaml_text(body.baseline_yaml)
     current = settings.canonical
     return diff_canonical_runtime(baseline, current)
+
+
+@app.get("/governance/experiments")
+def list_experiments(
+    domain: Annotated[ExperimentDomain | None, Query()] = None,
+    status: Annotated[ExperimentStatus | None, Query()] = None,
+    change_type: Annotated[ChangeType | None, Query()] = None,
+    tag: Annotated[str | None, Query()] = None,
+    linked_release: Annotated[str | None, Query()] = None,
+    notes_substring: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    """APEX experiment registry (FB-CAN-027): filterable list."""
+    reg = load_or_create_experiment_registry()
+    rows = query_experiments(
+        reg,
+        domain=domain,
+        status=status,
+        change_type=change_type,
+        tag=tag,
+        linked_release=linked_release,
+        notes_substring=notes_substring,
+    )
+    return {"experiments": [e.model_dump(mode="json") for e in rows], "count": len(rows)}
+
+
+@app.get("/governance/experiments/{experiment_id}")
+def get_experiment(experiment_id: str) -> dict[str, Any]:
+    reg = load_or_create_experiment_registry()
+    for e in reg.experiments:
+        if e.experiment_id == experiment_id:
+            return e.model_dump(mode="json")
+    raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="experiment not found")
+
+
+@app.post("/governance/experiments")
+def post_experiment(
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Create or replace an experiment by ``experiment_id`` (JSON body matches ``ExperimentRecord``)."""
+    try:
+        rec = ExperimentRecord.model_validate(body)
+        reg = load_or_create_experiment_registry()
+        new_reg = upsert_experiment(reg, rec)
+        write_experiment_registry(new_reg)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=exc.errors(),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return rec.model_dump(mode="json")
+
+
+@app.delete("/governance/experiments/{experiment_id}")
+def remove_experiment(
+    experiment_id: str,
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, str]:
+    try:
+        reg = load_or_create_experiment_registry()
+        new_reg = delete_experiment(reg, experiment_id)
+        write_experiment_registry(new_reg)
+    except KeyError:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="experiment not found") from None
+    return {"deleted": experiment_id}
 
 
 @app.get("/routes")
