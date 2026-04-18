@@ -187,6 +187,27 @@ def test_live_blocked_without_fault_stress_evidence():
     assert "fault_stress_evidence" in r.blocked_gates
 
 
+def test_feature_family_live_requires_replay_flag():
+    ev = _minimal_evidence_live().model_copy(update={"feature_family_replay_passed": False})
+    c = ReleaseCandidate(
+        release_id="rel-ff",
+        kind="feature_family",
+        owner="ops",
+        config_version="1.0.0",
+        feature_family_refs=["funding"],
+        evidence=ev,
+        rollback=RollbackTarget(target_config_version="0.9.0", target_feature_family_refs=["funding"]),
+    )
+    r = evaluate_promotion_gates(c, target_environment="live")
+    assert r.allowed is False
+    assert "feature_family_replay" in r.blocked_gates
+
+    ev2 = ev.model_copy(update={"feature_family_replay_passed": True})
+    c2 = c.model_copy(update={"evidence": ev2})
+    r2 = evaluate_promotion_gates(c2, target_environment="live")
+    assert r2.allowed is True
+
+
 def test_release_ledger_roundtrip(tmp_path):
     path = tmp_path / "ledger.json"
     led = ReleaseLedger(

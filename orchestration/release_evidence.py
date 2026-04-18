@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.config.canonical_config import CanonicalRuntimeConfig, resolve_canonical_config
 from app.config.settings import AppSettings, load_settings
 from models.registry.shadow_comparison_store import load_shadow_comparison_store
-from orchestration.release_gating import RollbackTarget
+from app.contracts.release_objects import RollbackTarget
 
 
 class ReleaseEvidenceBundle(BaseModel):
