@@ -6,7 +6,8 @@
 ## Routing and service
 
 - **`router.py`** — **`create_execution_adapter` / `get_execution_adapter`**: selects adapter from `AppSettings` (`paper` → Alpaca paper, `live` → Coinbase live)
-- **`service.py`** — **`ExecutionService`**: central submit path; uses intent gate + adapter
+- **`service.py`** — **`ExecutionService`**: central submit path; runs **`execution_logic.prepare_order_intent_for_execution`** (guidance + optional size scale) then intent gate + adapter
+- **`execution_logic.py`** — **FB-CAN-008:** execution confidence, style (`passive` / `aggressive` / `staggered` / `twap` / `suppress`), stress mode, worst-case edge; **`ExecutionFeedback`** / partial-fill reconciliation helpers; live loop attaches **`metadata.execution_context`**
 - **`intent_gate.py`** — Validates execution allowed (signing, settings)
 
 ## Adapters (`execution/adapters/`)
