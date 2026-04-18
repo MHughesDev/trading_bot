@@ -1152,7 +1152,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-GOV-OBJ",
         "id": "FB-CAN-051",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement release-object model (config/logic/model-family/feature-family/combined)",
         "agent_task": "Implement canonical release-object schema and APIs across config release, logic release, model-family release, feature-family release, and combined release, each with owner/rationale/evidence/rollback metadata.",
         "affected_files": "models/|orchestration/|control_plane/|app/contracts/|tests/",

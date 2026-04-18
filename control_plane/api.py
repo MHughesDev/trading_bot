@@ -112,11 +112,19 @@ from orchestration.app_scheduler import (
     stop_app_background_scheduler,
 )
 from orchestration.asset_init_pipeline import get_job as get_init_job, try_start_asset_init_job
+from app.contracts.release_objects import (
+    ReleaseCandidate,
+    ReleaseEnvironment,
+    ReleaseLedger,
+    read_release_ledger,
+    write_release_ledger,
+)
 from orchestration.release_evidence import (
     build_release_evidence_bundle,
     diff_canonical_runtime,
     resolve_canonical_from_yaml_text,
 )
+from orchestration.release_gating import evaluate_promotion_gates
 from orchestration.shadow_comparison import run_shadow_replay_pair_comparison
 from app.config.shadow_comparison import shadow_policy_from_settings
 from models.registry.shadow_comparison_store import (
@@ -778,6 +786,13 @@ class ShadowComparisonRunRequest(BaseModel):
     bars: int = Field(220, ge=50, le=5000)
 
 
+class PromotionGateEvaluateRequest(BaseModel):
+    """Evaluate promotion gates for a release candidate (FB-CAN-051)."""
+
+    candidate: dict[str, Any]
+    target_environment: ReleaseEnvironment = "live"
+
+
 @app.get("/governance/release-evidence")
 def get_release_evidence() -> dict[str, Any]:
     """APEX release evidence bundle for the running process (FB-CAN-026)."""
@@ -850,6 +865,54 @@ def post_release_evidence_diff(body: ReleaseEvidenceDiffRequest) -> dict[str, An
     baseline = resolve_canonical_from_yaml_text(body.baseline_yaml)
     current = settings.canonical
     return diff_canonical_runtime(baseline, current)
+
+
+@app.get("/governance/release-objects")
+def list_release_objects() -> dict[str, Any]:
+    """APEX release ledger (FB-CAN-051): config/logic/model/feature/combined release records."""
+    led = read_release_ledger()
+    if led is None:
+        return {"schema_version": 1, "candidates": [], "count": 0, "ledger_path": "models/registry/release_ledger.json"}
+    d = led.model_dump(mode="json")
+    d["count"] = len(led.candidates)
+    return d
+
+
+@app.get("/governance/release-objects/{release_id}")
+def get_release_object(release_id: str) -> dict[str, Any]:
+    """Return one release candidate by ``release_id``."""
+    led = read_release_ledger()
+    if led is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="release ledger not found")
+    for c in led.candidates:
+        if c.release_id == release_id:
+            return c.model_dump(mode="json")
+    raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="release_id not found")
+
+
+@app.post("/governance/release-objects")
+def post_release_object(
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Create or replace a release candidate by ``release_id`` in the ledger file."""
+    cand = ReleaseCandidate.model_validate(body)
+    led = read_release_ledger()
+    if led is None:
+        led = ReleaseLedger()
+    rest: list[ReleaseCandidate] = [c for c in led.candidates if c.release_id != cand.release_id]
+    rest.append(cand)
+    led = ReleaseLedger(candidates=rest)
+    write_release_ledger(led)
+    return {"ok": True, "release_id": cand.release_id}
+
+
+@app.post("/governance/release-objects/evaluate-gates")
+def post_release_objects_evaluate_gates(body: PromotionGateEvaluateRequest) -> dict[str, Any]:
+    """Evaluate promotion gates for a candidate JSON (no persistence)."""
+    cand = ReleaseCandidate.model_validate(body.candidate)
+    result = evaluate_promotion_gates(cand, target_environment=body.target_environment)
+    return result.model_dump(mode="json")
 
 
 @app.get("/governance/experiments")
