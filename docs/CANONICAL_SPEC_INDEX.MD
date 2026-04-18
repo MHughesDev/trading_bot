@@ -2,7 +2,7 @@
 
 **Purpose:** Single entry point for **target system architecture** during the **FB-CAN-*** canonical migration. Use this page to decide which documents are **binding for “what we are building toward”** vs **historical or as-implemented**.
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-014: [`CANONICAL_MODULE_MAP.MD`](CANONICAL_MODULE_MAP.MD) — code-to-domain map).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-015: [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py) — input snapshot contracts).
 
 ---
 
@@ -41,5 +41,6 @@ When two documents conflict on **target** behavior, **canonical APEX** wins. Whe
 - **Governance (release gating + experiment registry):** [`GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD)
 - **Deletion log (removed paths + replacements):** [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD)
 - **Module map (runtime packages ↔ APEX domains):** [`CANONICAL_MODULE_MAP.MD`](CANONICAL_MODULE_MAP.MD)
+- **Decision Service input snapshots (typed):** [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py) · builders [`app/contracts/snapshot_builders.py`](../app/contracts/snapshot_builders.py)
 - **Queue program:** [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) · [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) §2.7 **FB-CAN-***
 - **Gap audit:** [`reports/REPO_VS_CANONICAL_SPECS_GAP_AUDIT.md`](reports/REPO_VS_CANONICAL_SPECS_GAP_AUDIT.md)

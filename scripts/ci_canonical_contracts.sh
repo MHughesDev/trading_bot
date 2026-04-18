@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # FB-CAN-013 — merge gate: release-gating CLI accepts the checked-in live candidate fixture.
-# Canonical domain tests run in the main `pytest tests/` job (`test_canonical_*.py`, etc.).
+# FB-CAN-015 — typed snapshot models (`tests/test_decision_snapshots.py`) run in main pytest.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

@@ -34,6 +34,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD) | Operator guide: governance files and `validate_release_gates.py`. |
 | [`docs/CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD) | **FB-CAN-012+** — removed paths and replacement pointers (canonical migration). |
 | [`docs/CANONICAL_MODULE_MAP.MD`](CANONICAL_MODULE_MAP.MD) | **FB-CAN-014** — module map: runtime packages vs APEX domains (`run_decision_tick` spine). |
+| [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py) | **FB-CAN-015** — APEX input snapshot Pydantic models + `snapshot_builders` at pipeline boundary. |
 | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent workflow: one slice → validate → PR → merge. |
 | [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) | Cursor **Add to Queue** skill for adding/updating items. |
 | [`.cursor/skills/queue-one-at-a-time/SKILL.md`](../.cursor/skills/queue-one-at-a-time/SKILL.md) | Cursor **Queue One-at-a-Time** execution skill (take top Open row only, implement, validate, document, commit). |

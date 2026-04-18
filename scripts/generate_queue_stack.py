@@ -648,7 +648,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DATA",
         "id": "FB-CAN-015",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Canonical data contract layer for market/structural/safety/execution snapshots",
         "agent_task": "Implement canonical input contract models and validators for Market Snapshot, Structural Signal Snapshot, Safety/Regime Snapshot, Execution Feedback Snapshot, and Service Configuration Snapshot. Replace ad-hoc feature dictionaries at decision boundaries with typed canonical snapshots and explicit freshness/confidence semantics from the canonical data contract spec.",
         "affected_files": "app/contracts/|decision_engine/|data_plane/|tests/",
