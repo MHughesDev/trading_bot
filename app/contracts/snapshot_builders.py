@@ -8,6 +8,7 @@ from typing import Any
 
 from app.config.settings import AppSettings
 from app.config.signal_confidence import apply_signal_family_confidence
+from app.contracts.canonical_conventions import validate_decision_boundary_input_timestamps
 from app.contracts.decision_snapshots import (
     DecisionBoundaryInput,
     ExchangeRiskLevel,
@@ -211,6 +212,7 @@ def build_decision_boundary_input(
         execution_feedback=execution_feedback,
         service_config=svc,
     )
+    validate_decision_boundary_input_timestamps(bundle)
 
     merged["canonical_market_freshness"] = float(m_fresh)
     merged["canonical_market_reliability"] = m_rel

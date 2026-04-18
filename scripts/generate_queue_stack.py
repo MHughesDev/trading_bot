@@ -1306,7 +1306,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-CONTRACT-COMMON",
         "id": "FB-CAN-062",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Enforce canonical contract common conventions (UTC/freshness/confidence types)",
         "agent_task": "Implement contract validators for canonical common field conventions: UTC timestamps, bounded confidence/freshness normalization, semantic primitive typing, and missing/degraded data behavior rules. Add tests for malformed payload rejection and deterministic fallback behavior.",
         "affected_files": "app/contracts/|decision_engine/|data_plane/|tests/",
