@@ -110,8 +110,24 @@ def build_decision_boundary_input(
         snapshot_id=sid,
         timestamp=ts,
         instrument_id=symbol,
+        funding_rate=_safe_float(merged, "funding_rate", 0.0),
+        funding_rate_zscore=_safe_float(merged, "funding_rate_zscore", 0.0),
+        funding_velocity=_safe_float(merged, "funding_velocity", 0.0),
+        open_interest=_safe_float(merged, "open_interest", 0.0),
+        open_interest_delta_short=_safe_float(merged, "open_interest_delta_short", 0.0),
+        basis_bps=_safe_float(merged, "basis_bps", 0.0),
+        cross_exchange_divergence=_safe_float(merged, "cross_exchange_divergence", 0.0),
+        liquidation_proximity_long=_clip01(_safe_float(merged, "liquidation_proximity_long", 0.5)),
+        liquidation_proximity_short=_clip01(_safe_float(merged, "liquidation_proximity_short", 0.5)),
+        liquidation_cluster_density_long=_clip01(_safe_float(merged, "liquidation_cluster_density_long", 0.0)),
+        liquidation_cluster_density_short=_clip01(_safe_float(merged, "liquidation_cluster_density_short", 0.0)),
+        liquidation_data_confidence=_clip01(_safe_float(merged, "liquidation_data_confidence", 0.5)),
+        perp_spot_divergence_score=_safe_float(merged, "perp_spot_divergence_score", 0.0)
+        if "perp_spot_divergence_score" in merged
+        else None,
         signal_freshness_structural=_clip01(_safe_float(merged, "structural_freshness", 0.75)),
         signal_reliability_structural=_clip01(_safe_float(merged, "structural_reliability", 0.7)),
+        signal_source_count=int(round(5.0 * _clip01(_safe_float(merged, "structural_family_coverage", 0.0)))),
     )
 
     safety = SafetyRegimeSnapshot(

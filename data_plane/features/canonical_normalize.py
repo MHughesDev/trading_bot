@@ -11,8 +11,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from data_plane.ingest.structural_signals import apply_structural_families_from_row
+
 # Bump when normalization rules change (stored on feature rows).
-CANONICAL_NORMALIZATION_VERSION = 1
+CANONICAL_NORMALIZATION_VERSION = 2
 
 # Primary return keys the decision path prefers (alias from ``ret_*``).
 _RETURN_ALIASES: tuple[tuple[str, str], ...] = (
@@ -28,14 +30,20 @@ def _clip01(x: float) -> float:
 
 
 def completeness_score(row: dict[str, float]) -> float:
-    """1.0 when core families present; degrades smoothly when not."""
+    """1.0 when core families present; degrades smoothly when not.
+
+    Includes optional structural bundle coverage (FB-CAN-049): at least one structural
+    family present when ``structural_family_coverage >= 0.2``.
+    """
     has_price = "close" in row and float(row.get("close", 0.0)) > 0
     # ret_1 or return_1
     has_ret = any(k in row for k in ("ret_1", "return_1"))
     has_vol = "volume" in row
     has_rsi = "rsi_14" in row
     has_atr = "atr_14" in row
-    parts = [has_price, has_ret, has_vol, has_rsi, has_atr]
+    cov = float(row.get("structural_family_coverage", 0.0))
+    has_struct = cov >= 0.2
+    parts = [has_price, has_ret, has_vol, has_rsi, has_atr, has_struct]
     return sum(1.0 for p in parts if p) / max(len(parts), 1)
 
 
@@ -77,6 +85,8 @@ def normalize_feature_row(
     if "spread_bps_feature" not in out and "micro_spread_bps" in out:
         out["spread_bps_feature"] = float(out["micro_spread_bps"])
 
+    apply_structural_families_from_row(out)
+
     fresh = feature_freshness_from_age(bar_age_seconds, stale_seconds=stale_data_seconds)
     rel = feature_reliability_heuristic(out)
     complete = completeness_score(out)
@@ -87,9 +97,15 @@ def normalize_feature_row(
     out["canonical_snapshot_complete"] = complete
     out["signal_confidence_aggregate"] = conf
     out["canonical_normalization_version"] = float(CANONICAL_NORMALIZATION_VERSION)
-    # Structural bundle proxies (until perp/OI ingest is wired)
-    out["structural_freshness"] = _clip01(0.75 * fresh + 0.25 * rel)
-    out["structural_reliability"] = _clip01(0.65 * rel + 0.35 * complete)
+    # Structural bundle: per-family coverage + bar freshness (FB-CAN-049)
+    per_f = float(out.get("structural_per_family_freshness_mean", 0.0))
+    cov = float(out.get("structural_family_coverage", 0.0))
+    all_miss = float(out.get("structural_all_missing", 1.0))
+    out["structural_freshness"] = _clip01(0.45 * per_f + 0.35 * cov + 0.2 * fresh)
+    out["structural_reliability"] = _clip01(0.5 * rel + 0.35 * cov + 0.15 * (1.0 - all_miss))
+    if all_miss >= 0.99:
+        out["structural_freshness"] = _clip01(min(out["structural_freshness"], 0.15))
+        out["structural_reliability"] = _clip01(min(out["structural_reliability"], 0.18))
     return out
 
 
