@@ -32,6 +32,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`orchestration/release_gating.py`](../orchestration/release_gating.py) | **APEX release gating** — **FB-CAN-011**; `ReleaseCandidate`, `evaluate_promotion_gates`, JSON ledger helpers. |
 | [`models/registry/experiment_registry.py`](../models/registry/experiment_registry.py) | **APEX experiment registry** — **FB-CAN-011**; `ExperimentRecord`, `query_experiments`, JSON registry helpers. |
 | [`docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD) | Operator guide: governance files and `validate_release_gates.py`. |
+| [`docs/CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD) | **FB-CAN-012+** — removed paths and replacement pointers (canonical migration). |
 | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent workflow: one slice → validate → PR → merge. |
 | [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) | Cursor **Add to Queue** skill for adding/updating items. |
 | [`.cursor/skills/queue-one-at-a-time/SKILL.md`](../.cursor/skills/queue-one-at-a-time/SKILL.md) | Cursor **Queue One-at-a-Time** execution skill (take top Open row only, implement, validate, document, commit). |

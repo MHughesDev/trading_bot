@@ -203,7 +203,7 @@ Delete once canonical replacements are active:
 - `docs/Specs/RISK_ENGINE.MD`
 - `docs/Specs/EXECUTION_LAYER.MD`
 - `docs/Specs/APP_CONFIG_AND_CONTRACTS.MD`
-- `docs/Specs/MASTER_SPEC_RISK_STATE_GAP.MD` (if superseded by this audit + canonical mapping)
+- ~~`docs/Specs/MASTER_SPEC_RISK_STATE_GAP.MD`~~ — **removed (FB-CAN-012, 2026-04-18)**; superseded by this audit + [`CANONICAL_DELETION_LOG.MD`](../CANONICAL_DELETION_LOG.MD)
 - Legacy-only decision abstractions in `decision_engine/` tied solely to `ForecastPacket -> PolicySystem -> single proposal` flow (module-level deletion list to be finalized during FB-CAN-004..006)
 - Legacy-only risk branches in `risk_engine/engine.py` that become redundant under canonical risk architecture
 - Legacy-only execution wrappers in `execution/` that bypass canonical execution-confidence/stress/partial-fill logic
