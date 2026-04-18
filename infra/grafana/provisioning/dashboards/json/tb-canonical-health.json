@@ -266,7 +266,37 @@
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": {}, "overrides": [] },
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 72 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 72 },
+      "id": 19,
+      "targets": [
+        {
+          "expr": "sum(rate(tb_governance_gate_outcome_total[5m])) by (outcome, target_environment)",
+          "legendFormat": "{{outcome}} {{target_environment}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Governance: promotion gate outcomes (rate)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 72 },
+      "id": 20,
+      "targets": [
+        {
+          "expr": "sum(rate(tb_governance_gate_failure_total[15m])) by (gate, target_environment)",
+          "legendFormat": "{{gate}} @ {{target_environment}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Governance: gate failure rate by blocked gate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 80 },
       "id": 11,
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [

@@ -85,6 +85,11 @@ MONITORING_DOMAIN_CHECKLIST: dict[str, frozenset[str]] = {
     "governance": frozenset(
         {
             "tb_canonical_active_config_version_info",
+            "tb_governance_promotion_attempt",
+            "tb_governance_gate_outcome",
+            "tb_governance_gate_failure",
+            "tb_governance_config_drift_event",
+            "tb_governance_rollback_event",
         }
     ),
 }
@@ -95,6 +100,7 @@ def _registered_metric_names() -> FrozenSet[str]:
     # Import side-effect: register instruments
     import observability.canonical_metrics  # noqa: F401
     import observability.drift_calibration_metrics  # noqa: F401
+    import observability.governance_metrics  # noqa: F401
     import observability.metrics  # noqa: F401
 
     from prometheus_client import REGISTRY

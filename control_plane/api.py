@@ -837,6 +837,11 @@ def get_governance_monitoring() -> dict[str, Any]:
             "tb_canonical_carry_decision_quality, tb_canonical_carry_reason_total, "
             "tb_canonical_carry_directional_suppression_total (FB-CAN-064)"
         ),
+        "governance_operator_metrics": (
+            "tb_governance_promotion_attempt, tb_governance_gate_outcome, tb_governance_gate_failure, "
+            "tb_governance_config_drift_event, tb_governance_rollback_event (FB-CAN-065)"
+        ),
+        "governance_metrics_module": "observability/governance_metrics.py",
     }
 
 
@@ -883,6 +888,12 @@ def post_release_evidence_diff(body: ReleaseEvidenceDiffRequest) -> dict[str, An
     baseline = resolve_canonical_from_yaml_text(body.baseline_yaml)
     current = settings.canonical
     report = build_canonical_config_diff_report(baseline, current)
+    try:
+        from observability.governance_metrics import record_config_diff_report  # noqa: PLC0415
+
+        record_config_diff_report(report)
+    except Exception:
+        pass
     if body.append_audit:
         append_config_diff_audit_entry(report)
     return report
@@ -932,6 +943,13 @@ def post_release_object(
     rest.append(cand)
     led = ReleaseLedger(candidates=rest)
     write_release_ledger(led)
+    try:
+        from observability.governance_metrics import record_rollback_release_candidate  # noqa: PLC0415
+
+        if str(cand.current_stage) == "rolled_back":
+            record_rollback_release_candidate(source="release_object_write")
+    except Exception:
+        pass
     return {"ok": True, "release_id": cand.release_id}
 
 
