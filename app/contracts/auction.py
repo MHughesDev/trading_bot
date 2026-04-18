@@ -33,5 +33,14 @@ class AuctionResult(BaseModel):
     top_n_limit: int = 1
     max_notional_usd: float = 0.0
     selected_notional_usd: float = 0.0
+    # FB-CAN-044 — throughput / saturation
+    candidates_evaluated: int = 0
+    candidates_eligible: int = 0
+    top_n_saturation: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="selected_count / top_n_limit when top_n_limit > 0",
+    )
     # FB-CAN-034 — deterministic thesis / cluster metadata for diversification penalties
     clustering_metadata: dict[str, Any] = Field(default_factory=dict)

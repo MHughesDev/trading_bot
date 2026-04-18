@@ -140,6 +140,10 @@ def run_spec_policy_step(
             )
 
     if apex is not None and trigger is not None and feature_row is not None:
+        try:
+            top_n_auction = int(settings.canonical.domains.auction.get("top_n", 1))
+        except Exception:
+            top_n_auction = 1
         proposal, auction_result = run_opportunity_auction(
             symbol,
             forecast_packet,
@@ -152,7 +156,7 @@ def run_spec_policy_step(
             portfolio_equity_usd=portfolio_equity_usd,
             position_signed_qty=position_signed_qty,
             base_proposal=proposal,
-            top_n=1,
+            top_n=top_n_auction,
             structure=structure,
         )
         forecast_packet.forecast_diagnostics["auction"] = auction_result.model_dump()

@@ -21,6 +21,14 @@ from app.contracts.trigger import TriggerOutput
 from decision_engine.trigger_engine import state_alignment_score
 
 
+def _auction_domain(settings: AppSettings) -> dict[str, Any]:
+    try:
+        d = settings.canonical.domains.auction
+        return dict(d) if d is not None else {}
+    except Exception:
+        return {}
+
+
 def _clip(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, float(x)))
 
@@ -144,14 +152,24 @@ def run_opportunity_auction(
     portfolio_equity_usd: float,
     position_signed_qty: Decimal | None,
     base_proposal: ActionProposal | None,
-    top_n: int = 1,
+    top_n: int | None = None,
     structure: CanonicalStructureOutput | None = None,
 ) -> tuple[ActionProposal | None, AuctionResult]:
     """
     Build long/short/flat candidates, score, select top-N under notional cap.
 
     When ``base_proposal`` is None, only flat is considered (still logs auction).
+
+    **FB-CAN-044:** ``top_n`` defaults from ``apex_canonical.domains.auction.top_n``;
+    ``max_candidates`` bounds the scored candidate list (long/short/flat).
     """
+    ad = _auction_domain(settings)
+    top_n_eff = int(top_n if top_n is not None else ad.get("top_n", 1))
+    top_n_eff = max(1, min(8, top_n_eff))
+    max_cand = int(ad.get("max_candidates", 3))
+    max_cand = max(1, min(3, max_cand))
+    sat_warn = float(ad.get("saturation_warn_score", 0.85))
+
     st = structure if structure is not None else structure_from_forecast_packet(forecast_packet)
     exec_conf = _exec_confidence(spread_bps)
     dq_pen = _clip(float(feature_row.get("canonical_exec_quality_penalty", 0.0)), 0.0, 1.0)
@@ -178,7 +196,7 @@ def run_opportunity_auction(
     deg = app_risk.canonical_degradation or apex.degradation
 
     max_per = float(settings.risk_max_per_symbol_usd)
-    max_notional = top_n * max_per
+    max_notional = top_n_eff * max_per
 
     wA, wS, wC, wT, wE, wO, wL = 0.18, 0.14, 0.18, 0.16, 0.14, 0.1, 0.1
     wD, wM, wP, wG, wB, wR = 0.35, 0.2, 0.15, 0.4, 0.35, 0.35
@@ -193,6 +211,14 @@ def run_opportunity_auction(
         candidates.append((1, long_p))
         candidates.append((-1, short_p))
     candidates.append((0, None))
+    if max_cand == 2:
+        candidates = [c for c in candidates if c[0] != 0]
+    elif max_cand == 1:
+        if base_proposal is not None:
+            d0 = int(base_proposal.direction)
+            candidates = [(d0, base_proposal.model_copy(update={"direction": d0}))]
+        else:
+            candidates = [(0, None)]
 
     min_trig_conf = 0.08
     min_decision_conf = 0.12
@@ -330,45 +356,63 @@ def run_opportunity_auction(
         if eligible:
             scored.append((auction_score, direction, proposal, rec))
 
-    scored.sort(key=lambda x: (-x[0], -trigger.trigger_confidence, -exec_conf, -x[1]))
+    scored.sort(
+        key=lambda x: (
+            -x[0],
+            -trigger.trigger_confidence,
+            -exec_conf,
+            -x[3].penalties.get("R", 0.0),
+            -abs(x[1]),
+        )
+    )
 
     winner: ActionProposal | None = None
     sel_score: float | None = None
     sel_dir: int | None = None
     total_notional = 0.0
     pick_count = 0
+    selected_dirs: list[int] = []
 
     for auction_score, direction, proposal, rec in scored:
+        if not rec.eligible:
+            continue
         if direction == 0:
             rec.status = "selected"
             winner = None
             sel_score = auction_score
             sel_dir = 0
             pick_count = 1
+            selected_dirs = [0]
+            total_notional = 0.0
             break
         if proposal is None:
             continue
         notion = proposal.size_fraction * max_per
-        if total_notional + notion > max_notional + 1e-9:
+        if notion > max_notional + 1e-9:
             rec.status = "suppressed"
             rec.reasons.append("notional_budget")
-            continue
-        if pick_count >= top_n:
-            rec.status = "suppressed"
-            rec.reasons.append("top_n_limit")
             continue
         rec.status = "selected"
         winner = proposal
         sel_score = auction_score
         sel_dir = direction
-        total_notional += notion
-        pick_count += 1
+        total_notional = notion
+        pick_count = 1
+        selected_dirs = [direction]
         break
 
     for rec in records:
         if rec.status == "pending":
             rec.status = "suppressed"
             rec.reasons.append("outranked")
+
+    n_eval = len(records)
+    n_elig = sum(1 for r in records if r.eligible)
+    sat = float(pick_count) / float(top_n_eff) if top_n_eff > 0 else 0.0
+    if top_n_eff > 1 and pick_count < top_n_eff and n_elig > 0:
+        for rec in records:
+            if rec.status == "suppressed" and rec.eligible and "notional_budget" not in rec.reasons:
+                rec.reasons.append("top_n_throughput_shortfall")
 
     meta: dict[str, Any] = {
         "schema_version": 1,
@@ -377,6 +421,16 @@ def run_opportunity_auction(
         "liquidation_cluster_key": liq_cluster_key,
         "long_short_structural_correlation_proxy": round(corr_ls, 6),
         "diversification_weights": {"d1": d1, "d2": d2, "d3": d3},
+        "fb_can_044": {
+            "top_n_requested": top_n_eff,
+            "max_candidates": max_cand,
+            "candidates_evaluated": n_eval,
+            "candidates_eligible": n_elig,
+            "selected_count": pick_count,
+            "top_n_saturation": round(sat, 6),
+            "selected_directions": selected_dirs,
+            "saturation_warn_score": sat_warn,
+        },
     }
     if sel_dir is not None and str(int(sel_dir)) in thesis_keys:
         meta["selected_thesis_bucket"] = thesis_keys[str(int(sel_dir))]
@@ -386,9 +440,12 @@ def run_opportunity_auction(
         selected_direction=sel_dir,
         selected_score=sel_score,
         records=records,
-        top_n_limit=top_n,
+        top_n_limit=top_n_eff,
         max_notional_usd=max_notional,
         selected_notional_usd=total_notional,
+        candidates_evaluated=n_eval,
+        candidates_eligible=n_elig,
+        top_n_saturation=sat,
         clustering_metadata=meta,
     )
     return winner, result

@@ -29,6 +29,10 @@ apex_canonical:
         rel_vol: 0.25
         fragility: 0.25
         directional_pressure: 0.2
+    auction:
+      top_n: 1
+      max_candidates: 3
+      saturation_warn_score: 0.85
     risk_sizing:
       max_total_exposure_usd: 100000
       max_per_symbol_usd: 40000

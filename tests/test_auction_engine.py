@@ -267,6 +267,36 @@ def test_corr_penalty_higher_when_book_aligns_with_long():
     assert l1.penalties["D_corr"] >= l0.penalties["D_corr"]
 
 
+def test_fb_can_044_top_n_shortfall_suppression_reason():
+    """When top_n > 1 but only one outcome can be selected, emit throughput shortfall."""
+    base = ActionProposal(
+        symbol="BTC/USD",
+        route_id=RouteId.INTRADAY,
+        direction=1,
+        size_fraction=0.25,
+        stop_distance_pct=0.02,
+    )
+    settings = AppSettings()
+    settings.canonical.domains.auction = {"top_n": 3, "max_candidates": 3, "saturation_warn_score": 0.5}
+    _, result = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=RiskState(),
+        spread_bps=5.0,
+        feature_row={"close": 50_000.0, "atr_14": 100.0},
+        settings=settings,
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+    )
+    assert result.top_n_limit == 3
+    assert result.top_n_saturation < 1.0
+    assert result.candidates_evaluated >= 1
+    assert any("top_n_throughput_shortfall" in r.reasons for r in result.records if r.eligible)
+
+
 def test_ranking_stable_tiebreak():
     """Same inputs → same winner (deterministic)."""
     base = ActionProposal(
