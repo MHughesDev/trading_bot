@@ -309,9 +309,16 @@ def evaluate_promotion_gates(
     if allowed:
         reasons.append(f"gates passed for target_environment={target_environment!r}")
 
-    return PromotionGateResult(
+    result = PromotionGateResult(
         allowed=allowed,
         target_environment=target_environment,
         reasons=reasons,
         blocked_gates=sorted(set(blocked)),
     )
+    try:
+        from observability.governance_metrics import record_promotion_gate_result  # noqa: PLC0415
+
+        record_promotion_gate_result(result, kind=str(candidate.kind))
+    except Exception:
+        pass
+    return result

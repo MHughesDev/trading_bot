@@ -113,6 +113,44 @@ groups:
           description: "When carry evaluates, combined funding and trigger confidence proxy is persistently weak; may indicate quiet funding or weak trigger alignment."
           runbook: "docs/MONITORING_CANONICAL.MD#fb-can-064-carry-monitoring"
 
+  - name: canonical_governance_operator_fb_can_065
+    rules:
+      - alert: GovernancePromotionGateFailures
+        expr: |
+          sum(increase(tb_governance_gate_outcome_total{outcome="blocked"}[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: governance
+        annotations:
+          summary: "Release promotion gates returned blocked in the last 15m"
+          description: "At least one evaluate_promotion_gates call did not allow promotion; inspect governance API payloads and evidence packages."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-065-governance-operator-monitoring"
+
+      - alert: GovernanceConfigDiffRequiresReview
+        expr: |
+          sum(increase(tb_governance_config_drift_event_total{requires_operator_review="true"}[1h])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: governance
+        annotations:
+          summary: "Canonical config diff flagged operator review (risk/execution semantics)"
+          description: "POST /governance/release-evidence/diff reported semantic changes requiring review."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-065-governance-operator-monitoring"
+
+      - alert: GovernanceRollbackLedgerEvent
+        expr: |
+          sum(increase(tb_governance_rollback_event_total[1h])) > 0
+        for: 1m
+        labels:
+          severity: info
+          domain: governance
+        annotations:
+          summary: "Rollback lifecycle recorded on a release candidate"
+          description: "A release object was written with current_stage=rolled_back; confirm playbook execution."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-065-governance-operator-monitoring"
+
   - name: canonical_governance_shadow
     rules:
       - alert: CanonicalShadowDivergenceEvents

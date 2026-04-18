@@ -1348,7 +1348,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-GOV-MON",
         "id": "FB-CAN-065",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement governance/operator health monitoring domain",
         "agent_task": "Implement governance/operator monitoring metrics and alerts (promotion attempts, gate failures, rollback events, evidence completeness failures, config drift events) required by canonical monitoring spec.",
         "affected_files": "observability/|orchestration/|models/|scripts/|tests/",
