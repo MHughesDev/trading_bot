@@ -8,6 +8,7 @@ from orchestration.release_gating import (
     RollbackTarget,
     evaluate_promotion_gates,
     read_release_ledger,
+    required_environment_before,
     write_release_ledger,
 )
 
@@ -19,6 +20,11 @@ def _fault_stress_fields() -> dict:
         "fault_stress_run_ids": ["ci-fault-suite"],
         "fault_profile_ids_satisfied": _ALL_FAULT_IDS,
     }
+
+
+def _env_shadow() -> dict:
+    """FB-CAN-052: live promotion requires prior stage == shadow."""
+    return {"environment": "shadow"}
 
 
 def _minimal_evidence_live() -> EvidencePackage:
@@ -41,6 +47,7 @@ def test_gates_fail_without_rollback():
         kind="config",
         owner="ops",
         config_version="1.0.0",
+        **_env_shadow(),
         evidence=_minimal_evidence_live(),
         rollback=RollbackTarget(),
     )
@@ -55,6 +62,7 @@ def test_gates_pass_config_live():
         kind="config",
         owner="ops",
         config_version="1.0.0",
+        **_env_shadow(),
         evidence=_minimal_evidence_live(),
         rollback=RollbackTarget(target_config_version="0.9.0", instructions="revert yaml"),
     )
@@ -69,6 +77,7 @@ def test_combined_live_requires_live_replay_equivalence():
         owner="ops",
         config_version="1.0.0",
         logic_version="2.0.0",
+        **_env_shadow(),
         evidence=EvidencePackage(
             version_identifiers={"config": "1.0.0", "logic": "2.0.0"},
             replay_summary="ok",
@@ -97,6 +106,7 @@ def test_logic_live_requires_live_replay_equivalence():
         owner="ops",
         config_version="1.0.0",
         logic_version="2.0.0",
+        **_env_shadow(),
         evidence=EvidencePackage(
             version_identifiers={"config": "1.0.0", "logic": "2.0.0"},
             replay_summary="ok",
@@ -125,6 +135,7 @@ def test_logic_live_requires_test_flags():
         owner="ops",
         config_version="1.0.0",
         logic_version="2.0.0",
+        **_env_shadow(),
         evidence=EvidencePackage(
             version_identifiers={"config": "1.0.0", "logic": "2.0.0"},
             replay_summary="ok",
@@ -155,6 +166,48 @@ def test_logic_live_requires_test_flags():
     assert r2.allowed is True
 
 
+def test_live_blocked_when_not_shadow_stage():
+    c = ReleaseCandidate(
+        release_id="rel-skip",
+        kind="config",
+        owner="ops",
+        config_version="1.0.0",
+        environment="research",
+        evidence=_minimal_evidence_live(),
+        rollback=RollbackTarget(target_config_version="0.9.0", instructions="revert yaml"),
+    )
+    r = evaluate_promotion_gates(c, target_environment="live")
+    assert r.allowed is False
+    assert "environment_stage_order" in r.blocked_gates
+
+
+def test_simulation_requires_prior_research_environment():
+    c = ReleaseCandidate(
+        release_id="rel-sim",
+        kind="config",
+        owner="ops",
+        config_version="1.0.0",
+        environment="shadow",
+        evidence=EvidencePackage(
+            version_identifiers={"config": "1.0.0"},
+            replay_summary="ok",
+            replay_run_ids=["r1"],
+        ),
+        rollback=RollbackTarget(target_config_version="0.9.0"),
+    )
+    r = evaluate_promotion_gates(c, target_environment="simulation")
+    assert r.allowed is False
+    assert "environment_stage_order" in r.blocked_gates
+
+    c2 = c.model_copy(update={"environment": "research"})
+    r2 = evaluate_promotion_gates(c2, target_environment="simulation")
+    assert r2.allowed is True
+
+
+def test_required_environment_before_live_is_shadow():
+    assert required_environment_before("live") == "shadow"
+
+
 def test_live_blocked_without_shadow_comparison():
     ev = _minimal_evidence_live().model_copy(update={"shadow_comparison_passed": False})
     c = ReleaseCandidate(
@@ -162,6 +215,7 @@ def test_live_blocked_without_shadow_comparison():
         kind="config",
         owner="ops",
         config_version="1.0.0",
+        **_env_shadow(),
         evidence=ev,
         rollback=RollbackTarget(target_config_version="0.9.0", instructions="revert"),
     )
@@ -179,6 +233,7 @@ def test_live_blocked_without_fault_stress_evidence():
         kind="config",
         owner="ops",
         config_version="1.0.0",
+        **_env_shadow(),
         evidence=ev,
         rollback=RollbackTarget(target_config_version="0.9.0", instructions="revert"),
     )
@@ -194,6 +249,7 @@ def test_feature_family_live_requires_replay_flag():
         kind="feature_family",
         owner="ops",
         config_version="1.0.0",
+        **_env_shadow(),
         feature_family_refs=["funding"],
         evidence=ev,
         rollback=RollbackTarget(target_config_version="0.9.0", target_feature_family_refs=["funding"]),

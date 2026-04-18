@@ -10,7 +10,7 @@
   "feature_family_refs": [],
   "severity": "moderate",
   "current_stage": "draft",
-  "environment": "research",
+  "environment": "shadow",
   "evidence": {
     "version_identifiers": {"config": "1.0.0", "logic": "1.0.0"},
     "domains_changed": [],

@@ -1,7 +1,10 @@
-"""APEX release gating and promotion lifecycle (FB-CAN-011, FB-CAN-051).
+"""APEX release gating and promotion lifecycle (FB-CAN-011, FB-CAN-051, FB-CAN-052).
 
 Schema lives in :mod:`app.contracts.release_objects`; this module evaluates
 promotion gates from ``APEX_Config_Management_and_Release_Gating_Spec_v1_0.md``.
+
+**FB-CAN-052:** ``ReleaseCandidate.environment`` must equal the **immediate predecessor**
+in research → simulation → shadow → live before promoting to the next stage (no skips).
 """
 
 from __future__ import annotations
@@ -22,6 +25,37 @@ from app.contracts.release_objects import (
 )
 from orchestration.fault_injection_profiles import fault_stress_evidence_satisfied
 
+# Spec §4 — ordered environments (FB-CAN-052).
+_ENVIRONMENT_ORDER: tuple[ReleaseEnvironment, ...] = ("research", "simulation", "shadow", "live")
+
+
+def required_environment_before(target_environment: ReleaseEnvironment) -> ReleaseEnvironment | None:
+    """Environment the candidate must occupy before a one-step promotion to ``target_environment``."""
+    try:
+        i = _ENVIRONMENT_ORDER.index(target_environment)
+    except ValueError:
+        return None
+    if i == 0:
+        return None
+    return _ENVIRONMENT_ORDER[i - 1]
+
+
+def _environment_progression_ok(
+    candidate: ReleaseCandidate,
+    target_environment: ReleaseEnvironment,
+) -> tuple[bool, str]:
+    req = required_environment_before(target_environment)
+    if req is None:
+        return True, ""
+    if candidate.environment != req:
+        return (
+            False,
+            f"candidate.environment must be {req!r} before promoting to {target_environment!r}; "
+            f"got {candidate.environment!r} (no implicit cross-stage promotion; FB-CAN-052)",
+        )
+    return True, ""
+
+
 __all__ = [
     "ConfigLifecycleStage",
     "EvidencePackage",
@@ -35,6 +69,7 @@ __all__ = [
     "default_release_ledger_path",
     "evaluate_promotion_gates",
     "read_release_ledger",
+    "required_environment_before",
     "write_release_ledger",
 ]
 
@@ -88,6 +123,12 @@ def evaluate_promotion_gates(
         if not candidate.feature_family_refs:
             blocked.append("feature_family_refs")
             reasons.append("feature_family release requires non-empty feature_family_refs")
+
+    # --- Explicit environment-stage progression (spec §4; FB-CAN-052) ---
+    ok_env, env_msg = _environment_progression_ok(candidate, target_environment)
+    if not ok_env:
+        blocked.append("environment_stage_order")
+        reasons.append(env_msg)
 
     # Environment-specific gates
     if target_environment == "simulation":
