@@ -10,6 +10,7 @@ from app.contracts.decisions import ActionProposal, RouteId, TradeAction
 from app.contracts.orders import OrderIntent, OrderSide, OrderType, TimeInForce
 from app.contracts.risk import RiskState, SystemMode
 from observability.metrics import FEED_STALE_BLOCKS
+from risk_engine.canonical_sizing import compute_canonical_notional
 from risk_engine.signing import sign_order_intent
 
 
@@ -42,6 +43,7 @@ class RiskEngine:
         product_tradable: bool = True,
         position_signed_qty: Decimal | None = None,
         available_cash_usd: float | None = None,
+        portfolio_equity_usd: float | None = None,
     ) -> tuple[TradeAction | None, RiskState]:
         """Return None if blocked; otherwise TradeAction for execution layer.
 
@@ -126,11 +128,22 @@ class RiskEngine:
             if pos < 0 and proposal.direction < 0:
                 return None, risk
 
-        notional = proposal.size_fraction * self._settings.risk_max_per_symbol_usd
-        notional *= float(risk.canonical_size_multiplier)
-        if notional > self._settings.risk_max_per_symbol_usd:
-            return None, risk
-        if current_total_exposure_usd + notional > self._settings.risk_max_total_exposure_usd:
+        eq = float(portfolio_equity_usd) if portfolio_equity_usd is not None else self._current_equity
+        cn = compute_canonical_notional(
+            proposal,
+            risk,
+            self._settings,
+            mid_price=mid_price,
+            spread_bps=spread_bps,
+            position_signed_qty=position_signed_qty,
+            current_total_exposure_usd=current_total_exposure_usd,
+            portfolio_equity_usd=eq,
+        )
+        notional = cn.final_notional_usd
+        risk = risk.model_copy(
+            update={"last_risk_sizing": cn.diagnostics.model_dump()},
+        )
+        if notional <= 0:
             return None, risk
 
         qty = Decimal(str(round(notional / max(mid_price, 1e-12), 8)))

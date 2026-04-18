@@ -10,6 +10,9 @@ from typing import Any
 
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
 from app.contracts.forecast_packet import ForecastPacket
+from app.contracts.trigger import TriggerOutput
+from decision_engine.trigger_engine import asymmetry_score
+from risk_engine.canonical_sizing import classify_liquidation_mode, exec_confidence_from_spread
 
 
 def _clip01(x: float) -> float:
@@ -115,17 +118,49 @@ def degradation_size_multiplier(level: DegradationLevel) -> float:
     }[level]
 
 
-def merge_canonical_into_risk(risk: Any, apex: CanonicalStateOutput | None) -> Any:
-    """Attach canonical degradation + size multiplier to RiskState for RiskEngine."""
-    if apex is None:
-        return risk
+def merge_canonical_into_risk(
+    risk: Any,
+    apex: CanonicalStateOutput | None,
+    *,
+    forecast_packet: ForecastPacket | None = None,
+    trigger: TriggerOutput | None = None,
+    spread_bps: float = 0.0,
+    feature_row: dict[str, float] | None = None,
+) -> Any:
+    """Attach canonical degradation, size multiplier, and FB-CAN-007 sizing inputs."""
     from app.contracts.risk import RiskState
 
     if not isinstance(risk, RiskState):
         return risk
-    return risk.model_copy(
-        update={
-            "canonical_degradation": apex.degradation,
-            "canonical_size_multiplier": degradation_size_multiplier(apex.degradation),
-        }
-    )
+    if apex is None:
+        return risk
+
+    upd: dict[str, Any] = {
+        "canonical_degradation": apex.degradation,
+        "canonical_size_multiplier": degradation_size_multiplier(apex.degradation),
+    }
+    if forecast_packet is not None:
+        close = max(_safe_float(feature_row or {}, "close", 1.0), 1e-12)
+        atr = _safe_float(feature_row or {}, "atr_14", 0.0)
+        atr_over = atr / close
+        asym = asymmetry_score(forecast_packet)
+        tc = float(trigger.trigger_confidence) if trigger is not None else 0.0
+        ec = exec_confidence_from_spread(spread_bps)
+        mode = classify_liquidation_mode(
+            trigger_confidence=tc,
+            heat=float(apex.heat_score),
+            asymmetry=asym,
+            atr_over_close=atr_over,
+            degradation=apex.degradation,
+        )
+        upd.update(
+            {
+                "risk_asymmetry_score": asym,
+                "risk_trigger_confidence": tc,
+                "risk_execution_confidence": ec,
+                "risk_heat_score": float(apex.heat_score),
+                "risk_reflexivity_score": float(apex.reflexivity_score),
+                "risk_liquidation_mode": mode,
+            }
+        )
+    return risk.model_copy(update=upd)

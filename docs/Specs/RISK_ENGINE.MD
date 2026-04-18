@@ -6,6 +6,7 @@
 ## `RiskEngine` (`risk_engine/engine.py`)
 
 - Evaluates **`ActionProposal`** vs **`RiskState`** and settings (stale feed/data, spread, drawdown, mode, exposure, position).
+- **FB-CAN-007:** Notional for new entries uses **`risk_engine/canonical_sizing.py`** — layered multipliers (degradation, position inertia / flip penalty, capped asymmetry boost ≤1.2×, liquidation offense/defense mode, edge-budget, concentration) before quantity sizing. **`RiskState.last_risk_sizing`** holds explainable diagnostics. Hard gates above still apply first.
 - Returns **`TradeAction | None`**; `None` means blocked.
 - Precedence is documented in **`docs/RISK_PRECEDENCE.MD`** (authoritative for ordering).
 
@@ -14,6 +15,7 @@
 - **`feed_last_message_at`** — WS freshness
 - **`position_signed_qty`** — Signed position for flatten / reduce-only
 - **`available_cash_usd`** — Optional cap on buy notional (e.g. replay with portfolio cash when enabled in settings)
+- **`portfolio_equity_usd`** — Used for concentration / inertia proxies in canonical sizing (defaults to engine equity if omitted)
 
 ## Signing
 

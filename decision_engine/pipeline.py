@@ -326,8 +326,15 @@ class DecisionPipeline:
         regime_out = _regime_output_from_packet(pkt)
         apex = build_canonical_state(pkt, feature_row, spread_bps=spread_bps)
         regime_out = regime_out.model_copy(update={"apex": apex})
-        risk = merge_canonical_into_risk(risk, apex)
         trig = evaluate_trigger(pkt, feature_row, spread_bps=spread_bps, apex=apex)
+        risk = merge_canonical_into_risk(
+            risk,
+            apex,
+            forecast_packet=pkt,
+            trigger=trig,
+            spread_bps=spread_bps,
+            feature_row=feature_row,
+        )
         mp = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
         eq = float(portfolio_equity_usd) if portfolio_equity_usd is not None else 100_000.0
 
