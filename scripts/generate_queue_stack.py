@@ -1068,7 +1068,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-RISK-SIZE",
         "id": "FB-CAN-045",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement canonical sizing formula stack (inertia, asymmetry cap, degradation multipliers)",
         "agent_task": "Implement canonical sizing stack with position inertia, capped asymmetry boosts, degradation multipliers, edge-budget scaling, and concentration-aware caps. Provide transparent intermediate terms in risk diagnostics and replay outputs.",
         "affected_files": "risk_engine/|app/contracts/risk.py|decision_engine/|tests/",

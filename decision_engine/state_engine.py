@@ -326,10 +326,69 @@ def degradation_size_multiplier(level: DegradationLevel) -> float:
     }[level]
 
 
+def _risk_sizing_domain(settings: AppSettings | None) -> dict[str, Any]:
+    if settings is None:
+        return {}
+    try:
+        rs = settings.canonical.domains.risk_sizing
+        return dict(rs) if isinstance(rs, dict) else {}
+    except Exception:
+        return {}
+
+
+def _cfg_float(dom: dict[str, Any], key: str, default: float) -> float:
+    v = dom.get(key)
+    if v is None:
+        return default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def composite_degradation_size_multiplier(
+    level: DegradationLevel,
+    apex: CanonicalStateOutput | None,
+    settings: AppSettings | None,
+) -> tuple[float, dict[str, float]]:
+    """FB-CAN-045: base degradation × transition × novelty throttles (spec §11.1 / §14.3)."""
+    base = degradation_size_multiplier(level)
+    terms: dict[str, float] = {
+        "degradation_base_multiplier": base,
+        "transition_probability": 0.0,
+        "novelty": 0.0,
+        "transition_multiplier": 1.0,
+        "novelty_multiplier": 1.0,
+    }
+    if apex is None or base <= 0.0:
+        return base, terms
+    tp = _clip01(float(apex.transition_probability))
+    nov = _clip01(float(apex.novelty))
+    terms["transition_probability"] = tp
+    terms["novelty"] = nov
+    dom = _risk_sizing_domain(settings)
+    wt = _cfg_float(dom, "transition_size_multiplier_weight", 0.35)
+    wn = _cfg_float(dom, "novelty_size_multiplier_weight", 0.25)
+    cap = _cfg_float(dom, "max_transition_novelty_multiplier_weight", 0.55)
+    wsum = wt + wn
+    if wsum <= 0.0:
+        return base, terms
+    if wsum > cap and cap > 0.0:
+        s = cap / wsum
+        wt *= s
+        wn *= s
+    t_mult = max(0.0, 1.0 - wt * tp)
+    n_mult = max(0.0, 1.0 - wn * nov)
+    terms["transition_multiplier"] = t_mult
+    terms["novelty_multiplier"] = n_mult
+    return base * t_mult * n_mult, terms
+
+
 def merge_canonical_into_risk(
     risk: Any,
     apex: CanonicalStateOutput | None,
     *,
+    settings: AppSettings | None = None,
     forecast_packet: ForecastPacket | None = None,
     trigger: TriggerOutput | None = None,
     spread_bps: float = 0.0,
@@ -361,12 +420,15 @@ def merge_canonical_into_risk(
             update={
                 "hard_override_active": bool(hard_override_active),
                 "hard_override_kind": hard_override_kind,
+                "canonical_degradation_sizing_terms": None,
             }
         )
 
+    comp_m, deg_terms = composite_degradation_size_multiplier(apex.degradation, apex, settings)
     upd: dict[str, Any] = {
         "canonical_degradation": apex.degradation,
-        "canonical_size_multiplier": degradation_size_multiplier(apex.degradation),
+        "canonical_size_multiplier": comp_m,
+        "canonical_degradation_sizing_terms": deg_terms,
         "hard_override_active": bool(hard_override_active),
         "hard_override_kind": hard_override_kind,
         **_apply_degradation_transition_fields(risk, apex.degradation),

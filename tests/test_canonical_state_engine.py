@@ -82,11 +82,16 @@ def test_regime_confidence_matches_spec_separation():
 
 
 def test_merge_canonical_into_risk():
+    from app.config.settings import AppSettings
+
     apex = build_canonical_state(_pkt(), {"close": 1.0, "atr_14": 0.0, "rsi_14": 50.0}, spread_bps=1.0)
     r0 = RiskState()
-    r1 = merge_canonical_into_risk(r0, apex)
+    r1 = merge_canonical_into_risk(r0, apex, settings=AppSettings())
     assert r1.canonical_degradation == apex.degradation
-    assert r1.canonical_size_multiplier == degradation_size_multiplier(apex.degradation)
+    base = degradation_size_multiplier(apex.degradation)
+    assert r1.canonical_size_multiplier <= base + 1e-9
+    assert r1.canonical_degradation_sizing_terms is not None
+    assert r1.canonical_degradation_sizing_terms.get("degradation_base_multiplier") == pytest.approx(base)
 
 
 def test_merge_canonical_updates_false_positive_memory():
