@@ -1264,7 +1264,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-RUNTIME-CUT",
         "id": "FB-CAN-059",
         "kind": "hardening",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Add cutover guard to prevent legacy+canonical dual-path runtime activation",
         "agent_task": "Implement runtime cutover guard that prevents simultaneous legacy and canonical execution paths after cutover phase. Fail fast on mixed-mode activation unless explicitly in migration-shadow mode with strict flags.",
         "affected_files": "app/runtime/live_service.py|decision_engine/run_step.py|app/config/|tests/",

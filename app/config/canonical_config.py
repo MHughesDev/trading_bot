@@ -56,6 +56,10 @@ class CanonicalDomains(BaseModel):
     replay: dict[str, Any] = Field(default_factory=dict)
     feature_families: dict[str, Any] = Field(default_factory=dict)
     shadow_comparison: dict[str, Any] = Field(default_factory=dict)
+    runtime_cutover: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Cutover / migration-shadow flags (FB-CAN-059); see default.yaml.",
+    )
 
 
 class CanonicalRuntimeConfig(BaseModel):
@@ -161,6 +165,12 @@ def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
         shadow_comparison={
             "projection": "legacy",
             "note": "Override with apex_canonical.domains.shadow_comparison (FB-CAN-038).",
+        },
+        runtime_cutover={
+            "projection": "legacy",
+            "phase": "canonical_active",
+            "migration_shadow_allowed": False,
+            "note": "Set migration_shadow_allowed true only when enabling runtime bridge in_process (FB-CAN-059).",
         },
         feature_families={
             "projection": "legacy",
