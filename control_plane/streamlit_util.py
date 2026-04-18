@@ -86,6 +86,18 @@ def fetch_auth_me_json() -> dict[str, Any] | None:
         return None
 
 
+def _touch_auth_session() -> None:
+    """Best-effort idle keepalive for logged-in Streamlit operators."""
+    try:
+        httpx.post(
+            f"{get_api_base()}/auth/touch",
+            timeout=8.0,
+            headers=_cookie_headers() or None,
+        )
+    except httpx.HTTPError:
+        return
+
+
 def require_streamlit_session_only() -> None:
     """
     Enforce route guard **login only** (no venue-key onboarding gate).
@@ -106,6 +118,7 @@ def require_streamlit_session_only() -> None:
         st.session_state.pop("operator_session_token", None)
         st.switch_page("pages/0_Login.py")
         st.stop()
+    _touch_auth_session()
 
 
 def redirect_after_session_login() -> None:
@@ -161,6 +174,7 @@ def require_streamlit_app_access() -> None:
     ):
         st.switch_page("pages/98_Setup_API_keys.py")
         st.stop()
+    _touch_auth_session()
 
 
 def api_get_json(path: str, *, timeout: float = 10.0) -> dict[str, Any]:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from control_plane.streamlit_chrome import render_app_sidebar
+from control_plane._theme import inject_global_css, render_brand_lockup
 from control_plane.streamlit_util import (
     get_api_base,
     operator_login,
@@ -12,21 +12,18 @@ from control_plane.streamlit_util import (
     redirect_after_session_login,
 )
 
-st.set_page_config(page_title="Sign up — Trading Bot", layout="centered")
-render_app_sidebar()
-st.title("Create account")
-
-st.caption(
-    f"Control plane: `{get_api_base()}` — **`NM_AUTH_SESSION_ENABLED=true`** required for password accounts."
-)
-
-st.page_link("pages/0_Login.py", label="Already have an account? Sign in", icon=":material/login:")
+st.set_page_config(page_title="Sign up — Trading Bot", layout="centered", initial_sidebar_state="collapsed")
+inject_global_css()
+st.markdown("<div class='tb-auth-wrap'><div class='tb-auth-card'>", unsafe_allow_html=True)
+render_brand_lockup(subtitle="Operate paper and live trading from one console.")
+st.write("")
+st.subheader("Create account")
 
 with st.form("sign_up"):
     email = st.text_input("Email", autocomplete="email")
     pw = st.text_input("Password", type="password", autocomplete="new-password")
     pw2 = st.text_input("Confirm password", type="password", autocomplete="new-password")
-    submitted = st.form_submit_button("Create account", type="primary")
+    submitted = st.form_submit_button("Create account", type="primary", use_container_width=True)
 
 if submitted:
     if pw != pw2:
@@ -48,4 +45,7 @@ if submitted:
                     "Use **Sign in** with your email and password."
                 )
 
-st.page_link("Home.py", label="Back to Dashboard", icon=":material/dashboard:")
+st.page_link("pages/0_Login.py", label="Already have an account? Sign in", icon=":material/login:")
+st.caption("Paper trading only until live credentials are added.")
+st.markdown("</div></div>", unsafe_allow_html=True)
+st.caption(f"Control plane: `{get_api_base()}`")

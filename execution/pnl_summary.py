@@ -42,6 +42,7 @@ def compute_pnl_series(
     range_key: PnlRange,
     *,
     bucket_seconds: int = 3600,
+    mode: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Cumulative realized P&L series from the JSONL ledger (dashboard chart)."""
@@ -52,6 +53,7 @@ def compute_pnl_series(
     return {
         "range": range_key,
         "bucket_seconds": max(60, int(bucket_seconds)),
+        "mode": mode,
         "window_start": None if start is None else start.isoformat(),
         "window_end": end.isoformat(),
         "points": series,
