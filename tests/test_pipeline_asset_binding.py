@@ -37,7 +37,7 @@ def test_multi_symbol_global_paths_without_manifest_abstains(tmp_path, monkeypat
     caplog.set_level(logging.ERROR)
     pipe = DecisionPipeline(settings=settings)
     risk = RiskState()
-    _, fc, route, proposal = pipe.step(
+    _, fc, route, proposal, _ = pipe.step(
         "BTC-USD",
         _features(),
         spread_bps=5.0,

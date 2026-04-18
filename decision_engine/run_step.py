@@ -84,10 +84,11 @@ def run_decision_tick(
             regime=regime,
             risk=risk_state,
             forecast_packet=None,
+            carry_sleeve=getattr(risk_state, "carry_sleeve_last", None),
         )
         return regime, fc, route, proposal, trade, risk_state
 
-    regime, fc, route, proposal = pipeline.step(
+    regime, fc, route, proposal, risk_state = pipeline.step(
         symbol,
         feature_row,
         spread_bps,
@@ -118,5 +119,6 @@ def run_decision_tick(
         regime=regime,
         risk=risk_state,
         forecast_packet=pipeline.last_forecast_packet,
+        carry_sleeve=getattr(risk_state, "carry_sleeve_last", None),
     )
     return regime, fc, route, proposal, trade, risk_state

@@ -73,6 +73,7 @@ include = [
   "forecaster_model*",
   "policy_model*",
   "operator_packaging*",
+  "carry_sleeve*",
 ]
 
 [tool.pytest.ini_options]

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.config.settings import AppSettings
 from app.contracts.canonical_state import DegradationLevel
-from app.contracts.decisions import ActionProposal
+from app.contracts.decisions import ActionProposal, RouteId
 from app.contracts.risk import RiskState
 
 
@@ -167,6 +167,79 @@ def compute_canonical_notional(
     deg_m = float(risk.canonical_size_multiplier)
     after_deg = base * deg_m
     diag.after_degradation = after_deg
+
+    if proposal.route_id == RouteId.CARRY:
+        carry_m = 0.55
+        after_carry = after_deg * carry_m
+        diag.reason_codes.append("carry_sleeve_independent_multiplier")
+        inertia_m, inertia_reason = inertia_multiplier(
+            direction=proposal.direction,
+            position_signed_qty=position_signed_qty,
+            mid_price=mid_price,
+            equity_usd=eq,
+        )
+        after_in = after_carry * inertia_m
+        diag.after_inertia = after_in
+        if inertia_reason:
+            diag.reason_codes.append(inertia_reason)
+        asym = risk.risk_asymmetry_score
+        tc = risk.risk_trigger_confidence
+        ec = risk.risk_execution_confidence if risk.risk_execution_confidence is not None else exec_confidence_from_spread(
+            spread_bps
+        )
+        heat = risk.risk_heat_score if risk.risk_heat_score is not None else 0.35
+        refl = risk.risk_reflexivity_score if risk.risk_reflexivity_score is not None else 0.35
+        boost_m = 1.0
+        boost_reason: str | None = None
+        if asym is not None and tc is not None:
+            boost_m, boost_reason = asymmetry_boost(
+                asymmetry=asym,
+                trigger_confidence=tc,
+                execution_confidence=ec,
+                heat=heat,
+                reflexivity=refl,
+            )
+        after_boost = after_in * min(boost_m, 1.15)
+        diag.after_asymmetry_boost = after_boost
+        diag.asymmetry_boost_applied = min(boost_m, 1.15)
+        if boost_reason:
+            diag.reason_codes.append(boost_reason)
+        mode = risk.risk_liquidation_mode or "neutral"
+        diag.liquidation_mode = mode
+        liq_m = liquidation_mode_multiplier(mode)
+        after_liq = after_boost * liq_m
+        diag.after_liquidation_mode = after_liq
+        pos = float(position_signed_qty) if position_signed_qty is not None else 0.0
+        sym_existing = abs(pos * float(mid_price))
+        exposure_frac = _clip01(current_total_exposure_usd / max_total) if max_total > 0 else 0.0
+        sym_exposure_frac = _clip01(sym_existing / eq)
+        edge_m = edge_budget_multiplier(
+            heat=heat,
+            exposure_frac=exposure_frac,
+            symbol_exposure_frac=sym_exposure_frac,
+        )
+        after_edge = after_liq * edge_m
+        diag.after_edge_budget = after_edge
+        if edge_m < 0.999:
+            diag.reason_codes.append("edge_budget")
+        conc_m, conc_reason = concentration_multiplier(
+            proposed_notional=after_edge,
+            symbol_existing_notional=sym_existing,
+            equity_usd=eq,
+            total_exposure_usd=current_total_exposure_usd,
+            max_total_usd=max_total,
+        )
+        final = after_edge * conc_m
+        diag.after_concentration = final
+        if conc_reason:
+            diag.reason_codes.append(conc_reason)
+        final = min(final, max_slot)
+        if current_total_exposure_usd + final > max_total:
+            headroom = max(0.0, max_total - current_total_exposure_usd)
+            final = min(final, headroom)
+            diag.reason_codes.append("total_exposure_cap")
+        diag.final_notional_usd = final
+        return CanonicalNotionalResult(final_notional_usd=final, diagnostics=diag)
 
     inertia_m, inertia_reason = inertia_multiplier(
         direction=proposal.direction,

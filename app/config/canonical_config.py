@@ -131,7 +131,16 @@ def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
             "memory_qdrant_collection": settings.memory_qdrant_collection,
             "memory_top_k": settings.memory_top_k,
         },
-        carry={"projection": "legacy"},
+        carry={
+            "projection": "legacy",
+            "carry_enabled": False,
+            "carry_activation_requires_directional_neutrality": True,
+            "carry_max_exposure_usd": 5000.0,
+            "carry_funding_threshold": 0.35,
+            "carry_independent_risk_multiplier": 0.35,
+            "carry_attribution_isolation_required": True,
+            "carry_low_directional_trigger_confidence": 0.15,
+        },
         monitoring={
             "projection": "legacy",
             "observability_log_level": settings.observability_log_level,

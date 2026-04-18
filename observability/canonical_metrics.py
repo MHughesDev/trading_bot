@@ -97,10 +97,23 @@ CANONICAL_ACTIVE_CONFIG_VERSION = Gauge(
     ["version"],
 )
 
-# --- Placeholders for future wiring (carry, shadow divergence) ---
+# --- Carry sleeve (spec §4.8) ---
 CANONICAL_CARRY_SLEEVE_ACTIVE = Gauge(
     "tb_canonical_carry_sleeve_active",
-    "Carry sleeve active (0/1) — placeholder until carry path wired",
+    "Carry sleeve active this tick (0/1)",
+    ["symbol"],
+)
+CANONICAL_CARRY_TARGET_NOTIONAL_USD = Histogram(
+    "tb_canonical_carry_target_notional_usd",
+    "Carry sleeve target notional when evaluated",
+    ["symbol"],
+    buckets=(0.0, 100.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0, 25000.0),
+)
+CANONICAL_CARRY_FUNDING_SIGNAL = Histogram(
+    "tb_canonical_carry_funding_signal",
+    "Funding extremity proxy used for carry (0-1)",
+    ["symbol"],
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
 )
 CANONICAL_SHADOW_DIVERGENCE = Counter(
     "tb_canonical_replay_shadow_divergence_total",
@@ -115,6 +128,7 @@ def record_canonical_post_tick(
     regime: Any,
     risk: Any,
     forecast_packet: Any | None,
+    carry_sleeve: dict[str, Any] | None = None,
 ) -> None:
     """Record canonical metrics from one `run_decision_tick` completion."""
     sym = symbol or "unknown"
@@ -169,6 +183,22 @@ def record_canonical_post_tick(
     if age is not None:
         try:
             CANONICAL_DATA_AGE_SECONDS.labels(symbol=sym).observe(float(age))
+        except (TypeError, ValueError):
+            pass
+
+    cs = carry_sleeve
+    if cs is None and risk is not None:
+        cs = getattr(risk, "carry_sleeve_last", None)
+    if isinstance(cs, dict):
+        try:
+            active = 1.0 if bool(cs.get("active")) else 0.0
+            CANONICAL_CARRY_SLEEVE_ACTIVE.labels(symbol=sym).set(active)
+            if cs.get("target_notional_usd") is not None:
+                CANONICAL_CARRY_TARGET_NOTIONAL_USD.labels(symbol=sym).observe(
+                    float(cs["target_notional_usd"])
+                )
+            if cs.get("funding_signal") is not None:
+                CANONICAL_CARRY_FUNDING_SIGNAL.labels(symbol=sym).observe(float(cs["funding_signal"]))
         except (TypeError, ValueError):
             pass
 

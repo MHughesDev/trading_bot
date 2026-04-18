@@ -53,7 +53,7 @@ def test_pipeline_always_has_forecast_packet() -> None:
 def test_forecast_output_derived_from_packet() -> None:
     pipe = DecisionPipeline(settings=AppSettings())
     risk = RiskState()
-    _, fc, _, _ = pipe.step(
+    _, fc, _, _, _ = pipe.step(
         "BTC-USD",
         _features(),
         spread_bps=5.0,

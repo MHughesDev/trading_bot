@@ -2,7 +2,7 @@
 
 **Purpose:** Single **code-to-domain** map for the shared decision path after **FB-CAN-004…011**. Use it with **[`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD)** (what to build toward) and **[`docs/Specs/README.MD`](Specs/README.MD)** (as-built file index).
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-017: `app/contracts/canonical_structure.py`, `structure_adapter.py`).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-018: `carry_sleeve/`).
 
 ---
 
@@ -34,6 +34,7 @@ Legacy **ForecastPacket → PolicySystem → proposal** remains the **forecast/r
 | Policy / proposal | [`decision_engine/spec_policy_proposal.py`](../decision_engine/spec_policy_proposal.py), [`decision_engine/action_generator.py`](../decision_engine/action_generator.py) | Uses trigger + auction when enabled. |
 | Risk + sizing | [`risk_engine/engine.py`](../risk_engine/engine.py), [`risk_engine/canonical_sizing.py`](../risk_engine/canonical_sizing.py) | Hard gates + `compute_canonical_notional`; `last_risk_sizing` diagnostics. |
 | Execution guidance | [`execution/execution_logic.py`](../execution/execution_logic.py), [`execution/service.py`](../execution/service.py), [`app/contracts/execution_guidance.py`](../app/contracts/execution_guidance.py) | Prepare/sign path before adapters. |
+| Carry sleeve | [`carry_sleeve/engine.py`](../carry_sleeve/engine.py), [`app/contracts/carry_sleeve.py`](../app/contracts/carry_sleeve.py) | **FB-CAN-018:** optional `RouteId.CARRY` proposal; isolation vs directional; `domains.carry` in canonical config. |
 | Metrics | [`observability/canonical_metrics.py`](../observability/canonical_metrics.py) | `tb_canonical_*`; recorded from `run_decision_tick`. |
 
 ---
