@@ -6,9 +6,49 @@ shadow/replay divergence trends. See docs/MONITORING_CANONICAL.MD.
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 from prometheus_client import Counter, Gauge, Histogram
+
+# FB-CAN-069: rolling samples for post-release live probation (percentiles over recent ticks)
+_PROB_EDGE: deque[float] = deque(maxlen=50_000)
+_PROB_DRIFT: deque[float] = deque(maxlen=50_000)
+_PROB_FP: deque[float] = deque(maxlen=50_000)
+_PROB_LAST_RELEASE: str | None = None
+
+
+def reset_probation_sample_buffers(release_id: str) -> None:
+    """Clear rolling buffers when monitoring a different active-live release."""
+    global _PROB_LAST_RELEASE
+    rid = str(release_id or "").strip()
+    if not rid:
+        return
+    if _PROB_LAST_RELEASE == rid:
+        return
+    _PROB_EDGE.clear()
+    _PROB_DRIFT.clear()
+    _PROB_FP.clear()
+    _PROB_LAST_RELEASE = rid
+
+
+def percentile_95(values: list[float]) -> float | None:
+    if not values:
+        return None
+    xs = sorted(values)
+    i = int(round(0.95 * (len(xs) - 1)))
+    i = max(0, min(i, len(xs) - 1))
+    return float(xs[i])
+
+
+def get_probation_rolling_samples(max_samples: int) -> tuple[list[float], list[float], list[float]]:
+    """Last up to ``max_samples`` values per series (edge erosion only on trade_intent ticks)."""
+    n = max(0, int(max_samples))
+    return (
+        list(_PROB_EDGE)[-n:] if _PROB_EDGE else [],
+        list(_PROB_DRIFT)[-n:] if _PROB_DRIFT else [],
+        list(_PROB_FP)[-n:] if _PROB_FP else [],
+    )
 
 # --- Edge erosion (spec §4.7 / §4.9 — realized vs theoretical proxy) ---
 CANONICAL_THEORETICAL_EDGE_SCORE = Histogram(
@@ -106,6 +146,7 @@ def record_calibration_and_drift_from_tick(
     risk: Any,
     forecast_packet: Any | None,
     feature_row: dict[str, float] | None,
+    record_probation_samples: bool = True,
 ) -> None:
     """Record FB-CAN-039 metrics for one decision cycle (called from record_canonical_post_tick)."""
     sym = symbol or "unknown"
@@ -113,11 +154,16 @@ def record_calibration_and_drift_from_tick(
 
     fp_mem = float(getattr(risk, "trigger_false_positive_memory", 0.0) or 0.0)
     CANONICAL_FALSE_POSITIVE_MEMORY.labels(symbol=sym).observe(fp_mem)
+    if record_probation_samples:
+        _PROB_FP.append(fp_mem)
 
     dq = feats.get("canonical_exec_quality_penalty")
     if dq is not None:
         try:
-            CANONICAL_FEATURE_DRIFT_PENALTY.labels(symbol=sym).observe(float(dq))
+            dq_f = float(dq)
+            CANONICAL_FEATURE_DRIFT_PENALTY.labels(symbol=sym).observe(dq_f)
+            if record_probation_samples:
+                _PROB_DRIFT.append(dq_f)
         except (TypeError, ValueError):
             pass
 
@@ -173,6 +219,8 @@ def record_calibration_and_drift_from_tick(
     CANONICAL_THEORETICAL_EDGE_SCORE.labels(symbol=sym).observe(theo)
     CANONICAL_EDGE_EROSION.labels(symbol=sym).observe(erosion)
     CANONICAL_EXECUTION_CONFIDENCE.labels(symbol=sym).observe(ec)
+    if record_probation_samples:
+        _PROB_EDGE.append(erosion)
 
 
 def refresh_shadow_divergence_gauges_from_store(store: dict[str, Any] | None) -> None:

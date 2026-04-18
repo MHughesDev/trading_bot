@@ -1404,7 +1404,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-PROBATION",
         "id": "FB-CAN-069",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement post-release probation-window monitors and abort triggers",
         "agent_task": "Implement canonical post-release probation monitoring with automatic abort/rollback trigger policies when divergence or risk-quality thresholds breach defined limits during early live windows.",
         "affected_files": "orchestration/|observability/|models/|scripts/|tests/",

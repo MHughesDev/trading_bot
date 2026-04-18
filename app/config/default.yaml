@@ -224,6 +224,17 @@ apex_canonical:
         min_bars: 200
       rollback:
         severe_rate_multiplier: 1.5
+    post_release_probation:
+      enabled: true
+      windows:
+        active_hours: 48.0
+        cooldown_hours: 72.0
+        total_window_hours: 120.0
+      thresholds:
+        edge_erosion_p95_max: 0.35
+        feature_drift_penalty_p95_max: 0.55
+        trigger_false_positive_memory_p95_max: 0.65
+      sample_window_ticks: 256
 execution:
   mode: live
   live_adapter: coinbase

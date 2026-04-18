@@ -128,6 +128,7 @@ from orchestration.release_evidence import (
     build_release_evidence_bundle,
     resolve_canonical_from_yaml_text,
 )
+from orchestration.post_release_probation import evaluate_post_release_probation_tick
 from orchestration.release_gating import evaluate_promotion_gates
 from orchestration.shadow_comparison import run_shadow_replay_pair_comparison
 from app.config.shadow_comparison import shadow_policy_from_settings
@@ -842,7 +843,19 @@ def get_governance_monitoring() -> dict[str, Any]:
             "tb_governance_config_drift_event, tb_governance_rollback_event (FB-CAN-065)"
         ),
         "governance_metrics_module": "observability/governance_metrics.py",
+        "post_release_probation": (
+            "tb_governance_probation_monitoring_active, tb_governance_probation_abort_recommended, "
+            "tb_governance_probation_phase_total (FB-CAN-069); policy: apex_canonical.domains.post_release_probation"
+        ),
+        "post_release_probation_module": "observability/probation_metrics.py",
+        "post_release_probation_status": "GET /governance/probation-status",
     }
+
+
+@app.get("/governance/probation-status")
+def get_governance_probation_status() -> dict[str, Any]:
+    """Post-release live probation evaluation snapshot (FB-CAN-069)."""
+    return evaluate_post_release_probation_tick(settings=settings, risk_engine=None)
 
 
 @app.get("/governance/shadow-comparison")

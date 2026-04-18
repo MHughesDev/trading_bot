@@ -234,6 +234,7 @@ def record_canonical_post_tick(
     forecast_packet: Any | None,
     carry_sleeve: dict[str, Any] | None = None,
     feature_row: dict[str, float] | None = None,
+    record_probation_samples: bool = True,
 ) -> None:
     """Record canonical metrics from one `run_decision_tick` completion."""
     sym = symbol or "unknown"
@@ -363,6 +364,7 @@ def record_canonical_post_tick(
         risk=risk,
         forecast_packet=forecast_packet,
         feature_row=feature_row,
+        record_probation_samples=record_probation_samples,
     )
 
     fr = feature_row or {}

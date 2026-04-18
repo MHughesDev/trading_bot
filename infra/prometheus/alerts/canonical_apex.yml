@@ -218,3 +218,16 @@ groups:
           summary: "Shadow comparison recommends rollback"
           description: "Governance shadow replay report set rollback_recommended; review release and candidate logic."
           runbook: "docs/MONITORING_CANONICAL.MD#fb-can-039-alert-rules-drift--calibration--shadow-trends"
+
+  - name: canonical_governance_probation_fb_can_069
+    rules:
+      - alert: GovernanceProbationAbortRecommended
+        expr: tb_governance_probation_abort_recommended == 1
+        for: 2m
+        labels:
+          severity: critical
+          domain: governance
+        annotations:
+          summary: "Post-release probation recommends abort/rollback"
+          description: "Rolling risk-quality proxies breached policy during the active live probation window; review release ledger and execute rollback playbook."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-069-post-release-probation"

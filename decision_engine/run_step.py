@@ -108,6 +108,7 @@ def run_decision_tick(
             forecast_packet=None,
             carry_sleeve=getattr(risk_state, "carry_sleeve_last", None),
             feature_row=eff if isinstance(eff, dict) else feature_row,
+            record_probation_samples=not replay_deterministic,
         )
         return regime, fc, route, proposal, trade, risk_state
 
@@ -165,6 +166,13 @@ def run_decision_tick(
     DECISION_LATENCY.observe(time.perf_counter() - t0)
     maybe_set_config_version_from_engine(risk_engine)
     eff = pipeline.last_feature_effective
+    if not replay_deterministic:
+        try:
+            from orchestration.post_release_probation import prepare_probation_sample_buffers_before_metrics
+
+            prepare_probation_sample_buffers_before_metrics(settings=risk_engine._settings)
+        except Exception:
+            pass
     record_canonical_post_tick(
         symbol=symbol,
         regime=regime,
@@ -172,5 +180,16 @@ def run_decision_tick(
         forecast_packet=pipeline.last_forecast_packet,
         carry_sleeve=getattr(risk_state, "carry_sleeve_last", None),
         feature_row=eff if isinstance(eff, dict) else feature_row,
+        record_probation_samples=not replay_deterministic,
     )
+    if not replay_deterministic:
+        try:
+            from orchestration.post_release_probation import evaluate_post_release_probation_tick
+
+            evaluate_post_release_probation_tick(
+                settings=risk_engine._settings,
+                risk_engine=risk_engine,
+            )
+        except Exception:
+            pass
     return regime, fc, route, proposal, trade, risk_state

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import yaml
 
+from app.config.post_release_probation import validate_post_release_probation_domain
 from app.config.shadow_comparison import validate_shadow_comparison_domain
 from app.config.signal_confidence import validate_signal_confidence_domain
 
@@ -93,6 +94,10 @@ def main() -> int:
         return 1
 
     for err in validate_shadow_comparison_domain(domains.get("shadow_comparison")):
+        print(f"ci_canonical_config_gates: {err}", file=sys.stderr)
+        return 1
+
+    for err in validate_post_release_probation_domain(domains.get("post_release_probation")):
         print(f"ci_canonical_config_gates: {err}", file=sys.stderr)
         return 1
 
