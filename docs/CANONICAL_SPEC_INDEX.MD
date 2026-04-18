@@ -2,7 +2,7 @@
 
 **Purpose:** Single entry point for **target system architecture** during the **FB-CAN-*** canonical migration. Use this page to decide which documents are **binding for “what we are building toward”** vs **historical or as-implemented**.
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-012: `docs/CANONICAL_DELETION_LOG.MD`; removed superseded `docs/Specs/MASTER_SPEC_RISK_STATE_GAP.MD`).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-013: `scripts/ci_canonical_contracts.sh`, `tests/test_canonical_contracts_smoke.py`).
 
 ---
 

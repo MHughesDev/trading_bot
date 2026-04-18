@@ -620,7 +620,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-TEST",
         "id": "FB-CAN-013",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Replace tests and CI gates for canonical behavior",
         "agent_task": "Replace obsolete tests asserting legacy architecture, then add canonical contract tests for state/trigger/auction/risk/execution/replay/governance domains. Update CI scripts and workflow so merge gates enforce canonical schemas and release-gating evidence checks rather than legacy-only invariants.",
         "affected_files": "tests/|scripts/|.github/workflows/ci.yml|docs/Specs/TESTING_AND_CI.MD",

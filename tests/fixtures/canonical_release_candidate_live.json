@@ -1,0 +1,40 @@
+{
+  "release_id": "ci-fixture-config-live-ok",
+  "kind": "config",
+  "owner": "ci",
+  "rationale": "Fixture for CI release-gate validation (FB-CAN-013).",
+  "release_notes": "Not a real release.",
+  "config_version": "1.0.0",
+  "logic_version": null,
+  "model_family_ref": null,
+  "feature_family_refs": [],
+  "severity": "moderate",
+  "current_stage": "draft",
+  "environment": "research",
+  "evidence": {
+    "version_identifiers": {"config": "1.0.0", "logic": "1.0.0"},
+    "domains_changed": [],
+    "replay_summary": "ok",
+    "replay_run_ids": ["r1"],
+    "scenario_stress_summary": "ok",
+    "shadow_comparison_summary": "",
+    "expected_benefits": "",
+    "known_risks": "none",
+    "owner_approval_present": true,
+    "owner_approver": "",
+    "unit_tests_passed": null,
+    "scenario_tests_passed": null,
+    "replay_regression_passed": null,
+    "shadow_divergence_reviewed": true,
+    "holdout_evidence_present": null
+  },
+  "rollback": {
+    "target_config_version": "0.9.0",
+    "target_logic_version": null,
+    "target_model_family_ref": null,
+    "instructions": "revert yaml",
+    "trigger_conditions": "",
+    "rollback_owner": ""
+  },
+  "linked_experiment_ids": []
+}

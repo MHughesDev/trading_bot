@@ -94,7 +94,7 @@ Agents working here should:
 | `observability/` | Metrics, logging |
 | `orchestration/` | Nightly retrain stub |
 | `infra/` | `docker-compose.yml`, Prometheus config |
-| `scripts/` | `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`, `smoke_credentials.py`, `create_github_issues.sh` |
+| `scripts/` | `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`, `ci_canonical_contracts.sh`, `smoke_credentials.py`, `create_github_issues.sh` |
 | `tests/` | Pytest suite |
 | `docs/` | **[Queue system](docs/QUEUE_SCHEMA.md):** `QUEUE.MD`, `QUEUE_STACK.csv`, `QUEUE_ARCHIVE.MD`, `AUTOMATION_QUEUE_SLICE_PROMPT.MD`, `QUEUE_SCHEMA.md`; other reference `.MD` files |
 | `legacy/cryptobot/` | Frozen snapshot; not part of main pipeline |
@@ -121,7 +121,7 @@ When work uses a **feature branch** (e.g. `cursor/<task>-42e8`):
 
 1. **Branch from `main`** — `git fetch origin main && git checkout -b <branch-name> main` (or equivalent).
 2. **Implement and commit** on that branch.
-3. **Test before merge** — from repo root, run the full checks in **§9** (`ruff`, `pytest`, `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`). **Do not merge into `main` if tests fail** unless the task explicitly documents an exception and the risk.
+3. **Test before merge** — from repo root, run the full checks in **§9** (`ruff`, `pytest`, `ci_spec_compliance.sh`, `ci_mlflow_promotion_policy.sh`, `ci_canonical_contracts.sh`). **Do not merge into `main` if tests fail** unless the task explicitly documents an exception and the risk.
 4. **Merge into `main` only after tests pass** — e.g. `git checkout main && git merge <branch-name>` (or merge via PR in GitHub, then pull `main` locally).
 5. **Push `main`** — `git push origin main` so the default branch is fully updated.
 6. **Delete the feature branch** so it does not accumulate:
@@ -170,6 +170,7 @@ python3 scripts/ci_queue_consistency.py
 bash scripts/ci_pip_audit.sh
 bash scripts/ci_bandit.sh
 bash scripts/ci_mlflow_promotion_policy.sh
+bash scripts/ci_canonical_contracts.sh
 ```
 
 **Secret scanning (optional locally):** `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 detect --source /repo --redact` (same image as CI **gitleaks** job).

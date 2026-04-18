@@ -11,6 +11,7 @@
 | Experiment records, registry queries, link to release candidate | `models/registry/experiment_registry.py` |
 | Default experiment registry file | `models/registry/experiment_registry.json` |
 | CLI validation of a candidate JSON against gates | `scripts/validate_release_gates.py` |
+| CI merge gate (checked-in fixture must pass `--target live`) | `scripts/ci_canonical_contracts.sh` (GitHub Actions **lint-test** job) |
 
 ## Operator workflow (minimal)
 

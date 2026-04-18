@@ -42,6 +42,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`scripts/queue_top.sh`](../scripts/queue_top.sh) | **Shell alias** for agents: same as `python3 scripts/print_next_queue_item.py` — **grab the top Open row** without opening the CSV in an editor. |
 | [`scripts/close_queue_item.py`](../scripts/close_queue_item.py) | **Agent helper:** mark an item **`Done`** in `scripts/generate_queue_stack.py`, run **`generate_queue_stack.py`**, optionally flip **`Open` → `Done`** in a matching **`QUEUE_ARCHIVE.MD`** table row. |
 | [`scripts/queue_close.sh`](../scripts/queue_close.sh) | **Shell alias:** `bash scripts/queue_close.sh --next` or `--id <ID>` — **move / archive closure** without loading the full CSV or archive. |
+| [`scripts/ci_canonical_contracts.sh`](../scripts/ci_canonical_contracts.sh) | **FB-CAN-013** — CI: `validate_release_gates.py` on `tests/fixtures/canonical_release_candidate_live.json`. |
 
 **Audit → backlog (optional):** [`docs/FULL_AUDIT.md`](FULL_AUDIT.md) **§8** audit report · [`.cursor/skills/draft-audit-report`](../.cursor/skills/draft-audit-report/SKILL.md) · [`.cursor/skills/audit-report-to-queue`](../.cursor/skills/audit-report-to-queue/SKILL.md) · [`docs/BRAINSTORM/BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD`](BRAINSTORM/BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD)
 
