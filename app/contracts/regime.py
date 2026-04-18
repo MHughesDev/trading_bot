@@ -4,6 +4,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from app.contracts.canonical_state import CanonicalStateOutput
+
 
 class SemanticRegime(StrEnum):
     BULL = "bull"
@@ -13,9 +15,10 @@ class SemanticRegime(StrEnum):
 
 
 class RegimeOutput(BaseModel):
-    """Gaussian HMM (4 states) mapped to semantic regimes."""
+    """Gaussian HMM (4 states) mapped to semantic regimes; optional APEX canonical slice."""
 
     state_index: int = Field(ge=0, le=3)
     semantic: SemanticRegime
     probabilities: list[float]
     confidence: float = Field(ge=0.0, le=1.0)
+    apex: CanonicalStateOutput | None = None

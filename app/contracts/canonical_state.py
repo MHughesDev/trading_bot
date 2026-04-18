@@ -1,0 +1,37 @@
+"""APEX canonical state / regime outputs (FB-CAN-004).
+
+Aligned with docs/Human Provided Specs/new_specs/canonical/APEX_State_Regime_Logic_Detail_Spec_v1_0.md
+§4–11 (regime vector, confidence, transition, heat, reflexivity, degradation).
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+from pydantic import BaseModel, Field
+
+
+class DegradationLevel(StrEnum):
+    NORMAL = "normal"
+    REDUCED = "reduced"
+    DEFENSIVE = "defensive"
+    NO_TRADE = "no_trade"
+
+
+class CanonicalStateOutput(BaseModel):
+    """Compact, deterministic state snapshot for replay and downstream consumers."""
+
+    regime_probabilities: list[float] = Field(
+        ...,
+        min_length=5,
+        max_length=5,
+        description="Order: trend, range, stress, dislocated, transition — sum ≈ 1",
+    )
+    regime_confidence: float = Field(ge=0.0, le=1.0)
+    transition_probability: float = Field(ge=0.0, le=1.0)
+    novelty: float = Field(ge=0.0, le=1.0)
+    heat_score: float = Field(ge=0.0, le=1.0)
+    reflexivity_score: float = Field(ge=0.0, le=1.0)
+    degradation: DegradationLevel = DegradationLevel.NORMAL
+    # Explainability (optional component breakdown for heat)
+    heat_components: dict[str, float] = Field(default_factory=dict)
