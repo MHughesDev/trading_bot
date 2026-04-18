@@ -15,14 +15,14 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-013** are **Done**. **FB-CAN-014**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
+**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-014** are **Done**. **FB-CAN-015**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **14** | FB-CAN-015..016, FB-CAN-019..021, FB-CAN-024, FB-CAN-029..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
-| **MEDIUM** | **39** | FB-CAN-014, FB-CAN-017..018, FB-CAN-022..023, FB-CAN-025..028, FB-CAN-032, FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
+| **MEDIUM** | **38** | FB-CAN-017..018, FB-CAN-022..023, FB-CAN-025..028, FB-CAN-032, FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
 | **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
@@ -187,9 +187,9 @@
 | FB-CAN-009 | CAN-REPL | A | DS | feature | MEDIUM | Done | **Replay:** `ReplayRunContract`, canonical event envelopes, fault injection, deterministic tick. **Done 2026-04-18.** | `backtesting/`, `app/contracts/`, `decision_engine/run_step.py`, tests |
 | FB-CAN-010 | CAN-MON | B | OB | feature | MEDIUM | Done | **Monitoring:** `canonical_metrics.py` `tb_canonical_*`, Grafana panels, `MONITORING_CANONICAL.MD`. **Done 2026-04-18.** | `observability/`, `infra/`, docs |
 | FB-CAN-011 | CAN-GOV | B | OP | platform | MEDIUM | Done | **Release gating + experiment registry:** `orchestration/release_gating.py` (`ReleaseCandidate`, `evaluate_promotion_gates`, ledger I/O), `models/registry/experiment_registry.py`, `scripts/validate_release_gates.py`, `docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`. **Done 2026-04-18.** | `orchestration/`, `models/registry/`, `scripts/`, `docs/`, `tests/` |
-| FB-CAN-012 | CAN-DEL | A | CP | tech_debt | MEDIUM | Done | **Superseded doc removal:** deleted `docs/Specs/MASTER_SPEC_RISK_STATE_GAP.MD` (gap audit §5.1); added [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD) + updated gap audit §5.1 and Specs index. Remaining as-built Specs deletions deferred to **FB-CAN-014**. **Done 2026-04-18.** | `docs/`, `docs/reports/` |
+| FB-CAN-012 | CAN-DEL | A | CP | tech_debt | MEDIUM | Done | **Superseded doc removal:** deleted `docs/Specs/MASTER_SPEC_RISK_STATE_GAP.MD` (gap audit §5.1); added [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD) + updated gap audit §5.1 and Specs index. **Done 2026-04-18.** | `docs/`, `docs/reports/` |
 | FB-CAN-013 | CAN-TEST | B | CI | platform | HIGH | Done | **Canonical CI + tests:** `scripts/ci_canonical_contracts.sh` (release-gate fixture), `tests/test_canonical_contracts_smoke.py`, `tests/fixtures/canonical_release_candidate_live.json`, workflow step in `ci.yml`; `AGENTS.md` §9 + `TESTING_AND_CI.MD`. **Done 2026-04-18.** | `tests/`, `scripts/`, `.github/workflows/ci.yml`, `docs/` |
-| FB-CAN-014 | CAN-CLEAN | B | OP | change | MEDIUM | Open | Finalize canonical module map/docs cleanup and remove contradictory guidance. | `README.md`, `docs/`, core modules |
+| FB-CAN-014 | CAN-CLEAN | B | OP | change | MEDIUM | Done | **Module map + pointers:** [`CANONICAL_MODULE_MAP.MD`](CANONICAL_MODULE_MAP.MD); README + `CANONICAL_SPEC_INDEX` + `Specs/README` + `QUEUE_SCHEMA`; clarified deletion log vs as-built Specs. **Done 2026-04-18.** | `README.md`, `docs/` |
 | FB-CAN-015 | CAN-DATA | A | DP | feature | HIGH | Open | Build canonical input contract layer for market/structural/safety/execution/config snapshots at decision boundaries. | `app/contracts/`, `decision_engine/`, `data_plane/`, tests |
 | FB-CAN-016 | CAN-NORM | A | DP | feature | HIGH | Open | Refactor ingest/feature normalization to canonical freshness/reliability/confidence family semantics. | `data_plane/ingest/`, `data_plane/features/`, `app/contracts/`, tests |
 | FB-CAN-017 | CAN-STR | A | FR | feature | MEDIUM | Open | Replace legacy ForecastPacket-centric structure output contracts with canonical structure outputs. | `app/contracts/forecast_packet.py`, `decision_engine/pipeline.py`, `forecaster_model/`, tests |

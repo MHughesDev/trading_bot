@@ -634,7 +634,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-CLEAN",
         "id": "FB-CAN-014",
         "kind": "change",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Final canonical docs and module-structure cleanup",
         "agent_task": "Finalize end-state repository structure and docs after canonical migration: publish module map, responsibility boundaries, removed-module tombstones, operator runbooks, and migration notes. Ensure README/docs/spec pointers consistently reference canonical architecture and no stale contradictory guidance remains.",
         "affected_files": "README.md|docs/|app/|decision_engine/|risk_engine/|execution/|backtesting/",
