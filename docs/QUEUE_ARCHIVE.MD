@@ -15,13 +15,13 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-005** are **Done**. **FB-CAN-006**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
+**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-006** are **Done**. **FB-CAN-007**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **18** | FB-CAN-006..008, FB-CAN-013, FB-CAN-015..016, FB-CAN-019..021, FB-CAN-024, FB-CAN-029..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
+| **HIGH** | **17** | FB-CAN-007..008, FB-CAN-013, FB-CAN-015..016, FB-CAN-019..021, FB-CAN-024, FB-CAN-029..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
 | **MEDIUM** | **43** | FB-CAN-009..012, FB-CAN-014, FB-CAN-017..018, FB-CAN-022..023, FB-CAN-025..028, FB-CAN-032, FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
 | **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
@@ -181,7 +181,7 @@
 | FB-CAN-003 | CAN-CFG | A | CFG | feature | HIGH | Done | **Canonical config bundle:** `app/config/canonical_config.py`, `AppSettings.canonical`, optional `apex_canonical` in YAML; legacy projection + merge. **Done 2026-04-18.** | `app/config/settings.py`, `app/config/default.yaml`, `app/config/canonical_config.py`, tests/docs |
 | FB-CAN-004 | CAN-STATE | A | FR | feature | HIGH | Done | **State engine:** `decision_engine/state_engine.py`, `CanonicalStateOutput` on `RegimeOutput.apex`, `RiskState` degradation sizing in `RiskEngine`. **Done 2026-04-18.** | `decision_engine/`, `app/contracts/`, `risk_engine/`, tests |
 | FB-CAN-005 | CAN-TRIG | A | FR | feature | HIGH | Done | **Trigger engine:** `trigger_engine.py`, `TriggerOutput`, diagnostics on `ForecastPacket`, policy gate + size scale. **Done 2026-04-18.** | `decision_engine/`, `app/contracts/`, tests |
-| FB-CAN-006 | CAN-AUCT | A | FR | feature | HIGH | Open | Implement opportunity auction scoring/constraints/top-N selection replacing direct single-proposal flow. | `decision_engine/`, contracts/tests |
+| FB-CAN-006 | CAN-AUCT | A | FR | feature | HIGH | Done | **Auction:** `auction_engine.py`, ranked long/short vs flat, penalties + top-N/notional cap, diagnostics on packet. **Done 2026-04-18.** | `decision_engine/`, `app/contracts/`, tests |
 | FB-CAN-007 | CAN-RISK | A | RT | feature | HIGH | Open | Replace legacy risk engine with canonical sizing/concentration/edge-budget/degradation-aware model. | `risk_engine/`, contracts/tests |
 | FB-CAN-008 | CAN-EXEC | A | EX | feature | HIGH | Open | Replace thin execution service with canonical execution-confidence/style/stress/partial-fill logic and feedback. | `execution/`, contracts/tests |
 | FB-CAN-009 | CAN-REPL | A | DS | feature | MEDIUM | Open | Align replay/simulation with canonical event contracts and deterministic stress/fault profiles. | `backtesting/`, `decision_engine/run_step.py`, tests |

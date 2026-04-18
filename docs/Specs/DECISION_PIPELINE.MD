@@ -11,6 +11,7 @@
 
 - **`state_engine.py`** — **FB-CAN-004:** builds APEX **`CanonicalStateOutput`** from `ForecastPacket` + features (5-class regime probs, confidence, transition, novelty, heat, reflexivity, degradation); attached to **`RegimeOutput.apex`** and merged into **`RiskState`** for sizing.
 - **`trigger_engine.py`** — **FB-CAN-005:** Setup → Pre-Trigger → Confirmed Trigger; **`TriggerOutput`** serialized under **`ForecastPacket.forecast_diagnostics["trigger"]`**; gates proposals in **`run_spec_policy_step`** when trigger invalid.
+- **`auction_engine.py`** — **FB-CAN-006:** scores long/short/flat candidates (canonical weighted score + penalties), selects winner under top-N and notional cap; result in **`forecast_diagnostics["auction"]`**.
 - **`pipeline.py`** — `DecisionPipeline`: regime + forecast + route + `ActionProposal` from features and risk state
 - **`features_live.py`** — Live tick / overlay feature row construction
 - **`feature_frame.py`** — Bar enrichment and merges (live/replay)

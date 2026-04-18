@@ -32,7 +32,7 @@ def _structural_confidence(pkt: ForecastPacket) -> float:
     return _clip01(float(cs))
 
 
-def _asymmetry_score(pkt: ForecastPacket) -> float:
+def asymmetry_score(pkt: ForecastPacket) -> float:
     """Directional asymmetry from short-horizon quantiles [0,1]."""
     if not pkt.q_low or not pkt.q_high or not pkt.q_med:
         return 0.0
@@ -42,7 +42,7 @@ def _asymmetry_score(pkt: ForecastPacket) -> float:
     return _clip01(bias)
 
 
-def _state_alignment(apex: CanonicalStateOutput) -> float:
+def state_alignment_score(apex: CanonicalStateOutput) -> float:
     rp = apex.regime_probabilities
     if len(rp) >= 5:
         return _clip01(max(rp[0], rp[1]))
@@ -59,8 +59,8 @@ def evaluate_trigger(
     """Evaluate three-stage trigger from packet, microstructure proxies, and canonical state."""
     reasons: list[str] = []
 
-    A = _asymmetry_score(pkt)
-    S = _state_alignment(apex)
+    A = asymmetry_score(pkt)
+    S = state_alignment_score(apex)
     C_struct = _structural_confidence(pkt)
     C = _clip01(0.5 * apex.regime_confidence + 0.5 * C_struct)
     H = apex.heat_score
