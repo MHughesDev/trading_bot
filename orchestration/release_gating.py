@@ -5,6 +5,9 @@ promotion gates from ``APEX_Config_Management_and_Release_Gating_Spec_v1_0.md``.
 
 **FB-CAN-052:** ``ReleaseCandidate.environment`` must equal the **immediate predecessor**
 in research → simulation → shadow → live before promoting to the next stage (no skips).
+
+**FB-CAN-053:** Rollback playbook fields (owner, instructions, triggers) required for
+promotion beyond **research**; structural validation on rollback version refs.
 """
 
 from __future__ import annotations
@@ -24,6 +27,10 @@ from app.contracts.release_objects import (
     write_release_ledger,
 )
 from orchestration.fault_injection_profiles import fault_stress_evidence_satisfied
+from orchestration.rollback_validation import (
+    validate_rollback_playbook,
+    validate_rollback_target_references,
+)
 
 # Spec §4 — ordered environments (FB-CAN-052).
 _ENVIRONMENT_ORDER: tuple[ReleaseEnvironment, ...] = ("research", "simulation", "shadow", "live")
@@ -56,6 +63,17 @@ def _environment_progression_ok(
     return True, ""
 
 
+def validate_rollback_for_promotion(
+    rollback: RollbackTarget,
+    *,
+    target_environment: ReleaseEnvironment,
+) -> tuple[bool, list[str]]:
+    """Structural refs + operator playbook (FB-CAN-053)."""
+    ok_a, ra = validate_rollback_target_references(rollback)
+    ok_b, rb_reasons = validate_rollback_playbook(rollback, target_environment=target_environment)
+    return ok_a and ok_b, ra + rb_reasons
+
+
 __all__ = [
     "ConfigLifecycleStage",
     "EvidencePackage",
@@ -70,6 +88,7 @@ __all__ = [
     "evaluate_promotion_gates",
     "read_release_ledger",
     "required_environment_before",
+    "validate_rollback_for_promotion",
     "write_release_ledger",
 ]
 
@@ -107,6 +126,11 @@ def evaluate_promotion_gates(
         reasons.append(
             "rollback target must include config/logic/model ref, feature-family list, or instructions"
         )
+    elif target_environment != "research":
+        ok_rb, rb_msgs = validate_rollback_for_promotion(rb, target_environment=target_environment)
+        if not ok_rb:
+            blocked.append("rollback_playbook")
+            reasons.extend(rb_msgs)
 
     # --- Owner ---
     if not (candidate.owner and candidate.owner.strip()):

@@ -10,4 +10,6 @@ python3 scripts/validate_release_gates.py \
   --candidate tests/fixtures/canonical_release_candidate_live.json \
   --target live
 
+bash scripts/ci_rollback_playbook.sh
+
 echo "ci_canonical_contracts: OK"

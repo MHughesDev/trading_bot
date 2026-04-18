@@ -11,6 +11,7 @@
 | Shadow replay comparison (divergence rates, thresholds, probation, rollback hint) (**FB-CAN-038**) | `orchestration/shadow_comparison.py`, `app/config/shadow_comparison.py`, `apex_canonical.domains.shadow_comparison` in `default.yaml`, `models/registry/shadow_comparison_store.json` |
 | Control plane: current bundle + diff vs pasted `default.yaml` | `GET /governance/release-evidence`, `POST /governance/release-evidence/diff` (`control_plane/api.py`) |
 | Control plane: release-object ledger + gate evaluation (FB-CAN-051) | `GET /governance/release-objects`, `GET /governance/release-objects/{release_id}`, `POST /governance/release-objects` (mutating), `POST /governance/release-objects/evaluate-gates` |
+| Rollback playbooks + CI viability (FB-CAN-053) | `orchestration/rollback_validation.py`, `scripts/ci_rollback_playbook.sh` (invoked from `ci_canonical_contracts.sh`), `GET /governance/rollback-playbook`, `docs/operations/rollback_playbooks.md` |
 | Control plane: shadow policy + last report; run paired replay (**FB-CAN-038**) | `GET /governance/shadow-comparison`, `POST /governance/shadow-comparison/run` (mutating) |
 | CLI: paired replay compare | `scripts/compare_shadow_replays.py` |
 | JSON ledger path (optional) | `models/registry/release_ledger.json` via `default_release_ledger_path()` |

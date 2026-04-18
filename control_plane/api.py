@@ -915,6 +915,33 @@ def post_release_objects_evaluate_gates(body: PromotionGateEvaluateRequest) -> d
     return result.model_dump(mode="json")
 
 
+@app.get("/governance/rollback-playbook")
+def get_governance_rollback_playbook() -> dict[str, Any]:
+    """Rollback playbook requirements and pointers (FB-CAN-053)."""
+    return {
+        "docs": "docs/operations/rollback_playbooks.md",
+        "spec": "docs/Human Provided Specs/new_specs/canonical/APEX_Config_Management_and_Release_Gating_Spec_v1_0.md",
+        "ci_script": "scripts/ci_rollback_playbook.sh",
+        "release_objects_api": "GET /governance/release-objects",
+        "requirements": {
+            "research": {"rollback_playbook_text_required": False},
+            "simulation": {
+                "rollback_playbook_text_required": True,
+                "fields": ["rollback_owner", "instructions", "trigger_conditions"],
+            },
+            "shadow": {
+                "rollback_playbook_text_required": True,
+                "fields": ["rollback_owner", "instructions", "trigger_conditions"],
+            },
+            "live": {
+                "rollback_playbook_text_required": True,
+                "fields": ["rollback_owner", "instructions", "trigger_conditions"],
+            },
+        },
+        "validate_fn": "orchestration.rollback_validation.validate_rollback_playbook",
+    }
+
+
 @app.get("/governance/experiments")
 def list_experiments(
     domain: Annotated[ExperimentDomain | None, Query()] = None,

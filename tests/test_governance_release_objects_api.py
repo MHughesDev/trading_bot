@@ -66,7 +66,12 @@ def test_evaluate_gates(client_with_ledger: TestClient) -> None:
                 "fault_stress_run_ids": ["ci-fault-suite"],
                 "fault_profile_ids_satisfied": fault_ids,
             },
-            "rollback": {"target_config_version": "0.9.0"},
+            "rollback": {
+                "target_config_version": "0.9.0",
+                "instructions": "revert apex_canonical to target version; restart control plane",
+                "trigger_conditions": "shadow divergence spike or post-deploy gate failure",
+                "rollback_owner": "ops",
+            },
             "environment": "shadow",
         },
         "target_environment": "live",

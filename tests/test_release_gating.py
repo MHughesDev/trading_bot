@@ -27,6 +27,25 @@ def _env_shadow() -> dict:
     return {"environment": "shadow"}
 
 
+def _rollback_promotable() -> RollbackTarget:
+    """FB-CAN-053: version pointer + operator playbook for non-research gates."""
+    return RollbackTarget(
+        target_config_version="0.9.0",
+        instructions="revert apex_canonical to target version; restart control plane",
+        trigger_conditions="shadow divergence spike or post-deploy gate failure",
+        rollback_owner="ops",
+    )
+
+
+def _rollback_logic_promotable() -> RollbackTarget:
+    return RollbackTarget(
+        target_logic_version="1.0.0",
+        instructions="deploy prior logic artifact; restart api and live workers",
+        trigger_conditions="failed regression suite or elevated error rate",
+        rollback_owner="ops",
+    )
+
+
 def _minimal_evidence_live() -> EvidencePackage:
     return EvidencePackage(
         version_identifiers={"config": "1.0.0", "logic": "1.0.0"},
@@ -64,7 +83,7 @@ def test_gates_pass_config_live():
         config_version="1.0.0",
         **_env_shadow(),
         evidence=_minimal_evidence_live(),
-        rollback=RollbackTarget(target_config_version="0.9.0", instructions="revert yaml"),
+        rollback=_rollback_promotable(),
     )
     r = evaluate_promotion_gates(c, target_environment="live")
     assert r.allowed is True
@@ -92,7 +111,7 @@ def test_combined_live_requires_live_replay_equivalence():
             shadow_comparison_passed=True,
             **_fault_stress_fields(),
         ),
-        rollback=RollbackTarget(target_config_version="0.9.0"),
+        rollback=_rollback_promotable(),
     )
     r = evaluate_promotion_gates(c, target_environment="live")
     assert r.allowed is False
@@ -121,7 +140,7 @@ def test_logic_live_requires_live_replay_equivalence():
             shadow_comparison_passed=True,
             **_fault_stress_fields(),
         ),
-        rollback=RollbackTarget(target_logic_version="1.0.0"),
+        rollback=_rollback_logic_promotable(),
     )
     r = evaluate_promotion_gates(c, target_environment="live")
     assert r.allowed is False
@@ -145,7 +164,7 @@ def test_logic_live_requires_test_flags():
             shadow_divergence_reviewed=True,
             **_fault_stress_fields(),
         ),
-        rollback=RollbackTarget(target_logic_version="1.0.0"),
+        rollback=_rollback_logic_promotable(),
     )
     r = evaluate_promotion_gates(c, target_environment="live")
     assert r.allowed is False
@@ -174,7 +193,7 @@ def test_live_blocked_when_not_shadow_stage():
         config_version="1.0.0",
         environment="research",
         evidence=_minimal_evidence_live(),
-        rollback=RollbackTarget(target_config_version="0.9.0", instructions="revert yaml"),
+        rollback=_rollback_promotable(),
     )
     r = evaluate_promotion_gates(c, target_environment="live")
     assert r.allowed is False
@@ -193,7 +212,7 @@ def test_simulation_requires_prior_research_environment():
             replay_summary="ok",
             replay_run_ids=["r1"],
         ),
-        rollback=RollbackTarget(target_config_version="0.9.0"),
+        rollback=_rollback_promotable(),
     )
     r = evaluate_promotion_gates(c, target_environment="simulation")
     assert r.allowed is False
@@ -217,7 +236,7 @@ def test_live_blocked_without_shadow_comparison():
         config_version="1.0.0",
         **_env_shadow(),
         evidence=ev,
-        rollback=RollbackTarget(target_config_version="0.9.0", instructions="revert"),
+        rollback=_rollback_promotable(),
     )
     r = evaluate_promotion_gates(c, target_environment="live")
     assert r.allowed is False
@@ -235,11 +254,31 @@ def test_live_blocked_without_fault_stress_evidence():
         config_version="1.0.0",
         **_env_shadow(),
         evidence=ev,
-        rollback=RollbackTarget(target_config_version="0.9.0", instructions="revert"),
+        rollback=_rollback_promotable(),
     )
     r = evaluate_promotion_gates(c, target_environment="live")
     assert r.allowed is False
     assert "fault_stress_evidence" in r.blocked_gates
+
+
+def test_live_blocked_without_rollback_playbook():
+    c = ReleaseCandidate(
+        release_id="rel-norb",
+        kind="config",
+        owner="ops",
+        config_version="1.0.0",
+        **_env_shadow(),
+        evidence=_minimal_evidence_live(),
+        rollback=RollbackTarget(
+            target_config_version="0.9.0",
+            instructions="short",
+            trigger_conditions="x",
+            rollback_owner="",
+        ),
+    )
+    r = evaluate_promotion_gates(c, target_environment="live")
+    assert r.allowed is False
+    assert "rollback_playbook" in r.blocked_gates
 
 
 def test_feature_family_live_requires_replay_flag():
@@ -252,7 +291,13 @@ def test_feature_family_live_requires_replay_flag():
         **_env_shadow(),
         feature_family_refs=["funding"],
         evidence=ev,
-        rollback=RollbackTarget(target_config_version="0.9.0", target_feature_family_refs=["funding"]),
+        rollback=RollbackTarget(
+            target_config_version="0.9.0",
+            target_feature_family_refs=["funding"],
+            instructions="disable funding family in yaml; redeploy config",
+            trigger_conditions="replay shows family-specific regression",
+            rollback_owner="ops",
+        ),
     )
     r = evaluate_promotion_gates(c, target_environment="live")
     assert r.allowed is False
