@@ -26,6 +26,13 @@ REQUIRED_SIGNAL_FAMILIES: tuple[str, ...] = (
     "heat_components",
 )
 
+# Optional upstream families: availability gates + lower weight in aggregate blend (FB-CAN-050).
+OPTIONAL_SIGNAL_FAMILIES: frozenset[str] = frozenset({"options_context", "stablecoin_flow_proxy"})
+OPTIONAL_FAMILY_AVAILABILITY_KEY: dict[str, str] = {
+    "options_context": "options_context_available",
+    "stablecoin_flow_proxy": "stablecoin_flow_available",
+}
+
 
 class SignalFamilyParams(BaseModel):
     """Per-family decay / confidence parameters (spec §5.1)."""
@@ -126,7 +133,17 @@ def apply_signal_family_confidence(
             out[key] = 0.0
             continue
 
+        if name in OPTIONAL_SIGNAL_FAMILIES:
+            ak = OPTIONAL_FAMILY_AVAILABILITY_KEY.get(name, "")
+            if ak and float(out.get(ak, 0.0)) < 0.5:
+                out[key] = _clip01(p.base_confidence_floor)
+                continue
+
         eff_fresh = _clip01(min(max(fresh_in, p.freshness_floor), p.freshness_cap))
+        if name == "options_context":
+            eff_fresh = _clip01(min(eff_fresh, float(out.get("options_freshness", eff_fresh))))
+        elif name == "stablecoin_flow_proxy":
+            eff_fresh = _clip01(min(eff_fresh, float(out.get("stablecoin_freshness", eff_fresh))))
         lat = _spread_latency_proxy(out)
         # Staleness → decay toward floor (deterministic, replay-friendly)
         staleness = 1.0 - eff_fresh
@@ -138,10 +155,18 @@ def apply_signal_family_confidence(
         raw_score -= p.reliability_penalty_weight * (1.0 - rel_term)
         out[key] = _clip01(raw_score)
 
-    # Blend aggregate from per-family scores (deterministic; complements FB-CAN-016 heuristic when present)
-    fam_vals = [float(out[f"signal_confidence_{n}"]) for n in REQUIRED_SIGNAL_FAMILIES if f"signal_confidence_{n}" in out]
-    if fam_vals:
-        agg = sum(fam_vals) / len(fam_vals)
+    # Blend aggregate from per-family scores (optional families down-weighted; FB-CAN-050)
+    weighted: list[tuple[float, float]] = []
+    for n in REQUIRED_SIGNAL_FAMILIES:
+        sk = f"signal_confidence_{n}"
+        if sk not in out:
+            continue
+        w = 0.35 if n in OPTIONAL_SIGNAL_FAMILIES else 1.0
+        weighted.append((float(out[sk]), w))
+    if weighted:
+        num = sum(v * w for v, w in weighted)
+        den = sum(w for _, w in weighted)
+        agg = num / den if den > 0 else 0.0
         prev = out.get("signal_confidence_aggregate")
         if prev is not None:
             try:
@@ -150,10 +175,23 @@ def apply_signal_family_confidence(
                 pass
         out["signal_confidence_aggregate"] = _clip01(agg)
 
+    # Explicit fallback flags when family is enabled in config but upstream has no data (FB-CAN-050)
+    for name in OPTIONAL_SIGNAL_FAMILIES:
+        ak = OPTIONAL_FAMILY_AVAILABILITY_KEY.get(name, "")
+        fam_gate = ff.get(name)
+        enabled = isinstance(fam_gate, dict) and fam_gate.get("enabled") is True
+        if ak:
+            miss = enabled and float(out.get(ak, 0.0)) < 0.5
+            out[f"{name}_fallback_active"] = 1.0 if miss else 0.0
+            if name == "stablecoin_flow_proxy":
+                out["stablecoin_flow_fallback_active"] = out["stablecoin_flow_proxy_fallback_active"]
+
     return out
 
 
 __all__ = [
+    "OPTIONAL_FAMILY_AVAILABILITY_KEY",
+    "OPTIONAL_SIGNAL_FAMILIES",
     "REQUIRED_SIGNAL_FAMILIES",
     "SignalFamilyParams",
     "apply_signal_family_confidence",

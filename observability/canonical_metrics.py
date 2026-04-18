@@ -134,6 +134,28 @@ CANONICAL_EXECUTION_GUIDANCE_CONFIDENCE = Histogram(
     buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
 )
 
+# --- Optional feature families (FB-CAN-050) ---
+CANONICAL_OPTIONS_CONTEXT_AVAILABLE = Gauge(
+    "tb_canonical_options_context_available",
+    "1 when gex_score or iv_skew_score present on feature row",
+    ["symbol"],
+)
+CANONICAL_STABLECOIN_FLOW_AVAILABLE = Gauge(
+    "tb_canonical_stablecoin_flow_available",
+    "1 when stablecoin_flow_proxy present on feature row",
+    ["symbol"],
+)
+CANONICAL_OPTIONS_CONTEXT_FALLBACK = Gauge(
+    "tb_canonical_options_context_fallback_active",
+    "1 when options family enabled but no options fields upstream",
+    ["symbol"],
+)
+CANONICAL_STABLECOIN_FLOW_FALLBACK = Gauge(
+    "tb_canonical_stablecoin_flow_fallback_active",
+    "1 when stablecoin family enabled but no stablecoin proxy upstream",
+    ["symbol"],
+)
+
 # --- Data quality proxy (spec §4.2) ---
 CANONICAL_DATA_AGE_SECONDS = Histogram(
     "tb_canonical_data_age_seconds",
@@ -310,6 +332,23 @@ def record_canonical_post_tick(
         forecast_packet=forecast_packet,
         feature_row=feature_row,
     )
+
+    fr = feature_row or {}
+    try:
+        CANONICAL_OPTIONS_CONTEXT_AVAILABLE.labels(symbol=sym).set(
+            float(fr.get("options_context_available", 0.0))
+        )
+        CANONICAL_STABLECOIN_FLOW_AVAILABLE.labels(symbol=sym).set(
+            float(fr.get("stablecoin_flow_available", 0.0))
+        )
+        CANONICAL_OPTIONS_CONTEXT_FALLBACK.labels(symbol=sym).set(
+            float(fr.get("options_context_fallback_active", 0.0))
+        )
+        CANONICAL_STABLECOIN_FLOW_FALLBACK.labels(symbol=sym).set(
+            float(fr.get("stablecoin_flow_proxy_fallback_active", fr.get("stablecoin_flow_fallback_active", 0.0)))
+        )
+    except (TypeError, ValueError):
+        pass
 
     dr = getattr(risk, "last_decision_record", None)
     if isinstance(dr, dict):

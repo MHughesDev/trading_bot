@@ -125,9 +125,28 @@ def build_decision_boundary_input(
         perp_spot_divergence_score=_safe_float(merged, "perp_spot_divergence_score", 0.0)
         if "perp_spot_divergence_score" in merged
         else None,
+        gex_score=_safe_float(merged, "gex_score", 0.0) if "gex_score" in merged else None,
+        iv_skew_score=_safe_float(merged, "iv_skew_score", 0.0) if "iv_skew_score" in merged else None,
+        options_freshness=_clip01(_safe_float(merged, "options_freshness", 0.0))
+        if float(merged.get("options_context_available", 0.0) or 0.0) >= 0.5
+        else None,
+        options_reliability=_clip01(_safe_float(merged, "options_reliability", 0.0))
+        if float(merged.get("options_context_available", 0.0) or 0.0) >= 0.5
+        else None,
+        stablecoin_flow_proxy=_safe_float(merged, "stablecoin_flow_proxy", 0.0)
+        if "stablecoin_flow_proxy" in merged
+        else None,
+        stablecoin_freshness=_clip01(_safe_float(merged, "stablecoin_freshness", 0.0))
+        if float(merged.get("stablecoin_flow_available", 0.0) or 0.0) >= 0.5
+        else None,
         signal_freshness_structural=_clip01(_safe_float(merged, "structural_freshness", 0.75)),
         signal_reliability_structural=_clip01(_safe_float(merged, "structural_reliability", 0.7)),
-        signal_source_count=int(round(5.0 * _clip01(_safe_float(merged, "structural_family_coverage", 0.0)))),
+        signal_source_count=min(
+            7,
+            int(round(5.0 * _clip01(_safe_float(merged, "structural_family_coverage", 0.0))))
+            + (1 if _safe_float(merged, "options_context_available", 0.0) >= 0.5 else 0)
+            + (1 if _safe_float(merged, "stablecoin_flow_available", 0.0) >= 0.5 else 0),
+        ),
     )
 
     safety = SafetyRegimeSnapshot(

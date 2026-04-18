@@ -12,6 +12,8 @@ apex_canonical:
     - basis
     - cross_exchange_divergence
     - liquidation_structure
+    - options_context
+    - stablecoin_flow_proxy
     - execution_feedback
     - novelty
     - heat_components
@@ -138,18 +140,18 @@ apex_canonical:
         latency_penalty_weight: 0.25
         reliability_penalty_weight: 0.28
       options_context:
-        enabled: false
+        enabled: true
         base_confidence_floor: 0.0
-        base_confidence_cap: 0.15
+        base_confidence_cap: 0.35
         freshness_floor: 0.0
         freshness_cap: 1.0
         decay_lambda: 1.2
         latency_penalty_weight: 0.15
         reliability_penalty_weight: 0.2
       stablecoin_flow_proxy:
-        enabled: false
+        enabled: true
         base_confidence_floor: 0.0
-        base_confidence_cap: 0.15
+        base_confidence_cap: 0.3
         freshness_floor: 0.0
         freshness_cap: 1.0
         decay_lambda: 1.0
@@ -196,9 +198,9 @@ apex_canonical:
       liquidation_structure:
         enabled: true
       options_context:
-        enabled: false
+        enabled: true
       stablecoin_flow_proxy:
-        enabled: false
+        enabled: true
       execution_feedback:
         enabled: true
       novelty:

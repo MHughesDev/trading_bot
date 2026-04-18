@@ -201,6 +201,7 @@ class DecisionPipeline:
     def __init__(self, settings: AppSettings | None = None) -> None:
         self._settings = settings or load_settings()
         self._last_forecast_packet: ForecastPacket | None = None
+        self._last_feature_effective: dict[str, float] | None = None
         self._cache_key: tuple | None = None
         self._forecaster_weight_bundle: ForecasterWeightBundle | None = None
         self._torch_model = None
@@ -260,6 +261,11 @@ class DecisionPipeline:
         """Last `ForecastPacket` built on the hot path (master spec §5)."""
         return self._last_forecast_packet
 
+    @property
+    def last_feature_effective(self) -> dict[str, float] | None:
+        """Last feature row after boundary merge + signal confidence (FB-CAN-050 metrics)."""
+        return self._last_feature_effective
+
     def step(
         self,
         symbol: str,
@@ -278,6 +284,7 @@ class DecisionPipeline:
         product_tradable: bool = True,
         execution_feedback_state: dict[str, dict[str, float]] | None = None,
     ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, RiskState]:
+        self._last_feature_effective = None
         mp0 = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
         ef_override = execution_feedback_snapshot
         if execution_feedback_state is not None:
@@ -302,6 +309,7 @@ class DecisionPipeline:
             b2 = execution_feedback_state.get(symbol)
             if b2:
                 feature_effective = merge_memory_into_feature_row(feature_effective, b2)
+        self._last_feature_effective = dict(feature_effective)
         _ = _feature_vector(feature_effective)  # reserved for future feature-cache alignment
         self._log_serving_mode_once(self._settings)
 
