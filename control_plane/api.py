@@ -119,9 +119,13 @@ from app.contracts.release_objects import (
     read_release_ledger,
     write_release_ledger,
 )
+from orchestration.config_diff_audit import (
+    append_config_diff_audit_entry,
+    build_canonical_config_diff_report,
+    read_config_diff_audit_tail,
+)
 from orchestration.release_evidence import (
     build_release_evidence_bundle,
-    diff_canonical_runtime,
     resolve_canonical_from_yaml_text,
 )
 from orchestration.release_gating import evaluate_promotion_gates
@@ -773,6 +777,10 @@ class ReleaseEvidenceDiffRequest(BaseModel):
         default=None,
         description="Full YAML document (e.g. app/config/default.yaml) for baseline canonical merge",
     )
+    append_audit: bool = Field(
+        default=False,
+        description="If true, append full diff report to models/registry/config_diff_audit.jsonl (FB-CAN-057)",
+    )
 
 
 class ShadowComparisonRunRequest(BaseModel):
@@ -868,7 +876,17 @@ def post_release_evidence_diff(body: ReleaseEvidenceDiffRequest) -> dict[str, An
         )
     baseline = resolve_canonical_from_yaml_text(body.baseline_yaml)
     current = settings.canonical
-    return diff_canonical_runtime(baseline, current)
+    report = build_canonical_config_diff_report(baseline, current)
+    if body.append_audit:
+        append_config_diff_audit_entry(report)
+    return report
+
+
+@app.get("/governance/config-diff-audit")
+def get_config_diff_audit(limit: Annotated[int, Query(ge=1, le=500)] = 50) -> dict[str, Any]:
+    """Last N immutable config diff audit entries (JSONL tail; FB-CAN-057)."""
+    rows = read_config_diff_audit_tail(limit=limit)
+    return {"entries": rows, "count": len(rows)}
 
 
 @app.get("/governance/release-objects")

@@ -1236,7 +1236,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-CONFIG-DIFF",
         "id": "FB-CAN-057",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement immutable config diff audit trail and semantic-change guardrails",
         "agent_task": "Implement immutable config diff audit trail and semantic-change guardrails so config fields cannot silently change meaning across versions. Include diff rendering for operator review and replay compatibility checks.",
         "affected_files": "app/config/|models/|control_plane/|scripts/|tests/",

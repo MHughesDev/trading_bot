@@ -9,5 +9,6 @@ bash scripts/ci_forbidden_legacy_paths.sh
 python3 scripts/ci_replay_determinism.py
 python3 scripts/ci_live_replay_equivalence.py
 python3 scripts/ci_monitoring_domain_checklist.py
+python3 scripts/ci_config_diff_semantics.py
 
 echo "ci_canonical_gates: OK"

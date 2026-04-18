@@ -15,6 +15,9 @@ build/
 # Local tooling
 *.local
 
+# Local config diff audit trail (FB-CAN-057)
+models/registry/config_diff_audit.jsonl
+
 # Runtime operator state (per machine)
 data/system_power.json
 data/execution_profile.json
