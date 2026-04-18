@@ -80,7 +80,13 @@ def run_canonical_decision_sequence_after_forecast(
 
     # --- state (canonical apex on regime output) ---
     regime_out = regime_output_from_forecast_packet(pkt)
-    apex = build_canonical_state(pkt, feature_effective, spread_bps=spread_bps)
+    apex = build_canonical_state(
+        pkt,
+        feature_effective,
+        spread_bps=spread_bps,
+        settings=settings,
+        structure=canonical_structure,
+    )
     apex = apply_normalization_degradation(apex, feature_effective)
     ho, ho_kind = classify_hard_override(
         risk=risk,

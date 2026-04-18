@@ -173,6 +173,8 @@ def run_opportunity_auction(
     signed_pos_frac = (qty * mp) / eq
     pos_frac = abs(signed_pos_frac)
     heat = apex.heat_score
+    nov = apex.novelty
+    rfx = apex.reflexivity_score
     deg = app_risk.canonical_degradation or apex.degradation
 
     max_per = float(settings.risk_max_per_symbol_usd)
@@ -241,9 +243,10 @@ def run_opportunity_auction(
         if direction == 1 or direction == -1:
             D_corr = max(D_corr, 0.55 * corr_ls)
         D_thesis = _clip(
-            0.38 * float(apex.novelty)
-            + 0.32 * float(st.fragility_score)
-            + 0.3 * abs(float(forecast_packet.ood_score)),
+            0.32 * float(nov)
+            + 0.28 * float(st.fragility_score)
+            + 0.25 * abs(float(forecast_packet.ood_score))
+            + 0.15 * float(rfx),
             0.0,
             1.0,
         )
@@ -265,7 +268,11 @@ def run_opportunity_auction(
         Cq = pos_frac
         Ov = _clip(abs(float(forecast_packet.ood_score)) * 0.5 + heat * 0.3, 0.0, 1.0)
         N_deploy = _clip(pos_frac * float(app_risk.canonical_size_multiplier), 0.0, 1.0)
-        B_edge = _clip(0.35 * heat + 0.3 * Cq + 0.2 * Ov + 0.15 * N_deploy, 0.0, 1.0)
+        B_edge = _clip(
+            0.32 * heat + 0.26 * Cq + 0.18 * Ov + 0.14 * N_deploy + 0.1 * rfx,
+            0.0,
+            1.0,
+        )
         R_conc = _clip(pos_frac * 0.7 + heat * 0.25, 0.0, 1.0)
 
         raw = (

@@ -31,6 +31,23 @@ CANONICAL_NOVELTY = Histogram(
     ["symbol"],
     buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
 )
+CANONICAL_REFLEXIVITY = Histogram(
+    "tb_canonical_reflexivity_score",
+    "APEX reflexivity score (0-1)",
+    ["symbol"],
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+CANONICAL_HEAT_COMPONENT = Histogram(
+    "tb_canonical_heat_component",
+    "APEX heat score raw components Hf..He before weighted sum (spec §8.2)",
+    ["symbol", "component"],
+    buckets=(0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.65, 0.8, 1.0),
+)
+CANONICAL_NOVELTY_REASON = Counter(
+    "tb_canonical_novelty_reason_total",
+    "Novelty reason codes emitted with state (FB-CAN-042)",
+    ["symbol", "reason"],
+)
 CANONICAL_DEGRADATION_TICKS = Counter(
     "tb_canonical_degradation_observations_total",
     "Per-tick degradation level observations (rate ~ occupancy)",
@@ -151,6 +168,18 @@ def record_canonical_post_tick(
         CANONICAL_REGIME_CONFIDENCE.labels(symbol=sym).observe(float(apex.regime_confidence))
         CANONICAL_HEAT_SCORE.labels(symbol=sym).observe(float(apex.heat_score))
         CANONICAL_NOVELTY.labels(symbol=sym).observe(float(apex.novelty))
+        CANONICAL_REFLEXIVITY.labels(symbol=sym).observe(float(apex.reflexivity_score))
+        hc = getattr(apex, "heat_components", None) or {}
+        if isinstance(hc, dict):
+            for comp_name, val in hc.items():
+                try:
+                    CANONICAL_HEAT_COMPONENT.labels(symbol=sym, component=str(comp_name)).observe(
+                        float(val)
+                    )
+                except (TypeError, ValueError):
+                    pass
+        for code in getattr(apex, "novelty_reason_codes", None) or []:
+            CANONICAL_NOVELTY_REASON.labels(symbol=sym, reason=str(code)).inc()
         deg = getattr(apex.degradation, "value", str(apex.degradation))
         CANONICAL_DEGRADATION_TICKS.labels(symbol=sym, level=str(deg)).inc()
 
