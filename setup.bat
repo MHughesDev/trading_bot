@@ -67,7 +67,7 @@ echo Installing package with dev + dashboard ^(Streamlit for run.bat^) ...
 "%VPY%" -m pip install -e ".[dev,dashboard]" || (
   echo.
   echo ERROR: dependency install failed.
-  echo If you are behind a proxy, verify HTTP(S)_PROXY and set PIP_INDEX_URL to a reachable package index.
+  echo If you are behind a proxy, verify HTTP^(S^)_PROXY and set PIP_INDEX_URL to a reachable package index.
   echo Then re-run setup.bat.
   exit /b 1
 )
