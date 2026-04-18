@@ -1516,7 +1516,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-BINDING-IMM",
         "id": "FB-CAN-077",
         "kind": "hardening",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement immutable run-binding guard for config+logic+dataset identifiers",
         "agent_task": "Enforce immutable run binding so live/replay/shadow runs persist and expose config_version, logic_version, dataset_id, and seed identifiers with tamper-evident linkage; reject records missing mandatory identifiers.",
         "affected_files": "app/contracts/|backtesting/|orchestration/|models/|tests/",

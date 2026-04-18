@@ -157,6 +157,7 @@ def replay_decisions(
             collect_events=emit_canonical_events,
             events_out=row_events,
             execution_feedback_state=exec_feedback_state,
+            replay_dataset_fingerprint=dataset_fp,
         )
         fill_price: float | None = None
         fee_paid: Decimal | None = None
@@ -404,6 +405,7 @@ def replay_multi_asset_decisions(
                 collect_events=emit_canonical_events,
                 events_out=row_events,
                 execution_feedback_state=exec_feedback_state,
+                replay_dataset_fingerprint=dataset_fp,
             )
 
             fill_price: float | None = None

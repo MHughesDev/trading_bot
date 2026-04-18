@@ -55,6 +55,7 @@ def run_decision_tick(
     replay_deterministic: bool = False,
     execution_feedback_state: dict[str, dict[str, float]] | None = None,
     replay_contract: ReplayRunContract | None = None,
+    replay_dataset_fingerprint: str | None = None,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, TradeAction | None, RiskState]:
     t0 = time.perf_counter()
     if not replay_deterministic:
@@ -177,6 +178,8 @@ def run_decision_tick(
         trade=trade,
         feature_row=feature_row,
         mid_price=mid_price,
+        replay_contract=replay_contract,
+        replay_dataset_fingerprint=replay_dataset_fingerprint,
     )
     risk_state = risk_state.model_copy(
         update={"last_decision_record": dr.model_dump(mode="json")},

@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.config.settings import AppSettings
+from app.contracts.run_binding import build_run_binding, resolve_effective_seed
+from app.contracts.replay_events import ReplayRunContract
 from app.contracts.decision_record import (
     DecisionOutcome,
     DecisionRecord,
@@ -46,13 +48,47 @@ def _ts(ts: datetime | None) -> datetime:
     return t
 
 
-def _cfg_versions(settings: AppSettings) -> tuple[str, str | None]:
+def _cfg_versions(settings: AppSettings) -> tuple[str, str]:
     try:
         cv = str(settings.canonical.metadata.config_version)
-        lv = settings.canonical.metadata.logic_version
+        lv = str(settings.canonical.metadata.logic_version or "1.0.0").strip() or "1.0.0"
         return cv, lv
     except Exception:
-        return "1.0.0", None
+        return "1.0.0", "1.0.0"
+
+
+def _replay_domain(settings: AppSettings) -> dict[str, Any]:
+    dom = getattr(settings.canonical, "domains", None)
+    d: dict[str, Any] = dom.replay if dom is not None else {}
+    return d if isinstance(d, dict) else {}
+
+
+def _live_dataset_id(settings: AppSettings) -> str:
+    rid = _replay_domain(settings).get("live_dataset_id", "live")
+    s = str(rid).strip()
+    return s if s else "live"
+
+
+def _strict_run_binding(settings: AppSettings) -> bool:
+    v = _replay_domain(settings).get("strict_run_binding", False)
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return bool(v)
+
+
+def _resolve_dataset_id_for_binding(
+    *,
+    settings: AppSettings,
+    replay_contract: ReplayRunContract | None,
+    replay_dataset_fingerprint: str | None,
+) -> str:
+    if replay_contract is not None:
+        ds = str(replay_contract.dataset_id).strip()
+        if ds:
+            return ds
+    if replay_dataset_fingerprint:
+        return f"fp:{replay_dataset_fingerprint[:16]}"
+    return _live_dataset_id(settings)
 
 
 def _deterministic_id(prefix: str, symbol: str, ts: datetime, extra: str = "") -> str:
@@ -75,6 +111,8 @@ def build_decision_record(
     trade: TradeAction | None,
     feature_row: dict[str, float] | None = None,
     mid_price: float | None = None,
+    replay_contract: ReplayRunContract | None = None,
+    replay_dataset_fingerprint: str | None = None,
 ) -> DecisionRecord:
     """Assemble §15 decision record from pipeline + risk outputs."""
     ts = _ts(data_timestamp)
@@ -85,6 +123,29 @@ def build_decision_record(
         json.dumps(forecast.model_dump(mode="json"), sort_keys=True),
     )
     cv, lv = _cfg_versions(settings)
+    ds_id = _resolve_dataset_id_for_binding(
+        settings=settings,
+        replay_contract=replay_contract,
+        replay_dataset_fingerprint=replay_dataset_fingerprint,
+    )
+    if _strict_run_binding(settings) and replay_dataset_fingerprint and replay_contract is None:
+        raise ValueError(
+            "strict_run_binding: replay_contract is required when replay_dataset_fingerprint is set (FB-CAN-077)"
+        )
+    seed_eff = resolve_effective_seed(
+        replay_contract=replay_contract,
+        replay_dataset_fingerprint=replay_dataset_fingerprint,
+        config_version=cv,
+        logic_version=lv,
+        live_dataset_id=_live_dataset_id(settings),
+    )
+    rb = build_run_binding(
+        config_version=cv,
+        logic_version=lv,
+        dataset_id=ds_id,
+        seed_effective=seed_eff,
+        replay_contract=replay_contract,
+    )
 
     fd: dict[str, Any] = {}
     trig: dict[str, Any] | None = None
@@ -248,6 +309,7 @@ def build_decision_record(
         instrument_id=symbol,
         config_version=cv,
         logic_version=lv,
+        run_binding=rb,
         input_snapshot_ids=boundary_ids,
         effective_signal_map=eff,
         regime_semantic=regime.semantic.value,
