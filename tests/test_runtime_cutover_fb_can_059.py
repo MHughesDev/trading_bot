@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.config.canonical_config import merge_canonical, synthesize_canonical_from_legacy
+from app.config.canonical_config import merge_canonical, synthesize_canonical_from_app_settings
 from app.config.runtime_cutover import validate_runtime_cutover
 from app.config.settings import AppSettings, load_settings
 
@@ -14,7 +14,7 @@ def test_validate_raises_when_bridge_in_process_without_migration_shadow() -> No
         microservices_runtime_bridge_enabled=True,
         microservices_execution_gateway_mode="in_process",
     )
-    base = synthesize_canonical_from_legacy(s)
+    base = synthesize_canonical_from_app_settings(s)
     assert base.domains.runtime_cutover.get("migration_shadow_allowed") is False
     with pytest.raises(RuntimeError, match="Runtime cutover guard"):
         validate_runtime_cutover(s)
@@ -25,7 +25,7 @@ def test_validate_ok_when_migration_shadow_allowed() -> None:
         microservices_runtime_bridge_enabled=True,
         microservices_execution_gateway_mode="in_process",
     )
-    base = synthesize_canonical_from_legacy(s)
+    base = synthesize_canonical_from_app_settings(s)
     rc = dict(base.domains.runtime_cutover)
     rc["migration_shadow_allowed"] = True
     override = base.model_copy(

@@ -1,4 +1,4 @@
-"""Map PolicySystem output + ForecastPacket routing adapter → legacy contracts for RiskEngine."""
+"""Map PolicySystem output + ForecastPacket routing → RiskEngine contracts (policy pipeline)."""
 
 from __future__ import annotations
 

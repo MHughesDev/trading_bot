@@ -1278,7 +1278,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-FINAL-PRUNE",
         "id": "FB-CAN-060",
         "kind": "tech_debt",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Final hard-prune: remove all deprecated canonical-migration shims",
         "agent_task": "After all canonical modules are primary and validated, remove temporary migration adapters/shims/deprecation compatibility code and any remaining old architecture remnants. This is the final hard-prune slice before declaring canonical completion.",
         "affected_files": "app/|decision_engine/|risk_engine/|execution/|backtesting/|docs/|tests/",
