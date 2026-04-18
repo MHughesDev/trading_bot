@@ -1390,7 +1390,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-REPLAY-SEED",
         "id": "FB-CAN-068",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Enforce deterministic seed and reproducibility metadata across replay/sim",
         "agent_task": "Implement deterministic seed policy and metadata persistence for replay/simulation runs, including run IDs and reproducibility hashes, so identical inputs/config/logic/seed produce identical outputs with auditable provenance.",
         "affected_files": "backtesting/|scripts/|models/|tests/|docs/",

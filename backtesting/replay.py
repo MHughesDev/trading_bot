@@ -24,6 +24,13 @@ from backtesting.replay_helpers import (
     remaining_edge_and_exec_confidence_for_partial_fill,
     scaled_order_quantity_for_fill_ratio,
 )
+from backtesting.replay_provenance import (
+    attach_provenance_to_rows,
+    build_replay_provenance,
+    dataset_fingerprint,
+    multi_dataset_fingerprint,
+    resolve_replay_seed,
+)
 from backtesting.simulator import (
     cash_delta_for_trade,
     fill_price_with_slippage,
@@ -68,6 +75,10 @@ def replay_decisions(
 
     **FB-CAN-055:** When ``emit_canonical_events`` and ``enforce_event_family_coverage`` are True,
     validates that emitted event families satisfy the minimum set for ``replay_mode`` (APEX replay spec §5–6).
+
+    **FB-CAN-068:** Each row includes ``replay_provenance`` (seed derivation, dataset fingerprint,
+    contract identity hash, reproducibility hash). Stochastic execution uses ``ReplayRunContract.seed``,
+    else ``execution_params.rng_seed``, else a seed derived from dataset fingerprint + contract identity.
     """
     if bars.height == 0:
         return []
@@ -85,16 +96,19 @@ def replay_decisions(
     rng = None
     portfolio: PortfolioTracker | None = None
     app_s = load_settings()
-    if track_portfolio:
-        execp = execution_params or BacktestExecutionParams.from_settings(app_s)
-        rng = make_replay_rng(execp.rng_seed)
-        portfolio = PortfolioTracker(execp.initial_cash)
 
     contract = replay_contract or ReplayRunContract(
         replay_run_id="replay-inline",
         dataset_id="inline",
         instrument_scope=[symbol],
     )
+    dataset_fp = dataset_fingerprint(frame)
+    if track_portfolio:
+        execp = execution_params or BacktestExecutionParams.from_settings(app_s)
+    eff_seed, seed_deriv = resolve_replay_seed(contract, exec_params=execp, dataset_fp=dataset_fp)
+    if track_portfolio and execp is not None:
+        rng = make_replay_rng(eff_seed)
+        portfolio = PortfolioTracker(execp.initial_cash)
     fault_base = merge_replay_fault_profile(
         fault_injection_profile_id=contract.fault_injection_profile_id,
         contract_profile=contract.fault_injection_profile,
@@ -245,6 +259,16 @@ def replay_decisions(
     )
     if enforce_event_family_coverage and emit_canonical_events and not ok_cov:
         raise ValueError("; ".join(cov_reasons))
+    rows_for_hash = [{k: v for k, v in r.items() if k != "replay_provenance"} for r in rows_out]
+    prov = build_replay_provenance(
+        contract=contract,
+        effective_seed=eff_seed,
+        seed_derivation=seed_deriv,
+        dataset_fp=dataset_fp,
+        row_count=len(rows_out),
+        rows_for_hash=rows_for_hash,
+    )
+    attach_provenance_to_rows(rows_out, prov)
     return rows_out
 
 
@@ -295,6 +319,7 @@ def replay_multi_asset_decisions(
 
     symbols_sorted = sorted(frames.keys())
     sorted_ts = sorted(all_ts, key=lambda x: x.timestamp() if isinstance(x, datetime) else float(x))
+    dataset_fp = multi_dataset_fingerprint(frames)
 
     spread_map = spread_bps_by_symbol or {}
     init_pos = initial_positions or {}
@@ -319,7 +344,9 @@ def replay_multi_asset_decisions(
     app_s = load_settings()
     if track_portfolio:
         execp = execution_params or BacktestExecutionParams.from_settings(app_s)
-        rng = make_replay_rng(execp.rng_seed)
+    eff_seed_ma, seed_deriv_ma = resolve_replay_seed(contract, exec_params=execp, dataset_fp=dataset_fp)
+    if track_portfolio and execp is not None:
+        rng = make_replay_rng(eff_seed_ma)
         portfolio = PortfolioTracker(execp.initial_cash)
 
     last_mid: dict[str, float] = {}
@@ -483,4 +510,14 @@ def replay_multi_asset_decisions(
     )
     if enforce_event_family_coverage and emit_canonical_events and not ok_cov:
         raise ValueError("; ".join(cov_reasons))
+    rows_for_hash_ma = [{k: v for k, v in r.items() if k != "replay_provenance"} for r in rows_out]
+    prov_ma = build_replay_provenance(
+        contract=contract,
+        effective_seed=eff_seed_ma,
+        seed_derivation=seed_deriv_ma,
+        dataset_fp=dataset_fp,
+        row_count=len(rows_out),
+        rows_for_hash=rows_for_hash_ma,
+    )
+    attach_provenance_to_rows(rows_out, prov_ma)
     return rows_out
