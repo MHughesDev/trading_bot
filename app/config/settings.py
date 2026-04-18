@@ -10,6 +10,7 @@ from pydantic import Field, PrivateAttr, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.config.canonical_config import CanonicalRuntimeConfig, resolve_canonical_config
+from app.config.runtime_cutover import validate_runtime_cutover
 
 PlatformSupportedUniverseMode = Literal["intersection", "union"]
 
@@ -456,4 +457,5 @@ def load_settings(path: Path | None = None) -> AppSettings:
 
     out = apply_active_model_set(base)
     out._canonical_runtime = resolve_canonical_config(out, raw_cfg)  # noqa: SLF001
+    validate_runtime_cutover(out)
     return out

@@ -24,6 +24,7 @@ from typing import Any
 
 from decimal import Decimal
 
+from app.config.runtime_cutover import validate_runtime_cutover
 from app.config.settings import AppSettings, load_settings
 from app.contracts.events import BarEvent
 from app.contracts.execution_guidance import ExecutionFeedback
@@ -180,6 +181,7 @@ async def run_live_loop(
     stop_event: asyncio.Event | None = None,
 ) -> None:
     cfg = settings or load_settings()
+    validate_runtime_cutover(cfg)
     syms = symbols or cfg.market_data_symbols
     ws = KrakenWebSocketClient(syms)
     feature_pipeline = FeaturePipeline(

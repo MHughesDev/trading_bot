@@ -2,7 +2,9 @@
 Single decision + risk step shared by live runtime and backtest replay (spec: same path).
 
 Import this module from both `app/runtime/live_service.py` and `backtesting/replay.py`
-so drift is visible in one place.
+so drift is visible in one place. Runtime cutover / mixed-mode guards (FB-CAN-059) live in
+``app.config.runtime_cutover`` and run at settings load and live loop startup — not inside
+this function — to keep the shared tick free of config loading.
 
 Canonical sequence (FB-CAN-029): ``pipeline.step`` runs normalize → forecast →
 :func:`decision_engine.canonical_orchestrator.run_canonical_decision_sequence_after_forecast`

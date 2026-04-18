@@ -234,7 +234,7 @@
 | FB-CAN-056 | CAN-MON-DOMAINS | B | OB | feature | MEDIUM | Done | Implement monitoring-domain coverage checklist and CI assertions for required metric families. | `observability/`, `scripts/`, docs/tests |
 | FB-CAN-057 | CAN-CONFIG-DIFF | B | CFG | platform | LOW | Done | Implement immutable config diff audit trail and semantic-change guardrails. | `app/config/`, `models/`, `control_plane/`, scripts/tests |
 | FB-CAN-058 | CAN-DOC-TOMBS | B | OP | change | LOW | Done | Add tombstone index for removed modules/docs with canonical replacement pointers. | `docs/`, `README.md`, reports/tests |
-| FB-CAN-059 | CAN-RUNTIME-CUT | A | RT | hardening | MEDIUM | Open | Add runtime cutover guard preventing unintended legacy+canonical dual-path activation. | `app/runtime/live_service.py`, `decision_engine/run_step.py`, config/tests |
+| FB-CAN-059 | CAN-RUNTIME-CUT | A | RT | hardening | MEDIUM | Done | Add runtime cutover guard preventing unintended legacy+canonical dual-path activation. | `app/runtime/live_service.py`, `decision_engine/run_step.py`, config/tests |
 | FB-CAN-060 | CAN-FINAL-PRUNE | B | CP | tech_debt | HIGH | Open | Final hard-prune of temporary migration shims and remaining old architecture remnants. | core modules, docs, tests |
 | FB-CAN-061 | CAN-CONFIG-META | B | CFG | feature | MEDIUM | Open | Implement canonical config metadata fields and validation rules. | `app/config/`, `models/`, `scripts/`, tests |
 | FB-CAN-062 | CAN-CONTRACT-COMMON | A | DP | feature | MEDIUM | Open | Enforce canonical contract common conventions (UTC/freshness/confidence typing and bounds). | `app/contracts/`, `decision_engine/`, `data_plane/`, tests |

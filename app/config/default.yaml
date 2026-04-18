@@ -207,6 +207,9 @@ apex_canonical:
         enabled: true
       heat_components:
         enabled: true
+    runtime_cutover:
+      phase: canonical_active
+      migration_shadow_allowed: false
     shadow_comparison:
       enabled: true
       thresholds:
