@@ -662,7 +662,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-NORM",
         "id": "FB-CAN-016",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Normalize ingestion outputs to canonical feature families and confidence fields",
         "agent_task": "Refactor ingest/normalization outputs so all upstream signals carry canonical freshness/reliability/confidence fields and normalized naming. Add mapping/validation for required signal families and reject incomplete snapshots according to canonical degradation rules.",
         "affected_files": "data_plane/ingest/|data_plane/features/|app/contracts/|tests/",

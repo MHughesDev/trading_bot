@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from data_plane.features.canonical_normalize import normalize_feature_row
 from data_plane.features.pipeline import FeaturePipeline
 from data_plane.ingest.normalizers import OrderBookLevel2Snapshot, TickerSnapshot, TradeTick
 
@@ -45,4 +46,5 @@ def feature_row_from_tick(
         row.update(pipe.sentiment_features(**sentiment))
     else:
         row.update(pipe.sentiment_features())
-    return row
+    # Tick path: treat as current (freshness 1.0 unless caller passes bar_age via overlay)
+    return normalize_feature_row(row, bar_age_seconds=None)

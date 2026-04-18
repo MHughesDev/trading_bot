@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import polars as pl
 
+from data_plane.features.canonical_normalize import (
+    bar_age_seconds_from_timestamp,
+    normalize_feature_row,
+)
 from data_plane.features.pipeline import FeaturePipeline
 
 FEATURE_SCHEMA_VERSION = 1
@@ -12,6 +18,9 @@ FEATURE_SCHEMA_VERSION = 1
 def enrich_bars_last_row(
     bars: pl.DataFrame,
     feature_pipeline: FeaturePipeline,
+    *,
+    bar_timestamp: Any | None = None,
+    stale_data_seconds: float = 120.0,
 ) -> dict[str, float] | None:
     """Run FeaturePipeline.enrich_bars and return the last row as float dict (+ schema_version)."""
     if bars.height == 0:
@@ -20,6 +29,7 @@ def enrich_bars_last_row(
     last = enriched.tail(1)
     row = last.to_dicts()[0]
     out: dict[str, float] = {}
+    ts = row.get("timestamp")
     for k, v in row.items():
         if k == "timestamp":
             continue
@@ -31,6 +41,12 @@ def enrich_bars_last_row(
             except (TypeError, ValueError):
                 pass
     out["feature_schema_version"] = float(FEATURE_SCHEMA_VERSION)
+
+    age = None
+    ref_ts = bar_timestamp if bar_timestamp is not None else ts
+    if ref_ts is not None:
+        age = bar_age_seconds_from_timestamp(ref_ts)
+    out = normalize_feature_row(out, bar_age_seconds=age, stale_data_seconds=stale_data_seconds)
     return out
 
 

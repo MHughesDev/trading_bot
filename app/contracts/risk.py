@@ -31,3 +31,8 @@ class RiskState(BaseModel):
     risk_reflexivity_score: float | None = Field(default=None, ge=0.0, le=1.0)
     risk_liquidation_mode: str | None = None
     last_risk_sizing: dict | None = None
+    # FB-CAN-016 — canonical feature normalization at bar/tick boundary
+    feature_freshness: float | None = Field(default=None, ge=0.0, le=1.0)
+    feature_reliability: float | None = Field(default=None, ge=0.0, le=1.0)
+    signal_confidence_aggregate: float | None = Field(default=None, ge=0.0, le=1.0)
+    canonical_snapshot_complete: float | None = Field(default=None, ge=0.0, le=1.0)
