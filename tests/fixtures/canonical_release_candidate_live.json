@@ -12,10 +12,13 @@
   "current_stage": "draft",
   "environment": "shadow",
   "evidence": {
+    "schema_version": 1,
     "version_identifiers": {"config": "1.0.0", "logic": "1.0.0"},
     "domains_changed": [],
     "replay_summary": "ok",
     "replay_run_ids": ["r1"],
+    "scenario_test_run_ids": ["ci-scenario-suite-1"],
+    "key_metrics": {"false_positive_rate": 0.02},
     "fault_stress_run_ids": ["ci-fault-suite"],
     "fault_profile_ids_satisfied": [
       "book_imbalance_stress",
@@ -27,7 +30,8 @@
       "stale_structural_feed"
     ],
     "scenario_stress_summary": "ok",
-    "shadow_comparison_summary": "",
+    "shadow_comparison_summary": "CI fixture: baseline vs candidate within governance thresholds",
+    "failure_modes_documented": "Documented in linked experiment exp-ci-canonical-complete.",
     "expected_benefits": "",
     "known_risks": "none",
     "owner_approval_present": true,
