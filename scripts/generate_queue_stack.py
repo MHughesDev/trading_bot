@@ -1502,7 +1502,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-EDGE-MON",
         "id": "FB-CAN-076",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement edge-budget proxy monitoring and alert thresholds",
         "agent_task": "Implement edge-budget proxy metric family and alert thresholds spanning decision, auction, and execution layers, including realized-vs-theoretical edge erosion monitoring and suppression escalation when edge budget degrades.",
         "affected_files": "decision_engine/|execution/|observability/|infra/|tests/",

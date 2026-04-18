@@ -219,6 +219,48 @@ groups:
           description: "Governance shadow replay report set rollback_recommended; review release and candidate logic."
           runbook: "docs/MONITORING_CANONICAL.MD#fb-can-039-alert-rules-drift--calibration--shadow-trends"
 
+  - name: canonical_edge_budget_fb_can_076
+    rules:
+      - alert: CanonicalEdgeBudgetStressHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(tb_canonical_edge_budget_stress_bucket[15m])) by (le, symbol)
+          ) > 0.45
+        for: 15m
+        labels:
+          severity: warning
+          domain: risk_sizing
+        annotations:
+          summary: "Edge-budget stress proxy high (symbol={{ $labels.symbol }})"
+          description: "p95 of (1 - edge_budget_multiplier) from last_risk_sizing; heat/exposure overlap throttling elevated."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-076-edge-budget-monitoring"
+
+      - alert: CanonicalAuctionEdgePenaltyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(tb_canonical_auction_edge_penalty_max_bucket[15m])) by (le, symbol)
+          ) > 0.55
+        for: 15m
+        labels:
+          severity: warning
+          domain: auction
+        annotations:
+          summary: "Auction B_edge penalty p95 high (symbol={{ $labels.symbol }})"
+          description: "Opportunity auction edge-budget penalty term elevated across candidates; review heat, deployment, and overlap."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-076-edge-budget-monitoring"
+
+      - alert: CanonicalEdgeBudgetEscalationSpike
+        expr: |
+          sum(rate(tb_canonical_edge_budget_escalation_total[20m])) by (symbol, reason) > 0.02
+        for: 20m
+        labels:
+          severity: info
+          domain: drift_calibration
+        annotations:
+          summary: "Edge-budget escalation events (symbol={{ $labels.symbol }}, reason={{ $labels.reason }})"
+          description: "Stress proxy coincided with auction suppression, high B penalty, or trade-intent edge erosion per FB-CAN-076."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-076-edge-budget-monitoring"
+
   - name: canonical_governance_probation_fb_can_069
     rules:
       - alert: GovernanceProbationAbortRecommended

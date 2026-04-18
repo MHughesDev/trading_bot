@@ -58,6 +58,9 @@ class RiskSizingDiagnostics(BaseModel):
     inertia_multiplier: float = 1.0
     liquidation_mode_multiplier: float = 1.0
     edge_budget_multiplier: float = 1.0
+    # FB-CAN-076 — headroom = multiplier; stress = 1 - headroom (monitoring proxy)
+    edge_budget_headroom: float = 1.0
+    edge_budget_stress: float = 0.0
     concentration_multiplier: float = 1.0
     symbol_concentration_multiplier: float = 1.0
     book_concentration_multiplier: float = 1.0
@@ -358,6 +361,8 @@ def compute_canonical_notional(
             min_mult=_cfg_float(dom, "edge_budget_min_multiplier", 0.35),
         )
         diag.edge_budget_multiplier = edge_m
+        diag.edge_budget_headroom = float(edge_m)
+        diag.edge_budget_stress = _clip01(1.0 - float(edge_m))
         after_edge = after_liq * edge_m
         diag.after_edge_budget = after_edge
         if edge_m < 0.999:
@@ -453,6 +458,8 @@ def compute_canonical_notional(
         min_mult=_cfg_float(dom, "edge_budget_min_multiplier", 0.35),
     )
     diag.edge_budget_multiplier = edge_m
+    diag.edge_budget_headroom = float(edge_m)
+    diag.edge_budget_stress = _clip01(1.0 - float(edge_m))
     after_edge = after_liq * edge_m
     diag.after_edge_budget = after_edge
     if edge_m < 0.999:

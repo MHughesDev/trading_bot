@@ -140,6 +140,126 @@ CANONICAL_FINAL_NOTIONAL_USD = Histogram(
     ["symbol"],
     buckets=(0.0, 100.0, 500.0, 1000.0, 5000.0, 10000.0, 25000.0, 50000.0, 100000.0),
 )
+# FB-CAN-076 — edge-budget proxy (1 - edge_budget_multiplier); headroom = multiplier
+CANONICAL_EDGE_BUDGET_HEADROOM = Histogram(
+    "tb_canonical_edge_budget_headroom",
+    "Risk sizing edge_budget_multiplier (headroom under heat/exposure thesis overlap)",
+    ["symbol"],
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.85, 0.92, 1.0),
+)
+CANONICAL_EDGE_BUDGET_STRESS = Histogram(
+    "tb_canonical_edge_budget_stress",
+    "1 - edge_budget_headroom (higher = less edge budget remaining)",
+    ["symbol"],
+    buckets=(0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.65, 0.8, 1.0),
+)
+CANONICAL_AUCTION_EDGE_PENALTY = Histogram(
+    "tb_canonical_auction_edge_penalty_max",
+    "Max auction B_edge penalty across candidates this tick (0-1)",
+    ["symbol"],
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+CANONICAL_EDGE_BUDGET_ESCALATION = Counter(
+    "tb_canonical_edge_budget_escalation_total",
+    "Ticks where edge-budget stress coincides with auction suppression or strong B penalty (FB-CAN-076)",
+    ["symbol", "reason"],
+)
+
+
+def _edge_budget_escalation_metrics(
+    *,
+    symbol: str,
+    risk: Any,
+    forecast_packet: Any | None,
+    settings: Any | None = None,
+) -> None:
+    """FB-CAN-076: correlate sizing headroom, auction B penalty, and trade-intent edge erosion."""
+    sym = symbol or "unknown"
+    esc_cfg: dict[str, Any] = {}
+    try:
+        mon = settings.canonical.domains.monitoring if settings is not None else None
+        if isinstance(mon, dict):
+            raw = mon.get("edge_budget_escalation")
+            esc_cfg = dict(raw) if isinstance(raw, dict) else {}
+    except Exception:
+        esc_cfg = {}
+    rs = getattr(risk, "last_risk_sizing", None)
+    stress = None
+    if isinstance(rs, dict):
+        es = rs.get("edge_budget_stress")
+        if es is not None:
+            try:
+                stress = float(es)
+            except (TypeError, ValueError):
+                stress = None
+        if stress is None:
+            hr = rs.get("edge_budget_headroom", rs.get("edge_budget_multiplier"))
+            if hr is not None:
+                try:
+                    stress = max(0.0, min(1.0, 1.0 - float(hr)))
+                except (TypeError, ValueError):
+                    stress = None
+
+    max_b = None
+    auction_suppressed = False
+    if forecast_packet is not None:
+        fd = forecast_packet.forecast_diagnostics or {}
+        au = fd.get("auction")
+        if isinstance(au, dict):
+            if au.get("selected_symbol") is None and au.get("records"):
+                auction_suppressed = True
+            recs = au.get("records")
+            if isinstance(recs, list):
+                for r in recs:
+                    if not isinstance(r, dict):
+                        continue
+                    pens = r.get("penalties")
+                    if isinstance(pens, dict) and "B" in pens:
+                        try:
+                            b = float(pens["B"])
+                            max_b = b if max_b is None else max(max_b, b)
+                        except (TypeError, ValueError):
+                            pass
+
+    erosion = None
+    rec = getattr(risk, "last_decision_record", None)
+    if isinstance(rec, dict) and str(rec.get("outcome") or "") == "trade_intent":
+        ti = rec.get("trade_intent")
+        if isinstance(ti, dict):
+            try:
+                dc = float(ti.get("decision_confidence", 0.0))
+                tc = float(ti.get("trigger_confidence", 0.0))
+                ec = float(ti.get("execution_confidence", 0.0))
+                theo = max(0.0, min(1.0, dc * tc))
+                erosion = max(0.0, theo - ec)
+            except (TypeError, ValueError):
+                erosion = None
+
+    def _f_cfg(key: str, default: float) -> float:
+        v = esc_cfg.get(key)
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    t_stress = _f_cfg("stress_min", 0.35)
+    t_b = _f_cfg("auction_B_penalty_min", 0.55)
+    t_erosion = _f_cfg("edge_erosion_min", 0.4)
+
+    if stress is not None and stress >= t_stress and auction_suppressed:
+        CANONICAL_EDGE_BUDGET_ESCALATION.labels(symbol=sym, reason="stress_and_auction_suppressed").inc()
+    if stress is not None and stress >= t_stress and max_b is not None and max_b >= t_b:
+        CANONICAL_EDGE_BUDGET_ESCALATION.labels(symbol=sym, reason="stress_and_high_B_penalty").inc()
+    if (
+        stress is not None
+        and stress >= t_stress
+        and erosion is not None
+        and erosion >= t_erosion
+    ):
+        CANONICAL_EDGE_BUDGET_ESCALATION.labels(symbol=sym, reason="stress_and_edge_erosion").inc()
+
 
 # --- Execution guidance (FB-CAN-047) ---
 CANONICAL_EXECUTION_STYLE = Counter(
@@ -255,6 +375,7 @@ def record_canonical_post_tick(
     carry_sleeve: dict[str, Any] | None = None,
     feature_row: dict[str, float] | None = None,
     record_probation_samples: bool = True,
+    settings: Any | None = None,
 ) -> None:
     """Record canonical metrics from one `run_decision_tick` completion."""
     sym = symbol or "unknown"
@@ -345,6 +466,21 @@ def record_canonical_post_tick(
                     CANONICAL_AUCTION_CANDIDATES_EVALUATED.labels(symbol=sym).observe(float(ce))
                 except (TypeError, ValueError):
                     pass
+            recs_au = au.get("records")
+            max_b = None
+            if isinstance(recs_au, list):
+                for r in recs_au:
+                    if not isinstance(r, dict):
+                        continue
+                    pens = r.get("penalties")
+                    if isinstance(pens, dict) and "B" in pens:
+                        try:
+                            b = float(pens["B"])
+                            max_b = b if max_b is None else max(max_b, b)
+                        except (TypeError, ValueError):
+                            pass
+            if max_b is not None:
+                CANONICAL_AUCTION_EDGE_PENALTY.labels(symbol=sym).observe(float(max_b))
 
     sm = getattr(risk, "canonical_size_multiplier", None)
     if sm is not None:
@@ -356,6 +492,16 @@ def record_canonical_post_tick(
         if fn is not None:
             try:
                 CANONICAL_FINAL_NOTIONAL_USD.labels(symbol=sym).observe(float(fn))
+            except (TypeError, ValueError):
+                pass
+        hr = rs.get("edge_budget_headroom")
+        if hr is None:
+            hr = rs.get("edge_budget_multiplier")
+        if hr is not None:
+            try:
+                hrf = float(hr)
+                CANONICAL_EDGE_BUDGET_HEADROOM.labels(symbol=sym).observe(hrf)
+                CANONICAL_EDGE_BUDGET_STRESS.labels(symbol=sym).observe(max(0.0, min(1.0, 1.0 - hrf)))
             except (TypeError, ValueError):
                 pass
 
@@ -399,6 +545,7 @@ def record_canonical_post_tick(
         feature_row=feature_row,
         record_probation_samples=record_probation_samples,
     )
+    _edge_budget_escalation_metrics(symbol=sym, risk=risk, forecast_packet=forecast_packet, settings=settings)
 
     fr = feature_row or {}
     try:

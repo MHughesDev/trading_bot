@@ -231,6 +231,11 @@ apex_canonical:
         enabled: true
       heat_components:
         enabled: true
+    monitoring:
+      edge_budget_escalation:
+        stress_min: 0.35
+        auction_B_penalty_min: 0.55
+        edge_erosion_min: 0.4
     runtime_cutover:
       phase: canonical_active
       migration_shadow_allowed: false

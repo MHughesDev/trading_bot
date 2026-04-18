@@ -129,6 +129,7 @@ def run_decision_tick(
             carry_sleeve=getattr(risk_state, "carry_sleeve_last", None),
             feature_row=eff if isinstance(eff, dict) else feature_row,
             record_probation_samples=not replay_deterministic,
+            settings=risk_engine._settings,
         )
         return regime, fc, route, proposal, trade, risk_state
 
@@ -216,6 +217,7 @@ def run_decision_tick(
         carry_sleeve=getattr(risk_state, "carry_sleeve_last", None),
         feature_row=eff if isinstance(eff, dict) else feature_row,
         record_probation_samples=not replay_deterministic,
+        settings=risk_engine._settings,
     )
     if not replay_deterministic:
         try:

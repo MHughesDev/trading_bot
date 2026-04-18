@@ -863,6 +863,11 @@ def get_governance_monitoring() -> dict[str, Any]:
             "hard_override kinds: data_integrity_alert, exchange_risk_critical; "
             "policy: apex_canonical.domains.risk_sizing.exchange_risk"
         ),
+        "edge_budget_metrics": (
+            "tb_canonical_edge_budget_headroom, tb_canonical_edge_budget_stress, "
+            "tb_canonical_auction_edge_penalty_max, tb_canonical_edge_budget_escalation (FB-CAN-076); "
+            "policy: apex_canonical.domains.monitoring.edge_budget_escalation"
+        ),
     }
 
 
