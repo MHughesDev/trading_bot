@@ -8,7 +8,8 @@
 
 - **`router.py`** — **`create_execution_adapter`**: selects adapter from `AppSettings` (`paper` → Alpaca paper, `live` → Coinbase live); duplicate alias removed (**FB-CAN-021**)
 - **`service.py`** — **`ExecutionService`**: central submit path; runs **`execution_logic.prepare_order_intent_for_execution`** (guidance + optional size scale) then intent gate + adapter
-- **`execution_logic.py`** — **FB-CAN-008:** execution confidence, style (`passive` / `aggressive` / `staggered` / `twap` / `suppress`), stress mode, worst-case edge; **`ExecutionFeedback`** / partial-fill reconciliation helpers; live loop attaches **`metadata.execution_context`**
+- **`execution_logic.py`** — **FB-CAN-008:** execution confidence, style (`passive` / `aggressive` / `staggered` / `twap` / `suppress`), stress mode, worst-case edge; **`ExecutionFeedback`** / **`reconcile_partial_fill`** helpers; live loop attaches **`metadata.execution_context`**
+- **`partial_fill_reconcile.py`** — **FB-CAN-048:** typed **`PartialFillReconciliation`** from **`reconcile_partial_fill_record`** (uses **`apex_canonical.domains.execution`** partial-fill thresholds)
 - **`intent_gate.py`** — Validates execution allowed (signing, settings)
 
 ## Adapters (`execution/adapters/`)
