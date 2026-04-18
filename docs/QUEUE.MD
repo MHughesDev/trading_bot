@@ -118,12 +118,12 @@ stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_t
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-031** are **Done** (incl. **FB-CAN-031** — missed-move ordering per spec §8, `trigger_false_positive_memory`, auction **P** penalty). **FB-CAN-032**…**FB-CAN-078** remain **Open** for canonical migration (next **HIGH** slice **FB-CAN-033**). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** 47 canonical replacement slices.
+**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-032** are **Done** (incl. **FB-CAN-032** — `signal_confidence` + `feature_families` in YAML, `apply_signal_family_confidence`, CI validation). **FB-CAN-033**…**FB-CAN-078** remain **Open** for canonical migration (next **HIGH** slice **FB-CAN-033**). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** 46 canonical replacement slices.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **5** | FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
-| **MEDIUM** | **30** | FB-CAN-032, FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
+| **MEDIUM** | **29** | FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
 | **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
 **Full row text and completed history:** [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (§2 open tables, §3 fixes, §4 gates, §5 archive).

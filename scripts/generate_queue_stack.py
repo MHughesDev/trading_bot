@@ -886,7 +886,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-SIGNAL-FAM",
         "id": "FB-CAN-032",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement canonical per-signal confidence/decay families and enable flags",
         "agent_task": "Implement canonical signal confidence domain with per-family floors/caps/decay/latency/reliability parameters and feature-family enablement flags. Cover required families (funding, OI, basis, liquidation, cross-venue divergence, stablecoin proxy, execution feedback, novelty, heat components).",
         "affected_files": "app/config/|data_plane/features/|decision_engine/|tests/",

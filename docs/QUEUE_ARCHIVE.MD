@@ -15,14 +15,14 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-031** are **Done**. **FB-CAN-032**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
+**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-032** are **Done**. **FB-CAN-033**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **5** | FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
-| **MEDIUM** | **30** | FB-CAN-032, FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
+| **MEDIUM** | **29** | FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
 | **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
@@ -207,7 +207,7 @@
 | FB-CAN-029 | CAN-RUNTIME | A | RT | feature | HIGH | Done | **`decision_engine/canonical_orchestrator.py`** — explicit post-forecast sequence (structure → state → trigger → auction → carry); `pipeline.step` delegates; `run_step` / `live_service` docstrings. **Done 2026-04-18.** | `decision_engine/`, `app/runtime/live_service.py` |
 | FB-CAN-030 | CAN-REPLAY-DELTA | A | DS | feature | HIGH | Done | **`backtesting/live_replay_equivalence.py`**; **`scripts/ci_live_replay_equivalence.py`** + **`ci_canonical_gates.sh`**; **`EvidencePackage.live_replay_equivalence_*`** gates **logic**/**combined** live promotion; tests. **Done 2026-04-18.** | `backtesting/`, `orchestration/release_gating.py`, `scripts/`, `tests/`, `docs/` |
 | FB-CAN-031 | CAN-TRIG-MISSED | A | FR | feature | HIGH | Done | **§8 missed-move** after strength; **`execution_too_degraded`** reason; **`RiskState.trigger_false_positive_memory`** EMA in **`merge_canonical_into_risk`**; auction **P** uses memory; **`safety_snapshot_event`**. **Done 2026-04-18.** | `decision_engine/`, `app/contracts/risk.py`, `backtesting/replay_events.py`, `tests/` |
-| FB-CAN-032 | CAN-SIGNAL-FAM | A | CFG | feature | MEDIUM | Open | Implement per-signal confidence/decay families and feature-family enable flags required by canonical config. | `app/config/`, `data_plane/features/`, `decision_engine/`, tests |
+| FB-CAN-032 | CAN-SIGNAL-FAM | A | CFG | feature | MEDIUM | Done | **`app/config/signal_confidence.py`**; **`default.yaml`** `signal_confidence` + `feature_families` + `enabled_feature_families`; **`build_decision_boundary_input`** applies per-family scores; **`ci_canonical_config_gates`**. **Done 2026-04-18.** | `app/config/`, `app/contracts/snapshot_builders.py`, `scripts/`, `tests/` |
 | FB-CAN-033 | CAN-STATE-OVR | A | RT | feature | HIGH | Open | Implement hard override taxonomy and degradation transition logging with deterministic event records. | `decision_engine/state_engine.py`, `risk_engine/`, `observability/`, contracts/tests |
 | FB-CAN-034 | CAN-AUCT-CORR | A | FR | feature | MEDIUM | Open | Add candidate correlation/thesis clustering penalties and deterministic metadata in auction outputs. | `decision_engine/auction_engine.py`, contracts/replay/tests |
 | FB-CAN-035 | CAN-EXEC-FEED | A | EX | feature | MEDIUM | Open | Implement execution feedback memory that updates future decision/execution quality penalties deterministically. | `execution/`, `decision_engine/`, `data_plane/memory/`, replay/tests |

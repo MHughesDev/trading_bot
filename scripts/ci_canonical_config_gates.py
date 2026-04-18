@@ -12,6 +12,8 @@ from pathlib import Path
 
 import yaml
 
+from app.config.signal_confidence import validate_signal_confidence_domain
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -50,6 +52,23 @@ def main() -> int:
             "ci_canonical_config_gates: apex_canonical.domains.risk_sizing is required (FB-CAN-022)",
             file=sys.stderr,
         )
+        return 1
+    sc = domains.get("signal_confidence")
+    if not isinstance(sc, dict):
+        print(
+            "ci_canonical_config_gates: apex_canonical.domains.signal_confidence is required (FB-CAN-032)",
+            file=sys.stderr,
+        )
+        return 1
+    ff = domains.get("feature_families")
+    if not isinstance(ff, dict):
+        print(
+            "ci_canonical_config_gates: apex_canonical.domains.feature_families is required (FB-CAN-032)",
+            file=sys.stderr,
+        )
+        return 1
+    for err in validate_signal_confidence_domain(sc):
+        print(f"ci_canonical_config_gates: {err}", file=sys.stderr)
         return 1
 
     from app.config.settings import load_settings

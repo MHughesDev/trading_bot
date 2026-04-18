@@ -2,7 +2,7 @@
 
 **Purpose:** Single **code-to-domain** map for the shared decision path after **FB-CAN-004…011**. Use it with **[`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD)** (what to build toward) and **[`docs/Specs/README.MD`](Specs/README.MD)** (as-built file index).
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-031: missed-move + `trigger_false_positive_memory`; FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-032: [`signal_confidence.py`](../app/config/signal_confidence.py); FB-CAN-031: missed-move + `trigger_false_positive_memory`; FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
 
 ---
 
@@ -22,7 +22,7 @@ Legacy **ForecastPacket → PolicySystem → proposal** remains the **forecast/r
 
 | Step | Primary modules | Notes |
 |------|-----------------|--------|
-| Config / versioning | [`app/config/canonical_config.py`](../app/config/canonical_config.py), [`app/config/settings.py`](../app/config/settings.py) | `AppSettings.canonical` + optional YAML `apex_canonical`. |
+| Config / versioning | [`app/config/canonical_config.py`](../app/config/canonical_config.py), [`app/config/settings.py`](../app/config/settings.py), [`app/config/signal_confidence.py`](../app/config/signal_confidence.py) | `AppSettings.canonical` + YAML `apex_canonical` (**FB-CAN-032** `signal_confidence` / `feature_families`). |
 | Decision step | [`decision_engine/run_step.py`](../decision_engine/run_step.py) | **`run_decision_tick`** — single entry for live and replay. |
 | Typed input snapshots | [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py), [`app/contracts/snapshot_builders.py`](../app/contracts/snapshot_builders.py) | **FB-CAN-015:** boundary contracts + merge into effective feature row; diagnostics on packet. |
 | Feature normalization | [`data_plane/features/canonical_normalize.py`](../data_plane/features/canonical_normalize.py) | **FB-CAN-016:** aliases, freshness/reliability, completeness; `apply_normalization_degradation` in `state_engine.py`. |

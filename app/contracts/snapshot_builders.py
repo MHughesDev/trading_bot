@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.config.settings import AppSettings
+from app.config.signal_confidence import apply_signal_family_confidence
 from app.contracts.decision_snapshots import (
     DecisionBoundaryInput,
     ExchangeRiskLevel,
@@ -69,8 +70,19 @@ def build_decision_boundary_input(
     imb = _clip01((rsi - 50.0) / 50.0)
     burst = _clip01(vol / (close * 1e-6 + 1e6))
 
-    m_fresh = _clip01(_safe_float(feature_row, "feature_freshness", 0.92))
-    m_rel = _clip01(_safe_float(feature_row, "feature_reliability", 0.88))
+    merged: dict[str, float] = dict(feature_row)
+    try:
+        dom = settings.canonical.domains
+        merged = apply_signal_family_confidence(
+            merged,
+            signal_confidence=dict(dom.signal_confidence or {}),
+            feature_families=dict(dom.feature_families or {}),
+        )
+    except Exception:
+        pass
+
+    m_fresh = _clip01(_safe_float(merged, "feature_freshness", 0.92))
+    m_rel = _clip01(_safe_float(merged, "feature_reliability", 0.88))
 
     market = MarketSnapshot(
         snapshot_id=sid,
@@ -91,15 +103,15 @@ def build_decision_boundary_input(
         market_freshness=m_fresh,
         market_reliability=m_rel,
         session_mode=SessionMode.WEEKEND if ts.weekday() >= 5 else SessionMode.REGULAR,
-        price_return_short=_safe_float(feature_row, "return_1", 0.0),
+        price_return_short=_safe_float(merged, "return_1", 0.0),
     )
 
     structural = StructuralSignalSnapshot(
         snapshot_id=sid,
         timestamp=ts,
         instrument_id=symbol,
-        signal_freshness_structural=_clip01(_safe_float(feature_row, "structural_freshness", 0.75)),
-        signal_reliability_structural=_clip01(_safe_float(feature_row, "structural_reliability", 0.7)),
+        signal_freshness_structural=_clip01(_safe_float(merged, "structural_freshness", 0.75)),
+        signal_reliability_structural=_clip01(_safe_float(merged, "structural_reliability", 0.7)),
     )
 
     safety = SafetyRegimeSnapshot(
@@ -165,7 +177,6 @@ def build_decision_boundary_input(
         service_config=svc,
     )
 
-    merged: dict[str, float] = dict(feature_row)
     merged["canonical_market_freshness"] = float(m_fresh)
     merged["canonical_market_reliability"] = m_rel
     merged["canonical_structural_freshness"] = structural.signal_freshness_structural
