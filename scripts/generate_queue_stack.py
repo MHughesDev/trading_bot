@@ -1320,7 +1320,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-SUPPRESS-TAX",
         "id": "FB-CAN-063",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement suppression/safety reason taxonomy and stable reason codes",
         "agent_task": "Define and enforce canonical suppression and safety-override reason taxonomy with stable reason codes across trigger/auction/risk/execution. Ensure all no-trade and reduction decisions emit machine-readable reasons for monitoring and replay forensic analysis.",
         "affected_files": "app/contracts/|decision_engine/|risk_engine/|execution/|observability/|tests/",

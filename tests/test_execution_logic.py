@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.contracts.execution_guidance import ExecutionFeedback
+from app.contracts.reason_codes import EXE_STYLE_PASSIVE
 from execution.execution_logic import (
     apply_execution_feedback,
     build_execution_context_from_decision,
@@ -92,7 +93,7 @@ def test_select_execution_style_passive_branch():
         domain={"high_confidence_threshold": 0.72, "passive_spread_limit_bps": 18.0},
     )
     assert style == "passive"
-    assert codes == ["style_branch_passive_high_conf_tight_spread"]
+    assert codes == [EXE_STYLE_PASSIVE]
 
 
 def test_build_guidance_includes_style_rationale():

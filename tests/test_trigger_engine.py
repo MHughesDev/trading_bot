@@ -8,6 +8,11 @@ from datetime import UTC, datetime
 import pytest
 
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
+from app.contracts.reason_codes import (
+    TRG_DEGRADATION_BLOCK,
+    TRG_INSUFFICIENT_REMAINING_EDGE,
+    TRG_MOVE_ALREADY_EXTENDED,
+)
 from app.contracts.forecast_packet import ForecastPacket
 from decision_engine.trigger_engine import evaluate_trigger
 
@@ -67,7 +72,7 @@ def test_no_trade_degradation_blocks():
     apex = _apex().model_copy(update={"degradation": DegradationLevel.NO_TRADE})
     out = evaluate_trigger(_pkt(), {"close": 1.0}, spread_bps=1.0, apex=apex)
     assert out.setup_valid is False
-    assert "degradation_block" in out.trigger_reason_codes
+    assert TRG_DEGRADATION_BLOCK in out.trigger_reason_codes
 
 
 def test_missed_move_suppresses_after_strength_met():
@@ -77,7 +82,7 @@ def test_missed_move_suppresses_after_strength_met():
     out = evaluate_trigger(pkt, feats, spread_bps=5.0, apex=_apex())
     assert out.missed_move_flag is True
     assert out.trigger_valid is False
-    assert "move_already_extended" in out.trigger_reason_codes
+    assert TRG_MOVE_ALREADY_EXTENDED in out.trigger_reason_codes
 
 
 def test_remaining_edge_missed_sets_insufficient_remaining_edge():
@@ -85,4 +90,4 @@ def test_remaining_edge_missed_sets_insufficient_remaining_edge():
     feats = {"close": 50_000.0, "rsi_14": 55.0, "return_1": 0.001, "volume": 1e6}
     out = evaluate_trigger(pkt, feats, spread_bps=75.0, apex=_apex())
     assert out.missed_move_flag is True
-    assert "insufficient_remaining_edge" in out.trigger_reason_codes
+    assert TRG_INSUFFICIENT_REMAINING_EDGE in out.trigger_reason_codes

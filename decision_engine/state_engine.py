@@ -10,6 +10,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.config.settings import AppSettings
+from app.contracts.reason_codes import (
+    STATE_ELEVATED_TRANSITION,
+    STATE_HIGH_OOD,
+    STATE_HMM_AMBIGUOUS,
+    STATE_STRUCTURE_FRAGILE,
+)
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
 from app.contracts.canonical_structure import CanonicalStructureOutput
 from app.contracts.forecast_packet import ForecastPacket
@@ -137,13 +143,13 @@ def build_canonical_state(
     )
     novelty_reason_codes: list[str] = []
     if ood >= 0.90:
-        novelty_reason_codes.append("high_ood")
+        novelty_reason_codes.append(STATE_HIGH_OOD)
     if hmm_amb >= 0.75:
-        novelty_reason_codes.append("hmm_ambiguous")
+        novelty_reason_codes.append(STATE_HMM_AMBIGUOUS)
     if frag >= 0.72:
-        novelty_reason_codes.append("structure_fragile")
+        novelty_reason_codes.append(STATE_STRUCTURE_FRAGILE)
     if transition_probability >= 0.65:
-        novelty_reason_codes.append("elevated_transition_risk")
+        novelty_reason_codes.append(STATE_ELEVATED_TRANSITION)
 
     rsi = _safe_float(feature_row, "rsi_14", 50.0)
     rsi_ext = _clip01(abs(rsi - 50.0) / 50.0)

@@ -10,6 +10,12 @@ from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
 from app.contracts.decisions import ActionProposal, RouteId
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState
+from app.contracts.reason_codes import (
+    AUC_MISSED_MOVE,
+    AUC_THESIS_OVERLAP_CAP,
+    AUC_TOP_N_SHORTFALL,
+    TRG_MOVE_ALREADY_EXTENDED,
+)
 from app.contracts.trigger import TriggerOutput
 from decision_engine.auction_engine import run_opportunity_auction
 
@@ -132,7 +138,7 @@ def test_missed_move_excludes_directional():
         trigger_strength=0.5,
         trigger_confidence=0.6,
         missed_move_flag=True,
-        trigger_reason_codes=["move_already_extended"],
+        trigger_reason_codes=[TRG_MOVE_ALREADY_EXTENDED],
     )
     prop, result = run_opportunity_auction(
         "BTC/USD",
@@ -149,7 +155,7 @@ def test_missed_move_excludes_directional():
     )
     assert prop is None
     assert result.selected_direction == 0
-    assert any("missed_move" in r.reasons for r in result.records if r.direction != 0)
+    assert any(AUC_MISSED_MOVE in r.reasons for r in result.records if r.direction != 0)
 
 
 def test_false_positive_memory_increases_auction_penalty():
@@ -294,7 +300,7 @@ def test_fb_can_044_top_n_shortfall_suppression_reason():
     assert result.top_n_limit == 3
     assert result.top_n_saturation < 1.0
     assert result.candidates_evaluated >= 1
-    assert any("top_n_throughput_shortfall" in r.reasons for r in result.records if r.eligible)
+    assert any(AUC_TOP_N_SHORTFALL in r.reasons for r in result.records if r.eligible)
 
 
 def test_ranking_stable_tiebreak():
@@ -385,7 +391,7 @@ def test_fb_can_046_thesis_overlap_hard_cap():
     )
     long_rec = next(r for r in r1.records if r.direction == 1)
     assert not long_rec.eligible
-    assert "thesis_overlap_cap" in long_rec.reasons
+    assert AUC_THESIS_OVERLAP_CAP in long_rec.reasons
     assert r1.clustering_metadata.get("fb_can_046") is not None
 
 

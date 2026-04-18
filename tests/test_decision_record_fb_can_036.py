@@ -13,6 +13,7 @@ from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState, SystemMode
 from decision_engine.decision_record import build_decision_record
 from decision_engine.pipeline import DecisionPipeline
+from app.contracts.reason_codes import PIP_NO_TRADE_SELECTED
 from risk_engine.engine import RISK_BLOCK_PAUSE_NEW_ENTRIES, RiskEngine
 
 
@@ -48,7 +49,7 @@ def test_build_decision_record_no_trade_has_codes():
     )
     route = RouteDecision(route_id=RouteId.NO_TRADE, confidence=0.0, ranking=[RouteId.NO_TRADE])
     risk = RiskState(
-        last_pipeline_no_trade_codes=["pipeline_no_trade_selected"],
+        last_pipeline_no_trade_codes=[PIP_NO_TRADE_SELECTED],
         last_risk_block_codes=[],
     )
     pkt = _pkt()
@@ -65,7 +66,7 @@ def test_build_decision_record_no_trade_has_codes():
         trade=None,
     )
     assert dr.no_trade is not None
-    assert "pipeline_no_trade_selected" in dr.no_trade.no_trade_reason_codes
+    assert PIP_NO_TRADE_SELECTED in dr.no_trade.no_trade_reason_codes
     assert dr.forecast_summary.get("route_confidence") == pytest.approx(0.0)
 
 

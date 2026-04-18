@@ -22,6 +22,11 @@ from app.contracts.decision_record import (
     TradeIntentSide,
     Urgency,
 )
+from app.contracts.reason_codes import (
+    PIP_CARRY_SLEEVE_BLOCKED,
+    PIP_TRADE_SELECTED,
+    normalize_reason_codes,
+)
 from app.contracts.decisions import ActionProposal, RouteDecision, TradeAction
 from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
@@ -111,8 +116,8 @@ def build_decision_record(
     if forecast_packet is not None:
         fc_sum["packet_ood"] = forecast_packet.ood_score
 
-    pipe_codes = list(risk.last_pipeline_no_trade_codes or [])
-    risk_codes = list(risk.last_risk_block_codes or [])
+    pipe_codes = normalize_reason_codes(list(risk.last_pipeline_no_trade_codes or []))
+    risk_codes = normalize_reason_codes(list(risk.last_risk_block_codes or []))
     ho = fd.get("hard_override") if isinstance(fd.get("hard_override"), dict) else {}
     ho_active = bool(ho.get("active")) if ho else bool(getattr(risk, "hard_override_active", False))
 
@@ -123,7 +128,7 @@ def build_decision_record(
             event_id=f"so-{rid[:8]}",
             timestamp=ts,
             override_type=SafetyOverrideType.HARD_OVERRIDE,
-            reason_codes=[f"hard_override_{kind}"],
+            reason_codes=normalize_reason_codes([f"hard_override_{kind}"]),
             affected_instruments=[symbol],
         )
 
@@ -140,7 +145,7 @@ def build_decision_record(
             intent_id=f"ri-{rid[:8]}",
             timestamp=ts,
             instrument_id=symbol,
-            reason_codes=["flatten_all"],
+            reason_codes=normalize_reason_codes(["flatten_all"]),
         )
     elif trade is not None and proposal is not None:
         outcome = DecisionOutcome.TRADE_INTENT
@@ -188,14 +193,20 @@ def build_decision_record(
             execution_confidence=ec,
             degradation_level=deg_s or "normal",
             max_slippage_tolerance_bps=float(guid.max_slippage_tolerance_bps),
-            reason_codes=["pipeline_trade_selected"] + list(guid.style_rationale_codes),
+            reason_codes=normalize_reason_codes(
+                [PIP_TRADE_SELECTED] + list(guid.style_rationale_codes)
+            ),
         )
     else:
         codes: list[str] = []
         codes.extend(pipe_codes)
         codes.extend(risk_codes)
+        if apex is not None:
+            codes.extend(normalize_reason_codes(list(getattr(apex, "novelty_reason_codes", None) or [])))
         if not codes:
-            codes = ["no_trade_unknown"]
+            codes = normalize_reason_codes(["no_trade_unknown"])
+        else:
+            codes = normalize_reason_codes(codes)
         no_trade = NoTradeDecision(
             event_id=f"nt-{rid[:8]}",
             timestamp=ts,
@@ -207,7 +218,7 @@ def build_decision_record(
                 "degradation": deg_s,
             },
         )
-        if "carry_sleeve_directional_blocked" in pipe_codes:
+        if PIP_CARRY_SLEEVE_BLOCKED in pipe_codes:
             suppression = SuppressionEvent(
                 event_id=f"su-{rid[:8]}",
                 timestamp=ts,
