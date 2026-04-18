@@ -9,6 +9,8 @@
 
 ## Pipeline
 
+- **`app/contracts/decision_snapshots.py`** — **FB-CAN-015:** Pydantic models for **Market / Structural / Safety / Execution feedback / Service config** input families (APEX data-contract spec); validated before each tick.
+- **`app/contracts/snapshot_builders.py`** — **FB-CAN-015:** builds **`DecisionBoundaryInput`** from the legacy feature row + `mid_price`, `spread_bps`, `data_timestamp`, `AppSettings`; merges canonical freshness/reliability scalars into the effective feature dict; full bundle JSON is stored under **`ForecastPacket.forecast_diagnostics["canonical_boundary_input"]`**.
 - **`state_engine.py`** — **FB-CAN-004:** builds APEX **`CanonicalStateOutput`** from `ForecastPacket` + features (5-class regime probs, confidence, transition, novelty, heat, reflexivity, degradation); attached to **`RegimeOutput.apex`** and merged into **`RiskState`** for sizing.
 - **`trigger_engine.py`** — **FB-CAN-005:** Setup → Pre-Trigger → Confirmed Trigger; **`TriggerOutput`** serialized under **`ForecastPacket.forecast_diagnostics["trigger"]`**; gates proposals in **`run_spec_policy_step`** when trigger invalid.
 - **`auction_engine.py`** — **FB-CAN-006:** scores long/short/flat candidates (canonical weighted score + penalties), selects winner under top-N and notional cap; result in **`forecast_diagnostics["auction"]`**.

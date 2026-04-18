@@ -9,12 +9,18 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
 import numpy as np
 
 from app.config.settings import AppSettings, load_settings
+from app.contracts.decision_snapshots import ExecutionFeedbackSnapshot
+from app.contracts.snapshot_builders import (
+    boundary_input_to_diagnostic_dict,
+    build_decision_boundary_input,
+)
 from app.contracts.asset_model_manifest import AssetModelManifest
 from app.contracts.decisions import ActionProposal, RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
@@ -277,8 +283,20 @@ class DecisionPipeline:
         mid_price: float | None = None,
         portfolio_equity_usd: float | None = None,
         position_signed_qty: Decimal | None = None,
+        data_timestamp: datetime | None = None,
+        execution_feedback_snapshot: ExecutionFeedbackSnapshot | None = None,
     ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None]:
-        _ = _feature_vector(feature_row)  # reserved for future feature-cache alignment
+        mp0 = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
+        boundary_input, feature_effective = build_decision_boundary_input(
+            symbol=symbol,
+            feature_row=feature_row,
+            spread_bps=float(spread_bps),
+            mid_price=mp0,
+            data_timestamp=data_timestamp,
+            settings=self._settings,
+            execution_feedback=execution_feedback_snapshot,
+        )
+        _ = _feature_vector(feature_effective)  # reserved for future feature-cache alignment
         self._log_serving_mode_once(self._settings)
 
         rp = resolve_serving_paths(symbol, self._settings)
@@ -294,7 +312,7 @@ class DecisionPipeline:
             cfg = base_cfg
         bar_sec = max(1, int(self._settings.market_data_bar_interval_seconds))
         cfg.base_interval_seconds = bar_sec
-        o, h, lo, cl, vo = ohlc_arrays_from_feature_row(feature_row, history_len=cfg.history_length)
+        o, h, lo, cl, vo = ohlc_arrays_from_feature_row(feature_effective, history_len=cfg.history_length)
         pkt = build_forecast_packet_methodology(
             o,
             h,
@@ -309,6 +327,9 @@ class DecisionPipeline:
         )
         pkt.forecast_diagnostics["symbol"] = symbol
         pkt.forecast_diagnostics["pipeline"] = "master_spec"
+        pkt.forecast_diagnostics["canonical_boundary_input"] = boundary_input_to_diagnostic_dict(
+            boundary_input
+        )
         pkt.packet_schema_version = 1
         cid = rp.forecaster_checkpoint_id
         pkt.source_checkpoint_id = cid
@@ -324,18 +345,18 @@ class DecisionPipeline:
         self._last_forecast_packet = pkt
 
         regime_out = _regime_output_from_packet(pkt)
-        apex = build_canonical_state(pkt, feature_row, spread_bps=spread_bps)
+        apex = build_canonical_state(pkt, feature_effective, spread_bps=spread_bps)
         regime_out = regime_out.model_copy(update={"apex": apex})
-        trig = evaluate_trigger(pkt, feature_row, spread_bps=spread_bps, apex=apex)
+        trig = evaluate_trigger(pkt, feature_effective, spread_bps=spread_bps, apex=apex)
         risk = merge_canonical_into_risk(
             risk,
             apex,
             forecast_packet=pkt,
             trigger=trig,
             spread_bps=spread_bps,
-            feature_row=feature_row,
+            feature_row=feature_effective,
         )
-        mp = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
+        mp = float(mid_price) if mid_price is not None else float(feature_effective.get("close", 1.0))
         eq = float(portfolio_equity_usd) if portfolio_equity_usd is not None else 100_000.0
 
         if rp.binding_abstain:
@@ -366,7 +387,7 @@ class DecisionPipeline:
             policy_system=self._policy_system,
             trigger=trig,
             apex=apex,
-            feature_row=feature_row,
+            feature_row=feature_effective,
         )
         return regime_out, fc, route, action
 
