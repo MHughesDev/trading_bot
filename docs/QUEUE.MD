@@ -118,7 +118,7 @@ stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_t
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-036** are **Done** (incl. **FB-CAN-036** — canonical `DecisionRecord` + risk block codes + `/governance/decision-record`). **FB-CAN-037**…**FB-CAN-078** remain **Open** for canonical migration (next **HIGH** slice **FB-CAN-041**). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** 42 canonical replacement slices.
+**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-037** are **Done** (incl. **FB-CAN-037** — named fault profiles + fault stress slots on evidence + shadow/live `fault_stress_evidence` gate). **FB-CAN-038**…**FB-CAN-078** remain **Open** for canonical migration (next **HIGH** slice **FB-CAN-041**). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** 41 canonical replacement slices.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|

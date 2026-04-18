@@ -17,6 +17,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestration.fault_injection_profiles import fault_stress_evidence_satisfied
+
 ReleaseObjectKind = Literal["config", "logic", "model_family", "feature_family", "combined"]
 ReleaseEnvironment = Literal["research", "simulation", "shadow", "live"]
 ConfigLifecycleStage = Literal[
@@ -72,6 +74,14 @@ class EvidencePackage(BaseModel):
     live_replay_equivalence_report: dict[str, Any] | None = Field(
         default=None,
         description="Optional JSON snapshot from LiveReplayEquivalenceReport.",
+    )
+    fault_stress_run_ids: list[str] = Field(
+        default_factory=list,
+        description="Replay run ids under canonical fault profiles (FB-CAN-037).",
+    )
+    fault_profile_ids_satisfied: list[str] = Field(
+        default_factory=list,
+        description="Canonical fault profile ids exercised for those runs.",
     )
 
 
@@ -170,6 +180,14 @@ def evaluate_promotion_gates(
         if candidate.evidence.owner_approval_present is not True:
             blocked.append("owner_approval")
             reasons.append("shadow path requires owner approval flag")
+        if not fault_stress_evidence_satisfied(
+            fault_stress_run_ids=ev.fault_stress_run_ids,
+            fault_profile_ids_satisfied=ev.fault_profile_ids_satisfied,
+        ):
+            blocked.append("fault_stress_evidence")
+            reasons.append(
+                "shadow requires fault stress replay ids and all canonical fault profile ids (FB-CAN-037)"
+            )
 
     if target_environment == "live":
         if not ev.owner_approval_present:
@@ -183,6 +201,14 @@ def evaluate_promotion_gates(
         if ev.shadow_divergence_reviewed is not True:
             blocked.append("shadow_divergence_reviewed")
             reasons.append("live requires shadow divergence reviewed (spec §7.2–9.4)")
+        if not fault_stress_evidence_satisfied(
+            fault_stress_run_ids=ev.fault_stress_run_ids,
+            fault_profile_ids_satisfied=ev.fault_profile_ids_satisfied,
+        ):
+            blocked.append("fault_stress_evidence")
+            reasons.append(
+                "live requires fault stress replay evidence and full canonical fault profile coverage (FB-CAN-037)"
+            )
         # Logic gates
         if candidate.kind in ("logic", "combined"):
             if ev.unit_tests_passed is not True:

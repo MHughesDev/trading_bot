@@ -33,7 +33,8 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`observability/canonical_metrics.py`](../observability/canonical_metrics.py) | **APEX canonical monitoring** — **FB-CAN-010**; `tb_canonical_*` Prometheus metrics. |
 | [`docs/MONITORING_CANONICAL.MD`](../docs/MONITORING_CANONICAL.MD) | Operator mapping: APEX monitoring domains → implemented metrics; **FB-CAN-028** Prometheus rules + Grafana `tb-canonical-health`. |
 | [`orchestration/release_gating.py`](../orchestration/release_gating.py) | **APEX release gating** — **FB-CAN-011**; `ReleaseCandidate`, `evaluate_promotion_gates`, JSON ledger helpers. |
-| [`orchestration/release_evidence.py`](../orchestration/release_evidence.py) | **Release evidence bundles** — **FB-CAN-026**; canonical fingerprint, diff vs baseline YAML, replay/shadow run id slots. |
+| [`orchestration/release_evidence.py`](../orchestration/release_evidence.py) | **Release evidence bundles** — **FB-CAN-026**; canonical fingerprint, diff vs baseline YAML, replay/shadow run id slots; **FB-CAN-037** `fault_stress_run_ids` / `fault_profile_ids_satisfied`. |
+| [`orchestration/fault_injection_profiles.py`](../orchestration/fault_injection_profiles.py) | **FB-CAN-037** — named deterministic fault profiles for replay; merge helper + promotion evidence check. |
 | [`models/registry/experiment_registry.py`](../models/registry/experiment_registry.py) | **APEX experiment registry** — **FB-CAN-011** / **FB-CAN-027**; `ExperimentRecord`, lifecycle validation, `query_experiments`, ledger sync, JSON registry helpers. |
 | [`research/`](../research/) | **FB-CAN-027** — re-exports experiment registry for research tooling entry point. |
 | [`docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD) | Operator guide: governance files and `validate_release_gates.py`. |

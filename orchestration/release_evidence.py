@@ -36,6 +36,14 @@ class ReleaseEvidenceBundle(BaseModel):
     canonical_diff_vs_baseline: dict[str, Any] | None = None
     replay_run_ids: list[str] = Field(default_factory=list)
     shadow_run_ids: list[str] = Field(default_factory=list)
+    fault_stress_run_ids: list[str] = Field(
+        default_factory=list,
+        description="Replay/simulation run ids executed under named canonical fault profiles (FB-CAN-037).",
+    )
+    fault_profile_ids_satisfied: list[str] = Field(
+        default_factory=list,
+        description="Which canonical fault profile ids were exercised by fault_stress_run_ids.",
+    )
     rollback: RollbackTarget = Field(default_factory=RollbackTarget)
 
 
@@ -114,6 +122,8 @@ def build_release_evidence_bundle(
     baseline_yaml_text: str | None = None,
     replay_run_ids: list[str] | None = None,
     shadow_run_ids: list[str] | None = None,
+    fault_stress_run_ids: list[str] | None = None,
+    fault_profile_ids_satisfied: list[str] | None = None,
     rollback: RollbackTarget | None = None,
 ) -> ReleaseEvidenceBundle:
     """Compose a evidence bundle from live settings and optional baseline file."""
@@ -136,5 +146,7 @@ def build_release_evidence_bundle(
         canonical_diff_vs_baseline=diff,
         replay_run_ids=list(replay_run_ids or []),
         shadow_run_ids=list(shadow_run_ids or []),
+        fault_stress_run_ids=list(fault_stress_run_ids or []),
+        fault_profile_ids_satisfied=list(fault_profile_ids_satisfied or []),
         rollback=rollback or RollbackTarget(),
     )

@@ -44,6 +44,10 @@ class ReplayRunContract(BaseModel):
     instrument_scope: list[str] = Field(default_factory=list)
     replay_mode: ReplayMode = "historical_nominal"
     execution_model_profile: ExecutionModelProfile = "baseline"
+    fault_injection_profile_id: str | None = Field(
+        default=None,
+        description="Named canonical profile from orchestration.fault_injection_profiles (FB-CAN-037); merged under fault_injection_profile.",
+    )
     fault_injection_profile: dict[str, Any] = Field(default_factory=dict)
     seed: int | None = None
 
