@@ -12,6 +12,7 @@ This folder holds **specifications that describe the repository as implemented**
 | Location | Role |
 |----------|------|
 | **[`docs/CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD)** | **Target** APEX architecture (canonical `new_specs/canonical/`) — precedence vs as-built |
+| **[`docs/CANONICAL_MODULE_MAP.MD`](../CANONICAL_MODULE_MAP.MD)** | **Code ↔ domains** — primary Python modules for state/trigger/auction/risk/execution/replay/governance |
 | **`docs/Specs/`** (this folder) | What the code **is** and **does** today |
 | **`docs/Human Provided Specs/new_specs/canonical/`** | Canonical APEX specs (see index above) |
 | **`docs/Human Provided Specs/`** (root `*.MD`) | Legacy human intent; backlog driver; compare to code + Specs |
