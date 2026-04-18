@@ -249,14 +249,26 @@ class ExecutionFeedbackSnapshot(BaseModel):
 
 
 class ServiceConfigurationSnapshot(BaseModel):
-    """§ service config — versioned view for replay attribution."""
+    """§ service config — versioned view for replay attribution (FB-CAN-071).
+
+    Binds **config_version**, **logic_version**, **environment_scope**, and **enabled_feature_families**
+    from :class:`~app.config.canonical_config.CanonicalMetadata` for traceability on every tick.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
+    snapshot_schema_version: int = Field(
+        default=1,
+        ge=1,
+        description="Contract revision for ServiceConfigurationSnapshot (FB-CAN-071).",
+    )
     snapshot_id: str
     timestamp: datetime
     config_version: str = "1.0.0"
+    config_name: str | None = None
     logic_version: str | None = None
+    environment_scope: str = "unspecified"
+    enabled_feature_families: list[str] = Field(default_factory=list)
     execution_mode: str = "paper"
     market_data_symbols: list[str] = Field(default_factory=list)
     bar_interval_seconds: int = 60
