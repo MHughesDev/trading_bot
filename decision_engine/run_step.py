@@ -37,13 +37,15 @@ def run_decision_tick(
     position_signed_qty: Decimal | None = None,
     available_cash_usd: float | None = None,
     portfolio_equity_usd: float | None = None,
+    replay_deterministic: bool = False,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, TradeAction | None, RiskState]:
     t0 = time.perf_counter()
-    sync_from_disk()
+    if not replay_deterministic:
+        sync_from_disk()
     eq = portfolio_equity_usd
     if eq is None:
         eq = risk_engine.current_equity
-    if not is_on():
+    if not replay_deterministic and not is_on():
         regime = RegimeOutput(
             state_index=0,
             semantic=SemanticRegime.SIDEWAYS,

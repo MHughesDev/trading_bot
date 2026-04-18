@@ -9,9 +9,11 @@ from typing import Any
 import polars as pl
 
 from app.config.settings import load_settings
+from app.contracts.replay_events import ReplayRunContract
 from app.contracts.risk import RiskState
 from backtesting.execution_params import BacktestExecutionParams
 from backtesting.portfolio import PortfolioTracker
+from backtesting.replay_core import run_one_replay_step
 from backtesting.simulator import (
     cash_delta_for_trade,
     fill_price_with_slippage,
@@ -35,12 +37,20 @@ def replay_decisions(
     position_signed_qty: Decimal | None = None,
     execution_params: BacktestExecutionParams | None = None,
     track_portfolio: bool = False,
+    replay_contract: ReplayRunContract | None = None,
+    emit_canonical_events: bool = False,
+    fault_injection_profile: dict[str, Any] | None = None,
 ) -> list[dict]:
     """
     Walk OHLCV bars; same `enrich_bars_last_row` + `run_decision_tick` as live (cumulative window).
 
     When ``track_portfolio`` is True, applies simulated slippage + fees from ``execution_params``.
     If ``execution_params`` is omitted, loads defaults from ``AppSettings`` (same YAML as live).
+
+    **FB-CAN-009:** Pass ``replay_contract`` for config/version fields; set ``emit_canonical_events``
+    to append per-bar ``canonical_events`` (market, structural, safety, decision, optional fault,
+    execution feedback). Uses ``replay_deterministic=True`` so replay does not depend on system power
+    disk sync. ``fault_injection_profile`` merges over ``replay_contract.fault_injection_profile``.
     """
     if bars.height == 0:
         return []
@@ -63,6 +73,15 @@ def replay_decisions(
         rng = make_replay_rng(execp.rng_seed)
         portfolio = PortfolioTracker(execp.initial_cash)
 
+    contract = replay_contract or ReplayRunContract(
+        replay_run_id="replay-inline",
+        dataset_id="inline",
+        instrument_scope=[symbol],
+    )
+    fault_base = dict(contract.fault_injection_profile)
+    if fault_injection_profile:
+        fault_base.update(fault_injection_profile)
+
     for row in frame.iter_rows(named=True):
         ts = row.get("timestamp")
         sub = raw.filter(pl.col("timestamp") <= ts) if ts is not None else raw
@@ -84,18 +103,23 @@ def replay_decisions(
         eq_usd: float | None = None
         if track_portfolio and portfolio is not None:
             eq_usd = float(portfolio.market_value({symbol: mid}))
-        regime, fc, route, proposal, trade_action, risk = run_decision_tick(
+        row_events: list[dict[str, Any]] | None = [] if emit_canonical_events else None
+        regime, fc, route, proposal, trade_action, risk = run_one_replay_step(
             symbol=symbol,
-            feature_row=feats,
+            feats=feats,
             spread_bps=spread_bps,
-            risk_state=risk,
+            dt=dt,
+            mid=mid,
+            risk=risk,
             pipeline=pipeline,
             risk_engine=risk_engine,
-            mid_price=mid,
-            data_timestamp=dt,
-            position_signed_qty=pos,
-            available_cash_usd=avail,
-            portfolio_equity_usd=eq_usd,
+            pos=pos,
+            avail=avail,
+            eq_usd=eq_usd,
+            contract=contract,
+            fault_profile=fault_base,
+            collect_events=emit_canonical_events,
+            events_out=row_events,
         )
         fill_price: float | None = None
         fee_paid: Decimal | None = None
@@ -149,6 +173,8 @@ def replay_decisions(
             "trade": executed.model_dump() if executed else None,
             "solvency_blocked": solvency_blocked,
         }
+        if emit_canonical_events and row_events is not None:
+            row_dict["canonical_events"] = row_events
         if track_portfolio and portfolio is not None:
             row_dict["portfolio_cash"] = str(portfolio.cash)
             row_dict["portfolio_position_qty"] = str(portfolio.positions.get(symbol, Decimal(0)))
@@ -172,6 +198,9 @@ def replay_multi_asset_decisions(
     initial_positions: dict[str, Decimal] | None = None,
     execution_params: BacktestExecutionParams | None = None,
     track_portfolio: bool = False,
+    replay_contract: ReplayRunContract | None = None,
+    emit_canonical_events: bool = False,
+    fault_injection_profile: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Multi-symbol replay with **one shared** ``RiskState`` and (when ``track_portfolio``)
@@ -210,6 +239,14 @@ def replay_multi_asset_decisions(
     positions: dict[str, Decimal] = {s: init_pos.get(s, Decimal(0)) for s in symbols_sorted}
 
     risk = RiskState()
+    contract = replay_contract or ReplayRunContract(
+        replay_run_id="replay-multi-inline",
+        dataset_id="inline",
+        instrument_scope=list(symbols_sorted),
+    )
+    fault_base = dict(contract.fault_injection_profile)
+    if fault_injection_profile:
+        fault_base.update(fault_injection_profile)
     execp: BacktestExecutionParams | None = None
     rng = None
     portfolio: PortfolioTracker | None = None
@@ -256,18 +293,23 @@ def replay_multi_asset_decisions(
                 px[symbol] = mid
                 eq_m = float(portfolio.market_value(px))
 
-            regime, fc, route, proposal, trade_action, risk = run_decision_tick(
+            row_events: list[dict[str, Any]] | None = [] if emit_canonical_events else None
+            regime, fc, route, proposal, trade_action, risk = run_one_replay_step(
                 symbol=symbol,
-                feature_row=feats,
+                feats=feats,
                 spread_bps=sp,
-                risk_state=risk,
+                dt=dt,
+                mid=mid,
+                risk=risk,
                 pipeline=pipeline,
                 risk_engine=risk_engine,
-                mid_price=mid,
-                data_timestamp=dt,
-                position_signed_qty=pos,
-                available_cash_usd=avail_m,
-                portfolio_equity_usd=eq_m,
+                pos=pos,
+                avail=avail_m,
+                eq_usd=eq_m,
+                contract=contract,
+                fault_profile=fault_base,
+                collect_events=emit_canonical_events,
+                events_out=row_events,
             )
 
             fill_price: float | None = None
@@ -321,6 +363,8 @@ def replay_multi_asset_decisions(
                 "trade": executed.model_dump() if executed else None,
                 "solvency_blocked": solvency_blocked,
             }
+            if emit_canonical_events and row_events is not None:
+                one["canonical_events"] = row_events
             if track_portfolio and portfolio is not None:
                 one["fill_price"] = fill_price
                 one["fee_paid"] = str(fee_paid) if fee_paid is not None else None
