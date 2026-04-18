@@ -2,6 +2,8 @@
 
 This document maps **APEX Monitoring & Alerting Spec v1.0** domains to **Prometheus metrics** implemented in **`observability/canonical_metrics.py`** (queue slice **FB-CAN-010**) and **`observability/drift_calibration_metrics.py`** (**FB-CAN-039**).
 
+**FB-CAN-056** adds a machine-checkable **domain checklist** in **`observability/monitoring_domain_checklist.py`** (eleven domains: system, data, state, trigger, auction, risk, execution, carry, drift, replay/shadow, governance). CI runs **`python3 scripts/ci_monitoring_domain_checklist.py`** from **`scripts/ci_canonical_gates.sh`** and fails if required metric **family** names disappear from the Prometheus registry after loading the canonical observability modules.
+
 **FB-CAN-028** adds checked-in **Prometheus alert rules** (`infra/prometheus/alerts/canonical_apex.yml`), a **Grafana dashboard** (`infra/grafana/provisioning/dashboards/json/tb-canonical-health.json`, UID **`tb-canonical-health`**), and **`GET /governance/monitoring`** in the control plane for pointers. Docker Compose mounts alert rules into Prometheus (`infra/docker-compose.yml`); **`infra/prometheus/prometheus.yml`** references them via `rule_files`.
 
 ## Metric name prefix
