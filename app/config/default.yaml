@@ -2,9 +2,11 @@ apex_canonical:
   metadata:
     config_version: 1.0.0
     config_name: trading-bot-default
+    created_at: '2026-01-01T00:00:00+00:00'
     created_by: repo-default.yaml
-    environment_scope: unspecified
-    notes: Optional; merge over synthesized legacy projection from flat settings.
+    environment_scope: live
+    notes: Repository default canonical bundle; merged over AppSettings synthesis
+      from flat settings and NM_*.
     enabled_feature_families:
     - market_microstructure
     - funding
