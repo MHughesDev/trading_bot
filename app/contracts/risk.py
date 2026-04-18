@@ -23,3 +23,11 @@ class RiskState(BaseModel):
     # APEX canonical degradation (FB-CAN-004); size_multiplier throttles new risk
     canonical_degradation: DegradationLevel | None = None
     canonical_size_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
+    # FB-CAN-007 — inputs for canonical layered sizing (set on decision hot path)
+    risk_asymmetry_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    risk_trigger_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    risk_execution_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    risk_heat_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    risk_reflexivity_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    risk_liquidation_mode: str | None = None
+    last_risk_sizing: dict | None = None

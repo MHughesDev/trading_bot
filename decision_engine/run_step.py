@@ -72,6 +72,7 @@ def run_decision_tick(
             product_tradable=False,
             position_signed_qty=position_signed_qty,
             available_cash_usd=available_cash_usd,
+            portfolio_equity_usd=eq,
         )
         DECISION_LATENCY.observe(time.perf_counter() - t0)
         return regime, fc, route, proposal, trade, risk_state
@@ -97,6 +98,7 @@ def run_decision_tick(
         product_tradable=product_tradable,
         position_signed_qty=position_signed_qty,
         available_cash_usd=available_cash_usd,
+        portfolio_equity_usd=eq,
     )
     DECISION_LATENCY.observe(time.perf_counter() - t0)
     return regime, fc, route, proposal, trade, risk_state
