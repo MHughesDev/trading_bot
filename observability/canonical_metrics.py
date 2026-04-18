@@ -75,6 +75,12 @@ CANONICAL_TRIGGER_MISSED_MOVE = Counter(
     "Missed-move flag set on trigger evaluation",
     ["symbol"],
 )
+CANONICAL_TRIGGER_SETUP_TO_CONFIRM_LATENCY_MS = Histogram(
+    "tb_canonical_trigger_setup_to_confirm_latency_ms",
+    "Deterministic setup→confirm stage ordering latency (FB-CAN-043)",
+    ["symbol"],
+    buckets=(0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 25.0, 50.0, 100.0),
+)
 
 # --- Auction / decision (spec §4.5) ---
 CANONICAL_AUCTION_SCORE = Histogram(
@@ -208,6 +214,12 @@ def record_canonical_post_tick(
                 CANONICAL_TRIGGER_STAGE.labels(symbol=sym, stage=stage, passed=str(passed)).inc()
             if bool(tr.get("missed_move_flag")):
                 CANONICAL_TRIGGER_MISSED_MOVE.labels(symbol=sym).inc()
+            lat = tr.get("setup_to_confirm_latency_ms")
+            if lat is not None:
+                try:
+                    CANONICAL_TRIGGER_SETUP_TO_CONFIRM_LATENCY_MS.labels(symbol=sym).observe(float(lat))
+                except (TypeError, ValueError):
+                    pass
         au = fd.get("auction")
         if isinstance(au, dict):
             sel = au.get("selected_score")
