@@ -9,6 +9,7 @@ from app.contracts.decisions import ActionProposal, RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState as AppRiskState
+from app.contracts.trigger import TriggerOutput
 from decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
 from policy_model.bridge import policy_envelope_from_app_settings
 from policy_model.objects import ExecutionState, PortfolioState, RiskState as PolicyRiskState
@@ -104,6 +105,7 @@ def run_spec_policy_step(
     portfolio_equity_usd: float,
     position_signed_qty: Decimal | None,
     policy_system: PolicySystem | None = None,
+    trigger: TriggerOutput | None = None,
 ) -> tuple[ForecastOutput, RouteDecision, ActionProposal | None]:
     """
     Human-spec path: PolicySystem + ExecutionPlan → proposal; `ForecastOutput` from packet for metrics.
@@ -120,10 +122,27 @@ def run_spec_policy_step(
     out = sys.decide(forecast_packet, ps, es, env_risk)
     plan = out["execution_plan"]
     proposal = execution_plan_to_proposal(symbol, forecast_packet=forecast_packet, fc=fc, plan=plan)
-    # RouteDecision is informational in spec mode — fixed ranking
-    route = RouteDecision(
-        route_id=RouteId.INTRADAY,
-        confidence=1.0,
-        ranking=[RouteId.INTRADAY, RouteId.NO_TRADE],
-    )
+
+    if trigger is not None:
+        forecast_packet.forecast_diagnostics["trigger"] = trigger.model_dump()
+        if not trigger.trigger_valid:
+            proposal = None
+        elif proposal is not None:
+            scale = 0.2 + 0.8 * float(trigger.trigger_confidence)
+            proposal = proposal.model_copy(
+                update={"size_fraction": min(1.0, proposal.size_fraction * scale)}
+            )
+
+    if proposal is None:
+        route = RouteDecision(
+            route_id=RouteId.NO_TRADE,
+            confidence=0.0,
+            ranking=[RouteId.NO_TRADE],
+        )
+    else:
+        route = RouteDecision(
+            route_id=RouteId.INTRADAY,
+            confidence=1.0,
+            ranking=[RouteId.INTRADAY, RouteId.NO_TRADE],
+        )
     return fc, route, proposal

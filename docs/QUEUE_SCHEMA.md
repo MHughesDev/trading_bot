@@ -22,6 +22,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) | **This file** — portable schema + queue-system index. |
 | [`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD) | **APEX canonical** specs index + precedence vs as-built (`docs/Specs/`) — program **FB-CAN-002**. |
 | [`app/config/canonical_config.py`](../app/config/canonical_config.py) | **APEX canonical runtime config** (`CanonicalRuntimeConfig`) — **FB-CAN-003**; optional YAML `apex_canonical` merged over legacy projection. |
+| [`decision_engine/trigger_engine.py`](../decision_engine/trigger_engine.py) | **APEX three-stage trigger** — **FB-CAN-005**; `TriggerOutput` in `ForecastPacket.forecast_diagnostics["trigger"]`. |
 | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent workflow: one slice → validate → PR → merge. |
 | [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) | Cursor **Add to Queue** skill for adding/updating items. |
 | [`.cursor/skills/queue-one-at-a-time/SKILL.md`](../.cursor/skills/queue-one-at-a-time/SKILL.md) | Cursor **Queue One-at-a-Time** execution skill (take top Open row only, implement, validate, document, commit). |
