@@ -29,6 +29,11 @@ class ExecutionGuidance(BaseModel):
     urgency_high: bool = False
     suppress_order: bool = False
     size_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
+    # FB-CAN-075 — explainable execution confidence decomposition (APEX Execution spec §4)
+    execution_confidence_terms: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-term quality [0,1] and weights used in execution_confidence",
+    )
 
 
 class ExecutionFeedback(BaseModel):

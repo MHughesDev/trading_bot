@@ -48,15 +48,74 @@ def _f(ctx: dict[str, Any], key: str, default: float) -> float:
         return default
 
 
+def _execution_confidence_config(domain: dict[str, Any]) -> dict[str, Any]:
+    """FB-CAN-075: nested ``execution_confidence`` under apex_canonical.domains.execution."""
+    raw = domain.get("execution_confidence") if isinstance(domain.get("execution_confidence"), dict) else {}
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _normalize_weights(raw: dict[str, Any], keys: tuple[str, ...]) -> dict[str, float]:
+    n = len(keys)
+    out = {k: 1.0 / n for k in keys}
+    for k in keys:
+        v = raw.get(k)
+        if v is None:
+            continue
+        try:
+            out[k] = max(0.0, float(v))
+        except (TypeError, ValueError):
+            pass
+    s = sum(out.values())
+    if s <= 0.0:
+        return {k: 1.0 / n for k in keys}
+    return {k: out[k] / s for k in keys}
+
+
 def compute_execution_confidence(ctx: dict[str, Any]) -> float:
-    """Spec §4.3 — five quality scores averaged."""
+    """Spec §4 — weighted blend of microstructure + latency + reliability terms (FB-CAN-075)."""
+    conf, _terms = compute_execution_confidence_with_terms(ctx)
+    return conf
+
+
+def compute_execution_confidence_with_terms(ctx: dict[str, Any]) -> tuple[float, dict[str, float]]:
+    """Return clipped execution confidence and per-term contributions (weights + qualities)."""
+    dom = ctx.get("_execution_policy") if isinstance(ctx.get("_execution_policy"), dict) else {}
+    ec_cfg = _execution_confidence_config(dom)
+    w_raw = ec_cfg.get("weights") if isinstance(ec_cfg.get("weights"), dict) else {}
+    keys = (
+        "depth_quality",
+        "spread_quality",
+        "venue_quality",
+        "latency_quality",
+        "slippage_quality",
+        "reliability_quality",
+    )
+    weights = _normalize_weights(w_raw, keys)
+
     qd = _clip01(_f(ctx, "depth_quality", 0.75))
     qs = _clip01(_f(ctx, "spread_quality", 0.75))
     qv = _clip01(_f(ctx, "venue_quality", 0.8))
     ql = _clip01(_f(ctx, "latency_quality", 0.75))
-    qr = _clip01(_f(ctx, "slippage_quality", 0.7))
-    raw = (qd + qs + qv + ql + qr) / 5.0
-    return _clip01(raw)
+    q_slip = _clip01(_f(ctx, "slippage_quality", 0.7))
+    q_rel = _clip01(_f(ctx, "reliability_quality", q_slip))
+
+    terms: dict[str, float] = {
+        "depth_quality": qd,
+        "spread_quality": qs,
+        "venue_quality": qv,
+        "latency_quality": ql,
+        "slippage_quality": q_slip,
+        "reliability_quality": q_rel,
+        "weight_depth_quality": weights["depth_quality"],
+        "weight_spread_quality": weights["spread_quality"],
+        "weight_venue_quality": weights["venue_quality"],
+        "weight_latency_quality": weights["latency_quality"],
+        "weight_slippage_quality": weights["slippage_quality"],
+        "weight_reliability_quality": weights["reliability_quality"],
+    }
+    raw = sum(weights[k] * terms[k] for k in keys)
+    terms["execution_confidence_raw"] = raw
+    return _clip01(raw), terms
 
 
 def compute_stress_mode(ctx: dict[str, Any]) -> tuple[bool, list[str]]:
@@ -133,7 +192,7 @@ def build_execution_guidance(ctx: dict[str, Any]) -> ExecutionGuidance:
     """Full guidance record for metadata + service gating."""
     dom = ctx.get("_execution_policy") if isinstance(ctx.get("_execution_policy"), dict) else {}
     spread_bps = _f(ctx, "spread_bps", 5.0)
-    exec_conf = compute_execution_confidence(ctx)
+    exec_conf, ec_terms = compute_execution_confidence_with_terms(ctx)
     stress, stress_reasons = compute_stress_mode(ctx)
     wce, edge_suppress = compute_worst_case_edge(ctx)
     heat = _f(ctx, "heat_score", 0.2)
@@ -187,6 +246,7 @@ def build_execution_guidance(ctx: dict[str, Any]) -> ExecutionGuidance:
         urgency_high=urgency,
         suppress_order=suppress,
         size_multiplier=size_mult,
+        execution_confidence_terms=ec_terms,
     )
 
 
@@ -271,11 +331,28 @@ def build_execution_context_from_decision(
     venue_q = _clip01(0.82 - spread_stress * 0.35)
     latency_q = _clip01(0.88 - spread_stress * 0.25)
     slip_q = _clip01(1.0 - min(0.9, slip_bps / 120.0))
-    if execution_feedback_bucket:
-        venue_q = _clip01(0.5 * venue_q + 0.5 * float(execution_feedback_bucket.get("venue_quality", venue_q)))
-        slip_q = _clip01(0.55 * slip_q + 0.45 * float(execution_feedback_bucket.get("execution_trust", slip_q)))
-
     ex_dom = _execution_domain(settings)
+    ec_cfg = _execution_confidence_config(ex_dom)
+    lat_ref = float(ec_cfg.get("latency_ms_reference", 450.0))
+    lat_stress = float(ec_cfg.get("latency_stress_scale", 1.35))
+    rel_fill_w = float(ec_cfg.get("reliability_fill_ratio_weight", 0.55))
+    rel_trust_w = float(ec_cfg.get("reliability_trust_weight", 0.45))
+
+    lat_ms = max(0.0, float(feature_row.get("canonical_exec_latency_ms_ema", 0.0) or 0.0))
+    fill_ema = _clip01(float(feature_row.get("canonical_exec_fill_ratio_ema", 1.0)))
+    trust_fb = _clip01(float(feature_row.get("canonical_exec_execution_trust", 0.75)))
+    if execution_feedback_bucket:
+        lat_ms = max(lat_ms, float(execution_feedback_bucket.get("latency_ms_ema", 0.0)))
+        fill_ema = _clip01(float(execution_feedback_bucket.get("fill_ratio_ema", fill_ema)))
+        trust_fb = _clip01(float(execution_feedback_bucket.get("execution_trust", trust_fb)))
+        venue_q = _clip01(0.5 * venue_q + 0.5 * float(execution_feedback_bucket.get("venue_quality", venue_q)))
+        slip_q = _clip01(0.55 * slip_q + 0.45 * trust_fb)
+    if lat_ms > 0.0 and lat_ref > 1e-9:
+        latency_q = _clip01(1.0 - min(1.0, (lat_ms / lat_ref) * lat_stress))
+    rel_q = _clip01(rel_fill_w * fill_ema + rel_trust_w * trust_fb)
+    if execution_feedback_bucket is None and lat_ms <= 0.0:
+        rel_q = slip_q
+
     min_trade_edge = float(ex_dom.get("minimum_tradeable_edge", 0.0015))
     urg_s = float(ex_dom.get("urgency_trigger_strength_above", 0.55))
     urg_c = float(ex_dom.get("urgency_trigger_confidence_above", 0.4))
@@ -288,6 +365,7 @@ def build_execution_context_from_decision(
         "venue_quality": venue_q,
         "latency_quality": latency_q,
         "slippage_quality": slip_q,
+        "reliability_quality": rel_q,
         "heat_score": heat,
         "volatility_proxy": vol_proxy,
         "expected_edge": expected_edge,

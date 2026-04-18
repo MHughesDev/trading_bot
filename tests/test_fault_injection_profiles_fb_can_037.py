@@ -70,6 +70,18 @@ def test_apply_fault_book_imbalance_and_execution():
     assert "execution_slippage_stress_injection" in reasons
 
 
+def test_apply_fault_execution_latency_stress_fb_can_075():
+    row = {"canonical_exec_latency_ms_ema": 100.0}
+    feats, _sp, _dt, reasons = apply_fault_injection(
+        feature_row=row,
+        spread_bps=5.0,
+        data_timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        profile={"execution_latency_ms_add": 500.0},
+    )
+    assert feats["canonical_exec_latency_ms_ema"] == 600.0
+    assert "execution_latency_stress_injection" in reasons
+
+
 def test_replay_contract_named_profile_emits_fault_events():
     rows = []
     for i in range(4):

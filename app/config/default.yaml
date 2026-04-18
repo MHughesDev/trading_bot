@@ -96,6 +96,18 @@ apex_canonical:
       worst_case_slippage_multiplier: 2.5
       partial_fill_min_remaining_fraction: 0.02
       partial_fill_low_execution_floor: 0.22
+      execution_confidence:
+        latency_ms_reference: 450.0
+        latency_stress_scale: 1.35
+        reliability_fill_ratio_weight: 0.55
+        reliability_trust_weight: 0.45
+        weights:
+          depth_quality: 0.15
+          spread_quality: 0.15
+          venue_quality: 0.2
+          latency_quality: 0.2
+          slippage_quality: 0.15
+          reliability_quality: 0.15
     signal_confidence:
       market_microstructure:
         enabled: true

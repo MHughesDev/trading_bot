@@ -102,6 +102,12 @@ def apply_fault_injection(
         row["canonical_exec_fill_ratio"] = _clip(cur * float(fr_mult), 0.0, 1.0)
         reasons.append("execution_fill_stress_injection")
 
+    lat_add = profile.get("execution_latency_ms_add")
+    if lat_add is not None:
+        cur = float(row.get("canonical_exec_latency_ms_ema", 45.0))
+        row["canonical_exec_latency_ms_ema"] = max(0.0, cur + float(lat_add))
+        reasons.append("execution_latency_stress_injection")
+
     lds = profile.get("liquidity_depth_scale")
     if lds is not None:
         m = _clip(float(lds), 0.0, 1.0)

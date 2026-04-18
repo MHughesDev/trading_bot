@@ -123,6 +123,9 @@ def merge_memory_into_feature_row(
     out["canonical_venue_degradation_ema"] = float(bucket.get("venue_degradation_ema", 0.0))
     out["canonical_exec_slippage_ema_bps"] = float(bucket.get("slip_ema_bps", 0.0))
     out["canonical_exec_fill_ratio_ema"] = float(bucket.get("fill_ratio_ema", 1.0))
+    # FB-CAN-075 — latency EMA for execution confidence (replay + live parity)
+    out["canonical_exec_latency_ms_ema"] = float(bucket.get("latency_ms_ema", 0.0))
+    out["canonical_exec_execution_trust"] = float(bucket.get("execution_trust", 0.75))
     return out
 
 

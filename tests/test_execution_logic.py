@@ -9,6 +9,7 @@ from execution.execution_logic import (
     build_execution_context_from_decision,
     build_execution_guidance,
     compute_execution_confidence,
+    compute_execution_confidence_with_terms,
     prepare_order_intent_for_execution,
     reconcile_partial_fill,
     select_execution_style,
@@ -116,6 +117,103 @@ def test_build_guidance_includes_style_rationale():
     assert g.preferred_execution_style == "passive"
     assert g.style_rationale_codes
     assert g.remaining_edge >= 0.0
+
+
+def test_execution_confidence_weights_and_terms_fb_can_075():
+    ctx = {
+        "depth_quality": 0.8,
+        "spread_quality": 0.7,
+        "venue_quality": 0.9,
+        "latency_quality": 0.6,
+        "slippage_quality": 0.5,
+        "reliability_quality": 0.55,
+        "_execution_policy": {
+            "execution_confidence": {
+                "weights": {
+                    "depth_quality": 1.0,
+                    "spread_quality": 1.0,
+                    "venue_quality": 1.0,
+                    "latency_quality": 2.0,
+                    "slippage_quality": 1.0,
+                    "reliability_quality": 2.0,
+                }
+            }
+        },
+    }
+    conf, terms = compute_execution_confidence_with_terms(ctx)
+    assert 0.0 <= conf <= 1.0
+    assert "weight_latency_quality" in terms
+    assert terms["latency_quality"] == 0.6
+    g = build_execution_guidance(
+        {
+            **ctx,
+            "spread_bps": 8.0,
+            "heat_score": 0.2,
+            "expected_edge": 0.02,
+            "expected_slippage_bps": 6.0,
+            "minimum_tradeable_edge": 0.0015,
+            "remaining_edge": 0.015,
+            "urgency_high": False,
+        }
+    )
+    assert g.execution_confidence_terms.get("execution_confidence_raw") is not None
+    assert abs(g.execution_confidence - conf) < 1e-9
+
+
+def test_latency_reliability_from_feature_row_fb_can_075():
+    regime = RegimeOutput(
+        state_index=0,
+        semantic=SemanticRegime.BULL,
+        probabilities=[0.5, 0.2, 0.2, 0.1],
+        confidence=0.5,
+    )
+    fc = ForecastOutput(
+        returns_1=0.01,
+        returns_3=0.0,
+        returns_5=0.0,
+        returns_15=0.0,
+        volatility=0.02,
+        uncertainty=0.1,
+    )
+    settings = AppSettings()
+    ctx_lo = build_execution_context_from_decision(
+        spread_bps=6.0,
+        feature_row={
+            "close": 50000.0,
+            "atr_14": 100.0,
+            "return_1": 0.001,
+            "volume": 1e6,
+            "canonical_exec_latency_ms_ema": 200.0,
+            "canonical_exec_fill_ratio_ema": 0.95,
+            "canonical_exec_execution_trust": 0.9,
+        },
+        regime=regime,
+        forecast=fc,
+        risk=RiskState(),
+        mid_price=50000.0,
+        forecast_packet=None,
+        settings=settings,
+    )
+    ctx_hi = build_execution_context_from_decision(
+        spread_bps=6.0,
+        feature_row={
+            "close": 50000.0,
+            "atr_14": 100.0,
+            "return_1": 0.001,
+            "volume": 1e6,
+            "canonical_exec_latency_ms_ema": 900.0,
+            "canonical_exec_fill_ratio_ema": 0.4,
+            "canonical_exec_execution_trust": 0.35,
+        },
+        regime=regime,
+        forecast=fc,
+        risk=RiskState(),
+        mid_price=50000.0,
+        forecast_packet=None,
+        settings=settings,
+    )
+    assert ctx_lo["latency_quality"] >= ctx_hi["latency_quality"]
+    assert ctx_lo["reliability_quality"] >= ctx_hi["reliability_quality"]
 
 
 def test_build_context_from_decision():
