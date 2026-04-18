@@ -169,7 +169,7 @@ A final detail-closure pass added FB-CAN-061..070 to cover remaining canonical s
 - magic-constant guardrails in canonical paths,
 - replay deterministic seeding/provenance metadata,
 - post-release probation-window abort policies,
-- machine-readable canonical spec section-to-queue coverage matrix.
+- machine-readable canonical spec section-to-queue coverage matrix (**published:** [`CANONICAL_SPEC_COVERAGE_MATRIX.json`](CANONICAL_SPEC_COVERAGE_MATRIX.json), summary [`CANONICAL_SPEC_COVERAGE_MATRIX.MD`](CANONICAL_SPEC_COVERAGE_MATRIX.MD); CI: `scripts/ci_canonical_coverage_matrix.py`).
 
 ## 3.4 Remaining-detail pass (operational traceability and acceptance closure)
 
