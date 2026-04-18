@@ -19,8 +19,8 @@ from policy_model.objects import ExecutionState, PortfolioState, RiskState as Po
 from policy_model.system import PolicySystem
 
 # Maps |required_delta_fraction| ∈ [0,1] to RiskEngine `size_fraction` ∈ (0,1].
-# Chosen so a full delta to max position maps to size_fraction=1; aligns with legacy
-# `propose_action` slot semantics (see `decision_engine/action_generator.py`).
+# Chosen so a full delta to max position maps to size_fraction=1; aligns with prior
+# per-route slot fractions (FB-CAN-019 removed standalone `action_generator.py`).
 SPEC_POLICY_DELTA_TO_SIZE_FRACTION_SCALE = 4.0
 
 

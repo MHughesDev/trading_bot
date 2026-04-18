@@ -17,7 +17,7 @@
 - **`pipeline.py`** — `DecisionPipeline`: regime + forecast + route + `ActionProposal` from features and risk state
 - **`features_live.py`** — Live tick / overlay feature row construction
 - **`feature_frame.py`** — Bar enrichment and merges (live/replay)
-- **`action_generator.py`** — Route/action wiring (see code for current routes)
+- **`spec_policy_proposal.py`** — PolicySystem + trigger + auction → `ActionProposal` (replaces legacy standalone route→proposal helper removed in FB-CAN-019)
 - **`audit.py`** — `decision_trace` structures for logging and optional QuestDB persistence
 
 ## Parity rule
