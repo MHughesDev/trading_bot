@@ -32,9 +32,7 @@ jobs:
         run: python3 scripts/ci_queue_consistency.py
       - name: MLflow promotion policy
         run: bash scripts/ci_mlflow_promotion_policy.sh
-      - name: Canonical contracts + release-gate fixture (FB-CAN-013)
-        run: bash scripts/ci_canonical_contracts.sh
-      - name: Canonical CI gates (FB-CAN-025)
+      - name: Canonical CI gates + acceptance audit (FB-CAN-025 / FB-CAN-078)
         run: bash scripts/ci_canonical_gates.sh
       - name: Canonical glossary references (FB-CAN-040)
         run: bash scripts/ci_canonical_glossary.sh

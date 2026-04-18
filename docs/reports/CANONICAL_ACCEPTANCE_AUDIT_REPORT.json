@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "audit_id": "CANONICAL-ACCEPTANCE-AUDIT",
+  "queue_id": "FB-CAN-078",
+  "generated_at_utc": "2026-04-18T20:05:08+00:00",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "steps": [
+    {
+      "step": "gap_audit_doc",
+      "ok": true,
+      "path": "docs/reports/REPO_VS_CANONICAL_SPECS_GAP_AUDIT.md"
+    },
+    {
+      "step": "canonical_spec_tree",
+      "ok": true,
+      "md_count": 11
+    },
+    {
+      "step": "fixture",
+      "ok": true,
+      "path": "tests/fixtures/canonical_release_candidate_live.json"
+    },
+    {
+      "step": "fixture",
+      "ok": true,
+      "path": "tests/fixtures/canonical_experiment_registry_ci.json"
+    },
+    {
+      "step": "matrix_signoff_checklist",
+      "ok": true,
+      "items": 4
+    },
+    {
+      "step": "open_fb_can_queue",
+      "count": 0,
+      "ids": [],
+      "strict": false
+    },
+    {
+      "step": "ci_canonical_contracts",
+      "exit_code": 0,
+      "ok": true
+    }
+  ]
+}
