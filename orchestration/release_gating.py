@@ -8,9 +8,15 @@ in research → simulation → shadow → live before promoting to the next stag
 
 **FB-CAN-053:** Rollback playbook fields (owner, instructions, triggers) required for
 promotion beyond **research**; structural validation on rollback version refs.
+
+**FB-CAN-054:** Linked experiments must satisfy predeclared metrics and failure-mode
+documentation before release promotion (lazy import avoids circular deps with
+``models.registry.experiment_registry``).
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from app.contracts.release_objects import (
     ConfigLifecycleStage,
@@ -74,6 +80,52 @@ def validate_rollback_for_promotion(
     return ok_a and ok_b, ra + rb_reasons
 
 
+def validate_linked_experiments_for_promotion(
+    candidate: ReleaseCandidate,
+    *,
+    target_environment: ReleaseEnvironment,
+    experiment_registry_path: str | Path | None = None,
+) -> tuple[bool, list[str]]:
+    """
+    FB-CAN-054: each linked experiment must pass registry completeness checks
+    (predeclared metrics, success decision, failure modes) before promotion to
+    simulation or beyond.
+    """
+    if target_environment == "research":
+        return True, []
+    ids = [x.strip() for x in candidate.linked_experiment_ids if x and x.strip()]
+    if not ids:
+        return True, []
+
+    # Lazy import: ``experiment_registry`` imports this module at top level.
+    from models.registry.experiment_registry import (  # noqa: PLC0415
+        get_experiment_by_id,
+        read_experiment_registry,
+    )
+
+    reg = read_experiment_registry(experiment_registry_path)
+    if reg is None:
+        return False, [
+            "linked_experiment_ids is non-empty but experiment registry file is missing or unreadable"
+        ]
+
+    reasons: list[str] = []
+    from models.registry.experiment_validation import (  # noqa: PLC0415
+        validate_experiment_promotion_readiness,
+    )
+
+    for eid in ids:
+        rec = get_experiment_by_id(reg, eid)
+        if rec is None:
+            reasons.append(f"linked experiment {eid!r} not found in experiment registry")
+            continue
+        ok, msgs = validate_experiment_promotion_readiness(rec)
+        if not ok:
+            for m in msgs:
+                reasons.append(f"experiment {eid}: {m}")
+    return len(reasons) == 0, reasons
+
+
 __all__ = [
     "ConfigLifecycleStage",
     "EvidencePackage",
@@ -89,6 +141,7 @@ __all__ = [
     "read_release_ledger",
     "required_environment_before",
     "validate_rollback_for_promotion",
+    "validate_linked_experiments_for_promotion",
     "write_release_ledger",
 ]
 
@@ -101,11 +154,15 @@ def evaluate_promotion_gates(
     candidate: ReleaseCandidate,
     *,
     target_environment: ReleaseEnvironment,
+    experiment_registry_path: str | Path | None = None,
 ) -> PromotionGateResult:
     """
     Evaluate mandatory gates before advancing ``candidate`` toward ``target_environment``.
 
     Rules are a **minimal** encoding of spec §7: missing evidence → not allowed.
+
+    ``experiment_registry_path`` (FB-CAN-054): optional override for the experiment registry JSON
+    when validating ``linked_experiment_ids`` (defaults to on-disk path).
     """
     reasons: list[str] = []
     blocked: list[str] = []
@@ -131,6 +188,16 @@ def evaluate_promotion_gates(
         if not ok_rb:
             blocked.append("rollback_playbook")
             reasons.extend(rb_msgs)
+
+    # --- Linked experiments (FB-CAN-054) ---
+    ok_exp, exp_msgs = validate_linked_experiments_for_promotion(
+        candidate,
+        target_environment=target_environment,
+        experiment_registry_path=experiment_registry_path,
+    )
+    if not ok_exp:
+        blocked.append("linked_experiments_complete")
+        reasons.extend(exp_msgs)
 
     # --- Owner ---
     if not (candidate.owner and candidate.owner.strip()):

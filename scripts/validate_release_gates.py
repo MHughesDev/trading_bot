@@ -28,14 +28,23 @@ def main() -> int:
     )
     p.add_argument(
         "--target",
-        choices=["simulation", "shadow", "live"],
+        choices=["research", "simulation", "shadow", "live"],
         default="live",
         help="Target environment to gate toward",
+    )
+    p.add_argument(
+        "--experiment-registry",
+        type=Path,
+        default=None,
+        help="Optional path to experiment_registry.json when validating linked_experiment_ids (FB-CAN-054)",
     )
     args = p.parse_args()
     raw = json.loads(args.candidate.read_text(encoding="utf-8"))
     cand = ReleaseCandidate.model_validate(raw)
-    result = evaluate_promotion_gates(cand, target_environment=args.target)
+    kwargs: dict = {"target_environment": args.target}
+    if args.experiment_registry is not None:
+        kwargs["experiment_registry_path"] = args.experiment_registry
+    result = evaluate_promotion_gates(cand, **kwargs)
     print(json.dumps(result.model_dump(mode="json"), indent=2))
     return 0 if result.allowed else 2
 

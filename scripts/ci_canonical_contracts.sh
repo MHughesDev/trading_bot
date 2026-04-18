@@ -8,7 +8,8 @@ cd "$ROOT"
 
 python3 scripts/validate_release_gates.py \
   --candidate tests/fixtures/canonical_release_candidate_live.json \
-  --target live
+  --target live \
+  --experiment-registry tests/fixtures/canonical_experiment_registry_ci.json
 
 bash scripts/ci_rollback_playbook.sh
 

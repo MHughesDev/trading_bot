@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-04-18T00:00:00+00:00",
+  "experiments": [
+    {
+      "experiment_id": "exp-ci-canonical-complete",
+      "title": "CI fixture experiment for release gating",
+      "owner": "ci",
+      "status": "completed",
+      "domain": "trigger_research",
+      "hypothesis": "Fixture hypothesis for linked release gate validation.",
+      "change_type": "new_trigger_rule",
+      "metrics_defined_before_run": ["false_positive_rate", "trigger_hit_rate"],
+      "success_decision": "Met predeclared false-positive target; proceed to shadow review.",
+      "failure_modes_observed": "Under stress scenarios the candidate increased no-trade occupancy; monitor in shadow.",
+      "notes": "Synthetic row for FB-CAN-054 promotion gate checks."
+    }
+  ]
+}

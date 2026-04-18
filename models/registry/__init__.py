@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from models.registry.active_set import active_model_set_status, apply_active_model_set
 from models.registry.experiment_registry import (
+    EXPERIMENT_STATUSES_REQUIRING_PROMOTION_READINESS,
     ExperimentRecord,
     ExperimentRegistry,
     default_experiment_registry_path,
     delete_experiment,
+    get_experiment_by_id,
     link_experiment_to_release,
     load_or_create_experiment_registry,
     query_experiments,
@@ -18,6 +20,7 @@ from models.registry.experiment_registry import (
     validate_experiment_transition,
     write_experiment_registry,
 )
+from models.registry.experiment_validation import validate_experiment_promotion_readiness
 from models.registry.mlflow_registry import MLflowModelRegistry
 from models.registry.store import (
     REGISTRY_SCHEMA_VERSION,
@@ -28,6 +31,7 @@ from models.registry.store import (
 )
 
 __all__ = [
+    "EXPERIMENT_STATUSES_REQUIRING_PROMOTION_READINESS",
     "MLflowModelRegistry",
     "REGISTRY_SCHEMA_VERSION",
     "ExperimentRecord",
@@ -36,6 +40,7 @@ __all__ = [
     "apply_active_model_set",
     "delete_experiment",
     "default_experiment_registry_path",
+    "get_experiment_by_id",
     "default_registry_path",
     "link_experiment_to_release",
     "load_or_create_experiment_registry",
@@ -46,6 +51,7 @@ __all__ = [
     "suggest_experiment_id",
     "upsert_experiment",
     "validate_experiment_record_fields",
+    "validate_experiment_promotion_readiness",
     "validate_experiment_transition",
     "write_active_model_set",
     "write_experiment_registry",

@@ -1194,7 +1194,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-EXP-METRICS",
         "id": "FB-CAN-054",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Enforce experiment predeclared metrics and failure-mode capture",
         "agent_task": "Add registry validators that require predeclared success metrics and failure-mode documentation before experiment completion/promotion states. Reject incomplete experiment records from promotion workflows.",
         "affected_files": "research/|models/|scripts/|tests/",

@@ -229,7 +229,7 @@
 | FB-CAN-051 | CAN-GOV-OBJ | B | OP | platform | MEDIUM | Done | Implement release-object model (config/logic/model-family/feature-family/combined). | `models/`, `orchestration/`, `control_plane/`, contracts/tests |
 | FB-CAN-052 | CAN-GOV-ENV | B | OP | platform | MEDIUM | Done | Implement research/simulation/shadow/live stage-enforcement rules for promotion flow. | `orchestration/`, `scripts/`, `models/`, docs/tests |
 | FB-CAN-053 | CAN-GOV-ROLL | B | OP | platform | LOW | Done | Implement rollback playbooks and rollback-target validation as promotion requirements. | `docs/`, `scripts/`, `orchestration/`, `control_plane/`, tests |
-| FB-CAN-054 | CAN-EXP-METRICS | B | DS | feature | MEDIUM | Open | Enforce experiment predeclared metrics and failure-mode capture before promotion states. | `research/`, `models/`, `scripts/`, tests |
+| FB-CAN-054 | CAN-EXP-METRICS | B | DS | feature | MEDIUM | Done | Enforce experiment predeclared metrics and failure-mode capture before promotion states. | `research/`, `models/`, `scripts/`, tests |
 | FB-CAN-055 | CAN-REPLAY-MODES | B | DS | feature | MEDIUM | Open | Implement canonical replay modes and required event-family coverage checks. | `backtesting/`, contracts/scripts/tests |
 | FB-CAN-056 | CAN-MON-DOMAINS | B | OB | feature | MEDIUM | Open | Implement monitoring-domain coverage checklist and CI assertions for required metric families. | `observability/`, `scripts/`, docs/tests |
 | FB-CAN-057 | CAN-CONFIG-DIFF | B | CFG | platform | LOW | Open | Implement immutable config diff audit trail and semantic-change guardrails. | `app/config/`, `models/`, `control_plane/`, scripts/tests |

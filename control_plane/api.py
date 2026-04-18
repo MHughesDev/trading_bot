@@ -791,6 +791,10 @@ class PromotionGateEvaluateRequest(BaseModel):
 
     candidate: dict[str, Any]
     target_environment: ReleaseEnvironment = "live"
+    experiment_registry_path: str | None = Field(
+        default=None,
+        description="Optional path to experiment_registry.json for linked_experiment_ids checks (FB-CAN-054).",
+    )
 
 
 @app.get("/governance/release-evidence")
@@ -911,7 +915,10 @@ def post_release_object(
 def post_release_objects_evaluate_gates(body: PromotionGateEvaluateRequest) -> dict[str, Any]:
     """Evaluate promotion gates for a candidate JSON (no persistence)."""
     cand = ReleaseCandidate.model_validate(body.candidate)
-    result = evaluate_promotion_gates(cand, target_environment=body.target_environment)
+    kwargs: dict[str, Any] = {"target_environment": body.target_environment}
+    if body.experiment_registry_path:
+        kwargs["experiment_registry_path"] = body.experiment_registry_path
+    result = evaluate_promotion_gates(cand, **kwargs)
     return result.model_dump(mode="json")
 
 
