@@ -2,7 +2,7 @@
 
 **Purpose:** Single **code-to-domain** map for the shared decision path after **FB-CAN-004…011**. Use it with **[`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD)** (what to build toward) and **[`docs/Specs/README.MD`](Specs/README.MD)** (as-built file index).
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-032: [`signal_confidence.py`](../app/config/signal_confidence.py); FB-CAN-031: missed-move + `trigger_false_positive_memory`; FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-033: `classify_hard_override` + transition/occupancy on **`RiskState`**; FB-CAN-032: [`signal_confidence.py`](../app/config/signal_confidence.py); FB-CAN-031: missed-move + `trigger_false_positive_memory`; FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
 
 ---
 
@@ -29,7 +29,7 @@ Legacy **ForecastPacket → PolicySystem → proposal** remains the **forecast/r
 | Forecast / structure (canonical view) | [`app/contracts/canonical_structure.py`](../app/contracts/canonical_structure.py), [`app/contracts/structure_adapter.py`](../app/contracts/structure_adapter.py) | **FB-CAN-017:** `CanonicalStructureOutput` from `ForecastPacket`; diagnostics on packet; feeds trigger + auction. |
 | Pipeline orchestration | [`decision_engine/pipeline.py`](../decision_engine/pipeline.py) | Boundary normalize + forecast packet build. |
 | Canonical post-forecast sequence | [`decision_engine/canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py) | **FB-CAN-029** — structure → state → trigger → auction → carry (shared by `pipeline.step`). |
-| State / regime / degradation | [`decision_engine/state_engine.py`](../decision_engine/state_engine.py), [`app/contracts/canonical_state.py`](../app/contracts/canonical_state.py) | `RegimeOutput.apex`, `RiskState` canonical fields. |
+| State / regime / degradation | [`decision_engine/state_engine.py`](../decision_engine/state_engine.py), [`app/contracts/canonical_state.py`](../app/contracts/canonical_state.py), [`app/contracts/hard_override.py`](../app/contracts/hard_override.py) | **FB-CAN-033:** `classify_hard_override` (deterministic taxonomy); **`RiskState`** transition count + per-level occupancy; hard override forces **NO_TRADE** in orchestrator before auction. |
 | Three-stage trigger | [`decision_engine/trigger_engine.py`](../decision_engine/trigger_engine.py), [`app/contracts/trigger.py`](../app/contracts/trigger.py) | **FB-CAN-031** missed-move gate; diagnostics: `forecast_diagnostics["trigger"]`. |
 | Opportunity auction | [`decision_engine/auction_engine.py`](../decision_engine/auction_engine.py), [`app/contracts/auction.py`](../app/contracts/auction.py) | **FB-CAN-031** false-positive memory penalty **P**; diagnostics: `forecast_diagnostics["auction"]`. |
 | Risk — trigger memory | [`app/contracts/risk.py`](../app/contracts/risk.py), [`decision_engine/state_engine.py`](../decision_engine/state_engine.py) | **`trigger_false_positive_memory`** updated in `merge_canonical_into_risk`. |
@@ -37,7 +37,7 @@ Legacy **ForecastPacket → PolicySystem → proposal** remains the **forecast/r
 | Risk + sizing | [`risk_engine/engine.py`](../risk_engine/engine.py), [`risk_engine/canonical_sizing.py`](../risk_engine/canonical_sizing.py) | Hard gates + `compute_canonical_notional`; `last_risk_sizing` diagnostics. |
 | Execution guidance | [`execution/execution_logic.py`](../execution/execution_logic.py), [`execution/service.py`](../execution/service.py), [`app/contracts/execution_guidance.py`](../app/contracts/execution_guidance.py) | Prepare/sign path before adapters. |
 | Carry sleeve | [`carry_sleeve/engine.py`](../carry_sleeve/engine.py), [`app/contracts/carry_sleeve.py`](../app/contracts/carry_sleeve.py) | **FB-CAN-018:** optional `RouteId.CARRY` proposal; isolation vs directional; `domains.carry` in canonical config. |
-| Metrics | [`observability/canonical_metrics.py`](../observability/canonical_metrics.py) | `tb_canonical_*`; recorded from `run_decision_tick`. |
+| Metrics | [`observability/canonical_metrics.py`](../observability/canonical_metrics.py) | `tb_canonical_*`; **FB-CAN-033** `tb_canonical_hard_override_total`, `tb_canonical_degradation_transition_count`; recorded from `run_decision_tick`. |
 
 ---
 

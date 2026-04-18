@@ -267,6 +267,9 @@ class DecisionPipeline:
         position_signed_qty: Decimal | None = None,
         data_timestamp: datetime | None = None,
         execution_feedback_snapshot: ExecutionFeedbackSnapshot | None = None,
+        feed_last_message_at: datetime | None = None,
+        now_ref: datetime | None = None,
+        product_tradable: bool = True,
     ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, RiskState]:
         mp0 = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
         boundary_input, feature_effective = build_decision_boundary_input(
@@ -342,6 +345,10 @@ class DecisionPipeline:
             settings=self._settings,
             risk=risk,
             policy_system=self._policy_system,
+            feed_last_message_at=feed_last_message_at,
+            data_timestamp=data_timestamp,
+            now_ref=now_ref if now_ref is not None else data_timestamp,
+            product_tradable=product_tradable,
         )
 
 
