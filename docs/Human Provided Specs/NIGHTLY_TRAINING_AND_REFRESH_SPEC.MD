@@ -1,6 +1,9 @@
 # Nightly Training and Refresh Spec
 ## Forecaster + RL Policy Maintenance Cycle
 
+> **Target architecture:** For the **APEX canonical** migration and **intended** end-state system design, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`new_specs/canonical/`](new_specs/canonical/). This document remains **historical / legacy intent** for the pre-canonical pipeline where applicable; where it conflicts with canonical APEX on **future** architecture, prefer canonical specs for roadmap decisions.
+
+
 Version: 1.0  
 Document type: execution spec  
 Scope: recurring nightly training, evaluation, and candidate refresh for the forecaster and policy model  

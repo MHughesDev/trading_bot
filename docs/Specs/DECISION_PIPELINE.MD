@@ -1,5 +1,8 @@
 # Decision engine
 
+> **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`../Human Provided Specs/new_specs/canonical/`](../Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
+
+
 ## Shared tick
 
 - **`run_step.py`** — **`run_decision_tick`**: single step used by **`app/runtime/live_service`** and **`backtesting/replay.py`**. Records decision latency metric when wired.
