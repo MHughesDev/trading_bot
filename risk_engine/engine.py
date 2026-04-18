@@ -178,7 +178,7 @@ class RiskEngine:
         )
         return action, risk
 
-    def to_order_intent(self, action: TradeAction) -> OrderIntent:
+    def to_order_intent(self, action: TradeAction, *, sign: bool | None = None) -> OrderIntent:
         intent = OrderIntent(
             symbol=action.symbol,
             side=OrderSide(action.side),
@@ -189,6 +189,9 @@ class RiskEngine:
             time_in_force=TimeInForce.GTC,
             metadata={"route_id": action.route_id.value},
         )
+        do_sign = sign if sign is not None else True
+        if not do_sign:
+            return intent
         secret = (
             self._settings.risk_signing_secret.get_secret_value()
             if self._settings.risk_signing_secret

@@ -18,6 +18,7 @@ from decimal import Decimal
 
 from app.config.settings import AppSettings, load_settings
 from app.contracts.events import BarEvent
+from app.contracts.execution_guidance import ExecutionFeedback
 from app.contracts.risk import RiskState
 from app.runtime.asset_lifecycle_state import effective_lifecycle_state
 from app.runtime.asset_model_registry import list_symbols as list_asset_manifest_symbols
@@ -45,6 +46,11 @@ from decision_engine.pipeline import DecisionPipeline
 from decision_engine.run_step import run_decision_tick
 from execution.adapters.base_adapter import PositionSnapshot
 from execution.credentials import venue_credentials_configured
+from execution.execution_logic import (
+    apply_execution_feedback,
+    build_execution_context_from_decision,
+    prepare_order_intent_for_execution,
+)
 from execution.service import ExecutionService
 from execution.trade_markers import TradeMarker, append_marker
 from risk_engine.engine import RiskEngine
@@ -176,6 +182,7 @@ async def run_live_loop(
     risk_engine = RiskEngine(cfg)
     exec_svc = ExecutionService(cfg)
     risk_state = RiskState()
+    exec_feedback: dict[str, dict[str, float]] = {}
     venue_creds_ok = venue_credentials_configured(cfg)
     if not venue_creds_ok:
         logger.warning(
@@ -464,7 +471,25 @@ async def run_live_loop(
                     logger.exception("runtime bridge shadow handoff failed")
 
             oid = str(uuid.uuid4())
-            intent = risk_engine.to_order_intent(trade) if trade else None
+            intent = None
+            if trade:
+                raw = risk_engine.to_order_intent(trade, sign=False)
+                fb = exec_feedback.get(symbol)
+                xctx = build_execution_context_from_decision(
+                    spread_bps=spread_bps,
+                    feature_row=feats,
+                    regime=regime,
+                    forecast=fc,
+                    risk=risk_state,
+                    mid_price=mid,
+                    forecast_packet=pipeline.last_forecast_packet,
+                    execution_feedback_bucket=fb,
+                )
+                meta = dict(raw.metadata or {})
+                meta["execution_context"] = xctx
+                raw = raw.model_copy(update={"metadata": meta})
+                intent = prepare_order_intent_for_execution(raw, cfg)
+            exec_blocked = trade is not None and intent is None
             trace = decision_trace(
                 symbol=symbol,
                 regime=regime,
@@ -472,9 +497,11 @@ async def run_live_loop(
                 route=route,
                 proposal=proposal,
                 risk=risk_state,
-                trade_allowed=trade is not None,
+                trade_allowed=trade is not None and not exec_blocked,
                 order_intent=intent,
-                block_reason=None if trade else "risk_blocked_or_no_trade",
+                block_reason="execution_guidance_suppress"
+                if exec_blocked
+                else (None if trade else "risk_blocked_or_no_trade"),
                 correlation_id=oid,
                 forecast_packet=pipeline.last_forecast_packet,
             )
@@ -495,7 +522,17 @@ async def run_live_loop(
                     pass
                 else:
                     try:
-                        await exec_svc.submit_order(intent)
+                        ack = await exec_svc.submit_order(intent)
+                        exec_feedback[symbol] = apply_execution_feedback(
+                            symbol,
+                            ExecutionFeedback(
+                                fill_ratio=1.0,
+                                realized_slippage_bps=0.0,
+                                venue_quality_score=0.85,
+                                adapter=str(getattr(ack, "adapter", "")),
+                            ),
+                            state=exec_feedback,
+                        )
                         try:
                             append_marker(
                                 TradeMarker(

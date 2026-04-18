@@ -6,6 +6,7 @@ from app.config.settings import AppSettings
 from app.contracts.orders import OrderIntent
 from app.runtime.asset_execution_mode import effective_execution_mode
 from execution.adapters.base_adapter import ExecutionAdapter, OrderAck
+from execution.execution_logic import prepare_order_intent_for_execution
 from execution.intent_gate import require_execution_allowed
 from execution.router import create_execution_adapter
 
@@ -36,6 +37,13 @@ class ExecutionService:
         return self.adapter_for_symbol(intent.symbol)
 
     async def submit_order(self, intent: OrderIntent) -> OrderAck:
-        require_execution_allowed(intent, self._settings)
-        adapter = self._adapter_for_intent(intent)
-        return await adapter.submit_order(intent)
+        meta = intent.metadata or {}
+        if not meta.get("execution_prepared"):
+            prepared = prepare_order_intent_for_execution(intent, self._settings)
+            if prepared is None:
+                raise RuntimeError("execution_guidance_suppressed")
+        else:
+            prepared = intent
+        require_execution_allowed(prepared, self._settings)
+        adapter = self._adapter_for_intent(prepared)
+        return await adapter.submit_order(prepared)
