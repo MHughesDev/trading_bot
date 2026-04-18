@@ -25,6 +25,8 @@ from decision_engine.pipeline import DecisionPipeline
 from decision_engine.run_step import run_decision_tick
 from risk_engine.engine import RiskEngine
 
+__all__ = ["replay_decisions", "replay_multi_asset_decisions", "run_decision_tick"]
+
 
 def replay_decisions(
     bars: pl.DataFrame,

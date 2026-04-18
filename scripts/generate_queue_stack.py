@@ -592,7 +592,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-GOV",
         "id": "FB-CAN-011",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Add release gating and experiment registry integration",
         "agent_task": "Implement config/logic release lifecycle and promotion gates (research→simulation→shadow→live), with immutable versioning and rollback metadata. Add experiment registry records linking hypotheses, replay/scenario evidence, shadow results, and release candidates to enforce canonical governance requirements.",
         "affected_files": "models/|orchestration/|scripts/|docs/|tests/",
