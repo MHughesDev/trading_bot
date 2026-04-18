@@ -27,6 +27,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`risk_engine/canonical_sizing.py`](../risk_engine/canonical_sizing.py) | **APEX canonical risk sizing** — **FB-CAN-007**; `RiskState.last_risk_sizing` after `RiskEngine.evaluate`. |
 | [`execution/execution_logic.py`](../execution/execution_logic.py) | **APEX execution guidance** — **FB-CAN-008**; `OrderIntent.metadata.execution_guidance`. |
 | [`app/contracts/replay_events.py`](../app/contracts/replay_events.py) | **Canonical replay run + events** — **FB-CAN-009**; `ReplayRunContract`, `ReplayEventEnvelope`. |
+| [`backtesting/live_replay_equivalence.py`](../backtesting/live_replay_equivalence.py) | **Live–replay equivalence** — **FB-CAN-030**; decision-output fingerprints + promotion evidence fields. |
 | [`observability/canonical_metrics.py`](../observability/canonical_metrics.py) | **APEX canonical monitoring** — **FB-CAN-010**; `tb_canonical_*` Prometheus metrics. |
 | [`docs/MONITORING_CANONICAL.MD`](../docs/MONITORING_CANONICAL.MD) | Operator mapping: APEX monitoring domains → implemented metrics; **FB-CAN-028** Prometheus rules + Grafana `tb-canonical-health`. |
 | [`orchestration/release_gating.py`](../orchestration/release_gating.py) | **APEX release gating** — **FB-CAN-011**; `ReleaseCandidate`, `evaluate_promotion_gates`, JSON ledger helpers. |
