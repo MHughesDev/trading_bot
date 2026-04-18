@@ -78,7 +78,7 @@ Think of it as a little factory line — not every bell and whistle, just the ha
 | 📦 | Default execution mode is **paper**; go **live** only when you mean it and keys are set. |
 | 🧪 | Dev quickies: `python3 -m ruff check .` and `python3 -m pytest tests/ -q` (after `pip install -e ".[dev]"`). |
 
-**Want the full map?** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) · **Canonical target architecture (APEX):** [`docs/CANONICAL_SPEC_INDEX.MD`](docs/CANONICAL_SPEC_INDEX.MD) · **Legacy vs canonical naming:** [`docs/CANONICAL_GLOSSARY.MD`](docs/CANONICAL_GLOSSARY.MD) · **Code ↔ APEX domains:** [`docs/CANONICAL_MODULE_MAP.MD`](docs/CANONICAL_MODULE_MAP.MD) · **Typed decision inputs:** [`app/contracts/decision_snapshots.py`](app/contracts/decision_snapshots.py) · **Release gating / experiment registry:** [`docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD) · **Repo contract for contributors:** [`AGENTS.md`](AGENTS.md).
+**Want the full map?** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) · **Canonical target architecture (APEX):** [`docs/CANONICAL_SPEC_INDEX.MD`](docs/CANONICAL_SPEC_INDEX.MD) · **Legacy vs canonical naming:** [`docs/CANONICAL_GLOSSARY.MD`](docs/CANONICAL_GLOSSARY.MD) · **Code ↔ APEX domains:** [`docs/CANONICAL_MODULE_MAP.MD`](docs/CANONICAL_MODULE_MAP.MD) · **Removed paths (tombstones):** [`docs/CANONICAL_TOMBSTONE_INDEX.MD`](docs/CANONICAL_TOMBSTONE_INDEX.MD) · **Typed decision inputs:** [`app/contracts/decision_snapshots.py`](app/contracts/decision_snapshots.py) · **Release gating / experiment registry:** [`docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD) · **Repo contract for contributors:** [`AGENTS.md`](AGENTS.md).
 
 ---
 
