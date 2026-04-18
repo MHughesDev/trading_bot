@@ -15,13 +15,13 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-028** are **Done**. **FB-CAN-029**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
+**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-029** are **Done**. **FB-CAN-030**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **8** | FB-CAN-029..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
+| **HIGH** | **7** | FB-CAN-030..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
 | **MEDIUM** | **30** | FB-CAN-032, FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
 | **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
@@ -204,7 +204,7 @@
 | FB-CAN-026 | CAN-REL | B | OP | platform | MEDIUM | Done | **`orchestration/release_evidence.py`:** `ReleaseEvidenceBundle`, fingerprint, canonical diff vs baseline YAML; **`scripts/build_release_evidence_bundle.py`**; **`GET /governance/release-evidence`**, **`POST /governance/release-evidence/diff`**; tests. **Done 2026-04-18.** | `orchestration/`, `control_plane/`, `scripts/`, `tests/`, `docs/` |
 | FB-CAN-027 | CAN-EXP | B | DS | feature | MEDIUM | Done | **Experiment registry:** lifecycle transitions + required fields when not `draft`; `upsert`/`delete` sync `release_ledger.json` `linked_experiment_ids`; **`GET/POST/DELETE /governance/experiments`**; **`research/`** package re-export. **Done 2026-04-18.** | `research/`, `models/registry/`, `control_plane/`, `tests/` |
 | FB-CAN-028 | CAN-MON-ALRT | B | OB | feature | MEDIUM | Done | **Prometheus:** `infra/prometheus/alerts/canonical_apex.yml` + `rule_files` in `prometheus.yml`; **Compose** mounts alerts; **Grafana** `tb-canonical-health.json`; **`GET /governance/monitoring`**; **`MONITORING_CANONICAL.MD`**. **Done 2026-04-18.** | `infra/`, `control_plane/`, `docs/`, `tests/` |
-| FB-CAN-029 | CAN-RUNTIME | A | RT | feature | HIGH | Open | Refactor live/runtime orchestration to explicit canonical domain sequence and remove hidden legacy coupling. | `app/runtime/live_service.py`, `decision_engine/run_step.py`, decision/risk/execution modules |
+| FB-CAN-029 | CAN-RUNTIME | A | RT | feature | HIGH | Done | **`decision_engine/canonical_orchestrator.py`** — explicit post-forecast sequence (structure → state → trigger → auction → carry); `pipeline.step` delegates; `run_step` / `live_service` docstrings. **Done 2026-04-18.** | `decision_engine/`, `app/runtime/live_service.py` |
 | FB-CAN-030 | CAN-REPLAY-DELTA | A | DS | feature | HIGH | Open | Enforce deterministic live-vs-replay equivalence harness and promotion-blocking divergence policy. | `backtesting/`, `decision_engine/run_step.py`, tests/scripts/docs |
 | FB-CAN-031 | CAN-TRIG-MISSED | A | FR | feature | HIGH | Open | Implement missed-move handling and false-positive memory penalties across trigger and auction domains. | `decision_engine/trigger_engine.py`, `decision_engine/auction_engine.py`, contracts/replay/tests |
 | FB-CAN-032 | CAN-SIGNAL-FAM | A | CFG | feature | MEDIUM | Open | Implement per-signal confidence/decay families and feature-family enable flags required by canonical config. | `app/config/`, `data_plane/features/`, `decision_engine/`, tests |

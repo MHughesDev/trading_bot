@@ -844,7 +844,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-RUNTIME",
         "id": "FB-CAN-029",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Refactor live runtime orchestration to canonical domain sequence",
         "agent_task": "Refactor app/runtime/live_service.py and shared run-step orchestration to explicit canonical sequence: normalize -> state -> structure -> trigger -> auction -> risk -> execution guidance -> intent/output -> feedback. Remove hidden coupling to legacy decision pipeline once canonical orchestrator is stable.",
         "affected_files": "app/runtime/live_service.py|decision_engine/run_step.py|decision_engine/|execution/|risk_engine/",

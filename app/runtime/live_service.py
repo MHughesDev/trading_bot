@@ -1,6 +1,14 @@
 """
 Live trading loop: Kraken WS → features → decision → risk → audit → optional QuestDB → execution.
 
+**FB-CAN-029 canonical tick shape** (per message, when the watch gate runs a decision):
+
+1. **Normalize / features** — Kraken WS → ``normalize_kraken_ws_message`` → bars + feature overlays.
+2. **Shared decision step** — ``run_decision_tick`` (same as replay): pipeline canonical sequence then
+   ``risk_engine.evaluate`` (see ``decision_engine/canonical_orchestrator.py`` + ``run_step.py``).
+3. **Execution guidance + intent** — ``build_execution_context_from_decision`` / ``prepare_order_intent_for_execution``.
+4. **Feedback** — ``apply_execution_feedback`` after a successful submit (stubbed fill quality).
+
 Uses `run_decision_tick` (same path as `backtesting/replay.py`). Passes `feed_last_message_at` from WS.
 """
 

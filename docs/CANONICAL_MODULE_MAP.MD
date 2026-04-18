@@ -2,7 +2,7 @@
 
 **Purpose:** Single **code-to-domain** map for the shared decision path after **FB-CAN-004…011**. Use it with **[`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD)** (what to build toward) and **[`docs/Specs/README.MD`](Specs/README.MD)** (as-built file index).
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
 
 ---
 
@@ -27,7 +27,8 @@ Legacy **ForecastPacket → PolicySystem → proposal** remains the **forecast/r
 | Typed input snapshots | [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py), [`app/contracts/snapshot_builders.py`](../app/contracts/snapshot_builders.py) | **FB-CAN-015:** boundary contracts + merge into effective feature row; diagnostics on packet. |
 | Feature normalization | [`data_plane/features/canonical_normalize.py`](../data_plane/features/canonical_normalize.py) | **FB-CAN-016:** aliases, freshness/reliability, completeness; `apply_normalization_degradation` in `state_engine.py`. |
 | Forecast / structure (canonical view) | [`app/contracts/canonical_structure.py`](../app/contracts/canonical_structure.py), [`app/contracts/structure_adapter.py`](../app/contracts/structure_adapter.py) | **FB-CAN-017:** `CanonicalStructureOutput` from `ForecastPacket`; diagnostics on packet; feeds trigger + auction. |
-| Pipeline orchestration | [`decision_engine/pipeline.py`](../decision_engine/pipeline.py) | Regime, forecast, policy, canonical layers. |
+| Pipeline orchestration | [`decision_engine/pipeline.py`](../decision_engine/pipeline.py) | Boundary normalize + forecast packet build. |
+| Canonical post-forecast sequence | [`decision_engine/canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py) | **FB-CAN-029** — structure → state → trigger → auction → carry (shared by `pipeline.step`). |
 | State / regime / degradation | [`decision_engine/state_engine.py`](../decision_engine/state_engine.py), [`app/contracts/canonical_state.py`](../app/contracts/canonical_state.py) | `RegimeOutput.apex`, `RiskState` canonical fields. |
 | Three-stage trigger | [`decision_engine/trigger_engine.py`](../decision_engine/trigger_engine.py), [`app/contracts/trigger.py`](../app/contracts/trigger.py) | Diagnostics: `forecast_diagnostics["trigger"]`. |
 | Opportunity auction | [`decision_engine/auction_engine.py`](../decision_engine/auction_engine.py), [`app/contracts/auction.py`](../app/contracts/auction.py) | Diagnostics: `forecast_diagnostics["auction"]`. |
