@@ -28,6 +28,7 @@ All canonical slice metrics use the `tb_canonical_*` prefix (alongside existing 
 | Shadow / replay (FB-CAN-039) | `tb_canonical_shadow_divergence_rate`, `tb_canonical_shadow_comparison_within_thresholds`, `tb_canonical_shadow_rollback_recommended`, `tb_canonical_shadow_comparison_bars_compared` | Refreshed from persisted shadow comparison store on API startup and after **`POST /governance/shadow-comparison/run`** |
 | Governance | `tb_canonical_active_config_version_info` | Set once from `AppSettings.canonical.metadata.config_version` |
 | Governance / operator (**FB-CAN-065**) | `tb_governance_promotion_attempt`, `tb_governance_gate_outcome`, `tb_governance_gate_failure`, `tb_governance_config_drift_event`, `tb_governance_rollback_event` | From `evaluate_promotion_gates` (kind + target env), `POST /governance/release-evidence/diff` (semantic drift flags), release ledger writes with `current_stage=rolled_back` |
+| Post-release probation (**FB-CAN-069**) | `tb_governance_probation_monitoring_active`, `tb_governance_probation_abort_recommended`, `tb_governance_probation_phase_total` | Live ticks only: rolling p95 over edge erosion, feature drift penalty, and false-positive memory vs `apex_canonical.domains.post_release_probation.thresholds`; see `GET /governance/probation-status` |
 | Carry sleeve | `tb_canonical_carry_sleeve_active`, `tb_canonical_carry_target_notional_usd`, `tb_canonical_carry_funding_signal`, `tb_canonical_carry_trigger_confidence`, `tb_canonical_carry_decision_quality`, `tb_canonical_carry_reason_total`, `tb_canonical_carry_directional_suppression_total` | From `carry_sleeve` diagnostics / `RiskState.carry_sleeve_last` (**FB-CAN-064**): exposure (target notional), funding extremity, trigger confidence at evaluation, quality proxy `funding×trigger`, per-reason counter, isolation suppression |
 | Shadow / replay | `tb_canonical_replay_shadow_divergence_total` | Incremented when divergence jobs emit events (legacy counter) |
 
@@ -76,6 +77,10 @@ Logical rules live in **`infra/prometheus/alerts/canonical_apex.yml`** (loaded b
 Tune `for:` windows and thresholds per environment; defaults aim for **actionable** signals with **low noise**.
 
 See **`docs/Human Provided Specs/new_specs/canonical/APEX_Monitoring_and_Alerting_Spec_v1_0.md`** for full requirement text.
+
+### FB-CAN-069 post-release probation
+
+After a **live** release candidate reaches `active_live` with `approved_at`, the process monitors **active** and **cooldown** phases (hours from `apex_canonical.domains.post_release_probation.windows`). During the **active** phase, if at least 32 **trade_intent** samples exist in the rolling window, p95 of edge erosion, `canonical_exec_quality_penalty` (drift), and `trigger_false_positive_memory` are compared to policy maxima; **`tb_governance_probation_abort_recommended`** goes to 1 when any breach fires (operator executes rollback per playbook — not automated ledger writes).
 
 ### FB-CAN-065 governance / operator monitoring
 

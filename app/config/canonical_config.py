@@ -89,6 +89,10 @@ class CanonicalDomains(BaseModel):
     replay: dict[str, Any] = Field(default_factory=dict)
     feature_families: dict[str, Any] = Field(default_factory=dict)
     shadow_comparison: dict[str, Any] = Field(default_factory=dict)
+    post_release_probation: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Live post-release probation windows and abort thresholds (FB-CAN-069).",
+    )
     runtime_cutover: dict[str, Any] = Field(
         default_factory=dict,
         description="Cutover / migration-shadow flags (FB-CAN-059); see default.yaml.",
@@ -200,6 +204,10 @@ def synthesize_canonical_from_app_settings(settings: Any) -> CanonicalRuntimeCon
         shadow_comparison={
             "source": "app_settings",
             "note": "Override with apex_canonical.domains.shadow_comparison (FB-CAN-038).",
+        },
+        post_release_probation={
+            "source": "app_settings",
+            "note": "Override with apex_canonical.domains.post_release_probation (FB-CAN-069).",
         },
         runtime_cutover={
             "source": "app_settings",
