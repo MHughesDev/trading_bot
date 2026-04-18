@@ -27,6 +27,11 @@ from app.runtime.system_power import is_on, sync_from_disk
 from decision_engine.decision_record import build_decision_record, set_last_decision_record
 from decision_engine.pipeline import DecisionPipeline
 from observability.canonical_metrics import maybe_set_config_version_from_engine, record_canonical_post_tick
+from observability.lag_metrics import (
+    event_lag_seconds,
+    execution_feedback_lag_seconds,
+    record_lag_seconds,
+)
 from observability.metrics import DECISION_LATENCY
 from risk_engine.engine import RiskEngine
 
@@ -88,7 +93,20 @@ def run_decision_tick(
             available_cash_usd=available_cash_usd,
             portfolio_equity_usd=eq,
         )
-        DECISION_LATENCY.observe(time.perf_counter() - t0)
+        t_done = time.perf_counter()
+        DECISION_LATENCY.observe(t_done - t0)
+        fb_bucket = (
+            execution_feedback_state.get(symbol) if isinstance(execution_feedback_state, dict) else None
+        )
+        record_lag_seconds(
+            symbol,
+            data_ingestion_seconds=event_lag_seconds(
+                data_timestamp=data_timestamp,
+                feed_last_message_at=feed_last_message_at,
+            ),
+            decision_processing_seconds=t_done - t0,
+            execution_feedback_seconds=execution_feedback_lag_seconds(fb_bucket),
+        )
         maybe_set_config_version_from_engine(risk_engine)
         risk_state = risk_state.model_copy(
             update={
@@ -144,6 +162,7 @@ def run_decision_tick(
         available_cash_usd=available_cash_usd,
         portfolio_equity_usd=eq,
     )
+    t_after_risk = time.perf_counter()
     dr = build_decision_record(
         symbol=symbol,
         data_timestamp=data_timestamp,
@@ -166,7 +185,20 @@ def run_decision_tick(
         pipeline.last_forecast_packet.forecast_diagnostics["decision_record"] = dr.model_dump(
             mode="json"
         )
-    DECISION_LATENCY.observe(time.perf_counter() - t0)
+    t_tick_done = time.perf_counter()
+    DECISION_LATENCY.observe(t_tick_done - t0)
+    fb_bucket2 = (
+        execution_feedback_state.get(symbol) if isinstance(execution_feedback_state, dict) else None
+    )
+    record_lag_seconds(
+        symbol,
+        data_ingestion_seconds=event_lag_seconds(
+            data_timestamp=data_timestamp,
+            feed_last_message_at=feed_last_message_at,
+        ),
+        decision_processing_seconds=t_after_risk - t0,
+        execution_feedback_seconds=execution_feedback_lag_seconds(fb_bucket2),
+    )
     maybe_set_config_version_from_engine(risk_engine)
     eff = pipeline.last_feature_effective
     if not replay_deterministic:

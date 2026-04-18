@@ -849,6 +849,11 @@ def get_governance_monitoring() -> dict[str, Any]:
         ),
         "post_release_probation_module": "observability/probation_metrics.py",
         "post_release_probation_status": "GET /governance/probation-status",
+        "lag_metrics": (
+            "tb_canonical_lag_seconds{domain=data_ingestion|decision|execution_feedback} (FB-CAN-072); "
+            "see observability/lag_metrics.py"
+        ),
+        "lag_metrics_module": "observability/lag_metrics.py",
     }
 
 

@@ -247,7 +247,7 @@
 | FB-CAN-069 | CAN-PROBATION | B | OP | platform | LOW | Done | Implement post-release probation-window monitors and automatic abort triggers. | orchestration/observability/models/scripts/tests |
 | FB-CAN-070 | CAN-COVERAGE-MAP | B | OP | change | MEDIUM | Done | Publish canonical spec section-to-queue coverage matrix and closure checklist gate. | docs/reports/scripts/QUEUE/tests |
 | FB-CAN-071 | CAN-CONFIG-SNAP | A | DP | feature | MEDIUM | Done | Implement canonical Service Configuration Snapshot contract and traceability bindings. | contracts/decision/replay/config/tests |
-| FB-CAN-072 | CAN-MON-LAG | B | OB | feature | MEDIUM | Open | Implement processing lag/event lag/decision-cycle duration metrics and alerts. | observability/runtime/decision/execution/infra/tests |
+| FB-CAN-072 | CAN-MON-LAG | B | OB | feature | MEDIUM | Done | **`tb_canonical_lag_seconds`** per-domain lag + Grafana + alerts (**FB-CAN-072**). **Done 2026-04-18.** | observability/runtime/decision/execution/infra/tests |
 | FB-CAN-073 | CAN-STATE-WEEKEND | A | RT | feature | LOW | Open | Implement weekend/low-liquidity mode occupancy handling and propagation. | state/risk/observability/tests |
 | FB-CAN-074 | CAN-STATE-EXRISK | A | RT | feature | MEDIUM | Open | Integrate exchange-risk flags and data-integrity warnings into degradation/override logic. | state/data/risk/contracts/tests |
 | FB-CAN-075 | CAN-EXEC-LAT | A | EX | feature | LOW | Open | Implement execution latency/reliability quality terms in execution confidence. | execution/config/replay/observability/tests |

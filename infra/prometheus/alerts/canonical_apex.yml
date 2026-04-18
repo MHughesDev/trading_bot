@@ -231,3 +231,47 @@ groups:
           summary: "Post-release probation recommends abort/rollback"
           description: "Rolling risk-quality proxies breached policy during the active live probation window; review release ledger and execute rollback playbook."
           runbook: "docs/MONITORING_CANONICAL.MD#fb-can-069-post-release-probation"
+
+  - name: canonical_system_lag_fb_can_072
+    rules:
+      - alert: CanonicalEventLagHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(tb_canonical_lag_seconds_bucket{domain="data_ingestion"}[5m])) by (le, symbol)
+          ) > 90
+        for: 10m
+        labels:
+          severity: warning
+          domain: system_health
+        annotations:
+          summary: "Event / data ingestion lag p95 high (symbol={{ $labels.symbol }})"
+          description: "Max age of feed last message vs bar data timestamp vs now exceeds 90s at p95 (APEX §4.1 event lag)."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-072-lag-metrics"
+
+      - alert: CanonicalDecisionProcessingLagHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(tb_canonical_lag_seconds_bucket{domain="decision"}[5m])) by (le, symbol)
+          ) > 2.0
+        for: 10m
+        labels:
+          severity: warning
+          domain: system_health
+        annotations:
+          summary: "Decision pipeline+risk processing p95 high (symbol={{ $labels.symbol }})"
+          description: "Wall time for pipeline.step + risk_engine.evaluate exceeded 2s at p95; investigate CPU, model load, or blocking I/O on the hot path."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-072-lag-metrics"
+
+      - alert: CanonicalDecisionCycleDurationHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(tb_decision_latency_seconds_bucket[5m])) by (le, symbol)
+          ) > 5.0
+        for: 10m
+        labels:
+          severity: warning
+          domain: system_health
+        annotations:
+          summary: "End-to-end decision cycle p95 high (symbol={{ $labels.symbol }})"
+          description: "Full tick wall time (tb_decision_latency_seconds) exceeded 5s at p95."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-072-lag-metrics"

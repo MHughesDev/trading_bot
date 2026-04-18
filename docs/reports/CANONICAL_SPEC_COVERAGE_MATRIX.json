@@ -159,14 +159,16 @@
       "id": "gap_K_monitoring",
       "gap_audit_section": "K. Monitoring / alerting",
       "canonical_specs": ["APEX_Monitoring_and_Alerting_Spec_v1_0.md"],
-      "queue_ids": ["FB-CAN-010", "FB-CAN-028", "FB-CAN-039", "FB-CAN-056", "FB-CAN-064", "FB-CAN-065"],
+      "queue_ids": ["FB-CAN-010", "FB-CAN-028", "FB-CAN-039", "FB-CAN-056", "FB-CAN-064", "FB-CAN-065", "FB-CAN-072"],
       "implementation_paths": [
         "observability/canonical_metrics.py",
         "observability/drift_calibration_metrics.py",
+        "observability/lag_metrics.py",
         "observability/monitoring_domain_checklist.py",
+        "decision_engine/run_step.py",
         "infra/prometheus/alerts/canonical_apex.yml"
       ],
-      "test_path_patterns": ["tests/test_canonical_metrics*", "tests/test_monitoring_domain*", "tests/test_drift*"]
+      "test_path_patterns": ["tests/test_canonical_metrics*", "tests/test_monitoring_domain*", "tests/test_drift*", "tests/test_lag_metrics*"]
     },
     {
       "id": "gap_L_config_release_governance",
