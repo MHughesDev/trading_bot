@@ -1,9 +1,11 @@
-"""APEX Decision Service input snapshot contracts (FB-CAN-015).
+"""APEX Decision Service input snapshot contracts (FB-CAN-015, FB-CAN-062).
 
 Aligned with
 ``docs/Human Provided Specs/new_specs/canonical/APEX_Decision_Service_Feature_Schema_and_Data_Contracts_v1_0.md``
-§5–9 (input families). Pydantic enforces ranges; builders in
-``app.contracts.snapshot_builders`` project legacy feature rows into these models.
+§4–9 (common conventions + input families). Pydantic enforces ranges; **FB-CAN-062** normalizes
+naive timestamps to UTC and clips confidence/freshness-like fields to ``[0,1]`` via
+``app.contracts.canonical_conventions``. Builders in ``app.contracts.snapshot_builders`` project
+legacy feature rows into these models.
 """
 
 from __future__ import annotations
@@ -13,6 +15,8 @@ from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.contracts.canonical_conventions import clip_symmetric_unit, clip_unit_interval, ensure_utc_datetime
 
 
 class SessionMode(StrEnum):
@@ -69,6 +73,18 @@ class MarketSnapshot(BaseModel):
     exchange_health_score: float | None = None
     source_latency_ms: float | None = None
 
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def _timestamp_utc(cls, v: Any) -> datetime:
+        if not isinstance(v, datetime):
+            raise ValueError("timestamp must be datetime")
+        return ensure_utc_datetime(v)
+
+    @field_validator("market_freshness", "market_reliability", mode="before")
+    @classmethod
+    def _clip_confidence_pair(cls, v: Any) -> float:
+        return clip_unit_interval(v)
+
     @model_validator(mode="after")
     def _bid_ask_order(self) -> MarketSnapshot:
         if self.best_ask < self.best_bid:
@@ -110,6 +126,41 @@ class StructuralSignalSnapshot(BaseModel):
     stablecoin_freshness: float | None = Field(default=None, ge=0.0, le=1.0)
     signal_source_count: int | None = None
 
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def _timestamp_utc(cls, v: Any) -> datetime:
+        if not isinstance(v, datetime):
+            raise ValueError("timestamp must be datetime")
+        return ensure_utc_datetime(v)
+
+    @field_validator(
+        "liquidation_proximity_long",
+        "liquidation_proximity_short",
+        "liquidation_cluster_density_long",
+        "liquidation_cluster_density_short",
+        "liquidation_data_confidence",
+        "signal_freshness_structural",
+        "signal_reliability_structural",
+        mode="before",
+    )
+    @classmethod
+    def _clip01_structural(cls, v: Any) -> float:
+        return clip_unit_interval(v)
+
+    @field_validator("options_freshness", "options_reliability", "stablecoin_freshness", mode="before")
+    @classmethod
+    def _clip01_optional(cls, v: Any) -> float | None:
+        if v is None:
+            return None
+        return clip_unit_interval(v)
+
+    @field_validator("gex_score", "iv_skew_score", "stablecoin_flow_proxy", mode="before")
+    @classmethod
+    def _clip_symmetric_optional(cls, v: Any) -> float | None:
+        if v is None:
+            return None
+        return clip_symmetric_unit(v)
+
 
 class SafetyRegimeSnapshot(BaseModel):
     """§7 — safety / regime inputs (pre-decision; may be neutral before apex merge)."""
@@ -133,6 +184,25 @@ class SafetyRegimeSnapshot(BaseModel):
     degradation_reason_codes: list[str] = Field(default_factory=list)
     volatility_circuit_breaker_active: bool | None = None
     data_integrity_alert: bool | None = None
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def _timestamp_utc(cls, v: Any) -> datetime:
+        if not isinstance(v, datetime):
+            raise ValueError("timestamp must be datetime")
+        return ensure_utc_datetime(v)
+
+    @field_validator(
+        "regime_confidence",
+        "transition_probability",
+        "novelty_score",
+        "crypto_heat_score",
+        "reflexivity_score",
+        mode="before",
+    )
+    @classmethod
+    def _clip01_safety(cls, v: Any) -> float:
+        return clip_unit_interval(v)
 
     @field_validator("regime_probabilities")
     @classmethod
@@ -165,6 +235,18 @@ class ExecutionFeedbackSnapshot(BaseModel):
     execution_stress_flag: bool | None = None
     execution_anomaly_codes: list[str] = Field(default_factory=list)
 
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def _timestamp_utc(cls, v: Any) -> datetime:
+        if not isinstance(v, datetime):
+            raise ValueError("timestamp must be datetime")
+        return ensure_utc_datetime(v)
+
+    @field_validator("fill_ratio", "execution_confidence_realized", "venue_quality_score", mode="before")
+    @classmethod
+    def _clip01_exec(cls, v: Any) -> float:
+        return clip_unit_interval(v)
+
 
 class ServiceConfigurationSnapshot(BaseModel):
     """§ service config — versioned view for replay attribution."""
@@ -179,6 +261,13 @@ class ServiceConfigurationSnapshot(BaseModel):
     market_data_symbols: list[str] = Field(default_factory=list)
     bar_interval_seconds: int = 60
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def _timestamp_utc(cls, v: Any) -> datetime:
+        if not isinstance(v, datetime):
+            raise ValueError("timestamp must be datetime")
+        return ensure_utc_datetime(v)
 
 
 class DecisionBoundaryInput(BaseModel):
