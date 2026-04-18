@@ -22,7 +22,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) | **This file** — portable schema + queue-system index. |
 | [`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD) | **APEX canonical** specs index + precedence vs as-built (`docs/Specs/`) — program **FB-CAN-002**. |
 | [`app/config/canonical_config.py`](../app/config/canonical_config.py) | **APEX canonical runtime config** (`CanonicalRuntimeConfig`) — **FB-CAN-003**; optional YAML `apex_canonical` merged over legacy projection. |
-| [`decision_engine/trigger_engine.py`](../decision_engine/trigger_engine.py) | **APEX three-stage trigger** — **FB-CAN-005**; `TriggerOutput` in `ForecastPacket.forecast_diagnostics["trigger"]`. |
+| [`decision_engine/trigger_engine.py`](../decision_engine/trigger_engine.py) | **APEX three-stage trigger** — **FB-CAN-005**; **FB-CAN-031** missed-move §8 ordering; `TriggerOutput` in `ForecastPacket.forecast_diagnostics["trigger"]`. |
 | [`decision_engine/auction_engine.py`](../decision_engine/auction_engine.py) | **APEX opportunity auction** — **FB-CAN-006**; `AuctionResult` in `ForecastPacket.forecast_diagnostics["auction"]`. |
 | [`risk_engine/canonical_sizing.py`](../risk_engine/canonical_sizing.py) | **APEX canonical risk sizing** — **FB-CAN-007**; `RiskState.last_risk_sizing` after `RiskEngine.evaluate`. |
 | [`execution/execution_logic.py`](../execution/execution_logic.py) | **APEX execution guidance** — **FB-CAN-008**; `OrderIntent.metadata.execution_guidance`. |

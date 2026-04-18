@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
@@ -56,3 +57,21 @@ def test_no_trade_degradation_blocks():
     out = evaluate_trigger(_pkt(), {"close": 1.0}, spread_bps=1.0, apex=apex)
     assert out.setup_valid is False
     assert "degradation_block" in out.trigger_reason_codes
+
+
+def test_missed_move_suppresses_after_strength_met():
+    """§8: extension / remaining-edge gate runs when strength would otherwise confirm."""
+    pkt = replace(_pkt(), interval_width=[0.5, 0.08, 0.1])
+    feats = {"close": 50_000.0, "rsi_14": 55.0, "return_1": 0.02, "volume": 1e6}
+    out = evaluate_trigger(pkt, feats, spread_bps=5.0, apex=_apex())
+    assert out.missed_move_flag is True
+    assert out.trigger_valid is False
+    assert "move_already_extended" in out.trigger_reason_codes
+
+
+def test_remaining_edge_missed_sets_insufficient_remaining_edge():
+    pkt = replace(_pkt(), interval_width=[0.02, 0.04, 0.06])
+    feats = {"close": 50_000.0, "rsi_14": 55.0, "return_1": 0.001, "volume": 1e6}
+    out = evaluate_trigger(pkt, feats, spread_bps=75.0, apex=_apex())
+    assert out.missed_move_flag is True
+    assert "insufficient_remaining_edge" in out.trigger_reason_codes

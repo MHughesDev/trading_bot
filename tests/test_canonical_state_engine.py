@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from app.contracts.canonical_state import DegradationLevel
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState
+from app.contracts.trigger import TriggerOutput
 from decision_engine.state_engine import (
     build_canonical_state,
     degradation_size_multiplier,
@@ -44,6 +45,32 @@ def test_merge_canonical_into_risk():
     r1 = merge_canonical_into_risk(r0, apex)
     assert r1.canonical_degradation == apex.degradation
     assert r1.canonical_size_multiplier == degradation_size_multiplier(apex.degradation)
+
+
+def test_merge_canonical_updates_false_positive_memory():
+    apex = build_canonical_state(_pkt(), {"close": 1.0, "atr_14": 0.0, "rsi_14": 50.0}, spread_bps=1.0)
+    trig = TriggerOutput(
+        setup_valid=True,
+        setup_score=0.5,
+        pretrigger_valid=True,
+        pretrigger_score=0.5,
+        trigger_valid=False,
+        trigger_type="none",
+        trigger_strength=0.4,
+        trigger_confidence=0.3,
+        missed_move_flag=True,
+        trigger_reason_codes=["move_already_extended"],
+    )
+    r0 = RiskState(trigger_false_positive_memory=0.0)
+    r1 = merge_canonical_into_risk(
+        r0,
+        apex,
+        forecast_packet=_pkt(),
+        trigger=trig,
+        spread_bps=1.0,
+        feature_row={"close": 1.0},
+    )
+    assert r1.trigger_false_positive_memory > 0.0
 
 
 def test_degradation_no_trade_zero_multiplier():

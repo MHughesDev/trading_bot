@@ -175,7 +175,9 @@ def run_opportunity_auction(
             0.0,
             1.0,
         )
-        P_fp = _clip(1.0 - apex.regime_confidence, 0.0, 1.0) * 0.3
+        rc_pen = _clip(1.0 - apex.regime_confidence, 0.0, 1.0) * 0.3
+        fp_mem = _clip(float(getattr(app_risk, "trigger_false_positive_memory", 0.0)), 0.0, 1.0)
+        P_fp = _clip(rc_pen + 0.55 * fp_mem, 0.0, 1.0)
         G_deg = _degradation_penalty(deg)
         Cq = pos_frac
         Ov = _clip(abs(float(forecast_packet.ood_score)) * 0.5 + heat * 0.3, 0.0, 1.0)
