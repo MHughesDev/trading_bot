@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.contracts.canonical_state import DegradationLevel
 
 
 class SystemMode(StrEnum):
@@ -18,3 +20,6 @@ class RiskState(BaseModel):
     current_drawdown_pct: float = 0.0
     spread_bps: float | None = None
     data_age_seconds: float | None = None
+    # APEX canonical degradation (FB-CAN-004); size_multiplier throttles new risk
+    canonical_degradation: DegradationLevel | None = None
+    canonical_size_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)

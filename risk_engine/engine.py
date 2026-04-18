@@ -127,6 +127,7 @@ class RiskEngine:
                 return None, risk
 
         notional = proposal.size_fraction * self._settings.risk_max_per_symbol_usd
+        notional *= float(risk.canonical_size_multiplier)
         if notional > self._settings.risk_max_per_symbol_usd:
             return None, risk
         if current_total_exposure_usd + notional > self._settings.risk_max_total_exposure_usd:

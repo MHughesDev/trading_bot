@@ -9,6 +9,7 @@
 
 ## Pipeline
 
+- **`state_engine.py`** — **FB-CAN-004:** builds APEX **`CanonicalStateOutput`** from `ForecastPacket` + features (5-class regime probs, confidence, transition, novelty, heat, reflexivity, degradation); attached to **`RegimeOutput.apex`** and merged into **`RiskState`** for sizing.
 - **`pipeline.py`** — `DecisionPipeline`: regime + forecast + route + `ActionProposal` from features and risk state
 - **`features_live.py`** — Live tick / overlay feature row construction
 - **`feature_frame.py`** — Bar enrichment and merges (live/replay)

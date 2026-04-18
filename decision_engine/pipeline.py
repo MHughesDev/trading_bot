@@ -21,6 +21,7 @@ from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState
+from decision_engine.state_engine import build_canonical_state, merge_canonical_into_risk
 from app.runtime.asset_model_registry import load_manifest
 from decision_engine.spec_policy_proposal import run_spec_policy_step
 from forecaster_model.config import ForecasterConfig
@@ -322,6 +323,9 @@ class DecisionPipeline:
         self._last_forecast_packet = pkt
 
         regime_out = _regime_output_from_packet(pkt)
+        apex = build_canonical_state(pkt, feature_row, spread_bps=spread_bps)
+        regime_out = regime_out.model_copy(update={"apex": apex})
+        risk = merge_canonical_into_risk(risk, apex)
         mp = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
         eq = float(portfolio_equity_usd) if portfolio_equity_usd is not None else 100_000.0
 
