@@ -17,6 +17,7 @@ from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState
 from app.runtime.system_power import is_on, sync_from_disk
 from decision_engine.pipeline import DecisionPipeline
+from observability.canonical_metrics import maybe_set_config_version_from_engine, record_canonical_post_tick
 from observability.metrics import DECISION_LATENCY
 from risk_engine.engine import RiskEngine
 
@@ -77,6 +78,13 @@ def run_decision_tick(
             portfolio_equity_usd=eq,
         )
         DECISION_LATENCY.observe(time.perf_counter() - t0)
+        maybe_set_config_version_from_engine(risk_engine)
+        record_canonical_post_tick(
+            symbol=symbol,
+            regime=regime,
+            risk=risk_state,
+            forecast_packet=None,
+        )
         return regime, fc, route, proposal, trade, risk_state
 
     regime, fc, route, proposal = pipeline.step(
@@ -103,4 +111,11 @@ def run_decision_tick(
         portfolio_equity_usd=eq,
     )
     DECISION_LATENCY.observe(time.perf_counter() - t0)
+    maybe_set_config_version_from_engine(risk_engine)
+    record_canonical_post_tick(
+        symbol=symbol,
+        regime=regime,
+        risk=risk_state,
+        forecast_packet=pipeline.last_forecast_packet,
+    )
     return regime, fc, route, proposal, trade, risk_state
