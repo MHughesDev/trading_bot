@@ -39,3 +39,18 @@ class CanonicalStateOutput(BaseModel):
     novelty_components: dict[str, float] = Field(default_factory=dict)
     reflexivity_components: dict[str, float] = Field(default_factory=dict)
     novelty_reason_codes: list[str] = Field(default_factory=list)
+    session_reason_codes: list[str] = Field(
+        default_factory=list,
+        description="FB-CAN-073: e.g. state_session_weekend, state_session_low_liquidity",
+    )
+    # FB-CAN-073 — weekend / low-liquidity session context (APEX State spec §12)
+    session_mode: str = Field(
+        default="regular",
+        description="regular | weekend | low_liquidity — calendar + optional depth proxy",
+    )
+    session_mode_throttle: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Aggression multiplier for sizing / trigger tightening (1.0 = no throttle)",
+    )

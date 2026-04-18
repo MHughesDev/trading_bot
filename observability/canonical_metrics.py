@@ -48,6 +48,11 @@ CANONICAL_NOVELTY_REASON = Counter(
     "Novelty reason codes emitted with state (FB-CAN-042)",
     ["symbol", "reason"],
 )
+CANONICAL_SESSION_REASON = Counter(
+    "tb_canonical_session_reason_total",
+    "Weekend / low-liquidity session reason codes (FB-CAN-073)",
+    ["symbol", "reason"],
+)
 CANONICAL_DEGRADATION_TICKS = Counter(
     "tb_canonical_degradation_observations_total",
     "Per-tick degradation level observations (rate ~ occupancy)",
@@ -61,6 +66,16 @@ CANONICAL_HARD_OVERRIDE = Counter(
 CANONICAL_DEGRADATION_TRANSITION_COUNT = Gauge(
     "tb_canonical_degradation_transition_count",
     "Cumulative degradation level transitions observed on RiskState",
+    ["symbol"],
+)
+CANONICAL_SESSION_MODE = Counter(
+    "tb_canonical_session_mode_total",
+    "Weekend / low-liquidity / regular session observations per tick (FB-CAN-073)",
+    ["symbol", "mode"],
+)
+CANONICAL_SESSION_MODE_TRANSITION_COUNT = Gauge(
+    "tb_canonical_session_mode_transition_count",
+    "Cumulative session mode transitions on RiskState (FB-CAN-073)",
     ["symbol"],
 )
 
@@ -256,8 +271,13 @@ def record_canonical_post_tick(
                     pass
         for code in getattr(apex, "novelty_reason_codes", None) or []:
             CANONICAL_NOVELTY_REASON.labels(symbol=sym, reason=str(code)).inc()
+        for code in getattr(apex, "session_reason_codes", None) or []:
+            CANONICAL_SESSION_REASON.labels(symbol=sym, reason=str(code)).inc()
         deg = getattr(apex.degradation, "value", str(apex.degradation))
         CANONICAL_DEGRADATION_TICKS.labels(symbol=sym, level=str(deg)).inc()
+        sm = getattr(apex, "session_mode", None)
+        if sm is not None:
+            CANONICAL_SESSION_MODE.labels(symbol=sym, mode=str(sm)).inc()
 
     if risk is not None and bool(getattr(risk, "hard_override_active", False)):
         hk = getattr(risk, "hard_override_kind", None)
@@ -267,6 +287,12 @@ def record_canonical_post_tick(
     if tc is not None:
         try:
             CANONICAL_DEGRADATION_TRANSITION_COUNT.labels(symbol=sym).set(float(tc))
+        except (TypeError, ValueError):
+            pass
+    stc = getattr(risk, "session_mode_transition_count", None)
+    if stc is not None:
+        try:
+            CANONICAL_SESSION_MODE_TRANSITION_COUNT.labels(symbol=sym).set(float(stc))
         except (TypeError, ValueError):
             pass
 

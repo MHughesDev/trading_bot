@@ -38,6 +38,7 @@ TRG_MOVE_ALREADY_EXTENDED = "trg_move_already_extended"
 TRG_INSUFFICIENT_REMAINING_EDGE = "trg_insufficient_remaining_edge"
 TRG_EXECUTION_TOO_DEGRADED = "trg_execution_too_degraded"
 TRG_TRIGGER_STRENGTH_LOW = "trg_trigger_strength_low"
+TRG_SESSION_MODE_THROTTLE = "trg_session_mode_throttle"
 
 # Auction
 AUC_DEGRADATION_NO_TRADE = "auc_degradation_no_trade"
@@ -76,6 +77,8 @@ STATE_HIGH_OOD = "state_high_ood"
 STATE_HMM_AMBIGUOUS = "state_hmm_ambiguous"
 STATE_STRUCTURE_FRAGILE = "state_structure_fragile"
 STATE_ELEVATED_TRANSITION = "state_elevated_transition_risk"
+STATE_SESSION_WEEKEND = "state_session_weekend"
+STATE_SESSION_LOW_LIQUIDITY = "state_session_low_liquidity"
 
 # Legacy string -> canonical (trigger)
 _ALIASES: dict[str, str] = {

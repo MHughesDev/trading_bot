@@ -52,6 +52,10 @@ class RiskState(BaseModel):
     degradation_transition_count: int = Field(default=0, ge=0)
     last_degradation_level: str | None = None
     degradation_occupancy_ticks: dict[str, int] = Field(default_factory=dict)
+    # FB-CAN-073 — weekend / low-liquidity session tracking (mirrors degradation occupancy pattern)
+    session_mode: str | None = None
+    session_mode_transition_count: int = Field(default=0, ge=0)
+    session_mode_occupancy_ticks: dict[str, int] = Field(default_factory=dict)
     # FB-CAN-036 — last-tick canonical reason codes (replay / decision record)
     last_risk_block_codes: list[str] = Field(default_factory=list)
     last_pipeline_no_trade_codes: list[str] = Field(default_factory=list)

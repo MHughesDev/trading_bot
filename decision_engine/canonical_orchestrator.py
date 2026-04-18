@@ -88,6 +88,7 @@ def run_canonical_decision_sequence_after_forecast(
         spread_bps=spread_bps,
         settings=settings,
         structure=canonical_structure,
+        data_timestamp=data_timestamp,
     )
     apex = apply_normalization_degradation(apex, feature_effective)
     ho, ho_kind = classify_hard_override(

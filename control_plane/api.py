@@ -854,6 +854,10 @@ def get_governance_monitoring() -> dict[str, Any]:
             "see observability/lag_metrics.py"
         ),
         "lag_metrics_module": "observability/lag_metrics.py",
+        "session_mode_metrics": (
+            "tb_canonical_session_mode, tb_canonical_session_mode_transition_count, "
+            "tb_canonical_session_reason (FB-CAN-073); policy: apex_canonical.domains.state_safety_degradation.session_mode"
+        ),
     }
 
 

@@ -21,6 +21,11 @@ apex_canonical:
     - heat_components
   domains:
     state_safety_degradation:
+      session_mode:
+        enabled: true
+        weekend_throttle: 0.88
+        low_liquidity_throttle: 0.82
+        low_liquidity_depth_floor: 0.35
       heat_weights:
         Hf: 0.2
         Hl: 0.25
