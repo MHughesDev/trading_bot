@@ -4,6 +4,8 @@
 
 **Documentation last reviewed:** 2026-04-18 (FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) + Specs tombstones; see [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD)).
 
+**Terminology:** [`CANONICAL_GLOSSARY.MD`](CANONICAL_GLOSSARY.MD) — legacy vs APEX naming (FB-CAN-040).
+
 ---
 
 ## Precedence (highest first)

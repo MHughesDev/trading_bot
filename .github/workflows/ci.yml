@@ -36,6 +36,8 @@ jobs:
         run: bash scripts/ci_canonical_contracts.sh
       - name: Canonical CI gates (FB-CAN-025)
         run: bash scripts/ci_canonical_gates.sh
+      - name: Canonical glossary references (FB-CAN-040)
+        run: bash scripts/ci_canonical_glossary.sh
 
   # FB-AUD-019 — secret scan (Docker image on ubuntu-latest)
   gitleaks:
