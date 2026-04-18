@@ -1,8 +1,9 @@
 # REPO vs Canonical Specs Gap Audit
 
-Date: 2026-04-13  
+Date: 2026-04-18 (review pass; **FB-CAN-001** closure)  
 Scope: hard repo-to-canonical-spec audit for full architectural replacement  
-Canonical source of truth: `docs/Human Provided Specs/new_specs/canonical/`
+Canonical source of truth: `docs/Human Provided Specs/new_specs/canonical/`  
+**Queue:** This file satisfies **FB-CAN-001** (authoritative gap audit + migration map). Later canonical slices (**FB-CAN-002+**) may extend appendices or add linked reports; do not treat `docs/Specs/*.MD` as architecture truth until **FB-CAN-002** lands.
 
 ## 1) Repository inventory (verified)
 
@@ -24,7 +25,7 @@ Canonical source of truth: `docs/Human Provided Specs/new_specs/canonical/`
 3. Risk path is hard-gate based: stale feed/timestamp, spread, drawdown, mode block, exposure, reduce-only/flatten-all.
 4. Execution service is thin and primarily routes risk-approved `OrderIntent` to adapter submit.
 5. Config surface (`AppSettings` + `default.yaml`) is broad but legacy-shaped (routing/risk basic thresholds, model file paths, runtime toggles), not canonical domainized config.
-6. Queue was previously empty sentinel; now populated with canonical migration program IDs `FB-CAN-001..014`.
+6. Queue tracks the canonical migration program (**FB-CAN-***); **FB-CAN-001** (this audit) is closed; follow-on work is **FB-CAN-002+** per [`QUEUE_STACK.csv`](../QUEUE_STACK.csv).
 
 ## 2) Canonical target inventory
 
@@ -244,7 +245,7 @@ Delete once canonical replacements are active:
 
 ## 7) Ordered implementation sequence (hard replacement)
 
-1. FB-CAN-001: publish this audit and precise migration map.
+1. FB-CAN-001: publish this audit and precise migration map (**Done** — 2026-04-18).
 2. FB-CAN-002: canonical docs adoption and explicit de-canonicalization of conflicting docs.
 3. FB-CAN-003: canonical config schema + immutable versioning scaffolding.
 4. FB-CAN-004: state/regime engine.
@@ -261,7 +262,27 @@ Delete once canonical replacements are active:
 
 ## 8) Queue mapping (IDs -> domains)
 
-- FB-CAN-001: Audit baseline + migration map
+### 8.0 FB-CAN-001 through FB-CAN-014 (explicit program scope)
+
+These are the fourteen primary slices called out in the **FB-CAN-001** queue task (`agent_task` references **FB-CAN-001..014**). Extended backlog (**FB-CAN-015+**) is enumerated in **§8.1** and in [`QUEUE_STACK.csv`](../QUEUE_STACK.csv).
+
+| ID | Batch | Primary domain |
+|----|-------|----------------|
+| **FB-CAN-001** | CAN-AUD | **Gap audit + migration map** (this document) |
+| **FB-CAN-002** | CAN-DOC | Docs/spec authority and precedence vs `docs/Specs/` |
+| **FB-CAN-003** | CAN-CFG | Configuration schema, versioning, compatibility |
+| **FB-CAN-004** | CAN-STATE | State / regime / degradation engine |
+| **FB-CAN-005** | CAN-TRIG | Three-stage trigger / timing engine |
+| **FB-CAN-006** | CAN-AUCT | Opportunity auction scoring and selection |
+| **FB-CAN-007** | CAN-RISK | Risk, sizing, exposure (canonical model) |
+| **FB-CAN-008** | CAN-EXEC | Execution confidence, style, stress, partial-fill, feedback |
+| **FB-CAN-009** | CAN-REPL | Replay / simulation interface and events |
+| **FB-CAN-010** | CAN-MON | Monitoring and alerting metric families |
+| **FB-CAN-011** | CAN-GOV | Release gating + experiment registry |
+| **FB-CAN-012** | CAN-DEL | Hard-delete obsolete paths post-migration |
+| **FB-CAN-013** | CAN-TEST | Tests + CI gates for canonical behavior |
+| **FB-CAN-014** | CAN-CLEAN | Final docs + module-structure cleanup |
+
 - FB-CAN-002: Docs/spec authority
 - FB-CAN-003: Config/release-object schema base
 - FB-CAN-004: State/regime/degradation
