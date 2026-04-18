@@ -1,6 +1,6 @@
 # Canonical monitoring and alerting (APEX)
 
-This document maps **APEX Monitoring & Alerting Spec v1.0** domains to **Prometheus metrics** implemented in **`observability/canonical_metrics.py`** (queue slice **FB-CAN-010**).
+This document maps **APEX Monitoring & Alerting Spec v1.0** domains to **Prometheus metrics** implemented in **`observability/canonical_metrics.py`** (queue slice **FB-CAN-010**) and **`observability/drift_calibration_metrics.py`** (**FB-CAN-039**).
 
 **FB-CAN-028** adds checked-in **Prometheus alert rules** (`infra/prometheus/alerts/canonical_apex.yml`), a **Grafana dashboard** (`infra/grafana/provisioning/dashboards/json/tb-canonical-health.json`, UID **`tb-canonical-health`**), and **`GET /governance/monitoring`** in the control plane for pointers. Docker Compose mounts alert rules into Prometheus (`infra/docker-compose.yml`); **`infra/prometheus/prometheus.yml`** references them via `rule_files`.
 
@@ -18,9 +18,13 @@ All canonical slice metrics use the `tb_canonical_*` prefix (alongside existing 
 | Risk | `tb_canonical_risk_size_multiplier`, `tb_canonical_risk_final_notional_usd` | From `RiskState` |
 | Data quality (proxy) | `tb_canonical_data_age_seconds` | From `RiskState.data_age_seconds` |
 | Drift / calibration | `tb_canonical_forecast_ood_score` | From `ForecastPacket.ood_score` |
+| Drift / calibration (FB-CAN-039) | `tb_canonical_theoretical_edge_score`, `tb_canonical_edge_erosion_score`, `tb_canonical_trade_intent_execution_confidence` | Trade-intent ticks only; theoretical edge = `decision_confidence × trigger_confidence`, erosion = `max(0, theoretical − execution_confidence)` |
+| Drift / calibration (FB-CAN-039) | `tb_canonical_feature_drift_penalty`, `tb_canonical_trigger_false_positive_memory` | From `canonical_exec_quality_penalty` feature + `RiskState.trigger_false_positive_memory` |
+| Drift / calibration (FB-CAN-039) | `tb_canonical_confidence_calibration_gap`, `tb_canonical_conformal_interval_relative_width`, `tb_canonical_conformal_calibration_applied_total` | Route vs packet confidence gap; conformal band width when `conformal_applied` |
+| Shadow / replay (FB-CAN-039) | `tb_canonical_shadow_divergence_rate`, `tb_canonical_shadow_comparison_within_thresholds`, `tb_canonical_shadow_rollback_recommended`, `tb_canonical_shadow_comparison_bars_compared` | Refreshed from persisted shadow comparison store on API startup and after **`POST /governance/shadow-comparison/run`** |
 | Governance | `tb_canonical_active_config_version_info` | Set once from `AppSettings.canonical.metadata.config_version` |
 | Carry sleeve | `tb_canonical_carry_sleeve_active` | Placeholder gauge (0 until wired) |
-| Shadow / replay | `tb_canonical_replay_shadow_divergence_total` | Placeholder counter for future divergence jobs |
+| Shadow / replay | `tb_canonical_replay_shadow_divergence_total` | Incremented when divergence jobs emit events (legacy counter) |
 
 ## Emission point
 
@@ -52,6 +56,15 @@ Logical rules live in **`infra/prometheus/alerts/canonical_apex.yml`** (loaded b
 | `CanonicalRiskSizeMultiplierLow` | Risk | p05 size multiplier persistently low |
 | `CanonicalCarrySleeveActive` | Carry | carry active sustained (info) |
 | `CanonicalShadowDivergenceEvents` | Shadow/replay | divergence counter increasing |
+
+### FB-CAN-039 alert rules (drift / calibration / shadow trends)
+
+| Alert | Domain | Notes |
+|-------|--------|--------|
+| `CanonicalEdgeErosionHigh` | Drift / execution | p95 edge erosion score high over 15m |
+| `CanonicalConfidenceCalibrationGap` | Calibration | p95 abs(route − forecaster confidence) high |
+| `CanonicalShadowDivergenceRateHigh` | Shadow/replay | last persisted `trade_intent_divergence` rate above threshold |
+| `CanonicalShadowRollbackRecommended` | Shadow/replay | critical when governance report sets `rollback_recommended` |
 
 Tune `for:` windows and thresholds per environment; defaults aim for **actionable** signals with **low noise**.
 

@@ -100,6 +100,7 @@ def build_decision_record(
     eff: dict[str, float] = {}
 
     fc_sum = forecast.model_dump(mode="json")
+    fc_sum["route_confidence"] = float(route.confidence)
     if forecast_packet is not None:
         fc_sum["packet_ood"] = forecast_packet.ood_score
 

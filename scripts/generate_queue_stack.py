@@ -984,7 +984,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-MON-DRIFT",
         "id": "FB-CAN-039",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement calibration/drift monitoring families and alerts",
         "agent_task": "Implement canonical drift and calibration metrics/alerts, including realized-vs-theoretical edge erosion, confidence calibration drift, and replay-shadow divergence trend monitors with alert escalation policies.",
         "affected_files": "observability/|infra/|control_plane/|tests/|docs/",

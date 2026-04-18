@@ -161,7 +161,52 @@
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": {}, "overrides": [] },
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 40 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "id": 12,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_edge_erosion_score_bucket[15m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} p95 erosion",
+          "refId": "A"
+        }
+      ],
+      "title": "Drift: edge erosion score p95 (trade_intent)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "id": 13,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_confidence_calibration_gap_bucket[10m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} p95 gap",
+          "refId": "A"
+        }
+      ],
+      "title": "Calibration: route vs forecaster confidence gap (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 48 },
+      "id": 14,
+      "targets": [
+        {
+          "expr": "tb_canonical_shadow_divergence_rate",
+          "legendFormat": "{{rate_kind}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Shadow governance: last persisted divergence rates",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 56 },
       "id": 11,
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [

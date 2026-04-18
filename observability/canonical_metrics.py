@@ -1,4 +1,4 @@
-"""APEX canonical monitoring metric families (FB-CAN-010).
+"""APEX canonical monitoring metric families (FB-CAN-010, FB-CAN-039).
 
 Maps domains in docs/Human Provided Specs/new_specs/canonical/APEX_Monitoring_and_Alerting_Spec_v1_0.md
 to Prometheus instruments. Call :func:`record_canonical_post_tick` once per decision cycle.
@@ -9,6 +9,8 @@ from __future__ import annotations
 from typing import Any
 
 from prometheus_client import Counter, Gauge, Histogram
+
+from observability.drift_calibration_metrics import record_calibration_and_drift_from_tick
 
 # --- State / safety (spec §4.3) ---
 CANONICAL_REGIME_CONFIDENCE = Histogram(
@@ -139,6 +141,7 @@ def record_canonical_post_tick(
     risk: Any,
     forecast_packet: Any | None,
     carry_sleeve: dict[str, Any] | None = None,
+    feature_row: dict[str, float] | None = None,
 ) -> None:
     """Record canonical metrics from one `run_decision_tick` completion."""
     sym = symbol or "unknown"
@@ -222,6 +225,13 @@ def record_canonical_post_tick(
                 CANONICAL_CARRY_FUNDING_SIGNAL.labels(symbol=sym).observe(float(cs["funding_signal"]))
         except (TypeError, ValueError):
             pass
+
+    record_calibration_and_drift_from_tick(
+        symbol=sym,
+        risk=risk,
+        forecast_packet=forecast_packet,
+        feature_row=feature_row,
+    )
 
 
 def set_active_config_version(version: str) -> None:

@@ -23,6 +23,7 @@ from starlette.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from decision_engine.decision_record import get_last_decision_record
+from observability.drift_calibration_metrics import refresh_shadow_divergence_gauges_from_store
 from observability.forecaster_metrics import MODEL_VERSION_INFO
 
 from app.config.model_artifacts import model_artifact_contract
@@ -226,6 +227,7 @@ async def _lifespan(app: FastAPI):
     start_app_background_scheduler(settings)
     start_alpaca_universe_scheduler(settings)
     start_coinbase_universe_scheduler(settings)
+    refresh_shadow_divergence_gauges_from_store(load_shadow_comparison_store())
     yield
     stop_coinbase_universe_scheduler()
     stop_alpaca_universe_scheduler()
@@ -801,6 +803,7 @@ def get_governance_monitoring() -> dict[str, Any]:
         "prometheus_rules": "infra/prometheus/alerts/canonical_apex.yml",
         "grafana_dashboard_uid": "tb-canonical-health",
         "metrics_module": "observability/canonical_metrics.py",
+        "drift_calibration_metrics": "observability/drift_calibration_metrics.py",
     }
 
 
@@ -832,6 +835,7 @@ def post_governance_shadow_comparison_run(
         candidate_logic_version=body.candidate_logic_version.strip() or "1.0.0",
     )
     save_shadow_comparison_report(rep)
+    refresh_shadow_divergence_gauges_from_store(load_shadow_comparison_store())
     return rep
 
 
