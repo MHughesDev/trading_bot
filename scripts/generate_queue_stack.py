@@ -1530,7 +1530,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-FINAL-AUDIT",
         "id": "FB-CAN-078",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Add automated canonical acceptance audit before declaring migration complete",
         "agent_task": "Add automated canonical acceptance audit script that validates queue coverage matrix completion, required module existence/deletions, contract conformance checks, and governance evidence readiness. Gate final migration closeout on this report.",
         "affected_files": "scripts/|docs/reports/|tests/|docs/QUEUE_STACK.csv",

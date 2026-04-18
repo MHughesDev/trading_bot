@@ -9,7 +9,7 @@
 ## Agent protocol (read first — token-efficient)
 
 0. **Every agent session:** Read **[`README.md`](../README.md)** and **[`AGENTS.md`](../AGENTS.md)** in full first — **re-read `AGENTS.md`** after any context reset or new thread. Then use the commands below for task selection (steps 1–4).
-1. **Do not** read this whole file to pick work. **Do not** open **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** or **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** in full. From repo root run **`bash scripts/queue_top.sh`** (same as **`python3 scripts/print_next_queue_item.py`**) to print the full next **`Open`** row to stdout (optional **`--json`**).
+1. **Do not** read this whole file to pick work. **Do not** open **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** or **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** in full. From repo root run **`bash scripts/queue_top.sh`** (same as **`python3 scripts/print_next_queue_item.py`**) to print the full next **`Open`** row to stdout (optional **`--json`** — when the backlog is empty, JSON mode prints **`{"queue_empty": true, "message": "..."}`**).
 2. The script selects the smallest **`stack_order`** with **`status`** = **`Open`** (excluding **`_QUEUE_EMPTY_`**). If output is **`QUEUE_EMPTY:`** or **`id`** = **`_QUEUE_EMPTY_`** → **stop** (nothing to do).
 3. **Implement from that one row:** use **`agent_task`**, **`affected_files`**, optional **`docs_refs`** (read only those paths if present). You do **not** need other markdown files to understand the task.
 4. After completing work: run **`bash scripts/queue_close.sh --next`** (or **`bash scripts/queue_close.sh --id <ID>`**) to set **`status=Done`** in [`scripts/generate_queue_stack.py`](../scripts/generate_queue_stack.py), regenerate **`QUEUE_STACK.csv`**, and update a matching **`Open` → `Done`** row in **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** when the ID appears in a standard pipe table. Then refresh **[§2](#2-open-queue-status)** counts in this file if needed and follow **[§6](#6-how-to-add-or-close-an-item)**. **Do not merge the PR to `main`** (e.g. `gh pr merge`) until this closure is **committed and pushed**. See [`AGENTS.md`](../AGENTS.md) §7 and [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) Phase 6.
@@ -118,13 +118,13 @@ stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_t
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-038** are **Done** (incl. **FB-CAN-038** — shadow replay comparison + `shadow_comparison_passed` gate + governance APIs). **FB-CAN-039**…**FB-CAN-078** remain **Open** for canonical migration (next **HIGH** slice **FB-CAN-041**), except **FB-CAN-059** (runtime cutover guard), **FB-CAN-060** (canonical synthesis shim prune), **FB-CAN-061** (canonical config metadata validation), **FB-CAN-062** (canonical contract conventions), **FB-CAN-068** (replay/sim deterministic seed + provenance), **FB-CAN-069** (post-release probation monitors), **FB-CAN-070** (canonical coverage matrix), **FB-CAN-071** (service configuration snapshot contract), **FB-CAN-072** (per-domain lag / cycle duration metrics), **FB-CAN-073** (weekend / low-liquidity session mode), **FB-CAN-074** (exchange risk / data integrity in degradation), **FB-CAN-075** (execution latency/reliability confidence terms), **FB-CAN-076** (edge-budget proxy monitoring), and **FB-CAN-077** (immutable run binding) **Done**. Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** 26 canonical replacement slices.
+**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-078** (canonical replacement program) are **Done**, including **FB-CAN-078** (automated acceptance audit). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** none — sentinel **`_QUEUE_EMPTY_`** only.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **3** | FB-CAN-041, FB-CAN-045, FB-CAN-047 |
-| **MEDIUM** | **16** | FB-CAN-039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-063, FB-CAN-066, FB-CAN-078 |
-| **LOW** | **7** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067 |
+| **HIGH** | **0** | — |
+| **MEDIUM** | **0** | — |
+| **LOW** | **0** | — |
 
 **Full row text and completed history:** [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (§2 open tables, §3 fixes, §4 gates, §5 archive).
 

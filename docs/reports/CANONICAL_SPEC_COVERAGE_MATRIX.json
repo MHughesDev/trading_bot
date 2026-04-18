@@ -231,9 +231,11 @@
       "id": "gap_O_tests_ci_gates",
       "gap_audit_section": "O. Tests / CI",
       "canonical_specs": ["APEX_Decision_Service_Feature_Schema_and_Data_Contracts_v1_0.md §19–20"],
-      "queue_ids": ["FB-CAN-025", "FB-CAN-056", "FB-CAN-061", "FB-CAN-062", "FB-CAN-063", "FB-CAN-067"],
+      "queue_ids": ["FB-CAN-025", "FB-CAN-056", "FB-CAN-061", "FB-CAN-062", "FB-CAN-063", "FB-CAN-067", "FB-CAN-078"],
       "implementation_paths": [
         "scripts/ci_canonical_gates.sh",
+        "scripts/ci_canonical_gates_inner.sh",
+        "scripts/ci_canonical_acceptance_audit.py",
         "scripts/ci_canonical_config_gates.py",
         "scripts/ci_spec_compliance.sh",
         "scripts/ci_canonical_contracts.sh",

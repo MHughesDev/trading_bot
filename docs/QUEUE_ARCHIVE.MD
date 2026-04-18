@@ -15,15 +15,15 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-038** are **Done**. **FB-CAN-039**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track, except **FB-CAN-059** (runtime cutover guard), **FB-CAN-060** (canonical synthesis shim prune), **FB-CAN-061** (canonical config metadata validation), and **FB-CAN-062** (canonical contract conventions) **Done**. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
+**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-078** are **Done** (incl. **FB-CAN-078** acceptance audit). Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue:** no **Open** rows — sentinel **`_QUEUE_EMPTY_`** only.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **3** | FB-CAN-041, FB-CAN-045, FB-CAN-047 |
-| **MEDIUM** | **21** | FB-CAN-039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
-| **LOW** | **11** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-075, FB-CAN-077 |
+| **HIGH** | **0** | — |
+| **MEDIUM** | **0** | — |
+| **LOW** | **0** | — |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
 
@@ -253,7 +253,7 @@
 | FB-CAN-075 | CAN-EXEC-LAT | A | EX | feature | LOW | Done | Implement execution latency/reliability quality terms in execution confidence. | execution/config/replay/observability/tests |
 | FB-CAN-076 | CAN-EDGE-MON | B | OB | feature | MEDIUM | Done | Implement edge-budget proxy monitoring and alert thresholds. | decision/execution/observability/infra/tests |
 | FB-CAN-077 | CAN-BINDING-IMM | B | DS | hardening | LOW | Done | Implement immutable run-binding guard for config/logic/dataset/seed identifiers. | contracts/replay/orchestration/models/tests |
-| FB-CAN-078 | CAN-FINAL-AUDIT | B | OP | platform | MEDIUM | Open | Add automated canonical acceptance audit as final migration completion gate. | scripts/reports/tests/QUEUE |
+| FB-CAN-078 | CAN-FINAL-AUDIT | B | OP | platform | MEDIUM | Done | Add automated canonical acceptance audit as final migration completion gate. | scripts/reports/tests/QUEUE |
 
 ### Compliance & release gates (open)
 

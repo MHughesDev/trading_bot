@@ -60,14 +60,30 @@ def test_format_text_includes_agent_task() -> None:
     assert "Do the thing" in out
 
 
-def test_cli_json_stdout(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    p = Path(__file__).resolve().parents[1] / "docs" / "QUEUE_STACK.csv"
-    if not p.is_file():
-        pytest.skip("QUEUE_STACK.csv not present")
-
-    monkeypatch.setattr(sys, "argv", ["print_next_queue_item.py", "--json"])
+def test_cli_json_stdout(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    p = tmp_path / "q.csv"
+    p.write_text(
+        "stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_task\n"
+        "1,HIGH,A,,CLI-1,x,Open,s,s,task\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "argv", ["print_next_queue_item.py", "--csv", str(p), "--json"])
     assert main() == 0
     captured = capsys.readouterr().out
     data = json.loads(captured)
-    assert "id" in data
+    assert data.get("id") == "CLI-1"
     assert data.get("status") == "Open"
+
+
+def test_cli_json_stdout_queue_empty(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    p = tmp_path / "empty.csv"
+    p.write_text(
+        "stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_task\n"
+        "1,LOW,D,,_QUEUE_EMPTY_,deferred,empty,x,x,\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "argv", ["print_next_queue_item.py", "--csv", str(p), "--json"])
+    assert main() == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data.get("queue_empty") is True
+    assert "message" in data
