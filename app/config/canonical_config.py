@@ -55,6 +55,7 @@ class CanonicalDomains(BaseModel):
     monitoring: dict[str, Any] = Field(default_factory=dict)
     replay: dict[str, Any] = Field(default_factory=dict)
     feature_families: dict[str, Any] = Field(default_factory=dict)
+    shadow_comparison: dict[str, Any] = Field(default_factory=dict)
 
 
 class CanonicalRuntimeConfig(BaseModel):
@@ -156,6 +157,10 @@ def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
             "backtesting_fee_bps": settings.backtesting_fee_bps,
             "backtesting_initial_cash_usd": settings.backtesting_initial_cash_usd,
             "backtesting_rng_seed": settings.backtesting_rng_seed,
+        },
+        shadow_comparison={
+            "projection": "legacy",
+            "note": "Override with apex_canonical.domains.shadow_comparison (FB-CAN-038).",
         },
         feature_families={
             "projection": "legacy",

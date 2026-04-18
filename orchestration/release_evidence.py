@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config.canonical_config import CanonicalRuntimeConfig, resolve_canonical_config
 from app.config.settings import AppSettings, load_settings
+from models.registry.shadow_comparison_store import load_shadow_comparison_store
 from orchestration.release_gating import RollbackTarget
 
 
@@ -43,6 +44,10 @@ class ReleaseEvidenceBundle(BaseModel):
     fault_profile_ids_satisfied: list[str] = Field(
         default_factory=list,
         description="Which canonical fault profile ids were exercised by fault_stress_run_ids.",
+    )
+    shadow_comparison_report: dict[str, Any] | None = Field(
+        default=None,
+        description="Latest shadow vs baseline replay comparison (FB-CAN-038).",
     )
     rollback: RollbackTarget = Field(default_factory=RollbackTarget)
 
@@ -124,12 +129,18 @@ def build_release_evidence_bundle(
     shadow_run_ids: list[str] | None = None,
     fault_stress_run_ids: list[str] | None = None,
     fault_profile_ids_satisfied: list[str] | None = None,
+    shadow_comparison_report: dict[str, Any] | None = None,
     rollback: RollbackTarget | None = None,
 ) -> ReleaseEvidenceBundle:
     """Compose a evidence bundle from live settings and optional baseline file."""
     s = settings or load_settings()
     current = s.canonical
     fp = canonical_runtime_fingerprint(current)
+    shadow_rep = shadow_comparison_report
+    if shadow_rep is None:
+        st = load_shadow_comparison_store()
+        if isinstance(st, dict) and isinstance(st.get("last_report"), dict):
+            shadow_rep = st["last_report"]
     diff: dict[str, Any] | None = None
     baseline: CanonicalRuntimeConfig | None = None
     if baseline_yaml_text is not None and baseline_yaml_text.strip():
@@ -148,5 +159,6 @@ def build_release_evidence_bundle(
         shadow_run_ids=list(shadow_run_ids or []),
         fault_stress_run_ids=list(fault_stress_run_ids or []),
         fault_profile_ids_satisfied=list(fault_profile_ids_satisfied or []),
+        shadow_comparison_report=shadow_rep,
         rollback=rollback or RollbackTarget(),
     )

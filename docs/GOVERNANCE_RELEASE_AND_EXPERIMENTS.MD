@@ -6,9 +6,12 @@
 
 | Capability | Location |
 |------------|----------|
-| Release candidate model, evidence package, rollback metadata, promotion gate evaluation (**FB-CAN-037:** `fault_stress_run_ids` + `fault_profile_ids_satisfied` required for shadow/live when gates are evaluated) | `orchestration/release_gating.py` |
-| Evidence bundle JSON, canonical fingerprint, structured diff vs baseline YAML (**FB-CAN-026**); fault-stress run references (**FB-CAN-037**) | `orchestration/release_evidence.py`, `scripts/build_release_evidence_bundle.py` |
+| Release candidate model, evidence package, rollback metadata, promotion gate evaluation (**FB-CAN-037:** `fault_stress_run_ids` + `fault_profile_ids_satisfied` required for shadow/live when gates are evaluated; **FB-CAN-038:** `shadow_comparison_passed` required for shadow/live) | `orchestration/release_gating.py` |
+| Evidence bundle JSON, canonical fingerprint, structured diff vs baseline YAML (**FB-CAN-026**); fault-stress run references (**FB-CAN-037**); optional shadow comparison report (**FB-CAN-038**) | `orchestration/release_evidence.py`, `scripts/build_release_evidence_bundle.py` |
+| Shadow replay comparison (divergence rates, thresholds, probation, rollback hint) (**FB-CAN-038**) | `orchestration/shadow_comparison.py`, `app/config/shadow_comparison.py`, `apex_canonical.domains.shadow_comparison` in `default.yaml`, `models/registry/shadow_comparison_store.json` |
 | Control plane: current bundle + diff vs pasted `default.yaml` | `GET /governance/release-evidence`, `POST /governance/release-evidence/diff` (`control_plane/api.py`) |
+| Control plane: shadow policy + last report; run paired replay (**FB-CAN-038**) | `GET /governance/shadow-comparison`, `POST /governance/shadow-comparison/run` (mutating) |
+| CLI: paired replay compare | `scripts/compare_shadow_replays.py` |
 | JSON ledger path (optional) | `models/registry/release_ledger.json` via `default_release_ledger_path()` |
 | Experiment records, registry queries, lifecycle validation, bidirectional link to release ledger (**FB-CAN-027**) | `models/registry/experiment_registry.py` |
 | Experiment HTTP API (list/get/upsert/delete) | `GET/POST/DELETE /governance/experiments` in `control_plane/api.py` |
@@ -26,6 +29,7 @@
 5. **Experiments (FB-CAN-027):** Use `GET /governance/experiments` with optional query filters; `POST /governance/experiments` with a full `ExperimentRecord` JSON (mutating routes require API key / session as other control-plane mutators). Linking `linked_release_candidate` to a `release_id` requires that release to exist in `models/registry/release_ledger.json` first; the ledger’s `linked_experiment_ids` is updated automatically. Status transitions follow the spec §4 table (invalid transitions return 422).
 6. **Promotion:** Run `python3 scripts/validate_release_gates.py --candidate <file.json> --target live` (or `shadow` / `simulation`). Exit code `0` = gates pass; `2` = blocked (see printed JSON for `blocked_gates`).
 7. **Live–replay equivalence (FB-CAN-030):** For `kind` **logic** or **combined**, `evidence.live_replay_equivalence_passed` must be **true** for **live** promotion. Populate `live_replay_equivalence_report` with the JSON from `LiveReplayEquivalenceReport.to_dict()` when attaching harness output. CI runs `scripts/ci_live_replay_equivalence.py` (two identical replays must match decision-output fingerprints).
+8. **Shadow comparison (FB-CAN-038):** For **shadow** and **live** promotion, set `evidence.shadow_comparison_passed` to **true** after running a paired replay (baseline vs candidate `logic_version` on the same dataset) and verifying divergence rates are within `apex_canonical.domains.shadow_comparison.thresholds` and `bars_compared >= probation.min_bars`. Use `python3 scripts/compare_shadow_replays.py` or `POST /governance/shadow-comparison/run` (persisted report). Attach `evidence.shadow_comparison_report` with the JSON from `ShadowComparisonReport.to_dict()` (includes `rollback_recommended`).
 
 ## Notes
 

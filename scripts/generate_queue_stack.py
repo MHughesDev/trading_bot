@@ -970,7 +970,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-SHADOW",
         "id": "FB-CAN-038",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement shadow environment comparison and promotion thresholds",
         "agent_task": "Implement explicit shadow-mode evaluation pipelines with configured divergence thresholds, probation windows, and promotion/rollback criteria. Persist comparison results as structured release evidence and expose via governance APIs.",
         "affected_files": "orchestration/|models/|control_plane/|scripts/|tests/",

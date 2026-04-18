@@ -116,6 +116,12 @@ from orchestration.release_evidence import (
     diff_canonical_runtime,
     resolve_canonical_from_yaml_text,
 )
+from orchestration.shadow_comparison import run_shadow_replay_pair_comparison
+from app.config.shadow_comparison import shadow_policy_from_settings
+from models.registry.shadow_comparison_store import (
+    load_shadow_comparison_store,
+    save_shadow_comparison_report,
+)
 from models.registry.experiment_registry import (
     ChangeType,
     ExperimentDomain,
@@ -759,6 +765,17 @@ class ReleaseEvidenceDiffRequest(BaseModel):
     )
 
 
+class ShadowComparisonRunRequest(BaseModel):
+    """Run synthetic paired replay for shadow divergence metrics (FB-CAN-038)."""
+
+    baseline_logic_version: str = "1.0.0"
+    candidate_logic_version: str = "1.0.0"
+    baseline_replay_run_id: str = "shadow-baseline"
+    candidate_replay_run_id: str = "shadow-candidate"
+    symbol: str = "BTC-USD"
+    bars: int = Field(220, ge=50, le=5000)
+
+
 @app.get("/governance/release-evidence")
 def get_release_evidence() -> dict[str, Any]:
     """APEX release evidence bundle for the running process (FB-CAN-026)."""
@@ -785,6 +802,37 @@ def get_governance_monitoring() -> dict[str, Any]:
         "grafana_dashboard_uid": "tb-canonical-health",
         "metrics_module": "observability/canonical_metrics.py",
     }
+
+
+@app.get("/governance/shadow-comparison")
+def get_governance_shadow_comparison() -> dict[str, Any]:
+    """Last persisted shadow vs baseline replay comparison + policy (FB-CAN-038)."""
+    st = load_shadow_comparison_store()
+    pol = shadow_policy_from_settings(settings)
+    return {
+        "policy": pol.model_dump(mode="json"),
+        "store": st,
+        "docs": "docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD",
+    }
+
+
+@app.post("/governance/shadow-comparison/run")
+def post_governance_shadow_comparison_run(
+    body: ShadowComparisonRunRequest,
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Run paired replays, persist structured report, return JSON (operator tooling)."""
+    rep = run_shadow_replay_pair_comparison(
+        settings=settings,
+        bars=int(body.bars),
+        symbol=body.symbol.strip() or "BTC-USD",
+        baseline_replay_run_id=body.baseline_replay_run_id.strip() or "shadow-baseline",
+        candidate_replay_run_id=body.candidate_replay_run_id.strip() or "shadow-candidate",
+        baseline_logic_version=body.baseline_logic_version.strip() or "1.0.0",
+        candidate_logic_version=body.candidate_logic_version.strip() or "1.0.0",
+    )
+    save_shadow_comparison_report(rep)
+    return rep
 
 
 @app.post("/governance/release-evidence/diff")
