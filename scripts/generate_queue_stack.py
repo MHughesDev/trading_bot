@@ -14,6 +14,139 @@ from pathlib import Path
 
 ROWS: list[dict[str, str]] = [
     {
+        "priority": "HIGH",
+        "phase": "B",
+        "batch": "AUTH-IDLE",
+        "id": "FB-AUTH-001",
+        "kind": "hardening",
+        "status": "Open",
+        "summary_one_line": "2-hour idle lockout; unauthenticated users see only the login page",
+        "agent_task": (
+            "Goal: Any user whose session has been idle for more than 2 hours, or "
+            "who has no valid session cookie at all, must be blocked from every "
+            "Streamlit page except pages/0_Login.py and pages/99_Sign_up.py and "
+            "forcibly redirected to the login page. No partial page renders, no "
+            "sidebar data leaks, no account information visible. "
+            "Acceptance criteria: "
+            "(1) Add column last_activity_at to the operator_sessions SQLite table "
+            "in app/runtime/operator_sessions.py (ALTER TABLE if the column is "
+            "missing at startup so existing DBs upgrade). "
+            "(2) Add helper touch_session(session_id) in operator_sessions.py that "
+            "updates last_activity_at to current UTC epoch; call it from the "
+            "FastAPI session-auth dependency in control_plane/api.py on every "
+            "authenticated request, and from require_streamlit_app_access in "
+            "control_plane/streamlit_util.py before returning. "
+            "(3) Add setting auth_idle_timeout_seconds: int = 7200 in "
+            "app/config/settings.py exposed as env var NM_AUTH_IDLE_TIMEOUT_SECONDS. "
+            "(4) Session validation: if now - last_activity_at > idle timeout, "
+            "delete the session row and return 401 from API routes; in the "
+            "Streamlit gate call st.switch_page('pages/0_Login.py') followed by "
+            "st.stop() so no further widgets render. The existing 7-day absolute "
+            "TTL (auth_session_ttl_seconds) still applies in parallel — whichever "
+            "limit fires first wins. "
+            "(5) Change app/config/settings.py default for auth_session_enabled "
+            "from False to True and update the .env.example comment so disabling "
+            "it is an explicit dev-only opt-out. "
+            "(6) Audit every file under control_plane/ (Home.py and pages/*.py) "
+            "to confirm require_streamlit_app_access is called as the first line "
+            "after imports; 0_Login.py and 99_Sign_up.py stay on the login-only "
+            "gate require_streamlit_session_only. No page may render shared "
+            "chrome (sidebar, account widgets) before the gate runs. "
+            "(7) Tests: tests/test_auth_idle_timeout.py covers session rows with "
+            "last_activity_at older than 7200s being invalidated, a fresh session "
+            "passing, and the exact 7200s boundary; tests/test_streamlit_gate_blocks_pages.py "
+            "iterates every page module and asserts that without a valid token "
+            "the gate raises/redirects before any page-specific code runs. "
+            "(8) /auth/login and /auth/logout must set and clear last_activity_at "
+            "correctly on session create/destroy. "
+            "Constraints: do not break the existing 7-day absolute TTL behavior; "
+            "do not change cookie names or storage backend; preserve public "
+            "endpoints (register/login/health) as currently declared."
+        ),
+        "affected_files": (
+            "app/config/settings.py|app/runtime/operator_sessions.py|"
+            "control_plane/streamlit_util.py|control_plane/api.py|"
+            "control_plane/Home.py|control_plane/pages/|.env.example|"
+            "tests/test_auth_idle_timeout.py|tests/test_streamlit_gate_blocks_pages.py"
+        ),
+        "docs_refs": "README.md|docs/WINDOWS_OPERATOR_UI.MD",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
+        "priority": "HIGH",
+        "phase": "B",
+        "batch": "UX-ONBOARD",
+        "id": "FB-UX-017",
+        "kind": "change",
+        "status": "Open",
+        "summary_one_line": "Venue-key onboarding wizard: Alpaca step -> Coinbase step -> dashboard",
+        "agent_task": (
+            "Goal: Replace the single-form Setup API Keys page with a two-step "
+            "wizard that asks Alpaca credentials first, then Coinbase, then "
+            "redirects to the dashboard. Transitions between steps must be "
+            "handled in-process via st.session_state and st.rerun() so the user "
+            "sees one smooth flow, not a full page reload. "
+            "Current code: control_plane/pages/98_Setup_API_keys.py (approx "
+            "lines 22-109) renders EITHER Alpaca OR Coinbase based on "
+            "execution_mode. Backend PUT /auth/venue-credentials lives at "
+            "control_plane/api.py:610-641 with request model "
+            "VenueCredentialsPut in app/contracts/user_venue_credentials.py:8-16. "
+            "Post-login routing is in control_plane/streamlit_util.py:111-127 "
+            "(redirect_after_session_login). "
+            "Acceptance criteria: "
+            "(1) Rewrite 98_Setup_API_keys.py to read st.session_state."
+            "venue_setup_step with values 'alpaca', 'coinbase', 'done'. Default "
+            "to 'alpaca' on first entry. "
+            "(2) Step 'alpaca' renders ONLY the Alpaca api_key and api_secret "
+            "inputs, a primary button 'Next' and a secondary 'Skip (paper "
+            "trading will be unavailable)'. On Next, POST partial Alpaca-only "
+            "update to PUT /auth/venue-credentials, then set "
+            "venue_setup_step='coinbase' and call st.rerun(). "
+            "(3) Step 'coinbase' renders ONLY the Coinbase api_key and "
+            "api_secret inputs, a primary 'Next' and a secondary 'Skip (live "
+            "trading will be unavailable)'. On Next, POST partial Coinbase-only "
+            "update, set venue_setup_step='done', st.rerun(). "
+            "(4) Step 'done' immediately calls st.switch_page('Home.py'). "
+            "(5) Use st.progress or st.caption('Step 1 of 2' / 'Step 2 of 2') "
+            "as the transition indicator; no full-page reload between steps. "
+            "(6) Backend partial updates: confirm (and fix if needed) that "
+            "VenueCredentialsPut has all venue fields Optional, and that the "
+            "PUT handler in control_plane/api.py only overwrites fields that "
+            "are present and non-None in the request payload. Missing Alpaca "
+            "fields in a Coinbase-only save must not clear previously saved "
+            "Alpaca keys. Add a backend test for partial-update non-clobber. "
+            "(7) Resume behavior: if the user lands on the page with Alpaca "
+            "already saved but Coinbase missing, start on step 'coinbase'. If "
+            "both saved, call st.switch_page('Home.py') immediately. Use "
+            "user_has_required_venue_keys / venue credentials status lookup to "
+            "determine this. "
+            "(8) Pre-fill inputs with masked suffix from VenueCredentialsResponse "
+            "(e.g. '•••• abcd') so a returning user can keep or replace existing "
+            "keys without re-typing from scratch. "
+            "(9) Tests: tests/test_venue_wizard_steps.py covers state "
+            "transitions alpaca->coinbase->done, Next-then-Skip paths, and the "
+            "redirect to Home.py after the final step. "
+            "tests/test_venue_wizard_resume.py covers: (a) Alpaca saved, "
+            "Coinbase missing -> starts on coinbase; (b) both saved -> "
+            "switch_page('Home.py'); (c) partial-update non-clobber on the "
+            "backend. "
+            "Constraints: do not change cookie/auth flows; do not require any "
+            "new env vars; keep NM_STREAMLIT_VENUE_KEYS_REQUIRED semantics "
+            "intact."
+        ),
+        "affected_files": (
+            "control_plane/pages/98_Setup_API_keys.py|"
+            "control_plane/streamlit_util.py|control_plane/api.py|"
+            "app/contracts/user_venue_credentials.py|"
+            "tests/test_venue_wizard_steps.py|"
+            "tests/test_venue_wizard_resume.py"
+        ),
+        "docs_refs": "docs/WINDOWS_OPERATOR_UI.MD|README.md",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
         "priority": "MEDIUM",
         "phase": "B",
         "batch": "DOC-UX",
