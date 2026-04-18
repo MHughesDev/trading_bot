@@ -10,6 +10,7 @@ from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState as AppRiskState
 from app.contracts.canonical_state import CanonicalStateOutput
+from app.contracts.canonical_structure import CanonicalStructureOutput
 from app.contracts.trigger import TriggerOutput
 from decision_engine.auction_engine import run_opportunity_auction
 from decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
@@ -110,6 +111,7 @@ def run_spec_policy_step(
     trigger: TriggerOutput | None = None,
     apex: CanonicalStateOutput | None = None,
     feature_row: dict[str, float] | None = None,
+    structure: CanonicalStructureOutput | None = None,
 ) -> tuple[ForecastOutput, RouteDecision, ActionProposal | None]:
     """
     Human-spec path: PolicySystem + ExecutionPlan → proposal; `ForecastOutput` from packet for metrics.
@@ -151,6 +153,7 @@ def run_spec_policy_step(
             position_signed_qty=position_signed_qty,
             base_proposal=proposal,
             top_n=1,
+            structure=structure,
         )
         forecast_packet.forecast_diagnostics["auction"] = auction_result.model_dump()
 

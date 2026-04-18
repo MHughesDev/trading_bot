@@ -2,7 +2,7 @@
 
 **Purpose:** Single **code-to-domain** map for the shared decision path after **FB-CAN-004…011**. Use it with **[`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD)** (what to build toward) and **[`docs/Specs/README.MD`](Specs/README.MD)** (as-built file index).
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-016: `data_plane/features/canonical_normalize.py`).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-017: `app/contracts/canonical_structure.py`, `structure_adapter.py`).
 
 ---
 
@@ -26,6 +26,7 @@ Legacy **ForecastPacket → PolicySystem → proposal** remains the **forecast/r
 | Decision step | [`decision_engine/run_step.py`](../decision_engine/run_step.py) | **`run_decision_tick`** — single entry for live and replay. |
 | Typed input snapshots | [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py), [`app/contracts/snapshot_builders.py`](../app/contracts/snapshot_builders.py) | **FB-CAN-015:** boundary contracts + merge into effective feature row; diagnostics on packet. |
 | Feature normalization | [`data_plane/features/canonical_normalize.py`](../data_plane/features/canonical_normalize.py) | **FB-CAN-016:** aliases, freshness/reliability, completeness; `apply_normalization_degradation` in `state_engine.py`. |
+| Forecast / structure (canonical view) | [`app/contracts/canonical_structure.py`](../app/contracts/canonical_structure.py), [`app/contracts/structure_adapter.py`](../app/contracts/structure_adapter.py) | **FB-CAN-017:** `CanonicalStructureOutput` from `ForecastPacket`; diagnostics on packet; feeds trigger + auction. |
 | Pipeline orchestration | [`decision_engine/pipeline.py`](../decision_engine/pipeline.py) | Regime, forecast, policy, canonical layers. |
 | State / regime / degradation | [`decision_engine/state_engine.py`](../decision_engine/state_engine.py), [`app/contracts/canonical_state.py`](../app/contracts/canonical_state.py) | `RegimeOutput.apex`, `RiskState` canonical fields. |
 | Three-stage trigger | [`decision_engine/trigger_engine.py`](../decision_engine/trigger_engine.py), [`app/contracts/trigger.py`](../app/contracts/trigger.py) | Diagnostics: `forecast_diagnostics["trigger"]`. |

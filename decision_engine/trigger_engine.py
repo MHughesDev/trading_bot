@@ -7,7 +7,9 @@ and reason codes. See APEX_Trigger_Math_Pseudocode_Detail_Spec_v1_0.md.
 from __future__ import annotations
 
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
+from app.contracts.canonical_structure import CanonicalStructureOutput
 from app.contracts.forecast_packet import ForecastPacket
+from app.contracts.structure_adapter import structure_from_forecast_packet
 from app.contracts.trigger import TriggerOutput
 
 
@@ -55,13 +57,15 @@ def evaluate_trigger(
     *,
     spread_bps: float,
     apex: CanonicalStateOutput,
+    structure: CanonicalStructureOutput | None = None,
 ) -> TriggerOutput:
     """Evaluate three-stage trigger from packet, microstructure proxies, and canonical state."""
     reasons: list[str] = []
+    st = structure if structure is not None else structure_from_forecast_packet(pkt)
 
-    A = asymmetry_score(pkt)
+    A = float(st.asymmetry_score)
     S = state_alignment_score(apex)
-    C_struct = _structural_confidence(pkt)
+    C_struct = _clip01(0.55 * float(st.model_agreement_score) + 0.45 * _structural_confidence(pkt))
     C = _clip01(0.5 * apex.regime_confidence + 0.5 * C_struct)
     H = apex.heat_score
     N = apex.novelty
@@ -104,6 +108,7 @@ def evaluate_trigger(
     vol_score = vol_norm
     T_score = _clip01(1.0 - spread_stress)
     F = _clip01(1.0 - float(pkt.ood_score))
+    F = _clip01(0.5 * F + 0.5 * (1.0 - float(st.fragility_score)))
 
     wI, wV, wT, wF = 0.3, 0.25, 0.25, 0.2
     pre_raw = wI * imb_shift + wV * vol_score + wT * T_score + wF * F

@@ -2,7 +2,7 @@
 
 **Purpose:** Single entry point for **target system architecture** during the **FB-CAN-*** canonical migration. Use this page to decide which documents are **binding for “what we are building toward”** vs **historical or as-implemented**.
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-016: [`data_plane/features/canonical_normalize.py`](../data_plane/features/canonical_normalize.py)).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-017: [`app/contracts/canonical_structure.py`](../app/contracts/canonical_structure.py), [`app/contracts/structure_adapter.py`](../app/contracts/structure_adapter.py)).
 
 ---
 

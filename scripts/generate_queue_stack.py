@@ -676,7 +676,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-STR",
         "id": "FB-CAN-017",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Replace legacy ForecastPacket-centric structure output contract",
         "agent_task": "Replace or adapt ForecastPacket-centric interfaces so structure/forecast outputs align to canonical structure inputs required by trigger and auction domains. Remove legacy-only packet fields that do not map to canonical semantics and add migration adapters with expiry if needed.",
         "affected_files": "app/contracts/forecast_packet.py|decision_engine/pipeline.py|forecaster_model/|tests/",
