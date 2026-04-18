@@ -774,7 +774,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DEL-TEST",
         "id": "FB-CAN-024",
         "kind": "tech_debt",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Delete obsolete tests that assert legacy architecture",
         "agent_task": "Remove tests that lock in legacy DecisionPipeline/PolicySystem/hard-gate-only/thin-execution behavior after canonical replacements land. Replace with canonical domain tests in same slices to avoid temporary coverage regression.",
         "affected_files": "tests/|decision_engine/|risk_engine/|execution/",
