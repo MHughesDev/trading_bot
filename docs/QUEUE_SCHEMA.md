@@ -27,6 +27,8 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`risk_engine/canonical_sizing.py`](../risk_engine/canonical_sizing.py) | **APEX canonical risk sizing** — **FB-CAN-007**; `RiskState.last_risk_sizing` after `RiskEngine.evaluate`. |
 | [`execution/execution_logic.py`](../execution/execution_logic.py) | **APEX execution guidance** — **FB-CAN-008**; `OrderIntent.metadata.execution_guidance`. |
 | [`app/contracts/replay_events.py`](../app/contracts/replay_events.py) | **Canonical replay run + events** — **FB-CAN-009**; `ReplayRunContract`, `ReplayEventEnvelope`. |
+| [`observability/canonical_metrics.py`](../observability/canonical_metrics.py) | **APEX canonical monitoring** — **FB-CAN-010**; `tb_canonical_*` Prometheus metrics. |
+| [`docs/MONITORING_CANONICAL.MD`](../docs/MONITORING_CANONICAL.MD) | Operator mapping: APEX monitoring domains → implemented metrics. |
 | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent workflow: one slice → validate → PR → merge. |
 | [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) | Cursor **Add to Queue** skill for adding/updating items. |
 | [`.cursor/skills/queue-one-at-a-time/SKILL.md`](../.cursor/skills/queue-one-at-a-time/SKILL.md) | Cursor **Queue One-at-a-Time** execution skill (take top Open row only, implement, validate, document, commit). |

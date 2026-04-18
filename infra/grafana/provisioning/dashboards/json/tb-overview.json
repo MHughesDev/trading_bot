@@ -67,6 +67,36 @@
       ],
       "title": "Policy shadow |Δexposure| (p95)",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_regime_confidence_bucket[5m])) by (le))",
+          "legendFormat": "p95 regime confidence",
+          "refId": "A"
+        }
+      ],
+      "title": "Canonical: regime confidence (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "sum(rate(tb_canonical_trigger_stage_total[5m])) by (stage, passed)",
+          "legendFormat": "{{stage}} passed={{passed}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Canonical: trigger stages (rate)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
