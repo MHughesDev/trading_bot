@@ -154,6 +154,8 @@ def run_opportunity_auction(
     """
     st = structure if structure is not None else structure_from_forecast_packet(forecast_packet)
     exec_conf = _exec_confidence(spread_bps)
+    dq_pen = _clip(float(feature_row.get("canonical_exec_quality_penalty", 0.0)), 0.0, 1.0)
+    exec_conf = _clip(exec_conf * (1.0 - 0.45 * dq_pen), 0.0, 1.0)
     S_align = state_alignment_score(apex)
     C_conf = _clip(
         0.45 * apex.regime_confidence

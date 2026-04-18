@@ -39,6 +39,7 @@ def run_one_replay_step(
     collect_events: bool,
     events_out: list[dict[str, Any]] | None,
     execution_profile: str | None = None,
+    execution_feedback_state: dict[str, dict[str, float]] | None = None,
 ) -> tuple[Any, Any, Any, Any, Any, Any]:
     """Apply fault injection, run deterministic tick, optionally append canonical events."""
     fp_in = dict(fault_profile or {})
@@ -67,6 +68,7 @@ def run_one_replay_step(
         available_cash_usd=avail,
         portfolio_equity_usd=eq_usd,
         replay_deterministic=True,
+        execution_feedback_state=execution_feedback_state,
     )
 
     if collect_events and events_out is not None:

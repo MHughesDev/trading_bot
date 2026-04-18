@@ -928,7 +928,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-EXEC-FEED",
         "id": "FB-CAN-035",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement execution feedback memory into future decision quality",
         "agent_task": "Implement slow-moving execution feedback memory (realized slippage, fill ratio/latency, venue degradation) that feeds execution confidence and decision-quality penalties over time. Persist and replay this feedback deterministically.",
         "affected_files": "execution/|decision_engine/|data_plane/memory/|backtesting/|tests/",

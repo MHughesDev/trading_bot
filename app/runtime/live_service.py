@@ -54,8 +54,8 @@ from decision_engine.pipeline import DecisionPipeline
 from decision_engine.run_step import run_decision_tick
 from execution.adapters.base_adapter import PositionSnapshot
 from execution.credentials import venue_credentials_configured
+from data_plane.memory.execution_feedback_memory import update_execution_feedback_memory
 from execution.execution_logic import (
-    apply_execution_feedback,
     build_execution_context_from_decision,
     prepare_order_intent_for_execution,
 )
@@ -452,6 +452,7 @@ async def run_live_loop(
                     product_tradable=tradable,
                     position_signed_qty=positions.get(symbol, Decimal(0)),
                     portfolio_equity_usd=risk_engine.current_equity,
+                    execution_feedback_state=exec_feedback,
                 )
                 record_decision_tick(symbol, last_decision_monotonic)
             else:
@@ -531,11 +532,12 @@ async def run_live_loop(
                 else:
                     try:
                         ack = await exec_svc.submit_order(intent)
-                        exec_feedback[symbol] = apply_execution_feedback(
+                        exec_feedback[symbol] = update_execution_feedback_memory(
                             symbol,
                             ExecutionFeedback(
                                 fill_ratio=1.0,
                                 realized_slippage_bps=0.0,
+                                fill_latency_ms=35.0,
                                 venue_quality_score=0.85,
                                 adapter=str(getattr(ack, "adapter", "")),
                             ),
