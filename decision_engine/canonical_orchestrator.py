@@ -98,6 +98,9 @@ def run_canonical_decision_sequence_after_forecast(
         "active": ho,
         "kind": ho_kind.value,
     }
+    pipe_codes: list[str] = []
+    if ho:
+        pipe_codes = ["pipeline_hard_override", f"override_{ho_kind.value}"]
     regime_out = regime_out.model_copy(update={"apex": apex})
 
     # --- trigger ---
@@ -120,6 +123,7 @@ def run_canonical_decision_sequence_after_forecast(
         hard_override_active=ho,
         hard_override_kind=ho_kind,
     )
+    risk = risk.model_copy(update={"last_pipeline_no_trade_codes": list(pipe_codes)})
 
     mp = float(mid_price)
     eq = float(portfolio_equity_usd)
@@ -154,6 +158,9 @@ def run_canonical_decision_sequence_after_forecast(
             confidence=0.0,
             ranking=[RouteId.NO_TRADE],
         )
+        risk = risk.model_copy(
+            update={"last_pipeline_no_trade_codes": ["pipeline_binding_abstain"]},
+        )
         return regime_out, fc, route, None, risk
 
     # --- auction (policy + opportunity auction inside run_spec_policy_step) ---
@@ -182,6 +189,7 @@ def run_canonical_decision_sequence_after_forecast(
         carry_cfg,
         directional_proposal=action,
     )
+    carry_prop: ActionProposal | None = None
     risk = risk.model_copy(
         update={"carry_sleeve_last": carry_dec.model_dump(mode="json")},
     )
@@ -194,6 +202,14 @@ def run_canonical_decision_sequence_after_forecast(
                 route_id=RouteId.NO_TRADE,
                 confidence=0.0,
                 ranking=[RouteId.NO_TRADE],
+            )
+            risk = risk.model_copy(
+                update={
+                    "last_pipeline_no_trade_codes": list(
+                        risk.last_pipeline_no_trade_codes or []
+                    )
+                    + ["carry_sleeve_directional_blocked"]
+                },
             )
         carry_prop = build_carry_proposal(
             symbol,
@@ -208,6 +224,16 @@ def run_canonical_decision_sequence_after_forecast(
                 confidence=min(1.0, carry_dec.funding_signal),
                 ranking=[RouteId.CARRY, RouteId.NO_TRADE],
             )
+
+    if (
+        not pipe_codes
+        and action is None
+        and route.route_id == RouteId.NO_TRADE
+        and not (carry_dec.active and carry_prop is not None)
+    ):
+        risk = risk.model_copy(
+            update={"last_pipeline_no_trade_codes": ["pipeline_no_trade_selected"]},
+        )
 
     return regime_out, fc, route, action, risk
 

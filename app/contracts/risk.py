@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app.contracts.canonical_state import DegradationLevel
@@ -47,3 +49,7 @@ class RiskState(BaseModel):
     degradation_transition_count: int = Field(default=0, ge=0)
     last_degradation_level: str | None = None
     degradation_occupancy_ticks: dict[str, int] = Field(default_factory=dict)
+    # FB-CAN-036 — last-tick canonical reason codes (replay / decision record)
+    last_risk_block_codes: list[str] = Field(default_factory=list)
+    last_pipeline_no_trade_codes: list[str] = Field(default_factory=list)
+    last_decision_record: dict[str, Any] | None = None

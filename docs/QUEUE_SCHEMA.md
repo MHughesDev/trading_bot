@@ -42,6 +42,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py) | **FB-CAN-015** — APEX input snapshot Pydantic models + `snapshot_builders` at pipeline boundary. |
 | [`data_plane/features/canonical_normalize.py`](../data_plane/features/canonical_normalize.py) | **FB-CAN-016** — canonical feature naming + freshness/reliability; degradation hooks. |
 | [`data_plane/memory/execution_feedback_memory.py`](../data_plane/memory/execution_feedback_memory.py) | **FB-CAN-035** — slow EMA execution quality memory; deterministic replay + live updates. |
+| [`app/contracts/decision_record.py`](../app/contracts/decision_record.py) | **FB-CAN-036** — canonical `DecisionRecord`, trade/no-trade/suppression/safety outputs. |
 | [`app/contracts/canonical_structure.py`](../app/contracts/canonical_structure.py) | **FB-CAN-017** — `CanonicalStructureOutput`; `structure_from_forecast_packet`; `forecast_diagnostics["canonical_structure"]`. |
 | [`carry_sleeve/`](../carry_sleeve/) | **FB-CAN-018** — carry eligibility/sizing; `RouteId.CARRY`; `forecast_diagnostics["carry_sleeve"]`; metrics `tb_canonical_carry_*`. |
 | [`docs/architecture/risk_precedence.md`](architecture/risk_precedence.md) | **FB-CAN-020** — `RiskEngine.evaluate` order + canonical sizing + signing (replaces stale table). |

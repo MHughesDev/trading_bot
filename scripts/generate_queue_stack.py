@@ -942,7 +942,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DEC-REC",
         "id": "FB-CAN-036",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement canonical decision record + suppression/safety event outputs",
         "agent_task": "Implement canonical output contracts for Trade Intent, Reduce Exposure Intent, No-Trade Decision, Suppression Event, Safety Override Event, and Decision Record. Ensure every no-trade path emits explicit reason codes and structured diagnostics.",
         "affected_files": "app/contracts/|decision_engine/|risk_engine/|control_plane/api.py|tests/",

@@ -118,12 +118,12 @@ stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_t
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-035** are **Done** (incl. **FB-CAN-035** — execution feedback EMA + replay/live wiring). **FB-CAN-036**…**FB-CAN-078** remain **Open** for canonical migration (next **HIGH** slice **FB-CAN-041**). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** 43 canonical replacement slices.
+**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-036** are **Done** (incl. **FB-CAN-036** — canonical `DecisionRecord` + risk block codes + `/governance/decision-record`). **FB-CAN-037**…**FB-CAN-078** remain **Open** for canonical migration (next **HIGH** slice **FB-CAN-041**). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** 42 canonical replacement slices.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **4** | FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
-| **MEDIUM** | **27** | FB-CAN-036..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
+| **MEDIUM** | **26** | FB-CAN-037..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
 | **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
 **Full row text and completed history:** [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (§2 open tables, §3 fixes, §4 gates, §5 archive).
