@@ -7,6 +7,11 @@ apex_canonical:
     notes: Optional; merge over synthesized legacy projection from flat settings.
     enabled_feature_families:
     - market_microstructure
+    - funding
+    - open_interest
+    - basis
+    - cross_exchange_divergence
+    - liquidation_structure
     - execution_feedback
     - novelty
     - heat_components
@@ -88,45 +93,45 @@ apex_canonical:
         latency_penalty_weight: 0.35
         reliability_penalty_weight: 0.25
       funding:
-        enabled: false
-        base_confidence_floor: 0.0
-        base_confidence_cap: 0.2
+        enabled: true
+        base_confidence_floor: 0.05
+        base_confidence_cap: 0.85
         freshness_floor: 0.0
         freshness_cap: 1.0
         decay_lambda: 1.5
         latency_penalty_weight: 0.2
         reliability_penalty_weight: 0.3
       open_interest:
-        enabled: false
-        base_confidence_floor: 0.0
-        base_confidence_cap: 0.2
+        enabled: true
+        base_confidence_floor: 0.05
+        base_confidence_cap: 0.82
         freshness_floor: 0.0
         freshness_cap: 1.0
         decay_lambda: 1.5
         latency_penalty_weight: 0.2
         reliability_penalty_weight: 0.3
       basis:
-        enabled: false
-        base_confidence_floor: 0.0
-        base_confidence_cap: 0.2
+        enabled: true
+        base_confidence_floor: 0.05
+        base_confidence_cap: 0.82
         freshness_floor: 0.0
         freshness_cap: 1.0
         decay_lambda: 1.5
         latency_penalty_weight: 0.25
         reliability_penalty_weight: 0.25
       cross_exchange_divergence:
-        enabled: false
-        base_confidence_floor: 0.0
-        base_confidence_cap: 0.25
+        enabled: true
+        base_confidence_floor: 0.05
+        base_confidence_cap: 0.8
         freshness_floor: 0.0
         freshness_cap: 1.0
         decay_lambda: 1.8
         latency_penalty_weight: 0.3
         reliability_penalty_weight: 0.3
       liquidation_structure:
-        enabled: false
-        base_confidence_floor: 0.0
-        base_confidence_cap: 0.25
+        enabled: true
+        base_confidence_floor: 0.05
+        base_confidence_cap: 0.8
         freshness_floor: 0.0
         freshness_cap: 1.0
         decay_lambda: 1.6
@@ -181,15 +186,15 @@ apex_canonical:
       market_microstructure:
         enabled: true
       funding:
-        enabled: false
+        enabled: true
       open_interest:
-        enabled: false
+        enabled: true
       basis:
-        enabled: false
+        enabled: true
       cross_exchange_divergence:
-        enabled: false
+        enabled: true
       liquidation_structure:
-        enabled: false
+        enabled: true
       options_context:
         enabled: false
       stablecoin_flow_proxy:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.contracts.replay_events import ReplayEventEnvelope
+from data_plane.ingest.structural_signals import STRUCTURAL_REPLAY_KEYS
 
 
 def build_market_snapshot_event(
@@ -39,12 +40,16 @@ def build_structural_signal_event(
 ) -> ReplayEventEnvelope:
     keys = sorted(feature_row.keys())
     head = [(k, round(float(feature_row[k]), 6)) for k in keys[:32]]
+    structural_subset = {
+        k: round(float(feature_row[k]), 6) for k in STRUCTURAL_REPLAY_KEYS if k in feature_row
+    }
     return ReplayEventEnvelope(
         event_family="structural_signal_event",
         replay_run_id=replay_run_id,
         symbol=symbol,
         timestamp=timestamp,
         payload={
+            "structural": structural_subset,
             "feature_dim": len(feature_row),
             "feature_keys_head": keys[:16],
             "feature_fingerprint": repr(head),

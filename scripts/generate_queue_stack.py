@@ -1124,7 +1124,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DATA-STRUCT",
         "id": "FB-CAN-049",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement structural signal ingestion families (funding/OI/basis/liquidations/divergence)",
         "agent_task": "Implement/normalize structural signal ingestion families required by canonical specs: funding, open interest structure, basis/perp-spot divergence, liquidation structure, and cross-exchange divergence. Include confidence/freshness normalization and missing-data degradation behavior.",
         "affected_files": "data_plane/ingest/|data_plane/features/|app/contracts/|tests/",
