@@ -22,6 +22,16 @@ from orchestration.release_gating import (
 _ALL_FAULT_IDS = list(list_canonical_fault_profile_ids())
 
 
+def _evidence_fb_can_066_baseline() -> dict:
+    """Minimum structured fields for promotion beyond research (FB-CAN-066)."""
+    return {
+        "scenario_test_run_ids": ["scenario-baseline-1"],
+        "key_metrics": {"false_positive_rate": 0.02},
+        "failure_modes_documented": "documented in experiment and stress runs",
+        "shadow_comparison_summary": "shadow vs baseline within governance thresholds",
+    }
+
+
 def _fault_stress_fields() -> dict:
     return {
         "fault_stress_run_ids": ["ci-fault-suite"],
@@ -55,10 +65,15 @@ def _rollback_logic_promotable() -> RollbackTarget:
 
 def _minimal_evidence_live() -> EvidencePackage:
     return EvidencePackage(
+        schema_version=1,
         version_identifiers={"config": "1.0.0", "logic": "1.0.0"},
         replay_summary="ok",
         replay_run_ids=["r1"],
         scenario_stress_summary="ok",
+        scenario_test_run_ids=["scenario-suite-1"],
+        shadow_comparison_summary="shadow vs baseline within thresholds",
+        key_metrics={"false_positive_rate": 0.02, "max_drawdown_proxy": 0.01},
+        failure_modes_documented="latency spikes under stress; mitigated via wider spreads",
         known_risks="none",
         owner_approval_present=True,
         shadow_divergence_reviewed=True,
@@ -116,6 +131,7 @@ def test_combined_live_requires_live_replay_equivalence():
             replay_regression_passed=True,
             live_replay_equivalence_passed=None,
             shadow_comparison_passed=True,
+            **_evidence_fb_can_066_baseline(),
             **_fault_stress_fields(),
         ),
         rollback=_rollback_promotable(),
@@ -145,6 +161,7 @@ def test_logic_live_requires_live_replay_equivalence():
             replay_regression_passed=True,
             live_replay_equivalence_passed=False,
             shadow_comparison_passed=True,
+            **_evidence_fb_can_066_baseline(),
             **_fault_stress_fields(),
         ),
         rollback=_rollback_logic_promotable(),
@@ -169,6 +186,7 @@ def test_logic_live_requires_test_flags():
             known_risks="reviewed",
             owner_approval_present=True,
             shadow_divergence_reviewed=True,
+            **_evidence_fb_can_066_baseline(),
             **_fault_stress_fields(),
         ),
         rollback=_rollback_logic_promotable(),
@@ -218,6 +236,7 @@ def test_simulation_requires_prior_research_environment():
             version_identifiers={"config": "1.0.0"},
             replay_summary="ok",
             replay_run_ids=["r1"],
+            **_evidence_fb_can_066_baseline(),
         ),
         rollback=_rollback_promotable(),
     )
@@ -308,7 +327,11 @@ def test_simulation_blocked_when_linked_experiment_incomplete(tmp_path: Path):
         owner="ops",
         config_version="1.0.0",
         environment="research",
-        evidence=EvidencePackage(version_identifiers={"config": "1.0.0"}, replay_summary="ok"),
+        evidence=EvidencePackage(
+            version_identifiers={"config": "1.0.0"},
+            replay_summary="ok",
+            **_evidence_fb_can_066_baseline(),
+        ),
         rollback=_rollback_promotable(),
         linked_experiment_ids=["exp-incomplete"],
     )
@@ -340,7 +363,11 @@ def test_simulation_passes_with_complete_linked_experiment(tmp_path: Path):
         owner="ops",
         config_version="1.0.0",
         environment="research",
-        evidence=EvidencePackage(version_identifiers={"config": "1.0.0"}, replay_summary="ok"),
+        evidence=EvidencePackage(
+            version_identifiers={"config": "1.0.0"},
+            replay_summary="ok",
+            **_evidence_fb_can_066_baseline(),
+        ),
         rollback=_rollback_promotable(),
         linked_experiment_ids=["exp-complete"],
     )

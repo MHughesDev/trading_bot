@@ -32,6 +32,7 @@ from app.contracts.release_objects import (
     read_release_ledger,
     write_release_ledger,
 )
+from orchestration.evidence_package_validation import evidence_completeness_blocked_gates
 from orchestration.fault_injection_profiles import fault_stress_evidence_satisfied
 from orchestration.rollback_validation import (
     validate_rollback_playbook,
@@ -220,6 +221,15 @@ def evaluate_promotion_gates(
     if not ok_env:
         blocked.append("environment_stage_order")
         reasons.append(env_msg)
+
+    # --- FB-CAN-066: evidence package schema completeness (simulation / shadow / live) ---
+    ec_blocked, ec_reasons = evidence_completeness_blocked_gates(
+        candidate,
+        ev,
+        target_environment=target_environment,
+    )
+    blocked.extend(ec_blocked)
+    reasons.extend(ec_reasons)
 
     # Environment-specific gates
     if target_environment == "simulation":

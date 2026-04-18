@@ -1362,7 +1362,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-EVIDENCE-SCHEMA",
         "id": "FB-CAN-066",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Define canonical evidence package schema for promotion decisions",
         "agent_task": "Define and enforce a canonical evidence package schema that links replay runs, scenario tests, shadow comparisons, key metrics, failure modes, and rollback targets for each promotion decision. Gate releases on schema completeness.",
         "affected_files": "models/|orchestration/|scripts/|docs/|tests/",

@@ -50,18 +50,41 @@ class RollbackTarget(BaseModel):
 
 
 class EvidencePackage(BaseModel):
-    """Material-release evidence bundle (spec §8)."""
+    """Material-release evidence bundle (spec §8).
+
+    **FB-CAN-066** — canonical promotion evidence schema: links replay runs, scenario tests,
+    shadow narrative, key metric snapshots, failure-mode documentation, and ties to rollback
+    (rollback lives on :class:`RollbackTarget`). Completeness is enforced in
+    :func:`orchestration.release_gating.evaluate_promotion_gates` for simulation+ targets.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
+    schema_version: int = Field(
+        default=1,
+        ge=1,
+        description="Evidence package schema revision (FB-CAN-066).",
+    )
     version_identifiers: dict[str, str] = Field(default_factory=dict)
     domains_changed: list[str] = Field(default_factory=list)
     replay_summary: str = ""
     replay_run_ids: list[str] = Field(default_factory=list)
     scenario_stress_summary: str = ""
+    scenario_test_run_ids: list[str] = Field(
+        default_factory=list,
+        description="Scenario / stress replay run ids (distinct from fault_stress_run_ids).",
+    )
     shadow_comparison_summary: str = ""
     expected_benefits: str = ""
     known_risks: str = ""
+    key_metrics: dict[str, float] = Field(
+        default_factory=dict,
+        description="Named metric snapshots for promotion review (FB-CAN-066).",
+    )
+    failure_modes_documented: str = Field(
+        default="",
+        description="Explicit failure modes / mitigations; complements known_risks and experiments.",
+    )
     owner_approval_present: bool = False
     owner_approver: str = ""
     unit_tests_passed: bool | None = None
