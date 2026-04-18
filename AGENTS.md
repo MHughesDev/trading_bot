@@ -86,7 +86,7 @@ Agents working here should:
 | `app/` | Runtime (`live_service`), config (`app/config/`), contracts |
 | `data_plane/` | Ingest (Kraken WS/REST, normalizers), bars, features, memory, storage |
 | `models/` | Regime, forecast, routing, MLflow registry stubs |
-| `decision_engine/` | Pipeline, `run_step` (shared tick), action generator |
+| `decision_engine/` | Pipeline, `run_step` (shared tick), policy/spec proposal path |
 | `risk_engine/` | `RiskEngine`, signing |
 | `execution/` | Router, service, **adapters** (Alpaca paper, Coinbase live) |
 | `backtesting/` | Replay, simulator, portfolio |

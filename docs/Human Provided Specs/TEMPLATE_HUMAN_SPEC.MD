@@ -38,5 +38,5 @@ What this document explicitly does **not** cover.
 
 *Optional — for agents or humans: what was checked against the codebase and when.*
 
-- [ ] Compared to `docs/Specs/SYSTEM_OVERVIEW.MD`
+- [ ] Compared to `docs/Specs/SYSTEM_OVERVIEW.MD` (as-built; not the APEX target — see `docs/Specs/CANONICAL_PRECEDENCE.MD`)
 - [ ] Gaps filed in the **queue system** (`docs/QUEUE_STACK.csv` / `docs/QUEUE_ARCHIVE.MD` per `docs/QUEUE.MD` §6; see `docs/QUEUE_SCHEMA.md`)
