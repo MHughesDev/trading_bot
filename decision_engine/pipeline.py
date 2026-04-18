@@ -358,6 +358,8 @@ class DecisionPipeline:
             position_signed_qty=position_signed_qty,
             policy_system=self._policy_system,
             trigger=trig,
+            apex=apex,
+            feature_row=feature_row,
         )
         return regime_out, fc, route, action
 

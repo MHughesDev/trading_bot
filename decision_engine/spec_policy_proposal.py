@@ -9,7 +9,9 @@ from app.contracts.decisions import ActionProposal, RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState as AppRiskState
+from app.contracts.canonical_state import CanonicalStateOutput
 from app.contracts.trigger import TriggerOutput
+from decision_engine.auction_engine import run_opportunity_auction
 from decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
 from policy_model.bridge import policy_envelope_from_app_settings
 from policy_model.objects import ExecutionState, PortfolioState, RiskState as PolicyRiskState
@@ -106,6 +108,8 @@ def run_spec_policy_step(
     position_signed_qty: Decimal | None,
     policy_system: PolicySystem | None = None,
     trigger: TriggerOutput | None = None,
+    apex: CanonicalStateOutput | None = None,
+    feature_row: dict[str, float] | None = None,
 ) -> tuple[ForecastOutput, RouteDecision, ActionProposal | None]:
     """
     Human-spec path: PolicySystem + ExecutionPlan → proposal; `ForecastOutput` from packet for metrics.
@@ -132,6 +136,23 @@ def run_spec_policy_step(
             proposal = proposal.model_copy(
                 update={"size_fraction": min(1.0, proposal.size_fraction * scale)}
             )
+
+    if apex is not None and trigger is not None and feature_row is not None:
+        proposal, auction_result = run_opportunity_auction(
+            symbol,
+            forecast_packet,
+            apex=apex,
+            trigger=trigger,
+            app_risk=app_risk,
+            spread_bps=spread_bps,
+            feature_row=feature_row,
+            settings=settings,
+            portfolio_equity_usd=portfolio_equity_usd,
+            position_signed_qty=position_signed_qty,
+            base_proposal=proposal,
+            top_n=1,
+        )
+        forecast_packet.forecast_diagnostics["auction"] = auction_result.model_dump()
 
     if proposal is None:
         route = RouteDecision(
