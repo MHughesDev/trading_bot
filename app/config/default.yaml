@@ -5,7 +5,13 @@ apex_canonical:
     created_by: repo-default.yaml
     environment_scope: unspecified
     notes: Optional; merge over synthesized legacy projection from flat settings.
-  domains: {}
+  domains:
+    risk_sizing:
+      max_total_exposure_usd: 100000
+      max_per_symbol_usd: 40000
+      max_drawdown_pct: 0.15
+      max_spread_bps: 50
+      stale_data_seconds: 120
 execution:
   mode: live
   live_adapter: coinbase
@@ -34,12 +40,6 @@ memory:
   qdrant_collection: news_context_memory
   retrieval_interval_seconds: 60
   top_k: 10
-risk:
-  max_total_exposure_usd: 100000
-  max_per_symbol_usd: 40000
-  max_drawdown_pct: 0.15
-  max_spread_bps: 50
-  stale_data_seconds: 120
 features:
   return_windows:
   - 1

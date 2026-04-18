@@ -40,6 +40,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`carry_sleeve/`](../carry_sleeve/) | **FB-CAN-018** — carry eligibility/sizing; `RouteId.CARRY`; `forecast_diagnostics["carry_sleeve"]`; metrics `tb_canonical_carry_*`. |
 | [`docs/architecture/risk_precedence.md`](architecture/risk_precedence.md) | **FB-CAN-020** — `RiskEngine.evaluate` order + canonical sizing + signing (replaces stale table). |
 | [`execution/router.py`](../execution/router.py) | **FB-CAN-021** — `create_execution_adapter` only (removed duplicate `get_execution_adapter`). |
+| [`app/config/default.yaml`](../app/config/default.yaml) | **FB-CAN-022** — risk limits under **`apex_canonical.domains.risk_sizing`** (no top-level **`risk:`**). |
 | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent workflow: one slice → validate → PR → merge. |
 | [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) | Cursor **Add to Queue** skill for adding/updating items. |
 | [`.cursor/skills/queue-one-at-a-time/SKILL.md`](../.cursor/skills/queue-one-at-a-time/SKILL.md) | Cursor **Queue One-at-a-Time** execution skill (take top Open row only, implement, validate, document, commit). |

@@ -2,7 +2,7 @@
 
 **Purpose:** Single **code-to-domain** map for the shared decision path after **FB-CAN-004…011**. Use it with **[`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD)** (what to build toward) and **[`docs/Specs/README.MD`](Specs/README.MD)** (as-built file index).
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-021: `execution/router` — `create_execution_adapter` only).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-022: `app/config` — `apex_canonical.domains.risk_sizing` for YAML risk limits).
 
 ---
 

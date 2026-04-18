@@ -6,7 +6,7 @@
 ## As implemented
 
 - **`market_data_symbols`** drives multiple independent **decision ticks** (one stream per symbol in `live_service` / replay loops).
-- **Aggregate exposure (FB-SPEC-07-01):** `RiskEngine.evaluate` applies **`risk_max_total_exposure_usd`** as a **portfolio-wide** ceiling on *new* notional (`current_total_exposure_usd + proposed_notional`), and **`risk_max_per_symbol_usd`** per symbol. Configure both in `default.yaml` under `risk:` or via **`NM_RISK_MAX_TOTAL_EXPOSURE_USD`** / **`NM_RISK_MAX_PER_SYMBOL_USD`**. There is no separate “per-tier” cap beyond these two knobs.
+- **Aggregate exposure (FB-SPEC-07-01):** `RiskEngine.evaluate` applies **`risk_max_total_exposure_usd`** as a **portfolio-wide** ceiling on *new* notional (`current_total_exposure_usd + proposed_notional`), and **`risk_max_per_symbol_usd`** per symbol. Configure via **`NM_RISK_MAX_TOTAL_EXPOSURE_USD`** / **`NM_RISK_MAX_PER_SYMBOL_USD`** or **`apex_canonical.domains.risk_sizing`** in `default.yaml` (FB-CAN-022 removed the legacy top-level **`risk:`** block). There is no separate “per-tier” cap beyond these two knobs.
 - **Cross-symbol policy (FB-SPEC-07-02):** the hot path uses an **independent per-symbol** contract — no correlation matrix, shared factor risk, or risk-parity allocator. Decision ticks do not coordinate entries across symbols beyond the shared global/per-symbol USD caps above.
 - **`RiskEngine`** also applies drawdown, spread, stale-data, mode, and reduce-only rules shared across symbols.
 - **`Position reconcile`** (if enabled) is per adapter account; multi-symbol positions remain under the same limits.

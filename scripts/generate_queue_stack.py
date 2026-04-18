@@ -746,7 +746,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DEL-CFG",
         "id": "FB-CAN-022",
         "kind": "tech_debt",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Delete conflicting legacy config keys and env surfaces",
         "agent_task": "After canonical config adoption, remove superseded AppSettings/default.yaml keys and NM_* env mappings that conflict with canonical domains. Provide migration notes and fail-fast warnings for removed keys during one deprecation window, then hard-delete.",
         "affected_files": "app/config/settings.py|app/config/default.yaml|README.md|docs/",

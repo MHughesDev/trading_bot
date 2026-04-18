@@ -74,7 +74,7 @@ Think of it as a little factory line — not every bell and whistle, just the ha
 
 | | |
 |:---:|:---|
-| 🔑 | Put secrets in **`.env`** — never commit them. App settings use the **`NM_`** prefix (see [`.env.example`](.env.example)). |
+| 🔑 | Put secrets in **`.env`** — never commit them. App settings use the **`NM_`** prefix (see [`.env.example`](.env.example)). Risk limits in YAML live under **`apex_canonical.domains.risk_sizing`** in **`app/config/default.yaml`** (not a top-level **`risk:`** key). |
 | 📦 | Default execution mode is **paper**; go **live** only when you mean it and keys are set. |
 | 🧪 | Dev quickies: `python3 -m ruff check .` and `python3 -m pytest tests/ -q` (after `pip install -e ".[dev]"`). |
 
