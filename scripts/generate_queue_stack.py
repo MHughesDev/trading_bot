@@ -816,7 +816,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-EXP",
         "id": "FB-CAN-027",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement experiment registry CRUD and linkage to release candidates",
         "agent_task": "Create experiment registry models/storage/APIs with required canonical fields (hypothesis, metrics-defined-before-run, failure modes, replay/scenario/shadow references, release candidate links). Enforce lifecycle transitions and traceability from experiment to promotion decision.",
         "affected_files": "research/|models/|control_plane/|docs/|tests/",

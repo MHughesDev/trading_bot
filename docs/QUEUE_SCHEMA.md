@@ -31,7 +31,8 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`docs/MONITORING_CANONICAL.MD`](../docs/MONITORING_CANONICAL.MD) | Operator mapping: APEX monitoring domains → implemented metrics. |
 | [`orchestration/release_gating.py`](../orchestration/release_gating.py) | **APEX release gating** — **FB-CAN-011**; `ReleaseCandidate`, `evaluate_promotion_gates`, JSON ledger helpers. |
 | [`orchestration/release_evidence.py`](../orchestration/release_evidence.py) | **Release evidence bundles** — **FB-CAN-026**; canonical fingerprint, diff vs baseline YAML, replay/shadow run id slots. |
-| [`models/registry/experiment_registry.py`](../models/registry/experiment_registry.py) | **APEX experiment registry** — **FB-CAN-011**; `ExperimentRecord`, `query_experiments`, JSON registry helpers. |
+| [`models/registry/experiment_registry.py`](../models/registry/experiment_registry.py) | **APEX experiment registry** — **FB-CAN-011** / **FB-CAN-027**; `ExperimentRecord`, lifecycle validation, `query_experiments`, ledger sync, JSON registry helpers. |
+| [`research/`](../research/) | **FB-CAN-027** — re-exports experiment registry for research tooling entry point. |
 | [`docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD) | Operator guide: governance files and `validate_release_gates.py`. |
 | [`docs/CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD) | **FB-CAN-012+** — removed paths and replacement pointers (canonical migration). |
 | [`docs/CANONICAL_MODULE_MAP.MD`](CANONICAL_MODULE_MAP.MD) | **FB-CAN-014** — module map: runtime packages vs APEX domains (`run_decision_tick` spine). |
