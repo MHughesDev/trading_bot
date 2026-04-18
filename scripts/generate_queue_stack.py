@@ -704,7 +704,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DEL-DEC",
         "id": "FB-CAN-019",
         "kind": "tech_debt",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Delete obsolete decision_engine modules after canonical cutover",
         "agent_task": "After state/trigger/auction orchestration is active, delete obsolete decision_engine modules that encode legacy DecisionPipeline/PolicySystem single-proposal flow. Update imports and remove dead code paths/tests tied to removed modules in the same PR slice.",
         "affected_files": "decision_engine/|tests/",
