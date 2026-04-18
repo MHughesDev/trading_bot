@@ -2,7 +2,7 @@
 
 **Purpose:** Single entry point for **target system architecture** during the **FB-CAN-*** canonical migration. Use this page to decide which documents are **binding for “what we are building toward”** vs **historical or as-implemented**.
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) + Specs tombstones; see [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD)).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-058: [`CANONICAL_TOMBSTONE_INDEX.MD`](CANONICAL_TOMBSTONE_INDEX.MD); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) + Specs tombstones; see [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD)).
 
 **Terminology:** [`CANONICAL_GLOSSARY.MD`](CANONICAL_GLOSSARY.MD) — legacy vs APEX naming (FB-CAN-040).
 
@@ -44,6 +44,7 @@ When two documents conflict on **target** behavior, **canonical APEX** wins. Whe
 
 - **Governance (release gating + experiment registry):** [`GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD)
 - **Deletion log (removed paths + replacements):** [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD)
+- **Tombstone index (paths + GitHub commit links + replacements):** [`CANONICAL_TOMBSTONE_INDEX.MD`](CANONICAL_TOMBSTONE_INDEX.MD) (**FB-CAN-058**)
 - **Module map (runtime packages ↔ APEX domains):** [`CANONICAL_MODULE_MAP.MD`](CANONICAL_MODULE_MAP.MD)
 - **Decision Service input snapshots (typed):** [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py) · builders [`app/contracts/snapshot_builders.py`](../app/contracts/snapshot_builders.py)
 - **Queue program:** [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) · [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) §2.7 **FB-CAN-***

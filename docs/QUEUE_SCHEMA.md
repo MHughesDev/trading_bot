@@ -41,6 +41,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`research/`](../research/) | **FB-CAN-027** — re-exports experiment registry for research tooling entry point. |
 | [`docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD) | Operator guide: governance files and `validate_release_gates.py`. |
 | [`docs/CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD) | **FB-CAN-012+** — removed paths and replacement pointers (canonical migration). |
+| [`docs/CANONICAL_TOMBSTONE_INDEX.MD`](CANONICAL_TOMBSTONE_INDEX.MD) | **FB-CAN-058** — tombstone index with GitHub commit links + replacements. |
 | [`docs/CANONICAL_MODULE_MAP.MD`](CANONICAL_MODULE_MAP.MD) | **FB-CAN-014** — module map: runtime packages vs APEX domains (`run_decision_tick` spine). |
 | [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py) | **FB-CAN-015** — APEX input snapshot Pydantic models + `snapshot_builders` at pipeline boundary. |
 | [`data_plane/features/canonical_normalize.py`](../data_plane/features/canonical_normalize.py) | **FB-CAN-016** — canonical feature naming + freshness/reliability; degradation hooks. |

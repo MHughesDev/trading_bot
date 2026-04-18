@@ -1250,7 +1250,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DOC-TOMBS",
         "id": "FB-CAN-058",
         "kind": "change",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Add explicit tombstone index for removed modules and removed docs",
         "agent_task": "Add docs index of removed/replaced modules/docs with removal commit links and canonical replacement pointers. Ensure operators and contributors can trace where legacy paths moved and why they were deleted.",
         "affected_files": "docs/|README.md|docs/reports/|tests/",
