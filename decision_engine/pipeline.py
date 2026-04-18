@@ -327,6 +327,7 @@ class DecisionPipeline:
             cl,
             vo,
             cfg=cfg,
+            now=data_timestamp,
             conformal_state_path=conf_path,
             weight_bundle=self._forecaster_weight_bundle if self._torch_model is None else None,
             torch_model=self._torch_model,
