@@ -1376,7 +1376,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-CONSTANTS",
         "id": "FB-CAN-067",
         "kind": "hardening",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Add guardrail against hidden magic constants in canonical paths",
         "agent_task": "Add lint/static checks and review guidance to prevent hidden constants in canonical domains; require configurable thresholds/weights to originate from canonical config versions and fail CI on newly introduced untracked constants in key modules.",
         "affected_files": "scripts/|decision_engine/|risk_engine/|execution/|app/config/|tests/",
