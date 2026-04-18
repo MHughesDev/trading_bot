@@ -118,11 +118,11 @@ stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_t
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-078** (canonical replacement program) are **Done**, including **FB-CAN-078** (automated acceptance audit). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** none — sentinel **`_QUEUE_EMPTY_`** only.
+**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-078** (canonical replacement program) are **Done**, including **FB-CAN-078** (automated acceptance audit). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** **FB-AUTH-001**, **FB-UX-017** — both **HIGH**, operator-facing login security + venue onboarding.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **0** | — |
+| **HIGH** | **2** | FB-AUTH-001, FB-UX-017 |
 | **MEDIUM** | **0** | — |
 | **LOW** | **0** | — |
 

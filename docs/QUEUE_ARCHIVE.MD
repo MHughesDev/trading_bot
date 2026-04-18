@@ -15,13 +15,13 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-078** are **Done** (incl. **FB-CAN-078** acceptance audit). Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue:** no **Open** rows — sentinel **`_QUEUE_EMPTY_`** only.
+**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-078** are **Done** (incl. **FB-CAN-078** acceptance audit). Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue:** **FB-AUTH-001** (idle-timeout login gate) and **FB-UX-017** (venue-key onboarding wizard) — both **HIGH**. See [**HIGH priority**](#high-priority) table below.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **0** | — |
+| **HIGH** | **2** | FB-AUTH-001, FB-UX-017 |
 | **MEDIUM** | **0** | — |
 | **LOW** | **0** | — |
 
@@ -33,7 +33,10 @@
 
 *P0 / P1 — release-critical and core architecture.*
 
-*No **Open** rows — audit backlog [**§2.5**](#25-post-audit-hardening-fb-aud) **Done**; stack empty in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)**.*
+| ID | Batch | Phase | Cat | Kind | Pri | Status | Summary | Affected files |
+|----|-------|-------|-----|------|-----|--------|---------|----------------|
+| FB-AUTH-001 | AUTH-IDLE | B | CP | hardening | HIGH | Open | **2-hour idle lockout + hard gate on all pages.** Add `last_activity_at` to `operator_sessions`, touch it on every authenticated request, invalidate sessions idle > `NM_AUTH_IDLE_TIMEOUT_SECONDS` (default 7200s). Flip `auth_session_enabled` default to **True**. `require_streamlit_app_access` must `st.switch_page('pages/0_Login.py')` + `st.stop()` immediately when a session is missing/expired — no partial renders on Home/Account/Dashboard. `0_Login.py`/`99_Sign_up.py` stay on login-only gate. Absolute 7-day TTL still applies in parallel. | `app/config/settings.py`, `app/runtime/operator_sessions.py`, `control_plane/streamlit_util.py`, `control_plane/api.py`, `control_plane/Home.py`, `control_plane/pages/`, `.env.example`, `tests/test_auth_idle_timeout.py`, `tests/test_streamlit_gate_blocks_pages.py` |
+| FB-UX-017 | UX-ONBOARD | B | UI | change | HIGH | Open | **Sequential venue-key wizard.** Split `pages/98_Setup_API_keys.py` into two in-process steps driven by `st.session_state["venue_setup_step"]` (`alpaca` → `coinbase` → `done`). Each step has Next + Skip; transitions via `st.rerun()` for smooth flow; `st.progress`/`st.caption` as step indicator. Backend `PUT /auth/venue-credentials` must accept partial updates without clobbering the other venue. Resume logic: returning user lands on first missing step; fully complete user switches straight to `Home.py`. Pre-fill masked suffix for existing keys. | `control_plane/pages/98_Setup_API_keys.py`, `control_plane/streamlit_util.py`, `control_plane/api.py`, `app/contracts/user_venue_credentials.py`, `tests/test_venue_wizard_steps.py`, `tests/test_venue_wizard_resume.py` |
 
 ### 2.2 Per-asset product epic (**FB-AP-P0**)
 
@@ -130,7 +133,7 @@
 | FB-UX-013 | AP-UX-UI | B | UI | feature | LOW | Done | **In-app notifications:** Toasts for init complete, train failure, flatten (**st.toast** + polling or events). **Done 2026-04-12:** **`control_plane/app_toasts.py`** — **`maybe_toast`** + **`NM_STREAMLIT_TOASTS_ENABLED`**; Asset page **Initialize** / **Start** / **Stop** (flatten-aware); **init monitor** + **scheduler panel** transitions; **`post_mutate_response`** long timeout for Stop. | `control_plane/` |
 | FB-UX-014 | AP-UX-UI | B | UI | feature | LOW | Done | **Watchlist / favorites:** Pin symbols for quick navigation to Asset Page (session or per-user prefs). **Done 2026-04-12:** **`control_plane/watchlist.py`** — session **`st.session_state`** list (max 24); **Pin ★** / **Remove ★** on **Asset** page; sidebar links in **`streamlit_chrome.py`**. | `control_plane/` |
 | FB-UX-015 | AP-UX-ONB | B | UI | feature | HIGH | Done | **Dedicated Sign up page + mandatory venue API key onboarding:** **`pages/99_Sign_up.py`** (link from **`0_Login`** + sidebar); **`pages/98_Setup_API_keys.py`** when **`NM_STREAMLIT_VENUE_KEYS_REQUIRED=true`** — **`require_streamlit_app_access`** redirects until Alpaca (paper) or Coinbase (live) pair saved per **`GET /status` → `execution_mode`**; **`/auth/me`**, **`/auth/login`**, **`/auth/register`** return **`venue_keys_required`** / **`venue_keys_complete`**. Kraken remains deployment **`NM_*`** only. **Done 2026-04-13.** | `control_plane/pages/`, `control_plane/streamlit_util.py`, `control_plane/api.py`, `app/runtime/auth_venue_status.py` |
-| FB-UX-016 | UX-DOC | B | OP | change | MEDIUM | Done | **Document venue key onboarding in README + RUNBOOKS:** operator paragraph under *Control plane security* (**`README.md`**) — sessions, route guard, **`NM_STREAMLIT_VENUE_KEYS_REQUIRED`**, pages 98/99, links to **`PER_ASSET_OPERATOR`** / **`RUNBOOKS`**. **`RUNBOOKS.MD`** — new § *Streamlit venue key onboarding (FB-UX-015)* — prerequisites (**`NM_AUTH_VENUE_CREDENTIALS_MASTER_SECRET`**), behavior, Kraken note. **Done 2026-04-13.** | `README.md`, `docs/RUNBOOKS.MD` |
+| FB-UX-017 | UX-DOC | B | OP | change | MEDIUM | Done | **Document venue key onboarding in README + RUNBOOKS:** operator paragraph under *Control plane security* (**`README.md`**) — sessions, route guard, **`NM_STREAMLIT_VENUE_KEYS_REQUIRED`**, pages 98/99, links to **`PER_ASSET_OPERATOR`** / **`RUNBOOKS`**. **`RUNBOOKS.MD`** — new § *Streamlit venue key onboarding (FB-UX-015)* — prerequisites (**`NM_AUTH_VENUE_CREDENTIALS_MASTER_SECRET`**), behavior, Kraken note. **Done 2026-04-13.** | `README.md`, `docs/RUNBOOKS.MD` |
 
 ### 2.5 Post-audit hardening (**FB-AUD-***)
 
