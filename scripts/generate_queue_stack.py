@@ -16,6 +16,302 @@ ROWS: list[dict[str, str]] = [
     {
         "priority": "HIGH",
         "phase": "B",
+        "batch": "CHART-FIX",
+        "id": "IL-CHART-001",
+        "kind": "fix",
+        "status": "Open",
+        "summary_one_line": "Asset chart returns 500 for uninitialized symbols; broaden except + ensure canonical_bars table exists",
+        "agent_task": (
+            "Goal: GET /assets/chart/bars must not return 500 when a symbol is "
+            "uninitialized, when the canonical_bars QuestDB table does not yet "
+            "exist, or when QuestDB has zero rows. Today the handler only "
+            "catches ValueError (control_plane/api.py:1335-1348); psycopg "
+            "UndefinedTable and OperationalError escape the handler and yield "
+            "500, which is what the Asset page is surfacing as 'Chart data "
+            "failed: Server error 500 Internal Server Error'. "
+            "Acceptance criteria: "
+            "(1) In data_plane/storage/questdb.py, on first connect ensure the "
+            "canonical_bars table exists via CREATE TABLE IF NOT EXISTS using "
+            "the same DDL the insert path expects. Idempotent; safe on warm "
+            "connections. Add a unit test. "
+            "(2) In control_plane/api.py handler for /assets/chart/bars, "
+            "broaden the except to catch psycopg.errors.UndefinedTable and "
+            "treat it as empty: return 200 with count=0, bars=[], plus a "
+            "'warning' field explaining the table was just created. "
+            "(3) Catch psycopg.OperationalError (connection refused / stale "
+            "connection) and return 503 with a JSON error envelope {error: "
+            "'storage_unavailable', detail: str(exc)}. Never 500. "
+            "(4) Any other unexpected Exception: log with traceback, return "
+            "500 but with a structured envelope {error: 'internal', detail: "
+            "str(exc)} so clients can parse it. No raw FastAPI HTML. "
+            "(5) Add integration tests: tests/test_chart_bars_empty_table.py "
+            "(drop table, call endpoint, expect 200 empty) and "
+            "tests/test_chart_bars_connection_down.py (mock OperationalError "
+            "from qdb.connect, expect 503). "
+            "(6) Update control_plane/asset_page.py error surface to "
+            "differentiate 'no data yet' (show friendly empty-state message) "
+            "from 503/500 (show actual error). "
+            "Constraints: do not change the success-response schema; existing "
+            "200-with-bars clients must not break."
+        ),
+        "affected_files": (
+            "control_plane/api.py|control_plane/chart_bars.py|"
+            "data_plane/storage/questdb.py|control_plane/asset_page.py|"
+            "tests/test_chart_bars_empty_table.py|"
+            "tests/test_chart_bars_connection_down.py"
+        ),
+        "docs_refs": "docs/architecture/backtesting_simulator.md",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
+        "priority": "HIGH",
+        "phase": "B",
+        "batch": "UX-NAV",
+        "id": "FB-UX-018",
+        "kind": "change",
+        "status": "Open",
+        "summary_one_line": "Sidebar: migrate to st.navigation, 5 primary links + Watching/Holdings expanders, drop URL and config-symbol blocks",
+        "agent_task": (
+            "Goal: Replace the current sidebar (Streamlit's default multipage "
+            "auto-sidebar that exposes Home/Login/Live/Regimes/Routes/Models/"
+            "Logs/Emergency/Account/Setup API keys/Sign up/Asset PLUS the "
+            "custom list from streamlit_chrome.py) with a single curated "
+            "sidebar containing ONLY: Dashboard, Asset page, Account, Sign "
+            "in, Sign up. Below the primary nav, two collapsible expanders: "
+            "'Watching' (from lifecycle.active) and 'Holdings' (from current "
+            "positions). Remove the 'Open asset (from config)', 'Active "
+            "(watching)', 'Watchlist (session)' and Control plane / QuestDB "
+            "/ Grafana URL blocks. "
+            "Acceptance criteria: "
+            "(1) Migrate Home.py entry to use st.navigation + st.Page (modern "
+            "multipage API) so hidden pages (1_Live.py, 2_Regimes.py, "
+            "3_Routes.py, 4_Models.py, 5_Logs.py, 6_Emergency.py, "
+            "98_Setup_API_keys.py) are still routable (98 via redirect from "
+            "login) but not listed in the sidebar. "
+            "(2) In control_plane/streamlit_chrome.py rewrite "
+            "render_app_sidebar to emit only the 5 st.page_link entries and "
+            "the two new expanders. Delete the URL-block and config-symbol "
+            "block code entirely. "
+            "(3) Watching expander: pull from GET /status -> "
+            "asset_lifecycle.states, filter state == 'active'; each row is a "
+            "st.page_link to /Asset?symbol=X with last-price delta suffix "
+            "from the price cache if available, else symbol only. "
+            "(4) Holdings expander: new helper that hits "
+            "GET /positions (add the route if not present; see "
+            "execution/pnl_summary.py) and renders one row per non-zero "
+            "position: symbol + qty + unrealized PnL colored green/red. "
+            "(5) Each expander preserves its open/closed state in "
+            "st.session_state across reruns. "
+            "(6) Ensure all existing pages still render; the hidden ones "
+            "remain reachable via direct URL for ops. Update tests in "
+            "tests/test_streamlit_chrome_active.py and add "
+            "tests/test_sidebar_holdings.py. "
+            "Constraints: do not remove the page files; only hide them from "
+            "the sidebar. Do not break /auth/* flows."
+        ),
+        "affected_files": (
+            "control_plane/Home.py|control_plane/streamlit_chrome.py|"
+            "control_plane/pages/|control_plane/api.py|"
+            "tests/test_streamlit_chrome_active.py|"
+            "tests/test_sidebar_holdings.py"
+        ),
+        "docs_refs": "docs/WINDOWS_OPERATOR_UI.MD",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
+        "priority": "HIGH",
+        "phase": "B",
+        "batch": "UX-THEME",
+        "id": "FB-UX-019",
+        "kind": "change",
+        "status": "Open",
+        "summary_one_line": "Design system: dark theme, .streamlit/config.toml, global CSS module, Inter + JetBrains Mono",
+        "agent_task": (
+            "Goal: Establish a cohesive modern visual language across the "
+            "Streamlit app so every subsequent page redesign inherits it. "
+            "Dark-first, financial-grade, low chrome. "
+            "Acceptance criteria: "
+            "(1) Create .streamlit/config.toml with theme settings: "
+            "base='dark', primaryColor='#6366F1' (accent), "
+            "backgroundColor='#0B0F17', secondaryBackgroundColor='#111827', "
+            "textColor='#E5E7EB', font='sans serif'. "
+            "(2) Create control_plane/_theme.py exporting inject_global_css() "
+            "that calls st.markdown with <style> containing: import Inter and "
+            "JetBrains Mono from Google Fonts; body font-family Inter; .stMarkdown "
+            "code, .stMetric-value {font-family: 'JetBrains Mono'; "
+            "font-variant-numeric: tabular-nums}; hide #MainMenu, footer, "
+            "header (Deploy button + hamburger); card utility class with "
+            "border 1px solid #1F2937 and border-radius 12px; P&L green "
+            "#22D3A0 and loss red #F87171 as CSS vars --pnl-up / --pnl-down. "
+            "(3) Call inject_global_css() from Home.py and every pages/*.py "
+            "at the top (after auth gate). "
+            "(4) Update st.set_page_config in Home.py to layout='wide', "
+            "initial_sidebar_state='expanded', page_title='Trading Bot', "
+            "page_icon set to a subtle glyph. "
+            "(5) Add a small 'brand' helper render_brand() that prints a "
+            "compact logo/wordmark at the top of the sidebar. "
+            "(6) Tests: tests/test_theme_css_injection.py asserts "
+            "inject_global_css returns the expected CSS contract (Inter font "
+            "import, tabular-nums rule, hidden-chrome rule). "
+            "Constraints: do not introduce a new dependency unless it is "
+            "already in pyproject dashboard extra. No runtime light/dark "
+            "toggle."
+        ),
+        "affected_files": (
+            ".streamlit/config.toml|control_plane/_theme.py|"
+            "control_plane/Home.py|control_plane/pages/|"
+            "tests/test_theme_css_injection.py"
+        ),
+        "docs_refs": "docs/WINDOWS_OPERATOR_UI.MD",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
+        "priority": "HIGH",
+        "phase": "B",
+        "batch": "UX-DASH",
+        "id": "FB-UX-020",
+        "kind": "change",
+        "status": "Open",
+        "summary_one_line": "Dashboard redesign: hero PnL chart with Paper/Live toggle, Active-watching panel, Holdings panel",
+        "agent_task": (
+            "Goal: Home.py becomes a clean operator dashboard. One hero P&L "
+            "chart spanning the full width with a segmented Paper|Live "
+            "toggle in the top-right. Two side-by-side panels below: Active "
+            "watching and Current holdings. "
+            "Acceptance criteria: "
+            "(1) Hero P&L: use plotly dark theme, cumulative realized+unrealized "
+            "P&L line. Data source: existing GET /pnl/series (add optional "
+            "?mode=paper|live query param if not already supported) served "
+            "from execution/pnl_ledger.py. Segmented toggle via st.segmented_control "
+            "or st.radio styled as pills; selection persists in st.session_state. "
+            "(2) Below the chart, two columns (st.columns([1,1])): "
+            "  - LEFT: 'Active watching' — list of symbols in "
+            "    asset_lifecycle.states == 'active'. Each row: symbol (bold), "
+            "    last price, 24h delta (green/red), clickable to Asset page. "
+            "  - RIGHT: 'Current holdings' — one row per non-zero position: "
+            "    symbol, qty, avg cost, market value, unrealized P&L with "
+            "    color. Empty state: friendly 'No open positions'. "
+            "(3) Remove the legacy pnl_panel.py holdings table AND the old "
+            "execution-mode caption row — those responsibilities now live in "
+            "the two new panels and the Asset page's per-symbol toggle "
+            "(FB-AP-030) respectively. Do not reintroduce an app-wide "
+            "Paper/Live switch; the hero-chart toggle is READ-ONLY (affects "
+            "the chart view, not order routing). "
+            "(4) All numbers tabular-nums via the theme CSS from FB-UX-019. "
+            "(5) Tests: tests/test_dashboard_pnl_toggle.py covers mode switch "
+            "re-renders with correct /pnl/series?mode=... call; "
+            "tests/test_dashboard_panels.py covers empty-state and populated "
+            "states for both panels. "
+            "Constraints: depends on FB-UX-019 theme being applied. No "
+            "regressions to existing /pnl/series consumers."
+        ),
+        "affected_files": (
+            "control_plane/Home.py|control_plane/pnl_panel.py|"
+            "control_plane/api.py|execution/pnl_ledger.py|"
+            "execution/pnl_summary.py|"
+            "tests/test_dashboard_pnl_toggle.py|"
+            "tests/test_dashboard_panels.py"
+        ),
+        "docs_refs": "docs/WINDOWS_OPERATOR_UI.MD",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
+        "priority": "MEDIUM",
+        "phase": "B",
+        "batch": "UX-ASSET",
+        "id": "FB-UX-021",
+        "kind": "change",
+        "status": "Open",
+        "summary_one_line": "Asset page redesign: slim header, morphing lifecycle button, collapse Chart-API debug",
+        "agent_task": (
+            "Goal: control_plane/pages/Asset.py and the helpers in "
+            "control_plane/asset_page.py become minimal and chart-first. "
+            "Acceptance criteria: "
+            "(1) Header: one line containing symbol badge, lifecycle state "
+            "badge, watchlist pin, and a single primary button that morphs "
+            "by state: Initialize (uninitialized) / Start (initialized_not_active) "
+            "/ Stop (active). Color: accent when Initialize, green when "
+            "Start, red when Stop. Replace today's multi-column header. "
+            "(2) Execution-mode dropdown and the long 'Application default / "
+            "Effective for orders / Paper vs live / Apply execution mode' "
+            "paragraph collapse into a single compact selectbox + Save "
+            "button, or an st.popover labeled 'Execution mode' if the "
+            "Streamlit version supports it. "
+            "(3) Candlestick chart becomes the hero below the header, full "
+            "width. Interval selector is a segmented control "
+            "(1s/1m/1h/1d/1w/1M) above the chart, right-aligned. "
+            "(4) Move the 'FB-AP-034 — SSE push' caption and the entire "
+            "'Chart API (read-only)' section into a single st.expander("
+            "'Developer / Debug', expanded=False). "
+            "(5) 'No manifest for this symbol (uninitialized)' message "
+            "becomes a friendly empty-state card with the Initialize button "
+            "in it, not a blue info banner. "
+            "(6) Integrates with IL-CHART-001 empty-state behavior. "
+            "(7) Tests: tests/test_asset_page_header_morph.py covers the "
+            "three lifecycle button variants; existing asset-page tests must "
+            "still pass. "
+            "Constraints: depends on FB-UX-019 theme and IL-CHART-001 fix."
+        ),
+        "affected_files": (
+            "control_plane/pages/Asset.py|control_plane/asset_page.py|"
+            "control_plane/asset_lifecycle_actions.py|"
+            "tests/test_asset_page_header_morph.py"
+        ),
+        "docs_refs": "docs/WINDOWS_OPERATOR_UI.MD",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
+        "priority": "MEDIUM",
+        "phase": "B",
+        "batch": "UX-AUTH",
+        "id": "FB-UX-022",
+        "kind": "change",
+        "status": "Open",
+        "summary_one_line": "Account / Sign-in / Sign-up polish: centered card forms, brand hero, consistent padding",
+        "agent_task": (
+            "Goal: pages/0_Login.py, pages/99_Sign_up.py, pages/7_Account.py "
+            "get a cohesive modern look matching the new theme. "
+            "Acceptance criteria: "
+            "(1) Login and Sign-up: no sidebar before auth — use "
+            "st.set_page_config(initial_sidebar_state='collapsed') on those "
+            "two pages. Center a single card (max-width 420px) with the "
+            "brand wordmark, one-line tagline, the form (email, password "
+            "only — no clutter), primary CTA button, and a subtle "
+            "'Already have an account? Sign in' / 'Create one' link. "
+            "(2) Account: card-based layout with three stacked cards — "
+            "'Profile' (email, created_at, last login), 'Security' (logout "
+            "all sessions button, change password if supported), 'Venue "
+            "keys' (shows masked key status for Alpaca + Coinbase with an "
+            "'Update' link that opens the FB-UX-017 wizard). No more flat "
+            "unstyled form fields. "
+            "(3) All forms inherit tabular-nums + Inter from the theme; "
+            "consistent 24px padding, 12px corner radius, border "
+            "1px solid #1F2937. "
+            "(4) Error states use color var --pnl-down; success uses "
+            "--pnl-up. "
+            "(5) Tests: tests/test_auth_pages_layout.py smoke-renders each "
+            "of the three pages under the theme and asserts brand helper + "
+            "card wrapper appear. "
+            "Constraints: depends on FB-UX-019 theme; must still honor "
+            "FB-AUTH-001 idle-timeout gate semantics."
+        ),
+        "affected_files": (
+            "control_plane/pages/0_Login.py|control_plane/pages/99_Sign_up.py|"
+            "control_plane/pages/7_Account.py|control_plane/_theme.py|"
+            "tests/test_auth_pages_layout.py"
+        ),
+        "docs_refs": "docs/WINDOWS_OPERATOR_UI.MD",
+        "audit_id": "",
+        "anchor": "",
+    },
+    {
+        "priority": "HIGH",
+        "phase": "B",
         "batch": "AUTH-IDLE",
         "id": "FB-AUTH-001",
         "kind": "hardening",

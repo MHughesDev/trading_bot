@@ -118,12 +118,12 @@ stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_t
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-078** (canonical replacement program) are **Done**, including **FB-CAN-078** (automated acceptance audit). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** **FB-AUTH-001**, **FB-UX-017** — both **HIGH**, operator-facing login security + venue onboarding.
+**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-078** (canonical replacement program) are **Done**. Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack (pull order):** **IL-CHART-001** (chart 500 fix) → **FB-UX-018** (sidebar) → **FB-UX-019** (theme) → **FB-UX-020** (dashboard) → **FB-UX-021** (asset page) → **FB-UX-022** (auth pages) → **FB-AUTH-001** (2h idle gate) → **FB-UX-017** (venue wizard).
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **2** | FB-AUTH-001, FB-UX-017 |
-| **MEDIUM** | **0** | — |
+| **HIGH** | **6** | IL-CHART-001, FB-UX-018, FB-UX-019, FB-UX-020, FB-AUTH-001, FB-UX-017 |
+| **MEDIUM** | **2** | FB-UX-021, FB-UX-022 |
 | **LOW** | **0** | — |
 
 **Full row text and completed history:** [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (§2 open tables, §3 fixes, §4 gates, §5 archive).
