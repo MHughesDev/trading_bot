@@ -1012,7 +1012,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-STATE-REGIME",
         "id": "FB-CAN-041",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement full 5-class regime probability vector and transition confidence math",
         "agent_task": "Implement canonical regime vector with classes trend/range/stress/dislocated/transition, normalized probabilities, regime confidence separation metric, and transition probability computation. Ensure all downstream consumers read probability vectors (not hard labels only) and replay records full state output.",
         "affected_files": "decision_engine/state_engine.py|app/contracts/|backtesting/|tests/",

@@ -15,10 +15,20 @@ class SemanticRegime(StrEnum):
 
 
 class RegimeOutput(BaseModel):
-    """Gaussian HMM (4 states) mapped to semantic regimes; optional APEX canonical slice."""
+    """Regime view for the decision path.
+
+    **Legacy:** ``probabilities`` holds the forecaster HMM soft vector (length 4: bull/bear/volatile/sideways).
+    **Canonical (FB-CAN-041):** ``canonical_regime_probabilities`` holds the APEX 5-class vector
+    (trend, range, stress, dislocated, transition) — use with ``apex`` for full state; do not rely on
+    ``semantic`` / ``state_index`` alone for migration logic.
+    """
 
     state_index: int = Field(ge=0, le=3)
     semantic: SemanticRegime
     probabilities: list[float]
     confidence: float = Field(ge=0.0, le=1.0)
+    canonical_regime_probabilities: list[float] | None = Field(
+        default=None,
+        description="APEX 5-class regime distribution when canonical state is built (order: trend, range, stress, dislocated, transition)",
+    )
     apex: CanonicalStateOutput | None = None

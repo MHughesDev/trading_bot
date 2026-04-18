@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from app.contracts.canonical_state import DegradationLevel
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState
@@ -37,6 +39,16 @@ def test_build_canonical_state_sums_probabilities():
     assert abs(sum(apex.regime_probabilities) - 1.0) < 1e-6
     assert 0.0 <= apex.regime_confidence <= 1.0
     assert apex.degradation in DegradationLevel
+    rp = sorted(apex.regime_probabilities, reverse=True)
+    assert apex.regime_confidence == pytest.approx(rp[0] - rp[1], rel=1e-9, abs=1e-9)
+    assert 0.0 <= apex.transition_probability <= 1.0
+
+
+def test_regime_confidence_matches_spec_separation():
+    """APEX State spec §6 — max(R) - second_max(R) on the 5-class vector."""
+    from decision_engine.state_engine import _regime_confidence_separation
+
+    assert _regime_confidence_separation([0.5, 0.3, 0.1, 0.05, 0.05]) == pytest.approx(0.2)
 
 
 def test_merge_canonical_into_risk():
