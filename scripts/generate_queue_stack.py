@@ -802,7 +802,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-REL",
         "id": "FB-CAN-026",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement config/version diffing and release evidence bundles",
         "agent_task": "Implement artifacts and APIs for config version diffs, logic version references, replay/shadow evidence bundles, and rollback target metadata required for release gating. Make these outputs consumable by control-plane and CI promotion checks.",
         "affected_files": "models/|orchestration/|control_plane/|scripts/|docs/",
