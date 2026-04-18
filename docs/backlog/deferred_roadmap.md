@@ -25,7 +25,7 @@ Themes below are **intentionally out of scope** for full delivery in the current
 
 ## FB-N3 — Portfolio optimization
 
-**Current state:** [`risk_engine/equal_weight.py`](../risk_engine/equal_weight.py) provides a **deterministic equal-weight** allocation helper for `n` symbols (reference / backtests). No third-party optimizer is bundled.
+**Current state:** A small **equal-weight** reference (`1/n` fractions) is not bundled in-repo (removed **FB-CAN-020**; was `risk_engine/equal_weight.py`). Reintroduce inline or under `models/` when portfolio optimization is prioritized. No third-party optimizer is bundled.
 
 **Suggested phases (when prioritized):**
 
