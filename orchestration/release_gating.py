@@ -65,6 +65,14 @@ class EvidencePackage(BaseModel):
     replay_regression_passed: bool | None = None
     shadow_divergence_reviewed: bool | None = None
     holdout_evidence_present: bool | None = None  # model-family gate
+    live_replay_equivalence_passed: bool | None = Field(
+        default=None,
+        description="True when live–replay equivalence harness reports no divergence (FB-CAN-030).",
+    )
+    live_replay_equivalence_report: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional JSON snapshot from LiveReplayEquivalenceReport.",
+    )
 
 
 class ReleaseCandidate(BaseModel):
@@ -183,6 +191,13 @@ def evaluate_promotion_gates(
                 blocked.append("scenario_tests")
             if ev.replay_regression_passed is not True:
                 blocked.append("replay_regression")
+            if ev.live_replay_equivalence_passed is not True:
+                blocked.append("live_replay_equivalence")
+                reasons.append("live requires live–replay deterministic equivalence (FB-CAN-030)")
+        if candidate.kind == "combined":
+            if ev.live_replay_equivalence_passed is not True:
+                blocked.append("live_replay_equivalence")
+                reasons.append("live requires live–replay equivalence for combined logic+config releases")
         # Model family gates
         if candidate.kind in ("model_family", "combined"):
             if ev.holdout_evidence_present is not True:

@@ -858,7 +858,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-REPLAY-DELTA",
         "id": "FB-CAN-030",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Close live-vs-replay divergence and enforce deterministic equivalence rules",
         "agent_task": "Implement deterministic equivalence harness between live decisions and replay under identical inputs/config/logic versions, including canonical event emission and diff reports. Block promotion when divergence thresholds exceed policy.",
         "affected_files": "backtesting/|decision_engine/run_step.py|tests/|scripts/|docs/",
