@@ -20,6 +20,9 @@ class HardOverrideKind(StrEnum):
     PRODUCT_UNTRADABLE = "product_untradable"
     NORMALIZATION_INCOMPLETE = "normalization_incomplete"
     SIGNAL_CONFIDENCE_LOW = "signal_confidence_low"
+    # FB-CAN-074 — exchange risk / data integrity (APEX State spec §13)
+    DATA_INTEGRITY_ALERT = "data_integrity_alert"
+    EXCHANGE_RISK_CRITICAL = "exchange_risk_critical"
 
 
 __all__ = ["HardOverrideKind"]

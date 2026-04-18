@@ -11,7 +11,11 @@ from typing import Any
 
 from app.config.settings import AppSettings
 from app.contracts.reason_codes import (
+    STATE_DATA_INTEGRITY_ALERT,
     STATE_ELEVATED_TRANSITION,
+    STATE_EXCHANGE_RISK_CRITICAL,
+    STATE_EXCHANGE_RISK_ELEVATED,
+    STATE_EXCHANGE_RISK_HIGH,
     STATE_HIGH_OOD,
     STATE_HMM_AMBIGUOUS,
     STATE_SESSION_LOW_LIQUIDITY,
@@ -55,6 +59,47 @@ def _state_safety_domain(settings: AppSettings | None) -> dict[str, Any]:
         return dict(d) if d is not None else {}
     except Exception:
         return {}
+
+
+def _exchange_risk_code_from_feature_row(feature_row: dict[str, float]) -> int:
+    """FB-CAN-074: 0=low, 1=elevated, 2=high, 3=critical from merged boundary hints."""
+    v = feature_row.get("apex_exchange_risk_level_code")
+    if v is None:
+        return 0
+    try:
+        return int(round(float(v)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _exchange_risk_level_str(code: int) -> str:
+    m = {0: "low", 1: "elevated", 2: "high", 3: "critical"}
+    return m.get(max(0, min(3, code)), "low")
+
+
+def classify_exchange_risk_and_integrity(
+    feature_row: dict[str, float],
+) -> tuple[str, bool, list[str]]:
+    """FB-CAN-074: map boundary safety hints + integrity flag to canonical state_* codes."""
+    code = _exchange_risk_code_from_feature_row(feature_row)
+    level_s = _exchange_risk_level_str(code)
+    di_raw = feature_row.get("apex_data_integrity_alert")
+    di = False
+    if di_raw is not None:
+        try:
+            di = float(di_raw) >= 0.5
+        except (TypeError, ValueError):
+            di = bool(di_raw)
+    codes: list[str] = []
+    if di:
+        codes.append(STATE_DATA_INTEGRITY_ALERT)
+    if code == 1:
+        codes.append(STATE_EXCHANGE_RISK_ELEVATED)
+    elif code == 2:
+        codes.append(STATE_EXCHANGE_RISK_HIGH)
+    elif code >= 3:
+        codes.append(STATE_EXCHANGE_RISK_CRITICAL)
+    return level_s, di, codes
 
 
 def classify_session_mode(
@@ -212,6 +257,7 @@ def build_canonical_state(
         feature_row=feature_row,
         settings=settings,
     )
+    ex_level, data_alert, safety_codes = classify_exchange_risk_and_integrity(feature_row)
 
     rsi = _safe_float(feature_row, "rsi_14", 50.0)
     rsi_ext = _clip01(abs(rsi - 50.0) / 50.0)
@@ -241,16 +287,26 @@ def build_canonical_state(
     )
 
     deg = DegradationLevel.NORMAL
+    # FB-CAN-074 — exchange risk / data integrity influence degradation (spec §13)
+    er_code = _exchange_risk_code_from_feature_row(feature_row)
     if spread_bps > 75 or heat_score > 0.92 or transition_probability > 0.88 or novelty >= 0.95:
+        deg = DegradationLevel.NO_TRADE
+    elif data_alert or er_code >= 3:
         deg = DegradationLevel.NO_TRADE
     elif (
         heat_score > 0.68
         or transition_probability > 0.58
         or novelty > 0.82
         or reflexivity > 0.88
+        or er_code == 2
     ):
         deg = DegradationLevel.DEFENSIVE
-    elif heat_score > 0.45 or transition_probability > 0.38 or reflexivity > 0.72:
+    elif (
+        heat_score > 0.45
+        or transition_probability > 0.38
+        or reflexivity > 0.72
+        or er_code == 1
+    ):
         deg = DegradationLevel.REDUCED
 
     return CanonicalStateOutput(
@@ -268,6 +324,9 @@ def build_canonical_state(
         session_reason_codes=list(sess_codes),
         session_mode=sess_mode,
         session_mode_throttle=float(sess_thr),
+        exchange_risk_level=ex_level,
+        data_integrity_alert=bool(data_alert),
+        safety_reason_codes=list(safety_codes),
     )
 
 
@@ -335,6 +394,13 @@ def classify_hard_override(
                 return True, HardOverrideKind.SIGNAL_CONFIDENCE_LOW
         except (TypeError, ValueError):
             pass
+
+    # FB-CAN-074 — boundary safety: data integrity + critical venue risk
+    _ex_lvl, data_alert, _safety_codes = classify_exchange_risk_and_integrity(fr)
+    if data_alert:
+        return True, HardOverrideKind.DATA_INTEGRITY_ALERT
+    if _exchange_risk_code_from_feature_row(fr) >= 3:
+        return True, HardOverrideKind.EXCHANGE_RISK_CRITICAL
 
     return False, HardOverrideKind.NONE
 
@@ -407,6 +473,15 @@ def apply_normalization_degradation(
     if comp is not None and float(comp) < 0.4:
         if deg == DegradationLevel.NORMAL:
             deg = DegradationLevel.REDUCED
+    # FB-CAN-074 — reinforce degradation when integrity / exchange risk hints lag apex
+    er_c = _exchange_risk_code_from_feature_row(fr)
+    _, di_alert, _ = classify_exchange_risk_and_integrity(fr)
+    if di_alert and deg == DegradationLevel.NORMAL:
+        deg = DegradationLevel.REDUCED
+    if er_c == 1 and deg == DegradationLevel.NORMAL:
+        deg = DegradationLevel.REDUCED
+    if er_c == 2 and deg in (DegradationLevel.NORMAL, DegradationLevel.REDUCED):
+        deg = DegradationLevel.DEFENSIVE
     if deg == apex.degradation:
         return apex
     return apex.model_copy(update={"degradation": deg})
@@ -456,6 +531,7 @@ def composite_degradation_size_multiplier(
         "transition_multiplier": 1.0,
         "novelty_multiplier": 1.0,
         "session_mode_throttle": 1.0,
+        "exchange_risk_throttle": 1.0,
     }
     if apex is None or base <= 0.0:
         return base, terms
@@ -480,7 +556,32 @@ def composite_degradation_size_multiplier(
     terms["novelty_multiplier"] = n_mult
     sess_thr = _clip01(float(getattr(apex, "session_mode_throttle", 1.0)))
     terms["session_mode_throttle"] = sess_thr
-    return base * t_mult * n_mult * sess_thr, terms
+    # FB-CAN-074 — extra throttle from exchange risk + data integrity (apex fields)
+    er_c = 0
+    lvl = str(getattr(apex, "exchange_risk_level", "low") or "low").lower()
+    if lvl == "elevated":
+        er_c = 1
+    elif lvl == "high":
+        er_c = 2
+    elif lvl == "critical":
+        er_c = 3
+    dom_sz = _risk_sizing_domain(settings)
+    er_dom = dom_sz.get("exchange_risk") if isinstance(dom_sz.get("exchange_risk"), dict) else {}
+    te = _cfg_float(er_dom, "elevated_throttle", 0.92) if isinstance(er_dom, dict) else 0.92
+    th = _cfg_float(er_dom, "high_throttle", 0.82) if isinstance(er_dom, dict) else 0.82
+    tc = _cfg_float(er_dom, "critical_throttle", 0.72) if isinstance(er_dom, dict) else 0.72
+    ex_thr = 1.0
+    if er_c == 1:
+        ex_thr = te
+    elif er_c == 2:
+        ex_thr = th
+    elif er_c >= 3:
+        ex_thr = tc
+    terms["exchange_risk_throttle"] = _clip01(ex_thr)
+    if bool(getattr(apex, "data_integrity_alert", False)):
+        di_m = _cfg_float(er_dom, "data_integrity_throttle", 0.88) if isinstance(er_dom, dict) else 0.88
+        terms["exchange_risk_throttle"] = _clip01(float(terms["exchange_risk_throttle"]) * di_m)
+    return base * t_mult * n_mult * sess_thr * float(terms["exchange_risk_throttle"]), terms
 
 
 def merge_canonical_into_risk(
@@ -515,11 +616,19 @@ def merge_canonical_into_risk(
         risk = risk.model_copy(update=norm_fields)
 
     if apex is None:
+        ex_hint = str(_exchange_risk_level_str(_exchange_risk_code_from_feature_row(fr)))
+        di_hint = False
+        try:
+            di_hint = float(fr.get("apex_data_integrity_alert", 0.0) or 0.0) >= 0.5
+        except (TypeError, ValueError):
+            di_hint = bool(fr.get("apex_data_integrity_alert"))
         return risk.model_copy(
             update={
                 "hard_override_active": bool(hard_override_active),
                 "hard_override_kind": hard_override_kind,
                 "canonical_degradation_sizing_terms": None,
+                "exchange_risk_level": ex_hint,
+                "data_integrity_alert": di_hint,
             }
         )
 
@@ -531,6 +640,8 @@ def merge_canonical_into_risk(
         "canonical_degradation_sizing_terms": deg_terms,
         "hard_override_active": bool(hard_override_active),
         "hard_override_kind": hard_override_kind,
+        "exchange_risk_level": str(getattr(apex, "exchange_risk_level", "low") or "low"),
+        "data_integrity_alert": bool(getattr(apex, "data_integrity_alert", False)),
         **_apply_degradation_transition_fields(risk, apex.degradation),
         **_apply_session_mode_fields(risk, sess_mode),
     }

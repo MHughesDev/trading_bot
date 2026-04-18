@@ -79,6 +79,11 @@ STATE_STRUCTURE_FRAGILE = "state_structure_fragile"
 STATE_ELEVATED_TRANSITION = "state_elevated_transition_risk"
 STATE_SESSION_WEEKEND = "state_session_weekend"
 STATE_SESSION_LOW_LIQUIDITY = "state_session_low_liquidity"
+# FB-CAN-074 — exchange risk / data integrity (APEX State spec §13)
+STATE_DATA_INTEGRITY_ALERT = "state_data_integrity_alert"
+STATE_EXCHANGE_RISK_ELEVATED = "state_exchange_risk_elevated"
+STATE_EXCHANGE_RISK_HIGH = "state_exchange_risk_high"
+STATE_EXCHANGE_RISK_CRITICAL = "state_exchange_risk_critical"
 
 # Legacy string -> canonical (trigger)
 _ALIASES: dict[str, str] = {
@@ -132,6 +137,11 @@ _ALIASES: dict[str, str] = {
     "hmm_ambiguous": STATE_HMM_AMBIGUOUS,
     "structure_fragile": STATE_STRUCTURE_FRAGILE,
     "elevated_transition_risk": STATE_ELEVATED_TRANSITION,
+    # FB-CAN-074
+    "data_integrity_alert": STATE_DATA_INTEGRITY_ALERT,
+    "exchange_risk_elevated": STATE_EXCHANGE_RISK_ELEVATED,
+    "exchange_risk_high": STATE_EXCHANGE_RISK_HIGH,
+    "exchange_risk_critical": STATE_EXCHANGE_RISK_CRITICAL,
 }
 
 

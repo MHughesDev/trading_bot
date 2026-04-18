@@ -249,7 +249,7 @@
 | FB-CAN-071 | CAN-CONFIG-SNAP | A | DP | feature | MEDIUM | Done | Implement canonical Service Configuration Snapshot contract and traceability bindings. | contracts/decision/replay/config/tests |
 | FB-CAN-072 | CAN-MON-LAG | B | OB | feature | MEDIUM | Done | **`tb_canonical_lag_seconds`** per-domain lag + Grafana + alerts (**FB-CAN-072**). **Done 2026-04-18.** | observability/runtime/decision/execution/infra/tests |
 | FB-CAN-073 | CAN-STATE-WEEKEND | A | RT | feature | LOW | Done | Session mode + throttle on **`CanonicalStateOutput`**; **`RiskState`** occupancy; sizing + trigger tightening; **`tb_canonical_session_mode`** + transition gauge (**FB-CAN-073**). **Done 2026-04-18.** | state/risk/observability/tests |
-| FB-CAN-074 | CAN-STATE-EXRISK | A | RT | feature | MEDIUM | Open | Integrate exchange-risk flags and data-integrity warnings into degradation/override logic. | state/data/risk/contracts/tests |
+| FB-CAN-074 | CAN-STATE-EXRISK | A | RT | feature | MEDIUM | Done | Integrate exchange-risk flags and data-integrity warnings into degradation/override logic. | state/data/risk/contracts/tests |
 | FB-CAN-075 | CAN-EXEC-LAT | A | EX | feature | LOW | Open | Implement execution latency/reliability quality terms in execution confidence. | execution/config/replay/observability/tests |
 | FB-CAN-076 | CAN-EDGE-MON | B | OB | feature | MEDIUM | Open | Implement edge-budget proxy monitoring and alert thresholds. | decision/execution/observability/infra/tests |
 | FB-CAN-077 | CAN-BINDING-IMM | B | DS | hardening | LOW | Open | Implement immutable run-binding guard for config/logic/dataset/seed identifiers. | contracts/replay/orchestration/models/tests |

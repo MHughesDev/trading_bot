@@ -53,6 +53,11 @@ CANONICAL_SESSION_REASON = Counter(
     "Weekend / low-liquidity session reason codes (FB-CAN-073)",
     ["symbol", "reason"],
 )
+CANONICAL_SAFETY_REASON = Counter(
+    "tb_canonical_safety_reason_total",
+    "Exchange risk / data integrity safety reason codes (FB-CAN-074)",
+    ["symbol", "reason"],
+)
 CANONICAL_DEGRADATION_TICKS = Counter(
     "tb_canonical_degradation_observations_total",
     "Per-tick degradation level observations (rate ~ occupancy)",
@@ -273,6 +278,8 @@ def record_canonical_post_tick(
             CANONICAL_NOVELTY_REASON.labels(symbol=sym, reason=str(code)).inc()
         for code in getattr(apex, "session_reason_codes", None) or []:
             CANONICAL_SESSION_REASON.labels(symbol=sym, reason=str(code)).inc()
+        for code in getattr(apex, "safety_reason_codes", None) or []:
+            CANONICAL_SAFETY_REASON.labels(symbol=sym, reason=str(code)).inc()
         deg = getattr(apex.degradation, "value", str(apex.degradation))
         CANONICAL_DEGRADATION_TICKS.labels(symbol=sym, level=str(deg)).inc()
         sm = getattr(apex, "session_mode", None)

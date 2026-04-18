@@ -254,6 +254,11 @@ def build_decision_boundary_input(
     merged["canonical_structural_reliability"] = float(structural.signal_reliability_structural)
     merged["canonical_safety_heat"] = float(safety.crypto_heat_score)
     merged["canonical_safety_novelty"] = float(safety.novelty_score)
+    # FB-CAN-074 — float hints for state engine (string enums → stable numeric codes)
+    _erl = str(safety.exchange_risk_level.value if hasattr(safety.exchange_risk_level, "value") else safety.exchange_risk_level)
+    _erl_map = {"low": 0.0, "elevated": 1.0, "high": 2.0, "critical": 3.0}
+    merged["apex_exchange_risk_level_code"] = float(_erl_map.get(_erl.lower(), 0.0))
+    merged["apex_data_integrity_alert"] = 1.0 if bool(safety.data_integrity_alert) else 0.0
     merged["canonical_exec_slippage_bps"] = float(execution_feedback.realized_slippage_bps)
     merged["canonical_exec_fill_ratio"] = float(execution_feedback.fill_ratio)
     merged["canonical_book_imbalance"] = float(imb)

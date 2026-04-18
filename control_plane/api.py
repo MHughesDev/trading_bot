@@ -858,6 +858,11 @@ def get_governance_monitoring() -> dict[str, Any]:
             "tb_canonical_session_mode, tb_canonical_session_mode_transition_count, "
             "tb_canonical_session_reason (FB-CAN-073); policy: apex_canonical.domains.state_safety_degradation.session_mode"
         ),
+        "exchange_risk_safety_metrics": (
+            "tb_canonical_safety_reason (FB-CAN-074); "
+            "hard_override kinds: data_integrity_alert, exchange_risk_critical; "
+            "policy: apex_canonical.domains.risk_sizing.exchange_risk"
+        ),
     }
 
 

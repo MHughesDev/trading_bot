@@ -77,6 +77,11 @@ apex_canonical:
       transition_size_multiplier_weight: 0.35
       novelty_size_multiplier_weight: 0.25
       max_transition_novelty_multiplier_weight: 0.55
+      exchange_risk:
+        elevated_throttle: 0.92
+        high_throttle: 0.82
+        critical_throttle: 0.72
+        data_integrity_throttle: 0.88
     execution:
       high_confidence_threshold: 0.72
       medium_confidence_threshold: 0.45

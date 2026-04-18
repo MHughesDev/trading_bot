@@ -54,3 +54,16 @@ class CanonicalStateOutput(BaseModel):
         le=1.0,
         description="Aggression multiplier for sizing / trigger tightening (1.0 = no throttle)",
     )
+    # FB-CAN-074 — venue / feed safety inputs (APEX State spec §13–14)
+    exchange_risk_level: str = Field(
+        default="low",
+        description="low | elevated | high | critical — from boundary safety snapshot or feature hints",
+    )
+    data_integrity_alert: bool = Field(
+        default=False,
+        description="True when upstream marks data integrity warning / stale composite inputs",
+    )
+    safety_reason_codes: list[str] = Field(
+        default_factory=list,
+        description="state_* codes for exchange risk and data integrity (monitoring / replay)",
+    )
