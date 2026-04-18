@@ -69,9 +69,10 @@ def evaluate_trigger(
     C = _clip01(0.5 * apex.regime_confidence + 0.5 * C_struct)
     H = apex.heat_score
     N = apex.novelty
+    Rfx = apex.reflexivity_score
 
-    wA, wS, wC, wH, wN = 0.35, 0.25, 0.3, 0.35, 0.35
-    setup_raw = wA * A + wS * S + wC * C - wH * H - wN * N
+    wA, wS, wC, wH, wN, wRfx = 0.35, 0.25, 0.3, 0.35, 0.35, 0.25
+    setup_raw = wA * A + wS * S + wC * C - wH * H - wN * N - wRfx * Rfx
     setup_score = _clip01(setup_raw)
 
     spread_stress = _clip01(spread_bps / 80.0)

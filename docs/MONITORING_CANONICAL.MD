@@ -12,7 +12,7 @@ All canonical slice metrics use the `tb_canonical_*` prefix (alongside existing 
 
 | APEX domain (spec §3–4) | Instrument | Notes |
 |-------------------------|------------|--------|
-| State / safety | `tb_canonical_regime_confidence`, `tb_canonical_heat_score`, `tb_canonical_novelty`, `tb_canonical_degradation_observations_total`, `tb_canonical_hard_override_total`, `tb_canonical_degradation_transition_count` | From `RegimeOutput.apex` and **`RiskState`** (FB-CAN-033) |
+| State / safety | `tb_canonical_regime_confidence`, `tb_canonical_heat_score`, `tb_canonical_novelty`, `tb_canonical_reflexivity_score`, `tb_canonical_heat_component`, `tb_canonical_novelty_reason_total`, `tb_canonical_degradation_observations_total`, `tb_canonical_hard_override_total`, `tb_canonical_degradation_transition_count` | From `RegimeOutput.apex` and **`RiskState`** (FB-CAN-033). **FB-CAN-042:** reflexivity histogram; per-component heat (`component` label `Hf`…`He`); novelty reason counters. |
 | Trigger | `tb_canonical_trigger_stage_total`, `tb_canonical_trigger_missed_move_total` | From `forecast_diagnostics["trigger"]` |
 | Auction / decision | `tb_canonical_auction_selected_score`, `tb_canonical_auction_suppressed_total` | From `forecast_diagnostics["auction"]` |
 | Risk | `tb_canonical_risk_size_multiplier`, `tb_canonical_risk_final_notional_usd` | From `RiskState` |

@@ -11,6 +11,7 @@ from typing import Any
 
 from app.config.settings import AppSettings
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
+from app.contracts.canonical_structure import CanonicalStructureOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.hard_override import HardOverrideKind
 from app.contracts.risk import RiskState, SystemMode
@@ -38,6 +39,29 @@ def _normalize5(raw: list[float]) -> list[float]:
     return [max(0.0, x) / s for x in raw]
 
 
+def _state_safety_domain(settings: AppSettings | None) -> dict[str, Any]:
+    if settings is None:
+        return {}
+    try:
+        d = settings.canonical.domains.state_safety_degradation
+        return dict(d) if d is not None else {}
+    except Exception:
+        return {}
+
+
+def _normalize_named_weights(
+    raw: dict[str, Any] | None,
+    keys: tuple[str, ...],
+    defaults: dict[str, float],
+) -> dict[str, float]:
+    src = raw if isinstance(raw, dict) else {}
+    out: dict[str, float] = {}
+    for k in keys:
+        out[k] = float(src.get(k, defaults[k]))
+    s = sum(max(0.0, v) for v in out.values()) or 1.0
+    return {k: max(0.0, out[k]) / s for k in keys}
+
+
 def _regime_confidence_separation(probs: list[float]) -> float:
     """APEX State spec §6 — max(R) - second_max(R) on the 5-class vector."""
     if len(probs) < 2:
@@ -51,6 +75,8 @@ def build_canonical_state(
     feature_row: dict[str, float],
     *,
     spread_bps: float,
+    settings: AppSettings | None = None,
+    structure: CanonicalStructureOutput | None = None,
 ) -> CanonicalStateOutput:
     """Derive APEX canonical state from forecaster packet and microstructure features.
 
@@ -94,7 +120,30 @@ def build_canonical_state(
     regime_confidence = _regime_confidence_separation(regime_probs)
 
     ood = _clip01(float(pkt.ood_score))
-    novelty = _clip01(0.55 * ood + 0.45 * (1.0 - max(p)))
+    hmm_amb = _clip01(1.0 - max(p))
+    frag = _clip01(float(structure.fragility_score)) if structure is not None else 0.0
+
+    dom = _state_safety_domain(settings)
+    nov_def = {"ood": 0.38, "hmm_ambiguity": 0.22, "structure_fragility": 0.25, "transition": 0.15}
+    nov_w = _normalize_named_weights(dom.get("novelty_weights"), tuple(nov_def.keys()), nov_def)
+    novelty_components = {
+        "ood": ood,
+        "hmm_ambiguity": hmm_amb,
+        "structure_fragility": frag,
+        "transition": transition_probability,
+    }
+    novelty = _clip01(
+        sum(nov_w[k] * novelty_components[k] for k in nov_w)
+    )
+    novelty_reason_codes: list[str] = []
+    if ood >= 0.90:
+        novelty_reason_codes.append("high_ood")
+    if hmm_amb >= 0.75:
+        novelty_reason_codes.append("hmm_ambiguous")
+    if frag >= 0.72:
+        novelty_reason_codes.append("structure_fragile")
+    if transition_probability >= 0.65:
+        novelty_reason_codes.append("elevated_transition_risk")
 
     rsi = _safe_float(feature_row, "rsi_14", 50.0)
     rsi_ext = _clip01(abs(rsi - 50.0) / 50.0)
@@ -104,18 +153,36 @@ def build_canonical_state(
     hx = spread_stress * 0.15
     hv = rel_vol * 0.2
     he = spread_stress * 0.15
-    heat_raw = hf + hl + ho + hx + hv + he
-    heat_score = _clip01(heat_raw)
     heat_components = {"Hf": hf, "Hl": hl, "Ho": ho, "Hx": hx, "Hv": hv, "He": he}
+    heat_def = {"Hf": 0.2, "Hl": 0.25, "Ho": 0.15, "Hx": 0.15, "Hv": 0.15, "He": 0.1}
+    hw = _normalize_named_weights(dom.get("heat_weights"), tuple(heat_def.keys()), heat_def)
+    heat_raw = sum(hw[k] * heat_components[k] for k in hw)
+    heat_score = _clip01(heat_raw)
 
-    reflexivity = _clip01(0.5 * rsi_ext + 0.35 * rel_vol + 0.15 * p_vol)
+    dir_press = _clip01(abs(float(structure.directional_bias))) if structure is not None else 0.0
+    ref_def = {"rsi_ext": 0.3, "rel_vol": 0.25, "fragility": 0.25, "directional_pressure": 0.2}
+    ref_w = _normalize_named_weights(dom.get("reflexivity_weights"), tuple(ref_def.keys()), ref_def)
+    reflexivity_components = {
+        "rsi_ext": rsi_ext,
+        "rel_vol": rel_vol,
+        "fragility": frag,
+        "directional_pressure": dir_press,
+    }
+    reflexivity = _clip01(
+        sum(ref_w[k] * reflexivity_components[k] for k in ref_w)
+    )
 
     deg = DegradationLevel.NORMAL
-    if spread_bps > 75 or heat_score > 0.92 or transition_probability > 0.88:
+    if spread_bps > 75 or heat_score > 0.92 or transition_probability > 0.88 or novelty >= 0.95:
         deg = DegradationLevel.NO_TRADE
-    elif heat_score > 0.68 or transition_probability > 0.58 or novelty > 0.82:
+    elif (
+        heat_score > 0.68
+        or transition_probability > 0.58
+        or novelty > 0.82
+        or reflexivity > 0.88
+    ):
         deg = DegradationLevel.DEFENSIVE
-    elif heat_score > 0.45 or transition_probability > 0.38:
+    elif heat_score > 0.45 or transition_probability > 0.38 or reflexivity > 0.72:
         deg = DegradationLevel.REDUCED
 
     return CanonicalStateOutput(
@@ -127,6 +194,9 @@ def build_canonical_state(
         reflexivity_score=reflexivity,
         degradation=deg,
         heat_components=heat_components,
+        novelty_components=novelty_components,
+        reflexivity_components=reflexivity_components,
+        novelty_reason_codes=novelty_reason_codes,
     )
 
 
@@ -321,6 +391,7 @@ def merge_canonical_into_risk(
                 "risk_trigger_confidence": tc,
                 "risk_execution_confidence": ec,
                 "risk_heat_score": float(apex.heat_score),
+                "risk_novelty_score": float(apex.novelty),
                 "risk_reflexivity_score": float(apex.reflexivity_score),
                 "risk_liquidation_mode": mode,
             }

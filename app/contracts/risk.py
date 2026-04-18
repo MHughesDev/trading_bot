@@ -31,6 +31,7 @@ class RiskState(BaseModel):
     risk_trigger_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     risk_execution_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     risk_heat_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    risk_novelty_score: float | None = Field(default=None, ge=0.0, le=1.0)
     risk_reflexivity_score: float | None = Field(default=None, ge=0.0, le=1.0)
     risk_liquidation_mode: str | None = None
     last_risk_sizing: dict | None = None

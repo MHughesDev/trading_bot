@@ -11,6 +11,24 @@ apex_canonical:
     - novelty
     - heat_components
   domains:
+    state_safety_degradation:
+      heat_weights:
+        Hf: 0.2
+        Hl: 0.25
+        Ho: 0.15
+        Hx: 0.15
+        Hv: 0.15
+        He: 0.1
+      novelty_weights:
+        ood: 0.38
+        hmm_ambiguity: 0.22
+        structure_fragility: 0.25
+        transition: 0.15
+      reflexivity_weights:
+        rsi_ext: 0.3
+        rel_vol: 0.25
+        fragility: 0.25
+        directional_pressure: 0.2
     risk_sizing:
       max_total_exposure_usd: 100000
       max_per_symbol_usd: 40000

@@ -35,3 +35,7 @@ class CanonicalStateOutput(BaseModel):
     degradation: DegradationLevel = DegradationLevel.NORMAL
     # Explainability (optional component breakdown for heat)
     heat_components: dict[str, float] = Field(default_factory=dict)
+    # FB-CAN-042 — novelty / reflexivity trace (spec §8–10)
+    novelty_components: dict[str, float] = Field(default_factory=dict)
+    reflexivity_components: dict[str, float] = Field(default_factory=dict)
+    novelty_reason_codes: list[str] = Field(default_factory=list)

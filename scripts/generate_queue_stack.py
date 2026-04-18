@@ -1026,7 +1026,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-STATE-HEAT",
         "id": "FB-CAN-042",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement novelty/heat/reflexivity score stack and propagation",
         "agent_task": "Implement canonical novelty score, crypto heat score, and reflexivity score components with bounded normalization and propagation into trigger/auction/risk degradation penalties. Add observability distributions and replay trace fields.",
         "affected_files": "decision_engine/state_engine.py|decision_engine/trigger_engine.py|risk_engine/|observability/|tests/",

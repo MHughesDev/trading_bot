@@ -77,6 +77,9 @@ def build_safety_snapshot_event(
     if apex is not None:
         payload["apex_degradation"] = getattr(apex, "degradation", None)
         payload["apex_heat"] = getattr(apex, "heat_score", None)
+        payload["apex_novelty"] = getattr(apex, "novelty", None)
+        payload["apex_reflexivity"] = getattr(apex, "reflexivity_score", None)
+        payload["apex_novelty_reason_codes"] = getattr(apex, "novelty_reason_codes", None)
         if hasattr(apex, "model_dump"):
             payload["canonical_state_output"] = apex.model_dump(mode="json")
     return ReplayEventEnvelope(

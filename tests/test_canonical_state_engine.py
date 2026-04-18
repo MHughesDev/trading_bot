@@ -6,7 +6,9 @@ from datetime import UTC, datetime
 
 import pytest
 
+from app.config.settings import AppSettings
 from app.contracts.canonical_state import DegradationLevel
+from app.contracts.canonical_structure import CanonicalStructureOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState
 from app.contracts.trigger import TriggerOutput
@@ -42,6 +44,34 @@ def test_build_canonical_state_sums_probabilities():
     rp = sorted(apex.regime_probabilities, reverse=True)
     assert apex.regime_confidence == pytest.approx(rp[0] - rp[1], rel=1e-9, abs=1e-9)
     assert 0.0 <= apex.transition_probability <= 1.0
+
+
+def test_build_canonical_state_includes_novelty_trace_with_structure():
+    st = CanonicalStructureOutput(
+        p05=-0.02,
+        p25=-0.01,
+        p50=0.0,
+        p75=0.01,
+        p95=0.02,
+        volatility_forecast=0.02,
+        asymmetry_score=0.3,
+        continuation_probability=0.5,
+        fragility_score=0.8,
+        directional_bias=0.1,
+        model_agreement_score=0.7,
+        model_correlation_penalty=0.2,
+    )
+    feats = {"close": 50_000.0, "atr_14": 100.0, "rsi_14": 50.0}
+    apex = build_canonical_state(
+        _pkt(),
+        feats,
+        spread_bps=5.0,
+        settings=AppSettings(),
+        structure=st,
+    )
+    assert "ood" in apex.novelty_components
+    assert "rsi_ext" in apex.reflexivity_components
+    assert isinstance(apex.novelty_reason_codes, list)
 
 
 def test_regime_confidence_matches_spec_separation():
