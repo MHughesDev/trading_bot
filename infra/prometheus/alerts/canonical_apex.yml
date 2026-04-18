@@ -100,3 +100,57 @@ groups:
           summary: "Shadow/replay divergence event rate (kind={{ $labels.kind }})"
           description: "Divergence counter is increasing; correlate with release and replay jobs when wired."
           runbook: "docs/MONITORING_CANONICAL.MD#fb-can-028-alert-rules"
+
+  - name: canonical_drift_calibration_fb_can_039
+    rules:
+      - alert: CanonicalEdgeErosionHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(tb_canonical_edge_erosion_score_bucket[15m])) by (le, symbol)
+          ) > 0.45
+        for: 15m
+        labels:
+          severity: warning
+          domain: drift_calibration
+        annotations:
+          summary: "High realized-vs-theoretical edge erosion proxy (symbol={{ $labels.symbol }})"
+          description: "Trade-intent ticks show large gap between joint route×trigger confidence and execution confidence."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-039-alert-rules-drift--calibration--shadow-trends"
+
+      - alert: CanonicalConfidenceCalibrationGap
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(tb_canonical_confidence_calibration_gap_bucket[10m])) by (le, symbol)
+          ) > 0.35
+        for: 15m
+        labels:
+          severity: warning
+          domain: drift_calibration
+        annotations:
+          summary: "Route vs forecaster confidence gap elevated (symbol={{ $labels.symbol }})"
+          description: "Calibration drift proxy: absolute difference between route confidence and packet confidence."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-039-alert-rules-drift--calibration--shadow-trends"
+
+      - alert: CanonicalShadowDivergenceRateHigh
+        expr: |
+          max(tb_canonical_shadow_divergence_rate{rate_kind="trade_intent_divergence"}) > 0.12
+        for: 10m
+        labels:
+          severity: warning
+          domain: shadow_replay
+        annotations:
+          summary: "Shadow replay trade-intent divergence rate above threshold"
+          description: "Last persisted governance shadow comparison shows elevated trade_intent_divergence rate."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-039-alert-rules-drift--calibration--shadow-trends"
+
+      - alert: CanonicalShadowRollbackRecommended
+        expr: |
+          tb_canonical_shadow_rollback_recommended == 1
+        for: 2m
+        labels:
+          severity: critical
+          domain: shadow_replay
+        annotations:
+          summary: "Shadow comparison recommends rollback"
+          description: "Governance shadow replay report set rollback_recommended; review release and candidate logic."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-039-alert-rules-drift--calibration--shadow-trends"

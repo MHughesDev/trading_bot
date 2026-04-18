@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+
+import pytest
 from app.config.settings import AppSettings
 from app.contracts.decisions import ActionProposal, RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
@@ -64,6 +66,7 @@ def test_build_decision_record_no_trade_has_codes():
     )
     assert dr.no_trade is not None
     assert "pipeline_no_trade_selected" in dr.no_trade.no_trade_reason_codes
+    assert dr.forecast_summary.get("route_confidence") == pytest.approx(0.0)
 
 
 def test_risk_engine_sets_block_code_on_pause():
