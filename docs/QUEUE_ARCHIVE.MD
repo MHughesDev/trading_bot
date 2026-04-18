@@ -15,13 +15,13 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-020** are **Done**. **FB-CAN-021**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
+**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-021** are **Done**. **FB-CAN-024**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **10** | FB-CAN-021, FB-CAN-024, FB-CAN-029..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
+| **HIGH** | **9** | FB-CAN-024, FB-CAN-029..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
 | **MEDIUM** | **36** | FB-CAN-022..023, FB-CAN-025..028, FB-CAN-032, FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
 | **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
@@ -196,7 +196,7 @@
 | FB-CAN-018 | CAN-CARRY | A | FR | feature | MEDIUM | Done | **`carry_sleeve/`:** eligibility + sizing from `domains.carry`; `RouteId.CARRY`; pipeline attaches `carry_sleeve` diagnostics; `RiskState.carry_sleeve_last`; Prometheus carry metrics; replay `decision_output_event` includes carry. **Done 2026-04-18.** | `carry_sleeve/`, `decision_engine/`, `risk_engine/`, `observability/`, `backtesting/`, tests |
 | FB-CAN-019 | CAN-DEL-DEC | A | CP | tech_debt | HIGH | Done | Removed unused **`decision_engine/action_generator.py`** + **`tests/test_action_generator_routes.py`**; `decision_engine` package no longer exports `propose_action`. **Done 2026-04-18.** | [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD) |
 | FB-CAN-020 | CAN-DEL-RISK | A | CP | tech_debt | HIGH | Done | Removed unused **`risk_engine/equal_weight.py`** + **`tests/test_equal_weight.py`** (deferred FB-N3 stub, not on `RiskEngine` path). Updated **`docs/architecture/risk_precedence.md`** to match gates + canonical sizing + signing. **Done 2026-04-18.** | [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD) |
-| FB-CAN-021 | CAN-DEL-EXEC | A | CP | tech_debt | HIGH | Open | Delete obsolete thin execution-only paths after canonical execution modules land. | `execution/`, tests |
+| FB-CAN-021 | CAN-DEL-EXEC | A | CP | tech_debt | HIGH | Done | Removed duplicate **`get_execution_adapter`** alias in **`execution/router.py`** (use **`create_execution_adapter`** only). **`ExecutionService`** + guidance path unchanged. **Done 2026-04-18.** | [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD) |
 | FB-CAN-022 | CAN-DEL-CFG | A | CFG | tech_debt | MEDIUM | Open | Delete superseded legacy config keys/env mappings after canonical config migration window. | `app/config/`, README/docs |
 | FB-CAN-023 | CAN-DEL-DOC | B | OP | tech_debt | MEDIUM | Open | Delete/archive conflicting docs/Specs and add non-canonical tombstones/redirects. | `docs/Specs/`, `docs/Human Provided Specs/`, README/docs |
 | FB-CAN-024 | CAN-DEL-TEST | B | CI | tech_debt | HIGH | Open | Delete legacy-architecture tests and replace with canonical domain tests in same slices. | `tests/`, decision/risk/execution modules |

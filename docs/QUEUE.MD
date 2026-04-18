@@ -118,11 +118,11 @@ stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_t
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-020** are **Done** (includes removal of unused `equal_weight` stub per FB-CAN-020). **FB-CAN-021**…**FB-CAN-078** remain **Open** for canonical migration. Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** 58 canonical replacement slices; next item is **FB-CAN-021**.
+**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-021** are **Done** (includes removal of duplicate `get_execution_adapter` alias per FB-CAN-021). **FB-CAN-024**…**FB-CAN-078** remain **Open** for canonical migration (next HIGH slice **FB-CAN-024**). Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack:** 57 canonical replacement slices.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **10** | FB-CAN-021, FB-CAN-024, FB-CAN-029..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
+| **HIGH** | **9** | FB-CAN-024, FB-CAN-029..031, FB-CAN-033, FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
 | **MEDIUM** | **36** | FB-CAN-022..023, FB-CAN-025..028, FB-CAN-032, FB-CAN-034..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
 | **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
