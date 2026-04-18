@@ -1,0 +1,58 @@
+"""Tests for APEX trigger engine (FB-CAN-005)."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
+from app.contracts.forecast_packet import ForecastPacket
+from decision_engine.trigger_engine import evaluate_trigger
+
+
+def _apex() -> CanonicalStateOutput:
+    return CanonicalStateOutput(
+        regime_probabilities=[0.25, 0.25, 0.2, 0.15, 0.15],
+        regime_confidence=0.4,
+        transition_probability=0.2,
+        novelty=0.1,
+        heat_score=0.2,
+        reflexivity_score=0.2,
+        degradation=DegradationLevel.NORMAL,
+    )
+
+
+def _pkt() -> ForecastPacket:
+    return ForecastPacket(
+        timestamp=datetime.now(UTC),
+        horizons=[1, 3, 5],
+        q_low=[-0.02, -0.03, -0.04],
+        q_med=[0.01, 0.0, 0.0],
+        q_high=[0.04, 0.05, 0.06],
+        interval_width=[0.06, 0.08, 0.1],
+        regime_vector=[0.3, 0.3, 0.2, 0.2],
+        confidence_score=0.75,
+        ensemble_variance=[0.01, 0.02, 0.03],
+        ood_score=0.05,
+    )
+
+
+def test_evaluate_trigger_emits_stages():
+    feats = {"close": 50_000.0, "rsi_14": 55.0, "return_1": 0.001, "volume": 1e6}
+    out = evaluate_trigger(_pkt(), feats, spread_bps=5.0, apex=_apex())
+    assert hasattr(out, "setup_valid")
+    assert 0.0 <= out.setup_score <= 1.0
+    assert 0.0 <= out.pretrigger_score <= 1.0
+    assert out.trigger_type in (
+        "none",
+        "imbalance_spike",
+        "volume_burst",
+        "structure_break",
+        "composite_confirmed",
+    )
+
+
+def test_no_trade_degradation_blocks():
+    apex = _apex().model_copy(update={"degradation": DegradationLevel.NO_TRADE})
+    out = evaluate_trigger(_pkt(), {"close": 1.0}, spread_bps=1.0, apex=apex)
+    assert out.setup_valid is False
+    assert "degradation_block" in out.trigger_reason_codes
