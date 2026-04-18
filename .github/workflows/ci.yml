@@ -34,6 +34,8 @@ jobs:
         run: bash scripts/ci_mlflow_promotion_policy.sh
       - name: Canonical contracts + release-gate fixture (FB-CAN-013)
         run: bash scripts/ci_canonical_contracts.sh
+      - name: Canonical CI gates (FB-CAN-025)
+        run: bash scripts/ci_canonical_gates.sh
 
   # FB-AUD-019 — secret scan (Docker image on ubuntu-latest)
   gitleaks:

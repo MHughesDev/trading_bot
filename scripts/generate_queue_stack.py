@@ -788,7 +788,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-CI",
         "id": "FB-CAN-025",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Add CI gates for canonical contract compliance and deletion completion",
         "agent_task": "Add CI scripts/checks that enforce canonical contract schemas, required config metadata/version fields, replay determinism checks, and hard-fail if forbidden legacy modules remain after designated cutover IDs. Ensure queue consistency gate includes canonical batch IDs.",
         "affected_files": "scripts/|.github/workflows/ci.yml|tests/|docs/",

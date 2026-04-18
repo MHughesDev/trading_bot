@@ -171,6 +171,7 @@ bash scripts/ci_pip_audit.sh
 bash scripts/ci_bandit.sh
 bash scripts/ci_mlflow_promotion_policy.sh
 bash scripts/ci_canonical_contracts.sh
+bash scripts/ci_canonical_gates.sh
 ```
 
 **Secret scanning (optional locally):** `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 detect --source /repo --redact` (same image as CI **gitleaks** job).
