@@ -147,19 +147,23 @@ def build_execution_feedback_event(
     simulated_latency_ms: float,
     execution_confidence_realized: float,
     profile: str,
+    partial_fill_reconciliation: dict[str, Any] | None = None,
 ) -> ReplayEventEnvelope:
+    payload: dict[str, Any] = {
+        "simulated_fill_price": simulated_fill_price,
+        "simulated_fill_ratio": simulated_fill_ratio,
+        "simulated_fill_latency_ms": simulated_latency_ms,
+        "execution_confidence_realized": execution_confidence_realized,
+        "execution_model_profile": profile,
+    }
+    if partial_fill_reconciliation is not None:
+        payload["partial_fill_reconciliation"] = partial_fill_reconciliation
     return ReplayEventEnvelope(
         event_family="execution_feedback_event",
         replay_run_id=replay_run_id,
         symbol=symbol,
         timestamp=timestamp,
-        payload={
-            "simulated_fill_price": simulated_fill_price,
-            "simulated_fill_ratio": simulated_fill_ratio,
-            "simulated_fill_latency_ms": simulated_latency_ms,
-            "execution_confidence_realized": execution_confidence_realized,
-            "execution_model_profile": profile,
-        },
+        payload=payload,
     )
 
 

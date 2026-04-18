@@ -75,6 +75,8 @@ apex_canonical:
       urgency_trigger_strength_above: 0.55
       urgency_trigger_confidence_above: 0.4
       worst_case_slippage_multiplier: 2.5
+      partial_fill_min_remaining_fraction: 0.02
+      partial_fill_low_execution_floor: 0.22
     signal_confidence:
       market_microstructure:
         enabled: true

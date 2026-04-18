@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from app.config.settings import load_settings
 from app.contracts.replay_events import ReplayRunContract
 from backtesting.fault_injection import apply_fault_injection
 from backtesting.replay_events import (
@@ -16,7 +17,11 @@ from backtesting.replay_events import (
     build_safety_snapshot_event,
     build_structural_signal_event,
 )
-from backtesting.replay_helpers import execution_profile_fill_ratio
+from backtesting.replay_helpers import (
+    execution_profile_fill_ratio,
+    remaining_edge_and_exec_confidence_for_partial_fill,
+)
+from execution.partial_fill_reconcile import reconcile_partial_fill_record
 from decision_engine.pipeline import DecisionPipeline
 from risk_engine.engine import RiskEngine
 
@@ -130,6 +135,16 @@ def run_one_replay_step(
             )
         if trade_action is not None:
             ec = float(getattr(risk_out, "risk_execution_confidence", None) or 0.72)
+            pfr: dict[str, Any] | None = None
+            if fill_ratio < 1.0 - 1e-12:
+                rem_edge, ec_pf = remaining_edge_and_exec_confidence_for_partial_fill(risk_out)
+                pfr = reconcile_partial_fill_record(
+                    intended_qty=float(trade_action.quantity),
+                    fill_ratio=fill_ratio,
+                    remaining_edge=rem_edge,
+                    execution_confidence_realized=ec_pf,
+                    settings=load_settings(),
+                ).model_dump(mode="json")
             events_out.append(
                 build_execution_feedback_event(
                     replay_run_id=rid,
@@ -140,6 +155,7 @@ def run_one_replay_step(
                     simulated_latency_ms=45.0,
                     execution_confidence_realized=min(1.0, max(0.0, ec)),
                     profile=str(prof),
+                    partial_fill_reconciliation=pfr,
                 ).model_dump(mode="json")
             )
 

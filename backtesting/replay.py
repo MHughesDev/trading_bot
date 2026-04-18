@@ -15,9 +15,13 @@ from backtesting.execution_params import BacktestExecutionParams
 from backtesting.portfolio import PortfolioTracker
 from backtesting.replay_core import run_one_replay_step
 from orchestration.fault_injection_profiles import merge_replay_fault_profile
+from execution.partial_fill_reconcile import reconcile_partial_fill_record
 from backtesting.replay_helpers import (
     execution_feedback_from_simulated_fill,
     execution_profile_fill_ratio,
+    patch_execution_feedback_event_with_partial_fill,
+    remaining_edge_and_exec_confidence_for_partial_fill,
+    scaled_order_quantity_for_fill_ratio,
 )
 from backtesting.simulator import (
     cash_delta_for_trade,
@@ -140,9 +144,11 @@ def replay_decisions(
         cash_delta: Decimal | None = None
         solvency_blocked = False
         executed = trade_action
+        pfr_dict: dict | None = None
 
         if trade_action is not None and portfolio is not None and execp is not None and rng is not None:
-            q = Decimal(str(trade_action.quantity))
+            fr_sim = execution_profile_fill_ratio(prof_name)
+            q = scaled_order_quantity_for_fill_ratio(trade_action.quantity, fr_sim)
             fill_price = fill_price_with_slippage(
                 mid,
                 trade_action.side,
@@ -174,7 +180,8 @@ def replay_decisions(
                 fee_paid = None
                 cash_delta = None
         elif trade_action is not None:
-            q = Decimal(str(trade_action.quantity))
+            fr_sim = execution_profile_fill_ratio(prof_name)
+            q = scaled_order_quantity_for_fill_ratio(trade_action.quantity, fr_sim)
             if trade_action.side == "buy":
                 pos += q
             else:
@@ -183,6 +190,15 @@ def replay_decisions(
         if executed is not None:
             fill_px = float(fill_price) if fill_price is not None else float(mid)
             fr = execution_profile_fill_ratio(prof_name)
+            rem_edge, ec_pf = remaining_edge_and_exec_confidence_for_partial_fill(risk)
+            if fr < 1.0 - 1e-12:
+                pfr_dict = reconcile_partial_fill_record(
+                    intended_qty=float(trade_action.quantity),
+                    fill_ratio=fr,
+                    remaining_edge=rem_edge,
+                    execution_confidence_realized=ec_pf,
+                    settings=app_s,
+                ).model_dump(mode="json")
             execution_feedback_from_simulated_fill(
                 symbol=symbol,
                 mid_price=mid,
@@ -199,7 +215,14 @@ def replay_decisions(
             "trade": executed.model_dump() if executed else None,
             "solvency_blocked": solvency_blocked,
         }
-        if emit_canonical_events and row_events is not None:
+        if executed is not None:
+            row_dict["simulated_fill_ratio"] = execution_profile_fill_ratio(prof_name)
+            if pfr_dict is not None:
+                row_dict["partial_fill_reconciliation"] = pfr_dict
+        if emit_canonical_events and row_events is not None and pfr_dict is not None:
+            patch_execution_feedback_event_with_partial_fill(row_events, partial_fill_reconciliation=pfr_dict)
+            row_dict["canonical_events"] = row_events
+        elif emit_canonical_events and row_events is not None:
             row_dict["canonical_events"] = row_events
         if track_portfolio and portfolio is not None:
             row_dict["portfolio_cash"] = str(portfolio.cash)
@@ -348,9 +371,11 @@ def replay_multi_asset_decisions(
             cash_delta: Decimal | None = None
             solvency_blocked = False
             executed = trade_action
+            pfr_dict_ma: dict | None = None
 
             if trade_action is not None and portfolio is not None and execp is not None and rng is not None:
-                q = Decimal(str(trade_action.quantity))
+                fr_sim = execution_profile_fill_ratio(prof_name)
+                q = scaled_order_quantity_for_fill_ratio(trade_action.quantity, fr_sim)
                 fill_price = fill_price_with_slippage(
                     mid,
                     trade_action.side,
@@ -382,7 +407,8 @@ def replay_multi_asset_decisions(
                     fee_paid = None
                     cash_delta = None
             elif trade_action is not None:
-                q = Decimal(str(trade_action.quantity))
+                fr_sim = execution_profile_fill_ratio(prof_name)
+                q = scaled_order_quantity_for_fill_ratio(trade_action.quantity, fr_sim)
                 if trade_action.side == "buy":
                     positions[symbol] = positions.get(symbol, Decimal(0)) + q
                 else:
@@ -391,6 +417,15 @@ def replay_multi_asset_decisions(
             if executed is not None:
                 fill_px = float(fill_price) if fill_price is not None else float(mid)
                 fr = execution_profile_fill_ratio(prof_name)
+                rem_edge, ec_pf = remaining_edge_and_exec_confidence_for_partial_fill(risk)
+                if fr < 1.0 - 1e-12:
+                    pfr_dict_ma = reconcile_partial_fill_record(
+                        intended_qty=float(trade_action.quantity),
+                        fill_ratio=fr,
+                        remaining_edge=rem_edge,
+                        execution_confidence_realized=ec_pf,
+                        settings=app_s,
+                    ).model_dump(mode="json")
                 execution_feedback_from_simulated_fill(
                     symbol=symbol,
                     mid_price=mid,
@@ -406,7 +441,14 @@ def replay_multi_asset_decisions(
                 "trade": executed.model_dump() if executed else None,
                 "solvency_blocked": solvency_blocked,
             }
-            if emit_canonical_events and row_events is not None:
+            if executed is not None:
+                one["simulated_fill_ratio"] = execution_profile_fill_ratio(prof_name)
+                if pfr_dict_ma is not None:
+                    one["partial_fill_reconciliation"] = pfr_dict_ma
+            if emit_canonical_events and row_events is not None and pfr_dict_ma is not None:
+                patch_execution_feedback_event_with_partial_fill(row_events, partial_fill_reconciliation=pfr_dict_ma)
+                one["canonical_events"] = row_events
+            elif emit_canonical_events and row_events is not None:
                 one["canonical_events"] = row_events
             if track_portfolio and portfolio is not None:
                 one["fill_price"] = fill_price
