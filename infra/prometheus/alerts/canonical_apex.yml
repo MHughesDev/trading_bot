@@ -1,0 +1,102 @@
+# APEX canonical alerting (FB-CAN-028)
+# Requires scraping /metrics from the control plane (see infra/prometheus/prometheus.yml).
+# Tune thresholds per environment; defaults are conservative to reduce noise.
+
+groups:
+  - name: canonical_data_state
+    rules:
+      - alert: CanonicalDataAgeHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(tb_canonical_data_age_seconds_bucket[5m])) by (le, symbol)
+          ) > 90
+        for: 10m
+        labels:
+          severity: warning
+          domain: data_quality
+        annotations:
+          summary: "Canonical data age p95 high (symbol={{ $labels.symbol }})"
+          description: "RiskState data_age_seconds distribution suggests stale market/feature inputs."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-028-alert-rules"
+
+      - alert: CanonicalDegradationNoTradeOccupancy
+        expr: |
+          sum by (symbol) (
+            increase(tb_canonical_degradation_observations_total{level="no_trade"}[15m])
+          ) > 25
+        for: 5m
+        labels:
+          severity: warning
+          domain: state_safety
+        annotations:
+          summary: "Elevated NO_TRADE degradation observations ({{ $labels.symbol }})"
+          description: "Degradation level no_trade tick count increased in the last 15m window."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-028-alert-rules"
+
+  - name: canonical_trigger_auction
+    rules:
+      - alert: CanonicalTriggerMissedMoveSpike
+        expr: |
+          sum(increase(tb_canonical_trigger_missed_move_total[20m])) by (symbol) > 8
+        for: 5m
+        labels:
+          severity: warning
+          domain: trigger
+        annotations:
+          summary: "Missed-move flags elevated ({{ $labels.symbol }})"
+          description: "Trigger missed_move counter increased faster than baseline; review trigger thresholds and market regime."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-028-alert-rules"
+
+      - alert: CanonicalAuctionSuppressedSpike
+        expr: |
+          sum(rate(tb_canonical_auction_suppressed_total[10m])) by (symbol) > 0.15
+        for: 10m
+        labels:
+          severity: info
+          domain: auction
+        annotations:
+          summary: "Auction suppression rate elevated ({{ $labels.symbol }})"
+          description: "Opportunity auction often had no winner; may be normal in quiet markets—correlate with trigger pass rates."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-028-alert-rules"
+
+  - name: canonical_risk_carry
+    rules:
+      - alert: CanonicalRiskSizeMultiplierLow
+        expr: |
+          histogram_quantile(0.05,
+            sum(rate(tb_canonical_risk_size_multiplier_bucket[10m])) by (le, symbol)
+          ) < 0.35
+        for: 15m
+        labels:
+          severity: warning
+          domain: risk
+        annotations:
+          summary: "Canonical size multiplier persistently low ({{ $labels.symbol }})"
+          description: "Risk sizing throttling may be aggressive; review heat, degradation, and edge budget terms."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-028-alert-rules"
+
+      - alert: CanonicalCarrySleeveActive
+        expr: |
+          max_over_time(tb_canonical_carry_sleeve_active[10m]) > 0.5
+        for: 30m
+        labels:
+          severity: info
+          domain: carry
+        annotations:
+          summary: "Carry sleeve active on {{ $labels.symbol }}"
+          description: "Carry path engaged; verify funding signal and isolation behavior match policy."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-028-alert-rules"
+
+  - name: canonical_governance_shadow
+    rules:
+      - alert: CanonicalShadowDivergenceEvents
+        expr: |
+          sum(rate(tb_canonical_replay_shadow_divergence_total[5m])) by (kind) > 0
+        for: 5m
+        labels:
+          severity: info
+          domain: shadow_replay
+        annotations:
+          summary: "Shadow/replay divergence event rate (kind={{ $labels.kind }})"
+          description: "Divergence counter is increasing; correlate with release and replay jobs when wired."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-028-alert-rules"
