@@ -94,6 +94,18 @@ CANONICAL_AUCTION_SUPPRESSED = Counter(
     "Cycles where auction had no winner (suppress or outranked)",
     ["symbol"],
 )
+CANONICAL_AUCTION_TOP_N_SATURATION = Histogram(
+    "tb_canonical_auction_top_n_saturation",
+    "Auction top-N saturation selected_count/top_n (FB-CAN-044)",
+    ["symbol"],
+    buckets=(0.0, 0.25, 0.5, 0.75, 1.0),
+)
+CANONICAL_AUCTION_CANDIDATES_EVALUATED = Histogram(
+    "tb_canonical_auction_candidates_evaluated",
+    "Candidates scored in opportunity auction this tick",
+    ["symbol"],
+    buckets=(0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 8.0),
+)
 
 # --- Risk (spec §4.6) ---
 CANONICAL_SIZE_MULTIPLIER = Histogram(
@@ -230,6 +242,18 @@ def record_canonical_post_tick(
                     pass
             if au.get("selected_symbol") is None and au.get("records"):
                 CANONICAL_AUCTION_SUPPRESSED.labels(symbol=sym).inc()
+            ts = au.get("top_n_saturation")
+            if ts is not None:
+                try:
+                    CANONICAL_AUCTION_TOP_N_SATURATION.labels(symbol=sym).observe(float(ts))
+                except (TypeError, ValueError):
+                    pass
+            ce = au.get("candidates_evaluated")
+            if ce is not None:
+                try:
+                    CANONICAL_AUCTION_CANDIDATES_EVALUATED.labels(symbol=sym).observe(float(ce))
+                except (TypeError, ValueError):
+                    pass
 
     sm = getattr(risk, "canonical_size_multiplier", None)
     if sm is not None:

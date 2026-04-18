@@ -1054,7 +1054,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-AUCT-TOPN",
         "id": "FB-CAN-044",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement auction throughput bounds and top-N saturation controls",
         "agent_task": "Implement canonical auction throughput bounds: max candidate count, top-N selection caps, saturation metrics, and deterministic tie-break ordering. Add suppression reasons when candidates are excluded by throughput constraints.",
         "affected_files": "decision_engine/auction_engine.py|app/contracts/|observability/|tests/",
