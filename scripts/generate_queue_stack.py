@@ -872,7 +872,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-TRIG-MISSED",
         "id": "FB-CAN-031",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement missed-move handling and trigger false-positive memory penalties",
         "agent_task": "Implement explicit missed-move flagging and false-positive memory feedback required by canonical trigger and auction specs. Ensure missed-move suppresses ineligible candidates, and false-positive history contributes to auction penalties with deterministic replay visibility.",
         "affected_files": "decision_engine/trigger_engine.py|decision_engine/auction_engine.py|app/contracts/|backtesting/|tests/",

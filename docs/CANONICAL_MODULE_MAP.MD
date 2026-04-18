@@ -2,7 +2,7 @@
 
 **Purpose:** Single **code-to-domain** map for the shared decision path after **FB-CAN-004…011**. Use it with **[`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD)** (what to build toward) and **[`docs/Specs/README.MD`](Specs/README.MD)** (as-built file index).
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-031: missed-move + `trigger_false_positive_memory`; FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
 
 ---
 
@@ -30,8 +30,9 @@ Legacy **ForecastPacket → PolicySystem → proposal** remains the **forecast/r
 | Pipeline orchestration | [`decision_engine/pipeline.py`](../decision_engine/pipeline.py) | Boundary normalize + forecast packet build. |
 | Canonical post-forecast sequence | [`decision_engine/canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py) | **FB-CAN-029** — structure → state → trigger → auction → carry (shared by `pipeline.step`). |
 | State / regime / degradation | [`decision_engine/state_engine.py`](../decision_engine/state_engine.py), [`app/contracts/canonical_state.py`](../app/contracts/canonical_state.py) | `RegimeOutput.apex`, `RiskState` canonical fields. |
-| Three-stage trigger | [`decision_engine/trigger_engine.py`](../decision_engine/trigger_engine.py), [`app/contracts/trigger.py`](../app/contracts/trigger.py) | Diagnostics: `forecast_diagnostics["trigger"]`. |
-| Opportunity auction | [`decision_engine/auction_engine.py`](../decision_engine/auction_engine.py), [`app/contracts/auction.py`](../app/contracts/auction.py) | Diagnostics: `forecast_diagnostics["auction"]`. |
+| Three-stage trigger | [`decision_engine/trigger_engine.py`](../decision_engine/trigger_engine.py), [`app/contracts/trigger.py`](../app/contracts/trigger.py) | **FB-CAN-031** missed-move gate; diagnostics: `forecast_diagnostics["trigger"]`. |
+| Opportunity auction | [`decision_engine/auction_engine.py`](../decision_engine/auction_engine.py), [`app/contracts/auction.py`](../app/contracts/auction.py) | **FB-CAN-031** false-positive memory penalty **P**; diagnostics: `forecast_diagnostics["auction"]`. |
+| Risk — trigger memory | [`app/contracts/risk.py`](../app/contracts/risk.py), [`decision_engine/state_engine.py`](../decision_engine/state_engine.py) | **`trigger_false_positive_memory`** updated in `merge_canonical_into_risk`. |
 | Policy / proposal | [`decision_engine/spec_policy_proposal.py`](../decision_engine/spec_policy_proposal.py) | PolicySystem + trigger + auction; legacy `action_generator.py` removed (FB-CAN-019). |
 | Risk + sizing | [`risk_engine/engine.py`](../risk_engine/engine.py), [`risk_engine/canonical_sizing.py`](../risk_engine/canonical_sizing.py) | Hard gates + `compute_canonical_notional`; `last_risk_sizing` diagnostics. |
 | Execution guidance | [`execution/execution_logic.py`](../execution/execution_logic.py), [`execution/service.py`](../execution/service.py), [`app/contracts/execution_guidance.py`](../app/contracts/execution_guidance.py) | Prepare/sign path before adapters. |

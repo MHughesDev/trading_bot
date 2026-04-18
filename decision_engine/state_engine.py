@@ -199,4 +199,19 @@ def merge_canonical_into_risk(
                 "risk_liquidation_mode": mode,
             }
         )
+        # FB-CAN-031: deterministic false-positive / late-chase memory for auction penalty
+        old_fp = float(getattr(risk, "trigger_false_positive_memory", 0.0) or 0.0)
+        tr = trigger
+        if tr is not None:
+            inc = 0.0
+            if tr.missed_move_flag:
+                inc = max(inc, 0.35)
+            elif tr.setup_valid and tr.pretrigger_valid and not tr.trigger_valid:
+                inc = max(
+                    inc,
+                    _clip01(0.45 * float(tr.trigger_strength) + 0.25 * (1.0 - float(tr.trigger_confidence))),
+                )
+            decay = 0.82 if tr.trigger_valid else 0.96
+            new_fp = _clip01(old_fp * decay + inc)
+            upd["trigger_false_positive_memory"] = new_fp
     return risk.model_copy(update=upd)

@@ -135,17 +135,37 @@ def evaluate_trigger(
 
     trigger_threshold = 0.2
     trigger_exec_floor = 0.1
-    trigger_valid = (
+    entry_extension_limit = 0.85
+    min_remaining_edge = 0.03
+
+    # Spec §8 — missed move evaluated after strength, before final trigger_valid (pseudocode §12).
+    width0 = float(pkt.interval_width[0]) if pkt.interval_width else 0.0
+    E = _clip01(width0 * 2.0)
+    R = A
+    X = spread_stress * 0.5 + (1.0 - exec_conf) * 0.5
+    missed_move_flag = E > entry_extension_limit or (R - X) < min_remaining_edge
+    if missed_move_flag:
+        if E > entry_extension_limit:
+            reasons.append("move_already_extended")
+        else:
+            reasons.append("insufficient_remaining_edge")
+
+    strength_ok = (
         setup_valid
         and pretrigger_valid
         and trigger_strength >= trigger_threshold
         and exec_conf >= trigger_exec_floor
     )
+    if setup_valid and pretrigger_valid and not strength_ok:
+        if exec_conf < trigger_exec_floor:
+            reasons.append("execution_too_degraded")
+        elif trigger_strength < trigger_threshold:
+            reasons.append("trigger_strength_low")
 
-    if not trigger_valid:
-        trig_type = "none"
-    else:
-        # Deterministic tie-break: imbalance → volume → structure → composite (last wins ties on max)
+    trigger_valid = strength_ok and not missed_move_flag
+
+    trig_type = "none"
+    if trigger_valid:
         candidates = [
             ("imbalance_spike", B),
             ("volume_burst", U),
@@ -164,19 +184,6 @@ def evaluate_trigger(
     Ce = exec_conf
     Cd = F
     trigger_confidence = _clip01((Cf + Cm + Ce + Cd) / 4.0)
-
-    width0 = float(pkt.interval_width[0]) if pkt.interval_width else 0.0
-    E = _clip01(width0 * 2.0)
-    R = A
-    X = spread_stress * 0.5 + (1.0 - exec_conf) * 0.5
-    missed_move_flag = E > 0.85 or (R - X) < 0.03
-    if missed_move_flag:
-        reasons.append("move_already_extended" if E > 0.85 else "insufficient_remaining_edge")
-        trigger_valid = False
-
-    if not trigger_valid and setup_valid and pretrigger_valid and not missed_move_flag:
-        if trigger_strength < trigger_threshold:
-            reasons.append("trigger_strength_low")
 
     return TriggerOutput(
         setup_valid=setup_valid,

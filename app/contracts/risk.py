@@ -38,3 +38,5 @@ class RiskState(BaseModel):
     canonical_snapshot_complete: float | None = Field(default=None, ge=0.0, le=1.0)
     # FB-CAN-018 — carry sleeve snapshot (last tick; replay / audit)
     carry_sleeve_last: dict | None = None
+    # FB-CAN-031 — false-positive / late-chase memory [0,1] for auction penalty (deterministic EMA)
+    trigger_false_positive_memory: float = Field(default=0.0, ge=0.0, le=1.0)

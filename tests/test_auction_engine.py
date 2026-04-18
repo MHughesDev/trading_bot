@@ -114,6 +114,86 @@ def test_no_trade_degradation_rejects_directional():
     assert result.selected_direction == 0
 
 
+def test_missed_move_excludes_directional():
+    base = ActionProposal(
+        symbol="BTC/USD",
+        route_id=RouteId.INTRADAY,
+        direction=1,
+        size_fraction=0.25,
+        stop_distance_pct=0.02,
+    )
+    trig = TriggerOutput(
+        setup_valid=True,
+        setup_score=0.5,
+        pretrigger_valid=True,
+        pretrigger_score=0.5,
+        trigger_valid=False,
+        trigger_type="composite_confirmed",
+        trigger_strength=0.5,
+        trigger_confidence=0.6,
+        missed_move_flag=True,
+        trigger_reason_codes=["move_already_extended"],
+    )
+    prop, result = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=trig,
+        app_risk=RiskState(),
+        spread_bps=5.0,
+        feature_row={"close": 50_000.0, "atr_14": 100.0},
+        settings=AppSettings(),
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+    )
+    assert prop is None
+    assert result.selected_direction == 0
+    assert any("missed_move" in r.reasons for r in result.records if r.direction != 0)
+
+
+def test_false_positive_memory_increases_auction_penalty():
+    base = ActionProposal(
+        symbol="BTC/USD",
+        route_id=RouteId.INTRADAY,
+        direction=1,
+        size_fraction=0.25,
+        stop_distance_pct=0.02,
+    )
+    risk0 = RiskState(trigger_false_positive_memory=0.0)
+    risk1 = RiskState(trigger_false_positive_memory=0.85)
+    feat = {"close": 50_000.0, "atr_14": 100.0}
+    _, r0 = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=risk0,
+        spread_bps=5.0,
+        feature_row=feat,
+        settings=AppSettings(),
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+    )
+    _, r1 = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=risk1,
+        spread_bps=5.0,
+        feature_row=feat,
+        settings=AppSettings(),
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+    )
+    long0 = next(r for r in r0.records if r.direction == 1)
+    long1 = next(r for r in r1.records if r.direction == 1)
+    assert long1.penalties["P"] > long0.penalties["P"]
+
+
 def test_ranking_stable_tiebreak():
     """Same inputs → same winner (deterministic)."""
     base = ActionProposal(
