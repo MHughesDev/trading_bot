@@ -18,14 +18,15 @@ All canonical slice metrics use the `tb_canonical_*` prefix (alongside existing 
 |-------------------------|------------|--------|
 | State / safety | `tb_canonical_regime_confidence`, `tb_canonical_heat_score`, `tb_canonical_novelty`, `tb_canonical_reflexivity_score`, `tb_canonical_heat_component`, `tb_canonical_novelty_reason_total`, `tb_canonical_degradation_observations_total`, `tb_canonical_hard_override_total`, `tb_canonical_degradation_transition_count`, `tb_canonical_session_mode_total`, `tb_canonical_session_mode_transition_count`, `tb_canonical_session_reason`, `tb_canonical_safety_reason` (counter family; exposition may append `_total`) | From `RegimeOutput.apex` and **`RiskState`** (FB-CAN-033). **FB-CAN-042:** reflexivity histogram; per-component heat (`component` label `Hf`…`He`); novelty reason counters. **FB-CAN-073:** weekend / low-liquidity session mode rate + transition gauge + session reason codes. **FB-CAN-074:** exchange-risk / data-integrity **`state_*`** codes on `apex.safety_reason_codes`. |
 | Trigger | `tb_canonical_trigger_stage_total`, `tb_canonical_trigger_missed_move_total`, `tb_canonical_trigger_setup_to_confirm_latency_ms` | From `forecast_diagnostics["trigger"]` (**FB-CAN-043:** deterministic stage timestamps + latency on `TriggerOutput`) |
-| Auction / decision | `tb_canonical_auction_selected_score`, `tb_canonical_auction_suppressed_total`, `tb_canonical_auction_top_n_saturation`, `tb_canonical_auction_candidates_evaluated` | From `forecast_diagnostics["auction"]` (**FB-CAN-044:** throughput / top-N saturation) |
-| Risk | `tb_canonical_risk_size_multiplier`, `tb_canonical_risk_final_notional_usd` | From `RiskState` |
+| Auction / decision | `tb_canonical_auction_selected_score`, `tb_canonical_auction_suppressed_total`, `tb_canonical_auction_top_n_saturation`, `tb_canonical_auction_candidates_evaluated`, `tb_canonical_auction_edge_penalty_max` (**FB-CAN-076**) | From `forecast_diagnostics["auction"]` (**FB-CAN-044:** throughput / top-N saturation). **FB-CAN-076:** max `penalties["B"]` across candidate records |
+| Risk | `tb_canonical_risk_size_multiplier`, `tb_canonical_risk_final_notional_usd`, `tb_canonical_edge_budget_headroom`, `tb_canonical_edge_budget_stress` (**FB-CAN-076**) | From `RiskState.last_risk_sizing` (**edge_budget_multiplier** / stress = 1−headroom) |
 | Execution (FB-CAN-047, FB-CAN-075) | `tb_canonical_execution_style_total`, `tb_canonical_execution_guidance_confidence` | From `last_decision_record.diagnostics.execution_guidance_preview` when present; **FB-CAN-075:** `execution_guidance.execution_confidence_terms` holds per-term qualities + normalized weights |
 | Data quality (proxy) | `tb_canonical_data_age_seconds` | From `RiskState.data_age_seconds` |
 | System lag (FB-CAN-072) | `tb_canonical_lag_seconds` | **`domain=data_ingestion`**: max age of feed vs bar timestamp vs now (event lag); **`domain=decision`**: `pipeline.step` + `risk_engine.evaluate` wall time; **`domain=execution_feedback`**: EMA fill latency from execution feedback memory (seconds). End-to-end tick duration: **`tb_decision_latency_seconds`** |
 | Optional families (FB-CAN-050) | `tb_canonical_options_context_available`, `tb_canonical_stablecoin_flow_available`, `tb_canonical_options_context_fallback_active`, `tb_canonical_stablecoin_flow_fallback_active` | From effective feature row after boundary merge (availability + fallback when families enabled but upstream missing) |
 | Drift / calibration | `tb_canonical_forecast_ood_score` | From `ForecastPacket.ood_score` |
 | Drift / calibration (FB-CAN-039) | `tb_canonical_theoretical_edge_score`, `tb_canonical_edge_erosion_score`, `tb_canonical_trade_intent_execution_confidence` | Trade-intent ticks only; theoretical edge = `decision_confidence × trigger_confidence`, erosion = `max(0, theoretical − execution_confidence)` |
+| Drift / calibration (**FB-CAN-076**) | `tb_canonical_edge_budget_escalation` | Counter `reason=` when edge-budget stress coincides with auction suppression, high **B** penalty, or trade-intent edge erosion; thresholds: `apex_canonical.domains.monitoring.edge_budget_escalation` |
 | Drift / calibration (FB-CAN-039) | `tb_canonical_feature_drift_penalty`, `tb_canonical_trigger_false_positive_memory` | From `canonical_exec_quality_penalty` feature + `RiskState.trigger_false_positive_memory` |
 | Drift / calibration (FB-CAN-039) | `tb_canonical_confidence_calibration_gap`, `tb_canonical_conformal_interval_relative_width`, `tb_canonical_conformal_calibration_applied_total` | Route vs packet confidence gap; conformal band width when `conformal_applied` |
 | Shadow / replay (FB-CAN-039) | `tb_canonical_shadow_divergence_rate`, `tb_canonical_shadow_comparison_within_thresholds`, `tb_canonical_shadow_rollback_recommended`, `tb_canonical_shadow_comparison_bars_compared` | Refreshed from persisted shadow comparison store on API startup and after **`POST /governance/shadow-comparison/run`** |
@@ -93,6 +94,14 @@ After a **live** release candidate reaches `active_live` with `approved_at`, the
 ### FB-CAN-065 governance / operator monitoring
 
 Module **`observability/governance_metrics.py`** registers Prometheus counters for promotion gate evaluations and config-diff semantics. **`GET /governance/monitoring`** lists **`governance_operator_metrics`** and **`governance_metrics_module`**. Grafana **tb-canonical-health** includes governance gate outcome and gate-failure panels. Alert group **`canonical_governance_operator_fb_can_065`** in **`infra/prometheus/alerts/canonical_apex.yml`** covers blocked promotions, config diffs requiring operator review, and rollback ledger events.
+
+### FB-CAN-076 edge-budget monitoring
+
+**Metrics:** **`tb_canonical_edge_budget_headroom`** (same as `edge_budget_multiplier` from `last_risk_sizing`), **`tb_canonical_edge_budget_stress`** (= 1 − headroom), **`tb_canonical_auction_edge_penalty_max`** (max `B` edge-budget penalty across auction candidates), **`tb_canonical_edge_budget_escalation`** (labels **`reason`**: `stress_and_auction_suppressed`, `stress_and_high_B_penalty`, `stress_and_edge_erosion`).
+
+**Config:** `apex_canonical.domains.monitoring.edge_budget_escalation` — `stress_min`, `auction_B_penalty_min`, `edge_erosion_min` (defaults align with alert rule baselines).
+
+**Alerts:** group **`canonical_edge_budget_fb_can_076`** in **`infra/prometheus/alerts/canonical_apex.yml`**.
 
 ### FB-CAN-072 lag metrics
 

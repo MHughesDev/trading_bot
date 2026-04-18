@@ -251,7 +251,7 @@
 | FB-CAN-073 | CAN-STATE-WEEKEND | A | RT | feature | LOW | Done | Session mode + throttle on **`CanonicalStateOutput`**; **`RiskState`** occupancy; sizing + trigger tightening; **`tb_canonical_session_mode`** + transition gauge (**FB-CAN-073**). **Done 2026-04-18.** | state/risk/observability/tests |
 | FB-CAN-074 | CAN-STATE-EXRISK | A | RT | feature | MEDIUM | Done | Integrate exchange-risk flags and data-integrity warnings into degradation/override logic. | state/data/risk/contracts/tests |
 | FB-CAN-075 | CAN-EXEC-LAT | A | EX | feature | LOW | Done | Implement execution latency/reliability quality terms in execution confidence. | execution/config/replay/observability/tests |
-| FB-CAN-076 | CAN-EDGE-MON | B | OB | feature | MEDIUM | Open | Implement edge-budget proxy monitoring and alert thresholds. | decision/execution/observability/infra/tests |
+| FB-CAN-076 | CAN-EDGE-MON | B | OB | feature | MEDIUM | Done | Implement edge-budget proxy monitoring and alert thresholds. | decision/execution/observability/infra/tests |
 | FB-CAN-077 | CAN-BINDING-IMM | B | DS | hardening | LOW | Open | Implement immutable run-binding guard for config/logic/dataset/seed identifiers. | contracts/replay/orchestration/models/tests |
 | FB-CAN-078 | CAN-FINAL-AUDIT | B | OP | platform | MEDIUM | Open | Add automated canonical acceptance audit as final migration completion gate. | scripts/reports/tests/QUEUE |
 

@@ -50,12 +50,15 @@ MONITORING_DOMAIN_CHECKLIST: dict[str, frozenset[str]] = {
         {
             "tb_canonical_auction_suppressed",
             "tb_canonical_auction_candidates_evaluated",
+            "tb_canonical_auction_edge_penalty_max",
         }
     ),
     "risk": frozenset(
         {
             "tb_canonical_risk_size_multiplier",
             "tb_canonical_risk_final_notional_usd",
+            "tb_canonical_edge_budget_headroom",
+            "tb_canonical_edge_budget_stress",
         }
     ),
     "execution": frozenset(
@@ -79,6 +82,7 @@ MONITORING_DOMAIN_CHECKLIST: dict[str, frozenset[str]] = {
         {
             "tb_canonical_forecast_ood_score",
             "tb_canonical_feature_drift_penalty",
+            "tb_canonical_edge_budget_escalation",
         }
     ),
     "replay_shadow": frozenset(

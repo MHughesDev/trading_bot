@@ -93,6 +93,10 @@ class CanonicalDomains(BaseModel):
         default_factory=dict,
         description="Live post-release probation windows and abort thresholds (FB-CAN-069).",
     )
+    monitoring: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Operator monitoring thresholds (FB-CAN-076 edge-budget escalation, etc.).",
+    )
     runtime_cutover: dict[str, Any] = Field(
         default_factory=dict,
         description="Cutover / migration-shadow flags (FB-CAN-059); see default.yaml.",
