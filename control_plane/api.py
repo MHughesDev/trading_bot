@@ -12,11 +12,12 @@ from typing import Annotated, Any, Literal
 
 from contextlib import asynccontextmanager
 
+import psycopg
 from pydantic import BaseModel, Field, ValidationError
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi import status as http_status
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
@@ -257,7 +258,10 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 tok = request.cookies.get(settings.auth_session_cookie_name)
                 if tok:
                     uid = operator_sessions_mod.resolve_session_user_id(
-                        settings.auth_users_db_path, tok
+                        settings.auth_users_db_path,
+                        tok,
+                        idle_timeout_seconds=settings.auth_idle_timeout_seconds,
+                        touch=True,
                     )
         token = tenant_ctx.set_current_user_id_token(uid)
         try:
@@ -334,7 +338,12 @@ def get_current_user(request: Request) -> UserRecord | None:
     if not settings.auth_session_enabled:
         return None
     tok = request.cookies.get(settings.auth_session_cookie_name)
-    uid = operator_sessions_mod.resolve_session_user_id(settings.auth_users_db_path, tok)
+    uid = operator_sessions_mod.resolve_session_user_id(
+        settings.auth_users_db_path,
+        tok,
+        idle_timeout_seconds=settings.auth_idle_timeout_seconds,
+        touch=True,
+    )
     if uid is None:
         return None
     return user_store_mod.get_user_by_id(settings.auth_users_db_path, uid)
@@ -369,7 +378,15 @@ def require_mutate_operator(
         return
     if settings.auth_session_enabled:
         tok = request.cookies.get(settings.auth_session_cookie_name)
-        if operator_sessions_mod.resolve_session_user_id(settings.auth_users_db_path, tok) is not None:
+        if (
+            operator_sessions_mod.resolve_session_user_id(
+                settings.auth_users_db_path,
+                tok,
+                idle_timeout_seconds=settings.auth_idle_timeout_seconds,
+                touch=True,
+            )
+            is not None
+        ):
             return
         raise HTTPException(
             status_code=http_status.HTTP_401_UNAUTHORIZED,
@@ -594,6 +611,12 @@ def get_me(user: Annotated[UserRecord, Depends(require_user)]) -> AuthUserRespon
     )
 
 
+@app.post("/auth/touch")
+def post_auth_touch(user: Annotated[UserRecord, Depends(require_user)]) -> dict[str, Any]:
+    """No-op payload that confirms auth and refreshes idle timer via dependency touch."""
+    return {"ok": True, "user_id": user.id}
+
+
 @app.get("/auth/venue-credentials", response_model=VenueCredentialsResponse)
 def get_venue_credentials(user: Annotated[UserRecord, Depends(require_user)]) -> VenueCredentialsResponse:
     """Masked Alpaca / Coinbase credential presence (FB-UX-006). Requires ``NM_AUTH_VENUE_CREDENTIALS_MASTER_SECRET``."""
@@ -733,6 +756,12 @@ async def get_portfolio_positions() -> dict[str, Any]:
     return await fetch_portfolio_positions(eff)
 
 
+@app.get("/positions")
+async def get_positions_alias() -> dict[str, Any]:
+    """Alias for ``/portfolio/positions`` (FB-UX-018 sidebar holdings)."""
+    return await get_portfolio_positions()
+
+
 @app.get("/pnl/summary")
 async def get_pnl_summary(
     range_key: Annotated[
@@ -760,9 +789,13 @@ def get_pnl_series(
         int,
         Query(ge=60, le=86_400, description="Bucket width for ledger aggregation (seconds)"),
     ] = 3600,
+    mode: Annotated[
+        Literal["paper", "live"] | None,
+        Query(description="Dashboard view mode only; does not alter execution routing"),
+    ] = None,
 ) -> dict[str, Any]:
     """Cumulative realized P&L time series from the local ledger (FB-AP-026 dashboard chart)."""
-    return compute_pnl_series(range_key, bucket_seconds=bucket_seconds)
+    return compute_pnl_series(range_key, bucket_seconds=bucket_seconds, mode=mode)
 
 
 @app.get("/microservices/health")
@@ -1221,7 +1254,12 @@ def post_asset_init(request: Request, symbol: str) -> dict[str, Any]:
         if settings.auth_session_enabled:
             tok = request.cookies.get(settings.auth_session_cookie_name)
             if tok:
-                uid = operator_sessions_mod.resolve_session_user_id(settings.auth_users_db_path, tok)
+                uid = operator_sessions_mod.resolve_session_user_id(
+                    settings.auth_users_db_path,
+                    tok,
+                    idle_timeout_seconds=settings.auth_idle_timeout_seconds,
+                    touch=True,
+                )
     job_id = try_start_asset_init_job(sym, user_id=uid)
     if job_id is None:
         raise HTTPException(
@@ -1346,6 +1384,32 @@ async def get_asset_chart_bars(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except psycopg.errors.UndefinedTable:
+        return {
+            "symbol": symbol.strip(),
+            "interval_seconds": (
+                int(interval_seconds)
+                if interval_seconds is not None
+                else max(1, int(settings.market_data_bar_interval_seconds))
+            ),
+            "start": (start.replace(tzinfo=UTC) if start.tzinfo is None else start.astimezone(UTC)).isoformat(),
+            "end": (end.replace(tzinfo=UTC) if end.tzinfo is None else end.astimezone(UTC)).isoformat(),
+            "limit": max(1, min(int(limit), 50_000)),
+            "count": 0,
+            "bars": [],
+            "warning": "canonical_bars table was missing and has been initialized; no data yet",
+        }
+    except psycopg.OperationalError as exc:
+        return JSONResponse(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"error": "storage_unavailable", "detail": str(exc)},
+        )
+    except Exception as exc:
+        logger.exception("Unexpected chart bars error symbol=%s", symbol)
+        return JSONResponse(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": "internal", "detail": str(exc)},
+        )
 
 
 @app.get("/assets/chart/latest-bar")

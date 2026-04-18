@@ -16,8 +16,8 @@ from control_plane.asset_chart_fetch import (
 )
 from control_plane.asset_chart_markers import trade_marker_buy_sell_traces
 from control_plane.asset_lifecycle_actions import (
+    lifecycle_action_spec,
     poll_init_job_until_terminal,
-    primary_lifecycle_action,
 )
 from control_plane.app_toasts import maybe_toast
 from control_plane.asset_manifest_card import manifest_model_rows
@@ -34,24 +34,77 @@ from control_plane.streamlit_util import (
 logger = logging.getLogger(__name__)
 
 
+def _run_initialize(sym: str, msg_key: str) -> None:
+    try:
+        with st.spinner("Running initialization pipeline…"):
+            r = api_post_json(f"/assets/init/{sym}")
+            jid = str(r.get("job_id") or "")
+            if jid:
+                st.session_state["init_monitor_job_id"] = jid
+            job = poll_init_job_until_terminal(
+                jid,
+                fetch_job=lambda j: api_get_json(f"/assets/init/jobs/{j}"),
+            )
+        if job.get("status") == "succeeded":
+            st.session_state[msg_key] = ("success", "Initialization finished.")
+            maybe_toast(f"Init finished: {sym}", icon="✅")
+        else:
+            st.session_state[msg_key] = (
+                "error",
+                str(job.get("error") or "Initialization failed."),
+            )
+            maybe_toast("Initialization failed.", icon="⚠️")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 409:
+            st.session_state[msg_key] = (
+                "error",
+                "Another initialization job is already running.",
+            )
+            maybe_toast("Another init job is running.", icon="⚠️")
+        else:
+            st.session_state[msg_key] = ("error", str(e))
+            maybe_toast(str(e)[:240], icon="⚠️")
+    except Exception as e:
+        st.session_state[msg_key] = ("error", str(e))
+        maybe_toast(str(e)[:240], icon="⚠️")
+    st.rerun()
+
+
 def _render_ohlc_chart(sym: str) -> None:
     """FB-AP-028: OHLC from ``/assets/chart/bars``; week/month from daily rollup."""
-    st.markdown("**OHLC chart**")
-    preset_labels: dict[str, Preset] = {
-        "second (1s)": "second",
-        "minute (1m)": "minute",
-        "hour (1h)": "hour",
-        "day": "day",
-        "week (from daily)": "week",
-        "month (from daily)": "month",
-    }
-    choice = st.selectbox(
-        "Interval",
-        options=list(preset_labels.keys()),
-        index=1,
-        key=f"asset_chart_interval_{sym}",
-    )
-    preset = preset_labels[choice]
+    left, right = st.columns([4, 2])
+    with left:
+        st.markdown("**OHLC chart**")
+    with right:
+        labels = ["1s", "1m", "1h", "1D", "1W", "1M"]
+        label_to_preset: dict[str, Preset] = {
+            "1s": "second",
+            "1m": "minute",
+            "1h": "hour",
+            "1D": "day",
+            "1W": "week",
+            "1M": "month",
+        }
+        default_label = st.session_state.get(f"asset_chart_interval_chip_{sym}", "1m")
+        if hasattr(st, "segmented_control"):
+            selected = st.segmented_control(
+                "Interval",
+                options=labels,
+                default=default_label if default_label in labels else "1m",
+                key=f"asset_chart_interval_chip_{sym}",
+                label_visibility="collapsed",
+            )
+            choice_label = str(selected or "1m")
+        else:
+            choice_label = st.radio(
+                "Interval",
+                options=labels,
+                horizontal=True,
+                index=labels.index(default_label) if default_label in labels else 1,
+                key=f"asset_chart_interval_chip_{sym}",
+                label_visibility="collapsed",
+            )
+    preset = label_to_preset[choice_label]
     req = preset_to_request(preset)
     try:
         from control_plane.streamlit_util import get_api_base
@@ -66,6 +119,30 @@ def _render_ohlc_chart(sym: str) -> None:
         logger.warning("asset_page: could not resolve API base for chart hints symbol=%s", sym, exc_info=True)
     try:
         bars, note, _eff = fetch_bars_for_preset(sym, preset)
+    except httpx.HTTPStatusError as e:
+        payload: dict[str, Any] = {}
+        try:
+            payload = e.response.json()
+        except Exception:
+            payload = {}
+        code = e.response.status_code
+        err = str(payload.get("error") or "").strip()
+        detail = str(payload.get("detail") or e).strip()
+        label = "Unexpected error" if code >= 500 else "Chart request failed"
+        if err == "storage_unavailable" or code == 503:
+            label = "Chart storage unavailable"
+        st.markdown(
+            (
+                "<div style='border-left:4px solid var(--loss-red,#ef4444);"
+                "padding:8px 10px;margin:8px 0;'>"
+                f"<strong>{label}</strong>: {detail}"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+        if st.button("Retry", key=f"asset_chart_retry_{sym}", use_container_width=False):
+            st.rerun()
+        return
     except Exception as e:
         st.error(f"Chart data failed: {e}")
         return
@@ -79,7 +156,40 @@ def _render_ohlc_chart(sym: str) -> None:
     if markers:
         st.caption(f"Trade markers in window: **{len(markers)}** (source: `data/trade_markers.jsonl`)")
     if not bars:
-        st.info("No bars returned — persist canonical bars to QuestDB or run startup backfill (see docs).")
+        st.markdown(
+            (
+                "<div style='text-align:center;padding:20px 0;color:var(--text-secondary,#9ca3af);'>"
+                "<div style='font-size:22px;opacity:.8;'>◌</div>"
+                f"<div>No price history for {sym} yet</div>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+        if st.button(
+            "Initialize",
+            type="primary",
+            key=f"asset_chart_empty_init_{sym}",
+            use_container_width=False,
+        ):
+            try:
+                with st.spinner("Running initialization pipeline…"):
+                    r = api_post_json(f"/assets/init/{sym}")
+                    jid = str(r.get("job_id") or "")
+                    if jid:
+                        st.session_state["init_monitor_job_id"] = jid
+                    job = poll_init_job_until_terminal(
+                        jid,
+                        fetch_job=lambda j: api_get_json(f"/assets/init/jobs/{j}"),
+                    )
+                if job.get("status") == "succeeded":
+                    maybe_toast(f"Init finished: {sym}", icon="✅")
+                    st.success("Initialization finished.")
+                else:
+                    maybe_toast("Initialization failed.", icon="⚠️")
+                    st.error(str(job.get("error") or "Initialization failed."))
+            except Exception as exc:
+                maybe_toast(str(exc)[:240], icon="⚠️")
+                st.error(str(exc))
         return
     try:
         import plotly.graph_objects as go
@@ -156,150 +266,95 @@ def render_asset_page(symbol: str) -> None:
         st.warning(f"Lifecycle: {e}")
         lifecycle_state = "?"
 
-    h1, h2 = st.columns([4, 1])
-    with h1:
-        st.subheader(f"Asset · `{sym}`")
-    with h2:
-        st.caption("Control")
-        action = primary_lifecycle_action(lifecycle_state) if lifecycle_state != "?" else None
-        if action == "initialize":
-            if st.button("Initialize", type="primary", key=f"asset_lc_init_{sym}", use_container_width=True):
-                try:
-                    with st.spinner("Running initialization pipeline…"):
-                        r = api_post_json(f"/assets/init/{sym}")
-                        jid = str(r.get("job_id") or "")
-                        if jid:
-                            st.session_state["init_monitor_job_id"] = jid
-                        job = poll_init_job_until_terminal(
-                            jid,
-                            fetch_job=lambda j: api_get_json(f"/assets/init/jobs/{j}"),
-                        )
-                    if job.get("status") == "succeeded":
-                        st.session_state[msg_key] = ("success", "Initialization finished.")
-                        maybe_toast(f"Init finished: {sym}", icon="✅")
-                    else:
-                        st.session_state[msg_key] = (
-                            "error",
-                            str(job.get("error") or "Initialization failed."),
-                        )
-                        maybe_toast("Initialization failed.", icon="⚠️")
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 409:
-                        st.session_state[msg_key] = (
-                            "error",
-                            "Another initialization job is already running.",
-                        )
-                        maybe_toast("Another init job is running.", icon="⚠️")
-                    else:
-                        st.session_state[msg_key] = ("error", str(e))
-                        maybe_toast(str(e)[:240], icon="⚠️")
-                except Exception as e:
-                    st.session_state[msg_key] = ("error", str(e))
-                    maybe_toast(str(e)[:240], icon="⚠️")
-                st.rerun()
-        elif action == "start":
-            if st.button("Start", type="primary", key=f"asset_lc_start_{sym}", use_container_width=True):
-                try:
-                    api_post_json(f"/assets/lifecycle/{sym}/start")
-                    st.session_state[msg_key] = ("success", "Watch started (active).")
-                    maybe_toast("Watch started (active).", icon="✅")
-                except Exception as e:
-                    st.session_state[msg_key] = ("error", str(e))
-                    maybe_toast(str(e)[:240], icon="⚠️")
-                st.rerun()
-        elif action == "stop":
-            if st.button("Stop", type="primary", key=f"asset_lc_stop_{sym}", use_container_width=True):
-                try:
-                    r = post_mutate_response(f"/assets/lifecycle/{sym}/stop", {})
-                    if r.status_code == 200:
-                        data = r.json()
-                        fr = data.get("flatten") if isinstance(data.get("flatten"), dict) else {}
-                        skipped = fr.get("skipped")
-                        submitted = fr.get("submitted")
-                        if skipped == "flat":
-                            msg = "Watch stopped — no open position to flatten."
-                            maybe_toast("No position to flatten.", icon="ℹ️")
-                        elif submitted:
-                            msg = "Watch stopped — flatten order submitted."
-                            maybe_toast("Flatten order submitted.", icon="✅")
-                        else:
-                            msg = "Watch stopped."
-                            maybe_toast(msg, icon="✅")
-                        st.session_state[msg_key] = ("success", msg)
-                    elif r.status_code == 502:
-                        try:
-                            detail = r.json().get("detail", r.text)
-                        except Exception:
-                            detail = r.text
-                        st.session_state[msg_key] = ("error", f"Stop failed (flatten): {detail}")
-                        maybe_toast("Flatten failed — lifecycle still active.", icon="⚠️")
-                    else:
-                        r.raise_for_status()
-                except Exception as e:
-                    st.session_state[msg_key] = ("error", str(e))
-                    maybe_toast(str(e)[:240], icon="⚠️")
-                st.rerun()
-        else:
-            st.caption(f"`{lifecycle_state}`")
-
-    wl1, wl2 = st.columns([3, 1])
-    with wl1:
-        st.caption(f"**Lifecycle:** `{lifecycle_state}`")
-    with wl2:
+    action, action_label, action_color = lifecycle_action_spec(lifecycle_state)
+    head1, head2, head3 = st.columns([5, 2, 2])
+    with head1:
+        st.page_link("Home.py", label="Dashboard", icon=":material/arrow_back:")
+        st.markdown(f"### `{sym}`")
+        badge_map = {
+            "uninitialized": "UNINITIALIZED",
+            "initialized_not_active": "READY",
+            "active": "ACTIVE",
+        }
+        badge = badge_map.get(lifecycle_state, lifecycle_state.upper())
+        st.markdown(f"<span style='border:1px solid #374151;border-radius:10px;padding:2px 10px;font-size:11px;'>{badge}</span>", unsafe_allow_html=True)
+    with head2:
         st.caption("Watchlist")
         if is_pinned(st.session_state, sym):
-            if st.button("Remove ★", key=f"asset_wl_unpin_{sym}", use_container_width=True):
+            if st.button("★ Pinned", key=f"asset_wl_unpin_{sym}", use_container_width=True):
                 remove_watchlist_symbol(st.session_state, sym)
                 maybe_toast(f"Removed {sym} from watchlist.", icon="⭐")
                 st.rerun()
         else:
-            if st.button("Pin ★", key=f"asset_wl_pin_{sym}", use_container_width=True):
+            if st.button("☆ Pin", key=f"asset_wl_pin_{sym}", use_container_width=True):
                 ok, wmsg = add_watchlist_symbol(st.session_state, sym)
                 if ok:
                     maybe_toast(f"Pinned {sym} to watchlist.", icon="⭐")
                 else:
                     maybe_toast(wmsg, icon="⚠️")
                 st.rerun()
+    with head3:
+        st.caption("Action")
+        if action == "initialize":
+            st.markdown(f"<style>div[data-testid='stButton'] button[kind='primary']{{background:{action_color};}}</style>", unsafe_allow_html=True)
+            if st.button(action_label, type="primary", key=f"asset_lc_init_{sym}", use_container_width=True):
+                _run_initialize(sym, msg_key)
+        elif action == "start":
+            st.markdown(f"<style>div[data-testid='stButton'] button[kind='primary']{{background:{action_color};}}</style>", unsafe_allow_html=True)
+            if st.button(action_label, type="primary", key=f"asset_lc_start_{sym}", use_container_width=True):
+                try:
+                    api_post_json(f"/assets/lifecycle/{sym}/start")
+                    st.session_state[msg_key] = ("success", "Watch started (active).")
+                    maybe_toast("Watch started (active).", icon="✅")
+                except Exception as e:
+                    st.session_state[msg_key] = ("error", str(e))
+                st.rerun()
+        elif action == "stop":
+            st.markdown(f"<style>div[data-testid='stButton'] button[kind='primary']{{background:{action_color};}}</style>", unsafe_allow_html=True)
+            if st.button(action_label, type="primary", key=f"asset_lc_stop_{sym}", use_container_width=True):
+                try:
+                    r = post_mutate_response(f"/assets/lifecycle/{sym}/stop", {})
+                    if r.status_code == 200:
+                        st.session_state[msg_key] = ("success", "Watch stopped.")
+                    elif r.status_code == 502:
+                        st.session_state[msg_key] = ("error", "Flatten failed — lifecycle still active.")
+                    else:
+                        r.raise_for_status()
+                except Exception as e:
+                    st.session_state[msg_key] = ("error", str(e))
+                st.rerun()
+        else:
+            st.caption(f"`{lifecycle_state}`")
 
-    st.markdown("**Execution mode (this symbol)**")
+    st.markdown("#### Mode")
     try:
         em = api_get_json(f"/assets/execution-mode/{sym}")
         eff = str(em.get("execution_mode", "?"))
         default_em = str(em.get("default_execution_mode", "?"))
-        st.caption(f"Application default: `{default_em}` · Effective for orders: **`{eff}`**")
-        choice = st.selectbox(
-            "Paper vs live (persisted)",
-            options=["(use default)", "paper", "live"],
-            index=(
-                1
-                if em.get("override") == "paper"
-                else 2
-                if em.get("override") == "live"
-                else 0
-            ),
-            key=f"asset_exec_mode_{sym}",
-        )
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Apply execution mode", key=f"asset_exec_apply_{sym}"):
-                try:
-                    if choice == "(use default)":
-                        try:
-                            api_delete_json(f"/assets/execution-mode/{sym}")
-                        except httpx.HTTPStatusError as e:
-                            if e.response.status_code != 404:
-                                raise
-                    else:
-                        api_put_json(
-                            f"/assets/execution-mode/{sym}",
-                            {"execution_mode": choice},
-                        )
-                    st.success("Updated.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e))
-        with c2:
-            st.caption("Requires **NM_CONTROL_PLANE_API_KEY** when the API enforces it.")
+        if hasattr(st, "popover"):
+            with st.popover(f"Mode · {eff}"):
+                st.caption(f"Default `{default_em}`")
+                choice = st.selectbox(
+                    "Execution mode",
+                    options=["(use default)", "paper", "live"],
+                    index=(1 if em.get("override") == "paper" else 2 if em.get("override") == "live" else 0),
+                    key=f"asset_exec_mode_{sym}",
+                )
+                if st.button("Save", key=f"asset_exec_apply_{sym}"):
+                    try:
+                        if choice == "(use default)":
+                            try:
+                                api_delete_json(f"/assets/execution-mode/{sym}")
+                            except httpx.HTTPStatusError as e:
+                                if e.response.status_code != 404:
+                                    raise
+                        else:
+                            api_put_json(f"/assets/execution-mode/{sym}", {"execution_mode": choice})
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+        else:
+            st.caption(f"Mode `{eff}` (default `{default_em}`)")
     except Exception as e:
         st.warning(f"Execution mode: {e}")
 
@@ -322,7 +377,16 @@ def render_asset_page(symbol: str) -> None:
         except Exception:
             st.table(rows)
     except Exception:
-        st.info("No manifest for this symbol (uninitialized). Use **POST /assets/init/{symbol}** from the API or operator flow.")
+        st.markdown(
+            (
+                "<div class='tb-card' style='text-align:center;'>"
+                f"<div style='color:#9CA3AF;'>No manifest for {sym} yet.</div>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+        if st.button("Initialize", type="primary", key=f"asset_manifest_empty_init_{sym}"):
+            _run_initialize(sym, msg_key)
 
     st.divider()
     _render_ohlc_chart(sym)
@@ -335,15 +399,14 @@ def render_asset_page(symbol: str) -> None:
         st.session_state["_cp_api_base"] = api_base
 
     st.divider()
-    st.markdown("**Chart API (read-only)**")
-    st.caption(
-        "OHLC: `GET /assets/chart/bars` · markers: `GET /assets/chart/trade-markers` "
-        "(see `docs/PER_ASSET_OPERATOR.MD`)."
-    )
-    st.markdown(
-        f"- Bars: `{api_base}/assets/chart/bars?symbol={sym}&start=<ISO>&end=<ISO>`\n"
-        f"- Trade markers: `{api_base}/assets/chart/trade-markers?symbol={sym}&start=<ISO>&end=<ISO>`"
-    )
+    with st.expander("Developer / Debug", expanded=False):
+        st.caption(
+            f"SSE: `{api_base}/assets/chart/stream?symbol={sym}&interval_seconds={preset_to_request('minute').interval_seconds}`"
+        )
+        st.markdown(
+            f"- Bars: `{api_base}/assets/chart/bars?symbol={sym}&start=<ISO>&end=<ISO>`\n"
+            f"- Trade markers: `{api_base}/assets/chart/trade-markers?symbol={sym}&start=<ISO>&end=<ISO>`"
+        )
 
 
 def render_asset_page_or_pick() -> None:

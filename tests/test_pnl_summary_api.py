@@ -65,9 +65,10 @@ def test_pnl_series_endpoint(client_pnl):
         ),
         path=ledger,
     )
-    r = client.get("/pnl/series?range=all&bucket_seconds=3600")
+    r = client.get("/pnl/series?range=all&bucket_seconds=3600&mode=paper")
     assert r.status_code == 200
     body = r.json()
     assert body["range"] == "all"
+    assert body["mode"] == "paper"
     assert len(body["points"]) >= 1
     assert "cumulative_usd" in body["points"][-1]

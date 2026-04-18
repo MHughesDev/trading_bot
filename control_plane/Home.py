@@ -13,35 +13,46 @@ from __future__ import annotations
 
 import streamlit as st
 
-from control_plane.health_strip import render_dashboard_health_strip
-from control_plane.init_monitor import render_init_pipeline_monitor
+from control_plane._theme import inject_global_css
 from control_plane.pnl_panel import render_pnl_panel
-from control_plane.scheduler_panel import render_scheduler_panel
-from control_plane.positions_panel import render_positions_sidebar
 from control_plane.streamlit_chrome import render_app_sidebar
 from control_plane.streamlit_util import require_streamlit_app_access
 
-st.set_page_config(page_title="Trading Bot", layout="wide")
-require_streamlit_app_access()
-st.title("Trading Bot")
-render_app_sidebar()
-
-render_dashboard_health_strip()
-
-render_init_pipeline_monitor()
-
-render_scheduler_panel()
-
-render_positions_sidebar()
-
-render_pnl_panel()
-
-st.markdown(
-    """
-Use the sidebar to open **Live**, **Regimes**, **Routes**, **Models**, **Logs**, **Emergency**.
-
-Pages call the FastAPI control plane (`/status`, `/routes`, `/models`, `/flatten`) and link to observability URLs.
-
-**Per-asset** controls (**Initialize / Start / Stop**, execution mode) are on the **Asset page** — see **`docs/PER_ASSET_OPERATOR.MD`** (**FB-AP-031**). System-wide power / hard stop removal: **FB-AP-039**.
-"""
+st.set_page_config(
+    page_title="Trading Bot",
+    page_icon="◧",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
+
+
+def _render_dashboard() -> None:
+    require_streamlit_app_access()
+    inject_global_css()
+    st.title("Trading Bot")
+    render_app_sidebar()
+    render_pnl_panel()
+
+
+if hasattr(st, "navigation") and hasattr(st, "Page"):
+    nav = st.navigation(
+        [
+            st.Page(_render_dashboard, title="Dashboard", icon=":material/dashboard:", default=True),
+            st.Page("pages/Asset.py", title="Asset page", icon=":material/show_chart:"),
+            st.Page("pages/7_Account.py", title="Account", icon=":material/settings:"),
+            st.Page("pages/0_Login.py", title="Sign in", icon=":material/login:"),
+            st.Page("pages/99_Sign_up.py", title="Sign up", icon=":material/person_add:"),
+            # Hidden but still routable via direct URL / deep links.
+            st.Page("pages/1_Live.py", title="Live"),
+            st.Page("pages/2_Regimes.py", title="Regimes"),
+            st.Page("pages/3_Routes.py", title="Routes"),
+            st.Page("pages/4_Models.py", title="Models"),
+            st.Page("pages/5_Logs.py", title="Logs"),
+            st.Page("pages/6_Emergency.py", title="Emergency"),
+            st.Page("pages/98_Setup_API_keys.py", title="Setup API keys"),
+        ],
+        position="hidden",
+    )
+    nav.run()
+else:
+    _render_dashboard()

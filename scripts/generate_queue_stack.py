@@ -19,7 +19,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CHART-FIX",
         "id": "IL-CHART-001",
         "kind": "fix",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Asset chart returns 500 for uninitialized symbols; broaden except + ensure canonical_bars table exists",
         "agent_task": (
             "Goal: GET /assets/chart/bars must not return 500 when a symbol is "
@@ -82,7 +82,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "UX-NAV",
         "id": "FB-UX-018",
         "kind": "change",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Sidebar: migrate to st.navigation, 5 primary links + Watching/Holdings expanders, drop URL and config-symbol blocks",
         "agent_task": (
             "Goal: Replace the current sidebar (Streamlit's default multipage "
@@ -164,7 +164,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "UX-THEME",
         "id": "FB-UX-019",
         "kind": "change",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Design system: dark theme, .streamlit/config.toml, global CSS module, Inter + JetBrains Mono",
         "agent_task": (
             "Goal: Establish a cohesive modern visual language across the "
@@ -256,7 +256,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "UX-DASH",
         "id": "FB-UX-020",
         "kind": "change",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Dashboard redesign: hero PnL chart with Paper/Live toggle, Active-watching panel, Holdings panel",
         "agent_task": (
             "Goal: Home.py becomes a clean operator dashboard. One hero P&L "
@@ -358,7 +358,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "UX-ASSET",
         "id": "FB-UX-021",
         "kind": "change",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Asset page redesign: slim header, morphing lifecycle button, collapse Chart-API debug",
         "agent_task": (
             "Goal: control_plane/pages/Asset.py and the helpers in "
@@ -463,7 +463,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "UX-AUTH",
         "id": "FB-UX-022",
         "kind": "change",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Account / Sign-in / Sign-up polish: centered card forms, brand hero, consistent padding",
         "agent_task": (
             "Goal: pages/0_Login.py, pages/99_Sign_up.py, pages/7_Account.py "
@@ -568,7 +568,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "AUTH-IDLE",
         "id": "FB-AUTH-001",
         "kind": "hardening",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "2-hour idle lockout; unauthenticated users see only the login page",
         "agent_task": (
             "Goal: Any user whose session has been idle for more than 2 hours, or "
@@ -628,7 +628,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "UX-ONBOARD",
         "id": "FB-UX-017",
         "kind": "change",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Venue-key onboarding wizard: Alpaca step -> Coinbase step -> dashboard",
         "agent_task": (
             "Goal: Replace the single-form Setup API Keys page with a two-step "

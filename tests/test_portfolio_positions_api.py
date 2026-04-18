@@ -25,3 +25,12 @@ def test_portfolio_positions_ok_stub(client_stub_adapter):
     assert body["adapter"] == "stub"
     assert body["execution_mode"] == "paper"
     assert body["mark_price_policy"]["source"] == "kraken_mid"
+
+
+def test_positions_alias_matches_portfolio_positions(client_stub_adapter):
+    r = client_stub_adapter.get("/positions")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["positions"] == []
+    assert body["adapter"] == "stub"

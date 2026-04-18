@@ -36,11 +36,19 @@ def ensure_sessions_schema(db_path: Path) -> None:
                 token TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
+                last_activity_at TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
                 revoked_at TEXT
             )
             """
         )
+        cols = conn.execute("PRAGMA table_info(operator_sessions)").fetchall()
+        names = {str(c["name"]) for c in cols}
+        if "last_activity_at" not in names:
+            conn.execute("ALTER TABLE operator_sessions ADD COLUMN last_activity_at TEXT")
+            conn.execute(
+                "UPDATE operator_sessions SET last_activity_at = created_at WHERE last_activity_at IS NULL"
+            )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_operator_sessions_user ON operator_sessions(user_id)"
         )
@@ -65,10 +73,10 @@ def create_session(db_path: Path, user_id: int, ttl_seconds: int) -> SessionReco
             _purge_expired(conn)
             conn.execute(
                 """
-                INSERT INTO operator_sessions (token, user_id, created_at, expires_at, revoked_at)
-                VALUES (?, ?, ?, ?, NULL)
+                INSERT INTO operator_sessions (token, user_id, created_at, last_activity_at, expires_at, revoked_at)
+                VALUES (?, ?, ?, ?, ?, NULL)
                 """,
-                (token, user_id, created_s, expires_s),
+                (token, user_id, created_s, created_s, expires_s),
             )
             conn.commit()
     return SessionRecord(token=token, user_id=user_id, expires_at=expires)
@@ -90,7 +98,34 @@ def revoke_session(db_path: Path, token: str) -> bool:
             return cur.rowcount > 0
 
 
-def resolve_session_user_id(db_path: Path, token: str | None) -> int | None:
+def touch_session(db_path: Path, token: str) -> bool:
+    """Update ``last_activity_at`` for a valid, non-revoked session token."""
+    tok = (token or "").strip()
+    if not tok:
+        return False
+    now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    with _lock:
+        ensure_sessions_schema(db_path)
+        with _connect(db_path) as conn:
+            cur = conn.execute(
+                """
+                UPDATE operator_sessions
+                SET last_activity_at = ?
+                WHERE token = ? AND revoked_at IS NULL
+                """,
+                (now, tok),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+
+def resolve_session_user_id(
+    db_path: Path,
+    token: str | None,
+    *,
+    idle_timeout_seconds: int | None = None,
+    touch: bool = False,
+) -> int | None:
     """Return user_id if token is valid (not expired, not revoked)."""
     if not token or not token.strip():
         return None
@@ -100,7 +135,7 @@ def resolve_session_user_id(db_path: Path, token: str | None) -> int | None:
         conn.commit()
         row = conn.execute(
             """
-            SELECT user_id, expires_at, revoked_at FROM operator_sessions
+            SELECT user_id, expires_at, revoked_at, last_activity_at FROM operator_sessions
             WHERE token = ?
             """,
             (token,),
@@ -113,6 +148,18 @@ def resolve_session_user_id(db_path: Path, token: str | None) -> int | None:
     exp_dt = datetime.fromisoformat(exp_s.replace("Z", "+00:00"))
     if exp_dt <= datetime.now(UTC):
         return None
+    if idle_timeout_seconds is not None and idle_timeout_seconds > 0:
+        la_raw = str(row["last_activity_at"] or "")
+        try:
+            last_act = datetime.fromisoformat(la_raw.replace("Z", "+00:00"))
+        except Exception:
+            last_act = exp_dt
+        idle_age = (datetime.now(UTC) - last_act.astimezone(UTC)).total_seconds()
+        if int(idle_age) > int(idle_timeout_seconds):
+            revoke_session(db_path, token)
+            return None
+    if touch:
+        touch_session(db_path, token)
     return int(row["user_id"])
 
 

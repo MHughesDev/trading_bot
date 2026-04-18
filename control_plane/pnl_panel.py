@@ -1,187 +1,274 @@
-"""Dashboard: PnL chart + holdings (FB-AP-026)."""
+"""Dashboard hero + watching/holdings panels (FB-UX-020)."""
 
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
-import streamlit as st
-
-from control_plane.csv_export import (
-    csv_text_to_utf8_bytes,
-    pnl_summary_to_csv_text,
-    positions_payload_to_csv_text,
-)
-from control_plane.streamlit_util import api_get_json
-
-
-def _fmt_usd(s: str | None) -> str:
-    if s is None or s == "":
-        return "—"
+def _fmt_money(raw: Any) -> str:
     try:
-        v = Decimal(s)
-    except (InvalidOperation, ValueError):
-        return s
-    sign = "" if v >= 0 else "-"
-    abs_v = abs(v)
-    return f"{sign}${abs_v:,.4f}"
+        v = Decimal(str(raw))
+    except Exception:
+        return str(raw)
+    sign = "+" if v >= 0 else "-"
+    return f"{sign}${abs(v):,.2f}"
 
 
-def _color_for_pnl(s: str | None) -> str:
-    if s is None or s == "":
-        return "#6b7280"
+def _fmt_qty(raw: Any) -> str:
     try:
-        v = Decimal(s)
-    except (InvalidOperation, ValueError):
-        return "#6b7280"
-    return "#16a34a" if v >= 0 else "#dc2626"
+        q = Decimal(str(raw))
+    except Exception:
+        return str(raw)
+    return f"{q:,.6f}".rstrip("0").rstrip(".")
+
+
+def _fmt_pct(raw: Any) -> str:
+    try:
+        p = Decimal(str(raw))
+    except Exception:
+        return str(raw)
+    return f"{p:+.2f}%"
+
+
+def _color_from_num(raw: Any) -> str:
+    try:
+        v = Decimal(str(raw))
+    except Exception:
+        return "#9CA3AF"
+    return "var(--pnl-up)" if v >= 0 else "var(--pnl-down)"
 
 
 def _bucket_seconds_for_range(range_key: str) -> int:
     return {
         "hour": 300,
         "day": 3600,
-        "month": 86400,
-        "year": 86400,
-        "all": 86400,
+        "month": 86_400,
+        "year": 86_400,
+        "all": 86_400,
     }.get(range_key, 3600)
 
 
-def _render_holdings_main(data: dict[str, Any] | None, *, fetch_error: str | None) -> None:
-    st.subheader("Current holdings")
-    st.caption("Open positions from the execution adapter (same source as the legacy portfolio API).")
-    if fetch_error:
-        st.error(f"Failed to load positions: {fetch_error}")
-        return
-    assert data is not None
-    if not data.get("ok"):
-        st.warning(data.get("error") or "positions unavailable")
-        return
-    rows = data.get("positions") or []
-    if not rows:
-        st.info("No open positions.")
-        return
-    table_rows = []
-    for p in rows:
-        table_rows.append(
+def _series_path(range_key: str, mode: str, bucket_seconds: int) -> str:
+    return f"/pnl/series?range={range_key}&bucket_seconds={bucket_seconds}&mode={mode}"
+
+
+def _active_watching_rows(status_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    states = ((status_payload.get("asset_lifecycle") or {}).get("states") or {})
+    cache = status_payload.get("price_cache") if isinstance(status_payload.get("price_cache"), dict) else {}
+    rows: list[dict[str, Any]] = []
+    for sym, state in states.items():
+        if str(state).strip() != "active":
+            continue
+        c = cache.get(sym) if isinstance(cache, dict) else None
+        rows.append(
             {
-                "Symbol": p.get("symbol", "?"),
-                "Qty": str(p.get("quantity", "")),
-                "uPnL USD": p.get("unrealized_pnl") or "—",
-                "Mark": p.get("mark_price") or "—",
+                "symbol": sym,
+                "last_price": c.get("last_price") if isinstance(c, dict) else None,
+                "delta_24h_pct": c.get("delta_24h_pct") if isinstance(c, dict) else None,
             }
         )
-    st.dataframe(table_rows, use_container_width=True, hide_index=True)
+    rows.sort(key=lambda r: str(r["symbol"]))
+    return rows
+
+
+def _holdings_rows(positions_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in positions_payload.get("positions") or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            qty = Decimal(str(row.get("quantity") or "0"))
+        except Exception:
+            continue
+        if qty == 0:
+            continue
+        mark = row.get("mark_price")
+        avg = row.get("avg_entry_price")
+        mkt_val: str | None = None
+        try:
+            if mark is not None:
+                mkt_val = str(qty * Decimal(str(mark)))
+        except Exception:
+            mkt_val = None
+        out.append(
+            {
+                "symbol": row.get("symbol") or "?",
+                "quantity": str(qty),
+                "avg_entry_price": avg,
+                "market_value": mkt_val,
+                "unrealized_pnl": row.get("unrealized_pnl"),
+            }
+        )
+    out.sort(key=lambda r: str(r["symbol"]))
+    return out
+
+
+def _render_hero_chart(series_payload: dict[str, Any]) -> None:
+    import streamlit as st
+
+    points = series_payload.get("points") or []
+    if not points:
+        st.caption("No realized P&L points in this window.")
+        return
+    xs: list[datetime] = []
+    ys: list[float] = []
+    for pt in points:
+        try:
+            xs.append(datetime.fromisoformat(str(pt.get("bucket_start", "")).replace("Z", "+00:00")))
+            ys.append(float(Decimal(str(pt.get("cumulative_usd") or "0"))))
+        except Exception:
+            continue
+    if not xs:
+        st.caption("No plottable P&L points in this window.")
+        return
+
+    line_color = "#22D3A0" if ys[-1] - ys[0] >= 0 else "#F87171"
+    try:
+        import plotly.graph_objects as go
+
+        fig = go.Figure(
+            data=[
+                go.Scatter(
+                    x=xs,
+                    y=ys,
+                    mode="lines",
+                    line={"color": line_color, "width": 2},
+                    fill="tozeroy",
+                    fillcolor="rgba(34,211,160,0.08)" if line_color == "#22D3A0" else "rgba(248,113,113,0.08)",
+                    name="Cumulative P&L",
+                )
+            ]
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            height=360,
+            margin={"l": 10, "r": 10, "t": 8, "b": 8},
+            paper_bgcolor="#0B0F17",
+            plot_bgcolor="#0B0F17",
+            xaxis={"showgrid": False},
+            yaxis={"showgrid": True, "gridcolor": "#1F2937"},
+        )
+        st.plotly_chart(fig, width="stretch")
+    except Exception:
+        st.line_chart({"time": xs, "cumulative": ys}, x="time", y="cumulative", width="stretch")
 
 
 def render_pnl_panel() -> None:
-    """Main dashboard: holdings + PnL timeframe + cumulative realized chart + unrealized summary."""
-    positions_payload: dict[str, Any] | None = None
-    positions_fetch_error: str | None = None
-    try:
-        positions_payload = api_get_json("/portfolio/positions")
-    except Exception as e:
-        positions_fetch_error = str(e)
+    """Dashboard body with mode toggle, hero chart, watching, and holdings."""
+    import streamlit as st
+    from control_plane.streamlit_util import api_get_json
 
-    _render_holdings_main(positions_payload, fetch_error=positions_fetch_error)
+    st.markdown("<div style='font-size:11px;letter-spacing:.08em;color:#6B7280;'>PORTFOLIO</div>", unsafe_allow_html=True)
 
-    if positions_payload is not None:
-        pos_csv = positions_payload_to_csv_text(positions_payload)
-        st.download_button(
-            label="Download positions (CSV)",
-            data=csv_text_to_utf8_bytes(pos_csv),
-            file_name="portfolio_positions.csv",
-            mime="text/csv",
-            key="dl_positions_csv_fb011",
-            width="stretch",
-        )
+    mode_key = "dashboard_pnl_mode"
+    if mode_key not in st.session_state:
+        st.session_state[mode_key] = "paper"
 
-    st.divider()
-    st.subheader("P&L")
-    st.caption(
-        "Realized chart sums the local ledger (`data/pnl_ledger.jsonl`) into time buckets; "
-        "totals align with `GET /pnl/summary` for the selected window."
+    top_left, top_right = st.columns([4, 1])
+    with top_right:
+        if hasattr(st, "segmented_control"):
+            picked = st.segmented_control(
+                "Mode",
+                options=["paper", "live"],
+                default=str(st.session_state[mode_key]),
+                key="dashboard_mode_seg",
+                label_visibility="collapsed",
+            )
+        else:
+            picked = st.radio(
+                "Mode",
+                options=["paper", "live"],
+                horizontal=True,
+                index=0 if st.session_state[mode_key] == "paper" else 1,
+                key="dashboard_mode_radio",
+                label_visibility="collapsed",
+            )
+        st.session_state[mode_key] = str(picked or st.session_state[mode_key])
+
+    range_labels = {
+        "1D": "day",
+        "1W": "day",
+        "1M": "month",
+        "3M": "month",
+        "YTD": "year",
+        "ALL": "all",
+    }
+    if "dashboard_range_label" not in st.session_state:
+        st.session_state["dashboard_range_label"] = "1D"
+    selected_label = st.radio(
+        "Range",
+        options=list(range_labels.keys()),
+        horizontal=True,
+        index=list(range_labels.keys()).index(str(st.session_state["dashboard_range_label"])),
+        key="dashboard_range_radio",
+        label_visibility="collapsed",
     )
-    opts = ("hour", "day", "month", "year", "all")
-    choice = st.selectbox("Timeframe", options=opts, index=1, key="pnl_range_select_fb026")
+    st.session_state["dashboard_range_label"] = selected_label
+    range_key = range_labels[selected_label]
 
-    bucket_sec = _bucket_seconds_for_range(choice)
-    try:
-        series_payload = api_get_json(f"/pnl/series?range={choice}&bucket_seconds={bucket_sec}")
-    except Exception as e:
-        st.error(f"Failed to load P&L series: {e}")
-        series_payload = None
+    mode = str(st.session_state[mode_key])
+    bucket_seconds = _bucket_seconds_for_range(range_key)
+    series_payload = api_get_json(_series_path(range_key, mode, bucket_seconds))
+    summary = api_get_json(f"/pnl/summary?range={range_key}")
 
-    try:
-        summary = api_get_json(f"/pnl/summary?range={choice}")
-    except Exception as e:
-        st.error(f"Failed to load P&L summary: {e}")
-        return
+    realized = summary.get("realized_pnl_usd") or "0"
+    unrealized = summary.get("unrealized_pnl_usd") or "0"
+    hero_total = Decimal(str(realized)) + Decimal(str(unrealized))
 
-    sum_csv = pnl_summary_to_csv_text(summary)
-    st.download_button(
-        label="Download P&L summary (CSV)",
-        data=csv_text_to_utf8_bytes(sum_csv),
-        file_name=f"pnl_summary_{choice}.csv",
-        mime="text/csv",
-        key="dl_pnl_summary_csv_fb011",
-        width="stretch",
-    )
-
-    r = summary.get("realized_pnl_usd")
-    u = summary.get("unrealized_pnl_usd")
-    w0 = summary.get("window_start") or "—"
-    w1 = summary.get("window_end") or "—"
-    st.caption(f"Window (UTC): `{w0}` → `{w1}` · range: `{summary.get('range', '?')}`")
-
-    c1, c2 = st.columns(2)
-    with c1:
+    with top_left:
         st.markdown(
-            f"**Realized (window)** "
-            f'<span style="color:{_color_for_pnl(r)};font-weight:700;">{_fmt_usd(r)}</span>',
+            f"<div style='font-size:56px;font-weight:600;line-height:1;'>"
+            f"{_fmt_money(hero_total)}</div>",
             unsafe_allow_html=True,
         )
-    with c2:
-        if u is None:
-            err = summary.get("positions_error") or "unknown"
-            st.markdown("**Unrealized** —")
-            st.warning(f"Could not sum positions: {err}")
-        else:
+        st.markdown(
+            f"<div style='font-size:14px;color:{_color_from_num(unrealized)};'>"
+            f"Unrealized {_fmt_money(unrealized)} · Realized {_fmt_money(realized)}</div>",
+            unsafe_allow_html=True,
+        )
+
+    _render_hero_chart(series_payload)
+
+    status_payload: dict[str, Any] = {}
+    try:
+        status_payload = api_get_json("/status")
+    except Exception:
+        status_payload = {}
+    positions_payload: dict[str, Any] = {}
+    try:
+        positions_payload = api_get_json("/positions")
+    except Exception:
+        positions_payload = {"positions": []}
+
+    watching = _active_watching_rows(status_payload)
+    holdings = _holdings_rows(positions_payload)
+
+    left, right = st.columns([1, 1])
+    with left:
+        st.markdown(f"**WATCHING** ({len(watching)})")
+        if not watching:
+            st.caption("No active watchlist")
+        for row in watching[:6]:
+            sym = str(row["symbol"])
+            price = row.get("last_price")
+            delta = row.get("delta_24h_pct")
+            right_text = f"{price}" if price is not None else "—"
+            if delta is not None:
+                right_text = f"{right_text} {_fmt_pct(delta)}"
+            st.page_link("pages/Asset.py", label=f"{sym} · {right_text}", query_params={"symbol": sym})
+
+    with right:
+        st.markdown(f"**HOLDINGS** ({len(holdings)})")
+        if not holdings:
+            st.caption("No open positions")
+        for row in holdings:
+            upnl = row.get("unrealized_pnl")
             st.markdown(
-                f"**Unrealized** "
-                f'<span style="color:{_color_for_pnl(u)};font-weight:700;">{_fmt_usd(u)}</span>',
+                (
+                    f"<div><strong>{row['symbol']}</strong> · qty {_fmt_qty(row['quantity'])} "
+                    f"· avg {row.get('avg_entry_price') or '—'} · mkt {row.get('market_value') or '—'} "
+                    f"· <span style='color:{_color_from_num(upnl)}'>uPnL {_fmt_money(upnl or 0)}</span></div>"
+                ),
                 unsafe_allow_html=True,
             )
-
-    if series_payload and series_payload.get("points"):
-        pts = series_payload["points"]
-        times: list[datetime] = []
-        cum_vals: list[float] = []
-        for pt in pts:
-            raw = pt.get("bucket_start")
-            if not raw:
-                continue
-            try:
-                t = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-            except ValueError:
-                continue
-            times.append(t)
-            try:
-                cum_vals.append(float(Decimal(str(pt.get("cumulative_usd", "0")))))
-            except Exception:
-                cum_vals.append(0.0)
-        if times:
-            st.caption("Cumulative realized P&L (USD) within the window")
-            st.line_chart(
-                {
-                    "Time": times,
-                    "Cumulative realized (USD)": cum_vals,
-                },
-                x="Time",
-                y="Cumulative realized (USD)",
-                width="stretch",
-            )
-
-    ledger = summary.get("ledger") or {}
-    st.caption(f"Ledger: `{ledger.get('source_of_truth', '?')}` — {ledger.get('note', '')}")

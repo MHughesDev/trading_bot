@@ -9,7 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from app.contracts.events import BarEvent
-from data_plane.storage.schemas import ensure_questdb_schema
+from data_plane.storage.schemas import QUESTDB_CANONICAL_BARS_DDL, ensure_questdb_schema
 from observability.metrics import QUESTDB_WRITE_FAIL
 
 
@@ -33,6 +33,8 @@ class QuestDBWriter:
 
     async def connect(self) -> None:
         self._conn = await psycopg.AsyncConnection.connect(self._conninfo, autocommit=True)
+        # FB-AP chart reads may happen before any writer path: ensure canonical_bars exists.
+        await self._conn.execute(QUESTDB_CANONICAL_BARS_DDL)
         await ensure_questdb_schema(self._conn)
 
     async def aclose(self) -> None:

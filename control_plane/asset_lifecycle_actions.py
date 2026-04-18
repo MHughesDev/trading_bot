@@ -8,6 +8,18 @@ from typing import Any, Callable, Literal
 LifecyclePrimaryAction = Literal["initialize", "start", "stop"]
 
 
+def lifecycle_action_spec(lifecycle_state: str) -> tuple[LifecyclePrimaryAction | None, str, str]:
+    """Return ``(action, label, color_hex)`` for Asset header morphing button."""
+    action = primary_lifecycle_action(lifecycle_state)
+    if action == "initialize":
+        return action, "Initialize", "#6366F1"
+    if action == "start":
+        return action, "Start", "#22D3A0"
+    if action == "stop":
+        return action, "Stop", "#F87171"
+    return None, "—", "#9CA3AF"
+
+
 def primary_lifecycle_action(lifecycle_state: str) -> LifecyclePrimaryAction | None:
     """
     Map persisted lifecycle to the single primary operator action for this state.

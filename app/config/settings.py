@@ -208,8 +208,9 @@ class AppSettings(BaseSettings):
     # FB-UX-001: operator user accounts (SQLite + Argon2); used by POST /auth/register
     auth_users_db_path: Path = Field(default=Path("data/users.sqlite"))
     # FB-UX-002: server-side sessions (same SQLite DB); mutating routes accept cookie or API key
-    auth_session_enabled: bool = False
+    auth_session_enabled: bool = True
     auth_session_ttl_seconds: int = 604_800  # 7 days
+    auth_idle_timeout_seconds: int = 7_200
     auth_session_cookie_name: str = "tb_operator_session"
     auth_session_cookie_secure: bool = False
     auth_session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
