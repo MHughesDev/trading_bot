@@ -108,6 +108,26 @@ def build_canonical_state(
     )
 
 
+def apply_normalization_degradation(
+    apex: CanonicalStateOutput,
+    feature_row: dict[str, float] | None,
+) -> CanonicalStateOutput:
+    """FB-CAN-016: bump degradation when normalized feature confidence/completeness is low."""
+    fr = feature_row or {}
+    deg = apex.degradation
+    sc = fr.get("signal_confidence_aggregate")
+    if sc is not None and float(sc) < 0.25:
+        if deg in (DegradationLevel.NORMAL, DegradationLevel.REDUCED):
+            deg = DegradationLevel.REDUCED
+    comp = fr.get("canonical_snapshot_complete")
+    if comp is not None and float(comp) < 0.4:
+        if deg == DegradationLevel.NORMAL:
+            deg = DegradationLevel.REDUCED
+    if deg == apex.degradation:
+        return apex
+    return apex.model_copy(update={"degradation": deg})
+
+
 def degradation_size_multiplier(level: DegradationLevel) -> float:
     """Throttle notional by degradation (spec §6.4 style)."""
     return {
@@ -132,6 +152,22 @@ def merge_canonical_into_risk(
 
     if not isinstance(risk, RiskState):
         return risk
+    fr = feature_row or {}
+    norm_fields: dict[str, Any] = {}
+    for k in (
+        "feature_freshness",
+        "feature_reliability",
+        "signal_confidence_aggregate",
+        "canonical_snapshot_complete",
+    ):
+        if k in fr:
+            try:
+                norm_fields[k] = float(fr[k])
+            except (TypeError, ValueError):
+                pass
+    if norm_fields:
+        risk = risk.model_copy(update=norm_fields)
+
     if apex is None:
         return risk
 

@@ -17,6 +17,7 @@
 - **`bars/rolling.py`** — Rolling OHLCV bars per symbol (bucket size in seconds, default 1s in live)
 - **`bars/aggregator.py`** — Aggregation helpers
 - **`features/pipeline.py`** — Polars feature pipeline (RSI, MACD, ATR, etc.)
+- **`features/canonical_normalize.py`** — **FB-CAN-016:** canonical aliases (`ret_*` → `return_*`), freshness/reliability/completeness aggregates, validation helpers; `enrich_bars_last_row` / tick overlays apply this before the decision pipeline
 
 ## Memory
 

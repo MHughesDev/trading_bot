@@ -69,8 +69,8 @@ def build_decision_boundary_input(
     imb = _clip01((rsi - 50.0) / 50.0)
     burst = _clip01(vol / (close * 1e-6 + 1e6))
 
-    m_fresh = 0.92
-    m_rel = 0.88
+    m_fresh = _clip01(_safe_float(feature_row, "feature_freshness", 0.92))
+    m_rel = _clip01(_safe_float(feature_row, "feature_reliability", 0.88))
 
     market = MarketSnapshot(
         snapshot_id=sid,
@@ -98,8 +98,8 @@ def build_decision_boundary_input(
         snapshot_id=sid,
         timestamp=ts,
         instrument_id=symbol,
-        signal_freshness_structural=0.75,
-        signal_reliability_structural=0.7,
+        signal_freshness_structural=_clip01(_safe_float(feature_row, "structural_freshness", 0.75)),
+        signal_reliability_structural=_clip01(_safe_float(feature_row, "structural_reliability", 0.7)),
     )
 
     safety = SafetyRegimeSnapshot(

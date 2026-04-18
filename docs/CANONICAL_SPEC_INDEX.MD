@@ -2,7 +2,7 @@
 
 **Purpose:** Single entry point for **target system architecture** during the **FB-CAN-*** canonical migration. Use this page to decide which documents are **binding for “what we are building toward”** vs **historical or as-implemented**.
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-015: [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py) — input snapshot contracts).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-016: [`data_plane/features/canonical_normalize.py`](../data_plane/features/canonical_normalize.py)).
 
 ---
 
