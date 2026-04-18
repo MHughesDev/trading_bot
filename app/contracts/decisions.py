@@ -11,6 +11,7 @@ class RouteId(StrEnum):
     SCALPING = "SCALPING"
     INTRADAY = "INTRADAY"
     SWING = "SWING"
+    CARRY = "CARRY"
 
 
 class RouteDecision(BaseModel):

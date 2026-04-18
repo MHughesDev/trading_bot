@@ -690,7 +690,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-CARRY",
         "id": "FB-CAN-018",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement carry sleeve domain required by canonical architecture",
         "agent_task": "Create explicit carry sleeve module with eligibility, sizing boundaries, and interaction rules with directional strategy risk. Integrate carry sleeve observability and replay hooks so carry behavior is deterministic and auditable.",
         "affected_files": "carry_sleeve/|decision_engine/|risk_engine/|backtesting/|tests/",

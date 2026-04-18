@@ -19,7 +19,7 @@ def test_master_pipeline_step_runs():
     feats["close"] = 50_000.0
     feats["volume"] = 1e6
     risk = RiskState()
-    regime, fc, route, proposal = pipe.step(
+    regime, fc, route, proposal, _ = pipe.step(
         "BTC-USD",
         feats,
         5.0,

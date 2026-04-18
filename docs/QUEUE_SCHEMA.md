@@ -37,6 +37,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py) | **FB-CAN-015** — APEX input snapshot Pydantic models + `snapshot_builders` at pipeline boundary. |
 | [`data_plane/features/canonical_normalize.py`](../data_plane/features/canonical_normalize.py) | **FB-CAN-016** — canonical feature naming + freshness/reliability; degradation hooks. |
 | [`app/contracts/canonical_structure.py`](../app/contracts/canonical_structure.py) | **FB-CAN-017** — `CanonicalStructureOutput`; `structure_from_forecast_packet`; `forecast_diagnostics["canonical_structure"]`. |
+| [`carry_sleeve/`](../carry_sleeve/) | **FB-CAN-018** — carry eligibility/sizing; `RouteId.CARRY`; `forecast_diagnostics["carry_sleeve"]`; metrics `tb_canonical_carry_*`. |
 | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent workflow: one slice → validate → PR → merge. |
 | [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) | Cursor **Add to Queue** skill for adding/updating items. |
 | [`.cursor/skills/queue-one-at-a-time/SKILL.md`](../.cursor/skills/queue-one-at-a-time/SKILL.md) | Cursor **Queue One-at-a-Time** execution skill (take top Open row only, implement, validate, document, commit). |

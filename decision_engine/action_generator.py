@@ -20,6 +20,7 @@ def propose_action(
         RouteId.SCALPING: 0.1,
         RouteId.INTRADAY: 0.2,
         RouteId.SWING: 0.35,
+        RouteId.CARRY: 0.15,
     }
     stop_pct = max(0.002, min(0.05, forecast.volatility * 2.0))
     return ActionProposal(

@@ -10,7 +10,7 @@ def test_decision_pipeline_step():
     pipe = DecisionPipeline()
     risk = RiskState()
     feats = {f"f{i}": float(i) * 0.01 for i in range(32)}
-    regime, fc, route, action = pipe.step(
+    regime, fc, route, action, _ = pipe.step(
         "BTC-USD",
         feats,
         spread_bps=5.0,
@@ -19,7 +19,7 @@ def test_decision_pipeline_step():
         portfolio_equity_usd=100_000.0,
     )
     assert regime.semantic.value in ("bull", "bear", "volatile", "sideways")
-    assert route.route_id.value in ("NO_TRADE", "SCALPING", "INTRADAY", "SWING")
+    assert route.route_id.value in ("NO_TRADE", "SCALPING", "INTRADAY", "SWING", "CARRY")
 
 
 def test_risk_engine_blocks_stale():

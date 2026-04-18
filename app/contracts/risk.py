@@ -36,3 +36,5 @@ class RiskState(BaseModel):
     feature_reliability: float | None = Field(default=None, ge=0.0, le=1.0)
     signal_confidence_aggregate: float | None = Field(default=None, ge=0.0, le=1.0)
     canonical_snapshot_complete: float | None = Field(default=None, ge=0.0, le=1.0)
+    # FB-CAN-018 — carry sleeve snapshot (last tick; replay / audit)
+    carry_sleeve_last: dict | None = None

@@ -94,10 +94,12 @@ def build_decision_output_event(
 ) -> ReplayEventEnvelope:
     trig = None
     auct = None
+    carry = None
     if forecast_packet is not None:
         fd = forecast_packet.forecast_diagnostics or {}
         trig = fd.get("trigger")
         auct = fd.get("auction")
+        carry = fd.get("carry_sleeve")
     rs = getattr(risk, "last_risk_sizing", None)
     return ReplayEventEnvelope(
         event_family="decision_output_event",
@@ -114,6 +116,7 @@ def build_decision_output_event(
             "risk_last_risk_sizing": rs,
             "trigger": trig,
             "auction": auct,
+            "carry_sleeve": carry,
         },
     )
 

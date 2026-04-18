@@ -16,6 +16,8 @@ from pathlib import Path
 import numpy as np
 
 from app.config.settings import AppSettings, load_settings
+from carry_sleeve.config import CarrySleeveConfig
+from carry_sleeve.engine import build_carry_proposal, evaluate_carry_sleeve
 from app.contracts.decision_snapshots import ExecutionFeedbackSnapshot
 from app.contracts.snapshot_builders import (
     boundary_input_to_diagnostic_dict,
@@ -290,7 +292,7 @@ class DecisionPipeline:
         position_signed_qty: Decimal | None = None,
         data_timestamp: datetime | None = None,
         execution_feedback_snapshot: ExecutionFeedbackSnapshot | None = None,
-    ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None]:
+    ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, RiskState]:
         mp0 = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
         boundary_input, feature_effective = build_decision_boundary_input(
             symbol=symbol,
@@ -388,7 +390,7 @@ class DecisionPipeline:
                 confidence=0.0,
                 ranking=[RouteId.NO_TRADE],
             )
-            return regime_out, fc, route, None
+            return regime_out, fc, route, None, risk
 
         fc, route, action = run_spec_policy_step(
             symbol,
@@ -405,7 +407,43 @@ class DecisionPipeline:
             feature_row=feature_effective,
             structure=canonical_structure,
         )
-        return regime_out, fc, route, action
+
+        carry_cfg = CarrySleeveConfig.from_canonical_domains(self._settings.canonical.domains.carry)
+        carry_dec = evaluate_carry_sleeve(
+            feature_effective,
+            trig,
+            apex,
+            carry_cfg,
+            directional_proposal=action,
+        )
+        risk = risk.model_copy(
+            update={"carry_sleeve_last": carry_dec.model_dump(mode="json")},
+        )
+        pkt.forecast_diagnostics["carry_sleeve"] = carry_dec.model_dump(mode="json")
+
+        if carry_dec.active:
+            if carry_dec.directional_blocked and action is not None:
+                action = None
+                route = RouteDecision(
+                    route_id=RouteId.NO_TRADE,
+                    confidence=0.0,
+                    ranking=[RouteId.NO_TRADE],
+                )
+            carry_prop = build_carry_proposal(
+                symbol,
+                carry_dec,
+                feature_row=feature_effective,
+                max_per_symbol_usd=float(self._settings.risk_max_per_symbol_usd),
+            )
+            if carry_prop is not None:
+                action = carry_prop
+                route = RouteDecision(
+                    route_id=RouteId.CARRY,
+                    confidence=min(1.0, carry_dec.funding_signal),
+                    ranking=[RouteId.CARRY, RouteId.NO_TRADE],
+                )
+
+        return regime_out, fc, route, action, risk
 
 
 def _load_torch_forecaster_if_configured(settings: AppSettings):
