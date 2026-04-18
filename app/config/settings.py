@@ -16,6 +16,37 @@ PlatformSupportedUniverseMode = Literal["intersection", "union"]
 _DEFAULT_YAML = Path(__file__).resolve().parent / "default.yaml"
 
 
+def _risk_limits_from_apex_domains(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Map ``apex_canonical.domains.risk_sizing`` onto flat ``NM_RISK_*`` fields (FB-CAN-022)."""
+    out: dict[str, Any] = {}
+    ac = cfg.get("apex_canonical") or {}
+    dom = ac.get("domains") or {}
+    rs = dom.get("risk_sizing") or {}
+    if not rs:
+        return out
+    if "max_total_exposure_usd" in rs:
+        out["risk_max_total_exposure_usd"] = float(rs["max_total_exposure_usd"])
+    if "max_per_symbol_usd" in rs:
+        out["risk_max_per_symbol_usd"] = float(rs["max_per_symbol_usd"])
+    if "max_drawdown_pct" in rs:
+        out["risk_max_drawdown_pct"] = float(rs["max_drawdown_pct"])
+    if "max_spread_bps" in rs:
+        out["risk_max_spread_bps"] = float(rs["max_spread_bps"])
+    if "stale_data_seconds" in rs:
+        out["risk_stale_data_seconds"] = float(rs["stale_data_seconds"])
+    return out
+
+
+def _reject_legacy_risk_yaml(cfg: dict[str, Any]) -> None:
+    """FB-CAN-022: fail fast if deprecated top-level ``risk:`` block is still present."""
+    if cfg.get("risk") is not None:
+        raise ValueError(
+            "YAML configuration error: top-level 'risk:' was removed (FB-CAN-022). "
+            "Move limits to apex_canonical.domains.risk_sizing (e.g. max_total_exposure_usd, "
+            "max_per_symbol_usd) or set NM_RISK_* environment variables."
+        )
+
+
 class AppSettings(BaseSettings):
     """Application settings: default.yaml + NM_* environment variables."""
 
@@ -238,13 +269,6 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         out["memory_qdrant_collection"] = mem.get("qdrant_collection", "news_context_memory")
         out["memory_retrieval_interval_seconds"] = mem.get("retrieval_interval_seconds", 60)
         out["memory_top_k"] = mem.get("top_k", 10)
-    if "risk" in cfg:
-        r = cfg["risk"] or {}
-        out["risk_max_total_exposure_usd"] = r.get("max_total_exposure_usd", 100_000)
-        out["risk_max_per_symbol_usd"] = r.get("max_per_symbol_usd", 40_000)
-        out["risk_max_drawdown_pct"] = r.get("max_drawdown_pct", 0.15)
-        out["risk_max_spread_bps"] = r.get("max_spread_bps", 50)
-        out["risk_stale_data_seconds"] = r.get("stale_data_seconds", 120)
     if "features" in cfg:
         fe = cfg["features"] or {}
         if "return_windows" in fe:
@@ -412,6 +436,7 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         if "active_registry_path" in mo:
             v = mo["active_registry_path"]
             out["models_active_registry_path"] = None if v is None else str(v)
+    out.update(_risk_limits_from_apex_domains(cfg))
     return out
 
 
@@ -423,6 +448,7 @@ def load_settings(path: Path | None = None) -> AppSettings:
     if p.exists():
         with open(p, encoding="utf-8") as f:
             raw_cfg = yaml.safe_load(f) or {}
+        _reject_legacy_risk_yaml(raw_cfg)
         kwargs.update(_yaml_to_kwargs(raw_cfg))
     base = AppSettings(**kwargs)
     # Optional JSON manifest overrides serving paths (FB-SPEC-06); applied after env.

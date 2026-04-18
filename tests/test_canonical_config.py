@@ -65,9 +65,11 @@ def test_load_settings_binds_canonical(tmp_path: Path, monkeypatch):
             {
                 "apex_canonical": {
                     "metadata": {"config_name": "tmp-file", "config_version": "2.0.0"},
-                    "domains": {"trigger": {"stage_timeout_ms": 500}},
+                    "domains": {
+                        "trigger": {"stage_timeout_ms": 500},
+                        "risk_sizing": {"max_total_exposure_usd": 99999},
+                    },
                 },
-                "risk": {"max_total_exposure_usd": 99999},
             }
         ),
         encoding="utf-8",
