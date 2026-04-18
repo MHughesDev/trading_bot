@@ -25,6 +25,7 @@ def main() -> int:
             "metadata": {
                 "config_version": "ci-base",
                 "config_name": "ci",
+                "environment_scope": "research",
             },
             "domains": {
                 "risk_sizing": {"max_total_exposure_usd": 10000.0},
@@ -37,6 +38,7 @@ def main() -> int:
             "metadata": {
                 "config_version": "ci-current",
                 "config_name": "ci",
+                "environment_scope": "research",
             },
             "domains": {
                 "risk_sizing": {"max_total_exposure_usd": 12000.0},

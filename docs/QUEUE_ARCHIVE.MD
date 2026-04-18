@@ -15,14 +15,14 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-038** are **Done**. **FB-CAN-039**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track, except **FB-CAN-059** (runtime cutover guard) and **FB-CAN-060** (canonical synthesis shim prune) **Done**. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
+**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-038** are **Done**. **FB-CAN-039**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track, except **FB-CAN-059** (runtime cutover guard), **FB-CAN-060** (canonical synthesis shim prune), and **FB-CAN-061** (canonical config metadata validation) **Done**. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **3** | FB-CAN-041, FB-CAN-045, FB-CAN-047 |
-| **MEDIUM** | **23** | FB-CAN-039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
+| **MEDIUM** | **22** | FB-CAN-039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-062..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
 | **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
@@ -236,7 +236,7 @@
 | FB-CAN-058 | CAN-DOC-TOMBS | B | OP | change | LOW | Done | Add tombstone index for removed modules/docs with canonical replacement pointers. | `docs/`, `README.md`, reports/tests |
 | FB-CAN-059 | CAN-RUNTIME-CUT | A | RT | hardening | MEDIUM | Done | Add runtime cutover guard preventing unintended legacy+canonical dual-path activation. | `app/runtime/live_service.py`, `decision_engine/run_step.py`, config/tests |
 | FB-CAN-060 | CAN-FINAL-PRUNE | B | CP | tech_debt | HIGH | Done | Final hard-prune of temporary migration shims and remaining old architecture remnants. | core modules, docs, tests |
-| FB-CAN-061 | CAN-CONFIG-META | B | CFG | feature | MEDIUM | Open | Implement canonical config metadata fields and validation rules. | `app/config/`, `models/`, `scripts/`, tests |
+| FB-CAN-061 | CAN-CONFIG-META | B | CFG | feature | MEDIUM | Done | Implement canonical config metadata fields and validation rules. | `app/config/`, `models/`, `scripts/`, tests |
 | FB-CAN-062 | CAN-CONTRACT-COMMON | A | DP | feature | MEDIUM | Open | Enforce canonical contract common conventions (UTC/freshness/confidence typing and bounds). | `app/contracts/`, `decision_engine/`, `data_plane/`, tests |
 | FB-CAN-063 | CAN-SUPPRESS-TAX | B | DP | feature | MEDIUM | Open | Implement stable suppression/safety reason taxonomy and machine-readable reason codes. | contracts + decision/risk/execution/observability/tests |
 | FB-CAN-064 | CAN-CARRY-MON | B | OB | feature | LOW | Open | Implement carry-sleeve monitoring and alert families. | `carry_sleeve/`, observability/infra/control_plane/tests |

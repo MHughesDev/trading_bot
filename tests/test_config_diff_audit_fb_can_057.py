@@ -20,7 +20,10 @@ def test_semantic_flags_risk_change(tmp_path: Path) -> None:
     raw_b = yaml.safe_load(
         """
 apex_canonical:
-  metadata: {config_version: "a", config_name: "t"}
+  metadata:
+    config_version: "a"
+    config_name: "t"
+    environment_scope: research
   domains:
     risk_sizing: {max_total_exposure_usd: 100.0}
 """
@@ -28,7 +31,10 @@ apex_canonical:
     raw_c = yaml.safe_load(
         """
 apex_canonical:
-  metadata: {config_version: "b", config_name: "t"}
+  metadata:
+    config_version: "b"
+    config_name: "t"
+    environment_scope: research
   domains:
     risk_sizing: {max_total_exposure_usd: 200.0}
 """
@@ -42,8 +48,16 @@ apex_canonical:
 
 def test_audit_append_and_read(tmp_path: Path) -> None:
     settings = AppSettings()
-    raw_b = {"apex_canonical": {"metadata": {"config_version": "1", "config_name": "x"}}}
-    raw_c = {"apex_canonical": {"metadata": {"config_version": "2", "config_name": "x"}}}
+    raw_b = {
+        "apex_canonical": {
+            "metadata": {"config_version": "1", "config_name": "x", "environment_scope": "research"}
+        }
+    }
+    raw_c = {
+        "apex_canonical": {
+            "metadata": {"config_version": "2", "config_name": "x", "environment_scope": "research"}
+        }
+    }
     b = resolve_canonical_config(settings, raw_b)
     c = resolve_canonical_config(settings, raw_c)
     rep = build_canonical_config_diff_report(b, c)

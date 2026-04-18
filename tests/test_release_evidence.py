@@ -29,7 +29,11 @@ def test_diff_empty_when_same(tmp_path: Path) -> None:
         yaml.dump(
             {
                 "apex_canonical": {
-                    "metadata": {"config_version": "1.0.0", "config_name": "t"},
+                    "metadata": {
+                        "config_version": "1.0.0",
+                        "config_name": "t",
+                        "environment_scope": "research",
+                    },
                     "domains": {"risk_sizing": {"max_total_exposure_usd": 100.0}},
                 }
             }
@@ -56,7 +60,11 @@ def test_bundle_with_baseline_diff(tmp_path: Path) -> None:
         yaml.dump(
             {
                 "apex_canonical": {
-                    "metadata": {"config_version": "0.9.0", "config_name": "old"},
+                    "metadata": {
+                        "config_version": "0.9.0",
+                        "config_name": "old",
+                        "environment_scope": "research",
+                    },
                     "domains": {"risk_sizing": {"max_total_exposure_usd": 1.0}},
                 }
             }

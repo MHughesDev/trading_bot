@@ -1292,7 +1292,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-CONFIG-META",
         "id": "FB-CAN-061",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement canonical config metadata fields and validation rules",
         "agent_task": "Implement required canonical config metadata fields (config_version, config_name, created_at, created_by, environment_scope, notes, enabled_feature_families, parent version linkage). Add schema validation and migration checks to reject incomplete production configs.",
         "affected_files": "app/config/|models/|scripts/|tests/",

@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 EnvironmentScope = Literal["research", "simulation", "shadow", "live", "unspecified"]
 
@@ -30,9 +30,41 @@ class CanonicalMetadata(BaseModel):
     created_by: str = "system"
     parent_config_version: str | None = None
     environment_scope: EnvironmentScope = "unspecified"
-    notes: str = ""
+    notes: str = "No additional notes."
     logic_version: str | None = None
     enabled_feature_families: list[str] = Field(default_factory=list)
+
+    @field_validator("enabled_feature_families", mode="after")
+    @classmethod
+    def _non_empty_feature_families(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("metadata.enabled_feature_families must be non-empty")
+        return v
+
+    @field_validator("config_version", mode="before")
+    @classmethod
+    def _coerce_config_version_str(cls, v: Any) -> Any:
+        if v is None:
+            return v
+        s = str(v).strip()
+        if not s:
+            raise ValueError("metadata.config_version must be non-empty")
+        return s
+
+    @field_validator(
+        "config_name",
+        "created_at",
+        "created_by",
+        "notes",
+        mode="before",
+    )
+    @classmethod
+    def _strip_nonempty_strings(cls, v: Any) -> Any:
+        if v is None:
+            return v
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("must be non-empty when provided")
+        return v
 
 
 class CanonicalDomains(BaseModel):
@@ -81,6 +113,8 @@ def synthesize_canonical_from_app_settings(settings: Any) -> CanonicalRuntimeCon
     meta = CanonicalMetadata(
         config_version="1.0.0",
         config_name="app-settings-synthesis",
+        created_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        created_by="app-settings-synthesis",
         notes="Synthesized from AppSettings + default.yaml; merged with apex_canonical from YAML when present.",
         environment_scope="unspecified",
         logic_version=None,
@@ -210,7 +244,8 @@ def merge_canonical(
 ) -> CanonicalRuntimeConfig:
     """Merge two configs: override metadata fields that are set; deep-merge domains."""
     md_base = base.metadata.model_dump()
-    md_ov = override.metadata.model_dump(exclude_none=True)
+    # exclude_defaults so partial YAML fragments do not wipe lists/strings with model defaults (FB-CAN-061).
+    md_ov = override.metadata.model_dump(exclude_none=True, exclude_defaults=True)
     merged_meta = CanonicalMetadata.model_validate(_deep_merge_base(md_base, md_ov))
     d_base = base.domains.model_dump()
     d_ov = override.domains.model_dump()
@@ -223,13 +258,23 @@ def resolve_canonical_config(
     yaml_cfg: dict[str, Any] | None,
 ) -> CanonicalRuntimeConfig:
     """Final canonical bundle: YAML ``apex_canonical`` merged over AppSettings synthesis."""
+    from app.config.canonical_metadata_validation import validate_canonical_runtime_metadata
+
     synthesized = synthesize_canonical_from_app_settings(settings)
     if not yaml_cfg:
-        return synthesized
-    fragment = yaml_cfg.get("apex_canonical")
-    if not fragment or not isinstance(fragment, dict):
-        return synthesized
-    parsed = parse_canonical_from_yaml_fragment(fragment)
-    if parsed is None:
-        return synthesized
-    return merge_canonical(synthesized, parsed)
+        out = synthesized
+    else:
+        fragment = yaml_cfg.get("apex_canonical")
+        if not fragment or not isinstance(fragment, dict):
+            out = synthesized
+        else:
+            parsed = parse_canonical_from_yaml_fragment(fragment)
+            if parsed is None:
+                out = synthesized
+            else:
+                out = merge_canonical(synthesized, parsed)
+    validate_canonical_runtime_metadata(
+        out.metadata,
+        execution_mode=getattr(settings, "execution_mode", "paper"),
+    )
+    return out

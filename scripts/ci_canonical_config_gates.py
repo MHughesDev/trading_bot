@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""FB-CAN-025: enforce APEX canonical config surface on default.yaml + loaded settings.
+"""FB-CAN-025 / FB-CAN-061: enforce APEX canonical config surface on default.yaml + loaded settings.
 
-- ``apex_canonical.metadata`` must include ``config_version`` and ``config_name``.
+- ``apex_canonical.metadata`` must include required §4 fields (version, name, created_at, created_by,
+  notes, enabled_feature_families).
 - ``apex_canonical.domains.risk_sizing`` must exist (FB-CAN-022 cutover).
 - :func:`load_settings` must produce a valid :class:`CanonicalRuntimeConfig` bundle.
 """
@@ -42,6 +43,25 @@ def main() -> int:
         return 1
     if not cn or not str(cn).strip():
         print("ci_canonical_config_gates: apex_canonical.metadata.config_name is required", file=sys.stderr)
+        return 1
+    ca = meta.get("created_at")
+    if not ca or not str(ca).strip():
+        print("ci_canonical_config_gates: apex_canonical.metadata.created_at is required (FB-CAN-061)", file=sys.stderr)
+        return 1
+    cb = meta.get("created_by")
+    if not cb or not str(cb).strip():
+        print("ci_canonical_config_gates: apex_canonical.metadata.created_by is required (FB-CAN-061)", file=sys.stderr)
+        return 1
+    nt = meta.get("notes")
+    if not nt or not str(nt).strip():
+        print("ci_canonical_config_gates: apex_canonical.metadata.notes is required (FB-CAN-061)", file=sys.stderr)
+        return 1
+    eff = meta.get("enabled_feature_families")
+    if not isinstance(eff, list) or len(eff) == 0:
+        print(
+            "ci_canonical_config_gates: apex_canonical.metadata.enabled_feature_families must be non-empty (FB-CAN-061)",
+            file=sys.stderr,
+        )
         return 1
 
     domains = ac.get("domains")
