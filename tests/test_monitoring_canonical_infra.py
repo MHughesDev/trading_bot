@@ -37,3 +37,11 @@ def test_governance_monitoring_endpoint():
     body = r.json()
     assert body.get("grafana_dashboard_uid") == "tb-canonical-health"
     assert "prometheus_rules" in body
+
+
+def test_governance_decision_record_endpoint():
+    c = TestClient(api.app)
+    r = c.get("/governance/decision-record")
+    assert r.status_code == 200
+    body = r.json()
+    assert "decision_record" in body

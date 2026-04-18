@@ -22,6 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from decision_engine.decision_record import get_last_decision_record
 from observability.forecaster_metrics import MODEL_VERSION_INFO
 
 from app.config.model_artifacts import model_artifact_contract
@@ -763,6 +764,15 @@ def get_release_evidence() -> dict[str, Any]:
     """APEX release evidence bundle for the running process (FB-CAN-026)."""
     b = build_release_evidence_bundle()
     return b.model_dump(mode="json")
+
+
+@app.get("/governance/decision-record")
+def get_governance_decision_record() -> dict[str, Any]:
+    """Last canonical DecisionRecord from this process (FB-CAN-036), if any."""
+    rec = get_last_decision_record()
+    if rec is None:
+        return {"decision_record": None, "note": "no_decision_tick_yet"}
+    return {"decision_record": rec}
 
 
 @app.get("/governance/monitoring")

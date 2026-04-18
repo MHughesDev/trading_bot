@@ -21,6 +21,7 @@ from app.contracts.forecast import ForecastOutput
 from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState
 from app.runtime.system_power import is_on, sync_from_disk
+from decision_engine.decision_record import build_decision_record, set_last_decision_record
 from decision_engine.pipeline import DecisionPipeline
 from observability.canonical_metrics import maybe_set_config_version_from_engine, record_canonical_post_tick
 from observability.metrics import DECISION_LATENCY
@@ -85,6 +86,18 @@ def run_decision_tick(
         )
         DECISION_LATENCY.observe(time.perf_counter() - t0)
         maybe_set_config_version_from_engine(risk_engine)
+        risk_state = risk_state.model_copy(
+            update={
+                "last_decision_record": {
+                    "schema_version": 1,
+                    "outcome": "no_trade",
+                    "no_trade": {
+                        "event_id": "power-off",
+                        "no_trade_reason_codes": ["system_power_off"],
+                    },
+                }
+            },
+        )
         record_canonical_post_tick(
             symbol=symbol,
             regime=regime,
@@ -122,6 +135,26 @@ def run_decision_tick(
         available_cash_usd=available_cash_usd,
         portfolio_equity_usd=eq,
     )
+    dr = build_decision_record(
+        symbol=symbol,
+        data_timestamp=data_timestamp,
+        settings=risk_engine._settings,
+        regime=regime,
+        forecast=fc,
+        route=route,
+        proposal=proposal,
+        risk=risk_state,
+        forecast_packet=pipeline.last_forecast_packet,
+        trade=trade,
+    )
+    risk_state = risk_state.model_copy(
+        update={"last_decision_record": dr.model_dump(mode="json")},
+    )
+    set_last_decision_record(dr)
+    if pipeline.last_forecast_packet is not None:
+        pipeline.last_forecast_packet.forecast_diagnostics["decision_record"] = dr.model_dump(
+            mode="json"
+        )
     DECISION_LATENCY.observe(time.perf_counter() - t0)
     maybe_set_config_version_from_engine(risk_engine)
     record_canonical_post_tick(

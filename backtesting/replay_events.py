@@ -109,6 +109,7 @@ def build_decision_output_event(
         auct = fd.get("auction")
         carry = fd.get("carry_sleeve")
     rs = getattr(risk, "last_risk_sizing", None)
+    dr = getattr(risk, "last_decision_record", None)
     return ReplayEventEnvelope(
         event_family="decision_output_event",
         replay_run_id=replay_run_id,
@@ -122,6 +123,7 @@ def build_decision_output_event(
             "route": route.model_dump(mode="json") if hasattr(route, "model_dump") else {},
             "proposal": proposal.model_dump(mode="json") if proposal is not None else None,
             "risk_last_risk_sizing": rs,
+            "decision_record": dr,
             "trigger": trig,
             "auction": auct,
             "carry_sleeve": carry,
