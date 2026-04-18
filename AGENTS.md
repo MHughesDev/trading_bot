@@ -172,6 +172,7 @@ bash scripts/ci_bandit.sh
 bash scripts/ci_mlflow_promotion_policy.sh
 bash scripts/ci_canonical_contracts.sh
 bash scripts/ci_canonical_gates.sh
+bash scripts/ci_canonical_glossary.sh
 ```
 
 **Secret scanning (optional locally):** `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 detect --source /repo --redact` (same image as CI **gitleaks** job).
@@ -184,6 +185,7 @@ Optional extras: `pip install -e ".[alpaca]"` for Alpaca adapter tests; `[dashbo
 
 Update **when** the change affects:
 
+- **Canonical migration naming** — prefer **[`docs/CANONICAL_GLOSSARY.MD`](docs/CANONICAL_GLOSSARY.MD)** when documenting legacy vs APEX terms (FB-CAN-040).
 - Operator-visible behavior, new/changed **`NM_*`** or config keys, or smoke/CI steps → **[`README.md`](README.md)** and/or relevant **[`docs/*.MD`](docs/)**.
 - **Queue system** — backlog or process changes → keep **[`docs/QUEUE_SCHEMA.md`](docs/QUEUE_SCHEMA.md)** consistent and update **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** + **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** + **[`docs/QUEUE.MD`](docs/QUEUE.MD)** snapshot as needed (see schema); only if the task is to record work — otherwise a short PR/summary may suffice.
 - **Full-scope audit** — follow **[`docs/FULL_AUDIT.md`](docs/FULL_AUDIT.md)**; end with a **§8** report under **`docs/reports/`**; use Cursor skills **`draft-audit-report`** / **`audit-report-to-queue`** (see **[`.cursor/skills/`](.cursor/skills/)**) to polish or promote findings to **`QUEUE_STACK.csv`**.

@@ -998,7 +998,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DOC-GLOSS",
         "id": "FB-CAN-040",
         "kind": "change",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Add canonical glossary/mapping table to eliminate ambiguous old naming",
         "agent_task": "Publish canonical glossary and old->new terminology mapping (e.g., legacy ForecastPacket/PolicySystem terms vs state/trigger/auction contracts) and enforce glossary references in docs and PR templates to reduce ambiguity during migration.",
         "affected_files": "docs/|README.md|.github/|tests/",
