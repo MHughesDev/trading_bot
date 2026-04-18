@@ -6,11 +6,14 @@ from decision_engine.pipeline import DecisionPipeline
 from risk_engine.engine import RiskEngine
 
 
-def test_decision_pipeline_step():
+def test_pipeline_step_merges_canonical_risk_inputs():
+    """RiskState after `step` carries canonical degradation + sizing inputs from state/trigger merge."""
     pipe = DecisionPipeline()
     risk = RiskState()
     feats = {f"f{i}": float(i) * 0.01 for i in range(32)}
-    regime, fc, route, action, _ = pipe.step(
+    feats["close"] = 50_000.0
+    feats["volume"] = 1e6
+    regime, fc, route, action, risk_out = pipe.step(
         "BTC-USD",
         feats,
         spread_bps=5.0,
@@ -20,6 +23,11 @@ def test_decision_pipeline_step():
     )
     assert regime.semantic.value in ("bull", "bear", "volatile", "sideways")
     assert route.route_id.value in ("NO_TRADE", "SCALPING", "INTRADAY", "SWING", "CARRY")
+    assert risk_out.canonical_degradation is not None
+    assert risk_out.risk_liquidation_mode is not None
+    assert risk_out.risk_asymmetry_score is not None
+    assert fc.volatility >= 0.0
+    assert action is None or action.symbol == "BTC-USD"
 
 
 def test_risk_engine_blocks_stale():

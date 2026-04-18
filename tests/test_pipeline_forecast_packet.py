@@ -1,4 +1,9 @@
-"""DecisionPipeline always builds a master-spec ForecastPacket + PolicySystem path."""
+"""Decision pipeline: ForecastPacket, canonical diagnostics, and policy/spec proposal path (FB-CAN-024).
+
+These tests assert the **current** shared tick shape: master-spec packet, optional PolicySystem,
+`canonical_structure` on the packet, and updated `RiskState` from `pipeline.step` — not a
+pre-canonical “single proposal only” fiction.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +25,12 @@ def _features(close: float = 50_000.0) -> dict[str, float]:
     return feats
 
 
+def test_default_settings_have_forecaster_fields():
+    s = AppSettings()
+    assert s.models_forecaster_checkpoint_id is None
+    assert s.models_forecaster_conformal_state_path is None
+
+
 def test_serving_mode_logged_once(caplog: pytest.LogCaptureFixture) -> None:
     pipeline_mod._serving_mode_logged = False
     caplog.set_level(logging.INFO)
@@ -32,7 +43,7 @@ def test_serving_mode_logged_once(caplog: pytest.LogCaptureFixture) -> None:
     )
 
 
-def test_pipeline_always_has_forecast_packet() -> None:
+def test_pipeline_step_produces_forecast_packet_and_canonical_structure() -> None:
     pipe = DecisionPipeline(settings=AppSettings())
     risk = RiskState()
     pipe.step(
@@ -48,6 +59,10 @@ def test_pipeline_always_has_forecast_packet() -> None:
     assert len(pkt.q_med) >= 1
     assert pkt.forecast_diagnostics.get("pipeline") == "master_spec"
     assert pkt.packet_schema_version == 1
+    cs = pkt.forecast_diagnostics.get("canonical_structure")
+    assert cs is not None
+    assert "volatility_forecast" in cs
+    assert "asymmetry_score" in cs
 
 
 def test_forecast_output_derived_from_packet() -> None:
