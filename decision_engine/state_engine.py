@@ -38,13 +38,26 @@ def _normalize5(raw: list[float]) -> list[float]:
     return [max(0.0, x) / s for x in raw]
 
 
+def _regime_confidence_separation(probs: list[float]) -> float:
+    """APEX State spec §6 — max(R) - second_max(R) on the 5-class vector."""
+    if len(probs) < 2:
+        return _clip01(probs[0] if probs else 0.0)
+    sp = sorted(probs, reverse=True)
+    return _clip01(sp[0] - sp[1])
+
+
 def build_canonical_state(
     pkt: ForecastPacket,
     feature_row: dict[str, float],
     *,
     spread_bps: float,
 ) -> CanonicalStateOutput:
-    """Derive APEX canonical state from forecaster packet and microstructure features."""
+    """Derive APEX canonical state from forecaster packet and microstructure features.
+
+    **5-class order (spec §4–5):** trend, range, stress, dislocated, transition.
+    **Transition scalar (spec §7.3):** ``Rc`` inverse regime confidence (HMM 4-way), ``Vt`` vol transition,
+    ``Md`` microstructure disagreement, ``Sd`` structural disagreement — clipped to ``[0, 1]``.
+    """
     rv = list(pkt.regime_vector)
     if len(rv) < 4:
         rv = (rv + [0.25] * 4)[:4]
@@ -58,22 +71,27 @@ def build_canonical_state(
 
     spread_stress = _clip01(spread_bps / 80.0)
 
-    rc_inv = 1.0 - (max(p) - sorted(p)[-2] if len(p) > 1 else max(p))
+    # HMM 4-way separation (feeds Rc for transition risk before 5-class merge)
+    sorted_hmm = sorted(p, reverse=True)
+    hmm_conf = (sorted_hmm[0] - sorted_hmm[1]) if len(sorted_hmm) > 1 else sorted_hmm[0]
+    rc = _clip01(1.0 - _clip01(hmm_conf))
+
     vt = rel_vol
     md = _clip01(abs(p_bull - p_bear))
     sd = _clip01(1.0 - max(p_bull + p_bear, p_side + p_vol))
-    t_raw = 0.35 * rc_inv + 0.25 * vt + 0.2 * md + 0.2 * sd
+    # Spec §7.3 — coefficients sum to 1.0 for interpretability
+    t_raw = 0.35 * rc + 0.25 * vt + 0.20 * md + 0.20 * sd
     transition_probability = _clip01(t_raw)
 
-    p_trend = _clip01(p_bull + p_bear)
-    p_range = _clip01(p_side)
-    p_stress = _clip01(p_vol * 0.55 + rel_vol * 0.25)
-    p_dislocated = _clip01(p_vol * 0.2 + spread_stress * 0.35 + rel_vol * 0.2)
-    p_transition = _clip01(transition_probability * 0.6 + (1.0 - max(p)) * 0.25)
-    regime_probs = _normalize5([p_trend, p_range, p_stress, p_dislocated, p_transition])
+    # Unnormalized masses → normalize to R (spec §5)
+    w_trend = max(1e-9, _clip01(p_bull + p_bear))
+    w_range = max(1e-9, _clip01(p_side))
+    w_stress = max(1e-9, _clip01(p_vol * 0.55 + rel_vol * 0.25))
+    w_dislocated = max(1e-9, _clip01(p_vol * 0.20 + spread_stress * 0.35 + rel_vol * 0.20))
+    w_transition = max(1e-9, transition_probability * 0.85 + (1.0 - max(p)) * 0.15)
 
-    sorted_p = sorted(regime_probs, reverse=True)
-    regime_confidence = _clip01((sorted_p[0] - sorted_p[1]) if len(sorted_p) > 1 else sorted_p[0])
+    regime_probs = _normalize5([w_trend, w_range, w_stress, w_dislocated, w_transition])
+    regime_confidence = _regime_confidence_separation(regime_probs)
 
     ood = _clip01(float(pkt.ood_score))
     novelty = _clip01(0.55 * ood + 0.45 * (1.0 - max(p)))

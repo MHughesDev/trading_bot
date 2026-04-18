@@ -101,7 +101,14 @@ def run_canonical_decision_sequence_after_forecast(
     pipe_codes: list[str] = []
     if ho:
         pipe_codes = ["pipeline_hard_override", f"override_{ho_kind.value}"]
-    regime_out = regime_out.model_copy(update={"apex": apex})
+    regime_out = regime_out.model_copy(
+        update={
+            "apex": apex,
+            "canonical_regime_probabilities": list(apex.regime_probabilities),
+            # Downstream should use 5-class vector + apex; keep HMM semantic for legacy charts
+            "confidence": float(apex.regime_confidence),
+        }
+    )
 
     # --- trigger ---
     trig = evaluate_trigger(
