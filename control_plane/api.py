@@ -12,6 +12,8 @@ from typing import Annotated, Any, Literal
 
 from contextlib import asynccontextmanager
 
+from pydantic import BaseModel, Field
+
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from fastapi.responses import PlainTextResponse, StreamingResponse
@@ -108,6 +110,11 @@ from orchestration.app_scheduler import (
     stop_app_background_scheduler,
 )
 from orchestration.asset_init_pipeline import get_job as get_init_job, try_start_asset_init_job
+from orchestration.release_evidence import (
+    build_release_evidence_bundle,
+    diff_canonical_runtime,
+    resolve_canonical_from_yaml_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -729,6 +736,35 @@ def get_pnl_series(
 def microservices_health() -> dict[str, Any]:
     """Best-effort probes for optional scaffold processes (see infra/docker-compose.microservices.yml)."""
     return probe_microservices_health()
+
+
+class ReleaseEvidenceDiffRequest(BaseModel):
+    """Optional full default.yaml text to diff against the running merged canonical config."""
+
+    baseline_yaml: str | None = Field(
+        default=None,
+        description="Full YAML document (e.g. app/config/default.yaml) for baseline canonical merge",
+    )
+
+
+@app.get("/governance/release-evidence")
+def get_release_evidence() -> dict[str, Any]:
+    """APEX release evidence bundle for the running process (FB-CAN-026)."""
+    b = build_release_evidence_bundle()
+    return b.model_dump(mode="json")
+
+
+@app.post("/governance/release-evidence/diff")
+def post_release_evidence_diff(body: ReleaseEvidenceDiffRequest) -> dict[str, Any]:
+    """Structured diff between baseline YAML and the running merged canonical config."""
+    if not (body.baseline_yaml and body.baseline_yaml.strip()):
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="baseline_yaml is required",
+        )
+    baseline = resolve_canonical_from_yaml_text(body.baseline_yaml)
+    current = settings.canonical
+    return diff_canonical_runtime(baseline, current)
 
 
 @app.get("/routes")

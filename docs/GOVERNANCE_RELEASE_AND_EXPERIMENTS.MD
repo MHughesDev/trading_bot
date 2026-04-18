@@ -7,6 +7,8 @@
 | Capability | Location |
 |------------|----------|
 | Release candidate model, evidence package, rollback metadata, promotion gate evaluation | `orchestration/release_gating.py` |
+| Evidence bundle JSON, canonical fingerprint, structured diff vs baseline YAML (**FB-CAN-026**) | `orchestration/release_evidence.py`, `scripts/build_release_evidence_bundle.py` |
+| Control plane: current bundle + diff vs pasted `default.yaml` | `GET /governance/release-evidence`, `POST /governance/release-evidence/diff` (`control_plane/api.py`) |
 | JSON ledger path (optional) | `models/registry/release_ledger.json` via `default_release_ledger_path()` |
 | Experiment records, registry queries, link to release candidate | `models/registry/experiment_registry.py` |
 | Default experiment registry file | `models/registry/experiment_registry.json` |
@@ -17,7 +19,9 @@
 
 1. **Experiments:** Append or update rows in `experiment_registry.json` using the `ExperimentRecord` schema (or call `upsert_experiment` from tooling). Use `query_experiments` for filters (domain, status, tags, notes substring, linked release).
 2. **Release candidates:** Append `ReleaseCandidate` entries to `release_ledger.json` (or build in Python and `write_release_ledger`).
-3. **Promotion:** Run `python3 scripts/validate_release_gates.py --candidate <file.json> --target live` (or `shadow` / `simulation`). Exit code `0` = gates pass; `2` = blocked (see printed JSON for `blocked_gates`).
+3. **Evidence bundle (config fingerprint + optional diff):** `python3 scripts/build_release_evidence_bundle.py --out evidence.json` (add `--baseline app/config/default.yaml` to include a structured diff vs that YAML merge). Attach or reference `evidence.json` from the promotion PR.
+4. **Control plane:** `GET /governance/release-evidence` returns the running process bundle; `POST /governance/release-evidence/diff` with body `{"baseline_yaml": "<full default.yaml text>"}` returns a diff vs the running merged canonical config.
+5. **Promotion:** Run `python3 scripts/validate_release_gates.py --candidate <file.json> --target live` (or `shadow` / `simulation`). Exit code `0` = gates pass; `2` = blocked (see printed JSON for `blocked_gates`).
 
 ## Notes
 
