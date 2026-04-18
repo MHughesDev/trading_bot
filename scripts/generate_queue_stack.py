@@ -606,7 +606,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DEL",
         "id": "FB-CAN-012",
         "kind": "tech_debt",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Hard-delete obsolete legacy architecture paths post-migration",
         "agent_task": "After replacement modules are active, delete obsolete pipeline code and contracts tied to legacy architecture (ForecastPacket/PolicySystem-only flow, stale wrappers, conflicting settings, superseded docs) per the canonical gap audit deletion list. Do not keep long-term dual-path logic; only preserve temporary shims with explicit expiry and removal commits.",
         "affected_files": "decision_engine/|risk_engine/|execution/|app/config/|docs/Specs/|tests/",
