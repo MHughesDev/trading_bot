@@ -732,7 +732,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DEL-EXEC",
         "id": "FB-CAN-021",
         "kind": "tech_debt",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Delete obsolete thin execution-only paths",
         "agent_task": "Delete execution service code paths that assume submit-only behavior once canonical execution confidence/style/stress/partial-fill modules are active. Keep venue adapter interfaces but remove deprecated wrappers and dead routing branches.",
         "affected_files": "execution/service.py|execution/|tests/",
