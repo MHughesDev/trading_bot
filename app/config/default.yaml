@@ -1,5 +1,13 @@
+apex_canonical:
+  metadata:
+    config_version: 1.0.0
+    config_name: trading-bot-default
+    created_by: repo-default.yaml
+    environment_scope: unspecified
+    notes: Optional; merge over synthesized legacy projection from flat settings.
+  domains: {}
 execution:
-  mode: paper
+  mode: live
   live_adapter: coinbase
   paper_adapter: alpaca
   portfolio_mark_price_source_paper: kraken_mid
