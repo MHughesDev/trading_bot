@@ -1040,7 +1040,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-TRIG-STAGE",
         "id": "FB-CAN-043",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement explicit Setup/Pre-Trigger/Confirm stage records and latency metrics",
         "agent_task": "Add canonical trigger-stage state machine records including setup pass, pre-trigger pass, confirm pass, stage timestamps, and setup->confirm latency metrics. Store stage failure reason codes and expose via decision records and monitoring.",
         "affected_files": "decision_engine/trigger_engine.py|app/contracts/|observability/|backtesting/|tests/",

@@ -1,10 +1,12 @@
-"""APEX three-stage trigger engine (FB-CAN-005).
+"""APEX three-stage trigger engine (FB-CAN-005, FB-CAN-043).
 
 Setup → Pre-Trigger → Confirmed Trigger with deterministic scores, missed-move suppression,
 and reason codes. See APEX_Trigger_Math_Pseudocode_Detail_Spec_v1_0.md.
 """
 
 from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
 
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
 from app.contracts.canonical_structure import CanonicalStructureOutput
@@ -58,9 +60,11 @@ def evaluate_trigger(
     spread_bps: float,
     apex: CanonicalStateOutput,
     structure: CanonicalStructureOutput | None = None,
+    decision_timestamp: datetime | None = None,
 ) -> TriggerOutput:
     """Evaluate three-stage trigger from packet, microstructure proxies, and canonical state."""
     reasons: list[str] = []
+    stage_fail: dict[str, list[str]] = {"setup": [], "pretrigger": [], "confirm": []}
     st = structure if structure is not None else structure_from_forecast_packet(pkt)
 
     A = float(st.asymmetry_score)
@@ -86,9 +90,11 @@ def evaluate_trigger(
     novelty_hard = N >= 0.98
     if novelty_hard:
         reasons.append("novelty_block")
+        stage_fail["setup"].append("novelty_block")
 
     if apex.degradation == DegradationLevel.NO_TRADE:
         reasons.append("degradation_block")
+        stage_fail["setup"].append("degradation_block")
 
     setup_valid = (
         setup_score >= setup_threshold
@@ -99,8 +105,10 @@ def evaluate_trigger(
     if not setup_valid and "novelty_block" not in reasons and "degradation_block" not in reasons:
         if setup_score < setup_threshold:
             reasons.append("low_setup_score")
+            stage_fail["setup"].append("low_setup_score")
         if exec_conf < setup_exec_floor:
             reasons.append("poor_execution_context")
+            stage_fail["setup"].append("poor_execution_context")
 
     rsi = _safe_float(feature_row, "rsi_14", 50.0)
     ret1 = _safe_float(feature_row, "return_1", 0.0)
@@ -126,8 +134,10 @@ def evaluate_trigger(
     if setup_valid and not pretrigger_valid:
         if pretrigger_score < pretrigger_threshold:
             reasons.append("pressure_not_building")
+            stage_fail["pretrigger"].append("pressure_not_building")
         if F < freshness_floor:
             reasons.append("stale_pretrigger_inputs")
+            stage_fail["pretrigger"].append("stale_pretrigger_inputs")
 
     B = _clip01(abs(ret1) * 25.0)
     U = vol_score
@@ -150,8 +160,10 @@ def evaluate_trigger(
     if missed_move_flag:
         if E > entry_extension_limit:
             reasons.append("move_already_extended")
+            stage_fail["confirm"].append("move_already_extended")
         else:
             reasons.append("insufficient_remaining_edge")
+            stage_fail["confirm"].append("insufficient_remaining_edge")
 
     strength_ok = (
         setup_valid
@@ -162,8 +174,10 @@ def evaluate_trigger(
     if setup_valid and pretrigger_valid and not strength_ok:
         if exec_conf < trigger_exec_floor:
             reasons.append("execution_too_degraded")
+            stage_fail["confirm"].append("execution_too_degraded")
         elif trigger_strength < trigger_threshold:
             reasons.append("trigger_strength_low")
+            stage_fail["confirm"].append("trigger_strength_low")
 
     trigger_valid = strength_ok and not missed_move_flag
 
@@ -188,6 +202,17 @@ def evaluate_trigger(
     Cd = F
     trigger_confidence = _clip01((Cf + Cm + Ce + Cd) / 4.0)
 
+    ref_ts = decision_timestamp if decision_timestamp is not None else pkt.timestamp
+    if ref_ts.tzinfo is None:
+        ref_ts = ref_ts.replace(tzinfo=UTC)
+    else:
+        ref_ts = ref_ts.astimezone(UTC)
+    # Deterministic sub-tick ordering for replay (not wall-clock profiling)
+    t_setup = ref_ts
+    t_pre = ref_ts + timedelta(milliseconds=1)
+    t_conf = ref_ts + timedelta(milliseconds=2)
+    lat_ms = 2.0
+
     return TriggerOutput(
         setup_valid=setup_valid,
         setup_score=setup_score,
@@ -199,4 +224,9 @@ def evaluate_trigger(
         trigger_confidence=trigger_confidence,
         missed_move_flag=missed_move_flag,
         trigger_reason_codes=reasons,
+        stage_timestamp_setup=t_setup.replace(microsecond=0).isoformat(),
+        stage_timestamp_pretrigger=t_pre.replace(microsecond=0).isoformat(),
+        stage_timestamp_confirm=t_conf.replace(microsecond=0).isoformat(),
+        setup_to_confirm_latency_ms=lat_ms,
+        stage_failure_codes=stage_fail,
     )

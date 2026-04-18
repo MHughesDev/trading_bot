@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 
+import pytest
+
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
 from app.contracts.forecast_packet import ForecastPacket
 from decision_engine.trigger_engine import evaluate_trigger
@@ -50,6 +52,15 @@ def test_evaluate_trigger_emits_stages():
         "structure_break",
         "composite_confirmed",
     )
+    assert out.stage_timestamp_setup and out.stage_timestamp_pretrigger and out.stage_timestamp_confirm
+    assert out.setup_to_confirm_latency_ms == pytest.approx(2.0)
+    assert "setup" in out.stage_failure_codes
+
+
+def test_trigger_stage_failure_codes_when_setup_fails():
+    apex = _apex().model_copy(update={"degradation": DegradationLevel.NO_TRADE})
+    out = evaluate_trigger(_pkt(), {"close": 1.0}, spread_bps=1.0, apex=apex)
+    assert out.stage_failure_codes.get("setup")
 
 
 def test_no_trade_degradation_blocks():

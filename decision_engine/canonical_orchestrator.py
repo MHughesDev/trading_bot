@@ -123,6 +123,7 @@ def run_canonical_decision_sequence_after_forecast(
         spread_bps=spread_bps,
         apex=apex,
         structure=canonical_structure,
+        decision_timestamp=data_timestamp,
     )
 
     # --- merge canonical inputs into risk before auction (policy reads app_risk) ---
