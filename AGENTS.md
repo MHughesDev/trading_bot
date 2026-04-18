@@ -33,7 +33,7 @@ If your environment supports project rules (for example `.cursorrules`), those r
 
 Agents working here should:
 
-- For **next queue item** work, **run** **`python3 scripts/print_next_queue_item.py`** from repo root first (prints the full next **`Open`** row as terminal text — same selection as smallest `stack_order` with `status=Open`; optional **`--json`**). Alternatively open **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** manually (see [`docs/QUEUE.MD`](docs/QUEUE.MD) **§0**). Use the row’s **`agent_task`** + **`affected_files`** — do not load the full [`QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD) unless **`docs_refs`** requires it. If the script prints **`QUEUE_EMPTY:`** or there is no **`Open`** row, **stop** and report — add or reprioritize per [**§6**](docs/QUEUE.MD#6-how-to-add-or-close-an-item); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
+- For **next queue item** work, **run** **`bash scripts/queue_top.sh`** from repo root first (same as **`python3 scripts/print_next_queue_item.py`** — prints the full next **`Open`** row; optional **`--json`**). **Do not** load **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** or **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** in full for task selection or closure. Use the row’s **`agent_task`** + **`affected_files`** — read other docs only when **`docs_refs`** names them. To **close** an item after implementation, run **`bash scripts/queue_close.sh --next`** or **`--id <ID>`** (updates `scripts/generate_queue_stack.py`, regenerates the CSV, and archive tables when applicable). If **`queue_top.sh`** prints **`QUEUE_EMPTY:`**, **stop** and report — add or reprioritize per [**§6**](docs/QUEUE.MD#6-how-to-add-or-close-an-item); see [`docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD`](docs/AUTOMATION_QUEUE_SLICE_PROMPT.MD) **Phase 1**.
 - When updating the **queue generator** ([`scripts/generate_queue_stack.py`](scripts/generate_queue_stack.py)): **reorder or append** entries in **`ROWS`** only — **`stack_order`** is filled when you run **`python scripts/generate_queue_stack.py`** (keep **`_QUEUE_EMPTY_`** last).
 - Preserve **non-negotiable rules** below unless the user task explicitly overrides.
 - Keep **live vs replay** behavior aligned where the architecture expects it (`decision_engine/run_step.py` is the shared decision step).
@@ -71,7 +71,7 @@ Agents working here should:
 1. **Explicit user / task instructions** for the current change.
 2. **Tests** (`tests/`) and **runtime behavior** of the code being changed.
 3. **[`README.md`](README.md)** — default entry (commands, stack summary); deep detail lives in **`docs/`**.
-4. **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** for the next executable task; **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** for full backlog tables and history; **[`docs/QUEUE.MD`](docs/QUEUE.MD)** for conventions only (do not treat narrative tables as executable spec unless the task says so).
+4. **Next task:** use **`bash scripts/queue_top.sh`** (output is derived from **[`docs/QUEUE_STACK.csv`](docs/QUEUE_STACK.csv)** — do not read the whole file for selection). **History / narrative tables:** **[`docs/QUEUE_ARCHIVE.MD`](docs/QUEUE_ARCHIVE.MD)** (do not load in full unless researching history). Conventions: **[`docs/QUEUE.MD`](docs/QUEUE.MD)** (do not treat narrative tables as executable spec unless the task says so).
 5. Other **[`docs/*.MD`](docs/)** reference files (risk precedence, shutdown, Coinbase granularity, etc.).
 6. Older comments or stale markdown — verify against code.
 

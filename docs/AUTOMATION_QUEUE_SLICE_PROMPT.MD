@@ -1,10 +1,10 @@
 # Automation prompt — queue slice → tests → PR → merge → prune
 
-**Documentation last reviewed:** **2026-04-19**.
+**Documentation last reviewed:** **2026-04-18**.
 
 **Queue system:** This prompt is part of the **[queue system](QUEUE_SCHEMA.md)** — see [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) for every file that implements backlog machinery.
 
-Use this document as the **system prompt** (or operator checklist) for an autonomous agent or CI-adjacent job that implements **one slice** from [`QUEUE_STACK.csv`](QUEUE_STACK.csv) (task text in **`agent_task`**), validates it, opens a PR, merges to `main`, and cleans up branches.
+Use this document as the **system prompt** (or operator checklist) for an autonomous agent or CI-adjacent job that implements **one slice** from the next **`Open`** row (**`bash scripts/queue_top.sh`** — task text in **`agent_task`**), validates it, opens a PR, merges to `main`, and cleans up branches.
 
 **Safety:** This workflow merges **the slice branch you created** into `main` after review. It does **not** mean “merge every remote branch into `main`” — that would be unsafe. **Prune** only **merged** feature branches (e.g. `cursor/*`), not arbitrary unmerged work.
 
@@ -12,7 +12,7 @@ Use this document as the **system prompt** (or operator checklist) for an autono
 
 ## Role
 
-You are a coding agent working in the Trading Bot repo. Your job is to **complete exactly one logical slice** from the next **`Open`** row in **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** — use **`agent_task`**, **`affected_files`**, and optional **`docs_refs`** from that row only (do not read the full [`QUEUE.MD`](QUEUE.MD) or [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) unless **`docs_refs`** points you there). **Run validation**, **open a pull request**, **merge the approved work into `main`**, and **delete merged feature branches** locally and on `origin`.
+You are a coding agent working in the Trading Bot repo. Your job is to **complete exactly one logical slice** from the next **`Open`** row — obtain it only via **`bash scripts/queue_top.sh`** (or `python3 scripts/print_next_queue_item.py`), **not** by opening **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** or **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** in full. Use **`agent_task`**, **`affected_files`**, and optional **`docs_refs`** from that output only (do not read the full [`QUEUE.MD`](QUEUE.MD) or [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) unless **`docs_refs`** points you there). **Run validation**, **open a pull request**, **merge the approved work into `main`**, and **delete merged feature branches** locally and on `origin`.
 
 **Session start (mandatory):** Read [`README.md`](../README.md) in full, then read [`AGENTS.md`](../AGENTS.md) in full — **every** new run or thread, including after context resets. Then follow `AGENTS.md` (Kraken-only market data policy, risk/signing paths, no secrets in commits, no MLflow auto-promotion, avoid unrelated refactors).
 
@@ -31,7 +31,7 @@ You are a coding agent working in the Trading Bot repo. Your job is to **complet
 ## Phase 1 — Plan and branch
 
 0. Already done mandatory read of [`README.md`](../README.md) and [`AGENTS.md`](../AGENTS.md) for this session (see **Role**).
-1. From repo root run **`python3 scripts/print_next_queue_item.py`** — stdout is the full next **`Open`** row (smallest **`stack_order`**); use **`--json`** if you need machine parsing. Alternatively read **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** only — **not** [`QUEUE.MD`](QUEUE.MD) in full. If output is **`QUEUE_EMPTY:`** or **`id`** is **`_QUEUE_EMPTY_`**, **stop** — report empty stack and point to [**§6** — How to add or close an item](QUEUE.MD#6-how-to-add-or-close-an-item). Implement using **`agent_task`** + **`affected_files`** from that row. When the operator asks for **HIGH** priority only: if the printed row is not HIGH, **stop** or re-sort work per operator (script prints the stack order; filter CSV manually for HIGH-only).
+1. From repo root run **`bash scripts/queue_top.sh`** (or **`python3 scripts/print_next_queue_item.py`**) — stdout is the full next **`Open`** row; use **`--json`** if you need machine parsing. **Do not** read the CSV or archive wholesale. If output is **`QUEUE_EMPTY:`** or **`id`** is **`_QUEUE_EMPTY_`**, **stop** — report empty stack and point to [**§6** — How to add or close an item](QUEUE.MD#6-how-to-add-or-close-an-item). Implement using **`agent_task`** + **`affected_files`** from that row.
 2. `git fetch origin main && git checkout main && git pull origin main`
 3. `git checkout -b <Branch>` from updated `main`.
 4. If the slice depends on another row (e.g. registry before guards), either include that dependency in the same slice or stop and report.
@@ -41,7 +41,7 @@ You are a coding agent working in the Trading Bot repo. Your job is to **complet
 ## Phase 2 — Implement
 
 1. Implement **only** the agreed queue slice; match existing patterns in **`affected_files`** from the CSV row.
-2. **Before any merge to `main`** (on your feature branch): close out the queue item — update **`QUEUE_STACK.csv`** (**`status`** → `Done` or remove row; **or** edit **`ROWS`** in **`scripts/generate_queue_stack.py`** and run **`python scripts/generate_queue_stack.py`** — no manual **`stack_order`** renumbering in Python), mirror status into **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** if that ID has a §2 table row, and refresh the small snapshot in [`QUEUE.MD`](QUEUE.MD) §2 if needed. This is **not** optional for a completed slice: GitHub is updated **only after** this bookkeeping is done and pushed (see Phase 6).
+2. **Before any merge to `main`** (on your feature branch): close out the queue item — run **`bash scripts/queue_close.sh --next`** (or **`--id <ID>`**) so **`ROWS`** in **`scripts/generate_queue_stack.py`** is updated, **`QUEUE_STACK.csv`** is regenerated, and **`QUEUE_ARCHIVE.MD`** table rows are updated when the helper can match them; refresh the small snapshot in [`QUEUE.MD`](QUEUE.MD) §2 if needed. This is **not** optional for a completed slice: GitHub is updated **only after** this bookkeeping is done and pushed (see Phase 6).
 3. **Do not** commit secrets; **do not** weaken tests to pass.
 
 ---
@@ -169,10 +169,10 @@ Task: Implement queue slice: <INSERT IDs OR BATCH>.
 Branch: cursor/<desc>-<suffix> from latest main.
 
 Steps:
-0) python3 scripts/print_next_queue_item.py  (or read QUEUE_STACK.csv for the next Open row)
+0) bash scripts/queue_top.sh   (do not open QUEUE_STACK.csv / QUEUE_ARCHIVE.MD in full)
 1) Fetch/pull main; create branch.
 2) Implement the slice only; touch paths from the CSV row **affected_files**.
-3) Close queue on branch: QUEUE_STACK.csv + QUEUE_ARCHIVE.MD + QUEUE.MD snapshot if needed; python3 scripts/ci_queue_consistency.py
+3) Close queue on branch: bash scripts/queue_close.sh --next (or --id <ID>); QUEUE.MD §2 snapshot if needed; python3 scripts/ci_queue_consistency.py
 4) Run: ruff check . ; pytest (full or targeted per change) ; scripts/ci_spec_compliance.sh ; scripts/ci_mlflow_promotion_policy.sh
 5) Commit (include queue closure); push -u origin <branch>
 6) Open PR to main with title/body referencing queue IDs and validation; push again if queue docs changed after first push
