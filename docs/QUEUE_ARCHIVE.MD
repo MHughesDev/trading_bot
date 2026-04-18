@@ -243,7 +243,7 @@
 | FB-CAN-065 | CAN-GOV-MON | B | OB | feature | LOW | Done | Implement governance/operator health monitoring domain and alerts. | observability/orchestration/models/scripts/tests |
 | FB-CAN-066 | CAN-EVIDENCE-SCHEMA | B | OP | platform | MEDIUM | Done | Define canonical evidence-package schema for promotion decisions and gate completeness. | `models/`, `orchestration/`, `scripts/`, docs/tests |
 | FB-CAN-067 | CAN-CONSTANTS | B | CP | hardening | LOW | Done | Add guardrails against hidden magic constants in canonical code paths. | scripts + core canonical modules/tests |
-| FB-CAN-068 | CAN-REPLAY-SEED | B | DS | feature | LOW | Open | Enforce deterministic seed policy and replay/sim reproducibility metadata. | `backtesting/`, scripts/models/tests/docs |
+| FB-CAN-068 | CAN-REPLAY-SEED | B | DS | feature | LOW | Done | Enforce deterministic seed policy and replay/sim reproducibility metadata. | `backtesting/`, scripts/models/tests/docs |
 | FB-CAN-069 | CAN-PROBATION | B | OP | platform | LOW | Open | Implement post-release probation-window monitors and automatic abort triggers. | orchestration/observability/models/scripts/tests |
 | FB-CAN-070 | CAN-COVERAGE-MAP | B | OP | change | MEDIUM | Open | Publish canonical spec section-to-queue coverage matrix and closure checklist gate. | docs/reports/scripts/QUEUE/tests |
 | FB-CAN-071 | CAN-CONFIG-SNAP | A | DP | feature | MEDIUM | Open | Implement canonical Service Configuration Snapshot contract and traceability bindings. | contracts/decision/replay/config/tests |
