@@ -15,14 +15,14 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-036** are **Done**. **FB-CAN-037**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
+**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-037** are **Done**. **FB-CAN-038**…**FB-CAN-078** remain **Open** for the hard repo-to-canonical migration + reconfiguration + deletion track. Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue is active**; sentinel **`_QUEUE_EMPTY_`** remains terminal-only for true-empty backlog states.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
 | **HIGH** | **4** | FB-CAN-041, FB-CAN-045, FB-CAN-047, FB-CAN-060 |
-| **MEDIUM** | **26** | FB-CAN-037..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
+| **MEDIUM** | **25** | FB-CAN-038..039, FB-CAN-042..044, FB-CAN-046, FB-CAN-048..052, FB-CAN-054..056, FB-CAN-059, FB-CAN-061..063, FB-CAN-066, FB-CAN-070..072, FB-CAN-074, FB-CAN-076, FB-CAN-078 |
 | **LOW** | **12** | FB-CAN-040, FB-CAN-053, FB-CAN-057..058, FB-CAN-064..065, FB-CAN-067..069, FB-CAN-073, FB-CAN-075, FB-CAN-077 |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
@@ -212,7 +212,7 @@
 | FB-CAN-034 | CAN-AUCT-CORR | A | FR | feature | MEDIUM | Done | **D** split into **`D_corr`**, **`D_thesis`**, **`D_liq`**; **`AuctionResult.clustering_metadata`** (thesis buckets, liquidation cluster key, long/short correlation proxy); **`penalties`** expose subcomponents. **Done 2026-04-18.** | `decision_engine/auction_engine.py`, `app/contracts/auction.py`, `tests/` |
 | FB-CAN-035 | CAN-EXEC-FEED | A | EX | feature | MEDIUM | Done | **`execution_feedback_memory.py`**: EMA trust/slippage/fill/latency/venue degradation; **`pipeline.step`** + replay; **`canonical_exec_quality_penalty`** → trigger + auction; live **`update_execution_feedback_memory`** after submit. **Done 2026-04-18.** | `data_plane/memory/`, `decision_engine/`, `backtesting/`, `app/runtime/`, `tests/` |
 | FB-CAN-036 | CAN-DEC-REC | B | DP | feature | MEDIUM | Done | **`app/contracts/decision_record.py`** (`DecisionRecord`, `TradeIntentCanonical`, `NoTradeDecision`, `SuppressionEvent`, `SafetyOverrideEvent`); **`build_decision_record`** + **`RiskState.last_decision_record`**; **`RiskEngine`** `last_risk_block_codes`; **`GET /governance/decision-record`**; replay event payload. **Done 2026-04-18.** | `app/contracts/`, `decision_engine/`, `risk_engine/`, `control_plane/api.py`, `backtesting/`, `tests/` |
-| FB-CAN-037 | CAN-FAULT | B | DS | feature | MEDIUM | Open | Add canonical fault-injection profiles for replay/simulation and release evidence requirements. | `backtesting/`, `orchestration/`, `scripts/`, tests/docs |
+| FB-CAN-037 | CAN-FAULT | B | DS | feature | MEDIUM | Done | **Named fault profiles** (`orchestration/fault_injection_profiles.py`), **`ReplayRunContract.fault_injection_profile_id`**, extended **`apply_fault_injection`**, **`ReleaseEvidenceBundle`/`EvidencePackage` fault stress fields**, shadow/live **`fault_stress_evidence`** gate, **`scripts/run_fault_profile_replay.py`**. **Done 2026-04-18.** | `backtesting/`, `orchestration/`, `scripts/`, `tests/`, `docs/` |
 | FB-CAN-038 | CAN-SHADOW | B | OP | platform | MEDIUM | Open | Implement shadow environment comparison thresholds/probation windows and promotion/rollback evidence APIs. | `orchestration/`, `models/`, `control_plane/`, `scripts/`, tests |
 | FB-CAN-039 | CAN-MON-DRIFT | B | OB | feature | MEDIUM | Open | Implement calibration/drift monitoring and alert escalation policies for edge erosion/divergence. | `observability/`, `infra/`, `control_plane/`, tests/docs |
 | FB-CAN-040 | CAN-DOC-GLOSS | B | OP | change | LOW | Open | Publish canonical glossary and old->new naming map to eliminate ambiguity during migration. | `docs/`, `README.md`, `.github/`, tests |

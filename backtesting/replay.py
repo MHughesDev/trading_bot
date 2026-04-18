@@ -14,6 +14,7 @@ from app.contracts.risk import RiskState
 from backtesting.execution_params import BacktestExecutionParams
 from backtesting.portfolio import PortfolioTracker
 from backtesting.replay_core import run_one_replay_step
+from orchestration.fault_injection_profiles import merge_replay_fault_profile
 from backtesting.replay_helpers import (
     execution_feedback_from_simulated_fill,
     execution_profile_fill_ratio,
@@ -53,10 +54,11 @@ def replay_decisions(
     When ``track_portfolio`` is True, applies simulated slippage + fees from ``execution_params``.
     If ``execution_params`` is omitted, loads defaults from ``AppSettings`` (same YAML as live).
 
-    **FB-CAN-009:** Pass ``replay_contract`` for config/version fields; set ``emit_canonical_events``
+    **FB-CAN-009 / FB-CAN-037:** Pass ``replay_contract`` for config/version fields; set ``emit_canonical_events``
     to append per-bar ``canonical_events`` (market, structural, safety, decision, optional fault,
     execution feedback). Uses ``replay_deterministic=True`` so replay does not depend on system power
-    disk sync. ``fault_injection_profile`` merges over ``replay_contract.fault_injection_profile``.
+    disk sync. Named ``fault_injection_profile_id`` merges first, then ``fault_injection_profile``,
+    then the ``fault_injection_profile`` kwarg.
     """
     if bars.height == 0:
         return []
@@ -84,9 +86,11 @@ def replay_decisions(
         dataset_id="inline",
         instrument_scope=[symbol],
     )
-    fault_base = dict(contract.fault_injection_profile)
-    if fault_injection_profile:
-        fault_base.update(fault_injection_profile)
+    fault_base = merge_replay_fault_profile(
+        fault_injection_profile_id=contract.fault_injection_profile_id,
+        contract_profile=contract.fault_injection_profile,
+        override=fault_injection_profile,
+    )
 
     exec_feedback_state: dict[str, dict[str, float]] = {}
     prof_name = contract.execution_model_profile
@@ -266,9 +270,11 @@ def replay_multi_asset_decisions(
         dataset_id="inline",
         instrument_scope=list(symbols_sorted),
     )
-    fault_base = dict(contract.fault_injection_profile)
-    if fault_injection_profile:
-        fault_base.update(fault_injection_profile)
+    fault_base = merge_replay_fault_profile(
+        fault_injection_profile_id=contract.fault_injection_profile_id,
+        contract_profile=contract.fault_injection_profile,
+        override=fault_injection_profile,
+    )
     exec_feedback_state: dict[str, dict[str, float]] = {}
     prof_name = contract.execution_model_profile
     execp: BacktestExecutionParams | None = None

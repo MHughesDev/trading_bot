@@ -16,6 +16,16 @@
     "domains_changed": [],
     "replay_summary": "ok",
     "replay_run_ids": ["r1"],
+    "fault_stress_run_ids": ["ci-fault-suite"],
+    "fault_profile_ids_satisfied": [
+      "book_imbalance_stress",
+      "execution_degradation",
+      "latency_stress",
+      "liquidity_collapse",
+      "market_data_outage",
+      "spread_widening_stress",
+      "stale_structural_feed"
+    ],
     "scenario_stress_summary": "ok",
     "shadow_comparison_summary": "",
     "expected_benefits": "",

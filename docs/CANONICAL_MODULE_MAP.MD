@@ -2,7 +2,7 @@
 
 **Purpose:** Single **code-to-domain** map for the shared decision path after **FB-CAN-004…011**. Use it with **[`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD)** (what to build toward) and **[`docs/Specs/README.MD`](Specs/README.MD)** (as-built file index).
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-036: [`decision_record.py`](../app/contracts/decision_record.py) + [`decision_engine/decision_record.py`](../decision_engine/decision_record.py) `build_decision_record`; FB-CAN-035: [`execution_feedback_memory.py`](../data_plane/memory/execution_feedback_memory.py) EMA + **`canonical_exec_quality_penalty`**; FB-CAN-034: auction **`D_corr`/`D_thesis`/`D_liq`** + **`AuctionResult.clustering_metadata`**; FB-CAN-033: `classify_hard_override` + transition/occupancy on **`RiskState`**; FB-CAN-032: [`signal_confidence.py`](../app/config/signal_confidence.py); FB-CAN-031: missed-move + `trigger_false_positive_memory`; FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-037: [`fault_injection_profiles.py`](../orchestration/fault_injection_profiles.py) named profiles + **`ReplayRunContract.fault_injection_profile_id`**; FB-CAN-036: [`decision_record.py`](../app/contracts/decision_record.py) + [`decision_engine/decision_record.py`](../decision_engine/decision_record.py) `build_decision_record`; FB-CAN-035: [`execution_feedback_memory.py`](../data_plane/memory/execution_feedback_memory.py) EMA + **`canonical_exec_quality_penalty`**; FB-CAN-034: auction **`D_corr`/`D_thesis`/`D_liq`** + **`AuctionResult.clustering_metadata`**; FB-CAN-033: `classify_hard_override` + transition/occupancy on **`RiskState`**; FB-CAN-032: [`signal_confidence.py`](../app/config/signal_confidence.py); FB-CAN-031: missed-move + `trigger_false_positive_memory`; FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
 
 ---
 
@@ -46,8 +46,8 @@ Legacy **ForecastPacket → PolicySystem → proposal** remains the **forecast/r
 
 | Concern | Modules |
 |---------|---------|
-| Run contract + events | [`app/contracts/replay_events.py`](../app/contracts/replay_events.py) |
-| Replay step + fault injection | [`backtesting/replay_core.py`](../backtesting/replay_core.py), [`backtesting/fault_injection.py`](../backtesting/fault_injection.py), [`backtesting/replay_events.py`](../backtesting/replay_events.py) |
+| Run contract + events | [`app/contracts/replay_events.py`](../app/contracts/replay_events.py) — **FB-CAN-037** optional **`fault_injection_profile_id`** (named canonical profile). |
+| Replay step + fault injection | [`backtesting/replay_core.py`](../backtesting/replay_core.py), [`backtesting/fault_injection.py`](../backtesting/fault_injection.py), [`orchestration/fault_injection_profiles.py`](../orchestration/fault_injection_profiles.py), [`backtesting/replay_events.py`](../backtesting/replay_events.py) |
 | Bar replay API | [`backtesting/replay.py`](../backtesting/replay.py) |
 
 ---
@@ -56,7 +56,8 @@ Legacy **ForecastPacket → PolicySystem → proposal** remains the **forecast/r
 
 | Concern | Modules / docs |
 |---------|----------------|
-| Release gating | [`orchestration/release_gating.py`](../orchestration/release_gating.py), [`scripts/validate_release_gates.py`](../scripts/validate_release_gates.py), [`scripts/ci_canonical_contracts.sh`](../scripts/ci_canonical_contracts.sh) |
+| Release gating | [`orchestration/release_gating.py`](../orchestration/release_gating.py) (**FB-CAN-037** `fault_stress_*` on `EvidencePackage` + **`fault_stress_evidence`** gate for shadow/live), [`scripts/validate_release_gates.py`](../scripts/validate_release_gates.py), [`scripts/ci_canonical_contracts.sh`](../scripts/ci_canonical_contracts.sh) |
+| Release evidence JSON | [`orchestration/release_evidence.py`](../orchestration/release_evidence.py) — **`fault_stress_run_ids`** / **`fault_profile_ids_satisfied`** slots (**FB-CAN-037**). |
 | Experiment registry | [`models/registry/experiment_registry.py`](../models/registry/experiment_registry.py) |
 | Runbooks | [`GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD), [`MONITORING_CANONICAL.MD`](MONITORING_CANONICAL.MD) |
 

@@ -956,7 +956,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-FAULT",
         "id": "FB-CAN-037",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Add canonical fault injection profiles for simulation and promotion gates",
         "agent_task": "Implement fault-injection profiles (data degradation, latency stress, execution degradation) in replay/simulation and require these scenarios in release evidence bundles before promotion.",
         "affected_files": "backtesting/|orchestration/|scripts/|tests/|docs/",

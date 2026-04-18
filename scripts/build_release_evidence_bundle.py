@@ -44,6 +44,20 @@ def main() -> int:
         dest="shadow_run_ids",
         help="Shadow run id (repeatable)",
     )
+    p.add_argument(
+        "--fault-stress-run-id",
+        action="append",
+        default=[],
+        dest="fault_stress_run_ids",
+        help="Replay run id under canonical fault profiles (FB-CAN-037, repeatable)",
+    )
+    p.add_argument(
+        "--fault-profile-satisfied",
+        action="append",
+        default=[],
+        dest="fault_profile_ids_satisfied",
+        help="Canonical fault profile id exercised (repeatable; use all seven for promotion evidence)",
+    )
     p.add_argument("--rollback-config-version", type=str, default=None)
     p.add_argument("--rollback-logic-version", type=str, default=None)
     p.add_argument("--rollback-instructions", type=str, default="")
@@ -58,6 +72,8 @@ def main() -> int:
         baseline_yaml_path=args.baseline,
         replay_run_ids=args.replay_run_ids,
         shadow_run_ids=args.shadow_run_ids,
+        fault_stress_run_ids=args.fault_stress_run_ids,
+        fault_profile_ids_satisfied=args.fault_profile_ids_satisfied,
         rollback=rb,
     )
     text = json.dumps(bundle.model_dump(mode="json"), indent=2)
