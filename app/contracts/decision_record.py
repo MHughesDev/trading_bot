@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.contracts.run_binding import RunBinding
+
 
 class TradeIntentSide(StrEnum):
     LONG = "long"
@@ -125,6 +127,7 @@ class DecisionRecord(BaseModel):
     instrument_id: str
     config_version: str = "1.0.0"
     logic_version: str | None = None
+    run_binding: RunBinding | None = None
     input_snapshot_ids: dict[str, str] = Field(default_factory=dict)
     effective_signal_map: dict[str, float] = Field(default_factory=dict)
     regime_semantic: str | None = None

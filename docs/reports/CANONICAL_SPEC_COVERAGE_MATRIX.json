@@ -142,7 +142,8 @@
         "FB-CAN-037",
         "FB-CAN-038",
         "FB-CAN-055",
-        "FB-CAN-068"
+        "FB-CAN-068",
+        "FB-CAN-077"
       ],
       "implementation_paths": [
         "backtesting/replay.py",
@@ -150,10 +151,12 @@
         "backtesting/replay_coverage.py",
         "backtesting/replay_provenance.py",
         "app/contracts/replay_events.py",
+        "app/contracts/run_binding.py",
+        "decision_engine/decision_record.py",
         "orchestration/shadow_comparison.py",
         "backtesting/live_replay_equivalence.py"
       ],
-      "test_path_patterns": ["tests/test_replay*", "tests/test_shadow*", "tests/test_live_replay*"]
+      "test_path_patterns": ["tests/test_replay*", "tests/test_shadow*", "tests/test_live_replay*", "tests/test_run_binding*"]
     },
     {
       "id": "gap_K_monitoring",
@@ -186,10 +189,12 @@
         "FB-CAN-053",
         "FB-CAN-057",
         "FB-CAN-066",
-        "FB-CAN-069"
+        "FB-CAN-069",
+        "FB-CAN-077"
       ],
       "implementation_paths": [
         "app/config/canonical_config.py",
+        "app/contracts/run_binding.py",
         "app/contracts/release_objects.py",
         "orchestration/release_gating.py",
         "orchestration/config_diff_audit.py",

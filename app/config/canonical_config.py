@@ -31,7 +31,7 @@ class CanonicalMetadata(BaseModel):
     parent_config_version: str | None = None
     environment_scope: EnvironmentScope = "unspecified"
     notes: str = "No additional notes."
-    logic_version: str | None = None
+    logic_version: str = "1.0.0"
     enabled_feature_families: list[str] = Field(default_factory=list)
 
     @field_validator("enabled_feature_families", mode="after")
@@ -41,14 +41,14 @@ class CanonicalMetadata(BaseModel):
             raise ValueError("metadata.enabled_feature_families must be non-empty")
         return v
 
-    @field_validator("config_version", mode="before")
+    @field_validator("config_version", "logic_version", mode="before")
     @classmethod
-    def _coerce_config_version_str(cls, v: Any) -> Any:
+    def _coerce_nonempty_version_str(cls, v: Any) -> Any:
         if v is None:
             return v
         s = str(v).strip()
         if not s:
-            raise ValueError("metadata.config_version must be non-empty")
+            raise ValueError("metadata version fields must be non-empty")
         return s
 
     @field_validator(
@@ -85,17 +85,16 @@ class CanonicalDomains(BaseModel):
     execution: dict[str, Any] = Field(default_factory=dict)
     memory_adaptation: dict[str, Any] = Field(default_factory=dict)
     carry: dict[str, Any] = Field(default_factory=dict)
-    monitoring: dict[str, Any] = Field(default_factory=dict)
+    monitoring: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Operator monitoring thresholds (FB-CAN-076) and observability bags.",
+    )
     replay: dict[str, Any] = Field(default_factory=dict)
     feature_families: dict[str, Any] = Field(default_factory=dict)
     shadow_comparison: dict[str, Any] = Field(default_factory=dict)
     post_release_probation: dict[str, Any] = Field(
         default_factory=dict,
         description="Live post-release probation windows and abort thresholds (FB-CAN-069).",
-    )
-    monitoring: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Operator monitoring thresholds (FB-CAN-076 edge-budget escalation, etc.).",
     )
     runtime_cutover: dict[str, Any] = Field(
         default_factory=dict,
@@ -125,7 +124,7 @@ def synthesize_canonical_from_app_settings(settings: Any) -> CanonicalRuntimeCon
         created_by="app-settings-synthesis",
         notes="Synthesized from AppSettings + default.yaml; merged with apex_canonical from YAML when present.",
         environment_scope="unspecified",
-        logic_version=None,
+        logic_version="1.0.0",
         enabled_feature_families=[
             "market_data",
             "features",

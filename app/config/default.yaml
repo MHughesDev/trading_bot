@@ -1,6 +1,7 @@
 apex_canonical:
   metadata:
     config_version: 1.0.0
+    logic_version: 1.0.0
     config_name: trading-bot-default
     created_at: '2026-01-01T00:00:00+00:00'
     created_by: repo-default.yaml
@@ -236,6 +237,9 @@ apex_canonical:
         stress_min: 0.35
         auction_B_penalty_min: 0.55
         edge_erosion_min: 0.4
+    replay:
+      live_dataset_id: live
+      strict_run_binding: false
     runtime_cutover:
       phase: canonical_active
       migration_shadow_allowed: false
