@@ -25,8 +25,13 @@ def test_post_release_evidence_diff(tmp_path) -> None:
     r = c.post("/governance/release-evidence/diff", json={"baseline_yaml": text})
     assert r.status_code == 200
     d = r.json()
-    assert "change_count" in d
-    assert "changes" not in d or isinstance(d.get("changes"), list)
+    assert d.get("schema_version") == 1
+    cd = d.get("canonical_diff") or {}
+    assert "change_count" in cd
+    assert isinstance(cd.get("changes"), list)
+    assert "semantic_analysis" in d
+    assert "markdown_render" in d
+    assert "replay_compatibility" in d
 
 
 def test_post_release_evidence_diff_rejects_empty() -> None:
