@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from models.registry.experiment_registry import (
+    ExperimentRecord,
+    ExperimentRegistry,
+    write_experiment_registry,
+)
 from orchestration.fault_injection_profiles import list_canonical_fault_profile_ids
 from orchestration.release_gating import (
     EvidencePackage,
@@ -279,6 +286,70 @@ def test_live_blocked_without_rollback_playbook():
     r = evaluate_promotion_gates(c, target_environment="live")
     assert r.allowed is False
     assert "rollback_playbook" in r.blocked_gates
+
+
+def test_simulation_blocked_when_linked_experiment_incomplete(tmp_path: Path):
+    """FB-CAN-054: linked experiments must satisfy promotion readiness before simulation+."""
+    reg_path = tmp_path / "experiment_registry.json"
+    bad = ExperimentRecord(
+        experiment_id="exp-incomplete",
+        title="t",
+        owner="o",
+        hypothesis="h",
+        status="completed",
+        metrics_defined_before_run=["false_positive_rate"],
+        success_decision="no",
+        failure_modes_observed="too short",
+    )
+    write_experiment_registry(ExperimentRegistry(experiments=[bad]), reg_path)
+    c = ReleaseCandidate(
+        release_id="rel-exp-link",
+        kind="config",
+        owner="ops",
+        config_version="1.0.0",
+        environment="research",
+        evidence=EvidencePackage(version_identifiers={"config": "1.0.0"}, replay_summary="ok"),
+        rollback=_rollback_promotable(),
+        linked_experiment_ids=["exp-incomplete"],
+    )
+    r = evaluate_promotion_gates(
+        c,
+        target_environment="simulation",
+        experiment_registry_path=reg_path,
+    )
+    assert r.allowed is False
+    assert "linked_experiments_complete" in r.blocked_gates
+
+
+def test_simulation_passes_with_complete_linked_experiment(tmp_path: Path):
+    reg_path = tmp_path / "experiment_registry.json"
+    good = ExperimentRecord(
+        experiment_id="exp-complete",
+        title="t",
+        owner="o",
+        hypothesis="h",
+        status="completed",
+        metrics_defined_before_run=["false_positive_rate"],
+        success_decision="Met the false positive rate target; ready for simulation.",
+        failure_modes_observed="Under stress the candidate raised no-trade occupancy; monitor closely.",
+    )
+    write_experiment_registry(ExperimentRegistry(experiments=[good]), reg_path)
+    c = ReleaseCandidate(
+        release_id="rel-exp-link-ok",
+        kind="config",
+        owner="ops",
+        config_version="1.0.0",
+        environment="research",
+        evidence=EvidencePackage(version_identifiers={"config": "1.0.0"}, replay_summary="ok"),
+        rollback=_rollback_promotable(),
+        linked_experiment_ids=["exp-complete"],
+    )
+    r = evaluate_promotion_gates(
+        c,
+        target_environment="simulation",
+        experiment_registry_path=reg_path,
+    )
+    assert r.allowed is True
 
 
 def test_feature_family_live_requires_replay_flag():

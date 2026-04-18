@@ -47,5 +47,5 @@
     "trigger_conditions": "shadow divergence spike or gate failure after deploy",
     "rollback_owner": "ci-ops"
   },
-  "linked_experiment_ids": []
+  "linked_experiment_ids": ["exp-ci-canonical-complete"]
 }

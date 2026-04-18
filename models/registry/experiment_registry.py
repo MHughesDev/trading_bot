@@ -23,6 +23,7 @@ from orchestration.release_gating import (
     read_release_ledger,
     write_release_ledger,
 )
+from models.registry.experiment_validation import validate_experiment_promotion_readiness
 
 ExperimentStatus = Literal[
     "draft",
@@ -60,6 +61,11 @@ ChangeType = Literal[
 ]
 
 # Spec §4 — allowed transitions (FB-CAN-027)
+# FB-CAN-054: completion / shadow / release candidacy require metrics + failure modes (spec §8–9).
+EXPERIMENT_STATUSES_REQUIRING_PROMOTION_READINESS: frozenset[ExperimentStatus] = frozenset(
+    ("completed", "candidate_for_shadow", "candidate_for_release")
+)
+
 _EXPERIMENT_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
     "draft": frozenset({"running", "rejected", "archived"}),
     "running": frozenset({"completed", "rejected", "candidate_for_shadow", "archived"}),
@@ -133,6 +139,10 @@ def validate_experiment_record_fields(record: ExperimentRecord, *, require_non_d
             errs.append("hypothesis is required when status is not draft")
         if not record.metrics_defined_before_run:
             errs.append("metrics_defined_before_run must be non-empty when status is not draft")
+    if st in EXPERIMENT_STATUSES_REQUIRING_PROMOTION_READINESS:
+        ok, reasons = validate_experiment_promotion_readiness(record)
+        if not ok:
+            errs.extend(reasons)
     return errs
 
 
@@ -292,6 +302,14 @@ def link_experiment_to_release(
         ledger_path=ledger_path,
     )
     return new_reg
+
+
+def get_experiment_by_id(reg: ExperimentRegistry, experiment_id: str) -> ExperimentRecord | None:
+    """Return the record for ``experiment_id`` or ``None``."""
+    for e in reg.experiments:
+        if e.experiment_id == experiment_id:
+            return e
+    return None
 
 
 def query_experiments(
