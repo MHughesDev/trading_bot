@@ -1,0 +1,245 @@
+{
+  "schema_version": 1,
+  "audit_id": "CANONICAL-COVERAGE-MATRIX",
+  "queue_slice": "FB-CAN-070",
+  "description": "Maps gap-audit domains (REPO_VS_CANONICAL_SPECS_GAP_AUDIT §3) to canonical specs, queue IDs, implementation paths, and test patterns. Used as the human + CI sign-off surface before FB-CAN-078 acceptance audit.",
+  "related_docs": [
+    "docs/reports/REPO_VS_CANONICAL_SPECS_GAP_AUDIT.md",
+    "docs/CANONICAL_MODULE_MAP.MD",
+    "docs/Human Provided Specs/new_specs/canonical/"
+  ],
+  "rows": [
+    {
+      "id": "gap_A_data_normalization",
+      "gap_audit_section": "A. Data ingestion / normalization",
+      "canonical_specs": [
+        "APEX_Decision_Service_Feature_Schema_and_Data_Contracts_v1_0.md §3–5",
+        "APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md §5"
+      ],
+      "queue_ids": ["FB-CAN-015", "FB-CAN-016", "FB-CAN-017"],
+      "implementation_paths": [
+        "data_plane/ingest/",
+        "app/contracts/decision_snapshots.py",
+        "app/contracts/snapshot_builders.py"
+      ],
+      "test_path_patterns": ["tests/test_*snapshot*", "tests/test_decision_snapshots*"]
+    },
+    {
+      "id": "gap_B_feature_engineering",
+      "gap_audit_section": "B. Feature engineering",
+      "canonical_specs": [
+        "APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md §6",
+        "APEX_Canonical_Configuration_Spec_v1_0.md §5"
+      ],
+      "queue_ids": ["FB-CAN-016", "FB-CAN-032", "FB-CAN-049", "FB-CAN-050"],
+      "implementation_paths": [
+        "data_plane/features/pipeline.py",
+        "data_plane/features/canonical_normalize.py",
+        "data_plane/features/optional_families.py",
+        "app/config/signal_confidence.py"
+      ],
+      "test_path_patterns": ["tests/test_feature*", "tests/test_optional_families*", "tests/test_signal_confidence*"]
+    },
+    {
+      "id": "gap_C_state_regime",
+      "gap_audit_section": "C. State / safety / regime",
+      "canonical_specs": [
+        "APEX_State_Regime_Logic_Detail_Spec_v1_0.md",
+        "APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md §7"
+      ],
+      "queue_ids": ["FB-CAN-041", "FB-CAN-042", "FB-CAN-033"],
+      "implementation_paths": [
+        "decision_engine/state_engine.py",
+        "app/contracts/canonical_state.py",
+        "app/contracts/hard_override.py"
+      ],
+      "test_path_patterns": ["tests/test_state_engine*", "tests/test_hard_override*"]
+    },
+    {
+      "id": "gap_D_forecast_structure",
+      "gap_audit_section": "D. Forecasting / structure",
+      "canonical_specs": [
+        "APEX_Decision_Service_Feature_Schema_and_Data_Contracts_v1_0.md §10",
+        "APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md §8"
+      ],
+      "queue_ids": ["FB-CAN-017"],
+      "implementation_paths": [
+        "app/contracts/canonical_structure.py",
+        "app/contracts/structure_adapter.py"
+      ],
+      "test_path_patterns": ["tests/test_structure*", "tests/test_canonical_structure*"]
+    },
+    {
+      "id": "gap_E_trigger",
+      "gap_audit_section": "E. Trigger / timing",
+      "canonical_specs": ["APEX_Trigger_Math_Pseudocode_Detail_Spec_v1_0.md"],
+      "queue_ids": ["FB-CAN-031", "FB-CAN-043"],
+      "implementation_paths": [
+        "decision_engine/trigger_engine.py",
+        "app/contracts/trigger.py"
+      ],
+      "test_path_patterns": ["tests/test_trigger_engine*"]
+    },
+    {
+      "id": "gap_F_auction",
+      "gap_audit_section": "F. Opportunity auction",
+      "canonical_specs": ["APEX_Auction_Scoring_Constraints_Detail_Spec_v1_0.md"],
+      "queue_ids": ["FB-CAN-034", "FB-CAN-044", "FB-CAN-046"],
+      "implementation_paths": [
+        "decision_engine/auction_engine.py",
+        "app/contracts/auction.py"
+      ],
+      "test_path_patterns": ["tests/test_auction_engine*"]
+    },
+    {
+      "id": "gap_G_risk_sizing",
+      "gap_audit_section": "G. Risk / sizing / exposure",
+      "canonical_specs": [
+        "APEX_Canonical_Configuration_Spec_v1_0.md §11",
+        "APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md §11"
+      ],
+      "queue_ids": ["FB-CAN-007", "FB-CAN-045"],
+      "implementation_paths": [
+        "risk_engine/engine.py",
+        "risk_engine/canonical_sizing.py"
+      ],
+      "test_path_patterns": ["tests/test_risk*", "tests/test_canonical_sizing*"]
+    },
+    {
+      "id": "gap_H_execution",
+      "gap_audit_section": "H. Execution",
+      "canonical_specs": ["APEX_Execution_Logic_Detail_Spec_v1_0.md"],
+      "queue_ids": ["FB-CAN-047", "FB-CAN-048"],
+      "implementation_paths": [
+        "execution/execution_logic.py",
+        "execution/service.py",
+        "execution/partial_fill_reconcile.py",
+        "app/contracts/execution_guidance.py"
+      ],
+      "test_path_patterns": ["tests/test_execution*", "tests/test_partial_fill*"]
+    },
+    {
+      "id": "gap_I_carry_sleeve",
+      "gap_audit_section": "I. Carry sleeve",
+      "canonical_specs": [
+        "APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md §13",
+        "APEX_Canonical_Configuration_Spec_v1_0.md §14"
+      ],
+      "queue_ids": ["FB-CAN-018", "FB-CAN-064"],
+      "implementation_paths": [
+        "carry_sleeve/engine.py",
+        "app/contracts/carry_sleeve.py"
+      ],
+      "test_path_patterns": ["tests/test_carry*"]
+    },
+    {
+      "id": "gap_J_replay_simulation",
+      "gap_audit_section": "J. Replay / simulation",
+      "canonical_specs": ["APEX_Replay_and_Simulation_Interface_Spec_v1_0.md"],
+      "queue_ids": [
+        "FB-CAN-009",
+        "FB-CAN-030",
+        "FB-CAN-037",
+        "FB-CAN-038",
+        "FB-CAN-055",
+        "FB-CAN-068"
+      ],
+      "implementation_paths": [
+        "backtesting/replay.py",
+        "backtesting/replay_core.py",
+        "backtesting/replay_coverage.py",
+        "backtesting/replay_provenance.py",
+        "app/contracts/replay_events.py",
+        "orchestration/shadow_comparison.py",
+        "backtesting/live_replay_equivalence.py"
+      ],
+      "test_path_patterns": ["tests/test_replay*", "tests/test_shadow*", "tests/test_live_replay*"]
+    },
+    {
+      "id": "gap_K_monitoring",
+      "gap_audit_section": "K. Monitoring / alerting",
+      "canonical_specs": ["APEX_Monitoring_and_Alerting_Spec_v1_0.md"],
+      "queue_ids": ["FB-CAN-010", "FB-CAN-028", "FB-CAN-039", "FB-CAN-056", "FB-CAN-064", "FB-CAN-065"],
+      "implementation_paths": [
+        "observability/canonical_metrics.py",
+        "observability/drift_calibration_metrics.py",
+        "observability/monitoring_domain_checklist.py",
+        "infra/prometheus/alerts/canonical_apex.yml"
+      ],
+      "test_path_patterns": ["tests/test_canonical_metrics*", "tests/test_monitoring_domain*", "tests/test_drift*"]
+    },
+    {
+      "id": "gap_L_config_release_governance",
+      "gap_audit_section": "L. Config / release gating",
+      "canonical_specs": [
+        "APEX_Config_Management_and_Release_Gating_Spec_v1_0.md",
+        "APEX_Canonical_Configuration_Spec_v1_0.md"
+      ],
+      "queue_ids": [
+        "FB-CAN-003",
+        "FB-CAN-011",
+        "FB-CAN-026",
+        "FB-CAN-051",
+        "FB-CAN-052",
+        "FB-CAN-053",
+        "FB-CAN-057",
+        "FB-CAN-066",
+        "FB-CAN-069"
+      ],
+      "implementation_paths": [
+        "app/config/canonical_config.py",
+        "app/contracts/release_objects.py",
+        "orchestration/release_gating.py",
+        "orchestration/config_diff_audit.py",
+        "orchestration/post_release_probation.py",
+        "control_plane/api.py"
+      ],
+      "test_path_patterns": ["tests/test_release_gating*", "tests/test_governance*", "tests/test_config_diff*"]
+    },
+    {
+      "id": "gap_M_experiment_registry",
+      "gap_audit_section": "M. Research experiment registry",
+      "canonical_specs": ["APEX_Research_Experiment_Registry_Spec_v1_0.md"],
+      "queue_ids": ["FB-CAN-027", "FB-CAN-054"],
+      "implementation_paths": [
+        "models/registry/experiment_registry.py",
+        "models/registry/experiment_validation.py"
+      ],
+      "test_path_patterns": ["tests/test_experiment*", "tests/test_governance_experiments*"]
+    },
+    {
+      "id": "gap_N_docs_glossary",
+      "gap_audit_section": "N. Docs/specs",
+      "canonical_specs": ["APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md §16"],
+      "queue_ids": ["FB-CAN-023", "FB-CAN-040", "FB-CAN-058"],
+      "implementation_paths": [
+        "docs/CANONICAL_GLOSSARY.MD",
+        "docs/CANONICAL_SPEC_INDEX.MD",
+        "docs/CANONICAL_TOMBSTONE_INDEX.MD",
+        "docs/Specs/CANONICAL_PRECEDENCE.MD"
+      ],
+      "test_path_patterns": ["tests/test_canonical_glossary*"]
+    },
+    {
+      "id": "gap_O_tests_ci_gates",
+      "gap_audit_section": "O. Tests / CI",
+      "canonical_specs": ["APEX_Decision_Service_Feature_Schema_and_Data_Contracts_v1_0.md §19–20"],
+      "queue_ids": ["FB-CAN-025", "FB-CAN-056", "FB-CAN-061", "FB-CAN-062", "FB-CAN-063", "FB-CAN-067"],
+      "implementation_paths": [
+        "scripts/ci_canonical_gates.sh",
+        "scripts/ci_canonical_config_gates.py",
+        "scripts/ci_spec_compliance.sh",
+        "scripts/ci_canonical_contracts.sh",
+        "scripts/ci_canonical_magic_constants.py",
+        "scripts/ci_monitoring_domain_checklist.py"
+      ],
+      "test_path_patterns": ["tests/test_ci_*"]
+    }
+  ],
+  "migration_signoff_checklist": [
+    "Every row in this matrix has at least one implementation path that exists and is non-empty for the current repo.",
+    "All queue_ids listed for a row are registered in scripts/generate_queue_stack.py (canonical program).",
+    "Open FB-CAN items in docs/QUEUE_STACK.csv are tracked; closure uses queue_close.sh per docs/QUEUE.MD.",
+    "Before declaring migration complete, run FB-CAN-078 automated acceptance audit in addition to this matrix."
+  ]
+}

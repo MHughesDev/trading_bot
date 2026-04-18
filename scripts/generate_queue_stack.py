@@ -1418,7 +1418,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-COVERAGE-MAP",
         "id": "FB-CAN-070",
         "kind": "change",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Publish canonical spec section-to-queue coverage matrix and closure checklist",
         "agent_task": "Publish and maintain a machine-readable coverage matrix mapping canonical spec sections to queue IDs, implementation files, and tests. Use the matrix as the completion gate for final canonical migration sign-off.",
         "affected_files": "docs/reports/|scripts/|docs/QUEUE_STACK.csv|tests/",
