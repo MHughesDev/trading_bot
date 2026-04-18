@@ -33,6 +33,7 @@ from app.contracts.decisions import ActionProposal, RouteDecision
 from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.regime import RegimeOutput
+from app.contracts.replay_events import ReplayRunContract
 from app.contracts.risk import RiskState
 from decision_engine.canonical_orchestrator import run_canonical_decision_sequence_after_forecast
 from app.runtime.asset_model_registry import load_manifest
@@ -283,6 +284,7 @@ class DecisionPipeline:
         now_ref: datetime | None = None,
         product_tradable: bool = True,
         execution_feedback_state: dict[str, dict[str, float]] | None = None,
+        replay_contract: ReplayRunContract | None = None,
     ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, RiskState]:
         self._last_feature_effective = None
         mp0 = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
@@ -304,6 +306,7 @@ class DecisionPipeline:
             data_timestamp=data_timestamp,
             settings=self._settings,
             execution_feedback=ef_override,
+            replay_contract=replay_contract,
         )
         if execution_feedback_state is not None:
             b2 = execution_feedback_state.get(symbol)

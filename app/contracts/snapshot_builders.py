@@ -9,6 +9,7 @@ from typing import Any
 from app.config.settings import AppSettings
 from app.config.signal_confidence import apply_signal_family_confidence
 from app.contracts.canonical_conventions import validate_decision_boundary_input_timestamps
+from app.contracts.replay_events import ReplayRunContract
 from app.contracts.decision_snapshots import (
     DecisionBoundaryInput,
     ExchangeRiskLevel,
@@ -24,6 +25,19 @@ from app.contracts.decision_snapshots import (
 
 def _clip01(x: float) -> float:
     return max(0.0, min(1.0, float(x)))
+
+
+def _replay_environment_scope(contract: ReplayRunContract) -> str:
+    """Map replay mode to canonical environment_scope for service-config attribution."""
+    rm = contract.replay_mode
+    val = str(rm.value if hasattr(rm, "value") else rm)
+    if val == "shadow_comparison":
+        return "shadow"
+    if val in ("historical_nominal", "historical_stress", "synthetic_fault_injected"):
+        return "simulation"
+    if val in ("trigger_debug", "execution_debug"):
+        return "research"
+    return "research"
 
 
 def _safe_float(row: dict[str, float], key: str, default: float = 0.0) -> float:
@@ -45,6 +59,7 @@ def build_decision_boundary_input(
     data_timestamp: datetime | None,
     settings: AppSettings,
     execution_feedback: ExecutionFeedbackSnapshot | None = None,
+    replay_contract: ReplayRunContract | None = None,
 ) -> tuple[DecisionBoundaryInput, dict[str, float]]:
     """
     Validate/normalize inputs into :class:`DecisionBoundaryInput` and merge canonical
@@ -189,20 +204,39 @@ def build_decision_boundary_input(
 
     cv = "1.0.0"
     lv = None
+    cfg_name: str | None = None
+    env_scope = "unspecified"
+    eff: list[str] = []
     try:
-        cv = str(settings.canonical.metadata.config_version)
-        lv = settings.canonical.metadata.logic_version
+        meta = settings.canonical.metadata
+        cv = str(meta.config_version)
+        lv = meta.logic_version
+        cfg_name = str(meta.config_name) if getattr(meta, "config_name", None) else None
+        env_scope = str(meta.environment_scope)
+        eff = list(meta.enabled_feature_families or [])
     except Exception:
         pass
+
+    svc_extra: dict[str, Any] = {}
+    if replay_contract is not None:
+        cv = str(replay_contract.config_version)
+        lv = replay_contract.logic_version
+        env_scope = _replay_environment_scope(replay_contract)
+        svc_extra["replay_run_id"] = replay_contract.replay_run_id
+        svc_extra["replay_dataset_id"] = replay_contract.dataset_id
 
     svc = ServiceConfigurationSnapshot(
         snapshot_id=sid,
         timestamp=ts,
         config_version=cv,
+        config_name=cfg_name,
         logic_version=lv,
+        environment_scope=env_scope,
+        enabled_feature_families=eff,
         execution_mode=str(settings.execution_mode),
         market_data_symbols=list(settings.market_data_symbols),
         bar_interval_seconds=int(settings.market_data_bar_interval_seconds),
+        extra=svc_extra,
     )
 
     bundle = DecisionBoundaryInput(

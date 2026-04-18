@@ -74,6 +74,7 @@ def run_one_replay_step(
         portfolio_equity_usd=eq_usd,
         replay_deterministic=True,
         execution_feedback_state=execution_feedback_state,
+        replay_contract=contract,
     )
 
     if collect_events and events_out is not None:

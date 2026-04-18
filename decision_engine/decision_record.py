@@ -103,7 +103,10 @@ def build_decision_record(
             for k in ("market", "structural", "safety", "execution_feedback", "service_config"):
                 sub = cbi.get(k)
                 if isinstance(sub, dict) and "snapshot_id" in sub:
-                    boundary_ids[f"{k}_snapshot_id"] = str(sub["snapshot_id"])
+                    sid_val = str(sub["snapshot_id"])
+                    boundary_ids[f"{k}_snapshot_id"] = sid_val
+                    if k == "service_config":
+                        boundary_ids["service_config_snapshot_id"] = sid_val
 
     apex = getattr(regime, "apex", None)
     deg = getattr(apex, "degradation", None) if apex is not None else None

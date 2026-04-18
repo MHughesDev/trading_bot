@@ -16,7 +16,7 @@
         "APEX_Decision_Service_Feature_Schema_and_Data_Contracts_v1_0.md §3–5",
         "APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md §5"
       ],
-      "queue_ids": ["FB-CAN-015", "FB-CAN-016", "FB-CAN-017"],
+      "queue_ids": ["FB-CAN-015", "FB-CAN-016", "FB-CAN-017", "FB-CAN-071"],
       "implementation_paths": [
         "data_plane/ingest/",
         "app/contracts/decision_snapshots.py",

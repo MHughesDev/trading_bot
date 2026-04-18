@@ -19,6 +19,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from app.contracts.decisions import ActionProposal, RouteDecision, RouteId, TradeAction
+from app.contracts.replay_events import ReplayRunContract
 from app.contracts.forecast import ForecastOutput
 from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState
@@ -48,6 +49,7 @@ def run_decision_tick(
     portfolio_equity_usd: float | None = None,
     replay_deterministic: bool = False,
     execution_feedback_state: dict[str, dict[str, float]] | None = None,
+    replay_contract: ReplayRunContract | None = None,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, TradeAction | None, RiskState]:
     t0 = time.perf_counter()
     if not replay_deterministic:
@@ -126,6 +128,7 @@ def run_decision_tick(
         now_ref=data_timestamp,
         product_tradable=product_tradable,
         execution_feedback_state=execution_feedback_state,
+        replay_contract=replay_contract,
     )
     trade, risk_state = risk_engine.evaluate(
         symbol,
