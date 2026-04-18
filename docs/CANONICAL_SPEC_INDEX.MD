@@ -2,7 +2,7 @@
 
 **Purpose:** Single entry point for **target system architecture** during the **FB-CAN-*** canonical migration. Use this page to decide which documents are **binding for “what we are building toward”** vs **historical or as-implemented**.
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-019: removed unused `decision_engine/action_generator.py`; see [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD)).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-020: removed `risk_engine/equal_weight.py`; see [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD)).
 
 ---
 

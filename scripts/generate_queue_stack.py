@@ -718,7 +718,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DEL-RISK",
         "id": "FB-CAN-020",
         "kind": "tech_debt",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Delete obsolete risk_engine branches and contracts",
         "agent_task": "Remove legacy hard-gate-only risk branches and contract fields that conflict with canonical risk/sizing architecture once canonical risk engine is the only active path. Ensure safety overrides and intent signing invariants remain enforced.",
         "affected_files": "risk_engine/|app/contracts/risk.py|app/contracts/decisions.py|tests/",
