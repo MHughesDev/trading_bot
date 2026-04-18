@@ -85,6 +85,57 @@ def _thesis_bucket_key(
     return f"{rname}:{bias}:{c_bucket}"
 
 
+def _portfolio_thesis_exposure_usd(
+    buckets: dict[str, float] | None,
+    tkey: str,
+) -> float:
+    """Sum absolute USD exposure for thesis cluster key (plain or ``symbol::thesis_key``)."""
+    if not buckets:
+        return 0.0
+    s = 0.0
+    for k, v in buckets.items():
+        ks = str(k)
+        if ks == tkey or ks.endswith("::" + tkey):
+            s += abs(float(v))
+    return s
+
+
+def merge_symbol_position_into_thesis_buckets(
+    *,
+    symbol: str,
+    apex: CanonicalStateOutput,
+    structure: CanonicalStructureOutput,
+    position_signed_qty: Decimal | None,
+    mid_price: float,
+    existing: dict[str, float] | None,
+) -> dict[str, float]:
+    """FB-CAN-046: drop prior keys for ``symbol::`` then set current signed notional for this thesis."""
+    prefix = f"{symbol}::"
+    buckets = {k: v for k, v in dict(existing or {}).items() if not str(k).startswith(prefix)}
+    qty = float(position_signed_qty) if position_signed_qty is not None else 0.0
+    if abs(qty) < 1e-15:
+        return buckets
+    d_sign = 1 if qty > 0 else -1
+    tk = _thesis_bucket_key(apex, structure, d_sign)
+    sk = f"{prefix}{tk}"
+    buckets[sk] = qty * float(mid_price)
+    return buckets
+
+
+def _thesis_overlap_fraction(
+    *,
+    buckets: dict[str, float] | None,
+    tkey: str,
+    portfolio_equity_usd: float,
+) -> float:
+    """FB-CAN-046: [0,1] book concentration in candidate thesis cluster (equity-normalized)."""
+    if not buckets:
+        return 0.0
+    eq = max(float(portfolio_equity_usd), 1e-9)
+    exp = _portfolio_thesis_exposure_usd(buckets, tkey)
+    return _clip(exp / eq, 0.0, 1.0)
+
+
 def _liq_cluster_key(feature_row: dict[str, float], pkt: ForecastPacket) -> str:
     """Quantized liquidation-geometry bucket for overlap penalties (FB-CAN-034)."""
     w0 = float(pkt.interval_width[0]) if pkt.interval_width else 0.0
@@ -154,6 +205,7 @@ def run_opportunity_auction(
     base_proposal: ActionProposal | None,
     top_n: int | None = None,
     structure: CanonicalStructureOutput | None = None,
+    current_total_exposure_usd: float = 0.0,
 ) -> tuple[ActionProposal | None, AuctionResult]:
     """
     Build long/short/flat candidates, score, select top-N under notional cap.
@@ -164,6 +216,12 @@ def run_opportunity_auction(
     ``max_candidates`` bounds the scored candidate list (long/short/flat).
     """
     ad = _auction_domain(settings)
+    thesis_cap = float(ad.get("thesis_overlap_cap", 0.72))
+    thesis_w = float(ad.get("thesis_overlap_weight", 1.15))
+    book_stress_boost = float(ad.get("book_exposure_stress_boost", 0.45))
+    liq_dom_thresh = float(ad.get("liquidation_stress_dominance_threshold", 0.55))
+    stress_rp_min = float(ad.get("stress_regime_min_for_dominance", 0.18))
+    defense_boost = float(ad.get("defense_posture_penalty_boost", 0.38))
     top_n_eff = int(top_n if top_n is not None else ad.get("top_n", 1))
     top_n_eff = max(1, min(8, top_n_eff))
     max_cand = int(ad.get("max_candidates", 3))
@@ -197,6 +255,16 @@ def run_opportunity_auction(
 
     max_per = float(settings.risk_max_per_symbol_usd)
     max_notional = top_n_eff * max_per
+    max_total_book = float(settings.risk_max_total_exposure_usd)
+    book_stress = _clip(current_total_exposure_usd / max(max_total_book, 1e-9), 0.0, 1.0)
+    thesis_buckets = merge_symbol_position_into_thesis_buckets(
+        symbol=symbol,
+        apex=apex,
+        structure=st,
+        position_signed_qty=position_signed_qty,
+        mid_price=mp,
+        existing=getattr(app_risk, "portfolio_thesis_buckets", None),
+    )
 
     wA, wS, wC, wT, wE, wO, wL = 0.18, 0.14, 0.18, 0.16, 0.14, 0.1, 0.1
     wD, wM, wP, wG, wB, wR = 0.35, 0.2, 0.15, 0.4, 0.35, 0.35
@@ -268,7 +336,16 @@ def run_opportunity_auction(
         D_corr = _corr_candidate_vs_book(direction, signed_pos_frac, apex, st)
         if direction == 1 or direction == -1:
             D_corr = max(D_corr, 0.55 * corr_ls)
-        D_thesis = _clip(
+        t_ov = _thesis_overlap_fraction(
+            buckets=thesis_buckets,
+            tkey=tkey,
+            portfolio_equity_usd=eq,
+        )
+        if direction != 0 and t_ov >= thesis_cap - 1e-12:
+            eligible = False
+            reasons.append("thesis_overlap_cap")
+        ov_excess = max(0.0, float(t_ov) - thesis_cap)
+        base_d_thesis = _clip(
             0.32 * float(nov)
             + 0.28 * float(st.fragility_score)
             + 0.25 * abs(float(forecast_packet.ood_score))
@@ -276,6 +353,7 @@ def run_opportunity_auction(
             0.0,
             1.0,
         )
+        D_thesis = _clip(base_d_thesis + thesis_w * ov_excess, 0.0, 1.0)
         D_liq = _clip(
             0.55 * L_liq + 0.28 * heat + 0.17 * float(forecast_packet.ood_score),
             0.0,
@@ -290,12 +368,23 @@ def run_opportunity_auction(
         rc_pen = _clip(1.0 - apex.regime_confidence, 0.0, 1.0) * 0.3
         fp_mem = _clip(float(getattr(app_risk, "trigger_false_positive_memory", 0.0)), 0.0, 1.0)
         P_fp = _clip(rc_pen + 0.55 * fp_mem, 0.0, 1.0)
-        G_deg = _degradation_penalty(deg)
+        rp_list = list(apex.regime_probabilities)
+        stress_rp = float(rp_list[2]) if len(rp_list) > 2 else 0.0
+        liq_stress_dom = (float(L_liq) >= liq_dom_thresh) and (stress_rp >= stress_rp_min)
+        mode_liq = str(getattr(app_risk, "risk_liquidation_mode", None) or "neutral")
+        posture_extra = defense_boost if (mode_liq == "defense" or liq_stress_dom) else 0.0
+        G_base = _degradation_penalty(deg)
+        G_deg = _clip(G_base + posture_extra, 0.0, 1.0)
         Cq = pos_frac
         Ov = _clip(abs(float(forecast_packet.ood_score)) * 0.5 + heat * 0.3, 0.0, 1.0)
         N_deploy = _clip(pos_frac * float(app_risk.canonical_size_multiplier), 0.0, 1.0)
         B_edge = _clip(
-            0.32 * heat + 0.26 * Cq + 0.18 * Ov + 0.14 * N_deploy + 0.1 * rfx,
+            0.32 * heat
+            + 0.26 * Cq
+            + 0.18 * Ov
+            + 0.14 * N_deploy
+            + 0.1 * rfx
+            + book_stress_boost * book_stress,
             0.0,
             1.0,
         )
@@ -338,8 +427,12 @@ def run_opportunity_auction(
             "M": M_overlap,
             "P": P_fp,
             "G": G_deg,
+            "G_base": G_base,
+            "G_posture": posture_extra,
             "B": B_edge,
             "R": R_conc,
+            "T_ov": float(t_ov),
+            "book_stress": book_stress,
         }
 
         rec = AuctionCandidateRecord(
@@ -430,6 +523,16 @@ def run_opportunity_auction(
             "top_n_saturation": round(sat, 6),
             "selected_directions": selected_dirs,
             "saturation_warn_score": sat_warn,
+        },
+        "fb_can_046": {
+            "thesis_overlap_cap": thesis_cap,
+            "thesis_overlap_weight": thesis_w,
+            "book_exposure_stress": round(book_stress, 6),
+            "book_exposure_stress_boost": book_stress_boost,
+            "liquidation_stress_dominance_threshold": liq_dom_thresh,
+            "stress_regime_min_for_dominance": stress_rp_min,
+            "defense_posture_penalty_boost": defense_boost,
+            "portfolio_thesis_buckets_keys": sorted(thesis_buckets.keys())[:32],
         },
     }
     if sel_dir is not None and str(int(sel_dir)) in thesis_keys:

@@ -112,6 +112,7 @@ def run_spec_policy_step(
     apex: CanonicalStateOutput | None = None,
     feature_row: dict[str, float] | None = None,
     structure: CanonicalStructureOutput | None = None,
+    current_total_exposure_usd: float = 0.0,
 ) -> tuple[ForecastOutput, RouteDecision, ActionProposal | None]:
     """
     Human-spec path: PolicySystem + ExecutionPlan → proposal; `ForecastOutput` from packet for metrics.
@@ -158,6 +159,7 @@ def run_spec_policy_step(
             base_proposal=proposal,
             top_n=top_n_auction,
             structure=structure,
+            current_total_exposure_usd=current_total_exposure_usd,
         )
         forecast_packet.forecast_diagnostics["auction"] = auction_result.model_dump()
 

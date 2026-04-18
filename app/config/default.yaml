@@ -33,6 +33,12 @@ apex_canonical:
       top_n: 1
       max_candidates: 3
       saturation_warn_score: 0.85
+      thesis_overlap_cap: 0.72
+      thesis_overlap_weight: 1.15
+      book_exposure_stress_boost: 0.45
+      liquidation_stress_dominance_threshold: 0.55
+      stress_regime_min_for_dominance: 0.18
+      defense_posture_penalty_boost: 0.38
     risk_sizing:
       max_total_exposure_usd: 100000
       max_per_symbol_usd: 40000

@@ -56,3 +56,5 @@ class RiskState(BaseModel):
     last_risk_block_codes: list[str] = Field(default_factory=list)
     last_pipeline_no_trade_codes: list[str] = Field(default_factory=list)
     last_decision_record: dict[str, Any] | None = None
+    # FB-CAN-046 — optional book-level thesis bucket notionals / fractions (equity-normalized) for overlap
+    portfolio_thesis_buckets: dict[str, float] | None = None

@@ -115,6 +115,7 @@ def run_decision_tick(
         risk_state,
         mid_price=mid_price,
         portfolio_equity_usd=eq,
+        current_total_exposure_usd=current_total_exposure_usd,
         position_signed_qty=position_signed_qty,
         data_timestamp=data_timestamp,
         feed_last_message_at=feed_last_message_at,
