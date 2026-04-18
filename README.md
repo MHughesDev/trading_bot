@@ -78,7 +78,7 @@ Think of it as a little factory line — not every bell and whistle, just the ha
 | 📦 | Default execution mode is **paper**; go **live** only when you mean it and keys are set. |
 | 🧪 | Dev quickies: `python3 -m ruff check .` and `python3 -m pytest tests/ -q` (after `pip install -e ".[dev]"`). |
 
-**Want the full map?** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) · **Canonical target architecture (APEX):** [`docs/CANONICAL_SPEC_INDEX.MD`](docs/CANONICAL_SPEC_INDEX.MD) · **Repo contract for contributors:** [`AGENTS.md`](AGENTS.md).
+**Want the full map?** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) · **Canonical target architecture (APEX):** [`docs/CANONICAL_SPEC_INDEX.MD`](docs/CANONICAL_SPEC_INDEX.MD) · **Release gating / experiment registry:** [`docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD) · **Repo contract for contributors:** [`AGENTS.md`](AGENTS.md).
 
 ---
 
