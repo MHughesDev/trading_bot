@@ -39,6 +39,24 @@ apex_canonical:
       max_drawdown_pct: 0.15
       max_spread_bps: 50
       stale_data_seconds: 120
+      quantile_asymmetry_boost_cap: 1.2
+      carry_asymmetry_boost_cap: 1.15
+      position_inertia_penalty_weight: 0.55
+      position_inertia_min_multiplier: 0.35
+      edge_budget_weight_heat: 0.45
+      edge_budget_weight_exposure: 0.35
+      edge_budget_weight_symbol_exposure: 0.2
+      edge_budget_strength: 0.62
+      edge_budget_min_multiplier: 0.35
+      symbol_concentration_threshold: 0.38
+      symbol_concentration_strength: 2.2
+      symbol_concentration_min_floor: 0.25
+      book_concentration_threshold: 0.82
+      book_concentration_strength: 3.0
+      book_concentration_min_floor: 0.4
+      transition_size_multiplier_weight: 0.35
+      novelty_size_multiplier_weight: 0.25
+      max_transition_novelty_multiplier_weight: 0.55
     signal_confidence:
       market_microstructure:
         enabled: true

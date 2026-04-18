@@ -65,6 +65,7 @@ def build_safety_snapshot_event(
         "regime_semantic": getattr(getattr(regime, "semantic", None), "value", None),
         "canonical_degradation": getattr(risk, "canonical_degradation", None),
         "canonical_size_multiplier": getattr(risk, "canonical_size_multiplier", None),
+        "canonical_degradation_sizing_terms": getattr(risk, "canonical_degradation_sizing_terms", None),
         "trigger_false_positive_memory": getattr(risk, "trigger_false_positive_memory", None),
         "hard_override_active": getattr(risk, "hard_override_active", None),
         "hard_override_kind": getattr(

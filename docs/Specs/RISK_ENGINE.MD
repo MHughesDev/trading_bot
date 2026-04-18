@@ -7,7 +7,7 @@
 ## `RiskEngine` (`risk_engine/engine.py`)
 
 - Evaluates **`ActionProposal`** vs **`RiskState`** and settings (stale feed/data, spread, drawdown, mode, exposure, position).
-- **FB-CAN-007:** Notional for new entries uses **`risk_engine/canonical_sizing.py`** — layered multipliers (degradation, position inertia / flip penalty, capped asymmetry boost ≤1.2×, liquidation offense/defense mode, edge-budget, concentration) before quantity sizing. **`RiskState.last_risk_sizing`** holds explainable diagnostics. Hard gates above still apply first.
+- **FB-CAN-007 / FB-CAN-045:** Notional for new entries uses **`risk_engine/canonical_sizing.py`** — layered multipliers (composite degradation including transition/novelty throttles from **`merge_canonical_into_risk`**, position inertia / flip penalty, capped asymmetry boost from **`apex_canonical.domains.risk_sizing`**, liquidation offense/defense mode, edge-budget, concentration) before quantity sizing. **`RiskState.last_risk_sizing`** and **`RiskState.canonical_degradation_sizing_terms`** hold explainable diagnostics. Hard gates above still apply first.
 - Returns **`TradeAction | None`**; `None` means blocked.
 - Precedence is documented in [`docs/architecture/risk_precedence.md`](../architecture/risk_precedence.md) (authoritative for ordering); see also [`docs/RISK_PRECEDENCE.MD`](../RISK_PRECEDENCE.MD) (redirect stub).
 

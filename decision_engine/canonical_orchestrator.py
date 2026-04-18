@@ -130,6 +130,7 @@ def run_canonical_decision_sequence_after_forecast(
     risk = merge_canonical_into_risk(
         risk,
         apex,
+        settings=settings,
         forecast_packet=pkt,
         trigger=trig,
         spread_bps=spread_bps,
