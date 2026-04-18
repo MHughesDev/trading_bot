@@ -8,6 +8,7 @@ import pytest
 
 from app.config.settings import AppSettings
 from app.contracts.canonical_state import DegradationLevel
+from app.contracts.reason_codes import TRG_MOVE_ALREADY_EXTENDED
 from app.contracts.canonical_structure import CanonicalStructureOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState
@@ -106,7 +107,7 @@ def test_merge_canonical_updates_false_positive_memory():
         trigger_strength=0.4,
         trigger_confidence=0.3,
         missed_move_flag=True,
-        trigger_reason_codes=["move_already_extended"],
+        trigger_reason_codes=[TRG_MOVE_ALREADY_EXTENDED],
     )
     r0 = RiskState(trigger_false_positive_memory=0.0)
     r1 = merge_canonical_into_risk(

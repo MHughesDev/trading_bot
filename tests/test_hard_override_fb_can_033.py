@@ -9,6 +9,7 @@ import pytest
 from app.config.settings import AppSettings
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.hard_override import HardOverrideKind
+from app.contracts.reason_codes import TRG_MOVE_ALREADY_EXTENDED
 from app.contracts.risk import RiskState, SystemMode
 from app.contracts.trigger import TriggerOutput
 from decision_engine.state_engine import (
@@ -141,7 +142,7 @@ def test_false_positive_memory_still_updates_with_trigger():
         trigger_strength=0.4,
         trigger_confidence=0.3,
         missed_move_flag=True,
-        trigger_reason_codes=["move_already_extended"],
+        trigger_reason_codes=[TRG_MOVE_ALREADY_EXTENDED],
     )
     r0 = RiskState(trigger_false_positive_memory=0.0)
     r1 = merge_canonical_into_risk(

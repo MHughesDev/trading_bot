@@ -16,6 +16,7 @@ from decimal import Decimal
 import numpy as np
 
 from app.config.settings import AppSettings
+from app.contracts.reason_codes import PIP_BINDING_ABSTAIN, PIP_CARRY_SLEEVE_BLOCKED, PIP_NO_TRADE_SELECTED
 from app.contracts.decisions import ActionProposal, RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
 from app.contracts.canonical_state import DegradationLevel
@@ -175,7 +176,7 @@ def run_canonical_decision_sequence_after_forecast(
             ranking=[RouteId.NO_TRADE],
         )
         risk = risk.model_copy(
-            update={"last_pipeline_no_trade_codes": ["pipeline_binding_abstain"]},
+            update={"last_pipeline_no_trade_codes": [PIP_BINDING_ABSTAIN]},
         )
         return regime_out, fc, route, None, risk
 
@@ -225,7 +226,7 @@ def run_canonical_decision_sequence_after_forecast(
                     "last_pipeline_no_trade_codes": list(
                         risk.last_pipeline_no_trade_codes or []
                     )
-                    + ["carry_sleeve_directional_blocked"]
+                    + [PIP_CARRY_SLEEVE_BLOCKED]
                 },
             )
         carry_prop = build_carry_proposal(
@@ -249,7 +250,7 @@ def run_canonical_decision_sequence_after_forecast(
         and not (carry_dec.active and carry_prop is not None)
     ):
         risk = risk.model_copy(
-            update={"last_pipeline_no_trade_codes": ["pipeline_no_trade_selected"]},
+            update={"last_pipeline_no_trade_codes": [PIP_NO_TRADE_SELECTED]},
         )
 
     return regime_out, fc, route, action, risk

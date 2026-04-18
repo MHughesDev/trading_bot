@@ -8,6 +8,18 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from app.contracts.reason_codes import (
+    TRG_DEGRADATION_BLOCK,
+    TRG_EXECUTION_TOO_DEGRADED,
+    TRG_INSUFFICIENT_REMAINING_EDGE,
+    TRG_LOW_SETUP_SCORE,
+    TRG_MOVE_ALREADY_EXTENDED,
+    TRG_NOVELTY_BLOCK,
+    TRG_POOR_EXECUTION_CONTEXT,
+    TRG_PRESSURE_NOT_BUILDING,
+    TRG_STALE_PRETRIGGER_INPUTS,
+    TRG_TRIGGER_STRENGTH_LOW,
+)
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
 from app.contracts.canonical_structure import CanonicalStructureOutput
 from app.contracts.forecast_packet import ForecastPacket
@@ -89,12 +101,12 @@ def evaluate_trigger(
 
     novelty_hard = N >= 0.98
     if novelty_hard:
-        reasons.append("novelty_block")
-        stage_fail["setup"].append("novelty_block")
+        reasons.append(TRG_NOVELTY_BLOCK)
+        stage_fail["setup"].append(TRG_NOVELTY_BLOCK)
 
     if apex.degradation == DegradationLevel.NO_TRADE:
-        reasons.append("degradation_block")
-        stage_fail["setup"].append("degradation_block")
+        reasons.append(TRG_DEGRADATION_BLOCK)
+        stage_fail["setup"].append(TRG_DEGRADATION_BLOCK)
 
     setup_valid = (
         setup_score >= setup_threshold
@@ -102,13 +114,13 @@ def evaluate_trigger(
         and not novelty_hard
         and exec_conf >= setup_exec_floor
     )
-    if not setup_valid and "novelty_block" not in reasons and "degradation_block" not in reasons:
+    if not setup_valid and TRG_NOVELTY_BLOCK not in reasons and TRG_DEGRADATION_BLOCK not in reasons:
         if setup_score < setup_threshold:
-            reasons.append("low_setup_score")
-            stage_fail["setup"].append("low_setup_score")
+            reasons.append(TRG_LOW_SETUP_SCORE)
+            stage_fail["setup"].append(TRG_LOW_SETUP_SCORE)
         if exec_conf < setup_exec_floor:
-            reasons.append("poor_execution_context")
-            stage_fail["setup"].append("poor_execution_context")
+            reasons.append(TRG_POOR_EXECUTION_CONTEXT)
+            stage_fail["setup"].append(TRG_POOR_EXECUTION_CONTEXT)
 
     rsi = _safe_float(feature_row, "rsi_14", 50.0)
     ret1 = _safe_float(feature_row, "return_1", 0.0)
@@ -133,11 +145,11 @@ def evaluate_trigger(
     )
     if setup_valid and not pretrigger_valid:
         if pretrigger_score < pretrigger_threshold:
-            reasons.append("pressure_not_building")
-            stage_fail["pretrigger"].append("pressure_not_building")
+            reasons.append(TRG_PRESSURE_NOT_BUILDING)
+            stage_fail["pretrigger"].append(TRG_PRESSURE_NOT_BUILDING)
         if F < freshness_floor:
-            reasons.append("stale_pretrigger_inputs")
-            stage_fail["pretrigger"].append("stale_pretrigger_inputs")
+            reasons.append(TRG_STALE_PRETRIGGER_INPUTS)
+            stage_fail["pretrigger"].append(TRG_STALE_PRETRIGGER_INPUTS)
 
     B = _clip01(abs(ret1) * 25.0)
     U = vol_score
@@ -159,11 +171,11 @@ def evaluate_trigger(
     missed_move_flag = E > entry_extension_limit or (R - X) < min_remaining_edge
     if missed_move_flag:
         if E > entry_extension_limit:
-            reasons.append("move_already_extended")
-            stage_fail["confirm"].append("move_already_extended")
+            reasons.append(TRG_MOVE_ALREADY_EXTENDED)
+            stage_fail["confirm"].append(TRG_MOVE_ALREADY_EXTENDED)
         else:
-            reasons.append("insufficient_remaining_edge")
-            stage_fail["confirm"].append("insufficient_remaining_edge")
+            reasons.append(TRG_INSUFFICIENT_REMAINING_EDGE)
+            stage_fail["confirm"].append(TRG_INSUFFICIENT_REMAINING_EDGE)
 
     strength_ok = (
         setup_valid
@@ -173,11 +185,11 @@ def evaluate_trigger(
     )
     if setup_valid and pretrigger_valid and not strength_ok:
         if exec_conf < trigger_exec_floor:
-            reasons.append("execution_too_degraded")
-            stage_fail["confirm"].append("execution_too_degraded")
+            reasons.append(TRG_EXECUTION_TOO_DEGRADED)
+            stage_fail["confirm"].append(TRG_EXECUTION_TOO_DEGRADED)
         elif trigger_strength < trigger_threshold:
-            reasons.append("trigger_strength_low")
-            stage_fail["confirm"].append("trigger_strength_low")
+            reasons.append(TRG_TRIGGER_STRENGTH_LOW)
+            stage_fail["confirm"].append(TRG_TRIGGER_STRENGTH_LOW)
 
     trigger_valid = strength_ok and not missed_move_flag
 

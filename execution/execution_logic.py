@@ -5,6 +5,21 @@ from __future__ import annotations
 from typing import Any
 
 from app.contracts.execution_guidance import ExecutionFeedback, ExecutionGuidance
+from app.contracts.reason_codes import (
+    EXE_CONF_FLOOR,
+    EXE_STYLE_AGGRESSIVE,
+    EXE_STYLE_PASSIVE,
+    EXE_STYLE_STAGGERED,
+    EXE_STYLE_SUPPRESS,
+    EXE_STYLE_TWAP,
+    EXE_STYLE_TWAP_STRESS,
+    EXE_STRESS_HEAT,
+    EXE_STRESS_LIQ,
+    EXE_STRESS_SPREAD,
+    EXE_STRESS_VENUE,
+    EXE_STRESS_VOL,
+    EXE_WORST_CASE_EDGE,
+)
 from app.contracts.orders import OrderIntent
 
 
@@ -56,19 +71,19 @@ def compute_stress_mode(ctx: dict[str, Any]) -> tuple[bool, list[str]]:
     stress = False
     if spread_bps > 45:
         stress = True
-        reasons.append("stress_spread_widening")
+        reasons.append(EXE_STRESS_SPREAD)
     if heat > 0.78:
         stress = True
-        reasons.append("stress_heat_extreme")
+        reasons.append(EXE_STRESS_HEAT)
     if vq < 0.35:
         stress = True
-        reasons.append("stress_venue_degradation")
+        reasons.append(EXE_STRESS_VENUE)
     if vol > 0.08:
         stress = True
-        reasons.append("stress_volatility")
+        reasons.append(EXE_STRESS_VOL)
     if liq_frag > 0.72:
         stress = True
-        reasons.append("stress_liquidity_collapse")
+        reasons.append(EXE_STRESS_LIQ)
     return stress, reasons
 
 
@@ -104,14 +119,14 @@ def select_execution_style(
     stress_ec = float(dom.get("stress_twap_exec_conf_below", 0.25))
 
     if stress and exec_conf < stress_ec:
-        return "twap", ["style_branch_stress_low_exec_conf_twap"]
+        return "twap", [EXE_STYLE_TWAP_STRESS]
     if exec_conf >= high_t and spread_bps <= passive_spread and not stress:
-        return "passive", ["style_branch_passive_high_conf_tight_spread"]
+        return "passive", [EXE_STYLE_PASSIVE]
     if exec_conf >= med_t:
-        return "staggered", ["style_branch_staggered_medium_conf"]
+        return "staggered", [EXE_STYLE_STAGGERED]
     if urgency_high and remaining_edge > emergency_floor:
-        return "aggressive", ["style_branch_aggressive_urgency_remaining_edge"]
-    return "twap", ["style_branch_default_twap"]
+        return "aggressive", [EXE_STYLE_AGGRESSIVE]
+    return "twap", [EXE_STYLE_TWAP]
 
 
 def build_execution_guidance(ctx: dict[str, Any]) -> ExecutionGuidance:
@@ -140,9 +155,9 @@ def build_execution_guidance(ctx: dict[str, Any]) -> ExecutionGuidance:
 
     suppress = edge_suppress or (exec_conf < ec_floor and not urgency)
     if edge_suppress:
-        reasons.append("worst_case_edge_below_min")
+        reasons.append(EXE_WORST_CASE_EDGE)
     if exec_conf < ec_floor and not urgency:
-        reasons.append("execution_confidence_floor")
+        reasons.append(EXE_CONF_FLOOR)
 
     size_mult = 1.0
     if stress:
@@ -157,7 +172,7 @@ def build_execution_guidance(ctx: dict[str, Any]) -> ExecutionGuidance:
 
     if suppress:
         style = "suppress"
-        style_codes = ["style_branch_suppress"]
+        style_codes = [EXE_STYLE_SUPPRESS]
 
     return ExecutionGuidance(
         preferred_execution_style=style,

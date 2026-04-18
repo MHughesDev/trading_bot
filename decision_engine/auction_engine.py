@@ -10,6 +10,18 @@ from decimal import Decimal
 from typing import Any
 
 from app.config.settings import AppSettings
+from app.contracts.reason_codes import (
+    AUC_DECISION_CONF_BELOW_MIN,
+    AUC_DEGRADATION_NO_TRADE,
+    AUC_EXEC_CONF_BELOW_MIN,
+    AUC_MISSED_MOVE,
+    AUC_NOTIONAL_BUDGET,
+    AUC_OUTRANKED,
+    AUC_THESIS_OVERLAP_CAP,
+    AUC_TOP_N_SHORTFALL,
+    AUC_TRIGGER_CONF_BELOW_MIN,
+    AUC_TRIGGER_INVALID,
+)
 from app.contracts.auction import AuctionCandidateRecord, AuctionResult
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
 from app.contracts.canonical_structure import CanonicalStructureOutput
@@ -308,22 +320,22 @@ def run_opportunity_auction(
         else:
             if deg == DegradationLevel.NO_TRADE:
                 eligible = False
-                reasons.append("degradation_no_trade")
+                reasons.append(AUC_DEGRADATION_NO_TRADE)
             if trigger.missed_move_flag:
                 eligible = False
-                reasons.append("missed_move")
+                reasons.append(AUC_MISSED_MOVE)
             if not trigger.trigger_valid:
                 eligible = False
-                reasons.append("trigger_invalid")
+                reasons.append(AUC_TRIGGER_INVALID)
             if trigger.trigger_confidence < min_trig_conf:
                 eligible = False
-                reasons.append("trigger_confidence_below_min")
+                reasons.append(AUC_TRIGGER_CONF_BELOW_MIN)
             if C_conf < min_decision_conf:
                 eligible = False
-                reasons.append("decision_confidence_below_min")
+                reasons.append(AUC_DECISION_CONF_BELOW_MIN)
             if exec_conf < min_exec_conf:
                 eligible = False
-                reasons.append("execution_confidence_below_min")
+                reasons.append(AUC_EXEC_CONF_BELOW_MIN)
 
         A = (
             _directional_asymmetry(forecast_packet, direction, structure=st)
@@ -343,7 +355,7 @@ def run_opportunity_auction(
         )
         if direction != 0 and t_ov >= thesis_cap - 1e-12:
             eligible = False
-            reasons.append("thesis_overlap_cap")
+            reasons.append(AUC_THESIS_OVERLAP_CAP)
         ov_excess = max(0.0, float(t_ov) - thesis_cap)
         base_d_thesis = _clip(
             0.32 * float(nov)
@@ -483,7 +495,7 @@ def run_opportunity_auction(
         notion = proposal.size_fraction * max_per
         if notion > max_notional + 1e-9:
             rec.status = "suppressed"
-            rec.reasons.append("notional_budget")
+            rec.reasons.append(AUC_NOTIONAL_BUDGET)
             continue
         rec.status = "selected"
         winner = proposal
@@ -497,7 +509,7 @@ def run_opportunity_auction(
     for rec in records:
         if rec.status == "pending":
             rec.status = "suppressed"
-            rec.reasons.append("outranked")
+            rec.reasons.append(AUC_OUTRANKED)
 
     n_eval = len(records)
     n_elig = sum(1 for r in records if r.eligible)
@@ -505,7 +517,7 @@ def run_opportunity_auction(
     if top_n_eff > 1 and pick_count < top_n_eff and n_elig > 0:
         for rec in records:
             if rec.status == "suppressed" and rec.eligible and "notional_budget" not in rec.reasons:
-                rec.reasons.append("top_n_throughput_shortfall")
+                rec.reasons.append(AUC_TOP_N_SHORTFALL)
 
     meta: dict[str, Any] = {
         "schema_version": 1,

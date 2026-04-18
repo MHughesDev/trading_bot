@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from app.contracts.auction import AuctionCandidateRecord, AuctionResult
 from app.contracts.execution_guidance import ExecutionFeedback, ExecutionGuidance
+from app.contracts.reason_codes import EXE_STYLE_PASSIVE
 from app.contracts.replay_events import ReplayEventEnvelope, ReplayRunContract
 from app.contracts.trigger import TriggerOutput
 
@@ -78,7 +79,7 @@ def test_execution_guidance_roundtrip():
         max_slippage_tolerance_bps=12.0,
         stress_mode_flag=False,
         execution_reason_codes=["ok"],
-        style_rationale_codes=["style_branch_passive_high_conf_tight_spread"],
+        style_rationale_codes=[EXE_STYLE_PASSIVE],
         worst_case_edge=0.0,
         remaining_edge=0.01,
         urgency_high=False,
