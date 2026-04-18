@@ -1208,7 +1208,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-REPLAY-MODES",
         "id": "FB-CAN-055",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement canonical replay modes and event-family coverage checks",
         "agent_task": "Implement replay mode enum and coverage checks for historical_nominal, historical_stress, synthetic_fault_injected, shadow_comparison, trigger_debug, execution_debug; enforce required canonical event families per run.",
         "affected_files": "backtesting/|app/contracts/|scripts/|tests/",

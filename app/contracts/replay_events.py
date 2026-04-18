@@ -6,18 +6,22 @@ See docs/Human Provided Specs/new_specs/canonical/APEX_Replay_and_Simulation_Int
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-ReplayMode = Literal[
-    "historical_nominal",
-    "historical_stress",
-    "synthetic_fault_injected",
-    "shadow_comparison",
-    "trigger_debug",
-    "execution_debug",
-]
+
+class ReplayMode(StrEnum):
+    """Canonical replay modes (spec §5). FB-CAN-055: StrEnum for validation + typing."""
+
+    HISTORICAL_NOMINAL = "historical_nominal"
+    HISTORICAL_STRESS = "historical_stress"
+    SYNTHETIC_FAULT_INJECTED = "synthetic_fault_injected"
+    SHADOW_COMPARISON = "shadow_comparison"
+    TRIGGER_DEBUG = "trigger_debug"
+    EXECUTION_DEBUG = "execution_debug"
+
 
 ExecutionModelProfile = Literal["optimistic", "baseline", "stress", "cascade_stress"]
 
@@ -42,7 +46,7 @@ class ReplayRunContract(BaseModel):
     time_range_start: str | None = None
     time_range_end: str | None = None
     instrument_scope: list[str] = Field(default_factory=list)
-    replay_mode: ReplayMode = "historical_nominal"
+    replay_mode: ReplayMode = ReplayMode.HISTORICAL_NOMINAL
     execution_model_profile: ExecutionModelProfile = "baseline"
     fault_injection_profile_id: str | None = Field(
         default=None,

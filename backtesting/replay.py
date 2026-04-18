@@ -10,6 +10,7 @@ import polars as pl
 
 from app.config.settings import load_settings
 from app.contracts.replay_events import ReplayRunContract
+from backtesting.replay_coverage import validate_replay_event_family_coverage
 from app.contracts.risk import RiskState
 from backtesting.execution_params import BacktestExecutionParams
 from backtesting.portfolio import PortfolioTracker
@@ -51,6 +52,7 @@ def replay_decisions(
     replay_contract: ReplayRunContract | None = None,
     emit_canonical_events: bool = False,
     fault_injection_profile: dict[str, Any] | None = None,
+    enforce_event_family_coverage: bool = True,
 ) -> list[dict]:
     """
     Walk OHLCV bars; same `enrich_bars_last_row` + `run_decision_tick` as live (cumulative window).
@@ -63,6 +65,9 @@ def replay_decisions(
     execution feedback). Uses ``replay_deterministic=True`` so replay does not depend on system power
     disk sync. Named ``fault_injection_profile_id`` merges first, then ``fault_injection_profile``,
     then the ``fault_injection_profile`` kwarg.
+
+    **FB-CAN-055:** When ``emit_canonical_events`` and ``enforce_event_family_coverage`` are True,
+    validates that emitted event families satisfy the minimum set for ``replay_mode`` (APEX replay spec §5–6).
     """
     if bars.height == 0:
         return []
@@ -233,6 +238,13 @@ def replay_decisions(
             row_dict["equity_mark"] = str(portfolio.market_value({symbol: mid}))
 
         rows_out.append(row_dict)
+    ok_cov, cov_reasons = validate_replay_event_family_coverage(
+        rows_out,
+        contract,
+        emit_canonical_events=emit_canonical_events,
+    )
+    if enforce_event_family_coverage and emit_canonical_events and not ok_cov:
+        raise ValueError("; ".join(cov_reasons))
     return rows_out
 
 
@@ -250,6 +262,7 @@ def replay_multi_asset_decisions(
     replay_contract: ReplayRunContract | None = None,
     emit_canonical_events: bool = False,
     fault_injection_profile: dict[str, Any] | None = None,
+    enforce_event_family_coverage: bool = True,
 ) -> list[dict[str, Any]]:
     """
     Multi-symbol replay with **one shared** ``RiskState`` and (when ``track_portfolio``)
@@ -463,4 +476,11 @@ def replay_multi_asset_decisions(
             bundle["portfolio_equity_mark"] = str(portfolio.market_value(mv_prices))
             bundle["positions"] = {s: str(q) for s, q in portfolio.positions.items()}
         rows_out.append(bundle)
+    ok_cov, cov_reasons = validate_replay_event_family_coverage(
+        rows_out,
+        contract,
+        emit_canonical_events=emit_canonical_events,
+    )
+    if enforce_event_family_coverage and emit_canonical_events and not ok_cov:
+        raise ValueError("; ".join(cov_reasons))
     return rows_out
