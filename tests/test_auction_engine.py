@@ -335,3 +335,116 @@ def test_ranking_stable_tiebreak():
     )
     assert (a1.direction if a1 else None) == (a2.direction if a2 else None)
     assert r1.selected_score == r2.selected_score
+
+
+def test_fb_can_046_thesis_overlap_hard_cap():
+    """Portfolio concentration in same thesis cluster rejects new directional entries."""
+    base = ActionProposal(
+        symbol="BTC/USD",
+        route_id=RouteId.INTRADAY,
+        direction=1,
+        size_fraction=0.25,
+        stop_distance_pct=0.02,
+    )
+    feat = {"close": 50_000.0, "atr_14": 100.0}
+    settings = AppSettings()
+    settings.canonical.domains.auction = {
+        **dict(settings.canonical.domains.auction),
+        "thesis_overlap_cap": 0.72,
+        "thesis_overlap_weight": 1.0,
+    }
+    _, r0 = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=RiskState(),
+        spread_bps=5.0,
+        feature_row=feat,
+        settings=settings,
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+    )
+    tk = r0.clustering_metadata["thesis_bucket_by_direction"]["1"]
+    risk_heavy = RiskState(
+        portfolio_thesis_buckets={tk: 80_000.0},
+    )
+    _, r1 = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=risk_heavy,
+        spread_bps=5.0,
+        feature_row=feat,
+        settings=settings,
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+    )
+    long_rec = next(r for r in r1.records if r.direction == 1)
+    assert not long_rec.eligible
+    assert "thesis_overlap_cap" in long_rec.reasons
+    assert r1.clustering_metadata.get("fb_can_046") is not None
+
+
+def test_fb_can_046_book_stress_and_defense_posture():
+    base = ActionProposal(
+        symbol="BTC/USD",
+        route_id=RouteId.INTRADAY,
+        direction=1,
+        size_fraction=0.25,
+        stop_distance_pct=0.02,
+    )
+    feat = {"close": 50_000.0, "atr_14": 100.0}
+    settings = AppSettings()
+    _, r0 = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=RiskState(risk_liquidation_mode="neutral"),
+        spread_bps=5.0,
+        feature_row=feat,
+        settings=settings,
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+        current_total_exposure_usd=0.0,
+    )
+    _, r_stress = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=RiskState(risk_liquidation_mode="neutral"),
+        spread_bps=5.0,
+        feature_row=feat,
+        settings=settings,
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+        current_total_exposure_usd=92_000.0,
+    )
+    l0 = next(r for r in r0.records if r.direction == 1)
+    ls = next(r for r in r_stress.records if r.direction == 1)
+    assert ls.penalties["B"] > l0.penalties["B"]
+
+    _, r_def = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=RiskState(risk_liquidation_mode="defense"),
+        spread_bps=5.0,
+        feature_row=feat,
+        settings=settings,
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+        current_total_exposure_usd=0.0,
+    )
+    ld = next(r for r in r_def.records if r.direction == 1)
+    assert ld.penalties["G"] >= l0.penalties["G"]
+    assert ld.penalties.get("G_posture", 0.0) > 0.0

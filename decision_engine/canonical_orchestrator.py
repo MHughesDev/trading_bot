@@ -71,6 +71,7 @@ def run_canonical_decision_sequence_after_forecast(
     data_timestamp: datetime | None = None,
     now_ref: datetime | None = None,
     product_tradable: bool = True,
+    current_total_exposure_usd: float = 0.0,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, RiskState]:
     """Stages after ``ForecastPacket`` build: structure → state → trigger → auction → carry → ``RiskState``."""
 
@@ -193,6 +194,7 @@ def run_canonical_decision_sequence_after_forecast(
         apex=apex,
         feature_row=feature_effective,
         structure=canonical_structure,
+        current_total_exposure_usd=current_total_exposure_usd,
     )
 
     # --- carry sleeve (overlays directional route when active) ---
