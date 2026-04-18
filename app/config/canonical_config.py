@@ -85,6 +85,10 @@ def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
             "risk",
             "backtesting",
             "execution",
+            "market_microstructure",
+            "execution_feedback",
+            "novelty",
+            "heat_components",
         ],
     )
     domains = CanonicalDomains(
@@ -92,6 +96,7 @@ def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
             "projection": "legacy",
             "features_return_windows": list(settings.features_return_windows),
             "features_volatility_windows": list(settings.features_volatility_windows),
+            "note": "Per-family params live in YAML apex_canonical.domains.signal_confidence (FB-CAN-032).",
         },
         state_safety_degradation={"projection": "legacy"},
         regime={"projection": "legacy"},

@@ -5,6 +5,11 @@ apex_canonical:
     created_by: repo-default.yaml
     environment_scope: unspecified
     notes: Optional; merge over synthesized legacy projection from flat settings.
+    enabled_feature_families:
+    - market_microstructure
+    - execution_feedback
+    - novelty
+    - heat_components
   domains:
     risk_sizing:
       max_total_exposure_usd: 100000
@@ -12,6 +17,129 @@ apex_canonical:
       max_drawdown_pct: 0.15
       max_spread_bps: 50
       stale_data_seconds: 120
+    signal_confidence:
+      market_microstructure:
+        enabled: true
+        base_confidence_floor: 0.05
+        base_confidence_cap: 1.0
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 2.0
+        latency_penalty_weight: 0.35
+        reliability_penalty_weight: 0.25
+      funding:
+        enabled: false
+        base_confidence_floor: 0.0
+        base_confidence_cap: 0.2
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 1.5
+        latency_penalty_weight: 0.2
+        reliability_penalty_weight: 0.3
+      open_interest:
+        enabled: false
+        base_confidence_floor: 0.0
+        base_confidence_cap: 0.2
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 1.5
+        latency_penalty_weight: 0.2
+        reliability_penalty_weight: 0.3
+      basis:
+        enabled: false
+        base_confidence_floor: 0.0
+        base_confidence_cap: 0.2
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 1.5
+        latency_penalty_weight: 0.25
+        reliability_penalty_weight: 0.25
+      cross_exchange_divergence:
+        enabled: false
+        base_confidence_floor: 0.0
+        base_confidence_cap: 0.25
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 1.8
+        latency_penalty_weight: 0.3
+        reliability_penalty_weight: 0.3
+      liquidation_structure:
+        enabled: false
+        base_confidence_floor: 0.0
+        base_confidence_cap: 0.25
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 1.6
+        latency_penalty_weight: 0.25
+        reliability_penalty_weight: 0.28
+      options_context:
+        enabled: false
+        base_confidence_floor: 0.0
+        base_confidence_cap: 0.15
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 1.2
+        latency_penalty_weight: 0.15
+        reliability_penalty_weight: 0.2
+      stablecoin_flow_proxy:
+        enabled: false
+        base_confidence_floor: 0.0
+        base_confidence_cap: 0.15
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 1.0
+        latency_penalty_weight: 0.15
+        reliability_penalty_weight: 0.2
+      execution_feedback:
+        enabled: true
+        base_confidence_floor: 0.1
+        base_confidence_cap: 1.0
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 1.0
+        latency_penalty_weight: 0.2
+        reliability_penalty_weight: 0.35
+      novelty:
+        enabled: true
+        base_confidence_floor: 0.0
+        base_confidence_cap: 1.0
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 0.8
+        latency_penalty_weight: 0.15
+        reliability_penalty_weight: 0.4
+      heat_components:
+        enabled: true
+        base_confidence_floor: 0.05
+        base_confidence_cap: 1.0
+        freshness_floor: 0.0
+        freshness_cap: 1.0
+        decay_lambda: 1.2
+        latency_penalty_weight: 0.25
+        reliability_penalty_weight: 0.3
+    feature_families:
+      market_microstructure:
+        enabled: true
+      funding:
+        enabled: false
+      open_interest:
+        enabled: false
+      basis:
+        enabled: false
+      cross_exchange_divergence:
+        enabled: false
+      liquidation_structure:
+        enabled: false
+      options_context:
+        enabled: false
+      stablecoin_flow_proxy:
+        enabled: false
+      execution_feedback:
+        enabled: true
+      novelty:
+        enabled: true
+      heat_components:
+        enabled: true
 execution:
   mode: live
   live_adapter: coinbase
