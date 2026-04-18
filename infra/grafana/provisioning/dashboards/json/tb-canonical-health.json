@@ -296,7 +296,47 @@
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": {}, "overrides": [] },
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 80 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 80 },
+      "id": 21,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_lag_seconds_bucket{domain=\"data_ingestion\"}[5m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} data_ingestion (event lag) p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_lag_seconds_bucket{domain=\"decision\"}[5m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} decision (pipeline+risk) p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_lag_seconds_bucket{domain=\"execution_feedback\"}[5m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} execution_feedback (EMA fill latency) p95",
+          "refId": "C"
+        }
+      ],
+      "title": "System: per-domain lag p95 (FB-CAN-072)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 88 },
+      "id": 22,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_decision_latency_seconds_bucket[5m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} end-to-end tick p95",
+          "refId": "A"
+        }
+      ],
+      "title": "System: decision cycle duration p95 (tb_decision_latency_seconds)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 96 },
       "id": 11,
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [

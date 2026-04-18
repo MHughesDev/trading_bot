@@ -19,6 +19,7 @@ MONITORING_DOMAIN_CHECKLIST: dict[str, frozenset[str]] = {
     "system": frozenset(
         {
             "tb_decision_latency_seconds",
+            "tb_canonical_lag_seconds",
         }
     ),
     "data": frozenset(
@@ -104,6 +105,7 @@ def _registered_metric_names() -> FrozenSet[str]:
     import observability.canonical_metrics  # noqa: F401
     import observability.drift_calibration_metrics  # noqa: F401
     import observability.governance_metrics  # noqa: F401
+    import observability.lag_metrics  # noqa: F401
     import observability.probation_metrics  # noqa: F401
     import observability.metrics  # noqa: F401
 
