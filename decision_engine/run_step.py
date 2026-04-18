@@ -3,6 +3,11 @@ Single decision + risk step shared by live runtime and backtest replay (spec: sa
 
 Import this module from both `app/runtime/live_service.py` and `backtesting/replay.py`
 so drift is visible in one place.
+
+Canonical sequence (FB-CAN-029): ``pipeline.step`` runs normalize → forecast →
+:func:`decision_engine.canonical_orchestrator.run_canonical_decision_sequence_after_forecast`
+(structure → state → trigger → auction → carry); this function then runs ``risk_engine.evaluate``
+(execution intent sizing / gating). Downstream: ``live_service`` builds execution guidance and submits orders.
 """
 
 from __future__ import annotations

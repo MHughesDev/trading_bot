@@ -1,8 +1,10 @@
-"""End-to-end decision: regime (packet) → forecast packet → PolicySystem → proposal (before risk).
+"""End-to-end decision: boundary normalize → forecast packet → canonical orchestrator → proposal (before risk).
 
-Canonical path matches `docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD` §5:
-features → forecaster (VSN → CNN → multi-res xLSTM → fusion → quantiles) → ForecastPacket →
-PolicySystem → RiskEngine contracts.
+Per **FB-CAN-029**, post-forecast stages live in
+:mod:`decision_engine.canonical_orchestrator` (structure → state → trigger → auction → carry).
+``RiskEngine.evaluate`` runs in :func:`decision_engine.run_step.run_decision_tick`.
+
+Legacy master-spec §5 path: features → forecaster → ``ForecastPacket`` → policy/auction → contracts.
 """
 
 from __future__ import annotations
@@ -16,28 +18,19 @@ from pathlib import Path
 import numpy as np
 
 from app.config.settings import AppSettings, load_settings
-from carry_sleeve.config import CarrySleeveConfig
-from carry_sleeve.engine import build_carry_proposal, evaluate_carry_sleeve
 from app.contracts.decision_snapshots import ExecutionFeedbackSnapshot
 from app.contracts.snapshot_builders import (
     boundary_input_to_diagnostic_dict,
     build_decision_boundary_input,
 )
 from app.contracts.asset_model_manifest import AssetModelManifest
-from app.contracts.decisions import ActionProposal, RouteDecision, RouteId
+from app.contracts.decisions import ActionProposal, RouteDecision
 from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
-from app.contracts.regime import RegimeOutput, SemanticRegime
+from app.contracts.regime import RegimeOutput
 from app.contracts.risk import RiskState
-from decision_engine.state_engine import (
-    apply_normalization_degradation,
-    build_canonical_state,
-    merge_canonical_into_risk,
-)
-from app.contracts.structure_adapter import structure_from_forecast_packet
-from decision_engine.trigger_engine import evaluate_trigger
+from decision_engine.canonical_orchestrator import run_canonical_decision_sequence_after_forecast
 from app.runtime.asset_model_registry import load_manifest
-from decision_engine.spec_policy_proposal import run_spec_policy_step
 from forecaster_model.config import ForecasterConfig
 from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
 from forecaster_model.inference.stub import ohlc_arrays_from_feature_row
@@ -57,24 +50,6 @@ def _feature_vector(values: dict[str, float], dim: int = 32) -> np.ndarray:
     for i, k in enumerate(keys[:dim]):
         vec[i] = float(values[k])
     return vec
-
-
-def _regime_output_from_packet(pkt: ForecastPacket) -> RegimeOutput:
-    """Map soft regime vector (length 4) to `RegimeOutput` for observability."""
-    probs = list(pkt.regime_vector)
-    if len(probs) < 4:
-        probs = (probs + [0.25] * 4)[:4]
-    s = sum(probs) or 1.0
-    p = [x / s for x in probs[:4]]
-    idx = int(np.argmax(p))
-    sem_map = (SemanticRegime.BULL, SemanticRegime.BEAR, SemanticRegime.VOLATILE, SemanticRegime.SIDEWAYS)
-    sem = sem_map[idx] if idx < 4 else SemanticRegime.SIDEWAYS
-    return RegimeOutput(
-        state_index=idx,
-        semantic=sem,
-        probabilities=p,
-        confidence=float(max(p)),
-    )
 
 
 def _forecaster_config_from_env(conformal_path: str | None) -> ForecasterConfig:
@@ -352,99 +327,22 @@ class DecisionPipeline:
             pkt.forecast_diagnostics["binding_reason"] = rp.binding_reason
         self._last_forecast_packet = pkt
 
-        canonical_structure = structure_from_forecast_packet(pkt)
-        pkt.forecast_diagnostics["canonical_structure"] = canonical_structure.model_dump(mode="json")
-
-        regime_out = _regime_output_from_packet(pkt)
-        apex = build_canonical_state(pkt, feature_effective, spread_bps=spread_bps)
-        apex = apply_normalization_degradation(apex, feature_effective)
-        regime_out = regime_out.model_copy(update={"apex": apex})
-        trig = evaluate_trigger(
-            pkt,
-            feature_effective,
-            spread_bps=spread_bps,
-            apex=apex,
-            structure=canonical_structure,
-        )
-        risk = merge_canonical_into_risk(
-            risk,
-            apex,
-            forecast_packet=pkt,
-            trigger=trig,
-            spread_bps=spread_bps,
-            feature_row=feature_effective,
-        )
         mp = float(mid_price) if mid_price is not None else float(feature_effective.get("close", 1.0))
         eq = float(portfolio_equity_usd) if portfolio_equity_usd is not None else 100_000.0
 
-        if rp.binding_abstain:
-            fc = ForecastOutput(
-                returns_1=0.0,
-                returns_3=0.0,
-                returns_5=0.0,
-                returns_15=0.0,
-                volatility=0.0,
-                uncertainty=1.0,
-            )
-            route = RouteDecision(
-                route_id=RouteId.NO_TRADE,
-                confidence=0.0,
-                ranking=[RouteId.NO_TRADE],
-            )
-            return regime_out, fc, route, None, risk
-
-        fc, route, action = run_spec_policy_step(
-            symbol,
-            pkt,
-            settings=self._settings,
-            app_risk=risk,
+        return run_canonical_decision_sequence_after_forecast(
+            symbol=symbol,
+            feature_effective=feature_effective,
+            spread_bps=float(spread_bps),
             mid_price=mp,
-            spread_bps=spread_bps,
             portfolio_equity_usd=eq,
             position_signed_qty=position_signed_qty,
+            pkt=pkt,
+            binding_abstain=bool(rp.binding_abstain),
+            settings=self._settings,
+            risk=risk,
             policy_system=self._policy_system,
-            trigger=trig,
-            apex=apex,
-            feature_row=feature_effective,
-            structure=canonical_structure,
         )
-
-        carry_cfg = CarrySleeveConfig.from_canonical_domains(self._settings.canonical.domains.carry)
-        carry_dec = evaluate_carry_sleeve(
-            feature_effective,
-            trig,
-            apex,
-            carry_cfg,
-            directional_proposal=action,
-        )
-        risk = risk.model_copy(
-            update={"carry_sleeve_last": carry_dec.model_dump(mode="json")},
-        )
-        pkt.forecast_diagnostics["carry_sleeve"] = carry_dec.model_dump(mode="json")
-
-        if carry_dec.active:
-            if carry_dec.directional_blocked and action is not None:
-                action = None
-                route = RouteDecision(
-                    route_id=RouteId.NO_TRADE,
-                    confidence=0.0,
-                    ranking=[RouteId.NO_TRADE],
-                )
-            carry_prop = build_carry_proposal(
-                symbol,
-                carry_dec,
-                feature_row=feature_effective,
-                max_per_symbol_usd=float(self._settings.risk_max_per_symbol_usd),
-            )
-            if carry_prop is not None:
-                action = carry_prop
-                route = RouteDecision(
-                    route_id=RouteId.CARRY,
-                    confidence=min(1.0, carry_dec.funding_signal),
-                    ranking=[RouteId.CARRY, RouteId.NO_TRADE],
-                )
-
-        return regime_out, fc, route, action, risk
 
 
 def _load_torch_forecaster_if_configured(settings: AppSettings):
