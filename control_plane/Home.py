@@ -35,9 +35,11 @@ def _render_dashboard() -> None:
 
 
 if hasattr(st, "navigation") and hasattr(st, "Page"):
+    _home_page = st.Page(_render_dashboard, title="Dashboard", icon=":material/dashboard:", default=True)
+    st.session_state["_cp_home_page"] = _home_page
     nav = st.navigation(
         [
-            st.Page(_render_dashboard, title="Dashboard", icon=":material/dashboard:", default=True),
+            _home_page,
             st.Page("pages/Asset.py", title="Asset page", icon=":material/show_chart:"),
             st.Page("pages/7_Account.py", title="Account", icon=":material/settings:"),
             st.Page("pages/0_Login.py", title="Sign in", icon=":material/login:"),

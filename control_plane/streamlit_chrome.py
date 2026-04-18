@@ -73,7 +73,8 @@ def render_app_sidebar() -> None:
 
     render_brand()
     st.sidebar.divider()
-    st.sidebar.page_link("Home.py", label="Dashboard", icon=":material/dashboard:")
+    _home_page = st.session_state.get("_cp_home_page", "Home.py")
+    st.sidebar.page_link(_home_page, label="Dashboard", icon=":material/dashboard:")
     st.sidebar.page_link("pages/Asset.py", label="Asset page", icon=":material/show_chart:")
     st.sidebar.page_link("pages/7_Account.py", label="Account", icon=":material/settings:")
     st.sidebar.page_link("pages/0_Login.py", label="Sign in", icon=":material/login:")
