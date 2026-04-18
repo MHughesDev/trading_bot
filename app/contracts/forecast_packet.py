@@ -14,6 +14,10 @@ class ForecastPacket:
 
     Fields mirror `docs/Human Provided Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD` §8.1.
     Use list[float] for portability (Torch tensors can be converted at model boundaries).
+
+    **APEX (FB-CAN-017):** trigger and auction consume :class:`~app.contracts.canonical_structure.CanonicalStructureOutput`
+    (derived via :func:`~app.contracts.structure_adapter.structure_from_forecast_packet` and stored under
+    ``forecast_diagnostics["canonical_structure"]``). The packet remains the wire format for the forecaster and PolicySystem.
     """
 
     timestamp: datetime

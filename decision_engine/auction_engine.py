@@ -11,11 +11,13 @@ from decimal import Decimal
 from app.config.settings import AppSettings
 from app.contracts.auction import AuctionCandidateRecord, AuctionResult
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
+from app.contracts.canonical_structure import CanonicalStructureOutput
 from app.contracts.decisions import ActionProposal
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState
+from app.contracts.structure_adapter import structure_from_forecast_packet
 from app.contracts.trigger import TriggerOutput
-from decision_engine.trigger_engine import asymmetry_score, state_alignment_score
+from decision_engine.trigger_engine import state_alignment_score
 
 
 def _clip(x: float, lo: float, hi: float) -> float:
@@ -55,14 +57,15 @@ def _oi_liquidation_proxy(pkt: ForecastPacket, feature_row: dict[str, float]) ->
     return oi_struct, liq_opp
 
 
-def _directional_asymmetry(pkt: ForecastPacket, direction: int) -> float:
+def _directional_asymmetry(
+    pkt: ForecastPacket,
+    direction: int,
+    structure: CanonicalStructureOutput | None = None,
+) -> float:
     """Asymmetry aligned with proposed direction (+1 long, -1 short)."""
-    base = asymmetry_score(pkt)
-    if not pkt.q_low or not pkt.q_high or not pkt.q_med:
-        return base
-    lo, hi, med = float(pkt.q_low[0]), float(pkt.q_high[0]), float(pkt.q_med[0])
-    width = max(hi - lo, 1e-12)
-    skew = ((med - lo) / width - 0.5) * 2.0
+    st = structure if structure is not None else structure_from_forecast_packet(pkt)
+    base = float(st.asymmetry_score)
+    skew = float(st.directional_bias)
     if direction > 0:
         return _clip(base * (0.5 + 0.5 * max(0.0, skew)), 0.0, 1.0)
     if direction < 0:
@@ -84,15 +87,23 @@ def run_opportunity_auction(
     position_signed_qty: Decimal | None,
     base_proposal: ActionProposal | None,
     top_n: int = 1,
+    structure: CanonicalStructureOutput | None = None,
 ) -> tuple[ActionProposal | None, AuctionResult]:
     """
     Build long/short/flat candidates, score, select top-N under notional cap.
 
     When ``base_proposal`` is None, only flat is considered (still logs auction).
     """
+    st = structure if structure is not None else structure_from_forecast_packet(forecast_packet)
     exec_conf = _exec_confidence(spread_bps)
     S_align = state_alignment_score(apex)
-    C_conf = _clip(0.5 * apex.regime_confidence + 0.5 * _structural_confidence(forecast_packet), 0.0, 1.0)
+    C_conf = _clip(
+        0.45 * apex.regime_confidence
+        + 0.35 * float(st.model_agreement_score)
+        + 0.2 * _structural_confidence(forecast_packet),
+        0.0,
+        1.0,
+    )
     T_trig = _clip(0.5 * trigger.trigger_strength + 0.5 * trigger.trigger_confidence, 0.0, 1.0)
     O_oi, L_liq = _oi_liquidation_proxy(forecast_packet, feature_row)
 
@@ -153,11 +164,17 @@ def run_opportunity_auction(
                 eligible = False
                 reasons.append("execution_confidence_below_min")
 
-        A = _directional_asymmetry(forecast_packet, direction) if direction != 0 else asymmetry_score(
-            forecast_packet
+        A = (
+            _directional_asymmetry(forecast_packet, direction, structure=st)
+            if direction != 0
+            else float(st.asymmetry_score)
         )
         D_div = _clip(heat * 0.4 + pos_frac * 0.5, 0.0, 1.0)
-        M_overlap = _clip(float(forecast_packet.ood_score), 0.0, 1.0)
+        M_overlap = _clip(
+            0.5 * float(forecast_packet.ood_score) + 0.5 * float(st.fragility_score),
+            0.0,
+            1.0,
+        )
         P_fp = _clip(1.0 - apex.regime_confidence, 0.0, 1.0) * 0.3
         G_deg = _degradation_penalty(deg)
         Cq = pos_frac
