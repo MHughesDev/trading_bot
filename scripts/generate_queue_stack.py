@@ -1474,7 +1474,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-STATE-EXRISK",
         "id": "FB-CAN-074",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Integrate exchange-risk flags and data-integrity warnings into degradation logic",
         "agent_task": "Integrate exchange risk flags and data integrity warnings as first-class safety inputs into regime/degradation transitions and hard overrides. Emit explicit warning events and suppression reasons tied to these inputs.",
         "affected_files": "decision_engine/state_engine.py|data_plane/|risk_engine/|app/contracts/|tests/",

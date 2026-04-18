@@ -16,7 +16,12 @@ from decimal import Decimal
 import numpy as np
 
 from app.config.settings import AppSettings
-from app.contracts.reason_codes import PIP_BINDING_ABSTAIN, PIP_CARRY_SLEEVE_BLOCKED, PIP_NO_TRADE_SELECTED
+from app.contracts.reason_codes import (
+    PIP_BINDING_ABSTAIN,
+    PIP_CARRY_SLEEVE_BLOCKED,
+    PIP_NO_TRADE_SELECTED,
+    normalize_reason_codes,
+)
 from app.contracts.decisions import ActionProposal, RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
 from app.contracts.canonical_state import DegradationLevel
@@ -109,7 +114,10 @@ def run_canonical_decision_sequence_after_forecast(
     }
     pipe_codes: list[str] = []
     if ho:
-        pipe_codes = ["pipeline_hard_override", f"override_{ho_kind.value}"]
+        pipe_codes = normalize_reason_codes(
+            ["pipeline_hard_override", f"override_{ho_kind.value}"]
+            + list(getattr(apex, "safety_reason_codes", None) or [])
+        )
     regime_out = regime_out.model_copy(
         update={
             "apex": apex,

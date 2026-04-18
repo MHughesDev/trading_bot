@@ -52,6 +52,9 @@ class RiskState(BaseModel):
     degradation_transition_count: int = Field(default=0, ge=0)
     last_degradation_level: str | None = None
     degradation_occupancy_ticks: dict[str, int] = Field(default_factory=dict)
+    # FB-CAN-074 — boundary safety hints merged into apex / risk audit trail
+    exchange_risk_level: str | None = None
+    data_integrity_alert: bool | None = None
     # FB-CAN-073 — weekend / low-liquidity session tracking (mirrors degradation occupancy pattern)
     session_mode: str | None = None
     session_mode_transition_count: int = Field(default=0, ge=0)

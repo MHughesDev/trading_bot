@@ -206,6 +206,7 @@ def build_decision_record(
         codes.extend(risk_codes)
         if apex is not None:
             codes.extend(normalize_reason_codes(list(getattr(apex, "novelty_reason_codes", None) or [])))
+            codes.extend(normalize_reason_codes(list(getattr(apex, "safety_reason_codes", None) or [])))
         if not codes:
             codes = normalize_reason_codes(["no_trade_unknown"])
         else:

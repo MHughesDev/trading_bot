@@ -37,6 +37,7 @@ MONITORING_DOMAIN_CHECKLIST: dict[str, frozenset[str]] = {
             "tb_canonical_session_mode",
             "tb_canonical_session_mode_transition_count",
             "tb_canonical_session_reason",
+            "tb_canonical_safety_reason",
         }
     ),
     "trigger": frozenset(
