@@ -87,6 +87,32 @@ groups:
           description: "Carry path engaged; verify funding signal and isolation behavior match policy."
           runbook: "docs/MONITORING_CANONICAL.MD#fb-can-028-alert-rules"
 
+      - alert: CanonicalCarryDirectionalSuppressionSpike
+        expr: |
+          sum(rate(tb_canonical_carry_directional_suppression_total[15m])) by (symbol) > 0.02
+        for: 20m
+        labels:
+          severity: warning
+          domain: carry
+        annotations:
+          summary: "Elevated carry isolation suppressing directional flow ({{ $labels.symbol }})"
+          description: "Directional trades blocked for carry attribution isolation more often than baseline; review sleeve config and trigger neutrality."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-064-carry-monitoring"
+
+      - alert: CanonicalCarryDecisionQualityLow
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(tb_canonical_carry_decision_quality_bucket[20m])) by (le, symbol)
+          ) < 0.12
+        for: 30m
+        labels:
+          severity: info
+          domain: carry
+        annotations:
+          summary: "Carry decision quality p95 low (funding×trigger) for {{ $labels.symbol }}"
+          description: "When carry evaluates, combined funding and trigger confidence proxy is persistently weak; may indicate quiet funding or weak trigger alignment."
+          runbook: "docs/MONITORING_CANONICAL.MD#fb-can-064-carry-monitoring"
+
   - name: canonical_governance_shadow
     rules:
       - alert: CanonicalShadowDivergenceEvents

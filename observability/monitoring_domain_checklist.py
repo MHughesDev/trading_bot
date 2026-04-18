@@ -62,6 +62,12 @@ MONITORING_DOMAIN_CHECKLIST: dict[str, frozenset[str]] = {
     "carry": frozenset(
         {
             "tb_canonical_carry_sleeve_active",
+            "tb_canonical_carry_target_notional_usd",
+            "tb_canonical_carry_funding_signal",
+            "tb_canonical_carry_trigger_confidence",
+            "tb_canonical_carry_decision_quality",
+            "tb_canonical_carry_reason",
+            "tb_canonical_carry_directional_suppression",
         }
     ),
     "drift": frozenset(

@@ -27,7 +27,7 @@ All canonical slice metrics use the `tb_canonical_*` prefix (alongside existing 
 | Drift / calibration (FB-CAN-039) | `tb_canonical_confidence_calibration_gap`, `tb_canonical_conformal_interval_relative_width`, `tb_canonical_conformal_calibration_applied_total` | Route vs packet confidence gap; conformal band width when `conformal_applied` |
 | Shadow / replay (FB-CAN-039) | `tb_canonical_shadow_divergence_rate`, `tb_canonical_shadow_comparison_within_thresholds`, `tb_canonical_shadow_rollback_recommended`, `tb_canonical_shadow_comparison_bars_compared` | Refreshed from persisted shadow comparison store on API startup and after **`POST /governance/shadow-comparison/run`** |
 | Governance | `tb_canonical_active_config_version_info` | Set once from `AppSettings.canonical.metadata.config_version` |
-| Carry sleeve | `tb_canonical_carry_sleeve_active` | Placeholder gauge (0 until wired) |
+| Carry sleeve | `tb_canonical_carry_sleeve_active`, `tb_canonical_carry_target_notional_usd`, `tb_canonical_carry_funding_signal`, `tb_canonical_carry_trigger_confidence`, `tb_canonical_carry_decision_quality`, `tb_canonical_carry_reason_total`, `tb_canonical_carry_directional_suppression_total` | From `carry_sleeve` diagnostics / `RiskState.carry_sleeve_last` (**FB-CAN-064**): exposure (target notional), funding extremity, trigger confidence at evaluation, quality proxy `funding×trigger`, per-reason counter, isolation suppression |
 | Shadow / replay | `tb_canonical_replay_shadow_divergence_total` | Incremented when divergence jobs emit events (legacy counter) |
 
 ## Emission point
@@ -59,6 +59,8 @@ Logical rules live in **`infra/prometheus/alerts/canonical_apex.yml`** (loaded b
 | `CanonicalAuctionSuppressedSpike` | Auction | high suppression *rate* (tune for your symbol mix) |
 | `CanonicalRiskSizeMultiplierLow` | Risk | p05 size multiplier persistently low |
 | `CanonicalCarrySleeveActive` | Carry | carry active sustained (info) |
+| `CanonicalCarryDirectionalSuppressionSpike` | Carry | isolation suppression rate elevated (**FB-CAN-064**) |
+| `CanonicalCarryDecisionQualityLow` | Carry | p95 carry decision quality (funding×trigger) persistently low (**FB-CAN-064**) |
 | `CanonicalShadowDivergenceEvents` | Shadow/replay | divergence counter increasing |
 
 ### FB-CAN-039 alert rules (drift / calibration / shadow trends)
@@ -73,3 +75,7 @@ Logical rules live in **`infra/prometheus/alerts/canonical_apex.yml`** (loaded b
 Tune `for:` windows and thresholds per environment; defaults aim for **actionable** signals with **low noise**.
 
 See **`docs/Human Provided Specs/new_specs/canonical/APEX_Monitoring_and_Alerting_Spec_v1_0.md`** for full requirement text.
+
+### FB-CAN-064 carry sleeve monitoring
+
+Replay **`decision_output_event`** payloads include **`carry_sleeve`** (already under `forecast_diagnostics`); each evaluation now records **`trigger_confidence`** and **`decision_quality`** (funding×trigger) on **`CarrySleeveDecision`** for operator forensics. Grafana **tb-canonical-health** adds panels for carry quality, trigger confidence, directional suppression rate, and reason-code rates.
