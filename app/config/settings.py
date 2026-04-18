@@ -222,7 +222,7 @@ class AppSettings(BaseSettings):
     def canonical(self) -> CanonicalRuntimeConfig:
         """Immutable APEX canonical config bundle (metadata + domains).
 
-        Populated by :func:`load_settings` (YAML ``apex_canonical`` merged over legacy projection).
+        Populated by :func:`load_settings` (YAML ``apex_canonical`` merged over AppSettings synthesis).
         For bare ``AppSettings(...)`` (tests), lazily synthesizes from flat fields only.
         """
         if self._canonical_runtime is None:

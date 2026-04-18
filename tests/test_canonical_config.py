@@ -10,15 +10,17 @@ from app.config.canonical_config import (
     merge_canonical,
     parse_canonical_from_yaml_fragment,
     resolve_canonical_config,
-    synthesize_canonical_from_legacy,
+    synthesize_canonical_from_app_settings,
 )
 from app.config.settings import AppSettings, load_settings
 
 
-def test_synthesize_contains_risk_and_replay_projection():
+def test_synthesize_contains_risk_and_replay_domains():
     s = AppSettings()
-    c = synthesize_canonical_from_legacy(s)
+    c = synthesize_canonical_from_app_settings(s)
     assert c.metadata.config_version == "1.0.0"
+    assert c.metadata.config_name == "app-settings-synthesis"
+    assert c.domains.risk_sizing.get("source") == "app_settings"
     assert c.domains.risk_sizing["max_total_exposure_usd"] == s.risk_max_total_exposure_usd
     assert c.domains.replay["backtesting_slippage_bps"] == s.backtesting_slippage_bps
 

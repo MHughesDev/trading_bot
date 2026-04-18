@@ -1,9 +1,10 @@
 """APEX canonical configuration models (FB-CAN-003).
 
 See docs/Human Provided Specs/new_specs/canonical/APEX_Canonical_Configuration_Spec_v1_0.md.
-Runtime uses a versioned bundle: metadata + per-domain dicts. Legacy flat AppSettings remains
-the operational source until each domain is wired; :func:`synthesize_canonical_from_legacy`
-projects current settings into the canonical shape for replay/version stamping.
+Runtime uses a versioned bundle: metadata + per-domain dicts. Flat :class:`~app.config.settings.AppSettings`
+(from ``default.yaml`` + ``NM_*``) is the operational source; :func:`synthesize_canonical_from_app_settings`
+projects it into the canonical shape for replay/version stamping. YAML ``apex_canonical`` deep-merges on top
+via :func:`resolve_canonical_config` (FB-CAN-060 removed migration-only ``projection: legacy`` markers).
 """
 
 from __future__ import annotations
@@ -71,16 +72,16 @@ class CanonicalRuntimeConfig(BaseModel):
     domains: CanonicalDomains
 
 
-def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
-    """Project current AppSettings into canonical domain dicts (compatibility layer)."""
+def synthesize_canonical_from_app_settings(settings: Any) -> CanonicalRuntimeConfig:
+    """Project current AppSettings into canonical domain dicts (baseline before YAML overlay)."""
     from app.config.settings import AppSettings
 
     if not isinstance(settings, AppSettings):
-        raise TypeError("synthesize_canonical_from_legacy expects AppSettings")
+        raise TypeError("synthesize_canonical_from_app_settings expects AppSettings")
     meta = CanonicalMetadata(
         config_version="1.0.0",
-        config_name="legacy-app-settings-projection",
-        notes="Synthesized from flat AppSettings / default.yaml until domains are fully wired.",
+        config_name="app-settings-synthesis",
+        notes="Synthesized from AppSettings + default.yaml; merged with apex_canonical from YAML when present.",
         environment_scope="unspecified",
         logic_version=None,
         enabled_feature_families=[
@@ -98,21 +99,21 @@ def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
     )
     domains = CanonicalDomains(
         signal_confidence={
-            "projection": "legacy",
+            "source": "app_settings",
             "features_return_windows": list(settings.features_return_windows),
             "features_volatility_windows": list(settings.features_volatility_windows),
             "note": "Per-family params live in YAML apex_canonical.domains.signal_confidence (FB-CAN-032).",
         },
-        state_safety_degradation={"projection": "legacy"},
-        regime={"projection": "legacy"},
+        state_safety_degradation={"source": "app_settings"},
+        regime={"source": "app_settings"},
         forecast_calibration={
-            "projection": "legacy",
+            "source": "app_settings",
             "models_forecaster_checkpoint_id": settings.models_forecaster_checkpoint_id,
             "models_torch_device": settings.models_torch_device,
         },
-        trigger={"projection": "legacy"},
+        trigger={"source": "app_settings"},
         auction={
-            "projection": "legacy",
+            "source": "app_settings",
             "routing_spread_trade_max_bps": settings.routing_spread_trade_max_bps,
             "routing_forecast_strength_min": settings.routing_forecast_strength_min,
             "routing_score_scalping_forecast": settings.routing_score_scalping_forecast,
@@ -121,7 +122,7 @@ def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
             "routing_spread_penalty_per_bp": settings.routing_spread_penalty_per_bp,
         },
         risk_sizing={
-            "projection": "legacy",
+            "source": "app_settings",
             "max_total_exposure_usd": settings.risk_max_total_exposure_usd,
             "max_per_symbol_usd": settings.risk_max_per_symbol_usd,
             "max_drawdown_pct": settings.risk_max_drawdown_pct,
@@ -129,7 +130,7 @@ def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
             "stale_data_seconds": settings.risk_stale_data_seconds,
         },
         execution={
-            "projection": "legacy",
+            "source": "app_settings",
             "execution_mode": settings.execution_mode,
             "execution_live_adapter": settings.execution_live_adapter,
             "execution_paper_adapter": settings.execution_paper_adapter,
@@ -137,12 +138,12 @@ def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
             "portfolio_mark_price_source_live": settings.portfolio_mark_price_source_live,
         },
         memory_adaptation={
-            "projection": "legacy",
+            "source": "app_settings",
             "memory_qdrant_collection": settings.memory_qdrant_collection,
             "memory_top_k": settings.memory_top_k,
         },
         carry={
-            "projection": "legacy",
+            "source": "app_settings",
             "carry_enabled": False,
             "carry_activation_requires_directional_neutrality": True,
             "carry_max_exposure_usd": 5000.0,
@@ -152,28 +153,28 @@ def synthesize_canonical_from_legacy(settings: Any) -> CanonicalRuntimeConfig:
             "carry_low_directional_trigger_confidence": 0.15,
         },
         monitoring={
-            "projection": "legacy",
+            "source": "app_settings",
             "observability_log_level": settings.observability_log_level,
         },
         replay={
-            "projection": "legacy",
+            "source": "app_settings",
             "backtesting_slippage_bps": settings.backtesting_slippage_bps,
             "backtesting_fee_bps": settings.backtesting_fee_bps,
             "backtesting_initial_cash_usd": settings.backtesting_initial_cash_usd,
             "backtesting_rng_seed": settings.backtesting_rng_seed,
         },
         shadow_comparison={
-            "projection": "legacy",
+            "source": "app_settings",
             "note": "Override with apex_canonical.domains.shadow_comparison (FB-CAN-038).",
         },
         runtime_cutover={
-            "projection": "legacy",
+            "source": "app_settings",
             "phase": "canonical_active",
             "migration_shadow_allowed": False,
             "note": "Set migration_shadow_allowed true only when enabling runtime bridge in_process (FB-CAN-059).",
         },
         feature_families={
-            "projection": "legacy",
+            "source": "app_settings",
             "market_data_symbols": list(settings.market_data_symbols),
             "market_data_bar_interval_seconds": settings.market_data_bar_interval_seconds,
         },
@@ -221,8 +222,8 @@ def resolve_canonical_config(
     settings: Any,
     yaml_cfg: dict[str, Any] | None,
 ) -> CanonicalRuntimeConfig:
-    """Final canonical bundle: YAML ``apex_canonical`` merged over legacy synthesis."""
-    synthesized = synthesize_canonical_from_legacy(settings)
+    """Final canonical bundle: YAML ``apex_canonical`` merged over AppSettings synthesis."""
+    synthesized = synthesize_canonical_from_app_settings(settings)
     if not yaml_cfg:
         return synthesized
     fragment = yaml_cfg.get("apex_canonical")

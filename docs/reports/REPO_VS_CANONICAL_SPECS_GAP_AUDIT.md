@@ -346,7 +346,7 @@ These are the fourteen primary slices called out in the **FB-CAN-001** queue tas
 - FB-CAN-057: Immutable config diff and semantic guardrails
 - FB-CAN-058: Tombstone index for removed modules/docs
 - FB-CAN-059: Runtime dual-path cutover guard
-- FB-CAN-060: Final shim/legacy remnant prune
+- FB-CAN-060: Final shim/legacy remnant prune — **done:** removed migration **`projection: legacy`** markers from canonical **`AppSettings`** synthesis; renamed **`synthesize_canonical_from_app_settings`**; CI guard **`ci_no_migration_projection_legacy.py`**
 - FB-CAN-061: Canonical config metadata field implementation
 - FB-CAN-062: Common contract convention enforcement
 - FB-CAN-063: Suppression/safety reason taxonomy stabilization
