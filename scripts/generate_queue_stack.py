@@ -1180,7 +1180,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-GOV-ROLL",
         "id": "FB-CAN-053",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement explicit rollback playbooks and rollback-target validation",
         "agent_task": "Implement rollback artifact validation and operator rollback playbooks linked to release objects; require rollback target references for all promotable releases and test rollback viability in CI simulation checks.",
         "affected_files": "docs/|scripts/|orchestration/|control_plane/|tests/",

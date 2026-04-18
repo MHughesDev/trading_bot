@@ -43,9 +43,9 @@
     "target_config_version": "0.9.0",
     "target_logic_version": null,
     "target_model_family_ref": null,
-    "instructions": "revert yaml",
-    "trigger_conditions": "",
-    "rollback_owner": ""
+    "instructions": "revert apex_canonical to target_config_version; restart control plane",
+    "trigger_conditions": "shadow divergence spike or gate failure after deploy",
+    "rollback_owner": "ci-ops"
   },
   "linked_experiment_ids": []
 }

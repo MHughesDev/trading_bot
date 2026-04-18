@@ -2,6 +2,8 @@
 
 **First-time setup:** see **[`READY_TO_RUN.MD`](READY_TO_RUN.MD)** (checklist: venv, `.env`, Docker, preflight, venues). This file adds secrets, incident response, and execution-mode restart detail beyond that checklist.
 
+**Release rollback playbooks (APEX):** **[`rollback_playbooks.md`](rollback_playbooks.md)** — required `rollback` fields on promotable releases, CI check, `GET /governance/rollback-playbook`.
+
 **Automated setup (local dev):** **`setup.bat`** (Windows) or **`./setup.sh`** (Linux/macOS) runs venv + **`pip install -e ".[dev,dashboard]"`**, then **`docker compose pull`** and **`up -d`** for **`infra/docker-compose.yml`** (unless **`NM_SKIP_DOCKER=1`** is set in the environment for that run — not an app setting). Windows: if **`docker`** is missing, offers **winget** install of Docker Desktop or opens the download page; waits for **`docker info`**, then **`pause`** so you can sign in to Docker Hub if prompted (optional for public images).
 
 ## Docker Compose — app + data stack (FB-CONT-002)
