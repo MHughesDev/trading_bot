@@ -1166,7 +1166,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-GOV-ENV",
         "id": "FB-CAN-052",
         "kind": "platform",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement research/simulation/shadow/live environment-stage enforcement",
         "agent_task": "Implement canonical environment-stage progression rules and enforcement so approvals are explicit per stage (research->simulation->shadow->live) with no implicit cross-stage promotion.",
         "affected_files": "orchestration/|scripts/|models/|docs/|tests/",

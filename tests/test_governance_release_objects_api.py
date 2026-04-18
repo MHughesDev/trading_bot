@@ -67,6 +67,7 @@ def test_evaluate_gates(client_with_ledger: TestClient) -> None:
                 "fault_profile_ids_satisfied": fault_ids,
             },
             "rollback": {"target_config_version": "0.9.0"},
+            "environment": "shadow",
         },
         "target_environment": "live",
     }
