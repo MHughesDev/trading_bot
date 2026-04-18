@@ -4,11 +4,12 @@
 Selection: smallest stack_order among rows where status is Open and id is not _QUEUE_EMPTY_.
 
 Run from repo root:
+  bash scripts/queue_top.sh
   python3 scripts/print_next_queue_item.py
 
 Exit codes: 0 if an Open item exists or backlog is empty (sentinel); 2 on CSV/read errors.
 
-See docs/QUEUE.MD and AGENTS.md — agents should run this (or read the CSV) before queue work.
+See docs/QUEUE.MD and AGENTS.md — agents should run **`queue_top.sh`** or this script; do not load **QUEUE_STACK.csv** in full for task selection.
 """
 from __future__ import annotations
 

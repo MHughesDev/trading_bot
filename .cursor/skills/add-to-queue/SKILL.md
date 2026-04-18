@@ -14,8 +14,8 @@ Follow this workflow whenever you need to **append or edit** the project work qu
 | Artifact | Role |
 |----------|------|
 | **[`docs/QUEUE.MD`](../../../docs/QUEUE.MD)** | **Conventions** (Kind, IDs, batch codes), **agent protocol**, and **how to add/close** items — small file; agents read this for rules only. |
-| **[`docs/QUEUE_STACK.csv`](../../../docs/QUEUE_STACK.csv)** | **Next-task stack** — **one row = one actionable task**. Required columns include **`agent_task`** (self-sufficient instructions), **`affected_files`**, **`docs_refs`**. |
-| **[`docs/QUEUE_ARCHIVE.MD`](../../../docs/QUEUE_ARCHIVE.MD)** | **Human-readable tables** — open-queue detail, `IL-*`, `HG-*`, completed archive. **Mirror** new/changed **Open** rows here when you add narrative tables. |
+| **[`docs/QUEUE_STACK.csv`](../../../docs/QUEUE_STACK.csv)** | **Next-task stack** — **one row = one actionable task**. Maintainers edit **`scripts/generate_queue_stack.py`** `ROWS` or targeted CSV edits; **agents implementing** work use **`bash scripts/queue_top.sh`** / **`queue_close.sh`** — do not load the whole CSV for pick/close. |
+| **[`docs/QUEUE_ARCHIVE.MD`](../../../docs/QUEUE_ARCHIVE.MD)** | **Human-readable tables** — open-queue detail, `IL-*`, `HG-*`, completed archive. **Mirror** new/changed **Open** rows when adding narrative tables; prefer **`queue_close.sh`** to flip **Open→Done** for matching pipe rows. |
 
 **Legacy:** The monolithic `QUEUE.MD` was split (2026) — full tables live in **`QUEUE_ARCHIVE.MD`**.
 

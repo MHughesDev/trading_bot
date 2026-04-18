@@ -1,6 +1,6 @@
 # Queue system — portable schema (any repository)
 
-**Documentation last reviewed:** **2026-04-19** (auto `stack_order` in generator — list order only).
+**Documentation last reviewed:** **2026-04-18** (`queue_top.sh` / `queue_close.sh` agent workflow — list order only in generator).
 
 ---
 
@@ -9,6 +9,8 @@
 The **queue system** is **all artifacts that define, store, and operate the work backlog machinery** — not only `QUEUE.MD`. When editing backlog **process**, **schema**, or **next-task** behavior, touch every relevant file below so nothing drifts.
 
 **Agent session contract (repo-wide, not queue-only):** [`README.md`](../README.md) + [`AGENTS.md`](../AGENTS.md) must be read at the start of every agent session; **[`.cursorrules`](../.cursorrules)** (if present) reinforces that for Cursor. Queue steps in [`QUEUE.MD`](QUEUE.MD) step **0** match this.
+
+**Agent workflow (token-efficient):** Do **not** load **[`QUEUE_STACK.csv`](QUEUE_STACK.csv)** or **[`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)** in full to pick or close work. Run **`bash scripts/queue_top.sh`** (or `python3 scripts/print_next_queue_item.py`) for the next task; after implementation, run **`bash scripts/queue_close.sh --next`** (or `--id <ID>`) to mark **`Done`** and regenerate the CSV. Use **`docs_refs`** only when the task points you at specific docs.
 
 **Template parity:** The canonical queue layout and filenames match the [MHughesDev/trading_bot](https://github.com/MHughesDev/trading_bot) template on GitHub (`docs/QUEUE*.MD`, `docs/QUEUE_STACK.csv`, `scripts/generate_queue_stack.py`, `scripts/ci_queue_consistency.py`, Cursor skills under `.cursor/skills/`). When changing the portable schema, keep this repo aligned with that source unless you intentionally fork behavior.
 
@@ -24,6 +26,9 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`scripts/generate_queue_stack.py`](../scripts/generate_queue_stack.py) | Optional CSV **regenerator** (maintainer tool): edit the **`ROWS`** list **order** (append/reorder dicts), run **`python scripts/generate_queue_stack.py`** — **`stack_order`** is **auto** (**1…N**, sentinel **`9999`**); do **not** hand-edit numbers in Python. |
 | [`scripts/ci_queue_consistency.py`](../scripts/ci_queue_consistency.py) | CI helper: **Open** rows in `QUEUE_STACK.csv` must appear in `QUEUE_ARCHIVE.MD` (see **FB-AUD-008**). |
 | [`scripts/print_next_queue_item.py`](../scripts/print_next_queue_item.py) | **Agent helper:** print the next **`Open`** row (smallest **`stack_order`**) as one terminal string; optional **`--json`**. |
+| [`scripts/queue_top.sh`](../scripts/queue_top.sh) | **Shell alias** for agents: same as `python3 scripts/print_next_queue_item.py` — **grab the top Open row** without opening the CSV in an editor. |
+| [`scripts/close_queue_item.py`](../scripts/close_queue_item.py) | **Agent helper:** mark an item **`Done`** in `scripts/generate_queue_stack.py`, run **`generate_queue_stack.py`**, optionally flip **`Open` → `Done`** in a matching **`QUEUE_ARCHIVE.MD`** table row. |
+| [`scripts/queue_close.sh`](../scripts/queue_close.sh) | **Shell alias:** `bash scripts/queue_close.sh --next` or `--id <ID>` — **move / archive closure** without loading the full CSV or archive. |
 
 **Audit → backlog (optional):** [`docs/FULL_AUDIT.md`](FULL_AUDIT.md) **§8** audit report · [`.cursor/skills/draft-audit-report`](../.cursor/skills/draft-audit-report/SKILL.md) · [`.cursor/skills/audit-report-to-queue`](../.cursor/skills/audit-report-to-queue/SKILL.md) · [`docs/BRAINSTORM/BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD`](BRAINSTORM/BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD)
 
