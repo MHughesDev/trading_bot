@@ -14,6 +14,8 @@ from app.contracts.reason_codes import (
     STATE_ELEVATED_TRANSITION,
     STATE_HIGH_OOD,
     STATE_HMM_AMBIGUOUS,
+    STATE_SESSION_LOW_LIQUIDITY,
+    STATE_SESSION_WEEKEND,
     STATE_STRUCTURE_FRAGILE,
 )
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
@@ -55,6 +57,58 @@ def _state_safety_domain(settings: AppSettings | None) -> dict[str, Any]:
         return {}
 
 
+def classify_session_mode(
+    *,
+    data_timestamp: datetime | None,
+    feature_row: dict[str, float],
+    settings: AppSettings | None = None,
+) -> tuple[str, float, list[str]]:
+    """FB-CAN-073: weekend vs low-liquidity vs regular session + throttle [0,1].
+
+    Low-liquidity is inferred from depth proxy when present (``depth_near_touch`` or
+    ``book_depth_bid_1pct``+``book_depth_ask_1pct``), otherwise weekend-only.
+    """
+    dom = _state_safety_domain(settings)
+    raw = dom.get("session_mode")
+    cfg = dict(raw) if isinstance(raw, dict) else {}
+    enabled = bool(cfg.get("enabled", True))
+    weekend_throttle = float(cfg.get("weekend_throttle", 0.88))
+    low_liq_throttle = float(cfg.get("low_liquidity_throttle", 0.82))
+    depth_floor = float(cfg.get("low_liquidity_depth_floor", 0.35))
+
+    codes: list[str] = []
+    if not enabled:
+        return "regular", 1.0, codes
+
+    ts = data_timestamp
+    if ts is None:
+        ts = datetime.now(UTC)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    else:
+        ts = ts.astimezone(UTC)
+
+    is_weekend = ts.weekday() >= 5
+    if is_weekend:
+        codes.append(STATE_SESSION_WEEKEND)
+
+    depth_nt = _safe_float(feature_row, "depth_near_touch", -1.0)
+    bid_d = _safe_float(feature_row, "depth_bid_1pct", -1.0)
+    ask_d = _safe_float(feature_row, "depth_ask_1pct", -1.0)
+    depth_proxy = depth_nt
+    if depth_proxy < 0.0 and bid_d >= 0.0 and ask_d >= 0.0:
+        depth_proxy = (bid_d + ask_d) * 0.5
+    low_liq = depth_proxy >= 0.0 and depth_proxy < depth_floor
+    if low_liq:
+        codes.append(STATE_SESSION_LOW_LIQUIDITY)
+
+    if low_liq:
+        return "low_liquidity", max(0.0, min(1.0, low_liq_throttle)), codes
+    if is_weekend:
+        return "weekend", max(0.0, min(1.0, weekend_throttle)), codes
+    return "regular", 1.0, codes
+
+
 def _normalize_named_weights(
     raw: dict[str, Any] | None,
     keys: tuple[str, ...],
@@ -83,6 +137,7 @@ def build_canonical_state(
     spread_bps: float,
     settings: AppSettings | None = None,
     structure: CanonicalStructureOutput | None = None,
+    data_timestamp: datetime | None = None,
 ) -> CanonicalStateOutput:
     """Derive APEX canonical state from forecaster packet and microstructure features.
 
@@ -151,6 +206,13 @@ def build_canonical_state(
     if transition_probability >= 0.65:
         novelty_reason_codes.append(STATE_ELEVATED_TRANSITION)
 
+    sess_ts = data_timestamp if data_timestamp is not None else getattr(pkt, "timestamp", None)
+    sess_mode, sess_thr, sess_codes = classify_session_mode(
+        data_timestamp=sess_ts,
+        feature_row=feature_row,
+        settings=settings,
+    )
+
     rsi = _safe_float(feature_row, "rsi_14", 50.0)
     rsi_ext = _clip01(abs(rsi - 50.0) / 50.0)
     hf = rsi_ext * 0.2
@@ -203,6 +265,9 @@ def build_canonical_state(
         novelty_components=novelty_components,
         reflexivity_components=reflexivity_components,
         novelty_reason_codes=novelty_reason_codes,
+        session_reason_codes=list(sess_codes),
+        session_mode=sess_mode,
+        session_mode_throttle=float(sess_thr),
     )
 
 
@@ -272,6 +337,31 @@ def classify_hard_override(
             pass
 
     return False, HardOverrideKind.NONE
+
+
+def _apply_session_mode_fields(risk: RiskState, new_mode: str) -> dict[str, Any]:
+    """FB-CAN-073: transition count + occupancy ticks per session mode."""
+    prev = risk.session_mode
+    new_s = str(new_mode)
+    prev_s = prev if prev is not None else None
+
+    trans_count = int(risk.session_mode_transition_count)
+    if prev_s is not None and prev_s != new_s:
+        trans_count += 1
+
+    occ = dict(risk.session_mode_occupancy_ticks or {})
+    if prev_s == new_s:
+        occ[new_s] = int(occ.get(new_s, 0)) + 1
+    else:
+        for k in list(occ.keys()):
+            occ[k] = 0
+        occ[new_s] = 1
+
+    return {
+        "session_mode_transition_count": trans_count,
+        "session_mode": new_s,
+        "session_mode_occupancy_ticks": occ,
+    }
 
 
 def _apply_degradation_transition_fields(
@@ -365,6 +455,7 @@ def composite_degradation_size_multiplier(
         "novelty": 0.0,
         "transition_multiplier": 1.0,
         "novelty_multiplier": 1.0,
+        "session_mode_throttle": 1.0,
     }
     if apex is None or base <= 0.0:
         return base, terms
@@ -387,7 +478,9 @@ def composite_degradation_size_multiplier(
     n_mult = max(0.0, 1.0 - wn * nov)
     terms["transition_multiplier"] = t_mult
     terms["novelty_multiplier"] = n_mult
-    return base * t_mult * n_mult, terms
+    sess_thr = _clip01(float(getattr(apex, "session_mode_throttle", 1.0)))
+    terms["session_mode_throttle"] = sess_thr
+    return base * t_mult * n_mult * sess_thr, terms
 
 
 def merge_canonical_into_risk(
@@ -431,6 +524,7 @@ def merge_canonical_into_risk(
         )
 
     comp_m, deg_terms = composite_degradation_size_multiplier(apex.degradation, apex, settings)
+    sess_mode = str(getattr(apex, "session_mode", "regular") or "regular")
     upd: dict[str, Any] = {
         "canonical_degradation": apex.degradation,
         "canonical_size_multiplier": comp_m,
@@ -438,6 +532,7 @@ def merge_canonical_into_risk(
         "hard_override_active": bool(hard_override_active),
         "hard_override_kind": hard_override_kind,
         **_apply_degradation_transition_fields(risk, apex.degradation),
+        **_apply_session_mode_fields(risk, sess_mode),
     }
     if forecast_packet is not None:
         close = max(_safe_float(feature_row or {}, "close", 1.0), 1e-12)

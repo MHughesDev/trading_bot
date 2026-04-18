@@ -47,13 +47,13 @@
         "APEX_State_Regime_Logic_Detail_Spec_v1_0.md",
         "APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md §7"
       ],
-      "queue_ids": ["FB-CAN-041", "FB-CAN-042", "FB-CAN-033"],
+      "queue_ids": ["FB-CAN-041", "FB-CAN-042", "FB-CAN-033", "FB-CAN-073"],
       "implementation_paths": [
         "decision_engine/state_engine.py",
         "app/contracts/canonical_state.py",
         "app/contracts/hard_override.py"
       ],
-      "test_path_patterns": ["tests/test_state_engine*", "tests/test_hard_override*"]
+      "test_path_patterns": ["tests/test_state_engine*", "tests/test_hard_override*", "tests/test_session_mode*"]
     },
     {
       "id": "gap_D_forecast_structure",
