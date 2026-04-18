@@ -2,6 +2,7 @@
 
 > **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`../Human Provided Specs/new_specs/canonical/`](../Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
 
+**FB-CAN-023 — Precedence:** Every file in **`docs/Specs/`** is **as-built engineering documentation**, not the APEX contract. For ordering rules, read **[`CANONICAL_PRECEDENCE.MD`](CANONICAL_PRECEDENCE.MD)**. Do not treat `docs/Specs/*.MD` as authoritative for **future** canonical requirements.
 
 This folder holds **specifications that describe the repository as implemented**. They are maintained to stay aligned with the code; when behavior changes, update the relevant file here (or ask an agent to).
 
@@ -12,6 +13,7 @@ This folder holds **specifications that describe the repository as implemented**
 | Location | Role |
 |----------|------|
 | **[`docs/CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD)** | **Target** APEX architecture (canonical `new_specs/canonical/`) — precedence vs as-built |
+| **[`CANONICAL_PRECEDENCE.MD`](CANONICAL_PRECEDENCE.MD)** | **FB-CAN-023** — explicit ordering: canonical vs as-built vs legacy human specs |
 | **[`docs/CANONICAL_MODULE_MAP.MD`](../CANONICAL_MODULE_MAP.MD)** | **Code ↔ domains** — primary Python modules for state/trigger/auction/risk/execution/replay/governance |
 | **`docs/Specs/`** (this folder) | What the code **is** and **does** today |
 | **`docs/Human Provided Specs/new_specs/canonical/`** | Canonical APEX specs (see index above) |

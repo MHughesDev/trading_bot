@@ -4,7 +4,7 @@ This folder holds **documents you supply** (product intent, external requirement
 
 ## Canonical target architecture (APEX)
 
-**[`new_specs/canonical/`](new_specs/canonical/)** holds the **canonical APEX** specifications — the **intended** end-state architecture during the **FB-CAN-*** migration. **Start here:** **[`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD)** (precedence rules and full index).
+**[`new_specs/canonical/`](new_specs/canonical/)** holds the **canonical APEX** specifications — the **intended** end-state architecture during the **FB-CAN-*** migration. **Start here:** **[`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD)** (precedence rules and full index). For a short ordering table (canonical vs as-built `docs/Specs/` vs legacy human intent), see **[`../Specs/CANONICAL_PRECEDENCE.MD`](../Specs/CANONICAL_PRECEDENCE.MD)** (**FB-CAN-023**).
 
 Older drafts live under [`new_specs/superseded/`](new_specs/superseded/). Root-level `*.MD` files in **this folder** (e.g. `MASTER_SYSTEM_PIPELINE_SPEC.MD`) remain **legacy human intent** for the pre-canonical pipeline; where they disagree with **APEX canonical** on future design, **canonical wins** for roadmap decisions.
 
@@ -40,6 +40,7 @@ Older drafts live under [`new_specs/superseded/`](new_specs/superseded/). Root-l
 | Folder | Owner | Content |
 |--------|--------|---------|
 | **`docs/Human Provided Specs/new_specs/canonical/`** | Product / program | **Target** APEX architecture (roadmap contract) — see **[`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD)** |
+| **`docs/Specs/CANONICAL_PRECEDENCE.MD`** | Maintained with the code | **FB-CAN-023** — explicit doc hierarchy so **`docs/Specs/`** is not read as the APEX contract |
 | **`docs/Specs/`** | Maintained with the code | What **is** implemented **today** (as-built) |
 | **`docs/Specs/FORECASTER_AND_POLICY.MD`** | Maintained with the code | Path-by-path map from legacy human specs (§26 forecaster, §27 policy) to `forecaster_model/` and `policy_model/` |
 | **`docs/Human Provided Specs/`** (here) | You | Legacy intent + canonical **`new_specs/canonical/`** |

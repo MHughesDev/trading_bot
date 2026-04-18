@@ -760,7 +760,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DEL-DOC",
         "id": "FB-CAN-023",
         "kind": "tech_debt",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Delete or archive obsolete docs/Specs canonical conflicts",
         "agent_task": "Delete or archive-as-historical conflicting docs under docs/Specs and legacy human spec narratives that contradict canonical specs. Add tombstone/redirect pages where needed so contributors cannot mistake old docs for active architecture requirements.",
         "affected_files": "docs/Specs/|docs/Human Provided Specs/|README.md|docs/",

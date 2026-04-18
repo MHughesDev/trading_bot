@@ -2,6 +2,7 @@
 
 > **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`../Human Provided Specs/new_specs/canonical/`](../Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
 
+> **Tombstone (FB-CAN-023):** Describes **`AppSettings`** / contracts as implemented. Canonical **configuration domain** **requirements** → [`APEX_Canonical_Configuration_Spec_v1_0.md`](../Human%20Provided%20Specs/new_specs/canonical/APEX_Canonical_Configuration_Spec_v1_0.md) + **[`CANONICAL_PRECEDENCE.MD`](CANONICAL_PRECEDENCE.MD)**.
 
 ## Configuration
 

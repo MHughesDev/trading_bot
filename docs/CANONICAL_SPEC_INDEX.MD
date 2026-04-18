@@ -2,11 +2,13 @@
 
 **Purpose:** Single entry point for **target system architecture** during the **FB-CAN-*** canonical migration. Use this page to decide which documents are **binding for “what we are building toward”** vs **historical or as-implemented**.
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-022: YAML `risk:` removed; see [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD)).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) + Specs tombstones; see [`CANONICAL_DELETION_LOG.MD`](CANONICAL_DELETION_LOG.MD)).
 
 ---
 
 ## Precedence (highest first)
+
+**Short table:** [`docs/Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) (**FB-CAN-023**).
 
 1. **`docs/Human Provided Specs/new_specs/canonical/*.md`** — **Canonical APEX** specifications (architecture, contracts, config, replay, monitoring, governance). These define the **intended** end state unless a queue item explicitly defers scope.
 2. **`docs/reports/REPO_VS_CANONICAL_SPECS_GAP_AUDIT.md`** — Authoritative **gap analysis** between the repo and canonical specs; use for migration ordering and queue ID mapping.
