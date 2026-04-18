@@ -1222,7 +1222,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-MON-DOMAINS",
         "id": "FB-CAN-056",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement monitoring domain coverage checklist and CI assertion",
         "agent_task": "Create machine-checkable monitoring domain checklist that asserts metric coverage across all canonical monitoring domains (system, data, state, trigger, auction, risk, execution, carry, drift, replay-shadow, governance). Fail CI when required families are absent.",
         "affected_files": "observability/|scripts/|docs/|tests/",
