@@ -140,6 +140,18 @@ apex_canonical:
         enabled: true
       heat_components:
         enabled: true
+    shadow_comparison:
+      enabled: true
+      thresholds:
+        trigger_divergence_max: 0.05
+        candidate_divergence_max: 0.08
+        auction_divergence_max: 0.08
+        suppression_divergence_max: 0.05
+        trade_intent_divergence_max: 0.06
+      probation:
+        min_bars: 200
+      rollback:
+        severe_rate_multiplier: 1.5
 execution:
   mode: live
   live_adapter: coinbase

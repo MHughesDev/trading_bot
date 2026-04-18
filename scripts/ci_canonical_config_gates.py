@@ -12,6 +12,7 @@ from pathlib import Path
 
 import yaml
 
+from app.config.shadow_comparison import validate_shadow_comparison_domain
 from app.config.signal_confidence import validate_signal_confidence_domain
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +69,10 @@ def main() -> int:
         )
         return 1
     for err in validate_signal_confidence_domain(sc):
+        print(f"ci_canonical_config_gates: {err}", file=sys.stderr)
+        return 1
+
+    for err in validate_shadow_comparison_domain(domains.get("shadow_comparison")):
         print(f"ci_canonical_config_gates: {err}", file=sys.stderr)
         return 1
 

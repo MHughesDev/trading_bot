@@ -83,6 +83,14 @@ class EvidencePackage(BaseModel):
         default_factory=list,
         description="Canonical fault profile ids exercised for those runs.",
     )
+    shadow_comparison_report: dict[str, Any] | None = Field(
+        default=None,
+        description="Structured shadow vs baseline replay comparison (FB-CAN-038).",
+    )
+    shadow_comparison_passed: bool | None = Field(
+        default=None,
+        description="True when comparison is within thresholds and probation (FB-CAN-038).",
+    )
 
 
 class ReleaseCandidate(BaseModel):
@@ -188,6 +196,9 @@ def evaluate_promotion_gates(
             reasons.append(
                 "shadow requires fault stress replay ids and all canonical fault profile ids (FB-CAN-037)"
             )
+        if ev.shadow_comparison_passed is not True:
+            blocked.append("shadow_comparison")
+            reasons.append("shadow requires shadow_comparison_passed (FB-CAN-038)")
 
     if target_environment == "live":
         if not ev.owner_approval_present:
@@ -201,6 +212,9 @@ def evaluate_promotion_gates(
         if ev.shadow_divergence_reviewed is not True:
             blocked.append("shadow_divergence_reviewed")
             reasons.append("live requires shadow divergence reviewed (spec §7.2–9.4)")
+        if ev.shadow_comparison_passed is not True:
+            blocked.append("shadow_comparison")
+            reasons.append("live requires shadow replay comparison within thresholds (FB-CAN-038)")
         if not fault_stress_evidence_satisfied(
             fault_stress_run_ids=ev.fault_stress_run_ids,
             fault_profile_ids_satisfied=ev.fault_profile_ids_satisfied,

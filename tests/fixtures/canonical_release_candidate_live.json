@@ -36,6 +36,7 @@
     "scenario_tests_passed": null,
     "replay_regression_passed": null,
     "shadow_divergence_reviewed": true,
+    "shadow_comparison_passed": true,
     "holdout_evidence_present": null
   },
   "rollback": {
