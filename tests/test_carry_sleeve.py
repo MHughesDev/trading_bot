@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
 from app.contracts.decisions import ActionProposal, RouteId
 from app.contracts.trigger import TriggerOutput
@@ -75,6 +77,8 @@ def test_carry_active_neutral_path():
     )
     assert dec.active is True
     assert dec.target_notional_usd == 5000.0
+    assert dec.trigger_confidence == pytest.approx(0.05)
+    assert dec.decision_quality == pytest.approx(dec.funding_signal * dec.trigger_confidence)
 
 
 def test_carry_suppresses_directional_when_isolation():

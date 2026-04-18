@@ -831,6 +831,12 @@ def get_governance_monitoring() -> dict[str, Any]:
         "grafana_dashboard_uid": "tb-canonical-health",
         "metrics_module": "observability/canonical_metrics.py",
         "drift_calibration_metrics": "observability/drift_calibration_metrics.py",
+        "carry_sleeve_metrics": (
+            "tb_canonical_carry_sleeve_active, tb_canonical_carry_target_notional_usd, "
+            "tb_canonical_carry_funding_signal, tb_canonical_carry_trigger_confidence, "
+            "tb_canonical_carry_decision_quality, tb_canonical_carry_reason_total, "
+            "tb_canonical_carry_directional_suppression_total (FB-CAN-064)"
+        ),
     }
 
 

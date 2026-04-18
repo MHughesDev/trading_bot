@@ -50,10 +50,15 @@ def evaluate_carry_sleeve(
         return CarrySleeveDecision(reason_codes=["carry_disabled"])
 
     fs = funding_signal_from_features(feature_row)
+    tc = _clip01(float(trigger.trigger_confidence))
+    quality = _clip01(fs * tc)
+
     if fs < cfg.carry_funding_threshold:
         return CarrySleeveDecision(
             eligible=False,
             funding_signal=fs,
+            trigger_confidence=tc,
+            decision_quality=quality,
             reason_codes=["funding_below_threshold"],
         )
 
@@ -61,6 +66,8 @@ def evaluate_carry_sleeve(
         return CarrySleeveDecision(
             eligible=False,
             funding_signal=fs,
+            trigger_confidence=tc,
+            decision_quality=quality,
             reason_codes=["degradation_no_trade"],
         )
 
@@ -74,6 +81,8 @@ def evaluate_carry_sleeve(
             eligible=eligible,
             active=False,
             funding_signal=fs,
+            trigger_confidence=tc,
+            decision_quality=quality,
             reason_codes=reasons + ["directional_not_neutral"],
         )
 
@@ -91,6 +100,8 @@ def evaluate_carry_sleeve(
         eligible=True,
         active=active,
         funding_signal=fs,
+        trigger_confidence=tc,
+        decision_quality=quality,
         target_notional_usd=cap,
         directional_blocked=directional_blocked,
         isolation_required=cfg.carry_attribution_isolation_required,

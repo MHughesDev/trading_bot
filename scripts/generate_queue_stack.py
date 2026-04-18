@@ -1334,7 +1334,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-CARRY-MON",
         "id": "FB-CAN-064",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement carry-sleeve monitoring and alert families",
         "agent_task": "Add carry-sleeve health metrics/alerts required by canonical monitoring domains, including carry exposure, carry decision quality, and carry-risk suppression indicators; integrate with dashboards and replay diagnostics.",
         "affected_files": "carry_sleeve/|observability/|infra/|control_plane/|tests/",

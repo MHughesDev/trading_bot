@@ -197,6 +197,28 @@ CANONICAL_CARRY_FUNDING_SIGNAL = Histogram(
     ["symbol"],
     buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
 )
+CANONICAL_CARRY_TRIGGER_CONFIDENCE = Histogram(
+    "tb_canonical_carry_trigger_confidence",
+    "Trigger confidence at carry evaluation (0-1, FB-CAN-064)",
+    ["symbol"],
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+CANONICAL_CARRY_DECISION_QUALITY = Histogram(
+    "tb_canonical_carry_decision_quality",
+    "Carry decision quality proxy funding×trigger_confidence (0-1, FB-CAN-064)",
+    ["symbol"],
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+CANONICAL_CARRY_REASON = Counter(
+    "tb_canonical_carry_reason_total",
+    "Carry sleeve reason codes emitted per tick (FB-CAN-064)",
+    ["symbol", "reason"],
+)
+CANONICAL_CARRY_DIRECTIONAL_SUPPRESSION = Counter(
+    "tb_canonical_carry_directional_suppression_total",
+    "Ticks where carry isolation suppressed directional flow (FB-CAN-064)",
+    ["symbol"],
+)
 CANONICAL_SHADOW_DIVERGENCE = Counter(
     "tb_canonical_replay_shadow_divergence_total",
     "Shadow vs live divergence events (increment when comparison runs)",
@@ -323,6 +345,16 @@ def record_canonical_post_tick(
                 )
             if cs.get("funding_signal") is not None:
                 CANONICAL_CARRY_FUNDING_SIGNAL.labels(symbol=sym).observe(float(cs["funding_signal"]))
+            if cs.get("trigger_confidence") is not None:
+                CANONICAL_CARRY_TRIGGER_CONFIDENCE.labels(symbol=sym).observe(
+                    float(cs["trigger_confidence"])
+                )
+            if cs.get("decision_quality") is not None:
+                CANONICAL_CARRY_DECISION_QUALITY.labels(symbol=sym).observe(float(cs["decision_quality"]))
+            for rc in cs.get("reason_codes") or []:
+                CANONICAL_CARRY_REASON.labels(symbol=sym, reason=str(rc)).inc()
+            if bool(cs.get("directional_blocked")):
+                CANONICAL_CARRY_DIRECTIONAL_SUPPRESSION.labels(symbol=sym).inc()
         except (TypeError, ValueError):
             pass
 

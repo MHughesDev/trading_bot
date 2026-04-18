@@ -239,7 +239,7 @@
 | FB-CAN-061 | CAN-CONFIG-META | B | CFG | feature | MEDIUM | Done | Implement canonical config metadata fields and validation rules. | `app/config/`, `models/`, `scripts/`, tests |
 | FB-CAN-062 | CAN-CONTRACT-COMMON | A | DP | feature | MEDIUM | Done | Enforce canonical contract common conventions (UTC/freshness/confidence typing and bounds). | `app/contracts/`, `decision_engine/`, `data_plane/`, tests |
 | FB-CAN-063 | CAN-SUPPRESS-TAX | B | DP | feature | MEDIUM | Done | Implement stable suppression/safety reason taxonomy and machine-readable reason codes. | contracts + decision/risk/execution/observability/tests |
-| FB-CAN-064 | CAN-CARRY-MON | B | OB | feature | LOW | Open | Implement carry-sleeve monitoring and alert families. | `carry_sleeve/`, observability/infra/control_plane/tests |
+| FB-CAN-064 | CAN-CARRY-MON | B | OB | feature | LOW | Done | Implement carry-sleeve monitoring and alert families. | `carry_sleeve/`, observability/infra/control_plane/tests |
 | FB-CAN-065 | CAN-GOV-MON | B | OB | feature | LOW | Open | Implement governance/operator health monitoring domain and alerts. | observability/orchestration/models/scripts/tests |
 | FB-CAN-066 | CAN-EVIDENCE-SCHEMA | B | OP | platform | MEDIUM | Open | Define canonical evidence-package schema for promotion decisions and gate completeness. | `models/`, `orchestration/`, `scripts/`, docs/tests |
 | FB-CAN-067 | CAN-CONSTANTS | B | CP | hardening | LOW | Open | Add guardrails against hidden magic constants in canonical code paths. | scripts + core canonical modules/tests |
