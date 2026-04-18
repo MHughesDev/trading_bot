@@ -194,6 +194,79 @@ def test_false_positive_memory_increases_auction_penalty():
     assert long1.penalties["P"] > long0.penalties["P"]
 
 
+def test_clustering_metadata_and_diversification_split_fb_can_034():
+    """FB-CAN-034: thesis buckets + D_corr/D_thesis/D_liq in penalties and clustering_metadata."""
+    base = ActionProposal(
+        symbol="BTC/USD",
+        route_id=RouteId.INTRADAY,
+        direction=1,
+        size_fraction=0.25,
+        stop_distance_pct=0.02,
+    )
+    feat = {"close": 50_000.0, "atr_14": 100.0}
+    _, result = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=RiskState(),
+        spread_bps=5.0,
+        feature_row=feat,
+        settings=AppSettings(),
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+    )
+    assert result.clustering_metadata.get("schema_version") == 1
+    assert "thesis_bucket_by_direction" in result.clustering_metadata
+    assert "liquidation_cluster_key" in result.clustering_metadata
+    long_rec = next(r for r in result.records if r.direction == 1)
+    assert "D_corr" in long_rec.penalties
+    assert "D_thesis" in long_rec.penalties
+    assert "D_liq" in long_rec.penalties
+
+
+def test_corr_penalty_higher_when_book_aligns_with_long():
+    base = ActionProposal(
+        symbol="BTC/USD",
+        route_id=RouteId.INTRADAY,
+        direction=1,
+        size_fraction=0.25,
+        stop_distance_pct=0.02,
+    )
+    feat = {"close": 50_000.0, "atr_14": 100.0}
+    _, r_flat = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=RiskState(),
+        spread_bps=5.0,
+        feature_row=feat,
+        settings=AppSettings(),
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=Decimal("0"),
+        base_proposal=base,
+    )
+    qty = Decimal("0.5")
+    _, r_long = run_opportunity_auction(
+        "BTC/USD",
+        _pkt(),
+        apex=_apex(),
+        trigger=_trigger_ok(),
+        app_risk=RiskState(),
+        spread_bps=5.0,
+        feature_row=feat,
+        settings=AppSettings(),
+        portfolio_equity_usd=100_000.0,
+        position_signed_qty=qty,
+        base_proposal=base,
+    )
+    l0 = next(r for r in r_flat.records if r.direction == 1)
+    l1 = next(r for r in r_long.records if r.direction == 1)
+    assert l1.penalties["D_corr"] >= l0.penalties["D_corr"]
+
+
 def test_ranking_stable_tiebreak():
     """Same inputs → same winner (deterministic)."""
     base = ActionProposal(

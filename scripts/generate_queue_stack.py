@@ -914,7 +914,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-AUCT-CORR",
         "id": "FB-CAN-034",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Add candidate correlation/thesis clustering penalties to auction",
         "agent_task": "Implement explicit candidate-correlation, overlap, and thesis-clustering penalties/constraints in auction ranking and selection caps. Include deterministic clustering metadata in decision records and replay outputs.",
         "affected_files": "decision_engine/auction_engine.py|app/contracts/|backtesting/|tests/",
