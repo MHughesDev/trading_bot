@@ -109,7 +109,7 @@
       "id": "gap_H_execution",
       "gap_audit_section": "H. Execution",
       "canonical_specs": ["APEX_Execution_Logic_Detail_Spec_v1_0.md"],
-      "queue_ids": ["FB-CAN-047", "FB-CAN-048"],
+      "queue_ids": ["FB-CAN-047", "FB-CAN-048", "FB-CAN-075"],
       "implementation_paths": [
         "execution/execution_logic.py",
         "execution/service.py",

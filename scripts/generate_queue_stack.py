@@ -1488,7 +1488,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-EXEC-LAT",
         "id": "FB-CAN-075",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement execution latency/reliability quality terms in execution confidence",
         "agent_task": "Implement explicit latency and reliability quality terms used by execution confidence score and expose their contribution weights/config in canonical config domains. Add replay hooks for latency stress scenarios.",
         "affected_files": "execution/|app/config/|backtesting/|observability/|tests/",
