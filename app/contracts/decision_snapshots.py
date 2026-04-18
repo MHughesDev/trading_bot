@@ -102,7 +102,12 @@ class StructuralSignalSnapshot(BaseModel):
     cascade_magnitude_estimate_short: float | None = None
     oi_concentration_score: float | None = None
     perp_spot_divergence_score: float | None = None
-    stablecoin_flow_proxy: float | None = None
+    gex_score: float | None = Field(default=None, ge=-1.0, le=1.0)
+    iv_skew_score: float | None = Field(default=None, ge=-1.0, le=1.0)
+    options_freshness: float | None = Field(default=None, ge=0.0, le=1.0)
+    options_reliability: float | None = Field(default=None, ge=0.0, le=1.0)
+    stablecoin_flow_proxy: float | None = Field(default=None, ge=-1.0, le=1.0)
+    stablecoin_freshness: float | None = Field(default=None, ge=0.0, le=1.0)
     signal_source_count: int | None = None
 
 

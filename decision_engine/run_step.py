@@ -98,13 +98,14 @@ def run_decision_tick(
                 }
             },
         )
+        eff = getattr(pipeline, "last_feature_effective", None)
         record_canonical_post_tick(
             symbol=symbol,
             regime=regime,
             risk=risk_state,
             forecast_packet=None,
             carry_sleeve=getattr(risk_state, "carry_sleeve_last", None),
-            feature_row=feature_row,
+            feature_row=eff if isinstance(eff, dict) else feature_row,
         )
         return regime, fc, route, proposal, trade, risk_state
 
@@ -161,12 +162,13 @@ def run_decision_tick(
         )
     DECISION_LATENCY.observe(time.perf_counter() - t0)
     maybe_set_config_version_from_engine(risk_engine)
+    eff = pipeline.last_feature_effective
     record_canonical_post_tick(
         symbol=symbol,
         regime=regime,
         risk=risk_state,
         forecast_packet=pipeline.last_forecast_packet,
         carry_sleeve=getattr(risk_state, "carry_sleeve_last", None),
-        feature_row=feature_row,
+        feature_row=eff if isinstance(eff, dict) else feature_row,
     )
     return regime, fc, route, proposal, trade, risk_state

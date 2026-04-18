@@ -1138,7 +1138,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-DATA-OPTIONS",
         "id": "FB-CAN-050",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement options-context and stablecoin-flow proxy feature families",
         "agent_task": "Implement optional canonical feature families for options context and stablecoin flow proxy with explicit availability rates and fallback behavior. Integrate into signal confidence domain and monitoring.",
         "affected_files": "data_plane/features/|decision_engine/|observability/|app/config/|tests/",

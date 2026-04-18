@@ -11,10 +11,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from data_plane.features.optional_families import apply_options_and_stablecoin_families
 from data_plane.ingest.structural_signals import apply_structural_families_from_row
 
 # Bump when normalization rules change (stored on feature rows).
-CANONICAL_NORMALIZATION_VERSION = 2
+CANONICAL_NORMALIZATION_VERSION = 3
 
 # Primary return keys the decision path prefers (alias from ``ret_*``).
 _RETURN_ALIASES: tuple[tuple[str, str], ...] = (
@@ -43,7 +44,9 @@ def completeness_score(row: dict[str, float]) -> float:
     has_atr = "atr_14" in row
     cov = float(row.get("structural_family_coverage", 0.0))
     has_struct = cov >= 0.2
-    parts = [has_price, has_ret, has_vol, has_rsi, has_atr, has_struct]
+    has_opt = float(row.get("options_context_available", 0.0)) >= 0.5
+    has_sc = float(row.get("stablecoin_flow_available", 0.0)) >= 0.5
+    parts = [has_price, has_ret, has_vol, has_rsi, has_atr, has_struct, has_opt, has_sc]
     return sum(1.0 for p in parts if p) / max(len(parts), 1)
 
 
@@ -86,6 +89,7 @@ def normalize_feature_row(
         out["spread_bps_feature"] = float(out["micro_spread_bps"])
 
     apply_structural_families_from_row(out)
+    apply_options_and_stablecoin_families(out)
 
     fresh = feature_freshness_from_age(bar_age_seconds, stale_seconds=stale_data_seconds)
     rel = feature_reliability_heuristic(out)

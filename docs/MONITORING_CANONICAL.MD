@@ -18,6 +18,7 @@ All canonical slice metrics use the `tb_canonical_*` prefix (alongside existing 
 | Risk | `tb_canonical_risk_size_multiplier`, `tb_canonical_risk_final_notional_usd` | From `RiskState` |
 | Execution (FB-CAN-047) | `tb_canonical_execution_style_total`, `tb_canonical_execution_guidance_confidence` | From `last_decision_record.diagnostics.execution_guidance_preview` when present |
 | Data quality (proxy) | `tb_canonical_data_age_seconds` | From `RiskState.data_age_seconds` |
+| Optional families (FB-CAN-050) | `tb_canonical_options_context_available`, `tb_canonical_stablecoin_flow_available`, `tb_canonical_options_context_fallback_active`, `tb_canonical_stablecoin_flow_fallback_active` | From effective feature row after boundary merge (availability + fallback when families enabled but upstream missing) |
 | Drift / calibration | `tb_canonical_forecast_ood_score` | From `ForecastPacket.ood_score` |
 | Drift / calibration (FB-CAN-039) | `tb_canonical_theoretical_edge_score`, `tb_canonical_edge_erosion_score`, `tb_canonical_trade_intent_execution_confidence` | Trade-intent ticks only; theoretical edge = `decision_confidence × trigger_confidence`, erosion = `max(0, theoretical − execution_confidence)` |
 | Drift / calibration (FB-CAN-039) | `tb_canonical_feature_drift_penalty`, `tb_canonical_trigger_false_positive_memory` | From `canonical_exec_quality_penalty` feature + `RiskState.trigger_false_positive_memory` |
