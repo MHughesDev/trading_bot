@@ -7,6 +7,7 @@ Single-symbol path ranks long vs short vs flat using the same score machinery.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 
 from app.config.settings import AppSettings
 from app.contracts.auction import AuctionCandidateRecord, AuctionResult
@@ -55,6 +56,63 @@ def _oi_liquidation_proxy(pkt: ForecastPacket, feature_row: dict[str, float]) ->
     oi_struct = _clip(w0 * 3.0, 0.0, 1.0)
     liq_opp = _clip(rel * 0.6 + w0 * 2.0, 0.0, 1.0)
     return oi_struct, liq_opp
+
+
+def _thesis_bucket_key(
+    apex: CanonicalStateOutput,
+    st: CanonicalStructureOutput,
+    direction: int,
+) -> str:
+    """Deterministic thesis bucket for clustering / caps (FB-CAN-034)."""
+    rp = list(apex.regime_probabilities)
+    if len(rp) >= 5:
+        idx = int(max(range(min(5, len(rp))), key=lambda i: rp[i]))
+    else:
+        idx = 0
+    regime_names = ("trend", "range", "stress", "dislocated", "transition")
+    rname = regime_names[idx] if idx < 5 else "unknown"
+    bias = "long" if direction > 0 else "short" if direction < 0 else "flat"
+    cp = float(st.continuation_probability)
+    c_bucket = "hi" if cp >= 0.55 else "lo"
+    return f"{rname}:{bias}:{c_bucket}"
+
+
+def _liq_cluster_key(feature_row: dict[str, float], pkt: ForecastPacket) -> str:
+    """Quantized liquidation-geometry bucket for overlap penalties (FB-CAN-034)."""
+    w0 = float(pkt.interval_width[0]) if pkt.interval_width else 0.0
+    close = max(abs(float(feature_row.get("close", 1.0))), 1e-12)
+    atr = float(feature_row.get("atr_14", 0.0) or 0.0)
+    rel = _clip(atr / close * 50.0, 0.0, 1.0)
+    liq = _clip(rel * 0.6 + w0 * 2.0, 0.0, 1.0)
+    bin_idx = min(4, int(liq * 5.0))
+    return f"L{bin_idx}"
+
+
+def _corr_candidate_vs_book(
+    direction: int,
+    pos_frac: float,
+    apex: CanonicalStateOutput,
+    st: CanonicalStructureOutput,
+) -> float:
+    """Proxy for candidate-to-book correlation / same-side concentration."""
+    qty_sign = 1.0 if pos_frac > 1e-12 else (-1.0 if pos_frac < -1e-12 else 0.0)
+    if direction == 0:
+        return _clip(abs(pos_frac) * 0.6 + 0.1 * float(st.model_correlation_penalty), 0.0, 1.0)
+    align = float(direction) * qty_sign
+    if align > 0:
+        return _clip(
+            abs(pos_frac) + 0.12 * float(apex.heat_score) + 0.08 * float(st.model_correlation_penalty),
+            0.0,
+            1.0,
+        )
+    if align < 0:
+        return _clip(abs(pos_frac) * 0.55 + 0.15 * float(st.model_correlation_penalty), 0.0, 1.0)
+    return _clip(abs(pos_frac) * 0.35 + 0.1 * float(st.model_correlation_penalty), 0.0, 1.0)
+
+
+def _corr_long_vs_short(st: CanonicalStructureOutput) -> float:
+    """Structural coupling between +1 and -1 candidates (model co-movement)."""
+    return _clip(0.35 + 0.65 * float(st.model_correlation_penalty), 0.0, 1.0)
 
 
 def _directional_asymmetry(
@@ -110,7 +168,8 @@ def run_opportunity_auction(
     eq = max(float(portfolio_equity_usd), 1e-9)
     qty = float(position_signed_qty) if position_signed_qty is not None else 0.0
     mp = float(feature_row.get("close", 1.0))
-    pos_frac = abs(qty * mp) / eq
+    signed_pos_frac = (qty * mp) / eq
+    pos_frac = abs(signed_pos_frac)
     heat = apex.heat_score
     deg = app_risk.canonical_degradation or apex.degradation
 
@@ -119,6 +178,9 @@ def run_opportunity_auction(
 
     wA, wS, wC, wT, wE, wO, wL = 0.18, 0.14, 0.18, 0.16, 0.14, 0.1, 0.1
     wD, wM, wP, wG, wB, wR = 0.35, 0.2, 0.15, 0.4, 0.35, 0.35
+    d1, d2, d3 = 0.45, 0.35, 0.2
+    corr_ls = _corr_long_vs_short(st)
+    liq_cluster_key = _liq_cluster_key(feature_row, forecast_packet)
 
     candidates: list[tuple[int, ActionProposal | None]] = []
     if base_proposal is not None:
@@ -134,6 +196,7 @@ def run_opportunity_auction(
 
     records: list[AuctionCandidateRecord] = []
     scored: list[tuple[float, int, ActionProposal | None, AuctionCandidateRecord]] = []
+    thesis_keys: dict[str, str] = {}
 
     for direction, proposal in candidates:
         reasons: list[str] = []
@@ -169,7 +232,25 @@ def run_opportunity_auction(
             if direction != 0
             else float(st.asymmetry_score)
         )
-        D_div = _clip(heat * 0.4 + pos_frac * 0.5, 0.0, 1.0)
+        tkey = _thesis_bucket_key(apex, st, direction)
+        thesis_keys[str(int(direction))] = tkey
+
+        D_corr = _corr_candidate_vs_book(direction, signed_pos_frac, apex, st)
+        if direction == 1 or direction == -1:
+            D_corr = max(D_corr, 0.55 * corr_ls)
+        D_thesis = _clip(
+            0.38 * float(apex.novelty)
+            + 0.32 * float(st.fragility_score)
+            + 0.3 * abs(float(forecast_packet.ood_score)),
+            0.0,
+            1.0,
+        )
+        D_liq = _clip(
+            0.55 * L_liq + 0.28 * heat + 0.17 * float(forecast_packet.ood_score),
+            0.0,
+            1.0,
+        )
+        D_div = _clip(d1 * D_corr + d2 * D_thesis + d3 * D_liq, 0.0, 1.0)
         M_overlap = _clip(
             0.5 * float(forecast_packet.ood_score) + 0.5 * float(st.fragility_score),
             0.0,
@@ -216,6 +297,9 @@ def run_opportunity_auction(
         }
         pens = {
             "D": D_div,
+            "D_corr": D_corr,
+            "D_thesis": D_thesis,
+            "D_liq": D_liq,
             "M": M_overlap,
             "P": P_fp,
             "G": G_deg,
@@ -277,6 +361,17 @@ def run_opportunity_auction(
             rec.status = "suppressed"
             rec.reasons.append("outranked")
 
+    meta: dict[str, Any] = {
+        "schema_version": 1,
+        "symbol": symbol,
+        "thesis_bucket_by_direction": thesis_keys,
+        "liquidation_cluster_key": liq_cluster_key,
+        "long_short_structural_correlation_proxy": round(corr_ls, 6),
+        "diversification_weights": {"d1": d1, "d2": d2, "d3": d3},
+    }
+    if sel_dir is not None and str(int(sel_dir)) in thesis_keys:
+        meta["selected_thesis_bucket"] = thesis_keys[str(int(sel_dir))]
+
     result = AuctionResult(
         selected_symbol=symbol if winner is not None else None,
         selected_direction=sel_dir,
@@ -285,5 +380,6 @@ def run_opportunity_auction(
         top_n_limit=top_n,
         max_notional_usd=max_notional,
         selected_notional_usd=total_notional,
+        clustering_metadata=meta,
     )
     return winner, result

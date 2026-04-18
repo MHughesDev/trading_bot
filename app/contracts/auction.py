@@ -5,6 +5,8 @@ See APEX_Auction_Scoring_Constraints_Detail_Spec_v1_0.md §16.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -31,3 +33,5 @@ class AuctionResult(BaseModel):
     top_n_limit: int = 1
     max_notional_usd: float = 0.0
     selected_notional_usd: float = 0.0
+    # FB-CAN-034 — deterministic thesis / cluster metadata for diversification penalties
+    clustering_metadata: dict[str, Any] = Field(default_factory=dict)
