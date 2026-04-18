@@ -1,6 +1,9 @@
 # Code-Level Architecture Specification — Forecaster Model
 ## VSN → Latent CNN → Multi-Resolution xLSTM → Regime-Conditioned Fusion → Quantile Head → Online Conformal Calibration → Ensemble
 
+> **Target architecture:** For the **APEX canonical** migration and **intended** end-state system design, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`new_specs/canonical/`](new_specs/canonical/). This document remains **historical / legacy intent** for the pre-canonical pipeline where applicable; where it conflicts with canonical APEX on **future** architecture, prefer canonical specs for roadmap decisions.
+
+
 Version: 1.0  
 Document type: implementation specification  
 Scope: model architecture, data contracts, training/inference design, module interfaces, extension points  

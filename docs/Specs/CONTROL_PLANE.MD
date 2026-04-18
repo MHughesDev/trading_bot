@@ -1,5 +1,8 @@
 # Control plane
 
+> **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`../Human Provided Specs/new_specs/canonical/`](../Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
+
+
 ## FastAPI (`control_plane/api.py`)
 
 - **Read:** `/status`, `/routes`, `/params`, `/system/mode`, `/models`, `/metrics` (Prometheus text), `/assets/*`, `/auth/*`, `/portfolio/*`, `/pnl/*`, `/universe/*`, `/scheduler/*`, … — see `control_plane/api.py` for the full route table

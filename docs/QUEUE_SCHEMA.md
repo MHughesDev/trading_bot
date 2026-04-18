@@ -20,6 +20,7 @@ The **queue system** is **all artifacts that define, store, and operate the work
 | [`QUEUE_STACK.csv`](QUEUE_STACK.csv) | **Next-task stack** — machine-readable; **`agent_task`** per row; canonical for **which** task runs next. |
 | [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) | **Narrative tables** — open detail, `IL-*`, `HG-*`, completed `FB-*` archive. |
 | [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) | **This file** — portable schema + queue-system index. |
+| [`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD) | **APEX canonical** specs index + precedence vs as-built (`docs/Specs/`) — program **FB-CAN-002**. |
 | [`AUTOMATION_QUEUE_SLICE_PROMPT.MD`](AUTOMATION_QUEUE_SLICE_PROMPT.MD) | Agent workflow: one slice → validate → PR → merge. |
 | [`.cursor/skills/add-to-queue/SKILL.md`](../.cursor/skills/add-to-queue/SKILL.md) | Cursor **Add to Queue** skill for adding/updating items. |
 | [`.cursor/skills/queue-one-at-a-time/SKILL.md`](../.cursor/skills/queue-one-at-a-time/SKILL.md) | Cursor **Queue One-at-a-Time** execution skill (take top Open row only, implement, validate, document, commit). |

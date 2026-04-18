@@ -1,5 +1,8 @@
 # System overview (as implemented)
 
+> **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`../Human Provided Specs/new_specs/canonical/`](../Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
+
+
 ## Product boundaries
 
 - **Market data:** **Kraken** only (WebSocket + REST under `data_plane/ingest/kraken_*`). **Alpaca** must not be used for market-data clients in the main package tree — `scripts/ci_spec_compliance.sh` fails on `alpaca.data` imports outside the paper execution adapter (`execution/adapters/alpaca_paper.py`). See [`../KRAKEN_MARKET_DATA.MD`](../KRAKEN_MARKET_DATA.MD).

@@ -1,5 +1,8 @@
 # Execution layer
 
+> **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`../Human Provided Specs/new_specs/canonical/`](../Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
+
+
 ## Routing and service
 
 - **`router.py`** — **`create_execution_adapter` / `get_execution_adapter`**: selects adapter from `AppSettings` (`paper` → Alpaca paper, `live` → Coinbase live)

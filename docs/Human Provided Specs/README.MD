@@ -2,9 +2,15 @@
 
 This folder holds **documents you supply** (product intent, external requirements, design notes, stakeholder checklists). They are **not** auto-generated from the codebase.
 
+## Canonical target architecture (APEX)
+
+**[`new_specs/canonical/`](new_specs/canonical/)** holds the **canonical APEX** specifications — the **intended** end-state architecture during the **FB-CAN-*** migration. **Start here:** **[`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD)** (precedence rules and full index).
+
+Older drafts live under [`new_specs/superseded/`](new_specs/superseded/). Root-level `*.MD` files in **this folder** (e.g. `MASTER_SYSTEM_PIPELINE_SPEC.MD`) remain **legacy human intent** for the pre-canonical pipeline; where they disagree with **APEX canonical** on future design, **canonical wins** for roadmap decisions.
+
 ## Purpose
 
-1. **Source of intent** — What you want the system to become or enforce, independent of current implementation.
+1. **Source of intent** — What you want the system to become or enforce, independent of current implementation (canonical APEX + legacy docs below).
 2. **Diff driver** — When an agent (or you) compares these files to **`docs/Specs/`** (as-built) and to the code, gaps become queue items in the **[queue system](../QUEUE_SCHEMA.md)** (`QUEUE_STACK.csv` + `QUEUE_ARCHIVE.MD` per **`docs/QUEUE.MD`** §6).
 
 ## Files in this repo
@@ -29,13 +35,14 @@ This folder holds **documents you supply** (product intent, external requirement
 - Use descriptive names: `PRODUCT_VISION_2026.MD`, `EXECUTION_REQUIREMENTS.MD`, etc.
 - Keep **`.MD`** extension to match repo doc conventions.
 
-## Relationship to `docs/Specs/`
+## Relationship to `docs/Specs/` and canonical APEX
 
 | Folder | Owner | Content |
 |--------|--------|---------|
-| **`docs/Specs/`** | Maintained with the code | What **is** implemented |
-| **`docs/Specs/FORECASTER_AND_POLICY.MD`** | Maintained with the code | Path-by-path map from these human specs (§26 forecaster, §27 policy) to `forecaster_model/` and `policy_model/` |
-| **`docs/Human Provided Specs/`** (here) | You | What **should** be true or what **you** assert |
+| **`docs/Human Provided Specs/new_specs/canonical/`** | Product / program | **Target** APEX architecture (roadmap contract) — see **[`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD)** |
+| **`docs/Specs/`** | Maintained with the code | What **is** implemented **today** (as-built) |
+| **`docs/Specs/FORECASTER_AND_POLICY.MD`** | Maintained with the code | Path-by-path map from legacy human specs (§26 forecaster, §27 policy) to `forecaster_model/` and `policy_model/` |
+| **`docs/Human Provided Specs/`** (here) | You | Legacy intent + canonical **`new_specs/canonical/`** |
 
 ## Do not commit secrets
 

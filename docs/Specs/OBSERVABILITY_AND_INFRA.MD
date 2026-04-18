@@ -1,5 +1,8 @@
 # Observability and infrastructure
 
+> **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`../Human Provided Specs/new_specs/canonical/`](../Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
+
+
 ## Observability (`observability/`)
 
 - **`metrics.py`** — Prometheus metrics (e.g. decision latency, feed stale blocks, normalizer unknowns, **`tb_questdb_write_fail_total`** for QuestDB writer errors — FB-AUD-015)

@@ -1,5 +1,8 @@
 # Codebase specs (derived)
 
+> **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`../Human Provided Specs/new_specs/canonical/`](../Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
+
+
 This folder holds **specifications that describe the repository as implemented**. They are maintained to stay aligned with the code; when behavior changes, update the relevant file here (or ask an agent to).
 
 **Not product marketing** — these are engineer-facing maps: modules, responsibilities, main entry points, and boundaries (e.g. Kraken-only market data, no Alpaca *data* imports outside the paper adapter, Alpaca paper / Coinbase live execution).
@@ -8,8 +11,10 @@ This folder holds **specifications that describe the repository as implemented**
 
 | Location | Role |
 |----------|------|
+| **[`docs/CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD)** | **Target** APEX architecture (canonical `new_specs/canonical/`) — precedence vs as-built |
 | **`docs/Specs/`** (this folder) | What the code **is** and **does** today |
-| **`docs/Human Provided Specs/`** | What **you** want; agents compare to code + Specs and update backlog / implementation |
+| **`docs/Human Provided Specs/new_specs/canonical/`** | Canonical APEX specs (see index above) |
+| **`docs/Human Provided Specs/`** (root `*.MD`) | Legacy human intent; backlog driver; compare to code + Specs |
 | **[`docs/QUEUE_SCHEMA.md`](../QUEUE_SCHEMA.md)** | **Queue system** — index of all backlog machinery |
 | **`docs/QUEUE.MD`** | Queue protocol + conventions |
 | **`docs/QUEUE_STACK.csv`** | Next tasks (`agent_task` per row) |
