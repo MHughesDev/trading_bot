@@ -1,0 +1,190 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_data_age_seconds_bucket[5m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} p95 data age (s)",
+          "refId": "A"
+        }
+      ],
+      "title": "Data quality: data age p95 (seconds)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(rate(tb_canonical_degradation_observations_total[5m])) by (symbol, level)",
+          "legendFormat": "{{symbol}} {{level}}",
+          "refId": "A"
+        }
+      ],
+      "title": "State: degradation observations (rate)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum(rate(tb_canonical_trigger_missed_move_total[5m])) by (symbol)",
+          "legendFormat": "{{symbol}} missed-move rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Trigger: missed-move rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum(rate(tb_canonical_auction_suppressed_total[5m])) by (symbol)",
+          "legendFormat": "{{symbol}} suppressed",
+          "refId": "A"
+        }
+      ],
+      "title": "Auction: suppression rate (no winner)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_risk_size_multiplier_bucket[5m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} p95 size mult",
+          "refId": "A"
+        }
+      ],
+      "title": "Risk: canonical size multiplier (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_risk_final_notional_usd_bucket[5m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} p95 notional USD",
+          "refId": "A"
+        }
+      ],
+      "title": "Risk: final notional USD (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "tb_canonical_carry_sleeve_active",
+          "legendFormat": "{{symbol}} active",
+          "refId": "A"
+        }
+      ],
+      "title": "Carry sleeve: active (0/1)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_carry_funding_signal_bucket[5m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} p95 funding signal",
+          "refId": "A"
+        }
+      ],
+      "title": "Carry sleeve: funding signal (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tb_canonical_forecast_ood_score_bucket[5m])) by (le, symbol))",
+          "legendFormat": "{{symbol}} p95 OOD",
+          "refId": "A"
+        }
+      ],
+      "title": "Drift: forecast OOD score (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "sum(rate(tb_canonical_replay_shadow_divergence_total[5m])) by (kind)",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Shadow / replay: divergence event rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 40 },
+      "id": 11,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        {
+          "expr": "max(tb_canonical_active_config_version_info) by (version)",
+          "legendFormat": "config {{version}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Governance: active canonical config version (info gauge)",
+      "type": "stat"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["trading-bot", "apex", "canonical"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "APEX canonical health",
+  "uid": "tb-canonical-health",
+  "version": 1,
+  "weekStart": ""
+}

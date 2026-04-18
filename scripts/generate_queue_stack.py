@@ -830,7 +830,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-MON-ALRT",
         "id": "FB-CAN-028",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Build alert policies and dashboards for canonical domain health",
         "agent_task": "Define and implement canonical alert thresholds, routing, and dashboards for decision quality, suppressions, degradation occupancy, execution edge erosion, replay-shadow divergence, and governance anomalies. Ensure alerts are actionable and non-noisy per canonical monitoring spec.",
         "affected_files": "observability/|infra/|control_plane/|docs/",

@@ -765,6 +765,18 @@ def get_release_evidence() -> dict[str, Any]:
     return b.model_dump(mode="json")
 
 
+@app.get("/governance/monitoring")
+def get_governance_monitoring() -> dict[str, Any]:
+    """Pointers to APEX canonical dashboards and Prometheus rules (FB-CAN-028)."""
+    return {
+        "docs": "docs/MONITORING_CANONICAL.MD",
+        "spec": "docs/Human Provided Specs/new_specs/canonical/APEX_Monitoring_and_Alerting_Spec_v1_0.md",
+        "prometheus_rules": "infra/prometheus/alerts/canonical_apex.yml",
+        "grafana_dashboard_uid": "tb-canonical-health",
+        "metrics_module": "observability/canonical_metrics.py",
+    }
+
+
 @app.post("/governance/release-evidence/diff")
 def post_release_evidence_diff(body: ReleaseEvidenceDiffRequest) -> dict[str, Any]:
     """Structured diff between baseline YAML and the running merged canonical config."""
