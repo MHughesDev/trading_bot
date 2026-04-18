@@ -14,6 +14,10 @@ from app.contracts.risk import RiskState
 from backtesting.execution_params import BacktestExecutionParams
 from backtesting.portfolio import PortfolioTracker
 from backtesting.replay_core import run_one_replay_step
+from backtesting.replay_helpers import (
+    execution_feedback_from_simulated_fill,
+    execution_profile_fill_ratio,
+)
 from backtesting.simulator import (
     cash_delta_for_trade,
     fill_price_with_slippage,
@@ -84,6 +88,9 @@ def replay_decisions(
     if fault_injection_profile:
         fault_base.update(fault_injection_profile)
 
+    exec_feedback_state: dict[str, dict[str, float]] = {}
+    prof_name = contract.execution_model_profile
+
     for row in frame.iter_rows(named=True):
         ts = row.get("timestamp")
         sub = raw.filter(pl.col("timestamp") <= ts) if ts is not None else raw
@@ -122,6 +129,7 @@ def replay_decisions(
             fault_profile=fault_base,
             collect_events=emit_canonical_events,
             events_out=row_events,
+            execution_feedback_state=exec_feedback_state,
         )
         fill_price: float | None = None
         fee_paid: Decimal | None = None
@@ -167,6 +175,18 @@ def replay_decisions(
                 pos += q
             else:
                 pos -= q
+
+        if executed is not None:
+            fill_px = float(fill_price) if fill_price is not None else float(mid)
+            fr = execution_profile_fill_ratio(prof_name)
+            execution_feedback_from_simulated_fill(
+                symbol=symbol,
+                mid_price=mid,
+                fill_price=fill_px,
+                fill_ratio=fr,
+                latency_ms=40.0 + 12.0 * (1.0 - fr),
+                exec_state=exec_feedback_state,
+            )
 
         row_dict: dict = {
             "timestamp": ts,
@@ -249,6 +269,8 @@ def replay_multi_asset_decisions(
     fault_base = dict(contract.fault_injection_profile)
     if fault_injection_profile:
         fault_base.update(fault_injection_profile)
+    exec_feedback_state: dict[str, dict[str, float]] = {}
+    prof_name = contract.execution_model_profile
     execp: BacktestExecutionParams | None = None
     rng = None
     portfolio: PortfolioTracker | None = None
@@ -312,6 +334,7 @@ def replay_multi_asset_decisions(
                 fault_profile=fault_base,
                 collect_events=emit_canonical_events,
                 events_out=row_events,
+                execution_feedback_state=exec_feedback_state,
             )
 
             fill_price: float | None = None
@@ -358,6 +381,18 @@ def replay_multi_asset_decisions(
                     positions[symbol] = positions.get(symbol, Decimal(0)) + q
                 else:
                     positions[symbol] = positions.get(symbol, Decimal(0)) - q
+
+            if executed is not None:
+                fill_px = float(fill_price) if fill_price is not None else float(mid)
+                fr = execution_profile_fill_ratio(prof_name)
+                execution_feedback_from_simulated_fill(
+                    symbol=symbol,
+                    mid_price=mid,
+                    fill_price=fill_px,
+                    fill_ratio=fr,
+                    latency_ms=40.0 + 12.0 * (1.0 - fr),
+                    exec_state=exec_feedback_state,
+                )
 
             one: dict[str, Any] = {
                 "route": route.route_id.value,

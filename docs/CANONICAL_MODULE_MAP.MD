@@ -2,7 +2,7 @@
 
 **Purpose:** Single **code-to-domain** map for the shared decision path after **FB-CAN-004…011**. Use it with **[`CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD)** (what to build toward) and **[`docs/Specs/README.MD`](Specs/README.MD)** (as-built file index).
 
-**Documentation last reviewed:** 2026-04-18 (FB-CAN-034: auction **`D_corr`/`D_thesis`/`D_liq`** + **`AuctionResult.clustering_metadata`**; FB-CAN-033: `classify_hard_override` + transition/occupancy on **`RiskState`**; FB-CAN-032: [`signal_confidence.py`](../app/config/signal_confidence.py); FB-CAN-031: missed-move + `trigger_false_positive_memory`; FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-035: [`execution_feedback_memory.py`](../data_plane/memory/execution_feedback_memory.py) EMA + **`canonical_exec_quality_penalty`**; FB-CAN-034: auction **`D_corr`/`D_thesis`/`D_liq`** + **`AuctionResult.clustering_metadata`**; FB-CAN-033: `classify_hard_override` + transition/occupancy on **`RiskState`**; FB-CAN-032: [`signal_confidence.py`](../app/config/signal_confidence.py); FB-CAN-031: missed-move + `trigger_false_positive_memory`; FB-CAN-029: [`canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py); FB-CAN-023: [`Specs/CANONICAL_PRECEDENCE.MD`](Specs/CANONICAL_PRECEDENCE.MD) clarifies as-built Specs vs APEX target).
 
 ---
 
@@ -26,6 +26,7 @@ Legacy **ForecastPacket → PolicySystem → proposal** remains the **forecast/r
 | Decision step | [`decision_engine/run_step.py`](../decision_engine/run_step.py) | **`run_decision_tick`** — single entry for live and replay. |
 | Typed input snapshots | [`app/contracts/decision_snapshots.py`](../app/contracts/decision_snapshots.py), [`app/contracts/snapshot_builders.py`](../app/contracts/snapshot_builders.py) | **FB-CAN-015:** boundary contracts + merge into effective feature row; diagnostics on packet. |
 | Feature normalization | [`data_plane/features/canonical_normalize.py`](../data_plane/features/canonical_normalize.py) | **FB-CAN-016:** aliases, freshness/reliability, completeness; `apply_normalization_degradation` in `state_engine.py`. |
+| Execution feedback memory | [`data_plane/memory/execution_feedback_memory.py`](../data_plane/memory/execution_feedback_memory.py) | **FB-CAN-035:** per-symbol EMA; boundary snapshot + `canonical_exec_quality_penalty` on feature row; replay updates after simulated fills. |
 | Forecast / structure (canonical view) | [`app/contracts/canonical_structure.py`](../app/contracts/canonical_structure.py), [`app/contracts/structure_adapter.py`](../app/contracts/structure_adapter.py) | **FB-CAN-017:** `CanonicalStructureOutput` from `ForecastPacket`; diagnostics on packet; feeds trigger + auction. |
 | Pipeline orchestration | [`decision_engine/pipeline.py`](../decision_engine/pipeline.py) | Boundary normalize + forecast packet build. |
 | Canonical post-forecast sequence | [`decision_engine/canonical_orchestrator.py`](../decision_engine/canonical_orchestrator.py) | **FB-CAN-029** — structure → state → trigger → auction → carry (shared by `pipeline.step`). |

@@ -76,6 +76,8 @@ def evaluate_trigger(
 
     spread_stress = _clip01(spread_bps / 80.0)
     exec_conf = _clip01(1.0 - spread_stress * 0.8)
+    dq = _safe_float(feature_row, "canonical_exec_quality_penalty", 0.0)
+    exec_conf = _clip01(exec_conf * (1.0 - 0.55 * _clip01(dq)))
     # Permissive defaults for stub/RNG paths; tighten when wiring canonical config.
     setup_threshold = 0.22
     setup_exec_floor = 0.12

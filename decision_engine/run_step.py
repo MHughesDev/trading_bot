@@ -44,6 +44,7 @@ def run_decision_tick(
     available_cash_usd: float | None = None,
     portfolio_equity_usd: float | None = None,
     replay_deterministic: bool = False,
+    execution_feedback_state: dict[str, dict[str, float]] | None = None,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, TradeAction | None, RiskState]:
     t0 = time.perf_counter()
     if not replay_deterministic:
@@ -105,6 +106,7 @@ def run_decision_tick(
         feed_last_message_at=feed_last_message_at,
         now_ref=data_timestamp,
         product_tradable=product_tradable,
+        execution_feedback_state=execution_feedback_state,
     )
     trade, risk_state = risk_engine.evaluate(
         symbol,

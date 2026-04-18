@@ -19,6 +19,11 @@ import numpy as np
 
 from app.config.settings import AppSettings, load_settings
 from app.contracts.decision_snapshots import ExecutionFeedbackSnapshot
+from data_plane.memory.execution_feedback_memory import (
+    execution_feedback_snapshot_from_memory,
+    memory_bucket_to_diagnostic,
+    merge_memory_into_feature_row,
+)
 from app.contracts.snapshot_builders import (
     boundary_input_to_diagnostic_dict,
     build_decision_boundary_input,
@@ -270,8 +275,19 @@ class DecisionPipeline:
         feed_last_message_at: datetime | None = None,
         now_ref: datetime | None = None,
         product_tradable: bool = True,
+        execution_feedback_state: dict[str, dict[str, float]] | None = None,
     ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, RiskState]:
         mp0 = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
+        ef_override = execution_feedback_snapshot
+        if execution_feedback_state is not None:
+            bucket = execution_feedback_state.get(symbol)
+            if bucket:
+                ef_override = execution_feedback_snapshot_from_memory(
+                    symbol=symbol,
+                    mid_price=mp0,
+                    data_timestamp=data_timestamp,
+                    bucket=bucket,
+                )
         boundary_input, feature_effective = build_decision_boundary_input(
             symbol=symbol,
             feature_row=feature_row,
@@ -279,8 +295,12 @@ class DecisionPipeline:
             mid_price=mp0,
             data_timestamp=data_timestamp,
             settings=self._settings,
-            execution_feedback=execution_feedback_snapshot,
+            execution_feedback=ef_override,
         )
+        if execution_feedback_state is not None:
+            b2 = execution_feedback_state.get(symbol)
+            if b2:
+                feature_effective = merge_memory_into_feature_row(feature_effective, b2)
         _ = _feature_vector(feature_effective)  # reserved for future feature-cache alignment
         self._log_serving_mode_once(self._settings)
 
@@ -328,6 +348,10 @@ class DecisionPipeline:
         if rp.binding_abstain and rp.binding_reason:
             pkt.forecast_diagnostics["binding_abstain"] = True
             pkt.forecast_diagnostics["binding_reason"] = rp.binding_reason
+        if execution_feedback_state is not None:
+            b3 = execution_feedback_state.get(symbol)
+            if b3:
+                pkt.forecast_diagnostics["execution_feedback_memory"] = memory_bucket_to_diagnostic(b3)
         self._last_forecast_packet = pkt
 
         mp = float(mid_price) if mid_price is not None else float(feature_effective.get("close", 1.0))
