@@ -900,7 +900,7 @@ ROWS: list[dict[str, str]] = [
         "batch": "CAN-STATE-OVR",
         "id": "FB-CAN-033",
         "kind": "feature",
-        "status": "Open",
+        "status": "Done",
         "summary_one_line": "Implement hard override taxonomy and degradation transition logging",
         "agent_task": "Implement explicit hard override taxonomy and degradation state transition accounting in state/risk layers, with deterministic event logging for override type, transition counts, and occupancy durations. Ensure downstream trade suppression behavior matches canonical safety semantics.",
         "affected_files": "decision_engine/state_engine.py|risk_engine/|observability/|app/contracts/|tests/",

@@ -10,6 +10,7 @@ after the pipeline returns a proposal.
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
 import numpy as np
@@ -17,6 +18,7 @@ import numpy as np
 from app.config.settings import AppSettings
 from app.contracts.decisions import ActionProposal, RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
+from app.contracts.canonical_state import DegradationLevel
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState
@@ -27,6 +29,7 @@ from decision_engine.spec_policy_proposal import run_spec_policy_step
 from decision_engine.state_engine import (
     apply_normalization_degradation,
     build_canonical_state,
+    classify_hard_override,
     merge_canonical_into_risk,
 )
 from decision_engine.trigger_engine import evaluate_trigger
@@ -64,6 +67,10 @@ def run_canonical_decision_sequence_after_forecast(
     settings: AppSettings,
     risk: RiskState,
     policy_system: PolicySystem | None,
+    feed_last_message_at: datetime | None = None,
+    data_timestamp: datetime | None = None,
+    now_ref: datetime | None = None,
+    product_tradable: bool = True,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, RiskState]:
     """Stages after ``ForecastPacket`` build: structure → state → trigger → auction → carry → ``RiskState``."""
 
@@ -75,6 +82,22 @@ def run_canonical_decision_sequence_after_forecast(
     regime_out = regime_output_from_forecast_packet(pkt)
     apex = build_canonical_state(pkt, feature_effective, spread_bps=spread_bps)
     apex = apply_normalization_degradation(apex, feature_effective)
+    ho, ho_kind = classify_hard_override(
+        risk=risk,
+        feature_row=feature_effective,
+        spread_bps=spread_bps,
+        settings=settings,
+        feed_last_message_at=feed_last_message_at,
+        data_timestamp=data_timestamp,
+        now_ref=now_ref,
+        product_tradable=product_tradable,
+    )
+    if ho:
+        apex = apex.model_copy(update={"degradation": DegradationLevel.NO_TRADE})
+    pkt.forecast_diagnostics["hard_override"] = {
+        "active": ho,
+        "kind": ho_kind.value,
+    }
     regime_out = regime_out.model_copy(update={"apex": apex})
 
     # --- trigger ---
@@ -94,10 +117,28 @@ def run_canonical_decision_sequence_after_forecast(
         trigger=trig,
         spread_bps=spread_bps,
         feature_row=feature_effective,
+        hard_override_active=ho,
+        hard_override_kind=ho_kind,
     )
 
     mp = float(mid_price)
     eq = float(portfolio_equity_usd)
+
+    if ho:
+        fc = ForecastOutput(
+            returns_1=0.0,
+            returns_3=0.0,
+            returns_5=0.0,
+            returns_15=0.0,
+            volatility=0.0,
+            uncertainty=1.0,
+        )
+        route = RouteDecision(
+            route_id=RouteId.NO_TRADE,
+            confidence=0.0,
+            ranking=[RouteId.NO_TRADE],
+        )
+        return regime_out, fc, route, None, risk
 
     if binding_abstain:
         fc = ForecastOutput(

@@ -66,6 +66,13 @@ def build_safety_snapshot_event(
         "canonical_degradation": getattr(risk, "canonical_degradation", None),
         "canonical_size_multiplier": getattr(risk, "canonical_size_multiplier", None),
         "trigger_false_positive_memory": getattr(risk, "trigger_false_positive_memory", None),
+        "hard_override_active": getattr(risk, "hard_override_active", None),
+        "hard_override_kind": getattr(
+            getattr(risk, "hard_override_kind", None), "value", getattr(risk, "hard_override_kind", None)
+        ),
+        "degradation_transition_count": getattr(risk, "degradation_transition_count", None),
+        "last_degradation_level": getattr(risk, "last_degradation_level", None),
+        "degradation_occupancy_ticks": getattr(risk, "degradation_occupancy_ticks", None),
     }
     if apex is not None:
         payload["apex_degradation"] = getattr(apex, "degradation", None)

@@ -102,6 +102,9 @@ def run_decision_tick(
         portfolio_equity_usd=eq,
         position_signed_qty=position_signed_qty,
         data_timestamp=data_timestamp,
+        feed_last_message_at=feed_last_message_at,
+        now_ref=data_timestamp,
+        product_tradable=product_tradable,
     )
     trade, risk_state = risk_engine.evaluate(
         symbol,

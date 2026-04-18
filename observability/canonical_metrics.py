@@ -34,6 +34,16 @@ CANONICAL_DEGRADATION_TICKS = Counter(
     "Per-tick degradation level observations (rate ~ occupancy)",
     ["symbol", "level"],
 )
+CANONICAL_HARD_OVERRIDE = Counter(
+    "tb_canonical_hard_override_total",
+    "Hard override classified this tick (APEX safety taxonomy)",
+    ["symbol", "kind"],
+)
+CANONICAL_DEGRADATION_TRANSITION_COUNT = Gauge(
+    "tb_canonical_degradation_transition_count",
+    "Cumulative degradation level transitions observed on RiskState",
+    ["symbol"],
+)
 
 # --- Trigger (spec §4.4) ---
 CANONICAL_TRIGGER_STAGE = Counter(
@@ -140,6 +150,17 @@ def record_canonical_post_tick(
         CANONICAL_NOVELTY.labels(symbol=sym).observe(float(apex.novelty))
         deg = getattr(apex.degradation, "value", str(apex.degradation))
         CANONICAL_DEGRADATION_TICKS.labels(symbol=sym, level=str(deg)).inc()
+
+    if risk is not None and bool(getattr(risk, "hard_override_active", False)):
+        hk = getattr(risk, "hard_override_kind", None)
+        k = getattr(hk, "value", str(hk or "unknown"))
+        CANONICAL_HARD_OVERRIDE.labels(symbol=sym, kind=str(k)).inc()
+    tc = getattr(risk, "degradation_transition_count", None)
+    if tc is not None:
+        try:
+            CANONICAL_DEGRADATION_TRANSITION_COUNT.labels(symbol=sym).set(float(tc))
+        except (TypeError, ValueError):
+            pass
 
     if forecast_packet is not None:
         CANONICAL_OOD_SCORE.labels(symbol=sym).observe(float(forecast_packet.ood_score))

@@ -5,6 +5,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from app.contracts.canonical_state import DegradationLevel
+from app.contracts.hard_override import HardOverrideKind
 
 
 class SystemMode(StrEnum):
@@ -40,3 +41,9 @@ class RiskState(BaseModel):
     carry_sleeve_last: dict | None = None
     # FB-CAN-031 — false-positive / late-chase memory [0,1] for auction penalty (deterministic EMA)
     trigger_false_positive_memory: float = Field(default=0.0, ge=0.0, le=1.0)
+    # FB-CAN-033 — hard override + degradation transition accounting (deterministic, replay-friendly)
+    hard_override_active: bool = False
+    hard_override_kind: HardOverrideKind = HardOverrideKind.NONE
+    degradation_transition_count: int = Field(default=0, ge=0)
+    last_degradation_level: str | None = None
+    degradation_occupancy_ticks: dict[str, int] = Field(default_factory=dict)

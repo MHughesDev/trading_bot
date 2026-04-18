@@ -6,10 +6,14 @@ Deterministic, replay-friendly; structural inputs default to neutral when absent
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
+from app.config.settings import AppSettings
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
 from app.contracts.forecast_packet import ForecastPacket
+from app.contracts.hard_override import HardOverrideKind
+from app.contracts.risk import RiskState, SystemMode
 from app.contracts.trigger import TriggerOutput
 from decision_engine.trigger_engine import asymmetry_score
 from risk_engine.canonical_sizing import classify_liquidation_mode, exec_confidence_from_spread
@@ -108,6 +112,102 @@ def build_canonical_state(
     )
 
 
+def classify_hard_override(
+    *,
+    risk: RiskState,
+    feature_row: dict[str, float] | None,
+    spread_bps: float,
+    settings: AppSettings,
+    feed_last_message_at: datetime | None,
+    data_timestamp: datetime | None,
+    now_ref: datetime | None,
+    product_tradable: bool = True,
+) -> tuple[bool, HardOverrideKind]:
+    """Deterministic hard-override classification (FB-CAN-033). First matching rule wins."""
+    if risk.mode != SystemMode.RUNNING:
+        return True, HardOverrideKind.SYSTEM_MODE
+
+    if not product_tradable:
+        return True, HardOverrideKind.PRODUCT_UNTRADABLE
+
+    stale_sec = float(settings.risk_stale_data_seconds)
+    max_spread = float(settings.risk_max_spread_bps)
+    max_dd = float(settings.risk_max_drawdown_pct)
+    ref = now_ref if now_ref is not None else datetime.now(UTC)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=UTC)
+    else:
+        ref = ref.astimezone(UTC)
+
+    if feed_last_message_at is not None:
+        flm = (
+            feed_last_message_at
+            if feed_last_message_at.tzinfo
+            else feed_last_message_at.replace(tzinfo=UTC)
+        ).astimezone(UTC)
+        if abs((ref - flm).total_seconds()) > stale_sec:
+            return True, HardOverrideKind.FEED_STALE
+
+    if data_timestamp is not None:
+        dt = data_timestamp if data_timestamp.tzinfo else data_timestamp.replace(tzinfo=UTC)
+        dt = dt.astimezone(UTC)
+        if abs((ref - dt).total_seconds()) > stale_sec:
+            return True, HardOverrideKind.DATA_TIMESTAMP_STALE
+
+    if float(spread_bps) > max_spread:
+        return True, HardOverrideKind.SPREAD_WIDE
+
+    if float(risk.current_drawdown_pct) > max_dd:
+        return True, HardOverrideKind.DRAWDOWN
+
+    fr = feature_row or {}
+    comp = fr.get("canonical_snapshot_complete")
+    if comp is not None:
+        try:
+            if float(comp) < 0.4:
+                return True, HardOverrideKind.NORMALIZATION_INCOMPLETE
+        except (TypeError, ValueError):
+            pass
+
+    sc = fr.get("signal_confidence_aggregate")
+    if sc is not None:
+        try:
+            if float(sc) < 0.25:
+                return True, HardOverrideKind.SIGNAL_CONFIDENCE_LOW
+        except (TypeError, ValueError):
+            pass
+
+    return False, HardOverrideKind.NONE
+
+
+def _apply_degradation_transition_fields(
+    risk: RiskState,
+    new_level: DegradationLevel,
+) -> dict[str, Any]:
+    """Update transition count, last level string, and per-level occupancy ticks."""
+    prev = risk.canonical_degradation
+    new_s = new_level.value
+    prev_s = prev.value if prev is not None else None
+
+    trans_count = int(risk.degradation_transition_count)
+    if prev_s is not None and prev_s != new_s:
+        trans_count += 1
+
+    occ = dict(risk.degradation_occupancy_ticks or {})
+    if prev_s == new_s:
+        occ[new_s] = int(occ.get(new_s, 0)) + 1
+    else:
+        for k in list(occ.keys()):
+            occ[k] = 0
+        occ[new_s] = 1
+
+    return {
+        "degradation_transition_count": trans_count,
+        "last_degradation_level": new_s,
+        "degradation_occupancy_ticks": occ,
+    }
+
+
 def apply_normalization_degradation(
     apex: CanonicalStateOutput,
     feature_row: dict[str, float] | None,
@@ -146,10 +246,10 @@ def merge_canonical_into_risk(
     trigger: TriggerOutput | None = None,
     spread_bps: float = 0.0,
     feature_row: dict[str, float] | None = None,
+    hard_override_active: bool = False,
+    hard_override_kind: HardOverrideKind = HardOverrideKind.NONE,
 ) -> Any:
     """Attach canonical degradation, size multiplier, and FB-CAN-007 sizing inputs."""
-    from app.contracts.risk import RiskState
-
     if not isinstance(risk, RiskState):
         return risk
     fr = feature_row or {}
@@ -169,11 +269,19 @@ def merge_canonical_into_risk(
         risk = risk.model_copy(update=norm_fields)
 
     if apex is None:
-        return risk
+        return risk.model_copy(
+            update={
+                "hard_override_active": bool(hard_override_active),
+                "hard_override_kind": hard_override_kind,
+            }
+        )
 
     upd: dict[str, Any] = {
         "canonical_degradation": apex.degradation,
         "canonical_size_multiplier": degradation_size_multiplier(apex.degradation),
+        "hard_override_active": bool(hard_override_active),
+        "hard_override_kind": hard_override_kind,
+        **_apply_degradation_transition_fields(risk, apex.degradation),
     }
     if forecast_packet is not None:
         close = max(_safe_float(feature_row or {}, "close", 1.0), 1e-12)
