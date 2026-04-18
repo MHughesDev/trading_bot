@@ -2,7 +2,7 @@
 
 **Purpose:** Single entry point for **target system architecture** during the **FB-CAN-*** canonical migration. Use this page to decide which documents are **binding for “what we are building toward”** vs **historical or as-implemented**.
 
-**Documentation last reviewed:** 2026-04-18.
+**Documentation last reviewed:** 2026-04-18 (FB-CAN-003: `app/config/canonical_config.py` + `apex_canonical` YAML).
 
 ---
 

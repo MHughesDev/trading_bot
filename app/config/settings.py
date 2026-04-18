@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import Field, SecretStr
+from pydantic import Field, PrivateAttr, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.config.canonical_config import CanonicalRuntimeConfig, resolve_canonical_config
 
 PlatformSupportedUniverseMode = Literal["intersection", "union"]
 
@@ -181,6 +183,19 @@ class AppSettings(BaseSettings):
     auth_session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     # FB-UX-006: Fernet key derived from this secret for per-user Alpaca/Coinbase blobs in SQLite
     auth_venue_credentials_master_secret: SecretStr | None = None
+
+    _canonical_runtime: CanonicalRuntimeConfig | None = PrivateAttr(default=None)
+
+    @property
+    def canonical(self) -> CanonicalRuntimeConfig:
+        """Immutable APEX canonical config bundle (metadata + domains).
+
+        Populated by :func:`load_settings` (YAML ``apex_canonical`` merged over legacy projection).
+        For bare ``AppSettings(...)`` (tests), lazily synthesizes from flat fields only.
+        """
+        if self._canonical_runtime is None:
+            self._canonical_runtime = resolve_canonical_config(self, None)
+        return self._canonical_runtime
 
 
 def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -404,12 +419,15 @@ def load_settings(path: Path | None = None) -> AppSettings:
     """Load default.yaml then apply NM_* env vars (env wins)."""
     p = path or _DEFAULT_YAML
     kwargs: dict[str, Any] = {}
+    raw_cfg: dict[str, Any] = {}
     if p.exists():
         with open(p, encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-        kwargs.update(_yaml_to_kwargs(cfg))
+            raw_cfg = yaml.safe_load(f) or {}
+        kwargs.update(_yaml_to_kwargs(raw_cfg))
     base = AppSettings(**kwargs)
     # Optional JSON manifest overrides serving paths (FB-SPEC-06); applied after env.
     from models.registry.active_set import apply_active_model_set
 
-    return apply_active_model_set(base)
+    out = apply_active_model_set(base)
+    out._canonical_runtime = resolve_canonical_config(out, raw_cfg)  # noqa: SLF001
+    return out
