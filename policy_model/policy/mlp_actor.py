@@ -51,6 +51,56 @@ class MultiBranchMLPPolicy:
             a = float(np.clip(a + self._rng.normal(0, 0.05), -1, 1))
         return PolicyAction(target_exposure=a, action_diagnostics={"deterministic": deterministic})
 
+    # --- training: analytic backprop for the 4-branch tanh MLP ---
+
+    def _branch_inputs(self, obs: PolicyObservation) -> list[tuple[np.ndarray, np.ndarray, str]]:
+        return [
+            (np.asarray(obs.forecast_features, dtype=np.float64), self._w_f, "w_f"),
+            (np.asarray(obs.portfolio_features, dtype=np.float64), self._w_p, "w_p"),
+            (np.asarray(obs.execution_features, dtype=np.float64), self._w_e, "w_e"),
+            (np.asarray(obs.risk_features, dtype=np.float64), self._w_r, "w_r"),
+        ]
+
+    def forward_with_cache(self, obs: PolicyObservation) -> tuple[float, dict]:
+        """Forward pass that retains intermediates needed by :meth:`backward`."""
+        xs: list[np.ndarray] = []
+        zs: list[np.ndarray] = []
+        for x, W, _name in self._branch_inputs(obs):
+            if len(x) < W.shape[0]:
+                x = np.pad(x, (0, W.shape[0] - len(x)))
+            x = x[: W.shape[0]]
+            xs.append(x)
+            zs.append(np.tanh(x @ W))
+        z = np.concatenate(zs)
+        s = float((z @ self._w_out).squeeze())
+        a = float(np.tanh(s))
+        return a, {"xs": xs, "zs": zs, "z": z, "a": a}
+
+    def backward(self, cache: dict, d_loss_d_a: float) -> dict[str, np.ndarray]:
+        """Gradients of a scalar loss w.r.t. every weight, given dL/da."""
+        a = cache["a"]
+        z = cache["z"]
+        d_s = d_loss_d_a * (1.0 - a * a)  # through output tanh
+        grad_w_out = z.reshape(-1, 1) * d_s  # (4*hidden, 1)
+        d_z = self._w_out.reshape(-1) * d_s  # (4*hidden,)
+        grads: dict[str, np.ndarray] = {"w_out": grad_w_out}
+        names = ("w_f", "w_p", "w_e", "w_r")
+        for i, name in enumerate(names):
+            zb = cache["zs"][i]
+            xb = cache["xs"][i]
+            d_zb = d_z[i * self._hidden : (i + 1) * self._hidden]
+            d_pre = d_zb * (1.0 - zb * zb)  # through branch tanh
+            grads[name] = np.outer(xb, d_pre)
+        return grads
+
+    def apply_grads(self, grads: dict[str, np.ndarray], lr: float) -> None:
+        """In-place SGD step."""
+        self._w_f -= lr * grads["w_f"]
+        self._w_p -= lr * grads["w_p"]
+        self._w_e -= lr * grads["w_e"]
+        self._w_r -= lr * grads["w_r"]
+        self._w_out -= lr * grads["w_out"]
+
     def save(self, path: str | Path) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
