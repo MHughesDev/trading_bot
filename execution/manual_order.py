@@ -31,6 +31,8 @@ async def submit_manual_order(
     *,
     order_type: str = "market",
     limit_price: Decimal | None = None,
+    stop_price: Decimal | None = None,
+    time_in_force: str = "gtc",
     mid_price: float | None = None,
     available_cash_usd: float | None = None,
     risk_state: RiskState | None = None,
@@ -73,6 +75,8 @@ async def submit_manual_order(
         available_cash_usd=available_cash_usd,
         order_type=order_type,
         limit_price=Decimal(str(limit_price)) if limit_price is not None else None,
+        stop_price=Decimal(str(stop_price)) if stop_price is not None else None,
+        time_in_force=time_in_force,
     )
     if ta is None:
         return {

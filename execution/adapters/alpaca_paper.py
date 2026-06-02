@@ -8,12 +8,55 @@ import random
 from decimal import Decimal
 
 from app.config.settings import AppSettings
-from app.contracts.orders import OrderIntent
+from app.contracts.orders import OrderIntent, OrderType, TimeInForce
 from execution.adapters.base_adapter import ExecutionAdapter, OrderAck, PositionSnapshot
 from execution.alpaca_util import from_alpaca_crypto_symbol, safe_exc_message, to_alpaca_crypto_symbol
 from execution.intent_gate import require_execution_allowed
 
 logger = logging.getLogger(__name__)
+
+# Alpaca crypto supports a subset of time-in-force values; GTD has no expiry plumbed
+# through OrderIntent, so it falls back to GTC.
+_ALPACA_TIF = {
+    TimeInForce.GTC: "gtc",
+    TimeInForce.IOC: "ioc",
+    TimeInForce.FOK: "fok",
+    TimeInForce.GTD: "gtc",
+}
+
+
+def alpaca_request_plan(order: OrderIntent) -> tuple[str, dict]:
+    """Map an :class:`OrderIntent` to an alpaca-py request class name and kwargs.
+
+    Pure (no alpaca-py import) so the type/price/TIF mapping is unit-testable without the
+    optional ``[alpaca]`` extra installed. ``side`` and ``time_in_force`` are returned as
+    lowercase strings matching the alpaca enum *values*; :meth:`submit_order` resolves them
+    to the real enums. Raises ``ValueError`` when a required price is missing.
+    """
+    sym = to_alpaca_crypto_symbol(order.symbol)
+    side = "buy" if order.side.value == "buy" else "sell"
+    tif = _ALPACA_TIF.get(order.time_in_force, "gtc")
+    base = {"symbol": sym, "qty": float(order.quantity), "side": side, "time_in_force": tif}
+    ot = order.order_type
+    if ot == OrderType.MARKET:
+        return "MarketOrderRequest", base
+    if ot == OrderType.LIMIT:
+        if order.limit_price is None:
+            raise ValueError("limit order requires limit_price")
+        return "LimitOrderRequest", {**base, "limit_price": float(order.limit_price)}
+    if ot == OrderType.STOP:
+        if order.stop_price is None:
+            raise ValueError("stop order requires stop_price")
+        return "StopOrderRequest", {**base, "stop_price": float(order.stop_price)}
+    if ot == OrderType.STOP_LIMIT:
+        if order.limit_price is None or order.stop_price is None:
+            raise ValueError("stop_limit order requires both stop_price and limit_price")
+        return "StopLimitOrderRequest", {
+            **base,
+            "stop_price": float(order.stop_price),
+            "limit_price": float(order.limit_price),
+        }
+    raise ValueError(f"unsupported order_type {ot!r}")
 
 # Transient Alpaca/network failures — bounded retries with jitter
 _RETRYABLE_EXCEPTION_NAMES = frozenset(
@@ -88,18 +131,15 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
 
     async def submit_order(self, order: OrderIntent) -> OrderAck:
         require_execution_allowed(order, self._settings)
+        from alpaca.trading import requests as areq
         from alpaca.trading.enums import OrderSide, TimeInForce
-        from alpaca.trading.requests import MarketOrderRequest
 
         client = self._ensure_client()
-        sym = to_alpaca_crypto_symbol(order.symbol)
-        side = OrderSide.BUY if order.side.value == "buy" else OrderSide.SELL
-        req = MarketOrderRequest(
-            symbol=sym,
-            qty=float(order.quantity),
-            side=side,
-            time_in_force=TimeInForce.GTC,
-        )
+        cls_name, kwargs = alpaca_request_plan(order)
+        sym = kwargs["symbol"]
+        kwargs["side"] = OrderSide.BUY if kwargs["side"] == "buy" else OrderSide.SELL
+        kwargs["time_in_force"] = TimeInForce(kwargs["time_in_force"])
+        req = getattr(areq, cls_name)(**kwargs)
 
         def _submit():
             return client.submit_order(req)

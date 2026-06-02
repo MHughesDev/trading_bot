@@ -1579,6 +1579,8 @@ def post_trade_order(
         body.quantity,
         order_type=body.order_type,
         limit_price=body.limit_price,
+        stop_price=body.stop_price,
+        time_in_force=body.time_in_force,
         mid_price=body.mid_price,
         source="control_plane",
     )

@@ -11,11 +11,52 @@ from urllib.parse import urlencode
 import httpx
 from coinbase import jwt_generator
 
-from app.contracts.orders import OrderIntent, OrderSide, OrderType
+from app.contracts.orders import OrderIntent, OrderSide, OrderType, TimeInForce
 
 logger = logging.getLogger(__name__)
 
 BROKERAGE_BASE = "https://api.coinbase.com/api/v3/brokerage"
+
+
+def build_coinbase_order_configuration(order: OrderIntent) -> dict[str, Any]:
+    """Map an :class:`OrderIntent` to a Coinbase Advanced Trade ``order_configuration``.
+
+    Coinbase supports market (IOC), limit (GTC/FOK), and stop-limit (GTC). It has no
+    native stop-*market* order, so a bare ``STOP`` intent is rejected rather than silently
+    downgraded to market (sensitive execution path — do not fake venue capability). Pure
+    function (no network) so the mapping is unit-testable.
+    """
+    qty = str(order.quantity)
+    ot = order.order_type
+    if ot == OrderType.MARKET:
+        return {"market_market_ioc": {"base_size": qty}}
+    if ot == OrderType.LIMIT:
+        if order.limit_price is None:
+            raise ValueError("limit order requires limit_price")
+        cfg = {"base_size": qty, "limit_price": str(order.limit_price)}
+        if order.time_in_force == TimeInForce.FOK:
+            return {"limit_limit_fok": cfg}
+        return {"limit_limit_gtc": cfg}
+    if ot == OrderType.STOP_LIMIT:
+        if order.limit_price is None or order.stop_price is None:
+            raise ValueError("stop_limit order requires both stop_price and limit_price")
+        # Buy-stops trigger as price rises to the stop; sell-stops as price falls to it.
+        stop_direction = (
+            "STOP_DIRECTION_STOP_UP" if order.side == OrderSide.BUY else "STOP_DIRECTION_STOP_DOWN"
+        )
+        return {
+            "stop_limit_stop_limit_gtc": {
+                "base_size": qty,
+                "limit_price": str(order.limit_price),
+                "stop_price": str(order.stop_price),
+                "stop_direction": stop_direction,
+            }
+        }
+    if ot == OrderType.STOP:
+        raise NotImplementedError(
+            "Coinbase supports stop-limit, not stop-market; use order_type=stop_limit with a limit_price"
+        )
+    raise NotImplementedError(f"unsupported order_type {ot!r} for Coinbase")
 
 
 def _rest_jwt(method: str, path: str, api_key: str, api_secret: str) -> str:
@@ -71,23 +112,15 @@ class CoinbaseAdvancedHTTPClient:
         raise ValueError(f"unsupported method {method}")
 
     async def create_order(self, order: OrderIntent) -> dict[str, Any]:
-        """Submit a market order (IOC)."""
+        """Submit an order (market IOC, limit GTC/FOK, or stop-limit GTC)."""
         path = "/api/v3/brokerage/orders"
         oid = order.client_order_id or f"tb-{order.symbol}-{id(order)}"
         side = "BUY" if order.side == OrderSide.BUY else "SELL"
-        qty = str(order.quantity)
         body: dict[str, Any] = {
             "client_order_id": oid[:128],
             "product_id": order.symbol,
             "side": side,
-            "order_configuration": {},
-        }
-        if order.order_type != OrderType.MARKET:
-            raise NotImplementedError("Only market orders are implemented for Coinbase live V1")
-        body["order_configuration"] = {
-            "market_market_ioc": {
-                "base_size": qty,
-            }
+            "order_configuration": build_coinbase_order_configuration(order),
         }
         resp = await self._request("POST", path, json_body=body)
         resp.raise_for_status()

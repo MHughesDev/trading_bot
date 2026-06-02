@@ -99,7 +99,8 @@ def build_default_tools(backend: PlatformBackend) -> list[ToolSpec]:
             name="place_order",
             description=(
                 "Place a buy or sell order. quantity is absolute base units. order_type is "
-                "'market' or 'limit' (limit requires limit_price). Pass mid_price to enable the "
+                "'market', 'limit' (needs limit_price), 'stop' (needs stop_price), or 'stop_limit' "
+                "(needs both). time_in_force is gtc/ioc/fok/gtd. Pass mid_price to enable the "
                 "available-cash check. The order passes RiskEngine gates and is risk-signed; it "
                 "may be blocked (see `blocked` reason codes in the result)."
             ),
@@ -109,8 +110,24 @@ def build_default_tools(backend: PlatformBackend) -> list[ToolSpec]:
                     "symbol": _SYMBOL,
                     "side": {"type": "string", "enum": ["buy", "sell"]},
                     "quantity": {"type": "string", "description": "Absolute quantity, e.g. '0.01'"},
-                    "order_type": {"type": "string", "enum": ["market", "limit"], "default": "market"},
-                    "limit_price": {"type": "string", "description": "Required for limit orders"},
+                    "order_type": {
+                        "type": "string",
+                        "enum": ["market", "limit", "stop", "stop_limit"],
+                        "default": "market",
+                    },
+                    "limit_price": {
+                        "type": "string",
+                        "description": "Required for limit and stop_limit orders",
+                    },
+                    "stop_price": {
+                        "type": "string",
+                        "description": "Required for stop and stop_limit orders",
+                    },
+                    "time_in_force": {
+                        "type": "string",
+                        "enum": ["gtc", "ioc", "fok", "gtd"],
+                        "default": "gtc",
+                    },
                     "mid_price": {"type": "number", "description": "Reference mark for cash gate"},
                 },
                 "required": ["symbol", "side", "quantity"],
@@ -122,6 +139,8 @@ def build_default_tools(backend: PlatformBackend) -> list[ToolSpec]:
                 quantity=str(_require(a, "quantity")),
                 order_type=str(a.get("order_type", "market")),
                 limit_price=a.get("limit_price"),
+                stop_price=a.get("stop_price"),
+                time_in_force=str(a.get("time_in_force", "gtc")),
                 mid_price=a.get("mid_price"),
             ),
             mutating=True,

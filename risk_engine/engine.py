@@ -220,6 +220,8 @@ class RiskEngine:
         available_cash_usd: float | None = None,
         order_type: str = "market",
         limit_price: Decimal | None = None,
+        stop_price: Decimal | None = None,
+        time_in_force: str = "gtc",
         allow_wide_spread: bool = False,
     ) -> tuple[TradeAction | None, RiskState]:
         """Risk gate for an explicit human/agent order with a caller-specified quantity.
@@ -278,28 +280,43 @@ class RiskEngine:
             if float(qty) * mid_price > float(available_cash_usd):
                 return None, _with_codes(risk, [RISK_BLOCK_AVAILABLE_CASH])
 
-        normalized_type = order_type if order_type in ("market", "limit") else "market"
+        normalized_type = (
+            order_type if order_type in ("market", "limit", "stop", "stop_limit") else "market"
+        )
+        needs_limit = normalized_type in ("limit", "stop_limit")
+        needs_stop = normalized_type in ("stop", "stop_limit")
+        tif = time_in_force if time_in_force in ("gtc", "ioc", "fok", "gtd") else "gtc"
         action = TradeAction(
             symbol=symbol,
             side=side.value,
             quantity=qty,
             order_type=normalized_type,
-            limit_price=limit_price if normalized_type == "limit" else None,
-            stop_price=None,
-            time_in_force="gtc",
+            limit_price=limit_price if needs_limit else None,
+            stop_price=stop_price if needs_stop else None,
+            time_in_force=tif,
             route_id=RouteId.NO_TRADE,
         )
         return action, _with_codes(risk, [])
 
     def to_order_intent(self, action: TradeAction, *, sign: bool | None = None) -> OrderIntent:
+        order_type_map = {
+            "market": OrderType.MARKET,
+            "limit": OrderType.LIMIT,
+            "stop": OrderType.STOP,
+            "stop_limit": OrderType.STOP_LIMIT,
+        }
+        try:
+            tif = TimeInForce(action.time_in_force)
+        except ValueError:
+            tif = TimeInForce.GTC
         intent = OrderIntent(
             symbol=action.symbol,
             side=OrderSide(action.side),
             quantity=action.quantity,
-            order_type=OrderType.MARKET if action.order_type == "market" else OrderType.LIMIT,
+            order_type=order_type_map.get(action.order_type, OrderType.MARKET),
             limit_price=action.limit_price,
             stop_price=action.stop_price,
-            time_in_force=TimeInForce.GTC,
+            time_in_force=tif,
             metadata={"route_id": action.route_id.value},
         )
         do_sign = sign if sign is not None else True

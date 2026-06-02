@@ -35,6 +35,8 @@ class PlatformBackend(Protocol):
         quantity: str,
         order_type: str = "market",
         limit_price: str | None = None,
+        stop_price: str | None = None,
+        time_in_force: str = "gtc",
         mid_price: float | None = None,
     ) -> dict[str, Any]: ...
     def flatten(self, symbol: str) -> dict[str, Any]: ...
@@ -123,6 +125,8 @@ class HttpPlatformBackend:
         quantity: str,
         order_type: str = "market",
         limit_price: str | None = None,
+        stop_price: str | None = None,
+        time_in_force: str = "gtc",
         mid_price: float | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -130,9 +134,12 @@ class HttpPlatformBackend:
             "side": side,
             "quantity": str(quantity),
             "order_type": order_type,
+            "time_in_force": time_in_force,
         }
         if limit_price is not None:
             body["limit_price"] = str(limit_price)
+        if stop_price is not None:
+            body["stop_price"] = str(stop_price)
         if mid_price is not None:
             body["mid_price"] = float(mid_price)
         return self._post("/trade/order", json=body)
