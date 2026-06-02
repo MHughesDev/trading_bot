@@ -1,4 +1,4 @@
-"""Per-user Alpaca / Coinbase API credentials — encrypted at rest (FB-UX-006)."""
+"""Per-user Alpaca / Coinbase / Webull API credentials — encrypted at rest (FB-UX-006)."""
 
 from __future__ import annotations
 
@@ -38,11 +38,18 @@ def ensure_venue_schema(db_path: Path) -> None:
                 alpaca_secret_enc BLOB,
                 coinbase_key_enc BLOB,
                 coinbase_secret_enc BLOB,
+                webull_key_enc BLOB,
+                webull_secret_enc BLOB,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
             """
         )
+        # Migrate pre-Webull tables: add columns if an older schema is present.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(user_venue_credentials)")}
+        for col in ("webull_key_enc", "webull_secret_enc"):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE user_venue_credentials ADD COLUMN {col} BLOB")
         conn.commit()
 
 
@@ -79,8 +86,11 @@ def save_credentials(
     alpaca_api_secret: str | None = None,
     coinbase_api_key: str | None = None,
     coinbase_api_secret: str | None = None,
+    webull_api_key: str | None = None,
+    webull_api_secret: str | None = None,
     clear_alpaca: bool = False,
     clear_coinbase: bool = False,
+    clear_webull: bool = False,
 ) -> None:
     """Upsert encrypted columns; None means leave unchanged unless clear_* is True."""
     f = _fernet(master_secret)
@@ -88,7 +98,8 @@ def save_credentials(
         ensure_venue_schema(db_path)
         with _connect(db_path) as conn:
             row = conn.execute(
-                "SELECT alpaca_key_enc, alpaca_secret_enc, coinbase_key_enc, coinbase_secret_enc "
+                "SELECT alpaca_key_enc, alpaca_secret_enc, coinbase_key_enc, coinbase_secret_enc, "
+                "webull_key_enc, webull_secret_enc "
                 "FROM user_venue_credentials WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
@@ -96,6 +107,8 @@ def save_credentials(
             asec = row["alpaca_secret_enc"] if row else None
             ck = row["coinbase_key_enc"] if row else None
             csec = row["coinbase_secret_enc"] if row else None
+            wk = row["webull_key_enc"] if row else None
+            wsec = row["webull_secret_enc"] if row else None
 
             if clear_alpaca:
                 ak, asec = None, None
@@ -113,20 +126,31 @@ def save_credentials(
                 if coinbase_api_secret is not None:
                     csec = _enc(f, coinbase_api_secret)
 
+            if clear_webull:
+                wk, wsec = None, None
+            else:
+                if webull_api_key is not None:
+                    wk = _enc(f, webull_api_key)
+                if webull_api_secret is not None:
+                    wsec = _enc(f, webull_api_secret)
+
             now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             conn.execute(
                 """
                 INSERT INTO user_venue_credentials (
-                    user_id, alpaca_key_enc, alpaca_secret_enc, coinbase_key_enc, coinbase_secret_enc, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    user_id, alpaca_key_enc, alpaca_secret_enc, coinbase_key_enc,
+                    coinbase_secret_enc, webull_key_enc, webull_secret_enc, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     alpaca_key_enc = excluded.alpaca_key_enc,
                     alpaca_secret_enc = excluded.alpaca_secret_enc,
                     coinbase_key_enc = excluded.coinbase_key_enc,
                     coinbase_secret_enc = excluded.coinbase_secret_enc,
+                    webull_key_enc = excluded.webull_key_enc,
+                    webull_secret_enc = excluded.webull_secret_enc,
                     updated_at = excluded.updated_at
                 """,
-                (user_id, ak, asec, ck, csec, now),
+                (user_id, ak, asec, ck, csec, wk, wsec, now),
             )
             conn.commit()
 
@@ -137,7 +161,8 @@ def load_masked(db_path: Path, master_secret: str, user_id: int) -> dict[str, An
     f = _fernet(master_secret)
     with _connect(db_path) as conn:
         row = conn.execute(
-            "SELECT alpaca_key_enc, alpaca_secret_enc, coinbase_key_enc, coinbase_secret_enc, updated_at "
+            "SELECT alpaca_key_enc, alpaca_secret_enc, coinbase_key_enc, coinbase_secret_enc, "
+            "webull_key_enc, webull_secret_enc, updated_at "
             "FROM user_venue_credentials WHERE user_id = ?",
             (user_id,),
         ).fetchone()
@@ -147,25 +172,35 @@ def load_masked(db_path: Path, master_secret: str, user_id: int) -> dict[str, An
             "alpaca_secret_set": False,
             "coinbase_key_set": False,
             "coinbase_secret_set": False,
+            "webull_key_set": False,
+            "webull_secret_set": False,
             "alpaca_key_masked": None,
             "alpaca_secret_masked": None,
             "coinbase_key_masked": None,
             "coinbase_secret_masked": None,
+            "webull_key_masked": None,
+            "webull_secret_masked": None,
             "updated_at": None,
         }
     ak = _dec(f, row["alpaca_key_enc"])
     asec = _dec(f, row["alpaca_secret_enc"])
     ck = _dec(f, row["coinbase_key_enc"])
     csec = _dec(f, row["coinbase_secret_enc"])
+    wk = _dec(f, row["webull_key_enc"])
+    wsec = _dec(f, row["webull_secret_enc"])
     return {
         "alpaca_key_set": bool(ak),
         "alpaca_secret_set": bool(asec),
         "coinbase_key_set": bool(ck),
         "coinbase_secret_set": bool(csec),
+        "webull_key_set": bool(wk),
+        "webull_secret_set": bool(wsec),
         "alpaca_key_masked": mask_secret(ak),
         "alpaca_secret_masked": mask_secret(asec),
         "coinbase_key_masked": mask_secret(ck),
         "coinbase_secret_masked": mask_secret(csec),
+        "webull_key_masked": mask_secret(wk),
+        "webull_secret_masked": mask_secret(wsec),
         "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
     }
 
@@ -178,7 +213,8 @@ def load_decrypted_credentials(
     f = _fernet(master_secret)
     with _connect(db_path) as conn:
         row = conn.execute(
-            "SELECT alpaca_key_enc, alpaca_secret_enc, coinbase_key_enc, coinbase_secret_enc "
+            "SELECT alpaca_key_enc, alpaca_secret_enc, coinbase_key_enc, coinbase_secret_enc, "
+            "webull_key_enc, webull_secret_enc "
             "FROM user_venue_credentials WHERE user_id = ?",
             (user_id,),
         ).fetchone()
@@ -188,10 +224,14 @@ def load_decrypted_credentials(
             "alpaca_api_secret": None,
             "coinbase_api_key": None,
             "coinbase_api_secret": None,
+            "webull_api_key": None,
+            "webull_api_secret": None,
         }
     return {
         "alpaca_api_key": _dec(f, row["alpaca_key_enc"]),
         "alpaca_api_secret": _dec(f, row["alpaca_secret_enc"]),
         "coinbase_api_key": _dec(f, row["coinbase_key_enc"]),
         "coinbase_api_secret": _dec(f, row["coinbase_secret_enc"]),
+        "webull_api_key": _dec(f, row["webull_key_enc"]),
+        "webull_api_secret": _dec(f, row["webull_secret_enc"]),
     }

@@ -39,6 +39,7 @@ from app.config.settings import AppSettings, load_settings
 from app.contracts.asset_model_manifest import AssetModelManifest
 from app.contracts.asset_lifecycle import AssetLifecycleState
 from app.contracts.auth_login import AuthUserResponse, LoginRequest
+from app.contracts.manual_order import FlattenRequest, ManualOrderRequest, ManualOrderResponse
 from app.contracts.user_registration import RegisterRequest, RegisterResponse
 from app.contracts.user_venue_credentials import VenueCredentialsPut, VenueCredentialsResponse
 from app.runtime.asset_execution_mode import (
@@ -90,6 +91,7 @@ from control_plane.execution_profile import (
 )
 from control_plane.microservice_health import probe_microservices_health
 from execution.flatten_stop import flatten_symbol_position_sync
+from execution.manual_order import submit_manual_order_sync
 from execution.pnl_summary import compute_pnl_series, compute_pnl_summary
 from execution.portfolio_positions import fetch_portfolio_positions
 from execution.service import ExecutionService
@@ -664,8 +666,11 @@ def put_venue_credentials(
         alpaca_api_secret=_nz(body.alpaca_api_secret),
         coinbase_api_key=_nz(body.coinbase_api_key),
         coinbase_api_secret=_nz(body.coinbase_api_secret),
+        webull_api_key=_nz(body.webull_api_key),
+        webull_api_secret=_nz(body.webull_api_secret),
         clear_alpaca=body.clear_alpaca,
         clear_coinbase=body.clear_coinbase,
+        clear_webull=body.clear_webull,
     )
     data = user_venue_credentials_mod.load_masked(settings.auth_users_db_path, master, user.id)
     return VenueCredentialsResponse(**data)
@@ -1552,3 +1557,52 @@ def post_asset_lifecycle_stop(
         "path": str(path),
         "flatten": flatten_report,
     }
+
+
+@app.post("/trade/order", response_model=ManualOrderResponse)
+def post_trade_order(
+    body: ManualOrderRequest,
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> ManualOrderResponse:
+    """Submit a manual (human-operator or agent) order — human-first trading surface.
+
+    The caller-specified ``quantity`` is honored (no automated sizing); RiskEngine hard
+    gates still apply and the intent is risk-signed before reaching the venue (paper by
+    default per execution mode). The MCP server posts here too, so humans and the AI agent
+    share one audited action path.
+    """
+    eff = merge_settings_for_execution(settings, tenant_ctx.get_current_user_id())
+    result = submit_manual_order_sync(
+        eff,
+        body.symbol.strip(),
+        body.side,
+        body.quantity,
+        order_type=body.order_type,
+        limit_price=body.limit_price,
+        mid_price=body.mid_price,
+        source="control_plane",
+    )
+    return ManualOrderResponse(
+        submitted=bool(result.get("submitted")),
+        symbol=body.symbol.strip(),
+        error=result.get("error"),
+        blocked=list(result.get("blocked") or []),
+        side=result.get("side"),
+        quantity=result.get("quantity"),
+        order_type=result.get("order_type"),
+        position_qty_before=result.get("position_qty_before"),
+        acks=list(result.get("acks") or []),
+    )
+
+
+@app.post("/trade/flatten")
+def post_trade_flatten(
+    body: FlattenRequest,
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Flatten (market-close) the open venue position for one symbol — human/agent action."""
+    sym = body.symbol.strip()
+    eff = merge_settings_for_execution(settings, tenant_ctx.get_current_user_id())
+    exec_svc = ExecutionService(eff)
+    report = flatten_symbol_position_sync(eff, sym, execution_service=exec_svc)
+    return {"symbol": sym, "flatten": report}

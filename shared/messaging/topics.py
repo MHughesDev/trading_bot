@@ -5,6 +5,9 @@ from __future__ import annotations
 MARKET_TICK_NORMALIZED_V1 = "market.tick.normalized.v1"
 MARKET_BOOK_NORMALIZED_V1 = "market.book.normalized.v1"
 MARKET_HEARTBEAT_V1 = "market.heartbeat.v1"
+# Emitted when a canonical bar closes (new atomic data unit persisted). The platform uses
+# this to trigger an AI decision — the platform calls the AI, not the other way around.
+MARKET_BAR_CLOSED_V1 = "market.bar.closed.v1"
 
 FEATURES_ROW_GENERATED_V1 = "features.row.generated.v1"
 

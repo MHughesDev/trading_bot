@@ -76,6 +76,55 @@ def _run_initialize(sym: str, msg_key: str) -> None:
     st.rerun()
 
 
+def _render_trade_panel(sym: str) -> None:
+    """Manual buy/sell/flatten for a human operator (routes through /trade → risk + signing)."""
+    st.markdown("#### Trade")
+    st.caption("Manual order — same risk gate + signing as the automated bot (paper by default).")
+    with st.form(f"trade_form_{sym}"):
+        c1, c2, c3 = st.columns([1, 1, 1])
+        side = c1.selectbox("Side", ["buy", "sell"], key=f"trade_side_{sym}")
+        qty = c2.number_input(
+            "Quantity", min_value=0.0, value=0.0, step=0.001, format="%.6f", key=f"trade_qty_{sym}"
+        )
+        otype = c3.selectbox("Type", ["market", "limit"], key=f"trade_type_{sym}")
+        limit_price = st.number_input(
+            "Limit price (limit orders)", min_value=0.0, value=0.0, step=0.01, key=f"trade_limit_{sym}"
+        )
+        submitted = st.form_submit_button("Place order", type="primary", use_container_width=True)
+    if submitted:
+        if qty <= 0:
+            st.error("Quantity must be greater than 0.")
+        else:
+            body: dict[str, Any] = {
+                "symbol": sym,
+                "side": side,
+                "quantity": str(qty),
+                "order_type": otype,
+            }
+            if otype == "limit" and limit_price > 0:
+                body["limit_price"] = str(limit_price)
+            try:
+                r = api_post_json("/trade/order", body)
+                if r.get("submitted"):
+                    st.success(f"Order submitted: {side} {qty} {sym}")
+                    maybe_toast(f"Order submitted: {side} {qty} {sym}", icon="✅")
+                else:
+                    reason = ", ".join(r.get("blocked") or []) or str(r.get("error") or "blocked")
+                    st.warning(f"Order not submitted — {reason}.")
+            except Exception as e:
+                st.error(str(e))
+    if st.button("Flatten position", key=f"trade_flatten_{sym}", use_container_width=True):
+        try:
+            r = api_post_json("/trade/flatten", {"symbol": sym})
+            rep = r.get("flatten", {}) if isinstance(r, dict) else {}
+            if rep.get("submitted"):
+                st.success(f"Flatten submitted for {sym}.")
+            else:
+                st.info(f"Flatten: {rep.get('skipped') or rep.get('error') or 'no position'}.")
+        except Exception as e:
+            st.error(str(e))
+
+
 def _render_ohlc_chart(sym: str) -> None:
     """FB-AP-028: OHLC from ``/assets/chart/bars``; week/month from daily rollup."""
     left, right = st.columns([4, 2])
@@ -321,6 +370,8 @@ def render_asset_page(symbol: str) -> None:
             st.caption(f"Mode `{eff}` (default `{default_em}`)")
     except Exception as e:
         st.warning(f"Execution mode: {e}")
+
+    _render_trade_panel(sym)
 
     try:
         m = api_get_json(f"/assets/models/{sym}")

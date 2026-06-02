@@ -54,6 +54,7 @@ from decision_engine.audit import decision_trace
 from decision_engine.feature_frame import enrich_bars_last_row, merge_feature_overlays
 from decision_engine.features_live import feature_row_from_tick
 from decision_engine.pipeline import DecisionPipeline
+from decision_engine.bar_event_trigger import MARKET_BAR_CLOSED_V1, publish_bar_closed
 from decision_engine.run_step import run_decision_tick
 from execution.adapters.base_adapter import PositionSnapshot
 from execution.credentials import venue_credentials_configured
@@ -227,6 +228,17 @@ async def run_live_loop(
             logger.exception("microservice runtime bridge init failed; continuing without bridge")
             runtime_bridge = None
             use_external_execution_gateway = False
+
+    # Bar-close → AI decision trigger: when enabled, publish a market.bar.closed.v1 event the
+    # moment a new canonical bar is persisted, so a decoupled BarDecisionTrigger drives the AI.
+    bar_event_bus = None
+    if cfg.bar_close_decision_trigger_enabled:
+        try:
+            bar_event_bus = create_message_bus()
+            logger.info("bar-close decision trigger enabled; publishing %s", MARKET_BAR_CLOSED_V1)
+        except Exception:
+            logger.exception("bar-close trigger bus init failed; continuing without it")
+            bar_event_bus = None
 
     qdb: QuestDBWriter | None = None
     if (
@@ -491,6 +503,23 @@ async def run_live_loop(
                         logger.debug("watermark write failed symbol=%s (non-fatal)", symbol)
                 except Exception:
                     logger.exception("questdb insert_bar failed")
+
+            # New bar added → signal the AI (platform triggers the AI, not vice-versa).
+            if bar_event_bus is not None and completed_bar is not None:
+                try:
+                    publish_bar_closed(
+                        bar_event_bus,
+                        symbol=symbol,
+                        ts=completed_bar["timestamp"],
+                        interval_seconds=bar_sec,
+                        open=float(completed_bar["open"]),
+                        high=float(completed_bar["high"]),
+                        low=float(completed_bar["low"]),
+                        close=float(completed_bar["close"]),
+                        volume=float(completed_bar["volume"]),
+                    )
+                except Exception:
+                    logger.debug("bar_closed event publish failed symbol=%s (non-fatal)", symbol)
 
             overlay = feature_row_from_tick(
                 norm,
