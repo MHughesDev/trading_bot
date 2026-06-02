@@ -9,12 +9,14 @@ logic can be unit-tested without real subprocesses or sockets.
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import IO, Any
 
 # Defaults — local-only binds; the desktop window is the single client.
 DEFAULT_API_HOST = "127.0.0.1"
@@ -85,6 +87,13 @@ def build_service_specs(
     return specs
 
 
+def _no_window_creationflags() -> int:
+    """``CREATE_NO_WINDOW`` on Windows (suppresses child console windows), else 0."""
+    if sys.platform.startswith("win"):
+        return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return 0
+
+
 def streamlit_health_url(ui_host: str = DEFAULT_UI_HOST, ui_port: int = DEFAULT_UI_PORT) -> str:
     """Streamlit's built-in health endpoint (returns 200 once the server is up)."""
     return f"http://{ui_host}:{int(ui_port)}/_stcore/health"
@@ -125,25 +134,55 @@ class DesktopProcessSupervisor:
         *,
         env: dict[str, str] | None = None,
         cwd: str | None = None,
-        spawn: Callable[..., Any] = subprocess.Popen,
+        spawn: Callable[..., Any] | None = None,
+        log_dir: str | Path | None = None,
     ) -> None:
         self._specs = list(specs)
         self._env = env
         self._cwd = cwd
-        self._spawn = spawn
+        # Default spawn suppresses child console windows on Windows and sends
+        # their output to per-service log files instead of new terminals.
+        self._spawn = spawn or self._windowless_spawn
+        self._log_dir = Path(log_dir) if log_dir is not None else None
         self._procs: list[tuple[str, Any]] = []
+        self._log_handles: list[IO[Any]] = []
 
     @property
     def names(self) -> list[str]:
         return [name for name, _ in self._procs]
+
+    def _windowless_spawn(self, args: list[str], *, env=None, cwd=None, name: str = "service"):
+        """Real-process spawn: no extra console window, output → a log file."""
+        kwargs: dict[str, Any] = {"env": env, "cwd": cwd}
+        flags = _no_window_creationflags()
+        if flags:
+            kwargs["creationflags"] = flags
+        if self._log_dir is not None:
+            self._log_dir.mkdir(parents=True, exist_ok=True)
+            log_fh = open(self._log_dir / f"{name}.log", "w", encoding="utf-8", buffering=1)  # noqa: SIM115
+            self._log_handles.append(log_fh)
+            kwargs["stdout"] = log_fh
+            kwargs["stderr"] = subprocess.STDOUT
+        return subprocess.Popen(args, **kwargs)
 
     def start(self) -> None:
         """Launch every spec in order. Already-started supervisors are a no-op."""
         if self._procs:
             return
         for spec in self._specs:
-            proc = self._spawn(spec.args, env=self._env, cwd=self._cwd)
+            proc = self._call_spawn(spec)
             self._procs.append((spec.name, proc))
+
+    def _call_spawn(self, spec: ServiceSpec) -> Any:
+        """Invoke the spawn callable, passing ``name`` only if it is accepted.
+
+        Injected test spawns use ``(args, env, cwd)``; the built-in windowless
+        spawn also takes ``name`` so each child gets its own log file.
+        """
+        try:
+            return self._spawn(spec.args, env=self._env, cwd=self._cwd, name=spec.name)
+        except TypeError:
+            return self._spawn(spec.args, env=self._env, cwd=self._cwd)
 
     def first_dead(self) -> str | None:
         """Name of the first child that has already exited, else None."""
@@ -158,6 +197,12 @@ class DesktopProcessSupervisor:
         for name, proc in reversed(self._procs):
             self._terminate_one(proc, timeout_s=timeout_s)
         self._procs = []
+        for fh in self._log_handles:
+            try:
+                fh.close()
+            except Exception:
+                pass
+        self._log_handles = []
 
     @staticmethod
     def _terminate_one(proc: Any, *, timeout_s: float) -> None:

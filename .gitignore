@@ -18,6 +18,9 @@ build/
 # Local config diff audit trail (FB-CAN-057)
 models/registry/config_diff_audit.jsonl
 
+# Desktop launcher service logs (per machine)
+logs/desktop/
+
 # Runtime operator state (per machine)
 data/system_power.json
 data/execution_profile.json

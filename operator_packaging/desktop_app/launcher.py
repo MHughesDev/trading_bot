@@ -158,9 +158,12 @@ def main() -> int:
         ui_port=ui_port,
         enable_supervisor=enable_supervisor,
     )
-    supervisor = DesktopProcessSupervisor(specs, env=env, cwd=str(root))
+    supervisor = DesktopProcessSupervisor(
+        specs, env=env, cwd=str(root), log_dir=root / "logs" / "desktop"
+    )
 
     print("[desktop] starting services:", ", ".join(s.name for s in specs))
+    print(f"[desktop] service output -> {root / 'logs' / 'desktop'} (no extra windows)")
     supervisor.start()
     try:
         print(f"[desktop] waiting for the dashboard at {ui_url} ...")

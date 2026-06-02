@@ -83,6 +83,35 @@ def test_supervisor_start_passes_env_cwd_and_stops_in_reverse():
     assert all(p.terminated for p in spawned)
 
 
+def test_supervisor_default_spawn_suppresses_windows_and_writes_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import operator_packaging.desktop_app.process_supervisor as ps
+
+    captured: list[dict] = []
+
+    def fake_popen(args, **kwargs):
+        captured.append({"args": args, **kwargs})
+        return _FakeProc(args)
+
+    # Pretend we are on Windows so CREATE_NO_WINDOW is requested.
+    monkeypatch.setattr(ps, "_no_window_creationflags", lambda: 0x08000000)
+    monkeypatch.setattr(ps.subprocess, "Popen", fake_popen)
+
+    log_dir = tmp_path / "logs"
+    sup = ps.DesktopProcessSupervisor(
+        [ServiceSpec("api", ["x"]), ServiceSpec("ui", ["y"])], log_dir=log_dir
+    )
+    sup.start()
+
+    assert all(c["creationflags"] == 0x08000000 for c in captured)
+    # Each child got its own log file as stdout, stderr folded in.
+    assert (log_dir / "api.log").exists()
+    assert (log_dir / "ui.log").exists()
+    assert all("stdout" in c and c["stderr"] is ps.subprocess.STDOUT for c in captured)
+    sup.stop()
+
+
 def test_supervisor_first_dead_detects_early_exit():
     def spawn(args, env=None, cwd=None):
         return _FakeProc(args, exit_code=1)
