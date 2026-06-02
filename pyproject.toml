@@ -50,9 +50,12 @@ all = [
 
 [project.scripts]
 tb-train-forecaster-distill = "forecaster_model.training.distill_mlp:main"
+trading-bot-desktop = "operator_packaging.desktop_app.launcher:main"
+tb-install-desktop-shortcut = "operator_packaging.desktop_app.shortcuts:main"
 
 [tool.setuptools.package-data]
 "app" = ["config/*.yaml"]
+"operator_packaging" = ["desktop_app/assets/*.svg"]
 
 [tool.setuptools.packages.find]
 where = ["."]

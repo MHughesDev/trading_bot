@@ -19,6 +19,31 @@ This document brainstorms **low-friction Windows setup** (`setup.bat` / `run.bat
 
 ---
 
+## 1.2 One-click desktop app (cross-platform)
+
+**`operator_packaging/desktop_app`** is the integrated, OS-agnostic launcher: one command (or one desktop icon) starts the **control-plane API** + **Streamlit dashboard** (and, only when **`NM_DESKTOP_START_SUPERVISOR=true`**, the power supervisor), waits for the UI, opens a **native pywebview window on the login screen**, and **stops every child process when the window is closed**. Unlike the bare **`operator_packaging.desktop_shell`** (window only), this one owns the whole lifecycle.
+
+**Run it (any platform), after `pip install -e ".[dashboard]"`:**
+
+```bash
+trading-bot-desktop                       # console script
+python -m operator_packaging.desktop_app  # equivalent
+```
+
+**Make a clickable desktop icon:**
+
+```bash
+python scripts/install_desktop_shortcut.py   # or: tb-install-desktop-shortcut
+```
+
+This detects the OS and writes a shortcut to your Desktop — **`.vbs`** (Windows, runs `pythonw` with no console), **`.command`** (macOS), or **`.desktop`** (Linux, uses `operator_packaging/desktop_app/assets/icon.svg`).
+
+**Session behavior (signed in until the app closes):** on launch the desktop launcher **clears all operator sessions** (so you always start at the login screen) and sets **`NM_AUTH_IDLE_TIMEOUT_SECONDS`** very high for the run (so you are not idled out). It also forces **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=true`** / **`NM_AUTH_SESSION_ENABLED=true`** and drops any **`NM_CONTROL_PLANE_API_KEY`** from the Streamlit process so a human actually signs in. Closing the window ends the run; the next launch asks for login again.
+
+**Tunables:** `NM_DESKTOP_UI_HOST` / `NM_DESKTOP_UI_PORT` (default `127.0.0.1:8501`), `NM_DESKTOP_API_HOST` / `NM_DESKTOP_API_PORT` (default `127.0.0.1:8000`), `NM_DESKTOP_START_SUPERVISOR` (default off — keeps "just trying it out" away from any venue), `NM_DESKTOP_STARTUP_TIMEOUT_SECONDS` (default 90). If pywebview is missing, the launcher falls back to opening your default browser and keeps the stack alive until Ctrl+C.
+
+---
+
 ## 1.1 Windows distribution (PyInstaller)
 
 **FB-UI-01-02** — practical notes for shipping **`trading_bot_operator_launcher.exe`**:

@@ -44,6 +44,17 @@ run.bat
 doctor.bat                  REM optional env doctor
 ```
 
+### 🖱️ One-click desktop app (optional)
+
+Prefer an icon over the terminal? After setup, install the dashboard extra and create a desktop shortcut:
+
+```bash
+pip install -e ".[dashboard]"
+python scripts/install_desktop_shortcut.py   # writes a Desktop shortcut for your OS
+```
+
+Double-click it (or run **`trading-bot-desktop`**) to start the API + dashboard, open a **native app window on the login screen**, and stop everything when you close the window. You stay signed in until the app is closed; the next launch asks for login again. Details: [`docs/operations/windows_operator_ui.md`](docs/operations/windows_operator_ui.md) §1.2.
+
 **Tips**
 
 - Want to skip Docker for a run? Set **`NM_SKIP_DOCKER=1`** (venv and pip still run). See [`.env.example`](.env.example).

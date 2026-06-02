@@ -98,6 +98,20 @@ def revoke_session(db_path: Path, token: str) -> bool:
             return cur.rowcount > 0
 
 
+def clear_all_sessions(db_path: Path) -> int:
+    """Delete every operator session row; returns the number removed.
+
+    Used by the desktop launcher so each app launch starts at the login screen
+    (no session survives a restart). Safe when the DB/table does not exist yet.
+    """
+    with _lock:
+        ensure_sessions_schema(db_path)
+        with _connect(db_path) as conn:
+            cur = conn.execute("DELETE FROM operator_sessions")
+            conn.commit()
+            return int(cur.rowcount or 0)
+
+
 def touch_session(db_path: Path, token: str) -> bool:
     """Update ``last_activity_at`` for a valid, non-revoked session token."""
     tok = (token or "").strip()
