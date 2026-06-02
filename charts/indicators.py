@@ -421,3 +421,14 @@ def available_indicators() -> list[IndicatorSpec]:
 def reference_levels(key: str) -> tuple[float, ...]:
     spec = REGISTRY.get(key.lower().replace(" ", "_"))
     return spec.reference_levels if spec else ()
+
+
+def indicator_label_to_key() -> dict[str, str]:
+    """Ordered {label: key} map for building a UI multiselect (category, label order)."""
+    return {spec.label: spec.key for spec in available_indicators()}
+
+
+def keys_from_labels(labels: list[str]) -> list[str]:
+    """Map selected multiselect labels back to registry keys (unknown labels ignored)."""
+    mapping = indicator_label_to_key()
+    return [mapping[label] for label in labels if label in mapping]

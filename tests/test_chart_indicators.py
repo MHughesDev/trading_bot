@@ -11,6 +11,8 @@ from charts._helpers import compute_indicator_frames  # noqa: E402
 from charts.indicators import (  # noqa: E402
     REGISTRY,
     available_indicators,
+    indicator_label_to_key,
+    keys_from_labels,
     overlay_keys,
     sub_pane_keys,
 )
@@ -59,6 +61,15 @@ def test_every_indicator_computes_finite(key: str) -> None:
 def test_unknown_indicator_raises() -> None:
     with pytest.raises(ValueError):
         compute_indicator_frames(_frame(), "definitely_not_an_indicator")
+
+
+def test_label_key_roundtrip_for_multiselect() -> None:
+    mapping = indicator_label_to_key()
+    # Every label maps to a registered key.
+    assert all(key in REGISTRY for key in mapping.values())
+    # Selecting labels yields the matching keys; unknown labels are ignored.
+    keys = keys_from_labels(["EMA (Exponential MA)", "Bollinger Bands", "Not An Indicator"])
+    assert keys == ["ema", "bollinger_bands"]
 
 
 def test_value_bounds_and_relationships() -> None:
