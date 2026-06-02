@@ -27,6 +27,11 @@ from control_plane.asset_lifecycle_actions import (
 from control_plane.app_toasts import maybe_toast
 from control_plane.asset_manifest_card import manifest_model_rows
 from control_plane.asset_page_helpers import normalize_symbol, validate_symbol_display
+from control_plane.manual_trade_form import (
+    ORDER_TYPES,
+    TIME_IN_FORCE,
+    build_manual_order_body,
+)
 from control_plane.navigation import DASHBOARD_PAGE
 from control_plane.watchlist import add_watchlist_symbol, is_pinned, remove_watchlist_symbol
 from control_plane.streamlit_util import (
@@ -86,23 +91,32 @@ def _render_trade_panel(sym: str) -> None:
         qty = c2.number_input(
             "Quantity", min_value=0.0, value=0.0, step=0.001, format="%.6f", key=f"trade_qty_{sym}"
         )
-        otype = c3.selectbox("Type", ["market", "limit"], key=f"trade_type_{sym}")
-        limit_price = st.number_input(
-            "Limit price (limit orders)", min_value=0.0, value=0.0, step=0.01, key=f"trade_limit_{sym}"
+        otype = c3.selectbox("Type", list(ORDER_TYPES), key=f"trade_type_{sym}")
+        p1, p2, p3 = st.columns([1, 1, 1])
+        limit_price = p1.number_input(
+            "Limit price", min_value=0.0, value=0.0, step=0.01, key=f"trade_limit_{sym}",
+            help="Required for limit and stop-limit orders",
         )
+        stop_price = p2.number_input(
+            "Stop price", min_value=0.0, value=0.0, step=0.01, key=f"trade_stop_{sym}",
+            help="Required for stop and stop-limit orders",
+        )
+        tif = p3.selectbox("Time in force", list(TIME_IN_FORCE), key=f"trade_tif_{sym}")
         submitted = st.form_submit_button("Place order", type="primary", use_container_width=True)
     if submitted:
-        if qty <= 0:
-            st.error("Quantity must be greater than 0.")
+        try:
+            body: dict[str, Any] = build_manual_order_body(
+                symbol=sym,
+                side=side,
+                quantity=qty,
+                order_type=otype,
+                limit_price=limit_price or None,
+                stop_price=stop_price or None,
+                time_in_force=tif,
+            )
+        except ValueError as e:
+            st.error(str(e))
         else:
-            body: dict[str, Any] = {
-                "symbol": sym,
-                "side": side,
-                "quantity": str(qty),
-                "order_type": otype,
-            }
-            if otype == "limit" and limit_price > 0:
-                body["limit_price"] = str(limit_price)
             try:
                 r = api_post_json("/trade/order", body)
                 if r.get("submitted"):
