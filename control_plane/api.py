@@ -666,8 +666,11 @@ def put_venue_credentials(
         alpaca_api_secret=_nz(body.alpaca_api_secret),
         coinbase_api_key=_nz(body.coinbase_api_key),
         coinbase_api_secret=_nz(body.coinbase_api_secret),
+        webull_api_key=_nz(body.webull_api_key),
+        webull_api_secret=_nz(body.webull_api_secret),
         clear_alpaca=body.clear_alpaca,
         clear_coinbase=body.clear_coinbase,
+        clear_webull=body.clear_webull,
     )
     data = user_venue_credentials_mod.load_masked(settings.auth_users_db_path, master, user.id)
     return VenueCredentialsResponse(**data)

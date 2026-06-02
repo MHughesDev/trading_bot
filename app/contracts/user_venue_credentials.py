@@ -12,8 +12,11 @@ class VenueCredentialsPut(BaseModel):
     alpaca_api_secret: str | None = None
     coinbase_api_key: str | None = None
     coinbase_api_secret: str | None = None
+    webull_api_key: str | None = None
+    webull_api_secret: str | None = None
     clear_alpaca: bool = False
     clear_coinbase: bool = False
+    clear_webull: bool = False
 
 
 class VenueCredentialsResponse(BaseModel):
@@ -21,8 +24,12 @@ class VenueCredentialsResponse(BaseModel):
     alpaca_secret_set: bool
     coinbase_key_set: bool
     coinbase_secret_set: bool
+    webull_key_set: bool = False
+    webull_secret_set: bool = False
     alpaca_key_masked: str | None = None
     alpaca_secret_masked: str | None = None
     coinbase_key_masked: str | None = None
     coinbase_secret_masked: str | None = None
+    webull_key_masked: str | None = None
+    webull_secret_masked: str | None = None
     updated_at: str | None = None
