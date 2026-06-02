@@ -1,7 +1,6 @@
 """Load YAML defaults + environment overrides (NM_ prefix)."""
 
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Any, Literal
 
@@ -68,8 +67,8 @@ class AppSettings(BaseSettings):
     position_reconcile_interval_seconds: int = 60
 
     market_data_provider: str = "kraken"
-    market_data_bar_interval_seconds: int = 1
-    training_data_granularity_seconds: int = 1
+    market_data_bar_interval_seconds: int = 60
+    training_data_granularity_seconds: int = 60
     market_data_symbols: list[str] = Field(
         default_factory=lambda: ["BTC-USD", "ETH-USD", "SOL-USD"]
     )
@@ -133,9 +132,9 @@ class AppSettings(BaseSettings):
     questdb_persist_canonical_bars: bool = False
     questdb_persist_microservice_events: bool = False
     # FB-AP-018: on live loop start, compare QuestDB max(ts) to last closed bucket for initialized symbols
-    questdb_startup_gap_detection: bool = False
+    questdb_startup_gap_detection: bool = True
     # FB-AP-019: after gap detection, fetch Kraken REST for gaps and insert into canonical_bars
-    questdb_startup_kraken_backfill: bool = False
+    questdb_startup_kraken_backfill: bool = True
     # When QuestDB has no rows for a symbol, cap how far back REST fetch starts (days before last closed bucket)
     questdb_backfill_max_lookback_days: int = 14
     questdb_batch_max_rows: int = 500
@@ -167,6 +166,8 @@ class AppSettings(BaseSettings):
     models_forecaster_torch_path: str | None = None
     # Optional NPZ: `MultiBranchMLPPolicy` weights for PolicySystem actor (FB-SPEC-02)
     models_policy_mlp_path: str | None = None
+    # Optional joblib: real-data `QuantileForecasterArtifact` (sklearn quantile) → live ForecastPacket (FB-SPEC-02)
+    models_forecaster_quantile_path: str | None = None
     # Optional JSON: promoted serving paths (overrides env for keys present; FB-SPEC-06)
     models_active_set_path: str | None = None
     models_active_set_label: str | None = None
@@ -421,6 +422,9 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
         if "policy_mlp_path" in mo:
             v = mo["policy_mlp_path"]
             out["models_policy_mlp_path"] = None if v is None else str(v)
+        if "forecaster_quantile_path" in mo:
+            v = mo["forecaster_quantile_path"]
+            out["models_forecaster_quantile_path"] = None if v is None else str(v)
         if "active_set_path" in mo:
             v = mo["active_set_path"]
             out["models_active_set_path"] = None if v is None else str(v)
@@ -440,8 +444,6 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["models_active_registry_path"] = None if v is None else str(v)
     out.update(_risk_limits_from_apex_domains(cfg))
     return out
-
-
 def load_settings(path: Path | None = None) -> AppSettings:
     """Load default.yaml then apply NM_* env vars (env wins)."""
     p = path or _DEFAULT_YAML
@@ -452,7 +454,9 @@ def load_settings(path: Path | None = None) -> AppSettings:
             raw_cfg = yaml.safe_load(f) or {}
         _reject_legacy_risk_yaml(raw_cfg)
         kwargs.update(_yaml_to_kwargs(raw_cfg))
-    base = AppSettings(**kwargs)
+    base = AppSettings()
+    kwargs = {k: v for k, v in kwargs.items() if k not in base.model_fields_set}
+    base = base.model_copy(update=kwargs)
     # Optional JSON manifest overrides serving paths (FB-SPEC-06); applied after env.
     from models.registry.active_set import apply_active_model_set
 

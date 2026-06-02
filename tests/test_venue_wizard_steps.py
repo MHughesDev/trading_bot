@@ -24,4 +24,4 @@ def test_wizard_has_next_and_skip_paths_for_both_steps() -> None:
 
 
 def test_done_step_redirects_to_home() -> None:
-    assert 'st.switch_page("Home.py")' in SRC
+    assert "DASHBOARD_PAGE" in SRC

@@ -35,3 +35,11 @@ data/alpaca_universe.sqlite
 data/alpaca_universe.sqlite-*
 data/coinbase_universe.sqlite
 data/coinbase_universe.sqlite-*
+data/canonical_bar_watermarks/
+data/asset_lifecycle_state/
+
+# Runtime queue / broker logs (per machine)
+queue/logs/
+
+# Pytest temp artifact directories
+.pytest-tmp/

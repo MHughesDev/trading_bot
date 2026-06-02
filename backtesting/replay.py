@@ -140,6 +140,10 @@ def replay_decisions(
         if track_portfolio and portfolio is not None:
             eq_usd = float(portfolio.market_value({symbol: mid}))
         row_events: list[dict[str, Any]] | None = [] if emit_canonical_events else None
+        # Phase C: pass the cumulative completed-bar window as ohlc_history (same semantics as live).
+        # `sub` already contains completed bars up to this timestamp — exclude the current row so
+        # replay mirrors live (live only sees bars that have *closed* before the current tick).
+        ohlc_window = sub.filter(pl.col("timestamp") < ts) if ts is not None else sub
         regime, fc, route, proposal, trade_action, risk = run_one_replay_step(
             symbol=symbol,
             feats=feats,
@@ -158,6 +162,7 @@ def replay_decisions(
             events_out=row_events,
             execution_feedback_state=exec_feedback_state,
             replay_dataset_fingerprint=dataset_fp,
+            ohlc_history=ohlc_window if ohlc_window.height >= 2 else None,
         )
         fill_price: float | None = None
         fee_paid: Decimal | None = None

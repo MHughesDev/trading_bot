@@ -17,6 +17,10 @@ def test_login_and_signup_do_not_require_full_app_gate() -> None:
     signup = _read("99_Sign_up.py")
     assert "require_streamlit_app_access()" not in login
     assert "require_streamlit_app_access()" not in signup
+    assert "redirect_authenticated_user_from_auth_page()" in login
+    assert "redirect_authenticated_user_from_auth_page()" in signup
+    assert 'page_link("pages/99_Sign_up.py"' in login
+    assert 'page_link("pages/0_Login.py"' in signup
 
 
 def test_all_authenticated_pages_call_require_streamlit_app_access() -> None:

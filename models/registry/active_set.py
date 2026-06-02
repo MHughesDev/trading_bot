@@ -21,6 +21,8 @@ _MANIFEST_MODEL_KEYS = (
     "forecaster_checkpoint_id",
     "forecaster_conformal_state_path",
     "forecaster_weights_path",
+    "forecaster_torch_path",
+    "forecaster_quantile_path",
     "policy_mlp_path",
 )
 

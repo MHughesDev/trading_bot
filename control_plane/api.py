@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import os
+import sys
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
+
+# psycopg async mode requires SelectorEventLoop on Windows (ProactorEventLoop is incompatible).
+# Set this at module level so it takes effect before uvicorn creates the event loop.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from contextlib import asynccontextmanager
 

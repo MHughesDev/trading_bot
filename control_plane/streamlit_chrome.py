@@ -5,6 +5,13 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from control_plane.navigation import (
+    ACCOUNT_PAGE,
+    ASSET_PAGE,
+    DASHBOARD_PAGE,
+    SIGN_IN_PAGE,
+    SIGN_UP_PAGE,
+)
 from control_plane._theme import render_brand
 from control_plane.streamlit_util import (
     api_get_json,
@@ -68,20 +75,18 @@ def _watching_suffix_from_status(st_data: dict[str, Any], symbol: str) -> str:
 
 
 def render_app_sidebar() -> None:
-    """Curated left rail: five primary links + Watching/Holdings expanders."""
+    """Authenticated left rail: primary navigation + watchlist/holdings expanders."""
     import streamlit as st
 
     render_brand()
     st.sidebar.divider()
-    st.sidebar.page_link("Home.py", label="Dashboard", icon=":material/dashboard:")
-    st.sidebar.page_link("pages/Asset.py", label="Asset page", icon=":material/show_chart:")
-    st.sidebar.page_link("pages/7_Account.py", label="Account", icon=":material/settings:")
-    st.sidebar.page_link("pages/0_Login.py", label="Sign in", icon=":material/login:")
-    st.sidebar.page_link("pages/99_Sign_up.py", label="Sign up", icon=":material/person_add:")
-    if st.session_state.get("operator_session_token"):
-        if st.sidebar.button("Sign out"):
-            operator_logout()
-            st.rerun()
+    st.sidebar.page_link(DASHBOARD_PAGE, label="Dashboard", icon=":material/dashboard:")
+    st.sidebar.page_link(ASSET_PAGE, label="Assets", icon=":material/show_chart:")
+    st.sidebar.page_link(ACCOUNT_PAGE, label="Account", icon=":material/settings:")
+    if st.sidebar.button("Sign out", icon=":material/logout:", use_container_width=True):
+        operator_logout()
+        st.switch_page(SIGN_IN_PAGE)
+        st.stop()
 
     st.sidebar.divider()
 
@@ -100,11 +105,11 @@ def render_app_sidebar() -> None:
         st_data = {}
         active_syms = []
 
-    with st.sidebar.expander("Watching", expanded=bool(st.session_state.get(watch_key, True))):
+    with st.sidebar.expander("Watchlist", expanded=bool(st.session_state.get(watch_key, True))):
         if active_syms:
             for sym in active_syms:
                 st.page_link(
-                    "pages/Asset.py",
+                    ASSET_PAGE,
                     label=f"{sym}{_watching_suffix_from_status(st_data, sym)}",
                     icon=":material/visibility:",
                     query_params={"symbol": sym},
@@ -121,7 +126,7 @@ def render_app_sidebar() -> None:
         except Exception:
             holdings_payload = {}
     holdings = _position_rows_from_payload(holdings_payload)
-    with st.sidebar.expander("Holdings", expanded=bool(st.session_state.get(hold_key, True))):
+    with st.sidebar.expander("Current holdings", expanded=bool(st.session_state.get(hold_key, True))):
         if holdings:
             for row in holdings:
                 sym = str(row.get("symbol") or "?")
@@ -143,3 +148,15 @@ def render_app_sidebar() -> None:
         else:
             st.caption("None")
     st.sidebar.divider()
+
+
+def render_public_sidebar() -> None:
+    """Minimal left rail for public auth pages."""
+    import streamlit as st
+
+    render_brand()
+    st.sidebar.divider()
+    st.sidebar.page_link(SIGN_IN_PAGE, label="Sign in", icon=":material/login:")
+    st.sidebar.page_link(SIGN_UP_PAGE, label="Sign up", icon=":material/person_add:")
+    st.sidebar.divider()
+    st.sidebar.caption("Public access is limited to Sign in and Sign up.")

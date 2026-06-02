@@ -26,11 +26,8 @@ html, body, [class*="css"] {
 
 #MainMenu,
 footer,
-header,
-[data-testid="stToolbar"],
 [data-testid="stDecoration"],
-[data-testid="stStatusWidget"],
-button[kind="header"] {
+[data-testid="stStatusWidget"] {
   visibility: hidden;
   height: 0;
   position: fixed;
@@ -41,6 +38,10 @@ button[kind="header"] {
   border: 1px solid #1F2937;
   border-radius: 12px;
   padding: 24px;
+}
+
+[data-testid="stSidebarNav"] {
+  display: none;
 }
 
 .tb-sidebar-brand {

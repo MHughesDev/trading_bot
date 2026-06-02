@@ -17,6 +17,10 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import polars as pl
 
 from app.contracts.decisions import ActionProposal, RouteDecision, RouteId, TradeAction
 from app.contracts.replay_events import ReplayRunContract
@@ -56,6 +60,7 @@ def run_decision_tick(
     execution_feedback_state: dict[str, dict[str, float]] | None = None,
     replay_contract: ReplayRunContract | None = None,
     replay_dataset_fingerprint: str | None = None,
+    ohlc_history: "pl.DataFrame | None" = None,
 ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, TradeAction | None, RiskState]:
     t0 = time.perf_counter()
     if not replay_deterministic:
@@ -149,6 +154,7 @@ def run_decision_tick(
         product_tradable=product_tradable,
         execution_feedback_state=execution_feedback_state,
         replay_contract=replay_contract,
+        ohlc_history=ohlc_history,
     )
     trade, risk_state = risk_engine.evaluate(
         symbol,

@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 from typing import Any
+
+from control_plane.chart_block import (
+    build_line_figure,
+    render_chart_card,
+    render_timeframe_selector,
+    series_points_to_xy,
+)
+
 
 def _fmt_money(raw: Any) -> str:
     try:
@@ -103,55 +110,23 @@ def _holdings_rows(positions_payload: dict[str, Any]) -> list[dict[str, Any]]:
     out.sort(key=lambda r: str(r["symbol"]))
     return out
 
-
 def _render_hero_chart(series_payload: dict[str, Any]) -> None:
-    import streamlit as st
-
     points = series_payload.get("points") or []
-    if not points:
-        st.caption("No realized P&L points in this window.")
-        return
-    xs: list[datetime] = []
-    ys: list[float] = []
-    for pt in points:
-        try:
-            xs.append(datetime.fromisoformat(str(pt.get("bucket_start", "")).replace("Z", "+00:00")))
-            ys.append(float(Decimal(str(pt.get("cumulative_usd") or "0"))))
-        except Exception:
-            continue
-    if not xs:
-        st.caption("No plottable P&L points in this window.")
-        return
-
-    line_color = "#22D3A0" if ys[-1] - ys[0] >= 0 else "#F87171"
-    try:
-        import plotly.graph_objects as go
-
-        fig = go.Figure(
-            data=[
-                go.Scatter(
-                    x=xs,
-                    y=ys,
-                    mode="lines",
-                    line={"color": line_color, "width": 2},
-                    fill="tozeroy",
-                    fillcolor="rgba(34,211,160,0.08)" if line_color == "#22D3A0" else "rgba(248,113,113,0.08)",
-                    name="Cumulative P&L",
-                )
-            ]
-        )
-        fig.update_layout(
-            template="plotly_dark",
-            height=360,
-            margin={"l": 10, "r": 10, "t": 8, "b": 8},
-            paper_bgcolor="#0B0F17",
-            plot_bgcolor="#0B0F17",
-            xaxis={"showgrid": False},
-            yaxis={"showgrid": True, "gridcolor": "#1F2937"},
-        )
-        st.plotly_chart(fig, width="stretch")
-    except Exception:
-        st.line_chart({"time": xs, "cumulative": ys}, x="time", y="cumulative", width="stretch")
+    xs, ys = series_points_to_xy(points)
+    fig = build_line_figure(
+        xs=xs,
+        ys=ys,
+        height=360,
+        y_axis_title="Dollars",
+        series_name="Cumulative P&L",
+        empty_annotation="No P&L data for this window.",
+    )
+    render_chart_card(
+        title="Portfolio P&L",
+        figure=fig,
+        caption="No realized P&L points in this window." if not xs else None,
+        key="dashboard_pnl_chart",
+    )
 
 
 def render_pnl_panel() -> None:
@@ -196,15 +171,12 @@ def render_pnl_panel() -> None:
     }
     if "dashboard_range_label" not in st.session_state:
         st.session_state["dashboard_range_label"] = "1D"
-    selected_label = st.radio(
-        "Range",
+    selected_label = render_timeframe_selector(
+        label="Range",
         options=list(range_labels.keys()),
-        horizontal=True,
-        index=list(range_labels.keys()).index(str(st.session_state["dashboard_range_label"])),
-        key="dashboard_range_radio",
-        label_visibility="collapsed",
+        state_key="dashboard_range_label",
+        default="1D",
     )
-    st.session_state["dashboard_range_label"] = selected_label
     range_key = range_labels[selected_label]
 
     mode = str(st.session_state[mode_key])

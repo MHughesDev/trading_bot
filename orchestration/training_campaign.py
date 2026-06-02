@@ -4,11 +4,14 @@ Real-data-only training driver (initial offline + nightly maintenance specs).
 No synthetic arrays. Fetches Kraken OHLC/trades (see ``real_data_bars``), walk-forward splits, fits quantile forecaster,
 runs heuristic policy rollout with real returns (RL placeholder until PPO/SAC).
 
-**Offline vs live forecaster:** this path fits **sklearn `QuantileRegressor`** and saves
-`forecaster_quantile_real.joblib`. Runtime **`DecisionPipeline`** builds **`ForecastPacket`**
-via **NumPy `ForecasterModel`** (`build_forecast_packet_methodology`) — not the same weights.
-Pinball metrics here **do not** equal live packet distribution until **FB-SPEC-02** wires
-checkpoints or a shared artifact.
+**Serving wiring:** ``forecaster_quantile_real.joblib`` is now wired into ``DecisionPipeline``
+via ``NM_MODELS_FORECASTER_QUANTILE_PATH`` (FB-SPEC-02, completed). The pipeline uses real
+OHLCV history threaded from ``RollingBars`` (Phase C). Promotion automatically updates the
+active-set manifest so the served path rotates on the next tick (Phase E / P1).
+
+**Live ≡ replay equivalence (I1):** pinball metrics from offline walk-forward *will* match
+live-equivalent replay once a window of real history is available (Phase C+F). Until then,
+run backtesting/replay.py to measure parity on a sample window.
 """
 
 from __future__ import annotations
@@ -52,7 +55,11 @@ from orchestration.training_spec_constants import (
     NIGHTLY_RL_RUNS,
     NIGHTLY_RL_SEEDS,
 )
-from orchestration.promotion import decide_forecaster_promotion_stub, write_promotion_sidecar
+from orchestration.promotion import (
+    apply_promotion_effect,
+    decide_forecaster_promotion_stub,
+    write_promotion_sidecar,
+)
 from orchestration.walkforward_triple import triple_splits
 
 logger = logging.getLogger(__name__)
@@ -295,11 +302,15 @@ def run_training_campaign(
     prom = decide_forecaster_promotion_stub(report=report, previous_champion_path=prev)
     prom_path = write_promotion_sidecar(out, prom)
     report["promotion_decision"] = prom.to_dict()
+    # Phase E / P1: atomic promotion effect — update active-set manifest when decision == "promote".
+    promotion_effect = apply_promotion_effect(prom, artifact_path=Path(fc_path))
+    report["promotion_effect"] = promotion_effect
     logger.info(
-        "training complete: forecaster=%s report=%s promotion=%s",
+        "training complete: forecaster=%s report=%s promotion=%s effect=%s",
         fc_path,
         out / "training_report.json",
         prom_path,
+        promotion_effect,
     )
     return report
 

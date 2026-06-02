@@ -14,8 +14,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import polars as pl
 
 from app.config.settings import AppSettings, load_settings
 from app.contracts.decision_snapshots import ExecutionFeedbackSnapshot
@@ -41,6 +45,10 @@ from forecaster_model.config import ForecasterConfig
 from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
 from forecaster_model.inference.stub import ohlc_arrays_from_feature_row
 from forecaster_model.models.forecaster_weights import ForecasterWeightBundle, load_forecaster_weights
+from forecaster_model.inference.quantile_infer import (
+    QuantileForecasterArtifact,
+    predict_quantile_forecast_packet,
+)
 from policy_model.policy.policy_network import PolicyNetwork
 from policy_model.system import PolicySystem
 
@@ -48,6 +56,8 @@ logger = logging.getLogger(__name__)
 
 # Log once per process: serving mode (RNG vs NPZ weights).
 _serving_mode_logged = False
+# Log once per process: quantile-forecaster predict fell back to numpy/torch (e.g. feature_dim drift).
+_quantile_fallback_logged = False
 
 
 def _feature_vector(values: dict[str, float], dim: int = 32) -> np.ndarray:
@@ -69,11 +79,31 @@ def _file_exists(p: str | None) -> bool:
     return bool(p and Path(p).is_file())
 
 
+def _ohlc_arrays_from_history_or_stub(
+    ohlc_history: "pl.DataFrame | None",
+    feature_row: dict[str, float],
+    *,
+    history_len: int = 64,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return real OHLCV arrays from ``ohlc_history`` when available; fall back to flat-bar stub."""
+    if ohlc_history is not None and ohlc_history.height >= 2:
+        n = min(ohlc_history.height, history_len)
+        df = ohlc_history.tail(n)
+        o = df["open"].to_numpy().astype(float)
+        h = df["high"].to_numpy().astype(float)
+        lo = df["low"].to_numpy().astype(float)
+        cl = df["close"].to_numpy().astype(float)
+        vo = df["volume"].to_numpy().astype(float)
+        return o, h, lo, cl, vo
+    return ohlc_arrays_from_feature_row(feature_row, history_len=history_len)
+
+
 def _global_model_paths_configured(settings: AppSettings) -> bool:
     return (
         _file_exists(settings.models_forecaster_torch_path)
         or _file_exists(settings.models_forecaster_weights_path)
         or _file_exists(settings.models_policy_mlp_path)
+        or _file_exists(settings.models_forecaster_quantile_path)
     )
 
 
@@ -93,6 +123,7 @@ class _ResolvedPaths:
     manifest: AssetModelManifest | None
     binding_abstain: bool
     binding_reason: str | None
+    forecaster_quantile_path: str | None = None
 
 
 def _paths_from_manifest_only(m: AssetModelManifest) -> _ResolvedPaths:
@@ -104,6 +135,7 @@ def _paths_from_manifest_only(m: AssetModelManifest) -> _ResolvedPaths:
         forecaster_conformal_state_path=m.forecaster_conformal_state_path,
         policy_mlp_path=pol,
         forecaster_checkpoint_id=None,
+        forecaster_quantile_path=getattr(m, "forecaster_quantile_path", None),
         manifest=m,
         binding_abstain=False,
         binding_reason=None,
@@ -121,6 +153,7 @@ def _merge_manifest_and_settings(
             forecaster_conformal_state_path=settings.models_forecaster_conformal_state_path,
             policy_mlp_path=settings.models_policy_mlp_path,
             forecaster_checkpoint_id=settings.models_forecaster_checkpoint_id,
+            forecaster_quantile_path=settings.models_forecaster_quantile_path,
             manifest=None,
             binding_abstain=False,
             binding_reason=None,
@@ -134,6 +167,8 @@ def _merge_manifest_and_settings(
         or settings.models_forecaster_conformal_state_path,
         policy_mlp_path=pol or settings.models_policy_mlp_path,
         forecaster_checkpoint_id=settings.models_forecaster_checkpoint_id,
+        forecaster_quantile_path=getattr(m, "forecaster_quantile_path", None)
+        or settings.models_forecaster_quantile_path,
         manifest=m,
         binding_abstain=False,
         binding_reason=None,
@@ -195,6 +230,7 @@ def _resolved_paths_key(rp: _ResolvedPaths) -> tuple:
         rp.forecaster_weights_path,
         rp.forecaster_conformal_state_path,
         rp.policy_mlp_path,
+        rp.forecaster_quantile_path,
     )
 
 
@@ -209,6 +245,7 @@ class DecisionPipeline:
         self._torch_device = None
         self._torch_cfg: ForecasterConfig | None = None
         self._policy_system: PolicySystem | None = None
+        self._quantile_forecaster: QuantileForecasterArtifact | None = None
 
     @staticmethod
     def _log_serving_mode_once(settings: AppSettings) -> None:
@@ -218,11 +255,15 @@ class DecisionPipeline:
         _serving_mode_logged = True
         fw = settings.models_forecaster_weights_path
         ft = settings.models_forecaster_torch_path
+        fq = settings.models_forecaster_quantile_path
         pp = settings.models_policy_mlp_path
         has_torch = bool(ft and Path(ft).is_file())
         has_npz = bool(fw and Path(fw).is_file())
+        has_quantile = bool(fq and Path(fq).is_file())
         has_p = bool(pp and Path(pp).is_file())
-        if has_torch:
+        if has_quantile:
+            fmode = "quantile_ohlc_v1"
+        elif has_torch:
             fmode = "pytorch_mlp"
         elif has_npz:
             fmode = "npz_weights"
@@ -249,13 +290,62 @@ class DecisionPipeline:
                 "models_forecaster_weights_path": rp.forecaster_weights_path,
                 "models_forecaster_conformal_state_path": rp.forecaster_conformal_state_path,
                 "models_policy_mlp_path": rp.policy_mlp_path,
+                "models_forecaster_quantile_path": rp.forecaster_quantile_path,
             }
         )
         self._forecaster_weight_bundle = _load_forecaster_bundle_if_configured(eff)
+        self._quantile_forecaster = _load_quantile_forecaster_if_configured(eff)
         self._torch_model, self._torch_device, self._torch_cfg = _load_torch_forecaster_if_configured(
             eff
         )
         self._policy_system = _load_policy_system_if_configured(eff)
+
+    def _build_quantile_packet(
+        self,
+        feature_effective: dict[str, float],
+        now_ts: datetime | None,
+        bar_sec: int,
+        ohlc_history: "pl.DataFrame | None" = None,
+    ) -> ForecastPacket | None:
+        """Real-data sklearn quantile forecaster → ForecastPacket; geometry from the artifact.
+
+        Uses ``ohlc_history`` (real rolling bars, Phase C) when available; falls back to the
+        flat-bar stub so a cold-start never crashes the tick.
+
+        Returns None (→ caller falls back to numpy/torch) on any feature_dim / history mismatch so a
+        stale artifact degrades gracefully instead of killing the decision tick.
+        """
+        art = self._quantile_forecaster
+        if art is None:
+            return None
+        snap = art.config_snapshot or {}
+        try:
+            q_cfg = ForecasterConfig(
+                history_length=int(snap.get("history_length", 128)),
+                forecast_horizon=int(snap.get("forecast_horizon", 8)),
+                quantiles=tuple(float(x) for x in snap.get("quantiles", (0.1, 0.5, 0.9))),
+                feature_windows=tuple(int(x) for x in snap.get("feature_windows", (4, 16, 64))),
+                num_regime_dims=int(snap.get("num_regime_dims", 4)),
+                base_interval_seconds=bar_sec,
+            )
+            o, h, lo, cl, vo = _ohlc_arrays_from_history_or_stub(
+                ohlc_history, feature_effective, history_len=q_cfg.history_length
+            )
+            pkt = predict_quantile_forecast_packet(o, h, lo, cl, vo, art, q_cfg, now_ts=now_ts)
+        except Exception:
+            global _quantile_fallback_logged
+            if not _quantile_fallback_logged:
+                _quantile_fallback_logged = True
+                logger.warning(
+                    "quantile forecaster predict failed; falling back to numpy/torch forecaster",
+                    exc_info=True,
+                )
+            return None
+        pkt.forecast_diagnostics["methodology"] = "quantile_ohlc_v1"
+        pkt.forecast_diagnostics["weight_source"] = "quantile_ohlc_v1"
+        if art.data_snapshot_id:
+            pkt.forecast_diagnostics["data_snapshot_id"] = art.data_snapshot_id
+        return pkt
 
     @property
     def last_forecast_packet(self) -> ForecastPacket | None:
@@ -285,6 +375,7 @@ class DecisionPipeline:
         product_tradable: bool = True,
         execution_feedback_state: dict[str, dict[str, float]] | None = None,
         replay_contract: ReplayRunContract | None = None,
+        ohlc_history: "pl.DataFrame | None" = None,
     ) -> tuple[RegimeOutput, ForecastOutput, RouteDecision, ActionProposal | None, RiskState]:
         self._last_feature_effective = None
         mp0 = float(mid_price) if mid_price is not None else float(feature_row.get("close", 1.0))
@@ -329,20 +420,30 @@ class DecisionPipeline:
             cfg = base_cfg
         bar_sec = max(1, int(self._settings.market_data_bar_interval_seconds))
         cfg.base_interval_seconds = bar_sec
-        o, h, lo, cl, vo = ohlc_arrays_from_feature_row(feature_effective, history_len=cfg.history_length)
-        pkt = build_forecast_packet_methodology(
-            o,
-            h,
-            lo,
-            cl,
-            vo,
-            cfg=cfg,
-            now=data_timestamp,
-            conformal_state_path=conf_path,
-            weight_bundle=self._forecaster_weight_bundle if self._torch_model is None else None,
-            torch_model=self._torch_model,
-            torch_device=self._torch_device,
-        )
+        # Forecaster precedence: real-data quantile artifact > torch > NPZ bundle > RNG (FB-SPEC-02).
+        # ohlc_history (Phase C): real rolling bars from the caller; falls back to flat-bar stub.
+        pkt = None
+        if self._quantile_forecaster is not None:
+            pkt = self._build_quantile_packet(
+                feature_effective, data_timestamp, bar_sec, ohlc_history=ohlc_history
+            )
+        if pkt is None:
+            o, h, lo, cl, vo = _ohlc_arrays_from_history_or_stub(
+                ohlc_history, feature_effective, history_len=cfg.history_length
+            )
+            pkt = build_forecast_packet_methodology(
+                o,
+                h,
+                lo,
+                cl,
+                vo,
+                cfg=cfg,
+                now=data_timestamp,
+                conformal_state_path=conf_path,
+                weight_bundle=self._forecaster_weight_bundle if self._torch_model is None else None,
+                torch_model=self._torch_model,
+                torch_device=self._torch_device,
+            )
         pkt.forecast_diagnostics["symbol"] = symbol
         pkt.forecast_diagnostics["pipeline"] = "master_spec"
         pkt.forecast_diagnostics["canonical_boundary_input"] = boundary_input_to_diagnostic_dict(
@@ -431,4 +532,22 @@ def _load_policy_system_if_configured(settings: AppSettings) -> PolicySystem | N
         return PolicySystem(policy_algorithm=net)
     except OSError as exc:
         logger.warning("policy MLP weights not loaded from %s (%s); using heuristic actor", p, exc)
+        return None
+
+
+def _load_quantile_forecaster_if_configured(settings: AppSettings) -> QuantileForecasterArtifact | None:
+    """FB-SPEC-02: load the real-data sklearn quantile forecaster (joblib) when configured.
+
+    Takes precedence over the NumPy/torch forecaster when present — real fitted signal instead of
+    the RNG/flat numpy-reference forward. Geometry is read back from the artifact at predict time.
+    """
+    p = settings.models_forecaster_quantile_path
+    if not p or not Path(p).is_file():
+        return None
+    try:
+        return QuantileForecasterArtifact.load(Path(p))
+    except (OSError, KeyError, ValueError) as exc:
+        logger.warning(
+            "quantile forecaster not loaded from %s (%s); using numpy/torch forecaster", p, exc
+        )
         return None

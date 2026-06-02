@@ -6,6 +6,7 @@ import httpx
 import streamlit as st
 
 from control_plane._theme import inject_global_css
+from control_plane.navigation import DASHBOARD_PAGE, SIGN_IN_PAGE
 from control_plane.streamlit_chrome import render_app_sidebar
 from control_plane.streamlit_util import (
     api_get_json,
@@ -72,7 +73,7 @@ st.caption(
 
 if not streamlit_venue_keys_gate_enabled():
     st.info("Venue key onboarding is **off** (`NM_STREAMLIT_VENUE_KEYS_REQUIRED` not set). Opening Dashboard.")
-    st.switch_page("Home.py")
+    st.switch_page(DASHBOARD_PAGE)
     st.stop()
 
 try:
@@ -80,7 +81,7 @@ try:
     st.success(f"Signed in as **{me.get('email', '?')}**.")
 except Exception:
     st.error("Session invalid — sign in again.")
-    st.switch_page("pages/0_Login.py")
+    st.switch_page(SIGN_IN_PAGE)
     st.stop()
 
 try:
@@ -102,7 +103,7 @@ if step not in {"alpaca", "coinbase", "done"}:
 
 if _current_step(vc) == "done" or step == "done":
     st.session_state["venue_setup_step"] = "done"
-    st.switch_page("Home.py")
+    st.switch_page(DASHBOARD_PAGE)
     st.stop()
 
 if step == "alpaca":

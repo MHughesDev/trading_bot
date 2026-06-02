@@ -15,6 +15,7 @@ from risk_engine.signing import sign_order_intent
 
 # FB-CAN-036 — stable codes for decision records / audit
 RISK_BLOCK_FEED_STALE = "risk_feed_stale"
+RISK_BLOCK_DATA_HEALTH = "risk_data_health"  # Phase D: bad OHLCV history → no new entries
 RISK_BLOCK_DATA_TIMESTAMP_STALE = "risk_data_timestamp_stale"
 RISK_BLOCK_SPREAD_WIDE = "risk_spread_wide"
 RISK_BLOCK_DRAWDOWN = "risk_drawdown_limit"
@@ -110,6 +111,10 @@ class RiskEngine:
 
         if not product_tradable:
             return None, _with_codes(risk, [RISK_BLOCK_PRODUCT_UNTRADABLE])
+
+        # Phase D: data-health hard gate — bad OHLCV history blocks new entries.
+        if getattr(risk, "data_integrity_alert", False):
+            return None, _with_codes(risk, [RISK_BLOCK_DATA_HEALTH])
 
         mode = risk.mode
         if mode == SystemMode.MAINTENANCE:

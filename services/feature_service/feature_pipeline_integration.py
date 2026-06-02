@@ -14,7 +14,7 @@ from shared.messaging.envelope import EventEnvelope
 
 def _bar_interval_s() -> int:
     try:
-        v = int(os.getenv("NM_FEATURE_SERVICE_BAR_INTERVAL_SECONDS", "1"))
+        v = int(os.getenv("NM_FEATURE_SERVICE_BAR_INTERVAL_SECONDS", "60"))
         return max(1, v)
     except ValueError:
         return 1

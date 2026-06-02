@@ -27,7 +27,7 @@ try:
 except Exception:
     st.warning(
         "Sign in with **`NM_AUTH_SESSION_ENABLED=true`** on the API to manage venue keys. "
-        "Set **`NM_STREAMLIT_ROUTE_GUARD_ENABLED=false`** or use **Sign in / Register** first."
+        "If this persists after signing in, verify the API session settings and cookie configuration."
     )
     st.stop()
 

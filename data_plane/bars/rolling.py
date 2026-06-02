@@ -29,6 +29,55 @@ class RollingBars:
         floored = epoch - (epoch % self.interval_seconds)
         return datetime.fromtimestamp(floored, tz=UTC)
 
+    def seed(self, rows: "list[dict] | pl.DataFrame") -> None:
+        """Pre-populate completed buckets from historical OHLCV rows.
+
+        Rows must contain columns: ``timestamp``, ``open``, ``high``, ``low``, ``close``,
+        ``volume``. They are sorted ascending, trimmed to ``max_completed``, and loaded into
+        ``_completed``. ``_bucket_start`` is advanced to the last seeded row's bucket floor so
+        the first ``on_tick`` after seeding continues contiguously (Phase C warm-start).
+        """
+        if isinstance(rows, pl.DataFrame):
+            records: list[dict] = rows.sort("timestamp").to_dicts()
+        else:
+            records = sorted(rows, key=lambda r: r.get("timestamp") or 0)
+        if not records:
+            return
+        # Keep only the tail that fits in max_completed.
+        records = records[-self.max_completed :]
+        self._completed = [
+            {
+                "timestamp": r["timestamp"],
+                "open": float(r["open"]),
+                "high": float(r["high"]),
+                "low": float(r["low"]),
+                "close": float(r["close"]),
+                "volume": float(r["volume"]),
+            }
+            for r in records
+        ]
+        # Reset to "no partial in progress" — the first live on_tick will open a new bucket.
+        # This prevents the first tick from spuriously closing a synthetic partial seeded from
+        # the last historical bar.
+        self._bucket_start = None
+        self._o = self._h = self._l = self._c = 0.0
+        self._v = 0.0
+
+    def bars_frame_completed(self) -> pl.DataFrame:
+        """Completed bars only (no in-progress bucket) — used for deterministic forecaster input."""
+        if not self._completed:
+            return pl.DataFrame(
+                schema={
+                    "timestamp": pl.Datetime(time_zone="UTC"),
+                    "open": pl.Float64,
+                    "high": pl.Float64,
+                    "low": pl.Float64,
+                    "close": pl.Float64,
+                    "volume": pl.Float64,
+                }
+            )
+        return pl.DataFrame(self._completed).sort("timestamp")
+
     def on_tick(self, price: float, ts: datetime, size: float = 0.0) -> dict[str, Any] | None:
         """Update current bucket or roll to a new bar.
 

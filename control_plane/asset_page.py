@@ -9,6 +9,11 @@ import httpx
 import streamlit as st
 
 from control_plane.asset_chart_data import Preset, preset_to_request
+from control_plane.chart_block import (
+    build_ohlc_figure,
+    render_chart_card,
+    render_timeframe_selector,
+)
 from control_plane.asset_chart_fetch import (
     chart_time_window,
     fetch_bars_for_preset,
@@ -22,6 +27,7 @@ from control_plane.asset_lifecycle_actions import (
 from control_plane.app_toasts import maybe_toast
 from control_plane.asset_manifest_card import manifest_model_rows
 from control_plane.asset_page_helpers import normalize_symbol, validate_symbol_display
+from control_plane.navigation import DASHBOARD_PAGE
 from control_plane.watchlist import add_watchlist_symbol, is_pinned, remove_watchlist_symbol
 from control_plane.streamlit_util import (
     api_delete_json,
@@ -74,7 +80,7 @@ def _render_ohlc_chart(sym: str) -> None:
     """FB-AP-028: OHLC from ``/assets/chart/bars``; week/month from daily rollup."""
     left, right = st.columns([4, 2])
     with left:
-        st.markdown("**OHLC chart**")
+        st.markdown("**Asset price chart**")
     with right:
         labels = ["1s", "1m", "1h", "1D", "1W", "1M"]
         label_to_preset: dict[str, Preset] = {
@@ -85,25 +91,12 @@ def _render_ohlc_chart(sym: str) -> None:
             "1W": "week",
             "1M": "month",
         }
-        default_label = st.session_state.get(f"asset_chart_interval_chip_{sym}", "1m")
-        if hasattr(st, "segmented_control"):
-            selected = st.segmented_control(
-                "Interval",
-                options=labels,
-                default=default_label if default_label in labels else "1m",
-                key=f"asset_chart_interval_chip_{sym}",
-                label_visibility="collapsed",
-            )
-            choice_label = str(selected or "1m")
-        else:
-            choice_label = st.radio(
-                "Interval",
-                options=labels,
-                horizontal=True,
-                index=labels.index(default_label) if default_label in labels else 1,
-                key=f"asset_chart_interval_chip_{sym}",
-                label_visibility="collapsed",
-            )
+        choice_label = render_timeframe_selector(
+            label="Interval",
+            options=labels,
+            state_key=f"asset_chart_interval_chip_{sym}",
+            default="1m",
+        )
     preset = label_to_preset[choice_label]
     req = preset_to_request(preset)
     try:
@@ -156,14 +149,17 @@ def _render_ohlc_chart(sym: str) -> None:
     if markers:
         st.caption(f"Trade markers in window: **{len(markers)}** (source: `data/trade_markers.jsonl`)")
     if not bars:
-        st.markdown(
-            (
-                "<div style='text-align:center;padding:20px 0;color:var(--text-secondary,#9ca3af);'>"
-                "<div style='font-size:22px;opacity:.8;'>◌</div>"
-                f"<div>No price history for {sym} yet</div>"
-                "</div>"
-            ),
-            unsafe_allow_html=True,
+        fig = build_ohlc_figure(
+            bars=[],
+            height=440,
+            y_axis_title="Dollars",
+            empty_annotation=f"No price history for {sym} yet.",
+        )
+        render_chart_card(
+            title=f"{sym} price history",
+            figure=fig,
+            caption=f"{note}. Initialize this asset to begin filling the chart.",
+            key=f"asset_ohlc_chart_empty_{sym}",
         )
         if st.button(
             "Initialize",
@@ -192,52 +188,20 @@ def _render_ohlc_chart(sym: str) -> None:
                 st.error(str(exc))
         return
     try:
-        import plotly.graph_objects as go
-
         buy_tr, sell_tr = trade_marker_buy_sell_traces(markers, bars)
-        fig = go.Figure(
-            data=[
-                go.Candlestick(
-                    x=[b["ts"] for b in bars],
-                    open=[b["open"] for b in bars],
-                    high=[b["high"] for b in bars],
-                    low=[b["low"] for b in bars],
-                    close=[b["close"] for b in bars],
-                    name="OHLC",
-                )
-            ]
-        )
-        if buy_tr["x"]:
-            fig.add_trace(
-                go.Scatter(
-                    x=buy_tr["x"],
-                    y=buy_tr["y"],
-                    mode="markers",
-                    name="Buy",
-                    marker=dict(size=11, color="#16a34a", symbol="triangle-up", line=dict(width=1, color="#14532d")),
-                    text=buy_tr["text"],
-                    hovertemplate="%{text}<extra></extra>",
-                )
-            )
-        if sell_tr["x"]:
-            fig.add_trace(
-                go.Scatter(
-                    x=sell_tr["x"],
-                    y=sell_tr["y"],
-                    mode="markers",
-                    name="Sell",
-                    marker=dict(size=11, color="#dc2626", symbol="triangle-down", line=dict(width=1, color="#7f1d1d")),
-                    text=sell_tr["text"],
-                    hovertemplate="%{text}<extra></extra>",
-                )
-            )
-        fig.update_layout(
-            xaxis_rangeslider_visible=False,
+        fig = build_ohlc_figure(
+            bars=bars,
+            buy_markers=buy_tr,
+            sell_markers=sell_tr,
             height=440,
-            margin=dict(l=10, r=10, t=30, b=10),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            y_axis_title="Dollars",
         )
-        st.plotly_chart(fig, width="stretch")
+        render_chart_card(
+            title=f"{sym} price history",
+            figure=fig,
+            caption=note,
+            key=f"asset_ohlc_chart_{sym}",
+        )
     except ImportError:
         st.caption("Install **plotly** (`pip install -e \".[dashboard]\"`) for candlesticks; showing close line.")
         st.line_chart(
@@ -269,7 +233,7 @@ def render_asset_page(symbol: str) -> None:
     action, action_label, action_color = lifecycle_action_spec(lifecycle_state)
     head1, head2, head3 = st.columns([5, 2, 2])
     with head1:
-        st.page_link("Home.py", label="Dashboard", icon=":material/arrow_back:")
+        st.page_link(DASHBOARD_PAGE, label="Dashboard", icon=":material/arrow_back:")
         st.markdown(f"### `{sym}`")
         badge_map = {
             "uninitialized": "UNINITIALIZED",

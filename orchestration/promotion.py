@@ -122,3 +122,72 @@ def write_promotion_sidecar(artifact_dir: Path, decision: PromotionDecision) -> 
     path = artifact_dir / "promotion_decision.json"
     path.write_text(json.dumps(decision.to_dict(), indent=2), encoding="utf-8")
     return path
+
+
+def apply_promotion_effect(
+    decision: PromotionDecision,
+    *,
+    artifact_path: Path,
+    active_set_path: Path | None = None,
+) -> dict[str, Any]:
+    """Atomically update the active-set manifest when ``decision.decision == 'promote'``.
+
+    If ``active_set_path`` is None, looks for ``NM_MODELS_ACTIVE_SET_PATH`` in the environment.
+    When no active-set path is configured, writes a ``promoted_forecaster_quantile.joblib``
+    symlink/copy alongside the artifact instead (standalone promotion).
+
+    Returns a summary dict for logging.
+
+    Invariant (I2): this is a file-level atomic swap — the live process re-reads the path on
+    the next tick; no in-place mutation of an already-loaded artifact.
+    """
+    decision_val = getattr(decision, "decision", "no_decision")
+    if decision_val != "promote":
+        return {"action": "no_effect", "reason": decision_val}
+
+    import os
+    import shutil
+    import tempfile
+
+    # Resolve active-set path
+    asp = active_set_path
+    if asp is None:
+        env_asp = os.getenv("NM_MODELS_ACTIVE_SET_PATH", "").strip()
+        if env_asp:
+            asp = Path(env_asp)
+
+    if asp is not None:
+        # Update JSON manifest atomically.
+        asp.parent.mkdir(parents=True, exist_ok=True)
+        existing: dict[str, Any] = {}
+        if asp.is_file():
+            try:
+                existing = json.loads(asp.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existing = {}
+        existing["forecaster_quantile_path"] = str(artifact_path)
+        existing["promoted_at"] = datetime.now(UTC).isoformat()
+        existing["promoted_from"] = str(artifact_path)
+        text = json.dumps(existing, indent=2, sort_keys=True)
+        fd, tmp = tempfile.mkstemp(dir=asp.parent, prefix=f".{asp.name}.", suffix=".tmp", text=True)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, asp)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        return {"action": "active_set_updated", "path": str(asp), "artifact": str(artifact_path)}
+    else:
+        # No active-set manifest configured — copy artifact to a stable "promoted" path.
+        promoted = artifact_path.parent / "promoted_forecaster_quantile.joblib"
+        try:
+            shutil.copy2(str(artifact_path), str(promoted))
+        except OSError as exc:
+            return {"action": "copy_failed", "error": str(exc)}
+        return {"action": "promoted_copy", "path": str(promoted), "artifact": str(artifact_path)}

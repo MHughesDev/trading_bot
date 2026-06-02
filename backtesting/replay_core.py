@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import polars as pl
 
 from app.config.settings import load_settings
 from app.contracts.replay_events import ReplayRunContract
@@ -46,6 +49,7 @@ def run_one_replay_step(
     execution_profile: str | None = None,
     execution_feedback_state: dict[str, dict[str, float]] | None = None,
     replay_dataset_fingerprint: str | None = None,
+    ohlc_history: "pl.DataFrame | None" = None,
 ) -> tuple[Any, Any, Any, Any, Any, Any]:
     """Apply fault injection, run deterministic tick, optionally append canonical events."""
     fp_in = dict(fault_profile or {})
@@ -77,6 +81,7 @@ def run_one_replay_step(
         execution_feedback_state=execution_feedback_state,
         replay_contract=contract,
         replay_dataset_fingerprint=replay_dataset_fingerprint,
+        ohlc_history=ohlc_history,
     )
 
     if collect_events and events_out is not None:

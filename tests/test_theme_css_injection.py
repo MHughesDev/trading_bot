@@ -26,7 +26,8 @@ def test_inject_global_css_contract(monkeypatch):
     assert "font-variant-numeric: tabular-nums" in css
     assert "#MainMenu" in css
     assert "footer" in css
-    assert "header" in css
+    assert '[data-testid="stSidebarNav"]' in css
+    assert 'button[kind="header"]' not in css
     assert "--pnl-up: #22D3A0" in css
     assert "--pnl-down: #F87171" in css
     assert calls and calls[0][1] is True

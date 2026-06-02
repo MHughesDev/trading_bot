@@ -276,7 +276,7 @@ execution:
   position_reconcile_interval_seconds: 60
 market_data:
   provider: kraken
-  bar_interval_seconds: 1
+  bar_interval_seconds: 60
   training_granularity_seconds: 60
   symbols:
   - BTC-USD
@@ -338,8 +338,8 @@ observability:
 questdb:
   persist_decision_traces: false
   persist_canonical_bars: false
-  startup_gap_detection: false
-  startup_kraken_backfill: false
+  startup_gap_detection: true
+  startup_kraken_backfill: true
   backfill_max_lookback_days: 14
   persist_microservice_events: false
   batch_max_rows: 500

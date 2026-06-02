@@ -12,8 +12,9 @@ set "VPY=%CD%\.venv\Scripts\python.exe"
 set "PATH=%CD%\.venv\Scripts;%PATH%"
 
 call :loading "Spinning up Control Plane API"
-REM Control plane API (background window)
-start "Trading Bot API" cmd /k ""%VPY%" -m uvicorn control_plane.api:app --host 127.0.0.1 --port 8000"
+REM Control plane API (background window) — run_api.py sets WindowsSelectorEventLoopPolicy
+REM before uvicorn creates the event loop (required for psycopg async on Windows).
+start "Trading Bot API" cmd /k ""%VPY%" run_api.py --host 127.0.0.1 --port 8000"
 
 REM Brief pause so API can bind before Streamlit calls it
 timeout /t 2 /nobreak >nul

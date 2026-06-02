@@ -8,10 +8,12 @@ from control_plane._theme import inject_global_css, render_brand_lockup
 from control_plane.streamlit_util import (
     get_api_base,
     operator_login,
+    redirect_authenticated_user_from_auth_page,
     redirect_after_session_login,
 )
 
 st.set_page_config(page_title="Sign in — Trading Bot", layout="centered", initial_sidebar_state="collapsed")
+redirect_authenticated_user_from_auth_page()
 inject_global_css()
 st.markdown("<div class='tb-auth-wrap'><div class='tb-auth-card'>", unsafe_allow_html=True)
 render_brand_lockup(subtitle="Operate paper and live trading from one console.")

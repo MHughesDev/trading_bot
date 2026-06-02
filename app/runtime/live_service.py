@@ -45,6 +45,8 @@ from data_plane.ingest.kraken_symbols import canonical_symbol_from_kraken_pair
 from data_plane.ingest.kraken_ws import KrakenWebSocketClient
 from data_plane.ingest.normalizers import OrderBookLevel2Snapshot, TickerSnapshot, TradeTick
 from data_plane.ingest.product_cache import ProductMetadataCache
+from app.runtime.canonical_bar_watermark import read_canonical_through, write_canonical_through
+from data_plane.health.data_health import check_data_health
 from data_plane.storage.questdb import QuestDBWriter
 from data_plane.storage.startup_gap_detection import detect_canonical_bar_gaps
 from orchestration.startup_canonical_backfill import run_startup_canonical_backfill
@@ -257,18 +259,42 @@ async def run_live_loop(
                 )
                 if cfg.questdb_startup_gap_detection:
                     for g in gaps:
-                        if g.gap_detected:
-                            logger.warning(
-                                "canonical_bar_gap %s",
-                                g.to_log_dict(),
-                            )
-                        else:
-                            logger.info(
-                                "canonical_bar_gap_ok %s",
-                                g.to_log_dict(),
-                            )
+                        wm = read_canonical_through(g.symbol)
+                        n_gap = (
+                            int(g.behind_seconds / bar_sec) if g.behind_seconds else 0
+                        )
+                        logger.info(
+                            "startup_gap_check symbol=%s canonical_through=%s gap_detected=%s gap_bars=%d db_max=%s",
+                            g.symbol,
+                            wm.isoformat() if wm else None,
+                            g.gap_detected,
+                            n_gap,
+                            g.max_stored_ts.isoformat() if g.max_stored_ts else None,
+                        )
+                backfill_summaries: list[dict] = []
                 if cfg.questdb_startup_kraken_backfill:
-                    await run_startup_canonical_backfill(cfg, qdb, gaps=gaps)
+                    backfill_summaries = await run_startup_canonical_backfill(cfg, qdb, gaps=gaps)
+                    # Re-detect residual gaps after backfill (Kraken 720-candle cap may leave some).
+                    if backfill_summaries:
+                        try:
+                            residual_gaps = await detect_canonical_bar_gaps(
+                                qdb,
+                                symbols=init_syms,
+                                interval_seconds=bar_sec,
+                            )
+                            for rg in residual_gaps:
+                                if rg.gap_detected:
+                                    n_res = (
+                                        int(rg.behind_seconds / bar_sec) if rg.behind_seconds else 0
+                                    )
+                                    logger.warning(
+                                        "startup_residual_gap symbol=%s residual_bars=%d "
+                                        "(Kraken 720-candle cap may prevent full fill)",
+                                        rg.symbol,
+                                        n_res,
+                                    )
+                        except Exception:
+                            logger.exception("residual gap re-detection failed (non-fatal)")
         except Exception:
             logger.exception("startup canonical bar gap detection / backfill failed")
 
@@ -348,6 +374,48 @@ async def run_live_loop(
     rollers: dict[str, RollingBars] = {
         s: RollingBars(s, interval_seconds=bar_sec) for s in syms
     }
+
+    # Phase C warm-start: seed each roller from QuestDB (or Kraken REST fallback) so the first
+    # decision tick sees real OHLC history instead of a cold-empty window.
+    _seed_limit = max(r.max_completed for r in rollers.values()) if rollers else 512
+    for _sym, _roller in rollers.items():
+        try:
+            if qdb is not None:
+                from datetime import timedelta
+                _now = datetime.now(UTC)
+                _start = _now - timedelta(seconds=bar_sec * (_seed_limit + 10))
+                _rows = await qdb.query_canonical_bars(
+                    _sym,
+                    start=_start,
+                    end=_now,
+                    interval_seconds=bar_sec,
+                    limit=_seed_limit,
+                )
+                if _rows:
+                    import polars as _pl
+                    _df = _pl.DataFrame(_rows).rename({"ts": "timestamp"})
+                    _roller.seed(_df)
+                    logger.info(
+                        "roller_seeded symbol=%s bars=%d last_ts=%s",
+                        _sym,
+                        len(_rows),
+                        _df["timestamp"].max(),
+                    )
+                    continue
+            # QuestDB unavailable or empty — fall back to Kraken REST.
+            from orchestration.real_data_bars import fetch_symbol_bars_async
+            from datetime import timedelta as _td
+            _fb_end = datetime.now(UTC)
+            _fb_start = _fb_end - _td(seconds=bar_sec * (_seed_limit + 10))
+            _fb_df = await fetch_symbol_bars_async(_sym, _fb_start, _fb_end, granularity_seconds=bar_sec)
+            if _fb_df is not None and _fb_df.height > 0:
+                _roller.seed(_fb_df)
+                logger.info(
+                    "roller_seeded_kraken symbol=%s bars=%d", _sym, _fb_df.height
+                )
+        except Exception:
+            logger.warning("roller warm-start failed for %s (non-fatal); starting cold", _sym)
+
     positions: dict[str, Decimal] = {s: Decimal(0) for s in syms}
     last_decision_monotonic: dict[str, float] = {}
 
@@ -413,6 +481,14 @@ async def run_live_loop(
                         schema_version=1,
                     )
                     await qdb.insert_bar(bar)
+                    try:
+                        write_canonical_through(
+                            symbol,
+                            canonical_through_ts=completed_bar["timestamp"],
+                            interval_seconds=bar_sec,
+                        )
+                    except Exception:
+                        logger.debug("watermark write failed symbol=%s (non-fatal)", symbol)
                 except Exception:
                     logger.exception("questdb insert_bar failed")
 
@@ -441,6 +517,23 @@ async def run_live_loop(
                 last_decision_monotonic=last_decision_monotonic,
             )
             if run_decision:
+                # Phase D: data-health gate — bad history → PAUSE_NEW_ENTRIES via data_integrity_alert.
+                _completed_bars = rollers[symbol].bars_frame_completed()
+                _health = check_data_health(
+                    symbol,
+                    _completed_bars if _completed_bars.height > 0 else None,
+                    required_bars=cfg.features_volatility_windows[-1] if cfg.features_volatility_windows else 60,
+                    interval_seconds=bar_sec,
+                )
+                if not _health.is_healthy:
+                    logger.warning(
+                        "data_health_gate symbol=%s %s",
+                        symbol,
+                        _health.to_log_dict(),
+                    )
+                risk_state = risk_state.model_copy(
+                    update={"data_integrity_alert": not _health.is_healthy}
+                )
                 regime, fc, route, proposal, trade, risk_state = run_decision_tick(
                     symbol=symbol,
                     feature_row=feats,
@@ -455,6 +548,7 @@ async def run_live_loop(
                     position_signed_qty=positions.get(symbol, Decimal(0)),
                     portfolio_equity_usd=risk_engine.current_equity,
                     execution_feedback_state=exec_feedback,
+                    ohlc_history=_completed_bars if _completed_bars.height >= 2 else None,
                 )
                 record_decision_tick(symbol, last_decision_monotonic)
             else:

@@ -53,19 +53,22 @@ def get_questdb_console_url() -> str:
 
 
 def streamlit_route_guard_enabled() -> bool:
-    """Return True when ``NM_STREAMLIT_ROUTE_GUARD_ENABLED`` is truthy (1/true/yes).
+    """Always enforce the Streamlit session gate for non-login routes."""
+    return True
 
-    When enabled, ``require_streamlit_app_access`` enforces login unless
-    ``NM_CONTROL_PLANE_API_KEY`` is set in this process (automation bypass) or
-    ``GET /auth/me`` succeeds with the session cookie. Requires
-    ``NM_AUTH_SESSION_ENABLED`` on the API for password login. See README
-    *Streamlit route guard (FB-AUD-002)* and ``docs/RUNBOOKS.MD``.
-    """
-    return os.getenv("NM_STREAMLIT_ROUTE_GUARD_ENABLED", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+
+def redirect_authenticated_user_from_auth_page() -> None:
+    """Keep signed-in users off public auth pages by sending them forward."""
+    import streamlit as st
+
+    if get_control_plane_key().strip():
+        return
+    if not _operator_session_token():
+        return
+    if fetch_auth_me_json() is None:
+        st.session_state.pop("operator_session_token", None)
+        return
+    redirect_after_session_login()
 
 
 def fetch_auth_me_json() -> dict[str, Any] | None:
@@ -107,16 +110,18 @@ def require_streamlit_session_only() -> None:
     """
     import streamlit as st
 
+    from control_plane.navigation import SIGN_IN_PAGE
+
     if not streamlit_route_guard_enabled():
         return
     if get_control_plane_key().strip():
         return
     if not _operator_session_token():
-        st.switch_page("pages/0_Login.py")
+        st.switch_page(SIGN_IN_PAGE)
         st.stop()
     if fetch_auth_me_json() is None:
         st.session_state.pop("operator_session_token", None)
-        st.switch_page("pages/0_Login.py")
+        st.switch_page(SIGN_IN_PAGE)
         st.stop()
     _touch_auth_session()
 
@@ -125,8 +130,10 @@ def redirect_after_session_login() -> None:
     """After successful ``operator_login``, send user to Dashboard or venue-key setup."""
     import streamlit as st
 
+    from control_plane.navigation import DASHBOARD_PAGE, SETUP_API_KEYS_PAGE
+
     if not streamlit_venue_keys_gate_enabled():
-        st.switch_page("Home.py")
+        st.switch_page(DASHBOARD_PAGE)
         st.stop()
     me = fetch_auth_me_json()
     if (
@@ -134,9 +141,9 @@ def redirect_after_session_login() -> None:
         and me.get("venue_keys_required") is True
         and me.get("venue_keys_complete") is False
     ):
-        st.switch_page("pages/98_Setup_API_keys.py")
+        st.switch_page(SETUP_API_KEYS_PAGE)
         st.stop()
-    st.switch_page("Home.py")
+    st.switch_page(DASHBOARD_PAGE)
     st.stop()
 
 
@@ -155,24 +162,26 @@ def require_streamlit_app_access() -> None:
     """
     import streamlit as st
 
+    from control_plane.navigation import SETUP_API_KEYS_PAGE, SIGN_IN_PAGE
+
     if not streamlit_route_guard_enabled():
         return
     if get_control_plane_key().strip():
         return
     if not _operator_session_token():
-        st.switch_page("pages/0_Login.py")
+        st.switch_page(SIGN_IN_PAGE)
         st.stop()
     me = fetch_auth_me_json()
     if me is None:
         st.session_state.pop("operator_session_token", None)
-        st.switch_page("pages/0_Login.py")
+        st.switch_page(SIGN_IN_PAGE)
         st.stop()
     if (
         streamlit_venue_keys_gate_enabled()
         and me.get("venue_keys_required") is True
         and me.get("venue_keys_complete") is False
     ):
-        st.switch_page("pages/98_Setup_API_keys.py")
+        st.switch_page(SETUP_API_KEYS_PAGE)
         st.stop()
     _touch_auth_session()
 

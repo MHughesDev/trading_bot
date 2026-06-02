@@ -23,6 +23,7 @@ class AssetModelManifest(BaseModel):
     forecaster_conformal_state_path: str | None = None
     forecaster_config_path: str | None = None
     forecaster_torch_path: str | None = None
+    forecaster_quantile_path: str | None = None
     policy_mlp_path: str | None = None
     policy_checkpoint_path: str | None = None
     runtime_instance_id: str | None = None
