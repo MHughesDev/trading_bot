@@ -110,3 +110,26 @@ risk_engine/canonical_sizing.py:458
 risk_engine/canonical_sizing.py:465
 risk_engine/engine.py:36
 risk_engine/engine.py:37
+risk_engine/engine.py:38
+
+# Injectable three-stage trigger thresholds (decision_engine.trigger_engine.TriggerThresholds)
+# and their settings-backed defaults (configurable; defaults match historical values).
+decision_engine/trigger_engine.py:75
+decision_engine/trigger_engine.py:76
+decision_engine/trigger_engine.py:77
+decision_engine/trigger_engine.py:78
+decision_engine/trigger_engine.py:79
+decision_engine/trigger_engine.py:80
+decision_engine/trigger_engine.py:81
+decision_engine/trigger_engine.py:82
+app/config/settings.py:195
+app/config/settings.py:196
+app/config/settings.py:197
+
+# Pre-existing canonical constants whose allowlisted line numbers had drifted.
+app/config/settings.py:88
+app/config/settings.py:95
+app/config/settings.py:99
+app/config/settings.py:103
+app/config/settings.py:108
+app/config/settings.py:114

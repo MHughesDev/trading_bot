@@ -38,7 +38,7 @@ from decision_engine.state_engine import (
     classify_hard_override,
     merge_canonical_into_risk,
 )
-from decision_engine.trigger_engine import evaluate_trigger
+from decision_engine.trigger_engine import TriggerThresholds, evaluate_trigger
 from policy_model.system import PolicySystem
 
 
@@ -135,6 +135,7 @@ def run_canonical_decision_sequence_after_forecast(
         apex=apex,
         structure=canonical_structure,
         decision_timestamp=data_timestamp,
+        thresholds=TriggerThresholds.from_settings(settings),
     )
 
     # --- merge canonical inputs into risk before auction (policy reads app_risk) ---

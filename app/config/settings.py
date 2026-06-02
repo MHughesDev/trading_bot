@@ -189,6 +189,13 @@ class AppSettings(BaseSettings):
     # off so existing tick-driven behavior is unchanged.
     bar_close_decision_trigger_enabled: bool = False
 
+    # Three-stage trigger thresholds (decision_engine.trigger_engine.TriggerThresholds). Defaults
+    # match the historical permissive values; raise them to make entries stricter as the
+    # forecaster/policy improve (higher = fewer, higher-conviction triggers).
+    trigger_setup_threshold: float = 0.22
+    trigger_pretrigger_threshold: float = 0.18
+    trigger_confirm_threshold: float = 0.2
+
     # FB-AP-020: Alpaca tradable crypto universe snapshot (SQLite; not market data)
     alpaca_universe_db_path: Path = Field(default=Path("data/alpaca_universe.sqlite"))
     alpaca_universe_sync_enabled: bool = False

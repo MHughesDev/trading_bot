@@ -79,6 +79,11 @@ def _file_exists(p: str | None) -> bool:
     return bool(p and Path(p).is_file())
 
 
+def _is_cold_start(ohlc_history: "pl.DataFrame | None") -> bool:
+    """True when there is no real rolling history yet (forecast must use the flat-bar stub)."""
+    return ohlc_history is None or ohlc_history.height < 2
+
+
 def _ohlc_arrays_from_history_or_stub(
     ohlc_history: "pl.DataFrame | None",
     feature_row: dict[str, float],
@@ -86,7 +91,7 @@ def _ohlc_arrays_from_history_or_stub(
     history_len: int = 64,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Return real OHLCV arrays from ``ohlc_history`` when available; fall back to flat-bar stub."""
-    if ohlc_history is not None and ohlc_history.height >= 2:
+    if not _is_cold_start(ohlc_history):
         n = min(ohlc_history.height, history_len)
         df = ohlc_history.tail(n)
         o = df["open"].to_numpy().astype(float)
@@ -444,6 +449,9 @@ class DecisionPipeline:
                 torch_model=self._torch_model,
                 torch_device=self._torch_device,
             )
+        # Surface cold-start (synthetic flat-bar) forecasts so the stub is never silently used.
+        # (Entry blocking on missing history is handled upstream by the live data-health gate.)
+        pkt.forecast_diagnostics["cold_start_synthetic"] = _is_cold_start(ohlc_history)
         pkt.forecast_diagnostics["symbol"] = symbol
         pkt.forecast_diagnostics["pipeline"] = "master_spec"
         pkt.forecast_diagnostics["canonical_boundary_input"] = boundary_input_to_diagnostic_dict(

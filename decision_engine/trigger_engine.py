@@ -6,6 +6,7 @@ and reason codes. See APEX_Trigger_Math_Pseudocode_Detail_Spec_v1_0.md.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from app.contracts.reason_codes import (
@@ -66,6 +67,40 @@ def state_alignment_score(apex: CanonicalStateOutput) -> float:
     return 0.5
 
 
+@dataclass(frozen=True)
+class TriggerThresholds:
+    """Three-stage trigger thresholds. Defaults match the historical hard-coded values; inject
+    tightened values (e.g. from settings) to make the trigger stricter as forecasts improve."""
+
+    setup_threshold: float = 0.22
+    setup_exec_floor: float = 0.12
+    pretrigger_threshold: float = 0.18
+    freshness_floor: float = 0.08
+    confirm_threshold: float = 0.2
+    confirm_exec_floor: float = 0.1
+    entry_extension_limit: float = 0.85
+    min_remaining_edge: float = 0.03
+
+    @classmethod
+    def from_settings(cls, settings: object) -> "TriggerThresholds":
+        """Read overrides from settings (``trigger_*_threshold``), falling back to defaults."""
+        d = cls()
+        return cls(
+            setup_threshold=float(getattr(settings, "trigger_setup_threshold", d.setup_threshold)),
+            setup_exec_floor=d.setup_exec_floor,
+            pretrigger_threshold=float(
+                getattr(settings, "trigger_pretrigger_threshold", d.pretrigger_threshold)
+            ),
+            freshness_floor=d.freshness_floor,
+            confirm_threshold=float(
+                getattr(settings, "trigger_confirm_threshold", d.confirm_threshold)
+            ),
+            confirm_exec_floor=d.confirm_exec_floor,
+            entry_extension_limit=d.entry_extension_limit,
+            min_remaining_edge=d.min_remaining_edge,
+        )
+
+
 def evaluate_trigger(
     pkt: ForecastPacket,
     feature_row: dict[str, float],
@@ -74,8 +109,10 @@ def evaluate_trigger(
     apex: CanonicalStateOutput,
     structure: CanonicalStructureOutput | None = None,
     decision_timestamp: datetime | None = None,
+    thresholds: TriggerThresholds | None = None,
 ) -> TriggerOutput:
     """Evaluate three-stage trigger from packet, microstructure proxies, and canonical state."""
+    thr = thresholds or TriggerThresholds()
     reasons: list[str] = []
     stage_fail: dict[str, list[str]] = {"setup": [], "pretrigger": [], "confirm": []}
     st = structure if structure is not None else structure_from_forecast_packet(pkt)
@@ -96,10 +133,11 @@ def evaluate_trigger(
     exec_conf = _clip01(1.0 - spread_stress * 0.8)
     dq = _safe_float(feature_row, "canonical_exec_quality_penalty", 0.0)
     exec_conf = _clip01(exec_conf * (1.0 - 0.55 * _clip01(dq)))
-    # Permissive defaults for stub/RNG paths; tighten when wiring canonical config.
-    base_setup_threshold = 0.22
+    # Thresholds are injectable (TriggerThresholds.from_settings); defaults match the historical
+    # permissive values so behavior is unchanged until an operator tightens them.
+    base_setup_threshold = thr.setup_threshold
     setup_threshold = base_setup_threshold
-    setup_exec_floor = 0.12
+    setup_exec_floor = thr.setup_exec_floor
     sess_thr = _clip01(float(getattr(apex, "session_mode_throttle", 1.0)))
     if sess_thr < 1.0:
         bump = 1.0 - sess_thr
@@ -146,9 +184,9 @@ def evaluate_trigger(
     wI, wV, wT, wF = 0.3, 0.25, 0.25, 0.2
     pre_raw = wI * imb_shift + wV * vol_score + wT * T_score + wF * F
     pretrigger_score = _clip01(pre_raw)
-    base_pretrigger_threshold = 0.18
+    base_pretrigger_threshold = thr.pretrigger_threshold
     pretrigger_threshold = base_pretrigger_threshold
-    freshness_floor = 0.08
+    freshness_floor = thr.freshness_floor
     if sess_thr < 1.0:
         bump = 1.0 - sess_thr
         pretrigger_threshold = _clip01(base_pretrigger_threshold + 0.10 * bump)
@@ -173,15 +211,15 @@ def evaluate_trigger(
     composite = c1 * B + c2 * U + c3 * K
     trigger_strength = _clip01(max(B, U, K, composite))
 
-    base_trigger_threshold = 0.2
+    base_trigger_threshold = thr.confirm_threshold
     trigger_threshold = base_trigger_threshold
-    trigger_exec_floor = 0.1
+    trigger_exec_floor = thr.confirm_exec_floor
     if sess_thr < 1.0:
         bump = 1.0 - sess_thr
         trigger_threshold = _clip01(base_trigger_threshold + 0.08 * bump)
         trigger_exec_floor = _clip01(trigger_exec_floor + 0.04 * bump)
-    entry_extension_limit = 0.85
-    min_remaining_edge = 0.03
+    entry_extension_limit = thr.entry_extension_limit
+    min_remaining_edge = thr.min_remaining_edge
 
     # Spec §8 — missed move evaluated after strength, before final trigger_valid (pseudocode §12).
     width0 = float(pkt.interval_width[0]) if pkt.interval_width else 0.0
