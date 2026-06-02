@@ -37,7 +37,10 @@ from forecaster_model.training.real_data_fit import (
     save_training_report,
 )
 from orchestration.real_data_bars import dataset_snapshot_id, fetch_symbol_bars_sync, write_snapshot_manifest
-from orchestration.rl_real_data_eval import run_heuristic_rollout_on_range
+from orchestration.rl_real_data_eval import (
+    run_heuristic_rollout_on_range,
+    train_actor_critic_on_range,
+)
 from orchestration.training_spec_constants import (
     CAMPAIGN_FORECASTER_RUNS,
     CAMPAIGN_FORECASTER_SEEDS,
@@ -251,8 +254,9 @@ def run_training_campaign(
             rl_lookback,
         )
 
-    # Initial campaign: 2 algorithm families × 3 splits × 3 seeds = 18 (heuristic placeholders for PPO/SAC)
-    alg_tags = ("ppo_placeholder", "sac_placeholder") if mode == "initial" else ("nightly",)
+    # Initial campaign trains the advantage-weighted actor-critic policy on real bars; nightly
+    # runs the heuristic baseline rollout (cheap, used for trade-activity gating).
+    alg_tags = ("advantage_actor_critic",) if mode == "initial" else ("nightly",)
     if rl_skipped is not None:
         alg_tags = ()
     for alg in alg_tags:
@@ -260,13 +264,26 @@ def run_training_campaign(
             for seed in rl_seeds:
                 if rl_idx >= n_rl_runs:
                     break
-                m = run_heuristic_rollout_on_range(
-                    bars,
-                    trip.train,
-                    best_artifact,
-                    cfg,
-                    max_steps=rl_steps,
-                )
+                if mode == "initial":
+                    # Persist the first trained policy as the per-asset serving artifact.
+                    save_path = (out / "policy" / "policy_mlp.npz") if rl_idx == 0 else None
+                    m = train_actor_critic_on_range(
+                        bars,
+                        trip.train,
+                        best_artifact,
+                        cfg,
+                        max_steps=rl_steps,
+                        seed=seed,
+                        save_policy_path=save_path,
+                    )
+                else:
+                    m = run_heuristic_rollout_on_range(
+                        bars,
+                        trip.train,
+                        best_artifact,
+                        cfg,
+                        max_steps=rl_steps,
+                    )
                 rl_results.append(
                     {
                         "split": sp_idx,
@@ -294,7 +311,7 @@ def run_training_campaign(
         "rl_skipped": rl_skipped,
         "spec_notes": {
             "forecaster": "quantile_ohlc_v1 sklearn on real Kraken candles/trades only",
-            "rl": "heuristic policy rollout on real returns; PPO/SAC backlog",
+            "rl": "advantage-weighted actor-critic on real returns (initial); heuristic rollout (nightly)",
         },
     }
     save_training_report(out / "training_report.json", report)
