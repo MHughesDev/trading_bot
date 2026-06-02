@@ -206,6 +206,91 @@ class RiskEngine:
         )
         return action, _with_codes(risk, [])
 
+    def evaluate_manual_order(
+        self,
+        symbol: str,
+        *,
+        side: OrderSide,
+        quantity: Decimal,
+        risk: RiskState,
+        mid_price: float = 0.0,
+        spread_bps: float = 0.0,
+        product_tradable: bool = True,
+        position_signed_qty: Decimal | None = None,
+        available_cash_usd: float | None = None,
+        order_type: str = "market",
+        limit_price: Decimal | None = None,
+        allow_wide_spread: bool = False,
+    ) -> tuple[TradeAction | None, RiskState]:
+        """Risk gate for an explicit human/agent order with a caller-specified quantity.
+
+        Unlike :meth:`evaluate`, the quantity is honored as given (no automated sizing).
+        Hard account-safety gates still apply, so manual and automated orders share the
+        same final authority (FB risk-is-final): product tradability, drawdown halt, data
+        integrity, system mode (maintenance / pause / reduce-only / flatten), wide spread
+        on *increasing* orders, and available cash for buys. Reducing/closing orders are
+        intentionally allowed through pause/reduce-only/drawdown so a position can always
+        be exited. The returned :class:`TradeAction` is sign-ready via :meth:`to_order_intent`.
+        """
+
+        def _with_codes(rs: RiskState, codes: list[str]) -> RiskState:
+            return rs.model_copy(update={"last_risk_block_codes": list(codes)})
+
+        if quantity is None or quantity <= 0:
+            return None, _with_codes(risk, [RISK_BLOCK_QTY_ZERO])
+
+        pos = position_signed_qty if position_signed_qty is not None else Decimal(0)
+        signed = quantity if side == OrderSide.BUY else -quantity
+        increasing = pos == 0 or (pos > 0) == (signed > 0)
+
+        if not product_tradable:
+            return None, _with_codes(risk, [RISK_BLOCK_PRODUCT_UNTRADABLE])
+
+        dd = 0.0
+        if self._peak_equity > 0:
+            dd = (self._peak_equity - self._current_equity) / self._peak_equity
+        risk = risk.model_copy(update={"current_drawdown_pct": dd})
+        if dd > self._settings.risk_max_drawdown_pct and increasing:
+            return None, _with_codes(risk, [RISK_BLOCK_DRAWDOWN])
+
+        if getattr(risk, "data_integrity_alert", False) and increasing:
+            return None, _with_codes(risk, [RISK_BLOCK_DATA_HEALTH])
+
+        mode = risk.mode
+        if mode == SystemMode.MAINTENANCE:
+            return None, _with_codes(risk, [RISK_BLOCK_MAINTENANCE])
+        if mode == SystemMode.PAUSE_NEW_ENTRIES and increasing:
+            return None, _with_codes(risk, [RISK_BLOCK_PAUSE_NEW_ENTRIES])
+        if mode in (SystemMode.REDUCE_ONLY, SystemMode.FLATTEN_ALL) and increasing:
+            return None, _with_codes(risk, [RISK_BLOCK_REDUCE_ONLY_ADD])
+
+        if increasing and not allow_wide_spread and spread_bps > self._settings.risk_max_spread_bps:
+            r2 = risk.model_copy(update={"spread_bps": spread_bps})
+            return None, _with_codes(r2, [RISK_BLOCK_SPREAD_WIDE])
+
+        qty = quantity
+        if mode in (SystemMode.REDUCE_ONLY, SystemMode.FLATTEN_ALL) and not increasing and pos != 0:
+            qty = min(qty, abs(pos))
+            if qty <= 0:
+                return None, _with_codes(risk, [RISK_BLOCK_REDUCE_ONLY_QTY])
+
+        if side == OrderSide.BUY and mid_price > 0 and available_cash_usd is not None:
+            if float(qty) * mid_price > float(available_cash_usd):
+                return None, _with_codes(risk, [RISK_BLOCK_AVAILABLE_CASH])
+
+        normalized_type = order_type if order_type in ("market", "limit") else "market"
+        action = TradeAction(
+            symbol=symbol,
+            side=side.value,
+            quantity=qty,
+            order_type=normalized_type,
+            limit_price=limit_price if normalized_type == "limit" else None,
+            stop_price=None,
+            time_in_force="gtc",
+            route_id=RouteId.NO_TRADE,
+        )
+        return action, _with_codes(risk, [])
+
     def to_order_intent(self, action: TradeAction, *, sign: bool | None = None) -> OrderIntent:
         intent = OrderIntent(
             symbol=action.symbol,
