@@ -31,7 +31,11 @@ from app.contracts.execution_guidance import ExecutionFeedback
 from app.contracts.risk import RiskState
 from app.runtime.asset_lifecycle_state import effective_lifecycle_state
 from app.runtime.asset_model_registry import list_symbols as list_asset_manifest_symbols
-from app.runtime.live_watch_gate import record_decision_tick, should_run_decision_tick
+from app.runtime.live_watch_gate import (
+    lifecycle_allows_decision,
+    record_decision_tick,
+    should_run_decision_tick,
+)
 from app.runtime.system_power import is_on, sync_from_disk
 from data_plane.bars.rolling import RollingBars
 from data_plane.features.pipeline import FeaturePipeline
@@ -54,7 +58,12 @@ from decision_engine.audit import decision_trace
 from decision_engine.feature_frame import enrich_bars_last_row, merge_feature_overlays
 from decision_engine.features_live import feature_row_from_tick
 from decision_engine.pipeline import DecisionPipeline
-from decision_engine.bar_event_trigger import MARKET_BAR_CLOSED_V1, publish_bar_closed
+from decision_engine.bar_event_trigger import (
+    MARKET_BAR_CLOSED_V1,
+    BarClosedEvent,
+    BarDecisionTrigger,
+    publish_bar_closed,
+)
 from decision_engine.run_step import run_decision_tick
 from execution.adapters.base_adapter import PositionSnapshot
 from execution.credentials import venue_credentials_configured
@@ -232,9 +241,18 @@ async def run_live_loop(
     # Bar-close → AI decision trigger: when enabled, publish a market.bar.closed.v1 event the
     # moment a new canonical bar is persisted, so a decoupled BarDecisionTrigger drives the AI.
     bar_event_bus = None
+    # Bar-close events the trigger has flagged for an event-driven decision, keyed by symbol.
+    pending_bar_decisions: dict[str, BarClosedEvent] = {}
     if cfg.bar_close_decision_trigger_enabled:
         try:
             bar_event_bus = create_message_bus()
+            # Decoupled subscriber: a closed bar records a pending decision for its symbol; the
+            # loop runs the canonical decision tick with full context on the next pass (with an
+            # in-process bus this fires inline during publish, i.e. the same iteration).
+            BarDecisionTrigger(
+                bar_event_bus,
+                lambda ev: pending_bar_decisions.__setitem__(ev.symbol, ev),
+            ).start()
             logger.info("bar-close decision trigger enabled; publishing %s", MARKET_BAR_CLOSED_V1)
         except Exception:
             logger.exception("bar-close trigger bus init failed; continuing without it")
@@ -545,6 +563,17 @@ async def run_live_loop(
                 effective_lifecycle=effective_lifecycle_state,
                 last_decision_monotonic=last_decision_monotonic,
             )
+            # Event-driven: a freshly closed bar forces a decision even if the interval throttle
+            # would skip it — but never bypasses the lifecycle gate (non-active assets stay idle).
+            bar_triggered = pending_bar_decisions.pop(symbol, None) is not None
+            if (
+                not run_decision
+                and bar_triggered
+                and lifecycle_allows_decision(
+                    symbol, cfg, effective_lifecycle=effective_lifecycle_state
+                )
+            ):
+                run_decision = True
             if run_decision:
                 # Phase D: data-health gate — bad history → PAUSE_NEW_ENTRIES via data_integrity_alert.
                 _completed_bars = rollers[symbol].bars_frame_completed()

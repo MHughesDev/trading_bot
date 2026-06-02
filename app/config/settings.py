@@ -357,6 +357,8 @@ def _yaml_to_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
             out["microservices_runtime_bridge_enabled"] = bool(ms["runtime_bridge_enabled"])
         if "execution_gateway_mode" in ms:
             out["microservices_execution_gateway_mode"] = str(ms["execution_gateway_mode"])
+        if "bar_close_decision_trigger_enabled" in ms:
+            out["bar_close_decision_trigger_enabled"] = bool(ms["bar_close_decision_trigger_enabled"])
     if "scheduler" in cfg:
         sch = cfg["scheduler"] or {}
         if "nightly_enabled" in sch:

@@ -9,6 +9,19 @@ from app.config.settings import AppSettings
 from app.contracts.asset_lifecycle import AssetLifecycleState
 
 
+def lifecycle_allows_decision(
+    symbol: str,
+    settings: AppSettings,
+    *,
+    effective_lifecycle: Callable[[str], AssetLifecycleState],
+) -> bool:
+    """Lifecycle-only gate: when ``live_watch_lifecycle_gate`` is on, only ``active`` symbols decide."""
+    if settings.live_watch_lifecycle_gate:
+        if effective_lifecycle(symbol.strip()) != AssetLifecycleState.active:
+            return False
+    return True
+
+
 def should_run_decision_tick(
     symbol: str,
     settings: AppSettings,
@@ -24,9 +37,8 @@ def should_run_decision_tick(
     using monotonic time between **successful** decision ticks (throttle).
     """
     sym = symbol.strip()
-    if settings.live_watch_lifecycle_gate:
-        if effective_lifecycle(sym) != AssetLifecycleState.active:
-            return False
+    if not lifecycle_allows_decision(sym, settings, effective_lifecycle=effective_lifecycle):
+        return False
     min_s = float(settings.live_decision_min_interval_seconds)
     if min_s > 0:
         now = time.monotonic()

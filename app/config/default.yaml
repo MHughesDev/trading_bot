@@ -358,6 +358,9 @@ models:
 microservices:
   runtime_bridge_enabled: false
   execution_gateway_mode: in_process
+  # Platform-triggers-the-AI: publish market.bar.closed.v1 on each new bar and let a
+  # BarDecisionTrigger drive an event-driven decision tick (vs. pure interval polling).
+  bar_close_decision_trigger_enabled: false
 scheduler:
   nightly_enabled: false
   nightly_interval_seconds: 86400
