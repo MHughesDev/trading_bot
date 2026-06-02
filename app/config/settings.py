@@ -182,6 +182,13 @@ class AppSettings(BaseSettings):
     # external: bridge publishes through Redis; execution_gateway_service consumes risk.intent.accepted.
     microservices_execution_gateway_mode: Literal["in_process", "external"] = "in_process"
 
+    # When True, the live loop publishes a market.bar.closed.v1 event each time a new
+    # canonical bar closes (the moment it is added to the DB). A decoupled
+    # decision_engine.bar_event_trigger.BarDecisionTrigger subscriber turns that into the
+    # AI decision trigger — the platform calls the AI, not the other way around. Default
+    # off so existing tick-driven behavior is unchanged.
+    bar_close_decision_trigger_enabled: bool = False
+
     # FB-AP-020: Alpaca tradable crypto universe snapshot (SQLite; not market data)
     alpaca_universe_db_path: Path = Field(default=Path("data/alpaca_universe.sqlite"))
     alpaca_universe_sync_enabled: bool = False
