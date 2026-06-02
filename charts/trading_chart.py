@@ -15,8 +15,16 @@ from typing import Any
 
 import pandas as pd
 
-from charts._helpers import TIMEFRAME_OPTIONS, compute_indicator_frames, normalize_symbol
+from charts._helpers import (
+    TIMEFRAME_OPTIONS,
+    compute_indicator_frames,
+    heikin_ashi,
+    normalize_symbol,
+)
 from charts.data_feed import OHLCVDataSource, get_ohlcv
+from charts.indicators import overlay_keys, reference_levels, sub_pane_keys
+
+CHART_TYPES: tuple[str, ...] = ("candles", "heikin_ashi", "line")
 
 CHART_CONFIG: dict[str, Any] = {
     "size": {"width": 1_120, "height": 760},
@@ -59,10 +67,14 @@ CHART_CONFIG: dict[str, Any] = {
     },
 }
 
-_OVERLAY_KEYS = frozenset({"sma", "ema", "bollinger_bands", "vwap"})
-_SUB_PANE_KEYS = frozenset({"rsi", "macd", "volume"})
-# Sub-panes rendered in this order (top-to-bottom below main chart)
-_SUB_PANE_ORDER = ("volume", "rsi", "macd")
+# Derived from the indicator registry so newly-added studies render without edits here.
+_OVERLAY_KEYS = overlay_keys()
+_SUB_PANE_KEYS = sub_pane_keys()
+# Extra line colours cycled for overlays not in indicator_colors (keeps many overlays legible).
+_PALETTE = (
+    "#38BDF8", "#F59E0B", "#A78BFA", "#34D399", "#F472B6", "#FB7185",
+    "#FACC15", "#2DD4BF", "#C084FC", "#4ADE80", "#FB923C", "#60A5FA",
+)
 _CDN_URL = (
     "https://unpkg.com/lightweight-charts@4.2.0"
     "/dist/lightweight-charts.standalone.production.js"
@@ -110,10 +122,12 @@ class TradingChart:
         symbol: str,
         default_timeframe: str = "1D",
         *,
+        chart_type: str = "candles",
         data_source: OHLCVDataSource | None = None,
     ) -> None:
         self.symbol = normalize_symbol(symbol)
         self.timeframe = default_timeframe
+        self.chart_type = chart_type if chart_type in CHART_TYPES else "candles"
         self.data_source = data_source
         self.indicators: list[dict[str, Any]] = [{"name": "volume", "params": {}}]
 
@@ -127,11 +141,12 @@ class TradingChart:
     def render_html(self) -> str:
         """Return a self-contained HTML string for embedding via st.components.v1.html()."""
         frame = self._get_ohlcv(self.symbol, self.timeframe)
-        ohlcv_js = _ohlcv_to_js(frame)
 
         overlay_data: dict[str, list[dict[str, Any]]] = {}
         sub_pane_data: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        sub_order: list[str] = []
 
+        # Indicators always compute on the raw OHLCV; only the main candle display is transformed.
         for item in self.indicators:
             key = item["name"]
             computed = compute_indicator_frames(frame, key, **item["params"])
@@ -143,14 +158,27 @@ class TradingChart:
                     series_name: _indicator_to_js(sf, series_name)
                     for series_name, sf in computed.items()
                 }
+                if key not in sub_order:
+                    sub_order.append(key)
 
-        return self._build_html(ohlcv_js, overlay_data, sub_pane_data)
+        main_frame = heikin_ashi(frame) if self.chart_type == "heikin_ashi" else frame
+        candle_js = _ohlcv_to_js(main_frame)
+        line_js = (
+            [{"time": d["time"], "value": d["close"]} for d in candle_js]
+            if self.chart_type == "line"
+            else []
+        )
+        ref_levels = {k: list(reference_levels(k)) for k in sub_order if reference_levels(k)}
+        return self._build_html(candle_js, line_js, overlay_data, sub_pane_data, sub_order, ref_levels)
 
     def _build_html(
         self,
         ohlcv_js: list[dict[str, Any]],
+        line_js: list[dict[str, Any]],
         overlay_data: dict[str, list[dict[str, Any]]],
         sub_pane_data: dict[str, dict[str, list[dict[str, Any]]]],
+        sub_order: list[str],
+        ref_levels: dict[str, list[float]],
     ) -> str:
         cfg = CHART_CONFIG
         layout = cfg["layout"]
@@ -162,9 +190,9 @@ class TradingChart:
         pane_h = cfg["pane_heights"]
         colors = cfg["indicator_colors"]
 
-        # Determine which sub-panes are active (in display order)
-        active_sub = [k for k in _SUB_PANE_ORDER if k in sub_pane_data]
-        sub_px = {k: int(pane_h[k] * total_h) for k in active_sub}
+        # Sub-panes in selection order; unknown studies get a default height.
+        active_sub = list(sub_order)
+        sub_px = {k: int(float(pane_h.get(k, 0.15)) * total_h) for k in active_sub}
         main_px = total_h - sum(sub_px.values())
 
         sub_divs = "\n".join(
@@ -172,7 +200,7 @@ class TradingChart:
             for k in active_sub
         )
 
-        sub_js = self._build_sub_pane_js(active_sub, sub_px, vol_cfg)
+        sub_js = self._build_sub_pane_js(active_sub, sub_px, vol_cfg, ref_levels)
 
         return f"""<!DOCTYPE html>
 <html>
@@ -190,16 +218,26 @@ class TradingChart:
 <script>
 (function () {{
   var ohlcv = {json.dumps(ohlcv_js)};
+  var lineData = {json.dumps(line_js)};
   var overlayData = {json.dumps(overlay_data)};
   var subPaneData = {json.dumps(sub_pane_data)};
+  var refLevels = {json.dumps(ref_levels)};
   var indicatorColors = {json.dumps(colors)};
+  var palette = {json.dumps(list(_PALETTE))};
+  var chartType = {json.dumps(self.chart_type)};
 
+  var _paletteIdx = 0;
+  var _assigned = {{}};
   function colorFor(name) {{
     var entries = Object.entries(indicatorColors);
     for (var i = 0; i < entries.length; i++) {{
       if (name.indexOf(entries[i][0]) === 0) return entries[i][1];
     }}
-    return '#E5E7EB';
+    if (!(name in _assigned)) {{
+      _assigned[name] = palette[_paletteIdx % palette.length];
+      _paletteIdx += 1;
+    }}
+    return _assigned[name];
   }}
 
   // Shared chart options
@@ -233,21 +271,28 @@ class TradingChart:
   var ohlcvByTime = {{}};
   ohlcv.forEach(function (d) {{ ohlcvByTime[d.time] = d; }});
 
-  // --- Main chart (candlestick + overlays) ---
+  // --- Main chart (candlestick / Heikin-Ashi / line + overlays) ---
   var mainChart = LightweightCharts.createChart(
     document.getElementById('main-pane'),
     Object.assign({{}}, baseOpts, {{ height: {main_px} }})
   );
 
-  var candleSeries = mainChart.addCandlestickSeries({{
-    upColor: '{candles['up_color']}',
-    downColor: '{candles['down_color']}',
-    borderUpColor: '{candles['border_up_color']}',
-    borderDownColor: '{candles['border_down_color']}',
-    wickUpColor: '{candles['wick_up_color']}',
-    wickDownColor: '{candles['wick_down_color']}',
-  }});
-  candleSeries.setData(ohlcv);
+  if (chartType === 'line') {{
+    var lineSeries = mainChart.addLineSeries({{
+      color: '#38BDF8', lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+    }});
+    lineSeries.setData(lineData);
+  }} else {{
+    var candleSeries = mainChart.addCandlestickSeries({{
+      upColor: '{candles['up_color']}',
+      downColor: '{candles['down_color']}',
+      borderUpColor: '{candles['border_up_color']}',
+      borderDownColor: '{candles['border_down_color']}',
+      wickUpColor: '{candles['wick_up_color']}',
+      wickDownColor: '{candles['wick_down_color']}',
+    }});
+    candleSeries.setData(ohlcv);
+  }}
 
   Object.entries(overlayData).forEach(function (entry) {{
     var name = entry[0];
@@ -287,14 +332,15 @@ class TradingChart:
         active_sub: list[str],
         sub_px: dict[str, int],
         vol_cfg: dict[str, str],
+        ref_levels: dict[str, list[float]],
     ) -> str:
-        """Return JS lines for each active sub-pane chart."""
+        """Return JS for each active sub-pane chart (generic: any registered oscillator)."""
         blocks: list[str] = []
         for key in active_sub:
             h = sub_px[key]
             var = f"{key}Chart"
             blocks.append(
-                f"  // --- {key.upper()} pane ---\n"
+                f"  // --- {key} pane ---\n"
                 f"  var {var} = LightweightCharts.createChart(\n"
                 f"    document.getElementById('{key}-pane'),\n"
                 f"    Object.assign({{}}, baseOpts, {{ height: {h} }})\n"
@@ -318,48 +364,35 @@ class TradingChart:
                     f"  }});\n"
                     f"  volSeries.setData(volData);\n"
                 )
+                continue
 
-            elif key == "rsi":
-                blocks.append(
-                    f"  Object.entries(subPaneData['rsi'] || {{}}).forEach(function (e) {{\n"
-                    f"    var s = {var}.addLineSeries({{\n"
-                    f"      color: colorFor(e[0]), lineWidth: 1,\n"
-                    f"      priceLineVisible: false, lastValueVisible: true, title: e[0],\n"
-                    f"    }});\n"
-                    f"    s.setData(e[1]);\n"
-                    f"  }});\n"
-                    f"  // RSI reference lines at 70 / 30\n"
-                    f"  var rsiKeys = Object.keys(subPaneData['rsi'] || {{}});\n"
-                    f"  var rsiBase = rsiKeys.length ? (subPaneData['rsi'][rsiKeys[0]] || []) : [];\n"
-                    f"  [70, 30].forEach(function (lvl) {{\n"
-                    f"    var ref = {var}.addLineSeries({{\n"
-                    f"      color: lvl === 70 ? 'rgba(239,68,68,0.45)' : 'rgba(34,197,94,0.45)',\n"
-                    f"      lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,\n"
-                    f"      priceLineVisible: false, lastValueVisible: false,\n"
-                    f"    }});\n"
-                    f"    ref.setData(rsiBase.map(function (d) {{ return {{ time: d.time, value: lvl }}; }}));\n"
-                    f"  }});\n"
-                )
-
-            elif key == "macd":
-                blocks.append(
-                    f"  Object.entries(subPaneData['macd'] || {{}}).forEach(function (e) {{\n"
-                    f"    var name = e[0]; var data = e[1];\n"
-                    f"    if (name.indexOf('Histogram') !== -1) {{\n"
-                    f"      var s = {var}.addHistogramSeries({{\n"
-                    f"        color: colorFor(name),\n"
-                    f"        priceLineVisible: false, lastValueVisible: true, title: name,\n"
-                    f"      }});\n"
-                    f"      s.setData(data);\n"
-                    f"    }} else {{\n"
-                    f"      var s = {var}.addLineSeries({{\n"
-                    f"        color: colorFor(name), lineWidth: 1,\n"
-                    f"        priceLineVisible: false, lastValueVisible: true, title: name,\n"
-                    f"      }});\n"
-                    f"      s.setData(data);\n"
-                    f"    }}\n"
-                    f"  }});\n"
-                )
+            # Generic oscillator: line per series (histogram for *Histogram* names) + reference levels.
+            blocks.append(
+                f"  (function () {{\n"
+                f"    var pane = subPaneData['{key}'] || {{}};\n"
+                f"    var firstKey = Object.keys(pane)[0];\n"
+                f"    var base = firstKey ? (pane[firstKey] || []) : [];\n"
+                f"    Object.entries(pane).forEach(function (e) {{\n"
+                f"      var name = e[0], data = e[1];\n"
+                f"      if (name.indexOf('Histogram') !== -1) {{\n"
+                f"        var s = {var}.addHistogramSeries({{ color: colorFor(name),\n"
+                f"          priceLineVisible: false, lastValueVisible: true, title: name }});\n"
+                f"        s.setData(data);\n"
+                f"      }} else {{\n"
+                f"        var s = {var}.addLineSeries({{ color: colorFor(name), lineWidth: 1,\n"
+                f"          priceLineVisible: false, lastValueVisible: true, title: name }});\n"
+                f"        s.setData(data);\n"
+                f"      }}\n"
+                f"    }});\n"
+                f"    var refs = {json.dumps(ref_levels.get(key, []))};\n"
+                f"    refs.forEach(function (lvl) {{\n"
+                f"      var ref = {var}.addLineSeries({{ color: 'rgba(148,163,184,0.4)', lineWidth: 1,\n"
+                f"        lineStyle: LightweightCharts.LineStyle.Dashed,\n"
+                f"        priceLineVisible: false, lastValueVisible: false }});\n"
+                f"      ref.setData(base.map(function (d) {{ return {{ time: d.time, value: lvl }}; }}));\n"
+                f"    }});\n"
+                f"  }})();\n"
+            )
 
         return "".join(blocks)
 

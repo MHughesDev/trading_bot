@@ -114,6 +114,36 @@ def resample_ohlcv(frame: pd.DataFrame, rule: str) -> pd.DataFrame:
     return aggregated[["time", "open", "high", "low", "close", "volume"]]
 
 
+def heikin_ashi(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return a Heikin-Ashi OHLC frame derived from a standard OHLCV frame.
+
+    HA close = (O+H+L+C)/4; HA open = avg of prior HA open/close; HA high/low extend to the raw
+    high/low. Smooths trend visualisation; volume/time columns are preserved.
+    """
+    if frame.empty:
+        return frame
+    import numpy as np
+
+    o = frame["open"].to_numpy(dtype=float)
+    h = frame["high"].to_numpy(dtype=float)
+    low_ = frame["low"].to_numpy(dtype=float)
+    c = frame["close"].to_numpy(dtype=float)
+    n = len(c)
+    ha_close = (o + h + low_ + c) / 4.0
+    ha_open = np.empty(n, dtype=float)
+    ha_open[0] = (o[0] + c[0]) / 2.0
+    for i in range(1, n):
+        ha_open[i] = (ha_open[i - 1] + ha_close[i - 1]) / 2.0
+    ha_high = np.maximum.reduce([h, ha_open, ha_close])
+    ha_low = np.minimum.reduce([low_, ha_open, ha_close])
+    out = frame.copy()
+    out["open"] = ha_open
+    out["high"] = ha_high
+    out["low"] = ha_low
+    out["close"] = ha_close
+    return out
+
+
 def indicator_frame(series: pd.Series, name: str, times: pd.Series) -> pd.DataFrame:
     """Build a chart-ready indicator frame."""
     frame = pd.DataFrame({"time": times, name: pd.to_numeric(series, errors="coerce")})
