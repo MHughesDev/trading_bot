@@ -19,7 +19,7 @@ inject_global_css()
 render_app_sidebar()
 
 st.title("Account")
-st.caption("Per-user **Alpaca** (paper) and **Coinbase** (live) keys — **FB-UX-006**.")
+st.caption("Per-user **Alpaca** (paper), **Coinbase** (live), and **Webull** keys — **FB-UX-006**.")
 
 try:
     me = api_get_json("/auth/me")
@@ -75,13 +75,25 @@ st.caption(
     f"Key: `{vc.get('coinbase_key_masked') or '—'}` · Secret: `{vc.get('coinbase_secret_masked') or '—'}` · "
     f"Status: {'Active' if vc.get('coinbase_key_set') and vc.get('coinbase_secret_set') else 'Not set'}"
 )
+st.markdown("**Webull**")
+st.caption(
+    f"Key: `{vc.get('webull_key_masked') or '—'}` · Secret: `{vc.get('webull_secret_masked') or '—'}` · "
+    f"Status: {'Active' if vc.get('webull_key_set') and vc.get('webull_secret_set') else 'Not set'}"
+)
 st.page_link("pages/98_Setup_API_keys.py", label="Update venue keys", icon=":material/key:")
+st.caption(
+    "Get keys: [Alpaca](https://alpaca.markets/) · "
+    "[Coinbase](https://www.coinbase.com/settings/api) · "
+    "[Webull](https://www.webull.com/)"
+)
 
 with st.form("venue_keys"):
     ak = st.text_input("Alpaca API key ID", type="password", autocomplete="off")
     asec = st.text_input("Alpaca API secret", type="password", autocomplete="off")
     ck = st.text_input("Coinbase API key", type="password", autocomplete="off")
     csec = st.text_input("Coinbase API secret", type="password", autocomplete="off")
+    wk = st.text_input("Webull API key", type="password", autocomplete="off")
+    wsec = st.text_input("Webull API secret", type="password", autocomplete="off")
     sub = st.form_submit_button("Save", use_container_width=True)
 
 if sub:
@@ -94,6 +106,10 @@ if sub:
         body["coinbase_api_key"] = ck.strip()
     if csec.strip():
         body["coinbase_api_secret"] = csec.strip()
+    if wk.strip():
+        body["webull_api_key"] = wk.strip()
+    if wsec.strip():
+        body["webull_api_secret"] = wsec.strip()
     if not body:
         st.info("No new values entered.")
     else:
@@ -104,7 +120,7 @@ if sub:
         except Exception as ex:
             st.error(str(ex))
 
-colx, coly = st.columns(2)
+colx, coly, colz = st.columns(3)
 with colx:
     if st.button("Clear Alpaca keys"):
         try:
@@ -118,6 +134,14 @@ with coly:
         try:
             api_put_json("/auth/venue-credentials", {"clear_coinbase": True})
             st.success("Coinbase credentials cleared.")
+            st.rerun()
+        except Exception as ex:
+            st.error(str(ex))
+with colz:
+    if st.button("Clear Webull keys"):
+        try:
+            api_put_json("/auth/venue-credentials", {"clear_webull": True})
+            st.success("Webull credentials cleared.")
             st.rerun()
         except Exception as ex:
             st.error(str(ex))
