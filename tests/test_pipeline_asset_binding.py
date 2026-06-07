@@ -9,8 +9,8 @@ from app.contracts.asset_model_manifest import AssetModelManifest
 from app.contracts.decisions import RouteId
 from app.contracts.risk import RiskState
 from app.runtime import asset_model_registry as reg
-from decision_engine import pipeline as pipeline_mod
-from decision_engine.pipeline import DecisionPipeline, resolve_serving_paths
+from legacy.decision_pipeline.decision_engine import pipeline as pipeline_mod
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline, resolve_serving_paths
 
 
 def _features(close: float = 50_000.0) -> dict[str, float]:

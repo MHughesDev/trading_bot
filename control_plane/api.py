@@ -30,7 +30,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from decision_engine.decision_record import get_last_decision_record
+from app.runtime.decision_record_store import get_last_decision_record
 from observability.drift_calibration_metrics import refresh_shadow_divergence_gauges_from_store
 from observability.forecaster_metrics import MODEL_VERSION_INFO
 
@@ -47,6 +47,11 @@ from app.runtime.asset_execution_mode import (
     list_mode_overrides,
     to_api_dict as asset_execution_mode_to_api_dict,
     write_mode_override,
+)
+from app.runtime.asset_strategy_selection import (
+    delete_strategy_override,
+    to_api_dict as asset_strategy_selection_to_api_dict,
+    write_strategy_override,
 )
 from app.runtime.asset_lifecycle_state import (
     delete_lifecycle_state,
@@ -73,6 +78,7 @@ from app.runtime.execution_settings_merge import merge_settings_for_execution
 from app.runtime.user_store import UserRecord
 from execution.adapter_registry import supported_adapters_for_settings
 from control_plane.backtest_run import list_strategies_payload, run_symbol_backtest
+from strategies.registry import get_strategy
 from control_plane.chart_bars import (
     query_canonical_bars_for_chart,
     query_latest_canonical_bar_for_chart,
@@ -1343,6 +1349,66 @@ def delete_asset_execution_mode(
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="no execution_mode sidecar for symbol",
+        )
+    return {"ok": True, "symbol": sym}
+
+
+@app.get("/assets/strategy/{symbol}")
+def get_asset_strategy(symbol: str) -> dict[str, Any]:
+    """Per-symbol selected strategy — *is* the live decision source for this asset (FB-AP-XXX).
+
+    Falls back to the catalogue's default strategy when unset.
+    """
+    sym = symbol.strip()
+    return asset_strategy_selection_to_api_dict(sym)
+
+
+@app.put("/assets/strategy/{symbol}")
+def put_asset_strategy(
+    symbol: str,
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Pick an asset, click a strategy, let it run: persists the live decision-source choice.
+
+    The chosen strategy drives this symbol's live trading immediately (paper or live, per the
+    asset's execution mode) — re-run continuously over a trailing window by
+    :func:`app.runtime.strategy_decision_source.run_strategy_decision_tick`.
+    """
+    sym = symbol.strip()
+    key = body.get("strategy_key")
+    if not isinstance(key, str) or not key.strip():
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="strategy_key is required",
+        )
+    if get_strategy(key) is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"unknown strategy key: {key!r}",
+        )
+    params = body.get("strategy_params")
+    path = write_strategy_override(sym, key, params=params if isinstance(params, dict) else None)
+    return {
+        "ok": True,
+        "symbol": sym,
+        "strategy_key": key,
+        "path": str(path),
+    }
+
+
+@app.delete("/assets/strategy/{symbol}")
+def delete_asset_strategy(
+    symbol: str,
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Remove the per-symbol strategy override; live trading falls back to the catalogue default."""
+    sym = symbol.strip()
+    ok = delete_strategy_override(sym)
+    if not ok:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="no strategy sidecar for symbol",
         )
     return {"ok": True, "symbol": sym}
 

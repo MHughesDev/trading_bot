@@ -25,7 +25,7 @@ from backtesting.replay_helpers import (
     remaining_edge_and_exec_confidence_for_partial_fill,
 )
 from execution.partial_fill_reconcile import reconcile_partial_fill_record
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from risk_engine.engine import RiskEngine
 
 

@@ -22,8 +22,8 @@ import numpy as np
 import polars as pl
 from sklearn.linear_model import QuantileRegressor
 
-from forecaster_model.config import ForecasterConfig
-from forecaster_model.inference.quantile_infer import (
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.forecaster_model.inference.quantile_infer import (
     QuantileForecasterArtifact,
     _feature_row_at_t,
     predict_quantile_forecast_packet,

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from data_plane.bars.rolling import RollingMinuteBars
 from data_plane.features.pipeline import FeaturePipeline
-from decision_engine.feature_frame import enrich_bars_last_row
+from data_plane.features.frame_enrichment import enrich_bars_last_row
 
 
 def test_rolling_minute_bar_roll():

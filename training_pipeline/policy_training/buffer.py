@@ -6,7 +6,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
-from policy_model.objects import PolicyAction, PolicyObservation
+from legacy.decision_pipeline.policy_model.objects import PolicyAction, PolicyObservation
 
 
 @dataclass

@@ -18,7 +18,7 @@ from app.config.settings import AppSettings, load_settings
 from app.contracts.replay_events import ReplayRunContract
 from app.config.shadow_comparison import shadow_policy_from_settings
 from backtesting.replay import replay_decisions
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from models.registry.shadow_comparison_store import save_shadow_comparison_report
 from orchestration.shadow_comparison import compare_shadow_replay_rows
 from risk_engine.engine import RiskEngine

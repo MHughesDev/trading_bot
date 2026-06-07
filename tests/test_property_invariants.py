@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
-from forecaster_model.config import ForecasterConfig
-from policy_model.objects import (
+from legacy.decision_pipeline.forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.policy_model.objects import (
     ExecutionState,
     ForecastPacket as PolicyForecastPacket,
     PortfolioState,
     RiskState,
     TargetPosition,
 )
-from policy_model.risk.gate import RiskGate
+from legacy.decision_pipeline.policy_model.risk.gate import RiskGate
 
 
 def test_quantiles_monotonic_per_horizon() -> None:

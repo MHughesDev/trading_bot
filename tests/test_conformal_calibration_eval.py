@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from forecaster_model.calibration.conformal import MultiHorizonConformal
+from legacy.decision_pipeline.forecaster_model.calibration.conformal import MultiHorizonConformal
 
 
 def test_multi_horizon_conformal_widens_interval() -> None:

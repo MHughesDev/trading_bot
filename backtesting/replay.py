@@ -37,9 +37,9 @@ from backtesting.simulator import (
     make_replay_rng,
 )
 from data_plane.features.pipeline import FeaturePipeline
-from decision_engine.feature_frame import enrich_bars_last_row
-from decision_engine.pipeline import DecisionPipeline
-from decision_engine.run_step import run_decision_tick
+from data_plane.features.frame_enrichment import enrich_bars_last_row
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.run_step import run_decision_tick
 from risk_engine.engine import RiskEngine
 
 __all__ = ["replay_decisions", "replay_multi_asset_decisions", "run_decision_tick"]

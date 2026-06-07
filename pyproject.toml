@@ -82,7 +82,6 @@ include = [
   "data_plane*",
   "execution*",
   "models*",
-  "decision_engine*",
   "risk_engine*",
   "backtesting*",
   "control_plane*",
@@ -90,8 +89,7 @@ include = [
   "training_pipeline*",
   "strategies*",
   "observability*",
-  "forecaster_model*",
-  "policy_model*",
+  "legacy*",
   "operator_packaging*",
   "carry_sleeve*",
 ]

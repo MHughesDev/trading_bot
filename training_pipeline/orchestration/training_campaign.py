@@ -28,7 +28,7 @@ import polars as pl
 from app.config.settings import AppSettings, load_settings
 from app.runtime.system_power import is_on, sync_from_disk
 from execution.trade_activity import symbol_had_trade_in_lookback
-from forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
 from training_pipeline.forecaster_training.metrics import mean_pinball_loss
 from training_pipeline.forecaster_training.real_data_fit import (
     QuantileForecasterArtifact,

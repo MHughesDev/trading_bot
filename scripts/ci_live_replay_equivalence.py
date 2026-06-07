@@ -14,7 +14,7 @@ from backtesting.live_replay_equivalence import (
     fingerprints_from_replay_rows,
 )
 from backtesting.replay import replay_decisions
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from risk_engine.engine import RiskEngine
 
 

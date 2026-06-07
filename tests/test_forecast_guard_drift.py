@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from app.contracts.forecast_packet import ForecastPacket
-from forecaster_model.inference.guards import ForecastGuard, ForecastGuardConfig
+from legacy.decision_pipeline.forecaster_model.inference.guards import ForecastGuard, ForecastGuardConfig
 
 
 def test_drift_abstain():

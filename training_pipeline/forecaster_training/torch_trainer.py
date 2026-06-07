@@ -19,11 +19,11 @@ from typing import Any
 
 import numpy as np
 
-from forecaster_model.config import ForecasterConfig
-from forecaster_model.features.normalization import rolling_zscore_causal
-from forecaster_model.features.ohlc import build_observed_feature_matrix
-from forecaster_model.features.time_future import known_future_features
-from forecaster_model.regime.soft import soft_regime_from_returns
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.forecaster_model.features.normalization import rolling_zscore_causal
+from legacy.decision_pipeline.forecaster_model.features.ohlc import build_observed_feature_matrix
+from legacy.decision_pipeline.forecaster_model.features.time_future import known_future_features
+from legacy.decision_pipeline.forecaster_model.regime.soft import soft_regime_from_returns
 from training_pipeline.forecaster_training.checkpoint import save_json_checkpoint
 from training_pipeline.forecaster_training.device import resolve_torch_device
 
@@ -169,7 +169,7 @@ def train_forecaster_torch(
     except ImportError as e:
         raise ImportError("Install trading-bot[models_torch] for PyTorch forecaster training") from e
 
-    from forecaster_model.models.torch_forecaster_net import build_torch_forecaster
+    from legacy.decision_pipeline.forecaster_model.models.torch_forecaster_net import build_torch_forecaster
 
     cfg = cfg or ForecasterConfig()
     artifact_dir = Path(artifact_dir)

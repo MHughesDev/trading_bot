@@ -7,7 +7,7 @@ import polars as pl
 import pytest
 from datetime import UTC, datetime, timedelta
 
-from decision_engine.pipeline import DecisionPipeline, _ohlc_arrays_from_history_or_stub
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline, _ohlc_arrays_from_history_or_stub
 from app.config.settings import load_settings
 
 

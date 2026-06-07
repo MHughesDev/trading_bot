@@ -8,8 +8,8 @@ import pytest
 
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState
-from decision_engine import pipeline as pipeline_mod
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine import pipeline as pipeline_mod
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 
 _TORCH = importlib.util.find_spec("torch") is not None
 
@@ -55,7 +55,7 @@ def test_distilled_torch_checkpoint_pipeline_step(tmp_path) -> None:
 @pytest.mark.skipif(not _TORCH, reason="torch optional")
 def test_load_torch_forecaster_roundtrip_state_dict(tmp_path) -> None:
     from training_pipeline.forecaster_training.distill_mlp import train_distilled_mlp_forecaster
-    from forecaster_model.inference.torch_infer import load_torch_forecaster_checkpoint
+    from legacy.decision_pipeline.forecaster_model.inference.torch_infer import load_torch_forecaster_checkpoint
 
     train_distilled_mlp_forecaster(artifact_dir=tmp_path, epochs=1, steps_per_epoch=2, device="cpu")
     pt = tmp_path / "forecaster_torch.pt"

@@ -13,9 +13,9 @@ import pytest
 
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState
-from decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
-from decision_engine import pipeline as pipeline_mod
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
+from legacy.decision_pipeline.decision_engine import pipeline as pipeline_mod
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 
 
 def _features(close: float = 50_000.0) -> dict[str, float]:

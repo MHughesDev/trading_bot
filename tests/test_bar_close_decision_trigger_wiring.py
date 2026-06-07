@@ -9,7 +9,7 @@ import pytest
 from app.config.settings import AppSettings, _yaml_to_kwargs
 from app.contracts.asset_lifecycle import AssetLifecycleState
 from app.runtime.live_watch_gate import lifecycle_allows_decision
-from decision_engine.bar_event_trigger import BarClosedEvent, BarDecisionTrigger, publish_bar_closed
+from app.runtime.bar_event_trigger import BarClosedEvent, BarDecisionTrigger, publish_bar_closed
 from shared.messaging.in_memory import InMemoryMessageBus
 
 

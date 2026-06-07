@@ -21,19 +21,19 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
 from training_pipeline.forecaster_training.real_data_fit import (
     QuantileForecasterArtifact,
     predict_quantile_forecast_packet,
 )
-from policy_model.objects import (
+from legacy.decision_pipeline.policy_model.objects import (
     ExecutionState,
     PolicyObservation,
     PolicyRiskEnvelope,
     PortfolioState,
 )
-from policy_model.observation.builder import PolicyObservationBuilder
-from policy_model.policy.heuristic import HeuristicTargetPolicy
+from legacy.decision_pipeline.policy_model.observation.builder import PolicyObservationBuilder
+from legacy.decision_pipeline.policy_model.policy.heuristic import HeuristicTargetPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -273,8 +273,8 @@ def train_actor_critic_on_range(
     update every ``update_every`` transitions. Returns the deterministic eval metrics; persists
     the policy ``.npz`` when ``save_policy_path`` is given.
     """
-    from policy_model.objects import PolicyAction
-    from policy_model.policy.policy_network import PolicyNetwork
+    from legacy.decision_pipeline.policy_model.objects import PolicyAction
+    from legacy.decision_pipeline.policy_model.policy.policy_network import PolicyNetwork
     from training_pipeline.policy_training.buffer import ReplayBuffer, Transition
 
     arrays = (

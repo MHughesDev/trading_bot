@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from forecaster_model.losses.quantile import pinball_loss_scalar as pinball_loss
+from legacy.decision_pipeline.forecaster_model.losses.quantile import pinball_loss_scalar as pinball_loss
 
 
 def mean_pinball_loss(

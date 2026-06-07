@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from forecaster_model.data.dataset_manifest import DatasetManifest, build_manifest_from_arrays, compute_content_hash
+from legacy.decision_pipeline.forecaster_model.data.dataset_manifest import DatasetManifest, build_manifest_from_arrays, compute_content_hash
 from training_pipeline.forecaster_training.walkforward import WalkForwardConfig, walk_forward_indices
 
 

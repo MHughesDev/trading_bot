@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from policy_model.objects import PolicyAction, PolicyObservation
-from policy_model.policy.critic import ValueCritic
-from policy_model.policy.mlp_actor import MultiBranchMLPPolicy
-from policy_model.policy.policy_network import PolicyNetwork
+from legacy.decision_pipeline.policy_model.objects import PolicyAction, PolicyObservation
+from legacy.decision_pipeline.policy_model.policy.critic import ValueCritic
+from legacy.decision_pipeline.policy_model.policy.mlp_actor import MultiBranchMLPPolicy
+from legacy.decision_pipeline.policy_model.policy.policy_network import PolicyNetwork
 from training_pipeline.policy_training.actor_critic import ActorCriticTrainer
 from training_pipeline.policy_training.behavior_cloning import (
     BCDataset,

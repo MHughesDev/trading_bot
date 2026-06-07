@@ -8,7 +8,7 @@ from typing import Any
 
 from data_plane.bars.rolling import RollingBars
 from data_plane.features.pipeline import FeaturePipeline
-from decision_engine.feature_frame import enrich_bars_last_row, merge_feature_overlays
+from data_plane.features.frame_enrichment import enrich_bars_last_row, merge_feature_overlays
 from shared.messaging.envelope import EventEnvelope
 
 

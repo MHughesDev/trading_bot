@@ -1,4 +1,4 @@
-from policy_model.integration.full_policy_loop import run_stub_episode
+from legacy.decision_pipeline.policy_model.integration.full_policy_loop import run_stub_episode
 import numpy as np
 
 

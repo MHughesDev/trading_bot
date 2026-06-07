@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from forecaster_model.config import ForecasterConfig
-from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
 
 _GOLDEN_ANCHOR = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 

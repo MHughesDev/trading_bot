@@ -17,7 +17,7 @@ from app.contracts.reason_codes import (
     TRG_MOVE_ALREADY_EXTENDED,
 )
 from app.contracts.trigger import TriggerOutput
-from decision_engine.auction_engine import run_opportunity_auction
+from legacy.decision_pipeline.decision_engine.auction_engine import run_opportunity_auction
 
 
 def _pkt() -> ForecastPacket:

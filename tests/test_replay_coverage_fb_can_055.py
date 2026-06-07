@@ -14,7 +14,7 @@ from backtesting.replay_coverage import (
     collect_event_families_from_replay_rows,
     validate_replay_event_family_coverage,
 )
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from risk_engine.engine import RiskEngine
 
 

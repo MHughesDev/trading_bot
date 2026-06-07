@@ -1,4 +1,4 @@
-"""Live and replay must share decision_engine.run_step."""
+"""Live runs the strategy-based decision source (FB-AP-XXX); replay preserves the legacy path."""
 
 from __future__ import annotations
 
@@ -6,15 +6,15 @@ import ast
 from pathlib import Path
 
 
-def test_live_service_imports_run_decision_tick():
+def test_live_service_imports_strategy_decision_source():
     root = Path(__file__).resolve().parents[1]
     src = (root / "app" / "runtime" / "live_service.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     imported = []
     for n in tree.body:
-        if isinstance(n, ast.ImportFrom) and n.module == "decision_engine.run_step":
+        if isinstance(n, ast.ImportFrom) and n.module == "app.runtime.strategy_decision_source":
             imported.extend(alias.name for alias in n.names)
-    assert "run_decision_tick" in imported
+    assert "run_strategy_decision_tick" in imported
 
 
 def test_replay_imports_run_decision_tick():

@@ -16,7 +16,7 @@ from backtesting.replay_provenance import (
     deterministic_seed_from_dataset,
     resolve_replay_seed,
 )
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from risk_engine.engine import RiskEngine
 
 

@@ -7,14 +7,14 @@ from pathlib import Path
 
 import numpy as np
 
-from forecaster_model.calibration.conformal import (
+from legacy.decision_pipeline.forecaster_model.calibration.conformal import (
     MultiHorizonConformal,
     SlidingConformalCalibrator,
     load_conformal_state,
     save_conformal_state,
 )
-from forecaster_model.config import ForecasterConfig
-from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
 
 
 def test_multi_horizon_roundtrip_json() -> None:

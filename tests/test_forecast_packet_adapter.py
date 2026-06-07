@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.contracts.forecast_packet import ForecastPacket
-from decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
+from legacy.decision_pipeline.decision_engine.forecast_packet_adapter import forecast_packet_to_forecast_output
 
 
 def test_adapter_maps_medians_to_horizons() -> None:

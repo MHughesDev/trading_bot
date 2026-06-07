@@ -2,7 +2,7 @@ import numpy as np
 
 from app.contracts.forecast_packet import ForecastPacket
 from datetime import UTC, datetime
-from forecaster_model.models.ensemble import build_ensemble_forecast_packet, forward_ensemble_numpy
+from legacy.decision_pipeline.forecaster_model.models.ensemble import build_ensemble_forecast_packet, forward_ensemble_numpy
 
 
 def test_build_ensemble_packet():

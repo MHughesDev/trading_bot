@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from forecaster_model.config import ForecasterConfig
-from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
 
 
 def test_methodology_packet_monotone_quantiles() -> None:
@@ -23,7 +23,7 @@ def test_methodology_packet_monotone_quantiles() -> None:
 
 
 def test_sliding_conformal() -> None:
-    from forecaster_model.calibration.conformal import SlidingConformalCalibrator
+    from legacy.decision_pipeline.forecaster_model.calibration.conformal import SlidingConformalCalibrator
 
     c = SlidingConformalCalibrator(alpha=0.1, window_size=100)
     c.update(0.0, -0.1, 0.1)

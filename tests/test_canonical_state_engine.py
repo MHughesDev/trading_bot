@@ -13,7 +13,7 @@ from app.contracts.canonical_structure import CanonicalStructureOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState
 from app.contracts.trigger import TriggerOutput
-from decision_engine.state_engine import (
+from legacy.decision_pipeline.decision_engine.state_engine import (
     build_canonical_state,
     degradation_size_multiplier,
     merge_canonical_into_risk,
@@ -77,7 +77,7 @@ def test_build_canonical_state_includes_novelty_trace_with_structure():
 
 def test_regime_confidence_matches_spec_separation():
     """APEX State spec §6 — max(R) - second_max(R) on the 5-class vector."""
-    from decision_engine.state_engine import _regime_confidence_separation
+    from legacy.decision_pipeline.decision_engine.state_engine import _regime_confidence_separation
 
     assert _regime_confidence_separation([0.5, 0.3, 0.1, 0.05, 0.05]) == pytest.approx(0.2)
 

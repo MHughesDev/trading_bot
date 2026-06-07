@@ -11,7 +11,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from policy_model.policy.mlp_actor import MultiBranchMLPPolicy
+from legacy.decision_pipeline.policy_model.policy.mlp_actor import MultiBranchMLPPolicy
 
 
 def _policy_seed(symbol: str, job_id: str) -> int:

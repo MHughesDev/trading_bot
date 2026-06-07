@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from policy_model.objects import PolicyAction, PolicyObservation
+from legacy.decision_pipeline.policy_model.objects import PolicyAction, PolicyObservation
 
 
 @runtime_checkable

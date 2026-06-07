@@ -94,14 +94,14 @@ def test_import_boundary_serving_does_not_import_training() -> None:
 
     # Remove cached modules to get a fresh import check
     for key in list(sys.modules.keys()):
-        if "training_pipeline.forecaster_training" in key or "decision_engine.pipeline" in key:
+        if "training_pipeline.forecaster_training" in key or "legacy.decision_pipeline.decision_engine.pipeline" in key:
             del sys.modules[key]
 
     # Import pipeline — should not cause training_pipeline.forecaster_training.real_data_fit to import sklearn
-    import decision_engine.pipeline  # noqa: F401
+    import legacy.decision_pipeline.decision_engine.pipeline  # noqa: F401
 
     # forecaster_model.inference.quantile_infer should be importable without sklearn at module level
-    import forecaster_model.inference.quantile_infer  # noqa: F401
+    import legacy.decision_pipeline.forecaster_model.inference.quantile_infer  # noqa: F401
 
     # The training module should NOT have been imported as a side effect of the pipeline import
     assert "training_pipeline.forecaster_training.real_data_fit" not in sys.modules

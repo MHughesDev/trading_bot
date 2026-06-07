@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from decision_engine.state_engine import composite_degradation_size_multiplier, merge_canonical_into_risk
+from legacy.decision_pipeline.decision_engine.state_engine import composite_degradation_size_multiplier, merge_canonical_into_risk
 from risk_engine.canonical_sizing import (
     asymmetry_boost,
     classify_liquidation_mode,

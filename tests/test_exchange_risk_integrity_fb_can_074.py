@@ -17,7 +17,7 @@ from app.contracts.reason_codes import (
     STATE_EXCHANGE_RISK_HIGH,
 )
 from app.contracts.risk import RiskState, SystemMode
-from decision_engine.state_engine import (
+from legacy.decision_pipeline.decision_engine.state_engine import (
     apply_normalization_degradation,
     build_canonical_state,
     classify_exchange_risk_and_integrity,

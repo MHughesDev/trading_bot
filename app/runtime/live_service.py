@@ -1,15 +1,19 @@
 """
 Live trading loop: Kraken WS → features → decision → risk → audit → optional QuestDB → execution.
 
-**FB-CAN-029 canonical tick shape** (per message, when the watch gate runs a decision):
+**Strategy-based decision tick** (per message, when the watch gate runs a decision):
 
 1. **Normalize / features** — Kraken WS → ``normalize_kraken_ws_message`` → bars + feature overlays.
-2. **Shared decision step** — ``run_decision_tick`` (same as replay): pipeline canonical sequence then
-   ``risk_engine.evaluate`` (see ``decision_engine/canonical_orchestrator.py`` + ``run_step.py``).
+2. **Shared decision step** — ``run_strategy_decision_tick`` (same as replay): the asset's
+   user-selected strategy (:mod:`app.runtime.asset_strategy_selection`) is replayed over recent
+   bars via the backtest engine; a net-profitable run drives the live signal, then
+   ``risk_engine.evaluate`` applies risk approval (see ``app/runtime/strategy_decision_source.py``).
 3. **Execution guidance + intent** — ``build_execution_context_from_decision`` / ``prepare_order_intent_for_execution``.
 4. **Feedback** — ``apply_execution_feedback`` after a successful submit (stubbed fill quality).
 
-Uses `run_decision_tick` (same path as `backtesting/replay.py`). Passes `feed_last_message_at` from WS.
+Uses `run_strategy_decision_tick` (same path as `backtesting/replay.py`). Passes
+`feed_last_message_at` from WS. The retired forecaster/regime/RL decision pipeline is preserved
+for reference under `legacy/decision_pipeline/` — it is no longer part of the runtime.
 """
 
 from __future__ import annotations
@@ -54,17 +58,16 @@ from data_plane.health.data_health import check_data_health
 from data_plane.storage.questdb import QuestDBWriter
 from data_plane.storage.startup_gap_detection import detect_canonical_bar_gaps
 from orchestration.startup_canonical_backfill import run_startup_canonical_backfill
-from decision_engine.audit import decision_trace
-from decision_engine.feature_frame import enrich_bars_last_row, merge_feature_overlays
-from decision_engine.features_live import feature_row_from_tick
-from decision_engine.pipeline import DecisionPipeline
-from decision_engine.bar_event_trigger import (
+from app.runtime.decision_audit import decision_trace
+from data_plane.features.frame_enrichment import enrich_bars_last_row, merge_feature_overlays
+from data_plane.features.live_row import feature_row_from_tick
+from app.runtime.bar_event_trigger import (
     MARKET_BAR_CLOSED_V1,
     BarClosedEvent,
     BarDecisionTrigger,
     publish_bar_closed,
 )
-from decision_engine.run_step import run_decision_tick
+from app.runtime.strategy_decision_source import run_strategy_decision_tick
 from execution.adapters.base_adapter import PositionSnapshot
 from execution.credentials import venue_credentials_configured
 from data_plane.memory.execution_feedback_memory import update_execution_feedback_memory
@@ -200,7 +203,6 @@ async def run_live_loop(
         return_windows=cfg.features_return_windows,
         volatility_windows=cfg.features_volatility_windows,
     )
-    pipeline = DecisionPipeline(settings=cfg)
     risk_engine = RiskEngine(cfg)
     exec_svc = ExecutionService(cfg)
     risk_state = RiskState()
@@ -592,21 +594,19 @@ async def run_live_loop(
                 risk_state = risk_state.model_copy(
                     update={"data_integrity_alert": not _health.is_healthy}
                 )
-                regime, fc, route, proposal, trade, risk_state = run_decision_tick(
+                regime, fc, route, proposal, trade, risk_state = run_strategy_decision_tick(
                     symbol=symbol,
-                    feature_row=feats,
-                    spread_bps=spread_bps,
+                    settings=cfg,
                     risk_state=risk_state,
-                    pipeline=pipeline,
                     risk_engine=risk_engine,
                     mid_price=mid,
+                    spread_bps=spread_bps,
                     data_timestamp=data_ts,
-                    feed_last_message_at=ws.last_message_at,
                     product_tradable=tradable,
+                    ohlc_history=_completed_bars if _completed_bars.height >= 2 else None,
+                    feed_last_message_at=ws.last_message_at,
                     position_signed_qty=positions.get(symbol, Decimal(0)),
                     portfolio_equity_usd=risk_engine.current_equity,
-                    execution_feedback_state=exec_feedback,
-                    ohlc_history=_completed_bars if _completed_bars.height >= 2 else None,
                 )
                 record_decision_tick(symbol, last_decision_monotonic)
             else:
@@ -645,7 +645,7 @@ async def run_live_loop(
                     forecast=fc,
                     risk=risk_state,
                     mid_price=mid,
-                    forecast_packet=pipeline.last_forecast_packet,
+                    forecast_packet=None,
                     execution_feedback_bucket=fb,
                     settings=cfg,
                 )
@@ -667,7 +667,7 @@ async def run_live_loop(
                 if exec_blocked
                 else (None if trade else "risk_blocked_or_no_trade"),
                 correlation_id=oid,
-                forecast_packet=pipeline.last_forecast_packet,
+                forecast_packet=None,
             )
             logger.info("decision_trace %s", trace)
             if qdb:

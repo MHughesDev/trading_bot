@@ -537,6 +537,52 @@ def render_asset_page(symbol: str) -> None:
     except Exception as e:
         st.warning(f"Execution mode: {e}")
 
+    st.markdown("#### Strategy")
+    st.caption(
+        "Pick a strategy and it *is* the live decision source for this asset — runs continuously "
+        "(paper or live, per Mode above) the moment you save it. No separate enable step."
+    )
+    try:
+        catalogue = api_get_json("/strategies")
+        strategies = catalogue.get("strategies") or []
+        by_key = {s["key"]: s for s in strategies}
+        labels = {s["key"]: s.get("name") or s["key"] for s in strategies}
+        sel = api_get_json(f"/assets/strategy/{sym}")
+        eff_key = sel.get("strategy_key")
+        if not strategies:
+            st.caption("No strategies registered.")
+        elif hasattr(st, "popover"):
+            with st.popover(f"Strategy · {labels.get(eff_key, eff_key or '?')}"):
+                st.caption(f"Default `{labels.get(sel.get('default_strategy_key'), sel.get('default_strategy_key'))}`")
+                keys = ["(use default)"] + list(by_key)
+                current = sel.get("override")
+                choice = st.selectbox(
+                    "Live strategy",
+                    options=keys,
+                    format_func=lambda k: "(use default)" if k == "(use default)" else labels.get(k, k),
+                    index=(keys.index(current) if current in keys else 0),
+                    key=f"asset_live_strategy_{sym}",
+                )
+                if choice != "(use default)" and by_key[choice].get("description"):
+                    st.caption(by_key[choice]["description"])
+                if st.button("Save", key=f"asset_live_strategy_apply_{sym}"):
+                    try:
+                        if choice == "(use default)":
+                            try:
+                                api_delete_json(f"/assets/strategy/{sym}")
+                            except httpx.HTTPStatusError as e:
+                                if e.response.status_code != 404:
+                                    raise
+                        else:
+                            api_put_json(f"/assets/strategy/{sym}", {"strategy_key": choice})
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+        else:
+            st.caption(f"Strategy `{labels.get(eff_key, eff_key or '?')}`")
+    except Exception as e:
+        st.warning(f"Strategy: {e}")
+
     _render_trade_panel(sym)
 
     try:

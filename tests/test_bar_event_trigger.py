@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from decision_engine.bar_event_trigger import (
+from app.runtime.bar_event_trigger import (
     MARKET_BAR_CLOSED_V1,
     BarClosedEvent,
     BarDecisionTrigger,

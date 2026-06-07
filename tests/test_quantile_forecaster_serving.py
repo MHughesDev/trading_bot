@@ -16,8 +16,8 @@ import polars as pl
 
 from app.config.settings import load_settings
 from app.contracts.risk import RiskState
-from decision_engine.pipeline import DecisionPipeline, _load_quantile_forecaster_if_configured
-from forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline, _load_quantile_forecaster_if_configured
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
 from training_pipeline.forecaster_training.real_data_fit import fit_quantile_forecaster_from_bars
 
 

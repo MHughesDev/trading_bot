@@ -10,8 +10,8 @@ from app.config.settings import AppSettings, load_settings
 from app.contracts.canonical_state import CanonicalStateOutput, DegradationLevel
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState
-from decision_engine.pipeline import DecisionPipeline, _is_cold_start
-from decision_engine.trigger_engine import TriggerThresholds, evaluate_trigger
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline, _is_cold_start
+from legacy.decision_pipeline.decision_engine.trigger_engine import TriggerThresholds, evaluate_trigger
 
 
 def _apex() -> CanonicalStateOutput:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-from forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
 from training_pipeline.forecaster_training.real_data_fit import fit_quantile_forecaster_from_bars
 from training_pipeline.orchestration.rl_real_data_eval import (
     RLEpisodeMetrics,
@@ -13,7 +13,7 @@ from training_pipeline.orchestration.rl_real_data_eval import (
     run_policy_rollout_on_range,
     train_actor_critic_on_range,
 )
-from policy_model.policy.policy_network import PolicyNetwork
+from legacy.decision_pipeline.policy_model.policy.policy_network import PolicyNetwork
 
 _CFG = ForecasterConfig(
     history_length=8,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState, SystemMode
-from policy_model.risk_bridge import risk_state_to_policy_envelope
+from legacy.decision_pipeline.policy_model.risk_bridge import risk_state_to_policy_envelope
 
 
 def _settings() -> AppSettings:

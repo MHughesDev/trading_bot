@@ -1,6 +1,6 @@
 """FB-FR-PG9: simulated forecast build failure surfaces as abstention, not silent success."""
 
-from forecaster_model.inference.robust import safe_build_forecast_packet
+from legacy.decision_pipeline.forecaster_model.inference.robust import safe_build_forecast_packet
 
 
 def test_fault_injection_no_silent_packet():

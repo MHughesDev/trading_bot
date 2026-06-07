@@ -7,7 +7,7 @@ from data_plane.features.canonical_normalize import (
     normalize_feature_row,
     validate_normalized_row,
 )
-from decision_engine.state_engine import apply_normalization_degradation
+from legacy.decision_pipeline.decision_engine.state_engine import apply_normalization_degradation
 
 
 def test_normalize_aliases_ret_to_return():
