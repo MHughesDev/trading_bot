@@ -19,7 +19,7 @@ from app.contracts.run_binding import (
     effective_seed_live,
     resolve_effective_seed,
 )
-from decision_engine.decision_record import build_decision_record
+from legacy.decision_pipeline.decision_engine.decision_record import build_decision_record
 
 
 def _pkt() -> ForecastPacket:

@@ -9,12 +9,12 @@ torch = pytest.importorskip("torch")  # skips when the optional [models_torch] e
 
 import polars as pl  # noqa: E402
 
-from forecaster_model.config import ForecasterConfig  # noqa: E402
-from forecaster_model.inference.torch_infer import (  # noqa: E402
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig  # noqa: E402
+from legacy.decision_pipeline.forecaster_model.inference.torch_infer import (  # noqa: E402
     forward_torch_quantiles,
     load_torch_forecaster_checkpoint,
 )
-from forecaster_model.training.torch_trainer import (  # noqa: E402
+from training_pipeline.forecaster_training.torch_trainer import (  # noqa: E402
     build_torch_training_samples,
     train_forecaster_torch,
 )

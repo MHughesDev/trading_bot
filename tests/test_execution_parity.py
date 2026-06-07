@@ -1,7 +1,7 @@
 """FB-PL-PG5: planner respects min notional style constraints."""
 
-from policy_model.objects import ApprovedTarget, ExecutionState, PortfolioState
-from policy_model.execution.planner import ExecutionPlanner
+from legacy.decision_pipeline.policy_model.objects import ApprovedTarget, ExecutionState, PortfolioState
+from legacy.decision_pipeline.policy_model.execution.planner import ExecutionPlanner
 
 
 def test_skip_when_delta_notional_below_min():

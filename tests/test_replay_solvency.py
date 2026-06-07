@@ -15,7 +15,7 @@ from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState
 from backtesting.execution_params import BacktestExecutionParams
 from backtesting.replay import replay_decisions
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from risk_engine.engine import RiskEngine
 
 

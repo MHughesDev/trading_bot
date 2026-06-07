@@ -12,7 +12,7 @@ from app.contracts.hard_override import HardOverrideKind
 from app.contracts.reason_codes import TRG_MOVE_ALREADY_EXTENDED
 from app.contracts.risk import RiskState, SystemMode
 from app.contracts.trigger import TriggerOutput
-from decision_engine.state_engine import (
+from legacy.decision_pipeline.decision_engine.state_engine import (
     build_canonical_state,
     classify_hard_override,
     merge_canonical_into_risk,

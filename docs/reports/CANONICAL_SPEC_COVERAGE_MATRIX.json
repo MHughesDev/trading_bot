@@ -49,7 +49,7 @@
       ],
       "queue_ids": ["FB-CAN-041", "FB-CAN-042", "FB-CAN-033", "FB-CAN-073", "FB-CAN-074"],
       "implementation_paths": [
-        "decision_engine/state_engine.py",
+        "legacy/decision_pipeline/decision_engine/state_engine.py",
         "app/contracts/canonical_state.py",
         "app/contracts/hard_override.py"
       ],
@@ -75,7 +75,7 @@
       "canonical_specs": ["APEX_Trigger_Math_Pseudocode_Detail_Spec_v1_0.md"],
       "queue_ids": ["FB-CAN-031", "FB-CAN-043"],
       "implementation_paths": [
-        "decision_engine/trigger_engine.py",
+        "legacy/decision_pipeline/decision_engine/trigger_engine.py",
         "app/contracts/trigger.py"
       ],
       "test_path_patterns": ["tests/test_trigger_engine*"]
@@ -86,7 +86,7 @@
       "canonical_specs": ["APEX_Auction_Scoring_Constraints_Detail_Spec_v1_0.md"],
       "queue_ids": ["FB-CAN-034", "FB-CAN-044", "FB-CAN-046"],
       "implementation_paths": [
-        "decision_engine/auction_engine.py",
+        "legacy/decision_pipeline/decision_engine/auction_engine.py",
         "app/contracts/auction.py"
       ],
       "test_path_patterns": ["tests/test_auction_engine*"]
@@ -152,7 +152,7 @@
         "backtesting/replay_provenance.py",
         "app/contracts/replay_events.py",
         "app/contracts/run_binding.py",
-        "decision_engine/decision_record.py",
+        "legacy/decision_pipeline/decision_engine/decision_record.py",
         "orchestration/shadow_comparison.py",
         "backtesting/live_replay_equivalence.py"
       ],
@@ -168,7 +168,7 @@
         "observability/drift_calibration_metrics.py",
         "observability/lag_metrics.py",
         "observability/monitoring_domain_checklist.py",
-        "decision_engine/run_step.py",
+        "legacy/decision_pipeline/decision_engine/run_step.py",
         "infra/prometheus/alerts/canonical_apex.yml"
       ],
       "test_path_patterns": ["tests/test_canonical_metrics*", "tests/test_monitoring_domain*", "tests/test_drift*", "tests/test_lag_metrics*", "tests/test_edge_budget*"]

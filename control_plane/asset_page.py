@@ -273,6 +273,158 @@ def _render_ohlc_chart(sym: str) -> None:
         )
 
 
+_BACKTEST_PRESETS: tuple[Preset, ...] = ("minute", "hour", "day", "week", "month")
+
+
+def _backtest_param_input(sym: str, param: dict[str, Any]) -> Any:
+    """Render one strategy-parameter widget from its descriptor; return the entered value."""
+    name = param["name"]
+    kind = param.get("kind", "string")
+    default = param.get("default")
+    help_text = param.get("description") or None
+    key = f"asset_bt_param_{sym}_{name}"
+    if kind == "int":
+        return int(
+            st.number_input(
+                name,
+                value=int(default if default is not None else 0),
+                min_value=int(param["minimum"]) if param.get("minimum") is not None else None,
+                max_value=int(param["maximum"]) if param.get("maximum") is not None else None,
+                step=1,
+                key=key,
+                help=help_text,
+            )
+        )
+    if kind == "float":
+        return float(
+            st.number_input(
+                name,
+                value=float(default if default is not None else 0.0),
+                min_value=float(param["minimum"]) if param.get("minimum") is not None else None,
+                max_value=float(param["maximum"]) if param.get("maximum") is not None else None,
+                key=key,
+                help=help_text,
+            )
+        )
+    # decimal / string: keep as text so precision-sensitive values round-trip exactly.
+    return st.text_input(name, value=str(default if default is not None else ""), key=key, help=help_text)
+
+
+def _render_backtest_results(result: dict[str, Any]) -> None:
+    """Render PnL stats + fills/positions from a /assets/backtest response."""
+    st.caption(
+        f"Ran **{result.get('strategy_key')}** on **{result.get('bar_count')}** bars "
+        f"({result.get('start')} → {result.get('end')})."
+    )
+    pnls = result.get("stats_pnls") or {}
+    for ccy, stats in pnls.items():
+        cols = st.columns(4)
+        cols[0].metric(f"PnL ({ccy})", f"{stats.get('PnL (total)', 0.0):,.2f}")
+        cols[1].metric("PnL %", f"{stats.get('PnL% (total)', 0.0) * 100:,.3f}%")
+        cols[2].metric("Win rate", f"{stats.get('Win Rate', 0.0) * 100:,.1f}%")
+        cols[3].metric("Expectancy", f"{stats.get('Expectancy', 0.0):,.2f}")
+
+    rcols = st.columns(3)
+    rcols[0].metric("Orders", result.get("total_orders", 0))
+    rcols[1].metric("Positions", result.get("total_positions", 0))
+    rcols[2].metric("Iterations", result.get("iterations", 0))
+
+    returns = result.get("stats_returns") or {}
+    if returns:
+        with st.expander("Returns stats", expanded=False):
+            st.json(returns)
+
+    fills = result.get("fills") or []
+    if fills:
+        st.markdown("**Order fills**")
+        try:
+            import polars as pl
+
+            st.dataframe(pl.DataFrame(fills), hide_index=True, width="stretch")
+        except Exception:
+            st.table(fills)
+
+
+def _render_backtest_panel(sym: str, lifecycle_state: str) -> None:
+    """Strategy backtest — separate from paper/live, runnable concurrently (FB-AP-XXX).
+
+    Gated on the asset being initialized (has data); requires a strategy from the dropdown.
+    """
+    st.markdown("#### Backtest")
+    if lifecycle_state in ("uninitialized", "?"):
+        st.caption("Initialize this asset (load its data) before backtesting.")
+        return
+
+    try:
+        catalogue = api_get_json("/strategies")
+    except Exception as e:
+        st.warning(f"Strategies: {e}")
+        return
+    strategies = catalogue.get("strategies") or []
+    if not strategies:
+        st.caption("No strategies registered.")
+        return
+
+    by_key = {s["key"]: s for s in strategies}
+    labels = {s["key"]: s.get("name") or s["key"] for s in strategies}
+    keys = list(by_key)
+    chosen_key = st.selectbox(
+        "Strategy",
+        options=keys,
+        format_func=lambda k: labels.get(k, k),
+        key=f"asset_bt_strategy_{sym}",
+    )
+    descriptor = by_key[chosen_key]
+    if descriptor.get("description"):
+        st.caption(descriptor["description"])
+
+    preset = st.selectbox(
+        "Window",
+        options=_BACKTEST_PRESETS,
+        index=1,  # default "hour"
+        key=f"asset_bt_window_{sym}",
+    )
+
+    params: dict[str, Any] = {}
+    descriptor_params = descriptor.get("params") or []
+    if descriptor_params:
+        with st.expander("Parameters", expanded=False):
+            pcols = st.columns(min(3, len(descriptor_params)))
+            for i, param in enumerate(descriptor_params):
+                with pcols[i % len(pcols)]:
+                    params[param["name"]] = _backtest_param_input(sym, param)
+
+    if st.button("Run backtest", type="primary", key=f"asset_bt_run_{sym}"):
+        start, end = chart_time_window(preset)
+        body = {
+            "strategy_key": chosen_key,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "strategy_params": params,
+            "interval_seconds": preset_to_request(preset).interval_seconds,
+        }
+        try:
+            with st.spinner("Running backtest…"):
+                result = api_post_json(f"/assets/backtest/{sym}", body, timeout=180.0)
+            st.session_state[f"asset_bt_result_{sym}"] = result
+        except httpx.HTTPStatusError as e:
+            detail = e.response.text
+            if e.response.status_code == 503:
+                st.error(
+                    "Backtest engine not installed. Install the platform's NautilusTrader fork: "
+                    'pip install -e ".[backtest_nautilus]" (see strategies/README.md).'
+                )
+            else:
+                st.error(f"Backtest failed ({e.response.status_code}): {detail}")
+        except Exception as e:
+            st.error(f"Backtest failed: {e}")
+
+    result = st.session_state.get(f"asset_bt_result_{sym}")
+    if isinstance(result, dict):
+        st.divider()
+        _render_backtest_results(result)
+
+
 def render_asset_page(symbol: str) -> None:
     """Main column: lifecycle, manifest summary, OHLC chart, API hints."""
     sym = normalize_symbol(symbol)
@@ -385,6 +537,52 @@ def render_asset_page(symbol: str) -> None:
     except Exception as e:
         st.warning(f"Execution mode: {e}")
 
+    st.markdown("#### Strategy")
+    st.caption(
+        "Pick a strategy and it *is* the live decision source for this asset — runs continuously "
+        "(paper or live, per Mode above) the moment you save it. No separate enable step."
+    )
+    try:
+        catalogue = api_get_json("/strategies")
+        strategies = catalogue.get("strategies") or []
+        by_key = {s["key"]: s for s in strategies}
+        labels = {s["key"]: s.get("name") or s["key"] for s in strategies}
+        sel = api_get_json(f"/assets/strategy/{sym}")
+        eff_key = sel.get("strategy_key")
+        if not strategies:
+            st.caption("No strategies registered.")
+        elif hasattr(st, "popover"):
+            with st.popover(f"Strategy · {labels.get(eff_key, eff_key or '?')}"):
+                st.caption(f"Default `{labels.get(sel.get('default_strategy_key'), sel.get('default_strategy_key'))}`")
+                keys = ["(use default)"] + list(by_key)
+                current = sel.get("override")
+                choice = st.selectbox(
+                    "Live strategy",
+                    options=keys,
+                    format_func=lambda k: "(use default)" if k == "(use default)" else labels.get(k, k),
+                    index=(keys.index(current) if current in keys else 0),
+                    key=f"asset_live_strategy_{sym}",
+                )
+                if choice != "(use default)" and by_key[choice].get("description"):
+                    st.caption(by_key[choice]["description"])
+                if st.button("Save", key=f"asset_live_strategy_apply_{sym}"):
+                    try:
+                        if choice == "(use default)":
+                            try:
+                                api_delete_json(f"/assets/strategy/{sym}")
+                            except httpx.HTTPStatusError as e:
+                                if e.response.status_code != 404:
+                                    raise
+                        else:
+                            api_put_json(f"/assets/strategy/{sym}", {"strategy_key": choice})
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+        else:
+            st.caption(f"Strategy `{labels.get(eff_key, eff_key or '?')}`")
+    except Exception as e:
+        st.warning(f"Strategy: {e}")
+
     _render_trade_panel(sym)
 
     try:
@@ -419,6 +617,9 @@ def render_asset_page(symbol: str) -> None:
 
     st.divider()
     _render_ohlc_chart(sym)
+
+    st.divider()
+    _render_backtest_panel(sym, lifecycle_state)
 
     api_base = st.session_state.get("_cp_api_base", "")
     if not api_base:

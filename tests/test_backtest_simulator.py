@@ -17,7 +17,7 @@ from backtesting.simulator import (
     fill_price_with_slippage,
     make_replay_rng,
 )
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from risk_engine.engine import RiskEngine
 
 

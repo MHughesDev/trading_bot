@@ -1,7 +1,7 @@
 """
 Initial forecaster artifact for per-asset init (FB-AP-010).
 
-Runs :func:`forecaster_model.training.distill_mlp.train_distilled_mlp_forecaster` into
+Runs :func:`training_pipeline.forecaster_training.distill_mlp.train_distilled_mlp_forecaster` into
 ``<init_run_dir>/forecaster/`` — **synthetic teacher** distillation (same as CLI
 ``tb-train-forecaster-distill``), scoped per symbol/job so manifests can point at
 asset-specific paths. Real **bars→tensor** training is a follow-up; this closes the
@@ -30,7 +30,7 @@ def run_init_forecaster_distill(
     Raises:
         ImportError: if ``torch`` is not installed.
     """
-    from forecaster_model.training.distill_mlp import train_distilled_mlp_forecaster
+    from training_pipeline.forecaster_training.distill_mlp import train_distilled_mlp_forecaster
 
     forecaster_dir = run_dir / "forecaster"
     epochs = max(1, int(settings.asset_init_forecaster_distill_epochs))

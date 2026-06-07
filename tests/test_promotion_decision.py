@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orchestration.promotion import decide_forecaster_promotion_stub
+from training_pipeline.orchestration.promotion import decide_forecaster_promotion_stub
 
 
 def _report(score: float, artifact: str) -> dict:

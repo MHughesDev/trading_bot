@@ -19,7 +19,7 @@ from backtesting.metrics import (
 )
 from backtesting.replay import replay_decisions
 from backtesting.trade_ledger import build_trade_ledger, fills_from_rows, summarize_trades
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from risk_engine.engine import RiskEngine
 
 

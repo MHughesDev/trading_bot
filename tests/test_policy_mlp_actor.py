@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from policy_model.objects import PolicyObservation
-from policy_model.policy.mlp_actor import MultiBranchMLPPolicy
+from legacy.decision_pipeline.policy_model.objects import PolicyObservation
+from legacy.decision_pipeline.policy_model.policy.mlp_actor import MultiBranchMLPPolicy
 
 
 def test_mlp_policy_bounded_action() -> None:

@@ -285,7 +285,7 @@
 
 #### Reference — optional full-spec PyTorch decomposition (waived; not open queue)
 
-*Epic alignment:* [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD). **ID scheme:** **FB-FR-P0-0X-YY**. **Status:** all rows **Waived** with **FB-FR-P0-WAIVE** (2026-04-12) — kept only if you revisit native PyTorch training for every submodule.
+*Epic alignment:* [`legacy/decision_pipeline/docs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](../legacy/decision_pipeline/docs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD). **ID scheme:** **FB-FR-P0-0X-YY**. **Status:** all rows **Waived** with **FB-FR-P0-WAIVE** (2026-04-12) — kept only if you revisit native PyTorch training for every submodule.
 
 #### FB-FR-P0-02 — **Graph** (PyTorch module stack)
 
@@ -371,7 +371,7 @@
 
 *No open **FB-MS** items — slice **FB-MS-01 … FB-MS-06** completed **2026-04-11** (see [§5.5](#55-complete-archive-one-row-per-id)).*
 
-*Parent epic:* RL policy per [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Sub-rows FB-PL-P0-01 … FB-PL-P0-04 Done 2026-04-11** (NumPy stubs + offline env; full PyTorch RL remains future hardening).
+*Parent epic:* RL policy per [`legacy/decision_pipeline/docs/POLICY_MODEL_ARCHITECTURE_SPEC.MD`](../legacy/decision_pipeline/docs/POLICY_MODEL_ARCHITECTURE_SPEC.MD). **Sub-rows FB-PL-P0-01 … FB-PL-P0-04 Done 2026-04-11** (NumPy stubs + offline env; full PyTorch RL remains future hardening).
 
 *See also **HIGH** priority above (forecaster closeout). **FB-SPEC-06** is in [§5](#5-completed-archive-fb--themes).*
 
@@ -619,7 +619,7 @@ Grouped by theme for quicker lookup. *Chronological merge history is preserved i
 | FB-FR-PG8 | models | 2026-04-11 | Drift z-score + `test_forecast_guard_drift` |
 | FB-FR-PG9 | models | 2026-04-11 | `test_fault_injection_forecast` |
 | FB-HS-01 | specs | 2026-04-10 | Human specs + stubs + tests |
-| FB-HS-02 | specs | 2026-04-10 | `FORECASTER_AND_POLICY.MD` |
+| FB-HS-02 | specs | 2026-04-10 | `legacy/decision_pipeline/docs/FORECASTER_AND_POLICY.MD` |
 | FB-HS-03 | specs | 2026-04-11 | Methodology wired in code |
 | FB-HS-04 | specs | 2026-04-10 | Literal package layout |
 | FB-I1 | docs | 2026-04-10 | README orchestration note |

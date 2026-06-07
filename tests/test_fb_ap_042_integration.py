@@ -16,7 +16,7 @@ from app.runtime import asset_lifecycle_state as lc
 from app.runtime import asset_model_registry as reg
 from control_plane import api
 from data_plane.storage.merge_canonical_bars import merge_canonical_bars_frames
-from decision_engine.pipeline import resolve_serving_paths
+from legacy.decision_pipeline.decision_engine.pipeline import resolve_serving_paths
 
 
 @pytest.fixture

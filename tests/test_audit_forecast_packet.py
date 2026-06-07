@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.contracts.forecast_packet import ForecastPacket
-from decision_engine.audit import decision_trace
+from app.runtime.decision_audit import decision_trace
 from app.contracts.decisions import RouteDecision, RouteId
 from app.contracts.forecast import ForecastOutput
 from app.contracts.regime import RegimeOutput, SemanticRegime

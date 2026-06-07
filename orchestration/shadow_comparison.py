@@ -238,7 +238,7 @@ def run_shadow_replay_pair_comparison(
     from app.config.settings import AppSettings
     from app.contracts.replay_events import ReplayRunContract
     from backtesting.replay import replay_decisions
-    from decision_engine.pipeline import DecisionPipeline
+    from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
     from risk_engine.engine import RiskEngine
 
     policy = shadow_policy_from_settings(settings)

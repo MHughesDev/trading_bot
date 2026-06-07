@@ -204,7 +204,7 @@ An additional pass added FB-CAN-071..078 to close remaining operational/canonica
 
 Previously listed for wholesale removal once canonical replacements are active (now **archive-by-clarification** unless a later queue item deletes them):
 - `docs/Specs/SYSTEM_OVERVIEW.MD`
-- `docs/Specs/DECISION_PIPELINE.MD`
+- `legacy/decision_pipeline/docs/DECISION_PIPELINE.MD`
 - `docs/Specs/RISK_ENGINE.MD`
 - `docs/Specs/EXECUTION_LAYER.MD`
 - `docs/Specs/APP_CONFIG_AND_CONTRACTS.MD`

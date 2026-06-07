@@ -11,6 +11,9 @@ DASHBOARD_PAGE = st.Page(
     default=True,
 )
 ASSET_PAGE = st.Page("pages/Asset.py", title="Asset page", icon=":material/show_chart:")
+STRATEGY_BUILDER_PAGE = st.Page(
+    "pages/StrategyBuilder.py", title="Strategy builder", icon=":material/build:"
+)
 ACCOUNT_PAGE = st.Page("pages/7_Account.py", title="Account", icon=":material/settings:")
 SIGN_IN_PAGE = st.Page("pages/0_Login.py", title="Sign in", icon=":material/login:")
 SIGN_UP_PAGE = st.Page("pages/99_Sign_up.py", title="Sign up", icon=":material/person_add:")
@@ -25,6 +28,7 @@ SETUP_API_KEYS_PAGE = st.Page("pages/98_Setup_API_keys.py", title="Setup API key
 NAVIGATION_PAGES = [
     DASHBOARD_PAGE,
     ASSET_PAGE,
+    STRATEGY_BUILDER_PAGE,
     ACCOUNT_PAGE,
     SIGN_IN_PAGE,
     SIGN_UP_PAGE,

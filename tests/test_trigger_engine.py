@@ -14,7 +14,7 @@ from app.contracts.reason_codes import (
     TRG_MOVE_ALREADY_EXTENDED,
 )
 from app.contracts.forecast_packet import ForecastPacket
-from decision_engine.trigger_engine import evaluate_trigger
+from legacy.decision_pipeline.decision_engine.trigger_engine import evaluate_trigger
 
 
 def _apex() -> CanonicalStateOutput:

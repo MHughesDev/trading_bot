@@ -10,7 +10,7 @@ from app.config.settings import AppSettings
 from app.contracts.replay_events import ReplayRunContract
 from backtesting.fault_injection import apply_fault_injection
 from backtesting.replay import replay_decisions
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from orchestration.fault_injection_profiles import (
     CANONICAL_FAULT_PROFILES,
     fault_stress_evidence_satisfied,

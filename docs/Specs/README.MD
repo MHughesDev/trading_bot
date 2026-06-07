@@ -35,7 +35,7 @@ This folder holds **specifications that describe the repository as implemented**
 | [`SYSTEM_OVERVIEW.MD`](SYSTEM_OVERVIEW.MD) | Product boundaries, repository map, tech stack |
 | [`APP_CONFIG_AND_CONTRACTS.MD`](APP_CONFIG_AND_CONTRACTS.MD) | `app/config/`, `NM_*`, `app/contracts/` |
 | [`DATA_PLANE.MD`](DATA_PLANE.MD) | Ingest, bars, features, memory, storage |
-| [`DECISION_PIPELINE.MD`](DECISION_PIPELINE.MD) | `decision_engine/` — shared tick path |
+| [`legacy/decision_pipeline/docs/DECISION_PIPELINE.MD`](../../legacy/decision_pipeline/docs/DECISION_PIPELINE.MD) | `decision_engine/` — shared tick path |
 | [`RISK_ENGINE.MD`](RISK_ENGINE.MD) | `risk_engine/` — constraints, signing |
 | [`EXECUTION_LAYER.MD`](EXECUTION_LAYER.MD) | `execution/` — router, adapters, CDP REST |
 | [`BACKTESTING.MD`](BACKTESTING.MD) | `backtesting/` — replay parity with live |
@@ -43,11 +43,11 @@ This folder holds **specifications that describe the repository as implemented**
 | [`MODELS_AND_ORCHESTRATION.MD`](MODELS_AND_ORCHESTRATION.MD) | Regime, forecast, routing, retrain |
 | [`OBSERVABILITY_AND_INFRA.MD`](OBSERVABILITY_AND_INFRA.MD) | Metrics, logging, `infra/docker-compose.yml` |
 | [`TESTING_AND_CI.MD`](TESTING_AND_CI.MD) | `tests/`, `scripts/`, GitHub Actions |
-| [`FORECASTER_AND_POLICY.MD`](FORECASTER_AND_POLICY.MD) | `forecaster_model/`, `policy_model/`, `ForecastPacket` |
+| [`legacy/decision_pipeline/docs/FORECASTER_AND_POLICY.MD`](../../legacy/decision_pipeline/docs/FORECASTER_AND_POLICY.MD) | `forecaster_model/`, `policy_model/`, `ForecastPacket` |
 | [`MULTI_ASSET_PORTFOLIO.MD`](MULTI_ASSET_PORTFOLIO.MD) | Independent ticks vs shared risk caps; no cross-symbol optimizer (FB-SPEC-07) |
 | [`../MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD) | Historical note: legacy Ridge path removed; single master pipeline |
 | [`../SYSTEM_WALKTHROUGH.MD`](../SYSTEM_WALKTHROUGH.MD) | Step-by-step: live, paper, live execution, backtest (master pipeline) |
-| [`../Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](../Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) | Authoritative end-to-end system spec |
+| [`legacy/decision_pipeline/docs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](../../legacy/decision_pipeline/docs/MASTER_SYSTEM_PIPELINE_SPEC.MD) | Authoritative end-to-end system spec |
 
 ## Naming convention
 

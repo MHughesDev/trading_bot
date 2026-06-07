@@ -882,7 +882,7 @@ tb_drawdown_pct
 
 ### Alternative Phase 2 Designs
 - [ ] Machine-learned trigger thresholds (vs. hand-tuned)
-- [ ] LLM reasoning layer (System 2 as per AI_TRADING_AGENT_DESIGN.MD)
+- [ ] LLM reasoning layer (System 2 as per `legacy/decision_pipeline/docs/AI_TRADING_AGENT_DESIGN.MD`)
 - [ ] Multi-asset regime classification
 
 ### Alternative Phase 3 Designs
@@ -896,7 +896,7 @@ tb_drawdown_pct
 
 - [`docs/CANONICAL_SPEC_INDEX.MD`](CANONICAL_SPEC_INDEX.MD) — APEX system spec
 - [`docs/architecture/system_walkthrough.md`](architecture/system_walkthrough.md) — detailed walkthrough
-- [`docs/AI_TRADING_AGENT_DESIGN.MD`](AI_TRADING_AGENT_DESIGN.MD) — System 2 (LLM layer) design
+- [`legacy/decision_pipeline/docs/AI_TRADING_AGENT_DESIGN.MD`](../legacy/decision_pipeline/docs/AI_TRADING_AGENT_DESIGN.MD) — System 2 (LLM layer) design
 - [`docs/architecture/risk_precedence.md`](architecture/risk_precedence.md) — risk gate ordering
 - [`AGENTS.md`](../AGENTS.md) — contributor contract
 - [`app/contracts/reason_codes.py`](../app/contracts/reason_codes.py) — all block/approval codes

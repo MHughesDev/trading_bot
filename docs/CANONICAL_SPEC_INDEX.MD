@@ -16,7 +16,7 @@
 2. **`docs/reports/REPO_VS_CANONICAL_SPECS_GAP_AUDIT.md`** — Authoritative **gap analysis** between the repo and canonical specs; use for migration ordering and queue ID mapping.
 3. **`docs/reports/CANONICAL_SPEC_COVERAGE_MATRIX.json`** — Machine-readable **section-to-queue coverage matrix** (**FB-CAN-070**); human summary in [`CANONICAL_SPEC_COVERAGE_MATRIX.MD`](reports/CANONICAL_SPEC_COVERAGE_MATRIX.MD); validated by **`scripts/ci_canonical_coverage_matrix.py`**.
 4. **`docs/Specs/*.MD`** — **As-built / as-implemented** maps of the **current** codebase. They remain the best description of **what runs today** but are **not** the target architecture contract during migration. See each file’s header note.
-5. **Root-level `docs/Human Provided Specs/*.MD`** (e.g. `MASTER_SYSTEM_PIPELINE_SPEC.MD`) — **Legacy human intent** for the pre-canonical pipeline (forecaster/policy stack). Marked **superseded for target architecture** where they conflict with APEX canonical docs; kept for history and migration traceability.
+5. **`legacy/decision_pipeline/docs/*.MD`** (e.g. `MASTER_SYSTEM_PIPELINE_SPEC.MD`, relocated from `docs/Human Provided Specs/`) — **Legacy human intent** for the pre-canonical pipeline (forecaster/policy stack). Marked **superseded for target architecture** where they conflict with APEX canonical docs; kept for history and migration traceability.
 6. **`docs/Human Provided Specs/new_specs/superseded/`** — Older draft packs; **do not** use for new design decisions.
 
 When two documents conflict on **target** behavior, **canonical APEX** wins. When they conflict on **current code paths**, **`docs/Specs/`** + code win.

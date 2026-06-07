@@ -8,7 +8,7 @@ from app.config.settings import AppSettings
 from app.contracts.canonical_state import DegradationLevel
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.risk import RiskState
-from decision_engine.state_engine import (
+from legacy.decision_pipeline.decision_engine.state_engine import (
     build_canonical_state,
     classify_session_mode,
     merge_canonical_into_risk,

@@ -1,5 +1,6 @@
 from backtesting.execution_params import BacktestExecutionParams
 from backtesting.metrics import BacktestMetrics, compute_backtest_metrics
+from backtesting.nautilus_backtest import BacktestRunResult, run_backtest
 from backtesting.portfolio import PortfolioTracker
 from backtesting.replay import replay_decisions, replay_multi_asset_decisions
 from backtesting.simulator import (
@@ -21,6 +22,8 @@ from backtesting.trade_ledger import (
 __all__ = [
     "BacktestExecutionParams",
     "BacktestMetrics",
+    "BacktestRunResult",
+    "run_backtest",
     "PortfolioTracker",
     "TradeRecord",
     "TradeStats",

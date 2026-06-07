@@ -57,6 +57,15 @@ class FakeBackend:
         self.calls.append(("set_execution_mode", {"symbol": symbol, "mode": mode}))
         return {"symbol": symbol, "mode": mode}
 
+    # --- extended reads/actions: record the call, echo back kwargs ---
+    def __getattr__(self, name: str) -> Any:
+        def _generic(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            payload = {"args": args, **kwargs} if args else dict(kwargs)
+            self.calls.append((name, payload))
+            return {"ok": True, "tool": name, **kwargs}
+
+        return _generic
+
 
 @pytest.fixture
 def registry() -> ToolRegistry:
@@ -150,6 +159,55 @@ def test_handler_exception_is_captured() -> None:
     out = reg.call_tool("boom", {})
     assert out["error"] == "kaboom"
     assert out["tool"] == "boom"
+
+
+def test_registry_exposes_extended_surface(registry: ToolRegistry) -> None:
+    names = set(registry.tool_names())
+    # Spot-check a representative read tool and a representative act tool from each new group.
+    assert {
+        "list_alpaca_universe", "sync_alpaca_universe",
+        "get_scheduler_status", "set_params", "system_flatten", "set_system_mode",
+        "get_asset_model_manifest", "put_asset_model_manifest", "delete_asset_model_manifest",
+        "get_latest_bar", "get_trade_markers",
+        "list_release_objects", "create_experiment", "delete_experiment",
+        "run_shadow_comparison", "evaluate_release_gates",
+    } <= names
+    assert len(names) == 55
+
+
+def test_extended_read_tools_route_to_backend() -> None:
+    backend = FakeBackend()
+    reg = build_registry(backend)
+    assert reg.call_tool("get_scheduler_status", {})["ok"] is True
+    assert reg.call_tool("list_alpaca_universe", {"limit": 10, "query": "BTC"})["ok"] is True
+    out = reg.call_tool("get_latest_bar", {"symbol": "BTC-USD", "interval_seconds": 300})
+    assert out["ok"] is True
+    name, kwargs = backend.calls[-1]
+    assert name == "get_latest_bar" and kwargs["interval_seconds"] == 300
+
+
+def test_extended_act_tools_are_marked_mutating_and_dispatch() -> None:
+    backend = FakeBackend()
+    reg = build_registry(backend)
+    by_name = {s.name: s for s in reg.list_tools()}
+    for act in (
+        "sync_alpaca_universe", "set_params", "set_system_mode", "system_flatten",
+        "put_asset_model_manifest", "delete_asset_model_manifest",
+        "create_experiment", "delete_experiment", "run_shadow_comparison",
+    ):
+        assert by_name[act].mutating is True
+
+    reg.call_tool("set_system_mode", {"mode": "FLATTEN_ALL"})
+    name, payload = backend.calls[-1]
+    assert name == "set_system_mode" and payload["args"] == ("FLATTEN_ALL",)
+
+    reg.call_tool("create_experiment", {"experiment": {"experiment_id": "e1"}})
+    name, payload = backend.calls[-1]
+    assert name == "create_experiment" and payload["args"] == ({"experiment_id": "e1"},)
+
+    reg.call_tool("put_asset_model_manifest", {"symbol": "BTC-USD", "manifest": {"canonical_symbol": "BTC-USD"}})
+    name, payload = backend.calls[-1]
+    assert name == "put_asset_model_manifest" and payload["args"] == ("BTC-USD", {"canonical_symbol": "BTC-USD"})
 
 
 def test_duplicate_registration_rejected() -> None:

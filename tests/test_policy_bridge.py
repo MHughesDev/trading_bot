@@ -1,10 +1,10 @@
-"""policy_model.bridge: PolicyRiskEnvelope from AppSettings + RiskState."""
+"""legacy.decision_pipeline.policy_model.bridge: PolicyRiskEnvelope from AppSettings + RiskState."""
 
 from __future__ import annotations
 
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState, SystemMode
-from policy_model.bridge import policy_envelope_from_app_settings
+from legacy.decision_pipeline.policy_model.bridge import policy_envelope_from_app_settings
 
 
 def test_bridge_running_mode() -> None:

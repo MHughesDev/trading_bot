@@ -6,9 +6,9 @@ from datetime import UTC, datetime
 
 import numpy as np
 
-from forecaster_model.inference.stub import build_forecast_packet_stub
-from policy_model.objects import ExecutionState, PortfolioState, RiskState
-from policy_model.system import PolicySystem
+from legacy.decision_pipeline.forecaster_model.inference.stub import build_forecast_packet_stub
+from legacy.decision_pipeline.policy_model.objects import ExecutionState, PortfolioState, RiskState
+from legacy.decision_pipeline.policy_model.system import PolicySystem
 
 
 def _synth_bars(n: int = 128) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

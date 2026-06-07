@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from app.contracts.forecast_packet import ForecastPacket
-from forecaster_model.inference.robust import safe_build_forecast_packet
+from legacy.decision_pipeline.forecaster_model.inference.robust import safe_build_forecast_packet
 
 
 def _good_pkt():

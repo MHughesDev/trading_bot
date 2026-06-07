@@ -11,8 +11,8 @@ from app.contracts.forecast import ForecastOutput
 from app.contracts.forecast_packet import ForecastPacket
 from app.contracts.regime import RegimeOutput, SemanticRegime
 from app.contracts.risk import RiskState, SystemMode
-from decision_engine.decision_record import build_decision_record
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.decision_record import build_decision_record
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from app.contracts.reason_codes import PIP_NO_TRADE_SELECTED
 from risk_engine.engine import RISK_BLOCK_PAUSE_NEW_ENTRIES, RiskEngine
 
@@ -96,7 +96,7 @@ def test_pipeline_attaches_decision_record_to_risk():
     feats = {f"f{i}": float(i) * 0.01 for i in range(32)}
     feats["close"] = 50_000.0
     feats["volume"] = 1e6
-    from decision_engine.run_step import run_decision_tick
+    from legacy.decision_pipeline.decision_engine.run_step import run_decision_tick
     from risk_engine.engine import RiskEngine
 
     eng = RiskEngine(AppSettings())

@@ -9,11 +9,11 @@ import numpy as np
 
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState
-from decision_engine.pipeline import DecisionPipeline
-from forecaster_model.config import ForecasterConfig
-from forecaster_model.models.forecaster_weights import capture_forecaster_weights_from_seed, save_forecaster_weights
-from forecaster_model.models.numpy_reference import forward_numpy_reference
-from policy_model.policy.mlp_actor import MultiBranchMLPPolicy
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.forecaster_model.models.forecaster_weights import capture_forecaster_weights_from_seed, save_forecaster_weights
+from legacy.decision_pipeline.forecaster_model.models.numpy_reference import forward_numpy_reference
+from legacy.decision_pipeline.policy_model.policy.mlp_actor import MultiBranchMLPPolicy
 
 
 def test_forecaster_npz_matches_rng_forward() -> None:

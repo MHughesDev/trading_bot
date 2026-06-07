@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from forecaster_model.config import ForecasterConfig
-from forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
+from legacy.decision_pipeline.forecaster_model.config import ForecasterConfig
+from legacy.decision_pipeline.forecaster_model.inference.build_from_ohlc import build_forecast_packet_methodology
 
 _GOLDEN_ANCHOR = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -55,7 +55,7 @@ def test_models_torch_device_default(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize("raw", ["auto", "cpu"])
 def test_resolve_torch_device_cpu_paths(raw: str) -> None:
     pytest.importorskip("torch")
-    from forecaster_model.training.device import resolve_torch_device
+    from training_pipeline.forecaster_training.device import resolve_torch_device
 
     out = resolve_torch_device(raw)
     assert out == "cpu"

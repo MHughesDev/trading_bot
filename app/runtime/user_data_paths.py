@@ -55,6 +55,14 @@ def asset_execution_mode_dir() -> Path:
     return _under_data("NM_ASSET_EXECUTION_MODE_DIR", "data/asset_execution_mode")
 
 
+def asset_strategy_dir() -> Path:
+    return _under_data("NM_ASSET_STRATEGY_DIR", "data/asset_strategy")
+
+
+def custom_strategies_dir() -> Path:
+    return _under_data("NM_CUSTOM_STRATEGIES_DIR", "data/custom_strategies")
+
+
 def canonical_bar_watermark_dir() -> Path:
     return _under_data("NM_CANONICAL_BAR_WATERMARK_DIR", "data/canonical_bar_watermarks")
 

@@ -30,7 +30,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from decision_engine.decision_record import get_last_decision_record
+from app.runtime.decision_record_store import get_last_decision_record
 from observability.drift_calibration_metrics import refresh_shadow_divergence_gauges_from_store
 from observability.forecaster_metrics import MODEL_VERSION_INFO
 
@@ -47,6 +47,11 @@ from app.runtime.asset_execution_mode import (
     list_mode_overrides,
     to_api_dict as asset_execution_mode_to_api_dict,
     write_mode_override,
+)
+from app.runtime.asset_strategy_selection import (
+    delete_strategy_override,
+    to_api_dict as asset_strategy_selection_to_api_dict,
+    write_strategy_override,
 )
 from app.runtime.asset_lifecycle_state import (
     delete_lifecycle_state,
@@ -72,6 +77,17 @@ from app.runtime.auth_venue_status import venue_keys_status_for_user
 from app.runtime.execution_settings_merge import merge_settings_for_execution
 from app.runtime.user_store import UserRecord
 from execution.adapter_registry import supported_adapters_for_settings
+from control_plane.backtest_run import list_strategies_payload, run_symbol_backtest
+from strategies.custom_strategy_store import (
+    delete_custom_strategy,
+    get_custom_strategy,
+    list_custom_strategies,
+    register_custom_strategies,
+    registry_key as custom_strategy_registry_key,
+    save_custom_strategy,
+)
+from strategies.registry import get_strategy
+from strategies.rule_spec import RuleSpecError, RuleStrategySpec
 from control_plane.chart_bars import (
     query_canonical_bars_for_chart,
     query_latest_canonical_bar_for_chart,
@@ -115,12 +131,8 @@ from orchestration.coinbase_universe_scheduler import (
     stop_coinbase_universe_scheduler,
 )
 from orchestration.coinbase_universe_sync import sync_coinbase_tradable_universe
-from orchestration.app_scheduler import (
-    nightly_scheduler_detail,
-    scheduler_status,
-    start_app_background_scheduler,
-    stop_app_background_scheduler,
-)
+# Nightly in-process training scheduler removed (FB-AP-XXX): AI-model training is decoupled into
+# the standalone `training_pipeline` package and is no longer part of the control-plane runtime.
 from orchestration.asset_init_pipeline import get_job as get_init_job, try_start_asset_init_job
 from app.contracts.release_objects import (
     ReleaseCandidate,
@@ -247,14 +259,14 @@ async def _lifespan(app: FastAPI):
             "Set NM_CONTROL_PLANE_API_KEY, enable NM_AUTH_SESSION_ENABLED, or bind loopback-only.",
             settings.control_plane_host,
         )
-    start_app_background_scheduler(settings)
+    register_custom_strategies()
+    # Nightly training scheduler intentionally NOT started — training is decoupled (FB-AP-XXX).
     start_alpaca_universe_scheduler(settings)
     start_coinbase_universe_scheduler(settings)
     refresh_shadow_divergence_gauges_from_store(load_shadow_comparison_store())
     yield
     stop_coinbase_universe_scheduler()
     stop_alpaca_universe_scheduler()
-    stop_app_background_scheduler()
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
@@ -433,7 +445,7 @@ def get_status() -> dict[str, Any]:
             "sidecar_dir": str(asset_execution_mode_mod.mode_dir()),
             "overrides": list_mode_overrides(),
         },
-        "app_scheduler": scheduler_status(),
+        "app_scheduler": {"enabled": False, "decoupled": True, "note": "nightly training moved to training_pipeline package"},
         "alpaca_universe": {
             **alpaca_universe_store_mod.alpaca_universe_status(settings.alpaca_universe_db_path),
             **alpaca_universe_scheduler_status(),
@@ -453,8 +465,13 @@ def get_status() -> dict[str, Any]:
 
 @app.get("/scheduler/nightly")
 def get_nightly_scheduler_status() -> dict[str, Any]:
-    """Nightly in-process scheduler: last/next run, last error, last training report (FB-UX-012)."""
-    return nightly_scheduler_detail(settings)
+    """Nightly training scheduler is decoupled (FB-AP-XXX) — retained for backward-compat as inert."""
+    return {
+        "enabled": False,
+        "decoupled": True,
+        "note": "AI-model training moved to the standalone `training_pipeline` package; "
+        "no nightly job runs in the control-plane runtime.",
+    }
 
 
 @app.get("/universe/alpaca")
@@ -1346,6 +1363,68 @@ def delete_asset_execution_mode(
     return {"ok": True, "symbol": sym}
 
 
+@app.get("/assets/strategy/{symbol}")
+def get_asset_strategy(symbol: str) -> dict[str, Any]:
+    """Per-symbol selected strategy — *is* the live decision source for this asset (FB-AP-XXX).
+
+    Falls back to the catalogue's default strategy when unset.
+    """
+    sym = symbol.strip()
+    return asset_strategy_selection_to_api_dict(sym)
+
+
+@app.put("/assets/strategy/{symbol}")
+def put_asset_strategy(
+    symbol: str,
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Pick an asset, click a strategy, let it run: persists the live decision-source choice.
+
+    The chosen strategy drives this symbol's live trading immediately (paper or live, per the
+    asset's execution mode) — re-run continuously over a trailing window by
+    :func:`app.runtime.strategy_decision_source.run_strategy_decision_tick`.
+    """
+    sym = symbol.strip()
+    key = body.get("strategy_key")
+    if isinstance(key, str) and key.startswith("custom:"):
+        register_custom_strategies()
+    if not isinstance(key, str) or not key.strip():
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="strategy_key is required",
+        )
+    if get_strategy(key) is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"unknown strategy key: {key!r}",
+        )
+    params = body.get("strategy_params")
+    path = write_strategy_override(sym, key, params=params if isinstance(params, dict) else None)
+    return {
+        "ok": True,
+        "symbol": sym,
+        "strategy_key": key,
+        "path": str(path),
+    }
+
+
+@app.delete("/assets/strategy/{symbol}")
+def delete_asset_strategy(
+    symbol: str,
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Remove the per-symbol strategy override; live trading falls back to the catalogue default."""
+    sym = symbol.strip()
+    ok = delete_strategy_override(sym)
+    if not ok:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="no strategy sidecar for symbol",
+        )
+    return {"ok": True, "symbol": sym}
+
+
 @app.post("/assets/lifecycle/{symbol}/start")
 def post_asset_lifecycle_start(
     symbol: str,
@@ -1514,6 +1593,182 @@ def get_asset_chart_trade_markers(
         "source": "trade_markers_jsonl",
         "markers": [marker_to_api_dict(m) for m in rows],
     }
+
+
+class BacktestRunRequest(BaseModel):
+    """Run a registered strategy against a symbol over a time window (FB-AP-XXX).
+
+    Backtesting is independent of paper/live trading — it can run concurrently and never
+    routes real orders. Requires the asset to have canonical bars in the window.
+    """
+
+    strategy_key: str = Field(description="Key from GET /strategies (e.g. 'ema_cross')")
+    start: datetime = Field(description="Range start (UTC ISO-8601)")
+    end: datetime = Field(description="Range end (UTC ISO-8601)")
+    strategy_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Overrides for the strategy's default params (instrument_id/bar_type are injected)",
+    )
+    interval_seconds: int | None = Field(
+        default=None, description="Bar width; default = NM_MARKET_DATA_BAR_INTERVAL_SECONDS"
+    )
+    starting_balance: str = Field(default="100000", description="Simulated account starting cash")
+    starting_currency: str = Field(default="USD", description="Account/quote currency")
+
+
+@app.get("/strategies")
+def get_strategies() -> dict[str, Any]:
+    """Catalogue of backtestable strategies for the Asset-page dropdown (FB-AP-XXX).
+
+    Import-free: works whether or not the ``backtest_nautilus`` extra is installed.
+    Includes the user's custom (builder-created) strategies alongside the built-ins.
+    """
+    register_custom_strategies()
+    return list_strategies_payload()
+
+
+def _custom_strategy_to_api_dict(record: dict[str, Any]) -> dict[str, Any]:
+    spec = RuleStrategySpec.from_dict(record["spec"])
+    return {
+        "id": record["id"],
+        "registry_key": custom_strategy_registry_key(record["id"]),
+        "name": spec.name,
+        "spec": record["spec"],
+        "explanation": spec.explain(),
+        "created_at": record.get("created_at"),
+        "updated_at": record.get("updated_at"),
+    }
+
+
+def _spec_from_body(body: dict[str, Any]) -> RuleStrategySpec:
+    try:
+        spec = RuleStrategySpec.from_dict(body)
+    except (TypeError, ValueError, KeyError) as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"malformed strategy spec: {exc}",
+        ) from exc
+    try:
+        spec.validate()
+    except RuleSpecError as exc:
+        raise HTTPException(status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return spec
+
+
+@app.post("/strategies/custom/preview")
+def post_custom_strategy_preview(body: dict[str, Any]) -> dict[str, Any]:
+    """Validate a draft strategy spec and return its plain-English explanation.
+
+    Powers the strategy builder's live preview pane — "every strategy should generate a
+    human-readable explanation" — without persisting anything (FB-AP-XXX).
+    """
+    try:
+        spec = RuleStrategySpec.from_dict(body)
+    except (TypeError, ValueError, KeyError) as exc:
+        return {"valid": False, "errors": [f"malformed strategy spec: {exc}"], "explanation": None}
+    try:
+        spec.validate()
+    except RuleSpecError as exc:
+        return {"valid": False, "errors": [str(exc)], "explanation": spec.explain()}
+    return {"valid": True, "errors": [], "explanation": spec.explain()}
+
+
+@app.get("/strategies/custom")
+def get_custom_strategies() -> dict[str, Any]:
+    """List the current user's saved custom (builder-created) strategies (FB-AP-XXX)."""
+    register_custom_strategies()
+    records = list_custom_strategies()
+    return {"count": len(records), "strategies": [_custom_strategy_to_api_dict(r) for r in records]}
+
+
+@app.post("/strategies/custom")
+def post_custom_strategy(
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Create a new custom strategy from a builder spec; registers it for backtest/live use."""
+    spec = _spec_from_body(body)
+    record = save_custom_strategy(spec)
+    return _custom_strategy_to_api_dict(record)
+
+
+@app.get("/strategies/custom/{strategy_id}")
+def get_custom_strategy_route(strategy_id: str) -> dict[str, Any]:
+    register_custom_strategies()
+    record = get_custom_strategy(strategy_id)
+    if record is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown custom strategy id")
+    return _custom_strategy_to_api_dict(record)
+
+
+@app.put("/strategies/custom/{strategy_id}")
+def put_custom_strategy(
+    strategy_id: str,
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Edit and re-save an existing custom strategy (re-registers it under the same id)."""
+    if get_custom_strategy(strategy_id) is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown custom strategy id")
+    spec = _spec_from_body(body)
+    record = save_custom_strategy(spec, strategy_id=strategy_id)
+    return _custom_strategy_to_api_dict(record)
+
+
+@app.delete("/strategies/custom/{strategy_id}")
+def delete_custom_strategy_route(
+    strategy_id: str,
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    ok = delete_custom_strategy(strategy_id)
+    if not ok:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown custom strategy id")
+    return {"ok": True, "id": strategy_id}
+
+
+@app.post("/assets/backtest/{symbol}")
+async def post_asset_backtest(
+    symbol: str,
+    body: BacktestRunRequest,
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Run a strategy backtest for ``symbol`` over a window (FB-AP-XXX).
+
+    Separate from the paper/live execution modes and safe to run concurrently with them —
+    it only reads stored bars and never places real orders. ``503`` if the backtest engine
+    (the platform's NautilusTrader fork) isn't installed; ``422`` for bad input / no data.
+    """
+    sym = symbol.strip()
+    if body.strategy_key.startswith("custom:"):
+        register_custom_strategies()
+    try:
+        return await run_symbol_backtest(
+            settings,
+            symbol=sym,
+            strategy_key=body.strategy_key,
+            start=body.start,
+            end=body.end,
+            strategy_params=body.strategy_params,
+            interval_seconds=body.interval_seconds,
+            starting_balance=body.starting_balance,
+            starting_currency=body.starting_currency,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except ImportError as exc:
+        return JSONResponse(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"error": "backtest_engine_unavailable", "detail": str(exc)},
+        )
+    except Exception as exc:
+        logger.exception("Unexpected backtest error symbol=%s", sym)
+        return JSONResponse(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": "internal", "detail": str(exc)},
+        )
 
 
 @app.post("/assets/lifecycle/{symbol}/stop")

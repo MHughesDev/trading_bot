@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.config.settings import AppSettings
-from orchestration.nightly_retrain import run_nightly_training_job
+from training_pipeline.orchestration.nightly_retrain import run_nightly_training_job
 
 
 def test_run_nightly_per_asset_when_manifests_exist(
@@ -21,8 +21,8 @@ def test_run_nightly_per_asset_when_manifests_exist(
         calls.append((str(sym), Path(ad)))
         return {"ok": True, "symbol": sym}
 
-    monkeypatch.setattr("orchestration.nightly_retrain.run_training_campaign", fake_campaign)
-    monkeypatch.setattr("orchestration.nightly_retrain.list_manifest_symbols", lambda: ["A", "B"])
+    monkeypatch.setattr("training_pipeline.orchestration.nightly_retrain.run_training_campaign", fake_campaign)
+    monkeypatch.setattr("training_pipeline.orchestration.nightly_retrain.list_manifest_symbols", lambda: ["A", "B"])
     s = AppSettings(scheduler_nightly_per_asset_forecaster=True)
     r = run_nightly_training_job(
         settings=s,
@@ -41,7 +41,7 @@ def test_run_nightly_per_asset_when_manifests_exist(
 def test_run_nightly_skips_when_no_manifests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("orchestration.nightly_retrain.list_manifest_symbols", lambda: [])
+    monkeypatch.setattr("training_pipeline.orchestration.nightly_retrain.list_manifest_symbols", lambda: [])
     s = AppSettings(scheduler_nightly_per_asset_forecaster=True)
     r = run_nightly_training_job(settings=s, artifact_dir=tmp_path)
     assert r.get("skipped") is True
@@ -55,7 +55,7 @@ def test_legacy_single_symbol_when_per_asset_disabled(
         assert kwargs.get("symbol") is None
         return {"legacy": True}
 
-    monkeypatch.setattr("orchestration.nightly_retrain.run_training_campaign", fake_campaign)
+    monkeypatch.setattr("training_pipeline.orchestration.nightly_retrain.run_training_campaign", fake_campaign)
     s = AppSettings(scheduler_nightly_per_asset_forecaster=False)
     r = run_nightly_training_job(settings=s, artifact_dir=tmp_path)
     assert r.get("legacy") is True

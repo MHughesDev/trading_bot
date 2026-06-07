@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from app.config.settings import AppSettings
 from app.contracts.risk import RiskState, SystemMode
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 from risk_engine.engine import RiskEngine
 
 

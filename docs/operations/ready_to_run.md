@@ -93,7 +93,7 @@ python -m streamlit run control_plane/Home.py
 ## 8. Offline training
 
 - [ ] If **`NM_SYSTEM_POWER_LEGACY_ENABLED=true`**, ensure system **power ON** in `data/system_power.json` when you want the loop to run.
-- [ ] **`python -m orchestration.nightly_retrain --mode nightly`** (or `--mode initial` for longer campaign) — real Kraken OHLC; see README.
+- [ ] **`python -m training_pipeline.orchestration.nightly_retrain --mode nightly`** (or `--mode initial` for longer campaign) — real Kraken OHLC; see README.
 
 ---
 

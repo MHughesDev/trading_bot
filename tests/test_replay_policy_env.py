@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 from app.config.settings import AppSettings
-from policy_model.env.replay_env import ReplayPolicyEnvironment
-from policy_model.objects import PolicyAction
+from legacy.decision_pipeline.policy_model.env.replay_env import ReplayPolicyEnvironment
+from legacy.decision_pipeline.policy_model.objects import PolicyAction
 
 
 def test_replay_env_reset_step() -> None:

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.config.settings import AppSettings
 from control_plane import api
-from orchestration import app_scheduler as sch
+from training_pipeline.orchestration import app_scheduler as sch
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +39,7 @@ def test_nightly_tick_calls_job(monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append("run")
         return {"ok": True}
 
-    monkeypatch.setattr("orchestration.nightly_retrain.run_nightly_training_job", fake_job)
+    monkeypatch.setattr("training_pipeline.orchestration.nightly_retrain.run_nightly_training_job", fake_job)
     cfg = AppSettings(scheduler_nightly_enabled=True, scheduler_nightly_interval_seconds=1)
     sch.start_app_background_scheduler(cfg)
     time.sleep(2.5)

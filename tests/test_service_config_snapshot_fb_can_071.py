@@ -8,7 +8,7 @@ from app.config.settings import AppSettings
 from app.contracts.replay_events import ReplayMode, ReplayRunContract
 from app.contracts.snapshot_builders import build_decision_boundary_input
 from app.contracts.risk import RiskState
-from decision_engine.pipeline import DecisionPipeline
+from legacy.decision_pipeline.decision_engine.pipeline import DecisionPipeline
 
 
 def _features(close: float = 50_000.0) -> dict[str, float]:

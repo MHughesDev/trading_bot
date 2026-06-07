@@ -1,5 +1,5 @@
-from policy_model.objects import PolicyAction, PolicyObservation
-from policy_model.shadow import shadow_compare_actions
+from legacy.decision_pipeline.policy_model.objects import PolicyAction, PolicyObservation
+from legacy.decision_pipeline.policy_model.shadow import shadow_compare_actions
 
 
 def test_shadow_delta():
