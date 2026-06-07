@@ -9,7 +9,7 @@ from policy_model.observation.builder import PolicyObservationBuilder
 from policy_model.policy.action_projection import ActionProjector
 from policy_model.policy.heuristic import HeuristicTargetPolicy
 from policy_model.risk.gate import RiskGate
-from policy_model.training.protocol import RLPolicyAlgorithm
+from training_pipeline.policy_training.protocol import RLPolicyAlgorithm
 
 
 class PolicySystem:

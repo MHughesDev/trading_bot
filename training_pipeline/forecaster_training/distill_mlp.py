@@ -14,8 +14,8 @@ from typing import Any
 from forecaster_model.config import ForecasterConfig
 from forecaster_model.models.numpy_reference import forward_numpy_reference
 from forecaster_model.models.torch_forecaster_net import build_torch_forecaster, _obs_feature_dim
-from forecaster_model.training.checkpoint import save_json_checkpoint
-from forecaster_model.training.device import resolve_torch_device
+from training_pipeline.forecaster_training.checkpoint import save_json_checkpoint
+from training_pipeline.forecaster_training.device import resolve_torch_device
 
 
 def _random_inputs(

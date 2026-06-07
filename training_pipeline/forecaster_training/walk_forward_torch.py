@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from forecaster_model.training.walkforward import WalkForwardConfig, walk_forward_indices
+from training_pipeline.forecaster_training.walkforward import WalkForwardConfig, walk_forward_indices
 
 
 def describe_walk_forward_folds(

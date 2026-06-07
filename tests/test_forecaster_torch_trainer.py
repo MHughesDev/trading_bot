@@ -14,7 +14,7 @@ from forecaster_model.inference.torch_infer import (  # noqa: E402
     forward_torch_quantiles,
     load_torch_forecaster_checkpoint,
 )
-from forecaster_model.training.torch_trainer import (  # noqa: E402
+from training_pipeline.forecaster_training.torch_trainer import (  # noqa: E402
     build_torch_training_samples,
     train_forecaster_torch,
 )

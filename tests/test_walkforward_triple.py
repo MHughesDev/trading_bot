@@ -1,6 +1,6 @@
 """Walk-forward triple split geometry."""
 
-from orchestration.walkforward_triple import triple_splits
+from training_pipeline.orchestration.walkforward_triple import triple_splits
 
 
 def test_triple_splits_ordering() -> None:

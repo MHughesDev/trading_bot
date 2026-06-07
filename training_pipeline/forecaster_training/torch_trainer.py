@@ -24,8 +24,8 @@ from forecaster_model.features.normalization import rolling_zscore_causal
 from forecaster_model.features.ohlc import build_observed_feature_matrix
 from forecaster_model.features.time_future import known_future_features
 from forecaster_model.regime.soft import soft_regime_from_returns
-from forecaster_model.training.checkpoint import save_json_checkpoint
-from forecaster_model.training.device import resolve_torch_device
+from training_pipeline.forecaster_training.checkpoint import save_json_checkpoint
+from training_pipeline.forecaster_training.device import resolve_torch_device
 
 
 def train_forecaster_stub(

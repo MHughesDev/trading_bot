@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.config.settings import AppSettings
 from control_plane import api
-from orchestration import app_scheduler as sch
+from training_pipeline.orchestration import app_scheduler as sch
 
 
 @pytest.fixture(autouse=True)
@@ -23,24 +23,19 @@ def client_no_auth(monkeypatch):
     return TestClient(api.app)
 
 
-def test_scheduler_nightly_endpoint(client_no_auth: TestClient) -> None:
+def test_scheduler_nightly_endpoint_is_decoupled(client_no_auth: TestClient) -> None:
+    # Nightly training is decoupled (FB-AP-XXX): the endpoint is retained as an inert,
+    # backward-compatible marker — no nightly job runs in the runtime.
     r = client_no_auth.get("/scheduler/nightly")
     assert r.status_code == 200
     j = r.json()
-    assert "enabled" in j
-    assert "interval_seconds" in j
-    assert "last_tick_utc" in j
-    assert "last_run_finished_utc" in j
-    assert "next_run_after_utc" in j
-    assert "last_error" in j
-    assert "last_report" in j
-    assert "nightly_per_asset_forecaster" in j
-    assert "nightly_rl_requires_trade" in j
+    assert j["enabled"] is False
+    assert j["decoupled"] is True
 
 
-def test_status_app_scheduler_includes_next_fields(client_no_auth: TestClient) -> None:
+def test_status_app_scheduler_reports_decoupled(client_no_auth: TestClient) -> None:
     r = client_no_auth.get("/status")
     assert r.status_code == 200
     aps = r.json()["app_scheduler"]
-    assert "last_run_finished_utc" in aps
-    assert "next_run_after_utc" in aps
+    assert aps["enabled"] is False
+    assert aps["decoupled"] is True

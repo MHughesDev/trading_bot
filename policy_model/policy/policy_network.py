@@ -14,14 +14,17 @@ from typing import Any
 from policy_model.objects import PolicyAction, PolicyObservation
 from policy_model.policy.critic import ValueCritic
 from policy_model.policy.mlp_actor import MultiBranchMLPPolicy
-from policy_model.training.actor_critic import ActorCriticTrainer
-from policy_model.training.protocol import RLPolicyAlgorithm
+from training_pipeline.policy_training.protocol import RLPolicyAlgorithm
 
 
 class PolicyNetwork(RLPolicyAlgorithm):
     """Wraps `MultiBranchMLPPolicy` with a real RL `update` (behavior cloning / actor-critic)."""
 
     def __init__(self, seed: int = 0) -> None:
+        # Late import: training_pipeline.policy_training is the decoupled trainer package and
+        # imports the actor/critic from here — importing it at module top would re-form the cycle.
+        from training_pipeline.policy_training.actor_critic import ActorCriticTrainer
+
         self._actor = MultiBranchMLPPolicy(seed=seed)
         self._critic = ValueCritic(seed=seed)
         self._trainer = ActorCriticTrainer(self._actor, critic=self._critic)
@@ -31,8 +34,8 @@ class PolicyNetwork(RLPolicyAlgorithm):
 
     def update(self, batch: Any) -> dict[str, float]:
         # Late imports avoid a module import cycle (training packages import the actor).
-        from policy_model.training.behavior_cloning import BCDataset, train_behavior_cloning
-        from policy_model.training.buffer import ReplayBuffer, Transition
+        from training_pipeline.policy_training.behavior_cloning import BCDataset, train_behavior_cloning
+        from training_pipeline.policy_training.buffer import ReplayBuffer, Transition
 
         if isinstance(batch, BCDataset):
             return train_behavior_cloning(self._actor, batch, epochs=1)

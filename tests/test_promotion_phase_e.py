@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orchestration.promotion import (
+from training_pipeline.orchestration.promotion import (
     PromotionDecision,
     apply_promotion_effect,
 )
@@ -88,20 +88,20 @@ def test_promote_fallback_copy_when_no_asp(tmp_path) -> None:
 
 
 def test_import_boundary_serving_does_not_import_training() -> None:
-    """pipeline.py must not import from forecaster_model.training at module level."""
+    """pipeline.py must not import from training_pipeline.forecaster_training at module level."""
     import importlib
     import sys
 
     # Remove cached modules to get a fresh import check
     for key in list(sys.modules.keys()):
-        if "forecaster_model.training" in key or "decision_engine.pipeline" in key:
+        if "training_pipeline.forecaster_training" in key or "decision_engine.pipeline" in key:
             del sys.modules[key]
 
-    # Import pipeline — should not cause forecaster_model.training.real_data_fit to import sklearn
+    # Import pipeline — should not cause training_pipeline.forecaster_training.real_data_fit to import sklearn
     import decision_engine.pipeline  # noqa: F401
 
     # forecaster_model.inference.quantile_infer should be importable without sklearn at module level
     import forecaster_model.inference.quantile_infer  # noqa: F401
 
     # The training module should NOT have been imported as a side effect of the pipeline import
-    assert "forecaster_model.training.real_data_fit" not in sys.modules
+    assert "training_pipeline.forecaster_training.real_data_fit" not in sys.modules

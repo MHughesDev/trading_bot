@@ -14,7 +14,7 @@ import numpy as np
 
 from policy_model.policy.critic import ValueCritic
 from policy_model.policy.mlp_actor import MultiBranchMLPPolicy
-from policy_model.training.buffer import ReplayBuffer
+from training_pipeline.policy_training.buffer import ReplayBuffer
 
 
 class ActorCriticTrainer:

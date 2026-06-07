@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from orchestration.training_campaign import _cfg_from_spec
+from training_pipeline.orchestration.training_campaign import _cfg_from_spec
 from forecaster_model.config import ForecasterConfig
 from app.config.settings import AppSettings
 

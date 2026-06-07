@@ -22,7 +22,7 @@ import numpy as np
 import polars as pl
 
 from forecaster_model.config import ForecasterConfig
-from forecaster_model.training.real_data_fit import (
+from training_pipeline.forecaster_training.real_data_fit import (
     QuantileForecasterArtifact,
     predict_quantile_forecast_packet,
 )
@@ -275,7 +275,7 @@ def train_actor_critic_on_range(
     """
     from policy_model.objects import PolicyAction
     from policy_model.policy.policy_network import PolicyNetwork
-    from policy_model.training.buffer import ReplayBuffer, Transition
+    from training_pipeline.policy_training.buffer import ReplayBuffer, Transition
 
     arrays = (
         bars["open"].to_numpy(),

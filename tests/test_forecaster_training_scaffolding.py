@@ -1,4 +1,4 @@
-"""forecaster_model.training scaffolding (FB-FR-P1)."""
+"""training_pipeline.forecaster_training scaffolding (FB-FR-P1)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from pathlib import Path
 
 import numpy as np
 
-from forecaster_model.training.checkpoint import load_json_checkpoint, save_json_checkpoint
-from forecaster_model.training.metrics import mean_pinball_loss, pinball_loss
-from forecaster_model.training.walk_forward_torch import describe_walk_forward_folds
-from forecaster_model.training.walkforward import WalkForwardConfig, walk_forward_indices
+from training_pipeline.forecaster_training.checkpoint import load_json_checkpoint, save_json_checkpoint
+from training_pipeline.forecaster_training.metrics import mean_pinball_loss, pinball_loss
+from training_pipeline.forecaster_training.walk_forward_torch import describe_walk_forward_folds
+from training_pipeline.forecaster_training.walkforward import WalkForwardConfig, walk_forward_indices
 
 
 def test_pinball_loss() -> None:

@@ -4,7 +4,7 @@ In-process background jobs while the **application** is running (FB-AP-035).
 Schedulers register only when the FastAPI control plane process starts (lifespan) and stop on
 shutdown. **No** training runs when the API process is not running (e.g. desktop `.exe` closed).
 
-Nightly training uses :func:`orchestration.nightly_retrain.run_nightly_training_job` (real-data
+Nightly training uses :func:`training_pipeline.orchestration.nightly_retrain.run_nightly_training_job` (real-data
 campaign) when ``NM_SCHEDULER_NIGHTLY_ENABLED`` is true.
 """
 
@@ -73,7 +73,7 @@ def nightly_scheduler_detail(settings: AppSettings) -> dict[str, Any]:
 
 
 def _loop_body(settings: AppSettings) -> None:
-    from orchestration.nightly_retrain import run_nightly_training_job
+    from training_pipeline.orchestration.nightly_retrain import run_nightly_training_job
 
     try:
         report = run_nightly_training_job(settings=settings)

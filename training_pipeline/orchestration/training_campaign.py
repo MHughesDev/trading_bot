@@ -29,19 +29,19 @@ from app.config.settings import AppSettings, load_settings
 from app.runtime.system_power import is_on, sync_from_disk
 from execution.trade_activity import symbol_had_trade_in_lookback
 from forecaster_model.config import ForecasterConfig
-from forecaster_model.training.metrics import mean_pinball_loss
-from forecaster_model.training.real_data_fit import (
+from training_pipeline.forecaster_training.metrics import mean_pinball_loss
+from training_pipeline.forecaster_training.real_data_fit import (
     QuantileForecasterArtifact,
     fit_quantile_forecaster_from_bars,
     predict_quantile_forecast_packet,
     save_training_report,
 )
 from orchestration.real_data_bars import dataset_snapshot_id, fetch_symbol_bars_sync, write_snapshot_manifest
-from orchestration.rl_real_data_eval import (
+from training_pipeline.orchestration.rl_real_data_eval import (
     run_heuristic_rollout_on_range,
     train_actor_critic_on_range,
 )
-from orchestration.training_spec_constants import (
+from training_pipeline.orchestration.training_spec_constants import (
     CAMPAIGN_FORECASTER_RUNS,
     CAMPAIGN_FORECASTER_SEEDS,
     CAMPAIGN_HISTORY_LENGTH,
@@ -58,12 +58,12 @@ from orchestration.training_spec_constants import (
     NIGHTLY_RL_RUNS,
     NIGHTLY_RL_SEEDS,
 )
-from orchestration.promotion import (
+from training_pipeline.orchestration.promotion import (
     apply_promotion_effect,
     decide_forecaster_promotion_stub,
     write_promotion_sidecar,
 )
-from orchestration.walkforward_triple import triple_splits
+from training_pipeline.orchestration.walkforward_triple import triple_splits
 
 logger = logging.getLogger(__name__)
 

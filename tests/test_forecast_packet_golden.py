@@ -55,7 +55,7 @@ def test_models_torch_device_default(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize("raw", ["auto", "cpu"])
 def test_resolve_torch_device_cpu_paths(raw: str) -> None:
     pytest.importorskip("torch")
-    from forecaster_model.training.device import resolve_torch_device
+    from training_pipeline.forecaster_training.device import resolve_torch_device
 
     out = resolve_torch_device(raw)
     assert out == "cpu"

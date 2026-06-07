@@ -116,12 +116,8 @@ from orchestration.coinbase_universe_scheduler import (
     stop_coinbase_universe_scheduler,
 )
 from orchestration.coinbase_universe_sync import sync_coinbase_tradable_universe
-from orchestration.app_scheduler import (
-    nightly_scheduler_detail,
-    scheduler_status,
-    start_app_background_scheduler,
-    stop_app_background_scheduler,
-)
+# Nightly in-process training scheduler removed (FB-AP-XXX): AI-model training is decoupled into
+# the standalone `training_pipeline` package and is no longer part of the control-plane runtime.
 from orchestration.asset_init_pipeline import get_job as get_init_job, try_start_asset_init_job
 from app.contracts.release_objects import (
     ReleaseCandidate,
@@ -248,14 +244,13 @@ async def _lifespan(app: FastAPI):
             "Set NM_CONTROL_PLANE_API_KEY, enable NM_AUTH_SESSION_ENABLED, or bind loopback-only.",
             settings.control_plane_host,
         )
-    start_app_background_scheduler(settings)
+    # Nightly training scheduler intentionally NOT started — training is decoupled (FB-AP-XXX).
     start_alpaca_universe_scheduler(settings)
     start_coinbase_universe_scheduler(settings)
     refresh_shadow_divergence_gauges_from_store(load_shadow_comparison_store())
     yield
     stop_coinbase_universe_scheduler()
     stop_alpaca_universe_scheduler()
-    stop_app_background_scheduler()
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
@@ -434,7 +429,7 @@ def get_status() -> dict[str, Any]:
             "sidecar_dir": str(asset_execution_mode_mod.mode_dir()),
             "overrides": list_mode_overrides(),
         },
-        "app_scheduler": scheduler_status(),
+        "app_scheduler": {"enabled": False, "decoupled": True, "note": "nightly training moved to training_pipeline package"},
         "alpaca_universe": {
             **alpaca_universe_store_mod.alpaca_universe_status(settings.alpaca_universe_db_path),
             **alpaca_universe_scheduler_status(),
@@ -454,8 +449,13 @@ def get_status() -> dict[str, Any]:
 
 @app.get("/scheduler/nightly")
 def get_nightly_scheduler_status() -> dict[str, Any]:
-    """Nightly in-process scheduler: last/next run, last error, last training report (FB-UX-012)."""
-    return nightly_scheduler_detail(settings)
+    """Nightly training scheduler is decoupled (FB-AP-XXX) — retained for backward-compat as inert."""
+    return {
+        "enabled": False,
+        "decoupled": True,
+        "note": "AI-model training moved to the standalone `training_pipeline` package; "
+        "no nightly job runs in the control-plane runtime.",
+    }
 
 
 @app.get("/universe/alpaca")

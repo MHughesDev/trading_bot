@@ -18,7 +18,7 @@ from app.config.settings import load_settings
 from app.contracts.risk import RiskState
 from decision_engine.pipeline import DecisionPipeline, _load_quantile_forecaster_if_configured
 from forecaster_model.config import ForecasterConfig
-from forecaster_model.training.real_data_fit import fit_quantile_forecaster_from_bars
+from training_pipeline.forecaster_training.real_data_fit import fit_quantile_forecaster_from_bars
 
 
 def _random_walk_bars(n: int = 400, seed: int = 7) -> pl.DataFrame:

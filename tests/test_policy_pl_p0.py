@@ -15,8 +15,8 @@ from policy_model.env.runtime_check import assert_trading_policy_environment
 from policy_model.integration.offline_forecast_env import OfflineForecastPacketEnvironment
 from policy_model.objects import PolicyAction
 from policy_model.policy.mlp_actor import MultiBranchMLPPolicy
-from policy_model.training.actor_critic import ActorCriticTrainer
-from policy_model.training.buffer import ReplayBuffer, Transition
+from training_pipeline.policy_training.actor_critic import ActorCriticTrainer
+from training_pipeline.policy_training.buffer import ReplayBuffer, Transition
 
 
 def _sample_packets(n: int) -> list[ForecastPacket]:

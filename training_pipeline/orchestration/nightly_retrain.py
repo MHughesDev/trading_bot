@@ -17,7 +17,7 @@ from pathlib import Path
 from app.config.settings import AppSettings, load_settings
 from app.runtime.asset_model_registry import list_symbols as list_manifest_symbols
 
-from orchestration.training_campaign import run_training_campaign
+from training_pipeline.orchestration.training_campaign import run_training_campaign
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def run_nightly_training_job(
 
 
 def nightly_flow_entrypoint() -> None:
-    """CLI: `python -m orchestration.nightly_retrain` (no args — nightly defaults)."""
+    """CLI: `python -m training_pipeline.orchestration.nightly_retrain` (no args — nightly defaults)."""
     logging.basicConfig(level=logging.INFO)
     report = run_nightly_training_job()
     logger.info("nightly training report keys: %s", list(report.keys()))

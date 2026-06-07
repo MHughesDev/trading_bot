@@ -1,7 +1,7 @@
 """Inference-only quantile forecaster path (Phase E / P3).
 
 Separates the *serve* side (load + predict) from the *train* side
-(``forecaster_model.training.real_data_fit``).  Serving should import from this module;
+(``training_pipeline.forecaster_training.real_data_fit``).  Serving should import from this module;
 training imports from ``real_data_fit`` which defines the fitting logic.
 
 **sklearn on the serving path:** joblib deserialisation requires sklearn to be installed
@@ -30,7 +30,7 @@ from forecaster_model.regime.soft import soft_regime_from_returns
 class QuantileForecasterArtifact:
     """Persisted real-data fit — inference side (load + predict).
 
-    The training constructor lives in ``forecaster_model.training.real_data_fit``
+    The training constructor lives in ``training_pipeline.forecaster_training.real_data_fit``
     so that ``sklearn`` is only imported on the training path.
     """
 

@@ -9,9 +9,9 @@ import polars as pl
 import pytest
 
 from app.config.settings import AppSettings
-from forecaster_model.training.real_data_fit import QuantileForecasterArtifact
-from orchestration.rl_real_data_eval import RLEpisodeMetrics
-from orchestration.training_campaign import run_training_campaign
+from training_pipeline.forecaster_training.real_data_fit import QuantileForecasterArtifact
+from training_pipeline.orchestration.rl_real_data_eval import RLEpisodeMetrics
+from training_pipeline.orchestration.training_campaign import run_training_campaign
 
 
 def _bars(n: int = 120) -> pl.DataFrame:
@@ -43,17 +43,17 @@ def _dummy_artifact() -> QuantileForecasterArtifact:
 def test_nightly_rl_skipped_without_trade_markers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, had_trade: bool
 ) -> None:
-    monkeypatch.setattr("orchestration.training_campaign.is_on", lambda: True)
+    monkeypatch.setattr("training_pipeline.orchestration.training_campaign.is_on", lambda: True)
     monkeypatch.setattr(
-        "orchestration.training_campaign.fetch_symbol_bars_sync",
+        "training_pipeline.orchestration.training_campaign.fetch_symbol_bars_sync",
         lambda *_a, **_k: _bars(),
     )
     monkeypatch.setattr(
-        "orchestration.training_campaign.fit_quantile_forecaster_from_bars",
+        "training_pipeline.orchestration.training_campaign.fit_quantile_forecaster_from_bars",
         lambda *_a, **_k: _dummy_artifact(),
     )
     monkeypatch.setattr(
-        "orchestration.training_campaign._eval_pinball_on_range",
+        "training_pipeline.orchestration.training_campaign._eval_pinball_on_range",
         lambda *_a, **_k: {"pinball_mean": 0.1, "n": 5.0},
     )
     rl_calls: list[int] = []
@@ -70,11 +70,11 @@ def test_nightly_rl_skipped_without_trade_markers(
         )
 
     monkeypatch.setattr(
-        "orchestration.training_campaign.run_heuristic_rollout_on_range",
+        "training_pipeline.orchestration.training_campaign.run_heuristic_rollout_on_range",
         _track_rl,
     )
     monkeypatch.setattr(
-        "orchestration.training_campaign.symbol_had_trade_in_lookback",
+        "training_pipeline.orchestration.training_campaign.symbol_had_trade_in_lookback",
         lambda *_a, **_k: had_trade,
     )
     class _Prom:
@@ -82,11 +82,11 @@ def test_nightly_rl_skipped_without_trade_markers(
             return {}
 
     monkeypatch.setattr(
-        "orchestration.training_campaign.decide_forecaster_promotion_stub",
+        "training_pipeline.orchestration.training_campaign.decide_forecaster_promotion_stub",
         lambda **k: _Prom(),
     )
     monkeypatch.setattr(
-        "orchestration.training_campaign.write_promotion_sidecar",
+        "training_pipeline.orchestration.training_campaign.write_promotion_sidecar",
         lambda *a, **k: tmp_path / "promo.json",
     )
 
