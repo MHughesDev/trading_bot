@@ -10,6 +10,12 @@ implementation isn't lost: copy it into another repo and delete it from here whe
 Internal cross-imports between the three packages were rewritten to `legacy.decision_pipeline.*`
 so the snapshot still imports cleanly as a unit, but nothing in the runtime depends on it.
 
+`docs/` alongside the code holds the matching human/architecture specs (decision pipeline,
+forecaster, policy, and the System-2 LLM agent design) — relocated from `docs/Specs/` and
+`docs/Human Provided Specs/` for the same copy-paste-elsewhere-and-delete-later reason. Training
+specs moved to `training_pipeline/docs/` instead, since training stays a live (if decoupled)
+package.
+
 ## `cryptobot/`
 
 A **verbatim copy** of the files from the historical **`crypto`** Git branch: the standalone Alpaca **CryptoBot** script (`main.py`, `.gitignore`, `README.md`). This is preserved alongside [Trading Bot](../README.md) without merging unrelated histories.

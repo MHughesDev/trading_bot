@@ -1,12 +1,12 @@
 # Forecaster and policy packages (as implemented)
 
-> **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`../Human Provided Specs/new_specs/canonical/`](../Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
+> **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`docs/CANONICAL_SPEC_INDEX.MD`](../../../docs/CANONICAL_SPEC_INDEX.MD) and [`docs/Human Provided Specs/new_specs/canonical/`](../../../docs/Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
 
 
 **Human source of truth (verbatim filenames):**  
-[`MASTER_SYSTEM_PIPELINE_SPEC.MD`](../Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD) · [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](../Human%20Provided%20Specs/FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) · [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](../Human%20Provided%20Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD)
+[`MASTER_SYSTEM_PIPELINE_SPEC.MD`](MASTER_SYSTEM_PIPELINE_SPEC.MD) · [`FORECASTER_MODEL_ARCHITECTURE_SPEC.MD`](FORECASTER_MODEL_ARCHITECTURE_SPEC.MD) · [`POLICY_MODEL_ARCHITECTURE_SPEC.MD`](POLICY_MODEL_ARCHITECTURE_SPEC.MD)
 
-This document tracks **only** how the repository maps to those two files. Where the human spec gives an illustrative package layout (§26 forecaster, §27 policy), the code follows that layout **by path and module name**. Delivered NumPy forecaster + policy integration is tracked as **`FB-FR-CORE`** / **`FB-PL-CORE`** in [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD); open **`FB-FR-P0`** / **`FB-PL-P0`** track full architecture-spec training stacks.
+This document tracks **only** how the repository maps to those two files. Where the human spec gives an illustrative package layout (§26 forecaster, §27 policy), the code follows that layout **by path and module name**. Delivered NumPy forecaster + policy integration is tracked as **`FB-FR-CORE`** / **`FB-PL-CORE`** in [`docs/QUEUE_ARCHIVE.MD`](../../../docs/QUEUE_ARCHIVE.MD); open **`FB-FR-P0`** / **`FB-PL-P0`** track full architecture-spec training stacks.
 
 ## Forecaster (`forecaster_model/`) — alignment with human §26
 
@@ -52,7 +52,7 @@ VSN → Latent CNN → Multi-Resolution xLSTM → Regime-Conditioned Fusion → 
 
 ## Relationship to V3 runtime
 
-- **Only path:** **`ForecastPacket`** from **`forecaster_model`** ( **`ForecasterModel`** / methodology forward) drives **`PolicySystem`**, and **`ExecutionPlan`** maps to **`ActionProposal`** for **`RiskEngine`**. `ForecastOutput` for metrics is derived from the packet via **`decision_engine/forecast_packet_adapter.py`**. Optional **`NM_MODELS_FORECASTER_CHECKPOINT_ID`** / **`NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH`** — see [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD).
+- **Only path:** **`ForecastPacket`** from **`forecaster_model`** ( **`ForecasterModel`** / methodology forward) drives **`PolicySystem`**, and **`ExecutionPlan`** maps to **`ActionProposal`** for **`RiskEngine`**. `ForecastOutput` for metrics is derived from the packet via **`decision_engine/forecast_packet_adapter.py`**. Optional **`NM_MODELS_FORECASTER_CHECKPOINT_ID`** / **`NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH`** — see [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](../../../docs/MIGRATION_TO_SPEC_PIPELINE.MD).
 
 ## Dependencies
 

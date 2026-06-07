@@ -1,6 +1,6 @@
 # System walkthrough (AI / operator summary)
 
-This document gives a **step-by-step** picture of how the Trading Bot stack runs end-to-end. It reflects the **master system pipeline** ([`MASTER_SYSTEM_PIPELINE_SPEC.MD`](Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD)): **`ForecastPacket`** from **`forecaster_model`** (VSN → CNN → multi-resolution xLSTM → fusion → quantiles) + **`PolicySystem`**, **Kraken market data** (REST + WebSocket in the live loop; training/backfill pulls per [`KRAKEN_MARKET_DATA.MD`](KRAKEN_MARKET_DATA.MD)), and **`execution_mode = paper`** (Alpaca paper execution). **Execution** uses **Alpaca** (paper) or **Coinbase** (live) — neither venue feeds the decision pipeline as market data.
+This document gives a **step-by-step** picture of how the Trading Bot stack runs end-to-end. It reflects the **master system pipeline** ([`MASTER_SYSTEM_PIPELINE_SPEC.MD`](../../legacy/decision_pipeline/docs/MASTER_SYSTEM_PIPELINE_SPEC.MD)): **`ForecastPacket`** from **`forecaster_model`** (VSN → CNN → multi-resolution xLSTM → fusion → quantiles) + **`PolicySystem`**, **Kraken market data** (REST + WebSocket in the live loop; training/backfill pulls per [`KRAKEN_MARKET_DATA.MD`](KRAKEN_MARKET_DATA.MD)), and **`execution_mode = paper`** (Alpaca paper execution). **Execution** uses **Alpaca** (paper) or **Coinbase** (live) — neither venue feeds the decision pipeline as market data.
 
 ---
 
@@ -82,4 +82,4 @@ This document gives a **step-by-step** picture of how the Trading Bot stack runs
 | Conformal JSON on hot path | `NM_MODELS_FORECASTER_CONFORMAL_STATE_PATH` (optional) |
 | Execution venue | `NM_EXECUTION_MODE=paper` \| `live` |
 
-For deeper detail, see [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](MIGRATION_TO_SPEC_PIPELINE.MD), [`docs/Specs/SYSTEM_OVERVIEW.MD`](Specs/SYSTEM_OVERVIEW.MD), and [`docs/Specs/FORECASTER_AND_POLICY.MD`](Specs/FORECASTER_AND_POLICY.MD).
+For deeper detail, see [`docs/MIGRATION_TO_SPEC_PIPELINE.MD`](MIGRATION_TO_SPEC_PIPELINE.MD), [`docs/Specs/SYSTEM_OVERVIEW.MD`](Specs/SYSTEM_OVERVIEW.MD), and [`legacy/decision_pipeline/docs/FORECASTER_AND_POLICY.MD`](../../legacy/decision_pipeline/docs/FORECASTER_AND_POLICY.MD).

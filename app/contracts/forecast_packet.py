@@ -12,7 +12,7 @@ class ForecastPacket:
     """
     Output of the forecaster / world model for downstream policy and diagnostics.
 
-    Fields mirror `docs/Human Provided Specs/POLICY_MODEL_ARCHITECTURE_SPEC.MD` §8.1.
+    Fields mirror `legacy/decision_pipeline/docs/POLICY_MODEL_ARCHITECTURE_SPEC.MD` §8.1.
     Use list[float] for portability (Torch tensors can be converted at model boundaries).
 
     **APEX (FB-CAN-017):** trigger and auction consume :class:`~app.contracts.canonical_structure.CanonicalStructureOutput`

@@ -1,7 +1,7 @@
 """
 Nightly / scheduled training entry — **real Coinbase candles only** (no synthetic arrays).
 
-Implements cadence from `docs/Human Provided Specs/NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD`:
+Implements cadence from `training_pipeline/docs/NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD`:
 forecaster refresh → evaluation → heuristic RL rollout on real prices (PPO/SAC backlog).
 
 Promotion: never automatic; artifacts written under `NM_TRAINING_ARTIFACT_DIR` or `models/artifacts_training/`.

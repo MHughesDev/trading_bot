@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class ForecasterConfig:
-    """Defaults align with `docs/Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD` §7.1."""
+    """Defaults align with `legacy/decision_pipeline/docs/MASTER_SYSTEM_PIPELINE_SPEC.MD` §7.1."""
 
     base_interval_seconds: int = 60
     history_length: int = 128

@@ -1,7 +1,7 @@
 # Code-Level Architecture Specification — Policy Model
 ## Forecast-Conditioned Reinforcement Learning Policy for Crypto Trading
 
-> **Target architecture:** For the **APEX canonical** migration and **intended** end-state system design, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`new_specs/canonical/`](new_specs/canonical/). This document remains **historical / legacy intent** for the pre-canonical pipeline where applicable; where it conflicts with canonical APEX on **future** architecture, prefer canonical specs for roadmap decisions.
+> **Target architecture:** For the **APEX canonical** migration and **intended** end-state system design, see [`docs/CANONICAL_SPEC_INDEX.MD`](../../../docs/CANONICAL_SPEC_INDEX.MD) and [`docs/Human Provided Specs/new_specs/canonical/`](../../../docs/Human%20Provided%20Specs/new_specs/canonical/). This document remains **historical / legacy intent** for the pre-canonical pipeline where applicable; where it conflicts with canonical APEX on **future** architecture, prefer canonical specs for roadmap decisions.
 
 
 Version: 1.0  

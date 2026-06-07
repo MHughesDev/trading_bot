@@ -8,7 +8,7 @@
 
 - **Market data:** **Kraken** only (WebSocket + REST under `data_plane/ingest/kraken_*`). **Alpaca** must not be used for market-data clients in the main package tree — `scripts/ci_spec_compliance.sh` fails on `alpaca.data` imports outside the paper execution adapter (`execution/adapters/alpaca_paper.py`). See [`../KRAKEN_MARKET_DATA.MD`](../KRAKEN_MARKET_DATA.MD).
 - **Execution:** Config-driven — **paper** → Alpaca paper adapter; **live** → Coinbase Advanced Trade (CDP JWT) adapter. Shared **decision + risk** path for live and replay.
-- **Decision path:** master pipeline — **`ForecastPacket`** (`forecaster_model`, xLSTM stack) + **`PolicySystem`** (`policy_model`) → **`ActionProposal`** ([`MASTER_SYSTEM_PIPELINE_SPEC.MD`](../Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD), [`MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD)).
+- **Decision path:** master pipeline — **`ForecastPacket`** (`forecaster_model`, xLSTM stack) + **`PolicySystem`** (`policy_model`) → **`ActionProposal`** ([`MASTER_SYSTEM_PIPELINE_SPEC.MD`](../../legacy/decision_pipeline/docs/MASTER_SYSTEM_PIPELINE_SPEC.MD), [`MIGRATION_TO_SPEC_PIPELINE.MD`](../MIGRATION_TO_SPEC_PIPELINE.MD)).
 - **Risk:** `OrderIntent` execution is gated (HMAC signing, `execution/intent_gate.py`) per settings — not bypassed in production paths.
 
 ## Top-level packages (Python)

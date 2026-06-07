@@ -1,8 +1,8 @@
 # Decision engine
 
-> **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`../CANONICAL_SPEC_INDEX.MD`](../CANONICAL_SPEC_INDEX.MD) and [`../Human Provided Specs/new_specs/canonical/`](../Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
+> **Architecture status:** This file describes the **repository as implemented today**. For **target** system architecture during the canonical APEX migration, see [`docs/CANONICAL_SPEC_INDEX.MD`](../../../docs/CANONICAL_SPEC_INDEX.MD) and [`docs/Human Provided Specs/new_specs/canonical/`](../../../docs/Human%20Provided%20Specs/new_specs/canonical/). Where this document conflicts with canonical APEX specs on **future** design, treat this file as **as-built** only, not the roadmap.
 
-> **Tombstone (FB-CAN-023):** As-built module map only. APEX decision/trigger/auction **requirements** → canonical specs + **[`CANONICAL_PRECEDENCE.MD`](CANONICAL_PRECEDENCE.MD)**.
+> **Tombstone (FB-CAN-023):** As-built module map only. APEX decision/trigger/auction **requirements** → canonical specs + **[`docs/Specs/CANONICAL_PRECEDENCE.MD`](../../../docs/Specs/CANONICAL_PRECEDENCE.MD)**.
 
 ## Shared tick
 

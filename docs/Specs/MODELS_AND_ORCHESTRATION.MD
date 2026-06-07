@@ -7,7 +7,7 @@
 
 - **`registry/mlflow_registry.py`** — Stubs / helpers for MLflow; **no automatic model promotion in code** (CI guard)
 
-Forecaster weights and training live under **`forecaster_model/`** and **`orchestration/`** (master pipeline — see [`Human Provided Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](../Human%20Provided%20Specs/MASTER_SYSTEM_PIPELINE_SPEC.MD)).
+Forecaster weights and training live under **`forecaster_model/`** and **`orchestration/`** (master pipeline — see [`legacy/decision_pipeline/docs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](../../legacy/decision_pipeline/docs/MASTER_SYSTEM_PIPELINE_SPEC.MD)).
 
 ## Orchestration (`orchestration/`)
 

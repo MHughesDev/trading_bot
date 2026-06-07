@@ -1,6 +1,6 @@
 """
-Constants from `docs/Human Provided Specs/NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD` and
-`INITIAL_OFFLINE_TRAINING_CAMPAIGN_SPEC.MD` (training cadence only; no fake data).
+Constants from `training_pipeline/docs/NIGHTLY_TRAINING_AND_REFRESH_SPEC.MD` and
+`training_pipeline/docs/INITIAL_OFFLINE_TRAINING_CAMPAIGN_SPEC.MD` (training cadence only; no fake data).
 """
 
 # --- Nightly (maintenance) ---

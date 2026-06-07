@@ -1,4 +1,4 @@
-"""Policy object model — human `POLICY_MODEL_ARCHITECTURE_SPEC.MD` §8 package layout."""
+"""Policy object model — human `legacy/decision_pipeline/docs/POLICY_MODEL_ARCHITECTURE_SPEC.MD` §8 package layout."""
 
 from legacy.decision_pipeline.policy_model.objects.approved_target import ApprovedTarget
 from legacy.decision_pipeline.policy_model.objects.execution_plan import ExecutionPlan
