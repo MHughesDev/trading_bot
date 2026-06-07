@@ -21,15 +21,33 @@ server (see `tests/test_mcp_server_tools.py`).
 
 ## Tools the agent gets
 
-**Read:** `get_system_status`, `list_watched_assets`, `get_recent_bars`, `get_positions`,
-`get_pnl`, `get_latest_decision`.
+The registry exposes essentially the entire control-plane surface — ~55 tools spanning trading,
+asset administration, universes, system controls, charts, and APEX governance. Every tool routes
+through the same FastAPI control-plane endpoints a human uses, so **RiskEngine gates and
+risk-signing apply identically to the agent and to a human** — the agent is well-equipped but
+cannot bypass risk. Blocked orders come back with `blocked` reason codes; mutating tools carry the
+`mutating=True` flag in their `ToolSpec` so a client can gate/confirm them.
 
-**Act:** `place_order` (buy/sell, market/limit), `flatten_position`, `set_asset_lifecycle`
-(initialize/start/stop), `set_execution_mode` (paper/live/default).
+| Group | Read tools | Act (mutating) tools |
+|---|---|---|
+| Core | `get_system_status`, `list_watched_assets`, `get_recent_bars`, `get_positions`, `get_pnl`, `get_latest_decision` | `place_order`, `flatten_position`, `set_asset_lifecycle`, `set_execution_mode` |
+| Universe | `list_alpaca_universe`, `list_coinbase_universe`, `list_platform_supported_universe`, `search_universe` | `sync_alpaca_universe`, `sync_coinbase_universe` |
+| System | `get_scheduler_status`, `get_microservices_health`, `get_pnl_series`, `get_routes`, `get_params`, `get_system_mode`, `get_system_power`, `get_execution_profile`, `list_models` | `set_params`, `set_system_mode`, `system_flatten`, `set_system_power`, `set_execution_profile`, `set_model_version` |
+| Asset admin | `get_asset_model_manifest`, `get_asset_lifecycle`, `get_asset_execution_mode`, `get_asset_init_job` | `put_asset_model_manifest`, `delete_asset_model_manifest` |
+| Charts | `get_latest_bar`, `get_trade_markers` | — |
+| Governance | `get_release_evidence`, `get_config_diff_audit`, `get_governance_monitoring`, `get_probation_status`, `get_shadow_comparison`, `get_rollback_playbook`, `list_release_objects`, `get_release_object`, `list_experiments`, `get_experiment` | `diff_release_evidence`, `run_shadow_comparison`, `create_release_object`, `evaluate_release_gates`, `create_experiment`, `delete_experiment` |
 
-Every *act* tool routes through the control-plane `/trade/*` and `/assets/*` endpoints, so the
-**RiskEngine gates and risk-signing apply identically to the agent and to a human** — the agent
-is well-equipped but cannot bypass risk. Blocked orders come back with `blocked` reason codes.
+### Deliberately excluded
+
+A few endpoints are **not** exposed as agent tools, on purpose:
+
+- `/auth/*` (register/login/logout/me/touch) — human session/cookie management; not a fit for a
+  stateless tool-calling agent.
+- `/auth/venue-credentials` (read+write) — encrypts/stores third-party exchange API secrets;
+  letting an agent read or rewrite venue credentials is a credential-exfiltration / lockout risk
+  that isn't worth the convenience.
+- `/metrics` and `/assets/chart/stream` — Prometheus plaintext and SSE streaming don't fit the
+  request/response tool-call model.
 
 ## Running
 
