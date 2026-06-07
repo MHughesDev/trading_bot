@@ -72,6 +72,7 @@ from app.runtime.auth_venue_status import venue_keys_status_for_user
 from app.runtime.execution_settings_merge import merge_settings_for_execution
 from app.runtime.user_store import UserRecord
 from execution.adapter_registry import supported_adapters_for_settings
+from control_plane.backtest_run import list_strategies_payload, run_symbol_backtest
 from control_plane.chart_bars import (
     query_canonical_bars_for_chart,
     query_latest_canonical_bar_for_chart,
@@ -1514,6 +1515,79 @@ def get_asset_chart_trade_markers(
         "source": "trade_markers_jsonl",
         "markers": [marker_to_api_dict(m) for m in rows],
     }
+
+
+class BacktestRunRequest(BaseModel):
+    """Run a registered strategy against a symbol over a time window (FB-AP-XXX).
+
+    Backtesting is independent of paper/live trading — it can run concurrently and never
+    routes real orders. Requires the asset to have canonical bars in the window.
+    """
+
+    strategy_key: str = Field(description="Key from GET /strategies (e.g. 'ema_cross')")
+    start: datetime = Field(description="Range start (UTC ISO-8601)")
+    end: datetime = Field(description="Range end (UTC ISO-8601)")
+    strategy_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Overrides for the strategy's default params (instrument_id/bar_type are injected)",
+    )
+    interval_seconds: int | None = Field(
+        default=None, description="Bar width; default = NM_MARKET_DATA_BAR_INTERVAL_SECONDS"
+    )
+    starting_balance: str = Field(default="100000", description="Simulated account starting cash")
+    starting_currency: str = Field(default="USD", description="Account/quote currency")
+
+
+@app.get("/strategies")
+def get_strategies() -> dict[str, Any]:
+    """Catalogue of backtestable strategies for the Asset-page dropdown (FB-AP-XXX).
+
+    Import-free: works whether or not the ``backtest_nautilus`` extra is installed.
+    """
+    return list_strategies_payload()
+
+
+@app.post("/assets/backtest/{symbol}")
+async def post_asset_backtest(
+    symbol: str,
+    body: BacktestRunRequest,
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Run a strategy backtest for ``symbol`` over a window (FB-AP-XXX).
+
+    Separate from the paper/live execution modes and safe to run concurrently with them —
+    it only reads stored bars and never places real orders. ``503`` if the backtest engine
+    (the platform's NautilusTrader fork) isn't installed; ``422`` for bad input / no data.
+    """
+    sym = symbol.strip()
+    try:
+        return await run_symbol_backtest(
+            settings,
+            symbol=sym,
+            strategy_key=body.strategy_key,
+            start=body.start,
+            end=body.end,
+            strategy_params=body.strategy_params,
+            interval_seconds=body.interval_seconds,
+            starting_balance=body.starting_balance,
+            starting_currency=body.starting_currency,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except ImportError as exc:
+        return JSONResponse(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"error": "backtest_engine_unavailable", "detail": str(exc)},
+        )
+    except Exception as exc:
+        logger.exception("Unexpected backtest error symbol=%s", sym)
+        return JSONResponse(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": "internal", "detail": str(exc)},
+        )
 
 
 @app.post("/assets/lifecycle/{symbol}/stop")
