@@ -50,6 +50,29 @@ backtest_nautilus = [
 ]
 ```
 
+## User-built strategies (the strategy builder)
+
+Not every strategy is hand-written Python. The **Strategy Builder** page
+(`control_plane/pages/StrategyBuilder.py` → `/StrategyBuilder` → `POST /strategies/custom`)
+lets a user assemble a strategy from plain-language building blocks — *"WHEN the 7 EMA crosses
+above the 21 EMA THEN buy 2% of equity, EXIT WHEN down 1.5% or up 4%"* — with no code.
+
+That, and any future node-graph / code-mode builders, all compile down to one universal,
+import-free schema: [`rule_spec.py`](./rule_spec.py) (`RuleStrategySpec` — indicators,
+entry conditions, sizing, exits — plus `validate()` and a plain-English `explain()` so a user
+can sanity-check what they built before risking money on it). A single generic
+[`rule_based_strategy.py`](./rule_based_strategy.py) (`RuleBasedStrategy`/
+`RuleBasedStrategyConfig`) interprets that schema at runtime — its sole tunable parameter is
+`rule_spec`, a JSON-encoded string (Nautilus configs must be built from serialisable
+primitives).
+
+[`custom_strategy_store.py`](./custom_strategy_store.py) persists each saved strategy as a
+sidecar JSON file and dynamically registers it into this catalogue as an ordinary
+`StrategyDescriptor` with key `custom:<id>` (`register_or_replace`/`unregister` — see below).
+The rest of the platform — `run_backtest`, `/assets/backtest/{symbol}`,
+`/assets/strategy/{symbol}` (live decision source) — needs **zero** special-casing: to them,
+`custom:<id>` looks exactly like `ema_cross`.
+
 ## Adding a strategy
 
 1. Create `strategies/<name>_strategy.py` with a frozen `StrategyConfig`

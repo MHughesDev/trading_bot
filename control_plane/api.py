@@ -78,7 +78,16 @@ from app.runtime.execution_settings_merge import merge_settings_for_execution
 from app.runtime.user_store import UserRecord
 from execution.adapter_registry import supported_adapters_for_settings
 from control_plane.backtest_run import list_strategies_payload, run_symbol_backtest
+from strategies.custom_strategy_store import (
+    delete_custom_strategy,
+    get_custom_strategy,
+    list_custom_strategies,
+    register_custom_strategies,
+    registry_key as custom_strategy_registry_key,
+    save_custom_strategy,
+)
 from strategies.registry import get_strategy
+from strategies.rule_spec import RuleSpecError, RuleStrategySpec
 from control_plane.chart_bars import (
     query_canonical_bars_for_chart,
     query_latest_canonical_bar_for_chart,
@@ -250,6 +259,7 @@ async def _lifespan(app: FastAPI):
             "Set NM_CONTROL_PLANE_API_KEY, enable NM_AUTH_SESSION_ENABLED, or bind loopback-only.",
             settings.control_plane_host,
         )
+    register_custom_strategies()
     # Nightly training scheduler intentionally NOT started — training is decoupled (FB-AP-XXX).
     start_alpaca_universe_scheduler(settings)
     start_coinbase_universe_scheduler(settings)
@@ -1377,6 +1387,8 @@ def put_asset_strategy(
     """
     sym = symbol.strip()
     key = body.get("strategy_key")
+    if isinstance(key, str) and key.startswith("custom:"):
+        register_custom_strategies()
     if not isinstance(key, str) or not key.strip():
         raise HTTPException(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1609,8 +1621,109 @@ def get_strategies() -> dict[str, Any]:
     """Catalogue of backtestable strategies for the Asset-page dropdown (FB-AP-XXX).
 
     Import-free: works whether or not the ``backtest_nautilus`` extra is installed.
+    Includes the user's custom (builder-created) strategies alongside the built-ins.
     """
+    register_custom_strategies()
     return list_strategies_payload()
+
+
+def _custom_strategy_to_api_dict(record: dict[str, Any]) -> dict[str, Any]:
+    spec = RuleStrategySpec.from_dict(record["spec"])
+    return {
+        "id": record["id"],
+        "registry_key": custom_strategy_registry_key(record["id"]),
+        "name": spec.name,
+        "spec": record["spec"],
+        "explanation": spec.explain(),
+        "created_at": record.get("created_at"),
+        "updated_at": record.get("updated_at"),
+    }
+
+
+def _spec_from_body(body: dict[str, Any]) -> RuleStrategySpec:
+    try:
+        spec = RuleStrategySpec.from_dict(body)
+    except (TypeError, ValueError, KeyError) as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"malformed strategy spec: {exc}",
+        ) from exc
+    try:
+        spec.validate()
+    except RuleSpecError as exc:
+        raise HTTPException(status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return spec
+
+
+@app.post("/strategies/custom/preview")
+def post_custom_strategy_preview(body: dict[str, Any]) -> dict[str, Any]:
+    """Validate a draft strategy spec and return its plain-English explanation.
+
+    Powers the strategy builder's live preview pane — "every strategy should generate a
+    human-readable explanation" — without persisting anything (FB-AP-XXX).
+    """
+    try:
+        spec = RuleStrategySpec.from_dict(body)
+    except (TypeError, ValueError, KeyError) as exc:
+        return {"valid": False, "errors": [f"malformed strategy spec: {exc}"], "explanation": None}
+    try:
+        spec.validate()
+    except RuleSpecError as exc:
+        return {"valid": False, "errors": [str(exc)], "explanation": spec.explain()}
+    return {"valid": True, "errors": [], "explanation": spec.explain()}
+
+
+@app.get("/strategies/custom")
+def get_custom_strategies() -> dict[str, Any]:
+    """List the current user's saved custom (builder-created) strategies (FB-AP-XXX)."""
+    register_custom_strategies()
+    records = list_custom_strategies()
+    return {"count": len(records), "strategies": [_custom_strategy_to_api_dict(r) for r in records]}
+
+
+@app.post("/strategies/custom")
+def post_custom_strategy(
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Create a new custom strategy from a builder spec; registers it for backtest/live use."""
+    spec = _spec_from_body(body)
+    record = save_custom_strategy(spec)
+    return _custom_strategy_to_api_dict(record)
+
+
+@app.get("/strategies/custom/{strategy_id}")
+def get_custom_strategy_route(strategy_id: str) -> dict[str, Any]:
+    register_custom_strategies()
+    record = get_custom_strategy(strategy_id)
+    if record is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown custom strategy id")
+    return _custom_strategy_to_api_dict(record)
+
+
+@app.put("/strategies/custom/{strategy_id}")
+def put_custom_strategy(
+    strategy_id: str,
+    body: dict[str, Any],
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    """Edit and re-save an existing custom strategy (re-registers it under the same id)."""
+    if get_custom_strategy(strategy_id) is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown custom strategy id")
+    spec = _spec_from_body(body)
+    record = save_custom_strategy(spec, strategy_id=strategy_id)
+    return _custom_strategy_to_api_dict(record)
+
+
+@app.delete("/strategies/custom/{strategy_id}")
+def delete_custom_strategy_route(
+    strategy_id: str,
+    _: Annotated[None, Depends(require_mutate_operator)],
+) -> dict[str, Any]:
+    ok = delete_custom_strategy(strategy_id)
+    if not ok:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown custom strategy id")
+    return {"ok": True, "id": strategy_id}
 
 
 @app.post("/assets/backtest/{symbol}")
@@ -1626,6 +1739,8 @@ async def post_asset_backtest(
     (the platform's NautilusTrader fork) isn't installed; ``422`` for bad input / no data.
     """
     sym = symbol.strip()
+    if body.strategy_key.startswith("custom:"):
+        register_custom_strategies()
     try:
         return await run_symbol_backtest(
             settings,

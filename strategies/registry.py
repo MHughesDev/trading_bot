@@ -81,6 +81,21 @@ def register(descriptor: StrategyDescriptor) -> StrategyDescriptor:
     return descriptor
 
 
+def register_or_replace(descriptor: StrategyDescriptor) -> StrategyDescriptor:
+    """Like :func:`register`, but overwrites an existing entry for the same key.
+
+    Used for dynamically-loaded catalogue entries (e.g. user-built strategies — see
+    :mod:`strategies.custom_strategy_store`) whose definitions can be edited and re-saved.
+    """
+    _REGISTRY[descriptor.key] = descriptor
+    return descriptor
+
+
+def unregister(key: str) -> bool:
+    """Remove a catalogue entry by key. Returns ``True`` if it existed."""
+    return _REGISTRY.pop(key, None) is not None
+
+
 def list_strategies() -> list[StrategyDescriptor]:
     """All registered strategies, in registration order."""
     return list(_REGISTRY.values())
