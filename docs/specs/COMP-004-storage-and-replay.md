@@ -209,6 +209,59 @@ GET latest:{lane}:{instrument_id}
 - [ ] AC-6: A `market_simulator` run request submitted via the adapter returns `BacktestResult` metrics without any persistent state left in the simulator between runs — Verified by: [—]
 - [ ] AC-7: A Redis cache miss (TTL expiry) for `latest:{lane}:{instrument_id}` causes the system to rehydrate from Postgres or ClickHouse without data loss or an error surfaced to the user — Verified by: [—]
 
-## 7. Open Questions
+## 7. Raw Event Archive — Ground Truth Contract (P0-T11)
+
+This section pins the contract before any writer code is written (Phase 1).
+
+### 7.1 Partition Layout
+
+Object-storage (S3-compatible) path scheme:
+
+```
+s3://{bucket}/events/{lane_safe}/venue={venue_id}/instrument={instrument_id}/date={date}/
+```
+
+Where `{lane_safe}` replaces `.` with `_` (e.g. `market.bars.1m` → `market_bars_1m`).
+
+Example:
+```
+s3://bucket/events/market_bars_1m/venue=coinbase/instrument=BTC-USDT/date=2026-06-08/
+s3://bucket/events/market_trades/venue=alpaca/instrument=AAPL/date=2026-06-08/
+```
+
+The partition path function lives in `crates/storage/src/parquet/partition.rs`:
+
+```rust
+pub fn partition_path(lane: &str, venue_id: &str, instrument_id: &str, date: NaiveDate) -> String
+```
+
+### 7.2 Immutability and Append-Only Invariant
+
+- **No event is ever modified or deleted.**
+- Late data produces a **new revision event** (new `event_id`, new `available_time`) — it is appended as a new row, never as a mutation of the original.
+- Files written per batch are immutable after they are committed to object storage.
+
+### 7.3 Write Batching Policy
+
+The storage writer accumulates events before flushing:
+- **Trigger 1:** 10,000 events accumulated.
+- **Trigger 2:** 100 ms elapsed since last flush.
+- Whichever comes first triggers a flush.
+- Each flush creates one Parquet file in the partition.
+- Never one write-per-event.
+
+### 7.4 Nightly Compaction
+
+Small Parquet files accumulate during live operation (one file per batch flush). A nightly compaction job (`xtask` or scheduled process — see `crates/storage/src/parquet/compaction.rs`):
+- Scans all `lane/venue/instrument/date` partitions written in the last N days.
+- Merges small files per partition into a single consolidated file.
+- Does not delete or modify original files until the merged file is verified.
+- This maintains efficient DataFusion / Arrow read performance for backtest queries.
+
+### 7.5 Pre-Derivation Write Guarantee
+
+The raw event archive receives every normalized event **before** any derived event (bar, feature) produced from it is published on the bus. This is the structural guarantee of AC-1. The Phase 1 writer enforces this by writing to the Parquet archive synchronously as part of the normalization pipeline, before forwarding the event to the bar builder or feature engine.
+
+## 9. Open Questions
 
 Q-8: Retention policy for the raw Parquet archive — how long to keep raw events before tiering to cheaper cold storage? This affects storage cost and the window of full-fidelity backtest availability. Decision deferred; the system must be designed so the retention policy is configurable without architectural changes.

@@ -1070,6 +1070,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "rust_decimal",
+ "rust_decimal_macros",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3053,6 +3054,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_decimal_macros"
+version = "1.40.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74a5a6f027e892c7a035c6fddb50435a1fbf5a734ffc0c2a9fed4d0221440519"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4442,6 +4453,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 
