@@ -1,0 +1,20 @@
+[package]
+name = "platform"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+domain = { workspace = true }
+cfg = { workspace = true }
+observability = { workspace = true }
+api = { workspace = true }
+risk = { workspace = true }
+execution = { workspace = true }
+reconciliation = { workspace = true }
+strategy-runtime = { workspace = true }
+storage = { workspace = true }
+ui-gateway = { workspace = true }
+demand-manager = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }

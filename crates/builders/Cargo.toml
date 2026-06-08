@@ -1,0 +1,10 @@
+[package]
+name = "builders"
+version = "0.1.0"
+edition = "2021"
+
+# IMPORTANT: builders is PURE — no storage, event-bus, redis, sqlx, or clickhouse deps.
+# Same code runs live and in replay. Enforced by CI (builders-purity check).
+[dependencies]
+domain = { workspace = true }
+chrono = { workspace = true }

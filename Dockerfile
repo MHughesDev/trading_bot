@@ -1,40 +1,43 @@
-# FB-CONT-001 — application OCI image (control plane + React UI + optional live loop)
-# Build: docker build -t trading-bot:local .
-# Smoke:  docker run --rm trading-bot:local python -c "import app; import control_plane.api"
+# Multi-stage build for the platform binary and collectors.
+# Stage 1: Build
+FROM rust:1-slim-bookworm AS builder
 
-FROM python:3.12-slim-bookworm AS python-base
+WORKDIR /build
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace manifests first for layer caching
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates/ crates/
+COPY apps/ apps/
+COPY xtask/ xtask/
+
+# Build release binaries
+RUN cargo build --release -p platform -p collector-crypto -p collector-equity -p mcp-server
+
+# Stage 2: Runtime
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Copy binaries from builder
+COPY --from=builder /build/target/release/platform /usr/local/bin/platform
+COPY --from=builder /build/target/release/collector-crypto /usr/local/bin/collector-crypto
+COPY --from=builder /build/target/release/collector-equity /usr/local/bin/collector-equity
+COPY --from=builder /build/target/release/mcp-server /usr/local/bin/mcp-server
 
-# ── React frontend build stage ─────────────────────────────────────────────────
-FROM node:24-slim AS frontend-build
+# Copy config
+COPY config/ /app/config/
 
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
+EXPOSE 8080 8081
 
-# ── Final image ────────────────────────────────────────────────────────────────
-FROM python-base
-
-COPY . .
-# Overlay the pre-built React dist so FastAPI can serve it
-COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
-
-RUN chmod +x infra/docker/entrypoint.sh \
-    && pip install --no-cache-dir -e ".[alpaca,dashboard]"
-
-EXPOSE 8001
-
-ENTRYPOINT ["/app/infra/docker/entrypoint.sh"]
-CMD ["api"]
+CMD ["platform"]

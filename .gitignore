@@ -43,3 +43,12 @@ queue/logs/
 
 # Pytest temp artifact directories
 .pytest-tmp/
+/target/
+.env
+*.log
+*.local
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+.DS_Store
+Thumbs.db

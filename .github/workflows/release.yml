@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build release binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binaries
+        run: cargo build --release -p platform -p collector-crypto -p collector-equity -p mcp-server
+      - name: Package binaries
+        run: |
+          mkdir -p dist
+          cp target/release/platform dist/
+          cp target/release/collector-crypto dist/
+          cp target/release/collector-equity dist/
+          cp target/release/mcp-server dist/
+          tar -czf trading-platform-${{ github.ref_name }}-linux-x86_64.tar.gz -C dist .
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.tar.gz"
+          generate_release_notes: true

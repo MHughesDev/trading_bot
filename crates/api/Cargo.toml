@@ -1,0 +1,23 @@
+[package]
+name = "api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+domain = { workspace = true }
+risk = { workspace = true }
+execution = { workspace = true }
+strategy-runtime = { workspace = true }
+strategy-validator = { workspace = true }
+storage = { workspace = true }
+ui-gateway = { workspace = true }
+demand-manager = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }

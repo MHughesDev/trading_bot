@@ -1,0 +1,8 @@
+[package]
+name = "features"
+version = "0.1.0"
+edition = "2021"
+
+# IMPORTANT: features is PURE — no storage, event-bus, redis, sqlx, or clickhouse deps.
+[dependencies]
+domain = { workspace = true }
