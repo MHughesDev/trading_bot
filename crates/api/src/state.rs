@@ -1,10 +1,21 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use sqlx::PgPool;
+use uuid::Uuid;
 
 use execution::ExecutionEngine;
+use market_simulator_adapter::BacktestReport;
 use risk::{KillSwitch, RiskGate};
 use ui_gateway::SubscriptionRegistry;
+
+/// Status of an async backtest job.
+#[derive(Debug, Clone)]
+pub enum BacktestJobState {
+    Pending,
+    Completed(BacktestReport),
+    Failed(String),
+}
 
 /// Shared application state injected into every Axum handler.
 #[derive(Clone)]
@@ -14,6 +25,8 @@ pub struct AppState {
     pub kill_switch: Arc<KillSwitch>,
     pub execution: Arc<ExecutionEngine>,
     pub gateway: Arc<SubscriptionRegistry>,
+    /// In-memory backtest job store for Phase 4.
+    pub backtest_jobs: Arc<Mutex<HashMap<Uuid, BacktestJobState>>>,
 }
 
 impl AppState {
@@ -30,6 +43,7 @@ impl AppState {
             kill_switch,
             execution,
             gateway,
+            backtest_jobs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }

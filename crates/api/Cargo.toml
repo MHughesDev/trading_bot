@@ -9,6 +9,7 @@ risk = { workspace = true }
 execution = { workspace = true }
 strategy-runtime = { workspace = true }
 strategy-validator = { workspace = true }
+market-simulator-adapter = { workspace = true }
 storage = { workspace = true }
 ui-gateway = { workspace = true }
 demand-manager = { workspace = true }
