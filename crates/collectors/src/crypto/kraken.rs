@@ -170,7 +170,7 @@ impl Collector for KrakenCollector {
                 "req_id": 1
             });
             let subscribe_text = subscribe_msg.to_string();
-            if let Err(e) = ws_stream.send(Message::Text(subscribe_text.into())).await {
+            if let Err(e) = ws_stream.send(Message::Text(subscribe_text)).await {
                 warn!(error = %e, "failed to send subscribe message");
                 policy.wait().await;
                 continue;
@@ -207,8 +207,8 @@ impl Collector for KrakenCollector {
                             }
                             Ok(km) => {
                                 let is_trade_update =
-                                    km.channel.as_deref().map_or(false, |c| c == "trade")
-                                        && km.msg_type.as_deref().map_or(false, |t| t == "update");
+                                    km.channel.as_deref() == Some("trade")
+                                        && km.msg_type.as_deref() == Some("update");
 
                                 if !is_trade_update {
                                     continue;
