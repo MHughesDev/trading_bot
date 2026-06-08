@@ -78,7 +78,3 @@ Not chosen because: TimescaleDB adds complexity on top of Postgres without match
 
 ## References
 
-- [spec/07-storage-and-replay.md](../../refactor_reference_docs/spec/07-storage-and-replay.md) — storage split table, raw event archive as ground truth, partitioning, batching
-- [spec/03-data-engineering.md](../../refactor_reference_docs/spec/03-data-engineering.md) §9 — partitioning for reads, small-files problem, ClickHouse `ReplacingMergeTree`
-- [spec/09-tech-stack.md](../../refactor_reference_docs/spec/09-tech-stack.md) — sqlx, clickhouse, redis, arrow/parquet/datafusion crate selections
-- [spec/01-architecture.md](../../refactor_reference_docs/spec/01-architecture.md) — storage layer in end-to-end shape, failure-mode posture for storage writers

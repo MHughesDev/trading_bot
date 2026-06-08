@@ -1,6 +1,5 @@
 # Glossary
 
-Terms used throughout the system design documentation. Sourced from `refactor_reference_docs/spec/12-glossary.md`.
 
 ---
 

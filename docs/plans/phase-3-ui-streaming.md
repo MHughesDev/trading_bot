@@ -2,7 +2,7 @@
 Type: Formal
 Status: Pending
 Derived From: COMP-003, ADR-0011, SC-3
-Note: Canonical executable plans live in refactor_reference_docs/plans/. This copy is the traceable documentation record. On any conflict, refactor_reference_docs/ wins.
+Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
 ---
 
 # Phase 3 — See it (UI streaming gateway + React panels + demand manager)

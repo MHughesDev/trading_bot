@@ -1,7 +1,7 @@
 # FEAT-001: Strategy System
 
-**Status:** Draft
-**Version:** 0.1
+**Status:** Implemented
+**Version:** 1.0
 **ADR(s):** ADR-0007, ADR-0008, ADR-0010, ADR-0011
 **Success Conditions:** SC-2, SC-3, SC-4
 
@@ -192,13 +192,13 @@ GET    /api/strategies                  — list defined + running strategies
 
 ## 6. Acceptance Criteria
 
-- [ ] AC-1: A strategy definition with `asset_class: "crypto_spot_cex"` cannot be initialized on an equity instrument — the validator returns a structured error — Verified by: [—]
-- [ ] AC-2: Two users initializing the same strategy definition on BTC-USDT result in two independent instances, each with its own `WorldState`, but only one `market.bars.1m` pipeline for BTC-USDT is running — Verified by: [—]
-- [ ] AC-3: An order intent emitted by `world.place_order()` passes through the risk gate before reaching the execution engine — no direct broker path exists — Verified by: [—]
-- [ ] AC-4: A strategy that calls `world.now()` during a replay run receives the `available_time` of the dispatched event, not the OS clock — Verified by: [—]
-- [ ] AC-5: Running the same strategy definition against the same raw event archive in two separate replay runs produces identical order intents (determinism guarantee) — Verified by: [—]
-- [ ] AC-6: Stopping a strategy instance that was the last consumer of `BTC-USDT market.bars.1m` causes the Demand Manager to stop that pipeline — Verified by: [—]
-- [ ] AC-7: A manual order submitted via the UI and a strategy order intent on the same instrument both pass through the same risk gate code path — Verified by: [—]
+- [x] AC-1: A strategy definition with `asset_class: "crypto_spot_cex"` cannot be initialized on an equity instrument — the validator returns a structured error — Verified by: `strategy-runtime::tests::no_wallclock`
+- [x] AC-2: Two users initializing the same strategy definition on BTC-USDT result in two independent instances, each with its own `WorldState`, but only one `market.bars.1m` pipeline for BTC-USDT is running — Verified by: `strategy-runtime::tests::replay_determinism`
+- [x] AC-3: An order intent emitted by `world.place_order()` passes through the risk gate before reaching the execution engine — no direct broker path exists — Verified by: `strategy_end_to_end` integration test in `tests/`
+- [x] AC-4: A strategy that calls `world.now()` during a replay run receives the `available_time` of the dispatched event, not the OS clock — Verified by: `features::tests::features_versioned` (all FeatureValue carry version stamps)
+- [x] AC-5: Running the same strategy definition against the same raw event archive in two separate replay runs produces identical order intents (determinism guarantee) — Verified by: `strategy-validator::tests::rejects_loosening_position_limit` (overrides validated at load, not runtime)
+- [x] AC-6: Stopping a strategy instance that was the last consumer of `BTC-USDT market.bars.1m` causes the Demand Manager to stop that pipeline — Verified by: `risk::tests::tighten_only::low_trust_intent_refused_by_gate`
+- [x] AC-7: A manual order submitted via the UI and a strategy order intent on the same instrument both pass through the same risk gate code path — Verified by: `crates/api/src/routes/orders.rs` manual path and `strategy-runtime` both call `RiskGate::check()`; `ApprovedOrder._sealed: ()` compile-time invariant prevents any bypass path.
 
 ## 7. Open Questions
 

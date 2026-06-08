@@ -2,15 +2,15 @@
 Type: Formal
 Status: Current
 Derived From: SYS-001, DATA-001, DATA-002, DATA-003, DATA-004, FEAT-001, COMP-001, COMP-002, COMP-003, COMP-004, INTG-001, ADR-0001, ADR-0002, ADR-0003, ADR-0004, ADR-0005, ADR-0006, ADR-0007, ADR-0008, ADR-0009, ADR-0010, ADR-0011
-Note: Canonical executable plans live in refactor_reference_docs/plans/. This copy is the traceable documentation record. On any conflict, refactor_reference_docs/ wins.
+Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
 ---
 
 # Phase A — Initialize documentation workspace
 
 > **Self-contained execution doc.** You need only: this file, the template at
 > `../template/docs/`, the existing reference material in
-> `refactor_reference_docs/spec/`, `refactor_reference_docs/file-structure.md`, and the plan files in
-> `refactor_reference_docs/plans/`.
+> `[deleted - see Phase 7]/spec/`, `[deleted - see Phase 7]/file-structure.md`, and the plan files in
+> `docs/plans/`.
 >
 > **This phase runs BEFORE everything else** — before any Rust is written, before the workspace is
 > scaffolded (Phase B). The user always structures project documentation using the template `docs/`
@@ -58,7 +58,7 @@ This phase **only moves and restructures documentation** — it writes no system
   [`../procedures/verify-traceability.md`](../procedures/verify-traceability.md).
 - **Nothing is deleted that carries history.** Specs and ADRs retire (`Deprecated`/`Superseded`),
   they are not deleted.
-- **`refactor_reference_docs/` is read-only and permanent until the very end.** It stays at the
+- **`[deleted - see Phase 7]/` is read-only and permanent until the very end.** It stays at the
   repo root, untouched, throughout the entire refactor — Phases A through 6. It is the permanent
   reference anchor. **Never move it, never modify it, never delete it during this phase.** The only
   time it is deleted is as the **very last task in Phase 7**, after everything else is verified done.
@@ -90,7 +90,7 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Goal:** Fill the foundational project definition from existing material, assigning stable
   `SC-N`/`FM-N` IDs that downstream specs/plans will cite.
 - **Files:** `docs/artifact.md`.
-- **Context:** Source the content from `refactor_reference_docs/spec/00-overview.md` and
+- **Context:** Source the content from `[deleted - see Phase 7]/spec/00-overview.md` and
   the root `README.md`: *What we're building* (the event-driven local-first trading
   platform), *Who uses it* (the trusted small group), *What problem it solves* (correct, trustworthy
   money handling), *What good looks like* → derive `SC-1…SC-N` from the spec's success properties
@@ -108,7 +108,7 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Goal:** Port the spec's open questions into the `Q-N` register with status, options, resolution,
   and evidence.
 - **Files:** `docs/open-questions.md`.
-- **Context:** From `refactor_reference_docs/spec/10-open-questions.md`: Q1 (real-vs-paper),
+- **Context:** From `[deleted - see Phase 7]/spec/10-open-questions.md`: Q1 (real-vs-paper),
   Q2 (broker/venue), Q3 (strategy-format freeze), Q4 (capital/liability), Q5 (auth), Q6 (backtest
   fidelity), Q7 (watermark defaults), Q8 (retention) become `Q-1…Q-8`. Mark **Q-1, Q-2, and Q-3** as
   **Resolved** with the deciding ADR linked (created in P A-T04); the rest **Open** with their options
@@ -127,22 +127,22 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Context:** Mine the specs for the decisions and write one ADR each (use the ADR template in
   `docs/adr/README.md`: Context/Decision/Rationale/
   Consequences/Alternatives). Suggested set (number sequentially, adjust as needed):
-  - `0001-rust-modular-monolith-with-satellite-collectors` (from `refactor_reference_docs/spec/01-architecture.md`)
-  - `0002-decimal-money-newtypes-no-f64` (from `refactor_reference_docs/spec/02-data-model.md`/`03-data-engineering.md`)
-  - `0003-nats-jetstream-event-fabric` (from `refactor_reference_docs/spec/09-tech-stack.md`)
-  - `0004-storage-split-postgres-clickhouse-parquet-redis` (from `refactor_reference_docs/spec/07-storage-and-replay.md`)
-  - `0005-single-risk-gate-chokepoint-and-kill-switch` (from `refactor_reference_docs/spec/05-execution-and-risk.md`)
+  - `0001-rust-modular-monolith-with-satellite-collectors` (from `[deleted - see Phase 7]/spec/01-architecture.md`)
+  - `0002-decimal-money-newtypes-no-f64` (from `[deleted - see Phase 7]/spec/02-data-model.md`/`03-data-engineering.md`)
+  - `0003-nats-jetstream-event-fabric` (from `[deleted - see Phase 7]/spec/09-tech-stack.md`)
+  - `0004-storage-split-postgres-clickhouse-parquet-redis` (from `[deleted - see Phase 7]/spec/07-storage-and-replay.md`)
+  - `0005-single-risk-gate-chokepoint-and-kill-switch` (from `[deleted - see Phase 7]/spec/05-execution-and-risk.md`)
   - `0006-three-system-broker-architecture-coinbase-alpaca-market-simulator` (resolves Q-1 AND Q-2:
     Coinbase=live execution all assets, Alpaca=paper execution all assets, market_simulator=backtest
     execution; Kraken=crypto market data, Alpaca data feed=equity market data; three parallel systems
-    must exist for all assets/domains; from `refactor_reference_docs/spec/05-execution-and-risk.md`/`10-open-questions.md`)
+    must exist for all assets/domains; from `[deleted - see Phase 7]/spec/05-execution-and-risk.md`/`10-open-questions.md`)
   - `0011-demand-driven-data-engines-no-auto-start` (data pipelines start ONLY when a strategy or UI
     panel declares demand via the Demand Manager + venue-router; never on system init; from
-    `refactor_reference_docs/spec/03-data-engineering.md`/`04-strategy-system.md`)
-  - `0007-freeze-strategy-definition-format-v1` (resolves Q-3, from `refactor_reference_docs/spec/04-strategy-system.md`)
-  - `0008-available-time-ordering-and-same-builders-live-and-replay` (from `refactor_reference_docs/spec/03-data-engineering.md`/`07-storage-and-replay.md`)
-  - `0009-append-only-raw-event-archive-as-ground-truth` (from `refactor_reference_docs/spec/07-storage-and-replay.md`)
-  - `0010-three-front-doors-one-canonical-strategy-json` (from `refactor_reference_docs/spec/04-strategy-system.md`/`08-mcp-server.md`)
+    `[deleted - see Phase 7]/spec/03-data-engineering.md`/`04-strategy-system.md`)
+  - `0007-freeze-strategy-definition-format-v1` (resolves Q-3, from `[deleted - see Phase 7]/spec/04-strategy-system.md`)
+  - `0008-available-time-ordering-and-same-builders-live-and-replay` (from `[deleted - see Phase 7]/spec/03-data-engineering.md`/`07-storage-and-replay.md`)
+  - `0009-append-only-raw-event-archive-as-ground-truth` (from `[deleted - see Phase 7]/spec/07-storage-and-replay.md`)
+  - `0010-three-front-doors-one-canonical-strategy-json` (from `[deleted - see Phase 7]/spec/04-strategy-system.md`/`08-mcp-server.md`)
 - **Acceptance:** each ADR is `Accepted`, follows the template sections, and lists alternatives; the
   `adr/README.md` index has a row per ADR; Q-1/Q-3 in open-questions link to ADR-0006/ADR-0007.
 - **Depends on:** P A-T03.
@@ -153,20 +153,20 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Files:** `docs/specs/<TYPE>-<NNN>-*.md` + `docs/specs/README.md` index. Use the spec template and
   procedure in [`../procedures/add-spec.md`](../procedures/add-spec.md).
 - **Context:** Recommended mapping (split further if a file would exceed ~7 cohesive sections):
-  - `refactor_reference_docs/spec/02-data-model.md` → `DATA-001` event-envelope-and-payloads,
+  - `[deleted - see Phase 7]/spec/02-data-model.md` → `DATA-001` event-envelope-and-payloads,
     `DATA-002` instrument-metadata, `DATA-003` timestamps-and-identity.
-  - `refactor_reference_docs/spec/03-data-engineering.md` → `COMP-001` data-quality-and-ingestion
+  - `[deleted - see Phase 7]/spec/03-data-engineering.md` → `COMP-001` data-quality-and-ingestion
     (quarantine, dedup, watermarks/revisions, reconciliation policy).
-  - `refactor_reference_docs/spec/04-strategy-system.md` → `FEAT-001` strategy-system +
+  - `[deleted - see Phase 7]/spec/04-strategy-system.md` → `FEAT-001` strategy-system +
     `DATA-004` strategy-definition-format (the frozen 1.0 contract).
-  - `refactor_reference_docs/spec/05-execution-and-risk.md` → `COMP-002` execution-and-risk-gate.
-  - `refactor_reference_docs/spec/06-ui-and-streaming.md` → `COMP-003` ui-streaming-gateway.
-  - `refactor_reference_docs/spec/07-storage-and-replay.md` → `COMP-004` storage-and-replay.
-  - `refactor_reference_docs/spec/08-mcp-server.md` → `INTG-001` mcp-server.
+  - `[deleted - see Phase 7]/spec/05-execution-and-risk.md` → `COMP-002` execution-and-risk-gate.
+  - `[deleted - see Phase 7]/spec/06-ui-and-streaming.md` → `COMP-003` ui-streaming-gateway.
+  - `[deleted - see Phase 7]/spec/07-storage-and-replay.md` → `COMP-004` storage-and-replay.
+  - `[deleted - see Phase 7]/spec/08-mcp-server.md` → `INTG-001` mcp-server.
   - A `SYS-001` system-overview spec linking all of the above (diagram + cross-reference index),
-    sourced from `refactor_reference_docs/spec/01-architecture.md`.
-  - `refactor_reference_docs/spec/09-tech-stack.md` becomes a **research brief** (P A-T06) + the ADRs,
-    not a spec. `refactor_reference_docs/spec/12-glossary.md` becomes `docs/glossary.md` (P A-T09).
+    sourced from `[deleted - see Phase 7]/spec/01-architecture.md`.
+  - `[deleted - see Phase 7]/spec/09-tech-stack.md` becomes a **research brief** (P A-T06) + the ADRs,
+    not a spec. `[deleted - see Phase 7]/spec/12-glossary.md` becomes `docs/glossary.md` (P A-T09).
   Each spec's §1.3 links its ADR(s); §6 acceptance criteria are seeded from the spec's "decided
   mechanism" tests with `Verified by: [—]` and **checkboxes unticked** — this is correct for
   initialize. Filling those in is Phase 7's job. §7 references the relevant `Q-N`.
@@ -179,7 +179,7 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Goal:** Capture the evaluations that justified the stack and the gating venue choice.
 - **Files:** `docs/research/rust-trading-stack-evaluation.md`,
   `docs/research/broker-venue-selection.md`, + `docs/research/README.md` index rows.
-- **Context:** The first brief sources `refactor_reference_docs/spec/09-tech-stack.md`
+- **Context:** The first brief sources `[deleted - see Phase 7]/spec/09-tech-stack.md`
   (Question/Method/Findings/Recommendation/References per the research README) and is cited by
   ADR-0003/0004 and the tech ADRs. The second brief documents the **resolved** broker/venue
   selections for Q-1 and Q-2: Coinbase=live execution (all assets), Alpaca paper account=paper
@@ -194,8 +194,8 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Goal:** The current-state structural map — including the enumerated end-state file structure.
 - **Files:** `docs/architecture.md`.
 - **Context:** Fill the template's sections (Overview, Components, Data Flow, External Dependencies,
-  Key Decisions, Constraints) from `refactor_reference_docs/spec/01-architecture.md`. **Fold
-  the entire enumerated structure from `refactor_reference_docs/file-structure.md` into the
+  Key Decisions, Constraints) from `[deleted - see Phase 7]/spec/01-architecture.md`. **Fold
+  the entire enumerated structure from `[deleted - see Phase 7]/file-structure.md` into the
   Components section** (or a dedicated "Repository structure" section) — this is exactly what
   `architecture.md` is for: the single answer to "what does the system look like and how do the
   pieces fit." Components reference their `COMP/DATA/FEAT` spec; Key Decisions link the ADRs; External
@@ -210,8 +210,8 @@ This phase **only moves and restructures documentation** — it writes no system
   plans with the template's **Derived From** traceability, re-pointing all links to the new `docs/`
   locations.
 - **Files:** `docs/plans/rust-rewrite-master-plan.md` (from
-  `refactor_reference_docs/plans/00-master-plan.md`); `docs/plans/phase-A-documentation.md` …
-  `phase-7-cutover.md` (from `refactor_reference_docs/plans/`); `docs/plans/README.md` index rows. Follow
+  `docs/plans/00-master-plan.md`); `docs/plans/phase-A-documentation.md` …
+  `phase-7-cutover.md` (from `docs/plans/`); `docs/plans/README.md` index rows. Follow
   [`../procedures/add-plan.md`](../procedures/add-plan.md).
 - **Context:** Each migrated plan gets a header with `Type: Formal`, `Status: Current`, and a
   **Derived From** section listing the specs/ADRs/`SC-N` it traces to **at spec-ID granularity**
@@ -223,8 +223,8 @@ This phase **only moves and restructures documentation** — it writes no system
   finalize, when the specs are `Implemented`. Do **not** hand-map every task to a spec section now;
   that precision is not needed to start work and is error-prone.
   > Note: these `docs/plans/` copies are the **traceable record**. The canonical executable plans
-  > stay in `refactor_reference_docs/plans/` and are what later phases are run from (see master plan
-  > §3.1). Keep the two consistent in intent; the `refactor_reference_docs/` copy wins on conflict.
+  > stay in `docs/plans/` and are what later phases are run from (see master plan
+  > §3.1). Keep the two consistent in intent; the `[deleted - see Phase 7]/` copy wins on conflict.
 - **Acceptance:** all plans exist under `docs/plans/`; each is `Formal` with a populated **Derived
   From** at spec-ID granularity; the `../spec/`/`../file-structure.md` links are re-pointed to
   `docs/`; index rows added. (Section-level `§N.M` traces are optional at this stage.)
@@ -244,7 +244,7 @@ This phase **only moves and restructures documentation** — it writes no system
 
 ### P A-T10 — Verify structural integrity of the initialized workspace
 - **Goal:** Prove the initialized workspace is internally consistent — all references resolve, no
-  broken links, indexes complete. `refactor_reference_docs/` is **not** touched here; it remains at
+  broken links, indexes complete. `[deleted - see Phase 7]/` is **not** touched here; it remains at
   root throughout the entire refactor.
 - **Files:** run [`../procedures/verify-traceability.md`](../procedures/verify-traceability.md)
   steps 1–4 and 7–8 (the structural checks) against `docs/`. Skip step 9 ("Verification evidence on
@@ -252,9 +252,9 @@ This phase **only moves and restructures documentation** — it writes no system
   fields, and that is correct and intentional. Record the report.
 - **Context:** Check: every `Q-N`/`SC-N`/`FM-N`/`ADR-NNNN`/`§N.M` reference resolves; every plan
   passes two-way coverage (tasks have a Derived From source); no broken links; indexes match folders.
-  If anything fails, fix it in `docs/`. Do not touch `refactor_reference_docs/`.
+  If anything fails, fix it in `docs/`. Do not touch `[deleted - see Phase 7]/`.
 - **Acceptance:** structural traceability checks (steps 1–4, 7–8) pass; all specs are `Draft` with
-  unfilled evidence (correct); `refactor_reference_docs/` is still present and unmodified at root;
+  unfilled evidence (correct); `[deleted - see Phase 7]/` is still present and unmodified at root;
   `docs/` is the sole canonical workspace from which Phases B–6 are authored and executed.
 - **Depends on:** P A-T09.
 
@@ -276,8 +276,8 @@ This phase **only moves and restructures documentation** — it writes no system
 - [ ] Root `README.md` + `AGENT.md` + `docs/glossary.md` exist.
 - [ ] Structural traceability (steps 1–4, 7–8 of `verify-traceability`) passes; `docs/` is the
       single source of documentation truth that Phases B–6 are authored and executed from.
-- [ ] **`refactor_reference_docs/` is still present and unmodified at the repo root** — it is never
+- [ ] **`[deleted - see Phase 7]/` is still present and unmodified at the repo root** — it is never
       touched during the refactor and is only deleted as the very last act of Phase 7.
 - [ ] **Handoff note logged:** "Phase 7 finalizes these docs — advance specs to `Implemented`,
       fill `Verified by:` evidence, add operational procedures from reality, run the full
-      verify-traceability (including step 9), then delete `refactor_reference_docs/` as the final act."
+      verify-traceability (including step 9), then delete `[deleted - see Phase 7]/` as the final act."

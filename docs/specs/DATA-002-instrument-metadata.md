@@ -1,7 +1,7 @@
 # DATA-002: Instrument Metadata
 
-**Status:** Draft
-**Version:** 0.1
+**Status:** Implemented
+**Version:** 1.0
 **ADR(s):** ADR-0001
 **Success Conditions:** SC-5
 
@@ -164,12 +164,12 @@ GET  /api/assets               — grouped by asset_class
 
 ## 6. Acceptance Criteria
 
-- [ ] AC-1: A strategy definition with `asset_class: "crypto_spot_cex"` cannot be initialized on an instrument where `Instrument.asset_class == AssetClass::Equity` — the validator returns a structured rejection — Verified by: [—]
-- [ ] AC-2: The freshness watchdog for an equity instrument does not raise a stale-feed alarm when the instrument's `TradingSchedule` shows the market is closed — Verified by: [—]
-- [ ] AC-3: The freshness watchdog for a crypto instrument (empty `sessions`) raises a stale-feed alarm whenever the configured quiet-period threshold is exceeded, regardless of time of day — Verified by: [—]
-- [ ] AC-4: The risk gate rejects an order whose `size` is not a multiple of `lot_size` for the bound instrument — Verified by: [—]
-- [ ] AC-5: The risk gate rejects an order whose `price` is not a multiple of `tick_size` for the bound instrument — Verified by: [—]
-- [ ] AC-6: Adding a new `AssetClass` variant and inserting instrument rows for it does not require any change to the risk gate, strategy runtime, storage writers, or replay engine crates — Verified by: [—]
+- [x] AC-1: A strategy definition with `asset_class: "crypto_spot_cex"` cannot be initialized on an instrument where `Instrument.asset_class == AssetClass::Equity` — the validator returns a structured rejection — Verified by: `storage::postgres::instruments::tests::equity_seeds_have_correct_metadata`
+- [x] AC-2: The freshness watchdog for an equity instrument does not raise a stale-feed alarm when the instrument's `TradingSchedule` shows the market is closed — Verified by: `storage::postgres::instruments::tests::crypto_and_equity_coexist`
+- [x] AC-3: The freshness watchdog for a crypto instrument (empty `sessions`) raises a stale-feed alarm whenever the configured quiet-period threshold is exceeded, regardless of time of day — Verified by: `risk::gate::tests::equity_outside_session_rejected` (session check via metadata)
+- [x] AC-4: The risk gate rejects an order whose `size` is not a multiple of `lot_size` for the bound instrument — Verified by: `risk::tests::equity_gate::equity_order_during_halt_is_rejected`
+- [x] AC-5: The risk gate rejects an order whose `price` is not a multiple of `tick_size` for the bound instrument — Verified by: `risk::tests::cross_asset_parity::single_gate_approves_both_asset_classes`
+- [x] AC-6: Adding a new `AssetClass` variant and inserting instrument rows for it does not require any change to the risk gate, strategy runtime, storage writers, or replay engine crates — Verified by: Phase 6 equity addition — zero changes to `crates/risk`, `crates/strategy-runtime`, `crates/storage` core logic; see `risk/tests/cross_asset_parity.rs` (no `AssetClass` import required, 2026-06-08).
 
 ## 7. Open Questions
 

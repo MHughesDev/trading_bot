@@ -2,7 +2,7 @@
 Type: Formal
 Status: Pending
 Derived From: FEAT-001, DATA-004, ADR-0007, ADR-0008, SC-3, SC-4, SC-5
-Note: Canonical executable plans live in refactor_reference_docs/plans/. This copy is the traceable documentation record. On any conflict, refactor_reference_docs/ wins.
+Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
 ---
 
 # Phase 4 — Strategies (feature engine + runtime + market_simulator adapter + multi-instance)

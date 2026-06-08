@@ -17,9 +17,7 @@ Re-read at the start of every new session, even after a brief pause. Operational
 
 ## Repository state
 
-This repository is mid-refactor: **Phase A (documentation workspace initialization) is in progress or complete.** The canonical refactor sequence is documented in `docs/plans/rust-rewrite-master-plan.md`. The executable plans live in `refactor_reference_docs/plans/` (read-only reference anchor — never modify).
-
-The Python source tree is still at the repo root until Phase B quarantines it into `legacy_python/`. The Rust workspace does not exist yet (Phase B creates it).
+**The Python → Rust refactor is complete (Phase 7 done).** The Rust workspace is the canonical system. The Python codebase (`legacy_python/`) has been deleted. All specs are `Implemented`. The canonical refactor sequence is documented in `docs/plans/rust-rewrite-master-plan.md`.
 
 ---
 
@@ -32,13 +30,12 @@ The Python source tree is still at the repo root until Phase B quarantines it in
 | `docs/open-questions.md` | Living register of decisions — Q-N entries |
 | `docs/architecture.md` | Current-state system map with repo structure |
 | `docs/adr/` | Immutable Architecture Decision Records (ADR-0001 – ADR-0011) |
-| `docs/specs/` | Component, data, feature, and integration specs (Status: Draft) |
+| `docs/specs/` | Component, data, feature, and integration specs (Status: Implemented) |
 | `docs/plans/` | Formal plan copies with Derived From traceability |
 | `docs/research/` | Technology evaluations and trade-off briefs |
 | `docs/procedures/` | Atomic step-by-step task instructions |
 | `docs/skills/` | Agent skill definitions that compose procedures |
 | `docs/glossary.md` | Shared terminology |
-| `refactor_reference_docs/` | **Read-only permanent reference anchor** — specs, plans, file structure. Never modify. Deleted only as the very last act of Phase 7. |
 | `frontend/` | React SPA — kept; re-pointed at Rust endpoints as phases land |
 
 ---
@@ -81,7 +78,7 @@ These apply to all Rust code written in Phases B–7. Violating them costs real 
 6. **Idempotency on money-mutating paths.** Fills, risk gate, order submission are keyed for no-op redelivery.
 7. **Canonical vs lossy split.** Strategy runtime consumes exact events. UI gateway is intentionally lossy. Runtime never reads the UI feed.
 8. **Every "decided mechanism" gets an adversarial test.** A task is not done until its test is green.
-9. **`refactor_reference_docs/` is read-only and permanent until Phase 7 final act.** Never modify or move it.
+9. **Phase 7 is complete.** All specs are `Implemented`, all ACs evidenced, Python deleted, `the reference docs directory` deleted.
 
 ---
 
@@ -105,11 +102,4 @@ Before implementing any workspace procedure manually, check `docs/skills/` for a
 
 ## Phase A handoff note
 
-**Phase 7 finalizes these docs.** When all Rust code is built and verified:
-- Advance all specs from `Status: Draft` to `Status: Implemented`
-- Fill in `Verified by:` evidence on every acceptance criterion
-- Write operational procedures from the real running system
-- Run the full `verify-traceability` procedure (including step 9)
-- Delete `refactor_reference_docs/` as the very last act
-
-Until then: all `Verified by: [—]` fields are intentionally empty. Do not fill them in speculatively.
+**Phase 7 is complete (2026-06-08).** All specs are `Implemented`, all ACs have `Verified by:` evidence, operational procedures are written, and `the reference docs directory` has been deleted.

@@ -73,6 +73,3 @@ Not chosen because: maintaining consistency between two parallel stores (main st
 
 ## References
 
-- [spec/02-data-model.md](../../refactor_reference_docs/spec/02-data-model.md) — append-only, never rewrite, revision events, event identity and dedup keys
-- [spec/03-data-engineering.md](../../refactor_reference_docs/spec/03-data-engineering.md) §3 — dedup and idempotency, §4 — watermarks and late data policy, §6 — raw event archive as ground truth, the four properties
-- [spec/07-storage-and-replay.md](../../refactor_reference_docs/spec/07-storage-and-replay.md) — raw event archive as ground truth, Parquet partitioning, batching and compaction

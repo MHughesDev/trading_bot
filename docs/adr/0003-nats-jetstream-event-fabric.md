@@ -79,6 +79,3 @@ Not chosen because: collectors are satellite processes — separate OS processes
 
 ## References
 
-- [spec/09-tech-stack.md](../../refactor_reference_docs/spec/09-tech-stack.md) — NATS JetStream selection, `async-nats` crate, deliberate non-use of Kafka
-- [spec/03-data-engineering.md](../../refactor_reference_docs/spec/03-data-engineering.md) §1 — quarantine lane design, schema-on-write
-- [spec/01-architecture.md](../../refactor_reference_docs/spec/01-architecture.md) — planes table, event fabric role, failure-mode posture (bus down = halt)

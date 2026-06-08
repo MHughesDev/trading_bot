@@ -2,7 +2,7 @@
 Type: Formal
 Status: Pending
 Derived From: DATA-004, INTG-001, ADR-0010, SC-2
-Note: Canonical executable plans live in refactor_reference_docs/plans/. This copy is the traceable documentation record. On any conflict, refactor_reference_docs/ wins.
+Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
 ---
 
 # Phase 5 — Authoring front doors (JSON API + visual builder + MCP server)

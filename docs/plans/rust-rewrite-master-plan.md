@@ -2,7 +2,7 @@
 Type: Formal
 Status: Current
 Derived From: SYS-001, DATA-001, DATA-002, DATA-003, DATA-004, FEAT-001, COMP-001, COMP-002, COMP-003, COMP-004, INTG-001, ADR-0001, ADR-0002, ADR-0003, ADR-0004, ADR-0005, ADR-0006, ADR-0007, ADR-0008, ADR-0009, ADR-0010, ADR-0011, SC-1, SC-2, SC-3, SC-4, SC-5, SC-6, SC-7
-Note: Canonical executable plans live in refactor_reference_docs/plans/. This copy is the traceable documentation record. On any conflict, refactor_reference_docs/ wins.
+Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
 ---
 
 # Master Refactor Plan — Python → Rust Trading Platform
@@ -73,7 +73,7 @@ standalone. They are the things that, if violated, cost real money:
 8. **Every "decided mechanism" gets an adversarial test that proves it fires.** Quarantine,
    revisions, idempotent fills, no-lookahead, reconciliation halts, kill-switch trips, tighten-only
    risk overrides. "Decided" ≠ "done"; a phase task is not complete until its test is green.
-9. **`refactor_reference_docs/` stays at the repo root, read-only and unmodified, throughout the
+9. **`[deleted - see Phase 7]/` stays at the repo root, read-only and unmodified, throughout the
    entire refactor.** It is the permanent reference anchor (spec, architecture, file structure, plans
    as originally authored). Never move it, rename it, or modify any file inside it during Phases A–6.
    Deleting it is the **very last act of Phase 7** (P7-T07), after everything else is verified done.
@@ -131,10 +131,10 @@ These must be answered before the phase that depends on them; each phase file re
 2. **Execute phases strictly in order:** A → B → 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7. Do not start a phase
    until the previous phase's **exit criteria** are all green. (Phase 4 may begin once Phase 2 is
    done even if Phase 3 is not — that is the only parallelism allowed; the phase file states it.)
-3. **Execute the phase plans from `refactor_reference_docs/plans/`** — those files. They are the
+3. **Execute the phase plans from `docs/plans/`** — those files. They are the
    canonical, self-contained, executable plans. Each references the stable spec at
-   `refactor_reference_docs/spec/` and the structure at `refactor_reference_docs/file-structure.md`, both of
-   which live in `refactor_reference_docs/` and **persist unmodified until the very end** (see §2.9).
+   `[deleted - see Phase 7]/spec/` and the structure at `[deleted - see Phase 7]/file-structure.md`, both of
+   which live in `[deleted - see Phase 7]/` and **persist unmodified until the very end** (see §2.9).
    So every reference in every phase file stays valid for the entire refactor.
 4. **Within a phase, execute tasks by their dependency order** (each task lists `Depends on:`). A task
    is done only when its **acceptance criteria pass** — including the adversarial test where one is
@@ -142,18 +142,18 @@ These must be answered before the phase that depends on them; each phase file re
 5. **Track progress** by the task IDs (§7).
 
 **Two copies of the plans — which is which (do not get confused):**
-- `refactor_reference_docs/plans/` = the **canonical executable plans**. Read and
-  execute from here. Never edit the files under `refactor_reference_docs/` (§2.9) — track progress
+- `docs/plans/` = the **canonical executable plans**. Read and
+  execute from here. Never edit the files under `[deleted - see Phase 7]/` (§2.9) — track progress
   externally (PR/issue checklist), not by editing these.
 - `docs/plans/` (created by Phase A, task P A-T08) = a **traceable Formal-plan mirror** that is part
   of the `docs/` documentation deliverable (with **Derived From** headers linking to `docs/specs/`).
   It is the *record*, not the thing you execute from. If the two ever appear to disagree on technical
-  content, the `refactor_reference_docs/` copy wins.
+  content, the `[deleted - see Phase 7]/` copy wins.
 
-**Canonical content reference:** Until Phase A runs, `refactor_reference_docs/spec/` and
-`refactor_reference_docs/file-structure.md` are the only spec/structure docs. After Phase A,
+**Canonical content reference:** Until Phase A runs, `[deleted - see Phase 7]/spec/` and
+`[deleted - see Phase 7]/file-structure.md` are the only spec/structure docs. After Phase A,
 `docs/specs/` and `docs/architecture.md` are the *restructured* canonical versions for the
-documentation record — but the phase files keep citing the `refactor_reference_docs/` paths (which still
+documentation record — but the phase files keep citing the `[deleted - see Phase 7]/` paths (which still
 exist) so you never need to re-resolve a reference mid-refactor. Both say the same thing; the `spec/`
 wording is the source the `docs/specs/` versions were derived from.
 
@@ -186,7 +186,7 @@ determinism test" is one task, not three hundred lines enumerated.
 
 ## 5. Migration mechanics (Python → Rust without losing behavior)
 
-- **`refactor_reference_docs/` is the permanent reference anchor — never touch it until the very end.**
+- **`[deleted - see Phase 7]/` is the permanent reference anchor — never touch it until the very end.**
   It lives at the repo root, read-only and unmodified, from Phase A through Phase 6. Every phase
   reads from it; no phase writes to it, moves it, or removes files from it. Deletion happens once in
   Phase 7 (P7-T07) as the final act after everything else is verified done.
@@ -220,7 +220,7 @@ determinism test" is one task, not three hundred lines enumerated.
 - The `docs/` workspace is finalized: every spec `Implemented` with verified evidence, `architecture.md`
   reconciled to reality, operational procedures (`operate-the-stack`, `add-a-venue`) written from the
   actual system, `verify-traceability` all 10 steps green.
-- **`refactor_reference_docs/` is deleted from the repo root.** This is the last item. When this is
+- **`[deleted - see Phase 7]/` is deleted from the repo root.** This is the last item. When this is
   done, the refactor is done.
 
 ---

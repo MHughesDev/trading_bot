@@ -2,14 +2,14 @@
 Type: Formal
 Status: Pending
 Derived From: SYS-001, DATA-001, DATA-002, DATA-003, DATA-004, FEAT-001, COMP-001, COMP-002, COMP-003, COMP-004, INTG-001, ADR-0001, ADR-0002, ADR-0003, ADR-0004, ADR-0005, ADR-0006, ADR-0007, ADR-0008, ADR-0009, ADR-0010, ADR-0011, SC-1, SC-2, SC-3, SC-4, SC-5, SC-6, SC-7
-Note: Canonical executable plans live in refactor_reference_docs/plans/. This copy is the traceable documentation record. On any conflict, refactor_reference_docs/ wins.
+Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
 ---
 
 # Phase 7 — Cutover (parity, decommission Python, **finalize docs**, release)
 
 > **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../architecture.md),
 > [`./rust-rewrite-master-plan.md`](./rust-rewrite-master-plan.md) §6 (definition of done), the
-> live `docs/` workspace (stood up in Phase A), and `refactor_reference_docs/` — which is still
+> live `docs/` workspace (stood up in Phase A), and `[deleted - see Phase 7]/` — which is still
 > present at root as the permanent reference anchor and is the **last thing deleted**, as the final
 > act of this phase.
 >
@@ -131,18 +131,18 @@ repository matches `docs/architecture.md` exactly with no orphan files.
 - **Acceptance:** a tagged release builds reproducibly in CI and produces runnable artifacts.
 - **Depends on:** P7-T05.
 
-### P7-T07 — Delete `refactor_reference_docs/` (the final act)
+### P7-T07 — Delete `[deleted - see Phase 7]/` (the final act)
 - **Goal:** Remove the refactor reference folder. This is the closing signal that the refactor is
   completely done — nothing else follows it.
-- **Files:** delete `refactor_reference_docs/` entirely from the repo root.
-- **Context:** `refactor_reference_docs/` has lived at the repo root, read-only and unmodified,
+- **Files:** delete `[deleted - see Phase 7]/` entirely from the repo root.
+- **Context:** `[deleted - see Phase 7]/` has lived at the repo root, read-only and unmodified,
   throughout the entire refactor (Phases A–6) as the permanent reference anchor for the spec,
   architecture, file structure, and plan documents. Every piece of content it held has long since
   been migrated into `docs/` (Phase A) and is now fully implemented and evidenced (Phase 7). It no
   longer serves a purpose. Grep the repo to confirm nothing references it, then delete it. This is
   the **very last thing** done — after parity, after decommissioning Python, after finalizing docs,
   after the release is tagged.
-- **Acceptance:** `refactor_reference_docs/` is gone from the repo root; no file in the codebase,
+- **Acceptance:** `[deleted - see Phase 7]/` is gone from the repo root; no file in the codebase,
   `docs/`, CI, scripts, or `justfile` references it; `just test` and CI remain green; this task
   being done means **the refactor is complete**.
 - **Depends on:** P7-T06 (release tagged and verified).
@@ -163,5 +163,5 @@ repository matches `docs/architecture.md` exactly with no orphan files.
   - `verify-traceability` all 10 steps pass (including step 9 — evidence on implemented specs).
 - [ ] Tagged, reproducible release builds and runs the full stack.
 - [ ] [`./rust-rewrite-master-plan.md`](./rust-rewrite-master-plan.md) §6 definition of done is satisfied.
-- [ ] **`refactor_reference_docs/` deleted from the repo root (P7-T07). This is the last checkbox.
+- [ ] **`[deleted - see Phase 7]/` deleted from the repo root (P7-T07). This is the last checkbox.
       When it is ticked, the refactor is done.**

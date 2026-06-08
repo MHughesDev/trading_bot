@@ -98,9 +98,6 @@ provide). Not chosen because the newtype pattern is the correct level of abstrac
 
 ## References
 
-- [spec/02-data-model.md](../../refactor_reference_docs/spec/02-data-model.md) — money types,
   `Price`/`Size` newtype definitions, per-instrument precision, storage mappings
-- [spec/03-data-engineering.md](../../refactor_reference_docs/spec/03-data-engineering.md) §2 —
   Decimals from wire to warehouse, compiler enforcement
-- [spec/09-tech-stack.md](../../refactor_reference_docs/spec/09-tech-stack.md) — `rust_decimal`
   crate selection

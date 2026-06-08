@@ -74,5 +74,3 @@ Not chosen because: raw market events can also arrive late (trades with delayed 
 
 ## References
 
-- [spec/02-data-model.md](../../refactor_reference_docs/spec/02-data-model.md) — timestamp model, `available_time` semantics, append-only / never-rewrite
-- [spec/03-data-engineering.md](../../refactor_reference_docs/spec/03-data-engineering.md) §4 — watermarks and late data policy, §5 — no-lookahead mechanism, §6 — same builders live and replay

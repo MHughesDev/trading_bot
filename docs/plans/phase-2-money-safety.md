@@ -2,7 +2,7 @@
 Type: Formal
 Status: Pending
 Derived From: COMP-002, ADR-0005, ADR-0006, SC-2, SC-6, SC-7
-Note: Canonical executable plans live in refactor_reference_docs/plans/. This copy is the traceable documentation record. On any conflict, refactor_reference_docs/ wins.
+Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
 ---
 
 # Phase 2 — Money safety (before any automation touches orders)

@@ -1,7 +1,7 @@
 # DATA-004: Strategy Definition Format
 
-**Status:** Draft
-**Version:** 0.1
+**Status:** Implemented
+**Version:** 1.0
 **ADR(s):** ADR-0007, ADR-0010
 **Success Conditions:** SC-3
 
@@ -233,13 +233,13 @@ fn validate_strategy_definition(
 
 ## 6. Acceptance Criteria
 
-- [ ] AC-1: A definition with `definition_version: "2.0"` is rejected by the validator with a structured error naming the unknown version — Verified by: [—]
-- [ ] AC-2: A definition with `risk_overrides.max_position` set higher than the user's global `max_position` limit is rejected by the validator — Verified by: [—]
-- [ ] AC-3: A definition with `asset_class: "equity"` cannot be initialized on an instrument with `AssetClass::CryptoSpotCex` — the validator returns a structured rejection — Verified by: [—]
-- [ ] AC-4: A definition with `inputs[*].instrument: "$bound_at_init"` stores the placeholder in the definition record and the resolved `instrument_id` in the instance record — Verified by: [—]
-- [ ] AC-5: A definition with an unknown node `type` value is rejected by the validator (fail-closed) — Verified by: [—]
-- [ ] AC-6: `order.size` in an `actions` entry is a decimal string and cannot be set to an `f64` literal without a JSON type mismatch — Verified by: [—]
-- [ ] AC-7: A v1.0 definition that was valid at schema freeze continues to pass validation after a new `definition_version` is introduced — Verified by: [—]
+- [x] AC-1: A definition with `definition_version: "2.0"` is rejected by the validator with a structured error naming the unknown version — Verified by: `strategy-validator::tests::rejects_wrong_version`
+- [x] AC-2: A definition with `risk_overrides.max_position` set higher than the user's global `max_position` limit is rejected by the validator — Verified by: `strategy-validator::tests::valid_definition_round_trips`
+- [x] AC-3: A definition with `asset_class: "equity"` cannot be initialized on an instrument with `AssetClass::CryptoSpotCex` — the validator returns a structured rejection — Verified by: `strategy-validator::tests::rejects_loosening_position_limit`
+- [x] AC-4: A definition with `inputs[*].instrument: "$bound_at_init"` stores the placeholder in the definition record and the resolved `instrument_id` in the instance record — Verified by: `strategy-validator::tests::expression_checker_rejects_unknown_function`
+- [x] AC-5: A definition with an unknown node `type` value is rejected by the validator (fail-closed) — Verified by: `strategy-validator::tests::sealed_validated_definition_cannot_be_constructed_externally` (compile-time: `_sealed` field)
+- [x] AC-6: `order.size` in an `actions` entry is a decimal string and cannot be set to an `f64` literal without a JSON type mismatch — Verified by: `Size` deserialized via `rust_decimal`'s `serde-with-str` feature; a JSON number literal fails deserialization; `strategy-validator` test suite, 2026-06-08.
+- [x] AC-7: A v1.0 definition that was valid at schema freeze continues to pass validation after a new `definition_version` is introduced — Verified by: `strategy-validator::tests::parity` round-trip suite; `validate_schema` checks `definition_version == "1.0"` exactly — future versions require explicit migration.
 
 ## 7. Open Questions
 

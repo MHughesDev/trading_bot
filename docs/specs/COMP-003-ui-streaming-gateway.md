@@ -1,7 +1,7 @@
 # COMP-003: UI Streaming Gateway
 
-**Status:** Draft
-**Version:** 0.1
+**Status:** Implemented
+**Version:** 1.0
 **ADR(s):** ADR-0001, ADR-0011
 **Success Conditions:** SC-3
 
@@ -226,13 +226,13 @@ GET    /api/dashboard/breakdown
 
 ## 6. Acceptance Criteria
 
-- [ ] AC-1: A strategy runtime instance does not subscribe to any gateway-shaped UI lane — it consumes canonical bus events directly — Verified by: [—]
-- [ ] AC-2: A panel subscribing to `ui.orderbook.snapshot` with `max_fps: 20` receives no more than 20 snapshots per second regardless of how many raw L2 deltas arrive — Verified by: [—]
-- [ ] AC-3: On panel open, the client receives a current-state snapshot before any live stream events — Verified by: [—]
-- [ ] AC-4: When a panel closes and it was the last consumer of a lane, the Demand Manager is notified and the pipeline is stopped or deprioritized — Verified by: [—]
-- [ ] AC-5: A WebSocket subscription to a private lane (`orders.*`, `positions.*`) for user A cannot return data belonging to user B — Verified by: [—]
-- [ ] AC-6: A new panel subscribing to `market.bars.1m` for `BTC-USDT` when a strategy already needs that lane does not start a duplicate pipeline — Verified by: [—]
-- [ ] AC-7: Broker API credentials are not present in any WebSocket message or REST response body — Verified by: [—]
+- [x] AC-1: A strategy runtime instance does not subscribe to any gateway-shaped UI lane — it consumes canonical bus events directly — Verified by: `ui-gateway` unit tests, 2026-06-08
+- [x] AC-2: A panel subscribing to `ui.orderbook.snapshot` with `max_fps: 20` receives no more than 20 snapshots per second regardless of how many raw L2 deltas arrive — Verified by: `ui-gateway` unit tests, 2026-06-08
+- [x] AC-3: On panel open, the client receives a current-state snapshot before any live stream events — Verified by: `ui-gateway` unit tests, 2026-06-08
+- [x] AC-4: When a panel closes and it was the last consumer of a lane, the Demand Manager is notified and the pipeline is stopped or deprioritized — Verified by: `ui-gateway` unit tests, 2026-06-08
+- [x] AC-5: A WebSocket subscription to a private lane (`orders.*`, `positions.*`) for user A cannot return data belonging to user B — Verified by: `ui-gateway` unit tests, 2026-06-08
+- [x] AC-6: A new panel subscribing to `market.bars.1m` for `BTC-USDT` when a strategy already needs that lane does not start a duplicate pipeline — Verified by: `ui-gateway` unit tests, 2026-06-08
+- [x] AC-7: Broker API credentials are not present in any WebSocket message or REST response body — Verified by: `ui-gateway` unit tests, 2026-06-08
 
 ## 7. Open Questions
 

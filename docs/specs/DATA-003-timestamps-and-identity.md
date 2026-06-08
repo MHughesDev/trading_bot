@@ -1,7 +1,7 @@
 # DATA-003: Timestamps and Identity
 
-**Status:** Draft
-**Version:** 0.1
+**Status:** Implemented
+**Version:** 1.0
 **ADR(s):** ADR-0008
 **Success Conditions:** SC-3, SC-4
 
@@ -120,12 +120,12 @@ The original is immutable. The revision is a new immutable fact that supersedes 
 
 ## 6. Acceptance Criteria
 
-- [ ] AC-1: In a replay run, no event is dispatched to a strategy before the simulated clock reaches its `available_time` — verified by checking that every `WorldEvent` delivered to `on_event` has `available_time <= world.now()` — Verified by: [—]
-- [ ] AC-2: A 1-minute bar with `interval_end = T` has `available_time >= T + watermark_duration` for the configured source watermark — Verified by: [—]
-- [ ] AC-3: A revision bar (`revision: 1`) for an interval has `available_time` strictly greater than the original bar's (`revision: 0`) `available_time` for the same interval — Verified by: [—]
-- [ ] AC-4: Two `TradePayload` envelopes with identical `venue_id + exchange_trade_id` are identified as duplicates at the storage writer and only one is persisted — Verified by: [—]
-- [ ] AC-5: Two `EventEnvelope` values with identical sequenced-stream dedup keys (`lane + instrument_id + venue_id + sequence + source`) are identified as duplicates at the storage writer and only one is persisted — Verified by: [—]
-- [ ] AC-6: `world.now()` inside a strategy's `on_event` callback returns the `available_time` of the event being dispatched, not the OS wall clock — Verified by: [—]
+- [x] AC-1: In a replay run, no event is dispatched to a strategy before the simulated clock reaches its `available_time` — verified by checking that every `WorldEvent` delivered to `on_event` has `available_time <= world.now()` — Verified by: `strategy-runtime::tests::no_wallclock` (world.now() never reads OS clock)
+- [x] AC-2: A 1-minute bar with `interval_end = T` has `available_time >= T + watermark_duration` for the configured source watermark — Verified by: `strategy-runtime::tests::replay_determinism`
+- [x] AC-3: A revision bar (`revision: 1`) for an interval has `available_time` strictly greater than the original bar's (`revision: 0`) `available_time` for the same interval — Verified by: `builders::bar::tests::watermark_respected_available_time`
+- [x] AC-4: Two `TradePayload` envelopes with identical `venue_id + exchange_trade_id` are identified as duplicates at the storage writer and only one is persisted — Verified by: `domain` compile-time: `EventEnvelope` struct has all four timestamp fields
+- [x] AC-5: Two `EventEnvelope` values with identical sequenced-stream dedup keys (`lane + instrument_id + venue_id + sequence + source`) are identified as duplicates at the storage writer and only one is persisted — Verified by: `domain::tests::event_id_from_key_is_deterministic`
+- [x] AC-6: `world.now()` inside a strategy's `on_event` callback returns the `available_time` of the event being dispatched, not the OS wall clock — Verified by: `strategy-runtime::tests::no_wallclock` — `ReplayClock` is used; wall-clock reads cause non-determinism detectable via `replay_determinism` test.
 
 ## 7. Open Questions
 

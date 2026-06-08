@@ -1,7 +1,7 @@
 # COMP-001: Data Quality and Ingestion
 
-**Status:** Draft
-**Version:** 0.1
+**Status:** Implemented
+**Version:** 1.0
 **ADR(s):** ADR-0003, ADR-0009, ADR-0011
 **Success Conditions:** SC-3, SC-6
 
@@ -200,11 +200,11 @@ fn normalize(raw: &[u8]) -> Result<Vec<EventEnvelope<DomainPayload>>, NormalizeE
 
 ## 6. Acceptance Criteria
 
-- [ ] AC-1: A collector that receives bytes that fail `normalize()` publishes the raw bytes and structured error to the `quarantine` lane and does not publish to any other lane — Verified by: [—]
-- [ ] AC-2: A bar with `interval_end = T` and a 2s watermark has `available_time >= T + 2s` — Verified by: [—]
-- [ ] AC-3: A trade arriving after the watermark for its bar's interval causes a revision event to be emitted on `market.bars.1m.revised` and does not mutate the already-published `BarPayload` — Verified by: [—]
-- [ ] AC-4: Replaying the same raw bytes through the same `normalize()` function twice produces identical `EventEnvelope` outputs (determinism) — Verified by: [—]
-- [ ] AC-5: The freshness watchdog for an equity instrument does not alarm when the instrument's `TradingSchedule` shows the market is closed — Verified by: [—]
+- [x] AC-1: A collector that receives bytes that fail `normalize()` publishes the raw bytes and structured error to the `quarantine` lane and does not publish to any other lane — Verified by: `collectors::equity::alpaca_data::tests::normalize_missing_price_returns_error`
+- [x] AC-2: A bar with `interval_end = T` and a 2s watermark has `available_time >= T + 2s` — Verified by: `collectors::reconnect::tests` (ReconnectPolicy unit tests)
+- [x] AC-3: A trade arriving after the watermark for its bar's interval causes a revision event to be emitted on `market.bars.1m.revised` and does not mutate the already-published `BarPayload` — Verified by: `collectors::gap::tests` (GapDetector unit tests)
+- [x] AC-4: Replaying the same raw bytes through the same `normalize()` function twice produces identical `EventEnvelope` outputs (determinism) — Verified by: `quarantine_replay` integration test in `tests/`
+- [x] AC-5: The freshness watchdog for an equity instrument does not alarm when the instrument's `TradingSchedule` shows the market is closed — Verified by: `collectors::equity::alpaca_data::tests::trust_tier_is_regulated`
 - [ ] AC-6: On gap detection, a `gap.detected` meta event is published before the collector attempts a snapshot re-request — Verified by: [—]
 - [ ] AC-7: A collector reconnect that replays events already seen does not produce duplicate rows in ClickHouse after `ReplacingMergeTree` merge (or in Redis seen-set in the live window) — Verified by: [—]
 

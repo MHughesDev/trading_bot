@@ -82,7 +82,3 @@ Not chosen because: the risk gate, kill switch, and reconciliation loop must be 
 
 ## References
 
-- [spec/10-open-questions.md](../../refactor_reference_docs/spec/10-open-questions.md) — Q1 (paper first, decided), Q2 (Coinbase + Alpaca, decided), Q9 (market_simulator, decided)
-- [spec/07-storage-and-replay.md](../../refactor_reference_docs/spec/07-storage-and-replay.md) — market_simulator integration, Arrow IPC export, backtest fidelity caveat
-- [spec/05-execution-and-risk.md](../../refactor_reference_docs/spec/05-execution-and-risk.md) — paper vs live execution posture, reconciliation requirement before resuming
-- [spec/03-data-engineering.md](../../refactor_reference_docs/spec/03-data-engineering.md) §11 — data granularity model, 1-minute bar MVP constraint

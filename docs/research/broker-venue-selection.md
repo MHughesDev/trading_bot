@@ -97,10 +97,6 @@ Build order: paper execution first (Phase 2), live execution adapter after risk 
 
 ## References
 
-- `/home/user/trading_bot/refactor_reference_docs/spec/10-open-questions.md` — Q-1 (real vs paper), Q-2 (broker/venue), Q-9 (backtest engine ownership)
-- `/home/user/trading_bot/refactor_reference_docs/spec/01-architecture.md` — Demand Manager, on-demand pipeline lifecycle
-- `/home/user/trading_bot/refactor_reference_docs/plans/00-master-plan.md` §3 — resolved decision gates for Q-1 and Q-2
-- `/home/user/trading_bot/refactor_reference_docs/file-structure.md` — `crates/venue-router`, `crates/execution`, `crates/collectors` crate descriptions
 - Coinbase Advanced Trade API: https://docs.cdp.coinbase.com/advanced-trade/docs/welcome
 - Alpaca paper trading: https://docs.alpaca.markets/docs/paper-trading
 - Alpaca market data: https://docs.alpaca.markets/docs/getting-market-data
