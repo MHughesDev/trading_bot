@@ -56,8 +56,16 @@ being dropped or coerced; replayable after the normalizer is fixed.
 **Reconciliation** — Continuously checking internal state (positions, balances) against the
 broker's view and halting on divergence. Where money is actually lost or saved.
 
-**Replay engine** — Feeds recorded raw events through the same builders/runtime used live, in
-`available_time` order, to backtest deterministically.
+**market_simulator** — The external backtest engine (`github.com/MHughesDev/market_simulator`).
+This repo is a consumer of it, not its owner. The adapter crate exports data to it and parses
+results back. Owns the replay engine, fill simulation, and look-ahead enforcement — not this repo.
+
+**market_simulator adapter** — The crate in this repo (`crates/market-simulator-adapter`) that
+translates between this repo's domain types and the market_simulator's Arrow IPC contracts.
+Submits Run Requests; returns BacktestReports. Contains no fill logic.
+
+**Replay engine** — Owned by `market_simulator`, not this repo. Feeds recorded raw events through
+the same builders used live in `available_time` order, enforcing look-ahead safety.
 
 **Revision event** — An append-only event that supersedes an earlier one (e.g. a bar corrected by
 late data). History is never mutated in place.
@@ -65,8 +73,13 @@ late data). History is never mutated in place.
 **Risk gate** — The single synchronous chokepoint every order (manual or automated) passes
 through before execution. Enforces limits and the kill switch.
 
-**Strategy definition** — The canonical, versioned JSON document describing a strategy (inputs,
-nodes, signals, actions, risk overrides). The contract all three front doors target.
+**Strategy definition** — The canonical, versioned JSON document describing a strategy (inputs
+declared with `$bound_at_init`, nodes, signals, actions, risk overrides, `asset_class` scope).
+The contract all three front doors target. Not pre-bound to an instrument.
+
+**Strategy instance** — A running binding of a strategy definition to a specific instrument,
+created when a user clicks "Initialize" on an asset. One instance per instrument per user (MVP
+UX constraint). Each instance maintains its own `WorldState`.
 
 **Trust tier** — A first-class classification of how trustworthy a data source is
 (`regulated`, `centralized_exchange`, `onchain_confirmed`, `onchain_tentative`,

@@ -127,3 +127,29 @@ Optimize physical layout for the **dominant** query; accept the others are slowe
 Append-only, deterministic, idempotent, validated-at-write. These compose. A system built on them
 does not get *more* fragile as the tenth asset class is added — it gets *more* proven, because
 every new source flows through the same hardened path.
+
+## 11. Data granularity model
+
+The system is designed around three data granularity levels that can coexist on the bus as
+independent lanes. They are different subscriptions, not mutually exclusive:
+
+| Level | Lane | Frequency | Notes |
+|-------|------|-----------|-------|
+| OHLCV bars | `market.bars.1m`, `market.bars.1s` | 1/minute, 1/second | Primary for MVP |
+| Order-book deltas | `market.orderbook.l2` | Many per second | Post-MVP for v1 venues |
+| Individual trades | `market.trades` | Per-trade | Post-MVP for v1 venues |
+
+**MVP constraint:** Coinbase and Alpaca's APIs are not well-suited to reliable sub-minute
+streaming data. The v1 MVP operates on **1-minute OHLCV bars** as the primary data plane for
+live strategy execution and backtest export.
+
+**Architecture is granularity-agnostic:** The bus lanes, the bar builder, the strategy runtime,
+and the storage layer do not assume 1-minute as the only granularity. Second-level bars and
+order-book level data are valid payload types in the schema from day one; they simply will not be
+populated by the v1 collectors. When a venue's API supports reliable higher-frequency data (or
+when Kraken/other venues are added), those lanes activate with no schema changes.
+
+**Strategies declare what they need.** A strategy definition declares its minimum bar timeframe
+in `inputs`. A strategy written for 1m bars runs unmodified if 1s bars become available and the
+demand is re-declared. A strategy that requires order-book data cannot be initialized on an asset
+that only has bar data — the validator rejects it.

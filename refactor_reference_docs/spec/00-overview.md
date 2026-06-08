@@ -106,8 +106,26 @@ strategy feed is *correctness-shaped*.
 
 ## What v1 deliberately is and is not
 
-- **Is:** stocks + crypto, order-book driven, local, trusted users, one main binary plus a few
-  satellite collector processes, modular monolith with clean internal boundaries.
-- **Is not:** twelve microservices, multi-tenant isolation, every asset class at once, Kafka by
-  default. Those are over-built for this scope. We start boring and extract complexity only when
+- **Is:** Coinbase (crypto spot) + Alpaca (equities), 1-minute OHLCV data, order-book capable by
+  design but bar-first for MVP, local hosting, small trusted user group, one main binary plus a
+  few satellite collector processes, modular monolith with clean internal boundaries. Backtesting
+  delegated to the external `market_simulator` library (this repo owns the adapter, not the engine).
+- **Is not:** twelve microservices, multi-tenant isolation, every asset class simultaneously, Kafka
+  by default. Those are over-built for this scope. We start boring and extract complexity only when
   a measured pressure forces it.
+
+## Asset class expansion model
+
+The system is designed from the start to support eleven asset classes eventually — equities, ETFs,
+crypto spot (CEX and DEX/AMM), expiring futures, perpetual swaps, options, bonds, FX, NFTs, and
+prediction markets. The architecture ensures this does not require redesign:
+
+- **The runtime, risk gate, and event bus never branch on asset class.** Differences live in
+  instrument metadata, payload types, and collector implementations.
+- **Adding a new asset class = a new collector + a new payload type + new instrument metadata rows
+  + an asset spec in `docs/`.** Nothing in the core changes.
+- **The `market_simulator` external dependency expands independently** (it is designed for all
+  eleven classes). As it adds engines, the adapter in this repo is extended to match.
+
+v1 MVP proves the abstraction with two asset classes (Coinbase crypto + Alpaca equities) built
+deliberately differently. Every subsequent asset class is an additive extension.

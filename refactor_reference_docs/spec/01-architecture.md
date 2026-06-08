@@ -79,7 +79,7 @@ Strategies and UI panels do **not** start engines directly. They **declare deman
 
 ```json
 {
-  "consumer_id": "strategy_instance_123",
+  "consumer_id": "strategy_instance_user42_btc_usdt",
   "consumer_type": "strategy_runtime",
   "needs": [
     { "lane": "market.bars.1m", "instrument": "BTC-USDT" },
@@ -88,17 +88,19 @@ Strategies and UI panels do **not** start engines directly. They **declare deman
 }
 ```
 
-The Demand Manager aggregates demand across all consumers and starts / keeps alive / downshifts /
-stops the underlying collectors and feature pipelines:
+A strategy instance is bound to exactly one instrument. When a user initializes a strategy on
+`BTC-USDT`, one instance is created and declares demand for `BTC-USDT`. If another user also
+initializes a strategy on `BTC-USDT`, a second instance is created — but the Demand Manager sees
+that `BTC-USDT market.bars.1m` already has a pipeline running and does not start a duplicate.
 
 ```
-BTC-USDT market.bars.1m       needed by 42 consumers
-AAPL     market.orderbook.l2  needed by 7 consumers
+BTC-USDT market.bars.1m       needed by strategy_user42, strategy_user7, ui_panel_1
+AAPL     market.bars.1m       needed by strategy_user42, ui_panel_2
 ```
 
 Rule: if at least one consumer needs a lane, keep its pipeline active. If none do, stop it,
-pause it, or drop it to low-frequency/archival mode. This prevents every strategy from spinning
-up duplicate streams.
+pause it, or drop it to low-frequency/archival mode. This prevents every strategy instance from
+spinning up duplicate streams even across multiple users.
 
 ## Backpressure (non-negotiable)
 

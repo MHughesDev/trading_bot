@@ -21,21 +21,43 @@ in the system after the event schema** — it is what all three interfaces targe
 runtime executes. It is also effectively irreversible: once users have built strategies in it,
 changing it breaks their work. **Version it from event zero.**
 
+## The asset model: one strategy instance per asset
+
+A **strategy definition** is asset-class-scoped (it declares what kind of data it needs) but is
+**not** pre-bound to a specific instrument. A **strategy instance** is the runtime binding of a
+definition to exactly **one instrument**.
+
+The UI flow reflects this:
+
+```
+User clicks an asset (e.g. BTC-USDT on Coinbase)
+  → selects a strategy definition from their library
+  → clicks "Initialize"
+  → a strategy instance is created and started in the runtime for that instrument
+```
+
+There is no "run this strategy on a list of assets at once" action from the UI. If a user wants
+EMA-cross running on both BTC-USDT and AAPL, they click each asset separately and initialize the
+strategy on each. This produces two independent instances, each with its own `WorldState`,
+each routing intents through the risk gate independently.
+
+This keeps the UX mental model simple (one asset = one active strategy decision point) while the
+underlying runtime is still multi-instance capable.
+
 ## Strategy definition format (sketch)
 
 A strategy is a **versioned graph of nodes**: data sources → indicators/conditions → signals →
-order actions. Explicit declared inputs let the runtime build the right subscriptions and the
-backtester replay deterministically.
+order actions. Explicit declared inputs let the runtime build the right subscriptions.
 
 ```json
 {
   "strategy_id": "ema_cross_v1",
   "definition_version": "1.0",
-  "asset_universe": ["BTC-USDT", "AAPL"],
+  "asset_class": "crypto_spot_cex",
   "min_trust_tier": "centralized_exchange",
   "inputs": [
-    { "lane": "market.bars.1m", "instrument": "$each" },
-    { "lane": "features.technical", "instrument": "$each",
+    { "lane": "market.bars.1m", "instrument": "$bound_at_init" },
+    { "lane": "features.technical", "instrument": "$bound_at_init",
       "features": ["ema_7", "ema_21"] }
   ],
   "nodes": [
@@ -52,17 +74,50 @@ backtester replay deterministically.
 ```
 
 Notes:
-- `$each` fans the input out across `asset_universe` so one definition can run on many assets.
+- `$bound_at_init` is resolved to the specific instrument when the user initializes the strategy
+  on an asset. The definition is reusable; the instance is instrument-specific.
+- `asset_class` scopes which instruments this definition is valid for (e.g. a bond strategy
+  cannot be initialized on a crypto spot asset).
 - `min_trust_tier` lets the strategy refuse to act on data dirtier than it tolerates.
 - `risk_overrides` may **tighten** but never **loosen** the global risk gate (see
   [05-execution-and-risk.md](./05-execution-and-risk.md)).
+
+## Asset class coverage
+
+The strategy system is designed to be **asset-class-agnostic at the runtime level**. The
+instrument metadata table and the asset-specific data payloads carry all the per-class
+differences. This means the runtime, risk gate, and strategy definition format do not need to
+change as new asset classes are added — only collectors, payload types, and metadata rows change.
+
+**v1 MVP scope:** Coinbase (crypto spot CEX) and Alpaca (equities) only.
+
+**Target asset classes** the system must be architecturally capable of supporting (not all in
+v1, but no redesign should be required to add them):
+
+| Asset Class | Notes |
+|-------------|-------|
+| Equities | Common stocks, REITs, ADRs — Alpaca for MVP |
+| ETFs & Funds | OHLCV + NAV data; leveraged/inverse mechanics |
+| Crypto Spot (CEX) | Coinbase for MVP; Kraken and others later |
+| DEX / AMM | Uniswap v2/v3, Curve — AMM price-impact mechanics |
+| Futures (expiring) | Roll schedules, continuous series |
+| Perpetual Swaps | Funding payments, mark-price liquidation |
+| Options | IV surface, greeks, early exercise |
+| Bonds & Fixed Income | Scheduled cash flows, accrued interest, YTM |
+| FX | Currency pairs, overnight swap rates |
+| NFTs | Non-fungible positions, listing-based fills |
+| Prediction Markets | Binary contracts, oracle resolution |
+
+Strategy definitions declare their `asset_class`; the validator rejects initialization on an
+incompatible instrument. Lanes and payload types are extended per asset class; the core runtime
+loop does not branch on asset class.
 
 ## The runtime
 
 A strategy runtime instance:
 
-1. Loads a definition.
-2. Declares demand for the lanes/instruments in `inputs` (Demand Manager handles the rest).
+1. Loads a definition + the bound instrument (set at initialization time).
+2. Declares demand for the lanes/instruments in `inputs`, resolved to the bound instrument.
 3. Subscribes to the **canonical** bus events (never the UI feed).
 4. Maintains a local `WorldState` so the strategy does not manually join timestamps across tables.
 5. On each event, calls the strategy; emits order **intents** which flow through the risk gate.
@@ -76,7 +131,7 @@ pub trait Strategy {
 `WorldContext` exposes:
 
 ```rust
-world.now();                                 // simulated in replay, real live
+world.now();                                 // real live (no wall-clock reads in strategies)
 world.latest_bar(instrument, timeframe);
 world.latest_orderbook(instrument);
 world.feature(instrument, "ema_7");
@@ -85,17 +140,6 @@ world.position(instrument);
 world.open_orders(instrument);
 world.place_order(order_request);            // -> risk gate -> execution
 ```
-
-## Same interface, live and backtest
-
-```
-Live:      Live Event Fabric        → Strategy Runtime
-Backtest:  Historical Event Store    → Replay Engine → Strategy Runtime
-```
-
-The runtime is deterministic enough that the same historical event sequence replays identically
-(guaranteed by `available_time` ordering and same-builders-live-and-replay, per
-[03-data-engineering.md](./03-data-engineering.md)).
 
 ## Manual + automated coexist on the same asset
 

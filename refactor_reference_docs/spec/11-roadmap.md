@@ -39,30 +39,41 @@ anything depends on them.
 ## Phase 4 — Strategies
 
 17. **Feature engine** for a small indicator set (EMA/RSI to start), versioned, pure function.
-18. **Strategy runtime**: run ONE strategy on ONE asset, consuming canonical events, emitting
-    intents through the risk gate.
-19. **Backtest replay** from stored events through the same builders + runtime + paper execution.
-20. **Multi-asset, multi-strategy** runtime.
+18. **Strategy runtime**: user clicks an asset → initializes a strategy → runtime instance starts
+    bound to that instrument. Emits intents through the risk gate. One instance per
+    instrument per user (MVP UX constraint).
+19. **market_simulator adapter** (`crates/market-simulator-adapter`): export raw archived events
+    as Arrow IPC, submit Run Requests to market_simulator, return results. Wire to the REST
+    backtest endpoints. **No fill simulator is built in this repo.**
+20. **Multi-instance runtime**: several strategy instances active concurrently (one per initialized
+    asset), each with its own `WorldState`, all funneling intents through the single risk gate.
 
 ## Phase 5 — Authoring front doors
 
-21. **JSON strategy API** (create/validate/apply against the frozen format).
-22. **Visual n8n-style builder** (serializes to the same JSON).
-23. **MCP server** (thin; authors/applies the same JSON; no order tool).
+21. **JSON strategy API** (create/validate/apply/stop against the frozen format, bound to a
+    specific instrument at apply time).
+22. **Visual n8n-style builder** (serializes to the same JSON; opens from the instrument detail
+    view's strategy panel).
+23. **MCP server** (thin; authors/applies the same JSON; no order tool; `run_backtest` delegates
+    to the market_simulator adapter).
 
 ## Phase 6 — Second asset class proves the abstraction
 
-24. **One equity collector + equity broker adapter**, built deliberately differently from crypto,
-    with hours/halt/auction handling in metadata. If the schema + metadata survive both asset
-    classes unchanged, the abstraction is real.
+24. **One equity collector + equity broker adapter** (Alpaca, built deliberately differently from
+    Coinbase), with hours/halt/auction handling in instrument metadata.
+25. **Dashboard P&L breakdown** by asset class: the multi-venue account model works across
+    Coinbase + Alpaca; win rate and P&L are shown per asset class.
 
 ## Later (direction, not v1)
 
-Order-book reconstruction depth features; news/web scraper activity streams; AI event extraction;
-social sentiment; on-chain/DEX data (with reorg handling + `onchain_tentative` trust tier);
-options; ETFs; bond yields; Parquet/DataFusion research layer; MessagePack/Protobuf on the wire;
-multi-user scaling. Each new asset class is *a collector + a payload type + metadata rows* —
-never a redesign.
+Second-level bars and order-book level streaming (when venue APIs support it reliably);
+DEX/AMM collector; perpetuals; options; bonds; FX; NFTs; prediction markets; news/social
+exogenous-signal plane; AI/ML model inference port; multi-user scaling; on-chain data with reorg
+handling. Each new asset class is *a collector + a payload type + metadata rows + an
+asset-spec in docs* — never a redesign of the runtime or risk gate.
+
+The market_simulator's engine coverage expands independently; the adapter in this repo extends
+to match as new price-formation mechanics are supported.
 
 ## The discipline that makes the roadmap real
 

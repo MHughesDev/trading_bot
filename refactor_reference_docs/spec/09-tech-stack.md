@@ -96,23 +96,32 @@ trading-platform/
       src/{producer.rs, consumer.rs, lanes.rs}
     collectors/                   # satellite processes
       src/{crypto/, equity/, normalizer.rs}
-    builders/                     # PURE functions: same live + replay
-      src/{orderbook.rs, bars.rs, features.rs}
+    builders/                     # PURE functions: bar builder, orderbook reconstruction
+      src/{orderbook.rs, bars.rs, watermark.rs}
+    features/                     # PURE functions: indicators (EMA, RSI…)
+      src/{lib.rs, ema.rs, rsi.rs, window.rs}
     strategy-runtime/
-      src/{runtime.rs, world.rs}
+      src/{runtime.rs, world.rs, interpreter.rs, clock.rs, intents.rs}
     execution/                    # broker adapters + order state machine
       src/{broker.rs, paper.rs, order_state.rs, fills.rs}
     risk/                         # the risk gate + kill switch
       src/{gate.rs, limits.rs, kill_switch.rs}
     storage/
       src/{postgres.rs, clickhouse.rs, parquet.rs, redis.rs}
-    backtest/
-      src/{replay.rs, simulated_execution.rs, metrics.rs}
+    market-simulator-adapter/     # adapter to github.com/MHughesDev/market_simulator
+      src/{lib.rs, export.rs, run_request.rs, results.rs}
+                                  # export.rs: raw archive → Arrow IPC for market_simulator
+                                  # run_request.rs: build RunRequest from strategy + range
+                                  # results.rs: parse TradeRecord/metrics → domain types
     mcp-server/                   # thin front door -> canonical strategy JSON
       src/{tools.rs}
     observability/
       src/{tracing.rs, metrics.rs}
 ```
+
+**No `backtest/` crate.** Fill simulation is owned entirely by
+`github.com/MHughesDev/market_simulator`. This repo provides the data (raw archive → Arrow IPC)
+and the adapter; it does not implement a replay engine or a fill model.
 
 Boundaries live in code even when deployed as one binary + collectors. Extract a crate into its
 own process only when a measured pressure (independent failure or scaling) forces it.
