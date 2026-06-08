@@ -1,0 +1,34 @@
+[platform]
+port = 8080
+host = "0.0.0.0"
+
+[nats]
+url = "nats://localhost:4222"
+
+[postgres]
+url = "postgres://trading:trading@localhost:5432/trading"
+max_connections = 20
+
+[clickhouse]
+url = "http://trading:trading@localhost:8123/trading"
+
+[redis]
+url = "redis://localhost:6379"
+
+[risk]
+# Global defaults; per-user limits in the database can only tighten these.
+max_position_usd = 10_000
+max_order_rate_per_minute = 60
+max_daily_loss_usd = 500
+kill_switch = false
+
+[data]
+# Default watermark for liquid CEX market data (seconds)
+default_watermark_secs = 2
+# Batch size for storage writers (events)
+storage_batch_size = 10_000
+# Batch flush interval (milliseconds)
+storage_batch_flush_ms = 100
+
+[mcp_server]
+port = 8081

@@ -1,13 +1,28 @@
 <div align="center">
 
-# 🤖 Trading Bot
+# Trading Bot
 
-**A Python playground for AI-assisted crypto trading:** one codebase for **research**, **paper trading**, and **careful live execution** — with **Kraken** for market data and **Alpaca (paper)** / optional **Coinbase (live)** for orders.
+**A Python→Rust trading platform.** Currently mid-refactor: Phase A (documentation workspace) complete, Phase B (Rust workspace scaffold) next.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg?style=flat)](https://github.com/astral-sh/ruff)
 
 </div>
+
+---
+
+## Architecture, design decisions, and plans
+
+All system design documentation lives in **[`docs/`](docs/README.md)**:
+- [`docs/architecture.md`](docs/architecture.md) — system map, components, data flow, repo structure
+- [`docs/adr/`](docs/adr/README.md) — 11 Architecture Decision Records (all major decisions)
+- [`docs/specs/`](docs/specs/README.md) — component and feature specifications
+- [`docs/plans/`](docs/plans/README.md) — the full 10-phase refactor plan (Phase A → Phase 7)
+- [`docs/artifact.md`](docs/artifact.md) — project definition, success conditions, failure modes
+
+**Agent/operator instructions:** [`AGENT.md`](AGENT.md)
+
+**Canonical reference (read-only):** [`refactor_reference_docs/`](refactor_reference_docs/) — the original specs and executable plans. Never modify; deleted only at Phase 7 completion.
 
 ---
 

@@ -1,0 +1,113 @@
+[workspace]
+members = [
+    "crates/domain",
+    "crates/config",
+    "crates/observability",
+    "crates/event-bus",
+    "crates/storage",
+    "crates/builders",
+    "crates/features",
+    "crates/collectors",
+    "crates/risk",
+    "crates/execution",
+    "crates/reconciliation",
+    "crates/strategy-runtime",
+    "crates/strategy-validator",
+    "crates/demand-manager",
+    "crates/venue-router",
+    "crates/ui-gateway",
+    "crates/api",
+    "crates/market-simulator-adapter",
+    "crates/mcp-server",
+    "apps/platform",
+    "apps/collector-crypto",
+    "apps/collector-equity",
+    "apps/mcp-server",
+    "xtask",
+]
+resolver = "2"
+
+[workspace.dependencies]
+# async runtime
+tokio = { version = "1", features = ["full"] }
+
+# web API / middleware
+axum = { version = "0.8", features = ["ws", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-full", "timeout", "request-id"] }
+
+# serialization / core types
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+
+# databases / cache
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+clickhouse = "0.13"
+redis = { version = "0.29", features = ["aio", "tokio-comp"] }
+
+# event fabric
+async-nats = "0.42"
+
+# external connectivity
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "gzip", "brotli"] }
+
+# columnar analytics / backtest research
+arrow = "55"
+parquet = "55"
+
+# observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# config
+config = "0.14"
+toml = "0.8"
+
+# error handling
+thiserror = "2"
+anyhow = "1"
+
+# internal crates (path dependencies)
+domain = { path = "crates/domain" }
+cfg = { path = "crates/config" }
+observability = { path = "crates/observability" }
+event-bus = { path = "crates/event-bus" }
+storage = { path = "crates/storage" }
+builders = { path = "crates/builders" }
+features = { path = "crates/features" }
+collectors = { path = "crates/collectors" }
+risk = { path = "crates/risk" }
+execution = { path = "crates/execution" }
+reconciliation = { path = "crates/reconciliation" }
+strategy-runtime = { path = "crates/strategy-runtime" }
+strategy-validator = { path = "crates/strategy-validator" }
+demand-manager = { path = "crates/demand-manager" }
+venue-router = { path = "crates/venue-router" }
+ui-gateway = { path = "crates/ui-gateway" }
+api = { path = "crates/api" }
+market-simulator-adapter = { path = "crates/market-simulator-adapter" }
+mcp-server-lib = { path = "crates/mcp-server" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+
+[profile.dev]
+opt-level = 0
+debug = true

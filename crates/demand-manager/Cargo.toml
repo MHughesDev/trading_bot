@@ -1,0 +1,9 @@
+[package]
+name = "demand-manager"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+domain = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

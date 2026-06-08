@@ -1,0 +1,5 @@
+[alias]
+xt = "run --package xtask --"
+
+[env]
+RUST_LOG = { value = "info", force = false }

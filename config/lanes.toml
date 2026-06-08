@@ -1,0 +1,57 @@
+# Lane declarations: name → partition key + retention policy.
+# Naming convention: <domain>.<type>[.<resolution>]
+
+[[lanes]]
+name = "market.trades"
+partition_by = ["instrument_id", "venue_id"]
+retention_days = 90
+
+[[lanes]]
+name = "market.quotes"
+partition_by = ["instrument_id", "venue_id"]
+retention_days = 30
+
+[[lanes]]
+name = "market.orderbook.l2"
+partition_by = ["instrument_id", "venue_id"]
+retention_days = 7
+
+[[lanes]]
+name = "market.bars.1s"
+partition_by = ["instrument_id"]
+retention_days = 365
+
+[[lanes]]
+name = "market.bars.1m"
+partition_by = ["instrument_id"]
+retention_days = 730
+
+[[lanes]]
+name = "features.technical"
+partition_by = ["instrument_id"]
+retention_days = 365
+
+[[lanes]]
+name = "strategy.signals"
+partition_by = ["instance_id"]
+retention_days = 90
+
+[[lanes]]
+name = "orders.commands"
+partition_by = ["user_id"]
+retention_days = 365
+
+[[lanes]]
+name = "orders.events"
+partition_by = ["user_id"]
+retention_days = 365
+
+[[lanes]]
+name = "positions.events"
+partition_by = ["user_id"]
+retention_days = 365
+
+[[lanes]]
+name = "quarantine"
+partition_by = ["source"]
+retention_days = 30
