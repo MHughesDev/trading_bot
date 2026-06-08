@@ -6,8 +6,12 @@ edition = "2021"
 [dependencies]
 domain = { workspace = true }
 strategy-validator = { workspace = true }
+strategy-runtime = { workspace = true }
+market-simulator-adapter = { workspace = true }
+demand-manager = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+uuid = { workspace = true }

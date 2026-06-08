@@ -33,9 +33,14 @@ pub fn router(state: AppState) -> Router {
             "/api/ui/subscriptions",
             post(streams::create_ui_subscriptions),
         )
-        // Phase 3+ strategy management
-        .route("/api/strategies", get(strategies::list_strategies))
-        .route("/api/strategies", post(strategies::create_strategy))
+        // Phase 5 strategy management (create/list/get/start/stop)
+        .route(
+            "/api/strategies",
+            get(strategies::list_strategies).post(strategies::create_strategy),
+        )
+        .route("/api/strategies/:id/config", get(strategies::get_strategy))
+        .route("/api/strategies/:id/start", post(strategies::start_strategy))
+        .route("/api/strategies/:id/stop", post(strategies::stop_strategy))
         // Phase 4 backtests
         .route("/api/backtests", post(backtests::run_backtest))
         .route("/api/backtests/:id", get(backtests::get_backtest))

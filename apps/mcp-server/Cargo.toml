@@ -8,6 +8,7 @@ domain = { workspace = true }
 cfg = { workspace = true }
 observability = { workspace = true }
 mcp-server-lib = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }

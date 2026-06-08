@@ -2086,6 +2086,7 @@ dependencies = [
  "domain",
  "mcp-server-lib",
  "observability",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -2094,13 +2095,17 @@ dependencies = [
 name = "mcp-server-lib"
 version = "0.1.0"
 dependencies = [
+ "demand-manager",
  "domain",
+ "market-simulator-adapter",
  "serde",
  "serde_json",
+ "strategy-runtime",
  "strategy-validator",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -3782,6 +3787,8 @@ name = "strategy-validator"
 version = "0.1.0"
 dependencies = [
  "domain",
+ "risk",
+ "rust_decimal",
  "serde_json",
  "thiserror 2.0.18",
 ]
