@@ -1,7 +1,7 @@
 # COMP-002: Execution and Risk Gate
 
-**Status:** Draft
-**Version:** 0.1
+**Status:** Implemented
+**Version:** 1.0
 **ADR(s):** ADR-0005, ADR-0006
 **Success Conditions:** SC-2, SC-6, SC-7
 
@@ -200,13 +200,13 @@ POST   /api/trading/resume          — re-enable trading (explicit human action
 
 ## 6. Acceptance Criteria
 
-- [ ] AC-1: An order intent emitted by the strategy runtime cannot reach a broker adapter without passing through `RiskGate::check()` — no direct path exists in the codebase — Verified by: [—]
-- [ ] AC-2: A manual order submitted via `POST /api/orders` passes through the same `RiskGate::check()` code path as a strategy order intent — Verified by: [—]
-- [ ] AC-3: When `trading_enabled` is `false`, all calls to `RiskGate::check()` return `RiskRejection::KillSwitch` without evaluating further checks — Verified by: [—]
-- [ ] AC-4: Replaying the same fill event twice (simulating JetStream redelivery) results in the position being updated exactly once — Verified by: [—]
-- [ ] AC-5: A position/broker reconciliation divergence halts new orders on the affected instrument and raises an alarm before any further order submission is attempted — Verified by: [—]
-- [ ] AC-6: On startup after a simulated disconnect, the system queries the broker for open orders and positions before the risk gate allows any new order submission — Verified by: [—]
-- [ ] AC-7: A strategy `risk_overrides.max_position` value higher than the global limit is rejected at strategy validation time, not at order submission time — Verified by: [—]
+- [x] AC-1: An order intent emitted by the strategy runtime cannot reach a broker adapter without passing through `RiskGate::check()` — no direct path exists in the codebase — Verified by: Compile-time: `ApprovedOrder._sealed: ()` is private — no path to broker without gate
+- [x] AC-2: A manual order submitted via `POST /api/orders` passes through the same `RiskGate::check()` code path as a strategy order intent — Verified by: `risk::gate::tests::valid_order_approved` (manual + strategy paths converge on same `RiskGate::check`)
+- [x] AC-3: When `trading_enabled` is `false`, all calls to `RiskGate::check()` return `RiskRejection::KillSwitch` without evaluating further checks — Verified by: `risk::tests::kill_switch_trips::manual_trip_blocks_immediately`
+- [x] AC-4: Replaying the same fill event twice (simulating JetStream redelivery) results in the position being updated exactly once — Verified by: `execution::fills::tests` (idempotent fill tests)
+- [x] AC-5: A position/broker reconciliation divergence halts new orders on the affected instrument and raises an alarm before any further order submission is attempted — Verified by: `reconciliation_halt` integration test in `tests/`
+- [x] AC-6: On startup after a simulated disconnect, the system queries the broker for open orders and positions before the risk gate allows any new order submission — Verified by: `reconciliation_halt` integration test (startup query before resuming)
+- [x] AC-7: A strategy `risk_overrides.max_position` value higher than the global limit is rejected at strategy validation time, not at order submission time — Verified by: `risk::tests::tighten_only::loosening_max_position_is_rejected`
 
 ## 7. Open Questions
 

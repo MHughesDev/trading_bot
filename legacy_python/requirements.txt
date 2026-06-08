@@ -1,4 +1,0 @@
-alpaca-py>=0.43.2
-python-dotenv>=1.2.2
-pytz
-pandas>=2.2

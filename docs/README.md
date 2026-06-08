@@ -25,7 +25,6 @@ All project design content lives here. This folder is the canonical system-desig
 
 **Phase A (documentation workspace initialization) is complete.** All specs are `Status: Draft` with `Verified by: [—]` — this is correct and intentional. Phase 7 finalizes them once the Rust system is built.
 
-The canonical executable plans live in `refactor_reference_docs/plans/` at the repo root (read-only reference anchor). The copies in `plans/` here are the traceable documentation record. On any conflict, `refactor_reference_docs/` wins.
 
 ---
 

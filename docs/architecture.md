@@ -1,11 +1,7 @@
 # Architecture
 
-> **Status:** Current design — reflects the target end-state of the Python → Rust refactor.
-> Updated alongside the refactor phases. Where this document and a spec disagree, the spec wins
-> and this document should be corrected.
->
-> **Source documents:** `refactor_reference_docs/spec/01-architecture.md`,
-> `refactor_reference_docs/spec/09-tech-stack.md`, `refactor_reference_docs/file-structure.md`.
+> **Status:** Implemented — reflects the as-built system after the Python → Rust refactor (Phase 7 complete).
+> Where this document and a spec disagree, the spec wins and this document should be corrected.
 
 ---
 
@@ -176,7 +172,7 @@ Full ADR documents: `docs/adr/`
 
 ## 7. Repository Structure
 
-Target end-state layout after the Python → Rust refactor is complete. Source: `refactor_reference_docs/file-structure.md`.
+As-built layout after the Python → Rust refactor. All Python artifacts removed in Phase 7.
 
 ```
 trading-platform/                      # repo root (current trading_bot/, refactored)
@@ -263,8 +259,7 @@ trading-platform/                      # repo root (current trading_bot/, refact
 │   ├── quarantine_replay.rs
 │   └── reconciliation_halt.rs
 ├── xtask/                             # Rust-based dev automation (seed, gen-fixtures, check-money-f64)
-├── docs/                              # engineering docs: architecture, ADRs, specs, plans, research
-└── legacy_python/                     # quarantined old Python system; deleted in Phase 7
+└── docs/                              # engineering docs: architecture, ADRs, specs, plans, research
 ```
 
 ### Crate dependency graph

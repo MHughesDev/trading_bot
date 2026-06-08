@@ -3,6 +3,7 @@
 use rust_decimal::Decimal;
 
 use domain::{
+    instrument::HaltPolicy,
     money::{Price, Size},
     RiskRejection,
 };
@@ -155,6 +156,36 @@ pub fn check_instrument_active(instrument_id: &str, active: bool) -> Result<(), 
     Ok(())
 }
 
+/// Reject an order if the instrument is outside its trading session.
+/// Always passes for 24/7 instruments (when `is_in_session == true`).
+pub fn check_trading_session(
+    instrument_id: &str,
+    is_in_session: bool,
+) -> Result<(), RiskRejection> {
+    if !is_in_session {
+        return Err(RiskRejection::OutsideTradingHours {
+            instrument_id: instrument_id.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// Reject an order if the instrument is currently halted and its halt policy
+/// is `Haltable`.  Non-haltable instruments (e.g. permissionless crypto) pass
+/// unconditionally regardless of the `is_halted` flag.
+pub fn check_halt(
+    instrument_id: &str,
+    halt_policy: &HaltPolicy,
+    is_halted: bool,
+) -> Result<(), RiskRejection> {
+    if is_halted && *halt_policy == HaltPolicy::Haltable {
+        return Err(RiskRejection::InstrumentHalted {
+            instrument_id: instrument_id.to_owned(),
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +193,35 @@ mod tests {
 
     fn limits() -> GlobalRiskLimits {
         GlobalRiskLimits::default()
+    }
+
+    // ── Session / halt checks ────────────────────────────────────────────────
+
+    #[test]
+    fn in_session_passes() {
+        assert!(check_trading_session("AAPL", true).is_ok());
+    }
+
+    #[test]
+    fn outside_session_rejected() {
+        let err = check_trading_session("AAPL", false);
+        assert!(matches!(err, Err(RiskRejection::OutsideTradingHours { .. })));
+    }
+
+    #[test]
+    fn haltable_and_halted_rejected() {
+        let err = check_halt("AAPL", &HaltPolicy::Haltable, true);
+        assert!(matches!(err, Err(RiskRejection::InstrumentHalted { .. })));
+    }
+
+    #[test]
+    fn non_haltable_ignores_halt_flag() {
+        assert!(check_halt("BTC-USDT", &HaltPolicy::NonHaltable, true).is_ok());
+    }
+
+    #[test]
+    fn haltable_but_not_halted_passes() {
+        assert!(check_halt("AAPL", &HaltPolicy::Haltable, false).is_ok());
     }
 
     #[test]

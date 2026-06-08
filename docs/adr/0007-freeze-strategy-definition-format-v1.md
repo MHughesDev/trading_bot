@@ -80,6 +80,3 @@ Not chosen because: two formats with a translation layer between them creates a 
 
 ## References
 
-- [spec/10-open-questions.md](../../refactor_reference_docs/spec/10-open-questions.md) — Q3 (strategy definition format freeze, gating item), Q10 (per-asset instances, decided)
-- [spec/09-tech-stack.md](../../refactor_reference_docs/spec/09-tech-stack.md) — `crates/domain/src/strategy_def.rs` in workspace layout
-- [spec/05-execution-and-risk.md](../../refactor_reference_docs/spec/05-execution-and-risk.md) — `risk_overrides` tighten-only validation

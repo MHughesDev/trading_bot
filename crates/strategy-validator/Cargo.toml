@@ -5,5 +5,7 @@ edition = "2021"
 
 [dependencies]
 domain = { workspace = true }
+risk = { workspace = true }
+rust_decimal = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

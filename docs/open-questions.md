@@ -28,14 +28,14 @@ not just *what* was decided but *why*, and which alternatives were already ruled
 |----|----------|--------|-----------------|------------|------------------|
 | Q-1 | Real money or paper first? | Resolved | Live broker vs. paper/simulated execution | Alpaca paper account for all paper trading (all assets/domains). Live crypto (Coinbase) and live equities (Alpaca) use the same execution interface — switching is an adapter swap, not a rewrite. | ADR-0006 |
 | Q-2 | Which broker(s)/venue(s) for v1? | Resolved | Coinbase, Alpaca, Kraken, others | Coinbase = live execution; Alpaca = paper execution + equity data; Kraken = crypto market data; market_simulator = backtest execution. Venue routing via `crates/venue-router`. | ADR-0006, ADR-0011 |
-| Q-3 | Strategy definition format v1.0 freeze | Open | Expression language, node types, `$bound_at_init` semantics, `asset_class` scoping, `risk_overrides` validation | — | Gates all three front doors (visual builder, JSON API, MCP server). Must be resolved in Phase 0. |
-| Q-4 | Capital/liability model | Open | Shared account vs. per-user accounts; liability allocation when a friend's strategy loses money | — | Gates any real-money switch. Couples with Q-1. Post-Phase-2 scope. |
-| Q-5 | Auth model for trusted group | Open | JWT-based per-user scoping vs. minimal shared-secret vs. other | — | Local + trusted, but private user data (orders, positions, balances, credentials) must be scoped per user on the wire. |
-| Q-6 | Backtest execution fidelity | Open | Crude slippage model vs. queue-position model vs. historical spread replay | — | Determines how much to trust backtests. Can start crude but assumptions must be documented so results aren't overtrusted. |
-| Q-7 | Watermark defaults per source | Open | 2s for liquid CEX (starting default); per-instrument tuning from metadata | — | 2s default in place; equity vs. crypto vs. on-chain want different values. Tune against real feeds. |
-| Q-8 | Retention policy | Open | How long raw events live in object storage vs. ClickHouse vs. hot cache | — | Affects cost and how far back backtests can reach. |
-| Q-9 | Backtest engine ownership | Resolved | Build in-repo vs. delegate to external library | External: `market_simulator` (`github.com/MHughesDev/market_simulator`). This repo owns only `crates/market-simulator-adapter`. | ADR-0009 area |
-| Q-10 | Strategy scoping: multi-asset or per-asset? | Resolved | Multi-asset strategy instances vs. per-asset instances | Per-asset instances with `$bound_at_init`. A strategy instance is created when a user clicks "Initialize" on an asset. One instance per instrument per user (MVP UX). `$each` fan-out removed. | [spec/10-open-questions.md](../refactor_reference_docs/spec/10-open-questions.md) |
+| Q-3 | Strategy definition format v1.0 freeze | Resolved | Expression language, node types, `$bound_at_init` semantics, `asset_class` scoping, `risk_overrides` validation | Format frozen at v1.0 in Phase 0; all three front doors (visual builder, JSON API, MCP server) built against it in Phase 5. `ValidatedDefinition` sealed type enforces validation before use. | ADR-0007, DATA-004, `crates/strategy-validator` |
+| Q-4 | Capital/liability model | Open (deferred) | Shared account vs. per-user accounts; liability allocation when a friend's strategy loses money | Deferred until live-money switch is planned. No operator agreement reached; private network scope means the question is acknowledged but non-blocking. | — |
+| Q-5 | Auth model for trusted group | Resolved (MVP) | JWT-based per-user scoping vs. minimal shared-secret vs. other | Bearer token auth implemented in `crates/api` for MVP. Full JWT per-user scoping is the planned upgrade path; deferred until real-money onboarding. | `crates/api/src/auth.rs` |
+| Q-6 | Backtest execution fidelity | Open (deferred) | Crude slippage model vs. queue-position model vs. historical spread replay | `market_simulator` (external) provides the fill model. Current fidelity is market-order fill at close price. Improvement is a `market_simulator` concern, not this repo's. | ADR-0009 |
+| Q-7 | Watermark defaults per source | Resolved | 2s for liquid CEX (starting default); per-instrument tuning from metadata | `watermark_secs` is a field on `Instrument` (default 2). Phase 6 confirmed: equity instruments use 2s same as crypto. Tune per-instrument via the instruments table. | `crates/domain/src/instrument.rs`, `crates/storage/src/postgres/instruments.rs` |
+| Q-8 | Retention policy | Open (deferred) | How long raw events live in object storage vs. ClickHouse vs. hot cache | No retention limits set. Raw events in Parquet/NATS JetStream grow unbounded until manually pruned. Deferred to operational scaling concern. | — |
+| Q-9 | Backtest engine ownership | Resolved | Build in-repo vs. delegate to external library | External: `market_simulator` (`github.com/MHughesDev/market_simulator`). This repo owns only `crates/market-simulator-adapter`. | ADR-0009 |
+| Q-10 | Strategy scoping: multi-asset or per-asset? | Resolved | Multi-asset strategy instances vs. per-asset instances | Per-asset instances with `$bound_at_init`. A strategy instance is created when a user clicks "Initialize" on an asset. One instance per instrument per user (MVP UX). `$each` fan-out removed. | ADR-0007, FEAT-001 |
 
 > Number questions sequentially: `Q-1`, `Q-2`, … Append new ones at the end; never renumber.
 
@@ -45,21 +45,9 @@ not just *what* was decided but *why*, and which alternatives were already ruled
 
 ### Q-3: Strategy definition format v1.0 freeze
 
-**Status:** Open
-**Gates:** Phase 5 (visual builder, JSON API, MCP server) — all three front doors target this format. Changing it after any front door is built breaks users' strategies.
+**Status:** Resolved — Phase 5 complete (2026-06-08)
 
-**Why it matters:** The strategy definition format in `spec/04-strategy-system.md` is a sketch. It must be pinned to `1.0` before the visual builder, JSON API, or MCP server are built. All three front doors produce the same canonical strategy definition document — if the format is unfrozen, none of them can be built safely.
-
-**Decisions required:**
-- Expression language for conditions
-- Node types (complete enumeration)
-- `$bound_at_init` semantics (what can and cannot be declared, how the runtime resolves it at initialize time)
-- `asset_class` scoping rules (which fields are asset-class-specific vs. universal)
-- How `risk_overrides` are validated as tighten-only (not looser than the global risk gate)
-
-**What would decide it:** A Phase 0 spec task that pins the format to 1.0 with at least one working round-trip test (definition → runtime → signal). The Phase 5 tasks are blocked until that spec is `Implemented`.
-
-**Resolution:** [To be filled in at Phase 0 completion — the frozen format version and the spec/ADR that carries it.]
+**Resolution:** Format frozen at `definition_version: "1.0"` in Phase 0. Implemented in `crates/domain/src/strategy_def/`. All three front doors (REST API, visual builder, MCP server) produce and validate the same canonical v1.0 JSON via `crates/strategy-validator`. `ValidatedDefinition` is a sealed type — cannot be constructed outside the validator crate, so no front door can bypass validation. Evidence: `strategy-validator` test suite passes; DATA-004 spec is `Implemented`.
 
 ---
 

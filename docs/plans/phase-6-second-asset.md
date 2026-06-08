@@ -2,7 +2,7 @@
 Type: Formal
 Status: Pending
 Derived From: COMP-001, COMP-002, ADR-0006, SC-5
-Note: Canonical executable plans live in refactor_reference_docs/plans/. This copy is the traceable documentation record. On any conflict, refactor_reference_docs/ wins.
+Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
 ---
 
 # Phase 6 — Second asset class proves the abstraction (equities)

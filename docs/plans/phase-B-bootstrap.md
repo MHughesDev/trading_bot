@@ -2,7 +2,7 @@
 Type: Formal
 Status: Pending
 Derived From: SYS-001, ADR-0001, ADR-0003
-Note: Canonical executable plans live in refactor_reference_docs/plans/. This copy is the traceable documentation record. On any conflict, refactor_reference_docs/ wins.
+Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
 ---
 
 # Phase B — Bootstrap (workspace, infra, CI, Python quarantine)
@@ -33,7 +33,7 @@ command, CI runs fmt+clippy+test on every push, and the entire old Python tree i
   for all later phases and is removed only in Phase 7.
 - The workspace must **compile from commit one**. Every stub crate has a valid `lib.rs`/`main.rs`.
 - Pin external dependency versions **once** in `[workspace.dependencies]` (see
-  `refactor_reference_docs/spec/09-tech-stack.md`); member crates use `.workspace = true`.
+  `[deleted - see Phase 7]/spec/09-tech-stack.md`); member crates use `.workspace = true`.
 
 ---
 
@@ -46,7 +46,7 @@ command, CI runs fmt+clippy+test on every push, and the entire old Python tree i
   infra/ legacy/ mcp_server/ models/ observability/ orchestration/ packaging/ research/ risk_engine/
   services/ shared/ strategies/ tests/ training_pipeline/ scripts/ operator_packaging/
   TradingBotScript.py run_api.py pyproject.toml requirements.txt setup.* run.* doctor.*` →
-  `legacy_python/`. Keep `frontend/`, `refactor_reference_docs/`, `.git/`, `.github/` at root.
+  `legacy_python/`. Keep `frontend/`, `[deleted - see Phase 7]/`, `.git/`, `.github/` at root.
 - **Context:** Use `git mv` so history is preserved. The `infra/docker-compose*.yml` files are a
   reference for the new root `docker-compose.yml` in P B-T05 — read them, don't reuse blindly.
 - **Acceptance:** `git status` shows the moves as renames; `legacy_python/` contains the old tree;
@@ -59,7 +59,7 @@ command, CI runs fmt+clippy+test on every push, and the entire old Python tree i
   `deny.toml`, `.cargo/config.toml`, `.gitignore` (add `/target`, `frontend/node_modules`, `.env`).
 - **Context:** `Cargo.toml` declares `members = ["crates/*", "apps/*", "xtask"]`, `resolver = "2"`,
   a `[workspace.dependencies]` block with every crate from
-  `refactor_reference_docs/spec/09-tech-stack.md` pinned, `[workspace.lints]`, and tuned
+  `[deleted - see Phase 7]/spec/09-tech-stack.md` pinned, `[workspace.lints]`, and tuned
   `[profile.release]`. `rust-toolchain.toml` pins a recent stable.
 - **Acceptance:** `cargo build` succeeds (no members yet is fine); `cargo fmt --check` and
   `cargo clippy` run clean.
@@ -94,8 +94,8 @@ command, CI runs fmt+clippy+test on every push, and the entire old Python tree i
 - **Goal:** One-command local infra for NATS JetStream, Postgres, ClickHouse, Redis/Valkey.
 - **Files:** root `docker-compose.yml`, `.env.example`, `config/default.toml`, `config/local.toml`,
   `config/lanes.toml`, empty `migrations/` + `clickhouse/` dirs with a `.gitkeep` or README.
-- **Context:** Model service choices on `refactor_reference_docs/spec/07-storage-and-replay.md`
-  and `refactor_reference_docs/spec/09-tech-stack.md`. `legacy_python/infra/docker-compose*.yml`
+- **Context:** Model service choices on `[deleted - see Phase 7]/spec/07-storage-and-replay.md`
+  and `[deleted - see Phase 7]/spec/09-tech-stack.md`. `legacy_python/infra/docker-compose*.yml`
   is a reference for ports/volumes. JetStream must be enabled (durable streams).
 - **Acceptance:** `docker compose up -d` brings up all four services healthy; `.env.example`
   documents every URL/credential the Rust config will read.
@@ -125,10 +125,10 @@ command, CI runs fmt+clippy+test on every push, and the entire old Python tree i
   already exists from Phase A — do not recreate it or add loose files inside it.
 - **Files:** root `README.md` (update the stub created in Phase A if present), `tests/README.md`.
 - **Context:** README points at `docs/` (the Phase A workspace) for architecture, design decisions,
-  and plans. Also note that `refactor_reference_docs/` remains at root as a read-only reference
+  and plans. Also note that `[deleted - see Phase 7]/` remains at root as a read-only reference
   anchor and `legacy_python/` is reference-only behavior parity material.
 - **Acceptance:** A new contributor can `docker compose up`, `cargo build`, `just test` from the
-  README alone; README correctly points to `docs/` not to `refactor_reference_docs/`.
+  README alone; README correctly points to `docs/` not to `[deleted - see Phase 7]/`.
 - **Depends on:** P B-T06.
 
 ---
@@ -141,4 +141,4 @@ command, CI runs fmt+clippy+test on every push, and the entire old Python tree i
 - [ ] `docker compose up -d` yields healthy NATS, Postgres, ClickHouse, Redis.
 - [ ] `just fmt`, `just lint`, `just test` succeed; CI is green.
 - [ ] Root `README.md` exists and points at the `docs/` workspace (created in Phase A); `tests/README.md` exists.
-- [ ] `docs/` (from Phase A) and `refactor_reference_docs/` are both present at root, untouched by this phase.
+- [ ] `docs/` (from Phase A) and `[deleted - see Phase 7]/` are both present at root, untouched by this phase.

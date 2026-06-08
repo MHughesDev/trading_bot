@@ -82,6 +82,3 @@ Not chosen because: advisory systems fail exactly when they are needed most. A s
 
 ## References
 
-- [spec/05-execution-and-risk.md](../../refactor_reference_docs/spec/05-execution-and-risk.md) — risk gate design, kill switch, checks (v1), idempotency, reconciliation
-- [spec/09-tech-stack.md](../../refactor_reference_docs/spec/09-tech-stack.md) — `crates/risk` in workspace layout
-- [spec/03-data-engineering.md](../../refactor_reference_docs/spec/03-data-engineering.md) §3 — idempotency and fill dedup

@@ -97,7 +97,5 @@ latency and distributed-systems risk to the most safety-critical path.
 
 ## References
 
-- [spec/01-architecture.md](../../refactor_reference_docs/spec/01-architecture.md) — deployment
   philosophy, planes table, end-to-end shape, failure-mode posture
-- [spec/09-tech-stack.md](../../refactor_reference_docs/spec/09-tech-stack.md) — monorepo crate
   layout, Cargo workspace structure

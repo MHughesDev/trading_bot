@@ -74,6 +74,4 @@ Not chosen because: node graphs are a presentation-layer concept. A JSON API tha
 
 ## References
 
-- [spec/09-tech-stack.md](../../refactor_reference_docs/spec/09-tech-stack.md) — `crates/mcp-server` in workspace layout, `crates/domain/src/strategy_def.rs`
 - ADR-0007 — Strategy definition format v1.0 freeze (the format these front doors target)
-- [spec/10-open-questions.md](../../refactor_reference_docs/spec/10-open-questions.md) — Q3 strategy definition format, Q10 per-asset instances

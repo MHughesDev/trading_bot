@@ -2,7 +2,7 @@
 Type: Formal
 Status: Pending
 Derived From: DATA-001, DATA-002, DATA-003, DATA-004, ADR-0002, ADR-0007, ADR-0008, ADR-0009, SC-1, SC-3, SC-4
-Note: Canonical executable plans live in refactor_reference_docs/plans/. This copy is the traceable documentation record. On any conflict, refactor_reference_docs/ wins.
+Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
 ---
 
 # Phase 0 — Foundations (the irreversible core)

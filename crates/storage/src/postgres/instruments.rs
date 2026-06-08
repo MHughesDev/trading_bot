@@ -1,7 +1,11 @@
 //! Postgres queries for the instruments table.
+//!
+//! `equity_seed_instruments()` returns the canonical in-memory representations
+//! of the equity instruments added in Phase 6 — usable in tests and seeding
+//! scripts without a live database connection.
 
 use domain::{
-    instrument::{AssetClass, HaltPolicy, TradingSchedule},
+    instrument::{AssetClass, HaltPolicy, TradingSchedule, TradingSession},
     trust::TrustTier,
     Instrument,
 };
@@ -106,4 +110,113 @@ pub async fn list_active(pool: &PgPool) -> Result<Vec<Instrument>, PgError> {
         .into_iter()
         .map(|r| row_to_instrument(map_row(r)))
         .collect())
+}
+
+// ── Equity seed data (Phase 6) ────────────────────────────────────────────────
+
+/// The NYSE/NASDAQ regular session: 09:30–16:00 Eastern time.
+fn nyse_session() -> TradingSchedule {
+    TradingSchedule {
+        timezone: "America/New_York".into(),
+        sessions: vec![TradingSession {
+            open: "09:30".into(),
+            close: "16:00".into(),
+        }],
+        has_pre_market: true,
+        has_post_market: true,
+    }
+}
+
+/// Canonical equity instrument definitions for Phase 6.
+///
+/// These match the SQL rows that would be inserted by the Phase 6 migration:
+/// ```sql
+/// INSERT INTO instruments (id, venue_id, asset_class, tick_size, lot_size,
+///   base_precision, quote_precision, is_active, trust_tier, halt_policy)
+/// VALUES
+///   ('AAPL', 'alpaca', 'equity', 0.01, 1, 2, 2, true, 'regulated', 'haltable'),
+///   ('SPY',  'alpaca', 'equity', 0.01, 1, 2, 2, true, 'regulated', 'haltable');
+/// ```
+pub fn equity_seed_instruments() -> Vec<Instrument> {
+    let tick = Decimal::from_str("0.01").expect("const");
+    let lot = Decimal::ONE;
+    vec![
+        Instrument {
+            instrument_id: "AAPL".into(),
+            asset_class: AssetClass::Equity,
+            venue_id: "alpaca".into(),
+            base_precision: 2,
+            quote_precision: 2,
+            tick_size: tick,
+            lot_size: lot,
+            trading_hours: nyse_session(),
+            halt_behavior: HaltPolicy::Haltable,
+            trust_tier: TrustTier::Regulated,
+            active: true,
+            watermark_secs: 2,
+        },
+        Instrument {
+            instrument_id: "SPY".into(),
+            asset_class: AssetClass::Equity,
+            venue_id: "alpaca".into(),
+            base_precision: 2,
+            quote_precision: 2,
+            tick_size: tick,
+            lot_size: lot,
+            trading_hours: nyse_session(),
+            halt_behavior: HaltPolicy::Haltable,
+            trust_tier: TrustTier::Regulated,
+            active: true,
+            watermark_secs: 2,
+        },
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equity_seeds_have_correct_metadata() {
+        let seeds = equity_seed_instruments();
+        assert_eq!(seeds.len(), 2);
+
+        for inst in &seeds {
+            assert_eq!(inst.asset_class, AssetClass::Equity);
+            assert_eq!(inst.venue_id, "alpaca");
+            assert_eq!(inst.trust_tier, TrustTier::Regulated);
+            assert_eq!(inst.halt_behavior, HaltPolicy::Haltable);
+            assert!(!inst.trading_hours.is_24_7(), "equity must not be 24/7");
+            assert!(inst.active);
+        }
+    }
+
+    #[test]
+    fn crypto_and_equity_coexist() {
+        // Crypto: 24/7, non-haltable, CentralizedExchange
+        let crypto = Instrument {
+            instrument_id: "BTC-USDT".into(),
+            asset_class: AssetClass::CryptoSpotCex,
+            venue_id: "kraken".into(),
+            base_precision: 8,
+            quote_precision: 2,
+            tick_size: Decimal::from_str("0.01").unwrap(),
+            lot_size: Decimal::from_str("0.00001").unwrap(),
+            trading_hours: TradingSchedule::always_open(),
+            halt_behavior: HaltPolicy::NonHaltable,
+            trust_tier: TrustTier::CentralizedExchange,
+            active: true,
+            watermark_secs: 2,
+        };
+
+        let equity = &equity_seed_instruments()[0]; // AAPL
+
+        // Different schedules — same metadata model, no asset_class branches needed.
+        assert!(crypto.trading_hours.is_24_7());
+        assert!(!equity.trading_hours.is_24_7());
+        assert_eq!(crypto.halt_behavior, HaltPolicy::NonHaltable);
+        assert_eq!(equity.halt_behavior, HaltPolicy::Haltable);
+        assert_eq!(crypto.trust_tier, TrustTier::CentralizedExchange);
+        assert_eq!(equity.trust_tier, TrustTier::Regulated);
+    }
 }

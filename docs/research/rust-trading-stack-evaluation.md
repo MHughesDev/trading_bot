@@ -118,9 +118,6 @@ This stack is the minimum viable set for the system's six planes. No dependency 
 
 ## References
 
-- `/home/user/trading_bot/refactor_reference_docs/spec/09-tech-stack.md` — choices, rationale, starting Cargo.toml
-- `/home/user/trading_bot/refactor_reference_docs/spec/01-architecture.md` — the six planes, monolith rationale
-- `/home/user/trading_bot/refactor_reference_docs/file-structure.md` — crate dependency graph and purity rules
 - tokio: https://tokio.rs
 - axum: https://docs.rs/axum
 - async-nats / NATS JetStream: https://docs.nats.io / https://docs.rs/async-nats

@@ -1,128 +1,139 @@
-<div align="center">
-
 # Trading Bot
 
-**A Python→Rust trading platform.** Currently mid-refactor: Phase A (documentation workspace) complete, Phase B (Rust workspace scaffold) next.
-
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Code style: Ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg?style=flat)](https://github.com/astral-sh/ruff)
-
-</div>
+A Rust trading platform for crypto and equity markets. The Python → Rust refactor is **complete** (Phase 7 done). This is the canonical, production system.
 
 ---
 
-## Architecture, design decisions, and plans
+## Architecture and documentation
 
-All system design documentation lives in **[`docs/`](docs/README.md)**:
+All system design documentation lives in [`docs/`](docs/README.md):
+
 - [`docs/architecture.md`](docs/architecture.md) — system map, components, data flow, repo structure
-- [`docs/adr/`](docs/adr/README.md) — 11 Architecture Decision Records (all major decisions)
-- [`docs/specs/`](docs/specs/README.md) — component and feature specifications
-- [`docs/plans/`](docs/plans/README.md) — the full 10-phase refactor plan (Phase A → Phase 7)
-- [`docs/artifact.md`](docs/artifact.md) — project definition, success conditions, failure modes
+- [`docs/adr/`](docs/adr/README.md) — 11 Architecture Decision Records
+- [`docs/specs/`](docs/specs/README.md) — component and feature specifications (all `Implemented`)
+- [`docs/plans/`](docs/plans/README.md) — the completed 10-phase refactor plan (Phase A → Phase 7)
+- [`docs/parity-matrix.md`](docs/parity-matrix.md) — behavior parity verification (Python vs Rust)
 
 **Agent/operator instructions:** [`AGENT.md`](AGENT.md)
 
-**Canonical reference (read-only):** [`refactor_reference_docs/`](refactor_reference_docs/) — the original specs and executable plans. Never modify; deleted only at Phase 7 completion.
-
 ---
 
-## For AI agents and autonomous tools
+## Quickstart
 
-**Before any code changes, commands, or task work:** read this **`README.md`** in full, then read **[`AGENTS.md`](AGENTS.md)** in full. **`AGENTS.md`** is the mandatory repository contract (rules, safety boundaries, CI, queue workflow, handoff). **Re-read `AGENTS.md` at the start of every new agent session or thread** — including after context resets — not only on first clone.
+### Prerequisites
 
-**Queue work:** from repo root run **`bash scripts/queue_top.sh`** (or **`python3 scripts/print_next_queue_item.py`**) — prints the full next **`Open`** queue row (optional **`--json`**). To close an item after a slice, run **`bash scripts/queue_close.sh --next`**. See [`AGENTS.md`](AGENTS.md) and [`docs/QUEUE.MD`](docs/QUEUE.MD).
+- Rust (toolchain pinned in `rust-toolchain.toml`)
+- Docker (for NATS, Postgres, ClickHouse, Redis)
+- Alpaca paper trading account (free at alpaca.markets)
 
----
-
-## ⚡ Easy start (do this first)
-
-Right after you clone, these scripts set up a virtualenv, install the app, bring up the local data stack (Docker), and copy **`.env.example` → `.env`** if you do not have one yet.
-
-### 🐧 Linux / macOS
+### 1. Start infrastructure
 
 ```bash
-git clone https://github.com/MHughesDev/trading_bot.git
-cd trading_bot
-chmod +x setup.sh run.sh    # once
-./setup.sh                  # install + infra (runs package-index preflight first)
-./run.sh                    # API + supervisor + dashboard
-./doctor.sh                 # optional env doctor (full audit readiness checks)
+docker compose up -d
 ```
 
-### 🪟 Windows
-
-```bat
-git clone https://github.com/MHughesDev/trading_bot.git
-cd trading_bot
-setup.bat
-run.bat
-doctor.bat                  REM optional env doctor
-```
-
-### 🖱️ One-click desktop app (optional)
-
-Prefer an icon over the terminal? After setup, install the dashboard extra and create a desktop shortcut:
+### 2. Set environment variables
 
 ```bash
-pip install -e ".[dashboard]"
-python scripts/install_desktop_shortcut.py   # writes a Desktop shortcut for your OS
+cp .env.example .env
+# Edit .env: DATABASE_URL, NATS_URL, CLICKHOUSE_URL, REDIS_URL
+# Add: ALPACA_API_KEY_ID, ALPACA_API_SECRET_KEY
 ```
 
-Double-click it (or run **`trading-bot-desktop`**) to start the API + dashboard, open a **native app window on the login screen**, and stop everything when you close the window. You stay signed in until the app is closed; the next launch asks for login again. Details: [`docs/operations/windows_operator_ui.md`](docs/operations/windows_operator_ui.md) §1.2.
+### 3. Run database migrations
 
-**Tips**
+```bash
+sqlx migrate run
+```
 
-- Want to skip Docker for a run? Set **`NM_SKIP_DOCKER=1`** (venv and pip still run). See [`.env.example`](.env.example).
-- Local baseline: use **Python 3.12** for parity with CI (project minimum remains 3.11+).
-- Deeper checklist (keys, Docker, preflight): [`docs/READY_TO_RUN.MD`](docs/READY_TO_RUN.MD) · Windows UI notes: [`docs/WINDOWS_OPERATOR_UI.MD`](docs/WINDOWS_OPERATOR_UI.MD).
+### 4. Start the platform
 
----
+```bash
+cargo run -p platform
+```
 
-## 🛰️ When the system is *actually watching* an asset for you
+Platform starts on:
+- `http://localhost:8080` — REST API
+- `ws://localhost:8081` — WebSocket live feed
 
-Think of it as a little factory line — not every bell and whistle, just the happy path while the live loop is on and a symbol is in scope:
+### 5. Start collectors (optional, for live data)
 
-| Step | What happens |
-|:---:|:---|
-| 📡 | **Kraken** streams trades, ticker, and book updates over the WebSocket. |
-| 🧹 | Messages are **normalized** into clean snapshots (ticks, spreads, depth). |
-| 📊 | **Bars roll** and the **feature pipeline** turns price action into signals the models understand. |
-| 🧠 | The **decision engine** runs the same **`run_decision_tick`** path as replay — so paper and live stay honest with each other. |
-| 🛡️ | **Risk + signing** get the last word before anything leaves the building. |
-| 📝 | **Orders** go to **Alpaca (paper)** by default, or **Coinbase** when you have configured live mode and keys. |
-| 💾 | Along the way, **QuestDB / Redis / Qdrant** (via Docker) back bars, cache, and optional memory — so the app is not reinventing a database in RAM. |
+```bash
+# Crypto (Kraken)
+cargo run -p collector-crypto
 
-**One-liner vibe:** *market noise in → features → decision → risk → (maybe) trade.*
+# Equity (Alpaca IEX — free tier)
+cargo run -p collector-equity -- AAPL SPY
+```
 
----
+### 6. MCP server (optional, for AI agent integration)
 
-## 🎁 The boring stuff you still want
-
-| | |
-|:---:|:---|
-| 🔑 | Put secrets in **`.env`** — never commit them. App settings use the **`NM_`** prefix (see [`.env.example`](.env.example)). Risk limits in YAML live under **`apex_canonical.domains.risk_sizing`** in **`app/config/default.yaml`** (not a top-level **`risk:`** key). |
-| 🧩 | **Modular monolith architecture:** the application is organized as a single deployable process with clean module boundaries (`data_plane/`, `decision_engine/`, `risk_engine/`, `execution/`, etc.), not split into microservices. This keeps latency low, reasoning simple, and state management straightforward for the trading loop. |
-| 📛 | **Suppression / no-trade reason codes** (FB-CAN-063): stable prefixed strings (**`trg_*`**, **`auc_*`**, **`exe_*`**, **`pip_*`**, **`ovr_*`**, **`state_*`**, plus existing **`risk_*`** blocks) in decision records and diagnostics — see [`app/contracts/reason_codes.py`](app/contracts/reason_codes.py). |
-| ⚙️ | **Canonical metadata** (`apex_canonical.metadata` in **`default.yaml`**): must include **config_version**, **config_name**, **created_at**, **created_by**, **notes**, and **enabled_feature_families** (APEX §4, FB-CAN-061). With **`NM_EXECUTION_MODE=live`** or **`NM_CANONICAL_CONFIG_STRICT=1`**, **environment_scope** must not stay **unspecified** — set **research**, **simulation**, **shadow**, or **live**. |
-| 📦 | Default execution mode is **paper**; go **live** only when you mean it and keys are set. |
-| 🧪 | Dev quickies: `python3 -m ruff check .` and `python3 -m pytest tests/ -q` (after `pip install -e ".[dev]"`). |
-| 🏛️ | **Governance metrics** (FB-CAN-065): Prometheus **`tb_governance_*`** counters for promotion gates, config-diff drift flags, and rollback ledger events — see [`observability/governance_metrics.py`](observability/governance_metrics.py) and [`docs/MONITORING_CANONICAL.MD`](docs/MONITORING_CANONICAL.MD) (`GET /governance/monitoring`). |
-| ⏱️ | **Post-release probation** (FB-CAN-069): after a live **`active_live`** release, **`tb_governance_probation_*`** gauges reflect elevated monitoring and automatic **abort recommended** when rolling risk-quality proxies breach policy — see [`docs/MONITORING_CANONICAL.MD`](docs/MONITORING_CANONICAL.MD) and **`GET /governance/probation-status`**. |
-| 📊 | **Canonical coverage matrix** (FB-CAN-070): machine-readable gap-domain ↔ queue ↔ code ↔ tests map — [`docs/reports/CANONICAL_SPEC_COVERAGE_MATRIX.json`](docs/reports/CANONICAL_SPEC_COVERAGE_MATRIX.json), validated by **`scripts/ci_canonical_coverage_matrix.py`**. |
-| ⏳ | **Per-domain lag** (FB-CAN-072): Prometheus **`tb_canonical_lag_seconds`** (event lag, decision processing, execution-feedback EMA latency) plus **`tb_decision_latency_seconds`** — see [`docs/MONITORING_CANONICAL.MD`](docs/MONITORING_CANONICAL.MD). |
-| 📅 | **Weekend / low-liquidity session** (FB-CAN-073): **`apex_canonical.domains.state_safety_degradation.session_mode`** throttles sizing and triggers; metrics **`tb_canonical_session_mode`** — see [`docs/MONITORING_CANONICAL.MD`](docs/MONITORING_CANONICAL.MD). |
-| ⚠️ | **Exchange risk / data integrity** (FB-CAN-074): boundary **`SafetyRegimeSnapshot`** hints → **`apex_exchange_risk_level_code`** / **`apex_data_integrity_alert`** in the merged feature row; degradation, hard overrides (**`data_integrity_alert`**, **`exchange_risk_critical`**), sizing throttle (**`apex_canonical.domains.risk_sizing.exchange_risk`**), metrics **`tb_canonical_safety_reason`** — see [`docs/MONITORING_CANONICAL.MD`](docs/MONITORING_CANONICAL.MD). |
-| ⏲️ | **Execution latency / reliability confidence** (FB-CAN-075): **`apex_canonical.domains.execution.execution_confidence`** weights + latency/reliability scalars; **`ExecutionGuidance.execution_confidence_terms`**; feature row **`canonical_exec_latency_ms_ema`** / **`canonical_exec_execution_trust`**; replay fault **`execution_latency_ms_add`** — see [`execution/execution_logic.py`](execution/execution_logic.py). |
-| 📉 | **Edge-budget monitoring** (FB-CAN-076): Prometheus **`tb_canonical_edge_budget_headroom`** / **`tb_canonical_edge_budget_stress`**, **`tb_canonical_auction_edge_penalty_max`**, **`tb_canonical_edge_budget_escalation`**; thresholds in **`apex_canonical.domains.monitoring.edge_budget_escalation`** — see [`docs/MONITORING_CANONICAL.MD`](docs/MONITORING_CANONICAL.MD). |
-| 🔗 | **Immutable run binding** (FB-CAN-077): each **`DecisionRecord`** carries **`run_binding`** (config/logic/dataset/seed + tamper-evident hash); live **`apex_canonical.domains.replay.live_dataset_id`**; optional **`strict_run_binding`** — see [`app/contracts/run_binding.py`](app/contracts/run_binding.py). |
-| ✅ | **Acceptance audit** (FB-CAN-078): **`python3 scripts/ci_canonical_acceptance_audit.py`** (also last step of **`bash scripts/ci_canonical_gates.sh`**) writes **`docs/reports/CANONICAL_ACCEPTANCE_AUDIT_REPORT.json`**; use **`--strict-open-queue`** when no **`FB-CAN-*`** rows should remain **Open**. |
-
-**Want the full map?** [`docs/SYSTEM_WALKTHROUGH.MD`](docs/SYSTEM_WALKTHROUGH.MD) · **Canonical target architecture (APEX):** [`docs/CANONICAL_SPEC_INDEX.MD`](docs/CANONICAL_SPEC_INDEX.MD) · **Legacy vs canonical naming:** [`docs/CANONICAL_GLOSSARY.MD`](docs/CANONICAL_GLOSSARY.MD) · **Code ↔ APEX domains:** [`docs/CANONICAL_MODULE_MAP.MD`](docs/CANONICAL_MODULE_MAP.MD) · **Removed paths (tombstones):** [`docs/CANONICAL_TOMBSTONE_INDEX.MD`](docs/CANONICAL_TOMBSTONE_INDEX.MD) · **Typed decision inputs:** [`app/contracts/decision_snapshots.py`](app/contracts/decision_snapshots.py) · **Release gating / experiment registry:** [`docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD`](docs/GOVERNANCE_RELEASE_AND_EXPERIMENTS.MD) · **Repo contract for contributors:** [`AGENTS.md`](AGENTS.md).
+```bash
+cargo run -p mcp-server   # JSON-RPC 2.0 over stdin/stdout
+```
 
 ---
 
-<div align="center">
+## System overview
 
-*Have fun, measure twice, trade responsibly.*
+```
+Market Venues
+  ├── Kraken WS (crypto)
+  └── Alpaca WS (equity)
+       │ normalize() → EventEnvelope
+Satellite Collectors
+       │ publish to NATS JetStream
+Event Bus (NATS JetStream)
+       ├── Storage Writers (Postgres, ClickHouse, Parquet)
+       ├── Feature Engine (PURE — same code live and replay)
+       └── Strategy Runtime
+               │ order intents
+               ▼
+          Risk Gate ← single chokepoint, no bypass
+               │ approved orders
+               ▼
+          Execution Engine
+               ├── Coinbase (live crypto)
+               ├── Alpaca (paper / live equity)
+               └── market_simulator (backtest)
 
-</div>
+React Frontend ↔ REST API + WebSocket
+MCP Server ↔ REST API (strategy authoring only)
+```
+
+---
+
+## Key properties
+
+| Property | Mechanism |
+|----------|-----------|
+| No float money | `Price(Decimal)` / `Size(Decimal)` — no `From<f64>` |
+| Single risk gate | `ApprovedOrder._sealed: ()` — private field, no external construction |
+| No lookahead in replay | `world.now()` returns `event.available_time`, never wall clock |
+| Asset class parity | Equities and crypto use identical core code; differences in instrument metadata only |
+| Tighten-only overrides | Strategy `risk_overrides` validated at load time, not at order time |
+| Idempotent deduplication | Every order has an `idempotency_key`; gate caches decisions |
+
+---
+
+## Running tests
+
+```bash
+cargo test --workspace        # 255 tests, all pass
+```
+
+---
+
+## Docker build
+
+```bash
+docker build -t trading-bot:latest .
+docker run -p 8080:8080 -p 8081:8081 trading-bot:latest
+```
+
+---
+
+## Operational procedures
+
+- [Start/stop, kill switch, recovery](docs/procedures/operate-the-stack.md)
+- [Add a new venue or asset class](docs/procedures/add-a-venue.md)

@@ -1,4 +1,5 @@
 [workspace]
+# v1.0.0 — Phase 7 complete: Python→Rust refactor done, all specs Implemented.
 members = [
     "crates/domain",
     "crates/config",

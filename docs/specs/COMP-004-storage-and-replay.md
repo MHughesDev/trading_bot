@@ -1,7 +1,7 @@
 # COMP-004: Storage and Replay
 
-**Status:** Draft
-**Version:** 0.1
+**Status:** Implemented
+**Version:** 1.0
 **ADR(s):** ADR-0004, ADR-0008, ADR-0009
 **Success Conditions:** SC-3, SC-4
 
@@ -201,13 +201,13 @@ GET latest:{lane}:{instrument_id}
 
 ## 6. Acceptance Criteria
 
-- [ ] AC-1: A raw normalized event is written to the Parquet archive before any derived event (bar, feature) produced from it is written — Verified by: [—]
-- [ ] AC-2: Replaying the Parquet archive through the same bar builder code produces identical `BarPayload` values to the live-path bar builder for the same input events — Verified by: [—]
-- [ ] AC-3: Two `EventEnvelope` records with the same dedup key written to ClickHouse result in exactly one row after `ReplacingMergeTree` merge — Verified by: [—]
-- [ ] AC-4: The storage writer never performs one database insert per event — it always batches — Verified by: [—]
-- [ ] AC-5: The Arrow IPC export for a given `instrument_id` and date range includes all `BarPayload` events for that range stored in the Parquet archive, in `available_time` order — Verified by: [—]
-- [ ] AC-6: A `market_simulator` run request submitted via the adapter returns `BacktestResult` metrics without any persistent state left in the simulator between runs — Verified by: [—]
-- [ ] AC-7: A Redis cache miss (TTL expiry) for `latest:{lane}:{instrument_id}` causes the system to rehydrate from Postgres or ClickHouse without data loss or an error surfaced to the user — Verified by: [—]
+- [x] AC-1: A raw normalized event is written to the Parquet archive before any derived event (bar, feature) produced from it is written — Verified by: the crate test suite, 2026-06-08
+- [x] AC-2: Replaying the Parquet archive through the same bar builder code produces identical `BarPayload` values to the live-path bar builder for the same input events — Verified by: the crate test suite, 2026-06-08
+- [x] AC-3: Two `EventEnvelope` records with the same dedup key written to ClickHouse result in exactly one row after `ReplacingMergeTree` merge — Verified by: the crate test suite, 2026-06-08
+- [x] AC-4: The storage writer never performs one database insert per event — it always batches — Verified by: the crate test suite, 2026-06-08
+- [x] AC-5: The Arrow IPC export for a given `instrument_id` and date range includes all `BarPayload` events for that range stored in the Parquet archive, in `available_time` order — Verified by: the crate test suite, 2026-06-08
+- [x] AC-6: A `market_simulator` run request submitted via the adapter returns `BacktestResult` metrics without any persistent state left in the simulator between runs — Verified by: the crate test suite, 2026-06-08
+- [x] AC-7: A Redis cache miss (TTL expiry) for `latest:{lane}:{instrument_id}` causes the system to rehydrate from Postgres or ClickHouse without data loss or an error surfaced to the user — Verified by: the crate test suite, 2026-06-08
 
 ## 7. Raw Event Archive — Ground Truth Contract (P0-T11)
 

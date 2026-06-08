@@ -215,5 +215,13 @@ fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
             StatusCode::UNPROCESSABLE_ENTITY,
             "data trust tier insufficient",
         ),
+        RiskRejection::OutsideTradingHours { .. } => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "instrument is outside its trading session",
+        ),
+        RiskRejection::InstrumentHalted { .. } => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "instrument is currently halted",
+        ),
     }
 }

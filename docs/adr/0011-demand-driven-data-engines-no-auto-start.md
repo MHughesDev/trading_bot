@@ -91,6 +91,4 @@ Not chosen because: administrative manual management does not scale to a system 
 
 ## References
 
-- [spec/01-architecture.md](../../refactor_reference_docs/spec/01-architecture.md) — Demand Manager design, demand declaration example, reference-counting rule
-- [spec/03-data-engineering.md](../../refactor_reference_docs/spec/03-data-engineering.md) — data pipeline architecture, pure function builders
 - ADR-0008 — Pure function builders (prerequisite enabling demand-driven start/stop without state loss)

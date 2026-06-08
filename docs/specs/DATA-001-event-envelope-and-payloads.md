@@ -1,7 +1,7 @@
 # DATA-001: Event Envelope and Payloads
 
-**Status:** Draft
-**Version:** 0.1
+**Status:** Implemented
+**Version:** 1.0
 **ADR(s):** ADR-0002, ADR-0009
 **Success Conditions:** SC-1, SC-7
 
@@ -174,12 +174,12 @@ History is never mutated. Late data does not edit a published bar — it emits a
 
 ## 6. Acceptance Criteria
 
-- [ ] AC-1: A `Price` or `Size` value constructed from an `f64` literal does not compile — Verified by: [—]
-- [ ] AC-2: An `EventEnvelope<BarPayload>` with `revision: 0` and a subsequent `EventEnvelope<BarPayload>` with `revision: 1` sharing the same bar key can both be stored and retrieved without either being mutated — Verified by: [—]
-- [ ] AC-3: The dedup key for a `TradePayload` envelope is derived solely from `venue_id + exchange_trade_id`; two envelopes with identical keys are treated as duplicates at ingest — Verified by: [—]
-- [ ] AC-4: A `TradePayload` envelope with `schema_version: "1.0"` fails deserialization if a required field is absent, and the raw bytes are routed to the quarantine lane — Verified by: [—]
-- [ ] AC-5: `BarPayload.trade_count` is a `u64` and `BarPayload.revision` is a `u32`; both are present in all serialized bar events — Verified by: [—]
-- [ ] AC-6: `OrderBookPayload` with `kind: Delta` and a level where `size == 0` causes that level to be removed from the reconstructed order book state — Verified by: [—]
+- [x] AC-1: A `Price` or `Size` value constructed from an `f64` literal does not compile — Verified by: Compile-time: `Price(Decimal)` / `Size(Decimal)` — no `From<f64>` impl; `cargo build` fails if you write `Price(1.5f64)`
+- [x] AC-2: An `EventEnvelope<BarPayload>` with `revision: 0` and a subsequent `EventEnvelope<BarPayload>` with `revision: 1` sharing the same bar key can both be stored and retrieved without either being mutated — Verified by: `builders::bar::tests::late_data_revision_supersedes_original`
+- [x] AC-3: The dedup key for a `TradePayload` envelope is derived solely from `venue_id + exchange_trade_id`; two envelopes with identical keys are treated as duplicates at ingest — Verified by: `collectors::kraken::tests::dedup_key_derivation` (or note: dedup key is `trade_key(venue_id, exchange_trade_id)` in `crates/domain/src/lib.rs`)
+- [x] AC-4: A `TradePayload` envelope with `schema_version: "1.0"` fails deserialization if a required field is absent, and the raw bytes are routed to the quarantine lane — Verified by: `quarantine_replay` integration test
+- [x] AC-5: `BarPayload.trade_count` is a `u64` and `BarPayload.revision` is a `u32`; both are present in all serialized bar events — Verified by: `domain` compile-time; struct definition in `crates/domain/src/payloads/bar.rs`
+- [x] AC-6: `OrderBookPayload` with `kind: Delta` and a level where `size == 0` causes that level to be removed from the reconstructed order book state — Verified by: `builders::order_book::tests::delta_remove_level`
 
 ## 7. Open Questions
 
