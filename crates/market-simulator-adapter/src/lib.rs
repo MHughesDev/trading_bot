@@ -4,7 +4,7 @@
 //! Translates between this repo's domain types and market_simulator's Arrow IPC contracts.
 //!
 //! TODO(Phase 4): implement export, run_request, results parsing.
-pub mod export;
-pub mod run_request;
-pub mod results;
 pub mod contract;
+pub mod export;
+pub mod results;
+pub mod run_request;

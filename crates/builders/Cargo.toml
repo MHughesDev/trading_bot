@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 domain = { workspace = true }
 chrono = { workspace = true }
+uuid = { workspace = true }

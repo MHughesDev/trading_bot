@@ -18,3 +18,6 @@ demand-manager = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
+axum = { workspace = true }
+async-trait = "0.1"
+sqlx = { workspace = true }

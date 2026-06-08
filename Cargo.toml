@@ -39,7 +39,7 @@ tower-http = { version = "0.6", features = ["cors", "trace", "compression-full",
 # serialization / core types
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 rust_decimal = { version = "1", features = ["serde-with-str"] }
 
@@ -96,8 +96,8 @@ mcp-server-lib = { path = "crates/mcp-server" }
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"

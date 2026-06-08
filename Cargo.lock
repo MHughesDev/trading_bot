@@ -87,8 +87,10 @@ dependencies = [
  "domain",
  "execution",
  "risk",
+ "rust_decimal",
  "serde",
  "serde_json",
+ "sqlx",
  "storage",
  "strategy-runtime",
  "strategy-validator",
@@ -584,6 +586,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "domain",
+ "uuid",
 ]
 
 [[package]]
@@ -752,8 +755,13 @@ dependencies = [
 name = "collectors"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "domain",
+ "event-bus",
+ "futures-util",
  "reqwest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1070,6 +1078,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "rust_decimal",
+ "rust_decimal_macros",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1154,6 +1163,7 @@ name = "event-bus"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "base64 0.22.1",
  "domain",
  "serde",
  "serde_json",
@@ -1177,15 +1187,19 @@ dependencies = [
 name = "execution"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "domain",
  "reqwest",
  "risk",
+ "rust_decimal",
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror 2.0.18",
  "tokio",
- "tokio-tungstenite 0.24.0",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2569,6 +2583,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api",
+ "async-trait",
+ "axum",
  "cfg",
  "demand-manager",
  "domain",
@@ -2576,6 +2592,7 @@ dependencies = [
  "observability",
  "reconciliation",
  "risk",
+ "sqlx",
  "storage",
  "strategy-runtime",
  "tokio",
@@ -2806,8 +2823,11 @@ dependencies = [
 name = "reconciliation"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "domain",
+ "execution",
  "risk",
+ "rust_decimal",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2959,9 +2979,13 @@ dependencies = [
 name = "risk"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "domain",
+ "rust_decimal",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -3050,6 +3074,16 @@ dependencies = [
  "serde",
  "serde_json",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "rust_decimal_macros"
+version = "1.40.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74a5a6f027e892c7a035c6fddb50435a1fbf5a734ffc0c2a9fed4d0221440519"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -3710,12 +3744,14 @@ dependencies = [
  "domain",
  "parquet",
  "redis",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4442,6 +4478,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 
@@ -4461,7 +4498,10 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 name = "venue-router"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "collectors",
  "domain",
+ "event-bus",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
