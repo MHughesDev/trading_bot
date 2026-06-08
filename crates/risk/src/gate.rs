@@ -8,8 +8,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use domain::{
-    money::Price, order::OrderIntent, strategy_def::risk_overrides::RiskOverrides, RiskRejection,
-    TrustTier,
+    instrument::HaltPolicy,
+    money::Price,
+    order::OrderIntent,
+    strategy_def::risk_overrides::RiskOverrides,
+    RiskRejection, TrustTier,
 };
 use rust_decimal::Decimal;
 use uuid::Uuid;
@@ -57,10 +60,21 @@ pub struct GateContext {
     pub recent_orders_last_second: u32,
     /// Orders submitted in the last minute (for rate limiting).
     pub recent_orders_last_minute: u32,
+    /// Whether the instrument is currently within its trading session.
+    /// Always `true` for 24/7 instruments; computed from `TradingSchedule` by the caller.
+    pub is_in_session: bool,
+    /// Whether the instrument is currently halted at the exchange.
+    /// Only meaningful when `halt_policy == Haltable`.
+    pub is_halted: bool,
+    /// The instrument's halt policy.
+    pub halt_policy: HaltPolicy,
 }
 
 impl GateContext {
     /// Convenience constructor for manual orders (no strategy overrides, CEX trust).
+    ///
+    /// Defaults: `is_in_session = true` (24/7 crypto), `is_halted = false`,
+    /// `halt_policy = NonHaltable`. Override these fields for equity instruments.
     #[allow(clippy::too_many_arguments)]
     pub fn for_manual_order(
         current_position: Decimal,
@@ -84,6 +98,9 @@ impl GateContext {
             instrument_active,
             recent_orders_last_second,
             recent_orders_last_minute,
+            is_in_session: true,
+            is_halted: false,
+            halt_policy: HaltPolicy::NonHaltable,
         }
     }
 }
@@ -165,6 +182,8 @@ impl RiskGate {
             .map_err(|_| RiskRejection::TradingDisabled)?;
 
         limits::check_instrument_active(&intent.instrument_id, ctx.instrument_active)?;
+        limits::check_trading_session(&intent.instrument_id, ctx.is_in_session)?;
+        limits::check_halt(&intent.instrument_id, &ctx.halt_policy, ctx.is_halted)?;
         limits::check_rate_second(&effective, ctx.recent_orders_last_second)?;
         limits::check_rate_minute(&effective, ctx.recent_orders_last_minute)?;
         limits::check_position(
@@ -259,5 +278,64 @@ mod tests {
         ctx.instrument_active = false;
         let err = gate.check(simple_intent("BTC-USD"), &ctx);
         assert!(err.unwrap_err().to_string().contains("BTC-USD"));
+    }
+
+    // ── Cross-asset gate tests (P6-T01 adversarial) ──────────────────────────
+
+    #[test]
+    fn equity_outside_session_rejected() {
+        let gate = gate();
+        let mut ctx = simple_ctx();
+        ctx.is_in_session = false;
+        ctx.halt_policy = HaltPolicy::Haltable;
+        let err = gate.check(simple_intent("AAPL"), &ctx);
+        assert!(
+            matches!(err, Err(RiskRejection::OutsideTradingHours { .. })),
+            "expected OutsideTradingHours"
+        );
+    }
+
+    #[test]
+    fn equity_halted_rejected() {
+        let gate = gate();
+        let mut ctx = simple_ctx();
+        ctx.is_in_session = true;
+        ctx.halt_policy = HaltPolicy::Haltable;
+        ctx.is_halted = true;
+        let err = gate.check(simple_intent("AAPL"), &ctx);
+        assert!(
+            matches!(err, Err(RiskRejection::InstrumentHalted { .. })),
+            "expected InstrumentHalted"
+        );
+    }
+
+    #[test]
+    fn equity_in_session_not_halted_approved() {
+        let gate = gate();
+        let mut ctx = simple_ctx();
+        ctx.is_in_session = true;
+        ctx.halt_policy = HaltPolicy::Haltable;
+        ctx.is_halted = false;
+        assert!(gate.check(simple_intent("AAPL"), &ctx).is_ok());
+    }
+
+    #[test]
+    fn crypto_non_haltable_ignores_halt_flag() {
+        let gate = gate();
+        let mut ctx = simple_ctx();
+        ctx.halt_policy = HaltPolicy::NonHaltable;
+        ctx.is_halted = true; // would be rejected for Haltable
+        ctx.is_in_session = true;
+        assert!(
+            gate.check(simple_intent("BTC-USDT"), &ctx).is_ok(),
+            "NonHaltable crypto must not be blocked by is_halted"
+        );
+    }
+
+    #[test]
+    fn crypto_24_7_always_in_session() {
+        let gate = gate();
+        let ctx = simple_ctx(); // defaults: is_in_session=true, NonHaltable
+        assert!(gate.check(simple_intent("BTC-USDT"), &ctx).is_ok());
     }
 }

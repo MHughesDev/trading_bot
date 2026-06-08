@@ -95,4 +95,10 @@ pub enum RiskRejection {
 
     #[error("trust tier insufficient: required {required:?}, actual {actual:?}")]
     TrustTierInsufficient { required: String, actual: String },
+
+    #[error("order rejected: {instrument_id} is outside its trading session")]
+    OutsideTradingHours { instrument_id: String },
+
+    #[error("order rejected: {instrument_id} is halted")]
+    InstrumentHalted { instrument_id: String },
 }
