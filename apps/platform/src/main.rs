@@ -50,8 +50,14 @@ async fn main() -> anyhow::Result<()> {
         };
     let execution_engine = Arc::new(execution::ExecutionEngine::new(broker));
 
+    // Build demand manager and UI gateway.
+    let demand_registry = Arc::new(demand_manager::DemandRegistry::new(Arc::new(
+        demand_manager::NoopPipelineFactory,
+    )));
+    let gateway = Arc::new(ui_gateway::SubscriptionRegistry::new(demand_registry));
+
     // Build the API router.
-    let app_state = api::AppState::new(pg, risk_gate, kill_switch, execution_engine);
+    let app_state = api::AppState::new(pg, risk_gate, kill_switch, execution_engine, gateway);
     let router = api::router(app_state);
 
     // Bind and serve.
