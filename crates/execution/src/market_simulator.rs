@@ -1,1 +1,1 @@
-//! TODO(Phase 2): execution/market_simulator
+//! Market-simulator backtest broker adapter — stub (Phase 4 scope).

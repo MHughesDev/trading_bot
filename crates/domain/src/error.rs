@@ -71,4 +71,28 @@ pub enum RiskRejection {
 
     #[error("instrument {instrument_id} is not active")]
     InstrumentInactive { instrument_id: String },
+
+    #[error("price sanity check failed for {instrument_id}: limit_price {limit_price} is outside {band_bps}bps band around market {market_price}")]
+    PriceSanityFailed {
+        instrument_id: String,
+        limit_price: String,
+        market_price: String,
+        band_bps: u32,
+    },
+
+    #[error("invalid lot size for {instrument_id}: size {size} is not a multiple of lot_size {lot_size}")]
+    InvalidLotSize {
+        instrument_id: String,
+        size: String,
+        lot_size: String,
+    },
+
+    #[error("daily loss limit exceeded: daily_loss {daily_loss_usd}, limit {limit_usd}")]
+    DailyLossLimitExceeded {
+        daily_loss_usd: String,
+        limit_usd: String,
+    },
+
+    #[error("trust tier insufficient: required {required:?}, actual {actual:?}")]
+    TrustTierInsufficient { required: String, actual: String },
 }
