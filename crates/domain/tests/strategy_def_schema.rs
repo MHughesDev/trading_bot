@@ -1,10 +1,10 @@
 //! Adversarial test: the canonical strategy example from DATA-004 §3.1 deserializes
 //! and re-serializes stably, and `definition_version` is `"1.0"`.
 
-use domain::strategy_def::{StrategyDefinition, DEFINITION_VERSION};
+use domain::strategy_def::actions::ActionKind;
 use domain::strategy_def::inputs::BOUND_AT_INIT;
 use domain::strategy_def::nodes::NodeKind;
-use domain::strategy_def::actions::ActionKind;
+use domain::strategy_def::{StrategyDefinition, DEFINITION_VERSION};
 
 const CANONICAL_EXAMPLE: &str = r#"{
     "strategy_id": "ema_cross_v1",
@@ -31,8 +31,8 @@ const CANONICAL_EXAMPLE: &str = r#"{
 
 #[test]
 fn canonical_example_deserializes() {
-    let def: StrategyDefinition = serde_json::from_str(CANONICAL_EXAMPLE)
-        .expect("canonical example must deserialize");
+    let def: StrategyDefinition =
+        serde_json::from_str(CANONICAL_EXAMPLE).expect("canonical example must deserialize");
 
     assert_eq!(def.definition_version, DEFINITION_VERSION);
     assert_eq!(def.definition_version, "1.0");

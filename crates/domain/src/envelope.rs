@@ -93,8 +93,8 @@ impl<T: Payload> EventEnvelope<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::payloads::trade::{TradeSide, TradePayload};
     use crate::money::{Price, Size};
+    use crate::payloads::trade::{TradePayload, TradeSide};
     use chrono::Utc;
     use std::str::FromStr;
 
@@ -126,6 +126,9 @@ mod tests {
         let back: EventEnvelope<TradePayload> = serde_json::from_str(&json).unwrap();
         assert_eq!(env.event_id, back.event_id);
         assert_eq!(env.instrument_id, back.instrument_id);
-        assert_eq!(env.payload.exchange_trade_id, back.payload.exchange_trade_id);
+        assert_eq!(
+            env.payload.exchange_trade_id,
+            back.payload.exchange_trade_id
+        );
     }
 }

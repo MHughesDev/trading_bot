@@ -61,10 +61,7 @@ pub enum RiskRejection {
     },
 
     #[error("order rate limit exceeded: {orders_per_minute} orders/min, limit {limit}")]
-    RateLimitExceeded {
-        orders_per_minute: u32,
-        limit: u32,
-    },
+    RateLimitExceeded { orders_per_minute: u32, limit: u32 },
 
     #[error("kill switch active — all order flow halted")]
     KillSwitchActive,

@@ -5,6 +5,6 @@
 //! This identity is the structural guarantee against lookahead bias.
 //!
 //! TODO(Phase 1): implement bar builder, watermark, and orderbook reconstruction.
-pub mod orderbook;
 pub mod bars;
+pub mod orderbook;
 pub mod watermark;

@@ -12,9 +12,7 @@ use serde::{Deserialize, Serialize};
 /// that `derive(Ord)` gives `Regulated > CentralizedExchange > ... > SocialDerived`.
 /// Strategies declare a `min_trust_tier` and the system discards any event whose
 /// tier is *less than* the declared minimum.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustTier {
     /// Social or derived data (sentiment, news) — lowest trust.

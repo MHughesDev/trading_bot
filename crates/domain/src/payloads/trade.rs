@@ -26,7 +26,12 @@ pub struct TradePayload {
 }
 
 impl TradePayload {
-    pub fn new(price: Price, size: Size, side: TradeSide, exchange_trade_id: impl Into<String>) -> Self {
+    pub fn new(
+        price: Price,
+        size: Size,
+        side: TradeSide,
+        exchange_trade_id: impl Into<String>,
+    ) -> Self {
         Self {
             schema_version: Self::schema_version().into(),
             price,

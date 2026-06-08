@@ -2,15 +2,15 @@
 
 use chrono::Utc;
 use domain::{
-    EventEnvelope, TrustTier,
+    money::{Price, Size},
     payloads::{
-        Payload,
         bar::{BarPayload, Timeframe},
         orderbook::{BookLevel, OrderBookPayload},
         quote::QuotePayload,
-        trade::{TradeSide, TradePayload},
+        trade::{TradePayload, TradeSide},
+        Payload,
     },
-    money::{Price, Size},
+    EventEnvelope, TrustTier,
 };
 use uuid::Uuid;
 
@@ -32,8 +32,12 @@ fn make_envelope<T: Payload + Clone>(payload: T) -> EventEnvelope<T> {
     )
 }
 
-fn p(s: &str) -> Price { s.parse().unwrap() }
-fn sz(s: &str) -> Size { s.parse().unwrap() }
+fn p(s: &str) -> Price {
+    s.parse().unwrap()
+}
+fn sz(s: &str) -> Size {
+    s.parse().unwrap()
+}
 
 #[test]
 fn trade_envelope_round_trip() {
@@ -43,7 +47,10 @@ fn trade_envelope_round_trip() {
     let back: EventEnvelope<TradePayload> = serde_json::from_str(&json).unwrap();
     assert_eq!(env.event_id, back.event_id);
     assert_eq!(env.payload.price, back.payload.price);
-    assert_eq!(env.payload.exchange_trade_id, back.payload.exchange_trade_id);
+    assert_eq!(
+        env.payload.exchange_trade_id,
+        back.payload.exchange_trade_id
+    );
 }
 
 #[test]
@@ -59,8 +66,14 @@ fn quote_envelope_round_trip() {
 #[test]
 fn orderbook_envelope_round_trip() {
     let payload = OrderBookPayload::new_snapshot(
-        vec![BookLevel { price: p("49900"), size: sz("1.0") }],
-        vec![BookLevel { price: p("50100"), size: sz("0.5") }],
+        vec![BookLevel {
+            price: p("49900"),
+            size: sz("1.0"),
+        }],
+        vec![BookLevel {
+            price: p("50100"),
+            size: sz("0.5"),
+        }],
         999,
     );
     let env = make_envelope(payload);
@@ -74,7 +87,10 @@ fn orderbook_envelope_round_trip() {
 fn bar_envelope_round_trip() {
     let payload = BarPayload::new(
         Timeframe::Minutes1,
-        p("100"), p("110"), p("95"), p("105"),
+        p("100"),
+        p("110"),
+        p("95"),
+        p("105"),
         sz("500"),
         200,
     );

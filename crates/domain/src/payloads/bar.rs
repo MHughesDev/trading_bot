@@ -88,13 +88,29 @@ mod tests {
 
     #[test]
     fn revision_defaults_to_zero() {
-        let bar = BarPayload::new(Timeframe::Minutes1, p("100"), p("110"), p("95"), p("105"), sz("500"), 200);
+        let bar = BarPayload::new(
+            Timeframe::Minutes1,
+            p("100"),
+            p("110"),
+            p("95"),
+            p("105"),
+            sz("500"),
+            200,
+        );
         assert_eq!(bar.revision, 0);
     }
 
     #[test]
     fn ohlcv_are_price_and_size_types() {
-        let bar = BarPayload::new(Timeframe::Minutes1, p("100"), p("110"), p("95"), p("105"), sz("500"), 200);
+        let bar = BarPayload::new(
+            Timeframe::Minutes1,
+            p("100"),
+            p("110"),
+            p("95"),
+            p("105"),
+            sz("500"),
+            200,
+        );
         // The types themselves prove no f64 was used — this test is a structural assertion.
         let _: Price = bar.open;
         let _: Price = bar.close;
@@ -103,7 +119,15 @@ mod tests {
 
     #[test]
     fn serde_round_trip() {
-        let bar = BarPayload::new(Timeframe::Minutes1, p("100"), p("110"), p("95"), p("105"), sz("500"), 200);
+        let bar = BarPayload::new(
+            Timeframe::Minutes1,
+            p("100"),
+            p("110"),
+            p("95"),
+            p("105"),
+            sz("500"),
+            200,
+        );
         let json = serde_json::to_string(&bar).unwrap();
         let back: BarPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(bar.open, back.open);

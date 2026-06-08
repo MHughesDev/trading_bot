@@ -64,7 +64,7 @@ mod tests {
     fn available_time_uses_max_of_window_and_observed() {
         let params = AvailableTimeParams {
             window_close: ts(1_000),
-            observed_time: ts(1_001),   // observed is later
+            observed_time: ts(1_001), // observed is later
             watermark: Duration::seconds(2),
             processing_delay: Duration::milliseconds(50),
         };
@@ -77,7 +77,7 @@ mod tests {
     fn available_time_uses_window_when_later() {
         let params = AvailableTimeParams {
             window_close: ts(2_000),
-            observed_time: ts(1_999),   // observed is earlier
+            observed_time: ts(1_999), // observed is earlier
             watermark: Duration::seconds(2),
             processing_delay: Duration::seconds(0),
         };

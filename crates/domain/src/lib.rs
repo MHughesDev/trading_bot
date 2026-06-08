@@ -24,7 +24,7 @@ pub use envelope::EventEnvelope;
 pub use error::{NormalizeError, RiskRejection, ValidationError};
 pub use ids::{event_id_from_key, onchain_key, sequenced_key, trade_key, DedupKey};
 pub use instrument::{AssetClass, HaltPolicy, Instrument, InstrumentId, TradingSchedule, VenueId};
-pub use lanes::{Lane, QUARANTINE};
+pub use lanes::{Lane, UnknownLane, QUARANTINE};
 pub use money::{Price, Size};
 pub use order::{Fill, OrderIntent, OrderRequest, OrderState, OrderType, Side};
 pub use payloads::Payload;

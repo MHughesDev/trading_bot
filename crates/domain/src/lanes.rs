@@ -4,6 +4,9 @@
 //! list.  Using typed values rather than bare strings catches typos at compile
 //! time and makes exhaustive matching possible.
 
+use std::fmt;
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 pub const MARKET_TRADES: &str = "market.trades";
@@ -55,29 +58,44 @@ impl Lane {
             Lane::Quarantine => QUARANTINE,
         }
     }
+}
 
-    /// Parse from a canonical string.  Returns `None` for unknown values.
-    pub fn from_str(s: &str) -> Option<Self> {
+/// Error returned when parsing an unknown lane string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownLane(pub String);
+
+impl fmt::Display for UnknownLane {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unknown lane: {:?}", self.0)
+    }
+}
+
+impl std::error::Error for UnknownLane {}
+
+impl FromStr for Lane {
+    type Err = UnknownLane;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            MARKET_TRADES => Some(Lane::MarketTrades),
-            MARKET_QUOTES => Some(Lane::MarketQuotes),
-            MARKET_ORDERBOOK_L2 => Some(Lane::MarketOrderbookL2),
-            MARKET_BARS_1S => Some(Lane::MarketBars1s),
-            MARKET_BARS_1M => Some(Lane::MarketBars1m),
-            MARKET_BARS_1M_REVISED => Some(Lane::MarketBars1mRevised),
-            FEATURES_TECHNICAL => Some(Lane::FeaturesTechnical),
-            STRATEGY_SIGNALS => Some(Lane::StrategySignals),
-            ORDERS_COMMANDS => Some(Lane::OrdersCommands),
-            ORDERS_EVENTS => Some(Lane::OrdersEvents),
-            POSITIONS_EVENTS => Some(Lane::PositionsEvents),
-            QUARANTINE => Some(Lane::Quarantine),
-            _ => None,
+            MARKET_TRADES => Ok(Lane::MarketTrades),
+            MARKET_QUOTES => Ok(Lane::MarketQuotes),
+            MARKET_ORDERBOOK_L2 => Ok(Lane::MarketOrderbookL2),
+            MARKET_BARS_1S => Ok(Lane::MarketBars1s),
+            MARKET_BARS_1M => Ok(Lane::MarketBars1m),
+            MARKET_BARS_1M_REVISED => Ok(Lane::MarketBars1mRevised),
+            FEATURES_TECHNICAL => Ok(Lane::FeaturesTechnical),
+            STRATEGY_SIGNALS => Ok(Lane::StrategySignals),
+            ORDERS_COMMANDS => Ok(Lane::OrdersCommands),
+            ORDERS_EVENTS => Ok(Lane::OrdersEvents),
+            POSITIONS_EVENTS => Ok(Lane::PositionsEvents),
+            QUARANTINE => Ok(Lane::Quarantine),
+            other => Err(UnknownLane(other.to_owned())),
         }
     }
 }
 
-impl std::fmt::Display for Lane {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Lane {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
@@ -104,13 +122,13 @@ mod tests {
         ];
         for lane in &lanes {
             let s = lane.as_str();
-            let back = Lane::from_str(s).expect("should parse back");
+            let back: Lane = s.parse().expect("should parse back");
             assert_eq!(lane, &back, "failed for {s}");
         }
     }
 
     #[test]
-    fn unknown_lane_returns_none() {
-        assert!(Lane::from_str("not.a.lane").is_none());
+    fn unknown_lane_returns_err() {
+        assert!("not.a.lane".parse::<Lane>().is_err());
     }
 }
