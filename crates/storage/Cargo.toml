@@ -16,3 +16,5 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+rust_decimal = { workspace = true }
+uuid = { workspace = true }

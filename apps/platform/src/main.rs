@@ -1,7 +1,42 @@
-//! Platform monolith — wiring only.
-//! TODO(Phase 1): wire api + ui-gateway + strategy-runtime + risk + execution +
-//! reconciliation + demand-manager, load config and observability, serve.
+use anyhow::Context;
+use tracing::info;
 
-fn main() {
-    println!("platform stub — Phase B scaffold");
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Load layered config first (before tracing, so we can read json_logs).
+    let cfg = cfg::load().context("failed to load config")?;
+
+    // Init tracing.
+    if cfg.observability.json_logs {
+        observability::init_json("platform");
+    } else {
+        observability::init("platform");
+    }
+
+    info!(version = env!("CARGO_PKG_VERSION"), "platform starting");
+
+    // Connect to Postgres.
+    let pg = storage::postgres::connect(&cfg.database.url)
+        .await
+        .context("failed to connect to postgres")?;
+
+    info!("postgres connected");
+
+    // Build the API router.
+    let app_state = api::AppState::new(pg);
+    let router = api::router(app_state);
+
+    // Bind and serve.
+    let addr = format!("{}:{}", cfg.api.host, cfg.api.port);
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .with_context(|| format!("failed to bind to {addr}"))?;
+
+    info!(addr, "listening");
+
+    axum::serve(listener, router)
+        .await
+        .context("axum serve error")?;
+
+    Ok(())
 }

@@ -1,1 +1,8 @@
-//! TODO(Phase 1): bridges WS connection ↔ ui-gateway subscriptions
+use axum::{http::StatusCode, response::IntoResponse};
+
+use crate::auth::BearerToken;
+
+/// GET /ws/live — WebSocket upgrade for live data streaming.  Phase 3.
+pub async fn ws_live(_token: BearerToken) -> impl IntoResponse {
+    StatusCode::NOT_IMPLEMENTED
+}

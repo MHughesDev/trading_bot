@@ -1,1 +1,13 @@
-//! TODO(Phase 1): AppState: handles to risk, execution, runtime, storage, bus
+use sqlx::PgPool;
+
+/// Shared application state injected into every Axum handler.
+#[derive(Clone)]
+pub struct AppState {
+    pub pg: PgPool,
+}
+
+impl AppState {
+    pub fn new(pg: PgPool) -> Self {
+        Self { pg }
+    }
+}
