@@ -206,9 +206,8 @@ impl Collector for KrakenCollector {
                                 }
                             }
                             Ok(km) => {
-                                let is_trade_update =
-                                    km.channel.as_deref() == Some("trade")
-                                        && km.msg_type.as_deref() == Some("update");
+                                let is_trade_update = km.channel.as_deref() == Some("trade")
+                                    && km.msg_type.as_deref() == Some("update");
 
                                 if !is_trade_update {
                                     continue;
