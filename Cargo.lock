@@ -83,6 +83,7 @@ name = "api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "chrono",
  "demand-manager",
  "domain",
  "execution",
@@ -4392,12 +4393,15 @@ checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
 name = "ui-gateway"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "demand-manager",
  "domain",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
