@@ -1,6 +1,6 @@
 # Queue archive (historical tables)
 
-**Documentation last reviewed:** **2026-04-18**.
+**Documentation last reviewed:** **2026-06-08**.
 
 **Purpose:** Full backlog tables, resolved fixes, and completed archive moved from the slim [`QUEUE.MD`](QUEUE.MD) for token-efficient agent workflows. **Agents implementing work:** use [`QUEUE_STACK.csv`](QUEUE_STACK.csv) only — each row is self-contained.
 
@@ -15,19 +15,19 @@
 
 *Open roadmap and deferred rows. Legacy column **Type** maps to [Kind](#11-kind-work-type) (Feature→feature, Platform→platform, …).*
 
-**Status (2026-04-18):** **Canonical replacement program** — [**§2.7**](#27-canonical-replacement-program-fb-can) **FB-CAN-001**…**FB-CAN-078** are **Done** (incl. **FB-CAN-078** acceptance audit). Legacy roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** remain **Done**; audit/setup/doc tracks remain **Done**. **Open queue:** one HIGH fix (**IL-CHART-001**), five operator-UI refactor slices (**FB-UX-018** → **FB-UX-022**), and two auth/onboarding items (**FB-AUTH-001**, **FB-UX-017**). Pull order is set so the chart 500 fix runs first, then sidebar + theme land before the page redesigns that depend on them. See [**HIGH priority**](#high-priority) and [**MEDIUM priority**](#medium-priority) tables below.
+**Status (2026-06-08):** All prior epics are **Done** — canonical replacement program (FB-CAN-001…078), React SPA rewrite (Streamlit replaced June 2026), UX, auth, audit, and setup tracks. **Open queue (10 items across 4 batches):** FCST (forecaster training loop), REACT-UI (monitoring page, SSE chart, execution quality, governance, alerts), EXEC-ORDERS (limit/stop orders), VENUE (Kraken execution adapter). See [§2.8](#28-next-phase-open-work) for full open table.
 
 ### 2.1 Queue snapshot (open by priority)
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **6** | IL-CHART-001, FB-UX-018, FB-UX-019, FB-UX-020, FB-AUTH-001, FB-UX-017 |
-| **MEDIUM** | **2** | FB-UX-021, FB-UX-022 |
-| **LOW** | **0** | — |
+| **HIGH** | **3** | FB-FCST-001, FB-RX-001, FB-RX-002 |
+| **MEDIUM** | **5** | FB-FCST-002, FB-RX-003, FB-RX-004, FB-EXEC-001, FB-EXEC-002 |
+| **LOW** | **2** | FB-RX-005, FB-N1-S2 |
 
 *Update this table when **§2** Open rows change so “next **HIGH** open item” scans stay obvious (all three priority bands).*
 
-*Deferred **FB-N1** / **FB-N3** are **Done** (closed for now); see [**Out of scope**](#out-of-scope-not-prioritized).*
+*Deferred **FB-N3** (portfolio optimization) remains out of scope; see [**Out of scope**](#out-of-scope-not-prioritized).*
 
 ### HIGH priority
 
@@ -389,10 +389,46 @@
 
 | ID | Kind | Phase | Cat | Pri | Status | Summary |
 |----|------|-------|-----|-----|--------|---------|
-| FB-N1 | deferred | D | XX | LOW | Done | Multi-exchange execution — **first slice Done 2026-04-13** (**FB-N1-S1** in [§5.5](#55-complete-archive-one-row-per-id)). **Closed for now 2026-04-17** — full multi-venue scope remains future; reopen via [**§8**](#8-how-to-add-an-entry) or reprioritize. [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N1 |
-| FB-N3 | deferred | D | XX | LOW | Done | Portfolio optimization — **first slice Done 2026-04-13** (**FB-N3-S1** in [§5.5](#55-complete-archive-one-row-per-id)). **Closed for now 2026-04-17** — full optimizer scope remains future; reopen via [**§8**](#8-how-to-add-an-entry) or reprioritize. [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N3 |
+| FB-N1 | deferred | D | XX | LOW | Done | Multi-exchange execution — **first slice Done 2026-04-13** (**FB-N1-S1**). **Phase 2 re-opened 2026-06-08** as **FB-N1-S2** (Kraken execution adapter — LOW priority, phase C). |
+| FB-N3 | deferred | D | XX | LOW | Done | Portfolio optimization — **first slice Done 2026-04-13** (**FB-N3-S1**). **Closed for now** — full optimizer scope remains future; see [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD) §FB-N3 |
 
-*Rows retained for traceability. Full multi-venue / optimizer work remains **out of scope** until reprioritized; see [`DEFERRED_ROADMAP.MD`](DEFERRED_ROADMAP.MD).*
+*Rows retained for traceability. Portfolio optimizer (FB-N3) remains **out of scope**; FB-N1 Phase 2 is now active as FB-N1-S2.*
+
+---
+
+### 2.8 Next-phase open work (2026-06-08)
+
+*Added 2026-06-08 after audit of React frontend gaps vs. APEX canonical spec and deferred roadmap. All 117 prior items Done. Ten new Open items across four batches.*
+
+#### Batch FCST — Forecaster training loop
+
+| ID | Kind | Phase | Pri | Status | Summary | Affected files |
+|----|------|-------|-----|--------|---------|----------------|
+| FB-FCST-001 | feature | A | HIGH | Open | **Run training campaign + wire quantile artifact into live serving.** Run `orchestration/training_campaign.py` (1h bars / 30d), write joblib artifact, set `NM_MODELS_FORECASTER_QUANTILE_PATH`, verify live ticks log quantile forecaster (not RNG fallback), add smoke test, update docs Phase F as Done. | `orchestration/training_campaign.py`, `forecaster_model/training/real_data_fit.py`, `decision_engine/pipeline.py`, `.env.example`, `README.md`, `tests/test_forecaster_live_serving.py` |
+| FB-FCST-002 | feature | A | MEDIUM | Open | **Backtest quantile vs. baseline, measure PnL/Sharpe/pinball.** Replay 7d of 1h BTC/USD bars twice (RNG baseline + quantile artifact); write results to `docs/reports/BACKTEST_FCST_001.md`; assert replay completes and emits `forecaster_mode=quantile` decision records. | `backtesting/replay.py`, `decision_engine/pipeline.py`, `docs/reports/BACKTEST_FCST_001.md`, `tests/test_replay_quantile_vs_baseline.py` |
+
+#### Batch REACT-UI — React frontend completions
+
+| ID | Kind | Phase | Pri | Status | Summary | Affected files |
+|----|------|-------|-----|--------|---------|----------------|
+| FB-RX-001 | feature | B | HIGH | Open | **Monitoring page** — /monitoring route; four card sections: System State (regime probs, degradation, heat, novelty), Trigger Audit (last 20 decision records table), Risk Blocks (bar chart by gate), Data Health (integrity flag, watermark age). New GET /metrics/summary FastAPI endpoint. | `frontend/src/pages/MonitoringPage.tsx`, `frontend/src/App.tsx`, `frontend/src/components/layout/Sidebar.tsx`, `frontend/src/lib/api.ts`, `control_plane/api.py` |
+| FB-RX-002 | feature | B | HIGH | Open | **SSE live chart** — replace poll with EventSource for `/assets/chart/stream`; `useBarStream` hook with reconnect backoff; LIVE badge on OhlcvChart; polling fallback if SSE fails. | `frontend/src/pages/AssetPage.tsx`, `frontend/src/hooks/useBarStream.ts`, `frontend/src/components/charts/OhlcvChart.tsx`, `control_plane/api.py` |
+| FB-RX-003 | feature | B | MEDIUM | Open | **Execution quality UI** — 'Execution Quality' card on AssetPage + Dashboard aggregate card; new GET /assets/execution-quality/{symbol}; accumulate feedback in live_service deque if not already persisted. | `frontend/src/pages/AssetPage.tsx`, `frontend/src/pages/DashboardPage.tsx`, `frontend/src/lib/api.ts`, `control_plane/api.py`, `app/runtime/live_service.py` |
+| FB-RX-004 | feature | B | MEDIUM | Open | **Governance page** — /governance route; four tabs: Releases (evidence + rollback playbook), Config Diff, Shadow comparison (run button), Experiments registry. | `frontend/src/pages/GovernancePage.tsx`, `frontend/src/App.tsx`, `frontend/src/components/layout/Sidebar.tsx`, `frontend/src/lib/api.ts` |
+| FB-RX-005 | feature | B | LOW | Open | **Alert inbox** — GET /alerts (threshold checks on Prometheus metrics → structured alerts), POST /alerts/{id}/acknowledge (SQLite ack table), /alerts React page, Sidebar badge with unacknowledged count. | `frontend/src/pages/AlertsPage.tsx`, `control_plane/api.py`, `app/runtime/operator_sessions.py`, `tests/test_alerts_endpoint.py` |
+
+#### Batch EXEC-ORDERS — Order type expansion
+
+| ID | Kind | Phase | Pri | Status | Summary | Affected files |
+|----|------|-------|-----|--------|---------|----------------|
+| FB-EXEC-001 | feature | B | MEDIUM | Open | **Limit/stop orders — Alpaca paper.** Pass `limit_price`/`stop_price` through to Alpaca SDK; update `OrderIntent` contract; add limit price input to manual trade form; tests mock SDK. | `execution/adapters/alpaca_paper.py`, `app/contracts/orders.py`, `control_plane/api.py`, `frontend/src/pages/AssetPage.tsx`, `tests/test_alpaca_limit_orders.py` |
+| FB-EXEC-002 | feature | B | MEDIUM | Open | **Limit/stop orders — Coinbase live.** Wire `create_limit_order_gtc` in Coinbase adapter; intent_gate validation for missing limit_price; tests mock SDK; RUNBOOKS update. | `execution/adapters/coinbase_advanced_http.py`, `execution/intent_gate.py`, `docs/RUNBOOKS.MD`, `tests/test_coinbase_limit_orders.py` |
+
+#### Batch VENUE — Second execution venue
+
+| ID | Kind | Phase | Pri | Status | Summary | Affected files |
+|----|------|-------|-----|--------|---------|----------------|
+| FB-N1-S2 | feature | C | LOW | Open | **Kraken spot execution adapter.** `execution/adapters/kraken_spot_http.py` (HMAC-SHA512, AddOrder + QueryOrders); register in adapter_registry + router; `NM_KRAKEN_API_KEY/SECRET` env vars; AccountPage venue display; AGENTS.md update; ci_spec_compliance.sh pass. | `execution/adapters/kraken_spot_http.py`, `execution/adapter_registry.py`, `execution/router.py`, `app/config/settings.py`, `.env.example`, `AGENTS.md`, `tests/test_kraken_adapter.py` |
 
 ---
 

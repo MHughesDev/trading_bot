@@ -1,4 +1,4 @@
-"""Per-user venue (Alpaca / Coinbase) key completeness for auth responses and Streamlit gating."""
+"""Per-user venue (Alpaca / Coinbase) key completeness for auth responses and onboarding gating."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from app.config.settings import AppSettings
 from app.runtime import user_venue_credentials as user_venue_credentials_mod
 
 
-def streamlit_venue_keys_gate_enabled() -> bool:
-    """When true (NM_STREAMLIT_VENUE_KEYS_REQUIRED), logged-in users must save venue keys before the app."""
-    return os.getenv("NM_STREAMLIT_VENUE_KEYS_REQUIRED", "").strip().lower() in (
+def venue_keys_gate_enabled() -> bool:
+    """When true (NM_VENUE_KEYS_REQUIRED), logged-in users must save venue keys before trading."""
+    return os.getenv("NM_VENUE_KEYS_REQUIRED", "").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -41,10 +41,9 @@ def venue_keys_status_for_user(
     (None, None) when session auth is off — callers should omit or null these in JSON.
     When gating is off or master secret unset, returns (False, True) so clients do not block.
     """
-    # Session-only responses use None to mean "not applicable"
     if not settings.auth_session_enabled:
         return None, None
-    if not streamlit_venue_keys_gate_enabled() or not _master_configured(settings):
+    if not venue_keys_gate_enabled() or not _master_configured(settings):
         return False, True
     master = settings.auth_venue_credentials_master_secret
     assert master is not None

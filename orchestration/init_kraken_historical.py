@@ -44,15 +44,17 @@ def fetch_init_bootstrap_bars(
     symbol: str,
     *,
     settings: AppSettings | None = None,
+    lookback_days: int | None = None,
 ) -> InitKrakenHistoricalResult:
     """
     Pull bootstrap history from Kraken REST for first train / init pipeline.
 
-    Range: ``now - bootstrap_lookback_days`` through ``now`` (UTC).
+    Range: ``now - lookback_days`` through ``now`` (UTC).
+    ``lookback_days`` overrides ``settings.asset_init_bootstrap_lookback_days``.
     """
     s = settings or load_settings()
     sym = symbol.strip()
-    lookback = max(1, int(s.asset_init_bootstrap_lookback_days))
+    lookback = max(1, int(lookback_days if lookback_days is not None else s.asset_init_bootstrap_lookback_days))
     gran = resolve_init_bootstrap_granularity_seconds(s)
     end = datetime.now(UTC)
     start = end - timedelta(days=lookback)

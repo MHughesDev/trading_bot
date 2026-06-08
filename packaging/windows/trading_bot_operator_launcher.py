@@ -1,7 +1,7 @@
 """
 Windows operator launcher — same process layout as ``run.bat`` (FB-UI-01-01).
 
-Spawns: uvicorn control plane, power supervisor, Streamlit dashboard.
+Spawns: uvicorn control plane (which serves the React SPA) + power supervisor.
 Requires a repo clone with ``setup.bat`` run (``.venv`` present). Intended to be
 frozen with PyInstaller; the executable must live **in the repo root** next to
 ``setup.bat``, or run with current directory set to the repo root (the launcher
@@ -62,6 +62,7 @@ def main() -> None:
             creationflags=creationflags,
         )
 
+    # API also serves the React SPA from frontend/dist/
     _popen(
         [
             str(vpy),
@@ -71,28 +72,16 @@ def main() -> None:
             "--host",
             "127.0.0.1",
             "--port",
-            "8000",
+            "8001",
         ],
     )
     time.sleep(2)
     _popen([str(vpy), "-m", "app.runtime.power_supervisor"])
-    _popen(
-        [
-            str(vpy),
-            "-m",
-            "streamlit",
-            "run",
-            str(root / "control_plane" / "Home.py"),
-            "--server.headless",
-            "true",
-        ],
-    )
 
     print()
     print("Started (same as run.bat):")
-    print("  - Control plane: http://127.0.0.1:8000")
+    print("  - Dashboard + API: http://127.0.0.1:8001")
     print("  - Supervisor: live runtime on :8208 when power ON")
-    print("  - Dashboard: Streamlit (usually http://localhost:8501)")
     print()
     print("Close the spawned console windows to stop.")
     print("Set NM_POWER_SUPERVISOR_ENABLED=false to skip auto live runtime.")

@@ -73,7 +73,7 @@ fi
 
 "$VPY" -m pip install --upgrade pip wheel setuptools
 
-echo "Installing package with dev + dashboard (Streamlit) ..."
+echo "Installing package with dev + dashboard extras ..."
 if ! "$VPY" -m pip install -e ".[dev,dashboard]"; then
   echo ""
   echo "ERROR: dependency install failed."

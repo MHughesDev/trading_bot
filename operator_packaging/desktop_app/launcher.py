@@ -1,8 +1,9 @@
 """One-click desktop launcher for the Trading Bot.
 
-Starts the control-plane API + Streamlit dashboard (optionally the power
-supervisor), waits for the UI to come up, opens a native window on the **login
-screen**, and shuts everything down when that window is closed.
+Starts the control-plane API (which also serves the React SPA from
+frontend/dist/) and optionally the power supervisor, waits for the API to come
+up, opens a native window on the login screen, and shuts everything down when
+that window is closed.
 
 Run it any of these ways (all equivalent):
 
@@ -10,10 +11,10 @@ Run it any of these ways (all equivalent):
     python -m operator_packaging.desktop_app
     python operator_packaging/desktop_app/launcher.py
 
-Session behavior (matches "stay signed in until the app closes"):
-  * existing sessions are cleared on launch  -> you always start at the login
+Session behavior:
+  * existing sessions are cleared on launch  → you always start at the login
     screen;
-  * the idle lockout is suppressed while running -> you are not kicked out
+  * the idle lockout is suppressed while running → you are not kicked out
     mid-session; closing the window ends the run and the next launch asks for
     login again.
 """
@@ -32,8 +33,8 @@ from operator_packaging.desktop_app.process_supervisor import (
     DEFAULT_UI_HOST,
     DEFAULT_UI_PORT,
     DesktopProcessSupervisor,
+    api_health_url,
     build_service_specs,
-    streamlit_health_url,
     wait_for_http,
 )
 
@@ -66,6 +67,8 @@ def _truthy(raw: str) -> bool:
 def desktop_env(
     base_env: dict[str, str] | None = None,
     *,
+    api_host: str = DEFAULT_API_HOST,
+    api_port: int = DEFAULT_API_PORT,
     ui_host: str = DEFAULT_UI_HOST,
     ui_port: int = DEFAULT_UI_PORT,
 ) -> dict[str, str]:
@@ -73,20 +76,19 @@ def desktop_env(
 
     Forces session login (route guard on, sessions enabled), suppresses the idle
     lockout for the lifetime of the run, and points the desktop window helper at
-    the Streamlit URL. Honors anything the operator already set except where the
+    the React SPA URL. Honors anything the operator already set except where the
     desktop experience requires a specific value.
     """
     env = dict(os.environ if base_env is None else base_env)
     # Require login and keep the user signed in until the app closes.
-    env["NM_STREAMLIT_ROUTE_GUARD_ENABLED"] = "true"
     env["NM_AUTH_SESSION_ENABLED"] = "true"
+    env.setdefault("NM_CONTROL_PLANE_URL", f"http://{api_host}:{int(api_port)}")
     env["NM_AUTH_IDLE_TIMEOUT_SECONDS"] = _NO_IDLE_TIMEOUT_SECONDS
-    # An API key in the Streamlit process would bypass the login gate — drop it
-    # so a human actually signs in.
+    # Drop the API key so the user must authenticate via the React login page.
     env.pop("NM_CONTROL_PLANE_API_KEY", None)
-    # The desktop window points at the Streamlit UI, not the API.
-    env.setdefault("NM_STREAMLIT_DESKTOP_URL", f"http://{ui_host}:{int(ui_port)}")
-    env.setdefault("NM_STREAMLIT_DESKTOP_TITLE", "Trading Bot")
+    # The desktop window opens the React SPA served by the API.
+    env.setdefault("NM_DESKTOP_URL", f"http://{api_host}:{int(api_port)}")
+    env.setdefault("NM_DESKTOP_TITLE", "Trading Bot")
     return env
 
 
@@ -143,9 +145,9 @@ def main() -> int:
     enable_supervisor = _truthy(os.getenv("NM_DESKTOP_START_SUPERVISOR", ""))
     startup_timeout = float(os.getenv("NM_DESKTOP_STARTUP_TIMEOUT_SECONDS", "90"))
 
-    env = desktop_env(ui_host=ui_host, ui_port=ui_port)
-    title = env.get("NM_STREAMLIT_DESKTOP_TITLE", "Trading Bot")
-    ui_url = env.get("NM_STREAMLIT_DESKTOP_URL", f"http://{ui_host}:{int(ui_port)}")
+    env = desktop_env(api_host=api_host, api_port=api_port, ui_host=ui_host, ui_port=ui_port)
+    title = env.get("NM_DESKTOP_TITLE", "Trading Bot")
+    ui_url = env.get("NM_DESKTOP_URL", f"http://{api_host}:{int(api_port)}")
 
     cleared = reset_sessions_for_fresh_login()
     print(f"[desktop] cleared {cleared} prior session(s); starting on the login screen.")
@@ -166,9 +168,9 @@ def main() -> int:
     print(f"[desktop] service output -> {root / 'logs' / 'desktop'} (no extra windows)")
     supervisor.start()
     try:
-        print(f"[desktop] waiting for the dashboard at {ui_url} ...")
+        print(f"[desktop] waiting for the API + UI at {ui_url} ...")
         ready = wait_for_http(
-            streamlit_health_url(ui_host, ui_port),
+            api_health_url(api_host, api_port),
             timeout_s=startup_timeout,
         )
         dead = supervisor.first_dead()

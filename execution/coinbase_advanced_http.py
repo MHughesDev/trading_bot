@@ -6,7 +6,6 @@ import json
 import logging
 from decimal import Decimal
 from typing import Any
-from urllib.parse import urlencode
 
 import httpx
 from coinbase import jwt_generator
@@ -92,11 +91,10 @@ class CoinbaseAdvancedHTTPClient:
     ) -> httpx.Response:
         if not path.startswith("/api/v3/brokerage"):
             path = "/api/v3/brokerage" + path
-        jwt_path = path
-        if params:
-            qs = urlencode(sorted((str(k), str(v)) for k, v in params.items() if v is not None))
-            jwt_path = f"{path}?{qs}"
-        token = _rest_jwt(method, jwt_path, self._api_key, self._api_secret)
+        # Coinbase's CDP JWT `uri` claim is `METHOD host/path` — query params must NOT
+        # be included (including them causes a 401 Unauthorized from Coinbase even with
+        # valid keys, since the claim no longer matches what Coinbase expects to verify).
+        token = _rest_jwt(method, path, self._api_key, self._api_secret)
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",

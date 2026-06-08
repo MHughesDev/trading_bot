@@ -9,9 +9,9 @@ if not exist ".venv\Scripts\python.exe" (
 
 set "VPY=%CD%\.venv\Scripts\python.exe"
 
-REM Optional: override Streamlit URL if not on default port
-REM set NM_STREAMLIT_DESKTOP_URL=http://127.0.0.1:8501
+REM Optional: override the API URL shown in the pywebview window
+REM set NM_DESKTOP_URL=http://127.0.0.1:8001
 
-echo Starting desktop window (pywebview) — ensure Streamlit is already running (run.bat).
+echo Starting desktop window (pywebview) -- ensure run.bat (or run.sh) is already running.
 "%VPY%" -m operator_packaging.desktop_shell
 exit /b %ERRORLEVEL%

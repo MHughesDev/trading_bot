@@ -11,7 +11,7 @@ from operator_packaging.desktop_app.process_supervisor import (
     DesktopProcessSupervisor,
     ServiceSpec,
     build_service_specs,
-    streamlit_health_url,
+    api_health_url,
     wait_for_http,
 )
 
@@ -43,26 +43,23 @@ class _FakeProc:
 def test_build_service_specs_default_excludes_supervisor():
     specs = build_service_specs("/usr/bin/python")
     names = [s.name for s in specs]
-    assert names == ["api", "ui"]
+    # React SPA is served by FastAPI — no separate UI process.
+    assert names == ["api"]
     api = next(s for s in specs if s.name == "api")
     assert "uvicorn" in api.args and "control_plane.api:app" in api.args
-    ui = next(s for s in specs if s.name == "ui")
-    assert "streamlit" in ui.args and "control_plane/Home.py" in ui.args
 
 
 def test_build_service_specs_with_supervisor_and_ports():
     specs = build_service_specs(
         "py", api_port=9000, ui_port=9501, enable_supervisor=True
     )
-    assert [s.name for s in specs] == ["api", "supervisor", "ui"]
+    assert [s.name for s in specs] == ["api", "supervisor"]
     api = next(s for s in specs if s.name == "api")
     assert "9000" in api.args
-    ui = next(s for s in specs if s.name == "ui")
-    assert "9501" in ui.args
 
 
-def test_streamlit_health_url():
-    assert streamlit_health_url("127.0.0.1", 8501) == "http://127.0.0.1:8501/_stcore/health"
+def test_api_health_url():
+    assert api_health_url("127.0.0.1", 8001) == "http://127.0.0.1:8001/status"
 
 
 def test_supervisor_start_passes_env_cwd_and_stops_in_reverse():
@@ -94,20 +91,18 @@ def test_supervisor_default_spawn_suppresses_windows_and_writes_logs(
         captured.append({"args": args, **kwargs})
         return _FakeProc(args)
 
-    # Pretend we are on Windows so CREATE_NO_WINDOW is requested.
     monkeypatch.setattr(ps, "_no_window_creationflags", lambda: 0x08000000)
     monkeypatch.setattr(ps.subprocess, "Popen", fake_popen)
 
     log_dir = tmp_path / "logs"
     sup = ps.DesktopProcessSupervisor(
-        [ServiceSpec("api", ["x"]), ServiceSpec("ui", ["y"])], log_dir=log_dir
+        [ServiceSpec("api", ["x"]), ServiceSpec("supervisor", ["y"])], log_dir=log_dir
     )
     sup.start()
 
     assert all(c["creationflags"] == 0x08000000 for c in captured)
-    # Each child got its own log file as stdout, stderr folded in.
     assert (log_dir / "api.log").exists()
-    assert (log_dir / "ui.log").exists()
+    assert (log_dir / "supervisor.log").exists()
     assert all("stdout" in c and c["stderr"] is ps.subprocess.STDOUT for c in captured)
     sup.stop()
 
@@ -150,13 +145,12 @@ def test_wait_for_http_times_out():
 
 
 def test_desktop_env_forces_login_and_no_idle_timeout():
-    env = launcher.desktop_env({"NM_CONTROL_PLANE_API_KEY": "secret"}, ui_port=8501)
-    assert env["NM_STREAMLIT_ROUTE_GUARD_ENABLED"] == "true"
+    env = launcher.desktop_env({"NM_CONTROL_PLANE_API_KEY": "secret"}, api_port=8001)
     assert env["NM_AUTH_SESSION_ENABLED"] == "true"
     assert int(env["NM_AUTH_IDLE_TIMEOUT_SECONDS"]) > 10_000_000
     # API key bypass removed so a human must sign in.
     assert "NM_CONTROL_PLANE_API_KEY" not in env
-    assert env["NM_STREAMLIT_DESKTOP_URL"] == "http://127.0.0.1:8501"
+    assert env["NM_DESKTOP_URL"] == "http://127.0.0.1:8001"
 
 
 def test_resolve_python_exe_prefers_venv(tmp_path: Path):
@@ -228,5 +222,4 @@ def test_main_opens_window_and_stops_on_close(monkeypatch: pytest.MonkeyPatch):
 
     rc = launcher.main()
     assert rc == 0
-    # Window opens only after start; services stop after the window closes.
     assert events == ["start", "window", "stop"]

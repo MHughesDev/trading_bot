@@ -55,6 +55,7 @@ CONDITION_TYPES: dict[str, str] = {
     "less_than": "is less than",
     "rising": "is rising",
     "falling": "is falling",
+    "model_forecast": "AI forecast predicts",
 }
 
 #: Position-sizing modes.
@@ -125,6 +126,8 @@ class Condition:
     def validate(self, indicator_ids: set[str]) -> None:
         if self.type not in CONDITION_TYPES:
             raise RuleSpecError(f"unknown condition type {self.type!r}")
+        if self.type == "model_forecast":
+            return  # AI forecast conditions are validated at runtime by the forecaster service
         if self.left != "price" and self.left not in indicator_ids:
             raise RuleSpecError(f"condition references unknown indicator {self.left!r}")
         if self.type in ("rising", "falling"):
@@ -149,6 +152,9 @@ class Condition:
         return spec.label() if spec else self.left
 
     def explain(self, indicators_by_id: dict[str, "IndicatorSpec"]) -> str:
+        if self.type == "model_forecast":
+            conf = f" (min confidence {self.right_value:.0%})" if self.right_value is not None else ""
+            return f"AI price forecaster predicts a favourable move{conf}"
         verb = CONDITION_TYPES[self.type]
         left = self._left_label(indicators_by_id)
         if self.type in ("rising", "falling"):

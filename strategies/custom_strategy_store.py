@@ -1,46 +1,70 @@
 """Persistence + dynamic registration for user-built strategies (FB-AP-XXX strategy builder).
 
-Each user-built strategy is saved as a sidecar JSON file (mirrors
-``app/runtime/asset_strategy_selection.py``'s pattern) under
-``data/custom_strategies/<id>.json``, and — the key integration trick — is also registered
-into :mod:`strategies.registry` as an ordinary ``StrategyDescriptor`` with key
-``"custom:<id>"``, whose sole tunable parameter (``rule_spec``) carries the strategy's JSON
-spec as a string.
+Each user-built strategy is stored as a row in the operator user database
+(``users.sqlite`` — the same SQLite store that holds accounts, sessions, and venue
+credentials: see :mod:`app.runtime.user_store` / :mod:`app.runtime.user_venue_credentials`),
+in a ``custom_strategies`` table keyed by ``(user_id, id)`` with a foreign key to
+``users(id)``. Strategy specs are purely user data, so they belong alongside the rest of
+a user's account data in the server's database — not as loose JSON files on disk keyed by
+filesystem convention. The composite primary key + FK make per-user isolation a database
+guarantee rather than a directory-naming convention.
 
-This means the *entire* existing pipeline (the registry, ``backtesting/nautilus_backtest.py``,
+The other half of the trick (mirrors the original file-based version): every saved
+strategy is also registered into :mod:`strategies.registry` as an ordinary
+``StrategyDescriptor`` with key ``"custom:u<user_id>:<id>"``, whose sole tunable parameter
+(``rule_spec``) carries the strategy's JSON spec as a string. This means the *entire*
+existing pipeline (the registry, ``backtesting/nautilus_backtest.py``,
 ``app.runtime.asset_strategy_selection``, the Asset page's strategy picker) handles
-user-built strategies automatically, with no special-casing: to them, ``custom:<id>`` looks
-exactly like ``ema_cross`` — just another catalogue entry resolving to a ``Strategy``/
-``StrategyConfig`` pair (in this case, the single shared
+user-built strategies automatically, with no special-casing: to them,
+``custom:u<user_id>:<id>`` looks exactly like ``ema_cross`` — just another catalogue entry
+resolving to a ``Strategy``/``StrategyConfig`` pair (in this case, the single shared
 :class:`strategies.rule_based_strategy.RuleBasedStrategy`).
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
+import sqlite3
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
-from app.runtime import tenant_context
-from app.runtime import user_data_paths as user_paths
 from strategies.registry import StrategyDescriptor, StrategyParam, register_or_replace, unregister
 from strategies.rule_spec import RuleSpecError, RuleStrategySpec
 
-_DEFAULT_DIR = Path(os.getenv("NM_CUSTOM_STRATEGIES_DIR", "data/custom_strategies"))
+_lock = threading.Lock()
 
 _KEY_PREFIX = "custom:"
 
 
-def _multi_tenant() -> bool:
-    return os.getenv("NM_MULTI_TENANT_DATA_SCOPING", "").strip().lower() in ("1", "true", "yes")
+def _connect(db_path: Path) -> sqlite3.Connection:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
-def custom_strategies_dir() -> Path:
-    if _multi_tenant():
-        return user_paths.custom_strategies_dir()
-    return _DEFAULT_DIR
+def ensure_schema(db_path: Path) -> None:
+    with _connect(db_path) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS custom_strategies (
+                user_id INTEGER NOT NULL,
+                id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                spec_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        conn.commit()
 
 
 def _slugify(name: str) -> str:
@@ -48,26 +72,15 @@ def _slugify(name: str) -> str:
     return slug or "strategy"
 
 
-def _path(strategy_id: str) -> Path:
-    sid = strategy_id.strip()
-    if not sid or "/" in sid or "\\" in sid or sid.startswith("."):
-        raise ValueError("invalid custom strategy id")
-    return custom_strategies_dir() / f"{sid}.json"
+def registry_key(user_id: int, strategy_id: str) -> str:
+    """Catalogue key for a custom strategy — namespaced per user so two users' strategies
+    of the same id can never collide in the shared in-process registry."""
+    return f"{_KEY_PREFIX}u{int(user_id)}:{strategy_id}"
 
 
-def registry_key(strategy_id: str) -> str:
-    """Catalogue key for a custom strategy — namespaced per tenant when multi-tenant scoping
-    is on, so two users' strategies of the same id can't collide in the shared registry."""
-    if _multi_tenant():
-        uid = tenant_context.get_current_user_id()
-        if uid is not None:
-            return f"{_KEY_PREFIX}u{uid}:{strategy_id}"
-    return f"{_KEY_PREFIX}{strategy_id}"
-
-
-def _descriptor_for(strategy_id: str, spec: RuleStrategySpec) -> StrategyDescriptor:
+def _descriptor_for(user_id: int, strategy_id: str, spec: RuleStrategySpec) -> StrategyDescriptor:
     return StrategyDescriptor(
-        key=registry_key(strategy_id),
+        key=registry_key(user_id, strategy_id),
         name=spec.name,
         description=spec.explain(),
         strategy_path="strategies.rule_based_strategy:RuleBasedStrategy",
@@ -83,94 +96,138 @@ def _descriptor_for(strategy_id: str, spec: RuleStrategySpec) -> StrategyDescrip
     )
 
 
-def _new_id(name: str) -> str:
+def _row_to_record(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "spec": json.loads(row["spec_json"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _new_id(conn: sqlite3.Connection, user_id: int, name: str) -> str:
     base = _slugify(name)
     candidate = base
     n = 2
-    while _path(candidate).exists():
+    while conn.execute(
+        "SELECT 1 FROM custom_strategies WHERE user_id = ? AND id = ?", (user_id, candidate)
+    ).fetchone():
         candidate = f"{base}_{n}"
         n += 1
     return candidate
 
 
-def list_custom_strategies() -> list[dict]:
-    """All saved custom strategies, newest-updated first."""
-    d = custom_strategies_dir()
-    if not d.is_dir():
-        return []
-    out: list[dict] = []
-    for p in d.glob("*.json"):
-        record = _read(p)
-        if record is not None:
-            out.append(record)
-    out.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
-    return out
+def list_custom_strategies(db_path: Path, user_id: int) -> list[dict]:
+    """This user's saved custom strategies, newest-updated first. Strictly scoped to
+    ``user_id`` — the composite primary key guarantees no cross-user leakage."""
+    ensure_schema(db_path)
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM custom_strategies WHERE user_id = ? ORDER BY updated_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [_row_to_record(r) for r in rows]
 
 
-def get_custom_strategy(strategy_id: str) -> dict | None:
-    return _read(_path(strategy_id))
+def get_custom_strategy(db_path: Path, user_id: int, strategy_id: str) -> dict | None:
+    ensure_schema(db_path)
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM custom_strategies WHERE user_id = ? AND id = ?",
+            (user_id, strategy_id),
+        ).fetchone()
+    return _row_to_record(row) if row else None
 
 
-def _read(path: Path) -> dict | None:
-    if not path.is_file():
-        return None
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    if not isinstance(raw, dict) or "id" not in raw or "spec" not in raw:
-        return None
-    return raw
-
-
-def save_custom_strategy(spec: RuleStrategySpec, *, strategy_id: str | None = None) -> dict:
+def save_custom_strategy(
+    db_path: Path,
+    user_id: int,
+    spec: RuleStrategySpec,
+    *,
+    strategy_id: str | None = None,
+) -> dict:
     """Validate, persist, and (re-)register a user-built strategy. Returns its stored record.
 
-    If ``strategy_id`` is ``None`` a fresh id is derived from the strategy's name; otherwise
-    the existing record at that id is overwritten (edit-and-resave).
+    If ``strategy_id`` is ``None`` a fresh id is derived from the strategy's name (scoped to
+    this user — two users may each have a strategy slugging to ``ema_crossover``); otherwise
+    the existing record at that id is overwritten (edit-and-resave). Always scoped to
+    ``user_id``: a user can never overwrite or be blocked by another user's strategy id.
     """
     spec.validate()
     now = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
-    sid = strategy_id.strip() if strategy_id else _new_id(spec.name)
-    existing = get_custom_strategy(sid)
+    with _lock:
+        ensure_schema(db_path)
+        with _connect(db_path) as conn:
+            sid = strategy_id.strip() if strategy_id else _new_id(conn, user_id, spec.name)
+            existing = conn.execute(
+                "SELECT created_at FROM custom_strategies WHERE user_id = ? AND id = ?",
+                (user_id, sid),
+            ).fetchone()
+            created_at = existing["created_at"] if existing else now
+            conn.execute(
+                """
+                INSERT INTO custom_strategies (user_id, id, name, spec_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, id) DO UPDATE SET
+                    name = excluded.name,
+                    spec_json = excluded.spec_json,
+                    updated_at = excluded.updated_at
+                """,
+                (user_id, sid, spec.name, json.dumps(spec.to_dict()), created_at, now),
+            )
+            conn.commit()
+
     record = {
         "id": sid,
+        "user_id": user_id,
         "spec": spec.to_dict(),
-        "created_at": existing["created_at"] if existing else now,
+        "created_at": created_at,
         "updated_at": now,
     }
-
-    p = _path(sid)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-
-    register_or_replace(_descriptor_for(sid, spec))
+    register_or_replace(_descriptor_for(user_id, sid, spec))
     return record
 
 
-def delete_custom_strategy(strategy_id: str) -> bool:
-    p = _path(strategy_id)
-    if not p.is_file():
-        return False
-    p.unlink()
-    unregister(registry_key(strategy_id))
-    return True
+def delete_custom_strategy(db_path: Path, user_id: int, strategy_id: str) -> bool:
+    """Delete strictly within this user's scope — returns ``False`` for ids that exist but
+    belong to another user, exactly as if they didn't exist (no cross-user existence leak)."""
+    with _lock:
+        ensure_schema(db_path)
+        with _connect(db_path) as conn:
+            cur = conn.execute(
+                "DELETE FROM custom_strategies WHERE user_id = ? AND id = ?",
+                (user_id, strategy_id),
+            )
+            conn.commit()
+            removed = cur.rowcount > 0
+    if removed:
+        unregister(registry_key(user_id, strategy_id))
+    return removed
 
 
-def register_custom_strategies() -> int:
-    """Load every saved custom strategy from disk into the live registry.
+def register_custom_strategies(db_path: Path) -> int:
+    """Load every saved custom strategy — for every user — from the database into the live
+    in-process registry.
 
     Call once at process start (mirrors how the registry module self-populates its built-in
-    entries at import time) so user-built strategies survive a restart. Returns the count
-    registered; corrupt/invalid records are skipped rather than raising.
+    entries at import time) so user-built strategies survive a restart, and again whenever
+    the catalogue is listed or a custom strategy is assigned to an asset, so newly-saved
+    strategies are immediately runnable. Each is registered under its per-user-namespaced
+    key (``custom:u<user_id>:<id>``), so the shared registry never confuses two users'
+    strategies. Returns the count registered; corrupt/invalid records are skipped rather
+    than raising.
     """
+    ensure_schema(db_path)
+    with _connect(db_path) as conn:
+        rows = conn.execute("SELECT * FROM custom_strategies").fetchall()
     count = 0
-    for record in list_custom_strategies():
+    for row in rows:
         try:
-            spec = RuleStrategySpec.from_dict(record["spec"])
+            spec = RuleStrategySpec.from_dict(json.loads(row["spec_json"]))
             spec.validate()
-        except (RuleSpecError, KeyError, TypeError, ValueError):
+        except (RuleSpecError, KeyError, TypeError, ValueError, json.JSONDecodeError):
             continue
-        register_or_replace(_descriptor_for(record["id"], spec))
+        register_or_replace(_descriptor_for(row["user_id"], row["id"], spec))
         count += 1
     return count

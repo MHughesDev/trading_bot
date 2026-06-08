@@ -102,13 +102,17 @@ def _parse_line(line: str) -> TradeMarker | None:
 
 def iter_markers(
     *,
-    symbol: str,
+    symbol: str | None,
     start: datetime,
     end: datetime,
     path: Path | None = None,
 ) -> list[TradeMarker]:
-    """Markers with ``symbol`` matching and ``start <= ts < end`` (UTC)."""
-    sym = symbol.strip()
+    """Markers with ``start <= ts < end`` (UTC), optionally filtered to one ``symbol``.
+
+    ``symbol=None`` returns markers for every symbol — used for the account-wide
+    transaction log (``/account/transactions``).
+    """
+    sym = symbol.strip() if symbol is not None else None
     start = start.astimezone(UTC)
     end = end.astimezone(UTC)
     p = path or markers_path()
@@ -120,7 +124,7 @@ def iter_markers(
             m = _parse_line(line)
             if m is None:
                 continue
-            if m.symbol != sym:
+            if sym is not None and m.symbol != sym:
                 continue
             if m.ts < start or m.ts >= end:
                 continue

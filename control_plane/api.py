@@ -41,7 +41,13 @@ from app.contracts.asset_lifecycle import AssetLifecycleState
 from app.contracts.auth_login import AuthUserResponse, LoginRequest
 from app.contracts.manual_order import FlattenRequest, ManualOrderRequest, ManualOrderResponse
 from app.contracts.user_registration import RegisterRequest, RegisterResponse
-from app.contracts.user_venue_credentials import VenueCredentialsPut, VenueCredentialsResponse
+from app.contracts.user_venue_credentials import (
+    VenueCredentialsPut,
+    VenueCredentialsResponse,
+    VenueCredentialsVerifyRequest,
+    VenueCredentialsVerifyResponse,
+    VenueVerifyResult,
+)
 from app.runtime.asset_execution_mode import (
     delete_mode_override,
     list_mode_overrides,
@@ -73,6 +79,7 @@ from app.runtime import operator_sessions as operator_sessions_mod
 from app.runtime import tenant_context as tenant_ctx
 from app.runtime import user_store as user_store_mod
 from app.runtime import user_venue_credentials as user_venue_credentials_mod
+from app.runtime import venue_credentials_verify as venue_credentials_verify_mod
 from app.runtime.auth_venue_status import venue_keys_status_for_user
 from app.runtime.execution_settings_merge import merge_settings_for_execution
 from app.runtime.user_store import UserRecord
@@ -259,7 +266,7 @@ async def _lifespan(app: FastAPI):
             "Set NM_CONTROL_PLANE_API_KEY, enable NM_AUTH_SESSION_ENABLED, or bind loopback-only.",
             settings.control_plane_host,
         )
-    register_custom_strategies()
+    register_custom_strategies(settings.auth_users_db_path)
     # Nightly training scheduler intentionally NOT started — training is decoupled (FB-AP-XXX).
     start_alpaca_universe_scheduler(settings)
     start_coinbase_universe_scheduler(settings)
@@ -294,6 +301,13 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
 app = FastAPI(title="Trading Bot Control Plane", version="0.1.0", lifespan=_lifespan)
 app.add_middleware(TenantContextMiddleware)
 app.add_middleware(ControlPlaneRateLimitMiddleware)
+
+# Serve the React control plane UI (built via `npm run build` in frontend/).
+_FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+_STRATEGY_UI_DIST = os.path.join(os.path.dirname(__file__), "..", "strategy_ui", "dist")
+if os.path.isdir(_STRATEGY_UI_DIST):
+    from fastapi.staticfiles import StaticFiles as _StaticFiles
+    app.mount("/strategy-builder-legacy", _StaticFiles(directory=_STRATEGY_UI_DIST, html=True), name="strategy-builder-legacy")
 # FB-AP-034: browser EventSource (Streamlit on another origin) needs CORS on SSE + JSON
 _cors_origins = _cors_allow_origins_list(settings)
 app.add_middleware(
@@ -656,6 +670,87 @@ def get_venue_credentials(user: Annotated[UserRecord, Depends(require_user)]) ->
     return VenueCredentialsResponse(**data)
 
 
+@app.post("/auth/venue-credentials/verify", response_model=VenueCredentialsVerifyResponse)
+async def post_verify_venue_credentials(
+    body: VenueCredentialsVerifyRequest,
+    user: Annotated[UserRecord, Depends(require_user)],
+) -> VenueCredentialsVerifyResponse:
+    """Live-ping each venue with the entered key+secret before anything is saved (FB-UX-006 hardening).
+
+    Edited fields are merged with the user's existing decrypted credentials so a
+    *partial* edit — e.g. typing a new (possibly bad) API key while leaving the
+    secret field blank/"keep existing" — still gets fully live-verified against
+    the real paired value, instead of silently skipping the check. A venue is
+    only checked when it ends up with a complete key+secret pair *and* at least
+    one of those fields was actually edited in this request (so we never run a
+    network call — or attribute an error — for a venue the user didn't touch).
+
+    All venues funnel through the single `venue_credentials_verify_mod.verify_venues`
+    handler, which is registry-driven (`VENUE_REGISTRY`) so that future venues only
+    need a `verify_<venue>` coroutine and a registry entry — no endpoint changes.
+    This is the hard gate that guarantees nothing can be saved or shown as
+    "Connected" without having passed a live credential check first.
+    """
+    master = _venue_credentials_master_secret_value()
+    if not master:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Per-user venue credentials are not configured (set NM_AUTH_VENUE_CREDENTIALS_MASTER_SECRET)",
+        )
+
+    def _nz(v: str | None) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
+
+    fresh = {
+        "alpaca_api_key": _nz(body.alpaca_api_key),
+        "alpaca_api_secret": _nz(body.alpaca_api_secret),
+        "coinbase_api_key": _nz(body.coinbase_api_key),
+        "coinbase_api_secret": _nz(body.coinbase_api_secret),
+    }
+    edited_fields = {field for field, val in fresh.items() if val is not None}
+
+    stored = user_venue_credentials_mod.load_decrypted_credentials(settings.auth_users_db_path, master, user.id)
+
+    to_verify: dict[str, tuple[str, str]] = {}
+    edited_by_venue: dict[str, set[str]] = {}
+    for spec in venue_credentials_verify_mod.VENUE_REGISTRY:
+        key = fresh[spec.key_field] if fresh[spec.key_field] is not None else _nz(stored.get(spec.key_field))
+        secret = fresh[spec.secret_field] if fresh[spec.secret_field] is not None else _nz(stored.get(spec.secret_field))
+        edited = {f for f in (spec.key_field, spec.secret_field) if f in edited_fields}
+        if key and secret and edited:
+            to_verify[spec.name] = (key, secret)
+            edited_by_venue[spec.name] = edited
+
+    raw_results = await venue_credentials_verify_mod.verify_venues(to_verify)
+
+    def _to_contract(venue_name: str, r: "venue_credentials_verify_mod.VerifyResult") -> VenueVerifyResult:
+        spec = venue_credentials_verify_mod.VENUE_SPECS_BY_NAME[venue_name]
+        edited = edited_by_venue.get(venue_name, set())
+        key_error = r.key_error
+        secret_error = r.secret_error
+        generic_error = r.error
+        # A generic (non-attributed) error can only fairly be pinned on a field the
+        # user actually edited this round — never blame an untouched stored value.
+        if generic_error and not key_error and not secret_error:
+            if spec.key_field in edited and spec.secret_field in edited:
+                key_error = generic_error
+                secret_error = generic_error
+                generic_error = None
+            elif spec.key_field in edited:
+                key_error = generic_error
+                generic_error = None
+            elif spec.secret_field in edited:
+                secret_error = generic_error
+                generic_error = None
+        return VenueVerifyResult(ok=r.ok, key_error=key_error, secret_error=secret_error, error=generic_error)
+
+    results = {name: _to_contract(name, r) for name, r in raw_results.items()}
+    return VenueCredentialsVerifyResponse(alpaca=results.get("alpaca"), coinbase=results.get("coinbase"))
+
+
 @app.put("/auth/venue-credentials", response_model=VenueCredentialsResponse)
 def put_venue_credentials(
     body: VenueCredentialsPut,
@@ -789,6 +884,42 @@ async def get_portfolio_positions() -> dict[str, Any]:
 async def get_positions_alias() -> dict[str, Any]:
     """Alias for ``/portfolio/positions`` (FB-UX-018 sidebar holdings)."""
     return await get_portfolio_positions()
+
+
+@app.get("/account/transactions")
+def get_account_transactions(
+    start: Annotated[datetime | None, Query(description="Range start (UTC ISO-8601); default = all time")] = None,
+    end: Annotated[datetime | None, Query(description="Range end (UTC ISO-8601); default = now")] = None,
+    symbol: Annotated[str | None, Query(min_length=1, description="Filter to one canonical symbol (e.g. BTC-USD)")] = None,
+    limit: Annotated[int, Query(ge=1, le=10_000, description="Max transactions returned, newest first")] = 500,
+) -> dict[str, Any]:
+    """Account-wide buy/sell transaction log from append-only ``data/trade_markers.jsonl``.
+
+    Same source as the per-asset chart markers (FB-AP-025), but spanning every symbol the
+    account has traded — used by the frontend Transactions page.
+    """
+    e = end.astimezone(UTC) if end and end.tzinfo else (end.replace(tzinfo=UTC) if end else datetime.now(tz=UTC))
+    s = start.astimezone(UTC) if start and start.tzinfo else (start.replace(tzinfo=UTC) if start else datetime(1970, 1, 1, tzinfo=UTC))
+    if s >= e:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start must be before end",
+        )
+    sym = symbol.strip() if symbol else None
+    rows = iter_markers(symbol=sym, start=s, end=e)
+    rows.sort(key=lambda m: m.ts, reverse=True)
+    lim = min(int(limit), 10_000)
+    if len(rows) > lim:
+        rows = rows[:lim]
+    return {
+        "start": s.isoformat(),
+        "end": e.isoformat(),
+        "symbol": sym,
+        "limit": lim,
+        "count": len(rows),
+        "source": "trade_markers_jsonl",
+        "transactions": [marker_to_api_dict(m) for m in rows],
+    }
 
 
 @app.get("/pnl/summary")
@@ -1271,11 +1402,15 @@ def remove_asset_model_manifest(
     return {"ok": True, "symbol": symbol.strip()}
 
 
+class AssetInitRequest(BaseModel):
+    lookback_days: int | None = None
+
+
 @app.post("/assets/init/{symbol}")
-def post_asset_init(request: Request, symbol: str) -> dict[str, Any]:
+def post_asset_init(request: Request, symbol: str, body: AssetInitRequest = AssetInitRequest()) -> dict[str, Any]:
     """
-    Start per-asset initialization (FB-AP-006): Kraken REST bootstrap, validate, enrich features
-    (FB-AP-009 writes Parquet under ``data/asset_init``). One global runner — 409 if busy.
+    Start per-asset initialization: Kraken REST bootstrap → validate → seed QuestDB.
+    One global runner — 409 if busy. Optional ``lookback_days`` overrides the default.
     """
     sym = symbol.strip()
     uid: int | None = None
@@ -1289,13 +1424,14 @@ def post_asset_init(request: Request, symbol: str) -> dict[str, Any]:
                     idle_timeout_seconds=settings.auth_idle_timeout_seconds,
                     touch=True,
                 )
-    job_id = try_start_asset_init_job(sym, user_id=uid)
+    lookback = max(1, int(body.lookback_days)) if body.lookback_days is not None else None
+    job_id = try_start_asset_init_job(sym, user_id=uid, lookback_days=lookback)
     if job_id is None:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="asset init pipeline already running",
         )
-    return {"job_id": job_id, "symbol": sym}
+    return {"job_id": job_id, "symbol": sym, "lookback_days": lookback}
 
 
 @app.get("/assets/init/jobs/{job_id}")
@@ -1388,7 +1524,7 @@ def put_asset_strategy(
     sym = symbol.strip()
     key = body.get("strategy_key")
     if isinstance(key, str) and key.startswith("custom:"):
-        register_custom_strategies()
+        register_custom_strategies(settings.auth_users_db_path)
     if not isinstance(key, str) or not key.strip():
         raise HTTPException(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1623,7 +1759,7 @@ def get_strategies() -> dict[str, Any]:
     Import-free: works whether or not the ``backtest_nautilus`` extra is installed.
     Includes the user's custom (builder-created) strategies alongside the built-ins.
     """
-    register_custom_strategies()
+    register_custom_strategies(settings.auth_users_db_path)
     return list_strategies_payload()
 
 
@@ -1631,7 +1767,7 @@ def _custom_strategy_to_api_dict(record: dict[str, Any]) -> dict[str, Any]:
     spec = RuleStrategySpec.from_dict(record["spec"])
     return {
         "id": record["id"],
-        "registry_key": custom_strategy_registry_key(record["id"]),
+        "registry_key": custom_strategy_registry_key(record["user_id"], record["id"]),
         "name": spec.name,
         "spec": record["spec"],
         "explanation": spec.explain(),
@@ -1674,28 +1810,37 @@ def post_custom_strategy_preview(body: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/strategies/custom")
-def get_custom_strategies() -> dict[str, Any]:
-    """List the current user's saved custom (builder-created) strategies (FB-AP-XXX)."""
-    register_custom_strategies()
-    records = list_custom_strategies()
+def get_custom_strategies(user: Annotated[UserRecord, Depends(require_user)]) -> dict[str, Any]:
+    """List the current user's saved custom (builder-created) strategies (FB-AP-XXX).
+
+    Strategy specs are user data — owned by one account, stored as rows in the operator
+    database keyed by ``user_id`` (see :mod:`strategies.custom_strategy_store`), not as
+    files on disk. This route is therefore user-bound (session auth), not API-key
+    automation: there is no "the" custom strategy catalogue, only "yours".
+    """
+    register_custom_strategies(settings.auth_users_db_path)
+    records = list_custom_strategies(settings.auth_users_db_path, user.id)
     return {"count": len(records), "strategies": [_custom_strategy_to_api_dict(r) for r in records]}
 
 
 @app.post("/strategies/custom")
 def post_custom_strategy(
     body: dict[str, Any],
-    _: Annotated[None, Depends(require_mutate_operator)],
+    user: Annotated[UserRecord, Depends(require_user)],
 ) -> dict[str, Any]:
     """Create a new custom strategy from a builder spec; registers it for backtest/live use."""
     spec = _spec_from_body(body)
-    record = save_custom_strategy(spec)
+    record = save_custom_strategy(settings.auth_users_db_path, user.id, spec)
     return _custom_strategy_to_api_dict(record)
 
 
 @app.get("/strategies/custom/{strategy_id}")
-def get_custom_strategy_route(strategy_id: str) -> dict[str, Any]:
-    register_custom_strategies()
-    record = get_custom_strategy(strategy_id)
+def get_custom_strategy_route(
+    strategy_id: str,
+    user: Annotated[UserRecord, Depends(require_user)],
+) -> dict[str, Any]:
+    register_custom_strategies(settings.auth_users_db_path)
+    record = get_custom_strategy(settings.auth_users_db_path, user.id, strategy_id)
     if record is None:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown custom strategy id")
     return _custom_strategy_to_api_dict(record)
@@ -1705,22 +1850,22 @@ def get_custom_strategy_route(strategy_id: str) -> dict[str, Any]:
 def put_custom_strategy(
     strategy_id: str,
     body: dict[str, Any],
-    _: Annotated[None, Depends(require_mutate_operator)],
+    user: Annotated[UserRecord, Depends(require_user)],
 ) -> dict[str, Any]:
     """Edit and re-save an existing custom strategy (re-registers it under the same id)."""
-    if get_custom_strategy(strategy_id) is None:
+    if get_custom_strategy(settings.auth_users_db_path, user.id, strategy_id) is None:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown custom strategy id")
     spec = _spec_from_body(body)
-    record = save_custom_strategy(spec, strategy_id=strategy_id)
+    record = save_custom_strategy(settings.auth_users_db_path, user.id, spec, strategy_id=strategy_id)
     return _custom_strategy_to_api_dict(record)
 
 
 @app.delete("/strategies/custom/{strategy_id}")
 def delete_custom_strategy_route(
     strategy_id: str,
-    _: Annotated[None, Depends(require_mutate_operator)],
+    user: Annotated[UserRecord, Depends(require_user)],
 ) -> dict[str, Any]:
-    ok = delete_custom_strategy(strategy_id)
+    ok = delete_custom_strategy(settings.auth_users_db_path, user.id, strategy_id)
     if not ok:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="unknown custom strategy id")
     return {"ok": True, "id": strategy_id}
@@ -1740,7 +1885,7 @@ async def post_asset_backtest(
     """
     sym = symbol.strip()
     if body.strategy_key.startswith("custom:"):
-        register_custom_strategies()
+        register_custom_strategies(settings.auth_users_db_path)
     try:
         return await run_symbol_backtest(
             settings,
@@ -1863,3 +2008,25 @@ def post_trade_flatten(
     exec_svc = ExecutionService(eff)
     report = flatten_symbol_position_sync(eff, sym, execution_service=exec_svc)
     return {"symbol": sym, "flatten": report}
+
+
+# ── React frontend static serving ─────────────────────────────────────────────
+# Must come LAST — after all API routes — so API routes take precedence.
+# Strategy: mount /assets as plain static (Vite hashed bundles), then a
+# catch-all GET route serves index.html for every other path (React Router).
+if os.path.isdir(_FRONTEND_DIST):
+    import mimetypes as _mimetypes
+    from fastapi.responses import FileResponse as _FileResponse
+    from fastapi.staticfiles import StaticFiles as _FrontendStaticFiles
+
+    _assets_dir = os.path.join(_FRONTEND_DIST, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", _FrontendStaticFiles(directory=_assets_dir), name="frontend-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str) -> _FileResponse:
+        # Serve real files that exist in dist/ (e.g. favicon.ico, manifest.json)
+        candidate = os.path.join(_FRONTEND_DIST, full_path)
+        if full_path and os.path.isfile(candidate):
+            return _FileResponse(candidate)
+        return _FileResponse(os.path.join(_FRONTEND_DIST, "index.html"))

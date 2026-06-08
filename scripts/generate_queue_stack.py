@@ -2220,6 +2220,585 @@ ROWS: list[dict[str, str]] = [
         "audit_id": "CANONICAL-ACCEPTANCE-AUDIT",
         "anchor": "#27-canonical-replacement-program-fb-can",
     },
+    # ── Next-phase open work ─────────────────────────────────────────────────
+    # Batch FCST: forecaster training loop (Phase F from forecaster memory)
+    {
+        "priority": "HIGH",
+        "phase": "A",
+        "batch": "FCST",
+        "id": "FB-FCST-001",
+        "kind": "feature",
+        "status": "Open",
+        "summary_one_line": "Run forecaster training campaign and wire quantile artifact into live serving",
+        "agent_task": (
+            "Goal: Close Phase F of the forecaster roadmap. The quantile forecaster "
+            "serving path (FB-SPEC-02) is already wired in decision_engine/pipeline.py "
+            "(_load_quantile_forecaster_if_configured) and forecaster_model/inference/"
+            "quantile_infer.py. The artifact producer is "
+            "orchestration/training_campaign.py → forecaster_model/training/real_data_fit.py. "
+            "What is missing is actually running the training and pointing the env var at the "
+            "resulting artifact so live ticks use the real quantile model instead of the "
+            "NPZ/RNG fallback. "
+            "Acceptance criteria: "
+            "(1) From repo root, run: python orchestration/training_campaign.py "
+            "--symbol BTC/USD --interval 1h --lookback_days 30 "
+            "The script must complete without error and write a .joblib artifact to "
+            "models/ (or the configured path). Log the artifact path. "
+            "(2) Set NM_MODELS_FORECASTER_QUANTILE_PATH in .env.example (and document "
+            "in README.md §Configuration) pointing to the artifact. "
+            "(3) Confirm that on next live tick the pipeline logs 'Loaded quantile "
+            "forecaster from <path>' (or equivalent) rather than falling back to NPZ/RNG. "
+            "Add a smoke test: tests/test_forecaster_live_serving.py that loads the artifact "
+            "via _load_quantile_forecaster_if_configured and asserts it returns a "
+            "QuantileForecasterArtifact, not None. "
+            "(4) Update docs/reports/IMPLEMENTATION_SUMMARY_2026-06-02.md to mark Phase F "
+            "as DONE and record the artifact path convention and Kraken candle caveat "
+            "(720 candles max per interval; use 1h/30d or 4h/120d, not 1m/120d). "
+            "(5) Update AGENTS.md §Repository map if forecaster_model/ row description "
+            "needs updating. "
+            "Constraints: Kraken public /public/OHLC serves ~720 most-recent candles per "
+            "interval; do not attempt 1m granularity for 120d lookback. Use 1h bars / 30d "
+            "as the first training run. Do not auto-promote; operator sets the env var "
+            "manually after reviewing the artifact."
+        ),
+        "affected_files": (
+            "orchestration/training_campaign.py|"
+            "forecaster_model/training/real_data_fit.py|"
+            "forecaster_model/inference/quantile_infer.py|"
+            "decision_engine/pipeline.py|"
+            ".env.example|"
+            "README.md|"
+            "tests/test_forecaster_live_serving.py|"
+            "docs/reports/IMPLEMENTATION_SUMMARY_2026-06-02.md"
+        ),
+        "docs_refs": (
+            "docs/Human Provided Specs/new_specs/canonical/"
+            "APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md"
+        ),
+        "audit_id": "FCST-PHASE-F",
+        "anchor": "",
+    },
+    {
+        "priority": "MEDIUM",
+        "phase": "A",
+        "batch": "FCST",
+        "id": "FB-FCST-002",
+        "kind": "feature",
+        "status": "Open",
+        "summary_one_line": "Backtest with trained quantile forecaster: measure PnL/Sharpe/pinball vs. baseline",
+        "agent_task": (
+            "Goal: Run backtesting/replay.py with the trained quantile artifact from "
+            "FB-FCST-001 and produce a structured comparison against the NPZ/RNG baseline. "
+            "Acceptance criteria: "
+            "(1) Run a replay over at least 7 days of 1h Kraken bars for BTC/USD using "
+            "both: (a) NM_MODELS_FORECASTER_QUANTILE_PATH unset (RNG baseline) and "
+            "(b) NM_MODELS_FORECASTER_QUANTILE_PATH pointing to the trained artifact. "
+            "Record realized PnL, Sharpe ratio, and pinball loss (10th/50th/90th quantile) "
+            "for each run. "
+            "(2) Write results to docs/reports/BACKTEST_FCST_001.md using the template in "
+            "docs/reports/AUDIT_REPORT_TEMPLATE.md with a table comparing baseline vs. "
+            "quantile across: total_pnl, sharpe, win_rate, avg_pinball_10, avg_pinball_50, "
+            "avg_pinball_90, trigger_rate, and num_trades. "
+            "(3) If pinball loss is worse than baseline under quantile, document the "
+            "likely cause (cold-start synthetic bars, insufficient training data) and "
+            "add a note to the deferred_roadmap.md on what training data improvement is "
+            "needed before re-running. "
+            "(4) Add or extend tests/test_replay_quantile_vs_baseline.py to assert the "
+            "replay completes without error and emits decision records with the "
+            "forecaster_mode field set to 'quantile' (not 'rng'). "
+            "Constraints: depends on FB-FCST-001 artifact existing. Do not run live "
+            "orders during this task — paper/replay only. Log all runs with their "
+            "config_version so results are reproducible."
+        ),
+        "affected_files": (
+            "backtesting/replay.py|"
+            "backtesting/replay_core.py|"
+            "decision_engine/pipeline.py|"
+            "docs/reports/BACKTEST_FCST_001.md|"
+            "tests/test_replay_quantile_vs_baseline.py"
+        ),
+        "docs_refs": (
+            "docs/Human Provided Specs/new_specs/canonical/"
+            "APEX_Replay_and_Simulation_Interface_Spec_v1_0.md|"
+            "docs/reports/IMPLEMENTATION_SUMMARY_2026-06-02.md"
+        ),
+        "audit_id": "FCST-BACKTEST-001",
+        "anchor": "",
+    },
+    # Batch REACT-UI: React frontend completions
+    {
+        "priority": "HIGH",
+        "phase": "B",
+        "batch": "REACT-UI",
+        "id": "FB-RX-001",
+        "kind": "feature",
+        "status": "Open",
+        "summary_one_line": "React monitoring page: regime/heat/degradation/trigger state/decision audit dashboard",
+        "agent_task": (
+            "Goal: Add a /monitoring route to the React SPA that surfaces the canonical "
+            "system health data operators need to diagnose live behavior. The backend "
+            "already exposes governance/monitoring, /status (with symbols.*.lifecycle + "
+            "decision diagnostics), and Prometheus metrics. The React UI has no page that "
+            "shows regime state, heat scores, degradation level, trigger stage outcomes, "
+            "or suppression reasons. "
+            "Acceptance criteria: "
+            "(1) Add frontend/src/pages/MonitoringPage.tsx. Register route /monitoring "
+            "in App.tsx and add 'Monitoring' link to Sidebar.tsx (below Dashboard). "
+            "(2) Page layout — four collapsible card sections: "
+            "SYSTEM STATE: regime class (5-class vector with mini bar chart of "
+            "probabilities), degradation level badge (NORMAL/DEFENSIVE/REDUCED/NO_TRADE "
+            "in matching colors), session_mode, heat score, novelty score, reflexivity "
+            "score — all from GET /status or a new GET /governance/monitoring endpoint. "
+            "TRIGGER AUDIT: last 20 decision records from GET /governance/decision-record "
+            "displayed as a compact table: timestamp | symbol | trigger_fired | "
+            "trigger_type | setup_score | suppression_reason_codes. Clicking a row "
+            "expands inline JSON for the full record. "
+            "RISK BLOCKS: breakdown of tb_risk_blocks_total by gate name, rendered as "
+            "a horizontal bar chart (relative frequency). Data from GET /governance/"
+            "monitoring or Prometheus text scraped via a new GET /metrics/summary "
+            "FastAPI endpoint that parses Prometheus output and returns JSON "
+            "{metric_name: value}. "
+            "DATA HEALTH: data_integrity_alert flag, last bar timestamp per active "
+            "symbol, watermark age in seconds — all from GET /status. "
+            "(3) All numeric values use font-mono. Regime probabilities use the "
+            "existing gain/loss color palette. Degradation uses: NORMAL=text-pnl-up, "
+            "DEFENSIVE=amber, REDUCED=text-pnl-down, NO_TRADE=red with opacity fill. "
+            "(4) Add GET /metrics/summary to control_plane/api.py: parse "
+            "prometheus_client output and return a flat JSON dict of the tb_canonical_* "
+            "family. Require API key auth same as other protected routes. "
+            "(5) Add to frontend/src/lib/api.ts: monitoringApi.summary() and "
+            "monitoringApi.decisionRecords(limit). "
+            "(6) Auto-refresh every 10 seconds via TanStack Query refetchInterval. "
+            "Constraints: do not change existing contract schemas; read-only page. "
+            "Keep the page useful when monitoring returns partial data (empty states "
+            "for each section independently)."
+        ),
+        "affected_files": (
+            "frontend/src/pages/MonitoringPage.tsx|"
+            "frontend/src/App.tsx|"
+            "frontend/src/components/layout/Sidebar.tsx|"
+            "frontend/src/lib/api.ts|"
+            "control_plane/api.py"
+        ),
+        "docs_refs": (
+            "docs/Human Provided Specs/new_specs/canonical/"
+            "APEX_Monitoring_and_Alerting_Spec_v1_0.md|"
+            "docs/Human Provided Specs/new_specs/canonical/"
+            "APEX_State_Regime_Logic_Detail_Spec_v1_0.md"
+        ),
+        "audit_id": "RX-MONITORING-001",
+        "anchor": "",
+    },
+    {
+        "priority": "HIGH",
+        "phase": "B",
+        "batch": "REACT-UI",
+        "id": "FB-RX-002",
+        "kind": "feature",
+        "status": "Open",
+        "summary_one_line": "Wire SSE real-time bar stream to AssetPage OhlcvChart for live price updates",
+        "agent_task": (
+            "Goal: The backend already exposes GET /assets/chart/stream as a "
+            "Server-Sent Events endpoint that pushes new OHLCV bars as they complete. "
+            "The React AssetPage currently polls GET /assets/chart/bars on interval but "
+            "does not subscribe to the SSE stream, so the chart lags by up to the poll "
+            "interval and does not show the live (incomplete) bar. "
+            "Acceptance criteria: "
+            "(1) In frontend/src/pages/AssetPage.tsx, replace the polling query for bars "
+            "with a dual approach: initial fetch via existing GET /assets/chart/bars for "
+            "the history, then subscribe to GET /assets/chart/stream?symbol=X&interval=Y "
+            "using the browser EventSource API. On each SSE message append or update the "
+            "last bar in the OhlcvChart data array without re-fetching the full history. "
+            "(2) Add frontend/src/hooks/useBarStream.ts: a custom hook that wraps "
+            "EventSource, handles auth (pass NM_CONTROL_PLANE_API_KEY as a query param "
+            "or use the session cookie — match whatever the backend /stream endpoint "
+            "requires), reconnects on close, and returns { bars, isConnected, error }. "
+            "(3) Update frontend/src/components/charts/OhlcvChart.tsx: accept an "
+            "optional isLive prop; when true, show a small green dot indicator labeled "
+            "'LIVE' in the top-right of the chart. "
+            "(4) Show a 'Connecting...' state while EventSource is not yet OPEN. "
+            "Show a yellow 'Reconnecting' badge if the connection drops and the hook "
+            "is retrying (use exponential backoff: 1s, 2s, 4s, max 30s). "
+            "(5) Verify the backend /assets/chart/stream endpoint sends the correct "
+            "CORS headers for the dev proxy (npm run dev → vite proxy → :8001). If "
+            "CORS headers are missing, add them in control_plane/api.py StreamingResponse "
+            "for that route. "
+            "(6) Fallback: if EventSource is not supported or stream errors after 3 "
+            "retries, fall back to polling at 5s intervals and show a 'Polling (no SSE)' "
+            "indicator. "
+            "Constraints: do not break the existing static bars fetch path used by "
+            "Monitoring. Auth must work in both dev (proxy) and production (direct API). "
+            "The hook must clean up EventSource on component unmount."
+        ),
+        "affected_files": (
+            "frontend/src/pages/AssetPage.tsx|"
+            "frontend/src/hooks/useBarStream.ts|"
+            "frontend/src/components/charts/OhlcvChart.tsx|"
+            "control_plane/api.py"
+        ),
+        "docs_refs": "docs/RUNBOOKS.MD",
+        "audit_id": "RX-SSE-001",
+        "anchor": "",
+    },
+    {
+        "priority": "MEDIUM",
+        "phase": "B",
+        "batch": "REACT-UI",
+        "id": "FB-RX-003",
+        "kind": "feature",
+        "status": "Open",
+        "summary_one_line": "React execution quality dashboard: slippage, fill ratio, venue health per symbol",
+        "agent_task": (
+            "Goal: Operators have no way to see execution quality — slippage vs. mid, "
+            "fill ratio, fill latency, or venue degradation — in the React UI. The "
+            "canonical execution feedback memory exists in the backend "
+            "(execution/execution_feedback.py and related) but is not surfaced. "
+            "Acceptance criteria: "
+            "(1) Add an 'Execution Quality' card to the AssetPage (below the manual "
+            "trade form, above any debug section). The card shows for the selected symbol: "
+            "avg_slippage_bps (last 20 fills), fill_rate_pct (filled_qty/attempted_qty), "
+            "avg_fill_latency_ms, and venue_degradation_score (0.0–1.0). Empty state: "
+            "'No fills recorded yet.' "
+            "(2) Add GET /assets/execution-quality/{symbol} to control_plane/api.py "
+            "that reads from the execution feedback memory for that symbol and returns: "
+            "{ symbol, fill_count, avg_slippage_bps, fill_rate_pct, "
+            "avg_fill_latency_ms, venue_degradation_score, last_fill_at }. "
+            "Source: query execution feedback store "
+            "(data_plane/memory/ or wherever execution_feedback_event records are "
+            "persisted — check live_service.py and execution/service.py for where "
+            "feedback is written). If no store exists yet, read from the PnL ledger "
+            "as a fallback (execution/pnl_ledger.py) and compute slippage from "
+            "fill_price vs. mid_price fields. "
+            "(3) Add a new Dashboard card 'Execution Health' showing aggregated "
+            "avg_slippage_bps and fill_rate_pct across all active symbols, pulling from "
+            "the same endpoint for each. "
+            "(4) Add executionApi.quality(symbol) to frontend/src/lib/api.ts. "
+            "(5) Write tests/test_execution_quality_endpoint.py: assert the endpoint "
+            "returns the expected shape with fill_count=0 when no fills exist. "
+            "Constraints: read-only; do not change execution paths. If the feedback "
+            "store is not yet persisted to disk/DB, implement in-memory accumulation "
+            "in live_service.py as a deque(maxlen=100) per symbol and expose it."
+        ),
+        "affected_files": (
+            "frontend/src/pages/AssetPage.tsx|"
+            "frontend/src/pages/DashboardPage.tsx|"
+            "frontend/src/lib/api.ts|"
+            "control_plane/api.py|"
+            "app/runtime/live_service.py|"
+            "execution/service.py|"
+            "tests/test_execution_quality_endpoint.py"
+        ),
+        "docs_refs": (
+            "docs/Human Provided Specs/new_specs/canonical/"
+            "APEX_Execution_Logic_Detail_Spec_v1_0.md"
+        ),
+        "audit_id": "RX-EXEC-QUALITY-001",
+        "anchor": "",
+    },
+    {
+        "priority": "MEDIUM",
+        "phase": "B",
+        "batch": "REACT-UI",
+        "id": "FB-RX-004",
+        "kind": "feature",
+        "status": "Open",
+        "summary_one_line": "React governance page: release evidence, config diff audit, rollback playbook viewer",
+        "agent_task": (
+            "Goal: The backend already has a full governance suite "
+            "(/governance/release-evidence, /governance/config-diff-audit, "
+            "/governance/rollback-playbook, /governance/probation-status, "
+            "/governance/shadow-comparison, /governance/experiments) but none of it "
+            "is exposed in the React SPA. Operators need to inspect release history "
+            "and understand system governance state. "
+            "Acceptance criteria: "
+            "(1) Add frontend/src/pages/GovernancePage.tsx and register at /governance "
+            "in App.tsx. Add 'Governance' link to Sidebar.tsx (below Monitoring). "
+            "(2) Page layout — tabbed interface with four tabs: "
+            "RELEASES: table of release evidence records from GET /governance/release-evidence "
+            "(columns: id, type, owner, created_at, environment, status). Clicking a row "
+            "expands a panel with evidence JSON, rollback_target, and a 'View Rollback "
+            "Playbook' link that fetches GET /governance/rollback-playbook?release_id=X. "
+            "CONFIG DIFF: list from GET /governance/config-diff-audit; each row shows "
+            "config_version, changed_at, changed_by, diff_summary. Clicking expands "
+            "full diff rendered as a two-column before/after code block in font-mono. "
+            "SHADOW: latest GET /governance/shadow-comparison result — divergence score, "
+            "probation_window_remaining, comparison_timestamp, and a 'Run New Comparison' "
+            "button that POSTs to /governance/shadow-comparison/run (confirm dialog first). "
+            "EXPERIMENTS: paginated table from GET /governance/experiments — "
+            "id, hypothesis, status, created_at. Clicking shows full experiment record "
+            "with metrics, failure_modes, replay_references. "
+            "(3) Add governanceApi.* methods to frontend/src/lib/api.ts for all four "
+            "endpoint groups. "
+            "(4) All tables use font-mono for IDs and timestamps. Empty states show "
+            "a single line of text-muted with a description of what this tab tracks. "
+            "(5) The 'Run New Comparison' action shows a loading spinner and then "
+            "refreshes the Shadow tab data on completion. "
+            "Constraints: read-mostly page. Only the 'Run Comparison' action is "
+            "mutating. Require the API key header for all governance endpoints "
+            "consistent with existing auth. Do not expose rollback execution in the UI "
+            "— show the playbook text only."
+        ),
+        "affected_files": (
+            "frontend/src/pages/GovernancePage.tsx|"
+            "frontend/src/App.tsx|"
+            "frontend/src/components/layout/Sidebar.tsx|"
+            "frontend/src/lib/api.ts"
+        ),
+        "docs_refs": (
+            "docs/Human Provided Specs/new_specs/canonical/"
+            "APEX_Config_Management_and_Release_Gating_Spec_v1_0.md|"
+            "docs/Human Provided Specs/new_specs/canonical/"
+            "APEX_Research_Experiment_Registry_Spec_v1_0.md"
+        ),
+        "audit_id": "RX-GOVERNANCE-001",
+        "anchor": "",
+    },
+    {
+        "priority": "LOW",
+        "phase": "B",
+        "batch": "REACT-UI",
+        "id": "FB-RX-005",
+        "kind": "feature",
+        "status": "Open",
+        "summary_one_line": "React alert inbox: monitoring alerts list with acknowledge/dismiss workflow",
+        "agent_task": (
+            "Goal: The canonical monitoring spec (APEX_Monitoring_and_Alerting_Spec_v1_0.md) "
+            "defines alert policies across 7+ domains (data, state/safety, trigger, "
+            "decision, risk, execution, governance). Currently no alerts are surfaced to "
+            "the operator. Add a lightweight alert inbox to the React SPA. "
+            "Acceptance criteria: "
+            "(1) Add GET /alerts endpoint to control_plane/api.py. The endpoint should "
+            "query active alert conditions from Prometheus (scrape the /metrics text "
+            "endpoint internally and evaluate threshold rules) and return a list of: "
+            "{ id, domain, severity (info|warning|critical), title, detail, fired_at, "
+            "acknowledged_at | null }. "
+            "Start with these threshold rules hardcoded in the endpoint "
+            "(make them configurable later via settings): "
+            "- heat_score > 0.75 → warning 'High heat score' "
+            "- degradation_level in [REDUCED, NO_TRADE] → critical 'Degradation active' "
+            "- data_integrity_alert = true → critical 'Data integrity alert' "
+            "- fill_rate < 0.85 → warning 'Low fill rate' "
+            "- risk_block_count (last 10 min) > 10 → info 'Frequent risk blocks' "
+            "Persist acknowledged state in a simple SQLite table alerts_ack in the "
+            "same DB used by operator_sessions "
+            "(app/runtime/operator_sessions.py pattern). "
+            "(2) Add POST /alerts/{id}/acknowledge to mark an alert acknowledged "
+            "(requires session auth). "
+            "(3) Add frontend/src/pages/AlertsPage.tsx and register at /alerts in "
+            "App.tsx. Add to Sidebar with a badge showing unacknowledged count "
+            "(update via 30s polling). "
+            "(4) Alert list: each row shows severity icon (colored dot), title, domain "
+            "chip, fired_at (relative time), and an 'Ack' button that calls the "
+            "acknowledge endpoint and removes the row from the active list. "
+            "Critical alerts use loss-red left border; warnings use amber; info uses "
+            "neutral border. "
+            "(5) Add alertsApi.list() and alertsApi.acknowledge(id) to api.ts. "
+            "(6) Write tests/test_alerts_endpoint.py: assert GET /alerts returns "
+            "the expected shape; assert POST /alerts/{id}/acknowledge marks it. "
+            "Constraints: the alert evaluation logic should be simple threshold checks "
+            "initially — do not build a full alertmanager integration. The acknowledged "
+            "state resets when the underlying metric clears (re-fire on next poll)."
+        ),
+        "affected_files": (
+            "frontend/src/pages/AlertsPage.tsx|"
+            "frontend/src/App.tsx|"
+            "frontend/src/components/layout/Sidebar.tsx|"
+            "frontend/src/lib/api.ts|"
+            "control_plane/api.py|"
+            "app/runtime/operator_sessions.py|"
+            "tests/test_alerts_endpoint.py"
+        ),
+        "docs_refs": (
+            "docs/Human Provided Specs/new_specs/canonical/"
+            "APEX_Monitoring_and_Alerting_Spec_v1_0.md"
+        ),
+        "audit_id": "RX-ALERTS-001",
+        "anchor": "",
+    },
+    # Batch EXEC-ORDERS: order type expansion
+    {
+        "priority": "MEDIUM",
+        "phase": "B",
+        "batch": "EXEC-ORDERS",
+        "id": "FB-EXEC-001",
+        "kind": "feature",
+        "status": "Open",
+        "summary_one_line": "Limit and stop order support in Alpaca paper execution adapter",
+        "agent_task": (
+            "Goal: execution/adapters/alpaca_paper.py currently strips limit and stop "
+            "order types, coercing all orders to market. The canonical execution spec "
+            "requires passive (limit), aggressive (market), staggered, and stop orders. "
+            "The strategy builder and manual trade form already accept order_type as a "
+            "field on the order intent contract; the adapter silently drops it. "
+            "Acceptance criteria: "
+            "(1) Update AlpacaPaperAdapter.submit_order in "
+            "execution/adapters/alpaca_paper.py to pass limit_price through to the "
+            "Alpaca SDK when order_type='limit', and stop_price when order_type='stop' "
+            "or 'stop_limit'. Map the canonical order_type values to the Alpaca API "
+            "enum (alpaca-trade-api: 'market', 'limit', 'stop', 'stop_limit', "
+            "'trailing_stop'). "
+            "(2) Update the time_in_force mapping: limit orders default to 'gtc'; "
+            "market orders stay 'day' (Alpaca paper) unless overridden by the intent. "
+            "(3) Update app/contracts/orders.py OrderIntent (if needed) to ensure "
+            "limit_price: Decimal | None and stop_price: Decimal | None fields exist "
+            "and are threaded through execution/service.py → adapter. "
+            "(4) Update the manual trade form in frontend/src/pages/AssetPage.tsx: "
+            "add a 'Order type' select (Market / Limit / Stop) and conditionally show "
+            "a 'Limit price' input when Limit or Stop is selected. Wire through "
+            "POST /trade/order with the new fields. "
+            "(5) Update control_plane/api.py POST /trade/order request model to accept "
+            "limit_price and stop_price as optional fields. "
+            "(6) Write tests/test_alpaca_limit_orders.py: mock the Alpaca SDK client "
+            "and assert that a limit intent reaches submit_order with the correct "
+            "limit_price kwarg; assert market intent still works. "
+            "Constraints: paper only in this slice — do not touch Coinbase adapter. "
+            "Do not change the risk/signing path; limit_price is passed through after "
+            "intent_gate signs the order."
+        ),
+        "affected_files": (
+            "execution/adapters/alpaca_paper.py|"
+            "execution/service.py|"
+            "app/contracts/orders.py|"
+            "control_plane/api.py|"
+            "frontend/src/pages/AssetPage.tsx|"
+            "tests/test_alpaca_limit_orders.py"
+        ),
+        "docs_refs": (
+            "docs/Human Provided Specs/new_specs/canonical/"
+            "APEX_Execution_Logic_Detail_Spec_v1_0.md"
+        ),
+        "audit_id": "EXEC-LIMIT-ALPACA",
+        "anchor": "",
+    },
+    {
+        "priority": "MEDIUM",
+        "phase": "B",
+        "batch": "EXEC-ORDERS",
+        "id": "FB-EXEC-002",
+        "kind": "feature",
+        "status": "Open",
+        "summary_one_line": "Limit and stop order support in Coinbase Advanced live execution adapter",
+        "agent_task": (
+            "Goal: execution/adapters/coinbase_advanced_http.py currently raises "
+            "NotImplementedError for any non-market order type. The canonical execution "
+            "spec requires limit orders for passive execution style. "
+            "Acceptance criteria: "
+            "(1) Update CoinbaseAdvancedHttpAdapter.submit_order in "
+            "execution/adapters/coinbase_advanced_http.py to call the correct "
+            "Coinbase Advanced Trade API endpoint for limit orders. "
+            "For order_type='limit': use create_limit_order_gtc (or equivalent) "
+            "with limit_price passed as base_price. Use the coinbase-advanced-py "
+            "SDK (coinbase_advanced_py is already in pyproject.toml) — check "
+            "execution/coinbase_advanced_http.py for the existing SDK usage pattern "
+            "and follow it. "
+            "(2) For order_type='stop_limit': use create_stop_limit_order_gtc. "
+            "(3) Return a consistent OrderFillResult regardless of order type — "
+            "check how market order results are parsed in the existing adapter and "
+            "apply the same shape. If limit orders are not immediately filled "
+            "(status != 'FILLED'), return a partial OrderFillResult with "
+            "filled_qty=0 and status='open'; the execution feedback loop will "
+            "reconcile later via the partial-fill path. "
+            "(4) Add or extend intent_gate.py validation: if order_type is limit "
+            "and limit_price is None, raise a validation error before the adapter "
+            "is called. "
+            "(5) Write tests/test_coinbase_limit_orders.py: mock the coinbase "
+            "advanced SDK and assert a limit intent reaches create_limit_order_gtc "
+            "with the correct limit_price; assert market intent still works; assert "
+            "None limit_price with limit type raises before adapter call. "
+            "Constraints: live money path — be conservative. If the SDK method for "
+            "limit orders is unclear from the current coinbase_advanced_py version "
+            "(check pyproject.toml for the version), add a TODO and raise "
+            "NotImplementedError with a clear message rather than guessing the "
+            "API signature. Update RUNBOOKS.MD § Execution adapters with the new "
+            "supported order types."
+        ),
+        "affected_files": (
+            "execution/adapters/coinbase_advanced_http.py|"
+            "execution/service.py|"
+            "execution/intent_gate.py|"
+            "app/contracts/orders.py|"
+            "docs/RUNBOOKS.MD|"
+            "tests/test_coinbase_limit_orders.py"
+        ),
+        "docs_refs": (
+            "docs/Human Provided Specs/new_specs/canonical/"
+            "APEX_Execution_Logic_Detail_Spec_v1_0.md|"
+            "docs/RUNBOOKS.MD"
+        ),
+        "audit_id": "EXEC-LIMIT-COINBASE",
+        "anchor": "",
+    },
+    # Batch VENUE: second live execution venue (deferred roadmap FB-N1 phase 2)
+    {
+        "priority": "LOW",
+        "phase": "C",
+        "batch": "VENUE",
+        "id": "FB-N1-S2",
+        "kind": "feature",
+        "status": "Open",
+        "summary_one_line": "Second live execution venue: Kraken spot REST adapter under execution/adapters/",
+        "agent_task": (
+            "Goal: Add a Kraken spot execution adapter so the system can route live "
+            "orders to Kraken (in addition to Coinbase). Kraken is already the sole "
+            "market data provider; adding execution closes the venue loop for "
+            "operators who prefer Kraken for spot crypto. "
+            "This is Phase 2 of FB-N1 (multi-exchange execution) from "
+            "docs/backlog/deferred_roadmap.md. "
+            "Acceptance criteria: "
+            "(1) Create execution/adapters/kraken_spot_http.py implementing the same "
+            "abstract adapter interface used by alpaca_paper.py and "
+            "coinbase_advanced_http.py. Use the Kraken REST API v2 (private endpoints "
+            "/0/private/AddOrder, /0/private/QueryOrders). Authentication: HMAC-SHA512 "
+            "with NM_KRAKEN_API_KEY and NM_KRAKEN_API_SECRET (new env vars). "
+            "Support market and limit order types. Return OrderFillResult consistent "
+            "with the existing contract. "
+            "(2) Register 'kraken' as a valid adapter key in "
+            "execution/adapter_registry.py. "
+            "(3) Update execution/router.py create_execution_adapter to instantiate "
+            "KrakenSpotHttpAdapter when NM_EXECUTION_ADAPTER='kraken'. "
+            "(4) Add NM_KRAKEN_API_KEY and NM_KRAKEN_API_SECRET to .env.example "
+            "with comments. Update app/config/settings.py with the two new optional "
+            "settings (kraken_api_key: str = '', kraken_api_secret: str = ''). "
+            "(5) Add 'kraken' to GET /status execution_adapters listing "
+            "(control_plane/api.py) and to the venue credentials UI in "
+            "frontend/src/pages/AccountPage.tsx — masked suffix display + Update link "
+            "to a new step in the venue wizard (or a standalone edit form). "
+            "(6) Write tests/test_kraken_adapter.py: mock httpx calls to Kraken REST "
+            "and assert: market buy order maps to correct AddOrder payload with "
+            "ordertype=market; limit buy maps with ordertype=limit and price field; "
+            "HMAC signature is included in the headers (spot-check nonce header). "
+            "(7) Add to RUNBOOKS.MD § Execution adapters: Kraken credentials setup, "
+            "NM_EXECUTION_ADAPTER=kraken, and link to Kraken API key permission "
+            "requirements (trade permission needed; no withdrawal permission required). "
+            "Constraints: follow the Kraken API non-negotiable rule (AGENTS.md §3): "
+            "Kraken is market data only — this is an EXCEPTION for execution only. "
+            "Update AGENTS.md §1 to note Kraken is also a live execution venue. "
+            "Do not add any Kraken market-data imports outside the existing "
+            "data_plane/ingest/ path; this adapter is execution-only. "
+            "Run scripts/ci_spec_compliance.sh after the change to confirm the "
+            "compliance script still passes with the new kraken adapter file."
+        ),
+        "affected_files": (
+            "execution/adapters/kraken_spot_http.py|"
+            "execution/adapter_registry.py|"
+            "execution/router.py|"
+            "app/config/settings.py|"
+            ".env.example|"
+            "control_plane/api.py|"
+            "frontend/src/pages/AccountPage.tsx|"
+            "docs/RUNBOOKS.MD|"
+            "AGENTS.md|"
+            "scripts/ci_spec_compliance.sh|"
+            "tests/test_kraken_adapter.py"
+        ),
+        "docs_refs": (
+            "docs/backlog/deferred_roadmap.md|"
+            "docs/RUNBOOKS.MD|"
+            "AGENTS.md"
+        ),
+        "audit_id": "VENUE-KRAKEN-EXEC",
+        "anchor": "",
+    },
     {
         "priority": "LOW",
         "phase": "D",

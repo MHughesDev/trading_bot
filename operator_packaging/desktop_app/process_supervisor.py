@@ -20,9 +20,9 @@ from typing import IO, Any
 
 # Defaults — local-only binds; the desktop window is the single client.
 DEFAULT_API_HOST = "127.0.0.1"
-DEFAULT_API_PORT = 8000
+DEFAULT_API_PORT = 8001
 DEFAULT_UI_HOST = "127.0.0.1"
-DEFAULT_UI_PORT = 8501
+DEFAULT_UI_PORT = 8001  # React SPA is served directly by the FastAPI process
 
 
 @dataclass(frozen=True)
@@ -41,13 +41,13 @@ def build_service_specs(
     ui_host: str = DEFAULT_UI_HOST,
     ui_port: int = DEFAULT_UI_PORT,
     enable_supervisor: bool = False,
-    home_path: str = "control_plane/Home.py",
+    home_path: str = "control_plane/Home.py",  # kept for signature compat, unused
 ) -> list[ServiceSpec]:
-    """Build the API + (optional power supervisor) + Streamlit command lines.
+    """Build the API + (optional power supervisor) command lines.
 
-    The power supervisor (which can start the live trading runtime) is **off by
-    default** for the desktop app so "just trying it out" never touches a venue;
-    enable it with ``NM_DESKTOP_START_SUPERVISOR=true``.
+    The React SPA is served directly by FastAPI from frontend/dist/, so there is
+    no separate UI process. The power supervisor is off by default; enable it with
+    ``NM_DESKTOP_START_SUPERVISOR=true``.
     """
     specs: list[ServiceSpec] = [
         ServiceSpec(
@@ -66,24 +66,6 @@ def build_service_specs(
     ]
     if enable_supervisor:
         specs.append(ServiceSpec("supervisor", [python_exe, "-m", "app.runtime.power_supervisor"]))
-    specs.append(
-        ServiceSpec(
-            "ui",
-            [
-                python_exe,
-                "-m",
-                "streamlit",
-                "run",
-                home_path,
-                "--server.headless",
-                "true",
-                "--server.address",
-                ui_host,
-                "--server.port",
-                str(int(ui_port)),
-            ],
-        )
-    )
     return specs
 
 
@@ -94,9 +76,9 @@ def _no_window_creationflags() -> int:
     return 0
 
 
-def streamlit_health_url(ui_host: str = DEFAULT_UI_HOST, ui_port: int = DEFAULT_UI_PORT) -> str:
-    """Streamlit's built-in health endpoint (returns 200 once the server is up)."""
-    return f"http://{ui_host}:{int(ui_port)}/_stcore/health"
+def api_health_url(api_host: str = DEFAULT_API_HOST, api_port: int = DEFAULT_API_PORT) -> str:
+    """FastAPI health endpoint — returns 200 once the server is up."""
+    return f"http://{api_host}:{int(api_port)}/status"
 
 
 def _default_probe(url: str, *, timeout: float = 1.5) -> bool:

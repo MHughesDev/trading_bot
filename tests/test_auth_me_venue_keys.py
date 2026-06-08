@@ -39,7 +39,7 @@ def test_me_without_gate_returns_false_required(client_auth_venue: TestClient) -
 
 
 def test_me_with_gate_paper_incomplete(client_auth_venue: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NM_STREAMLIT_VENUE_KEYS_REQUIRED", "true")
+    monkeypatch.setenv("NM_VENUE_KEYS_REQUIRED", "true")
     c = client_auth_venue
     c.post("/auth/register", json={"email": "x@y.co", "password": "password-88"})
     c.post("/auth/login", json={"email": "x@y.co", "password": "password-88"})
@@ -51,7 +51,7 @@ def test_me_with_gate_paper_incomplete(client_auth_venue: TestClient, monkeypatc
 
 
 def test_me_with_gate_paper_complete(client_auth_venue: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NM_STREAMLIT_VENUE_KEYS_REQUIRED", "true")
+    monkeypatch.setenv("NM_VENUE_KEYS_REQUIRED", "true")
     c = client_auth_venue
     c.post("/auth/register", json={"email": "p@q.co", "password": "password-88"})
     c.post("/auth/login", json={"email": "p@q.co", "password": "password-88"})
@@ -66,7 +66,7 @@ def test_me_with_gate_paper_complete(client_auth_venue: TestClient, monkeypatch:
 
 
 def test_register_response_includes_venue_fields(client_auth_venue: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NM_STREAMLIT_VENUE_KEYS_REQUIRED", "true")
+    monkeypatch.setenv("NM_VENUE_KEYS_REQUIRED", "true")
     c = client_auth_venue
     r = c.post("/auth/register", json={"email": "new@u.co", "password": "password-88"})
     assert r.status_code == 200

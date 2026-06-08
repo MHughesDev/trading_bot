@@ -7,13 +7,8 @@ shift || true
 
 case "$cmd" in
   api)
-    exec uvicorn control_plane.api:app --host 0.0.0.0 --port 8000 "$@"
-    ;;
-  streamlit)
-    exec python3 -m streamlit run control_plane/Home.py \
-      --server.address 0.0.0.0 \
-      --server.port 8501 \
-      "$@"
+    # Serves the REST API + React SPA (frontend/dist/) on port 8001.
+    exec uvicorn control_plane.api:app --host 0.0.0.0 --port 8001 "$@"
     ;;
   live)
     exec python3 -m app.runtime.live_service "$@"

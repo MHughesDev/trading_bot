@@ -19,6 +19,27 @@ class VenueCredentialsPut(BaseModel):
     clear_webull: bool = False
 
 
+class VenueCredentialsVerifyRequest(BaseModel):
+    """Live-ping check for the key/secret pair about to be saved (FB-UX-006 hardening)."""
+
+    alpaca_api_key: str | None = None
+    alpaca_api_secret: str | None = None
+    coinbase_api_key: str | None = None
+    coinbase_api_secret: str | None = None
+
+
+class VenueVerifyResult(BaseModel):
+    ok: bool
+    key_error: str | None = None
+    secret_error: str | None = None
+    error: str | None = None
+
+
+class VenueCredentialsVerifyResponse(BaseModel):
+    alpaca: VenueVerifyResult | None = None
+    coinbase: VenueVerifyResult | None = None
+
+
 class VenueCredentialsResponse(BaseModel):
     alpaca_key_set: bool
     alpaca_secret_set: bool

@@ -118,13 +118,13 @@ stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_t
 
 ## 2. Open queue status
 
-**Snapshot (2026-04-18):** **FB-CAN-001**…**FB-CAN-078** (canonical replacement program) are **Done**. Prior roadmap epics **FB-AP-P0**, **FB-UX-P0**, **FB-CONT-P0** and audit/setup/doc items remain **Done**. **Open stack (pull order):** **IL-CHART-001** (chart 500 fix) → **FB-UX-018** (sidebar) → **FB-UX-019** (theme) → **FB-UX-020** (dashboard) → **FB-UX-021** (asset page) → **FB-UX-022** (auth pages) → **FB-AUTH-001** (2h idle gate) → **FB-UX-017** (venue wizard).
+**Snapshot (2026-06-08):** All prior epics (UX, auth, canonical replacement FB-CAN-001…078, audit/setup/doc) are **Done**. Streamlit UI replaced with React SPA (June 2026). **Open stack (pull order):** **FB-FCST-001** (forecaster training + live wiring) → **FB-FCST-002** (backtest quantile vs. baseline) → **FB-RX-001** (monitoring page) → **FB-RX-002** (SSE live chart) → **FB-RX-003** (execution quality UI) → **FB-RX-004** (governance page) → **FB-RX-005** (alert inbox) → **FB-EXEC-001** (Alpaca limit orders) → **FB-EXEC-002** (Coinbase limit orders) → **FB-N1-S2** (Kraken execution adapter).
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **6** | IL-CHART-001, FB-UX-018, FB-UX-019, FB-UX-020, FB-AUTH-001, FB-UX-017 |
-| **MEDIUM** | **2** | FB-UX-021, FB-UX-022 |
-| **LOW** | **0** | — |
+| **HIGH** | **3** | FB-FCST-001, FB-RX-001, FB-RX-002 |
+| **MEDIUM** | **5** | FB-FCST-002, FB-RX-003, FB-RX-004, FB-EXEC-001, FB-EXEC-002 |
+| **LOW** | **2** | FB-RX-005, FB-N1-S2 |
 
 **Full row text and completed history:** [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (§2 open tables, §3 fixes, §4 gates, §5 archive).
 

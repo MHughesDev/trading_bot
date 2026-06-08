@@ -38,14 +38,17 @@ def _trending_bars(count: int = 200, *, start_price: float = 100.0) -> list[dict
     return bars
 
 
+_USER_ID = 1
+
+
 @pytest.fixture
-def custom_strategies_dir(tmp_path, monkeypatch):
-    from strategies import custom_strategy_store as store
-
-    monkeypatch.setattr(store, "_DEFAULT_DIR", tmp_path / "custom_strategies")
+def custom_strategies_db(tmp_path):
+    return tmp_path / "users.sqlite"
 
 
-def _save_ema_strategy() -> str:
+def _save_ema_strategy(db_path) -> str:
+    from strategies.custom_strategy_store import registry_key
+
     spec = RuleStrategySpec(
         name="Builder EMA strategy",
         indicators=(
@@ -59,12 +62,12 @@ def _save_ema_strategy() -> str:
         size=SizeRule(type="percent_of_equity", value=0.02),
         exits=(ExitRule(type="stop_loss", value=0.015), ExitRule(type="take_profit", value=0.04)),
     )
-    record = save_custom_strategy(spec)
-    return f"custom:{record['id']}"
+    record = save_custom_strategy(db_path, _USER_ID, spec)
+    return registry_key(_USER_ID, record["id"])
 
 
-def test_custom_strategy_runs_through_existing_backtest_pipeline(custom_strategies_dir) -> None:
-    key = _save_ema_strategy()
+def test_custom_strategy_runs_through_existing_backtest_pipeline(custom_strategies_db) -> None:
+    key = _save_ema_strategy(custom_strategies_db)
 
     result = run_backtest(symbol="BTC-USD", strategy_key=key, bars=_trending_bars())
 
@@ -74,12 +77,12 @@ def test_custom_strategy_runs_through_existing_backtest_pipeline(custom_strategi
     assert "rule_spec" in result.strategy_params
 
 
-def test_custom_strategy_appears_in_catalogue(custom_strategies_dir) -> None:
+def test_custom_strategy_appears_in_catalogue(custom_strategies_db) -> None:
     from strategies.custom_strategy_store import register_custom_strategies
     from strategies.registry import get_strategy, list_strategies
 
-    key = _save_ema_strategy()
-    register_custom_strategies()
+    key = _save_ema_strategy(custom_strategies_db)
+    register_custom_strategies(custom_strategies_db)
 
     assert get_strategy(key) is not None
     assert any(d.key == key for d in list_strategies())

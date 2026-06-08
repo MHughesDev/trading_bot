@@ -1,0 +1,168 @@
+@import "tailwindcss";
+
+/* ─── Theme palettes ──────────────────────────────────────────────────────── */
+:root {
+  --tb-background: #F8F9FB;
+  --tb-surface: #FFFFFF;
+  --tb-surface-2: #F1F3F6;
+  --tb-border: #E5E7EB;
+  --tb-border-2: #D1D5DB;
+  --tb-text: #111827;
+  --tb-text-muted: #6B7280;
+  --tb-text-dim: #9CA3AF;
+  --tb-accent: #3B82F6;
+  --tb-accent-hover: #2563EB;
+  --tb-pnl-up: #16A34A;
+  --tb-pnl-down: #DC2626;
+  --tb-warning: #D97706;
+}
+
+.dark {
+  --tb-background: #111827;
+  --tb-surface: #1A2332;
+  --tb-surface-2: #243044;
+  --tb-border: #1F2937;
+  --tb-border-2: #374151;
+  --tb-text: #F9FAFB;
+  --tb-text-muted: #9CA3AF;
+  --tb-text-dim: #6B7280;
+  --tb-accent: #3B82F6;
+  --tb-accent-hover: #2563EB;
+  --tb-pnl-up: #22D3A0;
+  --tb-pnl-down: #F87171;
+  --tb-warning: #F59E0B;
+}
+
+@theme inline {
+  --color-background: var(--tb-background);
+  --color-surface: var(--tb-surface);
+  --color-surface-2: var(--tb-surface-2);
+  --color-border: var(--tb-border);
+  --color-border-2: var(--tb-border-2);
+  --color-text: var(--tb-text);
+  --color-text-muted: var(--tb-text-muted);
+  --color-text-dim: var(--tb-text-dim);
+  --color-accent: var(--tb-accent);
+  --color-accent-hover: var(--tb-accent-hover);
+  --color-pnl-up: var(--tb-pnl-up);
+  --color-pnl-down: var(--tb-pnl-down);
+  --color-warning: var(--tb-warning);
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; margin: 0; padding: 0; }
+  body {
+    background-color: var(--tb-background);
+    color: var(--tb-text);
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--tb-border-2); border-radius: 3px; }
+}
+
+/* ─── React Flow canvas overrides ─────────────────────────────────────────── */
+.react-flow__background { background: var(--tb-background); }
+.react-flow__controls {
+  background: var(--tb-surface); border: 1px solid var(--tb-border); border-radius: 8px;
+  overflow: hidden; box-shadow: none;
+}
+.react-flow__controls-button {
+  background: var(--tb-surface) !important; border: none !important;
+  border-bottom: 1px solid var(--tb-border) !important; color: var(--tb-text-muted) !important;
+  width: 28px !important; height: 28px !important;
+}
+.react-flow__controls-button:last-child { border-bottom: none !important; }
+.react-flow__controls-button:hover { background: var(--tb-surface-2) !important; color: var(--tb-text) !important; }
+.react-flow__controls-button svg { fill: currentColor; }
+.react-flow__edge-path { stroke: var(--tb-border-2); stroke-width: 2; }
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path { stroke: var(--tb-accent); }
+.react-flow__connection-path { stroke: var(--tb-accent); stroke-width: 2; stroke-dasharray: 5 3; }
+.react-flow__attribution { display: none; }
+
+/* ─── Handles ─────────────────────────────────────────────────────────────── */
+.react-flow__handle {
+  width: 10px !important; height: 10px !important;
+  border: 2px solid var(--tb-border-2) !important; background: var(--tb-surface) !important;
+  border-radius: 50% !important; transition: border-color 0.12s, background 0.12s;
+}
+.react-flow__handle:hover,
+.react-flow__handle.connectingto,
+.react-flow__handle.valid {
+  border-color: var(--tb-accent) !important; background: var(--tb-accent) !important;
+}
+
+/* ─── Node chrome ─────────────────────────────────────────────────────────── */
+.tb-node {
+  min-width: 210px; background: var(--tb-surface-2); border: 1px solid var(--tb-border-2);
+  border-radius: 10px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  cursor: default; transition: border-color 0.12s, box-shadow 0.12s;
+}
+.dark .tb-node { box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+.tb-node.selected, .tb-node:focus-within {
+  border-color: var(--tb-accent);
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.25), 0 4px 16px rgba(0,0,0,0.18);
+}
+.dark .tb-node.selected, .dark .tb-node:focus-within {
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.25), 0 4px 16px rgba(0,0,0,0.5);
+}
+.tb-node.disabled { opacity: 0.4; filter: grayscale(0.7); }
+
+/* ─── Node context menu ───────────────────────────────────────────────────── */
+.tb-context-menu {
+  position: fixed; z-index: 50; min-width: 168px; background: var(--tb-surface);
+  border: 1px solid var(--tb-border); border-radius: 8px; overflow: hidden;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.2); padding: 4px;
+}
+.dark .tb-context-menu { box-shadow: 0 8px 28px rgba(0,0,0,0.55); }
+.tb-context-menu-item {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  background: transparent; border: none; border-radius: 6px; padding: 7px 10px;
+  color: var(--tb-text-muted); font-size: 12.5px; font-family: inherit; cursor: pointer;
+  transition: background 0.1s;
+}
+.tb-context-menu-item:hover { background: var(--tb-surface-2); }
+.tb-context-menu-item.danger { color: var(--tb-pnl-down); }
+.tb-context-menu-item.danger:hover { background: rgba(239,68,68,0.12); }
+.tb-context-menu-icon { width: 14px; flex-shrink: 0; opacity: 0.8; text-align: center; }
+.tb-context-menu-sep { height: 1px; background: var(--tb-border); margin: 4px 2px; }
+.tb-node-header {
+  padding: 7px 12px; display: flex; align-items: center; gap: 6px;
+  font-weight: 600; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--tb-text);
+}
+.tb-node-header-badge {
+  margin-left: auto; font-size: 9px; opacity: 0.65; background: rgba(0,0,0,0.1);
+  padding: 1px 5px; border-radius: 4px; letter-spacing: 0.05em;
+}
+.dark .tb-node-header-badge { background: rgba(0,0,0,0.25); }
+.tb-node-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; }
+.tb-node-row { display: flex; align-items: center; gap: 8px; }
+.tb-node-label { color: var(--tb-text-dim); font-size: 10px; width: 52px; flex-shrink: 0; font-weight: 500; }
+
+/* ─── Controls inside nodes ───────────────────────────────────────────────── */
+.tb-input, .tb-select {
+  flex: 1; background: var(--tb-background); border: 1px solid var(--tb-border-2); border-radius: 6px;
+  padding: 4px 8px; color: var(--tb-text); font-size: 12px; font-family: inherit;
+  outline: none; min-width: 0; transition: border-color 0.12s;
+}
+.tb-input:focus, .tb-select:focus { border-color: var(--tb-text-dim); }
+.tb-input[type="number"] { font-family: 'JetBrains Mono', monospace; }
+.tb-select {
+  cursor: pointer; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236B7280'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center; padding-right: 24px;
+}
+.tb-unit { color: var(--tb-text-dim); font-size: 11px; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; }
+
+/* ─── Handle position labels ─────────────────────────────────────────────── */
+.tb-handle-label {
+  position: absolute; font-size: 9px; color: var(--tb-text-dim);
+  pointer-events: none; white-space: nowrap; font-weight: 500;
+}
