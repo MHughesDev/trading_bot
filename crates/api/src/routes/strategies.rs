@@ -13,10 +13,7 @@ use uuid::Uuid;
 use domain::strategy_def::StrategyDefinition;
 use strategy_validator::validate;
 
-use crate::{
-    auth::BearerToken,
-    state::AppState,
-};
+use crate::{auth::BearerToken, state::AppState};
 
 // ── Create ────────────────────────────────────────────────────────────────────
 
@@ -32,11 +29,11 @@ pub async fn create_strategy(
                 .iter()
                 .map(|e| json!({ "path": e.path, "message": e.message }))
                 .collect();
-            return (
+            (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({ "error": "validation_failed", "errors": formatted })),
             )
-                .into_response();
+                .into_response()
         }
         Ok(validated) => {
             let id = Uuid::new_v4();

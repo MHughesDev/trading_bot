@@ -16,7 +16,7 @@ use domain::strategy_def::{
     StrategyDefinition,
 };
 use features::FeatureValue;
-use strategy_runtime::{StrategyClock, WallClock, WorldEvent, StrategyInstance};
+use strategy_runtime::{StrategyClock, StrategyInstance, WallClock, WorldEvent};
 
 fn ema_cross_def() -> StrategyDefinition {
     StrategyDefinition {
@@ -114,7 +114,10 @@ fn identical_events_produce_identical_intents() {
     let b = run_once(events);
 
     assert_eq!(a.len(), b.len(), "intent counts must match across runs");
-    assert!(!a.is_empty(), "the EMA-cross condition must fire at least once");
+    assert!(
+        !a.is_empty(),
+        "the EMA-cross condition must fire at least once"
+    );
 
     for (ia, ib) in a.iter().zip(b.iter()) {
         assert_eq!(ia.instrument_id, ib.instrument_id);

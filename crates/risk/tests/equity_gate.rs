@@ -106,9 +106,7 @@ fn spy_order_outside_session_is_rejected() {
         None,
         None,
     );
-    let err = gate()
-        .check(intent, &equity_ctx(false, false))
-        .unwrap_err();
+    let err = gate().check(intent, &equity_ctx(false, false)).unwrap_err();
     assert!(
         matches!(err, RiskRejection::OutsideTradingHours { ref instrument_id }
             if instrument_id == "SPY"),

@@ -1,6 +1,8 @@
 # Trading Bot
 
-A Rust trading platform for crypto and equity markets. The Python → Rust refactor is **complete** (Phase 7 done). This is the canonical, production system.
+An all-in-one, **data & asset scalable** trading platform built in Rust. Designed from the ground up to support any asset class — crypto spot, equities, options, futures, FX, perpetuals, DEX/AMM pools, prediction markets, and beyond — through a metadata-driven architecture where adding a new market type is additive and requires zero changes to core runtime, risk, storage, or replay code.
+
+The Python → Rust refactor is **complete** (Phase 7 done). This is the canonical, production system.
 
 ---
 

@@ -39,7 +39,10 @@ pub fn router(state: AppState) -> Router {
             get(strategies::list_strategies).post(strategies::create_strategy),
         )
         .route("/api/strategies/:id/config", get(strategies::get_strategy))
-        .route("/api/strategies/:id/start", post(strategies::start_strategy))
+        .route(
+            "/api/strategies/:id/start",
+            post(strategies::start_strategy),
+        )
         .route("/api/strategies/:id/stop", post(strategies::stop_strategy))
         // Phase 4 backtests
         .route("/api/backtests", post(backtests::run_backtest))

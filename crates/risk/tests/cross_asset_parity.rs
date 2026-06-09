@@ -89,7 +89,10 @@ fn buy_intent(instrument_id: &str) -> OrderIntent {
 fn crypto_buy_approved_through_shared_gate() {
     let gate = shared_gate();
     let result = gate.check(buy_intent("BTC-USDT"), &crypto_ctx());
-    assert!(result.is_ok(), "BTC-USDT buy should be approved: {result:?}");
+    assert!(
+        result.is_ok(),
+        "BTC-USDT buy should be approved: {result:?}"
+    );
     assert_eq!(result.unwrap().intent.instrument_id, "BTC-USDT");
 }
 
@@ -97,7 +100,10 @@ fn crypto_buy_approved_through_shared_gate() {
 fn equity_buy_in_session_approved_through_shared_gate() {
     let gate = shared_gate();
     let result = gate.check(buy_intent("AAPL"), &equity_ctx(true));
-    assert!(result.is_ok(), "AAPL buy in-session should be approved: {result:?}");
+    assert!(
+        result.is_ok(),
+        "AAPL buy in-session should be approved: {result:?}"
+    );
     assert_eq!(result.unwrap().intent.instrument_id, "AAPL");
 }
 
@@ -110,8 +116,14 @@ fn single_gate_approves_both_asset_classes() {
     let crypto_result = gate.check(buy_intent("BTC-USDT"), &crypto_ctx());
     let equity_result = gate.check(buy_intent("AAPL"), &equity_ctx(true));
 
-    assert!(crypto_result.is_ok(), "crypto should pass: {crypto_result:?}");
-    assert!(equity_result.is_ok(), "equity should pass: {equity_result:?}");
+    assert!(
+        crypto_result.is_ok(),
+        "crypto should pass: {crypto_result:?}"
+    );
+    assert!(
+        equity_result.is_ok(),
+        "equity should pass: {equity_result:?}"
+    );
 }
 
 // ── Rejection path — each asset class fails for asset-specific reasons ────────
@@ -126,11 +138,17 @@ fn equity_outside_session_rejected_crypto_unaffected() {
 
     // Equity order outside market hours: rejected.
     let out_session = gate.check(buy_intent("AAPL"), &equity_ctx(false));
-    assert!(out_session.is_err(), "equity outside session must be rejected");
+    assert!(
+        out_session.is_err(),
+        "equity outside session must be rejected"
+    );
 
     // Crypto order always passes (24/7, NonHaltable).
     let crypto = gate.check(buy_intent("BTC-USDT"), &crypto_ctx());
-    assert!(crypto.is_ok(), "crypto must not be affected by equity session rules");
+    assert!(
+        crypto.is_ok(),
+        "crypto must not be affected by equity session rules"
+    );
 }
 
 // ── Kill switch kills both asset classes equally ──────────────────────────────
@@ -143,8 +161,12 @@ fn kill_switch_blocks_both_asset_classes() {
     ks.trip();
 
     use domain::RiskRejection;
-    let crypto_err = gate.check(buy_intent("BTC-USDT"), &crypto_ctx()).unwrap_err();
-    let equity_err = gate.check(buy_intent("AAPL"), &equity_ctx(true)).unwrap_err();
+    let crypto_err = gate
+        .check(buy_intent("BTC-USDT"), &crypto_ctx())
+        .unwrap_err();
+    let equity_err = gate
+        .check(buy_intent("AAPL"), &equity_ctx(true))
+        .unwrap_err();
 
     assert!(matches!(crypto_err, RiskRejection::KillSwitchActive));
     assert!(matches!(equity_err, RiskRejection::KillSwitchActive));

@@ -10,10 +10,10 @@ use std::sync::{Arc, Mutex};
 
 use uuid::Uuid;
 
+use demand_manager::{DemandRegistry, NoopPipelineFactory};
 use domain::strategy_def::StrategyDefinition;
 use market_simulator_adapter::BacktestReport;
 use strategy_runtime::InstanceManager;
-use demand_manager::{DemandRegistry, NoopPipelineFactory};
 
 /// Shared context injected into every MCP tool call.
 ///
@@ -84,7 +84,10 @@ pub fn dispatch_tool(
             }
         }
         "apply_strategy" => {
-            let store_id = params.get("store_id").and_then(|v| v.as_str()).unwrap_or("");
+            let store_id = params
+                .get("store_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let user_id = params.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
             let instrument_id = params
                 .get("instrument_id")
@@ -104,22 +107,23 @@ pub fn dispatch_tool(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let result = tools::lifecycle::stop_strategy(ctx, user_id, instrument_id);
-            serde_json::to_value(result)
-                .unwrap_or_else(|_| json!({"error": "serialization_error"}))
+            serde_json::to_value(result).unwrap_or_else(|_| json!({"error": "serialization_error"}))
         }
         "list_strategies" => {
             let list = tools::lifecycle::list_strategies(ctx);
             json!({ "strategies": list })
         }
         "run_backtest" => {
-            let store_id = params.get("store_id").and_then(|v| v.as_str()).unwrap_or("");
+            let store_id = params
+                .get("store_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let instrument_id = params
                 .get("instrument_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let result = tools::backtest::run_backtest(ctx, store_id, instrument_id);
-            serde_json::to_value(result)
-                .unwrap_or_else(|_| json!({"error": "serialization_error"}))
+            serde_json::to_value(result).unwrap_or_else(|_| json!({"error": "serialization_error"}))
         }
         "get_backtest_result" => {
             let backtest_id = params
@@ -127,8 +131,7 @@ pub fn dispatch_tool(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let result = tools::backtest::get_backtest_result(ctx, backtest_id);
-            serde_json::to_value(result)
-                .unwrap_or_else(|_| json!({"error": "serialization_error"}))
+            serde_json::to_value(result).unwrap_or_else(|_| json!({"error": "serialization_error"}))
         }
         unknown => {
             json!({ "error": "unknown_tool", "tool": unknown })

@@ -417,10 +417,7 @@ mod tests {
     use std::str::FromStr;
 
     fn feats(pairs: &[(&str, f64)]) -> HashMap<String, f64> {
-        pairs
-            .iter()
-            .map(|(k, v)| ((*k).to_owned(), *v))
-            .collect()
+        pairs.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect()
     }
 
     fn empty_bars() -> HashMap<Timeframe, BarPayload> {

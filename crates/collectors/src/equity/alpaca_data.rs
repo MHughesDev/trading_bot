@@ -45,6 +45,7 @@ struct AlpacaMessage {
     msg_type: String,
     #[serde(default)]
     msg: Option<String>,
+    #[allow(dead_code)]
     #[serde(rename = "S")]
     symbol: Option<String>,
     #[serde(rename = "p")]
@@ -178,10 +179,7 @@ impl Collector for AlpacaDataCollector {
                 "key": api_key,
                 "secret": api_secret,
             });
-            if let Err(e) = ws_stream
-                .send(Message::Text(auth_msg.to_string()))
-                .await
-            {
+            if let Err(e) = ws_stream.send(Message::Text(auth_msg.to_string())).await {
                 warn!(error = %e, "Alpaca WS auth send failed");
                 policy.wait().await;
                 continue;
@@ -337,7 +335,10 @@ mod tests {
         };
         let result = collector.normalize(&msg, &[], 1);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), NormalizeError::MissingField { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            NormalizeError::MissingField { .. }
+        ));
     }
 
     #[test]

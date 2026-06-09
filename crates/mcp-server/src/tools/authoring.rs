@@ -72,7 +72,10 @@ pub struct CreateError {
 /// `create_strategy` — validate and persist a strategy definition.
 ///
 /// Returns the store ID on success, or structured errors on validation failure.
-pub fn create_strategy(ctx: &McpContext, definition_json: &str) -> Result<CreateResult, CreateError> {
+pub fn create_strategy(
+    ctx: &McpContext,
+    definition_json: &str,
+) -> Result<CreateResult, CreateError> {
     let vr = validate_strategy(definition_json);
     if !vr.valid {
         return Err(CreateError {
