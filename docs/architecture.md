@@ -7,7 +7,7 @@
 
 ## 1. Overview
 
-The system is a **modular Rust monolith** (one main binary + satellite collectors) built on **NATS JetStream** as the event fabric. Six planes separate concerns:
+The system is an **all-in-one, data & asset scalable** trading platform — a **modular Rust monolith** (one main binary + satellite collectors) built on **NATS JetStream** as the event fabric. Asset classes (crypto spot, equities, options, futures, FX, perpetuals, DEX/AMM, prediction markets) are added through instrument metadata rows and new collector/broker implementations; no changes to core runtime, risk, storage, or replay are ever required. Six planes separate concerns:
 
 | Plane | Purpose | Transport |
 |-------|---------|-----------|
