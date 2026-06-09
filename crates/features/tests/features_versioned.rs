@@ -13,7 +13,7 @@ fn now() -> chrono::DateTime<Utc> {
 
 #[test]
 fn ema_feature_version_is_non_zero() {
-    assert!(EMA_FEATURE_VERSION > 0);
+    const { assert!(EMA_FEATURE_VERSION > 0) };
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn ema_same_stream_yields_identical_values() {
 
 #[test]
 fn rsi_feature_version_is_non_zero() {
-    assert!(RSI_FEATURE_VERSION > 0);
+    const { assert!(RSI_FEATURE_VERSION > 0) };
 }
 
 #[test]
