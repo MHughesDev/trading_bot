@@ -26,11 +26,11 @@ impl std::fmt::Display for ValidationError {
 
 /// A strategy definition that has passed all validation checks.
 ///
-/// The private `_sealed` field ensures this can only be constructed via `validate()`.
+/// `#[non_exhaustive]` ensures this can only be constructed via `validate()`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ValidatedDefinition {
     pub inner: StrategyDefinition,
-    _sealed: (),
 }
 
 impl ValidatedDefinition {
@@ -63,10 +63,7 @@ pub fn validate(def: &StrategyDefinition) -> Result<ValidatedDefinition, Vec<Val
     errors.extend(risk::validate_risk_overrides(&def.risk_overrides));
 
     if errors.is_empty() {
-        Ok(ValidatedDefinition {
-            inner: def.clone(),
-            _sealed: (),
-        })
+        Ok(ValidatedDefinition { inner: def.clone() })
     } else {
         Err(errors)
     }

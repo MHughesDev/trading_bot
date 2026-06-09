@@ -205,7 +205,10 @@ mod tests {
     #[test]
     fn outside_session_rejected() {
         let err = check_trading_session("AAPL", false);
-        assert!(matches!(err, Err(RiskRejection::OutsideTradingHours { .. })));
+        assert!(matches!(
+            err,
+            Err(RiskRejection::OutsideTradingHours { .. })
+        ));
     }
 
     #[test]

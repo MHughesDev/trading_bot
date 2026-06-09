@@ -199,28 +199,18 @@ impl Checker {
 
     fn check_term(&mut self) -> Result<(), String> {
         self.check_factor()?;
-        loop {
-            match self.peek() {
-                Tok::Plus | Tok::Minus => {
-                    self.advance();
-                    self.check_factor()?;
-                }
-                _ => break,
-            }
+        while let Tok::Plus | Tok::Minus = self.peek() {
+            self.advance();
+            self.check_factor()?;
         }
         Ok(())
     }
 
     fn check_factor(&mut self) -> Result<(), String> {
         self.check_unary()?;
-        loop {
-            match self.peek() {
-                Tok::Star | Tok::Slash => {
-                    self.advance();
-                    self.check_unary()?;
-                }
-                _ => break,
-            }
+        while let Tok::Star | Tok::Slash = self.peek() {
+            self.advance();
+            self.check_unary()?;
         }
         Ok(())
     }
@@ -260,7 +250,9 @@ impl Checker {
                 }
                 Ok(())
             }
-            other => Err(format!("unknown function '{other}'; expected feature or bar")),
+            other => Err(format!(
+                "unknown function '{other}'; expected feature or bar"
+            )),
         }
     }
 }
@@ -270,7 +262,10 @@ fn check_expr(input: &str) -> Result<(), String> {
     let mut checker = Checker { tokens, pos: 0 };
     checker.check_expr()?;
     if !matches!(checker.peek(), Tok::Eof) {
-        return Err(format!("unexpected token after expression: {:?}", checker.peek()));
+        return Err(format!(
+            "unexpected token after expression: {:?}",
+            checker.peek()
+        ));
     }
     Ok(())
 }
@@ -281,7 +276,12 @@ mod tests {
 
     fn ok(expr: &str) {
         let errs = validate_expression(expr, "test");
-        assert!(errs.is_empty(), "expected ok for {:?}, got: {:?}", expr, errs);
+        assert!(
+            errs.is_empty(),
+            "expected ok for {:?}, got: {:?}",
+            expr,
+            errs
+        );
     }
 
     fn err(expr: &str) {

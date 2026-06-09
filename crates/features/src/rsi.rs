@@ -82,7 +82,7 @@ mod tests {
         assert!(rsi.update(100.0).is_none()); // sets prev_price only
         assert!(rsi.update(101.0).is_none()); // change 1
         assert!(rsi.update(102.0).is_none()); // change 2
-        // 4th price completes the seed (period=3 changes)
+                                              // 4th price completes the seed (period=3 changes)
         assert!(rsi.update(103.0).is_some());
     }
 
@@ -102,7 +102,10 @@ mod tests {
         let prices: Vec<f64> = (0..20).map(|i| 100.0 + (i as f64) * 0.5).collect();
         let run = || {
             let mut r = Rsi::new(14);
-            prices.iter().filter_map(|&p| r.update(p)).collect::<Vec<_>>()
+            prices
+                .iter()
+                .filter_map(|&p| r.update(p))
+                .collect::<Vec<_>>()
         };
         let a = run();
         let b = run();

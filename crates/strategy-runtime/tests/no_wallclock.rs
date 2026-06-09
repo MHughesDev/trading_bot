@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use chrono::{Duration, Utc};
 use domain::money::{Price, Size};
+use domain::order::Side;
 use domain::payloads::bar::{BarPayload, Timeframe};
 use domain::strategy_def::{
     actions::{Action, ActionKind, OrderSpec, SizeMode},
@@ -13,8 +14,7 @@ use domain::strategy_def::{
     risk_overrides::RiskOverrides,
     StrategyDefinition,
 };
-use domain::order::Side;
-use strategy_runtime::{StrategyClock, WallClock, WorldEvent, StrategyInstance};
+use strategy_runtime::{StrategyClock, StrategyInstance, WallClock, WorldEvent};
 
 fn minimal_def() -> StrategyDefinition {
     StrategyDefinition {

@@ -23,7 +23,12 @@ fn ema_value_carries_version() {
     let prices = [10.0_f64, 11.0, 10.5, 11.2, 10.8, 11.5, 11.0];
     let mut last = None;
     for &p in &prices {
-        last = Some(FeatureValue::new("ema_7", ema.update(p), EMA_FEATURE_VERSION, t));
+        last = Some(FeatureValue::new(
+            "ema_7",
+            ema.update(p),
+            EMA_FEATURE_VERSION,
+            t,
+        ));
     }
     let fv = last.unwrap();
     assert_eq!(fv.feature_version, EMA_FEATURE_VERSION);
@@ -41,10 +46,7 @@ fn ema_same_stream_yields_identical_values() {
     let b = run(&prices);
     assert_eq!(a.len(), b.len());
     for (x, y) in a.iter().zip(b.iter()) {
-        assert!(
-            (x - y).abs() < 1e-12,
-            "EMA values differ: {x} vs {y}"
-        );
+        assert!((x - y).abs() < 1e-12, "EMA values differ: {x} vs {y}");
     }
 }
 
@@ -76,15 +78,15 @@ fn rsi_same_stream_yields_identical_values() {
     let prices: Vec<f64> = (0..20).map(|i| 100.0 + (i as f64) * 0.7).collect();
     let run = |prices: &[f64]| {
         let mut r = Rsi::new(14);
-        prices.iter().filter_map(|&p| r.update(p)).collect::<Vec<_>>()
+        prices
+            .iter()
+            .filter_map(|&p| r.update(p))
+            .collect::<Vec<_>>()
     };
     let a = run(&prices);
     let b = run(&prices);
     assert_eq!(a.len(), b.len());
     for (x, y) in a.iter().zip(b.iter()) {
-        assert!(
-            (x - y).abs() < 1e-12,
-            "RSI values differ: {x} vs {y}"
-        );
+        assert!((x - y).abs() < 1e-12, "RSI values differ: {x} vs {y}");
     }
 }

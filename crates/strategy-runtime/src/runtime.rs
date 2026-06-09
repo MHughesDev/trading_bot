@@ -14,8 +14,8 @@ use domain::strategy_def::StrategyDefinition;
 use thiserror::Error;
 
 use crate::clock::StrategyClock;
-use crate::interpreter::evaluate_signals;
 use crate::intents::build_intents_for_signals;
+use crate::interpreter::evaluate_signals;
 use crate::world::{WorldEvent, WorldState};
 
 /// Errors produced by the instance manager.

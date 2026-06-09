@@ -87,8 +87,7 @@ fn exported_schema_matches_expected() {
 
     let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
     assert_eq!(
-        names,
-        OHLCV_COLUMNS,
+        names, OHLCV_COLUMNS,
         "exported column order must match contract"
     );
 }

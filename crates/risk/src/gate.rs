@@ -8,11 +8,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use domain::{
-    instrument::HaltPolicy,
-    money::Price,
-    order::OrderIntent,
-    strategy_def::risk_overrides::RiskOverrides,
-    RiskRejection, TrustTier,
+    instrument::HaltPolicy, money::Price, order::OrderIntent,
+    strategy_def::risk_overrides::RiskOverrides, RiskRejection, TrustTier,
 };
 use rust_decimal::Decimal;
 use uuid::Uuid;

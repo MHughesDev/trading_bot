@@ -128,7 +128,10 @@ fn validated_definition_round_trips_stably() {
     let def2: StrategyDefinition = serde_json::from_str(&json1).unwrap();
     let json2 = serde_json::to_string(&def2).unwrap();
 
-    assert_eq!(json1, json2, "two serialize passes must produce identical JSON");
+    assert_eq!(
+        json1, json2,
+        "two serialize passes must produce identical JSON"
+    );
 }
 
 /// Multiple different valid strategies validate independently (no shared state).

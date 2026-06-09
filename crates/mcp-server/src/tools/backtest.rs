@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use market_simulator_adapter::{BacktestReport, placeholder_report};
+use market_simulator_adapter::{placeholder_report, BacktestReport};
 use uuid::Uuid;
 
 use crate::McpContext;

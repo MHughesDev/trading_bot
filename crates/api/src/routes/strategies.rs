@@ -13,10 +13,7 @@ use uuid::Uuid;
 use domain::strategy_def::StrategyDefinition;
 use strategy_validator::validate;
 
-use crate::{
-    auth::BearerToken,
-    state::AppState,
-};
+use crate::{auth::BearerToken, state::AppState};
 
 // ── Create ────────────────────────────────────────────────────────────────────
 

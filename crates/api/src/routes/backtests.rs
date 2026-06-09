@@ -75,11 +75,7 @@ pub async fn run_backtest(
         jobs.insert(job_id, BacktestJobState::Completed(report));
     });
 
-    (
-        StatusCode::ACCEPTED,
-        Json(json!({ "job_id": job_id })),
-    )
-        .into_response()
+    (StatusCode::ACCEPTED, Json(json!({ "job_id": job_id }))).into_response()
 }
 
 /// GET /api/backtests/{id} — fetch a backtest result by job ID.
@@ -103,8 +99,7 @@ pub async fn get_backtest(
             Json(json!({ "job_id": id, "status": "pending" })).into_response()
         }
         Some(BacktestJobState::Completed(report)) => {
-            Json(json!({ "job_id": id, "status": "completed", "report": report }))
-                .into_response()
+            Json(json!({ "job_id": id, "status": "completed", "report": report })).into_response()
         }
         Some(BacktestJobState::Failed(err)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
