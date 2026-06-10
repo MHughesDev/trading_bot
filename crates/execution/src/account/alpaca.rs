@@ -214,7 +214,7 @@ impl AccountSource for AlpacaAccountSource {
 
         Ok(activities
             .into_iter()
-            .filter_map(|a| {
+            .map(|a| {
                 let qty = a
                     .qty
                     .as_deref()
@@ -225,14 +225,14 @@ impl AccountSource for AlpacaAccountSource {
                     .as_deref()
                     .and_then(|s| s.parse::<DateTime<Utc>>().ok())
                     .unwrap_or_else(Utc::now);
-                Some(VenueTransaction {
+                VenueTransaction {
                     id: a.id,
                     transaction_type: a.activity_type,
                     instrument_id: a.symbol,
                     amount: qty,
                     currency: "USD".to_owned(),
                     occurred_at,
-                })
+                }
             })
             .collect())
     }

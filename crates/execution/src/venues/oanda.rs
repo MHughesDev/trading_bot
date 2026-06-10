@@ -59,6 +59,7 @@ struct OandaOrderTransaction {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OandaTradeResponse {
     id: String,
     instrument: String,
