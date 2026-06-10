@@ -18,7 +18,7 @@
 - [Module 7: The Risk Gate — Every Order's Checkpoint](#module-7-the-risk-gate--every-orders-checkpoint)
 - [Module 8: Execution and Fills — Order to Position](#module-8-execution-and-fills--order-to-position)
 - [Module 9: UI Data Flow — Subscription to Screen](#module-9-ui-data-flow--subscription-to-screen)
-- [Module 10: Backtesting and Replay — Deterministic Simulation](#module-10-backtesting-and-replay--deterministic-simulation)
+- [Module 10: Replay — Deterministic Simulation](#module-10-replay--deterministic-simulation)
 - [Module 11: Platform Boot Sequence](#module-11-platform-boot-sequence)
 - [Module 12: Adding a New Asset Class](#module-12-adding-a-new-asset-class)
 - [Module 13: Critical Invariants — The Rules That Must Never Break](#module-13-critical-invariants--the-rules-that-must-never-break)
@@ -35,7 +35,7 @@ Each entry has a one-line definition and a link to the module that teaches it in
 | **ADR** | Architecture Decision Record — an immutable document recording a major design choice | [Module 1](#module-1-the-big-picture) |
 | **ApprovedOrder** | An order that passed the risk gate; the only type the broker accepts | [Module 7](#module-7-the-risk-gate--every-orders-checkpoint) |
 | **AssetClass** | Broad economic category of a tradable instrument (equity, crypto, FX, etc.) | [Module 3](#module-3-the-domain-layer--core-types) |
-| **available_time** | When a strategy is *allowed* to act on an event — the replay sort key | [Module 10](#module-10-backtesting-and-replay--deterministic-simulation) |
+| **available_time** | When a strategy is *allowed* to act on an event — the replay sort key | [Module 10](#module-10-replay--deterministic-simulation) |
 | **Bar / BarPayload** | An OHLCV candlestick (open, high, low, close, volume) for a time period | [Module 5](#module-5-builders-and-features--pure-computation) |
 | **Broker** | Trait (interface) for submitting orders to a venue (Coinbase, Alpaca, etc.) | [Module 8](#module-8-execution-and-fills--order-to-position) |
 | **Builder** | Pure function that reconstructs derived data (bars, orderbook) from events | [Module 5](#module-5-builders-and-features--pure-computation) |
@@ -55,7 +55,7 @@ Each entry has a one-line definition and a link to the module that teaches it in
 | **JetStream** | NATS's persistent streaming feature used as the event bus | [Module 4](#module-4-data-ingestion--venue-to-bus) |
 | **KillSwitch** | Global flag that immediately blocks all new orders | [Module 7](#module-7-the-risk-gate--every-orders-checkpoint) |
 | **Lane** | A typed stream on the event bus (e.g., `market.bars.1m`, `features.technical`) | [Module 4](#module-4-data-ingestion--venue-to-bus) |
-| **MCP Server** | AI agent front door — 9 tools for strategy authoring, zero broker bypass | [Module 6](#module-6-strategy-system--definition-to-signal) |
+| **MCP Server** | AI agent front door — 7 tools for strategy authoring, zero broker bypass | [Module 6](#module-6-strategy-system--definition-to-signal) |
 | **Modular monolith** | One main binary + satellite collectors; loose coupling via event bus | [Module 1](#module-1-the-big-picture) |
 | **NATS** | The messaging system underlying the event bus | [Module 4](#module-4-data-ingestion--venue-to-bus) |
 | **NodeKind** | The type of a computation node in a strategy graph (Condition or Signal) | [Module 6](#module-6-strategy-system--definition-to-signal) |
@@ -69,7 +69,7 @@ Each entry has a one-line definition and a link to the module that teaches it in
 | **Position** | Current signed quantity held (positive = long, negative = short) | [Module 8](#module-8-execution-and-fills--order-to-position) |
 | **Quarantine** | Failsafe lane for events that fail schema validation — stored for later replay | [Module 4](#module-4-data-ingestion--venue-to-bus) |
 | **Reconciliation** | Continuous checking that internal state matches broker state | [Module 8](#module-8-execution-and-fills--order-to-position) |
-| **ReplayClock** | Simulated clock advanced by the replay engine — never reads wall time | [Module 10](#module-10-backtesting-and-replay--deterministic-simulation) |
+| **ReplayClock** | Simulated clock advanced by the replay engine — never reads wall time | [Module 10](#module-10-replay--deterministic-simulation) |
 | **RiskGate** | The single synchronous chokepoint every order must pass through | [Module 7](#module-7-the-risk-gate--every-orders-checkpoint) |
 | **RiskOverrides** | Per-strategy limits that can only *tighten* global limits, never loosen them | [Module 7](#module-7-the-risk-gate--every-orders-checkpoint) |
 | **Satellite binary** | A standalone process (collector) that crashes and reconnects independently | [Module 4](#module-4-data-ingestion--venue-to-bus) |
@@ -80,14 +80,14 @@ Each entry has a one-line definition and a link to the module that teaches it in
 | **StorageWriter** | Batched consumer that writes to Postgres, ClickHouse, Parquet, and Redis | [Module 4](#module-4-data-ingestion--venue-to-bus) |
 | **StrategyDefinition** | The frozen v1.0 JSON contract describing a strategy — template, not running code | [Module 6](#module-6-strategy-system--definition-to-signal) |
 | **StrategyInstance** | A running binding of a StrategyDefinition to one instrument for one user | [Module 6](#module-6-strategy-system--definition-to-signal) |
-| **StrategyClock** | Trait that abstracts time so strategies work identically live and in replay | [Module 10](#module-10-backtesting-and-replay--deterministic-simulation) |
+| **StrategyClock** | Trait that abstracts time so strategies work identically live and in replay | [Module 10](#module-10-replay--deterministic-simulation) |
 | **StrategyStore** | Persistent store of user-defined strategy definitions | [Module 6](#module-6-strategy-system--definition-to-signal) |
 | **Timeframe** | Bar interval enum (1s, 1m, 5m, 15m, 1h, 4h, 1d) | [Module 5](#module-5-builders-and-features--pure-computation) |
 | **TradingSchedule** | When an instrument trades — sessions, timezone, pre/post market flags | [Module 3](#module-3-the-domain-layer--core-types) |
 | **TrustTier** | Ordered enum for data trustworthiness — strategies declare a minimum required tier | [Module 3](#module-3-the-domain-layer--core-types) |
 | **ValidatedDefinition** | A strategy definition that passed all validator checks and may be executed | [Module 6](#module-6-strategy-system--definition-to-signal) |
 | **VenueRouter** | Resolves (AssetClass) → VenueId at runtime and manages collector lifecycle | [Module 4](#module-4-data-ingestion--venue-to-bus) |
-| **WallClock** | Real wall-clock time for live execution — never used in strategy evaluation | [Module 10](#module-10-backtesting-and-replay--deterministic-simulation) |
+| **WallClock** | Real wall-clock time for live execution — never used in strategy evaluation | [Module 10](#module-10-replay--deterministic-simulation) |
 | **WorldContext** | The read-only view a strategy calls during event processing (`now()`, `feature()`, `bar()`) | [Module 6](#module-6-strategy-system--definition-to-signal) |
 | **WorldEvent** | A typed event delivered to a strategy instance (Bar, Feature, PositionUpdate) | [Module 6](#module-6-strategy-system--definition-to-signal) |
 | **WorldState** | A strategy instance's live local snapshot of bars, features, and position | [Module 6](#module-6-strategy-system--definition-to-signal) |
@@ -103,7 +103,7 @@ This is an **all-in-one, data & asset scalable trading platform**. That phrase m
 1. **Data scalable** — the platform can consume data from any venue, any protocol, any asset class by adding a new Collector. The core runtime never changes.
 2. **Asset scalable** — adding a new market type (equities, options, DEX pools, prediction markets) requires adding metadata rows and a new Collector/Broker implementation. Zero changes to the risk gate, strategy runtime, storage, or replay engine.
 
-The system is written in Rust. It handles the full lifecycle: ingesting market data → computing indicators → evaluating strategy logic → passing orders through a risk gate → executing at a broker → recording every event immutably → backtesting on historical data.
+The system is written in Rust. It handles the full lifecycle: ingesting market data → computing indicators → evaluating strategy logic → passing orders through a risk gate → executing at a broker → recording every event immutably.
 
 ### The Modular Monolith
 
@@ -125,7 +125,7 @@ The system architecture is divided into six planes — six separate concerns tha
 | **Data** | Internal normalized events between services | NATS JetStream |
 | **Storage** | Durable historical record | ClickHouse + Postgres + Parquet + Redis |
 | **Strategy** | Decision-grade event consumption and order generation | Internal bus + runtime |
-| **Replay** | Historical simulation via market_simulator | Arrow IPC export |
+| **Replay** | Deterministic historical replay invariants (`available_time` ordering) | Parquet event archive |
 
 These planes don't call each other directly. They communicate through the event bus or REST. This separation means you can test the risk gate without a live market feed, and replay without a real broker.
 
@@ -197,7 +197,7 @@ Think of crates like packages. Each crate has one job. Here they are in dependen
 | Crate | Purpose |
 |-------|---------|
 | `crates/risk/` | The single risk gate every order passes through. Also: kill switch, rate limits, position checks, trust tier validation. |
-| `crates/execution/` | Order submission, fill processing, position tracking, broker adapters (Coinbase, Alpaca, market_simulator). |
+| `crates/execution/` | Order submission, fill processing, position tracking, broker adapters (Coinbase, Alpaca). |
 | `crates/reconciliation/` | Continuous checking that internal positions match broker state. Halts on divergence. |
 
 #### Strategy System
@@ -216,7 +216,6 @@ Think of crates like packages. Each crate has one job. Here they are in dependen
 | `crates/api/` | REST API (Axum) + WebSocket gateway for the frontend. |
 | `crates/ui-gateway/` | Intentionally-lossy live view for the frontend — throttled, sampled, aggregated. |
 | `crates/mcp-server/` | 9 Model Context Protocol tools for AI-agent strategy authoring. |
-| `crates/market-simulator-adapter/` | Bridge between this repo's types and the external `market_simulator` backtest engine. |
 
 ### `docs/` — Engineering documentation
 
@@ -236,7 +235,7 @@ docs/
 frontend/src/
 ├── App.tsx                 ← Routes, providers
 ├── api/                    ← Typed REST + WebSocket clients
-├── pages/                  ← Dashboard, InstrumentDetail, StrategyBuilder, Backtest
+├── pages/                  ← Dashboard, InstrumentDetail, StrategyBuilder
 ├── panels/                 ← ChartPanel, OrderBookPanel, PositionsPanel
 ├── builder/                ← Visual node-graph strategy builder
 ├── store/                  ← Client state (subscriptions, auth, selected instrument)
@@ -303,7 +302,7 @@ Key fields:
 | `sequence` | u64 | Monotonically increasing per lane+instrument |
 | `payload` | T | The actual data (TradePayload, BarPayload, etc.) |
 
-The four timestamps matter for replay — see [Module 10](#module-10-backtesting-and-replay--deterministic-simulation).
+The four timestamps matter for replay — see [Module 10](#module-10-replay--deterministic-simulation).
 
 ### `Instrument` — Metadata-Driven Design
 
@@ -503,8 +502,8 @@ If Kraken goes down, the collector crashes and restarts. The main platform binar
 | Backend | What goes there | Access pattern |
 |---------|----------------|----------------|
 | **Postgres** | Orders, fills, positions, user data, strategies | Transactional — must be consistent |
-| **ClickHouse** | Bars, trades, features | Time-series range scans — fast for backtest loading |
-| **Parquet** | Raw event archive | Append-only, immutable ground truth — fed to market_simulator |
+| **ClickHouse** | Bars, trades, features | Time-series range scans — fast for historical analytics |
+| **Parquet** | Raw event archive | Append-only, immutable ground truth for replay and audit |
 | **Redis** | Latest state per lane+instrument | Sub-millisecond reads — snapshot-on-connect for UI |
 
 The `StorageWriter` (`crates/storage/src/writer.rs`) batches events before writing — 10,000 events or 100ms, whichever comes first. Writing one event per insert would destroy database performance at market data rates.
@@ -858,7 +857,6 @@ Current implementations:
 |--------|------|---------|
 | `CoinbaseAdapter` | `coinbase.rs` | Live crypto (Coinbase Advanced Trade API) |
 | `AlpacaAdapter` | `alpaca.rs` | Paper/live equity (Alpaca API) |
-| `MarketSimulatorAdapter` | `market_simulator.rs` | Backtest fill simulation |
 | `NoBroker` | `broker.rs` | Fallback when no credentials are set |
 
 Adding a new broker (e.g., Interactive Brokers for futures): implement the trait, add a match arm in `apps/platform/src/main.rs`. Zero changes to the risk gate or strategy runtime.
@@ -990,11 +988,13 @@ Each panel subscription has its own rate limit. An order book panel showing 5 de
 
 ---
 
-## Module 10: Backtesting and Replay — Deterministic Simulation
+## Module 10: Replay — Deterministic Simulation
 
-### The Core Problem with Backtesting
+> **Note:** Backtesting is explicitly **out of scope** for this repository (removed 2026-06-10). This module covers the *replay invariants* — the timestamp discipline and pure-function rules that guarantee live correctness and determinism. These invariants stay even though no backtest engine exists here.
 
-Most backtesting systems have **lookahead bias** — the simulation accidentally uses information that wouldn't have been available at the time a trade was made. For example:
+### The Core Problem with Historical Simulation
+
+Most historical-simulation systems have **lookahead bias** — the simulation accidentally uses information that wouldn't have been available at the time a trade was made. For example:
 
 - Using a bar's closing price to decide to trade at the open
 - Using features computed from the "full" bar before the bar is finalized
@@ -1046,35 +1046,11 @@ This ordering makes it structurally impossible for a strategy to see something f
 
 The bar builder and feature engine are pure functions — no I/O. They run identically in live and replay. This guarantees that:
 
-- The 1-minute bar you see in backtest is identical to the 1-minute bar you would have seen live
-- The EMA values in backtest are identical to the live values (recorded with their `available_time`)
+- The 1-minute bar produced from replayed events is identical to the 1-minute bar produced live
+- Replayed EMA values are identical to the live values (recorded with their `available_time`)
 - There is no "recomputed with full data" problem
 
-### Backtest Flow
-
-```
-POST /api/backtests  { strategy_id, instrument_id, from, to }
-  ↓
-Load strategy definition
-  ↓
-Query ClickHouse for bars in date range (ORDER BY available_time)
-  ↓
-crates/market-simulator-adapter/src/export.rs
-  ↓  convert to Arrow IPC bytes
-crates/market-simulator-adapter/src/contract.rs
-  ↓  send RunRequest to market_simulator (external library)
-market_simulator:
-  ↓  instantiate strategy runtime (same code as live)
-  ↓  replay loop: advance ReplayClock, dispatch events in available_time order
-  ↓  collect order intents → fill simulation → BacktestReport
-  ↓
-crates/market-simulator-adapter/src/results.rs
-  ↓  parse results → this repo's types
-  ↓
-Store BacktestReport
-  ↓
-GET /api/backtests/{id}  → frontend displays results
-```
+These guarantees exist for **live correctness and auditability** — being able to reconstruct exactly what the system saw and when. Backtesting tooling, if it ever returns, would build on the same invariants, but no backtest engine, adapter, or API exists in this repository.
 
 ---
 
@@ -1284,7 +1260,7 @@ These are the hardcoded constraints that the entire system's correctness depends
 
 **What:** `crates/builders/` and `crates/features/` contain zero I/O. They are pure functions. The same code runs live (fed by bus events) and in replay (fed by Parquet events).
 
-**Why:** If builders or features behave differently in replay than live, backtest results are meaningless.
+**Why:** If builders or features behave differently in replay than live, any historical reconstruction or audit is meaningless.
 
 **Enforcement:** CI check "builders/features purity (no I/O deps)" fails if these crates import anything that touches the network, database, clock, or file system.
 

@@ -96,8 +96,7 @@ Event Bus (NATS JetStream)
                ▼
           Execution Engine
                ├── Coinbase (live crypto)
-               ├── Alpaca (paper / live equity)
-               └── market_simulator (backtest)
+               └── Alpaca (paper / live equity)
 
 React Frontend ↔ REST API + WebSocket
 MCP Server ↔ REST API (strategy authoring only)

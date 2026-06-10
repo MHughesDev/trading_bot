@@ -5,7 +5,7 @@
 //! * Crypto → Kraken (data)
 //! * Equity → Alpaca data feed
 //!
-//! Execution routing is separate: live→Coinbase, paper→Alpaca, backtest→market_simulator.
+//! Execution routing is separate: live→Coinbase, paper→Alpaca.
 
 pub mod lifecycle;
 pub mod registry;

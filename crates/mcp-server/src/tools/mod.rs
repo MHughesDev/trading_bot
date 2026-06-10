@@ -7,6 +7,5 @@
 //! like any other path.
 
 pub mod authoring;
-pub mod backtest;
 pub mod discovery;
 pub mod lifecycle;

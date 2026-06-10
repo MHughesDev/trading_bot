@@ -1,5 +1,4 @@
 pub mod assets;
-pub mod backtests;
 pub mod orders;
 pub mod strategies;
 pub mod streams;
@@ -44,8 +43,5 @@ pub fn router(state: AppState) -> Router {
             post(strategies::start_strategy),
         )
         .route("/api/strategies/:id/stop", post(strategies::stop_strategy))
-        // Phase 4 backtests
-        .route("/api/backtests", post(backtests::run_backtest))
-        .route("/api/backtests/:id", get(backtests::get_backtest))
         .with_state(state)
 }

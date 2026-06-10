@@ -1,6 +1,6 @@
 //! MCP server library — thin front door to the strategy platform.
 //!
-//! All nine tools route through the shared validator and runtime.
+//! All seven tools route through the shared validator and runtime.
 //! No privileged path; no order-placement tool.
 
 pub mod tools;
@@ -12,7 +12,6 @@ use uuid::Uuid;
 
 use demand_manager::{DemandRegistry, NoopPipelineFactory};
 use domain::strategy_def::StrategyDefinition;
-use market_simulator_adapter::BacktestReport;
 use strategy_runtime::InstanceManager;
 
 /// Shared context injected into every MCP tool call.
@@ -23,7 +22,6 @@ use strategy_runtime::InstanceManager;
 pub struct McpContext {
     pub strategy_store: Arc<Mutex<HashMap<Uuid, StrategyDefinition>>>,
     pub instance_manager: Arc<Mutex<InstanceManager>>,
-    pub backtest_results: Arc<Mutex<HashMap<Uuid, Result<BacktestReport, String>>>>,
 }
 
 impl McpContext {
@@ -32,7 +30,6 @@ impl McpContext {
         Self {
             strategy_store: Arc::new(Mutex::new(HashMap::new())),
             instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),
-            backtest_results: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -113,26 +110,6 @@ pub fn dispatch_tool(
             let list = tools::lifecycle::list_strategies(ctx);
             json!({ "strategies": list })
         }
-        "run_backtest" => {
-            let store_id = params
-                .get("store_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let instrument_id = params
-                .get("instrument_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let result = tools::backtest::run_backtest(ctx, store_id, instrument_id);
-            serde_json::to_value(result).unwrap_or_else(|_| json!({"error": "serialization_error"}))
-        }
-        "get_backtest_result" => {
-            let backtest_id = params
-                .get("backtest_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let result = tools::backtest::get_backtest_result(ctx, backtest_id);
-            serde_json::to_value(result).unwrap_or_else(|_| json!({"error": "serialization_error"}))
-        }
         unknown => {
             json!({ "error": "unknown_tool", "tool": unknown })
         }
@@ -209,29 +186,6 @@ pub fn tool_definitions() -> serde_json::Value {
             "name": "list_strategies",
             "description": "List all defined strategies",
             "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "run_backtest",
-            "description": "Submit a strategy for backtesting on a given instrument",
-            "inputSchema": {
-                "type": "object",
-                "required": ["store_id", "instrument_id"],
-                "properties": {
-                    "store_id": { "type": "string" },
-                    "instrument_id": { "type": "string" }
-                }
-            }
-        },
-        {
-            "name": "get_backtest_result",
-            "description": "Fetch metrics and P&L for a completed backtest",
-            "inputSchema": {
-                "type": "object",
-                "required": ["backtest_id"],
-                "properties": {
-                    "backtest_id": { "type": "string" }
-                }
-            }
         }
     ])
 }

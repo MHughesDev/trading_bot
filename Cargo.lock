@@ -87,7 +87,6 @@ dependencies = [
  "demand-manager",
  "domain",
  "execution",
- "market-simulator-adapter",
  "risk",
  "rust_decimal",
  "serde",
@@ -2046,23 +2045,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "market-simulator-adapter"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "chrono",
- "domain",
- "parquet",
- "rust_decimal",
- "serde",
- "serde_json",
- "storage",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2097,7 +2079,6 @@ version = "0.1.0"
 dependencies = [
  "demand-manager",
  "domain",
- "market-simulator-adapter",
  "serde",
  "serde_json",
  "strategy-runtime",

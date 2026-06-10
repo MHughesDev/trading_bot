@@ -16,13 +16,13 @@ The system is an **all-in-one, data & asset scalable** trading platform — a **
 | **Data** | Internal normalized events between services | NATS JetStream |
 | **Storage** | Durable historical record | ClickHouse + Postgres + Parquet + Redis |
 | **Strategy** | Decision-grade event consumption | Internal bus + runtime |
-| **Replay** | Historical simulation via market_simulator | Event store + Arrow IPC export |
+| **Replay** | Deterministic historical replay (`available_time` ordering) | Event store (Parquet archive) |
 
 The **main binary** (`apps/platform`) co-locates the API gateway, UI streaming gateway, strategy runtime, risk gate, execution engine, and demand manager. These components are co-located for legibility — for a money-handling system run by a small team, the ability to ask "what did the system believe and do, and why" and get a straight answer is the most valuable property.
 
 **Satellite collector processes** (one per venue/source) fail and reconnect independently without taking the core binary down. Each collector normalizes raw venue messages to typed `EventEnvelope` and publishes to the event bus.
 
-The **React frontend** (`frontend/`) connects to the main binary via REST (control plane: strategies, orders, backtests) and WebSocket (live panel subscriptions). It is retained from the Python-era system and re-pointed at the new Rust API/WS contracts.
+The **React frontend** (`frontend/`) connects to the main binary via REST (control plane: strategies, orders) and WebSocket (live panel subscriptions). It is retained from the Python-era system and re-pointed at the new Rust API/WS contracts.
 
 ---
 
@@ -40,14 +40,13 @@ The **React frontend** (`frontend/`) connects to the main binary via REST (contr
 | `crates/strategy-runtime` | `WorldState`/`WorldContext`, strategy interpreter (evaluates strategy-definition node graph), instance lifecycle, `world.now()` clock (no wall-clock reads) | FEAT-001 |
 | `crates/strategy-validator` | Validates strategy-definition JSON against the frozen 1.0 format; all three front doors (REST, visual builder, MCP) target this single validator | FEAT-001 |
 | `crates/risk` | Single risk gate + kill switch. Every order — manual or strategy-emitted — passes through here. Idempotent. Tighten-only risk overrides | COMP-002 |
-| `crates/execution` | Broker adapters: Coinbase (live), Alpaca (paper), market_simulator (backtest). Order state machine, fill handling, position updates, execution audit trail | COMP-002 |
+| `crates/execution` | Broker adapters: Coinbase (live), Alpaca (paper). Order state machine, fill handling, position updates, execution audit trail | COMP-002 |
 | `crates/reconciliation` | Position/balance reconciliation vs broker; per-lane freshness watchdog (market-hours-aware); sequence gap handling; divergence → kill switch trip | COMP-002 |
 | `crates/storage` | Postgres/ClickHouse/Parquet/Redis persistence adapters; batched storage-writer consumer (10k events or 100ms) | COMP-004 |
 | `crates/ui-gateway` | Throttled, intentionally lossy UI streaming; separate consumer view from canonical stream; per-panel rate limits; snapshot-on-connect | COMP-003 |
 | `crates/demand-manager` | Tracks what lanes and instruments each consumer (strategy instance, UI panel) needs; aggregates counts; starts/stops pipelines | COMP-003, FEAT-001 |
 | `crates/venue-router` | Resolves `(AssetClass, DataType)` → `VenueId` at runtime; starts/stops collector instances on demand; data pipelines never start at system init | COMP-002, ADR-0011 |
-| `crates/api` | Axum REST routes + WS upgrade + auth; control-plane endpoints for strategies, orders, backtests, assets, kill switch | SYS-001 |
-| `crates/market-simulator-adapter` | Thin adapter to `github.com/MHughesDev/market_simulator`; exports raw Parquet archive → Arrow IPC; submits `RunRequest`; translates results to domain types | COMP-004 |
+| `crates/api` | Axum REST routes + WS upgrade + auth; control-plane endpoints for strategies, orders, assets, kill switch | SYS-001 |
 | `crates/mcp-server` | Thin MCP front door; targets the canonical strategy JSON via `strategy-validator`; no privileged broker path; no order-placement tool | INTG-001 |
 | `apps/platform` | Main binary: wires api + ui-gateway + strategy-runtime + risk + execution + reconciliation + demand-manager; no logic, wiring only | SYS-001 |
 | `apps/collector-crypto` | Satellite binary: starts the Kraken crypto collector; publishes to the bus; reconnects independently | COMP-001 |
@@ -93,8 +92,7 @@ Risk Gate (crates/risk)                           │
        ▼                                          │
 Execution Engine (crates/execution)               │
   ├── Coinbase adapter (live)                     │
-  ├── Alpaca adapter (paper)                      │
-  └── market_simulator adapter (backtest)         │
+  └── Alpaca adapter (paper)                      │
        │                                          │
        ▼                                          │
 Broker APIs ◄─────────────────────────────────────┘
@@ -106,7 +104,7 @@ UI Gateway (crates/ui-gateway)
        ▼
 React Frontend
   ├── REST ↔ Axum API ↔ Main Binary
-  │   (strategies, orders, backtests, instruments)
+  │   (strategies, orders, instruments)
   └── WebSocket ↔ UI Gateway
       (live panels: chart, orderbook, positions)
 ```
@@ -119,12 +117,11 @@ React Frontend
 |---------|------|-------------|
 | NATS JetStream | Event bus — the spine of the Data plane; durable pub/sub; quarantine lane | ADR-0003 |
 | PostgreSQL | Transactional storage: users, orders, fills, positions, strategy definitions, risk config | ADR-0004 |
-| ClickHouse | Time-series storage: bars, trades, features; columnar scan for backtest data loading | ADR-0004 |
+| ClickHouse | Time-series storage: bars, trades, features; columnar scan for historical analytics | ADR-0004 |
 | Redis / Valkey | Latest-state cache: price snapshots, subscription state, rate-limit counters. Never source of truth for orders/fills | ADR-0004 |
 | Coinbase Advanced Trade API | Live execution broker for crypto (REST + WS) | ADR-0006 |
 | Alpaca API | Paper execution (all assets) + equity market data feed | ADR-0006 |
 | Kraken WS | Crypto market data source (trades, quotes, L2 order-book) | ADR-0006 |
-| github.com/MHughesDev/market_simulator | External backtest fill simulation engine; receives Arrow IPC export; returns TradeRecord results | ADR-0006 area (Q-9 resolution) |
 
 ---
 
@@ -134,7 +131,7 @@ React Frontend
 |-----|-------|--------|
 | ADR-0011 | On-Demand Pipeline Startup via Demand Manager + Venue Router | Accepted |
 | ADR-0010 | MCP Server as Thin Strategy Front Door | Accepted |
-| ADR-0009 | Backtest Engine Delegated to market_simulator | Accepted |
+| ADR-0009 | Backtest Engine Delegated to market_simulator | Superseded — backtesting removed from repo scope (2026-06-10) |
 | ADR-0008 | Strategy Runtime Uses world.now() — No Wall-Clock Reads | Accepted |
 | ADR-0007 | Strategy Definition Frozen at v1.0 Before Front Doors Built | Accepted |
 | ADR-0006 | Broker and Venue Selection: Coinbase + Alpaca + Kraken | Accepted |
@@ -165,8 +162,8 @@ Full ADR documents: `docs/adr/`
 **On-demand pipelines:**
 - Data pipelines (collectors, bar builders, feature engine) start **only** when at least one consumer (strategy instance or UI panel) has declared demand via the Demand Manager. They are never started at system initialization (ADR-0011).
 
-**No backtest engine in this repository:**
-- `crates/market-simulator-adapter` is a translation layer only. It contains no fill simulation logic, no replay loop, and no `available_time` ordering. All of that lives in `github.com/MHughesDev/market_simulator`.
+**No backtesting in this repository:**
+- Backtesting is explicitly out of scope (removed 2026-06-10). No backtest engine, no backtest adapter, no backtest API endpoints. The deterministic-replay invariants (`available_time` ordering, pure builders/features, `world.now()`) are retained because they guarantee live correctness and keep the door open for replay tooling later.
 
 ---
 
@@ -216,7 +213,7 @@ trading-platform/                      # repo root (current trading_bot/, refact
 │   ├── features/                      # PURE: indicator computation — EMA, RSI (live == replay)
 │   ├── collectors/                    # venue connectors: Kraken (crypto), Alpaca (equity)
 │   ├── risk/                          # single risk gate + kill switch
-│   ├── execution/                     # Coinbase (live), Alpaca (paper), market_simulator (backtest)
+│   ├── execution/                     # Coinbase (live), Alpaca (paper)
 │   ├── reconciliation/                # position/balance/freshness/sequence reconciliation
 │   ├── strategy-runtime/              # WorldState + strategy interpreter + instance lifecycle
 │   ├── strategy-validator/            # validates strategy-definition JSON (frozen 1.0 format)
@@ -224,7 +221,6 @@ trading-platform/                      # repo root (current trading_bot/, refact
 │   ├── venue-router/                  # resolves (AssetClass, DataType) → VenueId; on-demand lifecycle
 │   ├── ui-gateway/                    # throttled, lossy, frontend-shaped live views
 │   ├── api/                           # axum REST routes + WS upgrade + auth
-│   ├── market-simulator-adapter/      # adapter to github.com/MHughesDev/market_simulator
 │   └── mcp-server/                    # thin MCP front door → canonical strategy JSON
 │
 ├── apps/                              # ── thin BINARY crates (wiring only) ──
@@ -255,7 +251,6 @@ trading-platform/                      # repo root (current trading_bot/, refact
 │   ├── ingest_to_storage.rs
 │   ├── manual_order_flow.rs
 │   ├── strategy_end_to_end.rs
-│   ├── backtest_adapter.rs
 │   ├── quarantine_replay.rs
 │   └── reconciliation_halt.rs
 ├── xtask/                             # Rust-based dev automation (seed, gen-fixtures, check-money-f64)
@@ -273,9 +268,8 @@ domain  ────────────────────────
   │  │  └─────────── collectors                 (domain + event-bus + builders)
   │  └────────────── risk, execution, reconciliation, strategy-validator
   └───────────────── strategy-runtime, demand-manager, venue-router,
-                     ui-gateway, market-simulator-adapter, mcp-server, api
+                     ui-gateway, mcp-server, api
                        (compose the above; api is top of the graph)
 
 apps/*  depend on crates only — wiring, no logic.
-market_simulator ←── market-simulator-adapter (external; not in this workspace)
 ```
