@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, info};
+use uuid::Uuid;
 
 use crate::{
     collection::{fields, sources},
@@ -104,15 +105,26 @@ impl MilvusClient {
 
         let vector = call_openai_embedding(&req.text, openai_api_key, &self.http).await?;
 
-        let truncated_text = &req.text[..req.text.len().min(8190)];
+        // Truncate on a character boundary, not a byte index, to avoid a panic
+        // when a multi-byte character straddles the 8190-byte limit (M-11).
+        // Milvus max_length counts characters, so char-count truncation is also
+        // semantically correct.
+        const MAX_TEXT_CHARS: usize = 8190;
+        let truncated_text: String = req.text.chars().take(MAX_TEXT_CHARS).collect();
+
+        // Derive a deterministic Int64 primary key from event_id so that
+        // re-embedding the same event replaces the existing record rather than
+        // inserting a duplicate (M-1: autoId:false requires client-supplied id).
+        let pk_id = event_id_to_i64(&req.event_id);
 
         let entity = json!({
+            fields::ID:              pk_id,
             fields::VECTOR:          vector,
             fields::SOURCE:          req.source.as_str(),
             fields::EVENT_ID:        req.event_id,
             fields::INSTRUMENT_IDS:  req.instrument_ids,
             fields::VENUE:           req.venue,
-            fields::TEXT:            truncated_text,
+            fields::TEXT:            &truncated_text,
             fields::OCCURRED_AT_MS:  req.occurred_at_ms,
         });
 
@@ -126,8 +138,7 @@ impl MilvusClient {
         });
 
         let resp = self
-            .http
-            .post(&url)
+            .authed_post(&url)
             .json(&body)
             .send()
             .await
@@ -168,6 +179,18 @@ impl MilvusClient {
         });
 
         if let Some(filter) = source_filter {
+            // Validate against the closed set of known source constants to
+            // prevent Milvus DSL injection via an arbitrary filter string (H-3).
+            let valid_sources = [
+                sources::SOCIAL_POST,
+                sources::WEB_PAGE_SNAPSHOT,
+                sources::STRATEGY_DESCRIPTION,
+            ];
+            if !valid_sources.contains(&filter) {
+                return Err(SemanticError::Request(format!(
+                    "unknown source filter: {filter}"
+                )));
+            }
             body.as_object_mut()
                 .unwrap()
                 .insert("filter".into(), json!(format!("source == \"{filter}\"")));
@@ -179,8 +202,7 @@ impl MilvusClient {
         );
 
         let resp = self
-            .http
-            .post(&url)
+            .authed_post(&url)
             .json(&body)
             .send()
             .await
@@ -209,6 +231,16 @@ impl MilvusClient {
             })
             .collect())
     }
+}
+
+/// Convert an event_id string to a stable Int64 primary key for Milvus.
+///
+/// Parses the string as a UUID and folds the 128-bit value to i64 via XOR,
+/// producing a deterministic key that allows upsert to replace existing records.
+fn event_id_to_i64(event_id: &str) -> i64 {
+    let uuid = Uuid::parse_str(event_id).unwrap_or_else(|_| Uuid::new_v5(&Uuid::NAMESPACE_OID, event_id.as_bytes()));
+    let (hi, lo) = uuid.as_u64_pair();
+    (hi ^ lo) as i64
 }
 
 async fn call_openai_embedding(

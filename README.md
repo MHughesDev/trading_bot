@@ -68,7 +68,24 @@ cargo run -p collector-crypto
 cargo run -p collector-equity -- AAPL SPY
 ```
 
-### 6. MCP server (optional, for AI agent integration)
+### 6. Phase 7 satellites (optional, for knowledge layer)
+
+These services require additional env vars — see `.env.example` for all required values.
+
+```bash
+# Web page scraper — requires WEB_SCRAPER_URLS and optionally PLAYWRIGHT_BIN
+cargo run -p collector-web
+
+# Semantic embedder — requires OPENAI_API_KEY, MILVUS_HOST/MILVUS_HTTP_PORT
+cargo run -p embedder
+```
+
+Start the knowledge-layer backends (TigerGraph + Milvus) with:
+```bash
+docker compose up -d tigergraph etcd minio milvus
+```
+
+### 7. MCP server (optional, for AI agent integration)
 
 ```bash
 cargo run -p mcp-server   # JSON-RPC 2.0 over stdin/stdout

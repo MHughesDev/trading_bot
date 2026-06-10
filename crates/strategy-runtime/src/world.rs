@@ -93,6 +93,9 @@ impl WorldState {
                 self.current_time = *available_time;
             }
             WorldEvent::Feature { feature_value, .. } => {
+                // Advance current_time so ctx.now() is correct for strategies
+                // that fire on feature events before receiving a bar (M-12).
+                self.current_time = feature_value.available_time;
                 self.features
                     .insert(feature_value.name.clone(), feature_value.clone());
             }

@@ -223,5 +223,13 @@ fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
             StatusCode::SERVICE_UNAVAILABLE,
             "instrument is currently halted",
         ),
+        RiskRejection::RateLimitPerSecondExceeded { .. } => (
+            StatusCode::TOO_MANY_REQUESTS,
+            "order rate limit (per second) exceeded",
+        ),
+        RiskRejection::InvalidTickSize { .. } => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "limit price is not on a valid tick",
+        ),
     }
 }

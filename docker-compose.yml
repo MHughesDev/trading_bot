@@ -40,7 +40,7 @@ services:
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports:
       - "8123:8123"   # HTTP
-      - "9000:9000"   # native
+      - "9001:9000"   # native (host 9001 avoids collision with TigerGraph REST++ on 9000, M-16)
     volumes:
       - ch_data:/var/lib/clickhouse
       - ./clickhouse:/docker-entrypoint-initdb.d
@@ -64,13 +64,15 @@ services:
       retries: 10
 
   # TigerGraph graph store (P2-T12).
-  # NOTE: TigerGraph uses port 9000 for REST++ — conflicts with ClickHouse native
-  # port 9000 if both are exposed on the same host. Remap one if running both.
+  # Port assignments:
+  #   9000  (internal) — REST++ data API  → exposed on host as 9200 to avoid
+  #                      collision with ClickHouse's native port (M-16).
+  #   14240 (internal) — GSQL admin API + Studio UI.
   tigergraph:
     image: docker.tigergraph.com/tigergraph:3.9.3
     ports:
-      - "9090:9090"   # GSQL client
-      - "14240:14240" # TigerGraph Studio UI
+      - "9200:9000"   # REST++ data API (set TIGERGRAPH_PORT=9200 in .env)
+      - "14240:14240" # GSQL API + Studio UI (set TIGERGRAPH_GSQL_PORT=14240)
     volumes:
       - tigergraph_data:/home/tigergraph/tigergraph/data
     environment:

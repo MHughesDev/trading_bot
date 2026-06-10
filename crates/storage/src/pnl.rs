@@ -134,9 +134,16 @@ impl FifoEngine {
             };
 
             let consumed = close_qty.min(lot.remaining_qty);
-            // P&L = (close_price - open_price) * qty * USD_rate
-            // For long positions, open_usd_rate converts open notional to USD.
-            let realized_usd = (close_price - lot.open_price) * consumed * usd_rate;
+            // Correct cross-currency P&L (H-6):
+            //   realized_usd = close_notional_usd − open_notional_usd
+            //                = close_price × qty × close_usd_rate
+            //                  − open_price × qty × open_usd_rate
+            //
+            // Using a single close-time rate for the entire spread
+            // (the previous bug) over-/understates P&L whenever the
+            // quote-currency FX rate moved between open and close.
+            let realized_usd =
+                close_price * consumed * usd_rate - lot.open_price * consumed * lot.open_usd_rate;
 
             let close = PnlClose {
                 id: Uuid::new_v4(),
@@ -248,6 +255,7 @@ impl FifoEngine {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use super::*;
 
     fn uid() -> Uuid {
@@ -355,6 +363,33 @@ mod tests {
         let upnl =
             engine.unrealized_usd(user, AccountMode::Paper, "SOL-USD", dec(100), Decimal::ONE);
         assert_eq!(upnl, Decimal::ZERO);
+    }
+
+    #[test]
+    fn cross_currency_pnl_uses_correct_fx_rates() {
+        // H-6: BTC/EUR position — EUR/USD moved between open and close.
+        // Open: 1 BTC @ EUR 30_000, EUR/USD = 1.10  → open USD = 33_000
+        // Close: 1 BTC @ EUR 31_000, EUR/USD = 1.20 → close USD = 37_200
+        // Realized USD = 37_200 − 33_000 = 4_200
+        let user = uid();
+        let mut engine = FifoEngine::new();
+        let mode = AccountMode::Paper;
+
+        let open_eur_usd = Decimal::from_str("1.10").unwrap();
+        let close_eur_usd = Decimal::from_str("1.20").unwrap();
+        let open_price = Decimal::from(30_000);
+        let close_price = Decimal::from(31_000);
+
+        engine.open_lot(user, mode, "BTC-EUR", eid(), dec(1), open_price, open_eur_usd);
+        let closes =
+            engine.close_lots(user, mode, "BTC-EUR", eid(), dec(1), close_price, close_eur_usd);
+
+        assert_eq!(closes.len(), 1);
+        let expected = Decimal::from_str("4200").unwrap();
+        assert_eq!(
+            closes[0].realized_usd, expected,
+            "cross-currency P&L must use lot.open_usd_rate for open leg"
+        );
     }
 
     fn dec(n: i64) -> Decimal {

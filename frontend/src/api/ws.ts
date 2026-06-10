@@ -4,11 +4,18 @@ import type { WsOutMessage, SubSpec } from '@/lib/types'
 
 export type WsMessageHandler = (msg: WsOutMessage) => void
 
+// Synthetic control messages emitted on wsBus for connection state changes.
+// These are NOT server messages — they have type 'connected' | 'disconnected' | 'error'.
+export interface WsConnectedMessage { type: 'connected' }
+export interface WsDisconnectedMessage { type: 'disconnected' }
+export interface WsErrorMessage { type: 'error' }
+export type WsControlMessage = WsConnectedMessage | WsDisconnectedMessage | WsErrorMessage
+
 class WsMessageBus {
   private listeners = new Set<WsMessageHandler>()
 
-  emit(msg: WsOutMessage) {
-    this.listeners.forEach((l) => l(msg))
+  emit(msg: WsOutMessage | WsControlMessage) {
+    this.listeners.forEach((l) => l(msg as WsOutMessage))
   }
 
   on(fn: WsMessageHandler): () => void {
@@ -44,6 +51,8 @@ class WsClient {
 
     ws.onopen = () => {
       this.reconnectDelay = 1000
+      // Notify panels that the connection is live (L-6: was set before onopen).
+      wsBus.emit({ type: 'connected' })
       // Replay pending subscriptions on reconnect.
       for (const { panel_id, specs } of this.pending) {
         ws.send(JSON.stringify({ panel_id, subscribe: specs }))
@@ -60,6 +69,8 @@ class WsClient {
     }
 
     ws.onclose = () => {
+      // Notify panels so they can show a reconnecting state (L-14).
+      wsBus.emit({ type: 'disconnected' })
       if (!this.closed) {
         setTimeout(() => {
           this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30_000)
@@ -68,7 +79,11 @@ class WsClient {
       }
     }
 
-    ws.onerror = () => ws.close()
+    ws.onerror = () => {
+      // Emit an error event before closing so panels can show an error state (L-5).
+      wsBus.emit({ type: 'error' })
+      ws.close()
+    }
   }
 
   subscribe(panel_id: string, specs: SubSpec[]) {

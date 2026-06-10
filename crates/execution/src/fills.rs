@@ -3,11 +3,17 @@
 //! Fill processing is keyed by `(idempotency_key, broker_order_id, filled_qty, fill_price)`.
 //! A replay of the same fill from JetStream is a no-op.
 
+use std::collections::VecDeque;
+
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use domain::money::Price;
+
+/// Maximum number of fill dedup keys kept in memory.
+/// Covers all JetStream redelivery windows while bounding heap growth (H-4).
+const FILL_CACHE_CAPACITY: usize = 50_000;
 
 /// A single fill event received from the broker.
 #[derive(Debug, Clone)]
@@ -58,14 +64,33 @@ impl FillDedupKey {
 ///
 /// In production this is backed by the `fills` Postgres table, but the
 /// idempotency logic is encapsulated here so it can be unit-tested without I/O.
-#[derive(Debug, Default)]
+///
+/// Uses a bounded FIFO cache so memory usage is capped regardless of session
+/// length or fill volume (H-4).
+#[derive(Debug)]
 pub struct FillProcessor {
     seen: std::collections::HashSet<FillDedupKey>,
+    order: VecDeque<FillDedupKey>,
+    capacity: usize,
+}
+
+impl Default for FillProcessor {
+    fn default() -> Self {
+        Self::with_capacity(FILL_CACHE_CAPACITY)
+    }
 }
 
 impl FillProcessor {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            seen: std::collections::HashSet::with_capacity(capacity),
+            order: VecDeque::with_capacity(capacity),
+            capacity,
+        }
     }
 
     /// Apply `fill`.  Returns `Duplicate` if already seen, `Applied` otherwise.
@@ -74,6 +99,12 @@ impl FillProcessor {
         if self.seen.contains(&key) {
             FillResult::Duplicate
         } else {
+            if self.order.len() >= self.capacity {
+                if let Some(oldest) = self.order.pop_front() {
+                    self.seen.remove(&oldest);
+                }
+            }
+            self.order.push_back(key.clone());
             self.seen.insert(key);
             FillResult::Applied
         }

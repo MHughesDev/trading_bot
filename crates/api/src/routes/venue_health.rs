@@ -10,7 +10,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
-use crate::state::AppState;
+use crate::{auth::session::BearerToken, state::AppState};
 use domain::SupportedVenue;
 
 /// Response body for a venue health check.
@@ -22,7 +22,11 @@ pub struct VenueHealthResponse {
 }
 
 /// `GET /api/venues/:venue/health`
+///
+/// Requires a bearer token (L-4: previously unauthenticated, leaking which
+/// venue slugs are valid via the error message).
 pub async fn venue_health(
+    _token: BearerToken,
     Path(venue_slug): Path<String>,
     State(state): State<AppState>,
 ) -> Json<VenueHealthResponse> {
@@ -32,7 +36,8 @@ pub async fn venue_health(
             return Json(VenueHealthResponse {
                 ok: false,
                 latency_ms: 0,
-                message: format!("unknown venue: {venue_slug}"),
+                // Generic error — do not echo the slug to avoid venue enumeration.
+                message: "invalid venue".to_owned(),
             });
         }
     };

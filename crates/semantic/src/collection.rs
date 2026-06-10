@@ -42,15 +42,28 @@ struct MilvusResponse {
     message: Option<String>,
 }
 
+/// Response shape for a Milvus "already exists" error.
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct MilvusErrorResponse {
+    code: Option<i64>,
+    message: Option<String>,
+}
+
 impl MilvusClient {
     /// Ensure the social-posts collection exists, creating it if necessary.
+    ///
+    /// Treats "collection already exists" as success to handle concurrent
+    /// startup races (M-5: TOCTOU between exists-check and create).
     pub async fn ensure_collection(&self) -> Result<(), SemanticError> {
-        if self.collection_exists(SOCIAL_COLLECTION).await? {
-            info!(collection = SOCIAL_COLLECTION, "collection already exists");
-            return Ok(());
+        match self.create_collection(SOCIAL_COLLECTION, EMBEDDING_DIMS).await {
+            Ok(()) => Ok(()),
+            Err(SemanticError::Collection(msg)) if msg.contains("already exist") => {
+                info!(collection = SOCIAL_COLLECTION, "collection already exists");
+                Ok(())
+            }
+            Err(e) => Err(e),
         }
-        self.create_collection(SOCIAL_COLLECTION, EMBEDDING_DIMS)
-            .await
     }
 
     /// Return `true` if `collection_name` exists in Milvus.
@@ -60,8 +73,7 @@ impl MilvusClient {
             self.config.host, self.config.http_port
         );
         let resp = self
-            .http
-            .get(&url)
+            .authed_get(&url)
             .send()
             .await
             .map_err(|e| SemanticError::Request(e.to_string()))?;
@@ -86,6 +98,13 @@ impl MilvusClient {
     }
 
     /// Create a collection with the trading-platform schema.
+    ///
+    /// Fixes vs. original:
+    /// * `autoId: false` — client supplies a deterministic Int64 id derived
+    ///   from event_id so upsert genuinely replaces rather than always inserts (M-1).
+    /// * `dim` and `max_length` sent as integers, not strings (M-2).
+    /// * `indexType: "IVF_FLAT"` specified so `nlist` is valid (M-3).
+    /// * All requests use `authed_post` to attach credentials (M-4).
     pub async fn create_collection(
         &self,
         collection_name: &str,
@@ -104,37 +123,37 @@ impl MilvusClient {
                         "fieldName": fields::ID,
                         "dataType": "Int64",
                         "isPrimary": true,
-                        "autoId": true
+                        "autoId": false   // Client-supplied id enables real upsert (M-1).
                     },
                     {
                         "fieldName": fields::VECTOR,
                         "dataType": "FloatVector",
-                        "elementTypeParams": { "dim": dims.to_string() }
+                        "elementTypeParams": { "dim": dims }  // Integer, not string (M-2).
                     },
                     {
                         "fieldName": fields::SOURCE,
                         "dataType": "VarChar",
-                        "elementTypeParams": { "max_length": "64" }
+                        "elementTypeParams": { "max_length": 64 }  // Integer (M-2).
                     },
                     {
                         "fieldName": fields::EVENT_ID,
                         "dataType": "VarChar",
-                        "elementTypeParams": { "max_length": "64" }
+                        "elementTypeParams": { "max_length": 64 }
                     },
                     {
                         "fieldName": fields::INSTRUMENT_IDS,
                         "dataType": "VarChar",
-                        "elementTypeParams": { "max_length": "512" }
+                        "elementTypeParams": { "max_length": 512 }
                     },
                     {
                         "fieldName": fields::VENUE,
                         "dataType": "VarChar",
-                        "elementTypeParams": { "max_length": "64" }
+                        "elementTypeParams": { "max_length": 64 }
                     },
                     {
                         "fieldName": fields::TEXT,
                         "dataType": "VarChar",
-                        "elementTypeParams": { "max_length": "8192" }
+                        "elementTypeParams": { "max_length": 8192 }
                     },
                     {
                         "fieldName": fields::OCCURRED_AT_MS,
@@ -146,8 +165,9 @@ impl MilvusClient {
                 {
                     "fieldName": fields::VECTOR,
                     "indexName": "vector_index",
+                    "indexType": "IVF_FLAT",   // Required so nlist is valid (M-3).
                     "metricType": "COSINE",
-                    "params": { "nlist": "128" }
+                    "params": { "nlist": 128 }  // Integer (M-2).
                 }
             ]
         });
@@ -157,8 +177,7 @@ impl MilvusClient {
             self.config.host, self.config.http_port
         );
         let resp = self
-            .http
-            .post(&url)
+            .authed_post(&url)
             .json(&body)
             .send()
             .await
@@ -182,8 +201,7 @@ impl MilvusClient {
         );
         let body = json!({ "collectionName": collection_name });
         let resp = self
-            .http
-            .post(&url)
+            .authed_post(&url)
             .json(&body)
             .send()
             .await

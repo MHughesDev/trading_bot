@@ -44,15 +44,29 @@ impl RedisClient {
         Ok(val)
     }
 
-    /// Check if an `event_id` has been seen (dedup). Returns `true` if already in the set.
+    /// Check if an `event_id` has been seen (dedup). Returns `true` if already seen.
+    ///
+    /// Uses per-event keys with a TTL instead of a single monolithic set so
+    /// Redis memory is bounded (H-5).  The dedup window matches the Parquet
+    /// replay redelivery guarantee (24 h).
     pub async fn seen(&mut self, event_id: &str) -> Result<bool, RedisError> {
-        let result: i64 = self.conn.sismember("seen:events", event_id).await?;
-        Ok(result == 1)
+        let key = format!("seen:event:{event_id}");
+        let exists: bool = self.conn.exists(&key).await?;
+        Ok(exists)
     }
 
-    /// Mark `event_id` as seen.
+    /// Mark `event_id` as seen with a 24-hour TTL.
     pub async fn mark_seen(&mut self, event_id: &str) -> Result<(), RedisError> {
-        self.conn.sadd::<_, _, ()>("seen:events", event_id).await?;
+        let key = format!("seen:event:{event_id}");
+        // SET key 1 EX 86400 NX — atomic set-if-not-exists with TTL.
+        redis::cmd("SET")
+            .arg(&key)
+            .arg(1_u8)
+            .arg("EX")
+            .arg(86_400_u64)
+            .arg("NX")
+            .exec_async(&mut self.conn)
+            .await?;
         Ok(())
     }
 }
