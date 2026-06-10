@@ -59,16 +59,10 @@ being dropped or coerced; replayable after the normalizer is fixed.
 **Reconciliation** — Continuously checking internal state (positions, balances) against the
 broker's view and halting on divergence. Where money is actually lost or saved.
 
-**market_simulator** — The external backtest engine (`github.com/MHughesDev/market_simulator`).
-This repo is a consumer of it, not its owner. The adapter crate exports data to it and parses
-results back. Owns the replay engine, fill simulation, and look-ahead enforcement — not this repo.
-
-**market_simulator adapter** — The crate in this repo (`crates/market-simulator-adapter`) that
-translates between this repo's domain types and the market_simulator's Arrow IPC contracts.
-Submits Run Requests; returns BacktestReports. Contains no fill logic.
-
-**Replay engine** — Owned by `market_simulator`, not this repo. Feeds recorded raw events through
-the same builders used live in `available_time` order, enforcing look-ahead safety.
+**Replay invariants** — The timestamp discipline (`available_time` ordering) and pure-function
+rules (same builders/features live and replay) that make deterministic historical reconstruction
+possible. Retained for live correctness and auditability; backtesting itself is out of repo scope
+(removed 2026-06-10).
 
 **Revision event** — An append-only event that supersedes an earlier one (e.g. a bar corrected by
 late data). History is never mutated in place.

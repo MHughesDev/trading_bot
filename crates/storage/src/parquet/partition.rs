@@ -25,7 +25,7 @@
 //!   Each batch flush creates one Parquet file in the partition.
 //! - **Nightly compaction:** a compaction job merges the small batch files in each
 //!   `lane/venue/instrument/date` partition into a single large file, maintaining
-//!   efficient read performance for backtest queries without holding open large files
+//!   efficient read performance for replay and analytics queries without holding open large files
 //!   during live operation.
 //!
 //! This function signature is the contract Phase 1's writer must implement.

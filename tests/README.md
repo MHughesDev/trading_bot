@@ -10,7 +10,6 @@ Tests are added as phases complete:
 | Phase 2 | `manual_order_flow.rs` | REST order → risk gate → paper execution → position update |
 | Phase 2 | `reconciliation_halt.rs` | forced divergence halts the instrument |
 | Phase 4 | `strategy_end_to_end.rs` | definition → runtime → intent → risk → paper fill |
-| Phase 4 | `backtest_adapter.rs` | archive export → Arrow IPC → market_simulator contract check |
 | Phase 7 | `quarantine_replay.rs` | malformed feed → quarantine → fix → replay → storage |
 
 To run: `just test-integration` (requires `just infra` first)

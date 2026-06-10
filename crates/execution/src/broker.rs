@@ -1,9 +1,8 @@
 //! `Broker` trait and associated types.
 //!
-//! Three concrete implementations exist:
+//! Concrete implementations:
 //! - `alpaca.rs` — Alpaca paper account (Phase 2)
 //! - `coinbase.rs` — Coinbase live (post-Phase 6)
-//! - `market_simulator.rs` — backtest simulator (Phase 4)
 //!
 //! The risk gate and strategy runtime never know which implementation is active.
 

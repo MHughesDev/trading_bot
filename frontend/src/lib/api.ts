@@ -78,8 +78,6 @@ export const assetApi = {
     api.get('/assets/chart/bars', { params: { symbol, start, end, interval_seconds } }),
   tradeMarkers: (symbol: string, start?: string, end?: string) =>
     api.get('/assets/chart/trade-markers', { params: { symbol, start, end } }),
-  backtest: (symbol: string, strategy_id: string, window: string) =>
-    api.post(`/assets/backtest/${symbol}`, { strategy_id, window }),
 }
 
 // ── Portfolio ─────────────────────────────────────────────────────────────────

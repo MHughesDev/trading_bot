@@ -6,7 +6,6 @@ pub mod broker;
 pub mod coinbase;
 pub mod events;
 pub mod fills;
-pub mod market_simulator;
 pub mod order_state;
 pub mod positions;
 
