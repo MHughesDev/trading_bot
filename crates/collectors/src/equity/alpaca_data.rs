@@ -49,9 +49,9 @@ struct AlpacaMessage {
     #[serde(rename = "S")]
     symbol: Option<String>,
     #[serde(rename = "p")]
-    price: Option<f64>,
+    price: Option<String>,
     #[serde(rename = "s")]
-    size: Option<f64>,
+    size: Option<String>,
     #[serde(rename = "t")]
     timestamp: Option<String>,
     /// Trade ID from Alpaca (not always present on IEX).
@@ -86,22 +86,28 @@ impl AlpacaDataCollector {
         raw: &[u8],
         seq: u64,
     ) -> Result<EventEnvelope<TradePayload>, NormalizeError> {
-        let price_f = msg.price.ok_or_else(|| NormalizeError::MissingField {
-            field: "p".to_owned(),
-        })?;
-        let size_f = msg.size.ok_or_else(|| NormalizeError::MissingField {
-            field: "s".to_owned(),
-        })?;
+        let price_str = msg
+            .price
+            .as_deref()
+            .ok_or_else(|| NormalizeError::MissingField {
+                field: "p".to_owned(),
+            })?;
+        let size_str = msg
+            .size
+            .as_deref()
+            .ok_or_else(|| NormalizeError::MissingField {
+                field: "s".to_owned(),
+            })?;
         let ts_str = msg.timestamp.as_deref().unwrap_or("");
 
-        let price = Decimal::from_str(&price_f.to_string())
+        let price = Decimal::from_str(price_str)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
                 field: "p".to_owned(),
                 reason: e.to_string(),
             })?;
 
-        let size = Decimal::from_str(&size_f.to_string())
+        let size = Decimal::from_str(size_str)
             .map(Size::from_decimal)
             .map_err(|e| NormalizeError::InvalidSize {
                 field: "s".to_owned(),

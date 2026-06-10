@@ -35,14 +35,14 @@ impl AccountSource for TradovateAccountSource {
         &self,
         _creds: &VenueCredentials,
     ) -> Result<Vec<Balance>, AccountSourceError> {
-        Ok(vec![])
+        Err(AccountSourceError::NotImplemented)
     }
 
     async fn fetch_positions(
         &self,
         _creds: &VenueCredentials,
     ) -> Result<Vec<VenuePosition>, AccountSourceError> {
-        Ok(vec![])
+        Err(AccountSourceError::NotImplemented)
     }
 
     async fn fetch_transactions(
@@ -51,6 +51,6 @@ impl AccountSource for TradovateAccountSource {
         _user_id: uuid::Uuid,
         _since: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Vec<VenueTransaction>, AccountSourceError> {
-        Ok(vec![])
+        Err(AccountSourceError::NotImplemented)
     }
 }

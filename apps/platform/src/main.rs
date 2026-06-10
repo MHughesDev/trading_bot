@@ -60,6 +60,19 @@ async fn main() -> anyhow::Result<()> {
     let app_state = api::AppState::new(pg, risk_gate, kill_switch, execution_engine, gateway);
     let router = api::router(app_state);
 
+    // Safety guardrail (M-17): refuse to bind on a network-accessible address
+    // while bearer-token auth is still the placeholder (any non-empty token
+    // accepted).  Remove this check when Phase 2 session validation lands.
+    let is_loopback = matches!(cfg.api.host.as_str(), "127.0.0.1" | "::1" | "localhost");
+    if !is_loopback {
+        anyhow::bail!(
+            "SECURITY: auth is placeholder-only (M-17) — refusing to bind on \
+             non-loopback address '{}'. Set api.host to 127.0.0.1 or implement \
+             Phase 2 session validation first.",
+            cfg.api.host
+        );
+    }
+
     // Bind and serve.
     let addr = format!("{}:{}", cfg.api.host, cfg.api.port);
     let listener = tokio::net::TcpListener::bind(&addr)

@@ -8,7 +8,7 @@ pub const RSI_FEATURE_VERSION: u32 = 1;
 #[derive(Clone, Debug)]
 pub struct Rsi {
     period: usize,
-    prev_price: Option<f64>,
+    prev_value: Option<f64>,
     avg_gain: f64,
     avg_loss: f64,
     seed_gains: f64,
@@ -22,7 +22,7 @@ impl Rsi {
         assert!(period >= 2, "RSI period must be at least 2");
         Self {
             period,
-            prev_price: None,
+            prev_value: None,
             avg_gain: 0.0,
             avg_loss: 0.0,
             seed_gains: 0.0,
@@ -32,13 +32,13 @@ impl Rsi {
         }
     }
 
-    /// Update with a new close price.
+    /// Update with a new close value.
     ///
     /// Returns RSI ∈ [0, 100] once enough data exists; `None` otherwise.
     #[allow(clippy::cast_precision_loss)]
-    pub fn update(&mut self, price: f64) -> Option<f64> {
-        let prev = self.prev_price.replace(price)?;
-        let change = price - prev;
+    pub fn update(&mut self, value: f64) -> Option<f64> {
+        let prev = self.prev_value.replace(value)?;
+        let change = value - prev;
         let gain = change.max(0.0);
         let loss = (-change).max(0.0);
 

@@ -4,7 +4,6 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -13,7 +12,6 @@ use domain::{
     order::{OrderIntent, OrderType, Side},
     RiskRejection,
 };
-use risk::GateContext;
 
 use crate::{auth::BearerToken, state::AppState};
 
@@ -30,7 +28,7 @@ pub struct PlaceOrderRequest {
 /// POST /api/orders — submit a manual order through the risk gate.
 pub async fn place_order(
     _token: BearerToken,
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Json(req): Json<PlaceOrderRequest>,
 ) -> impl IntoResponse {
     // Parse side.
@@ -103,52 +101,20 @@ pub async fn place_order(
         intent.idempotency_key = key;
     }
 
-    // Build a minimal gate context.
-    // In production, current_position and market_price would be fetched from
-    // Postgres / Redis.  For Phase 2, we use conservative defaults.
-    let ctx = GateContext::for_manual_order(
-        Decimal::ZERO,      // TODO(P2+): fetch from DB
-        None,               // TODO(P2+): fetch from Redis
-        Decimal::new(1, 2), // 0.01 default tick
-        Decimal::new(1, 3), // 0.001 default lot
-        Decimal::ZERO,      // TODO(P2+): fetch realized P&L for today
-        true,               // TODO(P2+): check instrument active in DB
-        0,
-        0,
-    );
-
-    // Run through the risk gate.
-    let approved = match state.risk_gate.check(intent, &ctx) {
-        Ok(a) => a,
-        Err(rejection) => {
-            let (status, msg) = risk_rejection_response(&rejection);
-            return (
-                status,
-                Json(json!({ "error": msg, "reason": rejection.to_string() })),
-            )
-                .into_response();
-        }
-    };
-
-    let idempotency_key = approved.intent.idempotency_key;
-
-    // Submit to execution engine.
-    match state.execution.submit(approved).await {
-        Ok(result) => (
-            StatusCode::CREATED,
-            Json(json!({
-                "idempotency_key": idempotency_key,
-                "broker_order_id": result.broker_order_id,
-                "state": "submitted",
-            })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": "execution failed", "detail": e.to_string() })),
-        )
-            .into_response(),
-    }
+    // Position data is not yet wired (Phase 2).  Returning position=0 would let
+    // risk checks pass even when the account already holds a position — a
+    // false-permissive failure mode that could allow over-leverage.  Reject
+    // manual orders until real position, mark price, and P&L data are available.
+    return (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({
+            "error": "manual order placement not yet available",
+            "detail": "position and mark-price data are not yet wired (Phase 2); \
+                       accepting orders with zero-position defaults would bypass \
+                       position-limit checks"
+        })),
+    )
+        .into_response();
 }
 
 /// GET /api/orders/:id — look up an order by idempotency key.
