@@ -12,7 +12,9 @@ use uuid::Uuid;
 
 use domain::instrument::AssetClass;
 use domain::strategy_def::StrategyDefinition;
-use strategy_runtime::compatibility::{default_provided_lanes, is_compatible, InstrumentCapabilities};
+use strategy_runtime::compatibility::{
+    default_provided_lanes, is_compatible, InstrumentCapabilities,
+};
 use strategy_runtime::manifest::compile_manifest;
 use strategy_validator::validate;
 
