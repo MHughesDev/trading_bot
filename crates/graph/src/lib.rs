@@ -103,7 +103,10 @@ impl TigerGraphClient {
 
     /// Ping the TigerGraph instance.  Returns `Ok(())` on 2xx.
     pub async fn ping(&self) -> Result<(), GraphError> {
-        let url = format!("http://{}:{}/api/ping", self.config.host, self.config.restpp_port);
+        let url = format!(
+            "http://{}:{}/api/ping",
+            self.config.host, self.config.restpp_port
+        );
         let resp = self
             .http
             .get(&url)

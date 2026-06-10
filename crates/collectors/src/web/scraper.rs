@@ -649,10 +649,12 @@ mod tests {
     #[test]
     fn robots_txt_allow_overrides_disallow() {
         // L-1: Allow: /admin/public/ within Disallow: /admin/ should permit sub-path.
-        let content =
-            "User-agent: *\nDisallow: /admin/\nAllow: /admin/public/\n";
+        let content = "User-agent: *\nDisallow: /admin/\nAllow: /admin/public/\n";
         let r = RobotsTxt::parse(content);
-        assert!(!r.is_allowed("/admin/secret"), "/admin/secret must be blocked");
+        assert!(
+            !r.is_allowed("/admin/secret"),
+            "/admin/secret must be blocked"
+        );
         assert!(
             r.is_allowed("/admin/public/page"),
             "/admin/public/ should be explicitly allowed"
@@ -700,7 +702,10 @@ mod tests {
         let out = strip_html(html);
         assert!(!out.contains("var"), "script content must be stripped");
         assert!(out.contains("Visible"), "regular text must remain");
-        assert!(out.contains("Also visible"), "text after script must remain");
+        assert!(
+            out.contains("Also visible"),
+            "text after script must remain"
+        );
     }
 
     #[test]

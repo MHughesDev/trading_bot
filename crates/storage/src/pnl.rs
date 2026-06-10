@@ -255,8 +255,8 @@ impl FifoEngine {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use super::*;
+    use std::str::FromStr;
 
     fn uid() -> Uuid {
         Uuid::new_v4()
@@ -380,9 +380,24 @@ mod tests {
         let open_price = Decimal::from(30_000);
         let close_price = Decimal::from(31_000);
 
-        engine.open_lot(user, mode, "BTC-EUR", eid(), dec(1), open_price, open_eur_usd);
-        let closes =
-            engine.close_lots(user, mode, "BTC-EUR", eid(), dec(1), close_price, close_eur_usd);
+        engine.open_lot(
+            user,
+            mode,
+            "BTC-EUR",
+            eid(),
+            dec(1),
+            open_price,
+            open_eur_usd,
+        );
+        let closes = engine.close_lots(
+            user,
+            mode,
+            "BTC-EUR",
+            eid(),
+            dec(1),
+            close_price,
+            close_eur_usd,
+        );
 
         assert_eq!(closes.len(), 1);
         let expected = Decimal::from_str("4200").unwrap();
