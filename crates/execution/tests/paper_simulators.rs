@@ -38,7 +38,10 @@ fn intent(
 
 #[test]
 fn clob_partial_fill_aggregates() {
-    let sim = ClobFillSimulator { partial_fill_ratio: dec!(0.5), ..Default::default() };
+    let sim = ClobFillSimulator {
+        partial_fill_ratio: dec!(0.5),
+        ..Default::default()
+    };
     let mark = Price::from_decimal(dec!(50000));
     let fill = sim.simulate_fill(
         &intent(OrderType::Market, Side::Buy, None, TimeInForce::Gtc),
