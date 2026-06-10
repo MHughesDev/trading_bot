@@ -14,7 +14,6 @@ fn pnl_types_compile() {
 #[tokio::test]
 #[ignore = "requires a running migrated Postgres DB"]
 async fn fifo_partial_close_consistent() {
-    use chrono::Utc;
     use rust_decimal_macros::dec;
     use uuid::Uuid;
 
