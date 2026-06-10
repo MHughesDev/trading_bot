@@ -1,8 +1,6 @@
 //! P2-T06 acceptance test: OANDA candle normalizes to correct EventEnvelope.
 
 use collectors::fx::oanda::OandaCollector;
-use domain::payloads::bar::Timeframe;
-use domain::TrustTier;
 
 #[test]
 fn oanda_collector_instrument_id_uses_dash() {
