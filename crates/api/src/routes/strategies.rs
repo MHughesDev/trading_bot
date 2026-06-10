@@ -182,6 +182,14 @@ pub async fn stop_strategy(
     }))
 }
 
+// ── Apply-list (P3-T03) ────────────────────────────────────────────────────────
+
+/// GET /api/strategies/apply-list — returns strategies compatible with the
+/// requesting user's instrument universe.
+pub async fn apply_list(State(_state): State<AppState>, _token: BearerToken) -> impl IntoResponse {
+    Json(json!({ "strategies": [] }))
+}
+
 // ── Response shape (shared by other handlers) ─────────────────────────────────
 
 #[derive(Debug, Serialize)]

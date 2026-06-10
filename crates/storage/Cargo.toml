@@ -20,4 +20,5 @@ rust_decimal = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-rust_decimal_macros = "1"
+rust_decimal_macros = { workspace = true }
+strategy-runtime = { workspace = true }

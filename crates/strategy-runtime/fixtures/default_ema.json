@@ -1,0 +1,15 @@
+{
+  "strategy_id": "default_ema_7_21_discovery",
+  "definition_version": "1.0",
+  "asset_class": "crypto_spot_cex",
+  "min_trust_tier": "centralized_exchange",
+  "inputs": [
+    { "lane": "market.bars.1m", "instrument": "$bound_at_init" },
+    { "lane": "features.technical", "instrument": "$bound_at_init", "features": ["ema_7", "ema_21"] }
+  ],
+  "nodes": [
+    { "id": "n1", "type": "condition", "expr": "feature('ema_7') > feature('ema_21')" },
+    { "id": "n2", "type": "signal", "when": "n1", "emit": "bullish_cross" }
+  ],
+  "actions": []
+}

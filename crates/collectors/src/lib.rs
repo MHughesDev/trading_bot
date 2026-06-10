@@ -4,10 +4,16 @@
 //! different to prove that the `Collector` abstraction is venue-agnostic.
 
 pub mod crypto;
+pub mod dex;
 pub mod equity;
+pub mod futures;
+pub mod fx;
 pub mod gap;
 pub mod normalizer;
+pub mod options;
+pub mod prediction;
 pub mod reconnect;
+pub mod social;
 
 use std::sync::Arc;
 

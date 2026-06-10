@@ -5,9 +5,16 @@ edition = "2021"
 
 [dependencies]
 domain = { workspace = true }
+execution = { workspace = true }
+risk = { workspace = true }
 collectors = { workspace = true }
 event-bus = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 async-trait = "0.1"
+
+[dev-dependencies]
+rust_decimal = { workspace = true }
+rust_decimal_macros = { workspace = true }
+risk = { workspace = true, features = ["test-helpers"] }

@@ -7,8 +7,12 @@
 //! All OHLCV / price / size fields use `Price` / `Size` — never `f64`.
 
 pub mod bar;
+pub mod dex_quote;
+pub mod funding_rate;
 pub mod orderbook;
+pub mod prediction_price;
 pub mod quote;
+pub mod social_post;
 pub mod trade;
 
 /// Trait implemented by every v1 payload struct.
@@ -31,4 +35,8 @@ pub enum AnyPayload {
     Quote(quote::QuotePayload),
     OrderBook(orderbook::OrderBookPayload),
     Bar(bar::BarPayload),
+    FundingRate(funding_rate::FundingRatePayload),
+    PredictionPrice(prediction_price::PredictionPricePayload),
+    DexQuote(dex_quote::DexQuotePayload),
+    SocialPost(social_post::SocialPostPayload),
 }

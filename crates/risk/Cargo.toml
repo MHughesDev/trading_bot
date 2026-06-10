@@ -11,5 +11,8 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 rust_decimal = { workspace = true }
 
+[features]
+test-helpers = []
+
 [dev-dependencies]
 tokio = { workspace = true }

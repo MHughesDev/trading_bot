@@ -24,3 +24,9 @@ uuid = { workspace = true }
 rust_decimal = { workspace = true }
 sqlx = { workspace = true }
 chrono = { workspace = true }
+reqwest = { workspace = true }
+aes-gcm = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+rust_decimal_macros = { workspace = true }

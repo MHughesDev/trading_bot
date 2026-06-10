@@ -1,8 +1,10 @@
 pub mod assets;
+pub mod dashboard;
 pub mod orders;
 pub mod strategies;
 pub mod streams;
 pub mod trading;
+pub mod venue_health;
 
 use axum::{
     routing::{get, post},
@@ -43,5 +45,11 @@ pub fn router(state: AppState) -> Router {
             post(strategies::start_strategy),
         )
         .route("/api/strategies/:id/stop", post(strategies::stop_strategy))
+        // P2-T05 venue health checks
+        .route("/api/venues/:venue/health", get(venue_health::venue_health))
+        // P4-T06 dashboard rollup
+        .route("/api/dashboard/rollup", get(dashboard::get_rollup))
+        // P3-T03 apply-list
+        .route("/api/strategies/apply-list", get(strategies::apply_list))
         .with_state(state)
 }

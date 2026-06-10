@@ -1,5 +1,7 @@
 //! Execution engine — order state machine, broker adapters, fills, positions.
 
+pub mod account;
+pub mod account_source;
 pub mod alpaca;
 pub mod audit;
 pub mod broker;
@@ -7,7 +9,9 @@ pub mod coinbase;
 pub mod events;
 pub mod fills;
 pub mod order_state;
+pub mod paper;
 pub mod positions;
+pub mod venues;
 
 use std::sync::Arc;
 

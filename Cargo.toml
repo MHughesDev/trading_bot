@@ -19,9 +19,17 @@ members = [
     "crates/ui-gateway",
     "crates/api",
     "crates/mcp-server",
+    "crates/graph",
+    "crates/semantic",
     "apps/platform",
     "apps/collector-crypto",
     "apps/collector-equity",
+    "apps/collector-fx",
+    "apps/collector-kalshi",
+    "apps/collector-options",
+    "apps/collector-dex",
+    "apps/collector-futures",
+    "apps/collector-reddit",
     "apps/mcp-server",
     "xtask",
 ]
@@ -41,10 +49,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-rust_decimal = { version = "1", features = ["serde-with-str"] }
+rust_decimal = { version = "1", features = ["serde-with-str", "db-postgres"] }
+rust_decimal_macros = "1"
 
 # databases / cache
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "rust_decimal"] }
 clickhouse = "0.13"
 redis = { version = "0.29", features = ["aio", "tokio-comp"] }
 
@@ -73,10 +82,10 @@ anyhow = "1"
 
 # internal crates (path dependencies)
 domain = { path = "crates/domain" }
+storage = { path = "crates/storage" }
 cfg = { path = "crates/config" }
 observability = { path = "crates/observability" }
 event-bus = { path = "crates/event-bus" }
-storage = { path = "crates/storage" }
 builders = { path = "crates/builders" }
 features = { path = "crates/features" }
 collectors = { path = "crates/collectors" }
@@ -90,6 +99,8 @@ venue-router = { path = "crates/venue-router" }
 ui-gateway = { path = "crates/ui-gateway" }
 api = { path = "crates/api" }
 mcp-server-lib = { path = "crates/mcp-server" }
+graph = { path = "crates/graph" }
+semantic = { path = "crates/semantic" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

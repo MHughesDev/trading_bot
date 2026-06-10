@@ -17,7 +17,7 @@ pub type InstrumentId = String;
 pub type VenueId = String;
 
 /// Broad economic category of the instrument.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetClass {
     CryptoSpotCex,
@@ -31,6 +31,37 @@ pub enum AssetClass {
     Fx,
     Nft,
     PredictionMarket,
+}
+
+impl AssetClass {
+    /// Market microstructure model used for paper execution simulation.
+    pub fn market_structure(self) -> MarketStructure {
+        match self {
+            AssetClass::CryptoSpotCex
+            | AssetClass::Fx
+            | AssetClass::Etf
+            | AssetClass::Bond
+            | AssetClass::FuturesExpiring
+            | AssetClass::PerpetualSwap => MarketStructure::Clob,
+            AssetClass::Equity | AssetClass::Option => MarketStructure::BrokerQuote,
+            AssetClass::CryptoSpotDex | AssetClass::Nft => MarketStructure::AmmSwap,
+            AssetClass::PredictionMarket => MarketStructure::PredictionBinary,
+        }
+    }
+}
+
+/// Market microstructure model — determines which paper fill simulator to use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketStructure {
+    /// Central limit order book (most exchange-traded instruments).
+    Clob,
+    /// Dealer/broker quote — fill at quoted mid ± spread.
+    BrokerQuote,
+    /// AMM or DEX swap — fill at on-chain pool price.
+    AmmSwap,
+    /// Binary prediction market — fill at YES/NO price.
+    PredictionBinary,
 }
 
 /// When the instrument trades.  Empty `sessions` list means 24/7.

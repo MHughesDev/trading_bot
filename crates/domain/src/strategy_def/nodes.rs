@@ -64,4 +64,38 @@ pub enum NodeKind {
         /// Named signal consumed by `actions` (e.g. `"long"`, `"exit"`).
         emit: String,
     },
+    // ── v1.5 universe/pipeline nodes ─────────────────────────────────────────
+    /// Seeds the universe pipeline with the provided instrument set.
+    DataSource {
+        /// DataType key for the lane this source consumes (e.g. `"market.ohlcv"`).
+        data_type: String,
+    },
+    /// Ranks universe entries by a named feature value.
+    Rank {
+        /// ID of the upstream node supplying the universe.
+        input: String,
+        /// Feature name to rank by.
+        feature: String,
+        /// `true` = ascending (lowest first), `false` = descending.
+        ascending: bool,
+    },
+    /// Filters universe entries using a predicate expression over feature values.
+    Filter {
+        /// ID of the upstream node supplying the universe.
+        input: String,
+        /// Predicate expression (same grammar as `Condition`).
+        expr: String,
+    },
+    /// Keeps only the top N entries from the upstream universe.
+    TakeTopN {
+        /// ID of the upstream node supplying the universe.
+        input: String,
+        /// Maximum number of entries to keep.
+        n: usize,
+    },
+    /// Terminal node — marks the instruments to surface in scanner results.
+    SurfaceAction {
+        /// ID of the upstream node supplying the final universe.
+        input: String,
+    },
 }

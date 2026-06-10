@@ -22,6 +22,21 @@ pub enum Side {
     Sell,
 }
 
+/// How long an order remains active.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeInForce {
+    /// Good-Till-Cancelled — stays open across sessions.
+    #[default]
+    Gtc,
+    /// Day — expires at end of trading session.
+    Day,
+    /// Immediate-or-Cancel — cancel any unfilled portion immediately.
+    Ioc,
+    /// Fill-or-Kill — fill entirely or cancel entirely.
+    Fok,
+}
+
 /// Order type sent to the broker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -76,6 +91,8 @@ pub struct OrderIntent {
     /// Originating strategy (None for manual orders).
     pub strategy_id: Option<String>,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub time_in_force: TimeInForce,
 }
 
 impl OrderIntent {
@@ -96,6 +113,7 @@ impl OrderIntent {
             limit_price,
             strategy_id,
             created_at: Utc::now(),
+            time_in_force: TimeInForce::default(),
         }
     }
 }

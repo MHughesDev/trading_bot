@@ -5,5 +5,9 @@ edition = "2021"
 
 [dependencies]
 domain = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["time", "test-util", "macros", "rt"] }

@@ -1,0 +1,14 @@
+[package]
+name = "collector-kalshi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+domain = { workspace = true }
+cfg = { workspace = true }
+observability = { workspace = true }
+collectors = { workspace = true }
+event-bus = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }

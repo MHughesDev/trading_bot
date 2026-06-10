@@ -1,5 +1,6 @@
 //! Intentionally-lossy, frontend-shaped live views via WebSocket.
 //! The strategy runtime must NEVER consume this feed — it is a separate consumer view.
+pub mod nats_ws;
 pub mod shaping;
 pub mod snapshot;
 pub mod subscriptions;

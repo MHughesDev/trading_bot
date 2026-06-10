@@ -8,6 +8,7 @@ pub mod lanes;
 pub mod nats;
 pub mod publish;
 pub mod quarantine;
+pub mod subjects;
 pub mod subscribe;
 
 pub use backpressure::Backpressure;
@@ -15,6 +16,7 @@ pub use lanes::subject_for;
 pub use nats::{connect, setup_streams, NatsClient};
 pub use publish::Publisher;
 pub use quarantine::QuarantinePublisher;
+pub use subjects::{data_subject, ohlcv_subject, parse_subject};
 pub use subscribe::Subscriber;
 
 /// Alias for the bus-level error type.

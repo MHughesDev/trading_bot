@@ -63,8 +63,72 @@ services:
       timeout: 3s
       retries: 10
 
+  # TigerGraph graph store (P2-T12).
+  # NOTE: TigerGraph uses port 9000 for REST++ — conflicts with ClickHouse native
+  # port 9000 if both are exposed on the same host. Remap one if running both.
+  tigergraph:
+    image: docker.tigergraph.com/tigergraph:3.9.3
+    ports:
+      - "9090:9090"   # GSQL client
+      - "14240:14240" # TigerGraph Studio UI
+    volumes:
+      - tigergraph_data:/home/tigergraph/tigergraph/data
+    environment:
+      TIGERGRAPH_AGREED_TO_EULA: "yes"
+
+  # Milvus vector store (P2-T12) — requires etcd + minio.
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command:
+      - etcd
+      - --advertise-client-urls=http://127.0.0.1:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    volumes:
+      - etcd_data:/etcd
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-13T19-46-17Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "9001:9001"
+    volumes:
+      - minio_data:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  milvus:
+    image: milvusdb/milvus:v2.4.0
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports:
+      - "19530:19530"  # gRPC
+      - "9091:9091"    # HTTP/metrics
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      - etcd
+      - minio
+
 volumes:
   nats_data:
   pg_data:
   ch_data:
   redis_data:
+  tigergraph_data:
+  etcd_data:
+  minio_data:
+  milvus_data:

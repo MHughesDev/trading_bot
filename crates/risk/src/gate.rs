@@ -32,6 +32,17 @@ pub struct ApprovedOrder {
     _sealed: (),
 }
 
+impl ApprovedOrder {
+    /// Construct for testing only — bypasses the risk gate.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn new_for_test(intent: OrderIntent) -> Self {
+        Self {
+            intent,
+            _sealed: (),
+        }
+    }
+}
+
 /// Contextual data the caller must supply to the gate for each order check.
 /// The gate itself has no I/O; the caller pre-fetches what is needed.
 pub struct GateContext {

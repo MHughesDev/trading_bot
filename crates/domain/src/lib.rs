@@ -6,6 +6,7 @@
 //! Re-exports the full public API so callers can write `use domain::Price`
 //! without knowing the internal module layout.
 
+pub mod data_type;
 pub mod envelope;
 pub mod error;
 pub mod ids;
@@ -18,17 +19,28 @@ pub mod position;
 pub mod strategy_def;
 pub mod timestamp;
 pub mod trust;
+pub mod venue;
 
 // Convenience re-exports.
+pub use data_type::{DataType, UnknownDataType};
 pub use envelope::EventEnvelope;
 pub use error::{NormalizeError, RiskRejection, ValidationError};
 pub use ids::{event_id_from_key, onchain_key, sequenced_key, trade_key, DedupKey};
-pub use instrument::{AssetClass, HaltPolicy, Instrument, InstrumentId, TradingSchedule, VenueId};
+pub use instrument::{
+    AssetClass, HaltPolicy, Instrument, InstrumentId, MarketStructure, TradingSchedule, VenueId,
+};
 pub use lanes::{Lane, UnknownLane, QUARANTINE};
 pub use money::{Price, Size};
-pub use order::{Fill, OrderIntent, OrderRequest, OrderState, OrderType, Side};
-pub use payloads::Payload;
+pub use order::{Fill, OrderIntent, OrderRequest, OrderState, OrderType, Side, TimeInForce};
+pub use payloads::{
+    dex_quote::DexQuotePayload,
+    funding_rate::FundingRatePayload,
+    prediction_price::PredictionPricePayload,
+    social_post::{InstrumentMention, SocialPostPayload},
+    Payload,
+};
 pub use position::{Balance, Position};
 pub use strategy_def::StrategyDefinition;
 pub use timestamp::{compute_available_time, AvailableTimeParams, Timestamps};
 pub use trust::TrustTier;
+pub use venue::{SupportedVenue, UnknownVenue};
