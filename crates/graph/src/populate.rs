@@ -223,7 +223,7 @@ impl TigerGraphClient {
             json!({ vertex_types::STRATEGY_DEFINITION: srd_strat }),
         );
 
-        // INSTRUMENT_AT_VENUE edges (M-6: was defined in schema but never populated).
+        // INSTRUMENT_AT_VENUE edges.
         let mut iav_inst: Map<String, Value> = Map::new();
         for inst in &snapshot.instruments {
             let mut to_venue = Map::new();

@@ -60,6 +60,8 @@ pub enum AccountSourceError {
     Credentials(String),
     #[error("parse error: {0}")]
     Parse(String),
+    #[error("not implemented — full REST adapter deferred to Phase 4")]
+    NotImplemented,
 }
 
 /// On-demand per-venue account data fetcher.
