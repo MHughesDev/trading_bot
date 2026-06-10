@@ -65,7 +65,7 @@ impl PipelineRuntime {
         // Each stage narrows the universe for the next stage.
         let mut current_universe: Vec<String> = universe.clone();
 
-        for (stage_idx, stage) in stages.iter().enumerate() {
+        for (_stage_idx, stage) in stages.iter().enumerate() {
             let new_members: HashSet<String> = current_universe
                 .iter()
                 .filter(|inst| filter_fn(stage, inst.as_str()))
