@@ -35,7 +35,8 @@ struct MarketResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct KalshiMarket {
+pub(crate) struct KalshiMarket {
+    #[allow(dead_code)]
     ticker: String,
     yes_bid: Option<f64>,
     yes_ask: Option<f64>,

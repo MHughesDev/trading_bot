@@ -162,7 +162,7 @@ impl RedditCollector {
         Ok(EventEnvelope::new(
             event_id,
             "social.post",
-            &format!("reddit.{}", self.subreddit),
+            format!("reddit.{}", self.subreddit),
             VENUE_ID,
             SOURCE,
             TrustTier::SocialDerived,

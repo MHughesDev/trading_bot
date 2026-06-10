@@ -53,7 +53,7 @@ struct ChartResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct TradovateBar {
+pub(crate) struct TradovateBar {
     timestamp: Option<String>,
     open: Option<f64>,
     high: Option<f64>,

@@ -29,7 +29,7 @@ const SOURCE: &str = "zerox_rest";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ZeroXQuoteResponse {
+pub(crate) struct ZeroXQuoteResponse {
     sell_token_address: Option<String>,
     buy_token_address: Option<String>,
     sell_amount: String,

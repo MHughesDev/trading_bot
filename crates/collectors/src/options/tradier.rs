@@ -29,17 +29,7 @@ const SOURCE: &str = "tradier_rest";
 // ── Tradier response shapes ──────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-struct TimeSalesResponse {
-    series: Option<TimeSeries>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TimeSeries {
-    data: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TradierBar {
+pub(crate) struct TradierBar {
     time: Option<String>,
     open: Option<f64>,
     high: Option<f64>,
@@ -59,7 +49,7 @@ struct QuotesInner {
 }
 
 #[derive(Debug, Deserialize)]
-struct TradierQuote {
+pub(crate) struct TradierQuote {
     bid: Option<f64>,
     ask: Option<f64>,
     bidsize: Option<f64>,

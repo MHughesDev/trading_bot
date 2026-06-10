@@ -34,7 +34,7 @@ struct CandlesResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct OandaCandle {
+pub(crate) struct OandaCandle {
     time: String,
     mid: Option<OandaMid>,
     volume: u64,
