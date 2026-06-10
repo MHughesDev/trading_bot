@@ -29,6 +29,7 @@ const SOURCE: &str = "tradier_rest";
 // ── Tradier response shapes ──────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub(crate) struct TradierBar {
     time: Option<String>,
     open: Option<f64>,
@@ -76,6 +77,7 @@ impl TradierOptionsCollector {
     }
 
     /// Normalize a Tradier bar into an `EventEnvelope<BarPayload>`.
+    #[allow(dead_code)]
     pub(crate) fn normalize_bar(
         &self,
         bar: &TradierBar,
