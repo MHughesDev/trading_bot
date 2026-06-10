@@ -58,7 +58,10 @@ impl WebPageSnapshotPayload {
 
 impl Payload for WebPageSnapshotPayload {
     fn event_type() -> &'static str {
-        "web.page_snapshot.v1"
+        // Must match the NATS lane used in the web scraper (WEB_PAGE_SNAPSHOT_LANE).
+        // Previously returned "web.page_snapshot.v1" which created a mismatch
+        // between the event_type field and the lane consumers subscribe to (M-10).
+        "web.page_snapshot"
     }
 
     fn schema_version() -> &'static str {

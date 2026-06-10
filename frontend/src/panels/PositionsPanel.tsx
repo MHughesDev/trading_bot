@@ -11,10 +11,19 @@ interface PositionsPanelProps {
 
 const PANEL_ID = 'positions_panel'
 
+// Validate that a WS payload looks like a Position before using it (L-11).
+function isPosition(payload: unknown): payload is Position {
+  if (!payload || typeof payload !== 'object') return false
+  const p = payload as Record<string, unknown>
+  return typeof p.instrument_id === 'string' && typeof p.qty === 'string'
+}
+
+type ConnectionState = 'live' | 'reconnecting' | 'error' | 'disconnected'
+
 export function PositionsPanel({ userId }: PositionsPanelProps) {
   const panelId = useRef(PANEL_ID).current
   const [positions, setPositions] = useState<Position[]>([])
-  const [connected, setConnected] = useState(false)
+  const [connState, setConnState] = useState<ConnectionState>('disconnected')
 
   useEffect(() => {
     const client = getWsClient()
@@ -24,11 +33,19 @@ export function PositionsPanel({ userId }: PositionsPanelProps) {
     client.subscribe(panelId, [
       { lane: 'positions.events', instrument: userId },
     ])
-    setConnected(true)
+    // Do NOT set connected here — wait for the actual 'connected' event (L-6).
 
     const unsub = wsBus.on((msg: WsOutMessage) => {
+      // Handle control messages (L-5, L-14).
+      const type = (msg as { type: string }).type
+      if (type === 'connected') { setConnState('live'); return }
+      if (type === 'disconnected') { setConnState('reconnecting'); return }
+      if (type === 'error') { setConnState('error'); return }
+
       if (msg.type === 'frame' && msg.lane === 'positions.events') {
-        const update = msg.payload as Position
+        // Validate payload before use (L-11).
+        if (!isPosition(msg.payload)) return
+        const update = msg.payload
         setPositions((prev) => {
           const idx = prev.findIndex((p) => p.instrument_id === update.instrument_id)
           if (idx >= 0) {
@@ -39,22 +56,33 @@ export function PositionsPanel({ userId }: PositionsPanelProps) {
           return [...prev, update]
         })
       }
-      if (msg.type === 'heartbeat') setConnected(true)
+      if (msg.type === 'heartbeat') setConnState('live')
     })
 
     return () => {
       unsub()
       client.unsubscribe(panelId)
-      setConnected(false)
+      setConnState('disconnected')
     }
   }, [userId, panelId])
+
+  const connLabel =
+    connState === 'live' ? 'live'
+    : connState === 'reconnecting' ? 'reconnecting'
+    : connState === 'error' ? 'error'
+    : 'disconnected'
+
+  const connColor =
+    connState === 'live' ? 'text-green-400'
+    : connState === 'error' ? 'text-red-400'
+    : 'text-text-dim'
 
   return (
     <Card>
       <CardHeader className="pb-2 flex-row items-center justify-between">
         <CardTitle className="text-sm">Positions</CardTitle>
-        <span className={`text-xs ${connected ? 'text-green-400' : 'text-text-dim'}`}>
-          {connected ? 'live' : 'disconnected'}
+        <span className={`text-xs ${connColor}`}>
+          {connLabel}
         </span>
       </CardHeader>
       <CardContent className="p-0">

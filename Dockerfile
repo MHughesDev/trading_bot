@@ -16,8 +16,14 @@ COPY crates/ crates/
 COPY apps/ apps/
 COPY xtask/ xtask/
 
-# Build release binaries
-RUN cargo build --release -p platform -p collector-crypto -p collector-equity -p mcp-server
+# Build release binaries (all apps including Phase 7 satellites)
+RUN cargo build --release \
+    -p platform \
+    -p collector-crypto \
+    -p collector-equity \
+    -p collector-web \
+    -p embedder \
+    -p mcp-server
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim AS runtime
@@ -33,6 +39,8 @@ WORKDIR /app
 COPY --from=builder /build/target/release/platform /usr/local/bin/platform
 COPY --from=builder /build/target/release/collector-crypto /usr/local/bin/collector-crypto
 COPY --from=builder /build/target/release/collector-equity /usr/local/bin/collector-equity
+COPY --from=builder /build/target/release/collector-web /usr/local/bin/collector-web
+COPY --from=builder /build/target/release/embedder /usr/local/bin/embedder
 COPY --from=builder /build/target/release/mcp-server /usr/local/bin/mcp-server
 
 # Copy config

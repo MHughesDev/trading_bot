@@ -1,8 +1,8 @@
 ---
 Type: Formal
-Status: Pending
+Status: Complete
 Derived From: SYS-001, DATA-001, DATA-002, DATA-003, DATA-004, FEAT-001, COMP-001, COMP-002, COMP-003, COMP-004, INTG-001, ADR-0001, ADR-0002, ADR-0003, ADR-0004, ADR-0005, ADR-0006, ADR-0007, ADR-0008, ADR-0009, ADR-0010, ADR-0011, SC-1, SC-2, SC-3, SC-4, SC-5, SC-6, SC-7
-Note: Canonical executable plans live in docs/plans/. This copy is the traceable documentation record. On any conflict, [deleted - see Phase 7]/ wins.
+Note: Phase 7 is complete. The Python→Rust refactor is done. This document is superseded by the plans-set-B phase-7 plan and is retained as a historical record only.
 ---
 
 # Phase 7 — Cutover (parity, decommission Python, **finalize docs**, release)
@@ -151,17 +151,17 @@ repository matches `docs/architecture.md` exactly with no orphan files.
 
 ## Phase exit criteria (and whole-refactor done)
 
-- [ ] Parity matrix green; all intentional differences documented.
-- [ ] Full adversarial test sweep green (`just test` including every adversarial test).
-- [ ] `legacy_python/` deleted; no file references it; CI green.
-- [ ] Repo tree matches `docs/architecture.md` (no orphans/gaps).
-- [ ] **Documentation finalize pass complete (P7-T05):**
+- [x] Parity matrix green; all intentional differences documented.
+- [x] Full adversarial test sweep green (`just test` including every adversarial test).
+- [x] `legacy_python/` deleted; no file references it; CI green.
+- [x] Repo tree matches `docs/architecture.md` (no orphans/gaps).
+- [x] **Documentation finalize pass complete (P7-T05):**
   - every spec `Implemented` with all `Verified by:` fields filled and boxes ticked;
   - `architecture.md` matches reality, no `[not yet decided]` remaining;
   - all open questions resolved or concretely deferred;
   - `docs/procedures/operate-the-stack.md` and `docs/procedures/add-a-venue.md` exist and match reality;
   - `verify-traceability` all 10 steps pass (including step 9 — evidence on implemented specs).
-- [ ] Tagged, reproducible release builds and runs the full stack.
-- [ ] [`./rust-rewrite-master-plan.md`](./rust-rewrite-master-plan.md) §6 definition of done is satisfied.
-- [ ] **`[deleted - see Phase 7]/` deleted from the repo root (P7-T07). This is the last checkbox.
+- [x] Tagged, reproducible release builds and runs the full stack.
+- [x] [`./rust-rewrite-master-plan.md`](./rust-rewrite-master-plan.md) §6 definition of done is satisfied.
+- [x] **`[deleted - see Phase 7]/` deleted from the repo root (P7-T07). This is the last checkbox.
       When it is ticked, the refactor is done.**

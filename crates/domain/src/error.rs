@@ -63,6 +63,19 @@ pub enum RiskRejection {
     #[error("order rate limit exceeded: {orders_per_minute} orders/min, limit {limit}")]
     RateLimitExceeded { orders_per_minute: u32, limit: u32 },
 
+    #[error("order rate limit exceeded (per second): {orders_last_second} orders/s, limit {limit_per_second}/s")]
+    RateLimitPerSecondExceeded {
+        orders_last_second: u32,
+        limit_per_second: u32,
+    },
+
+    #[error("invalid tick size for {instrument_id}: price {price} is not a multiple of tick_size {tick_size}")]
+    InvalidTickSize {
+        instrument_id: String,
+        price: String,
+        tick_size: String,
+    },
+
     #[error("kill switch active — all order flow halted")]
     KillSwitchActive,
 

@@ -1,7 +1,9 @@
 //! Milvus vector-store client — embedding pipeline and metadata-filtered search
 //! (Phase 7).  Configured for `text-embedding-3-small` (1536 dimensions).
 //!
-//! Milvus REST API runs on port 19530 (gRPC) / 9091 (HTTP management).
+//! Milvus REST v2 API runs on port 19530 (same port as gRPC in Milvus 2.3+).
+//! Port 9091 is the legacy monitoring/metrics port and does NOT serve the REST
+//! v2 API at `/v2/vectordb/...` (H-11).
 
 pub mod collection;
 pub mod embed;
@@ -15,8 +17,8 @@ pub const EMBEDDING_DIMS: u32 = 1536;
 /// Collection name for social/news text embeddings.
 pub const SOCIAL_COLLECTION: &str = "trading_social_posts";
 
-/// Default Milvus HTTP management port.
-pub const DEFAULT_HTTP_PORT: u16 = 9091;
+/// Default Milvus HTTP REST v2 port (Milvus 2.3+).
+pub const DEFAULT_HTTP_PORT: u16 = 19530;
 
 /// Errors from semantic/vector operations.
 #[derive(Debug, Error)]
@@ -118,6 +120,28 @@ impl MilvusClient {
         })
     }
 
+    /// Return a request builder pre-configured with auth headers (M-4).
+    ///
+    /// Attaches `Authorization: Bearer user:password` when credentials are set,
+    /// so all collection and embed paths use authenticated requests.
+    pub(crate) fn authed_post(&self, url: &str) -> reqwest::RequestBuilder {
+        let req = self.http.post(url);
+        self.attach_auth(req)
+    }
+
+    pub(crate) fn authed_get(&self, url: &str) -> reqwest::RequestBuilder {
+        let req = self.http.get(url);
+        self.attach_auth(req)
+    }
+
+    fn attach_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let (Some(user), Some(pass)) = (&self.config.username, &self.config.password) {
+            req.header("Authorization", format!("Bearer {user}:{pass}"))
+        } else {
+            req
+        }
+    }
+
     /// Ping the Milvus HTTP endpoint.  Returns `Ok(())` on 2xx.
     pub async fn ping(&self) -> Result<(), SemanticError> {
         let url = format!(
@@ -125,8 +149,7 @@ impl MilvusClient {
             self.config.host, self.config.http_port
         );
         let resp = self
-            .http
-            .get(&url)
+            .authed_get(&url)
             .send()
             .await
             .map_err(|e| SemanticError::Request(e.to_string()))?;

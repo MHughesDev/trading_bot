@@ -58,9 +58,12 @@ pub fn check_rate_second(
     orders_last_second: u32,
 ) -> Result<(), RiskRejection> {
     if orders_last_second >= limits.max_orders_per_second {
-        return Err(RiskRejection::RateLimitExceeded {
-            orders_per_minute: orders_last_second * 60,
-            limit: limits.max_orders_per_minute,
+        // Use the per-second variant so audit logs show the correct breach
+        // reason (M-13: previously populated per-minute fields with per-second
+        // values, making breach analysis unreliable).
+        return Err(RiskRejection::RateLimitPerSecondExceeded {
+            orders_last_second,
+            limit_per_second: limits.max_orders_per_second,
         });
     }
     Ok(())
@@ -109,6 +112,29 @@ pub fn check_price_sanity(
             limit_price: lp_dec.to_string(),
             market_price: mp_dec.to_string(),
             band_bps: limits.price_band_bps,
+        });
+    }
+    Ok(())
+}
+
+/// Tick-size validity: limit price must be a whole multiple of `tick_size` (M-14).
+///
+/// Passes for market orders (no limit price) and when `tick_size` is zero.
+pub fn check_price_tick(
+    instrument_id: &str,
+    limit_price: Option<domain::money::Price>,
+    tick_size: Decimal,
+) -> Result<(), RiskRejection> {
+    let Some(lp) = limit_price else { return Ok(()) };
+    if tick_size.is_zero() {
+        return Ok(());
+    }
+    let remainder = lp.inner() % tick_size;
+    if !remainder.is_zero() {
+        return Err(RiskRejection::InvalidTickSize {
+            instrument_id: instrument_id.to_owned(),
+            price: lp.inner().to_string(),
+            tick_size: tick_size.to_string(),
         });
     }
     Ok(())
@@ -339,5 +365,48 @@ mod tests {
             err,
             Err(RiskRejection::DailyLossLimitExceeded { .. })
         ));
+    }
+
+    #[test]
+    fn price_not_on_tick_rejected() {
+        // M-14: price not a multiple of tick_size must be rejected.
+        use domain::money::Price;
+        let lp = Some(Price::from_str("100.001").unwrap());
+        let tick = Decimal::from_str("0.01").unwrap();
+        let err = check_price_tick("BTC-USD", lp, tick);
+        assert!(matches!(err, Err(RiskRejection::InvalidTickSize { .. })));
+    }
+
+    #[test]
+    fn price_on_tick_passes() {
+        use domain::money::Price;
+        let lp = Some(Price::from_str("100.02").unwrap());
+        let tick = Decimal::from_str("0.01").unwrap();
+        assert!(check_price_tick("BTC-USD", lp, tick).is_ok());
+    }
+
+    #[test]
+    fn market_order_no_limit_price_passes_tick_check() {
+        assert!(check_price_tick("BTC-USD", None, Decimal::from_str("0.01").unwrap()).is_ok());
+    }
+
+    #[test]
+    fn rate_second_error_uses_per_second_fields() {
+        // M-13: breach reason must identify per-second limit, not per-minute.
+        let lim = GlobalRiskLimits {
+            max_orders_per_second: 5,
+            ..Default::default()
+        };
+        let err = check_rate_second(&lim, 5).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                RiskRejection::RateLimitPerSecondExceeded {
+                    orders_last_second: 5,
+                    limit_per_second: 5
+                }
+            ),
+            "per-second breach must use RateLimitPerSecondExceeded variant"
+        );
     }
 }

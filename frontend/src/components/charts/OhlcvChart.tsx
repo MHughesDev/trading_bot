@@ -87,6 +87,8 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
     }
   }, [theme])
 
+  // Data and markers update — use stable array references as deps, not
+  // JSON.stringify (L-8: was O(n) per render for potentially 500 bars).
   useEffect(() => {
     if (!candleRef.current || bars.length === 0) return
 
@@ -118,9 +120,11 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
     }
 
     chartRef.current?.timeScale().fitContent()
-  }, [JSON.stringify(bars), JSON.stringify(markers), theme])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bars, markers])
 
-  // Sync TP/SL price lines.
+  // Sync TP/SL price lines — separate effect so price-line changes don't
+  // retrigger bar/marker processing (L-8).
   useEffect(() => {
     if (!candleRef.current) return
 
@@ -161,7 +165,8 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
         existing.set(id, newLine)
       }
     }
-  }, [JSON.stringify(priceLines)])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceLines])
 
   return <div ref={containerRef} style={{ height }} className="w-full" />
 }

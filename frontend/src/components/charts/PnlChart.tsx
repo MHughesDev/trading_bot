@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { createChart, AreaSeries, type IChartApi } from 'lightweight-charts'
+import { createChart, AreaSeries, type IChartApi, type ISeriesApi } from 'lightweight-charts'
 import { useThemeStore } from '@/store/theme'
 import { chartColors } from '@/lib/chartTheme'
 
@@ -23,10 +23,13 @@ function normalizeData(data: Props['data']): PnlPoint[] {
 export function PnlChart({ data }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
+  // Keep a ref to the series so data updates don't require chart teardown (L-9).
+  const seriesRef = useRef<ISeriesApi<'Area'> | null>(null)
 
   const points = normalizeData(data)
   const theme = useThemeStore((s) => s.theme)
 
+  // Init effect — runs only when theme changes, not on every data update (L-9).
   useEffect(() => {
     if (!containerRef.current) return
 
@@ -50,26 +53,12 @@ export function PnlChart({ data }: Props) {
 
     chartRef.current = chart
 
-    const series = chart.addSeries(AreaSeries, {
+    seriesRef.current = chart.addSeries(AreaSeries, {
       lineColor: colors.accent,
       topColor: 'rgba(59,130,246,0.25)',
       bottomColor: 'rgba(59,130,246,0)',
       lineWidth: 2,
     })
-
-    if (points.length > 0) {
-      const sorted = [...points].sort((a, b) => {
-        const ta = typeof a.time === 'string' ? new Date(a.time).getTime() : a.time
-        const tb = typeof b.time === 'string' ? new Date(b.time).getTime() : b.time
-        return ta - tb
-      })
-      const mapped = sorted.map((p) => ({
-        time: (typeof p.time === 'string' ? Math.floor(new Date(p.time).getTime() / 1000) : p.time) as number,
-        value: p.value,
-      }))
-      series.setData(mapped as Parameters<typeof series.setData>[0])
-      chart.timeScale().fitContent()
-    }
 
     const ro = new ResizeObserver(() => {
       if (containerRef.current) {
@@ -81,8 +70,28 @@ export function PnlChart({ data }: Props) {
     return () => {
       ro.disconnect()
       chart.remove()
+      chartRef.current = null
+      seriesRef.current = null
     }
-  }, [JSON.stringify(points), theme])
+  }, [theme])
+
+  // Data update effect — runs when data changes, does NOT recreate the chart (L-9).
+  // Uses the stable points reference instead of JSON.stringify (L-8).
+  useEffect(() => {
+    if (!seriesRef.current || points.length === 0) return
+
+    const sorted = [...points].sort((a, b) => {
+      const ta = typeof a.time === 'string' ? new Date(a.time).getTime() : a.time
+      const tb = typeof b.time === 'string' ? new Date(b.time).getTime() : b.time
+      return ta - tb
+    })
+    const mapped = sorted.map((p) => ({
+      time: (typeof p.time === 'string' ? Math.floor(new Date(p.time).getTime() / 1000) : p.time) as number,
+      value: p.value,
+    }))
+    seriesRef.current.setData(mapped as Parameters<typeof seriesRef.current.setData>[0])
+    chartRef.current?.timeScale().fitContent()
+  }, [points])
 
   return <div ref={containerRef} className="h-48 w-full" />
 }

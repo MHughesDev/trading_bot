@@ -223,14 +223,63 @@ impl TigerGraphClient {
             json!({ vertex_types::STRATEGY_DEFINITION: srd_strat }),
         );
 
+        // INSTRUMENT_AT_VENUE edges (M-6: was defined in schema but never populated).
+        let mut iav_inst: Map<String, Value> = Map::new();
+        for inst in &snapshot.instruments {
+            let mut to_venue = Map::new();
+            to_venue.insert(inst.venue_id.clone(), json!({}));
+            iav_inst.insert(
+                inst.instrument_id.clone(),
+                json!({ vertex_types::VENUE: to_venue }),
+            );
+        }
+        edges.insert(
+            edge_types::INSTRUMENT_AT_VENUE.to_owned(),
+            json!({ vertex_types::INSTRUMENT: iav_inst }),
+        );
+
+        // VENUE_SUPPORTS_ASSET_CLASS edges (M-6).
+        let mut vsac_venue: Map<String, Value> = Map::new();
+        for v in &snapshot.venues {
+            let ac_targets: Map<String, Value> = v
+                .asset_classes
+                .iter()
+                .map(|ac| (ac.clone(), json!({})))
+                .collect();
+            vsac_venue.insert(
+                v.venue_id.clone(),
+                json!({ vertex_types::ASSET_CLASS: ac_targets }),
+            );
+        }
+        edges.insert(
+            edge_types::VENUE_SUPPORTS_ASSET_CLASS.to_owned(),
+            json!({ vertex_types::VENUE: vsac_venue }),
+        );
+
+        // STRATEGY_FOR_ASSET_CLASS edges (M-6).
+        let mut sfac_strat: Map<String, Value> = Map::new();
+        for s in &snapshot.strategies {
+            let mut to_ac = Map::new();
+            to_ac.insert(s.asset_class.clone(), json!({}));
+            sfac_strat.insert(
+                s.strategy_id.clone(),
+                json!({ vertex_types::ASSET_CLASS: to_ac }),
+            );
+        }
+        edges.insert(
+            edge_types::STRATEGY_FOR_ASSET_CLASS.to_owned(),
+            json!({ vertex_types::STRATEGY_DEFINITION: sfac_strat }),
+        );
+
         let body = json!({
             "vertices": vertices,
             "edges":    edges,
         });
 
+        // REST++ data API requires the /restpp path prefix (H-10).
         let url = format!(
-            "http://{}:{}/graph/{}",
-            self.config.host, self.config.port, self.config.graph_name
+            "http://{}:{}/restpp/graph/{}",
+            self.config.host, self.config.restpp_port, self.config.graph_name
         );
         let resp = self
             .http
@@ -252,30 +301,46 @@ impl TigerGraphClient {
     /// Delete all vertices (and their incident edges) of every type.
     ///
     /// Used as the first step of a full rebuild.
+    ///
+    /// Collects all deletion errors rather than returning on the first failure
+    /// so a partial wipe does not silently leave stale data in place (M-7).
     pub async fn drop_all_data(&self) -> Result<(), GraphError> {
         info!("dropping all graph data for rebuild");
+        let mut errors: Vec<String> = Vec::new();
+
         for vtype in crate::schema::ALL_VERTEX_TYPES {
+            // REST++ data API requires the /restpp path prefix (H-10).
             let url = format!(
-                "http://{}:{}/graph/{}/vertices/{}",
-                self.config.host, self.config.port, self.config.graph_name, vtype
+                "http://{}:{}/restpp/graph/{}/vertices/{}",
+                self.config.host, self.config.restpp_port, self.config.graph_name, vtype
             );
-            let resp = self
+            match self
                 .http
                 .delete(&url)
                 .basic_auth(&self.config.username, Some(&self.config.password))
                 .send()
                 .await
-                .map_err(|e| GraphError::Request(e.to_string()))?;
-
-            let status = resp.status().as_u16();
-            if !resp.status().is_success() && status != 404 {
-                let text = resp.text().await.unwrap_or_default();
-                return Err(GraphError::Response(format!(
-                    "drop_all_data failed for {vtype}: {text}"
-                )));
+            {
+                Err(e) => errors.push(format!("{vtype}: request failed: {e}")),
+                Ok(resp) => {
+                    let status = resp.status().as_u16();
+                    if !resp.status().is_success() && status != 404 {
+                        let text = resp.text().await.unwrap_or_default();
+                        errors.push(format!("{vtype}: {text}"));
+                    }
+                }
             }
         }
-        Ok(())
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(GraphError::Response(format!(
+                "drop_all_data had {} failure(s): {}",
+                errors.len(),
+                errors.join("; ")
+            )))
+        }
     }
 
     /// Full rebuild: drop all data then repopulate from `snapshot`.

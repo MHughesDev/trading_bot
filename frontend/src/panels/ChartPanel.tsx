@@ -14,21 +14,38 @@ interface ChartPanelProps {
 const PANEL_ID_PREFIX = 'chart_'
 
 // Map the backend Bar (decimal string OHLCV, `time` field) to OhlcvChart's Bar.
-function toOhlcvBar(b: Bar): OhlcvBar {
-  return {
-    ts: b.time,
-    open: parseFloat(b.open),
-    high: parseFloat(b.high),
-    low: parseFloat(b.low),
-    close: parseFloat(b.close),
-    volume: parseFloat(b.volume),
-  }
+// Returns null if the payload is missing required fields (L-11 safety).
+function toOhlcvBar(b: Bar): OhlcvBar | null {
+  const open = parseFloat(b.open)
+  const high = parseFloat(b.high)
+  const low = parseFloat(b.low)
+  const close = parseFloat(b.close)
+  const volume = parseFloat(b.volume)
+  if (!b.time || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) return null
+  return { ts: b.time, open, high, low, close, volume: isNaN(volume) ? 0 : volume }
 }
+
+// Validate that a WS payload looks like a Bar before casting (L-11).
+function isBar(payload: unknown): payload is Bar {
+  if (!payload || typeof payload !== 'object') return false
+  const p = payload as Record<string, unknown>
+  return (
+    typeof p.time === 'string' &&
+    typeof p.open === 'string' &&
+    typeof p.high === 'string' &&
+    typeof p.low === 'string' &&
+    typeof p.close === 'string'
+  )
+}
+
+type ConnectionState = 'live' | 'reconnecting' | 'error' | 'disconnected'
 
 export function ChartPanel({ instrument, initialBars = [], priceLines = [] }: ChartPanelProps) {
   const panelId = useRef(`${PANEL_ID_PREFIX}${instrument}`).current
-  const [bars, setBars] = useState<Bar[]>(initialBars)
-  const [connected, setConnected] = useState(false)
+  // Seed bars from initialBars via useState initializer so live-accumulated
+  // data is never overwritten by a re-passed prop reference (L-7 fix).
+  const [bars, setBars] = useState<Bar[]>(() => initialBars)
+  const [connState, setConnState] = useState<ConnectionState>('disconnected')
 
   useEffect(() => {
     const client = getWsClient()
@@ -37,17 +54,32 @@ export function ChartPanel({ instrument, initialBars = [], priceLines = [] }: Ch
     client.subscribe(panelId, [
       { lane: 'market.bars.1m', instrument },
     ])
-    setConnected(true)
+    // Do NOT set connected here — wait for the actual 'connected' event (L-6).
 
     const unsub = wsBus.on((msg: WsOutMessage) => {
+      // Handle control messages for connection state (L-5, L-14).
+      if ((msg as { type: string }).type === 'connected') {
+        setConnState('live')
+        return
+      }
+      if ((msg as { type: string }).type === 'disconnected') {
+        setConnState('reconnecting')
+        return
+      }
+      if ((msg as { type: string }).type === 'error') {
+        setConnState('error')
+        return
+      }
+
       if (
         msg.type === 'frame' &&
         msg.lane === 'market.bars.1m' &&
         msg.instrument === instrument
       ) {
-        const bar = msg.payload as Bar
+        // Validate payload before casting (L-11).
+        if (!isBar(msg.payload)) return
+        const bar = msg.payload
         setBars((prev) => {
-          // Replace last bar if same timestamp, else append.
           if (prev.length > 0 && prev[prev.length - 1].time === bar.time) {
             return [...prev.slice(0, -1), bar]
           }
@@ -55,22 +87,35 @@ export function ChartPanel({ instrument, initialBars = [], priceLines = [] }: Ch
         })
       }
       if (msg.type === 'heartbeat') {
-        setConnected(true)
+        setConnState('live')
       }
     })
 
     return () => {
       unsub()
       client.unsubscribe(panelId)
-      setConnected(false)
+      setConnState('disconnected')
     }
   }, [instrument, panelId])
 
-  useEffect(() => {
-    if (initialBars.length > 0) setBars(initialBars)
-  }, [initialBars])
+  // Do NOT have an effect that resets bars from initialBars on prop change —
+  // that overwrites accumulated live data when the parent re-renders (L-7).
 
-  const ohlcvBars = bars.map(toOhlcvBar)
+  const ohlcvBars = bars.flatMap((b) => {
+    const mapped = toOhlcvBar(b)
+    return mapped ? [mapped] : []
+  })
+
+  const connLabel =
+    connState === 'live' ? 'live'
+    : connState === 'reconnecting' ? 'reconnecting'
+    : connState === 'error' ? 'error'
+    : 'disconnected'
+
+  const connColor =
+    connState === 'live' ? 'text-green-400'
+    : connState === 'error' ? 'text-red-400'
+    : 'text-text-dim'
 
   return (
     <Card>
@@ -78,8 +123,8 @@ export function ChartPanel({ instrument, initialBars = [], priceLines = [] }: Ch
         <CardTitle className="text-sm">
           {instrument} — 1m
         </CardTitle>
-        <span className={`text-xs ${connected ? 'text-green-400' : 'text-text-dim'}`}>
-          {connected ? 'live' : 'disconnected'}
+        <span className={`text-xs ${connColor}`}>
+          {connLabel}
         </span>
       </CardHeader>
       <CardContent className="p-0 pb-2">

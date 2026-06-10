@@ -6,8 +6,12 @@ use axum::{
 
 /// A bearer token extracted from `Authorization: Bearer <token>`.
 ///
-/// Phase 1: presence of any non-empty token is accepted.  Phase 2 will verify
-/// against the users table and populate a real user identity.
+/// # Security note (M-17)
+/// Currently accepts any non-empty token without validation against the user
+/// store — this is Phase 1 placeholder behaviour and **must not be deployed on
+/// a network-accessible endpoint**.  Phase 2 upgrade: validate the token with
+/// constant-time comparison against a session table and populate a real user
+/// identity.  Tracked as an open security item.
 #[derive(Debug, Clone)]
 pub struct BearerToken(pub String);
 

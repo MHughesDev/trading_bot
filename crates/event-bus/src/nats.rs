@@ -81,11 +81,16 @@ pub async fn setup_streams(js: &async_nats::jetstream::Context) -> Result<(), Bu
         .collect();
 
     for cfg in configs {
+        // Use Limits retention so every durable consumer sees every message
+        // (fan-out). WorkQueue deletes a message once any one consumer acks it,
+        // which silently starves all other consumers on the same lane.
+        // ORDERS_COMMANDS is intentionally handled by a single executor, but
+        // even there Limits+durable-consumer is safer than WorkQueue.
         let stream_config = stream::Config {
             name: cfg.stream_name.clone(),
             subjects: cfg.subjects,
             num_replicas: cfg.replicas,
-            retention: stream::RetentionPolicy::WorkQueue,
+            retention: stream::RetentionPolicy::Limits,
             ..Default::default()
         };
 

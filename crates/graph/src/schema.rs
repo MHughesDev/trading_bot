@@ -83,14 +83,16 @@ struct EdgeTypeDef {
 impl TigerGraphClient {
     /// Initialize the capability graph schema idempotently.
     ///
-    /// Submits the embedded GSQL DDL via the TigerGraph REST++ GSQL endpoint.
+    /// Submits the embedded GSQL DDL via the TigerGraph GSQL API endpoint.
     /// Re-running is safe — all DDL statements use `IF NOT EXISTS`.
+    ///
+    /// Uses `gsql_port` (default 14240), NOT the REST++ port (H-9).
     pub async fn init_schema(&self) -> Result<(), GraphError> {
         info!(graph = %self.config.graph_name, "initializing TigerGraph schema");
 
         let url = format!(
             "http://{}:{}/gsql/v1/statements",
-            self.config.host, self.config.port
+            self.config.host, self.config.gsql_port
         );
 
         let resp = self
@@ -130,9 +132,10 @@ impl TigerGraphClient {
     }
 
     async fn fetch_schema(&self) -> Result<GraphSchemaResponse, GraphError> {
+        // Schema introspection also lives on the GSQL port (H-9).
         let url = format!(
             "http://{}:{}/gsql/v1/schema/graphs/{}",
-            self.config.host, self.config.port, self.config.graph_name
+            self.config.host, self.config.gsql_port, self.config.graph_name
         );
         let resp = self
             .http

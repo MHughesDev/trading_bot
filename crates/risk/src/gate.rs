@@ -4,7 +4,7 @@
 //! `ApprovedOrder` cannot be constructed outside this module, so `execution`
 //! can only act on orders that passed the gate.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use domain::{
@@ -119,11 +119,50 @@ enum CachedDecision {
     Rejected(RiskRejection),
 }
 
+/// Maximum number of idempotency-key entries to hold in memory.
+/// Covers all redeliveries within a JetStream redelivery window while
+/// preventing unbounded heap growth in long-running sessions.
+const SEEN_KEYS_CAPACITY: usize = 10_000;
+
+/// Bounded FIFO idempotency cache — evicts oldest entry when full.
+struct BoundedDecisionCache {
+    map: HashMap<Uuid, CachedDecision>,
+    order: VecDeque<Uuid>,
+    capacity: usize,
+}
+
+impl BoundedDecisionCache {
+    fn new(capacity: usize) -> Self {
+        Self {
+            map: HashMap::with_capacity(capacity),
+            order: VecDeque::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    fn get(&self, key: &Uuid) -> Option<&CachedDecision> {
+        self.map.get(key)
+    }
+
+    fn insert(&mut self, key: Uuid, value: CachedDecision) {
+        if self.map.contains_key(&key) {
+            return;
+        }
+        if self.order.len() >= self.capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                self.map.remove(&oldest);
+            }
+        }
+        self.order.push_back(key);
+        self.map.insert(key, value);
+    }
+}
+
 /// The idempotent, synchronous risk gate.
 pub struct RiskGate {
     limits: GlobalRiskLimits,
     kill_switch: Arc<KillSwitch>,
-    seen_keys: Mutex<HashMap<Uuid, CachedDecision>>,
+    seen_keys: Mutex<BoundedDecisionCache>,
 }
 
 impl RiskGate {
@@ -131,7 +170,7 @@ impl RiskGate {
         Self {
             limits,
             kill_switch,
-            seen_keys: Mutex::new(HashMap::new()),
+            seen_keys: Mutex::new(BoundedDecisionCache::new(SEEN_KEYS_CAPACITY)),
         }
     }
 
@@ -150,14 +189,22 @@ impl RiskGate {
         }
 
         // 2. Idempotency cache — redelivered intents return the prior decision.
+        //    For cached approvals the kill switch must still be re-checked: a
+        //    JetStream redelivery arriving after the switch was tripped must
+        //    be blocked, not passed through on the cached-approval fast path.
         {
             let cache = self.seen_keys.lock().expect("seen_keys lock");
             if let Some(prior) = cache.get(&intent.idempotency_key) {
                 return match prior {
-                    CachedDecision::Approved => Ok(ApprovedOrder {
-                        intent,
-                        _sealed: (),
-                    }),
+                    CachedDecision::Approved => {
+                        if self.kill_switch.is_active() {
+                            return Err(RiskRejection::KillSwitchActive);
+                        }
+                        Ok(ApprovedOrder {
+                            intent,
+                            _sealed: (),
+                        })
+                    }
                     CachedDecision::Rejected(r) => Err(r.clone()),
                 };
             }
@@ -207,6 +254,7 @@ impl RiskGate {
             ctx.market_price,
         )?;
         limits::check_lot_size(&intent.instrument_id, intent.size, ctx.lot_size)?;
+        limits::check_price_tick(&intent.instrument_id, intent.limit_price, ctx.tick_size)?;
         limits::check_daily_loss(&effective, ctx.daily_loss_usd)?;
         trust_gate::check_trust(ctx.event_trust_tier, ctx.strategy_min_trust_tier)?;
 
@@ -268,6 +316,28 @@ mod tests {
         ks.trip();
         let err = gate.check(simple_intent("BTC-USD"), &simple_ctx());
         assert!(matches!(err, Err(RiskRejection::KillSwitchActive)));
+    }
+
+    #[test]
+    fn kill_switch_blocks_cached_approval() {
+        // C-2: a previously-approved intent arriving after the kill switch trips
+        // must be blocked even though it is in the cache as Approved.
+        let ks = Arc::new(KillSwitch::new(false));
+        let gate = RiskGate::new(GlobalRiskLimits::default(), Arc::clone(&ks));
+
+        let intent = simple_intent("BTC-USD");
+        // First call — switch off, should approve and cache.
+        assert!(gate.check(intent.clone(), &simple_ctx()).is_ok());
+
+        // Trip the kill switch.
+        ks.trip();
+
+        // Redelivery of the same intent (same idempotency_key) must be blocked.
+        let err = gate.check(intent, &simple_ctx());
+        assert!(
+            matches!(err, Err(RiskRejection::KillSwitchActive)),
+            "cached-approval must be re-checked against kill switch"
+        );
     }
 
     #[test]
