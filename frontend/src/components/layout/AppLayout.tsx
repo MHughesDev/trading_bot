@@ -5,7 +5,7 @@ import { GlassPillNav } from './GlassPillNav'
 import { ToastContainer } from '@/components/ToastContainer'
 
 // The Trading page fills the viewport — no vertical scroll on the main outlet.
-const FULL_HEIGHT_ROUTES = ['/trading']
+const FULL_HEIGHT_ROUTES = ['/trading', '/dashboard']
 
 export function AppLayout() {
   const { user, initialized } = useAuthStore()

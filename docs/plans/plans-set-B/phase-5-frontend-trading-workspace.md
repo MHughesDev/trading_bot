@@ -1,6 +1,7 @@
 ---
 Type: Formal
-Status: Pending
+Status: Complete
+Completed: 2026-06-10
 Derived From: C-012, C-013, C-026, C-060, C-094, C-096, C-112, C-118, C-119, C-120, C-123, C-126, C-127, C-129
 ---
 
@@ -182,18 +183,18 @@ window carries a **Paper/Live mode** toggle persisted in localStorage (default P
 ---
 
 ## Phase exit criteria
-- [ ] Five sections route at `/dashboard`, `/trading`, `/automations`, `/strategy`, `/settings`.
-- [ ] The glass-pill nav animates between sections (380 ms asymmetric easing) and honors
+- [x] Five sections route at `/dashboard`, `/trading`, `/automations`, `/strategy`, `/settings`.
+- [x] The glass-pill nav animates between sections (380 ms asymmetric easing) and honors
       `prefers-reduced-motion`.
-- [ ] No order-book/DOM/tick-list surface remains anywhere (`OrderBookPanel` deleted; grep clean).
-- [ ] Paper/Live mode is per-window, persisted in localStorage, defaults to Paper, and governs all
+- [x] No order-book/DOM/tick-list surface remains anywhere (`OrderBookPanel` deleted; grep clean).
+- [x] Paper/Live mode is per-window, persisted in localStorage, defaults to Paper, and governs all
       panels.
-- [ ] The NATS.ws hook streams live 1-min OHLCV and signals/releases demand.
-- [ ] Trading is a full-height horizontal infinite scroll hosting scanner and terminal panels.
-- [ ] Scanner panels are tile-based (no column dividers), populated by a compatible discovery-strategy
+- [x] The NATS.ws hook streams live 1-min OHLCV and signals/releases demand.
+- [x] Trading is a full-height horizontal infinite scroll hosting scanner and terminal panels.
+- [x] Scanner panels are tile-based (no column dividers), populated by a compatible discovery-strategy
       dropdown, with hover-to-remove.
-- [ ] Terminal panels show chart + asset-class-specific order ticket (bracket where supported, no risk
+- [x] Terminal panels show chart + asset-class-specific order ticket (bracket where supported, no risk
       fields) + positions + working orders + fills; no order book.
-- [ ] Chart annotations draw order markers and TP/SL lines on the candles.
-- [ ] `LayoutTemplateRegistry` exists and seeds the workspace.
-- [ ] `frontend/` builds (`npm run build`).
+- [x] Chart annotations draw order markers and TP/SL lines on the candles.
+- [x] `LayoutTemplateRegistry` exists and seeds the workspace.
+- [x] `frontend/` builds (`npm run build`).
