@@ -4,7 +4,6 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -13,7 +12,6 @@ use domain::{
     order::{OrderIntent, OrderType, Side},
     RiskRejection,
 };
-use risk::GateContext;
 
 use crate::{auth::BearerToken, state::AppState};
 
@@ -117,51 +115,6 @@ pub async fn place_order(
         })),
     )
         .into_response();
-
-    #[allow(unreachable_code)]
-    let ctx = GateContext::for_manual_order(
-        Decimal::ZERO,
-        None,
-        Decimal::new(1, 2),
-        Decimal::new(1, 3),
-        Decimal::ZERO,
-        true,
-        0,
-        0,
-    );
-
-    // Run through the risk gate.
-    let approved = match state.risk_gate.check(intent, &ctx) {
-        Ok(a) => a,
-        Err(rejection) => {
-            let (status, msg) = risk_rejection_response(&rejection);
-            return (
-                status,
-                Json(json!({ "error": msg, "reason": rejection.to_string() })),
-            )
-                .into_response();
-        }
-    };
-
-    let idempotency_key = approved.intent.idempotency_key;
-
-    // Submit to execution engine.
-    match state.execution.submit(approved).await {
-        Ok(result) => (
-            StatusCode::CREATED,
-            Json(json!({
-                "idempotency_key": idempotency_key,
-                "broker_order_id": result.broker_order_id,
-                "state": "submitted",
-            })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": "execution failed", "detail": e.to_string() })),
-        )
-            .into_response(),
-    }
 }
 
 /// GET /api/orders/:id — look up an order by idempotency key.

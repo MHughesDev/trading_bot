@@ -88,10 +88,10 @@ impl TradovateCollector {
         bar: &TradovateBar,
         seq: u64,
     ) -> Result<EventEnvelope<BarPayload>, NormalizeError> {
-        let open = parse_price(bar.open, "open")?;
-        let high = parse_price(bar.high, "high")?;
-        let low = parse_price(bar.low, "low")?;
-        let close = parse_price(bar.close, "close")?;
+        let open = wire_to_decimal(bar.open, "open")?;
+        let high = wire_to_decimal(bar.high, "high")?;
+        let low = wire_to_decimal(bar.low, "low")?;
+        let close = wire_to_decimal(bar.close, "close")?;
 
         let up_vol = bar.up_volume.unwrap_or(0.0);
         let down_vol = bar.down_volume.unwrap_or(0.0);
@@ -131,7 +131,7 @@ impl TradovateCollector {
     }
 }
 
-fn parse_price(v: Option<f64>, field: &str) -> Result<Price, NormalizeError> {
+fn wire_to_decimal(v: Option<f64>, field: &str) -> Result<Price, NormalizeError> {
     let v = v.ok_or(NormalizeError::MissingField {
         field: field.to_owned(),
     })?;

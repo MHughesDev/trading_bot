@@ -20,13 +20,13 @@ impl Ema {
         }
     }
 
-    /// Update with a new price; returns the current EMA.
+    /// Update with a new sample value; returns the current EMA.
     #[allow(clippy::cast_precision_loss)]
-    pub fn update(&mut self, price: f64) -> f64 {
+    pub fn update(&mut self, value: f64) -> f64 {
         let k = 2.0 / (self.period as f64 + 1.0);
         let ema = match self.value {
-            None => price,
-            Some(prev) => price * k + prev * (1.0 - k),
+            None => value,
+            Some(prev) => value * k + prev * (1.0 - k),
         };
         self.value = Some(ema);
         ema

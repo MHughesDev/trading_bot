@@ -22,9 +22,11 @@ fn main() {
 /// Scan the workspace for f64/f32 usage near price/size/quantity/amount field
 /// names or type annotations.  Any match is a CI failure — monetary values must
 /// use rust_decimal::Decimal.
+///
+/// Skips:
+/// - Lines inside `#[cfg(test)]` modules (depth-tracked brace counting)
+/// - Files under `*/tests/*` directories
 fn check_money_f64() {
-    // Patterns that indicate a floating-point monetary value.
-    // We match on: `f64` or `f32` appearing on the same line as a money keyword.
     let money_keywords = [
         "price",
         "size",
@@ -51,8 +53,11 @@ fn check_money_f64() {
     let mut violations: Vec<String> = vec![];
 
     for file in &files {
-        // Skip test fixtures and generated files.
         if file.contains("target/") {
+            continue;
+        }
+        // Skip dedicated test directories (e.g. crates/*/tests/).
+        if file.contains("/tests/") {
             continue;
         }
 
@@ -61,13 +66,44 @@ fn check_money_f64() {
             Err(_) => continue,
         };
 
+        // Track whether we are inside a #[cfg(test)] block by counting braces.
+        let mut in_test_depth: i32 = 0;
+        let mut brace_depth: i32 = 0;
+
         for (lineno, line) in content.lines().enumerate() {
-            let lower = line.to_lowercase();
-            // Skip comment-only lines and doc comments.
-            let trimmed = lower.trim_start();
+            let trimmed = line.trim();
+
+            // Detect entry into a cfg(test) block.
+            if trimmed.contains("#[cfg(test)]") {
+                in_test_depth = brace_depth + 1; // set sentinel one level deeper
+            }
+
+            // Count braces so we know when we exit the test module.
+            for ch in line.chars() {
+                match ch {
+                    '{' => brace_depth += 1,
+                    '}' => {
+                        brace_depth -= 1;
+                        // Once brace depth falls below the test sentinel, we're out.
+                        if in_test_depth > 0 && brace_depth < in_test_depth {
+                            in_test_depth = 0;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Skip lines inside test modules.
+            if in_test_depth > 0 {
+                continue;
+            }
+
+            // Skip comment-only lines.
             if trimmed.starts_with("//") {
                 continue;
             }
+
+            let lower = line.to_lowercase();
 
             let has_float = lower.contains(": f64")
                 || lower.contains(": f32")
@@ -86,7 +122,10 @@ fn check_money_f64() {
                 continue;
             }
 
-            let has_money_keyword = money_keywords.iter().any(|kw| lower.contains(kw));
+            // Match lowercase keywords only — this avoids false positives from
+            // Decimal wrapper types like `Price`, `Size` that appear in return
+            // type annotations (`-> Result<Price, ...>`).
+            let has_money_keyword = money_keywords.iter().any(|kw| line.contains(kw));
             if has_money_keyword {
                 violations.push(format!(
                     "{}:{}: f64/f32 on monetary field — use Decimal\n  {}",

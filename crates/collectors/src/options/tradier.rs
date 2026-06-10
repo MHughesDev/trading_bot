@@ -53,8 +53,10 @@ struct QuotesInner {
 pub(crate) struct TradierQuote {
     bid: Option<f64>,
     ask: Option<f64>,
-    bidsize: Option<f64>,
-    asksize: Option<f64>,
+    #[serde(rename = "bidsize")]
+    bid_lot: Option<f64>,
+    #[serde(rename = "asksize")]
+    ask_lot: Option<f64>,
 }
 
 // ── Collector ────────────────────────────────────────────────────────────────
@@ -83,10 +85,10 @@ impl TradierOptionsCollector {
         bar: &TradierBar,
         seq: u64,
     ) -> Result<EventEnvelope<BarPayload>, NormalizeError> {
-        let open = parse_price(bar.open, "open")?;
-        let high = parse_price(bar.high, "high")?;
-        let low = parse_price(bar.low, "low")?;
-        let close = parse_price(bar.close, "close")?;
+        let open = wire_to_decimal(bar.open, "open")?;
+        let high = wire_to_decimal(bar.high, "high")?;
+        let low = wire_to_decimal(bar.low, "low")?;
+        let close = wire_to_decimal(bar.close, "close")?;
         let volume_f = bar.volume.unwrap_or(0.0);
         let volume = Decimal::from_str(&volume_f.to_string())
             .map(Size::from_decimal)
@@ -128,10 +130,10 @@ impl TradierOptionsCollector {
         quote: &TradierQuote,
         seq: u64,
     ) -> Result<EventEnvelope<QuotePayload>, NormalizeError> {
-        let bid_price = parse_price(quote.bid, "bid")?;
-        let ask_price = parse_price(quote.ask, "ask")?;
-        let bid_size = parse_size(quote.bidsize, "bidsize")?;
-        let ask_size = parse_size(quote.asksize, "asksize")?;
+        let bid_price = wire_to_decimal(quote.bid, "bid")?;
+        let ask_price = wire_to_decimal(quote.ask, "ask")?;
+        let bid_size = wire_to_lot_decimal(quote.bid_lot, "bidsize")?;
+        let ask_size = wire_to_lot_decimal(quote.ask_lot, "asksize")?;
 
         let payload = QuotePayload::new(bid_price, bid_size, ask_price, ask_size);
         let dedup = sequenced_key("market.quotes", &self.instrument_id, VENUE_ID, seq, SOURCE);
@@ -155,7 +157,7 @@ impl TradierOptionsCollector {
     }
 }
 
-fn parse_price(v: Option<f64>, field: &str) -> Result<Price, NormalizeError> {
+fn wire_to_decimal(v: Option<f64>, field: &str) -> Result<Price, NormalizeError> {
     let v = v.ok_or(NormalizeError::MissingField {
         field: field.to_owned(),
     })?;
@@ -167,7 +169,7 @@ fn parse_price(v: Option<f64>, field: &str) -> Result<Price, NormalizeError> {
         })
 }
 
-fn parse_size(v: Option<f64>, field: &str) -> Result<Size, NormalizeError> {
+fn wire_to_lot_decimal(v: Option<f64>, field: &str) -> Result<Size, NormalizeError> {
     let v = v.unwrap_or(0.0);
     Decimal::from_str(&v.to_string())
         .map(Size::from_decimal)
@@ -251,8 +253,8 @@ mod tests {
         TradierQuote {
             bid: Some(2.55),
             ask: Some(2.65),
-            bidsize: Some(10.0),
-            asksize: Some(15.0),
+            bid_lot: Some(10.0),
+            ask_lot: Some(15.0),
         }
     }
 

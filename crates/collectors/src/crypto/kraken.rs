@@ -45,8 +45,8 @@ struct KrakenTrade {
     #[allow(dead_code)]
     symbol: String,
     side: String,
-    price: f64,
-    qty: f64,
+    price: String,
+    qty: String,
     trade_id: u64,
     timestamp: String,
     #[serde(default)]
@@ -82,17 +82,14 @@ impl KrakenCollector {
         trade: &KrakenTrade,
         raw: &[u8],
     ) -> Result<EventEnvelope<TradePayload>, NormalizeError> {
-        let price_str = trade.price.to_string();
-        let qty_str = trade.qty.to_string();
-
-        let price = Decimal::from_str(&price_str)
+        let price = Decimal::from_str(&trade.price)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
                 field: "price".to_owned(),
                 reason: e.to_string(),
             })?;
 
-        let size = Decimal::from_str(&qty_str)
+        let size = Decimal::from_str(&trade.qty)
             .map(Size::from_decimal)
             .map_err(|e| NormalizeError::InvalidSize {
                 field: "qty".to_owned(),
