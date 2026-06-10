@@ -4,10 +4,7 @@ use async_trait::async_trait;
 use reqwest::{header, Client};
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use std::str::FromStr;
-
 use domain::{
-    money::Price,
     order::{OrderType, Side},
 };
 use risk::ApprovedOrder;

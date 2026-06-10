@@ -5,10 +5,9 @@
 
 use chrono::Utc;
 use domain::instrument::AssetClass;
-use serde_json;
 use storage::automation::{AutomationRow, StageMembershipRow};
 use strategy_runtime::automation::plan::{
-    AutomationAccountMode, AutomationPlan, AutomationSpec, ExecutionAction, FilterStage, TimeWindow,
+    AutomationAccountMode, AutomationPlan, AutomationSpec, ExecutionAction, FilterStage,
 };
 use uuid::Uuid;
 
