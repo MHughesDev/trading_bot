@@ -30,6 +30,8 @@ members = [
     "apps/collector-dex",
     "apps/collector-futures",
     "apps/collector-reddit",
+    "apps/collector-web",
+    "apps/embedder",
     "apps/mcp-server",
     "xtask",
 ]

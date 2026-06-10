@@ -2,9 +2,7 @@
 // No risk section (C-114).
 
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/auth'
-import { authApi } from '@/lib/api'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { VenueCredentials } from '@/components/settings/VenueCredentials'
 import { cn } from '@/lib/utils'
@@ -19,23 +17,6 @@ const TABS: Array<{ id: SettingsTab; label: string }> = [
 
 function ProfileTab() {
   const { user, logout } = useAuthStore()
-  const [currentPw, setCurrentPw] = useState('')
-  const [newPw, setNewPw] = useState('')
-  const [pwError, setPwError] = useState('')
-  const [pwSuccess, setPwSuccess] = useState(false)
-
-  const changePwMutation = useMutation({
-    mutationFn: () =>
-      authApi.login(user?.email ?? '', currentPw).then(() =>
-        authApi.touch(),
-      ),
-    onSuccess: () => {
-      setPwSuccess(true)
-      setCurrentPw('')
-      setNewPw('')
-    },
-    onError: () => setPwError('Failed to update password.'),
-  })
 
   return (
     <div className="space-y-6 max-w-sm">

@@ -1,9 +1,10 @@
-//! Milvus vector-store client skeleton (P2-T12).
-//!
-//! Provides `connect()` + `ping()`.  Collection schema and population are Phase 7.
-//! Configured for `text-embedding-3-small` embeddings (1536 dimensions).
+//! Milvus vector-store client — embedding pipeline and metadata-filtered search
+//! (Phase 7).  Configured for `text-embedding-3-small` (1536 dimensions).
 //!
 //! Milvus REST API runs on port 19530 (gRPC) / 9091 (HTTP management).
+
+pub mod collection;
+pub mod embed;
 
 use thiserror::Error;
 

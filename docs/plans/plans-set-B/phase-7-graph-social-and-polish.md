@@ -1,6 +1,6 @@
 ---
 Type: Formal
-Status: Pending
+Status: Complete
 Derived From: C-043, C-065, C-101, C-102, C-103, C-106, C-110
 ---
 
@@ -131,16 +131,16 @@ for completed phases advance from `Draft` to `Implemented`.
 ---
 
 ## Phase exit criteria
-- [ ] TigerGraph schema (the listed vertices/edges) is created idempotently.
-- [ ] The graph is populated from registries and a wipe+rebuild reproduces it exactly (derived,
+- [x] TigerGraph schema (the listed vertices/edges) is created idempotently.
+- [x] The graph is populated from registries and a wipe+rebuild reproduces it exactly (derived,
       rebuildable).
-- [ ] Milvus collection + embedding pipeline embed social/web/strategy text; metadata-filtered semantic
+- [x] Milvus collection + embedding pipeline embed social/web/strategy text; metadata-filtered semantic
       search returns the right source.
-- [ ] The web scraper satellite honors `robots.txt` + per-domain limits, uses HTTP-first with
+- [x] The web scraper satellite honors `robots.txt` + per-domain limits, uses HTTP-first with
       Playwright fallback, and emits `web.page_snapshot` events.
-- [ ] `NEWCOMERS.md` describes the end-state with no removed concepts.
-- [ ] Frontend lint is reduced with no behavior change; `npm run build` succeeds.
-- [ ] Specs for completed phases read `Implemented` with `Verified by:`; `architecture.md` reconciled;
+- [x] `NEWCOMERS.md` describes the end-state with no removed concepts.
+- [x] Frontend lint is reduced with no behavior change; `npm run build` succeeds.
+- [x] Specs for completed phases read `Implemented` with `Verified by:`; `architecture.md` reconciled;
       set-B README statuses updated.
-- [ ] `cargo check --workspace`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+- [x] `cargo check --workspace`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
       --all-features` all green.

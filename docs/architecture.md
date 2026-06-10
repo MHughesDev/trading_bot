@@ -34,7 +34,9 @@ The **React frontend** (`frontend/`) connects to the main binary via REST (contr
 | `crates/config` | Typed runtime configuration loading and validation (env + TOML); fail-fast on missing/invalid | SYS-001 |
 | `crates/observability` | Tracing, structured logging, and metrics setup shared by all binaries; correctness metrics (consumer lag, queue depth, quarantine rate, reconciliation divergences) | SYS-001 |
 | `crates/event-bus` | NATS JetStream producer/consumer wrappers, lane naming, quarantine lane, bounded-queue backpressure | COMP-001 |
-| `crates/collectors` | Satellite connector logic: Kraken (crypto) and Alpaca (equity) venue connectors, `normalize()` → typed events, reconnect policy, gap detection | COMP-001 |
+| `crates/collectors` | Satellite connector logic: Kraken (crypto), Alpaca (equity), and web scraper venue connectors, `normalize()` → typed events, reconnect policy, gap detection | COMP-001 |
+| `crates/graph` | TigerGraph capability/compatibility graph — idempotent schema DDL, vertex/edge upsert, `RegistrySnapshot` population from domain defaults | P7-T01, P7-T02 |
+| `crates/semantic` | Milvus vector store — collection management, OpenAI embedding calls (`text-embedding-3-small`, 1536 dims), upsert and metadata-filtered similarity search | P7-T03 |
 | `crates/builders` | **PURE** functions: order-book reconstruction from snapshot+deltas, bar building with watermark/revision logic. Zero I/O dependencies — same code runs live and in replay | DATA-003, COMP-001 |
 | `crates/features` | **PURE** technical indicator functions: EMA, RSI, rolling window. Zero I/O dependencies — same code runs live and in replay | FEAT-001 |
 | `crates/strategy-runtime` | `WorldState`/`WorldContext`, strategy interpreter (evaluates strategy-definition node graph), instance lifecycle, `world.now()` clock (no wall-clock reads) | FEAT-001 |
@@ -51,6 +53,8 @@ The **React frontend** (`frontend/`) connects to the main binary via REST (contr
 | `apps/platform` | Main binary: wires api + ui-gateway + strategy-runtime + risk + execution + reconciliation + demand-manager; no logic, wiring only | SYS-001 |
 | `apps/collector-crypto` | Satellite binary: starts the Kraken crypto collector; publishes to the bus; reconnects independently | COMP-001 |
 | `apps/collector-equity` | Satellite binary: starts the Alpaca equity collector; publishes to the bus | COMP-001 |
+| `apps/collector-web` | Satellite binary: robots.txt-compliant web scraper; emits `WebPageSnapshotPayload` events | P7-T04 |
+| `apps/embedder` | Satellite binary: subscribes to social/web events; calls OpenAI embeddings API; upserts into Milvus | P7-T03 |
 
 ---
 
@@ -119,6 +123,9 @@ React Frontend
 | PostgreSQL | Transactional storage: users, orders, fills, positions, strategy definitions, risk config | ADR-0004 |
 | ClickHouse | Time-series storage: bars, trades, features; columnar scan for historical analytics | ADR-0004 |
 | Redis / Valkey | Latest-state cache: price snapshots, subscription state, rate-limit counters. Never source of truth for orders/fills | ADR-0004 |
+| TigerGraph | Capability/compatibility graph: instruments ↔ venues ↔ asset classes ↔ strategy definitions. REST++ API on port 9000. | P7-T01 |
+| Milvus | Vector database for semantic search over social/web/strategy content. REST API v2 on port 9091. | P7-T03 |
+| OpenAI Embeddings API | `text-embedding-3-small` (1536 dims) called by `apps/embedder` at ingest time | P7-T03 |
 | Coinbase Advanced Trade API | Live execution broker for crypto (REST + WS) | ADR-0006 |
 | Alpaca API | Paper execution (all assets) + equity market data feed | ADR-0006 |
 | Kraken WS | Crypto market data source (trades, quotes, L2 order-book) | ADR-0006 |
@@ -211,7 +218,9 @@ trading-platform/                      # repo root (current trading_bot/, refact
 │   ├── storage/                       # Postgres, ClickHouse, Parquet, Redis adapters + writer
 │   ├── builders/                      # PURE: order-book reconstruction, bar building (live == replay)
 │   ├── features/                      # PURE: indicator computation — EMA, RSI (live == replay)
-│   ├── collectors/                    # venue connectors: Kraken (crypto), Alpaca (equity)
+│   ├── collectors/                    # venue connectors: Kraken (crypto), Alpaca (equity), web scraper
+│   ├── graph/                         # TigerGraph capability graph: schema init, populate, rebuild
+│   ├── semantic/                      # Milvus collection, OpenAI embedding, filtered search
 │   ├── risk/                          # single risk gate + kill switch
 │   ├── execution/                     # Coinbase (live), Alpaca (paper)
 │   ├── reconciliation/                # position/balance/freshness/sequence reconciliation
@@ -227,6 +236,8 @@ trading-platform/                      # repo root (current trading_bot/, refact
 │   ├── platform/                      # THE main binary: api+ui-gateway+runtime+risk+exec
 │   ├── collector-crypto/              # satellite: Kraken crypto collector
 │   ├── collector-equity/              # satellite: Alpaca equity collector
+│   ├── collector-web/                 # satellite: robots.txt-compliant web scraper
+│   ├── embedder/                      # satellite: OpenAI embeddings → Milvus upsert
 │   └── mcp-server/                    # MCP server process (wraps crates/mcp-server)
 │
 ├── migrations/                        # sqlx Postgres migrations (timestamped .sql files)
@@ -266,6 +277,7 @@ domain  ────────────────────────
   │  │  │  │  └───── builders, features         (PURE — NO storage/bus deps)
   │  │  │  └──────── event-bus, storage         (domain + backend client)
   │  │  └─────────── collectors                 (domain + event-bus + builders)
+  │  │               graph, semantic            (domain + reqwest — knowledge layer)
   │  └────────────── risk, execution, reconciliation, strategy-validator
   └───────────────── strategy-runtime, demand-manager, venue-router,
                      ui-gateway, mcp-server, api

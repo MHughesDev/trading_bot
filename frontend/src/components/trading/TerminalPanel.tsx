@@ -1,7 +1,7 @@
 // Terminal panel: 1-min OHLCV chart + asset-class-specific order ticket +
 // positions + working orders + fills.  No order book, no DOM.
 
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChartPanel } from '@/panels/ChartPanel'
 import { PositionsPanel } from '@/panels/PositionsPanel'

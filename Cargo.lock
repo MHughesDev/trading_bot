@@ -912,6 +912,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "collector-web"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cfg",
+ "collectors",
+ "domain",
+ "event-bus",
+ "observability",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "collectors"
 version = "0.1.0"
 dependencies = [
@@ -1339,6 +1353,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedder"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cfg",
+ "chrono",
+ "domain",
+ "event-bus",
+ "observability",
+ "semantic",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1690,6 +1720,7 @@ dependencies = [
 name = "graph"
 version = "0.1.0"
 dependencies = [
+ "domain",
  "reqwest",
  "serde",
  "serde_json",
@@ -3604,6 +3635,7 @@ dependencies = [
 name = "semantic"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "reqwest",
  "serde",
  "serde_json",

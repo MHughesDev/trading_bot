@@ -1,0 +1,16 @@
+[package]
+name = "embedder"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+semantic = { workspace = true }
+domain = { workspace = true }
+cfg = { workspace = true }
+observability = { workspace = true }
+event-bus = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }

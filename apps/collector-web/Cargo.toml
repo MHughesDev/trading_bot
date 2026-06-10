@@ -1,0 +1,14 @@
+[package]
+name = "collector-web"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+collectors = { workspace = true }
+domain = { workspace = true }
+cfg = { workspace = true }
+observability = { workspace = true }
+event-bus = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }

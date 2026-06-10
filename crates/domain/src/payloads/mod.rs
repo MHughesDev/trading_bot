@@ -14,6 +14,7 @@ pub mod prediction_price;
 pub mod quote;
 pub mod social_post;
 pub mod trade;
+pub mod web_page_snapshot;
 
 /// Trait implemented by every v1 payload struct.
 pub trait Payload: serde::Serialize + for<'de> serde::Deserialize<'de> {
@@ -39,4 +40,5 @@ pub enum AnyPayload {
     PredictionPrice(prediction_price::PredictionPricePayload),
     DexQuote(dex_quote::DexQuotePayload),
     SocialPost(social_post::SocialPostPayload),
+    WebPageSnapshot(web_page_snapshot::WebPageSnapshotPayload),
 }
