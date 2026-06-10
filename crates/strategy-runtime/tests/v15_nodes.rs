@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use domain::data_type::DataType;
 use domain::strategy_def::{
-    inputs::InputDeclaration,
     nodes::{Node, NodeKind},
     risk_overrides::RiskOverrides,
     StrategyDefinition,
