@@ -56,7 +56,10 @@ impl MilvusClient {
     /// Treats "collection already exists" as success to handle concurrent
     /// startup races (M-5: TOCTOU between exists-check and create).
     pub async fn ensure_collection(&self) -> Result<(), SemanticError> {
-        match self.create_collection(SOCIAL_COLLECTION, EMBEDDING_DIMS).await {
+        match self
+            .create_collection(SOCIAL_COLLECTION, EMBEDDING_DIMS)
+            .await
+        {
             Ok(()) => Ok(()),
             Err(SemanticError::Collection(msg)) if msg.contains("already exist") => {
                 info!(collection = SOCIAL_COLLECTION, "collection already exists");

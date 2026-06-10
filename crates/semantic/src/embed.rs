@@ -238,7 +238,8 @@ impl MilvusClient {
 /// Parses the string as a UUID and folds the 128-bit value to i64 via XOR,
 /// producing a deterministic key that allows upsert to replace existing records.
 fn event_id_to_i64(event_id: &str) -> i64 {
-    let uuid = Uuid::parse_str(event_id).unwrap_or_else(|_| Uuid::new_v5(&Uuid::NAMESPACE_OID, event_id.as_bytes()));
+    let uuid = Uuid::parse_str(event_id)
+        .unwrap_or_else(|_| Uuid::new_v5(&Uuid::NAMESPACE_OID, event_id.as_bytes()));
     let (hi, lo) = uuid.as_u64_pair();
     (hi ^ lo) as i64
 }

@@ -136,10 +136,7 @@ impl MilvusClient {
 
     fn attach_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         if let (Some(user), Some(pass)) = (&self.config.username, &self.config.password) {
-            req.header(
-                "Authorization",
-                format!("Bearer {user}:{pass}"),
-            )
+            req.header("Authorization", format!("Bearer {user}:{pass}"))
         } else {
             req
         }

@@ -29,7 +29,10 @@ pub async fn quarantine_or_publish<T>(
             if let Err(e) = publisher.publish(&envelope, instrument_id).await {
                 warn!(instrument_id, source, error = %e, "main publish failed — routing to quarantine");
                 let publish_error = domain::NormalizeError::Deserialize(e.to_string());
-                if let Err(qe) = quarantine.publish_failure(raw, &publish_error, source).await {
+                if let Err(qe) = quarantine
+                    .publish_failure(raw, &publish_error, source)
+                    .await
+                {
                     error!(
                         instrument_id,
                         source,
