@@ -95,8 +95,8 @@ fn split_data_type(s: &str) -> Option<(&str, &str)> {
     for dt in DataType::all() {
         let key = dt.as_key();
         if let Some(rest) = s.strip_prefix(key) {
-            if rest.starts_with('.') {
-                return Some((key, &rest[1..]));
+            if let Some(after_dot) = rest.strip_prefix('.') {
+                return Some((key, after_dot));
             }
         }
     }

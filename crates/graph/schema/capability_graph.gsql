@@ -1,0 +1,83 @@
+// capability_graph.gsql — TigerGraph schema for the capability/compatibility graph.
+// Phase 7 (P7-T01). Derived from C-102/C-065.
+//
+// Vertices: AssetClass, Instrument, Venue, DataType, StrategyDefinition, Widget
+// Edges: INSTRUMENT_IS_A, VENUE_PROVIDES, STRATEGY_REQUIRES_DATA,
+//        INSTRUMENT_AT_VENUE, VENUE_SUPPORTS_ASSET_CLASS, STRATEGY_FOR_ASSET_CLASS
+//
+// Created idempotently — re-running is a no-op (all DDL uses IF NOT EXISTS).
+
+USE GLOBAL
+
+// ── Vertex types ──────────────────────────────────────────────────────────────
+
+CREATE VERTEX IF NOT EXISTS AssetClass (
+    PRIMARY_ID asset_class_id STRING,
+    name       STRING DEFAULT "",
+    label      STRING DEFAULT ""
+) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="TRUE"
+
+CREATE VERTEX IF NOT EXISTS Instrument (
+    PRIMARY_ID instrument_id STRING,
+    name       STRING DEFAULT "",
+    asset_class STRING DEFAULT "",
+    venue_id   STRING DEFAULT "",
+    active     BOOL DEFAULT TRUE
+) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="TRUE"
+
+CREATE VERTEX IF NOT EXISTS Venue (
+    PRIMARY_ID venue_id STRING,
+    name       STRING DEFAULT "",
+    description STRING DEFAULT ""
+) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="TRUE"
+
+CREATE VERTEX IF NOT EXISTS DataType (
+    PRIMARY_ID data_type_id STRING,
+    name       STRING DEFAULT "",
+    description STRING DEFAULT ""
+) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="TRUE"
+
+CREATE VERTEX IF NOT EXISTS StrategyDefinition (
+    PRIMARY_ID strategy_id STRING,
+    name       STRING DEFAULT "",
+    version    STRING DEFAULT "1.0",
+    asset_class STRING DEFAULT ""
+) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="TRUE"
+
+CREATE VERTEX IF NOT EXISTS Widget (
+    PRIMARY_ID widget_id STRING,
+    name       STRING DEFAULT "",
+    kind       STRING DEFAULT ""
+) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="TRUE"
+
+// ── Edge types ────────────────────────────────────────────────────────────────
+
+// Instrument belongs to an AssetClass.
+CREATE UNDIRECTED EDGE IF NOT EXISTS INSTRUMENT_IS_A (
+    FROM Instrument, TO AssetClass
+)
+
+// Venue provides a DataType.
+CREATE UNDIRECTED EDGE IF NOT EXISTS VENUE_PROVIDES (
+    FROM Venue, TO DataType
+)
+
+// StrategyDefinition requires a DataType to run.
+CREATE UNDIRECTED EDGE IF NOT EXISTS STRATEGY_REQUIRES_DATA (
+    FROM StrategyDefinition, TO DataType
+)
+
+// Instrument is traded at a Venue.
+CREATE UNDIRECTED EDGE IF NOT EXISTS INSTRUMENT_AT_VENUE (
+    FROM Instrument, TO Venue
+)
+
+// Venue supports an AssetClass.
+CREATE UNDIRECTED EDGE IF NOT EXISTS VENUE_SUPPORTS_ASSET_CLASS (
+    FROM Venue, TO AssetClass
+)
+
+// StrategyDefinition applies to an AssetClass.
+CREATE UNDIRECTED EDGE IF NOT EXISTS STRATEGY_FOR_ASSET_CLASS (
+    FROM StrategyDefinition, TO AssetClass
+)

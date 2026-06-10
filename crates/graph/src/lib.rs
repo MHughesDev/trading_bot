@@ -1,7 +1,10 @@
-//! TigerGraph client skeleton (P2-T12).
+//! TigerGraph client — capability/compatibility graph (Phase 7).
 //!
-//! Provides `connect()` + `ping()`.  Schema and population are Phase 7.
-//! The TigerGraph REST++ API runs on port 9000 (HTTP) / 9440 (HTTPS).
+//! Provides `connect()`, `ping()`, schema initialization, and graph population.
+//! TigerGraph REST++ API runs on port 9000 (HTTP) / 9440 (HTTPS).
+
+pub mod populate;
+pub mod schema;
 
 use thiserror::Error;
 

@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react'
 import {
-  createChart, CandlestickSeries, createSeriesMarkers,
+  createChart, CandlestickSeries, createSeriesMarkers, LineStyle,
   type IChartApi, type ISeriesApi, type CandlestickData, type Time,
 } from 'lightweight-charts'
 import { useThemeStore } from '@/store/theme'
 import { chartColors } from '@/lib/chartTheme'
+import type { PriceLineAnnotation } from './Annotations'
 
 export interface Bar {
   ts: string | number
@@ -25,6 +26,7 @@ export interface TradeMarker {
 interface Props {
   bars: Bar[]
   markers?: TradeMarker[]
+  priceLines?: PriceLineAnnotation[]
   height?: number
 }
 
@@ -33,10 +35,11 @@ function toTime(ts: string | number): Time {
   return Math.floor(new Date(ts).getTime() / 1000) as unknown as Time
 }
 
-export function OhlcvChart({ bars, markers = [], height = 360 }: Props) {
+export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const priceLineRefs = useRef<Map<string, unknown>>(new Map())
   const theme = useThemeStore((s) => s.theme)
 
   useEffect(() => {
@@ -116,6 +119,49 @@ export function OhlcvChart({ bars, markers = [], height = 360 }: Props) {
 
     chartRef.current?.timeScale().fitContent()
   }, [JSON.stringify(bars), JSON.stringify(markers), theme])
+
+  // Sync TP/SL price lines.
+  useEffect(() => {
+    if (!candleRef.current) return
+
+    const series = candleRef.current
+    const existing = priceLineRefs.current
+    const incoming = new Map(priceLines.map((pl) => [pl.id, pl]))
+
+    type PL = Parameters<typeof series.removePriceLine>[0]
+    type PLApply = { applyOptions: (o: object) => void }
+
+    // Remove stale lines.
+    for (const [id, priceLine] of existing) {
+      if (!incoming.has(id)) {
+        series.removePriceLine(priceLine as PL)
+        existing.delete(id)
+      }
+    }
+
+    // Add / update lines.
+    for (const [id, pl] of incoming) {
+      const lineStyleMap = {
+        dashed: LineStyle.Dashed,
+        solid: LineStyle.Solid,
+        dotted: LineStyle.Dotted,
+      }
+      const opts = {
+        price: pl.price,
+        color: pl.color,
+        lineWidth: 1 as const,
+        lineStyle: lineStyleMap[pl.lineStyle ?? 'dashed'],
+        axisLabelVisible: true,
+        title: pl.label ?? '',
+      }
+      if (existing.has(id)) {
+        (existing.get(id) as PLApply).applyOptions(opts)
+      } else {
+        const newLine = series.createPriceLine(opts)
+        existing.set(id, newLine)
+      }
+    }
+  }, [JSON.stringify(priceLines)])
 
   return <div ref={containerRef} style={{ height }} className="w-full" />
 }

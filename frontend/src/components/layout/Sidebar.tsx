@@ -12,9 +12,9 @@ import { useState } from 'react'
 
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/asset', label: 'Asset', icon: Search },
-  { to: '/strategy-builder', label: 'Strategy Builder', icon: Layers },
+  { to: '/trading', label: 'Trading', icon: Layers },
   { to: '/transactions', label: 'Transactions', icon: Receipt },
+  { to: '/asset', label: 'Asset lookup', icon: Search },
   { to: '/account', label: 'Account', icon: User },
 ]
 

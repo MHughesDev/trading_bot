@@ -14,6 +14,7 @@ pub mod options;
 pub mod prediction;
 pub mod reconnect;
 pub mod social;
+pub mod web;
 
 use std::sync::Arc;
 

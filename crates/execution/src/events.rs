@@ -62,6 +62,7 @@ pub fn ledger_fill_from_paper(
 }
 
 /// Build a `LedgerEvent::Fee` for an explicit fee event (e.g. platform fee).
+#[allow(clippy::too_many_arguments)]
 pub fn ledger_fee_event(
     user_id: Uuid,
     account_mode: AccountMode,
@@ -93,6 +94,7 @@ pub fn ledger_fee_event(
 }
 
 /// Build a `LedgerEvent::FundingPayment` for a perpetual swap funding event.
+#[allow(clippy::too_many_arguments)]
 pub fn ledger_funding_event(
     user_id: Uuid,
     account_mode: AccountMode,

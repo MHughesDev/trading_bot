@@ -1,16 +1,11 @@
 //! 0x Swap API broker adapter — DEX swap execution via firm quote.
 
 use async_trait::async_trait;
+use domain::order::{OrderType, Side};
 use reqwest::{header, Client};
+use risk::ApprovedOrder;
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use std::str::FromStr;
-
-use domain::{
-    money::Price,
-    order::{OrderType, Side},
-};
-use risk::ApprovedOrder;
 
 use crate::broker::{Broker, BrokerError, BrokerOrderState, BrokerOrderStatus, BrokerPosition};
 

@@ -53,7 +53,7 @@ struct ChartResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct TradovateBar {
+pub(crate) struct TradovateBar {
     timestamp: Option<String>,
     open: Option<f64>,
     high: Option<f64>,
@@ -83,7 +83,7 @@ impl TradovateCollector {
     }
 
     /// Normalize a Tradovate bar into an `EventEnvelope<BarPayload>`.
-    pub fn normalize_bar(
+    pub(crate) fn normalize_bar(
         &self,
         bar: &TradovateBar,
         seq: u64,

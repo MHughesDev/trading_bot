@@ -65,7 +65,7 @@ impl PipelineRuntime {
         // Each stage narrows the universe for the next stage.
         let mut current_universe: Vec<String> = universe.clone();
 
-        for (stage_idx, stage) in stages.iter().enumerate() {
+        for stage in stages.iter() {
             let new_members: HashSet<String> = current_universe
                 .iter()
                 .filter(|inst| filter_fn(stage, inst.as_str()))
@@ -90,11 +90,7 @@ impl PipelineRuntime {
             *self.memberships.get_mut(&key).unwrap() = new_members.clone();
 
             // The next stage's universe is the current stage's survivors.
-            if stage_idx == stages.len() - 1 {
-                current_universe = new_members.into_iter().collect();
-            } else {
-                current_universe = new_members.into_iter().collect();
-            }
+            current_universe = new_members.into_iter().collect();
         }
 
         // `current_universe` now holds the instruments that cleared ALL stages.

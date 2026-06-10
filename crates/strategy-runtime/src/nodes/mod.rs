@@ -18,8 +18,6 @@ use std::collections::HashMap;
 
 use domain::strategy_def::nodes::{Node, NodeKind};
 
-use crate::interpreter::evaluate_condition;
-
 /// A single entry in the universe: one instrument plus its current feature values.
 #[derive(Clone, Debug)]
 pub struct UniverseEntry {

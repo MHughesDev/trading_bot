@@ -111,22 +111,22 @@ export function serialize(input: SerializeInput): StrategyDefinition {
   // Build the node graph.
   const strategyNodes: StrategyNode[] = []
   for (const n of conditionNodes) {
-    const d = n.data as ConditionNodeData
+    const d = n.data as unknown as ConditionNodeData
     strategyNodes.push({ id: d.nodeId ?? n.id, type: 'condition', expr: d.expr })
   }
 
   // Signal nodes get their `when` from the edge connecting them to a condition.
   for (const n of signalNodes) {
-    const d = n.data as SignalNodeData
+    const d = n.data as unknown as SignalNodeData
     const inEdge = edges.find(e => e.target === n.id)
     const condNode = inEdge ? conditionNodes.find(c => c.id === inEdge.source) : null
-    const when = condNode ? ((condNode.data as ConditionNodeData).nodeId ?? condNode.id) : ''
+    const when = condNode ? ((condNode.data as unknown as ConditionNodeData).nodeId ?? condNode.id) : ''
     strategyNodes.push({ id: d.nodeId ?? n.id, type: 'signal', when, emit: d.emit })
   }
 
   // Actions.
   const actions: StrategyAction[] = actionNodes.map(n => {
-    const d = n.data as ActionNodeData
+    const d = n.data as unknown as ActionNodeData
     return {
       on_signal: d.on_signal,
       type: 'place_order',
@@ -137,7 +137,7 @@ export function serialize(input: SerializeInput): StrategyDefinition {
   // Derive inputs: always include market.bars.1m, plus features.technical if any
   // condition uses feature('…').
   const allFeatures = conditionNodes.flatMap(n =>
-    extractFeatureNames((n.data as ConditionNodeData).expr)
+    extractFeatureNames((n.data as unknown as ConditionNodeData).expr)
   )
   const inputs: InputDeclaration[] = [
     { lane: 'market.bars.1m', instrument: '$bound_at_init' },

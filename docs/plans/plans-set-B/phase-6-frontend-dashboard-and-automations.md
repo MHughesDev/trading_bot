@@ -1,6 +1,7 @@
 ---
 Type: Formal
-Status: Pending
+Status: Complete
+Completed: 2026-06-10
 Derived From: C-015, C-053, C-079, C-080, C-081, C-084, C-093, C-095, C-098
 ---
 
@@ -144,13 +145,13 @@ the verify-before-save flow.
 ---
 
 ## Phase exit criteria
-- [ ] Dashboard loads the three-tier rollup on-demand (no polling) for the selected Paper/Live mode.
-- [ ] Top tier shows platform P&L + win rate (USD); middle tier is a horizontal infinite slider of all
+- [x] Dashboard loads the three-tier rollup on-demand (no polling) for the selected Paper/Live mode.
+- [x] Top tier shows platform P&L + win rate (USD); middle tier is a horizontal infinite slider of all
       8 asset-class slices; bottom tier shows per-venue tiles that sum to the slice total.
-- [ ] Automations Single-Instrument flow builds + arms a plan with apply-list-filtered execution
+- [x] Automations Single-Instrument flow builds + arms a plan with apply-list-filtered execution
       strategies and an asset-class-aware time window.
-- [ ] Automations Pipeline flow builds ordered stage columns + a final action and shows a live stage
+- [x] Automations Pipeline flow builds ordered stage columns + a final action and shows a live stage
       board with counts and enter/exit deltas.
-- [ ] Settings has a Venue Credentials section that verifies before save, never echoes secrets, and
+- [x] Settings has a Venue Credentials section that verifies before save, never echoes secrets, and
       supports disconnect; no risk section exists.
-- [ ] `frontend/` builds (`npm run build`).
+- [x] `frontend/` builds (`npm run build`).

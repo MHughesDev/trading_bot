@@ -29,17 +29,8 @@ const SOURCE: &str = "tradier_rest";
 // ── Tradier response shapes ──────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-struct TimeSalesResponse {
-    series: Option<TimeSeries>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TimeSeries {
-    data: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TradierBar {
+#[allow(dead_code)]
+pub(crate) struct TradierBar {
     time: Option<String>,
     open: Option<f64>,
     high: Option<f64>,
@@ -59,7 +50,7 @@ struct QuotesInner {
 }
 
 #[derive(Debug, Deserialize)]
-struct TradierQuote {
+pub(crate) struct TradierQuote {
     bid: Option<f64>,
     ask: Option<f64>,
     bidsize: Option<f64>,
@@ -86,7 +77,8 @@ impl TradierOptionsCollector {
     }
 
     /// Normalize a Tradier bar into an `EventEnvelope<BarPayload>`.
-    pub fn normalize_bar(
+    #[allow(dead_code)]
+    pub(crate) fn normalize_bar(
         &self,
         bar: &TradierBar,
         seq: u64,
@@ -131,7 +123,7 @@ impl TradierOptionsCollector {
     }
 
     /// Normalize a Tradier quote into an `EventEnvelope<QuotePayload>`.
-    pub fn normalize_quote(
+    pub(crate) fn normalize_quote(
         &self,
         quote: &TradierQuote,
         seq: u64,

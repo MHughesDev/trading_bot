@@ -35,7 +35,8 @@ struct MarketResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct KalshiMarket {
+pub(crate) struct KalshiMarket {
+    #[allow(dead_code)]
     ticker: String,
     yes_bid: Option<f64>,
     yes_ask: Option<f64>,
@@ -84,7 +85,7 @@ impl KalshiCollector {
     }
 
     /// Normalize a Kalshi market snapshot into a prediction-price envelope.
-    pub fn normalize_prediction(
+    pub(crate) fn normalize_prediction(
         &self,
         market: &KalshiMarket,
         seq: u64,
@@ -143,7 +144,7 @@ impl KalshiCollector {
     }
 
     /// Normalize a Kalshi perpetual snapshot into an OHLCV bar.
-    pub fn normalize_perpetual_bar(
+    pub(crate) fn normalize_perpetual_bar(
         &self,
         market: &KalshiMarket,
         seq: u64,

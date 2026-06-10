@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use strategy_runtime::automation::pipeline::PipelineRuntime;
 use strategy_runtime::automation::plan::{
-    AutomationAccountMode, AutomationPlan, AutomationSpec, ExecutionAction, FilterStage, TimeWindow,
+    AutomationAccountMode, AutomationPlan, AutomationSpec, ExecutionAction, FilterStage,
 };
 
 fn make_plan(universe: Vec<String>, stages: Vec<FilterStage>) -> AutomationPlan {

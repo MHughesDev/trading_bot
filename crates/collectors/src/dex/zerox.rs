@@ -29,7 +29,7 @@ const SOURCE: &str = "zerox_rest";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ZeroXQuoteResponse {
+pub(crate) struct ZeroXQuoteResponse {
     sell_token_address: Option<String>,
     buy_token_address: Option<String>,
     sell_amount: String,
@@ -73,7 +73,7 @@ impl ZeroXCollector {
     }
 
     /// Normalize a 0x quote response into a `DexQuotePayload` envelope.
-    pub fn normalize_quote(
+    pub(crate) fn normalize_quote(
         &self,
         response: &ZeroXQuoteResponse,
         seq: u64,

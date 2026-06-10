@@ -1,6 +1,7 @@
 ---
 Type: Formal
-Status: Pending
+Status: Complete
+Completed: 2026-06-10
 Derived From: C-061, C-072, C-082, C-084, C-085, C-100, C-113, C-117
 ---
 
@@ -170,15 +171,15 @@ builder nodes (data-source selector, rank/sort/filter/take-top-N, alert/surface 
 ---
 
 ## Phase exit criteria
-- [ ] Strategy kind is inferred from the execution-block presence; declared `strategy_type` is ignored.
-- [ ] Capability manifest compiles at save into `strategy_manifests`; default EMA → `[market.ohlcv]`,
+- [x] Strategy kind is inferred from the execution-block presence; declared `strategy_type` is ignored.
+- [x] Capability manifest compiles at save into `strategy_manifests`; default EMA → `[market.ohlcv]`,
       `bar_close`, `Discovery`.
-- [ ] Apply-list endpoint returns only compatible strategies (incompatible omitted, not flagged).
-- [ ] A new account is seeded with exactly the default 7/21 EMA cross-asset discovery strategy.
-- [ ] `AutomationPlan` (single + pipeline) model and schema round-trip through Postgres.
-- [ ] Pipeline runtime maintains stateful stage membership with correct enter/exit deltas.
-- [ ] Rising-edge execution emits one order per crossing, deduped by
+- [x] Apply-list endpoint returns only compatible strategies (incompatible omitted, not flagged).
+- [x] A new account is seeded with exactly the default 7/21 EMA cross-asset discovery strategy.
+- [x] `AutomationPlan` (single + pipeline) model and schema round-trip through Postgres.
+- [x] Pipeline runtime maintains stateful stage membership with correct enter/exit deltas.
+- [x] Rising-edge execution emits one order per crossing, deduped by
       `(automation_id, instrument_id, stage_id, signal_epoch)`.
-- [ ] v1.5 builder nodes (data-source/rank/filter/take-top-N/surface) work and feed the manifest.
-- [ ] `cargo check --workspace`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+- [x] v1.5 builder nodes (data-source/rank/filter/take-top-N/surface) work and feed the manifest.
+- [x] `cargo check --workspace`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
       --all-features` all green.

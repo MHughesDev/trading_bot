@@ -149,12 +149,10 @@ export function BuilderCanvas({ onSaved }: BuilderCanvasProps) {
     }
   }
 
-  const handleLoadJson = (json: string) => {
+  const _handleLoadJson = (_json: string) => {
     try {
-      const def: StrategyDefinition = JSON.parse(json)
-      const { nodes: newNodes, edges: newEdges } = deserialize(def)
-      // Replace graph with deserialized nodes/edges
-      // (useNodesState/useEdgesState don't expose a reset directly — use setter)
+      const def: StrategyDefinition = JSON.parse(_json)
+      const { edges: newEdges } = deserialize(def)
       setEdges(newEdges)
       setStrategyId(def.strategy_id)
       setAssetClass(def.asset_class)

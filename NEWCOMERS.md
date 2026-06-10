@@ -41,6 +41,7 @@ Each entry has a one-line definition and a link to the module that teaches it in
 | **Builder** | Pure function that reconstructs derived data (bars, orderbook) from events | [Module 5](#module-5-builders-and-features--pure-computation) |
 | **$bound_at_init** | Placeholder in strategy definitions resolved to a real instrument at runtime | [Module 6](#module-6-strategy-system--definition-to-signal) |
 | **ClickHouse** | Columnar time-series database for bars, trades, and features | [Module 2](#module-2-codebase-map) |
+| **EmbedSource** | Tag on a Milvus vector indicating which domain produced it (`social.post`, `web.page_snapshot`, `strategy.description`) | [Module 2](#module-2-codebase-map) |
 | **Collector** | Satellite process that connects to a venue, normalizes data, and publishes to the bus | [Module 4](#module-4-data-ingestion--venue-to-bus) |
 | **Condition** | Boolean predicate over market state that a strategy evaluates on each event | [Module 6](#module-6-strategy-system--definition-to-signal) |
 | **DemandRegistry** | Ref-counted tracker of who needs what data lanes — starts/stops pipelines automatically | [Module 6](#module-6-strategy-system--definition-to-signal) |
@@ -56,6 +57,7 @@ Each entry has a one-line definition and a link to the module that teaches it in
 | **KillSwitch** | Global flag that immediately blocks all new orders | [Module 7](#module-7-the-risk-gate--every-orders-checkpoint) |
 | **Lane** | A typed stream on the event bus (e.g., `market.bars.1m`, `features.technical`) | [Module 4](#module-4-data-ingestion--venue-to-bus) |
 | **MCP Server** | AI agent front door — 7 tools for strategy authoring, zero broker bypass | [Module 6](#module-6-strategy-system--definition-to-signal) |
+| **Milvus** | Vector database storing text embeddings for semantic search over social/web/strategy content | [Module 2](#module-2-codebase-map) |
 | **Modular monolith** | One main binary + satellite collectors; loose coupling via event bus | [Module 1](#module-1-the-big-picture) |
 | **NATS** | The messaging system underlying the event bus | [Module 4](#module-4-data-ingestion--venue-to-bus) |
 | **NodeKind** | The type of a computation node in a strategy graph (Condition or Signal) | [Module 6](#module-6-strategy-system--definition-to-signal) |
@@ -68,6 +70,7 @@ Each entry has a one-line definition and a link to the module that teaches it in
 | **PipelineFactory** | Interface for starting/stopping data pipelines on demand | [Module 6](#module-6-strategy-system--definition-to-signal) |
 | **Position** | Current signed quantity held (positive = long, negative = short) | [Module 8](#module-8-execution-and-fills--order-to-position) |
 | **Quarantine** | Failsafe lane for events that fail schema validation — stored for later replay | [Module 4](#module-4-data-ingestion--venue-to-bus) |
+| **RegistrySnapshot** | A point-in-time snapshot of asset classes, instruments, venues, and data types used to populate the TigerGraph capability graph | [Module 2](#module-2-codebase-map) |
 | **Reconciliation** | Continuous checking that internal state matches broker state | [Module 8](#module-8-execution-and-fills--order-to-position) |
 | **ReplayClock** | Simulated clock advanced by the replay engine — never reads wall time | [Module 10](#module-10-replay--deterministic-simulation) |
 | **RiskGate** | The single synchronous chokepoint every order must pass through | [Module 7](#module-7-the-risk-gate--every-orders-checkpoint) |
@@ -83,6 +86,7 @@ Each entry has a one-line definition and a link to the module that teaches it in
 | **StrategyClock** | Trait that abstracts time so strategies work identically live and in replay | [Module 10](#module-10-replay--deterministic-simulation) |
 | **StrategyStore** | Persistent store of user-defined strategy definitions | [Module 6](#module-6-strategy-system--definition-to-signal) |
 | **Timeframe** | Bar interval enum (1s, 1m, 5m, 15m, 1h, 4h, 1d) | [Module 5](#module-5-builders-and-features--pure-computation) |
+| **TigerGraph** | Graph database storing the capability/compatibility graph — which venues support which instruments/asset classes | [Module 2](#module-2-codebase-map) |
 | **TradingSchedule** | When an instrument trades — sessions, timezone, pre/post market flags | [Module 3](#module-3-the-domain-layer--core-types) |
 | **TrustTier** | Ordered enum for data trustworthiness — strategies declare a minimum required tier | [Module 3](#module-3-the-domain-layer--core-types) |
 | **ValidatedDefinition** | A strategy definition that passed all validator checks and may be executed | [Module 6](#module-6-strategy-system--definition-to-signal) |
@@ -112,7 +116,7 @@ The system is a **modular monolith** — one main deployable binary (`platform`)
 - Not microservices: no inter-service RPC overhead, no distributed consensus to manage
 - Not a traditional monolith: collectors fail and reconnect independently without taking the core down; each is its own process
 
-The satellite binaries are `apps/collector-crypto` (Kraken) and `apps/collector-equity` (Alpaca). They connect to venues, normalize data, and publish to the event bus. If a satellite crashes, it restarts. The main binary doesn't care.
+The satellite binaries are `apps/collector-crypto` (Kraken), `apps/collector-equity` (Alpaca), `apps/collector-web` (web scraper), and `apps/embedder` (Milvus embedding pipeline). They connect to venues or external services, normalize data, and publish to the event bus. If a satellite crashes, it restarts. The main binary doesn't care.
 
 ### The Six Planes
 
@@ -168,6 +172,8 @@ Binaries contain no business logic. They wire together crates and start the serv
 | `apps/platform/` | Main binary — REST API + WebSocket server |
 | `apps/collector-crypto/` | Satellite: Kraken crypto data collector |
 | `apps/collector-equity/` | Satellite: Alpaca equity data collector |
+| `apps/collector-web/` | Satellite: robots.txt-compliant web page scraper |
+| `apps/embedder/` | Satellite: embedding pipeline — subscribes to social/web events, upserts into Milvus |
 | `apps/mcp-server/` | MCP server binary (AI agent interface) |
 
 ### `crates/` — Library crates (all logic lives here)
@@ -208,6 +214,13 @@ Think of crates like packages. Each crate has one job. Here they are in dependen
 | `crates/strategy-runtime/` | Interprets strategy definitions against live/replayed events. Maintains WorldState per instance. |
 | `crates/demand-manager/` | Ref-counted pipeline demand tracking. Starts pipelines when needed; stops them when no consumer remains. |
 | `crates/venue-router/` | Maps AssetClass → VenueId at runtime. Manages collector lifecycle on-demand. |
+
+#### Knowledge Layer (Phase 7)
+
+| Crate | Purpose |
+|-------|---------|
+| `crates/graph/` | TigerGraph capability/compatibility graph — vertex/edge schema, idempotent DDL init, population from registry snapshots. Maps instruments ↔ venues ↔ asset classes ↔ strategy definitions. |
+| `crates/semantic/` | Milvus vector store wrappers — collection management, OpenAI embedding calls (`text-embedding-3-small`, 1536 dims), upsert, and metadata-filtered similarity search. |
 
 #### Interfaces
 
@@ -388,6 +401,7 @@ Four types of market data payloads:
 | `QuotePayload` | Best bid/ask (L1) | bid_price, bid_size, ask_price, ask_size |
 | `OrderBookPayload` | Full L2 order book | bids: Vec<(price, size)>, asks: Vec<(price, size)>, is_snapshot |
 | `BarPayload` | OHLCV candlestick | timeframe, open, high, low, close, volume, trade_count, revision |
+| `WebPageSnapshotPayload` | Scraped web page content | url, title, text, word_count, fetch_method (Http/Playwright), occurred_at_ms |
 
 The `revision` field on `BarPayload` is important: when a late trade arrives after a bar closes, a new bar event with `revision > 0` is published. The original bar is **never mutated**. This is the append-only invariant.
 

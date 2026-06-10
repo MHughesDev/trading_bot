@@ -34,7 +34,7 @@ struct CandlesResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct OandaCandle {
+pub(crate) struct OandaCandle {
     time: String,
     mid: Option<OandaMid>,
     volume: u64,
@@ -72,7 +72,7 @@ impl OandaCollector {
     }
 
     /// Normalize an OANDA candle into a `EventEnvelope<BarPayload>`.
-    pub fn normalize_bar(
+    pub(crate) fn normalize_bar(
         &self,
         candle: &OandaCandle,
         seq: u64,

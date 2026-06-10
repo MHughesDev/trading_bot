@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -10,7 +10,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
+use domain::instrument::AssetClass;
 use domain::strategy_def::StrategyDefinition;
+use strategy_runtime::compatibility::{
+    default_provided_lanes, is_compatible, InstrumentCapabilities,
+};
+use strategy_runtime::manifest::compile_manifest;
 use strategy_validator::validate;
 
 use crate::{auth::BearerToken, state::AppState};
@@ -184,10 +189,99 @@ pub async fn stop_strategy(
 
 // ── Apply-list (P3-T03) ────────────────────────────────────────────────────────
 
+#[derive(Debug, Deserialize)]
+pub struct ApplyListParams {
+    /// Instrument identifier (e.g. `"BTC-USD"`).
+    pub instrument: Option<String>,
+    /// Asset class slug (e.g. `"crypto_spot_cex"`).  When supplied the provided
+    /// lane set is derived from the asset class; otherwise all lanes are assumed.
+    pub asset_class: Option<String>,
+}
+
 /// GET /api/strategies/apply-list — returns strategies compatible with the
-/// requesting user's instrument universe.
-pub async fn apply_list(State(_state): State<AppState>, _token: BearerToken) -> impl IntoResponse {
-    Json(json!({ "strategies": [] }))
+/// given instrument/asset-class combination.
+///
+/// Incompatible strategies are **omitted** from the response, never returned
+/// with a flag (C-113/C-117).
+pub async fn apply_list(
+    State(state): State<AppState>,
+    _token: BearerToken,
+    Query(params): Query<ApplyListParams>,
+) -> impl IntoResponse {
+    let caps = match params.asset_class.as_deref() {
+        Some(slug) => {
+            // Parse the slug to an AssetClass; fall back to full lane set on
+            // an unknown slug so new asset classes degrade gracefully.
+            let ac = slug_to_asset_class(slug);
+            InstrumentCapabilities {
+                provided_lanes: match ac {
+                    Some(ac) => default_provided_lanes(ac),
+                    None => all_lanes(),
+                },
+            }
+        }
+        None => InstrumentCapabilities {
+            provided_lanes: all_lanes(),
+        },
+    };
+
+    let store = state
+        .strategy_store
+        .lock()
+        .expect("strategy_store lock poisoned");
+
+    let compatible: Vec<serde_json::Value> = store
+        .iter()
+        .filter_map(|(id, def)| {
+            let manifest = compile_manifest(def);
+            if is_compatible(&manifest, &caps) {
+                Some(json!({
+                    "id": id,
+                    "strategy_id": def.strategy_id,
+                    "strategy_kind": format!("{:?}", manifest.strategy_kind).to_lowercase(),
+                    "evaluation_trigger": format!("{:?}", manifest.evaluation_trigger).to_lowercase(),
+                    "required_lanes": manifest.required_lanes
+                        .iter()
+                        .map(|dt| dt.as_key())
+                        .collect::<Vec<_>>(),
+                }))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Json(json!({ "strategies": compatible }))
+}
+
+fn slug_to_asset_class(slug: &str) -> Option<AssetClass> {
+    match slug {
+        "crypto_spot_cex" => Some(AssetClass::CryptoSpotCex),
+        "equity" => Some(AssetClass::Equity),
+        "fx" => Some(AssetClass::Fx),
+        "prediction_market" => Some(AssetClass::PredictionMarket),
+        "option" => Some(AssetClass::Option),
+        "crypto_spot_dex" => Some(AssetClass::CryptoSpotDex),
+        "perpetual_swap" => Some(AssetClass::PerpetualSwap),
+        "futures_expiring" => Some(AssetClass::FuturesExpiring),
+        _ => None,
+    }
+}
+
+fn all_lanes() -> Vec<domain::data_type::DataType> {
+    use domain::data_type::DataType;
+    vec![
+        DataType::MarketOhlcv,
+        DataType::MarketTrade,
+        DataType::MarketQuote,
+        DataType::MarketFundingRate,
+        DataType::MarketOpenInterest,
+        DataType::PredictionMarketPrice,
+        DataType::DexQuote,
+        DataType::SocialPost,
+        DataType::WebPageSnapshot,
+        DataType::NewsArticle,
+    ]
 }
 
 // ── Response shape (shared by other handlers) ─────────────────────────────────
