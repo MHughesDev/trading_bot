@@ -18,7 +18,6 @@ use std::collections::HashMap;
 
 use domain::strategy_def::nodes::{Node, NodeKind};
 
-
 /// A single entry in the universe: one instrument plus its current feature values.
 #[derive(Clone, Debug)]
 pub struct UniverseEntry {
