@@ -73,6 +73,7 @@ impl FifoEngine {
     }
 
     /// Record an opening fill: creates a new lot.
+    #[allow(clippy::too_many_arguments)]
     pub fn open_lot(
         &mut self,
         user_id: Uuid,
@@ -106,6 +107,7 @@ impl FifoEngine {
     /// Consume open lots FIFO for a closing fill.  Returns the close records created.
     ///
     /// `usd_rate` is the USD conversion rate at close time.
+    #[allow(clippy::too_many_arguments)]
     pub fn close_lots(
         &mut self,
         user_id: Uuid,
