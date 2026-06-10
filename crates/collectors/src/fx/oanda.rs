@@ -72,7 +72,7 @@ impl OandaCollector {
     }
 
     /// Normalize an OANDA candle into a `EventEnvelope<BarPayload>`.
-    pub fn normalize_bar(
+    pub(crate) fn normalize_bar(
         &self,
         candle: &OandaCandle,
         seq: u64,

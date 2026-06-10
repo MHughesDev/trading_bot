@@ -83,7 +83,7 @@ impl TradovateCollector {
     }
 
     /// Normalize a Tradovate bar into an `EventEnvelope<BarPayload>`.
-    pub fn normalize_bar(
+    pub(crate) fn normalize_bar(
         &self,
         bar: &TradovateBar,
         seq: u64,

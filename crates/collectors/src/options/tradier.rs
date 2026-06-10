@@ -76,7 +76,7 @@ impl TradierOptionsCollector {
     }
 
     /// Normalize a Tradier bar into an `EventEnvelope<BarPayload>`.
-    pub fn normalize_bar(
+    pub(crate) fn normalize_bar(
         &self,
         bar: &TradierBar,
         seq: u64,
@@ -121,7 +121,7 @@ impl TradierOptionsCollector {
     }
 
     /// Normalize a Tradier quote into an `EventEnvelope<QuotePayload>`.
-    pub fn normalize_quote(
+    pub(crate) fn normalize_quote(
         &self,
         quote: &TradierQuote,
         seq: u64,

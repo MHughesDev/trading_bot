@@ -73,7 +73,7 @@ impl ZeroXCollector {
     }
 
     /// Normalize a 0x quote response into a `DexQuotePayload` envelope.
-    pub fn normalize_quote(
+    pub(crate) fn normalize_quote(
         &self,
         response: &ZeroXQuoteResponse,
         seq: u64,
