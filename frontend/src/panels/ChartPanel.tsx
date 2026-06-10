@@ -1,17 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { OhlcvChart } from '@/components/charts/OhlcvChart'
+import { OhlcvChart, type Bar as OhlcvBar } from '@/components/charts/OhlcvChart'
 import { wsBus, getWsClient } from '@/api/ws'
 import type { Bar, WsOutMessage } from '@/lib/types'
+import type { PriceLineAnnotation } from '@/components/charts/Annotations'
 
 interface ChartPanelProps {
   instrument: string
   initialBars?: Bar[]
+  priceLines?: PriceLineAnnotation[]
 }
 
 const PANEL_ID_PREFIX = 'chart_'
 
-export function ChartPanel({ instrument, initialBars = [] }: ChartPanelProps) {
+// Map the backend Bar (decimal string OHLCV, `time` field) to OhlcvChart's Bar.
+function toOhlcvBar(b: Bar): OhlcvBar {
+  return {
+    ts: b.time,
+    open: parseFloat(b.open),
+    high: parseFloat(b.high),
+    low: parseFloat(b.low),
+    close: parseFloat(b.close),
+    volume: parseFloat(b.volume),
+  }
+}
+
+export function ChartPanel({ instrument, initialBars = [], priceLines = [] }: ChartPanelProps) {
   const panelId = useRef(`${PANEL_ID_PREFIX}${instrument}`).current
   const [bars, setBars] = useState<Bar[]>(initialBars)
   const [connected, setConnected] = useState(false)
@@ -37,7 +51,7 @@ export function ChartPanel({ instrument, initialBars = [] }: ChartPanelProps) {
           if (prev.length > 0 && prev[prev.length - 1].time === bar.time) {
             return [...prev.slice(0, -1), bar]
           }
-          return [...prev, bar].slice(-500) // keep last 500 bars
+          return [...prev, bar].slice(-500)
         })
       }
       if (msg.type === 'heartbeat') {
@@ -52,10 +66,11 @@ export function ChartPanel({ instrument, initialBars = [] }: ChartPanelProps) {
     }
   }, [instrument, panelId])
 
-  // Update initial bars when prop changes.
   useEffect(() => {
     if (initialBars.length > 0) setBars(initialBars)
   }, [initialBars])
+
+  const ohlcvBars = bars.map(toOhlcvBar)
 
   return (
     <Card>
@@ -68,12 +83,12 @@ export function ChartPanel({ instrument, initialBars = [] }: ChartPanelProps) {
         </span>
       </CardHeader>
       <CardContent className="p-0 pb-2">
-        {bars.length === 0 ? (
+        {ohlcvBars.length === 0 ? (
           <div className="flex h-72 items-center justify-center text-text-dim text-sm">
             Waiting for bars…
           </div>
         ) : (
-          <OhlcvChart bars={bars} markers={[]} height={300} />
+          <OhlcvChart bars={ohlcvBars} markers={[]} priceLines={priceLines} height={300} />
         )}
       </CardContent>
     </Card>

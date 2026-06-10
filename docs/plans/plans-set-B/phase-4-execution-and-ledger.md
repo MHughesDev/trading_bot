@@ -1,6 +1,7 @@
 ---
 Type: Formal
-Status: Pending
+Status: Complete
+Completed: 2026-06-10
 Derived From: C-017, C-056, C-058, C-059, C-068, C-073, C-086, C-087, C-088, C-092, C-105
 ---
 
@@ -158,18 +159,18 @@ numbers (platform → asset class → venue) with FIFO lot matching.
 ---
 
 ## Phase exit criteria
-- [ ] All four paper fill simulators + DEX wallet are fully implemented and deterministic (no network);
+- [x] All four paper fill simulators + DEX wallet are fully implemented and deterministic (no network);
       simulator tests green.
-- [ ] The execution router dispatches `PAPER` → simulator and `LIVE_ROUTED` → venue adapter, with
+- [x] The execution router dispatches `PAPER` → simulator and `LIVE_ROUTED` → venue adapter, with
       exactly those two modes; a paper order never touches a venue.
-- [ ] OANDA, Kalshi, Tradier, 0x, Tradovate broker adapters implement the `Broker` trait; adapter
+- [x] OANDA, Kalshi, Tradier, 0x, Tradovate broker adapters implement the `Broker` trait; adapter
       tests green (mocked HTTP).
-- [ ] The ledger writer appends one event per fill/fee/margin/funding, idempotently and insert-only.
-- [ ] The FIFO P&L lot engine computes realized (on close) and unrealized (at mark) P&L in USD with
+- [x] The ledger writer appends one event per fill/fee/margin/funding, idempotently and insert-only.
+- [x] The FIFO P&L lot engine computes realized (on close) and unrealized (at mark) P&L in USD with
       position-level win rate.
-- [ ] The USD rollup engine returns platform → asset-class → venue tiers for Paper and Live
+- [x] The USD rollup engine returns platform → asset-class → venue tiers for Paper and Live
       separately, on-demand.
-- [ ] Per-venue `AccountSource` adapters fetch balances/positions/transactions on demand using
+- [x] Per-venue `AccountSource` adapters fetch balances/positions/transactions on demand using
       decrypted credentials.
-- [ ] `cargo check --workspace`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+- [x] `cargo check --workspace`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
       --all-features` all green.
