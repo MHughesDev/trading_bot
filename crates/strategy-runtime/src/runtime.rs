@@ -3,7 +3,7 @@
 //! `StrategyInstance` binds a definition to one instrument for one user.
 //! `InstanceManager` tracks all active instances and deduplicates pipeline demand.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -102,7 +102,7 @@ impl StrategyInstance {
         )
     }
 
-    fn run_signals(&self, features: &HashMap<String, f64>) -> Vec<String> {
+    fn run_signals(&self, features: &HashMap<String, f64>) -> HashSet<String> {
         use domain::strategy_def::nodes::NodeKind;
 
         let mut conditions: HashMap<&str, bool> = HashMap::new();
