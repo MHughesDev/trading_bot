@@ -100,7 +100,7 @@ pub fn evaluate_signals(
 // ── Tokenizer ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-enum Tok {
+pub(crate) enum Tok {
     Num(f64),
     Ident(String),
     Str(String),
@@ -120,7 +120,7 @@ enum Tok {
     Eof,
 }
 
-fn tokenize(input: &str) -> Result<Vec<Tok>, EvalError> {
+pub(crate) fn tokenize(input: &str) -> Result<Vec<Tok>, EvalError> {
     let mut tokens = Vec::new();
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;

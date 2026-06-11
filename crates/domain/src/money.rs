@@ -12,6 +12,84 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+// ── rkyv archive support for Price and Size ─────────────────────────────────
+//
+// `rust_decimal::Decimal` has a built-in rkyv feature, but it targets rkyv
+// 0.7, not 0.8.  We use the `with` adapter pattern: `AsDecimalBytes` archives
+// any `Price` or `Size` field as its raw 16 bytes ([u8; 16]).
+//
+// Decimal is 4 × u32 (flags, hi, lo, mid) = 16 bytes, no padding.  The
+// transmute to/from [u8; 16] is sound — both types have the same size and
+// alignment requirements, and the byte pattern is stable within a process.
+
+/// rkyv `with` adapter: archives `Price` or `Size` as its raw 16 bytes.
+///
+/// Use as `#[rkyv(with = AsDecimalBytes)]` on any `Price` or `Size` field
+/// inside an `#[derive(rkyv::Archive)]` struct.
+pub struct AsDecimalBytes;
+
+// ── ArchiveWith / SerializeWith / DeserializeWith for Price ─────────────────
+
+impl rkyv::with::ArchiveWith<Price> for AsDecimalBytes {
+    type Archived = [u8; 16];
+    type Resolver = ();
+
+    fn resolve_with(field: &Price, (): (), out: rkyv::Place<[u8; 16]>) {
+        // SAFETY: Decimal is exactly 16 bytes (4 × u32, no padding).
+        #[allow(unsafe_code)]
+        let bytes: [u8; 16] = unsafe { core::mem::transmute(field.0) };
+        out.write(bytes);
+    }
+}
+
+impl<S: rkyv::rancor::Fallible + ?Sized> rkyv::with::SerializeWith<Price, S> for AsDecimalBytes {
+    fn serialize_with(_field: &Price, _serializer: &mut S) -> Result<(), S::Error> {
+        Ok(())
+    }
+}
+
+impl<D: rkyv::rancor::Fallible + ?Sized> rkyv::with::DeserializeWith<[u8; 16], Price, D>
+    for AsDecimalBytes
+{
+    fn deserialize_with(archived: &[u8; 16], _: &mut D) -> Result<Price, D::Error> {
+        // SAFETY: bytes were written by resolve_with / serialize_with above.
+        #[allow(unsafe_code)]
+        let decimal: Decimal = unsafe { core::mem::transmute(*archived) };
+        Ok(Price(decimal))
+    }
+}
+
+// ── ArchiveWith / SerializeWith / DeserializeWith for Size ──────────────────
+
+impl rkyv::with::ArchiveWith<Size> for AsDecimalBytes {
+    type Archived = [u8; 16];
+    type Resolver = ();
+
+    fn resolve_with(field: &Size, (): (), out: rkyv::Place<[u8; 16]>) {
+        // SAFETY: same layout guarantee as for Price.
+        #[allow(unsafe_code)]
+        let bytes: [u8; 16] = unsafe { core::mem::transmute(field.0) };
+        out.write(bytes);
+    }
+}
+
+impl<S: rkyv::rancor::Fallible + ?Sized> rkyv::with::SerializeWith<Size, S> for AsDecimalBytes {
+    fn serialize_with(_field: &Size, _serializer: &mut S) -> Result<(), S::Error> {
+        Ok(())
+    }
+}
+
+impl<D: rkyv::rancor::Fallible + ?Sized> rkyv::with::DeserializeWith<[u8; 16], Size, D>
+    for AsDecimalBytes
+{
+    fn deserialize_with(archived: &[u8; 16], _: &mut D) -> Result<Size, D::Error> {
+        // SAFETY: bytes were written by resolve_with / serialize_with above.
+        #[allow(unsafe_code)]
+        let decimal: Decimal = unsafe { core::mem::transmute(*archived) };
+        Ok(Size(decimal))
+    }
+}
+
 /// A non-negative decimal price (bid, ask, trade price, OHLC, etc.).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

@@ -1,19 +1,14 @@
 //! Tradovate futures 1-minute OHLCV collector (demo environment).
-//!
-//! Authenticates via `POST /auth/oauthtoken`, then polls
-//! `GET /md/getChart` for 1-minute bars.  Normalizes into
-//! `EventEnvelope<BarPayload>` with `AssetClass::FuturesExpiring` and
-//! `TrustTier::Regulated` (futures are exchange-regulated).
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use domain::{
-    event_id_from_key,
+    lanes,
     money::{Price, Size},
     payloads::bar::{BarPayload, Timeframe},
-    sequenced_key, EventEnvelope, NormalizeError, TrustTier,
+    EventEnvelope, NormalizeError,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -65,9 +60,7 @@ pub(crate) struct TradovateBar {
 
 // ── Collector ────────────────────────────────────────────────────────────────
 
-/// Tradovate futures 1-minute OHLCV collector.
 pub struct TradovateCollector {
-    /// Tradovate contract symbol, e.g. `"ESH4"` (E-mini S&P 500 March 2024).
     pub symbol: String,
     pub instrument_id: String,
 }
@@ -82,12 +75,11 @@ impl TradovateCollector {
         }
     }
 
-    /// Normalize a Tradovate bar into an `EventEnvelope<BarPayload>`.
     pub(crate) fn normalize_bar(
         &self,
         bar: &TradovateBar,
         seq: u64,
-    ) -> Result<EventEnvelope<BarPayload>, NormalizeError> {
+    ) -> Result<EventEnvelope, NormalizeError> {
         let open = wire_to_decimal(bar.open, "open")?;
         let high = wire_to_decimal(bar.high, "high")?;
         let low = wire_to_decimal(bar.low, "low")?;
@@ -104,29 +96,25 @@ impl TradovateCollector {
             })?;
 
         let payload = BarPayload::new(Timeframe::Minutes1, open, high, low, close, volume, 0);
-        let dedup = sequenced_key("market.bars.1m", &self.instrument_id, VENUE_ID, seq, SOURCE);
-        let event_id = event_id_from_key(&dedup);
 
-        let event_time = bar.timestamp.as_deref().and_then(|t| {
-            chrono::DateTime::parse_from_rfc3339(t)
-                .ok()
-                .map(|dt| dt.with_timezone(&Utc))
-        });
-        let now = Utc::now();
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
+
+        let timestamp_ns = bar
+            .timestamp
+            .as_deref()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|dt| dt.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|| Utc::now().timestamp_nanos_opt().unwrap_or(0));
 
         Ok(EventEnvelope::new(
-            event_id,
-            "market.bars.1m",
-            &self.instrument_id,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::Regulated,
-            event_time,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&self.instrument_id),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             seq,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         ))
     }
 }
@@ -162,7 +150,6 @@ impl Collector for TradovateCollector {
 
         info!(symbol = %self.symbol, "Tradovate collector starting");
 
-        // Obtain access token.
         let auth_body = AuthRequest {
             name: &username,
             password: &password,
@@ -221,6 +208,7 @@ impl Collector for TradovateCollector {
                                     result,
                                     &raw,
                                     &self.instrument_id,
+                                    lanes::MARKET_BARS_1M,
                                     SOURCE,
                                     &publisher,
                                     &quarantine,
@@ -240,6 +228,7 @@ impl Collector for TradovateCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::payloads::bar::BarPayload;
 
     fn sample_bar() -> TradovateBar {
         TradovateBar {
@@ -259,12 +248,13 @@ mod tests {
         let result = collector.normalize_bar(&sample_bar(), 1);
         assert!(result.is_ok(), "{:?}", result);
         let env = result.unwrap();
-        assert_eq!(env.instrument_id, "ESH4");
-        assert_eq!(env.venue_id, "tradovate");
-        assert_eq!(env.trust_tier, TrustTier::Regulated);
-        assert_eq!(env.payload.timeframe, Timeframe::Minutes1);
-        // Volume = up + down
-        let vol: f64 = env.payload.volume.to_string().parse().unwrap();
+        assert_eq!(
+            domain::instrument_name(env.instrument_id).as_deref(),
+            Some("ESH4")
+        );
+        let bar = env.decode_payload::<BarPayload>().unwrap();
+        assert_eq!(bar.timeframe, Timeframe::Minutes1);
+        let vol: f64 = bar.volume.to_string().parse().unwrap();
         assert!((vol - 2300.0).abs() < 0.01, "volume mismatch: {vol}");
     }
 

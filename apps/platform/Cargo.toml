@@ -15,9 +15,16 @@ strategy-runtime = { workspace = true }
 storage = { workspace = true }
 ui-gateway = { workspace = true }
 demand-manager = { workspace = true }
+event-bus = { workspace = true }
+collectors = { workspace = true }
+async-nats = { workspace = true }
+rtrb = { workspace = true }
+rust_decimal = { workspace = true }
+chrono = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 axum = { workspace = true }
 async-trait = "0.1"
 sqlx = { workspace = true }
+serde_json = { workspace = true }

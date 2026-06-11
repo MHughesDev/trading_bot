@@ -87,3 +87,18 @@ frontend-build:
 # Build release binary
 build-release:
     cargo build --release -p platform -p collector-crypto -p collector-equity -p mcp-server
+
+# ── Hot-path integrity ─────────────────────────────────────────────────────────
+
+# Verify no Publisher::publish calls exist on the strategy evaluation path.
+# Only tee.rs is allowed to reference Publisher.
+check-hot-path:
+    @echo "Checking: Publisher::publish must not appear in apps/platform/src/ except tee.rs..."
+    @result=$$(grep -r "Publisher::publish" apps/platform/src/ | grep -v "tee\.rs"); \
+    if [ -n "$$result" ]; then \
+        echo "FAIL: Publisher::publish found on hot path:"; \
+        echo "$$result"; \
+        exit 1; \
+    else \
+        echo "OK: Publisher::publish is confined to tee.rs"; \
+    fi

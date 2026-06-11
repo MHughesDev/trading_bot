@@ -13,9 +13,10 @@ use domain::order::OrderIntent;
 use domain::strategy_def::StrategyDefinition;
 use thiserror::Error;
 
+use crate::bytecode;
 use crate::clock::StrategyClock;
 use crate::intents::build_intents_for_signals;
-use crate::interpreter::evaluate_signals;
+use crate::interpreter::evaluate_condition;
 use crate::world::{WorldEvent, WorldState};
 
 /// Errors produced by the instance manager.
@@ -34,6 +35,8 @@ pub struct StrategyInstance {
     pub instrument_id: String,
     pub definition: StrategyDefinition,
     state: WorldState,
+    /// Condition node expressions compiled to postfix bytecode at init.
+    compiled_conditions: HashMap<String, bytecode::Program>,
 }
 
 impl StrategyInstance {
@@ -45,18 +48,38 @@ impl StrategyInstance {
     ) -> Self {
         let instrument_id = instrument_id.into();
         let state = WorldState::new(instrument_id.clone(), start_time);
+        let compiled_conditions = Self::compile_conditions(&definition.nodes);
         Self {
             user_id: user_id.into(),
             instrument_id,
             definition,
             state,
+            compiled_conditions,
         }
+    }
+
+    fn compile_conditions(
+        nodes: &[domain::strategy_def::nodes::Node],
+    ) -> HashMap<String, bytecode::Program> {
+        use domain::strategy_def::nodes::NodeKind;
+        nodes
+            .iter()
+            .filter_map(|node| {
+                if let NodeKind::Condition { expr } = &node.kind {
+                    bytecode::compile(expr)
+                        .ok()
+                        .map(|program| (node.id.clone(), program))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Process a world event.
     ///
     /// 1. Update `WorldState` from the event.
-    /// 2. Evaluate the definition node graph.
+    /// 2. Evaluate the definition node graph via compiled bytecode.
     /// 3. Collect and return any order intents — the caller routes them through
     ///    the risk gate.
     pub fn process_event(&mut self, event: WorldEvent) -> Vec<OrderIntent> {
@@ -69,7 +92,7 @@ impl StrategyInstance {
             .map(|(k, v)| (k.clone(), v.value))
             .collect();
 
-        let signals = evaluate_signals(&self.definition.nodes, &features, &self.state.bars);
+        let signals = self.run_signals(&features);
 
         build_intents_for_signals(
             &self.definition.actions,
@@ -77,6 +100,38 @@ impl StrategyInstance {
             &self.instrument_id,
             &self.definition.strategy_id,
         )
+    }
+
+    fn run_signals(&self, features: &HashMap<String, f64>) -> Vec<String> {
+        use domain::strategy_def::nodes::NodeKind;
+
+        let mut conditions: HashMap<&str, bool> = HashMap::new();
+        for node in &self.definition.nodes {
+            if let NodeKind::Condition { expr } = &node.kind {
+                let fired = if let Some(program) = self.compiled_conditions.get(&node.id) {
+                    bytecode::run(program, features, &self.state.bars)
+                } else {
+                    evaluate_condition(expr, features, &self.state.bars)
+                };
+                conditions.insert(&node.id, fired);
+            }
+        }
+
+        self.definition
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                if let NodeKind::Signal { when, emit } = &node.kind {
+                    if conditions.get(when.as_str()).copied().unwrap_or(false) {
+                        Some(emit.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// The `available_time` of the most recently processed event.

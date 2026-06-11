@@ -105,7 +105,7 @@ pub async fn place_order(
     // risk checks pass even when the account already holds a position — a
     // false-permissive failure mode that could allow over-leverage.  Reject
     // manual orders until real position, mark price, and P&L data are available.
-    return (
+    (
         StatusCode::SERVICE_UNAVAILABLE,
         Json(json!({
             "error": "manual order placement not yet available",
@@ -114,7 +114,7 @@ pub async fn place_order(
                        position-limit checks"
         })),
     )
-        .into_response();
+        .into_response()
 }
 
 /// GET /api/orders/:id — look up an order by idempotency key.
@@ -151,6 +151,7 @@ pub async fn get_order(
     }
 }
 
+#[allow(dead_code)]
 fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
     match r {
         RiskRejection::KillSwitchActive | RiskRejection::TradingDisabled => (

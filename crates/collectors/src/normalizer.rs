@@ -12,29 +12,28 @@ use tracing::{error, warn};
 /// * `Ok(envelope)` — publish to the instrument lane via `publisher`.
 /// * `Err(e)` — publish the raw bytes to the quarantine lane via `quarantine`.
 ///
-/// When the main bus publish fails (e.g. NATS reconnect window), the envelope
-/// is routed to the quarantine lane so no event is silently lost (H-7).
-pub async fn quarantine_or_publish<T>(
-    result: Result<domain::EventEnvelope<T>, domain::NormalizeError>,
+/// `instrument_name` is the human-readable string used for the NATS subject.
+/// `lane` is the lane name (e.g. `"market.trades"`).
+pub async fn quarantine_or_publish(
+    result: Result<domain::EventEnvelope, domain::NormalizeError>,
     raw: &[u8],
-    instrument_id: &str,
+    instrument_name: &str,
+    lane: &str,
     source: &str,
     publisher: &Arc<event_bus::Publisher>,
     quarantine: &Arc<event_bus::QuarantinePublisher>,
-) where
-    T: domain::payloads::Payload + serde::Serialize + Send + Sync,
-{
+) {
     match result {
         Ok(envelope) => {
-            if let Err(e) = publisher.publish(&envelope, instrument_id).await {
-                warn!(instrument_id, source, error = %e, "main publish failed — routing to quarantine");
+            if let Err(e) = publisher.publish(&envelope, instrument_name, lane).await {
+                warn!(instrument_name, source, error = %e, "main publish failed — routing to quarantine");
                 let publish_error = domain::NormalizeError::Deserialize(e.to_string());
                 if let Err(qe) = quarantine
                     .publish_failure(raw, &publish_error, source)
                     .await
                 {
                     error!(
-                        instrument_id,
+                        instrument_name,
                         source,
                         error = %qe,
                         "quarantine publish also failed — event lost"

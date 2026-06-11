@@ -9,3 +9,4 @@ edition = "2021"
 domain = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+rkyv = { workspace = true }

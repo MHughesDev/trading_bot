@@ -77,5 +77,48 @@ No external bus; collectors communicate with the main binary through in-process 
 
 Not chosen because: collectors are satellite processes — separate OS processes — so in-process channels cannot span the collector-to-core boundary. Additionally, in-process channels provide no durability or replay capability: if a storage writer task falls behind and is restarted, it loses everything buffered in the channel.
 
+## Amendment: JetStream is the tail, not the spine
+
+**Date:** 2026-06-11
+**Status:** Amends the decision above; the original rationale is unchanged.
+
+### What changed
+
+The original ADR placed JetStream on the **critical path** of every market-data event: the `Publisher::publish` call was awaited inline by collectors before the strategy ever saw the tick.  Profiling revealed that awaiting the JetStream server ACK adds 0.5–5 ms per tick — three orders of magnitude above the target strategy latency (< 50 µs p99 tick-to-intent).
+
+### New architecture: tee pattern
+
+The hot path for the Kraken BTC/USD instrument is now an in-process SPSC ring pipeline:
+
+```
+Kraken WS  →  ring_raw (4 096)  →  bar-builder  →  ring_world (1 024)
+           →  strategy-eval  →  ring_intent (256)  →  risk/exec  →  broker
+```
+
+All four stages are `tokio::spawn` tasks that communicate through bounded `rtrb` lock-free rings.  **No stage awaits any network call.**
+
+JetStream receives every event via an asynchronous **tee task** (`apps/platform/src/tee.rs`):
+
+```
+Kraken WS  ──(mpsc clone)──▶  tee_task  ──▶  JetStream publish_fire_and_forget
+```
+
+The tee task drains an unbounded `tokio::sync::mpsc` channel and calls `Publisher::publish_fire_and_forget`, which spawns a background tokio task per event.  If the tee task falls behind it drops events — JetStream writes are **best-effort** for replay; they are never on the trade-decision critical path.
+
+### Why
+
+JetStream ACK latency is incompatible with sub-millisecond strategy response times.  The ACK round-trip requires a disk write on the NATS server before the call returns, making it unsuitable as an inline pipeline stage for live trading.
+
+### Replay guarantee
+
+The tee task retries on publish failure at the tokio-task level.  Events that are not persisted to JetStream (e.g. during a NATS outage) will not appear in replay.  This is an acceptable trade-off: live trading correctness takes precedence over replay completeness during outages.  A future improvement (set-C issue #35) will bound the tee channel and add local buffering with retry semantics.
+
+### What stays the same
+
+- Satellite collectors (web scraper, reddit, embedder) remain separate processes communicating via NATS — they are low-frequency and not on the hot path.
+- JetStream subject naming and lane conventions are unchanged (`crates/event-bus/src/lanes.rs`).
+- The `Publisher` type is unchanged; only `publish_fire_and_forget` is new.
+- The quarantine lane is unchanged.
+
 ## References
 

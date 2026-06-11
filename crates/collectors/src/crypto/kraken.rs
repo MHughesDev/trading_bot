@@ -2,18 +2,17 @@
 //!
 //! Connects to `wss://ws.kraken.com/v2`, subscribes to the `trade` channel for
 //! the configured symbol, and normalizes each trade update into a
-//! [`domain::payloads::TradePayload`] wrapped in an [`domain::EventEnvelope`].
+//! [`domain::EventEnvelope`] with a rkyv-encoded [`domain::payloads::trade::TradePayload`].
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use domain::{
-    event_id_from_key,
     lanes::MARKET_TRADES,
     money::{Price, Size},
     payloads::trade::{TradePayload, TradeSide},
-    trade_key, EventEnvelope, NormalizeError, TrustTier,
+    EventEnvelope, NormalizeError,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
@@ -76,12 +75,8 @@ impl KrakenCollector {
         }
     }
 
-    /// Normalize a [`KrakenTrade`] into a domain `EventEnvelope<TradePayload>`.
-    fn normalize(
-        &self,
-        trade: &KrakenTrade,
-        raw: &[u8],
-    ) -> Result<EventEnvelope<TradePayload>, NormalizeError> {
+    /// Normalize a [`KrakenTrade`] into a binary [`EventEnvelope`].
+    fn normalize(&self, trade: &KrakenTrade, raw: &[u8]) -> Result<EventEnvelope, NormalizeError> {
         let price = Decimal::from_str(&trade.price)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
@@ -105,32 +100,145 @@ impl KrakenCollector {
         let exchange_trade_id = trade.trade_id.to_string();
         let payload = TradePayload::new(price, size, side, &exchange_trade_id);
 
-        let dedup = trade_key(VENUE_ID, &exchange_trade_id);
-        let event_id = event_id_from_key(&dedup);
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
 
-        let event_time = chrono::DateTime::parse_from_rfc3339(&trade.timestamp)
-            .ok()
-            .map(|dt| dt.with_timezone(&Utc));
-
-        let now = Utc::now();
+        let timestamp_ns = chrono::DateTime::parse_from_rfc3339(&trade.timestamp)
+            .map(|dt| dt.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|_| Utc::now().timestamp_nanos_opt().unwrap_or(0));
 
         let envelope = EventEnvelope::new(
-            event_id,
-            MARKET_TRADES,
-            &self.instrument_id,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::CentralizedExchange,
-            event_time,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&self.instrument_id),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             trade.trade_id,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         );
 
-        let _ = raw; // raw bytes passed through for quarantine if needed
+        let _ = raw;
         Ok(envelope)
+    }
+}
+
+impl KrakenCollector {
+    /// Run the collector in-process, writing normalized ticks into an rtrb ring.
+    ///
+    /// Each tick is also forwarded to `tee_tx` so the tee task can persist it
+    /// to JetStream asynchronously without blocking the hot path.
+    pub async fn run_in_process(
+        &self,
+        mut raw_prod: rtrb::Producer<domain::EventEnvelope>,
+        tee_tx: tokio::sync::mpsc::UnboundedSender<domain::EventEnvelope>,
+    ) -> Result<(), CollectorError> {
+        let mut policy = ReconnectPolicy::default();
+        let mut gap_detector = GapDetector::new(&self.instrument_id, MARKET_TRADES);
+
+        loop {
+            info!(symbol = %self.symbol, "connecting to Kraken WS (in-process)");
+
+            let ws_result = connect_async(KRAKEN_WS_URL).await;
+            let (mut ws_stream, _) = match ws_result {
+                Ok(conn) => conn,
+                Err(e) => {
+                    warn!(error = %e, "Kraken WS connect failed, retrying");
+                    policy.wait().await;
+                    continue;
+                }
+            };
+
+            let subscribe_msg = serde_json::json!({
+                "method": "subscribe",
+                "params": { "channel": "trade", "symbol": [self.symbol] },
+                "req_id": 1
+            });
+            if let Err(e) = ws_stream
+                .send(Message::Text(subscribe_msg.to_string()))
+                .await
+            {
+                warn!(error = %e, "failed to send subscribe message");
+                policy.wait().await;
+                continue;
+            }
+
+            policy.reset();
+            gap_detector.reset();
+            info!(symbol = %self.symbol, "subscribed to Kraken trade channel (in-process)");
+
+            loop {
+                let msg = ws_stream.next().await;
+                match msg {
+                    None => {
+                        warn!(symbol = %self.symbol, "Kraken WS stream ended");
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        warn!(error = %e, "Kraken WS read error");
+                        break;
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        let raw = text.as_bytes().to_vec();
+                        let parsed: Result<KrakenMessage, _> = serde_json::from_str(&text);
+                        match parsed {
+                            Err(e) => {
+                                warn!(error = %e, "failed to parse Kraken message (in-process)");
+                                let _ = raw;
+                            }
+                            Ok(km) => {
+                                let is_trade_update = km.channel.as_deref() == Some("trade")
+                                    && km.msg_type.as_deref() == Some("update");
+
+                                if !is_trade_update {
+                                    continue;
+                                }
+
+                                for trade in km.data.unwrap_or_default() {
+                                    if let Some(gap) = gap_detector.check(trade.trade_id) {
+                                        warn!(
+                                            instrument_id = %gap.instrument_id,
+                                            lane = %gap.lane,
+                                            expected = gap.expected,
+                                            got = gap.got,
+                                            "sequence gap detected"
+                                        );
+                                    }
+
+                                    match self.normalize(&trade, &raw) {
+                                        Ok(envelope) => {
+                                            if raw_prod.push(envelope.clone()).is_err() {
+                                                tracing::warn!("ring_raw full — tick dropped");
+                                            }
+                                            let _ = tee_tx.send(envelope);
+                                        }
+                                        Err(e) => {
+                                            warn!(error = %e, "normalize failed (in-process)");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(data))) => {
+                        if let Err(e) = ws_stream.send(Message::Pong(data)).await {
+                            warn!(error = %e, "failed to send pong");
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) => {
+                        info!(symbol = %self.symbol, "Kraken WS closed by server (in-process)");
+                        break;
+                    }
+                    Some(Ok(_)) => {}
+                }
+            }
+
+            warn!(
+                symbol = %self.symbol,
+                attempt = policy.attempt(),
+                "reconnecting to Kraken WS (in-process)"
+            );
+            policy.wait().await;
+        }
     }
 }
 
@@ -157,7 +265,6 @@ impl Collector for KrakenCollector {
                 }
             };
 
-            // Send subscribe message.
             let subscribe_msg = serde_json::json!({
                 "method": "subscribe",
                 "params": {
@@ -177,7 +284,6 @@ impl Collector for KrakenCollector {
             gap_detector.reset();
             info!(symbol = %self.symbol, "subscribed to Kraken trade channel");
 
-            // Read messages.
             loop {
                 let msg = ws_stream.next().await;
                 match msg {
@@ -212,7 +318,6 @@ impl Collector for KrakenCollector {
 
                                 let trades = km.data.unwrap_or_default();
                                 for trade in &trades {
-                                    // Gap detection using trade_id as sequence.
                                     if let Some(gap) = gap_detector.check(trade.trade_id) {
                                         warn!(
                                             instrument_id = %gap.instrument_id,
@@ -228,6 +333,7 @@ impl Collector for KrakenCollector {
                                         result,
                                         &raw,
                                         &self.instrument_id,
+                                        MARKET_TRADES,
                                         SOURCE,
                                         &publisher,
                                         &quarantine,
@@ -250,7 +356,6 @@ impl Collector for KrakenCollector {
                 }
             }
 
-            // Reconnect with backoff.
             warn!(
                 symbol = %self.symbol,
                 attempt = policy.attempt(),

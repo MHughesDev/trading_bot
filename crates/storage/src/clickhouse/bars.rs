@@ -13,7 +13,6 @@ pub struct BarRow {
     pub venue_id: String,
     /// Microseconds since Unix epoch.
     pub event_time_us: i64,
-    pub available_time_us: i64,
     pub timeframe: String,
     /// OHLCV as strings (Decimal-safe).
     pub open: String,
@@ -24,37 +23,29 @@ pub struct BarRow {
     pub trade_count: u64,
     /// `0` for the first publish; incremented on each late-data revision.
     pub revision: u32,
-    pub event_id: String,
 }
 
 impl BarRow {
-    pub fn from_envelope(
-        env: &EventEnvelope<BarPayload>,
-        instrument_id: &str,
-        venue_id: &str,
-    ) -> Self {
-        let event_time_us = env
-            .event_time
-            .unwrap_or(env.ingested_time)
-            .timestamp_micros();
-        let available_time_us = env.available_time.timestamp_micros();
-        let timeframe = format!("{:?}", env.payload.timeframe).to_lowercase();
+    pub fn from_envelope(env: &EventEnvelope) -> Option<Self> {
+        let bar = env.decode_payload::<BarPayload>().ok()?;
+        let instrument_id = domain::instrument_name(env.instrument_id).unwrap_or_default();
+        let venue_id = domain::venue_name(env.venue_id).unwrap_or_default();
+        let event_time_us = env.timestamp_ns / 1_000;
+        let timeframe = format!("{:?}", bar.timeframe).to_lowercase();
 
-        Self {
-            instrument_id: instrument_id.to_owned(),
-            venue_id: venue_id.to_owned(),
+        Some(Self {
+            instrument_id,
+            venue_id,
             event_time_us,
-            available_time_us,
             timeframe,
-            open: env.payload.open.to_string(),
-            high: env.payload.high.to_string(),
-            low: env.payload.low.to_string(),
-            close: env.payload.close.to_string(),
-            volume: env.payload.volume.to_string(),
-            trade_count: env.payload.trade_count,
-            revision: env.payload.revision,
-            event_id: env.event_id.to_string(),
-        }
+            open: bar.open.to_string(),
+            high: bar.high.to_string(),
+            low: bar.low.to_string(),
+            close: bar.close.to_string(),
+            volume: bar.volume.to_string(),
+            trade_count: bar.trade_count,
+            revision: bar.revision,
+        })
     }
 }
 

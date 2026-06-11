@@ -1,20 +1,15 @@
 //! Kalshi prediction-market YES/NO price + perpetuals OHLCV collector.
-//!
-//! Polls `GET /trade-api/v2/markets/{ticker}` for prediction prices and
-//! `GET /trade-api/v2/series/{series_ticker}/markets` for perpetuals.
-//! Normalizes into `EventEnvelope<PredictionPricePayload>` (YES/NO) and
-//! `EventEnvelope<BarPayload>` + `EventEnvelope<FundingRatePayload>` (perps).
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use domain::{
-    event_id_from_key,
+    lanes,
     money::{Price, Size},
     payloads::bar::{BarPayload, Timeframe},
     payloads::prediction_price::PredictionPricePayload,
-    sequenced_key, EventEnvelope, NormalizeError, TrustTier,
+    EventEnvelope, NormalizeError,
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -47,16 +42,12 @@ pub(crate) struct KalshiMarket {
 
 // ── Collector ────────────────────────────────────────────────────────────────
 
-/// Collector variant for the kind of Kalshi market.
 #[derive(Debug, Clone, Copy)]
 pub enum KalshiMarketKind {
-    /// YES/NO binary prediction market.
     Prediction,
-    /// Perpetual contract (series of related markets).
     Perpetual,
 }
 
-/// Kalshi collector for a single market ticker.
 pub struct KalshiCollector {
     pub ticker: String,
     pub instrument_id: String,
@@ -84,12 +75,11 @@ impl KalshiCollector {
         }
     }
 
-    /// Normalize a Kalshi market snapshot into a prediction-price envelope.
     pub(crate) fn normalize_prediction(
         &self,
         market: &KalshiMarket,
         seq: u64,
-    ) -> Result<EventEnvelope<PredictionPricePayload>, NormalizeError> {
+    ) -> Result<EventEnvelope, NormalizeError> {
         let yes_bid = market.yes_bid.unwrap_or(0.0);
         let yes_ask = market.yes_ask.unwrap_or(0.0);
         let yes_mid = (yes_bid + yes_ask) / 2.0;
@@ -101,7 +91,6 @@ impl KalshiCollector {
                 reason: e.to_string(),
             })?;
 
-        // no_price derived from complement.
         let no_mid = 1.0 - yes_mid;
         let no_price = Decimal::from_str(&no_mid.to_string())
             .map(Price::from_decimal)
@@ -117,40 +106,29 @@ impl KalshiCollector {
         });
 
         let payload = PredictionPricePayload::new(yes_price, no_price, volume);
-        let dedup = sequenced_key(
-            "prediction.price",
-            &self.instrument_id,
-            VENUE_ID,
-            seq,
-            SOURCE,
-        );
-        let event_id = event_id_from_key(&dedup);
-        let now = Utc::now();
+
+        let payload_bytes =
+            serde_json::to_vec(&payload).map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+
+        let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
         Ok(EventEnvelope::new(
-            event_id,
-            "prediction.price",
-            &self.instrument_id,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::Regulated,
-            None,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&self.instrument_id),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             seq,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         ))
     }
 
-    /// Normalize a Kalshi perpetual snapshot into an OHLCV bar.
     pub(crate) fn normalize_perpetual_bar(
         &self,
         market: &KalshiMarket,
         seq: u64,
-    ) -> Result<EventEnvelope<BarPayload>, NormalizeError> {
+    ) -> Result<EventEnvelope, NormalizeError> {
         let mid_price = {
-            let bid = market.no_bid.unwrap_or(0.0); // perps use no_bid/no_ask as price proxy
+            let bid = market.no_bid.unwrap_or(0.0);
             let ask = market.no_ask.unwrap_or(0.0);
             (bid + ask) / 2.0
         };
@@ -172,29 +150,19 @@ impl KalshiCollector {
 
         let payload = BarPayload::new(Timeframe::Minutes1, price, price, price, price, volume, 0);
 
-        let dedup = sequenced_key(
-            "prediction.price",
-            &self.instrument_id,
-            VENUE_ID,
-            seq,
-            SOURCE,
-        );
-        let event_id = event_id_from_key(&dedup);
-        let now = Utc::now();
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
+
+        let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
         Ok(EventEnvelope::new(
-            event_id,
-            "market.bars.1m",
-            &self.instrument_id,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::Regulated,
-            None,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&self.instrument_id),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             seq,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         ))
     }
 }
@@ -244,6 +212,7 @@ impl Collector for KalshiCollector {
                                         result,
                                         &raw,
                                         &self.instrument_id,
+                                        "prediction.price",
                                         SOURCE,
                                         &publisher,
                                         &quarantine,
@@ -256,6 +225,7 @@ impl Collector for KalshiCollector {
                                         result,
                                         &raw,
                                         &self.instrument_id,
+                                        lanes::MARKET_BARS_1M,
                                         SOURCE,
                                         &publisher,
                                         &quarantine,
@@ -276,6 +246,7 @@ impl Collector for KalshiCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::payloads::prediction_price::PredictionPricePayload;
 
     fn sample_prediction_market() -> KalshiMarket {
         KalshiMarket {
@@ -295,8 +266,11 @@ mod tests {
         let result = collector.normalize_prediction(&market, 1);
         assert!(result.is_ok(), "{:?}", result);
         let env = result.unwrap();
-        assert_eq!(env.instrument_id, "BTC-ABOVE-60K");
-        let payload = &env.payload;
+        assert_eq!(
+            domain::instrument_name(env.instrument_id).as_deref(),
+            Some("BTC-ABOVE-60K")
+        );
+        let payload: PredictionPricePayload = serde_json::from_slice(&env.payload).unwrap();
         let yes: f64 = payload.yes_price.to_string().parse().unwrap();
         let no: f64 = payload.no_price.to_string().parse().unwrap();
         assert!((0.0..=1.0).contains(&yes), "yes_price out of range: {yes}");
@@ -317,6 +291,9 @@ mod tests {
         let result = collector.normalize_perpetual_bar(&market, 1);
         assert!(result.is_ok(), "{:?}", result);
         let env = result.unwrap();
-        assert_eq!(env.instrument_id, "BTC-PERP");
+        assert_eq!(
+            domain::instrument_name(env.instrument_id).as_deref(),
+            Some("BTC-PERP")
+        );
     }
 }
