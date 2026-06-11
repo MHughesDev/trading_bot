@@ -295,18 +295,23 @@ impl Collector for AlpacaDataCollector {
 mod tests {
     use super::*;
 
-    #[test]
-    fn normalize_valid_trade() {
-        let collector = AlpacaDataCollector::new("AAPL");
-        let msg = AlpacaMessage {
+    fn make_msg(price: Option<&str>, size: Option<&str>, taker_side: &str) -> AlpacaMessage {
+        AlpacaMessage {
             msg_type: "t".into(),
             msg: None,
             symbol: Some("AAPL".into()),
-            price: Some("150.25".into()),
-            size: Some("100.0".into()),
+            price: price.map(Into::into),
+            size: size.map(Into::into),
             timestamp: Some("2024-01-15T14:30:00Z".into()),
             trade_id: Some(999),
-        };
+            taker_side: taker_side.to_owned(),
+        }
+    }
+
+    #[test]
+    fn normalize_valid_trade() {
+        let collector = AlpacaDataCollector::new("AAPL");
+        let msg = make_msg(Some("150.25"), Some("100.0"), "");
         let result = collector.normalize(&msg, &[], 1);
         assert!(result.is_ok());
         let envelope = result.unwrap();
@@ -323,15 +328,7 @@ mod tests {
     #[test]
     fn normalize_missing_price_returns_error() {
         let collector = AlpacaDataCollector::new("AAPL");
-        let msg = AlpacaMessage {
-            msg_type: "t".into(),
-            msg: None,
-            symbol: Some("AAPL".into()),
-            price: None,
-            size: Some("100.0".into()),
-            timestamp: Some("2024-01-15T14:30:00Z".into()),
-            trade_id: Some(999),
-        };
+        let msg = make_msg(None, Some("100.0"), "");
         let result = collector.normalize(&msg, &[], 1);
         assert!(result.is_err());
         assert!(matches!(
@@ -351,9 +348,37 @@ mod tests {
             size: Some("50.0".into()),
             timestamp: Some("2024-01-15T14:30:00Z".into()),
             trade_id: None,
+            taker_side: String::new(),
         };
         let envelope = collector.normalize(&msg, &[], 1).unwrap();
         let trade: TradePayload = envelope.decode_payload().unwrap();
         assert_eq!(trade.price.to_string(), "150.0");
+    }
+
+    #[test]
+    fn test_side_inference_buy() {
+        let collector = AlpacaDataCollector::new("AAPL");
+        let msg = make_msg(Some("100.0"), Some("10.0"), "B");
+        let envelope = collector.normalize(&msg, &[], 1).unwrap();
+        let trade: TradePayload = envelope.decode_payload().unwrap();
+        assert_eq!(trade.side, TradeSide::Buy);
+    }
+
+    #[test]
+    fn test_side_inference_sell() {
+        let collector = AlpacaDataCollector::new("AAPL");
+        let msg = make_msg(Some("100.0"), Some("10.0"), "S");
+        let envelope = collector.normalize(&msg, &[], 1).unwrap();
+        let trade: TradePayload = envelope.decode_payload().unwrap();
+        assert_eq!(trade.side, TradeSide::Sell);
+    }
+
+    #[test]
+    fn test_side_inference_unknown() {
+        let collector = AlpacaDataCollector::new("AAPL");
+        let msg = make_msg(Some("100.0"), Some("10.0"), "");
+        let envelope = collector.normalize(&msg, &[], 1).unwrap();
+        let trade: TradePayload = envelope.decode_payload().unwrap();
+        assert_eq!(trade.side, TradeSide::Unknown);
     }
 }
