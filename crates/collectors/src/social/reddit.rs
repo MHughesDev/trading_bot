@@ -129,8 +129,9 @@ impl RedditCollector {
             post.score.unwrap_or(0),
         );
 
-        let payload_bytes =
-            serde_json::to_vec(&payload).map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
 
         let instrument_name = format!("reddit.{}", self.subreddit);
         let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
@@ -306,7 +307,7 @@ mod tests {
         let result = collector.normalize_post(&post, 1);
         assert!(result.is_ok(), "{:?}", result);
         let env = result.unwrap();
-        let payload: SocialPostPayload = serde_json::from_slice(&env.payload).unwrap();
+        let payload: SocialPostPayload = env.decode_payload().unwrap();
         assert!(!payload.instrument_mentions.is_empty());
     }
 }

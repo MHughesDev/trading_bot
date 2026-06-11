@@ -6,7 +6,19 @@ use crate::money::{Price, Size};
 use crate::payloads::Payload;
 
 /// Whether the message is a full snapshot or an incremental delta.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug, PartialEq))]
 #[serde(rename_all = "snake_case")]
 pub enum BookUpdateKind {
     Snapshot,
@@ -14,16 +26,35 @@ pub enum BookUpdateKind {
 }
 
 /// A single price level in the order book.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug))]
 pub struct BookLevel {
     pub price: Price,
     pub size: Size,
 }
 
 /// L2 order-book event (snapshot or delta).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug))]
 pub struct OrderBookPayload {
-    pub schema_version: String,
     pub kind: BookUpdateKind,
     pub bids: Vec<BookLevel>,
     pub asks: Vec<BookLevel>,
@@ -36,7 +67,6 @@ pub struct OrderBookPayload {
 impl OrderBookPayload {
     pub fn new_snapshot(bids: Vec<BookLevel>, asks: Vec<BookLevel>, sequence: u64) -> Self {
         Self {
-            schema_version: Self::schema_version().into(),
             kind: BookUpdateKind::Snapshot,
             bids,
             asks,
@@ -47,7 +77,6 @@ impl OrderBookPayload {
 
     pub fn new_delta(bids: Vec<BookLevel>, asks: Vec<BookLevel>, sequence: u64) -> Self {
         Self {
-            schema_version: Self::schema_version().into(),
             kind: BookUpdateKind::Delta,
             bids,
             asks,
@@ -90,5 +119,22 @@ mod tests {
         let back: OrderBookPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(ob.sequence, back.sequence);
         assert_eq!(ob.bids, back.bids);
+    }
+
+    #[test]
+    fn rkyv_round_trip() {
+        let ob = OrderBookPayload::new_snapshot(
+            vec![level("49900", "1.0"), level("49800", "2.0")],
+            vec![level("50100", "0.5")],
+            1234,
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&ob).unwrap();
+        // SAFETY: bytes were produced by rkyv::to_bytes immediately above.
+        #[allow(unsafe_code)]
+        let archived =
+            unsafe { rkyv::access_unchecked::<rkyv::Archived<OrderBookPayload>>(bytes.as_ref()) };
+        let back: OrderBookPayload = rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap();
+        assert_eq!(ob.sequence, back.sequence);
+        assert_eq!(ob.bids.len(), back.bids.len());
     }
 }

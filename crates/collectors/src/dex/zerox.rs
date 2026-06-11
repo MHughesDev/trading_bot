@@ -109,8 +109,9 @@ impl ZeroXCollector {
             response.estimated_gas.clone(),
         );
 
-        let payload_bytes =
-            serde_json::to_vec(&payload).map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
 
         let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
@@ -213,7 +214,7 @@ mod tests {
             domain::instrument_name(env.instrument_id).as_deref(),
             Some("WETH-USDC")
         );
-        let payload: DexQuotePayload = serde_json::from_slice(&env.payload).unwrap();
+        let payload: DexQuotePayload = env.decode_payload().unwrap();
         assert_eq!(payload.price.to_string(), "2500");
         assert!(payload.estimated_gas.is_some());
     }

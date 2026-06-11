@@ -5,7 +5,19 @@ use serde::{Deserialize, Serialize};
 use crate::payloads::Payload;
 
 /// How the page was fetched.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug, PartialEq))]
 #[serde(rename_all = "snake_case")]
 pub enum FetchMethod {
     Http,
@@ -13,9 +25,18 @@ pub enum FetchMethod {
 }
 
 /// A scraped web-page snapshot normalized for the platform.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug))]
 pub struct WebPageSnapshotPayload {
-    pub schema_version: String,
     /// Full URL of the fetched page.
     pub url: String,
     /// Registered domain (e.g. `"example.com"`).
@@ -29,7 +50,7 @@ pub struct WebPageSnapshotPayload {
     /// Whether the page was fetched via HTTP or Playwright fallback.
     pub fetch_method: FetchMethod,
     /// Byte length of the original HTML response.
-    pub content_length: usize,
+    pub content_length: u64,
 }
 
 impl WebPageSnapshotPayload {
@@ -44,14 +65,13 @@ impl WebPageSnapshotPayload {
         content_length: usize,
     ) -> Self {
         Self {
-            schema_version: Self::schema_version().into(),
             url: url.into(),
             domain: domain.into(),
             title: title.into(),
             text_content: text_content.into(),
             status_code,
             fetch_method,
-            content_length,
+            content_length: content_length as u64,
         }
     }
 }
@@ -66,5 +86,34 @@ impl Payload for WebPageSnapshotPayload {
 
     fn schema_version() -> &'static str {
         "1"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rkyv_round_trip() {
+        let p = WebPageSnapshotPayload::new(
+            "https://example.com/btc",
+            "example.com",
+            "BTC News",
+            "Bitcoin is rising today.",
+            200,
+            FetchMethod::Http,
+            1024,
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&p).unwrap();
+        // SAFETY: bytes were produced by rkyv::to_bytes immediately above.
+        #[allow(unsafe_code)]
+        let archived = unsafe {
+            rkyv::access_unchecked::<rkyv::Archived<WebPageSnapshotPayload>>(bytes.as_ref())
+        };
+        let back: WebPageSnapshotPayload =
+            rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap();
+        assert_eq!(p.status_code, back.status_code);
+        assert_eq!(p.content_length, back.content_length);
+        assert_eq!(p.fetch_method, back.fetch_method);
     }
 }

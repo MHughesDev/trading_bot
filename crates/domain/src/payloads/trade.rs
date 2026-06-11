@@ -39,7 +39,6 @@ pub enum TradeSide {
 )]
 #[rkyv(derive(Debug))]
 pub struct TradePayload {
-    pub schema_version: String,
     #[rkyv(with = AsDecimalBytes)]
     pub price: Price,
     #[rkyv(with = AsDecimalBytes)]
@@ -60,7 +59,6 @@ impl TradePayload {
         exchange_trade_id: impl Into<String>,
     ) -> Self {
         Self {
-            schema_version: Self::schema_version().into(),
             price,
             size,
             side,
@@ -78,7 +76,6 @@ impl TradePayload {
         dedup_key: u64,
     ) -> Self {
         Self {
-            schema_version: Self::schema_version().into(),
             price,
             size,
             side,

@@ -6,9 +6,18 @@ use crate::money::{Price, Size};
 use crate::payloads::Payload;
 
 /// Firm DEX/AMM swap quote from an aggregator (e.g. 0x).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug))]
 pub struct DexQuotePayload {
-    pub schema_version: String,
     /// Token being sold (e.g. `"WETH"`).
     pub sell_token: String,
     /// Token being bought (e.g. `"USDC"`).
@@ -33,7 +42,6 @@ impl DexQuotePayload {
         estimated_gas: Option<String>,
     ) -> Self {
         Self {
-            schema_version: Self::schema_version().into(),
             sell_token: sell_token.into(),
             buy_token: buy_token.into(),
             sell_amount,
@@ -51,5 +59,31 @@ impl Payload for DexQuotePayload {
 
     fn schema_version() -> &'static str {
         "1"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn rkyv_round_trip() {
+        let p = DexQuotePayload::new(
+            "WETH",
+            "USDC",
+            Size::from_str("1.0").unwrap(),
+            Size::from_str("2500.0").unwrap(),
+            Price::from_str("2500.0").unwrap(),
+            Some("120000".to_owned()),
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&p).unwrap();
+        // SAFETY: bytes were produced by rkyv::to_bytes immediately above.
+        #[allow(unsafe_code)]
+        let archived =
+            unsafe { rkyv::access_unchecked::<rkyv::Archived<DexQuotePayload>>(bytes.as_ref()) };
+        let back: DexQuotePayload = rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap();
+        assert_eq!(p.price, back.price);
+        assert_eq!(p.estimated_gas, back.estimated_gas);
     }
 }

@@ -524,7 +524,9 @@ impl WebScraper {
             content_length,
         );
 
-        let payload_bytes = serde_json::to_vec(&payload).ok()?;
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .ok()?
+            .into_vec();
         let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
         Some(EventEnvelope::new(

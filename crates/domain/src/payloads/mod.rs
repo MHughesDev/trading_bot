@@ -29,7 +29,15 @@ pub trait Payload: serde::Serialize + for<'de> serde::Deserialize<'de> {
 /// Use this when you need to store a heterogeneous collection of events or
 /// pattern-match over payload kinds without knowing the concrete type at compile
 /// time.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AnyPayload {
     Trade(trade::TradePayload),

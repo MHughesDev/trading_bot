@@ -49,7 +49,6 @@ pub enum Timeframe {
 )]
 #[rkyv(derive(Debug))]
 pub struct BarPayload {
-    pub schema_version: String,
     pub timeframe: Timeframe,
     #[rkyv(with = AsDecimalBytes)]
     pub open: Price,
@@ -79,7 +78,6 @@ impl BarPayload {
         trade_count: u64,
     ) -> Self {
         Self {
-            schema_version: Self::schema_version().into(),
             timeframe,
             open,
             high,
