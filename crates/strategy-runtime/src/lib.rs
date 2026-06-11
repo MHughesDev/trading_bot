@@ -8,6 +8,7 @@ pub mod automation;
 pub mod bytecode;
 pub mod clock;
 pub mod compatibility;
+pub mod ids;
 pub mod intents;
 pub mod interpreter;
 pub mod kind;

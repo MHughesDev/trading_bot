@@ -101,8 +101,8 @@ fn run_once(events: Vec<WorldEvent>) -> Vec<domain::order::OrderIntent> {
     let clock = Arc::new(WallClock) as Arc<dyn StrategyClock>;
     let mut instance = StrategyInstance::new("user1", "BTC-USDT", ema_cross_def(), clock.now());
     let mut all_intents = Vec::new();
-    for event in events {
-        all_intents.extend(instance.process_event(event));
+    for event in &events {
+        all_intents.extend(instance.process_event(&event));
     }
     all_intents
 }
@@ -136,11 +136,11 @@ fn condition_false_emits_no_intents() {
 
     // ema_7 < ema_21 — condition is false
     let t = Utc::now();
-    instance.process_event(WorldEvent::Feature {
+    instance.process_event(&WorldEvent::Feature {
         instrument_id: "BTC-USDT".into(),
         feature_value: FeatureValue::new("ema_7", 9.0, 1, t),
     });
-    instance.process_event(WorldEvent::Feature {
+    instance.process_event(&WorldEvent::Feature {
         instrument_id: "BTC-USDT".into(),
         feature_value: FeatureValue::new("ema_21", 10.0, 1, t),
     });
@@ -154,7 +154,7 @@ fn condition_false_emits_no_intents() {
         Size::from_str("500").unwrap(),
         200,
     );
-    let intents = instance.process_event(WorldEvent::Bar {
+    let intents = instance.process_event(&WorldEvent::Bar {
         instrument_id: "BTC-USDT".into(),
         timeframe: Timeframe::Minutes1,
         bar,
