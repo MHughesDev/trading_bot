@@ -10,6 +10,7 @@ serde_json = { workspace = true }
 sqlx = { workspace = true }
 clickhouse = { workspace = true }
 redis = { workspace = true }
+ahash = "0.8"
 arrow = { workspace = true }
 parquet = { workspace = true }
 tokio = { workspace = true }

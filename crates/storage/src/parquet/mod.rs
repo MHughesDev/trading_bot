@@ -44,7 +44,7 @@ impl ParquetWriter {
         instrument_id: &str,
         date: chrono::NaiveDate,
         batch_id: &str,
-        rows: &[Vec<u8>],
+        rows: &[&[u8]],
     ) -> Result<(), ParquetError> {
         let rel = partition::partition_path(lane, venue_id, instrument_id, date);
         let dir = self.base_path.join(&rel);
@@ -60,7 +60,7 @@ impl ParquetWriter {
 
         let array: BinaryArray = rows
             .iter()
-            .map(|b| Some(b.as_slice()))
+            .map(|b| Some(*b))
             .collect::<Vec<_>>()
             .into_iter()
             .collect();
