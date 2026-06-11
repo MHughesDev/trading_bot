@@ -7,6 +7,11 @@
 //!   MILVUS_HTTP_PORT     — default: 9091
 //!   NATS_URL             — read via platform config
 
+#[cfg(not(test))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+
 use anyhow::Context;
 use event_bus::{connect, setup_streams};
 use semantic::{CollectionSpec, MilvusClient, MilvusConfig};
