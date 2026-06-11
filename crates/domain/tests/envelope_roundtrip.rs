@@ -88,7 +88,8 @@ fn rkyv_binary_round_trip() {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&env).unwrap();
     // SAFETY: bytes were produced by rkyv::to_bytes immediately above.
     #[allow(unsafe_code)]
-    let archived = unsafe { rkyv::access_unchecked::<rkyv::Archived<EventEnvelope>>(bytes.as_ref()) };
+    let archived =
+        unsafe { rkyv::access_unchecked::<rkyv::Archived<EventEnvelope>>(bytes.as_ref()) };
     let back: EventEnvelope = rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap();
     assert_eq!(env.sequence, back.sequence);
     assert_eq!(env.timestamp_ns, back.timestamp_ns);
