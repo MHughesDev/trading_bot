@@ -314,8 +314,8 @@ mod tests {
             msg_type: "t".into(),
             msg: None,
             symbol: Some("AAPL".into()),
-            price: Some(150.25),
-            size: Some(100.0),
+            price: Some("150.25".into()),
+            size: Some("100.0".into()),
             timestamp: Some("2024-01-15T14:30:00Z".into()),
             trade_id: Some(999),
         };
@@ -335,7 +335,7 @@ mod tests {
             msg: None,
             symbol: Some("AAPL".into()),
             price: None,
-            size: Some(100.0),
+            size: Some("100.0".into()),
             timestamp: Some("2024-01-15T14:30:00Z".into()),
             trade_id: Some(999),
         };
@@ -354,8 +354,8 @@ mod tests {
             msg_type: "t".into(),
             msg: None,
             symbol: Some("AAPL".into()),
-            price: Some(150.0),
-            size: Some(50.0),
+            price: Some("150.0".into()),
+            size: Some("50.0".into()),
             timestamp: Some("2024-01-15T14:30:00Z".into()),
             trade_id: None,
         };
