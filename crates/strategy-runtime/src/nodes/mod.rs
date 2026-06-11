@@ -44,9 +44,29 @@ pub type Universe = Vec<UniverseEntry>;
 /// downstream nodes can look it up.  Non-v1.5 nodes (Condition, Signal) are
 /// silently skipped.
 ///
+/// Filter expressions are compiled to bytecode **once** at the start of this
+/// function (universe-init time), not per-entry or per-tick.  This satisfies
+/// issue #24: no re-parsing occurs during the hot evaluation loop.
+///
 /// Returns the instrument IDs surfaced by the last `SurfaceAction` node found,
 /// or an empty vec if no `SurfaceAction` node exists.
 pub fn evaluate_universe_pipeline(nodes: &[Node], initial_universe: Universe) -> Vec<String> {
+    use crate::bytecode;
+
+    // Pre-compile all Filter node expressions once before any evaluation.
+    // node_id → compiled Program (or None if compilation failed; falls back
+    // to the string-interpreter path inside filter::filter).
+    let compiled_filters: HashMap<String, bytecode::Program> = nodes
+        .iter()
+        .filter_map(|node| {
+            if let NodeKind::Filter { expr, .. } = &node.kind {
+                bytecode::compile(expr).ok().map(|p| (node.id.clone(), p))
+            } else {
+                None
+            }
+        })
+        .collect();
+
     let mut node_outputs: HashMap<String, Arc<Universe>> = HashMap::new();
 
     for node in nodes {
@@ -66,7 +86,14 @@ pub fn evaluate_universe_pipeline(nodes: &[Node], initial_universe: Universe) ->
             }
             NodeKind::Filter { input, expr } => {
                 if let Some(universe) = node_outputs.get(input) {
-                    let filtered = filter::filter((**universe).clone(), expr);
+                    let filtered = if let Some(program) = compiled_filters.get(&node.id) {
+                        // Fast path: execute pre-compiled bytecode — no re-parsing per entry.
+                        filter::filter_compiled((**universe).clone(), program)
+                    } else {
+                        // Fallback: expression failed to compile; use the tree-walking
+                        // interpreter (will re-parse per entry, but this is the error path).
+                        filter::filter((**universe).clone(), expr)
+                    };
                     node_outputs.insert(node.id.clone(), Arc::new(filtered));
                 }
             }
