@@ -24,8 +24,15 @@ pub struct KalshiBroker {
 
 impl KalshiBroker {
     pub fn new(api_key: impl Into<String>) -> Self {
+        let client = reqwest::Client::builder()
+            .http2_keep_alive_interval(std::time::Duration::from_secs(30))
+            .http2_keep_alive_while_idle(true)
+            .tcp_nodelay(true)
+            .pool_idle_timeout(None)
+            .build()
+            .expect("failed to build reqwest client");
         Self {
-            client: Client::new(),
+            client,
             api_key: api_key.into(),
             base_url: BASE_URL.to_owned(),
         }

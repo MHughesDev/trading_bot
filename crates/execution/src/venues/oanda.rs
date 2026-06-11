@@ -25,8 +25,15 @@ pub struct OandaBroker {
 
 impl OandaBroker {
     pub fn new(api_token: impl Into<String>, account_id: impl Into<String>) -> Self {
+        let client = reqwest::Client::builder()
+            .http2_keep_alive_interval(std::time::Duration::from_secs(30))
+            .http2_keep_alive_while_idle(true)
+            .tcp_nodelay(true)
+            .pool_idle_timeout(None)
+            .build()
+            .expect("failed to build reqwest client");
         Self {
-            client: Client::new(),
+            client,
             api_token: api_token.into(),
             account_id: account_id.into(),
             base_url: DEMO_BASE_URL.to_owned(),
