@@ -102,7 +102,7 @@ fn run_once(events: Vec<WorldEvent>) -> Vec<domain::order::OrderIntent> {
     let mut instance = StrategyInstance::new("user1", "BTC-USDT", ema_cross_def(), clock.now());
     let mut all_intents = Vec::new();
     for event in &events {
-        all_intents.extend(instance.process_event(&event));
+        all_intents.extend(instance.process_event(event));
     }
     all_intents
 }
