@@ -3,10 +3,10 @@
 //! Private lanes (orders.*, positions.*, strategy.*) may only be subscribed by
 //! the authenticated user that owns them.  Public lanes are shareable.
 
-use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use dashmap::DashMap;
 use domain::lanes::Lane;
 use thiserror::Error;
 use uuid::Uuid;
@@ -45,14 +45,14 @@ pub enum SubscriptionError {
 /// Registry of active panel subscriptions, backed by the `DemandRegistry`.
 pub struct SubscriptionRegistry {
     demand: Arc<DemandRegistry>,
-    subs: Mutex<HashMap<Uuid, Arc<Subscription>>>,
+    subs: DashMap<Uuid, Arc<Subscription>>,
 }
 
 impl SubscriptionRegistry {
     pub fn new(demand: Arc<DemandRegistry>) -> Self {
         Self {
             demand,
-            subs: Mutex::new(HashMap::new()),
+            subs: DashMap::new(),
         }
     }
 
@@ -93,14 +93,13 @@ impl SubscriptionRegistry {
         });
 
         self.demand.add(&demand_lane, &instrument);
-        self.subs.lock().unwrap().insert(sub.id, Arc::clone(&sub));
+        self.subs.insert(sub.id, Arc::clone(&sub));
         Ok(sub)
     }
 
     /// Remove a subscription by its ID.  Returns `true` if it existed.
     pub fn remove(&self, sub_id: Uuid) -> bool {
-        let sub = self.subs.lock().unwrap().remove(&sub_id);
-        if let Some(sub) = sub {
+        if let Some((_, sub)) = self.subs.remove(&sub_id) {
             self.demand.remove(&sub.demand_lane, &sub.instrument);
             true
         } else {
@@ -110,50 +109,38 @@ impl SubscriptionRegistry {
 
     /// Remove all subscriptions for a user (e.g. on WS disconnect).
     pub fn remove_all_for_user(&self, user_id: &str) {
-        let to_remove: Vec<Arc<Subscription>> = {
-            let map = self.subs.lock().unwrap();
-            map.values()
-                .filter(|s| s.user_id == user_id)
-                .map(Arc::clone)
-                .collect()
-        };
-        {
-            let mut map = self.subs.lock().unwrap();
-            for s in &to_remove {
-                map.remove(&s.id);
-            }
-        }
+        let to_remove: Vec<Arc<Subscription>> = self
+            .subs
+            .iter()
+            .filter(|s| s.user_id == user_id)
+            .map(|s| Arc::clone(&s))
+            .collect();
         for s in &to_remove {
+            self.subs.remove(&s.id);
             self.demand.remove(&s.demand_lane, &s.instrument);
         }
     }
 
     /// Remove all subscriptions for a panel.
     pub fn remove_panel(&self, panel_id: &str, user_id: &str) {
-        let to_remove: Vec<Arc<Subscription>> = {
-            let map = self.subs.lock().unwrap();
-            map.values()
-                .filter(|s| s.panel_id == panel_id && s.user_id == user_id)
-                .map(Arc::clone)
-                .collect()
-        };
-        {
-            let mut map = self.subs.lock().unwrap();
-            for s in &to_remove {
-                map.remove(&s.id);
-            }
-        }
+        let to_remove: Vec<Arc<Subscription>> = self
+            .subs
+            .iter()
+            .filter(|s| s.panel_id == panel_id && s.user_id == user_id)
+            .map(|s| Arc::clone(&s))
+            .collect();
         for s in &to_remove {
+            self.subs.remove(&s.id);
             self.demand.remove(&s.demand_lane, &s.instrument);
         }
     }
 
     /// List all subscriptions for a user.
     pub fn list_for_user(&self, user_id: &str) -> Vec<Arc<Subscription>> {
-        let map = self.subs.lock().unwrap();
-        map.values()
+        self.subs
+            .iter()
             .filter(|s| s.user_id == user_id)
-            .map(Arc::clone)
+            .map(|s| Arc::clone(&s))
             .collect()
     }
 
