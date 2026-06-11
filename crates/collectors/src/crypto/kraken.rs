@@ -134,6 +134,130 @@ impl KrakenCollector {
     }
 }
 
+impl KrakenCollector {
+    /// Run the collector in-process, writing normalized ticks into an rtrb ring.
+    ///
+    /// Each tick is also forwarded to `tee_tx` so the tee task can persist it
+    /// to JetStream asynchronously without blocking the hot path.
+    pub async fn run_in_process(
+        &self,
+        mut raw_prod: rtrb::Producer<domain::EventEnvelope<domain::payloads::trade::TradePayload>>,
+        tee_tx: tokio::sync::mpsc::UnboundedSender<
+            domain::EventEnvelope<domain::payloads::trade::TradePayload>,
+        >,
+    ) -> Result<(), CollectorError> {
+        let mut policy = ReconnectPolicy::default();
+        let mut gap_detector = GapDetector::new(&self.instrument_id, MARKET_TRADES);
+
+        loop {
+            info!(symbol = %self.symbol, "connecting to Kraken WS (in-process)");
+
+            let ws_result = connect_async(KRAKEN_WS_URL).await;
+            let (mut ws_stream, _) = match ws_result {
+                Ok(conn) => conn,
+                Err(e) => {
+                    warn!(error = %e, "Kraken WS connect failed, retrying");
+                    policy.wait().await;
+                    continue;
+                }
+            };
+
+            let subscribe_msg = serde_json::json!({
+                "method": "subscribe",
+                "params": { "channel": "trade", "symbol": [self.symbol] },
+                "req_id": 1
+            });
+            if let Err(e) = ws_stream
+                .send(Message::Text(subscribe_msg.to_string()))
+                .await
+            {
+                warn!(error = %e, "failed to send subscribe message");
+                policy.wait().await;
+                continue;
+            }
+
+            policy.reset();
+            gap_detector.reset();
+            info!(symbol = %self.symbol, "subscribed to Kraken trade channel (in-process)");
+
+            loop {
+                let msg = ws_stream.next().await;
+                match msg {
+                    None => {
+                        warn!(symbol = %self.symbol, "Kraken WS stream ended");
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        warn!(error = %e, "Kraken WS read error");
+                        break;
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        let raw = text.as_bytes().to_vec();
+                        let parsed: Result<KrakenMessage, _> = serde_json::from_str(&text);
+                        match parsed {
+                            Err(e) => {
+                                warn!(error = %e, "failed to parse Kraken message (in-process)");
+                                let _ = raw;
+                            }
+                            Ok(km) => {
+                                let is_trade_update = km.channel.as_deref() == Some("trade")
+                                    && km.msg_type.as_deref() == Some("update");
+
+                                if !is_trade_update {
+                                    continue;
+                                }
+
+                                for trade in km.data.unwrap_or_default() {
+                                    if let Some(gap) = gap_detector.check(trade.trade_id) {
+                                        warn!(
+                                            instrument_id = %gap.instrument_id,
+                                            lane = %gap.lane,
+                                            expected = gap.expected,
+                                            got = gap.got,
+                                            "sequence gap detected"
+                                        );
+                                    }
+
+                                    match self.normalize(&trade, &raw) {
+                                        Ok(envelope) => {
+                                            // Push to hot-path ring; drop on full rather than block.
+                                            if raw_prod.push(envelope.clone()).is_err() {
+                                                tracing::warn!("ring_raw full — tick dropped");
+                                            }
+                                            // Best-effort tee to JetStream.
+                                            let _ = tee_tx.send(envelope);
+                                        }
+                                        Err(e) => {
+                                            warn!(error = %e, "normalize failed (in-process)");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(data))) => {
+                        if let Err(e) = ws_stream.send(Message::Pong(data)).await {
+                            warn!(error = %e, "failed to send pong");
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) => {
+                        info!(symbol = %self.symbol, "Kraken WS closed by server (in-process)");
+                        break;
+                    }
+                    Some(Ok(_)) => {}
+                }
+            }
+
+            warn!(
+                symbol = %self.symbol,
+                attempt = policy.attempt(),
+                "reconnecting to Kraken WS (in-process)"
+            );
+            policy.wait().await;
+        }
+    }
+}
+
 #[async_trait]
 impl Collector for KrakenCollector {
     async fn run(

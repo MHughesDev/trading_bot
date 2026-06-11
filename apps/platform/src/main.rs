@@ -1,3 +1,6 @@
+mod hot_path;
+mod tee;
+
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -55,6 +58,39 @@ async fn main() -> anyhow::Result<()> {
         demand_manager::NoopPipelineFactory,
     )));
     let gateway = Arc::new(ui_gateway::SubscriptionRegistry::new(demand_registry));
+
+    // ── In-process hot-path pipeline ──────────────────────────────────────────
+    //
+    // Connect to NATS for the JetStream tee (best-effort persistence).
+    // If NATS is unavailable the tee is skipped; the hot path still runs.
+    let (tee_tx, tee_rx) = tokio::sync::mpsc::unbounded_channel::<hot_path::RawTick>();
+
+    match event_bus::connect(&cfg.nats.url).await {
+        Ok(nats) => {
+            if let Err(e) = event_bus::setup_streams(&nats.js).await {
+                tracing::warn!(error = %e, "JetStream stream setup failed — tee disabled");
+            } else {
+                let publisher = Arc::new(event_bus::Publisher::new(nats.js));
+                tokio::spawn(tee::run_tee(publisher, tee_rx));
+                info!("JetStream tee task started");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "NATS unavailable — JetStream tee disabled");
+            // Drop tee_rx so tee senders see a closed channel harmlessly.
+            drop(tee_rx);
+        }
+    }
+
+    // Spawn the Kraken in-process pipeline for BTC/USD.
+    let _pipeline = hot_path::spawn_pipeline(
+        "BTC/USD".to_owned(),
+        "BTC-USD".to_owned(),
+        tee_tx,
+        Arc::clone(&execution_engine),
+        Arc::clone(&risk_gate),
+    );
+    info!("hot-path pipeline (BTC/USD) started");
 
     // Build the API router.
     let app_state = api::AppState::new(pg, risk_gate, kill_switch, execution_engine, gateway);

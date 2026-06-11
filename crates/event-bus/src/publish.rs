@@ -34,4 +34,28 @@ impl Publisher {
 
         Ok(())
     }
+
+    /// Serialize and spawn a background task to publish — never blocks the caller.
+    ///
+    /// Used by the tee task so JetStream writes never stall the hot-path rings.
+    /// Serialization errors are logged and dropped; publish errors are logged.
+    pub fn publish_fire_and_forget<T>(&self, envelope: &domain::EventEnvelope<T>, instrument_id: &str)
+    where
+        T: domain::payloads::Payload + serde::Serialize + Clone + Send + 'static,
+    {
+        let bytes = match serde_json::to_vec(envelope) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(error = %e, "tee serialize failed — event dropped");
+                return;
+            }
+        };
+        let subject = lanes::subject_for(envelope.lane.as_str(), instrument_id);
+        let js = self.js.clone();
+        tokio::spawn(async move {
+            if let Err(e) = js.publish(subject, bytes.into()).await {
+                tracing::warn!(error = %e, "tee JetStream publish failed");
+            }
+        });
+    }
 }
