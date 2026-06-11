@@ -39,18 +39,14 @@ impl AlpacaAccountSource {
         }
     }
 
-    fn parse_creds(creds: &VenueCredentials) -> Result<(String, String), AccountSourceError> {
-        let text = std::str::from_utf8(&creds.plaintext).map_err(|_| {
-            AccountSourceError::Credentials("credentials are not valid UTF-8".to_owned())
-        })?;
+    fn parse_creds(creds: &VenueCredentials) -> Result<(&str, &str), AccountSourceError> {
+        let text = std::str::from_utf8(&creds.plaintext)
+            .map_err(|_| AccountSourceError::Credentials("credentials are not valid UTF-8".to_owned()))?;
         let mut parts = text.splitn(2, ':');
-        let key = parts.next().unwrap_or("").to_owned();
-        let secret = parts
-            .next()
-            .ok_or_else(|| {
-                AccountSourceError::Credentials("expected api_key:api_secret".to_owned())
-            })?
-            .to_owned();
+        let key = parts.next().unwrap_or("");
+        let secret = parts.next().ok_or_else(|| {
+            AccountSourceError::Credentials("expected api_key:api_secret".to_owned())
+        })?;
         Ok((key, secret))
     }
 
