@@ -1,5 +1,6 @@
 //! P4-T06 acceptance tests — USD rollup engine.
 
+use domain::order::Side;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::collections::HashMap;
@@ -40,6 +41,7 @@ fn rollup_sums_tiers_consistently() {
         mode,
         "BTC-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(100),
         Decimal::ONE,
@@ -60,6 +62,7 @@ fn rollup_sums_tiers_consistently() {
         mode,
         "ETH-USD",
         eid(),
+        Side::Buy,
         dec!(2),
         dec!(1000),
         Decimal::ONE,
@@ -108,6 +111,7 @@ fn paper_and_live_are_isolated() {
         AccountMode::Paper,
         "BTC-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(100),
         Decimal::ONE,
@@ -128,6 +132,7 @@ fn paper_and_live_are_isolated() {
         AccountMode::Live,
         "ETH-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(1000),
         Decimal::ONE,
@@ -172,6 +177,7 @@ fn win_rate_is_position_level() {
         mode,
         "BTC-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(100),
         Decimal::ONE,
@@ -181,6 +187,7 @@ fn win_rate_is_position_level() {
         mode,
         "BTC-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(200),
         Decimal::ONE,
@@ -202,6 +209,7 @@ fn win_rate_is_position_level() {
         mode,
         "ETH-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(1000),
         Decimal::ONE,
