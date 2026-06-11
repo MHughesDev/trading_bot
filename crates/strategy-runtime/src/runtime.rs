@@ -46,7 +46,7 @@ pub struct StrategyInstance {
     /// Built once at init from compiled_conditions + registry.
     program_slots: HashMap<NodeId, Vec<u16>>,
     /// String node IDs indexed by NodeId for fallback interpreter path.
-    node_id_to_str: HashMap<NodeId, String>,
+    _node_id_to_str: HashMap<NodeId, String>,
 }
 
 impl StrategyInstance {
@@ -81,7 +81,7 @@ impl StrategyInstance {
             compiled_conditions,
             registry,
             program_slots,
-            node_id_to_str,
+            _node_id_to_str: node_id_to_str,
         }
     }
 
