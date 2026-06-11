@@ -40,8 +40,9 @@ impl AlpacaAccountSource {
     }
 
     fn parse_creds(creds: &VenueCredentials) -> Result<(&str, &str), AccountSourceError> {
-        let text = std::str::from_utf8(&creds.plaintext)
-            .map_err(|_| AccountSourceError::Credentials("credentials are not valid UTF-8".to_owned()))?;
+        let text = std::str::from_utf8(&creds.plaintext).map_err(|_| {
+            AccountSourceError::Credentials("credentials are not valid UTF-8".to_owned())
+        })?;
         let mut parts = text.splitn(2, ':');
         let key = parts.next().unwrap_or("");
         let secret = parts.next().ok_or_else(|| {
@@ -99,7 +100,7 @@ impl AccountSource for AlpacaAccountSource {
         creds: &VenueCredentials,
     ) -> Result<Vec<Balance>, AccountSourceError> {
         let (key, secret) = Self::parse_creds(creds)?;
-        let headers = Self::auth_headers(&key, &secret);
+        let headers = Self::auth_headers(key, secret);
 
         let resp = self
             .client
@@ -132,7 +133,7 @@ impl AccountSource for AlpacaAccountSource {
         creds: &VenueCredentials,
     ) -> Result<Vec<VenuePosition>, AccountSourceError> {
         let (key, secret) = Self::parse_creds(creds)?;
-        let headers = Self::auth_headers(&key, &secret);
+        let headers = Self::auth_headers(key, secret);
 
         let resp = self
             .client
@@ -172,7 +173,7 @@ impl AccountSource for AlpacaAccountSource {
         since: Option<DateTime<Utc>>,
     ) -> Result<Vec<VenueTransaction>, AccountSourceError> {
         let (key, secret) = Self::parse_creds(creds)?;
-        let headers = Self::auth_headers(&key, &secret);
+        let headers = Self::auth_headers(key, secret);
 
         let mut req = self
             .client
