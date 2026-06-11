@@ -62,17 +62,13 @@ impl AccountSource for KalshiAccountSource {
             .get(format!("{}/portfolio/balance", Self::base_url()))
             .headers(headers)
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
         let balance_cents = parsed["balance"].as_i64().unwrap_or(0);
         let balance = Decimal::from(balance_cents) / Decimal::from(100u64);
         Ok(vec![Balance {
@@ -93,17 +89,13 @@ impl AccountSource for KalshiAccountSource {
             .get(format!("{}/portfolio/positions", Self::base_url()))
             .headers(headers)
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
         let positions = parsed["market_positions"]
             .as_array()
             .cloned()
@@ -147,19 +139,13 @@ impl AccountSource for KalshiAccountSource {
         if let Some(s) = since {
             req = req.query(&[("min_ts", s.timestamp().to_string())]);
         }
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+        let resp = req.send().await?;
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
         let fills = parsed["fills"].as_array().cloned().unwrap_or_default();
         Ok(fills
             .iter()
