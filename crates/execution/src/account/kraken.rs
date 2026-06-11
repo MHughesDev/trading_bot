@@ -35,14 +35,12 @@ impl KrakenAccountSource {
     }
 
     fn parse_key(creds: &VenueCredentials) -> Result<(String, String), AccountSourceError> {
-        let text = String::from_utf8(creds.plaintext.clone())?;
-        let parts: Vec<&str> = text.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(AccountSourceError::Credentials(
-                "expected api_key:api_secret".to_owned(),
-            ));
-        }
-        Ok((parts[0].to_owned(), parts[1].to_owned()))
+        let text = std::str::from_utf8(&creds.plaintext)
+            .map_err(|_| AccountSourceError::Credentials("credentials are not valid UTF-8".to_owned()))?;
+        let mut parts = text.splitn(2, ':');
+        let key = parts.next().unwrap_or("").to_owned();
+        let secret = parts.next().ok_or_else(|| AccountSourceError::Credentials("expected api_key:api_secret".to_owned()))?.to_owned();
+        Ok((key, secret))
     }
 }
 

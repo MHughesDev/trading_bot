@@ -103,11 +103,11 @@ impl RedditCollector {
     }
 
     fn normalize_post(&self, post: &RedditPost, seq: u64) -> Result<EventEnvelope, NormalizeError> {
-        let title = post.title.clone().unwrap_or_default();
+        let title = post.title.as_deref().unwrap_or_default();
         let body = post
             .body
-            .clone()
-            .or_else(|| post.selftext.clone())
+            .as_deref()
+            .or_else(|| post.selftext.as_deref())
             .unwrap_or_default();
         let combined = format!("{title} {body}");
 
@@ -123,8 +123,8 @@ impl RedditCollector {
             &post.id,
             post.author.as_deref().unwrap_or("unknown"),
             post.subreddit.as_deref().unwrap_or(&self.subreddit),
-            &title,
-            &body,
+            title,
+            body,
             mentions,
             post.score.unwrap_or(0),
         );

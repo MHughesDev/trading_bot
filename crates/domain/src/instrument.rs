@@ -83,6 +83,26 @@ pub enum AssetClass {
 }
 
 impl AssetClass {
+    /// Canonical snake_case string key (matches serde `rename_all = "snake_case"`).
+    ///
+    /// Returns a `&'static str` — zero allocation, safe to use in hot paths
+    /// and in places that previously called `serde_json::to_value(a).as_str()`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AssetClass::CryptoSpotCex => "crypto_spot_cex",
+            AssetClass::Equity => "equity",
+            AssetClass::Etf => "etf",
+            AssetClass::CryptoSpotDex => "crypto_spot_dex",
+            AssetClass::FuturesExpiring => "futures_expiring",
+            AssetClass::PerpetualSwap => "perpetual_swap",
+            AssetClass::Option => "option",
+            AssetClass::Bond => "bond",
+            AssetClass::Fx => "fx",
+            AssetClass::Nft => "nft",
+            AssetClass::PredictionMarket => "prediction_market",
+        }
+    }
+
     /// Market microstructure model used for paper execution simulation.
     pub fn market_structure(self) -> MarketStructure {
         match self {

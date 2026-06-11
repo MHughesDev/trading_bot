@@ -36,7 +36,8 @@ impl CoinbaseAccountSource {
     }
 
     fn auth_headers(creds: &VenueCredentials) -> Result<header::HeaderMap, AccountSourceError> {
-        let key = String::from_utf8(creds.plaintext.clone())?;
+        let key = std::str::from_utf8(&creds.plaintext)
+            .map_err(|_| AccountSourceError::Credentials("credentials are not valid UTF-8".to_owned()))?;
         let mut headers = header::HeaderMap::new();
         if let Ok(v) = header::HeaderValue::from_str(&key) {
             headers.insert("CB-ACCESS-KEY", v);

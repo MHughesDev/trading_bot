@@ -77,12 +77,7 @@ impl RegistrySnapshot {
             AssetClass::PredictionMarket,
         ]
         .iter()
-        .map(|a| {
-            serde_json::to_value(a)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_owned))
-                .unwrap_or_default()
-        })
+        .map(|a| a.as_str().to_owned())
         .collect();
 
         let data_types: Vec<String> = domain::DataType::all()

@@ -74,6 +74,9 @@ rkyv = { version = "0.8", features = ["std"] }
 # fast non-cryptographic hashing for intern table
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
+# lock-free concurrent hash map
+dashmap = "6"
+
 # small-size-optimized vec (avoids heap for short feature lists)
 smallvec = { version = "1", features = ["union"] }
 

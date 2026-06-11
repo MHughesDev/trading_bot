@@ -101,8 +101,9 @@ impl RobotsTxt {
     ///   rules from later, non-matching agent blocks are not applied (M-8).
     /// * `Allow:` directives are honoured (longest-match-wins, per spec) (L-1).
     pub fn parse(content: &str) -> Self {
-        let mut disallowed: Vec<String> = Vec::new();
-        let mut allowed: Vec<String> = Vec::new();
+        // Capacity hint: most robots.txt files have fewer than 16 rules.
+        let mut disallowed: Vec<String> = Vec::with_capacity(16);
+        let mut allowed: Vec<String> = Vec::with_capacity(16);
         let mut in_applicable_section = false;
 
         for line in content.lines() {
@@ -130,6 +131,12 @@ impl RobotsTxt {
             }
         }
 
+        // Sort by length descending so the first match is always the longest
+        // (most specific) rule — allows early exit via `find()` instead of
+        // scanning the whole list to compute the maximum (#61).
+        disallowed.sort_unstable_by(|a, b| b.len().cmp(&a.len()));
+        allowed.sort_unstable_by(|a, b| b.len().cmp(&a.len()));
+
         Self {
             disallowed,
             allowed,
@@ -141,21 +148,22 @@ impl RobotsTxt {
     ///
     /// Uses longest-match-wins: an `Allow:` rule longer than the matching
     /// `Disallow:` rule takes precedence (per the robots spec).
+    /// Rules are pre-sorted by length descending so the first matching rule
+    /// is always the longest — O(n) with early exit (#61).
     pub fn is_allowed(&self, path: &str) -> bool {
+        // First match is longest match because rules are sorted longest-first.
         let disallow_len = self
             .disallowed
             .iter()
-            .filter(|d| path.starts_with(d.as_str()))
+            .find(|d| path.starts_with(d.as_str()))
             .map(|d| d.len())
-            .max()
             .unwrap_or(0);
 
         let allow_len = self
             .allowed
             .iter()
-            .filter(|a| path.starts_with(a.as_str()))
+            .find(|a| path.starts_with(a.as_str()))
             .map(|a| a.len())
-            .max()
             .unwrap_or(0);
 
         // Allow wins on a tie or when more specific than Disallow.
