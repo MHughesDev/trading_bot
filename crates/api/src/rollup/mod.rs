@@ -77,8 +77,9 @@ pub fn compute_rollup(
     // ── Realized P&L per instrument (lot_id → instrument info via lots) ─────────
     let lot_by_id: HashMap<Uuid, &PnlLot> = lots.iter().map(|l| (l.id, l)).collect();
 
-    // Group closes by instrument.
+    // Single pass over closes: accumulate realized P&L and trade counts together.
     let mut realized_by_instrument: HashMap<String, Decimal> = HashMap::new();
+    let mut trade_count_by_instrument: HashMap<String, usize> = HashMap::new();
     for close in closes {
         if let Some(lot) = lot_by_id.get(&close.lot_id) {
             if lot.user_id != user_id || lot.account_mode.as_str() != mode.as_str() {
@@ -87,6 +88,9 @@ pub fn compute_rollup(
             *realized_by_instrument
                 .entry(lot.instrument_id.clone())
                 .or_default() += close.realized_usd;
+            *trade_count_by_instrument
+                .entry(lot.instrument_id.clone())
+                .or_default() += 1;
         }
     }
 
@@ -118,19 +122,6 @@ pub fn compute_rollup(
     } else {
         winning_positions as f64 / total_positions as f64
     };
-
-    // ── Trade count per instrument ───────────────────────────────────────────────
-    let mut trade_count_by_instrument: HashMap<String, usize> = HashMap::new();
-    for close in closes {
-        if let Some(lot) = lot_by_id.get(&close.lot_id) {
-            if lot.user_id != user_id || lot.account_mode.as_str() != mode.as_str() {
-                continue;
-            }
-            *trade_count_by_instrument
-                .entry(lot.instrument_id.clone())
-                .or_default() += 1;
-        }
-    }
 
     // ── Group by (asset_class, venue) ────────────────────────────────────────────
     // venue_tile: (asset_class, venue) → (realized, unrealized, wins, total, trades)
