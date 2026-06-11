@@ -31,8 +31,7 @@ impl OandaAccountSource {
     }
 
     fn parse_creds(creds: &VenueCredentials) -> Result<(String, String), AccountSourceError> {
-        let text = String::from_utf8(creds.plaintext.clone())
-            .map_err(|e| AccountSourceError::Credentials(e.to_string()))?;
+        let text = String::from_utf8(creds.plaintext.clone())?;
         let parts: Vec<&str> = text.splitn(2, ':').collect();
         if parts.len() != 2 {
             return Err(AccountSourceError::Credentials(
@@ -76,19 +75,15 @@ impl AccountSource for OandaAccountSource {
             ))
             .headers(Self::auth_headers(&token))
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         let bal = parsed["account"]["balance"]
             .as_str()
@@ -121,19 +116,15 @@ impl AccountSource for OandaAccountSource {
             ))
             .headers(Self::auth_headers(&token))
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         let trades = parsed["trades"].as_array().cloned().unwrap_or_default();
         Ok(trades
@@ -175,21 +166,15 @@ impl AccountSource for OandaAccountSource {
             req = req.query(&[("from", s.to_rfc3339())]);
         }
 
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+        let resp = req.send().await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         let pages = parsed["pages"].as_array().cloned().unwrap_or_default();
         Ok(pages

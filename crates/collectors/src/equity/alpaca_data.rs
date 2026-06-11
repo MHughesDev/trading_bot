@@ -52,6 +52,9 @@ struct AlpacaMessage {
     /// Trade ID from Alpaca (not always present on IEX).
     #[serde(rename = "i", default)]
     trade_id: Option<u64>,
+    /// Taker side: "B" = buy, "S" = sell, absent = unknown.
+    #[serde(rename = "tks", default)]
+    taker_side: String,
 }
 
 // ── AlpacaDataCollector ──────────────────────────────────────────────────────
@@ -106,7 +109,11 @@ impl AlpacaDataCollector {
                 reason: e.to_string(),
             })?;
 
-        let side = TradeSide::Unknown;
+        let side = match msg.taker_side.as_str() {
+            "B" | "b" => TradeSide::Buy,
+            "S" | "s" => TradeSide::Sell,
+            _ => TradeSide::Unknown,
+        };
 
         let exchange_trade_id = msg
             .trade_id
