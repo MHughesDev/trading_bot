@@ -44,15 +44,15 @@ fn domain_defaults_snapshot_is_non_empty() {
 fn domain_defaults_include_known_types() {
     let snap = RegistrySnapshot::from_domain_defaults();
     assert!(
-        snap.asset_classes.iter().any(|a| *a == "crypto_spot_cex"),
+        snap.asset_classes.contains(&"crypto_spot_cex"),
         "crypto_spot_cex should be in defaults"
     );
     assert!(
-        snap.data_types.iter().any(|d| *d == "market.ohlcv"),
+        snap.data_types.contains(&"market.ohlcv"),
         "market.ohlcv should be in defaults"
     );
     assert!(
-        snap.data_types.iter().any(|d| *d == "web.page_snapshot"),
+        snap.data_types.contains(&"web.page_snapshot"),
         "web.page_snapshot should be in defaults"
     );
 }

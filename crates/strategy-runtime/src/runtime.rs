@@ -195,6 +195,8 @@ impl StrategyInstance {
     }
 }
 
+type InstanceKey = (Arc<str>, Arc<str>);
+
 /// Manages all active strategy instances keyed by `(user_id, instrument_id)`.
 ///
 /// Deduplicates pipeline demand via the `DemandRegistry`: when two users both
@@ -203,11 +205,11 @@ impl StrategyInstance {
 /// Keys use `Arc<str>` so that dispatch() can clone the by_instrument entry
 /// with atomic ref-count increments instead of heap String allocations.
 pub struct InstanceManager {
-    instances: HashMap<(Arc<str>, Arc<str>), StrategyInstance>,
+    instances: HashMap<InstanceKey, StrategyInstance>,
     /// Secondary index: interned InstrumentId → Vec of Arc<str> key pairs.
     /// Arc::clone is an atomic increment; the by_instrument clone in dispatch()
     /// allocates nothing on the heap per matched instance (#19).
-    by_instrument: HashMap<InstrumentId, Vec<(Arc<str>, Arc<str>)>>,
+    by_instrument: HashMap<InstrumentId, Vec<InstanceKey>>,
     demand: Arc<DemandRegistry>,
 }
 
@@ -257,8 +259,7 @@ impl InstanceManager {
         }
 
         let start = clock.now();
-        let instance =
-            StrategyInstance::new(&*uid, &*iid_str, definition, start);
+        let instance = StrategyInstance::new(&*uid, &*iid_str, definition, start);
         self.instances.insert(key.clone(), instance);
         // Intern the instrument name once at registration; store the compact u32 ID
         // so dispatch() can do a u32 hash lookup instead of a string hash lookup.
@@ -270,7 +271,7 @@ impl InstanceManager {
     /// Stop and remove the instance for `(user_id, instrument_id)`, releasing demand.
     pub fn stop(&mut self, user_id: &str, instrument_id: &str) {
         // Cold path — constructing temporary Arc<str> for key lookup is acceptable.
-        let key: (Arc<str>, Arc<str>) = (Arc::from(user_id), Arc::from(instrument_id));
+        let key: InstanceKey = (Arc::from(user_id), Arc::from(instrument_id));
         if let Some(instance) = self.instances.remove(&key) {
             for input in &instance.definition.inputs {
                 let resolved = if input.is_bound_at_init() {
@@ -302,7 +303,7 @@ impl InstanceManager {
         let mut results = Vec::new();
         if let Some(keys) = self.by_instrument.get(&iid) {
             // Arc::clone is an atomic ref-count increment — no heap allocation (#19).
-            let keys: Vec<(Arc<str>, Arc<str>)> = keys.clone();
+            let keys: Vec<InstanceKey> = keys.clone();
             for key in &keys {
                 if let Some(instance) = self.instances.get_mut(key) {
                     let intents = instance.process_event(&event);
