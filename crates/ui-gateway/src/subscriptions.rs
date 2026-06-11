@@ -45,7 +45,7 @@ pub enum SubscriptionError {
 /// Registry of active panel subscriptions, backed by the `DemandRegistry`.
 pub struct SubscriptionRegistry {
     demand: Arc<DemandRegistry>,
-    subs: Mutex<HashMap<Uuid, Subscription>>,
+    subs: Mutex<HashMap<Uuid, Arc<Subscription>>>,
 }
 
 impl SubscriptionRegistry {
@@ -69,7 +69,7 @@ impl SubscriptionRegistry {
         requesting_user_id: &str,
         depth: Option<u32>,
         max_fps: Option<u32>,
-    ) -> Result<Subscription, SubscriptionError> {
+    ) -> Result<Arc<Subscription>, SubscriptionError> {
         if is_private_lane(lane) && user_id != requesting_user_id {
             return Err(SubscriptionError::Unauthorized {
                 lane: lane.to_owned(),
@@ -81,7 +81,7 @@ impl SubscriptionRegistry {
         let demand_lane = map_to_nats_lane(lane)
             .ok_or_else(|| SubscriptionError::UnknownLane(lane.to_owned()))?;
 
-        let sub = Subscription {
+        let sub = Arc::new(Subscription {
             id: Uuid::new_v4(),
             panel_id,
             user_id,
@@ -90,10 +90,10 @@ impl SubscriptionRegistry {
             depth,
             max_fps,
             demand_lane: demand_lane.clone(),
-        };
+        });
 
         self.demand.add(&demand_lane, &instrument);
-        self.subs.lock().unwrap().insert(sub.id, sub.clone());
+        self.subs.lock().unwrap().insert(sub.id, Arc::clone(&sub));
         Ok(sub)
     }
 
@@ -110,11 +110,11 @@ impl SubscriptionRegistry {
 
     /// Remove all subscriptions for a user (e.g. on WS disconnect).
     pub fn remove_all_for_user(&self, user_id: &str) {
-        let to_remove: Vec<Subscription> = {
+        let to_remove: Vec<Arc<Subscription>> = {
             let map = self.subs.lock().unwrap();
             map.values()
                 .filter(|s| s.user_id == user_id)
-                .cloned()
+                .map(Arc::clone)
                 .collect()
         };
         {
@@ -130,11 +130,11 @@ impl SubscriptionRegistry {
 
     /// Remove all subscriptions for a panel.
     pub fn remove_panel(&self, panel_id: &str, user_id: &str) {
-        let to_remove: Vec<Subscription> = {
+        let to_remove: Vec<Arc<Subscription>> = {
             let map = self.subs.lock().unwrap();
             map.values()
                 .filter(|s| s.panel_id == panel_id && s.user_id == user_id)
-                .cloned()
+                .map(Arc::clone)
                 .collect()
         };
         {
@@ -149,11 +149,11 @@ impl SubscriptionRegistry {
     }
 
     /// List all subscriptions for a user.
-    pub fn list_for_user(&self, user_id: &str) -> Vec<Subscription> {
+    pub fn list_for_user(&self, user_id: &str) -> Vec<Arc<Subscription>> {
         let map = self.subs.lock().unwrap();
         map.values()
             .filter(|s| s.user_id == user_id)
-            .cloned()
+            .map(Arc::clone)
             .collect()
     }
 
