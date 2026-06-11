@@ -35,8 +35,7 @@ impl KalshiAccountSource {
     }
 
     fn auth_headers(creds: &VenueCredentials) -> Result<header::HeaderMap, AccountSourceError> {
-        let key = String::from_utf8(creds.plaintext.clone())
-            .map_err(|e| AccountSourceError::Credentials(e.to_string()))?;
+        let key = String::from_utf8(creds.plaintext.clone())?;
         let mut h = header::HeaderMap::new();
         if let Ok(v) = header::HeaderValue::from_str(&key) {
             h.insert("Authorization", v);

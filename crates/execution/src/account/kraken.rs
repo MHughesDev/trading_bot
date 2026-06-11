@@ -35,8 +35,7 @@ impl KrakenAccountSource {
     }
 
     fn parse_key(creds: &VenueCredentials) -> Result<(String, String), AccountSourceError> {
-        let text = String::from_utf8(creds.plaintext.clone())
-            .map_err(|e| AccountSourceError::Credentials(e.to_string()))?;
+        let text = String::from_utf8(creds.plaintext.clone())?;
         let parts: Vec<&str> = text.splitn(2, ':').collect();
         if parts.len() != 2 {
             return Err(AccountSourceError::Credentials(
@@ -64,19 +63,15 @@ impl AccountSource for KrakenAccountSource {
             .post(format!("{}/0/private/Balance", Self::base_url()))
             .header("API-Key", &api_key)
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         if let Some(errors) = parsed["error"].as_array() {
             if !errors.is_empty() {
@@ -115,19 +110,15 @@ impl AccountSource for KrakenAccountSource {
             .post(format!("{}/0/private/OpenPositions", Self::base_url()))
             .header("API-Key", &api_key)
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         let result = parsed["result"].as_object().cloned().unwrap_or_default();
         Ok(result
@@ -170,19 +161,15 @@ impl AccountSource for KrakenAccountSource {
             .header("API-Key", &api_key)
             .form(&params)
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         let trades = parsed["result"]["trades"]
             .as_object()
