@@ -13,9 +13,8 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use chrono::Utc;
 use domain::{
-    event_id_from_key,
     payloads::web_page_snapshot::{FetchMethod, WebPageSnapshotPayload},
-    sequenced_key, EventEnvelope, TrustTier,
+    EventEnvelope,
 };
 use tracing::{debug, info, warn};
 
@@ -426,7 +425,7 @@ impl WebScraper {
         url: &str,
         seq: u64,
         robots_cache: &HashMap<String, RobotsTxt>,
-    ) -> Option<EventEnvelope<WebPageSnapshotPayload>> {
+    ) -> Option<EventEnvelope> {
         // SSRF guard: reject non-http/https and private IP targets (H-2).
         if !is_safe_url(url) {
             warn!(%url, "URL failed safety check — skipping");
@@ -483,23 +482,16 @@ impl WebScraper {
             content_length,
         );
 
-        let dedup = sequenced_key(WEB_PAGE_SNAPSHOT_LANE, url, VENUE_ID, seq, SOURCE);
-        let event_id = event_id_from_key(&dedup);
-        let now = Utc::now();
+        let payload_bytes = serde_json::to_vec(&payload).ok()?;
+        let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
         Some(EventEnvelope::new(
-            event_id,
-            WEB_PAGE_SNAPSHOT_LANE,
-            domain,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::OnchainTentative,
-            None,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&domain),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             seq,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         ))
     }
 }
@@ -570,10 +562,11 @@ impl Collector for WebScraper {
 
                 seq += 1;
                 if let Some(envelope) = self.fetch_page(url, seq, &robots_cache).await {
-                    let raw = serde_json::to_vec(&envelope).unwrap_or_default();
+                    let raw = envelope.payload.clone();
                     crate::normalizer::quarantine_or_publish(
                         Ok(envelope),
                         &raw,
+                        url,
                         WEB_PAGE_SNAPSHOT_LANE,
                         SOURCE,
                         &publisher,

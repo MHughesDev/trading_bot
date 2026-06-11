@@ -6,11 +6,16 @@
 //! Re-exports the full public API so callers can write `use domain::Price`
 //! without knowing the internal module layout.
 
+// rkyv zero-copy impls on payload types require unsafe.  Every unsafe block
+// carries an audit comment explaining why it is sound.
+#![allow(unsafe_code)]
+
 pub mod data_type;
 pub mod envelope;
 pub mod error;
 pub mod ids;
 pub mod instrument;
+pub mod interned;
 pub mod lanes;
 pub mod money;
 pub mod order;
@@ -27,8 +32,10 @@ pub use envelope::EventEnvelope;
 pub use error::{NormalizeError, RiskRejection, ValidationError};
 pub use ids::{event_id_from_key, onchain_key, sequenced_key, trade_key, DedupKey};
 pub use instrument::{
-    AssetClass, HaltPolicy, Instrument, InstrumentId, MarketStructure, TradingSchedule, VenueId,
+    AssetClass, HaltPolicy, Instrument, InstrumentId, MarketStructure, SourceId,
+    TradingSchedule, VenueId,
 };
+pub use interned::{intern_instrument, intern_source, intern_venue, instrument_name, venue_name, source_name};
 pub use lanes::{Lane, UnknownLane, QUARANTINE};
 pub use money::{Price, Size};
 pub use order::{Fill, OrderIntent, OrderRequest, OrderState, OrderType, Side, TimeInForce};

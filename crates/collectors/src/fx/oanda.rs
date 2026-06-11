@@ -1,19 +1,14 @@
-//! OANDA v20 FX 1-minute OHLCV + quote collector (demo environment).
-//!
-//! Polls `GET /v3/instruments/{pair}/candles` for 1-minute bars and
-//! `GET /v3/instruments/{pair}/orderBook` for top-of-book quotes.
-//! Normalizes both into `EventEnvelope<BarPayload>` / `EventEnvelope<QuotePayload>`
-//! on `DataType::MarketOhlcv` / `DataType::MarketQuote`.
+//! OANDA v20 FX 1-minute OHLCV collector (demo environment).
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use domain::{
-    event_id_from_key,
+    lanes,
     money::{Price, Size},
     payloads::bar::{BarPayload, Timeframe},
-    sequenced_key, EventEnvelope, NormalizeError, TrustTier,
+    EventEnvelope, NormalizeError,
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -51,11 +46,8 @@ struct OandaMid {
 
 // ── Collector ────────────────────────────────────────────────────────────────
 
-/// OANDA FX 1-minute OHLCV + quote collector (demo env).
 pub struct OandaCollector {
-    /// FX pair in OANDA format, e.g. `"EUR_USD"`.
     pub pair: String,
-    /// Domain instrument ID, e.g. `"EUR-USD"`.
     pub instrument_id: String,
     pub venue_id: String,
 }
@@ -71,12 +63,11 @@ impl OandaCollector {
         }
     }
 
-    /// Normalize an OANDA candle into a `EventEnvelope<BarPayload>`.
     pub(crate) fn normalize_bar(
         &self,
         candle: &OandaCandle,
         seq: u64,
-    ) -> Result<EventEnvelope<BarPayload>, NormalizeError> {
+    ) -> Result<EventEnvelope, NormalizeError> {
         let mid = candle.mid.as_ref().ok_or(NormalizeError::MissingField {
             field: "mid".to_owned(),
         })?;
@@ -88,27 +79,22 @@ impl OandaCollector {
         let volume = Size::from_decimal(Decimal::from(candle.volume));
 
         let payload = BarPayload::new(Timeframe::Minutes1, open, high, low, close, volume, 0);
-        let dedup = sequenced_key("market.bars.1m", &self.instrument_id, VENUE_ID, seq, SOURCE);
-        let event_id = event_id_from_key(&dedup);
 
-        let event_time = chrono::DateTime::parse_from_rfc3339(&candle.time)
-            .ok()
-            .map(|dt| dt.with_timezone(&Utc));
-        let now = Utc::now();
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
+
+        let timestamp_ns = chrono::DateTime::parse_from_rfc3339(&candle.time)
+            .map(|dt| dt.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|_| Utc::now().timestamp_nanos_opt().unwrap_or(0));
 
         Ok(EventEnvelope::new(
-            event_id,
-            "market.bars.1m",
-            &self.instrument_id,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::Regulated,
-            event_time,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&self.instrument_id),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             seq,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         ))
     }
 }
@@ -173,6 +159,7 @@ impl Collector for OandaCollector {
                                     result,
                                     &raw,
                                     &self.instrument_id,
+                                    lanes::MARKET_BARS_1M,
                                     SOURCE,
                                     &publisher,
                                     &quarantine,
@@ -184,7 +171,6 @@ impl Collector for OandaCollector {
                 }
             }
 
-            // Poll every 60 seconds to align with 1-minute bar completion.
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         }
     }
@@ -193,6 +179,7 @@ impl Collector for OandaCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::payloads::bar::BarPayload;
 
     fn sample_candle() -> OandaCandle {
         OandaCandle {
@@ -214,16 +201,16 @@ mod tests {
         let result = collector.normalize_bar(&sample_candle(), 1);
         assert!(result.is_ok(), "normalize_bar failed: {:?}", result);
         let env = result.unwrap();
-        assert_eq!(env.instrument_id, "EUR-USD");
-        assert_eq!(env.source, SOURCE);
-        assert_eq!(env.trust_tier, TrustTier::Regulated);
-        let payload = &env.payload;
-        assert_eq!(payload.timeframe, Timeframe::Minutes1);
-        // open == 1.07500
-        let open: rust_decimal::Decimal = payload.open.to_string().parse().unwrap();
+        assert_eq!(
+            domain::instrument_name(env.instrument_id).as_deref(),
+            Some("EUR-USD")
+        );
+        let bar = env.decode_payload::<BarPayload>().unwrap();
+        assert_eq!(bar.timeframe, Timeframe::Minutes1);
+        let open: rust_decimal::Decimal = bar.open.to_string().parse().unwrap();
         let expected: rust_decimal::Decimal = "1.075".parse().unwrap();
         assert_eq!(open, expected, "open price mismatch");
-        assert_eq!(payload.volume.to_string(), "1234");
+        assert_eq!(bar.volume.to_string(), "1234");
     }
 
     #[test]

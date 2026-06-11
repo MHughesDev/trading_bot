@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use domain::instrument::{AssetClass, InstrumentId};
+use domain::instrument::AssetClass;
 
 /// Whether the automation runs against the paper account or live.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,7 +50,7 @@ pub enum AutomationSpec {
     /// Runs a single execution strategy on one instrument.
     SingleInstrument {
         asset_class: AssetClass,
-        instrument_id: InstrumentId,
+        instrument_id: String,
         execution_strategy_id: Uuid,
         time_window: TimeWindow,
     },
@@ -58,7 +58,7 @@ pub enum AutomationSpec {
     Pipeline {
         asset_class: AssetClass,
         /// Full universe of instruments this pipeline considers.
-        universe: Vec<InstrumentId>,
+        universe: Vec<String>,
         /// Ordered filter stages — instruments must clear all stages in sequence.
         stages: Vec<FilterStage>,
         execution_action: ExecutionAction,

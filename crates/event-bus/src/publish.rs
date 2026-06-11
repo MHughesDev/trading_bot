@@ -1,9 +1,13 @@
 //! JetStream publisher.
+//!
+// serde_json is intentionally absent from the hot-path serialization in this
+// crate — EventEnvelope is encoded with rkyv for all market-data lanes.
+// serde_json may only appear in API handlers and diagnostic tooling.
 
 use crate::lanes;
 use crate::nats::BusError;
 
-/// Publishes typed [`domain::EventEnvelope`]s to JetStream.
+/// Publishes [`domain::EventEnvelope`]s to JetStream using rkyv binary encoding.
 pub struct Publisher {
     js: async_nats::jetstream::Context,
 }
@@ -15,17 +19,20 @@ impl Publisher {
     }
 
     /// Serialize and publish an envelope to the correct lane subject.
-    pub async fn publish<T>(
+    ///
+    /// `instrument_name` is the human-readable instrument string (e.g. `"BTC-USD"`)
+    /// used to build the NATS subject; `lane` is the lane name (e.g. `"market.trades"`).
+    pub async fn publish(
         &self,
-        envelope: &domain::EventEnvelope<T>,
-        instrument_id: &str,
-    ) -> Result<(), BusError>
-    where
-        T: domain::payloads::Payload + serde::Serialize,
-    {
-        let bytes = serde_json::to_vec(envelope).map_err(|e| BusError::Serialize(e.to_string()))?;
+        envelope: &domain::EventEnvelope,
+        instrument_name: &str,
+        lane: &str,
+    ) -> Result<(), BusError> {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(envelope)
+            .map_err(|e| BusError::Serialize(e.to_string()))?
+            .into_vec();
 
-        let subject = lanes::subject_for(envelope.lane.as_str(), instrument_id);
+        let subject = lanes::subject_for(lane, instrument_name);
 
         self.js
             .publish(subject, bytes.into())
@@ -38,22 +45,21 @@ impl Publisher {
     /// Serialize and spawn a background task to publish — never blocks the caller.
     ///
     /// Used by the tee task so JetStream writes never stall the hot-path rings.
-    /// Serialization errors are logged and dropped; publish errors are logged.
-    pub fn publish_fire_and_forget<T>(
+    /// Serialize errors are logged and dropped; publish errors are logged.
+    pub fn publish_fire_and_forget(
         &self,
-        envelope: &domain::EventEnvelope<T>,
-        instrument_id: &str,
-    ) where
-        T: domain::payloads::Payload + serde::Serialize + Clone + Send + 'static,
-    {
-        let bytes = match serde_json::to_vec(envelope) {
-            Ok(b) => b,
+        envelope: &domain::EventEnvelope,
+        instrument_name: &str,
+        lane: &str,
+    ) {
+        let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(envelope) {
+            Ok(b) => b.into_vec(),
             Err(e) => {
                 tracing::warn!(error = %e, "tee serialize failed — event dropped");
                 return;
             }
         };
-        let subject = lanes::subject_for(envelope.lane.as_str(), instrument_id);
+        let subject = lanes::subject_for(lane, instrument_name);
         let js = self.js.clone();
         tokio::spawn(async move {
             if let Err(e) = js.publish(subject, bytes.into()).await {

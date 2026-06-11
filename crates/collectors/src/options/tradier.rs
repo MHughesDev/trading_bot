@@ -1,19 +1,15 @@
 //! Tradier options 1-minute OHLCV + quote collector.
-//!
-//! Polls `GET /v1/markets/timesales` for option contract bars and
-//! `GET /v1/markets/quotes` for NBBO quotes.
-//! Normalizes into `EventEnvelope<BarPayload>` and `EventEnvelope<QuotePayload>`.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use domain::{
-    event_id_from_key,
+    lanes,
     money::{Price, Size},
     payloads::bar::{BarPayload, Timeframe},
     payloads::quote::QuotePayload,
-    sequenced_key, EventEnvelope, NormalizeError, TrustTier,
+    EventEnvelope, NormalizeError,
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -61,9 +57,7 @@ pub(crate) struct TradierQuote {
 
 // ── Collector ────────────────────────────────────────────────────────────────
 
-/// Tradier options collector for a single option contract symbol.
 pub struct TradierOptionsCollector {
-    /// Option contract symbol (OCC format), e.g. `"AAPL240621C00200000"`.
     pub symbol: String,
     pub instrument_id: String,
 }
@@ -78,13 +72,12 @@ impl TradierOptionsCollector {
         }
     }
 
-    /// Normalize a Tradier bar into an `EventEnvelope<BarPayload>`.
     #[allow(dead_code)]
     pub(crate) fn normalize_bar(
         &self,
         bar: &TradierBar,
         seq: u64,
-    ) -> Result<EventEnvelope<BarPayload>, NormalizeError> {
+    ) -> Result<EventEnvelope, NormalizeError> {
         let open = wire_to_decimal(bar.open, "open")?;
         let high = wire_to_decimal(bar.high, "high")?;
         let low = wire_to_decimal(bar.low, "low")?;
@@ -98,61 +91,52 @@ impl TradierOptionsCollector {
             })?;
 
         let payload = BarPayload::new(Timeframe::Minutes1, open, high, low, close, volume, 0);
-        let dedup = sequenced_key("market.bars.1m", &self.instrument_id, VENUE_ID, seq, SOURCE);
-        let event_id = event_id_from_key(&dedup);
 
-        let event_time = bar.time.as_deref().and_then(|t| {
-            chrono::DateTime::parse_from_rfc3339(t)
-                .ok()
-                .map(|dt| dt.with_timezone(&Utc))
-        });
-        let now = Utc::now();
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
+
+        let timestamp_ns = bar
+            .time
+            .as_deref()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|dt| dt.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|| Utc::now().timestamp_nanos_opt().unwrap_or(0));
 
         Ok(EventEnvelope::new(
-            event_id,
-            "market.bars.1m",
-            &self.instrument_id,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::Regulated,
-            event_time,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&self.instrument_id),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             seq,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         ))
     }
 
-    /// Normalize a Tradier quote into an `EventEnvelope<QuotePayload>`.
     pub(crate) fn normalize_quote(
         &self,
         quote: &TradierQuote,
         seq: u64,
-    ) -> Result<EventEnvelope<QuotePayload>, NormalizeError> {
+    ) -> Result<EventEnvelope, NormalizeError> {
         let bid_price = wire_to_decimal(quote.bid, "bid")?;
         let ask_price = wire_to_decimal(quote.ask, "ask")?;
         let bid_size = wire_to_lot_decimal(quote.bid_lot, "bidsize")?;
         let ask_size = wire_to_lot_decimal(quote.ask_lot, "asksize")?;
 
         let payload = QuotePayload::new(bid_price, bid_size, ask_price, ask_size);
-        let dedup = sequenced_key("market.quotes", &self.instrument_id, VENUE_ID, seq, SOURCE);
-        let event_id = event_id_from_key(&dedup);
-        let now = Utc::now();
+
+        let payload_bytes = serde_json::to_vec(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+
+        let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
         Ok(EventEnvelope::new(
-            event_id,
-            "market.quotes",
-            &self.instrument_id,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::Regulated,
-            None,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&self.instrument_id),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             seq,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         ))
     }
 }
@@ -193,7 +177,6 @@ impl Collector for TradierOptionsCollector {
         info!(symbol = %self.symbol, "Tradier options collector starting");
 
         loop {
-            // Fetch quotes.
             let quote_url = format!(
                 "{TRADIER_REST_BASE}/markets/quotes?symbols={}&greeks=false",
                 self.symbol
@@ -219,6 +202,7 @@ impl Collector for TradierOptionsCollector {
                                 result,
                                 &raw,
                                 &self.instrument_id,
+                                lanes::MARKET_QUOTES,
                                 SOURCE,
                                 &publisher,
                                 &quarantine,
@@ -237,6 +221,8 @@ impl Collector for TradierOptionsCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::payloads::bar::BarPayload;
+    use domain::payloads::quote::QuotePayload;
 
     fn sample_bar() -> TradierBar {
         TradierBar {
@@ -264,9 +250,12 @@ mod tests {
         let result = collector.normalize_bar(&sample_bar(), 1);
         assert!(result.is_ok(), "{:?}", result);
         let env = result.unwrap();
-        assert_eq!(env.instrument_id, "AAPL240621C00200000");
-        assert_eq!(env.trust_tier, TrustTier::Regulated);
-        assert_eq!(env.payload.timeframe, Timeframe::Minutes1);
+        assert_eq!(
+            domain::instrument_name(env.instrument_id).as_deref(),
+            Some("AAPL240621C00200000")
+        );
+        let bar = env.decode_payload::<BarPayload>().unwrap();
+        assert_eq!(bar.timeframe, Timeframe::Minutes1);
     }
 
     #[test]
@@ -275,9 +264,8 @@ mod tests {
         let result = collector.normalize_quote(&sample_quote(), 1);
         assert!(result.is_ok(), "{:?}", result);
         let env = result.unwrap();
-        assert_eq!(env.instrument_id, "AAPL240621C00200000");
-        // bid < ask
-        assert!(env.payload.bid_price < env.payload.ask_price);
+        let payload: QuotePayload = serde_json::from_slice(&env.payload).unwrap();
+        assert!(payload.bid_price < payload.ask_price);
     }
 
     #[test]

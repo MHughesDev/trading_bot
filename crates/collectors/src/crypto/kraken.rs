@@ -2,18 +2,17 @@
 //!
 //! Connects to `wss://ws.kraken.com/v2`, subscribes to the `trade` channel for
 //! the configured symbol, and normalizes each trade update into a
-//! [`domain::payloads::TradePayload`] wrapped in an [`domain::EventEnvelope`].
+//! [`domain::EventEnvelope`] with a rkyv-encoded [`domain::payloads::trade::TradePayload`].
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use domain::{
-    event_id_from_key,
     lanes::MARKET_TRADES,
     money::{Price, Size},
     payloads::trade::{TradePayload, TradeSide},
-    trade_key, EventEnvelope, NormalizeError, TrustTier,
+    EventEnvelope, NormalizeError,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
@@ -76,12 +75,12 @@ impl KrakenCollector {
         }
     }
 
-    /// Normalize a [`KrakenTrade`] into a domain `EventEnvelope<TradePayload>`.
+    /// Normalize a [`KrakenTrade`] into a binary [`EventEnvelope`].
     fn normalize(
         &self,
         trade: &KrakenTrade,
         raw: &[u8],
-    ) -> Result<EventEnvelope<TradePayload>, NormalizeError> {
+    ) -> Result<EventEnvelope, NormalizeError> {
         let price = Decimal::from_str(&trade.price)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
@@ -105,31 +104,24 @@ impl KrakenCollector {
         let exchange_trade_id = trade.trade_id.to_string();
         let payload = TradePayload::new(price, size, side, &exchange_trade_id);
 
-        let dedup = trade_key(VENUE_ID, &exchange_trade_id);
-        let event_id = event_id_from_key(&dedup);
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
 
-        let event_time = chrono::DateTime::parse_from_rfc3339(&trade.timestamp)
-            .ok()
-            .map(|dt| dt.with_timezone(&Utc));
-
-        let now = Utc::now();
+        let timestamp_ns = chrono::DateTime::parse_from_rfc3339(&trade.timestamp)
+            .map(|dt| dt.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|_| Utc::now().timestamp_nanos_opt().unwrap_or(0));
 
         let envelope = EventEnvelope::new(
-            event_id,
-            MARKET_TRADES,
-            &self.instrument_id,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::CentralizedExchange,
-            event_time,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&self.instrument_id),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             trade.trade_id,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         );
 
-        let _ = raw; // raw bytes passed through for quarantine if needed
+        let _ = raw;
         Ok(envelope)
     }
 }
@@ -141,10 +133,8 @@ impl KrakenCollector {
     /// to JetStream asynchronously without blocking the hot path.
     pub async fn run_in_process(
         &self,
-        mut raw_prod: rtrb::Producer<domain::EventEnvelope<domain::payloads::trade::TradePayload>>,
-        tee_tx: tokio::sync::mpsc::UnboundedSender<
-            domain::EventEnvelope<domain::payloads::trade::TradePayload>,
-        >,
+        mut raw_prod: rtrb::Producer<domain::EventEnvelope>,
+        tee_tx: tokio::sync::mpsc::UnboundedSender<domain::EventEnvelope>,
     ) -> Result<(), CollectorError> {
         let mut policy = ReconnectPolicy::default();
         let mut gap_detector = GapDetector::new(&self.instrument_id, MARKET_TRADES);
@@ -220,11 +210,9 @@ impl KrakenCollector {
 
                                     match self.normalize(&trade, &raw) {
                                         Ok(envelope) => {
-                                            // Push to hot-path ring; drop on full rather than block.
                                             if raw_prod.push(envelope.clone()).is_err() {
                                                 tracing::warn!("ring_raw full — tick dropped");
                                             }
-                                            // Best-effort tee to JetStream.
                                             let _ = tee_tx.send(envelope);
                                         }
                                         Err(e) => {
@@ -281,7 +269,6 @@ impl Collector for KrakenCollector {
                 }
             };
 
-            // Send subscribe message.
             let subscribe_msg = serde_json::json!({
                 "method": "subscribe",
                 "params": {
@@ -301,7 +288,6 @@ impl Collector for KrakenCollector {
             gap_detector.reset();
             info!(symbol = %self.symbol, "subscribed to Kraken trade channel");
 
-            // Read messages.
             loop {
                 let msg = ws_stream.next().await;
                 match msg {
@@ -336,7 +322,6 @@ impl Collector for KrakenCollector {
 
                                 let trades = km.data.unwrap_or_default();
                                 for trade in &trades {
-                                    // Gap detection using trade_id as sequence.
                                     if let Some(gap) = gap_detector.check(trade.trade_id) {
                                         warn!(
                                             instrument_id = %gap.instrument_id,
@@ -352,6 +337,7 @@ impl Collector for KrakenCollector {
                                         result,
                                         &raw,
                                         &self.instrument_id,
+                                        MARKET_TRADES,
                                         SOURCE,
                                         &publisher,
                                         &quarantine,
@@ -374,7 +360,6 @@ impl Collector for KrakenCollector {
                 }
             }
 
-            // Reconnect with backoff.
             warn!(
                 symbol = %self.symbol,
                 attempt = policy.attempt(),

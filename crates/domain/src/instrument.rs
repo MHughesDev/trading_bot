@@ -10,11 +10,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::trust::TrustTier;
 
-/// Unique identifier for an instrument (e.g. `"BTC-USDT"`, `"AAPL"`).
-pub type InstrumentId = String;
+/// Interned u32 handle for an instrument name (e.g. `"BTC-USD"`, `"AAPL"`).
+///
+/// Assigned at startup from the [`crate::interned::InternTable`].  Zero heap
+/// allocation after interning — passes through ring buffers and NATS payloads
+/// as a 4-byte integer.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct InstrumentId(pub u32);
 
-/// Venue/broker identifier (e.g. `"coinbase"`, `"alpaca"`, `"kraken"`).
-pub type VenueId = String;
+/// Interned u32 handle for a venue name (e.g. `"kraken"`, `"alpaca"`).
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct VenueId(pub u32);
+
+/// Interned u32 handle for a source name (e.g. `"kraken_ws"`, `"alpaca_ws"`).
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct SourceId(pub u32);
 
 /// Broad economic category of the instrument.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -113,9 +135,11 @@ pub enum HaltPolicy {
 /// Complete instrument metadata record.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Instrument {
-    pub instrument_id: InstrumentId,
+    /// Human-readable instrument symbol, e.g. `"BTC-USD"`, `"AAPL"`.
+    pub instrument_id: String,
     pub asset_class: AssetClass,
-    pub venue_id: VenueId,
+    /// Human-readable venue name, e.g. `"kraken"`, `"alpaca"`.
+    pub venue_id: String,
     /// Decimal places for the base asset quantity.
     pub base_precision: u32,
     /// Decimal places for the quote asset price.

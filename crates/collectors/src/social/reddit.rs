@@ -1,12 +1,5 @@
 //! Reddit social collector — ingests posts + top-level comments via the official
 //! OAuth Data API with two-stage instrument linking (P2-T11).
-//!
-//! Rate budget: 80 QPM (admitted via the `RateBudget` in `demand-manager`).
-//! Emits `EventEnvelope<SocialPostPayload>` with `DataType::SocialPost`.
-//!
-//! ## Two-stage instrument linking
-//! 1. Cashtag/ticker extraction: scan text for `$SYMBOL` patterns.
-//! 2. Confidence filter: only link when match clears `LINK_CONFIDENCE_THRESHOLD`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,9 +7,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Utc;
 use domain::{
-    event_id_from_key,
     payloads::social_post::{InstrumentMention, SocialPostPayload},
-    sequenced_key, EventEnvelope, NormalizeError, TrustTier,
+    EventEnvelope, NormalizeError,
 };
 use serde::Deserialize;
 use tracing::{debug, info, warn};
@@ -27,7 +19,6 @@ const REDDIT_OAUTH_BASE: &str = "https://oauth.reddit.com";
 const VENUE_ID: &str = "reddit";
 const SOURCE: &str = "reddit_oauth_api";
 
-/// Minimum cashtag confidence to emit an instrument link.
 pub const LINK_CONFIDENCE_THRESHOLD: f32 = 0.75;
 
 // ── Reddit API response shapes ───────────────────────────────────────────────
@@ -55,26 +46,17 @@ struct RedditPost {
     title: Option<String>,
     selftext: Option<String>,
     score: Option<i64>,
-    // For comments.
     body: Option<String>,
 }
 
 // ── Instrument linker ────────────────────────────────────────────────────────
 
-/// Extract cashtag mentions (`$SYMBOL`) from text and score their confidence.
-///
-/// Confidence heuristics:
-/// - 1.0 if the symbol appears as an exact cashtag (`$BTC`) AND is in the known
-///   instrument set.
-/// - 0.5 if only the bare ticker appears in upper-case without `$`.
-/// - Ambiguous or very short tickers (< 3 chars) score 0.2 (below threshold).
 pub fn extract_mentions(
     text: &str,
     known_instruments: &HashMap<String, String>,
 ) -> Vec<InstrumentMention> {
     let mut mentions: HashMap<String, f32> = HashMap::new();
 
-    // Pass 1: cashtag extraction.
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '$' {
@@ -107,11 +89,8 @@ pub fn extract_mentions(
 
 // ── Collector ────────────────────────────────────────────────────────────────
 
-/// Reddit collector for a single subreddit.
 pub struct RedditCollector {
-    /// Subreddit name without `r/` prefix, e.g. `"wallstreetbets"`.
     pub subreddit: String,
-    /// Known instrument IDs for two-stage linking (symbol → instrument_id).
     pub known_instruments: HashMap<String, String>,
 }
 
@@ -127,7 +106,7 @@ impl RedditCollector {
         &self,
         post: &RedditPost,
         seq: u64,
-    ) -> Result<EventEnvelope<SocialPostPayload>, NormalizeError> {
+    ) -> Result<EventEnvelope, NormalizeError> {
         let title = post.title.clone().unwrap_or_default();
         let body = post
             .body
@@ -154,24 +133,19 @@ impl RedditCollector {
             post.score.unwrap_or(0),
         );
 
-        // Use post_id as a stable dedup anchor.
-        let dedup = sequenced_key("social.post", &post.id, VENUE_ID, seq, SOURCE);
-        let event_id = event_id_from_key(&dedup);
-        let now = Utc::now();
+        let payload_bytes = serde_json::to_vec(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+
+        let instrument_name = format!("reddit.{}", self.subreddit);
+        let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
         Ok(EventEnvelope::new(
-            event_id,
-            "social.post",
-            format!("reddit.{}", self.subreddit),
-            VENUE_ID,
-            SOURCE,
-            TrustTier::SocialDerived,
-            None,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&instrument_name),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             seq,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         ))
     }
 }
@@ -193,7 +167,6 @@ impl Collector for RedditCollector {
 
         info!(subreddit = %self.subreddit, "Reddit collector starting");
 
-        // Obtain OAuth token.
         let token_resp = client
             .post("https://www.reddit.com/api/v1/access_token")
             .basic_auth(&client_id, Some(&client_secret))
@@ -245,13 +218,15 @@ impl Collector for RedditCollector {
                             }
                         }
                         Ok(listing) => {
+                            let instrument_name = format!("reddit.{}", self.subreddit);
                             for child in &listing.data.children {
                                 seq += 1;
                                 let result = self.normalize_post(&child.data, seq);
                                 crate::normalizer::quarantine_or_publish(
                                     result,
                                     &raw,
-                                    &format!("reddit.{}", self.subreddit),
+                                    &instrument_name,
+                                    "social.post",
                                     SOURCE,
                                     &publisher,
                                     &quarantine,
@@ -263,7 +238,6 @@ impl Collector for RedditCollector {
                 }
             }
 
-            // ~80 QPM → 1 request / 0.75 s, but batch of 25 posts → ~3 reqs/min is safe.
             tokio::time::sleep(std::time::Duration::from_secs(20)).await;
         }
     }
@@ -272,6 +246,7 @@ impl Collector for RedditCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::payloads::social_post::SocialPostPayload;
 
     fn known() -> HashMap<String, String> {
         let mut m = HashMap::new();
@@ -296,7 +271,6 @@ mod tests {
     #[test]
     fn ambiguous_two_char_ticker_does_not_link() {
         let mentions = extract_mentions("$AI is trending", &known());
-        // "AI" is < 3 chars in the cashtag so should be filtered.
         assert!(
             mentions.is_empty()
                 || mentions
@@ -309,7 +283,6 @@ mod tests {
     #[test]
     fn unknown_cashtag_scores_below_threshold() {
         let mentions = extract_mentions("$DOGE is great", &known());
-        // DOGE not in known_instruments → confidence 0.6 < threshold 0.75.
         assert!(
             mentions.is_empty(),
             "unknown cashtag should fall below threshold"
@@ -337,7 +310,7 @@ mod tests {
         let result = collector.normalize_post(&post, 1);
         assert!(result.is_ok(), "{:?}", result);
         let env = result.unwrap();
-        assert_eq!(env.trust_tier, TrustTier::SocialDerived);
-        assert!(!env.payload.instrument_mentions.is_empty());
+        let payload: SocialPostPayload = serde_json::from_slice(&env.payload).unwrap();
+        assert!(!payload.instrument_mentions.is_empty());
     }
 }

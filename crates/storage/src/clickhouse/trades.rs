@@ -13,39 +13,30 @@ pub struct TradeRow {
     pub venue_id: String,
     /// Microseconds since Unix epoch.
     pub event_time_us: i64,
-    pub available_time_us: i64,
     /// `Decimal` serialized as a string.
     pub price: String,
     pub size: String,
     pub side: String,
     pub trade_id: String,
-    pub event_id: String,
 }
 
 impl TradeRow {
-    pub fn from_envelope(
-        env: &EventEnvelope<TradePayload>,
-        instrument_id: &str,
-        venue_id: &str,
-    ) -> Self {
-        let event_time_us = env
-            .event_time
-            .unwrap_or(env.ingested_time)
-            .timestamp_micros();
-        let available_time_us = env.available_time.timestamp_micros();
-        let side = format!("{:?}", env.payload.side).to_lowercase();
+    pub fn from_envelope(env: &EventEnvelope) -> Option<Self> {
+        let trade = env.decode_payload::<TradePayload>().ok()?;
+        let instrument_id = domain::instrument_name(env.instrument_id).unwrap_or_default();
+        let venue_id = domain::venue_name(env.venue_id).unwrap_or_default();
+        let event_time_us = env.timestamp_ns / 1_000;
+        let side = format!("{:?}", trade.side).to_lowercase();
 
-        Self {
-            instrument_id: instrument_id.to_owned(),
-            venue_id: venue_id.to_owned(),
+        Some(Self {
+            instrument_id,
+            venue_id,
             event_time_us,
-            available_time_us,
-            price: env.payload.price.to_string(),
-            size: env.payload.size.to_string(),
+            price: trade.price.to_string(),
+            size: trade.size.to_string(),
             side,
-            trade_id: env.payload.exchange_trade_id.clone(),
-            event_id: env.event_id.to_string(),
-        }
+            trade_id: trade.exchange_trade_id.clone(),
+        })
     }
 }
 

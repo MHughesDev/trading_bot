@@ -2,23 +2,18 @@
 //!
 //! Connects to `wss://stream.data.alpaca.markets/v2/iex`, authenticates with
 //! `ALPACA_API_KEY_ID` / `ALPACA_API_SECRET_KEY`, subscribes to real-time trade
-//! events, and normalizes them into `EventEnvelope<TradePayload>` on the same
-//! `market.trades` lane as the Kraken crypto collector — with zero changes to
-//! any downstream consumer.
-//!
-//! Deliberately structured differently from the Kraken collector to prove that
-//! the lane abstraction is venue-agnostic (Phase 6 requirement).
+//! events, and normalizes them into [`domain::EventEnvelope`] on the same
+//! `market.trades` lane as the Kraken crypto collector.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use domain::{
-    event_id_from_key,
     lanes::MARKET_TRADES,
     money::{Price, Size},
     payloads::trade::{TradePayload, TradeSide},
-    trade_key, EventEnvelope, NormalizeError, TrustTier,
+    EventEnvelope, NormalizeError,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
@@ -62,9 +57,6 @@ struct AlpacaMessage {
 // ── AlpacaDataCollector ──────────────────────────────────────────────────────
 
 /// Alpaca equity data feed connector.
-///
-/// Publishes `TrustTier::Regulated` trade events (equities are exchange-regulated
-/// vs `CentralizedExchange` for crypto) on the same `market.trades` lane.
 pub struct AlpacaDataCollector {
     /// Symbol in Alpaca/domain format, e.g. `"AAPL"`.
     pub symbol: String,
@@ -85,7 +77,7 @@ impl AlpacaDataCollector {
         msg: &AlpacaMessage,
         raw: &[u8],
         seq: u64,
-    ) -> Result<EventEnvelope<TradePayload>, NormalizeError> {
+    ) -> Result<EventEnvelope, NormalizeError> {
         let price_str = msg
             .price
             .as_deref()
@@ -114,7 +106,6 @@ impl AlpacaDataCollector {
                 reason: e.to_string(),
             })?;
 
-        // Alpaca trade messages carry no aggressor side; equity trades are bilateral.
         let side = TradeSide::Unknown;
 
         let exchange_trade_id = msg
@@ -124,28 +115,21 @@ impl AlpacaDataCollector {
 
         let payload = TradePayload::new(price, size, side, &exchange_trade_id);
 
-        let dedup = trade_key(VENUE_ID, &exchange_trade_id);
-        let event_id = event_id_from_key(&dedup);
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
 
-        let event_time = chrono::DateTime::parse_from_rfc3339(ts_str)
-            .ok()
-            .map(|dt| dt.with_timezone(&Utc));
-
-        let now = Utc::now();
+        let timestamp_ns = chrono::DateTime::parse_from_rfc3339(ts_str)
+            .map(|dt| dt.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|_| Utc::now().timestamp_nanos_opt().unwrap_or(0));
 
         let envelope = EventEnvelope::new(
-            event_id,
-            MARKET_TRADES,
-            &self.symbol,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::Regulated, // Equity events carry Regulated trust tier
-            event_time,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&self.symbol),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             seq,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         );
 
         let _ = raw;
@@ -179,7 +163,6 @@ impl Collector for AlpacaDataCollector {
                 }
             };
 
-            // Authenticate.
             let auth_msg = serde_json::json!({
                 "action": "auth",
                 "key": api_key,
@@ -191,7 +174,6 @@ impl Collector for AlpacaDataCollector {
                 continue;
             }
 
-            // Subscribe to trade events for this symbol.
             let subscribe_msg = serde_json::json!({
                 "action": "subscribe",
                 "trades": [self.symbol],
@@ -222,7 +204,6 @@ impl Collector for AlpacaDataCollector {
                     }
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
-                        // Alpaca sends JSON arrays of message objects.
                         let messages: Vec<AlpacaMessage> = match serde_json::from_str(&text) {
                             Ok(v) => v,
                             Err(e) => {
@@ -240,7 +221,6 @@ impl Collector for AlpacaDataCollector {
                         for am in &messages {
                             match am.msg_type.as_str() {
                                 "t" => {
-                                    // Trade event.
                                     seq += 1;
                                     if let Some(gap) = gap_detector.check(seq) {
                                         warn!(
@@ -256,6 +236,7 @@ impl Collector for AlpacaDataCollector {
                                         result,
                                         &raw,
                                         &self.symbol,
+                                        MARKET_TRADES,
                                         SOURCE,
                                         &publisher,
                                         &quarantine,
@@ -276,7 +257,7 @@ impl Collector for AlpacaDataCollector {
                                         "Alpaca WS error"
                                     );
                                 }
-                                _ => {} // subscription confirmations and other bookkeeping
+                                _ => {}
                             }
                         }
                     }
@@ -322,9 +303,14 @@ mod tests {
         let result = collector.normalize(&msg, &[], 1);
         assert!(result.is_ok());
         let envelope = result.unwrap();
-        assert_eq!(envelope.instrument_id, "AAPL");
-        assert_eq!(envelope.source, SOURCE);
-        assert_eq!(envelope.trust_tier, TrustTier::Regulated);
+        assert_eq!(
+            domain::instrument_name(envelope.instrument_id).as_deref(),
+            Some("AAPL")
+        );
+        assert_eq!(
+            domain::source_name(envelope.source_id).as_deref(),
+            Some(SOURCE)
+        );
     }
 
     #[test]
@@ -348,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn trust_tier_is_regulated() {
+    fn payload_is_valid_rkyv() {
         let collector = AlpacaDataCollector::new("AAPL");
         let msg = AlpacaMessage {
             msg_type: "t".into(),
@@ -360,7 +346,7 @@ mod tests {
             trade_id: None,
         };
         let envelope = collector.normalize(&msg, &[], 1).unwrap();
-        // Equity events must carry Regulated trust tier (higher than CentralizedExchange).
-        assert_eq!(envelope.trust_tier, TrustTier::Regulated);
+        let trade: TradePayload = envelope.decode_payload().unwrap();
+        assert_eq!(trade.price.to_string(), "150.0");
     }
 }

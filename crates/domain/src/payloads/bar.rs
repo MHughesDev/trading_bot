@@ -7,11 +7,15 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::money::{Price, Size};
+use crate::money::{AsDecimalBytes, Price, Size};
 use crate::payloads::Payload;
 
 /// Bar interval / timeframe.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug, PartialEq))]
 #[serde(rename_all = "snake_case")]
 pub enum Timeframe {
     Seconds1,
@@ -24,14 +28,23 @@ pub enum Timeframe {
 }
 
 /// OHLCV candlestick.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug))]
 pub struct BarPayload {
     pub schema_version: String,
     pub timeframe: Timeframe,
+    #[rkyv(with = AsDecimalBytes)]
     pub open: Price,
+    #[rkyv(with = AsDecimalBytes)]
     pub high: Price,
+    #[rkyv(with = AsDecimalBytes)]
     pub low: Price,
+    #[rkyv(with = AsDecimalBytes)]
     pub close: Price,
+    #[rkyv(with = AsDecimalBytes)]
     pub volume: Size,
     pub trade_count: u64,
     /// `0` for the initial publish; incremented on each late-data revision.
@@ -111,7 +124,6 @@ mod tests {
             sz("500"),
             200,
         );
-        // The types themselves prove no f64 was used — this test is a structural assertion.
         let _: Price = bar.open;
         let _: Price = bar.close;
         let _: Size = bar.volume;
@@ -132,5 +144,27 @@ mod tests {
         let back: BarPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(bar.open, back.open);
         assert_eq!(bar.revision, back.revision);
+    }
+
+    #[test]
+    fn rkyv_round_trip() {
+        let bar = BarPayload::new(
+            Timeframe::Minutes1,
+            p("100"),
+            p("110"),
+            p("95"),
+            p("105"),
+            sz("500"),
+            200,
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&bar).unwrap();
+        // SAFETY: bytes were produced by rkyv::to_bytes immediately above.
+        #[allow(unsafe_code)]
+        let archived = unsafe {
+            rkyv::access_unchecked::<rkyv::Archived<BarPayload>>(bytes.as_ref())
+        };
+        let back: BarPayload = rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap();
+        assert_eq!(bar.open, back.open);
+        assert_eq!(bar.trade_count, back.trade_count);
     }
 }

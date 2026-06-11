@@ -1,18 +1,16 @@
 //! 0x swap aggregator DEX quote-snapshot collector (P2-T09).
 //!
 //! Polls `GET /swap/v1/quote` for configured token pairs and emits
-//! firm-quote snapshots as `EventEnvelope<DexQuotePayload>` with
-//! `DataType::DexQuote` / `AssetClass::CryptoSpotDex`.
+//! firm-quote snapshots as `EventEnvelope` on the `dex.quote` lane.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use domain::{
-    event_id_from_key,
     money::{Price, Size},
     payloads::dex_quote::DexQuotePayload,
-    sequenced_key, EventEnvelope, NormalizeError, TrustTier,
+    EventEnvelope, NormalizeError,
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -42,15 +40,10 @@ pub(crate) struct ZeroXQuoteResponse {
 
 /// 0x DEX quote collector for a single token pair.
 pub struct ZeroXCollector {
-    /// Sell token symbol / address, e.g. `"WETH"`.
     pub sell_token: String,
-    /// Buy token symbol / address, e.g. `"USDC"`.
     pub buy_token: String,
-    /// Amount of sell token to quote (in base units, e.g. `"1000000000000000000"` for 1 WETH).
     pub sell_amount: String,
-    /// Domain instrument ID: `"{sell_token}-{buy_token}"`.
     pub instrument_id: String,
-    /// 0x API key (optional, rate limits apply without it).
     pub chain_id: u32,
 }
 
@@ -68,16 +61,15 @@ impl ZeroXCollector {
             buy_token,
             sell_amount: sell_amount.into(),
             instrument_id,
-            chain_id: 1, // Ethereum mainnet
+            chain_id: 1,
         }
     }
 
-    /// Normalize a 0x quote response into a `DexQuotePayload` envelope.
     pub(crate) fn normalize_quote(
         &self,
         response: &ZeroXQuoteResponse,
         seq: u64,
-    ) -> Result<EventEnvelope<DexQuotePayload>, NormalizeError> {
+    ) -> Result<EventEnvelope, NormalizeError> {
         let sell_amount = Decimal::from_str(&response.sell_amount)
             .map(Size::from_decimal)
             .map_err(|e| NormalizeError::InvalidSize {
@@ -117,23 +109,18 @@ impl ZeroXCollector {
             response.estimated_gas.clone(),
         );
 
-        let dedup = sequenced_key("dex.quote", &self.instrument_id, VENUE_ID, seq, SOURCE);
-        let event_id = event_id_from_key(&dedup);
-        let now = Utc::now();
+        let payload_bytes = serde_json::to_vec(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+
+        let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
         Ok(EventEnvelope::new(
-            event_id,
-            "dex.quote",
-            &self.instrument_id,
-            VENUE_ID,
-            SOURCE,
-            TrustTier::OnchainConfirmed,
-            None,
-            now,
-            now,
-            now,
+            domain::intern_instrument(&self.instrument_id),
+            domain::intern_venue(VENUE_ID),
+            domain::intern_source(SOURCE),
             seq,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         ))
     }
 }
@@ -185,6 +172,7 @@ impl Collector for ZeroXCollector {
                                 result,
                                 &raw,
                                 &self.instrument_id,
+                                "dex.quote",
                                 SOURCE,
                                 &publisher,
                                 &quarantine,
@@ -195,7 +183,6 @@ impl Collector for ZeroXCollector {
                 }
             }
 
-            // Poll every 30 seconds — 0x quotes are stateless and cheap.
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         }
     }
@@ -222,9 +209,11 @@ mod tests {
         let result = collector.normalize_quote(&sample_quote(), 1);
         assert!(result.is_ok(), "{:?}", result);
         let env = result.unwrap();
-        assert_eq!(env.instrument_id, "WETH-USDC");
-        assert_eq!(env.trust_tier, TrustTier::OnchainConfirmed);
-        let payload = &env.payload;
+        assert_eq!(
+            domain::instrument_name(env.instrument_id).as_deref(),
+            Some("WETH-USDC")
+        );
+        let payload: DexQuotePayload = serde_json::from_slice(&env.payload).unwrap();
         assert_eq!(payload.price.to_string(), "2500");
         assert!(payload.estimated_gas.is_some());
     }

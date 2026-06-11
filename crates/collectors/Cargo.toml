@@ -18,3 +18,4 @@ chrono = { workspace = true }
 futures-util = "0.3"
 rust_decimal = { workspace = true }
 rtrb = { workspace = true }
+rkyv = { workspace = true }

@@ -5,14 +5,13 @@
 
 use std::sync::Arc;
 
-use domain::payloads::trade::TradePayload;
 use domain::{EventEnvelope, OrderIntent};
 use rust_decimal::Decimal;
 use strategy_runtime::world::WorldEvent;
 use tracing::{info, warn};
 
 /// A normalized trade tick from the socket reader.
-pub type RawTick = EventEnvelope<TradePayload>;
+pub type RawTick = EventEnvelope;
 
 /// Keeps the spawned pipeline tasks alive.  Drop to stop the pipeline.
 pub struct PipelineHandle {
@@ -86,11 +85,16 @@ async fn stage_bar_builder(
     use domain::money::Size;
     use domain::payloads::bar::{BarPayload, Timeframe};
 
+    use chrono::DateTime;
+
     info!(instrument_id, "hot-path stage 2 (bar-builder) starting");
     loop {
         match raw_cons.pop() {
             Ok(tick) => {
-                let price = tick.payload.price;
+                let price = match tick.decode_payload::<domain::payloads::trade::TradePayload>() {
+                    Ok(p) => p.price,
+                    Err(_) => continue,
+                };
                 let bar = BarPayload::new(
                     Timeframe::Minutes1,
                     price,
@@ -100,11 +104,15 @@ async fn stage_bar_builder(
                     Size::from_decimal(Decimal::ONE),
                     tick.sequence,
                 );
+                let secs = tick.timestamp_ns / 1_000_000_000;
+                let nanos = (tick.timestamp_ns % 1_000_000_000).unsigned_abs() as u32;
+                let available_time =
+                    DateTime::from_timestamp(secs, nanos).unwrap_or_else(chrono::Utc::now);
                 let event = WorldEvent::Bar {
                     instrument_id: instrument_id.clone(),
                     timeframe: Timeframe::Minutes1,
                     bar,
-                    available_time: tick.available_time,
+                    available_time,
                 };
                 if world_prod.push(event).is_err() {
                     warn!(instrument_id, "ring_world full — WorldEvent dropped");

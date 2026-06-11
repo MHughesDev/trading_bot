@@ -65,6 +65,12 @@ async-nats = "0.42"
 # lock-free SPSC ring for in-process hot path
 rtrb = "0.3"
 
+# zero-copy binary serialization for hot-path events
+rkyv = { version = "0.8", features = ["std"] }
+
+# fast non-cryptographic hashing for intern table
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
 # external connectivity
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "gzip", "brotli"] }
@@ -108,7 +114,7 @@ graph = { path = "crates/graph" }
 semantic = { path = "crates/semantic" }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

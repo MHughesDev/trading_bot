@@ -4,12 +4,10 @@ use chrono::{DateTime, Duration, Utc};
 use domain::lanes;
 use domain::money::{Price, Size};
 use domain::{
-    compute_available_time,
     payloads::bar::{BarPayload, Timeframe},
     payloads::trade::TradePayload,
-    AvailableTimeParams, EventEnvelope, TrustTier,
+    EventEnvelope,
 };
-use uuid::Uuid;
 
 pub struct BarBuilderConfig {
     pub timeframe: Timeframe,
@@ -21,8 +19,8 @@ pub struct BarBuilderConfig {
 }
 
 pub enum BarEvent {
-    Closed(EventEnvelope<BarPayload>),
-    Revision(EventEnvelope<BarPayload>),
+    Closed(EventEnvelope),
+    Revision(EventEnvelope),
 }
 
 struct WindowAccum {
@@ -33,7 +31,6 @@ struct WindowAccum {
     close: Price,
     volume: Size,
     trade_count: u64,
-    last_observed_time: DateTime<Utc>,
 }
 
 struct PublishedBar {
@@ -44,7 +41,6 @@ struct PublishedBar {
 pub struct BarState {
     config: BarBuilderConfig,
     current: Option<WindowAccum>,
-    // keyed by window_start timestamp_millis
     published: HashMap<i64, PublishedBar>,
     sequence: u64,
 }
@@ -59,10 +55,15 @@ impl BarState {
         }
     }
 
-    /// Feed a trade into the builder. Returns any bar events that were emitted.
-    pub fn feed_trade(&mut self, trade: &EventEnvelope<TradePayload>) -> Vec<BarEvent> {
-        let trade_time = trade.event_time.unwrap_or(trade.available_time);
-        let observed = trade.observed_time;
+    pub fn feed_trade(&mut self, trade: &EventEnvelope) -> Vec<BarEvent> {
+        let trade_payload = match trade.decode_payload::<TradePayload>() {
+            Ok(p) => p,
+            Err(_) => return vec![],
+        };
+
+        let secs = trade.timestamp_ns / 1_000_000_000;
+        let nanos = (trade.timestamp_ns % 1_000_000_000).unsigned_abs() as u32;
+        let trade_time = DateTime::<Utc>::from_timestamp(secs, nanos).unwrap_or_else(Utc::now);
         let trade_window = window_start_for(trade_time, self.config.timeframe);
         let duration = timeframe_duration(self.config.timeframe);
 
@@ -72,17 +73,16 @@ impl BarState {
             None => {
                 self.current = Some(WindowAccum {
                     window_start: trade_window,
-                    open: trade.payload.price,
-                    high: trade.payload.price,
-                    low: trade.payload.price,
-                    close: trade.payload.price,
-                    volume: trade.payload.size,
+                    open: trade_payload.price,
+                    high: trade_payload.price,
+                    low: trade_payload.price,
+                    close: trade_payload.price,
+                    volume: trade_payload.size,
                     trade_count: 1,
-                    last_observed_time: observed,
                 });
             }
             Some(mut accum) if trade_window == accum.window_start => {
-                update_accum(&mut accum, trade, observed);
+                update_accum(&mut accum, &trade_payload);
                 self.current = Some(accum);
             }
             Some(accum) if trade_window > accum.window_start => {
@@ -90,57 +90,36 @@ impl BarState {
                 events.push(BarEvent::Closed(closed));
                 self.current = Some(WindowAccum {
                     window_start: trade_window,
-                    open: trade.payload.price,
-                    high: trade.payload.price,
-                    low: trade.payload.price,
-                    close: trade.payload.price,
-                    volume: trade.payload.size,
+                    open: trade_payload.price,
+                    high: trade_payload.price,
+                    low: trade_payload.price,
+                    close: trade_payload.price,
+                    volume: trade_payload.size,
                     trade_count: 1,
-                    last_observed_time: observed,
                 });
             }
             Some(accum) => {
-                // Late trade: put current back, then revise the published bar.
                 self.current = Some(accum);
                 let key = trade_window.timestamp_millis();
                 if let Some(pub_bar) = self.published.get_mut(&key) {
                     let new_rev = pub_bar.revision + 1;
                     let p = &mut pub_bar.payload;
-                    if trade.payload.price > p.high {
-                        p.high = trade.payload.price;
+                    if trade_payload.price > p.high {
+                        p.high = trade_payload.price;
                     }
-                    if trade.payload.price < p.low {
-                        p.low = trade.payload.price;
+                    if trade_payload.price < p.low {
+                        p.low = trade_payload.price;
                     }
-                    p.close = trade.payload.price;
-                    p.volume = Size(p.volume.0 + trade.payload.size.0);
+                    p.close = trade_payload.price;
+                    p.volume = Size(p.volume.0 + trade_payload.size.0);
                     p.trade_count += 1;
                     p.revision = new_rev;
                     pub_bar.revision = new_rev;
 
                     let revised_payload = p.clone();
                     let window_close = trade_window + duration;
-                    let available_time = compute_available_time(&AvailableTimeParams {
-                        window_close,
-                        observed_time: observed,
-                        watermark: self.config.watermark,
-                        processing_delay: self.config.processing_delay,
-                    });
                     self.sequence += 1;
-                    let env = EventEnvelope::new(
-                        Uuid::new_v4(),
-                        lanes::MARKET_BARS_1M_REVISED,
-                        self.config.instrument_id.clone(),
-                        self.config.venue_id.clone(),
-                        self.config.source.clone(),
-                        TrustTier::CentralizedExchange,
-                        Some(window_close),
-                        observed,
-                        Utc::now(),
-                        available_time,
-                        self.sequence,
-                        revised_payload,
-                    );
+                    let env = self.encode_bar_envelope(&revised_payload, window_close, lanes::MARKET_BARS_1M_REVISED);
                     events.push(BarEvent::Revision(env));
                 }
             }
@@ -149,25 +128,14 @@ impl BarState {
         events
     }
 
-    /// Flush the current in-progress window early (e.g. on shutdown).
-    pub fn flush(&mut self) -> Option<EventEnvelope<BarPayload>> {
+    pub fn flush(&mut self) -> Option<EventEnvelope> {
         let accum = self.current.take()?;
         let duration = timeframe_duration(self.config.timeframe);
         Some(self.build_bar_envelope(accum, duration))
     }
 
-    fn build_bar_envelope(
-        &mut self,
-        accum: WindowAccum,
-        duration: Duration,
-    ) -> EventEnvelope<BarPayload> {
+    fn build_bar_envelope(&mut self, accum: WindowAccum, duration: Duration) -> EventEnvelope {
         let window_close = accum.window_start + duration;
-        let available_time = compute_available_time(&AvailableTimeParams {
-            window_close,
-            observed_time: accum.last_observed_time,
-            watermark: self.config.watermark,
-            processing_delay: self.config.processing_delay,
-        });
         let payload = BarPayload::new(
             self.config.timeframe,
             accum.open,
@@ -191,43 +159,37 @@ impl BarState {
             },
         );
         self.sequence += 1;
+        self.encode_bar_envelope(&payload, window_close, lane)
+    }
+
+    fn encode_bar_envelope(&self, payload: &BarPayload, window_close: DateTime<Utc>, _lane: &str) -> EventEnvelope {
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload)
+            .expect("BarPayload rkyv serialization failed")
+            .into_vec();
+        let timestamp_ns = window_close.timestamp_nanos_opt().unwrap_or(0);
         EventEnvelope::new(
-            Uuid::new_v4(),
-            lane,
-            self.config.instrument_id.clone(),
-            self.config.venue_id.clone(),
-            self.config.source.clone(),
-            TrustTier::CentralizedExchange,
-            Some(window_close),
-            accum.last_observed_time,
-            Utc::now(),
-            available_time,
+            domain::intern_instrument(&self.config.instrument_id),
+            domain::intern_venue(&self.config.venue_id),
+            domain::intern_source(&self.config.source),
             self.sequence,
-            payload,
+            timestamp_ns,
+            payload_bytes,
         )
     }
 }
 
-fn update_accum(
-    accum: &mut WindowAccum,
-    trade: &EventEnvelope<TradePayload>,
-    observed: DateTime<Utc>,
-) {
-    if trade.payload.price > accum.high {
-        accum.high = trade.payload.price;
+fn update_accum(accum: &mut WindowAccum, trade: &TradePayload) {
+    if trade.price > accum.high {
+        accum.high = trade.price;
     }
-    if trade.payload.price < accum.low {
-        accum.low = trade.payload.price;
+    if trade.price < accum.low {
+        accum.low = trade.price;
     }
-    accum.close = trade.payload.price;
-    accum.volume = Size(accum.volume.0 + trade.payload.size.0);
+    accum.close = trade.price;
+    accum.volume = Size(accum.volume.0 + trade.size.0);
     accum.trade_count += 1;
-    if observed > accum.last_observed_time {
-        accum.last_observed_time = observed;
-    }
 }
 
-/// Compute the window-start for a timestamp given a timeframe.
 pub fn window_start_for(t: DateTime<Utc>, timeframe: Timeframe) -> DateTime<Utc> {
     use chrono::Timelike;
     match timeframe {
@@ -272,7 +234,6 @@ pub fn window_start_for(t: DateTime<Utc>, timeframe: Timeframe) -> DateTime<Utc>
     }
 }
 
-/// Duration of one bar window for the given timeframe.
 pub fn timeframe_duration(timeframe: Timeframe) -> Duration {
     match timeframe {
         Timeframe::Seconds1 => Duration::seconds(1),
@@ -289,28 +250,27 @@ pub fn timeframe_duration(timeframe: Timeframe) -> Duration {
 mod tests {
     use super::*;
     use chrono::TimeZone;
-    use domain::{payloads::trade::TradeSide, TrustTier};
+    use domain::payloads::trade::TradeSide;
     use std::str::FromStr;
 
-    fn make_trade(price: &str, size: &str, ts: DateTime<Utc>) -> EventEnvelope<TradePayload> {
+    fn make_trade(price: &str, size: &str, ts: DateTime<Utc>) -> EventEnvelope {
+        let payload = TradePayload::new(
+            Price::from_str(price).unwrap(),
+            Size::from_str(size).unwrap(),
+            TradeSide::Buy,
+            "t1",
+        );
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .unwrap()
+            .into_vec();
+        let ts_ns = ts.timestamp_nanos_opt().unwrap_or(0);
         EventEnvelope::new(
-            Uuid::new_v4(),
-            lanes::MARKET_TRADES,
-            "BTC-USD",
-            "kraken",
-            "kraken_ws",
-            TrustTier::CentralizedExchange,
-            Some(ts),
-            ts,
-            ts,
-            ts,
+            domain::intern_instrument("BTC-USD"),
+            domain::intern_venue("kraken"),
+            domain::intern_source("kraken_ws"),
             1,
-            TradePayload::new(
-                Price::from_str(price).unwrap(),
-                Size::from_str(size).unwrap(),
-                TradeSide::Buy,
-                "t1",
-            ),
+            ts_ns,
+            payload_bytes,
         )
     }
 
@@ -332,7 +292,6 @@ mod tests {
         assert!(state.feed_trade(&make_trade("100", "1", t0)).is_empty());
         assert!(state.feed_trade(&make_trade("110", "2", t0)).is_empty());
         assert!(state.feed_trade(&make_trade("95", "3", t0)).is_empty());
-        // No close yet — still in the same window.
     }
 
     #[test]
@@ -358,7 +317,8 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], BarEvent::Revision(_)));
         if let BarEvent::Revision(env) = &events[0] {
-            assert_eq!(env.payload.revision, 1);
+            let bar = env.decode_payload::<BarPayload>().unwrap();
+            assert_eq!(bar.revision, 1);
         }
     }
 
@@ -372,11 +332,12 @@ mod tests {
         state.feed_trade(&make_trade("80", "0.5", t0));
         let events = state.feed_trade(&make_trade("110", "1", t1));
         if let BarEvent::Closed(env) = &events[0] {
-            assert_eq!(env.payload.open.to_string(), "100");
-            assert_eq!(env.payload.high.to_string(), "120");
-            assert_eq!(env.payload.low.to_string(), "80");
-            assert_eq!(env.payload.close.to_string(), "80"); // last trade in window
-            assert_eq!(env.payload.trade_count, 3);
+            let bar = env.decode_payload::<BarPayload>().unwrap();
+            assert_eq!(bar.open.to_string(), "100");
+            assert_eq!(bar.high.to_string(), "120");
+            assert_eq!(bar.low.to_string(), "80");
+            assert_eq!(bar.close.to_string(), "80");
+            assert_eq!(bar.trade_count, 3);
         } else {
             panic!("expected Closed");
         }
