@@ -16,24 +16,51 @@ use crate::trust::TrustTier;
 /// allocation after interning — passes through ring buffers and NATS payloads
 /// as a 4-byte integer.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct InstrumentId(pub u32);
 
 /// Interned u32 handle for a venue name (e.g. `"kraken"`, `"alpaca"`).
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct VenueId(pub u32);
 
 /// Interned u32 handle for a source name (e.g. `"kraken_ws"`, `"alpaca_ws"`).
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct SourceId(pub u32);

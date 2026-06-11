@@ -102,11 +102,7 @@ impl RedditCollector {
         }
     }
 
-    fn normalize_post(
-        &self,
-        post: &RedditPost,
-        seq: u64,
-    ) -> Result<EventEnvelope, NormalizeError> {
+    fn normalize_post(&self, post: &RedditPost, seq: u64) -> Result<EventEnvelope, NormalizeError> {
         let title = post.title.clone().unwrap_or_default();
         let body = post
             .body
@@ -133,8 +129,8 @@ impl RedditCollector {
             post.score.unwrap_or(0),
         );
 
-        let payload_bytes = serde_json::to_vec(&payload)
-            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+        let payload_bytes =
+            serde_json::to_vec(&payload).map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
 
         let instrument_name = format!("reddit.{}", self.subreddit);
         let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);

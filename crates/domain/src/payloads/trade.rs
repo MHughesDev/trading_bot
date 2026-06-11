@@ -6,8 +6,16 @@ use crate::money::{AsDecimalBytes, Price, Size};
 use crate::payloads::Payload;
 
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[rkyv(derive(Debug, PartialEq))]
 #[serde(rename_all = "snake_case")]
@@ -20,8 +28,14 @@ pub enum TradeSide {
 
 /// A single matched trade from an exchange.
 #[derive(
-    Clone, Debug, PartialEq, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[rkyv(derive(Debug))]
 pub struct TradePayload {
@@ -103,9 +117,8 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&p).unwrap();
         // SAFETY: bytes were produced by rkyv::to_bytes immediately above.
         #[allow(unsafe_code)]
-        let archived = unsafe {
-            rkyv::access_unchecked::<rkyv::Archived<TradePayload>>(bytes.as_ref())
-        };
+        let archived =
+            unsafe { rkyv::access_unchecked::<rkyv::Archived<TradePayload>>(bytes.as_ref()) };
         let back: TradePayload = rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap();
         assert_eq!(p.price, back.price);
         assert_eq!(p.exchange_trade_id, back.exchange_trade_id);

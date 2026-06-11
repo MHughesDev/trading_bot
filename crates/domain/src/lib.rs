@@ -32,10 +32,12 @@ pub use envelope::EventEnvelope;
 pub use error::{NormalizeError, RiskRejection, ValidationError};
 pub use ids::{event_id_from_key, onchain_key, sequenced_key, trade_key, DedupKey};
 pub use instrument::{
-    AssetClass, HaltPolicy, Instrument, InstrumentId, MarketStructure, SourceId,
-    TradingSchedule, VenueId,
+    AssetClass, HaltPolicy, Instrument, InstrumentId, MarketStructure, SourceId, TradingSchedule,
+    VenueId,
 };
-pub use interned::{intern_instrument, intern_source, intern_venue, instrument_name, venue_name, source_name};
+pub use interned::{
+    instrument_name, intern_instrument, intern_source, intern_venue, source_name, venue_name,
+};
 pub use lanes::{Lane, UnknownLane, QUARANTINE};
 pub use money::{Price, Size};
 pub use order::{Fill, OrderIntent, OrderRequest, OrderState, OrderType, Side, TimeInForce};

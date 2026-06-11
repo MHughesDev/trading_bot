@@ -1,36 +1,14 @@
-//! Adversarial test: `EventEnvelope<T>` round-trips for every v1 payload type.
+//! Round-trip tests for `EventEnvelope` with rkyv-encoded payloads.
 
-use chrono::Utc;
 use domain::{
+    intern_instrument, intern_source, intern_venue,
     money::{Price, Size},
     payloads::{
         bar::{BarPayload, Timeframe},
-        orderbook::{BookLevel, OrderBookPayload},
-        quote::QuotePayload,
         trade::{TradePayload, TradeSide},
-        Payload,
     },
-    EventEnvelope, TrustTier,
+    EventEnvelope,
 };
-use uuid::Uuid;
-
-fn make_envelope<T: Payload + Clone>(payload: T) -> EventEnvelope<T> {
-    let now = Utc::now();
-    EventEnvelope::new(
-        Uuid::new_v4(),
-        "market.test",
-        "BTC-USDT",
-        "coinbase",
-        "test_source",
-        TrustTier::CentralizedExchange,
-        Some(now),
-        now,
-        now,
-        now,
-        1,
-        payload,
-    )
-}
 
 fn p(s: &str) -> Price {
     s.parse().unwrap()
@@ -39,52 +17,22 @@ fn sz(s: &str) -> Size {
     s.parse().unwrap()
 }
 
-#[test]
-fn trade_envelope_round_trip() {
+fn make_trade_envelope(seq: u64) -> EventEnvelope {
     let payload = TradePayload::new(p("50000.00"), sz("0.01"), TradeSide::Buy, "trade-123");
-    let env = make_envelope(payload);
-    let json = serde_json::to_string(&env).unwrap();
-    let back: EventEnvelope<TradePayload> = serde_json::from_str(&json).unwrap();
-    assert_eq!(env.event_id, back.event_id);
-    assert_eq!(env.payload.price, back.payload.price);
-    assert_eq!(
-        env.payload.exchange_trade_id,
-        back.payload.exchange_trade_id
-    );
+    let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+        .unwrap()
+        .into_vec();
+    EventEnvelope::new(
+        intern_instrument("BTC-USDT"),
+        intern_venue("coinbase"),
+        intern_source("test_source"),
+        seq,
+        1_700_000_000_000_000_000,
+        payload_bytes,
+    )
 }
 
-#[test]
-fn quote_envelope_round_trip() {
-    let payload = QuotePayload::new(p("49999.99"), sz("0.5"), p("50000.01"), sz("0.3"));
-    let env = make_envelope(payload);
-    let json = serde_json::to_string(&env).unwrap();
-    let back: EventEnvelope<QuotePayload> = serde_json::from_str(&json).unwrap();
-    assert_eq!(env.event_id, back.event_id);
-    assert_eq!(env.payload.bid_price, back.payload.bid_price);
-}
-
-#[test]
-fn orderbook_envelope_round_trip() {
-    let payload = OrderBookPayload::new_snapshot(
-        vec![BookLevel {
-            price: p("49900"),
-            size: sz("1.0"),
-        }],
-        vec![BookLevel {
-            price: p("50100"),
-            size: sz("0.5"),
-        }],
-        999,
-    );
-    let env = make_envelope(payload);
-    let json = serde_json::to_string(&env).unwrap();
-    let back: EventEnvelope<OrderBookPayload> = serde_json::from_str(&json).unwrap();
-    assert_eq!(env.event_id, back.event_id);
-    assert_eq!(env.payload.sequence, back.payload.sequence);
-}
-
-#[test]
-fn bar_envelope_round_trip() {
+fn make_bar_envelope(seq: u64) -> EventEnvelope {
     let payload = BarPayload::new(
         Timeframe::Minutes1,
         p("100"),
@@ -94,10 +42,54 @@ fn bar_envelope_round_trip() {
         sz("500"),
         200,
     );
-    let env = make_envelope(payload);
+    let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+        .unwrap()
+        .into_vec();
+    EventEnvelope::new(
+        intern_instrument("BTC-USDT"),
+        intern_venue("coinbase"),
+        intern_source("test_source"),
+        seq,
+        1_700_000_000_000_000_000,
+        payload_bytes,
+    )
+}
+
+#[test]
+fn trade_envelope_round_trip() {
+    let env = make_trade_envelope(1);
     let json = serde_json::to_string(&env).unwrap();
-    let back: EventEnvelope<BarPayload> = serde_json::from_str(&json).unwrap();
-    assert_eq!(env.event_id, back.event_id);
-    assert_eq!(env.payload.revision, 0);
-    assert_eq!(env.payload.open, back.payload.open);
+    let back: EventEnvelope = serde_json::from_str(&json).unwrap();
+    assert_eq!(env.instrument_id, back.instrument_id);
+    assert_eq!(env.sequence, back.sequence);
+    assert_eq!(env.payload, back.payload);
+
+    let trade = env.decode_payload::<TradePayload>().unwrap();
+    assert_eq!(trade.price.to_string(), "50000.00");
+    assert_eq!(trade.exchange_trade_id, "trade-123");
+}
+
+#[test]
+fn bar_envelope_round_trip() {
+    let env = make_bar_envelope(2);
+    let json = serde_json::to_string(&env).unwrap();
+    let back: EventEnvelope = serde_json::from_str(&json).unwrap();
+    assert_eq!(env.instrument_id, back.instrument_id);
+    assert_eq!(env.payload, back.payload);
+
+    let bar = env.decode_payload::<BarPayload>().unwrap();
+    assert_eq!(bar.revision, 0);
+    assert_eq!(bar.open.to_string(), "100");
+}
+
+#[test]
+fn rkyv_binary_round_trip() {
+    let env = make_trade_envelope(3);
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&env).unwrap();
+    // SAFETY: bytes were produced by rkyv::to_bytes immediately above.
+    #[allow(unsafe_code)]
+    let archived = unsafe { rkyv::access_unchecked::<rkyv::Archived<EventEnvelope>>(bytes.as_ref()) };
+    let back: EventEnvelope = rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap();
+    assert_eq!(env.sequence, back.sequence);
+    assert_eq!(env.timestamp_ns, back.timestamp_ns);
 }

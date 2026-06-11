@@ -21,8 +21,8 @@ pub async fn run_tee(
 ) {
     info!("tee task starting");
     while let Some(tick) = tee_rx.recv().await {
-        let instrument_name = domain::instrument_name(tick.instrument_id)
-            .unwrap_or_else(|| String::from("unknown"));
+        let instrument_name =
+            domain::instrument_name(tick.instrument_id).unwrap_or_else(|| String::from("unknown"));
         publisher.publish_fire_and_forget(&tick, &instrument_name, domain::lanes::MARKET_TRADES);
     }
     warn!("tee task channel closed — no more events will be persisted to JetStream");

@@ -27,7 +27,9 @@ use crate::instrument::{InstrumentId, SourceId, VenueId};
 /// All string identity fields have been replaced by 4-byte interned handles;
 /// the typed payload is pre-serialized to rkyv bytes.  Use
 /// [`crate::interned::instrument_name`] to recover the human-readable names.
-#[derive(Clone, Debug, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 #[rkyv(derive(Debug))]
 pub struct EventEnvelope {
     pub instrument_id: InstrumentId,
@@ -67,7 +69,8 @@ impl EventEnvelope {
     pub fn decode_payload<T>(&self) -> Result<T, rkyv::rancor::Error>
     where
         T: rkyv::Archive,
-        T::Archived: rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+        T::Archived:
+            rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
     {
         // SAFETY: payload bytes were produced by `rkyv::to_bytes` in this process.
         #[allow(unsafe_code)]

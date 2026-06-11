@@ -119,7 +119,11 @@ impl BarState {
                     let revised_payload = p.clone();
                     let window_close = trade_window + duration;
                     self.sequence += 1;
-                    let env = self.encode_bar_envelope(&revised_payload, window_close, lanes::MARKET_BARS_1M_REVISED);
+                    let env = self.encode_bar_envelope(
+                        &revised_payload,
+                        window_close,
+                        lanes::MARKET_BARS_1M_REVISED,
+                    );
                     events.push(BarEvent::Revision(env));
                 }
             }
@@ -162,7 +166,12 @@ impl BarState {
         self.encode_bar_envelope(&payload, window_close, lane)
     }
 
-    fn encode_bar_envelope(&self, payload: &BarPayload, window_close: DateTime<Utc>, _lane: &str) -> EventEnvelope {
+    fn encode_bar_envelope(
+        &self,
+        payload: &BarPayload,
+        window_close: DateTime<Utc>,
+        _lane: &str,
+    ) -> EventEnvelope {
         let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload)
             .expect("BarPayload rkyv serialization failed")
             .into_vec();

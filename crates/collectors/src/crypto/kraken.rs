@@ -76,11 +76,7 @@ impl KrakenCollector {
     }
 
     /// Normalize a [`KrakenTrade`] into a binary [`EventEnvelope`].
-    fn normalize(
-        &self,
-        trade: &KrakenTrade,
-        raw: &[u8],
-    ) -> Result<EventEnvelope, NormalizeError> {
+    fn normalize(&self, trade: &KrakenTrade, raw: &[u8]) -> Result<EventEnvelope, NormalizeError> {
         let price = Decimal::from_str(&trade.price)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {

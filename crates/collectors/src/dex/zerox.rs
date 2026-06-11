@@ -109,8 +109,8 @@ impl ZeroXCollector {
             response.estimated_gas.clone(),
         );
 
-        let payload_bytes = serde_json::to_vec(&payload)
-            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+        let payload_bytes =
+            serde_json::to_vec(&payload).map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
 
         let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 

@@ -48,8 +48,8 @@ impl<S: rkyv::rancor::Fallible + ?Sized> rkyv::with::SerializeWith<Price, S> for
     }
 }
 
-impl<D: rkyv::rancor::Fallible + ?Sized>
-    rkyv::with::DeserializeWith<[u8; 16], Price, D> for AsDecimalBytes
+impl<D: rkyv::rancor::Fallible + ?Sized> rkyv::with::DeserializeWith<[u8; 16], Price, D>
+    for AsDecimalBytes
 {
     fn deserialize_with(archived: &[u8; 16], _: &mut D) -> Result<Price, D::Error> {
         // SAFETY: bytes were written by resolve_with / serialize_with above.
@@ -79,8 +79,8 @@ impl<S: rkyv::rancor::Fallible + ?Sized> rkyv::with::SerializeWith<Size, S> for 
     }
 }
 
-impl<D: rkyv::rancor::Fallible + ?Sized>
-    rkyv::with::DeserializeWith<[u8; 16], Size, D> for AsDecimalBytes
+impl<D: rkyv::rancor::Fallible + ?Sized> rkyv::with::DeserializeWith<[u8; 16], Size, D>
+    for AsDecimalBytes
 {
     fn deserialize_with(archived: &[u8; 16], _: &mut D) -> Result<Size, D::Error> {
         // SAFETY: bytes were written by resolve_with / serialize_with above.

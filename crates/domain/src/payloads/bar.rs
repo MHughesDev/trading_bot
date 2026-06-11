@@ -12,8 +12,17 @@ use crate::payloads::Payload;
 
 /// Bar interval / timeframe.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[rkyv(derive(Debug, PartialEq))]
 #[serde(rename_all = "snake_case")]
@@ -29,8 +38,14 @@ pub enum Timeframe {
 
 /// OHLCV candlestick.
 #[derive(
-    Clone, Debug, PartialEq, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[rkyv(derive(Debug))]
 pub struct BarPayload {
@@ -160,9 +175,8 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&bar).unwrap();
         // SAFETY: bytes were produced by rkyv::to_bytes immediately above.
         #[allow(unsafe_code)]
-        let archived = unsafe {
-            rkyv::access_unchecked::<rkyv::Archived<BarPayload>>(bytes.as_ref())
-        };
+        let archived =
+            unsafe { rkyv::access_unchecked::<rkyv::Archived<BarPayload>>(bytes.as_ref()) };
         let back: BarPayload = rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap();
         assert_eq!(bar.open, back.open);
         assert_eq!(bar.trade_count, back.trade_count);
