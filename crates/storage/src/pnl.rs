@@ -170,7 +170,7 @@ impl FifoEngine {
             records.push(close.clone());
             self.closes.push(close);
 
-            lot.remaining_qty -= consumed;
+            Arc::make_mut(lot).remaining_qty -= consumed;
             close_qty -= consumed;
 
             if lot.remaining_qty <= Decimal::ZERO {
@@ -257,12 +257,12 @@ impl FifoEngine {
 
     /// Snapshot of all open lots (still partially or fully open) across all keys.
     pub fn open_lots(&self) -> impl Iterator<Item = &PnlLot> {
-        self.lots.values().flatten()
+        self.lots.values().flatten().map(|arc| arc.as_ref())
     }
 
     /// All lots ever opened (including fully closed ones).
     pub fn all_lots(&self) -> impl Iterator<Item = &PnlLot> {
-        self.lot_archive.values()
+        self.lot_archive.values().map(|arc| arc.as_ref())
     }
 }
 

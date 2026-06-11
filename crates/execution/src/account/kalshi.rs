@@ -35,10 +35,11 @@ impl KalshiAccountSource {
     }
 
     fn auth_headers(creds: &VenueCredentials) -> Result<header::HeaderMap, AccountSourceError> {
-        let key = std::str::from_utf8(&creds.plaintext)
-            .map_err(|_| AccountSourceError::Credentials("credentials are not valid UTF-8".to_owned()))?;
+        let key = std::str::from_utf8(&creds.plaintext).map_err(|_| {
+            AccountSourceError::Credentials("credentials are not valid UTF-8".to_owned())
+        })?;
         let mut h = header::HeaderMap::new();
-        if let Ok(v) = header::HeaderValue::from_str(&key) {
+        if let Ok(v) = header::HeaderValue::from_str(key) {
             h.insert("Authorization", v);
         } else {
             return Err(AccountSourceError::Credentials("invalid key".to_owned()));

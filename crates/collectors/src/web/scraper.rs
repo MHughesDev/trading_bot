@@ -5,6 +5,7 @@
 //! enforced.  When HTTP yields insufficient text content, a Playwright
 //! subprocess is invoked as a fallback if `PLAYWRIGHT_BIN` is configured.
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -134,8 +135,8 @@ impl RobotsTxt {
         // Sort by length descending so the first match is always the longest
         // (most specific) rule — allows early exit via `find()` instead of
         // scanning the whole list to compute the maximum (#61).
-        disallowed.sort_unstable_by(|a, b| b.len().cmp(&a.len()));
-        allowed.sort_unstable_by(|a, b| b.len().cmp(&a.len()));
+        disallowed.sort_unstable_by_key(|b| Reverse(b.len()));
+        allowed.sort_unstable_by_key(|b| Reverse(b.len()));
 
         Self {
             disallowed,
