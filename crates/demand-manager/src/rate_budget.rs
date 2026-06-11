@@ -94,15 +94,21 @@ impl RateBudget {
         let budgets = self.budgets.lock().unwrap();
         if let Some(budget) = budgets.get(&venue) {
             // saturating_sub via compare to avoid wrapping below zero
-            budget.active.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-                Some(v.saturating_sub(1))
-            }).ok();
+            budget
+                .active
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                    Some(v.saturating_sub(1))
+                })
+                .ok();
         }
     }
 
     /// Current active slot count for `venue` (for testing).
     pub fn active(&self, venue: SupportedVenue) -> u32 {
         let budgets = self.budgets.lock().unwrap();
-        budgets.get(&venue).map(|b| b.active.load(Ordering::Relaxed)).unwrap_or(0)
+        budgets
+            .get(&venue)
+            .map(|b| b.active.load(Ordering::Relaxed))
+            .unwrap_or(0)
     }
 }

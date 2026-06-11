@@ -72,7 +72,8 @@ mod tests {
     #[test]
     fn fixed_size_produces_intent() {
         let action = buy_fixed("0.01");
-        let intent = build_intent_from_action(&action, "BTC-USDT", "ema_cross_v1".to_owned()).unwrap();
+        let intent =
+            build_intent_from_action(&action, "BTC-USDT", "ema_cross_v1".to_owned()).unwrap();
         assert_eq!(intent.instrument_id, "BTC-USDT");
         assert_eq!(intent.strategy_id.as_deref(), Some("ema_cross_v1"));
         assert!(!intent.idempotency_key.is_nil());
