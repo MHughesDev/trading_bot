@@ -5,25 +5,26 @@
 //! per-venue budgets.  The budget is a single server-wide resource shared across all users.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use domain::SupportedVenue;
 use thiserror::Error;
 
 /// Free-tier capacity for one venue.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct VenueBudget {
     /// Maximum concurrent active subscriptions for this venue.
     pub max_concurrent: u32,
-    /// Currently active subscription count.
-    active: u32,
+    /// Currently active subscription count (atomic for lock-free increment/decrement).
+    active: AtomicU32,
 }
 
 impl VenueBudget {
     pub fn new(max_concurrent: u32) -> Self {
         Self {
             max_concurrent,
-            active: 0,
+            active: AtomicU32::new(0),
         }
     }
 }
@@ -76,28 +77,32 @@ impl RateBudget {
         let mut budgets = self.budgets.lock().unwrap();
         let budget = budgets.entry(venue).or_insert_with(|| VenueBudget::new(10));
 
-        if budget.active >= budget.max_concurrent {
+        let prev = budget.active.fetch_add(1, Ordering::Relaxed);
+        if prev >= budget.max_concurrent {
+            budget.active.fetch_sub(1, Ordering::Relaxed);
             return Err(BudgetExceeded {
                 venue: venue.as_str().to_owned(),
-                active: budget.active,
+                active: prev,
                 max: budget.max_concurrent,
             });
         }
-        budget.active += 1;
         Ok(())
     }
 
     /// Release one slot for `venue` (call when a lane stops).
     pub fn release(&self, venue: SupportedVenue) {
-        let mut budgets = self.budgets.lock().unwrap();
-        if let Some(budget) = budgets.get_mut(&venue) {
-            budget.active = budget.active.saturating_sub(1);
+        let budgets = self.budgets.lock().unwrap();
+        if let Some(budget) = budgets.get(&venue) {
+            // saturating_sub via compare to avoid wrapping below zero
+            budget.active.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                Some(v.saturating_sub(1))
+            }).ok();
         }
     }
 
     /// Current active slot count for `venue` (for testing).
     pub fn active(&self, venue: SupportedVenue) -> u32 {
         let budgets = self.budgets.lock().unwrap();
-        budgets.get(&venue).map(|b| b.active).unwrap_or(0)
+        budgets.get(&venue).map(|b| b.active.load(Ordering::Relaxed)).unwrap_or(0)
     }
 }
