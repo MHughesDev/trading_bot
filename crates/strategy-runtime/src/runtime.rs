@@ -106,7 +106,10 @@ impl StrategyInstance {
     /// 4. Collect and return any order intents — the caller routes them through the risk gate.
     pub fn process_event(&mut self, event: WorldEvent) -> Vec<OrderIntent> {
         // If this is a feature event, resolve the slot and write it before applying state.
-        if let WorldEvent::Feature { ref feature_value, .. } = event {
+        if let WorldEvent::Feature {
+            ref feature_value, ..
+        } = event
+        {
             if let Some(slot) = self.registry.get(&feature_value.name) {
                 self.state.set_feature(slot, feature_value.value);
             }
