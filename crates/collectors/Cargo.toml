@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 domain = { workspace = true }
 event-bus = { workspace = true }
+dashmap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
@@ -19,3 +20,4 @@ futures-util = "0.3"
 rust_decimal = { workspace = true }
 rtrb = { workspace = true }
 rkyv = { workspace = true }
+xxhash-rust = { workspace = true, features = ["xxh3"] }

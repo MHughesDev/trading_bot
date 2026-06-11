@@ -10,6 +10,7 @@
 //! (see migration 0008).
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -17,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::ledger::AccountMode;
+use domain::order::Side;
 
 /// An open FIFO lot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +28,8 @@ pub struct PnlLot {
     pub account_mode: AccountMode,
     pub instrument_id: String,
     pub open_event_id: Uuid,
+    /// Trade side — stored as the `Side` enum (not a String) to avoid per-lot allocation (#31).
+    pub side: Side,
     pub open_qty: Decimal,
     pub remaining_qty: Decimal,
     pub open_price: Decimal,
@@ -53,12 +57,15 @@ type LotKey = (Uuid, String, String);
 /// In-memory FIFO P&L engine.
 ///
 /// Thread-safety is left to the caller — wrap in `Mutex` / `RwLock` as needed.
+///
+/// `Arc<PnlLot>` is used in both `lots` and `lot_archive` so that a single heap
+/// allocation is shared between the two containers — no struct clone on insert (#35, #36).
 #[derive(Debug, Default)]
 pub struct FifoEngine {
     /// Open lots, oldest first (front = next to consume).
-    lots: HashMap<LotKey, VecDeque<PnlLot>>,
+    lots: HashMap<LotKey, VecDeque<Arc<PnlLot>>>,
     /// Archive of every lot ever opened — used for lookups after the lot is consumed.
-    lot_archive: HashMap<Uuid, PnlLot>,
+    lot_archive: HashMap<Uuid, Arc<PnlLot>>,
     /// All recorded close slices.
     closes: Vec<PnlClose>,
 }
@@ -73,6 +80,9 @@ impl FifoEngine {
     }
 
     /// Record an opening fill: creates a new lot.
+    ///
+    /// The lot is wrapped in `Arc` once and shared between the active queue and the
+    /// archive — no struct clone (#35, #36).
     #[allow(clippy::too_many_arguments)]
     pub fn open_lot(
         &mut self,
@@ -80,27 +90,30 @@ impl FifoEngine {
         account_mode: AccountMode,
         instrument_id: &str,
         open_event_id: Uuid,
+        side: Side,
         qty: Decimal,
         price: Decimal,
         usd_rate: Decimal,
-    ) -> PnlLot {
-        let lot = PnlLot {
+    ) -> Arc<PnlLot> {
+        let lot = Arc::new(PnlLot {
             id: Uuid::new_v4(),
             user_id,
             account_mode,
             instrument_id: instrument_id.to_owned(),
             open_event_id,
+            side,
             open_qty: qty,
             remaining_qty: qty,
             open_price: price,
             open_usd_rate: usd_rate,
             opened_at: Utc::now(),
-        };
-        self.lot_archive.insert(lot.id, lot.clone());
+        });
+        // Share via refcount — no struct clone.
+        self.lot_archive.insert(lot.id, Arc::clone(&lot));
         self.lots
             .entry(Self::key(user_id, account_mode, instrument_id))
             .or_default()
-            .push_back(lot.clone());
+            .push_back(Arc::clone(&lot));
         lot
     }
 

@@ -1,3 +1,8 @@
+# target-cpu=native is NOT set here — it breaks CI runners that lack AVX-512.
+# For production single-machine deployments, set it at build time:
+#   RUSTFLAGS="-C target-cpu=native" cargo build --release
+# For a portable AVX2 baseline use target-cpu=x86-64-v3 instead.
+
 [alias]
 xt = "run --package xtask --"
 xtask = "run --package xtask --"

@@ -10,6 +10,10 @@
 //!
 //!   collector-equity AAPL SPY MSFT
 
+#[cfg(not(test))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::sync::Arc;
 
 use anyhow::Context;

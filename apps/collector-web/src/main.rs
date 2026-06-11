@@ -6,6 +6,10 @@
 //!   WEB_SCRAPER_RATE_SECS    — minimum seconds between requests per domain (default: 2)
 //!   WEB_SCRAPER_POLL_SECS    — seconds between full scrape passes (default: 300)
 
+#[cfg(not(test))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::sync::Arc;
 use std::time::Duration;
 

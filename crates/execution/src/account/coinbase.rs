@@ -36,8 +36,8 @@ impl CoinbaseAccountSource {
     }
 
     fn auth_headers(creds: &VenueCredentials) -> Result<header::HeaderMap, AccountSourceError> {
-        let key = String::from_utf8(creds.plaintext.clone())
-            .map_err(|e| AccountSourceError::Credentials(e.to_string()))?;
+        let key = std::str::from_utf8(&creds.plaintext)
+            .map_err(|_| AccountSourceError::Credentials("credentials are not valid UTF-8".to_owned()))?;
         let mut headers = header::HeaderMap::new();
         if let Ok(v) = header::HeaderValue::from_str(&key) {
             headers.insert("CB-ACCESS-KEY", v);
@@ -84,30 +84,23 @@ impl AccountSource for CoinbaseAccountSource {
             .get(format!("{}/api/v3/brokerage/accounts", Self::base_url()))
             .headers(headers)
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
-        let accounts: Vec<CoinbaseAccount> = serde_json::from_value(parsed["accounts"].clone())
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let accounts: Vec<CoinbaseAccount> = serde_json::from_value(parsed["accounts"].clone())?;
 
         accounts
             .into_iter()
             .map(|a| {
-                let available = Decimal::from_str(&a.available_balance.value)
-                    .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
-                let locked = Decimal::from_str(&a.hold.value)
-                    .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+                let available = Decimal::from_str(&a.available_balance.value)?;
+                let locked = Decimal::from_str(&a.hold.value)?;
                 Ok(Balance {
                     asset: a.currency,
                     available: Size::from_decimal(available),
@@ -131,19 +124,15 @@ impl AccountSource for CoinbaseAccountSource {
             ))
             .headers(headers)
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         let spot: Vec<CoinbasePosition> =
             serde_json::from_value(parsed["breakdown"]["spot_positions"].clone())
@@ -151,10 +140,8 @@ impl AccountSource for CoinbaseAccountSource {
 
         spot.into_iter()
             .map(|p| {
-                let qty = Decimal::from_str(&p.net_size)
-                    .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
-                let price = Decimal::from_str(&p.avg_entry_price)
-                    .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+                let qty = Decimal::from_str(&p.net_size)?;
+                let price = Decimal::from_str(&p.avg_entry_price)?;
                 let upnl = Decimal::from_str(&p.unrealized_pnl).ok();
                 Ok(VenuePosition {
                     instrument_id: p.product_id,
@@ -185,21 +172,15 @@ impl AccountSource for CoinbaseAccountSource {
             req = req.query(&[("start_sequence_timestamp", s.to_rfc3339())]);
         }
 
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+        let resp = req.send().await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         let fills = parsed["fills"].as_array().cloned().unwrap_or_default();
         Ok(fills

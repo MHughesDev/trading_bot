@@ -28,3 +28,4 @@ axum = { workspace = true }
 async-trait = "0.1"
 sqlx = { workspace = true }
 serde_json = { workspace = true }
+mimalloc = { workspace = true }

@@ -45,6 +45,13 @@ pub struct EventEnvelope {
 
 const _: () = assert!(std::mem::size_of::<EventEnvelope>() <= 96);
 
+/// Type alias kept for migration compatibility.
+///
+/// `CompactEnvelope` and `EventEnvelope` are the same type — this alias lets
+/// call sites that were written against the `CompactEnvelope` name continue to
+/// compile while the codebase converges on a single name.
+pub type CompactEnvelope = EventEnvelope;
+
 impl EventEnvelope {
     /// Convenience constructor.
     pub fn new(

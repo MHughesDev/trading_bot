@@ -42,6 +42,17 @@ impl Publisher {
         Ok(())
     }
 
+    /// Fire-and-forget publish — does not wait for server ACK.
+    /// Use for the JetStream tee path only; never call from the strategy hot path.
+    pub fn publish_no_ack(&self, subject: &str, payload: Vec<u8>) {
+        let js = self.js.clone();
+        let subject = subject.to_owned();
+        tokio::spawn(async move {
+            let _ = js.publish(subject, payload.into()).await;
+            // ACK dropped intentionally — tee path only
+        });
+    }
+
     /// Serialize and spawn a background task to publish — never blocks the caller.
     ///
     /// Used by the tee task so JetStream writes never stall the hot-path rings.

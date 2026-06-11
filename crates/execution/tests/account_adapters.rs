@@ -96,7 +96,7 @@ async fn tradier_missing_separator_returns_credentials_error() {
 fn account_source_error_display_is_not_empty() {
     let e = AccountSourceError::Credentials("missing key".to_owned());
     assert!(!e.to_string().is_empty());
-    let e2 = AccountSourceError::Http("503".to_owned());
+    let e2 = AccountSourceError::HttpStatus("503".to_owned());
     assert!(!e2.to_string().is_empty());
     let e3 = AccountSourceError::Parse("invalid json".to_owned());
     assert!(!e3.to_string().is_empty());

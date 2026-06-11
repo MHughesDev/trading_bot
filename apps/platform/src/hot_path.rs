@@ -144,7 +144,7 @@ async fn stage_strategy_eval(
         match world_cons.pop() {
             Ok(event) => {
                 if let Some(ref mut instance) = strategy {
-                    for intent in instance.process_event(event) {
+                    for intent in instance.process_event(&event) {
                         if intent_prod.push(intent).is_err() {
                             warn!(instrument_id, "ring_intent full — intent dropped");
                         }

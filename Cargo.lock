@@ -832,6 +832,7 @@ dependencies = [
  "collectors",
  "domain",
  "event-bus",
+ "mimalloc",
  "observability",
  "tokio",
  "tracing",
@@ -846,6 +847,7 @@ dependencies = [
  "collectors",
  "domain",
  "event-bus",
+ "mimalloc",
  "observability",
  "tokio",
  "tracing",
@@ -860,6 +862,7 @@ dependencies = [
  "collectors",
  "domain",
  "event-bus",
+ "mimalloc",
  "observability",
  "tokio",
  "tracing",
@@ -874,6 +877,7 @@ dependencies = [
  "collectors",
  "domain",
  "event-bus",
+ "mimalloc",
  "observability",
  "tokio",
  "tracing",
@@ -888,6 +892,7 @@ dependencies = [
  "collectors",
  "domain",
  "event-bus",
+ "mimalloc",
  "observability",
  "tokio",
  "tracing",
@@ -902,6 +907,7 @@ dependencies = [
  "collectors",
  "domain",
  "event-bus",
+ "mimalloc",
  "observability",
  "tokio",
  "tracing",
@@ -916,6 +922,7 @@ dependencies = [
  "collectors",
  "domain",
  "event-bus",
+ "mimalloc",
  "observability",
  "tokio",
  "tracing",
@@ -930,6 +937,7 @@ dependencies = [
  "collectors",
  "domain",
  "event-bus",
+ "mimalloc",
  "observability",
  "tokio",
  "tracing",
@@ -944,6 +952,7 @@ dependencies = [
  "collectors",
  "domain",
  "event-bus",
+ "mimalloc",
  "observability",
  "tokio",
  "tracing",
@@ -955,6 +964,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "dashmap",
  "domain",
  "event-bus",
  "futures-util",
@@ -968,6 +978,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.24.0",
  "tracing",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -1248,6 +1259,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1257,6 +1282,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 name = "demand-manager"
 version = "0.1.0"
 dependencies = [
+ "dashmap",
  "domain",
  "thiserror 2.0.18",
  "tokio",
@@ -1340,6 +1366,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "uuid",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -1388,6 +1415,7 @@ dependencies = [
  "chrono",
  "domain",
  "event-bus",
+ "mimalloc",
  "observability",
  "semantic",
  "serde_json",
@@ -1444,6 +1472,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -2313,6 +2342,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
+name = "libmimalloc-sys"
+version = "0.1.49"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a45a52f43e1c16f667ccfe4dd8c85b7f7c204fd5e3bf46c5b0db9a5c3c0b8e9"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "libredox"
 version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2446,6 +2484,15 @@ name = "memchr"
 version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
+
+[[package]]
+name = "mimalloc"
+version = "0.1.52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d4139bb28d14ad1facf21d5eb8825051b326e172d216b39f6d31df53cc97862"
+dependencies = [
+ "libmimalloc-sys",
+]
 
 [[package]]
 name = "mime"
@@ -2952,6 +2999,7 @@ dependencies = [
  "domain",
  "event-bus",
  "execution",
+ "mimalloc",
  "observability",
  "reconciliation",
  "risk",
@@ -4295,6 +4343,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
+ "smallvec",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5051,6 +5100,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "collectors",
+ "dashmap",
  "domain",
  "event-bus",
  "execution",
@@ -5667,6 +5717,12 @@ dependencies = [
 [[package]]
 name = "xtask"
 version = "0.1.0"
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
 
 [[package]]
 name = "yaml-rust2"

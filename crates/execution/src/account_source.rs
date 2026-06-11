@@ -54,10 +54,25 @@ pub struct VenueTransaction {
 /// Errors from account-source queries.
 #[derive(Debug, Error)]
 pub enum AccountSourceError {
+    /// HTTP transport error (typed, formatted only on display).
     #[error("venue HTTP error: {0}")]
-    Http(String),
+    Http(#[from] reqwest::Error),
+    /// HTTP error response body (plain text from the venue).
+    #[error("venue HTTP error: {0}")]
+    HttpStatus(String),
+    /// Credential decode / validation error.
     #[error("credential error: {0}")]
     Credentials(String),
+    /// Bytes-to-UTF-8 conversion of the credential blob failed.
+    #[error("credential error: {0}")]
+    CredentialEncoding(#[from] std::string::FromUtf8Error),
+    /// JSON / decimal parse error (typed, formatted only on display).
+    #[error("parse error: {0}")]
+    ParseJson(#[from] serde_json::Error),
+    /// Decimal parse error (typed, formatted only on display).
+    #[error("parse error: {0}")]
+    ParseDecimal(#[from] rust_decimal::Error),
+    /// Legacy string parse error — kept for any callers that still use it.
     #[error("parse error: {0}")]
     Parse(String),
     #[error("not implemented — full REST adapter deferred to Phase 4")]

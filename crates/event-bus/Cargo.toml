@@ -13,3 +13,4 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 base64 = "0.22"
 rkyv = { workspace = true }
+xxhash-rust = { workspace = true }

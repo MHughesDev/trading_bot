@@ -31,15 +31,12 @@ impl OandaAccountSource {
     }
 
     fn parse_creds(creds: &VenueCredentials) -> Result<(String, String), AccountSourceError> {
-        let text = String::from_utf8(creds.plaintext.clone())
-            .map_err(|e| AccountSourceError::Credentials(e.to_string()))?;
-        let parts: Vec<&str> = text.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(AccountSourceError::Credentials(
-                "expected api_token:account_id".to_owned(),
-            ));
-        }
-        Ok((parts[0].to_owned(), parts[1].to_owned()))
+        let text = std::str::from_utf8(&creds.plaintext)
+            .map_err(|_| AccountSourceError::Credentials("credentials are not valid UTF-8".to_owned()))?;
+        let mut parts = text.splitn(2, ':');
+        let token = parts.next().unwrap_or("").to_owned();
+        let account_id = parts.next().ok_or_else(|| AccountSourceError::Credentials("expected api_token:account_id".to_owned()))?.to_owned();
+        Ok((token, account_id))
     }
 
     fn auth_headers(token: &str) -> header::HeaderMap {
@@ -76,19 +73,15 @@ impl AccountSource for OandaAccountSource {
             ))
             .headers(Self::auth_headers(&token))
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         let bal = parsed["account"]["balance"]
             .as_str()
@@ -121,19 +114,15 @@ impl AccountSource for OandaAccountSource {
             ))
             .headers(Self::auth_headers(&token))
             .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+            .await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         let trades = parsed["trades"].as_array().cloned().unwrap_or_default();
         Ok(trades
@@ -175,21 +164,15 @@ impl AccountSource for OandaAccountSource {
             req = req.query(&[("from", s.to_rfc3339())]);
         }
 
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| AccountSourceError::Http(e.to_string()))?;
+        let resp = req.send().await?;
 
         if !resp.status().is_success() {
-            return Err(AccountSourceError::Http(
+            return Err(AccountSourceError::HttpStatus(
                 resp.text().await.unwrap_or_default(),
             ));
         }
 
-        let parsed: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AccountSourceError::Parse(e.to_string()))?;
+        let parsed: serde_json::Value = resp.json().await?;
 
         let pages = parsed["pages"].as_array().cloned().unwrap_or_default();
         Ok(pages

@@ -74,7 +74,7 @@ fn current_time_tracks_event_available_time_not_wall_clock() {
         available_time: past_time,
     };
 
-    instance.process_event(event);
+    instance.process_event(&event);
 
     // After processing, current_time must equal the event's available_time.
     assert_eq!(

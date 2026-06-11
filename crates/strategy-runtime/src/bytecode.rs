@@ -267,6 +267,180 @@ fn bar_field_f64(bar: &BarPayload, field: &BarField) -> f64 {
     d.to_f64().unwrap_or(0.0)
 }
 
+/// Execute a compiled program against a feature slot array.
+///
+/// `feature_slots` is the global `WorldState::feature_slots` array.
+/// `local_to_global` maps each program-local feature slot index to a global registry slot.
+/// It is built once at `StrategyInstance` init by `resolve_program_slots`.
+///
+/// Returns `true` when the program produces a non-zero result.
+/// Returns `false` on missing feature/bar data, division by zero, or stack overflow.
+pub fn run_slots(
+    program: &Program,
+    local_to_global: &[u16],
+    feature_slots: &[f64],
+    bars: &HashMap<Timeframe, BarPayload>,
+) -> bool {
+    const STACK_DEPTH: usize = 32;
+    let mut stack = [0.0_f64; STACK_DEPTH];
+    let mut sp: usize = 0;
+
+    for op in &program.ops {
+        match op {
+            Op::LoadFeature(local_slot) => {
+                let global_slot = match local_to_global.get(*local_slot as usize) {
+                    Some(&g) => g,
+                    None => return false,
+                };
+                let val = match feature_slots.get(global_slot as usize) {
+                    Some(&v) if !v.is_nan() => v,
+                    _ => return false,
+                };
+                if sp >= STACK_DEPTH {
+                    return false;
+                }
+                stack[sp] = val;
+                sp += 1;
+            }
+            Op::LoadBarField(field) => {
+                let bar = match bars.get(&Timeframe::Minutes1) {
+                    Some(b) => b,
+                    None => return false,
+                };
+                if sp >= STACK_DEPTH {
+                    return false;
+                }
+                stack[sp] = bar_field_f64(bar, field);
+                sp += 1;
+            }
+            Op::Const(v) => {
+                if sp >= STACK_DEPTH {
+                    return false;
+                }
+                stack[sp] = *v;
+                sp += 1;
+            }
+            Op::Neg => {
+                if sp == 0 {
+                    return false;
+                }
+                stack[sp - 1] = -stack[sp - 1];
+            }
+            Op::Add => {
+                if sp < 2 {
+                    return false;
+                }
+                let b = stack[sp - 1];
+                sp -= 1;
+                stack[sp - 1] += b;
+            }
+            Op::Sub => {
+                if sp < 2 {
+                    return false;
+                }
+                let b = stack[sp - 1];
+                sp -= 1;
+                stack[sp - 1] -= b;
+            }
+            Op::Mul => {
+                if sp < 2 {
+                    return false;
+                }
+                let b = stack[sp - 1];
+                sp -= 1;
+                stack[sp - 1] *= b;
+            }
+            Op::Div => {
+                if sp < 2 {
+                    return false;
+                }
+                let b = stack[sp - 1];
+                if b == 0.0 {
+                    return false;
+                }
+                sp -= 1;
+                stack[sp - 1] /= b;
+            }
+            Op::Gt => {
+                if sp < 2 {
+                    return false;
+                }
+                let b = stack[sp - 1];
+                sp -= 1;
+                stack[sp - 1] = if stack[sp - 1] > b { 1.0 } else { 0.0 };
+            }
+            Op::Lt => {
+                if sp < 2 {
+                    return false;
+                }
+                let b = stack[sp - 1];
+                sp -= 1;
+                stack[sp - 1] = if stack[sp - 1] < b { 1.0 } else { 0.0 };
+            }
+            Op::GtEq => {
+                if sp < 2 {
+                    return false;
+                }
+                let b = stack[sp - 1];
+                sp -= 1;
+                stack[sp - 1] = if stack[sp - 1] >= b { 1.0 } else { 0.0 };
+            }
+            Op::LtEq => {
+                if sp < 2 {
+                    return false;
+                }
+                let b = stack[sp - 1];
+                sp -= 1;
+                stack[sp - 1] = if stack[sp - 1] <= b { 1.0 } else { 0.0 };
+            }
+            Op::EqEq => {
+                if sp < 2 {
+                    return false;
+                }
+                let b = stack[sp - 1];
+                sp -= 1;
+                let a = stack[sp - 1];
+                stack[sp - 1] = if (a - b).abs() < f64::EPSILON {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+            Op::BangEq => {
+                if sp < 2 {
+                    return false;
+                }
+                let b = stack[sp - 1];
+                sp -= 1;
+                let a = stack[sp - 1];
+                stack[sp - 1] = if (a - b).abs() >= f64::EPSILON {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+        }
+    }
+
+    sp > 0 && stack[sp - 1] != 0.0
+}
+
+/// Build the `local_to_global` slot mapping for a compiled program.
+///
+/// For each program-local feature slot (index into `program.feature_names`),
+/// return the corresponding global registry slot from `registry`.
+/// Any name not yet in the registry is assigned a new slot.
+pub fn resolve_program_slots(
+    program: &Program,
+    registry: &mut crate::registry::FeatureRegistry,
+) -> Vec<u16> {
+    program
+        .feature_names
+        .iter()
+        .map(|name| registry.get_or_assign(name))
+        .collect()
+}
+
 /// Execute a compiled program against current feature and bar state.
 ///
 /// Returns `true` when the program produces a non-zero result.

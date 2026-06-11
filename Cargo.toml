@@ -38,6 +38,9 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+# memory allocator
+mimalloc = { version = "0.1", default-features = false }
+
 # async runtime
 tokio = { version = "1", features = ["full"] }
 
@@ -70,6 +73,12 @@ rkyv = { version = "0.8", features = ["std"] }
 
 # fast non-cryptographic hashing for intern table
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# lock-free concurrent hash map
+dashmap = "6"
+
+# small-size-optimized vec (avoids heap for short feature lists)
+smallvec = { version = "1", features = ["union"] }
 
 # external connectivity
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
@@ -125,9 +134,12 @@ missing_panics_doc = "allow"
 module_name_repetitions = "allow"
 
 [profile.release]
-lto = "thin"
-codegen-units = 1
 opt-level = 3
+lto = "fat"
+panic = "abort"
+codegen-units = 1
+strip = false
+debug = 1
 
 [profile.dev]
 opt-level = 0

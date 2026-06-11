@@ -11,6 +11,7 @@ chrono = { workspace = true }
 rust_decimal = { workspace = true }
 thiserror = { workspace = true }
 rkyv = { workspace = true }
+xxhash-rust = { workspace = true }
 
 [dev-dependencies]
 rust_decimal_macros = "1"

@@ -3,6 +3,7 @@
 //! Only `SizeMode::Fixed` is supported in v1.0; other modes parse successfully
 //! but are not yet executable.
 
+use std::collections::HashSet;
 use std::str::FromStr;
 
 use domain::money::Size;
@@ -15,7 +16,7 @@ use domain::strategy_def::actions::{Action, ActionKind, SizeMode};
 pub fn build_intent_from_action(
     action: &Action,
     instrument_id: &str,
-    strategy_id: &str,
+    strategy_id: String,
 ) -> Option<OrderIntent> {
     let ActionKind::PlaceOrder { order } = &action.kind;
     match order.size_mode {
@@ -27,7 +28,7 @@ pub fn build_intent_from_action(
                 OrderType::Market,
                 size,
                 None,
-                Some(strategy_id.to_owned()),
+                Some(strategy_id),
             ))
         }
         // PercentOfBalance and RiskUnit are v1.0 parse-only; not executable yet.
@@ -38,14 +39,14 @@ pub fn build_intent_from_action(
 /// Build intents for all actions that match any of the emitted `signals`.
 pub fn build_intents_for_signals(
     actions: &[Action],
-    signals: &[String],
+    signals: &HashSet<String>,
     instrument_id: &str,
     strategy_id: &str,
 ) -> Vec<OrderIntent> {
     actions
         .iter()
         .filter(|a| signals.contains(&a.on_signal))
-        .filter_map(|a| build_intent_from_action(a, instrument_id, strategy_id))
+        .filter_map(|a| build_intent_from_action(a, instrument_id, strategy_id.to_owned()))
         .collect()
 }
 
@@ -71,7 +72,8 @@ mod tests {
     #[test]
     fn fixed_size_produces_intent() {
         let action = buy_fixed("0.01");
-        let intent = build_intent_from_action(&action, "BTC-USDT", "ema_cross_v1").unwrap();
+        let intent =
+            build_intent_from_action(&action, "BTC-USDT", "ema_cross_v1".to_owned()).unwrap();
         assert_eq!(intent.instrument_id, "BTC-USDT");
         assert_eq!(intent.strategy_id.as_deref(), Some("ema_cross_v1"));
         assert!(!intent.idempotency_key.is_nil());
@@ -80,7 +82,7 @@ mod tests {
     #[test]
     fn invalid_size_returns_none() {
         let action = buy_fixed("not_a_number");
-        assert!(build_intent_from_action(&action, "BTC-USDT", "s").is_none());
+        assert!(build_intent_from_action(&action, "BTC-USDT", "s".to_owned()).is_none());
     }
 
     #[test]
@@ -95,6 +97,6 @@ mod tests {
                 },
             },
         };
-        assert!(build_intent_from_action(&action, "BTC-USDT", "s").is_none());
+        assert!(build_intent_from_action(&action, "BTC-USDT", "s".to_owned()).is_none());
     }
 }

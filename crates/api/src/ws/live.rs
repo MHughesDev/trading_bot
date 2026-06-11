@@ -119,9 +119,9 @@ async fn handle_client_message(
                 let _ = socket
                     .send(json_msg(&WsOutMessage::Subscribed {
                         sub_id: sub.id,
-                        panel_id: sub.panel_id,
-                        lane: sub.lane,
-                        instrument: sub.instrument,
+                        panel_id: sub.panel_id.clone(),
+                        lane: sub.lane.clone(),
+                        instrument: sub.instrument.clone(),
                     }))
                     .await;
             }
