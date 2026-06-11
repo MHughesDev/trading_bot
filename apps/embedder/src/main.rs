@@ -11,7 +11,6 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-
 use anyhow::Context;
 use event_bus::{connect, setup_streams};
 use semantic::{CollectionSpec, MilvusClient, MilvusConfig};

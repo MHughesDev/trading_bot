@@ -93,8 +93,7 @@ impl AccountSource for CoinbaseAccountSource {
 
         let parsed: serde_json::Value = resp.json().await?;
 
-        let accounts: Vec<CoinbaseAccount> =
-            serde_json::from_value(parsed["accounts"].clone())?;
+        let accounts: Vec<CoinbaseAccount> = serde_json::from_value(parsed["accounts"].clone())?;
 
         accounts
             .into_iter()
