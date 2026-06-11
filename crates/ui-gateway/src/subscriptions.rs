@@ -62,10 +62,10 @@ impl SubscriptionRegistry {
     #[allow(clippy::too_many_arguments)]
     pub fn subscribe(
         &self,
-        panel_id: String,
-        user_id: String,
+        panel_id: &str,
+        user_id: &str,
         lane: &str,
-        instrument: String,
+        instrument: &str,
         requesting_user_id: &str,
         depth: Option<u32>,
         max_fps: Option<u32>,
@@ -73,7 +73,7 @@ impl SubscriptionRegistry {
         if is_private_lane(lane) && user_id != requesting_user_id {
             return Err(SubscriptionError::Unauthorized {
                 lane: lane.to_owned(),
-                owner: user_id,
+                owner: user_id.to_owned(),
                 requesting_user: requesting_user_id.to_owned(),
             });
         }
@@ -83,16 +83,16 @@ impl SubscriptionRegistry {
 
         let sub = Arc::new(Subscription {
             id: Uuid::new_v4(),
-            panel_id,
-            user_id,
+            panel_id: panel_id.to_owned(),
+            user_id: user_id.to_owned(),
             lane: lane.to_owned(),
-            instrument: instrument.clone(),
+            instrument: instrument.to_owned(),
             depth,
             max_fps,
             demand_lane: demand_lane.clone(),
         });
 
-        self.demand.add(&demand_lane, &instrument);
+        self.demand.add(&demand_lane, instrument);
         self.subs.lock().unwrap().insert(sub.id, Arc::clone(&sub));
         Ok(sub)
     }

@@ -51,10 +51,10 @@ pub async fn create_ui_subscriptions(
 
     for spec in &req.subscribe {
         match state.gateway.subscribe(
-            req.panel_id.clone(),
-            user_id.clone(),
+            &req.panel_id,
+            &user_id,
             &spec.lane,
-            spec.instrument.clone(),
+            &spec.instrument,
             &user_id,
             spec.depth,
             spec.max_fps,

@@ -14,10 +14,10 @@ fn registry() -> SubscriptionRegistry {
 fn user_can_subscribe_own_private_lane() {
     let reg = registry();
     let result = reg.subscribe(
-        "panel_1".to_owned(),
-        "alice".to_owned(),
+        "panel_1",
+        "alice",
         "orders.events",
-        "BTC-USD".to_owned(),
+        "BTC-USD",
         "alice", // requesting as alice
         None,
         None,
@@ -29,10 +29,10 @@ fn user_can_subscribe_own_private_lane() {
 fn user_cannot_subscribe_another_users_private_lane() {
     let reg = registry();
     let result = reg.subscribe(
-        "panel_1".to_owned(),
-        "alice".to_owned(), // subscription owned by alice
+        "panel_1",
+        "alice", // subscription owned by alice
         "orders.events",
-        "BTC-USD".to_owned(),
+        "BTC-USD",
         "bob", // but requested by bob — must fail
         None,
         None,
@@ -48,10 +48,10 @@ fn public_lane_is_shareable() {
     let reg = registry();
     // Bob can subscribe to Alice's public data (it's not scoped per user anyway).
     let result = reg.subscribe(
-        "panel_2".to_owned(),
-        "alice".to_owned(),
+        "panel_2",
+        "alice",
         "market.bars.1m",
-        "AAPL".to_owned(),
+        "AAPL",
         "bob",
         None,
         None,
@@ -63,10 +63,10 @@ fn public_lane_is_shareable() {
 fn unknown_lane_is_rejected() {
     let reg = registry();
     let result = reg.subscribe(
-        "panel_3".to_owned(),
-        "alice".to_owned(),
+        "panel_3",
+        "alice",
         "not.a.real.lane",
-        "BTC-USD".to_owned(),
+        "BTC-USD",
         "alice",
         None,
         None,
@@ -78,10 +78,10 @@ fn unknown_lane_is_rejected() {
 fn ui_orderbook_snapshot_is_accepted() {
     let reg = registry();
     let result = reg.subscribe(
-        "ob_panel".to_owned(),
-        "alice".to_owned(),
+        "ob_panel",
+        "alice",
         "ui.orderbook.snapshot",
-        "BTC-USD".to_owned(),
+        "BTC-USD",
         "alice",
         Some(20),
         Some(20),
@@ -96,10 +96,10 @@ fn subscribe_increments_demand_remove_decrements() {
 
     let sub = reg
         .subscribe(
-            "panel_a".to_owned(),
-            "alice".to_owned(),
+            "panel_a",
+            "alice",
             "market.bars.1m",
-            "ETH-USD".to_owned(),
+            "ETH-USD",
             "alice",
             None,
             None,
@@ -117,20 +117,20 @@ fn remove_all_for_user_cleans_up_demand() {
     let reg = registry();
 
     reg.subscribe(
-        "panel_1".to_owned(),
-        "alice".to_owned(),
+        "panel_1",
+        "alice",
         "market.bars.1m",
-        "BTC-USD".to_owned(),
+        "BTC-USD",
         "alice",
         None,
         None,
     )
     .unwrap();
     reg.subscribe(
-        "panel_2".to_owned(),
-        "alice".to_owned(),
+        "panel_2",
+        "alice",
         "market.trades",
-        "BTC-USD".to_owned(),
+        "BTC-USD",
         "alice",
         None,
         None,
