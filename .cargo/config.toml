@@ -1,3 +1,9 @@
+[build]
+rustflags = ["-C", "target-cpu=native"]
+# WARNING: Binaries compiled with target-cpu=native are NOT portable across
+# CPU generations. Use target-cpu=x86-64-v3 for a portable baseline that
+# enables AVX2. Only use "native" for single-machine deployments.
+
 [alias]
 xt = "run --package xtask --"
 xtask = "run --package xtask --"
