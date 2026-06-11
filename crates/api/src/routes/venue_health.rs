@@ -9,6 +9,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
+use thiserror::Error;
 
 use crate::{auth::session::BearerToken, state::AppState};
 use domain::SupportedVenue;
@@ -19,6 +20,17 @@ pub struct VenueHealthResponse {
     pub ok: bool,
     pub latency_ms: u64,
     pub message: String,
+}
+
+/// Errors from a venue ping (#49 — typed error avoids eager format! allocation).
+#[derive(Debug, Error)]
+enum PingError {
+    #[error("client build error: {0}")]
+    Build(reqwest::Error),
+    #[error("HTTP {0}")]
+    BadStatus(u16),
+    #[error("connection error: {0}")]
+    Connection(reqwest::Error),
 }
 
 /// `GET /api/venues/:venue/health`
@@ -52,17 +64,17 @@ pub async fn venue_health(
             latency_ms,
             message: msg,
         },
-        Err(msg) => VenueHealthResponse {
+        Err(e) => VenueHealthResponse {
             ok: false,
             latency_ms,
-            message: msg,
+            message: e.to_string(),
         },
     })
 }
 
 /// Perform a cheap authenticated ping to the venue.  Returns the server time/
-/// version string on success or an error description on failure.
-async fn check_venue_health(venue: SupportedVenue, _state: &AppState) -> Result<String, String> {
+/// version string on success or a typed error on failure.
+async fn check_venue_health(venue: SupportedVenue, _state: &AppState) -> Result<String, PingError> {
     match venue {
         SupportedVenue::Kraken => ping_kraken().await,
         SupportedVenue::Alpaca => ping_alpaca().await,
@@ -78,55 +90,49 @@ async fn check_venue_health(venue: SupportedVenue, _state: &AppState) -> Result<
 // ── Per-venue ping helpers ───────────────────────────────────────────────────
 // Each does the lightest possible public ping (no auth required for server time).
 
-async fn ping_kraken() -> Result<String, String> {
-    let url = "https://api.kraken.com/0/public/Time";
-    do_get_ping(url, "result.unixtime").await
+async fn ping_kraken() -> Result<String, PingError> {
+    do_get_ping("https://api.kraken.com/0/public/Time").await
 }
 
-async fn ping_alpaca() -> Result<String, String> {
-    let url = "https://api.alpaca.markets/v2/clock";
-    do_get_ping(url, "timestamp").await
+async fn ping_alpaca() -> Result<String, PingError> {
+    do_get_ping("https://api.alpaca.markets/v2/clock").await
 }
 
-async fn ping_coinbase() -> Result<String, String> {
-    let url = "https://api.coinbase.com/v2/time";
-    do_get_ping(url, "data.iso").await
+async fn ping_coinbase() -> Result<String, PingError> {
+    do_get_ping("https://api.coinbase.com/v2/time").await
 }
 
-async fn ping_oanda() -> Result<String, String> {
+async fn ping_oanda() -> Result<String, PingError> {
     // OANDA v20 — instruments endpoint is public
-    let url = "https://api-fxtrade.oanda.com/v3/instruments";
-    do_get_ping(url, "instruments").await
+    do_get_ping("https://api-fxtrade.oanda.com/v3/instruments").await
 }
 
-async fn ping_kalshi() -> Result<String, String> {
-    let url = "https://api.elections.kalshi.com/trade-api/v2/exchange/status";
-    do_get_ping(url, "trading_active").await
+async fn ping_kalshi() -> Result<String, PingError> {
+    do_get_ping("https://api.elections.kalshi.com/trade-api/v2/exchange/status").await
 }
 
-async fn ping_tradier() -> Result<String, String> {
-    let url = "https://api.tradier.com/v1/markets/clock";
-    do_get_ping(url, "clock.state").await
+async fn ping_tradier() -> Result<String, PingError> {
+    do_get_ping("https://api.tradier.com/v1/markets/clock").await
 }
 
-async fn ping_zerox() -> Result<String, String> {
+async fn ping_zerox() -> Result<String, PingError> {
     // 0x swap API health
-    let url = "https://api.0x.org/swap/v1/sources";
-    do_get_ping(url, "records").await
+    do_get_ping("https://api.0x.org/swap/v1/sources").await
 }
 
-async fn ping_tradovate() -> Result<String, String> {
-    let url = "https://demo.tradovateapi.com/v1/contract/find";
-    do_get_ping(url, "id").await
+async fn ping_tradovate() -> Result<String, PingError> {
+    do_get_ping("https://demo.tradovateapi.com/v1/contract/find").await
 }
 
 /// Generic GET ping — succeeds if we get a 2xx response.  Returns a sanitized
 /// status string (no credential material can leak through this path).
-async fn do_get_ping(url: &str, _expected_field: &str) -> Result<String, String> {
+/// Uses typed errors (#49) so the error message string is only formatted on
+/// Display, not at construction time.
+async fn do_get_ping(url: &str) -> Result<String, PingError> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
-        .map_err(|e| format!("client build error: {e}"))?;
+        .map_err(PingError::Build)?;
 
     match client.get(url).send().await {
         Ok(resp) => {
@@ -134,9 +140,9 @@ async fn do_get_ping(url: &str, _expected_field: &str) -> Result<String, String>
             if status.is_success() {
                 Ok(format!("HTTP {status}"))
             } else {
-                Err(format!("HTTP {status}"))
+                Err(PingError::BadStatus(status.as_u16()))
             }
         }
-        Err(e) => Err(format!("connection error: {e}")),
+        Err(e) => Err(PingError::Connection(e)),
     }
 }

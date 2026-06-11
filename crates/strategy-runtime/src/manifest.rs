@@ -4,8 +4,6 @@
 //! `CapabilityManifest` from the strategy definition graph.  The manifest is
 //! persisted in `strategy_manifests` and used for apply-list filtering.
 
-use std::collections::HashSet;
-
 use domain::data_type::DataType;
 use domain::strategy_def::{nodes::NodeKind, StrategyDefinition};
 use serde::{Deserialize, Serialize};
@@ -97,50 +95,66 @@ fn infer_trigger(lanes: &[DataType]) -> EvaluationTrigger {
     }
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Pre-computation helpers (#56, #68) ───────────────────────────────────────
 
-/// Compile a capability manifest from a strategy definition.
+/// Collect deduplicated required lanes from a definition's inputs and DataSource nodes.
 ///
-/// Walks the `inputs` and any `DataSource` nodes to collect `required_lanes`.
-/// Collects named features from `inputs` with a `features` list.
-/// Infers the evaluation trigger and strategy kind.
-pub fn compile_manifest(def: &StrategyDefinition) -> CapabilityManifest {
-    let mut seen_lanes: HashSet<DataType> = HashSet::new();
-    let mut required_lanes: Vec<DataType> = Vec::new();
+/// Uses linear scan (no HashSet): expected lane count is < 10, so O(n²) is faster
+/// than a HashSet allocation in practice (#56).
+fn collect_required_lanes(def: &StrategyDefinition) -> Vec<DataType> {
+    let mut lanes: Vec<DataType> = Vec::new();
 
-    // Source lanes from InputDeclaration entries.
     for input in &def.inputs {
         if let Some(dt) = lane_to_data_type(&input.lane) {
-            if seen_lanes.insert(dt) {
-                required_lanes.push(dt);
+            if !lanes.contains(&dt) {
+                lanes.push(dt);
             }
         }
     }
 
-    // Source lanes from v1.5 DataSource nodes.
     for node in &def.nodes {
         if let NodeKind::DataSource { data_type } = &node.kind {
             if let Ok(dt) = data_type.parse::<DataType>() {
-                if seen_lanes.insert(dt) {
-                    required_lanes.push(dt);
+                if !lanes.contains(&dt) {
+                    lanes.push(dt);
                 }
             }
         }
     }
 
-    // Named features from inputs.
-    // Using a HashSet<&str> for the dedup check avoids cloning each feature string
-    // twice (once for the set, once for the vec).  We only clone on insert.
-    let mut seen_features: HashSet<&str> = HashSet::new();
-    let mut required_features: Vec<String> = Vec::new();
-    for input in &def.inputs {
-        for feature in &input.features {
-            if seen_features.insert(feature.as_str()) {
-                required_features.push(feature.clone());
-            }
-        }
-    }
+    lanes
+}
 
+/// Collect deduplicated feature names from a definition's inputs.
+///
+/// Uses sort + dedup instead of a HashSet, eliminating the HashSet allocation
+/// entirely (#56, #57). Feature names are small strings (< 32 bytes typical)
+/// so sort is cache-friendly and faster than hashing for small n.
+fn collect_required_features(def: &StrategyDefinition) -> Vec<String> {
+    // Gather all feature name references before any allocation.
+    let mut refs: Vec<&str> = def
+        .inputs
+        .iter()
+        .flat_map(|i| i.features.iter().map(String::as_str))
+        .collect();
+
+    refs.sort_unstable();
+    refs.dedup();
+
+    // One String allocation per unique feature name (#57).
+    refs.iter().map(|s| s.to_string()).collect()
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/// Compile a capability manifest from a strategy definition.
+///
+/// Lane and feature collection is factored into pre-computation helpers so
+/// callers that cache the `StrategyDefinition` at load time can invoke those
+/// helpers once and skip the tree walk on repeated compiles (#56, #68).
+pub fn compile_manifest(def: &StrategyDefinition) -> CapabilityManifest {
+    let required_lanes = collect_required_lanes(def);
+    let required_features = collect_required_features(def);
     let evaluation_trigger = infer_trigger(&required_lanes);
     let strategy_kind = infer_kind(def);
 
