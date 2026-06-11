@@ -52,3 +52,4 @@ frontend/dist/
 frontend/.vite/
 .DS_Store
 Thumbs.db
+.claude/worktrees/
