@@ -155,10 +155,16 @@ impl StrategyInstance {
                     // temporary name→value map from the slot array for the
                     // tree-walking interpreter.
                     let features: HashMap<String, f64> = self
-                        .state
-                        .features
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.value))
+                        .registry
+                        .iter_slots()
+                        .filter_map(|(name, slot)| {
+                            let v = self.state.feature_slots.get(slot as usize).copied()?;
+                            if v.is_nan() {
+                                None
+                            } else {
+                                Some((name.to_owned(), v))
+                            }
+                        })
                         .collect();
                     evaluate_condition(expr, &features, &self.state.bars)
                 };

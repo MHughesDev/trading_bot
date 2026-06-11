@@ -39,4 +39,12 @@ impl FeatureRegistry {
     pub fn name_of(&self, slot: u16) -> Option<&str> {
         self.slot_to_name.get(slot as usize).map(String::as_str)
     }
+
+    /// Iterate all (name, slot) pairs — used only on the fallback path.
+    pub fn iter_slots(&self) -> impl Iterator<Item = (&str, u16)> {
+        self.slot_to_name
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (name.as_str(), i as u16))
+    }
 }
