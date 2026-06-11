@@ -22,6 +22,16 @@ pub enum StrategyKind {
 /// Rule: if any action contains a `PlaceOrder` execution block → `Execution`;
 /// otherwise → `Discovery`.  A stored `strategy_type` field (if present in
 /// legacy JSON) is ignored — the inferred value always wins (C-061).
+impl StrategyKind {
+    /// Lowercase string key — avoids `format!("{:?}", kind).to_lowercase()` allocations.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StrategyKind::Discovery => "discovery",
+            StrategyKind::Execution => "execution",
+        }
+    }
+}
+
 pub fn infer_kind(def: &StrategyDefinition) -> StrategyKind {
     let has_execution_block = def
         .actions
