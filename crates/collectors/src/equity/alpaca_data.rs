@@ -5,7 +5,8 @@
 //! events, and normalizes them into [`domain::EventEnvelope`] on the same
 //! `market.trades` lane as the Kraken crypto collector.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -88,11 +89,25 @@ struct AlpacaMessage<'a> {
 
 // ── AlpacaDataCollector ──────────────────────────────────────────────────────
 
+/// Per-instrument price state for tick-test side inference.
+///
+/// Stores `(prev_price, last_inferred_side)` keyed by instrument symbol.
+/// When the venue does not provide a taker side field (`tks` absent), we infer:
+/// * `price > prev_price` → `Side::Buy`
+/// * `price < prev_price` → `Side::Sell`
+/// * `price == prev_price` → carry forward the last inferred direction
+///
+/// Using `Mutex<HashMap>` for interior mutability so `normalize` can update
+/// state while taking `&self` (required by the `Collector` trait bounds).
+type TickTestState = Mutex<HashMap<String, (Decimal, TradeSide)>>;
+
 /// Alpaca equity data feed connector.
 pub struct AlpacaDataCollector {
     /// Symbol in Alpaca/domain format, e.g. `"AAPL"`.
     pub symbol: String,
     pub venue_id: String,
+    /// Per-instrument `(prev_price, last_side)` for tick-test side inference.
+    tick_state: TickTestState,
 }
 
 impl AlpacaDataCollector {
@@ -101,7 +116,29 @@ impl AlpacaDataCollector {
         Self {
             symbol,
             venue_id: VENUE_ID.to_owned(),
+            tick_state: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Infer the trade side using the tick-test rule and update per-instrument state.
+    ///
+    /// Called only when the venue does not supply an explicit taker side.
+    fn infer_side(&self, instrument: &str, price: Decimal) -> TradeSide {
+        let mut state = self.tick_state.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = state
+            .entry(instrument.to_owned())
+            .or_insert((price, TradeSide::Unknown));
+        let (prev_price, last_side) = *entry;
+        let inferred = if price > prev_price {
+            TradeSide::Buy
+        } else if price < prev_price {
+            TradeSide::Sell
+        } else {
+            // Equal price — carry forward last inferred direction.
+            last_side
+        };
+        *entry = (price, inferred);
+        inferred
     }
 
     fn normalize(
@@ -135,7 +172,8 @@ impl AlpacaDataCollector {
         let side = match msg.taker_side {
             "B" | "b" => TradeSide::Buy,
             "S" | "s" => TradeSide::Sell,
-            _ => TradeSide::Unknown,
+            // No explicit side from venue — use tick-test inference.
+            _ => self.infer_side(&self.symbol, price.0),
         };
 
         let exchange_trade_id = msg
@@ -415,6 +453,57 @@ mod tests {
         let msg = make_msg(Some("100.0"), Some("10.0"), "");
         let envelope = collector.normalize(&msg, &[], 1).unwrap();
         let trade: TradePayload = envelope.decode_payload().unwrap();
+        // First trade with no prior history → Unknown
         assert_eq!(trade.side, TradeSide::Unknown);
+    }
+
+    /// Issue #47: tick-test side inference.
+    ///
+    /// Given a sequence of trades with ascending then descending prices (no
+    /// taker-side field), the collector must infer Buy for the rising leg and
+    /// Sell for the falling leg.
+    #[test]
+    fn tick_test_ascending_then_descending() {
+        let collector = AlpacaDataCollector::new("AAPL");
+
+        // First trade: 100 — no history, Unknown
+        let t1 = make_msg(Some("100.0"), Some("10.0"), "");
+        let e1 = collector.normalize(&t1, &[], 1).unwrap();
+        let p1: TradePayload = e1.decode_payload().unwrap();
+        assert_eq!(p1.side, TradeSide::Unknown, "first trade has no history");
+
+        // Second trade: 101 > 100 → Buy
+        let t2 = make_msg(Some("101.0"), Some("10.0"), "");
+        let e2 = collector.normalize(&t2, &[], 2).unwrap();
+        let p2: TradePayload = e2.decode_payload().unwrap();
+        assert_eq!(p2.side, TradeSide::Buy, "ascending price → Buy");
+
+        // Third trade: 102 > 101 → Buy
+        let t3 = make_msg(Some("102.0"), Some("10.0"), "");
+        let e3 = collector.normalize(&t3, &[], 3).unwrap();
+        let p3: TradePayload = e3.decode_payload().unwrap();
+        assert_eq!(p3.side, TradeSide::Buy, "still ascending → Buy");
+
+        // Fourth trade: 101 < 102 → Sell
+        let t4 = make_msg(Some("101.0"), Some("10.0"), "");
+        let e4 = collector.normalize(&t4, &[], 4).unwrap();
+        let p4: TradePayload = e4.decode_payload().unwrap();
+        assert_eq!(p4.side, TradeSide::Sell, "descending price → Sell");
+
+        // Fifth trade: 100 < 101 → Sell
+        let t5 = make_msg(Some("100.0"), Some("10.0"), "");
+        let e5 = collector.normalize(&t5, &[], 5).unwrap();
+        let p5: TradePayload = e5.decode_payload().unwrap();
+        assert_eq!(p5.side, TradeSide::Sell, "still descending → Sell");
+
+        // Sixth trade: same price → carry forward Sell
+        let t6 = make_msg(Some("100.0"), Some("10.0"), "");
+        let e6 = collector.normalize(&t6, &[], 6).unwrap();
+        let p6: TradePayload = e6.decode_payload().unwrap();
+        assert_eq!(
+            p6.side,
+            TradeSide::Sell,
+            "equal price carries forward last direction"
+        );
     }
 }

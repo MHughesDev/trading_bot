@@ -50,10 +50,7 @@ impl DemandRegistry {
 
     /// Declare demand for `(lane, instrument)`.  Starts the pipeline on 0 → 1.
     pub fn add(&self, lane: &Lane, instrument: &str) {
-        let key: (Arc<str>, Arc<str>) = (
-            Arc::from(lane.as_str()),
-            Arc::from(instrument),
-        );
+        let key: (Arc<str>, Arc<str>) = (Arc::from(lane.as_str()), Arc::from(instrument));
         let needs_start = {
             let mut entry = self.entries.entry(key.clone()).or_insert(DemandEntry {
                 count: 0,
@@ -73,10 +70,7 @@ impl DemandRegistry {
 
     /// Remove demand for `(lane, instrument)`.  Stops the pipeline on 1 → 0.
     pub fn remove(&self, lane: &Lane, instrument: &str) {
-        let key: (Arc<str>, Arc<str>) = (
-            Arc::from(lane.as_str()),
-            Arc::from(instrument),
-        );
+        let key: (Arc<str>, Arc<str>) = (Arc::from(lane.as_str()), Arc::from(instrument));
         let stop_handle = {
             if let Some(mut entry) = self.entries.get_mut(&key) {
                 if entry.count > 0 {
@@ -102,10 +96,7 @@ impl DemandRegistry {
 
     /// Returns the current demand count for `(lane, instrument)`.
     pub fn count(&self, lane: &Lane, instrument: &str) -> u32 {
-        let key: (Arc<str>, Arc<str>) = (
-            Arc::from(lane.as_str()),
-            Arc::from(instrument),
-        );
+        let key: (Arc<str>, Arc<str>) = (Arc::from(lane.as_str()), Arc::from(instrument));
         self.entries.get(&key).map(|e| e.count).unwrap_or(0)
     }
 

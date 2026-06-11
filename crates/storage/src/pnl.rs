@@ -170,7 +170,7 @@ impl FifoEngine {
             records.push(close.clone());
             self.closes.push(close);
 
-            lot.remaining_qty -= consumed;
+            Arc::make_mut(lot).remaining_qty -= consumed;
             close_qty -= consumed;
 
             if lot.remaining_qty <= Decimal::ZERO {
@@ -257,12 +257,12 @@ impl FifoEngine {
 
     /// Snapshot of all open lots (still partially or fully open) across all keys.
     pub fn open_lots(&self) -> impl Iterator<Item = &PnlLot> {
-        self.lots.values().flatten()
+        self.lots.values().flatten().map(|arc| arc.as_ref())
     }
 
     /// All lots ever opened (including fully closed ones).
     pub fn all_lots(&self) -> impl Iterator<Item = &PnlLot> {
-        self.lot_archive.values()
+        self.lot_archive.values().map(|arc| arc.as_ref())
     }
 }
 
@@ -286,8 +286,26 @@ mod tests {
         let mode = AccountMode::Paper;
 
         // Buy 2 BTC at 100 then 1 BTC at 200.
-        engine.open_lot(user, mode, "BTC-USD", eid(), dec(2), dec(100), Decimal::ONE);
-        engine.open_lot(user, mode, "BTC-USD", eid(), dec(1), dec(200), Decimal::ONE);
+        engine.open_lot(
+            user,
+            mode,
+            "BTC-USD",
+            eid(),
+            Side::Buy,
+            dec(2),
+            dec(100),
+            Decimal::ONE,
+        );
+        engine.open_lot(
+            user,
+            mode,
+            "BTC-USD",
+            eid(),
+            Side::Buy,
+            dec(1),
+            dec(200),
+            Decimal::ONE,
+        );
 
         // Sell 2 BTC at 150 — should consume lot1 fully (2@100) first.
         let closes =
@@ -310,6 +328,7 @@ mod tests {
             mode,
             "ETH-USD",
             eid(),
+            Side::Buy,
             dec(3),
             dec(2000),
             Decimal::ONE,
@@ -341,7 +360,16 @@ mod tests {
         let mode = AccountMode::Paper;
 
         // BTC: open 1 @ 100, close @ 200 — win (+100)
-        engine.open_lot(user, mode, "BTC-USD", eid(), dec(1), dec(100), Decimal::ONE);
+        engine.open_lot(
+            user,
+            mode,
+            "BTC-USD",
+            eid(),
+            Side::Buy,
+            dec(1),
+            dec(100),
+            Decimal::ONE,
+        );
         engine.close_lots(user, mode, "BTC-USD", eid(), dec(1), dec(200), Decimal::ONE);
 
         // ETH: open 1 @ 2000, close @ 1500 — loss (-500)
@@ -350,6 +378,7 @@ mod tests {
             mode,
             "ETH-USD",
             eid(),
+            Side::Buy,
             dec(1),
             dec(2000),
             Decimal::ONE,
@@ -398,6 +427,7 @@ mod tests {
             mode,
             "BTC-EUR",
             eid(),
+            Side::Buy,
             dec(1),
             open_price,
             open_eur_usd,

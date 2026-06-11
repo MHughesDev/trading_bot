@@ -29,12 +29,11 @@ pub fn reconcile_one(
     broker_positions: &[BrokerPosition],
     kill_switch: &Arc<KillSwitch>,
 ) -> ReconcileOutcome {
+    // Pre-compute the normalized (no-dash) form once rather than per-comparison.
+    let normalized_id = internal.instrument_id.replace('-', "");
     let broker_qty = broker_positions
         .iter()
-        .find(|p| {
-            p.instrument_id == internal.instrument_id
-                || p.instrument_id == internal.instrument_id.replace('-', "")
-        })
+        .find(|p| p.instrument_id == internal.instrument_id || p.instrument_id == normalized_id)
         .map(|p| p.quantity)
         .unwrap_or(Decimal::ZERO);
 

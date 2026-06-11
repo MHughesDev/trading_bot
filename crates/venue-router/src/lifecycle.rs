@@ -39,8 +39,12 @@ impl LifecycleManager {
         instrument_id: String,
         collector: Arc<dyn Collector>,
     ) {
-        let key = (venue_id.clone(), lane.clone(), instrument_id.clone());
-        let is_first = self.registry.incr(key.clone()).await;
+        let key = (
+            Arc::from(venue_id.as_str()),
+            Arc::from(lane.as_str()),
+            Arc::from(instrument_id.as_str()),
+        );
+        let is_first = self.registry.incr(key.clone());
 
         if is_first {
             info!(
@@ -65,7 +69,7 @@ impl LifecycleManager {
                 }
             });
 
-            self.registry.insert_handle(key, handle).await;
+            self.registry.insert_handle(key, handle);
         }
     }
 
@@ -75,11 +79,11 @@ impl LifecycleManager {
     /// is aborted.
     pub async fn release(&self, venue_id: &str, lane: &str, instrument_id: &str) {
         let key = (
-            venue_id.to_owned(),
-            lane.to_owned(),
-            instrument_id.to_owned(),
+            Arc::from(venue_id),
+            Arc::from(lane),
+            Arc::from(instrument_id),
         );
-        let should_stop = self.registry.decr(&key).await;
+        let should_stop = self.registry.decr(&key);
 
         if should_stop {
             info!(
@@ -88,7 +92,7 @@ impl LifecycleManager {
                 instrument_id = %instrument_id,
                 "stopping collector (no more subscribers)"
             );
-            self.registry.remove_handle(&key).await;
+            self.registry.remove_handle(&key);
         }
     }
 }

@@ -59,10 +59,10 @@ pub struct WorldState {
     pub bars: HashMap<Timeframe, BarPayload>,
     /// Latest order-book snapshot (optional; not all instruments have L2 data).
     pub orderbook: Option<OrderBookPayload>,
-    /// Latest computed feature values by name.
-    pub features: HashMap<String, FeatureValue>,
     /// Feature slot array — indexed by u16 slot ID from FeatureRegistry.
     /// f64::NAN = feature not yet received.
+    /// This replaces the former `HashMap<String, FeatureValue>` to eliminate
+    /// per-tick String allocations (issues #4, #12, #17).
     pub feature_slots: Vec<f64>,
     /// Current signed position (positive = long, negative = short).
     pub position: Decimal,
@@ -77,7 +77,6 @@ impl WorldState {
             instrument_id: instrument_id.into(),
             bars: HashMap::new(),
             orderbook: None,
-            features: HashMap::new(),
             feature_slots: Vec::new(),
             position: Decimal::ZERO,
             current_time: start_time,
@@ -94,7 +93,6 @@ impl WorldState {
             instrument_id: instrument_id.into(),
             bars: HashMap::new(),
             orderbook: None,
-            features: HashMap::new(),
             feature_slots: vec![f64::NAN; num_slots],
             position: Decimal::ZERO,
             current_time: start_time,
@@ -116,9 +114,9 @@ impl WorldState {
             WorldEvent::Feature { feature_value, .. } => {
                 // Advance current_time so ctx.now() is correct for strategies
                 // that fire on feature events before receiving a bar (M-12).
+                // The actual slot write is done by StrategyInstance::process_event
+                // before calling apply_event, using the pre-resolved registry slot.
                 self.current_time = feature_value.available_time;
-                self.features
-                    .insert(feature_value.name.clone(), feature_value.clone());
             }
             WorldEvent::PositionUpdate { quantity, .. } => {
                 self.position = *quantity;
@@ -173,16 +171,6 @@ impl<'a> WorldContext<'a> {
     /// Latest bar for the given timeframe.
     pub fn latest_bar(&self, timeframe: Timeframe) -> Option<&BarPayload> {
         self.state.bars.get(&timeframe)
-    }
-
-    /// Current value of a named feature, or `None` if not yet computed.
-    pub fn feature(&self, name: &str) -> Option<f64> {
-        self.state.features.get(name).map(|f| f.value)
-    }
-
-    /// All current feature values — used by the interpreter to build the eval map.
-    pub fn features(&self) -> &HashMap<String, FeatureValue> {
-        &self.state.features
     }
 
     /// All current bars — used by the interpreter for `bar('field')` expressions.

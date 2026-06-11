@@ -82,7 +82,7 @@ smallvec = { version = "1", features = ["union"] }
 
 # external connectivity
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls", "gzip", "brotli"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "http2", "gzip", "brotli"] }
 
 # columnar analytics / archive storage
 arrow = "55"

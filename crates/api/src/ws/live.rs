@@ -138,7 +138,12 @@ async fn handle_client_message(
 }
 
 fn json_msg(msg: &WsOutMessage) -> Message {
-    Message::Text(serde_json::to_string(msg).unwrap_or_default().into())
+    // to_vec avoids the redundant UTF-8 validation pass that to_string performs
+    // after serialization (serde_json output is always valid UTF-8).
+    let bytes = serde_json::to_vec(msg).unwrap_or_default();
+    // SAFETY: serde_json always produces valid UTF-8.
+    let s = unsafe { String::from_utf8_unchecked(bytes) };
+    Message::Text(s.into())
 }
 
 fn now_iso() -> String {

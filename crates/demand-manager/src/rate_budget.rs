@@ -4,9 +4,9 @@
 //! `RateBudget::try_admit` admits or denies new collector subscriptions against
 //! per-venue budgets.  The budget is a single server-wide resource shared across all users.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+
+use dashmap::DashMap;
 
 use domain::SupportedVenue;
 use thiserror::Error;
@@ -43,14 +43,14 @@ pub struct BudgetExceeded {
 /// Before starting a new collector lane, call `try_admit`.  Call `release` when
 /// the lane stops.
 pub struct RateBudget {
-    budgets: Mutex<HashMap<SupportedVenue, VenueBudget>>,
+    budgets: DashMap<SupportedVenue, VenueBudget>,
 }
 
 impl RateBudget {
     /// Construct with per-venue budgets.
     pub fn new(budgets: impl IntoIterator<Item = (SupportedVenue, VenueBudget)>) -> Self {
         Self {
-            budgets: Mutex::new(budgets.into_iter().collect()),
+            budgets: budgets.into_iter().collect(),
         }
     }
 
@@ -74,8 +74,10 @@ impl RateBudget {
     /// Returns `Ok(())` on success (slot consumed) or `Err(BudgetExceeded)` if the
     /// venue's concurrent limit is already reached.
     pub fn try_admit(&self, venue: SupportedVenue) -> Result<(), BudgetExceeded> {
-        let mut budgets = self.budgets.lock().unwrap();
-        let budget = budgets.entry(venue).or_insert_with(|| VenueBudget::new(10));
+        let budget = self
+            .budgets
+            .entry(venue)
+            .or_insert_with(|| VenueBudget::new(10));
 
         let prev = budget.active.fetch_add(1, Ordering::Relaxed);
         if prev >= budget.max_concurrent {
@@ -91,8 +93,7 @@ impl RateBudget {
 
     /// Release one slot for `venue` (call when a lane stops).
     pub fn release(&self, venue: SupportedVenue) {
-        let budgets = self.budgets.lock().unwrap();
-        if let Some(budget) = budgets.get(&venue) {
+        if let Some(budget) = self.budgets.get(&venue) {
             // saturating_sub via compare to avoid wrapping below zero
             budget
                 .active
@@ -105,8 +106,7 @@ impl RateBudget {
 
     /// Current active slot count for `venue` (for testing).
     pub fn active(&self, venue: SupportedVenue) -> u32 {
-        let budgets = self.budgets.lock().unwrap();
-        budgets
+        self.budgets
             .get(&venue)
             .map(|b| b.active.load(Ordering::Relaxed))
             .unwrap_or(0)

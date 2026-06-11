@@ -28,6 +28,19 @@ pub enum EvaluationTrigger {
     Scheduled,
 }
 
+impl EvaluationTrigger {
+    /// Lowercase string key — avoids `format!("{:?}", trigger).to_lowercase()` allocations.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EvaluationTrigger::BarClose => "bar_close",
+            EvaluationTrigger::Tick => "tick",
+            EvaluationTrigger::Quote => "quote",
+            EvaluationTrigger::Event => "event",
+            EvaluationTrigger::Scheduled => "scheduled",
+        }
+    }
+}
+
 /// Compiled capability manifest — stored alongside the strategy definition.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CapabilityManifest {
@@ -116,11 +129,13 @@ pub fn compile_manifest(def: &StrategyDefinition) -> CapabilityManifest {
     }
 
     // Named features from inputs.
-    let mut seen_features: HashSet<String> = HashSet::new();
+    // Using a HashSet<&str> for the dedup check avoids cloning each feature string
+    // twice (once for the set, once for the vec).  We only clone on insert.
+    let mut seen_features: HashSet<&str> = HashSet::new();
     let mut required_features: Vec<String> = Vec::new();
     for input in &def.inputs {
         for feature in &input.features {
-            if seen_features.insert(feature.clone()) {
+            if seen_features.insert(feature.as_str()) {
                 required_features.push(feature.clone());
             }
         }

@@ -107,7 +107,7 @@ impl RedditCollector {
         let body = post
             .body
             .as_deref()
-            .or_else(|| post.selftext.as_deref())
+            .or(post.selftext.as_deref())
             .unwrap_or_default();
         let combined = format!("{title} {body}");
 

@@ -238,8 +238,8 @@ pub async fn apply_list(
                 Some(json!({
                     "id": id,
                     "strategy_id": def.strategy_id,
-                    "strategy_kind": format!("{:?}", manifest.strategy_kind).to_lowercase(),
-                    "evaluation_trigger": format!("{:?}", manifest.evaluation_trigger).to_lowercase(),
+                    "strategy_kind": manifest.strategy_kind.as_str(),
+                    "evaluation_trigger": manifest.evaluation_trigger.as_str(),
                     "required_lanes": manifest.required_lanes
                         .iter()
                         .map(|dt| dt.as_key())

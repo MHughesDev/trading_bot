@@ -11,6 +11,7 @@ use demand_manager::DemandRegistry;
 use domain::lanes::Lane;
 use domain::order::OrderIntent;
 use domain::strategy_def::StrategyDefinition;
+use domain::InstrumentId;
 use thiserror::Error;
 
 use crate::bytecode;
@@ -154,10 +155,16 @@ impl StrategyInstance {
                     // temporary name→value map from the slot array for the
                     // tree-walking interpreter.
                     let features: HashMap<String, f64> = self
-                        .state
-                        .features
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.value))
+                        .registry
+                        .iter_slots()
+                        .filter_map(|(name, slot)| {
+                            let v = self.state.feature_slots.get(slot as usize).copied()?;
+                            if v.is_nan() {
+                                None
+                            } else {
+                                Some((name.to_owned(), v))
+                            }
+                        })
                         .collect();
                     evaluate_condition(expr, &features, &self.state.bars)
                 };
@@ -193,12 +200,13 @@ impl StrategyInstance {
 /// Deduplicates pipeline demand via the `DemandRegistry`: when two users both
 /// need `BTC-USDT market.bars.1m`, only one pipeline runs.
 ///
-/// `by_instrument` is a secondary index from instrument_id → list of instance keys,
-/// enabling O(1) dispatch without iterating all instances.
+/// `by_instrument` is a secondary index from `InstrumentId` → list of instance keys,
+/// enabling O(1) u32 lookup without string hashing per dispatch.
 pub struct InstanceManager {
     instances: HashMap<(String, String), StrategyInstance>,
-    /// Secondary index: instrument_id → Vec of (user_id, instrument_id) keys.
-    by_instrument: HashMap<String, Vec<(String, String)>>,
+    /// Secondary index: interned InstrumentId → Vec of (user_id, instrument_id) keys.
+    /// Using `InstrumentId` (u32) as the key avoids string hashing on every event dispatch.
+    by_instrument: HashMap<InstrumentId, Vec<(String, String)>>,
     demand: Arc<DemandRegistry>,
 }
 
@@ -248,11 +256,10 @@ impl InstanceManager {
         let instance =
             StrategyInstance::new(user_id.clone(), instrument_id.clone(), definition, start);
         self.instances.insert(key.clone(), instance);
-        // Update secondary index so dispatch() can find this instance in O(1).
-        self.by_instrument
-            .entry(instrument_id.clone())
-            .or_default()
-            .push(key);
+        // Intern the instrument name once at registration; store the compact u32 ID
+        // so dispatch() can do a u32 hash lookup instead of a string hash lookup.
+        let iid = domain::intern_instrument(&instrument_id);
+        self.by_instrument.entry(iid).or_default().push(key);
         Ok(())
     }
 
@@ -275,8 +282,9 @@ impl InstanceManager {
 
     /// Dispatch an event to all instances bound to `instrument_id`.
     ///
-    /// Uses the `by_instrument` secondary index for O(1) lookup — no iteration
-    /// over unrelated instances and no `event.clone()` per match.
+    /// Interns `instrument_id` to a compact `InstrumentId` (u32) and uses the
+    /// `by_instrument` secondary index for O(1) u32-keyed lookup — no string
+    /// hashing in the hot path and no `event.clone()` per match.
     ///
     /// Returns `(user_id, intents)` pairs — one entry per instance that emitted
     /// at least one intent.
@@ -285,8 +293,9 @@ impl InstanceManager {
         instrument_id: &str,
         event: WorldEvent,
     ) -> Vec<(String, Vec<OrderIntent>)> {
+        let iid = domain::intern_instrument(instrument_id);
         let mut results = Vec::new();
-        if let Some(keys) = self.by_instrument.get(instrument_id) {
+        if let Some(keys) = self.by_instrument.get(&iid) {
             // Collect keys to avoid simultaneous borrow of self.instances and self.by_instrument.
             let keys: Vec<(String, String)> = keys.clone();
             for key in &keys {
