@@ -39,8 +39,11 @@ impl Publisher {
     ///
     /// Used by the tee task so JetStream writes never stall the hot-path rings.
     /// Serialization errors are logged and dropped; publish errors are logged.
-    pub fn publish_fire_and_forget<T>(&self, envelope: &domain::EventEnvelope<T>, instrument_id: &str)
-    where
+    pub fn publish_fire_and_forget<T>(
+        &self,
+        envelope: &domain::EventEnvelope<T>,
+        instrument_id: &str,
+    ) where
         T: domain::payloads::Payload + serde::Serialize + Clone + Send + 'static,
     {
         let bytes = match serde_json::to_vec(envelope) {

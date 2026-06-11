@@ -38,7 +38,11 @@ pub fn spawn_pipeline(
     let (intent_prod, intent_cons) = rtrb::RingBuffer::<OrderIntent>::new(256);
 
     let t1 = tokio::spawn(stage_socket_reader(symbol, raw_prod, tee_tx));
-    let t2 = tokio::spawn(stage_bar_builder(instrument_id.clone(), raw_cons, world_prod));
+    let t2 = tokio::spawn(stage_bar_builder(
+        instrument_id.clone(),
+        raw_cons,
+        world_prod,
+    ));
     let t3 = tokio::spawn(stage_strategy_eval(
         instrument_id.clone(),
         world_cons,
