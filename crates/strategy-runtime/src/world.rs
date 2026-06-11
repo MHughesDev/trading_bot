@@ -61,6 +61,9 @@ pub struct WorldState {
     pub orderbook: Option<OrderBookPayload>,
     /// Latest computed feature values by name.
     pub features: HashMap<String, FeatureValue>,
+    /// Feature slot array — indexed by u16 slot ID from FeatureRegistry.
+    /// f64::NAN = feature not yet received.
+    pub feature_slots: Vec<f64>,
     /// Current signed position (positive = long, negative = short).
     pub position: Decimal,
     /// The `available_time` of the most recently dispatched event.
@@ -75,6 +78,24 @@ impl WorldState {
             bars: HashMap::new(),
             orderbook: None,
             features: HashMap::new(),
+            feature_slots: Vec::new(),
+            position: Decimal::ZERO,
+            current_time: start_time,
+        }
+    }
+
+    /// Create a `WorldState` pre-allocated for `num_slots` feature slots.
+    pub fn with_capacity(
+        instrument_id: impl Into<String>,
+        start_time: DateTime<Utc>,
+        num_slots: usize,
+    ) -> Self {
+        Self {
+            instrument_id: instrument_id.into(),
+            bars: HashMap::new(),
+            orderbook: None,
+            features: HashMap::new(),
+            feature_slots: vec![f64::NAN; num_slots],
             position: Decimal::ZERO,
             current_time: start_time,
         }
@@ -102,6 +123,14 @@ impl WorldState {
             WorldEvent::PositionUpdate { quantity, .. } => {
                 self.position = *quantity;
             }
+        }
+    }
+
+    /// Write a feature value into the slot array by pre-resolved slot ID.
+    /// No-op if the slot index is out of range (guards against races during registry growth).
+    pub fn set_feature(&mut self, slot: u16, value: f64) {
+        if let Some(v) = self.feature_slots.get_mut(slot as usize) {
+            *v = value;
         }
     }
 

@@ -17,6 +17,7 @@ use crate::bytecode;
 use crate::clock::StrategyClock;
 use crate::intents::build_intents_for_signals;
 use crate::interpreter::evaluate_condition;
+use crate::registry::FeatureRegistry;
 use crate::world::{WorldEvent, WorldState};
 
 /// Errors produced by the instance manager.
@@ -37,6 +38,11 @@ pub struct StrategyInstance {
     state: WorldState,
     /// Condition node expressions compiled to postfix bytecode at init.
     compiled_conditions: HashMap<String, bytecode::Program>,
+    /// Stable feature registry — assigned at init, read-only during the hot loop.
+    registry: FeatureRegistry,
+    /// Per-program local-slot → global-registry-slot mapping, keyed by node id.
+    /// Built once at init from compiled_conditions + registry.
+    program_slots: HashMap<String, Vec<u16>>,
 }
 
 impl StrategyInstance {
@@ -47,14 +53,30 @@ impl StrategyInstance {
         start_time: DateTime<Utc>,
     ) -> Self {
         let instrument_id = instrument_id.into();
-        let state = WorldState::new(instrument_id.clone(), start_time);
         let compiled_conditions = Self::compile_conditions(&definition.nodes);
+
+        // Build the feature registry and per-program slot maps at init time.
+        // After this point the registry is read-only during the hot loop.
+        let mut registry = FeatureRegistry::new();
+        let program_slots: HashMap<String, Vec<u16>> = compiled_conditions
+            .iter()
+            .map(|(node_id, program)| {
+                let mapping = bytecode::resolve_program_slots(program, &mut registry);
+                (node_id.clone(), mapping)
+            })
+            .collect();
+
+        // Pre-allocate the slot array with NAN sentinels.
+        let state = WorldState::with_capacity(instrument_id.clone(), start_time, registry.len());
+
         Self {
             user_id: user_id.into(),
             instrument_id,
             definition,
             state,
             compiled_conditions,
+            registry,
+            program_slots,
         }
     }
 
@@ -79,20 +101,21 @@ impl StrategyInstance {
     /// Process a world event.
     ///
     /// 1. Update `WorldState` from the event.
-    /// 2. Evaluate the definition node graph via compiled bytecode.
-    /// 3. Collect and return any order intents — the caller routes them through
-    ///    the risk gate.
+    /// 2. If it is a Feature event, write the value into the slot array (no HashMap, no alloc).
+    /// 3. Evaluate the definition node graph via compiled bytecode against the slot array.
+    /// 4. Collect and return any order intents — the caller routes them through the risk gate.
     pub fn process_event(&mut self, event: WorldEvent) -> Vec<OrderIntent> {
+        // If this is a feature event, resolve the slot and write it before applying state.
+        if let WorldEvent::Feature { ref feature_value, .. } = event {
+            if let Some(slot) = self.registry.get(&feature_value.name) {
+                self.state.set_feature(slot, feature_value.value);
+            }
+        }
+
         self.state.apply_event(&event);
 
-        let features: HashMap<String, f64> = self
-            .state
-            .features
-            .iter()
-            .map(|(k, v)| (k.clone(), v.value))
-            .collect();
-
-        let signals = self.run_signals(&features);
+        // Feature slot array passed directly — no allocation, no string clone.
+        let signals = self.run_signals();
 
         build_intents_for_signals(
             &self.definition.actions,
@@ -102,16 +125,30 @@ impl StrategyInstance {
         )
     }
 
-    fn run_signals(&self, features: &HashMap<String, f64>) -> HashSet<String> {
+    fn run_signals(&self) -> HashSet<String> {
         use domain::strategy_def::nodes::NodeKind;
+
+        let feature_slots = &self.state.feature_slots;
 
         let mut conditions: HashMap<&str, bool> = HashMap::new();
         for node in &self.definition.nodes {
             if let NodeKind::Condition { expr } = &node.kind {
-                let fired = if let Some(program) = self.compiled_conditions.get(&node.id) {
-                    bytecode::run(program, features, &self.state.bars)
+                let fired = if let (Some(program), Some(local_to_global)) = (
+                    self.compiled_conditions.get(&node.id),
+                    self.program_slots.get(&node.id),
+                ) {
+                    bytecode::run_slots(program, local_to_global, feature_slots, &self.state.bars)
                 } else {
-                    evaluate_condition(expr, features, &self.state.bars)
+                    // Fallback for conditions that failed to compile — build a
+                    // temporary name→value map from the slot array for the
+                    // tree-walking interpreter.
+                    let features: HashMap<String, f64> = self
+                        .state
+                        .features
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.value))
+                        .collect();
+                    evaluate_condition(expr, &features, &self.state.bars)
                 };
                 conditions.insert(&node.id, fired);
             }
