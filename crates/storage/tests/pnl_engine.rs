@@ -1,5 +1,6 @@
 //! P4-T05 acceptance tests — FIFO P&L lot engine.
 
+use domain::order::Side;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use storage::{ledger::AccountMode, pnl::FifoEngine};
@@ -25,6 +26,7 @@ fn two_opens_partial_close_realizes_fifo() {
         mode,
         "BTC-USD",
         eid(),
+        Side::Buy,
         dec!(2),
         dec!(30000),
         Decimal::ONE,
@@ -35,6 +37,7 @@ fn two_opens_partial_close_realizes_fifo() {
         mode,
         "BTC-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(40000),
         Decimal::ONE,
@@ -70,6 +73,7 @@ fn remaining_lot_unrealized_at_mark() {
         mode,
         "ETH-USD",
         eid(),
+        Side::Buy,
         dec!(3),
         dec!(2000),
         Decimal::ONE,
@@ -104,6 +108,7 @@ fn win_rate_counts_profitable_positions_only() {
         mode,
         "BTC-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(100),
         Decimal::ONE,
@@ -124,6 +129,7 @@ fn win_rate_counts_profitable_positions_only() {
         mode,
         "ETH-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(2000),
         Decimal::ONE,
@@ -155,6 +161,7 @@ fn fifo_order_respected_across_three_lots() {
         mode,
         "SOL-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(100),
         Decimal::ONE,
@@ -164,6 +171,7 @@ fn fifo_order_respected_across_three_lots() {
         mode,
         "SOL-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(200),
         Decimal::ONE,
@@ -173,6 +181,7 @@ fn fifo_order_respected_across_three_lots() {
         mode,
         "SOL-USD",
         eid(),
+        Side::Buy,
         dec!(1),
         dec!(300),
         Decimal::ONE,
