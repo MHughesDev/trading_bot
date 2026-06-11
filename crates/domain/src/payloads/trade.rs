@@ -47,6 +47,9 @@ pub struct TradePayload {
     pub side: TradeSide,
     /// Opaque trade ID from the originating exchange, used as the dedup key.
     pub exchange_trade_id: String,
+    /// xxh3-64 dedup key: hash of (timestamp_ns LE || price_raw LE || size_raw LE).
+    /// 8 bytes, no heap allocation, replaces UUID v5 / SHA-1 dedup identity.
+    pub dedup_key: u64,
 }
 
 impl TradePayload {
@@ -62,6 +65,25 @@ impl TradePayload {
             size,
             side,
             exchange_trade_id: exchange_trade_id.into(),
+            dedup_key: 0,
+        }
+    }
+
+    /// Construct with an explicit xxh3 dedup key.
+    pub fn with_dedup_key(
+        price: Price,
+        size: Size,
+        side: TradeSide,
+        exchange_trade_id: impl Into<String>,
+        dedup_key: u64,
+    ) -> Self {
+        Self {
+            schema_version: Self::schema_version().into(),
+            price,
+            size,
+            side,
+            exchange_trade_id: exchange_trade_id.into(),
+            dedup_key,
         }
     }
 }

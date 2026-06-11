@@ -20,6 +20,7 @@ use serde::Deserialize;
 use std::str::FromStr;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
+use xxhash_rust::xxh3::xxh3_64;
 
 use crate::gap::GapDetector;
 use crate::reconnect::ReconnectPolicy;
@@ -29,28 +30,59 @@ const KRAKEN_WS_URL: &str = "wss://ws.kraken.com/v2";
 const VENUE_ID: &str = "kraken";
 const SOURCE: &str = "kraken_ws";
 
-/// Kraken trade message wrapper.
+// ── Dedup identity ───────────────────────────────────────────────────────────
+
+/// xxh3-64 dedup key: 8 bytes, no heap allocation, no SHA-1.
+fn trade_dedup_key(timestamp_ns: i64, price_raw: u64, size_raw: u64) -> u64 {
+    let mut buf = [0u8; 24];
+    buf[0..8].copy_from_slice(&timestamp_ns.to_le_bytes());
+    buf[8..16].copy_from_slice(&price_raw.to_le_bytes());
+    buf[16..24].copy_from_slice(&size_raw.to_le_bytes());
+    xxh3_64(&buf)
+}
+
+/// Extract a stable u64 fingerprint from a `Decimal` using its raw serialized
+/// bytes (lo 32 bits + mid 32 bits → u64 little-endian).
+fn decimal_to_raw_u64(d: rust_decimal::Decimal) -> u64 {
+    let bytes = d.serialize(); // [u8; 16]: flags, hi, lo, mid (each 4 bytes LE)
+    let lo = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+    let mid = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
+    (u64::from(mid) << 32) | u64::from(lo)
+}
+
+// ── Kraken message shapes ─────────────────────────────────────────────────────
+
+/// Kraken trade message wrapper — borrows directly from the WS frame bytes.
 #[derive(Debug, Deserialize)]
-struct KrakenMessage {
-    channel: Option<String>,
-    #[serde(rename = "type")]
-    msg_type: Option<String>,
-    data: Option<Vec<KrakenTrade>>,
+struct KrakenMessage<'a> {
+    #[serde(borrow)]
+    channel: Option<&'a str>,
+    #[serde(rename = "type", borrow)]
+    msg_type: Option<&'a str>,
+    data: Option<Vec<KrakenTrade<'a>>>,
 }
 
 /// A single trade entry inside a Kraken `trade.update` message.
+/// String fields borrow directly from the WS frame (no per-field allocation).
 #[derive(Debug, Deserialize)]
-struct KrakenTrade {
+struct KrakenTrade<'a> {
     #[allow(dead_code)]
-    symbol: String,
-    side: String,
-    price: String,
-    qty: String,
+    #[serde(borrow)]
+    symbol: &'a str,
+    #[serde(borrow)]
+    side: &'a str,
+    /// Raw price string — parsed directly to Decimal (no f64 intermediate).
+    #[serde(borrow)]
+    price: &'a str,
+    /// Raw qty string — parsed directly to Decimal (no f64 intermediate).
+    #[serde(borrow)]
+    qty: &'a str,
     trade_id: u64,
-    timestamp: String,
-    #[serde(default)]
+    #[serde(borrow)]
+    timestamp: &'a str,
+    #[serde(default, borrow)]
     #[allow(dead_code)]
-    ord_type: String,
+    ord_type: &'a str,
 }
 
 /// Kraken WS v2 connector for trade events.
@@ -76,37 +108,50 @@ impl KrakenCollector {
     }
 
     /// Normalize a [`KrakenTrade`] into a binary [`EventEnvelope`].
-    fn normalize(&self, trade: &KrakenTrade, raw: &[u8]) -> Result<EventEnvelope, NormalizeError> {
-        let price = Decimal::from_str(&trade.price)
+    fn normalize(
+        &self,
+        trade: &KrakenTrade<'_>,
+        raw: &[u8],
+    ) -> Result<EventEnvelope, NormalizeError> {
+        let price = Decimal::from_str(trade.price)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
                 field: "price".to_owned(),
                 reason: e.to_string(),
             })?;
 
-        let size = Decimal::from_str(&trade.qty)
+        let size = Decimal::from_str(trade.qty)
             .map(Size::from_decimal)
             .map_err(|e| NormalizeError::InvalidSize {
                 field: "qty".to_owned(),
                 reason: e.to_string(),
             })?;
 
-        let side = match trade.side.as_str() {
+        let side = match trade.side {
             "buy" => TradeSide::Buy,
             "sell" => TradeSide::Sell,
             _ => TradeSide::Unknown,
         };
 
         let exchange_trade_id = trade.trade_id.to_string();
-        let payload = TradePayload::new(price, size, side, &exchange_trade_id);
+
+        let timestamp_ns = chrono::DateTime::parse_from_rfc3339(trade.timestamp)
+            .map(|dt| dt.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|_| Utc::now().timestamp_nanos_opt().unwrap_or(0));
+
+        // xxh3-64 dedup key: no UUID v5, no SHA-1, no heap allocation.
+        let dedup_key = trade_dedup_key(
+            timestamp_ns,
+            decimal_to_raw_u64(price.0),
+            decimal_to_raw_u64(size.0),
+        );
+
+        let payload =
+            TradePayload::with_dedup_key(price, size, side, &exchange_trade_id, dedup_key);
 
         let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
             .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
             .into_vec();
-
-        let timestamp_ns = chrono::DateTime::parse_from_rfc3339(&trade.timestamp)
-            .map(|dt| dt.timestamp_nanos_opt().unwrap_or(0))
-            .unwrap_or_else(|_| Utc::now().timestamp_nanos_opt().unwrap_or(0));
 
         let envelope = EventEnvelope::new(
             domain::intern_instrument(&self.instrument_id),
@@ -179,15 +224,16 @@ impl KrakenCollector {
                     }
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
-                        let parsed: Result<KrakenMessage, _> = serde_json::from_str(&text);
+                        // Borrow directly from `text` — no per-field String allocations.
+                        let parsed: Result<KrakenMessage<'_>, _> = serde_json::from_str(&text);
                         match parsed {
                             Err(e) => {
                                 warn!(error = %e, "failed to parse Kraken message (in-process)");
                                 let _ = raw;
                             }
                             Ok(km) => {
-                                let is_trade_update = km.channel.as_deref() == Some("trade")
-                                    && km.msg_type.as_deref() == Some("update");
+                                let is_trade_update =
+                                    km.channel == Some("trade") && km.msg_type == Some("update");
 
                                 if !is_trade_update {
                                     continue;
@@ -297,7 +343,8 @@ impl Collector for KrakenCollector {
                     }
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
-                        let parsed: Result<KrakenMessage, _> = serde_json::from_str(&text);
+                        // Borrow directly from `text` — no per-field String allocations.
+                        let parsed: Result<KrakenMessage<'_>, _> = serde_json::from_str(&text);
                         match parsed {
                             Err(e) => {
                                 warn!(error = %e, "failed to parse Kraken message");
@@ -309,8 +356,8 @@ impl Collector for KrakenCollector {
                                 }
                             }
                             Ok(km) => {
-                                let is_trade_update = km.channel.as_deref() == Some("trade")
-                                    && km.msg_type.as_deref() == Some("update");
+                                let is_trade_update =
+                                    km.channel == Some("trade") && km.msg_type == Some("update");
 
                                 if !is_trade_update {
                                     continue;

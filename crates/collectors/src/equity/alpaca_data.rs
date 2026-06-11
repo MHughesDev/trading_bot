@@ -21,6 +21,7 @@ use serde::Deserialize;
 use std::str::FromStr;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
+use xxhash_rust::xxh3::xxh3_64;
 
 use crate::gap::GapDetector;
 use crate::reconnect::ReconnectPolicy;
@@ -31,30 +32,58 @@ const ALPACA_WS_URL: &str = "wss://stream.data.alpaca.markets/v2/iex";
 const VENUE_ID: &str = "alpaca";
 const SOURCE: &str = "alpaca_ws";
 
+// ── Dedup identity ───────────────────────────────────────────────────────────
+
+/// xxh3-64 dedup key: 8 bytes, no heap allocation, no SHA-1.
+/// Hashes the 24-byte concatenation of timestamp_ns || price_raw || size_raw
+/// (all little-endian) where price_raw and size_raw are the lower 8 bytes of
+/// the serialized Decimal representation.
+fn trade_dedup_key(timestamp_ns: i64, price_raw: u64, size_raw: u64) -> u64 {
+    let mut buf = [0u8; 24];
+    buf[0..8].copy_from_slice(&timestamp_ns.to_le_bytes());
+    buf[8..16].copy_from_slice(&price_raw.to_le_bytes());
+    buf[16..24].copy_from_slice(&size_raw.to_le_bytes());
+    xxh3_64(&buf)
+}
+
+/// Extract a stable u64 fingerprint from a `Decimal` using its raw serialized
+/// bytes (lo 32 bits + mid 32 bits → u64 little-endian).
+fn decimal_to_raw_u64(d: rust_decimal::Decimal) -> u64 {
+    let bytes = d.serialize(); // [u8; 16]: flags, hi, lo, mid (each 4 bytes LE)
+                               // bytes[0..4] = flags, [4..8] = hi, [8..12] = lo, [12..16] = mid
+                               // Use lo + mid as the 64-bit fingerprint (covers the significant mantissa bits).
+    let lo = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+    let mid = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
+    (u64::from(mid) << 32) | u64::from(lo)
+}
+
 // ── Alpaca message shapes ────────────────────────────────────────────────────
 
-/// Alpaca streaming message — deserialized from the array envelopes Alpaca sends.
+/// Alpaca streaming message — deserialized borrowing directly from the WS frame
+/// bytes (zero-copy for `&'a str` fields; no heap allocation per tick).
 #[derive(Debug, Deserialize)]
-struct AlpacaMessage {
-    #[serde(rename = "T")]
-    msg_type: String,
-    #[serde(default)]
-    msg: Option<String>,
+struct AlpacaMessage<'a> {
+    #[serde(rename = "T", borrow)]
+    msg_type: &'a str,
+    #[serde(default, borrow)]
+    msg: Option<&'a str>,
     #[allow(dead_code)]
-    #[serde(rename = "S")]
-    symbol: Option<String>,
-    #[serde(rename = "p")]
-    price: Option<String>,
-    #[serde(rename = "s")]
-    size: Option<String>,
-    #[serde(rename = "t")]
-    timestamp: Option<String>,
+    #[serde(rename = "S", default, borrow)]
+    symbol: Option<&'a str>,
+    /// Raw price string — parsed directly to Decimal (no f64 intermediate).
+    #[serde(rename = "p", default, borrow)]
+    price: Option<&'a str>,
+    /// Raw size string — parsed directly to Decimal (no f64 intermediate).
+    #[serde(rename = "s", default, borrow)]
+    size: Option<&'a str>,
+    #[serde(rename = "t", default, borrow)]
+    timestamp: Option<&'a str>,
     /// Trade ID from Alpaca (not always present on IEX).
     #[serde(rename = "i", default)]
     trade_id: Option<u64>,
     /// Taker side: "B" = buy, "S" = sell, absent = unknown.
-    #[serde(rename = "tks", default)]
-    taker_side: String,
+    #[serde(rename = "tks", default, borrow)]
+    taker_side: &'a str,
 }
 
 // ── AlpacaDataCollector ──────────────────────────────────────────────────────
@@ -77,23 +106,17 @@ impl AlpacaDataCollector {
 
     fn normalize(
         &self,
-        msg: &AlpacaMessage,
+        msg: &AlpacaMessage<'_>,
         raw: &[u8],
         seq: u64,
     ) -> Result<EventEnvelope, NormalizeError> {
-        let price_str = msg
-            .price
-            .as_deref()
-            .ok_or_else(|| NormalizeError::MissingField {
-                field: "p".to_owned(),
-            })?;
-        let size_str = msg
-            .size
-            .as_deref()
-            .ok_or_else(|| NormalizeError::MissingField {
-                field: "s".to_owned(),
-            })?;
-        let ts_str = msg.timestamp.as_deref().unwrap_or("");
+        let price_str = msg.price.ok_or_else(|| NormalizeError::MissingField {
+            field: "p".to_owned(),
+        })?;
+        let size_str = msg.size.ok_or_else(|| NormalizeError::MissingField {
+            field: "s".to_owned(),
+        })?;
+        let ts_str = msg.timestamp.unwrap_or("");
 
         let price = Decimal::from_str(price_str)
             .map(Price::from_decimal)
@@ -109,7 +132,7 @@ impl AlpacaDataCollector {
                 reason: e.to_string(),
             })?;
 
-        let side = match msg.taker_side.as_str() {
+        let side = match msg.taker_side {
             "B" | "b" => TradeSide::Buy,
             "S" | "s" => TradeSide::Sell,
             _ => TradeSide::Unknown,
@@ -120,15 +143,23 @@ impl AlpacaDataCollector {
             .map(|id| id.to_string())
             .unwrap_or_else(|| seq.to_string());
 
-        let payload = TradePayload::new(price, size, side, &exchange_trade_id);
+        let timestamp_ns = chrono::DateTime::parse_from_rfc3339(ts_str)
+            .map(|dt| dt.timestamp_nanos_opt().unwrap_or(0))
+            .unwrap_or_else(|_| Utc::now().timestamp_nanos_opt().unwrap_or(0));
+
+        // xxh3-64 dedup key: no UUID v5, no SHA-1, no heap allocation.
+        let dedup_key = trade_dedup_key(
+            timestamp_ns,
+            decimal_to_raw_u64(price.0),
+            decimal_to_raw_u64(size.0),
+        );
+
+        let payload =
+            TradePayload::with_dedup_key(price, size, side, &exchange_trade_id, dedup_key);
 
         let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
             .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
             .into_vec();
-
-        let timestamp_ns = chrono::DateTime::parse_from_rfc3339(ts_str)
-            .map(|dt| dt.timestamp_nanos_opt().unwrap_or(0))
-            .unwrap_or_else(|_| Utc::now().timestamp_nanos_opt().unwrap_or(0));
 
         let envelope = EventEnvelope::new(
             domain::intern_instrument(&self.symbol),
@@ -211,7 +242,8 @@ impl Collector for AlpacaDataCollector {
                     }
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
-                        let messages: Vec<AlpacaMessage> = match serde_json::from_str(&text) {
+                        // Borrow directly from `text` — no per-field String allocations.
+                        let messages: Vec<AlpacaMessage<'_>> = match serde_json::from_str(&text) {
                             Ok(v) => v,
                             Err(e) => {
                                 warn!(error = %e, "failed to parse Alpaca message array");
@@ -226,7 +258,7 @@ impl Collector for AlpacaDataCollector {
                         };
 
                         for am in &messages {
-                            match am.msg_type.as_str() {
+                            match am.msg_type {
                                 "t" => {
                                     seq += 1;
                                     if let Some(gap) = gap_detector.check(seq) {
@@ -295,16 +327,20 @@ impl Collector for AlpacaDataCollector {
 mod tests {
     use super::*;
 
-    fn make_msg(price: Option<&str>, size: Option<&str>, taker_side: &str) -> AlpacaMessage {
+    fn make_msg<'a>(
+        price: Option<&'a str>,
+        size: Option<&'a str>,
+        taker_side: &'a str,
+    ) -> AlpacaMessage<'a> {
         AlpacaMessage {
-            msg_type: "t".into(),
+            msg_type: "t",
             msg: None,
-            symbol: Some("AAPL".into()),
-            price: price.map(Into::into),
-            size: size.map(Into::into),
-            timestamp: Some("2024-01-15T14:30:00Z".into()),
+            symbol: Some("AAPL"),
+            price,
+            size,
+            timestamp: Some("2024-01-15T14:30:00Z"),
             trade_id: Some(999),
-            taker_side: taker_side.to_owned(),
+            taker_side,
         }
     }
 
@@ -341,14 +377,14 @@ mod tests {
     fn payload_is_valid_rkyv() {
         let collector = AlpacaDataCollector::new("AAPL");
         let msg = AlpacaMessage {
-            msg_type: "t".into(),
+            msg_type: "t",
             msg: None,
-            symbol: Some("AAPL".into()),
-            price: Some("150.0".into()),
-            size: Some("50.0".into()),
-            timestamp: Some("2024-01-15T14:30:00Z".into()),
+            symbol: Some("AAPL"),
+            price: Some("150.0"),
+            size: Some("50.0"),
+            timestamp: Some("2024-01-15T14:30:00Z"),
             trade_id: None,
-            taker_side: String::new(),
+            taker_side: "",
         };
         let envelope = collector.normalize(&msg, &[], 1).unwrap();
         let trade: TradePayload = envelope.decode_payload().unwrap();
