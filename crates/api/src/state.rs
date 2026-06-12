@@ -5,6 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use demand_manager::{DemandRegistry, NoopPipelineFactory};
+use execution::paper::PaperTradingEngine;
 use execution::ExecutionEngine;
 use risk::{KillSwitch, RiskGate};
 use strategy_runtime::{InstanceManager, WallClock};
@@ -19,6 +20,9 @@ pub struct AppState {
     pub risk_gate: Arc<RiskGate>,
     pub kill_switch: Arc<KillSwitch>,
     pub execution: Arc<ExecutionEngine>,
+    /// Internal paper trading engine — source of truth for paper-mode account
+    /// data on the dashboard (balances, positions, P&L per asset class).
+    pub paper_engine: Arc<PaperTradingEngine>,
     pub gateway: Arc<SubscriptionRegistry>,
     /// In-memory strategy definition store (keyed by Uuid).
     pub strategy_store: Arc<Mutex<HashMap<Uuid, StrategyDefinition>>>,
@@ -34,6 +38,7 @@ impl AppState {
         risk_gate: Arc<RiskGate>,
         kill_switch: Arc<KillSwitch>,
         execution: Arc<ExecutionEngine>,
+        paper_engine: Arc<PaperTradingEngine>,
         gateway: Arc<SubscriptionRegistry>,
     ) -> Self {
         let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
@@ -42,6 +47,7 @@ impl AppState {
             risk_gate,
             kill_switch,
             execution,
+            paper_engine,
             gateway,
             strategy_store: Arc::new(Mutex::new(HashMap::new())),
             instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),

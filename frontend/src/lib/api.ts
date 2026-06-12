@@ -5,6 +5,16 @@ export const api = axios.create({
   withCredentials: true,
 })
 
+// The Rust API's bearer auth is the M-17 placeholder (any non-empty token,
+// loopback only).  Attach a dev token so /api/* routes are reachable from
+// the SPA until Phase 2 session validation lands.
+api.interceptors.request.use((config) => {
+  if (!config.headers.Authorization) {
+    config.headers.Authorization = 'Bearer dev-local'
+  }
+  return config
+})
+
 api.interceptors.response.use(
   (r) => r,
   (err) => {

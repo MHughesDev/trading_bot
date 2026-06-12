@@ -42,15 +42,48 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&kill_switch),
     ));
 
-    // Build the in-house paper trading engine — one internal account per asset
-    // class, fills simulated locally, balances/positions/ledger all in-process.
-    // No external broker API credentials are needed anywhere on this path.
-    // Live broker adapters are loaded per-user from the database credential store
-    // when the user has deposited live trading credentials; the default is paper.
-    let paper_engine = Arc::new(execution::paper::PaperTradingEngine::new());
-    let paper_broker = paper_engine.broker(AssetClass::CryptoSpotCex);
+    // Build the in-house paper trading engine — the paper half of execution.
+    // One internal account per asset class, fills simulated locally with
+    // per-class realism (tuned spreads/fees, size impact, session calendars,
+    // mark-freshness gates); balances/positions/ledger all in-process.
+    // Live and paper share the same collector data: every pipeline feeds the
+    // engine's mark board and registers its instrument's asset class.  The
+    // multi-asset broker then routes each paper order to the account of its
+    // instrument's class.  Live broker adapters are loaded per-user from the
+    // database credential store when live credentials exist; default is paper.
+    let paper_engine = Arc::new(execution::paper::PaperTradingEngine::realistic());
+    let paper_broker = paper_engine.multi_asset_broker();
     let execution_engine = Arc::new(execution::ExecutionEngine::new(Arc::new(paper_broker)));
-    info!("in-house paper trading engine initialised (accounts for all asset classes, no external APIs)");
+    info!("in-house paper trading engine initialised (per-class accounts, realism gates on, no external APIs)");
+
+    // Perpetual-swap funding: charge open perp positions hourly at a flat
+    // default rate (1 bp per 8h, pro-rated).  Mirrors live venue cash flows.
+    {
+        let engine = Arc::clone(&paper_engine);
+        tokio::spawn(async move {
+            // 1 bp per 8h, pro-rated hourly: 0.0001 / 8.
+            let hourly_rate = rust_decimal::Decimal::new(125, 7);
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(3600));
+            tick.tick().await; // skip the immediate first tick
+            loop {
+                tick.tick().await;
+                for position in engine.positions(AssetClass::PerpetualSwap) {
+                    match engine.apply_funding(&position.instrument_id, hourly_rate) {
+                        Ok(payment) => tracing::debug!(
+                            instrument_id = %position.instrument_id,
+                            %payment,
+                            "paper perp funding applied"
+                        ),
+                        Err(e) => tracing::debug!(
+                            instrument_id = %position.instrument_id,
+                            error = %e,
+                            "paper perp funding skipped"
+                        ),
+                    }
+                }
+            }
+        });
+    }
 
     // Build demand manager and UI gateway.
     let demand_registry = Arc::new(demand_manager::DemandRegistry::new(Arc::new(
@@ -85,6 +118,7 @@ async fn main() -> anyhow::Result<()> {
     let _pipeline = hot_path::spawn_pipeline(
         "BTC/USD".to_owned(),
         "BTC-USD".to_owned(),
+        AssetClass::CryptoSpotCex,
         tee_tx,
         Arc::clone(&execution_engine),
         Arc::clone(&risk_gate),
@@ -92,8 +126,30 @@ async fn main() -> anyhow::Result<()> {
     );
     info!("hot-path pipeline (BTC/USD) started");
 
+    // Resume armed automations (paper AND live) from Postgres.  Automations
+    // are server-side state: they stay armed while the platform runs, no
+    // matter which mode any UI tab is displaying or whether a UI is open.
+    match storage::automation::armed_automations(&pg).await {
+        Ok(rows) => {
+            let paper = rows.iter().filter(|r| r.account_mode == "paper").count();
+            let live = rows.len() - paper;
+            info!(
+                paper,
+                live, "armed automations resumed — running server-side independent of UI sessions"
+            );
+        }
+        Err(e) => tracing::warn!(error = %e, "could not load armed automations at startup"),
+    }
+
     // Build the API router.
-    let app_state = api::AppState::new(pg, risk_gate, kill_switch, execution_engine, gateway);
+    let app_state = api::AppState::new(
+        pg,
+        risk_gate,
+        kill_switch,
+        execution_engine,
+        Arc::clone(&paper_engine),
+        gateway,
+    );
     let router = api::router(app_state);
 
     // Safety guardrail (M-17): refuse to bind on a network-accessible address

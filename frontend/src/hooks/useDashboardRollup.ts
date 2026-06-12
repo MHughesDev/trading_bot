@@ -13,12 +13,45 @@ export interface VenueTile {
   trade_count: number
 }
 
+export interface PaperPositionInfo {
+  instrument_id: string
+  quantity: string
+  average_entry_price: string
+  mark_price: string | null
+  unrealized_pnl: string
+  notional: string
+}
+
+/** Paper mode only: internal account data for one asset class. */
+export interface PaperAccountInfo {
+  currency: string
+  cash: string
+  equity: string
+  used_margin: string
+  free_collateral: string
+  fees_paid: string
+  open_positions: number
+  positions: PaperPositionInfo[]
+}
+
+/** Paper mode only: bot-wide account totals across all asset classes. */
+export interface PaperAccountTotals {
+  equity_usd: string
+  cash_usd: string
+  realized_pnl_usd: string
+  unrealized_pnl_usd: string
+  fees_paid_usd: string
+  open_positions: number
+  excluded_currencies: string[]
+}
+
 export interface AssetClassTile {
   asset_class: string
   realized_pnl_usd: string
   unrealized_pnl_usd: string
   win_rate: number
   venues: VenueTile[]
+  account?: PaperAccountInfo
 }
 
 export interface DashboardRollup {
@@ -27,6 +60,7 @@ export interface DashboardRollup {
   unrealized_pnl_usd: string
   win_rate: number
   by_asset_class: AssetClassTile[]
+  account_totals?: PaperAccountTotals
 }
 
 interface UseDashboardRollupResult {

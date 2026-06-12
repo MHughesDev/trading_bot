@@ -13,7 +13,7 @@ use domain::{
 
 use super::{PaperFill, PaperFillSimulator};
 
-/// Configurable spread and slippage for CLOB fills.
+/// Configurable spread, slippage, and size impact for CLOB fills.
 #[derive(Debug, Clone)]
 pub struct ClobFillSimulator {
     /// Half-spread in basis points applied to the mark price.
@@ -27,6 +27,14 @@ pub struct ClobFillSimulator {
     /// Fraction of requested qty that fills immediately (1 = full, 0.5 = half).
     /// Models shallow order-book depth for deterministic partial-fill testing.
     pub partial_fill_ratio: Decimal,
+    /// Size-impact model: notional (quote currency) at which a market order
+    /// pays `impact_bps_at_depth` of extra slippage.  Impact scales linearly
+    /// with notional and is capped at `max_impact_bps`.  `None` disables.
+    pub depth_notional: Option<Decimal>,
+    /// Extra slippage (bps) paid by a market order of exactly `depth_notional`.
+    pub impact_bps_at_depth: Decimal,
+    /// Upper bound on size impact (bps), however large the order.
+    pub max_impact_bps: Decimal,
 }
 
 impl Default for ClobFillSimulator {
@@ -37,23 +45,39 @@ impl Default for ClobFillSimulator {
             tick_size: dec!(0.01),
             fee_rate: dec!(0.001), // 0.1%
             partial_fill_ratio: Decimal::ONE,
+            depth_notional: None,
+            impact_bps_at_depth: Decimal::ZERO,
+            max_impact_bps: Decimal::ZERO,
         }
     }
 }
 
 impl ClobFillSimulator {
     /// Compute the simulated fill price for a **market** order, incorporating
-    /// half-spread and slippage in the direction of the trade.
-    fn market_fill_price(&self, mark: Price, side: Side) -> Price {
+    /// half-spread, tick slippage, and size impact in the trade's direction.
+    fn market_fill_price(&self, mark: Price, side: Side, qty: Decimal) -> Price {
         let m = mark.inner();
         let spread_adj = m * self.half_spread_bps / dec!(10000);
         let slip_adj = self.slippage_ticks * self.tick_size;
-        let total_adj = spread_adj + slip_adj;
+        let impact_adj = m * self.impact_bps(m, qty) / dec!(10000);
+        let total_adj = spread_adj + slip_adj + impact_adj;
         let raw = match side {
             Side::Buy => m + total_adj,
             Side::Sell => m - total_adj,
         };
         Price::from_decimal(raw.max(Decimal::ZERO))
+    }
+
+    /// Extra slippage (bps) for a market order of `qty` at mark `m`:
+    /// `impact_bps_at_depth × (qty × m / depth_notional)`, capped.
+    fn impact_bps(&self, m: Decimal, qty: Decimal) -> Decimal {
+        let Some(depth) = self.depth_notional else {
+            return Decimal::ZERO;
+        };
+        if depth <= Decimal::ZERO {
+            return Decimal::ZERO;
+        }
+        (self.impact_bps_at_depth * (qty * m) / depth).min(self.max_impact_bps)
     }
 
     /// Returns `true` if a resting limit order would fill at the current mark.
@@ -72,7 +96,7 @@ impl PaperFillSimulator for ClobFillSimulator {
     fn simulate_fill(&self, intent: &OrderIntent, mark: Price) -> PaperFill {
         let (fill_price, fills) = match intent.order_type {
             OrderType::Market => {
-                let fp = self.market_fill_price(mark, intent.side);
+                let fp = self.market_fill_price(mark, intent.side, intent.size.inner());
                 (fp, true)
             }
             OrderType::Limit | OrderType::StopLimit => {
@@ -86,7 +110,10 @@ impl PaperFillSimulator for ClobFillSimulator {
                     }
                 } else {
                     // No limit price provided — treat as market.
-                    (self.market_fill_price(mark, intent.side), true)
+                    (
+                        self.market_fill_price(mark, intent.side, intent.size.inner()),
+                        true,
+                    )
                 }
             }
         };
@@ -151,6 +178,34 @@ mod tests {
         let fill = sim.simulate_fill(&intent(OrderType::Market, Side::Sell, None), mark);
         assert!(fill.filled_qty > Decimal::ZERO);
         assert!(fill.fill_price.inner() < mark.inner());
+    }
+
+    #[test]
+    fn larger_market_orders_pay_more_impact() {
+        let sim = ClobFillSimulator {
+            depth_notional: Some(dec!(1_000_000)),
+            impact_bps_at_depth: dec!(10),
+            max_impact_bps: dec!(50),
+            ..Default::default()
+        };
+        let mark = Price::from_decimal(dec!(50_000));
+        let mut small = intent(OrderType::Market, Side::Buy, None);
+        small.size = Size::from_decimal(dec!(0.1)); // $5k notional
+        let mut big = intent(OrderType::Market, Side::Buy, None);
+        big.size = Size::from_decimal(dec!(20)); // $1M notional
+        let mut huge = intent(OrderType::Market, Side::Buy, None);
+        huge.size = Size::from_decimal(dec!(1_000)); // $50M — capped
+
+        let p_small = sim.simulate_fill(&small, mark).fill_price.inner();
+        let p_big = sim.simulate_fill(&big, mark).fill_price.inner();
+        let p_huge = sim.simulate_fill(&huge, mark).fill_price.inner();
+
+        assert!(p_big > p_small, "larger order must fill at a worse price");
+        // At depth: +10 bps over the small order's near-zero impact.
+        assert!(p_big - p_small > dec!(45) && p_big - p_small < dec!(55));
+        // Cap: 50 bps max impact = mark × 0.005 over spread+slippage.
+        let base = sim.simulate_fill(&small, mark).fill_price.inner();
+        assert!(p_huge - base <= dec!(250.01), "impact must respect the cap");
     }
 
     #[test]

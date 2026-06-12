@@ -6,6 +6,8 @@
 //! Computed on-demand when the Dashboard requests it.  Never runs in the background.
 //! Paper and Live are always separate account levels.
 
+pub mod paper;
+
 use std::collections::HashMap;
 
 use rust_decimal::Decimal;
@@ -34,6 +36,10 @@ pub struct AssetClassTile {
     pub unrealized_pnl_usd: Decimal,
     pub win_rate: f64,
     pub venues: Vec<VenueTile>,
+    /// Paper mode only: internal account data for this asset class
+    /// (cash, equity, margin, open positions).  `None` in live mode.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub account: Option<paper::PaperAccountInfo>,
 }
 
 /// Platform-wide rollup response.
@@ -44,6 +50,9 @@ pub struct RollupResponse {
     pub unrealized_pnl_usd: Decimal,
     pub win_rate: f64,
     pub by_asset_class: Vec<AssetClassTile>,
+    /// Paper mode only: bot-wide account totals across all asset classes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_totals: Option<paper::PaperAccountTotals>,
 }
 
 /// A mark price for an instrument at query time.
@@ -210,6 +219,7 @@ pub fn compute_rollup(
                 unrealized_pnl_usd: u,
                 win_rate: wr,
                 venues,
+                account: None,
             }
         })
         .collect();
@@ -224,6 +234,7 @@ pub fn compute_rollup(
         unrealized_pnl_usd: platform_unrealized,
         win_rate: platform_win_rate,
         by_asset_class: asset_class_tiles,
+        account_totals: None,
     }
 }
 

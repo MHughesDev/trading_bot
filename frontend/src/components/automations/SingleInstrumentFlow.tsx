@@ -115,7 +115,12 @@ export function SingleInstrumentFlow({ onArmed }: SingleInstrumentFlowProps) {
           asset_class: assetClass,
           instrument_id: instrument,
           execution_strategy_id: strategyId,
-          time_window: { kind: timeWindow },
+          // Canonical TimeWindow shape: 24/7 omits start/end; sessioned
+          // defaults to US regular trading hours.
+          time_window:
+            timeWindow === '24_7'
+              ? { start: null, end: null, timezone: 'UTC' }
+              : { start: '09:30', end: '16:00', timezone: 'America/New_York' },
         },
         armed: true,
       }),
