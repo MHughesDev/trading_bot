@@ -69,16 +69,20 @@ flow, sidebar status/positions, transactions, and asset pages still target
 dead endpoints. Phase-2 session auth (M-17) should land Rust-side
 `/auth/*` and the legacy pages should be re-pointed or retired.
 
-### F-4 Single hard-wired paper broker; live path unreachable
-`apps/platform/src/main.rs` builds
+### F-4 Single hard-wired paper broker; live path unreachable **[PAPER HALF FIXED]**
+`apps/platform/src/main.rs` built
 `ExecutionEngine::new(paper_engine.broker(AssetClass::CryptoSpotCex))` — a
-single broker for one asset class. Orders submitted through the hot path
-all hit the crypto paper account regardless of asset class, and there is no
-way to route a live order even though `venue-router::ExecRouter` (paper vs
-`LiveRouted`) and five live venue adapters exist. The `ExecRouter` is not
-referenced by the platform binary at all.
-**Recommendation:** make the hot path resolve `(account_mode, asset_class)`
-per order intent — paper → `paper_engine.broker(asset_class)`, live →
+single broker for one asset class, so every order hit the crypto paper
+account regardless of class.
+**Fix:** the paper half is now structured as its own complete execution
+side. Each data pipeline registers its instrument's asset class with the
+engine (`register_instrument`), and the new `MultiAssetPaperBroker`
+(`paper/dispatch.rs`) resolves the class **per order** and routes it to the
+correct internal account — same collector data feeding the mark board for
+both halves, execution split at the broker boundary.
+**Still open (live half):** there is still no way to route a live order;
+`venue-router::ExecRouter` (paper vs `LiveRouted`) and the five live venue
+adapters remain unreferenced by the platform binary. Wiring live =
 `ExecRouter::route(LiveRouted, …)` with per-user credentials from the
 credential store.
 
@@ -115,7 +119,7 @@ were silently dropped. All 11 now render.
 
 ## 3. Findings — realism assessment per asset class
 
-Implemented now **[FIXED]**:
+Implemented **[FIXED]**:
 
 - **Per-asset-class CLOB tuning.** All CLOB classes (crypto, futures, FX,
   perps) previously shared one simulator with equity-ish defaults (1-cent
@@ -126,43 +130,74 @@ Implemented now **[FIXED]**:
 - **Win/loss statistics.** Accounts now count closing trades and winners
   (cash sells, margin reductions, settlements), so the dashboard win rate
   is real rather than hardcoded 0.
+- **Size-dependent impact** (`clob.rs`). Market orders pay extra slippage
+  scaling linearly with notional against a per-class depth
+  (`impact_bps_at_depth × notional / depth_notional`, capped at
+  `max_impact_bps`): a $1M crypto order pays +5 bps, a $5k order pays
+  ~nothing.
+- **Market-hours enforcement** (`session.rs`). DST-aware, dependency-free
+  US-Eastern calendars: equities/ETF/options Mon–Fri 09:30–16:00, bonds
+  08:00–17:00, futures Globex week with the 17:00–18:00 break, FX
+  Sun 17:00 → Fri 17:00; crypto/perps/DEX/NFT/prediction stay 24/7.
+  Enforced at submit when `PaperEngineConfig::enforce_sessions` is on
+  (on in the platform via `PaperTradingEngine::realistic()`, off in unit
+  tests for determinism).
+- **Stale-mark guard.** Marks now carry observation timestamps; submits are
+  rejected (`StaleMark`) when the latest mark is older than
+  `max_mark_age_secs` (5 minutes in the platform config).
+- **Prediction-market fee formula.** Kalshi's actual
+  `0.07 × C × P × (1 − P)` (rounded up to the cent) replaces the flat 0.7%
+  of notional, which overcharged mid-range prices and undercharged extremes.
+- **Options quote realism.** Per-class broker-quote overrides: options fill
+  at ~1% half-spread plus a flat commission instead of equity's 3 bps.
+- **Perp funding scheduler.** The platform now charges open perp paper
+  positions hourly (1 bp per 8h, pro-rated) through
+  `PaperTradingEngine::apply_funding`, mirroring live venue cash flows.
 
-Roadmap (highest realism value first):
+Roadmap (remaining):
 
-1. **Size-dependent impact.** Fills ignore order size (`partial_fill_ratio`
-   is static). Add a square-root impact term against a configurable
-   per-instrument depth so a 100-BTC market order pays more than a 0.01-BTC
-   one.
-2. **Market-hours enforcement.** Equities/options/futures fill 24/7. Gate
-   `BrokerQuote`/futures fills on a DST-aware session calendar (queue or
-   reject outside RTH; the `TimeWindow` model already exists on automations).
-3. **Stale-mark guard.** A mark from hours ago still fills orders. Reject
-   (or flag) fills when the last mark is older than a per-class threshold.
-4. **Queue position for resting limits.** Resting orders currently fill the
+1. **Queue position for resting limits.** Resting orders currently fill the
    instant the mark *touches* the limit — optimistic vs reality. Require a
    strict cross (touch-through), and optionally fill proportionally to
    traded volume at the level.
-5. **Prediction-market fee formula.** Kalshi charges
-   `0.07 × C × P × (1 − P)` per contract, not a flat 0.7% of notional;
-   the flat rate overcharges mid-range prices and undercharges extremes.
-6. **Perp funding scheduler.** `apply_funding` exists but nothing calls it
-   periodically; add an 8-hourly task using a configurable or derived rate.
-7. **Contract multipliers from instrument metadata.** Futures use
+2. **Contract multipliers from instrument metadata.** Futures use
    multiplier 1; ES is $50/point. Source multipliers from instrument
    metadata instead of the per-class policy constant.
-8. **AMM realism.** Replace flat `price_impact_bps` with constant-product
+3. **AMM realism.** Replace flat `price_impact_bps` with constant-product
    (x·y=k) impact from configured pool depth + gas fee in quote terms
    (firm-quote path already exists for 0x wiring in Phase 4).
-9. **Equity microstructure extras.** Short locate/borrow fees (shorts are
+4. **Equity microstructure extras.** Short locate/borrow fees (shorts are
    currently impossible in cash accounts — fine for long-only, but margin
    equity accounts would need them), margin interest, dividends/corporate
    actions.
-10. **Options realism.** Spread should widen with moneyness/DTE; expiry
-    should auto-exercise ITM (settlement exists but must be scheduled);
-    short options need margin treatment (currently cash long-only).
-11. **Simulated latency/partial-fill jitter.** Optional deterministic-seeded
-    delay and fill fragmentation so strategy code experiences live-like
-    asynchrony in paper mode.
+5. **Options expiry.** Auto-exercise ITM at expiry (settlement exists but
+   must be scheduled); short options need margin treatment (currently cash
+   long-only); spread should further widen with moneyness/DTE.
+6. **Funding rate source.** The perp funding scheduler uses a flat default
+   rate; derive it from collector data (mark vs index premium) when a perp
+   collector lands.
+7. **Simulated latency/partial-fill jitter.** Optional deterministic-seeded
+   delay and fill fragmentation so strategy code experiences live-like
+   asynchrony in paper mode.
+
+### Architecture note: paper as its own half
+
+After this round the execution layer splits cleanly:
+
+```
+collectors (one feed, shared by both halves)
+   │  ticks → marks + instrument→asset-class registry
+   ▼
+PaperTradingEngine ◄── paper half: MultiAssetPaperBroker
+   │                    per-class accounts, tuned simulators,
+   │                    session/freshness gates, funding
+   └─ (live half, still to wire): venue-router ExecRouter
+                        → per-venue broker adapters + credentials
+```
+
+Paper never calls a venue; live never touches the internal accounts; both
+read the same mark board. The remaining work for full symmetry is the live
+half of F-4.
 
 ## 4. Multi-window / multi-tab design (as shipped)
 

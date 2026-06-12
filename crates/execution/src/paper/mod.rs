@@ -19,10 +19,12 @@ pub mod amm_swap;
 pub mod broker;
 pub mod broker_quote;
 pub mod clob;
+pub mod dispatch;
 pub mod engine;
 pub mod ledger;
 pub mod policy;
 pub mod prediction;
+pub mod session;
 pub mod wallet;
 
 use domain::{
@@ -42,7 +44,8 @@ pub use amm_swap::AmmQuoteSwapSimulator;
 pub use broker::PaperBroker;
 pub use broker_quote::BrokerQuoteFillSimulator;
 pub use clob::ClobFillSimulator;
-pub use engine::{PaperOrderRecord, PaperTradingEngine, SimulatorSet};
+pub use dispatch::MultiAssetPaperBroker;
+pub use engine::{PaperEngineConfig, PaperOrderRecord, PaperTradingEngine, SimulatorSet};
 pub use ledger::{PaperLedgerEntry, PaperLedgerKind};
 pub use policy::{AccountKind, AccountPolicy, ALL_ASSET_CLASSES};
 pub use prediction::PredictionMarketFillSimulator;

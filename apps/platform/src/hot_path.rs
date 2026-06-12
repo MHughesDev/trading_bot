@@ -29,6 +29,7 @@ pub struct PipelineHandle {
 pub fn spawn_pipeline(
     symbol: String,
     instrument_id: String,
+    asset_class: domain::instrument::AssetClass,
     tee_tx: tokio::sync::mpsc::UnboundedSender<RawTick>,
     execution_engine: Arc<execution::ExecutionEngine>,
     risk_gate: Arc<risk::RiskGate>,
@@ -36,6 +37,10 @@ pub fn spawn_pipeline(
     // board and fills any resting paper limit orders the mark crosses.
     paper_engine: Arc<PaperTradingEngine>,
 ) -> PipelineHandle {
+    // Shared-data contract: this pipeline is the mark source for BOTH halves
+    // (paper fills + live decisioning).  Registering the instrument's asset
+    // class lets the paper half route orders to the right internal account.
+    paper_engine.register_instrument(&instrument_id, asset_class);
     let (raw_prod, raw_cons) = rtrb::RingBuffer::<RawTick>::new(4096);
     let (world_prod, world_cons) = rtrb::RingBuffer::<WorldEvent>::new(1024);
     let (intent_prod, intent_cons) = rtrb::RingBuffer::<OrderIntent>::new(256);

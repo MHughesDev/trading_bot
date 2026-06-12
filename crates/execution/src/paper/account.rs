@@ -47,6 +47,15 @@ pub enum PaperTradeError {
     },
     #[error("no mark price for {instrument_id} — cannot fill")]
     NoMarkPrice { instrument_id: String },
+    #[error("market closed for {asset_class:?}")]
+    MarketClosed { asset_class: AssetClass },
+    #[error("stale mark for {instrument_id}: {age_secs}s old")]
+    StaleMark {
+        instrument_id: String,
+        age_secs: i64,
+    },
+    #[error("unknown instrument {0} — no asset class registered")]
+    UnknownInstrument(String),
     #[error("no open position in {instrument_id}")]
     NoPosition { instrument_id: String },
     #[error("unknown paper order: {0}")]
