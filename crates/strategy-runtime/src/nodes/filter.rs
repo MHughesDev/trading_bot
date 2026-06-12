@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::bytecode;
 use crate::interpreter::evaluate_condition;
-use crate::nodes::Universe;
+use crate::nodes::UniverseEntry;
 
 /// Retain only entries for which the pre-compiled `program` evaluates to true.
 ///
@@ -15,11 +15,12 @@ use crate::nodes::Universe;
 /// `feature(...)` calls in the program are resolved against each entry's
 /// feature map; `bar(...)` is not available in universe-mode evaluation and
 /// will return false if referenced.
-pub fn filter_compiled(universe: Universe, program: &bytecode::Program) -> Universe {
+pub fn filter_compiled(universe: &[UniverseEntry], program: &bytecode::Program) -> Vec<UniverseEntry> {
     let empty_bars = HashMap::new();
     universe
-        .into_iter()
+        .iter()
         .filter(|entry| bytecode::run(program, &entry.features, &empty_bars))
+        .cloned()
         .collect()
 }
 
@@ -29,13 +30,14 @@ pub fn filter_compiled(universe: Universe, program: &bytecode::Program) -> Unive
 /// Prefer `filter_compiled` when the same expression is evaluated more than once.
 ///
 /// Falls back to the interpreter for any expression that fails to compile.
-pub fn filter(universe: Universe, expr: &str) -> Universe {
+pub fn filter(universe: &[UniverseEntry], expr: &str) -> Vec<UniverseEntry> {
     let empty_bars = HashMap::new();
     match bytecode::compile(expr) {
         Ok(program) => filter_compiled(universe, &program),
         Err(_) => universe
-            .into_iter()
+            .iter()
             .filter(|entry| evaluate_condition(expr, &entry.features, &empty_bars))
+            .cloned()
             .collect(),
     }
 }

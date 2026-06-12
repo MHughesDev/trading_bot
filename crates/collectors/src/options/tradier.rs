@@ -125,8 +125,9 @@ impl TradierOptionsCollector {
 
         let payload = QuotePayload::new(bid_price, bid_size, ask_price, ask_size);
 
-        let payload_bytes =
-            serde_json::to_vec(&payload).map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
 
         let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
@@ -264,7 +265,7 @@ mod tests {
         let result = collector.normalize_quote(&sample_quote(), 1);
         assert!(result.is_ok(), "{:?}", result);
         let env = result.unwrap();
-        let payload: QuotePayload = serde_json::from_slice(&env.payload).unwrap();
+        let payload: QuotePayload = env.decode_payload().unwrap();
         assert!(payload.bid_price < payload.ask_price);
     }
 

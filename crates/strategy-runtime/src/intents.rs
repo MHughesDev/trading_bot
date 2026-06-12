@@ -16,7 +16,7 @@ use domain::strategy_def::actions::{Action, ActionKind, SizeMode};
 pub fn build_intent_from_action(
     action: &Action,
     instrument_id: &str,
-    strategy_id: String,
+    strategy_id: &str,
 ) -> Option<OrderIntent> {
     let ActionKind::PlaceOrder { order } = &action.kind;
     match order.size_mode {
@@ -28,7 +28,7 @@ pub fn build_intent_from_action(
                 OrderType::Market,
                 size,
                 None,
-                Some(strategy_id),
+                Some(strategy_id.to_owned()),
             ))
         }
         // PercentOfBalance and RiskUnit are v1.0 parse-only; not executable yet.
@@ -46,7 +46,7 @@ pub fn build_intents_for_signals(
     actions
         .iter()
         .filter(|a| signals.contains(&a.on_signal))
-        .filter_map(|a| build_intent_from_action(a, instrument_id, strategy_id.to_owned()))
+        .filter_map(|a| build_intent_from_action(a, instrument_id, strategy_id))
         .collect()
 }
 
@@ -72,8 +72,7 @@ mod tests {
     #[test]
     fn fixed_size_produces_intent() {
         let action = buy_fixed("0.01");
-        let intent =
-            build_intent_from_action(&action, "BTC-USDT", "ema_cross_v1".to_owned()).unwrap();
+        let intent = build_intent_from_action(&action, "BTC-USDT", "ema_cross_v1").unwrap();
         assert_eq!(intent.instrument_id, "BTC-USDT");
         assert_eq!(intent.strategy_id.as_deref(), Some("ema_cross_v1"));
         assert!(!intent.idempotency_key.is_nil());
@@ -82,7 +81,7 @@ mod tests {
     #[test]
     fn invalid_size_returns_none() {
         let action = buy_fixed("not_a_number");
-        assert!(build_intent_from_action(&action, "BTC-USDT", "s".to_owned()).is_none());
+        assert!(build_intent_from_action(&action, "BTC-USDT", "s").is_none());
     }
 
     #[test]
@@ -97,6 +96,6 @@ mod tests {
                 },
             },
         };
-        assert!(build_intent_from_action(&action, "BTC-USDT", "s".to_owned()).is_none());
+        assert!(build_intent_from_action(&action, "BTC-USDT", "s").is_none());
     }
 }

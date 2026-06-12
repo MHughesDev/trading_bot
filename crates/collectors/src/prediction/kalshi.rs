@@ -13,7 +13,6 @@ use domain::{
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use std::str::FromStr;
 use tracing::{info, warn};
 
 use crate::{Collector, CollectorError};
@@ -84,7 +83,7 @@ impl KalshiCollector {
         let yes_ask = market.yes_ask.unwrap_or(0.0);
         let yes_mid = (yes_bid + yes_ask) / 2.0;
 
-        let yes_price = Decimal::from_str(&yes_mid.to_string())
+        let yes_price = Decimal::try_from(yes_mid)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
                 field: "yes_mid".to_owned(),
@@ -92,7 +91,7 @@ impl KalshiCollector {
             })?;
 
         let no_mid = 1.0 - yes_mid;
-        let no_price = Decimal::from_str(&no_mid.to_string())
+        let no_price = Decimal::try_from(no_mid)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
                 field: "no_mid".to_owned(),
@@ -100,15 +99,14 @@ impl KalshiCollector {
             })?;
 
         let volume = market.volume.and_then(|v| {
-            Decimal::from_str(&v.to_string())
-                .ok()
-                .map(Price::from_decimal)
+            Decimal::try_from(v).ok().map(Price::from_decimal)
         });
 
         let payload = PredictionPricePayload::new(yes_price, no_price, volume);
 
-        let payload_bytes =
-            serde_json::to_vec(&payload).map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
 
         let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
@@ -133,7 +131,7 @@ impl KalshiCollector {
             (bid + ask) / 2.0
         };
 
-        let price = Decimal::from_str(&mid_price.to_string())
+        let price = Decimal::try_from(mid_price)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
                 field: "mid".to_owned(),
@@ -141,7 +139,7 @@ impl KalshiCollector {
             })?;
 
         let volume_raw = market.volume.unwrap_or(0.0);
-        let volume = Decimal::from_str(&volume_raw.to_string())
+        let volume = Decimal::try_from(volume_raw)
             .map(Size::from_decimal)
             .map_err(|e| NormalizeError::InvalidSize {
                 field: "volume".to_owned(),
@@ -270,7 +268,7 @@ mod tests {
             domain::instrument_name(env.instrument_id).as_deref(),
             Some("BTC-ABOVE-60K")
         );
-        let payload: PredictionPricePayload = serde_json::from_slice(&env.payload).unwrap();
+        let payload: PredictionPricePayload = env.decode_payload().unwrap();
         let yes: f64 = payload.yes_price.to_string().parse().unwrap();
         let no: f64 = payload.no_price.to_string().parse().unwrap();
         assert!((0.0..=1.0).contains(&yes), "yes_price out of range: {yes}");

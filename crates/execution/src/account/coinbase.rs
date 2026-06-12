@@ -199,7 +199,7 @@ impl AccountSource for CoinbaseAccountSource {
                     transaction_type: "fill".to_owned(),
                     instrument_id: Some(product_id),
                     amount: Decimal::from_str(&size).unwrap_or_default(),
-                    currency: "USD".to_owned(),
+                    currency: "USD",
                     occurred_at,
                 })
             })

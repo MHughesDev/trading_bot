@@ -5,7 +5,17 @@ use serde::{Deserialize, Serialize};
 use crate::payloads::Payload;
 
 /// A linked instrument mention found in a social-media post.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug))]
 pub struct InstrumentMention {
     /// Domain instrument ID (e.g. `"BTC-USD"`).
     pub instrument_id: String,
@@ -14,7 +24,17 @@ pub struct InstrumentMention {
 }
 
 /// A social-media post normalized for the platform.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug))]
 pub struct SocialPostPayload {
     pub schema_version: String,
     /// Source platform (e.g. `"reddit"`).

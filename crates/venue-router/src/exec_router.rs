@@ -36,7 +36,7 @@ pub enum RouteOutcome {
 #[derive(Debug, Error)]
 pub enum RoutingError {
     #[error("no live adapter registered for venue: {0}")]
-    NoAdapter(String),
+    NoAdapter(Box<str>),
     #[error("unsupported order type for venue {venue}: {detail}")]
     UnsupportedOrderType { venue: String, detail: String },
     #[error("broker error: {0}")]
@@ -87,7 +87,7 @@ impl ExecRouter {
                 let adapter = self
                     .adapters
                     .get(venue)
-                    .ok_or_else(|| RoutingError::NoAdapter(venue.to_owned()))?;
+                    .ok_or_else(|| RoutingError::NoAdapter(venue.into()))?;
 
                 let broker_order_id = adapter.submit(approved).await?;
                 Ok(RouteOutcome::LiveSubmitted { broker_order_id })

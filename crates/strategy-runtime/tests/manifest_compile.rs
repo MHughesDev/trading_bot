@@ -77,9 +77,9 @@ fn default_ema_manifest_kind_is_discovery() {
 #[test]
 fn default_ema_manifest_required_features() {
     let manifest = compile_manifest(&ema_discovery_def());
-    let mut features = manifest.required_features.clone();
+    let mut features: Vec<&str> = manifest.required_features.iter().map(String::as_str).collect();
     features.sort();
-    assert_eq!(features, vec!["ema_21", "ema_7"]);
+    assert_eq!(features, ["ema_21", "ema_7"]);
 }
 
 /// A strategy with a PlaceOrder action compiles to Execution kind.
