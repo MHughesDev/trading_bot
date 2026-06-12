@@ -42,12 +42,15 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&kill_switch),
     ));
 
-    // Build in-house paper execution engine — no external broker API credentials needed.
-    // Live broker adapters are loaded per-user from the database credential store when
-    // the user has deposited live trading credentials; the default path is always paper.
-    let (paper_broker, mark_price) = execution::paper::PaperBroker::new(AssetClass::CryptoSpotCex);
+    // Build the in-house paper trading engine — one internal account per asset
+    // class, fills simulated locally, balances/positions/ledger all in-process.
+    // No external broker API credentials are needed anywhere on this path.
+    // Live broker adapters are loaded per-user from the database credential store
+    // when the user has deposited live trading credentials; the default is paper.
+    let paper_engine = Arc::new(execution::paper::PaperTradingEngine::new());
+    let paper_broker = paper_engine.broker(AssetClass::CryptoSpotCex);
     let execution_engine = Arc::new(execution::ExecutionEngine::new(Arc::new(paper_broker)));
-    info!("in-house paper execution engine initialised (all asset classes covered)");
+    info!("in-house paper trading engine initialised (accounts for all asset classes, no external APIs)");
 
     // Build demand manager and UI gateway.
     let demand_registry = Arc::new(demand_manager::DemandRegistry::new(Arc::new(
@@ -85,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
         tee_tx,
         Arc::clone(&execution_engine),
         Arc::clone(&risk_gate),
-        mark_price,
+        Arc::clone(&paper_engine),
     );
     info!("hot-path pipeline (BTC/USD) started");
 
