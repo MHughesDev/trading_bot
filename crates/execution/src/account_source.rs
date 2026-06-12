@@ -47,7 +47,7 @@ pub struct VenueTransaction {
     pub transaction_type: String,
     pub instrument_id: Option<String>,
     pub amount: Decimal,
-    pub currency: String,
+    pub currency: &'static str,
     pub occurred_at: DateTime<Utc>,
 }
 

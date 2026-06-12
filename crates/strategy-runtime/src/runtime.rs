@@ -203,10 +203,10 @@ impl StrategyInstance {
 /// `by_instrument` is a secondary index from `InstrumentId` → list of instance keys,
 /// enabling O(1) u32 lookup without string hashing per dispatch.
 pub struct InstanceManager {
-    instances: HashMap<(String, String), StrategyInstance>,
+    instances: HashMap<(String, InstrumentId), StrategyInstance>,
     /// Secondary index: interned InstrumentId → Vec of (user_id, instrument_id) keys.
-    /// Using `InstrumentId` (u32) as the key avoids string hashing on every event dispatch.
-    by_instrument: HashMap<InstrumentId, Vec<(String, String)>>,
+    /// Using `InstrumentId` (u32) for both avoids string hashing on every event dispatch.
+    by_instrument: HashMap<InstrumentId, Vec<(String, InstrumentId)>>,
     demand: Arc<DemandRegistry>,
 }
 
@@ -231,7 +231,9 @@ impl InstanceManager {
     ) -> Result<(), RuntimeError> {
         let user_id = user_id.into();
         let instrument_id = instrument_id.into();
-        let key = (user_id.clone(), instrument_id.clone());
+        // Intern once at registration so all subsequent lookups use the compact u32.
+        let iid = domain::intern_instrument(&instrument_id);
+        let key = (user_id.clone(), iid);
 
         if self.instances.contains_key(&key) {
             return Err(RuntimeError::AlreadyRunning {
@@ -256,16 +258,14 @@ impl InstanceManager {
         let instance =
             StrategyInstance::new(user_id.clone(), instrument_id.clone(), definition, start);
         self.instances.insert(key.clone(), instance);
-        // Intern the instrument name once at registration; store the compact u32 ID
-        // so dispatch() can do a u32 hash lookup instead of a string hash lookup.
-        let iid = domain::intern_instrument(&instrument_id);
         self.by_instrument.entry(iid).or_default().push(key);
         Ok(())
     }
 
     /// Stop and remove the instance for `(user_id, instrument_id)`, releasing demand.
     pub fn stop(&mut self, user_id: &str, instrument_id: &str) {
-        let key = (user_id.to_owned(), instrument_id.to_owned());
+        let iid = domain::intern_instrument(instrument_id);
+        let key = (user_id.to_owned(), iid);
         if let Some(instance) = self.instances.remove(&key) {
             for input in &instance.definition.inputs {
                 let resolved = if input.is_bound_at_init() {
@@ -297,7 +297,7 @@ impl InstanceManager {
         let mut results = Vec::new();
         if let Some(keys) = self.by_instrument.get(&iid) {
             // Collect keys to avoid simultaneous borrow of self.instances and self.by_instrument.
-            let keys: Vec<(String, String)> = keys.clone();
+            let keys: Vec<(String, InstrumentId)> = keys.clone();
             for key in &keys {
                 if let Some(instance) = self.instances.get_mut(key) {
                     let intents = instance.process_event(&event);

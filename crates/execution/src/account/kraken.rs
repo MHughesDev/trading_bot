@@ -189,7 +189,7 @@ impl AccountSource for KrakenAccountSource {
                     transaction_type: "fill".to_owned(),
                     instrument_id: Some(pair),
                     amount: vol,
-                    currency: "USD".to_owned(),
+                    currency: "USD",
                     occurred_at,
                 })
             })

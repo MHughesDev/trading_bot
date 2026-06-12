@@ -37,9 +37,9 @@ pub struct AssetClassTile {
 }
 
 /// Platform-wide rollup response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RollupResponse {
-    pub mode: String,
+    pub mode: &'static str,
     pub realized_pnl_usd: Decimal,
     pub unrealized_pnl_usd: Decimal,
     pub win_rate: f64,
@@ -219,7 +219,7 @@ pub fn compute_rollup(
     let platform_unrealized: Decimal = asset_class_tiles.iter().map(|t| t.unrealized_pnl_usd).sum();
 
     RollupResponse {
-        mode: mode.as_str().to_owned(),
+        mode: mode.as_str(),
         realized_pnl_usd: platform_realized,
         unrealized_pnl_usd: platform_unrealized,
         win_rate: platform_win_rate,

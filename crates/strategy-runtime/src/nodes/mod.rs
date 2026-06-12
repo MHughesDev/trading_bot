@@ -80,7 +80,7 @@ pub fn evaluate_universe_pipeline(nodes: &[Node], initial_universe: Universe) ->
                 ascending,
             } => {
                 if let Some(universe) = node_outputs.get(input) {
-                    let ranked = rank::rank((**universe).clone(), feature, *ascending);
+                    let ranked = rank::rank(universe, feature, *ascending);
                     node_outputs.insert(node.id.clone(), Arc::new(ranked));
                 }
             }
@@ -88,18 +88,18 @@ pub fn evaluate_universe_pipeline(nodes: &[Node], initial_universe: Universe) ->
                 if let Some(universe) = node_outputs.get(input) {
                     let filtered = if let Some(program) = compiled_filters.get(&node.id) {
                         // Fast path: execute pre-compiled bytecode — no re-parsing per entry.
-                        filter::filter_compiled((**universe).clone(), program)
+                        filter::filter_compiled(universe, program)
                     } else {
                         // Fallback: expression failed to compile; use the tree-walking
                         // interpreter (will re-parse per entry, but this is the error path).
-                        filter::filter((**universe).clone(), expr)
+                        filter::filter(universe, expr)
                     };
                     node_outputs.insert(node.id.clone(), Arc::new(filtered));
                 }
             }
             NodeKind::TakeTopN { input, n } => {
                 if let Some(universe) = node_outputs.get(input) {
-                    let taken = take_top_n::take_top_n((**universe).clone(), *n);
+                    let taken = take_top_n::take_top_n(universe, *n);
                     node_outputs.insert(node.id.clone(), Arc::new(taken));
                 }
             }

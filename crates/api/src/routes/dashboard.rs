@@ -47,7 +47,7 @@ pub async fn get_rollup(
     // TODO: In a real deployment, fetch lots/closes from Postgres and marks from Redis.
     // For now, return an empty rollup (the FifoEngine and compute logic are tested separately).
     let rollup = RollupResponse {
-        mode: account_mode.as_str().to_owned(),
+        mode: account_mode.as_str(),
         realized_pnl_usd: rust_decimal::Decimal::ZERO,
         unrealized_pnl_usd: rust_decimal::Decimal::ZERO,
         win_rate: 0.0,

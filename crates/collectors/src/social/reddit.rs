@@ -54,8 +54,9 @@ struct RedditPost {
 pub fn extract_mentions(
     text: &str,
     known_instruments: &HashMap<String, String>,
+    scratch: &mut HashMap<String, f32>,
 ) -> Vec<InstrumentMention> {
-    let mut mentions: HashMap<String, f32> = HashMap::new();
+    scratch.clear();
 
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -71,17 +72,17 @@ pub fn extract_mentions(
                 } else {
                     0.6
                 };
-                let entry = mentions.entry(upper).or_insert(0.0_f32);
+                let entry = scratch.entry(upper).or_insert(0.0_f32);
                 *entry = entry.max(confidence);
             }
         }
     }
 
-    mentions
-        .into_iter()
-        .filter(|(_, conf)| *conf >= LINK_CONFIDENCE_THRESHOLD)
-        .map(|(instrument_id, confidence)| InstrumentMention {
-            instrument_id,
+    scratch
+        .iter()
+        .filter(|(_, conf)| **conf >= LINK_CONFIDENCE_THRESHOLD)
+        .map(|(instrument_id, &confidence)| InstrumentMention {
+            instrument_id: instrument_id.clone(),
             confidence,
         })
         .collect()
@@ -102,7 +103,12 @@ impl RedditCollector {
         }
     }
 
-    fn normalize_post(&self, post: &RedditPost, seq: u64) -> Result<EventEnvelope, NormalizeError> {
+    fn normalize_post(
+        &self,
+        post: &RedditPost,
+        seq: u64,
+        scratch: &mut HashMap<String, f32>,
+    ) -> Result<EventEnvelope, NormalizeError> {
         let title = post.title.as_deref().unwrap_or_default();
         let body = post
             .body
@@ -111,7 +117,7 @@ impl RedditCollector {
             .unwrap_or_default();
         let combined = format!("{title} {body}");
 
-        let mentions = extract_mentions(&combined, &self.known_instruments);
+        let mentions = extract_mentions(&combined, &self.known_instruments, scratch);
         debug!(
             post_id = %post.id,
             mention_count = mentions.len(),
@@ -188,6 +194,7 @@ impl Collector for RedditCollector {
             .map_err(|e| CollectorError::Connect(e.to_string()))?;
 
         let access_token = token.access_token;
+        let mut mention_scratch: HashMap<String, f32> = HashMap::new();
 
         loop {
             let url = format!("{REDDIT_OAUTH_BASE}/r/{}/new?limit=25", self.subreddit);
@@ -218,7 +225,8 @@ impl Collector for RedditCollector {
                             let instrument_name = format!("reddit.{}", self.subreddit);
                             for child in &listing.data.children {
                                 seq += 1;
-                                let result = self.normalize_post(&child.data, seq);
+                                let result =
+                                    self.normalize_post(&child.data, seq, &mut mention_scratch);
                                 crate::normalizer::quarantine_or_publish(
                                     result,
                                     &raw,
@@ -255,7 +263,8 @@ mod tests {
 
     #[test]
     fn cashtag_btc_links_above_threshold() {
-        let mentions = extract_mentions("$BTC is going to the moon!", &known());
+        let mut scratch = HashMap::new();
+        let mentions = extract_mentions("$BTC is going to the moon!", &known(), &mut scratch);
         assert!(!mentions.is_empty(), "BTC cashtag should link");
         let btc = mentions.iter().find(|m| m.instrument_id == "BTC").unwrap();
         assert!(
@@ -267,7 +276,8 @@ mod tests {
 
     #[test]
     fn ambiguous_two_char_ticker_does_not_link() {
-        let mentions = extract_mentions("$AI is trending", &known());
+        let mut scratch = HashMap::new();
+        let mentions = extract_mentions("$AI is trending", &known(), &mut scratch);
         assert!(
             mentions.is_empty()
                 || mentions
@@ -279,7 +289,8 @@ mod tests {
 
     #[test]
     fn unknown_cashtag_scores_below_threshold() {
-        let mentions = extract_mentions("$DOGE is great", &known());
+        let mut scratch = HashMap::new();
+        let mentions = extract_mentions("$DOGE is great", &known(), &mut scratch);
         assert!(
             mentions.is_empty(),
             "unknown cashtag should fall below threshold"
@@ -288,7 +299,9 @@ mod tests {
 
     #[test]
     fn multiple_cashtags_all_linked() {
-        let mentions = extract_mentions("Buying $BTC and $ETH today", &known());
+        let mut scratch = HashMap::new();
+        let mentions =
+            extract_mentions("Buying $BTC and $ETH today", &known(), &mut scratch);
         assert_eq!(mentions.len(), 2, "both BTC and ETH should link");
     }
 
@@ -304,7 +317,8 @@ mod tests {
             score: Some(42),
             body: None,
         };
-        let result = collector.normalize_post(&post, 1);
+        let mut scratch = HashMap::new();
+        let result = collector.normalize_post(&post, 1, &mut scratch);
         assert!(result.is_ok(), "{:?}", result);
         let env = result.unwrap();
         let payload: SocialPostPayload = env.decode_payload().unwrap();

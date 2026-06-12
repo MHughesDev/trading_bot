@@ -212,7 +212,7 @@ impl AccountSource for AlpacaAccountSource {
                     transaction_type: a.activity_type,
                     instrument_id: a.symbol,
                     amount: qty,
-                    currency: "USD".to_owned(),
+                    currency: "USD",
                     occurred_at,
                 }
             })
