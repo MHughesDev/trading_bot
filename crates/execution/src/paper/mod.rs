@@ -5,6 +5,7 @@
 //! computed locally.
 
 pub mod amm_swap;
+pub mod broker;
 pub mod broker_quote;
 pub mod clob;
 pub mod prediction;
@@ -20,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use amm_swap::AmmQuoteSwapSimulator;
+pub use broker::PaperBroker;
 pub use broker_quote::BrokerQuoteFillSimulator;
 pub use clob::ClobFillSimulator;
 pub use prediction::PredictionMarketFillSimulator;

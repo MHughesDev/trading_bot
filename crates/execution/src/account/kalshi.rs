@@ -164,7 +164,7 @@ impl AccountSource for KalshiAccountSource {
                     transaction_type: "fill".to_owned(),
                     instrument_id: Some(ticker),
                     amount: count,
-                    currency: "USD".to_owned(),
+                    currency: "USD",
                     occurred_at,
                 })
             })

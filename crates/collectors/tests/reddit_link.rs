@@ -13,7 +13,8 @@ fn known() -> HashMap<String, String> {
 
 #[test]
 fn cashtag_btc_links_above_threshold() {
-    let mentions = extract_mentions("$BTC is looking bullish today!", &known());
+    let mut scratch = HashMap::new();
+    let mentions = extract_mentions("$BTC is looking bullish today!", &known(), &mut scratch);
     let btc = mentions.iter().find(|m| m.instrument_id == "BTC");
     assert!(btc.is_some(), "BTC cashtag should be linked");
     assert!(
@@ -24,7 +25,8 @@ fn cashtag_btc_links_above_threshold() {
 
 #[test]
 fn ambiguous_two_char_mention_falls_below_threshold() {
-    let mentions = extract_mentions("$AI will replace us all", &known());
+    let mut scratch = HashMap::new();
+    let mentions = extract_mentions("$AI will replace us all", &known(), &mut scratch);
     // "AI" has 2 chars → extracted as 2-char ticker, filtered out.
     let linked = mentions
         .iter()
@@ -38,7 +40,8 @@ fn ambiguous_two_char_mention_falls_below_threshold() {
 #[test]
 fn unknown_cashtag_does_not_link() {
     // DOGE not in known_instruments → confidence 0.6, below 0.75 threshold.
-    let mentions = extract_mentions("$DOGE to the moon!", &known());
+    let mut scratch = HashMap::new();
+    let mentions = extract_mentions("$DOGE to the moon!", &known(), &mut scratch);
     assert!(
         mentions.is_empty(),
         "unknown cashtag should not link: {:?}",
@@ -48,7 +51,8 @@ fn unknown_cashtag_does_not_link() {
 
 #[test]
 fn social_post_event_carries_confidence_score() {
-    let mentions = extract_mentions("Buying $BTC and $ETH now", &known());
+    let mut scratch = HashMap::new();
+    let mentions = extract_mentions("Buying $BTC and $ETH now", &known(), &mut scratch);
     assert_eq!(mentions.len(), 2);
     for m in &mentions {
         assert!(

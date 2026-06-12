@@ -13,7 +13,6 @@ use domain::{
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use std::str::FromStr;
 use tracing::{info, warn};
 
 use crate::{Collector, CollectorError};
@@ -84,7 +83,7 @@ impl KalshiCollector {
         let yes_ask = market.yes_ask.unwrap_or(0.0);
         let yes_mid = (yes_bid + yes_ask) / 2.0;
 
-        let yes_price = Decimal::from_str(&yes_mid.to_string())
+        let yes_price = Decimal::try_from(yes_mid)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
                 field: "yes_mid".to_owned(),
@@ -92,7 +91,7 @@ impl KalshiCollector {
             })?;
 
         let no_mid = 1.0 - yes_mid;
-        let no_price = Decimal::from_str(&no_mid.to_string())
+        let no_price = Decimal::try_from(no_mid)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
                 field: "no_mid".to_owned(),
@@ -100,9 +99,7 @@ impl KalshiCollector {
             })?;
 
         let volume = market.volume.and_then(|v| {
-            Decimal::from_str(&v.to_string())
-                .ok()
-                .map(Price::from_decimal)
+            Decimal::try_from(v).ok().map(Price::from_decimal)
         });
 
         let payload = PredictionPricePayload::new(yes_price, no_price, volume);
@@ -134,7 +131,7 @@ impl KalshiCollector {
             (bid + ask) / 2.0
         };
 
-        let price = Decimal::from_str(&mid_price.to_string())
+        let price = Decimal::try_from(mid_price)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
                 field: "mid".to_owned(),
@@ -142,7 +139,7 @@ impl KalshiCollector {
             })?;
 
         let volume_raw = market.volume.unwrap_or(0.0);
-        let volume = Decimal::from_str(&volume_raw.to_string())
+        let volume = Decimal::try_from(volume_raw)
             .map(Size::from_decimal)
             .map_err(|e| NormalizeError::InvalidSize {
                 field: "volume".to_owned(),

@@ -199,7 +199,7 @@ impl AccountSource for OandaAccountSource {
                     transaction_type: tx_type,
                     instrument_id: instrument,
                     amount: units,
-                    currency: "USD".to_owned(),
+                    currency: "USD",
                     occurred_at,
                 })
             })

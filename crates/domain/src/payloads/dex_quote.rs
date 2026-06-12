@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::money::{Price, Size};
+use crate::money::{AsDecimalBytes, Price, Size};
 use crate::payloads::Payload;
 
 /// Firm DEX/AMM swap quote from an aggregator (e.g. 0x).
@@ -23,10 +23,13 @@ pub struct DexQuotePayload {
     /// Token being bought (e.g. `"USDC"`).
     pub buy_token: String,
     /// Amount of sell token offered.
+    #[rkyv(with = AsDecimalBytes)]
     pub sell_amount: Size,
     /// Amount of buy token returned (the "firm" quote).
+    #[rkyv(with = AsDecimalBytes)]
     pub buy_amount: Size,
     /// Implied price: buy_amount / sell_amount.
+    #[rkyv(with = AsDecimalBytes)]
     pub price: Price,
     /// Estimated gas cost in native units (e.g. ETH wei as a decimal string).
     pub estimated_gas: Option<String>,

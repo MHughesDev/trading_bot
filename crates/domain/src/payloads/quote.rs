@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::money::{Price, Size};
+use crate::money::{AsDecimalBytes, Price, Size};
 use crate::payloads::Payload;
 
 /// Best bid/ask at a point in time (L1 quote).
@@ -19,8 +19,11 @@ use crate::payloads::Payload;
 #[rkyv(derive(Debug))]
 pub struct QuotePayload {
     pub bid_price: Price,
+    #[rkyv(with = AsDecimalBytes)]
     pub bid_size: Size,
+    #[rkyv(with = AsDecimalBytes)]
     pub ask_price: Price,
+    #[rkyv(with = AsDecimalBytes)]
     pub ask_size: Size,
 }
 

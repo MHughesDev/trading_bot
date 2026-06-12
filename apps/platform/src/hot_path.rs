@@ -3,9 +3,9 @@
 //! Each stage communicates via a bounded lock-free SPSC ring (rtrb).  JetStream
 //! never appears on this path — it receives events via the async tee task.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use domain::{EventEnvelope, OrderIntent};
+use domain::{money::Price, EventEnvelope, OrderIntent};
 use rust_decimal::Decimal;
 use strategy_runtime::world::WorldEvent;
 use tracing::{info, warn};
@@ -31,6 +31,8 @@ pub fn spawn_pipeline(
     tee_tx: tokio::sync::mpsc::UnboundedSender<RawTick>,
     execution_engine: Arc<execution::ExecutionEngine>,
     risk_gate: Arc<risk::RiskGate>,
+    // Shared mark price updated by stage 2; read by the in-house paper broker.
+    mark_price: Arc<RwLock<Price>>,
 ) -> PipelineHandle {
     let (raw_prod, raw_cons) = rtrb::RingBuffer::<RawTick>::new(4096);
     let (world_prod, world_cons) = rtrb::RingBuffer::<WorldEvent>::new(1024);
@@ -41,6 +43,7 @@ pub fn spawn_pipeline(
         instrument_id.clone(),
         raw_cons,
         world_prod,
+        mark_price,
     ));
     let t3 = tokio::spawn(stage_strategy_eval(
         instrument_id.clone(),
@@ -81,6 +84,7 @@ async fn stage_bar_builder(
     instrument_id: String,
     mut raw_cons: rtrb::Consumer<RawTick>,
     mut world_prod: rtrb::Producer<WorldEvent>,
+    mark_price: Arc<RwLock<Price>>,
 ) {
     use domain::money::Size;
     use domain::payloads::bar::{BarPayload, Timeframe};
@@ -95,6 +99,9 @@ async fn stage_bar_builder(
                     Ok(p) => p.price,
                     Err(_) => continue,
                 };
+                if let Ok(mut m) = mark_price.write() {
+                    *m = price;
+                }
                 let bar = BarPayload::new(
                     Timeframe::Minutes1,
                     price,
