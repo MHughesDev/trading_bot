@@ -10,6 +10,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // Rust platform (REST + WebSocket) — see README quickstart.
+      '/api': 'http://127.0.0.1:8080',
+      '/ws': { target: 'ws://127.0.0.1:8080', ws: true },
       '/auth': 'http://127.0.0.1:8001',
       '/assets': 'http://127.0.0.1:8001',
       '/trade': 'http://127.0.0.1:8001',

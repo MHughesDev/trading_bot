@@ -92,8 +92,31 @@ async fn main() -> anyhow::Result<()> {
     );
     info!("hot-path pipeline (BTC/USD) started");
 
+    // Resume armed automations (paper AND live) from Postgres.  Automations
+    // are server-side state: they stay armed while the platform runs, no
+    // matter which mode any UI tab is displaying or whether a UI is open.
+    match storage::automation::armed_automations(&pg).await {
+        Ok(rows) => {
+            let paper = rows.iter().filter(|r| r.account_mode == "paper").count();
+            let live = rows.len() - paper;
+            info!(
+                paper,
+                live,
+                "armed automations resumed — running server-side independent of UI sessions"
+            );
+        }
+        Err(e) => tracing::warn!(error = %e, "could not load armed automations at startup"),
+    }
+
     // Build the API router.
-    let app_state = api::AppState::new(pg, risk_gate, kill_switch, execution_engine, gateway);
+    let app_state = api::AppState::new(
+        pg,
+        risk_gate,
+        kill_switch,
+        execution_engine,
+        Arc::clone(&paper_engine),
+        gateway,
+    );
     let router = api::router(app_state);
 
     // Safety guardrail (M-17): refuse to bind on a network-accessible address

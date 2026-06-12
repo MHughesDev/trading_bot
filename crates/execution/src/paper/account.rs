@@ -89,6 +89,10 @@ pub struct PaperAccountSnapshot {
     pub free_collateral: Decimal,
     pub realized_pnl: Decimal,
     pub fees_paid: Decimal,
+    /// Closing trades that realized P&L (sells, margin reductions, settlements).
+    pub closed_trades: u64,
+    /// Closing trades whose realized P&L was positive.
+    pub winning_trades: u64,
     pub positions: Vec<PaperPositionView>,
 }
 
@@ -104,6 +108,8 @@ pub struct PaperAccount {
     positions: HashMap<String, PaperPosition>,
     realized_pnl: Decimal,
     fees_paid: Decimal,
+    closed_trades: u64,
+    winning_trades: u64,
     ledger: PaperLedger,
 }
 
@@ -126,6 +132,8 @@ impl PaperAccount {
             positions: HashMap::new(),
             realized_pnl: Decimal::ZERO,
             fees_paid: Decimal::ZERO,
+            closed_trades: 0,
+            winning_trades: 0,
             ledger,
         }
     }
@@ -220,7 +228,9 @@ impl PaperAccount {
                     });
                 }
                 let entry = self.positions[&fill.instrument_id].average_entry_price;
-                self.realized_pnl += (price - entry) * qty * mult;
+                let realized = (price - entry) * qty * mult;
+                self.realized_pnl += realized;
+                self.record_close(realized);
                 self.cash += notional - fill.fee;
                 self.reduce_long(&fill.instrument_id, qty);
                 self.ledger.record(
@@ -301,6 +311,9 @@ impl PaperAccount {
         // Commit.
         self.cash += realized;
         self.realized_pnl += realized;
+        if !same_direction {
+            self.record_close(realized);
+        }
         if realized != Decimal::ZERO {
             self.ledger.record(
                 PaperLedgerKind::RealizedPnl,
@@ -339,6 +352,7 @@ impl PaperAccount {
         };
         self.cash += cash_delta;
         self.realized_pnl += realized;
+        self.record_close(realized);
         self.ledger.record(
             PaperLedgerKind::Settlement,
             Some(instrument_id.to_owned()),
@@ -447,6 +461,8 @@ impl PaperAccount {
             free_collateral: equity - used_margin,
             realized_pnl: self.realized_pnl,
             fees_paid: self.fees_paid,
+            closed_trades: self.closed_trades,
+            winning_trades: self.winning_trades,
             positions,
         }
     }
@@ -457,6 +473,14 @@ impl PaperAccount {
     }
 
     // ── Internals ────────────────────────────────────────────────────────────
+
+    /// Count a closing trade toward the account's win-rate statistics.
+    fn record_close(&mut self, realized: Decimal) {
+        self.closed_trades += 1;
+        if realized > Decimal::ZERO {
+            self.winning_trades += 1;
+        }
+    }
 
     fn charge_fee(&mut self, order_id: &str, instrument_id: &str, fee: Decimal) {
         if fee == Decimal::ZERO {
@@ -835,6 +859,33 @@ mod tests {
         let realized = acct.settle_position("ESM6", dec!(5_100)).unwrap();
         assert_eq!(realized, dec!(200));
         assert_eq!(acct.cash(), dec!(100_200));
+    }
+
+    #[test]
+    fn win_rate_counters_track_closes() {
+        let mut acct = PaperAccount::new(AssetClass::Equity, dec!(10_000));
+        acct.apply_fill(
+            "o-1",
+            &fill("AAPL", Side::Buy, dec!(10), dec!(100), Decimal::ZERO),
+            &no_marks,
+        )
+        .unwrap();
+        // One winning close, one losing close.
+        acct.apply_fill(
+            "o-2",
+            &fill("AAPL", Side::Sell, dec!(5), dec!(110), Decimal::ZERO),
+            &no_marks,
+        )
+        .unwrap();
+        acct.apply_fill(
+            "o-3",
+            &fill("AAPL", Side::Sell, dec!(5), dec!(90), Decimal::ZERO),
+            &no_marks,
+        )
+        .unwrap();
+        let snap = acct.snapshot(&no_marks);
+        assert_eq!(snap.closed_trades, 2);
+        assert_eq!(snap.winning_trades, 1);
     }
 
     #[test]

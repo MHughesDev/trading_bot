@@ -41,18 +41,83 @@ use super::{
 const ORDER_HISTORY_CAPACITY: usize = 50_000;
 
 /// The four market-structure simulators, instantiated once per engine.
-#[derive(Debug, Default)]
+///
+/// CLOB asset classes additionally carry per-class overrides so futures, FX,
+/// and perpetuals fill with their own tick sizes, spreads, and fee schedules
+/// instead of inheriting crypto-spot defaults.
+#[derive(Debug)]
 pub struct SimulatorSet {
+    /// Default CLOB simulator (crypto spot CEX defaults).
     pub clob: ClobFillSimulator,
+    /// Per-asset-class CLOB tuning (futures / FX / perps).
+    pub clob_overrides: HashMap<AssetClass, ClobFillSimulator>,
     pub broker_quote: BrokerQuoteFillSimulator,
     pub amm: AmmQuoteSwapSimulator,
     pub prediction: PredictionMarketFillSimulator,
 }
 
+impl Default for SimulatorSet {
+    fn default() -> Self {
+        Self::realistic()
+    }
+}
+
 impl SimulatorSet {
-    fn for_structure(&self, structure: MarketStructure) -> &dyn PaperFillSimulator {
-        match structure {
-            MarketStructure::Clob => &self.clob,
+    /// Per-asset-class tuned simulators approximating real venue economics:
+    /// - FX majors: sub-pip spreads, pip tick, no per-trade commission
+    ///   (spread-only retail pricing).
+    /// - Listed futures: index-style 0.25 tick, tight spread, small
+    ///   per-notional commission.
+    /// - Perpetual swaps: 0.1 tick, taker fee ~5 bps.
+    /// - Everything else keeps the crypto-spot CLOB defaults.
+    pub fn realistic() -> Self {
+        use rust_decimal_macros::dec;
+        let mut clob_overrides = HashMap::new();
+        clob_overrides.insert(
+            AssetClass::Fx,
+            ClobFillSimulator {
+                half_spread_bps: dec!(0.2),
+                slippage_ticks: Decimal::ONE,
+                tick_size: dec!(0.0001),
+                fee_rate: Decimal::ZERO,
+                partial_fill_ratio: Decimal::ONE,
+            },
+        );
+        clob_overrides.insert(
+            AssetClass::FuturesExpiring,
+            ClobFillSimulator {
+                half_spread_bps: dec!(1),
+                slippage_ticks: Decimal::ONE,
+                tick_size: dec!(0.25),
+                fee_rate: dec!(0.00005), // ~0.5 bps per side
+                partial_fill_ratio: Decimal::ONE,
+            },
+        );
+        clob_overrides.insert(
+            AssetClass::PerpetualSwap,
+            ClobFillSimulator {
+                half_spread_bps: dec!(1),
+                slippage_ticks: Decimal::ONE,
+                tick_size: dec!(0.1),
+                fee_rate: dec!(0.0005), // 5 bps taker
+                partial_fill_ratio: Decimal::ONE,
+            },
+        );
+        Self {
+            clob: ClobFillSimulator::default(),
+            clob_overrides,
+            broker_quote: BrokerQuoteFillSimulator::default(),
+            amm: AmmQuoteSwapSimulator::default(),
+            prediction: PredictionMarketFillSimulator::default(),
+        }
+    }
+
+    fn for_asset_class(&self, asset_class: AssetClass) -> &dyn PaperFillSimulator {
+        match asset_class.market_structure() {
+            MarketStructure::Clob => self
+                .clob_overrides
+                .get(&asset_class)
+                .unwrap_or(&self.clob),
             MarketStructure::BrokerQuote => &self.broker_quote,
             MarketStructure::AmmSwap => &self.amm,
             MarketStructure::PredictionBinary => &self.prediction,
@@ -251,7 +316,7 @@ impl PaperTradingEngine {
 
         let fill = self
             .sims
-            .for_structure(asset_class.market_structure())
+            .for_asset_class(asset_class)
             .simulate_fill(intent, mark);
 
         if fill.filled_qty > Decimal::ZERO {
@@ -466,7 +531,7 @@ impl PaperTradingEngine {
             probe.size = Size::from_decimal(remaining);
             let fill = self
                 .sims
-                .for_structure(record.asset_class.market_structure())
+                .for_asset_class(record.asset_class)
                 .simulate_fill(&probe, mark);
             if fill.filled_qty <= Decimal::ZERO {
                 continue; // still not marketable — keep resting
@@ -748,6 +813,29 @@ mod tests {
             eng.order_status(&resting_id).unwrap().state,
             BrokerOrderState::Rejected
         );
+    }
+
+    #[test]
+    fn per_asset_class_clob_tuning_applies() {
+        let eng = engine();
+        eng.on_mark("EUR-USD", Price::from_decimal(dec!(1.1000)));
+        let id = eng
+            .submit(
+                AssetClass::Fx,
+                &market("EUR-USD", Side::Buy, dec!(10_000)),
+            )
+            .unwrap();
+        let fx_fill = eng
+            .order_status(&id)
+            .unwrap()
+            .avg_fill_price
+            .unwrap()
+            .inner();
+        // FX override: sub-pip spread + 1-pip slippage, never crypto's 5 bps +
+        // penny tick.  Fill lands within ~1.3 pips of mark.
+        assert!(fx_fill > dec!(1.1000) && fx_fill < dec!(1.10013));
+        // Spread-only pricing: no commission charged.
+        assert_eq!(eng.snapshot(AssetClass::Fx).fees_paid, Decimal::ZERO);
     }
 
     #[test]

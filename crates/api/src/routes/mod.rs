@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod automations;
 pub mod dashboard;
 pub mod orders;
 pub mod strategies;
@@ -49,6 +50,23 @@ pub fn router(state: AppState) -> Router {
         .route("/api/venues/:venue/health", get(venue_health::venue_health))
         // P4-T06 dashboard rollup
         .route("/api/dashboard/rollup", get(dashboard::get_rollup))
+        // Automations — persisted server-side; paper and live coexist
+        .route(
+            "/api/automations",
+            get(automations::list_automations).post(automations::create_automation),
+        )
+        .route(
+            "/api/automations/:id/arm",
+            post(automations::arm_automation),
+        )
+        .route(
+            "/api/automations/:id/disarm",
+            post(automations::disarm_automation),
+        )
+        .route(
+            "/api/automations/:id",
+            axum::routing::delete(automations::delete_automation),
+        )
         // P3-T03 apply-list
         .route("/api/strategies/apply-list", get(strategies::apply_list))
         .with_state(state)

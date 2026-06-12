@@ -88,6 +88,7 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
           stages: stages.map((s) => ({
             stage_id: s.stage_id,
             strategy_id: s.strategy_id,
+            label: s.label,
           })),
           execution_action: {
             execution_strategy_id: execStrategyId,

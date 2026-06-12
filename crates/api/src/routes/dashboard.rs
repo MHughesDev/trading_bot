@@ -28,8 +28,13 @@ fn default_mode() -> String {
 }
 
 /// `GET /api/dashboard/rollup?mode=PAPER|LIVE`
+///
+/// Paper mode is served straight from the internal paper trading engine:
+/// asset-class-level account data (cash, equity, positions, P&L) plus
+/// bot-wide totals, with no venue tiles (paper execution is internal).
+/// Live mode aggregates venue-backed ledger data.
 pub async fn get_rollup(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Query(params): Query<RollupQuery>,
 ) -> impl IntoResponse {
     let account_mode = match params.mode.to_uppercase().as_str() {
@@ -44,14 +49,21 @@ pub async fn get_rollup(
         }
     };
 
-    // TODO: In a real deployment, fetch lots/closes from Postgres and marks from Redis.
-    // For now, return an empty rollup (the FifoEngine and compute logic are tested separately).
-    let rollup = RollupResponse {
-        mode: account_mode.as_str(),
-        realized_pnl_usd: rust_decimal::Decimal::ZERO,
-        unrealized_pnl_usd: rust_decimal::Decimal::ZERO,
-        win_rate: 0.0,
-        by_asset_class: vec![],
+    let rollup = match account_mode {
+        AccountMode::Paper => crate::rollup::paper::paper_rollup(&state.paper_engine),
+        AccountMode::Live => {
+            // TODO: fetch lots/closes from Postgres and marks from Redis once a
+            // live broker adapter is wired.  Until then live data is empty
+            // (the FifoEngine and compute logic are tested separately).
+            RollupResponse {
+                mode: account_mode.as_str(),
+                realized_pnl_usd: rust_decimal::Decimal::ZERO,
+                unrealized_pnl_usd: rust_decimal::Decimal::ZERO,
+                win_rate: 0.0,
+                by_asset_class: vec![],
+                account_totals: None,
+            }
+        }
     };
 
     Json(rollup).into_response()

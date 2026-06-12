@@ -4,16 +4,19 @@
 import type { AssetClassTile } from '@/hooks/useDashboardRollup'
 import { AssetClassSlice } from './AssetClassSlice'
 
-// The 8 canonical asset classes plus the extras defined in domain.
+// All 11 asset classes the paper engine opens accounts for (domain order).
 const ALL_CLASSES = [
   'crypto_spot_cex',
   'equity',
+  'etf',
   'fx',
   'prediction_market',
   'option',
   'crypto_spot_dex',
   'perpetual_swap',
   'futures_expiring',
+  'bond',
+  'nft',
 ]
 
 interface AssetClassSliderProps {
