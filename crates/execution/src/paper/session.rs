@@ -53,9 +53,7 @@ pub fn is_open(asset_class: AssetClass, now: DateTime<Utc>) -> bool {
         SessionCalendar::UsEquityRth => {
             is_weekday(weekday) && (9 * 60 + 30..16 * 60).contains(&minutes)
         }
-        SessionCalendar::UsBondCash => {
-            is_weekday(weekday) && (8 * 60..17 * 60).contains(&minutes)
-        }
+        SessionCalendar::UsBondCash => is_weekday(weekday) && (8 * 60..17 * 60).contains(&minutes),
         SessionCalendar::UsFuturesGlobex => match weekday {
             Weekday::Sat => false,
             Weekday::Sun => minutes >= 18 * 60,
