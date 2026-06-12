@@ -139,4 +139,3 @@ async fn load_kill_switch_state(pg: &sqlx::PgPool) -> bool {
         }
     }
 }
-
