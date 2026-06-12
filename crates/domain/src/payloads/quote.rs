@@ -18,8 +18,6 @@ use crate::payloads::Payload;
 )]
 #[rkyv(derive(Debug))]
 pub struct QuotePayload {
-    pub schema_version: String,
-    #[rkyv(with = AsDecimalBytes)]
     pub bid_price: Price,
     #[rkyv(with = AsDecimalBytes)]
     pub bid_size: Size,
@@ -32,7 +30,6 @@ pub struct QuotePayload {
 impl QuotePayload {
     pub fn new(bid_price: Price, bid_size: Size, ask_price: Price, ask_size: Size) -> Self {
         Self {
-            schema_version: Self::schema_version().into(),
             bid_price,
             bid_size,
             ask_price,
@@ -66,6 +63,23 @@ mod tests {
         );
         let json = serde_json::to_string(&q).unwrap();
         let back: QuotePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(q, back);
+    }
+
+    #[test]
+    fn rkyv_round_trip() {
+        let q = QuotePayload::new(
+            Price::from_str("49999.99").unwrap(),
+            Size::from_str("0.5").unwrap(),
+            Price::from_str("50000.01").unwrap(),
+            Size::from_str("0.3").unwrap(),
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
+        // SAFETY: bytes were produced by rkyv::to_bytes immediately above.
+        #[allow(unsafe_code)]
+        let archived =
+            unsafe { rkyv::access_unchecked::<rkyv::Archived<QuotePayload>>(bytes.as_ref()) };
+        let back: QuotePayload = rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap();
         assert_eq!(q, back);
     }
 }

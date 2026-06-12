@@ -195,18 +195,21 @@ impl StrategyInstance {
     }
 }
 
+type InstanceKey = (Arc<str>, Arc<str>);
+
 /// Manages all active strategy instances keyed by `(user_id, instrument_id)`.
 ///
 /// Deduplicates pipeline demand via the `DemandRegistry`: when two users both
 /// need `BTC-USDT market.bars.1m`, only one pipeline runs.
 ///
-/// `by_instrument` is a secondary index from `InstrumentId` → list of instance keys,
-/// enabling O(1) u32 lookup without string hashing per dispatch.
+/// Keys use `Arc<str>` so that dispatch() can clone the by_instrument entry
+/// with atomic ref-count increments instead of heap String allocations.
 pub struct InstanceManager {
-    instances: HashMap<(String, InstrumentId), StrategyInstance>,
-    /// Secondary index: interned InstrumentId → Vec of (user_id, instrument_id) keys.
-    /// Using `InstrumentId` (u32) for both avoids string hashing on every event dispatch.
-    by_instrument: HashMap<InstrumentId, Vec<(String, InstrumentId)>>,
+    instances: HashMap<InstanceKey, StrategyInstance>,
+    /// Secondary index: interned InstrumentId → Vec of Arc<str> key pairs.
+    /// Arc::clone is an atomic increment; the by_instrument clone in dispatch()
+    /// allocates nothing on the heap per matched instance (#19).
+    by_instrument: HashMap<InstrumentId, Vec<InstanceKey>>,
     demand: Arc<DemandRegistry>,
 }
 
@@ -229,23 +232,24 @@ impl InstanceManager {
         definition: StrategyDefinition,
         clock: &Arc<dyn StrategyClock>,
     ) -> Result<(), RuntimeError> {
-        let user_id = user_id.into();
-        let instrument_id = instrument_id.into();
-        // Intern once at registration so all subsequent lookups use the compact u32.
-        let iid = domain::intern_instrument(&instrument_id);
-        let key = (user_id.clone(), iid);
+        let user_id_str = user_id.into();
+        let instrument_id_str = instrument_id.into();
+        // Create Arc<str> once; all further clones are cheap atomic increments.
+        let uid: Arc<str> = Arc::from(user_id_str.as_str());
+        let iid_str: Arc<str> = Arc::from(instrument_id_str.as_str());
+        let key = (Arc::clone(&uid), Arc::clone(&iid_str));
 
         if self.instances.contains_key(&key) {
             return Err(RuntimeError::AlreadyRunning {
-                user_id,
-                instrument_id,
+                user_id: user_id_str,
+                instrument_id: instrument_id_str,
             });
         }
 
         // Declare demand for each input lane, resolving $bound_at_init.
         for input in &definition.inputs {
             let resolved = if input.is_bound_at_init() {
-                instrument_id.as_str()
+                &*iid_str
             } else {
                 input.instrument.as_str()
             };
@@ -255,17 +259,19 @@ impl InstanceManager {
         }
 
         let start = clock.now();
-        let instance =
-            StrategyInstance::new(user_id.clone(), instrument_id.clone(), definition, start);
+        let instance = StrategyInstance::new(&*uid, &*iid_str, definition, start);
         self.instances.insert(key.clone(), instance);
+        // Intern the instrument name once at registration; store the compact u32 ID
+        // so dispatch() can do a u32 hash lookup instead of a string hash lookup.
+        let iid = domain::intern_instrument(&iid_str);
         self.by_instrument.entry(iid).or_default().push(key);
         Ok(())
     }
 
     /// Stop and remove the instance for `(user_id, instrument_id)`, releasing demand.
     pub fn stop(&mut self, user_id: &str, instrument_id: &str) {
-        let iid = domain::intern_instrument(instrument_id);
-        let key = (user_id.to_owned(), iid);
+        // Cold path — constructing temporary Arc<str> for key lookup is acceptable.
+        let key: InstanceKey = (Arc::from(user_id), Arc::from(instrument_id));
         if let Some(instance) = self.instances.remove(&key) {
             for input in &instance.definition.inputs {
                 let resolved = if input.is_bound_at_init() {
@@ -292,17 +298,17 @@ impl InstanceManager {
         &mut self,
         instrument_id: &str,
         event: WorldEvent,
-    ) -> Vec<(String, Vec<OrderIntent>)> {
+    ) -> Vec<(Arc<str>, Vec<OrderIntent>)> {
         let iid = domain::intern_instrument(instrument_id);
         let mut results = Vec::new();
         if let Some(keys) = self.by_instrument.get(&iid) {
-            // Collect keys to avoid simultaneous borrow of self.instances and self.by_instrument.
-            let keys: Vec<(String, InstrumentId)> = keys.clone();
+            // Arc::clone is an atomic ref-count increment — no heap allocation (#19).
+            let keys: Vec<InstanceKey> = keys.clone();
             for key in &keys {
                 if let Some(instance) = self.instances.get_mut(key) {
                     let intents = instance.process_event(&event);
                     if !intents.is_empty() {
-                        results.push((key.0.clone(), intents));
+                        results.push((Arc::clone(&key.0), intents));
                     }
                 }
             }
@@ -451,7 +457,7 @@ mod tests {
         let results = manager.dispatch("BTC-USDT", event);
         assert_eq!(results.len(), 1);
         let (uid, intents) = &results[0];
-        assert_eq!(uid, "user1");
+        assert_eq!(uid.as_ref(), "user1");
         assert_eq!(intents.len(), 1);
         assert_eq!(intents[0].instrument_id, "BTC-USDT");
     }

@@ -35,10 +35,10 @@ pub async fn get_rollup(
     let account_mode = match params.mode.to_uppercase().as_str() {
         "PAPER" => AccountMode::Paper,
         "LIVE" => AccountMode::Live,
-        other => {
+        _other => {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": format!("unknown mode: {other}") })),
+                Json(serde_json::json!({ "error": "unknown mode; expected PAPER or LIVE" })),
             )
                 .into_response();
         }

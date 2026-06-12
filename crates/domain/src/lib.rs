@@ -10,6 +10,7 @@
 // carries an audit comment explaining why it is sound.
 #![allow(unsafe_code)]
 
+pub mod access;
 pub mod data_type;
 pub mod envelope;
 pub mod error;
@@ -27,6 +28,7 @@ pub mod trust;
 pub mod venue;
 
 // Convenience re-exports.
+pub use access::{access_trusted, decode_from_bytes};
 pub use data_type::{DataType, UnknownDataType};
 pub use envelope::EventEnvelope;
 pub use error::{NormalizeError, RiskRejection, ValidationError};
@@ -36,7 +38,8 @@ pub use instrument::{
     VenueId,
 };
 pub use interned::{
-    instrument_name, intern_instrument, intern_source, intern_venue, source_name, venue_name,
+    epoch_hash, instrument_name, intern_instrument, intern_source, intern_venue, seed_intern_table,
+    source_name, venue_name,
 };
 pub use lanes::{Lane, UnknownLane, QUARANTINE};
 pub use money::{Price, Size};

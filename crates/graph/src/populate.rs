@@ -46,12 +46,14 @@ pub struct StrategySpec {
 /// A full snapshot of registry data to be projected into the graph.
 #[derive(Debug, Default)]
 pub struct RegistrySnapshot {
-    /// Asset class string keys (serde snake_case, e.g. `"crypto_spot_cex"`).
-    pub asset_classes: Vec<String>,
+    /// Asset class canonical string keys (e.g. `"crypto_spot_cex"`).
+    /// Static slices — always derived from the statically-known `AssetClass` enum.
+    pub asset_classes: Vec<&'static str>,
     pub instruments: Vec<InstrumentSpec>,
     pub venues: Vec<VenueSpec>,
-    /// DataType keys (e.g. `"market.ohlcv"`, `"social.post"`).
-    pub data_types: Vec<String>,
+    /// DataType canonical keys (e.g. `"market.ohlcv"`, `"social.post"`).
+    /// Static slices — always derived from the statically-known `DataType` enum.
+    pub data_types: Vec<&'static str>,
     pub strategies: Vec<StrategySpec>,
 }
 
@@ -63,7 +65,7 @@ impl RegistrySnapshot {
     pub fn from_domain_defaults() -> Self {
         use domain::AssetClass;
 
-        let asset_classes: Vec<String> = [
+        let asset_classes: Vec<&'static str> = [
             AssetClass::CryptoSpotCex,
             AssetClass::Equity,
             AssetClass::Etf,
@@ -77,12 +79,12 @@ impl RegistrySnapshot {
             AssetClass::PredictionMarket,
         ]
         .iter()
-        .map(|a| a.as_str().to_owned())
+        .map(|a| a.as_str())
         .collect();
 
-        let data_types: Vec<String> = domain::DataType::all()
+        let data_types: Vec<&'static str> = domain::DataType::all()
             .iter()
-            .map(|dt| dt.as_key().to_owned())
+            .map(|dt| dt.as_key())
             .collect();
 
         Self {
@@ -111,7 +113,7 @@ impl TigerGraphClient {
         let mut ac_map = Map::new();
         for ac in &snapshot.asset_classes {
             ac_map.insert(
-                ac.clone(),
+                ac.to_string(),
                 json!({ "name": {"value": ac}, "label": {"value": ac} }),
             );
         }
@@ -120,7 +122,7 @@ impl TigerGraphClient {
         // DataType vertices.
         let mut dt_map = Map::new();
         for dt in &snapshot.data_types {
-            dt_map.insert(dt.clone(), json!({ "name": {"value": dt} }));
+            dt_map.insert(dt.to_string(), json!({ "name": {"value": dt} }));
         }
         vertices.insert(vertex_types::DATA_TYPE.to_owned(), Value::Object(dt_map));
 

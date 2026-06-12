@@ -90,6 +90,84 @@ impl<D: rkyv::rancor::Fallible + ?Sized> rkyv::with::DeserializeWith<[u8; 16], S
     }
 }
 
+/// Archived form of [`Price`] and [`Size`]: 16 raw bytes of a `rust_decimal::Decimal`.
+///
+/// Used when these types appear in positions that `AsDecimalBytes` cannot reach
+/// (e.g. `Option<Price>`, `Vec<Price>`).  Both `Price::Archive` and
+/// `Size::Archive` resolve to this type; the bit pattern is identical to the
+/// `AsDecimalBytes` adapter so the two representations are wire-compatible.
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct ArchivedDecimal(pub [u8; 16]);
+
+// SAFETY: ArchivedDecimal is repr(transparent) over [u8; 16].
+// u8 arrays have alignment 1, no padding, no pointers, no interior
+// mutability.  Every bit pattern is valid for u8 so there are no
+// uninitialised bytes.  The bytes are a stable in-process snapshot of
+// a Decimal value.
+#[allow(unsafe_code)]
+unsafe impl rkyv::Portable for ArchivedDecimal {}
+
+// SAFETY: same reasoning as Portable above — [u8; 16] has no
+// uninitialised / undefined bytes regardless of what Decimal bit
+// pattern is stored.
+#[allow(unsafe_code)]
+unsafe impl rkyv::traits::NoUndef for ArchivedDecimal {}
+
+impl rkyv::Archive for Price {
+    type Archived = ArchivedDecimal;
+    type Resolver = ();
+
+    fn resolve(&self, (): (), out: rkyv::Place<ArchivedDecimal>) {
+        // SAFETY: Decimal is 4 × u32 = 16 bytes, no padding, same alignment.
+        #[allow(unsafe_code)]
+        let bytes: [u8; 16] = unsafe { core::mem::transmute(self.0) };
+        out.write(ArchivedDecimal(bytes));
+    }
+}
+
+impl<S: rkyv::rancor::Fallible + ?Sized> rkyv::Serialize<S> for Price {
+    fn serialize(&self, _: &mut S) -> Result<(), S::Error> {
+        Ok(())
+    }
+}
+
+impl<D: rkyv::rancor::Fallible + ?Sized> rkyv::Deserialize<Price, D> for ArchivedDecimal {
+    fn deserialize(&self, _: &mut D) -> Result<Price, D::Error> {
+        // SAFETY: bytes were written by Price::resolve above, same layout.
+        #[allow(unsafe_code)]
+        let decimal: Decimal = unsafe { core::mem::transmute(self.0) };
+        Ok(Price(decimal))
+    }
+}
+
+impl rkyv::Archive for Size {
+    type Archived = ArchivedDecimal;
+    type Resolver = ();
+
+    fn resolve(&self, (): (), out: rkyv::Place<ArchivedDecimal>) {
+        // SAFETY: same layout guarantee as for Price.
+        #[allow(unsafe_code)]
+        let bytes: [u8; 16] = unsafe { core::mem::transmute(self.0) };
+        out.write(ArchivedDecimal(bytes));
+    }
+}
+
+impl<S: rkyv::rancor::Fallible + ?Sized> rkyv::Serialize<S> for Size {
+    fn serialize(&self, _: &mut S) -> Result<(), S::Error> {
+        Ok(())
+    }
+}
+
+impl<D: rkyv::rancor::Fallible + ?Sized> rkyv::Deserialize<Size, D> for ArchivedDecimal {
+    fn deserialize(&self, _: &mut D) -> Result<Size, D::Error> {
+        // SAFETY: same layout guarantee as Price.
+        #[allow(unsafe_code)]
+        let decimal: Decimal = unsafe { core::mem::transmute(self.0) };
+        Ok(Size(decimal))
+    }
+}
+
 /// A non-negative decimal price (bid, ask, trade price, OHLC, etc.).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

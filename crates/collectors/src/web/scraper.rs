@@ -5,7 +5,6 @@
 //! enforced.  When HTTP yields insufficient text content, a Playwright
 //! subprocess is invoked as a fallback if `PLAYWRIGHT_BIN` is configured.
 
-use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -83,13 +82,68 @@ fn is_public_ip(ip: IpAddr) -> bool {
 
 // ── robots.txt ────────────────────────────────────────────────────────────────
 
+/// A simple prefix trie for O(path_length) longest-prefix-match lookup of robots.txt rules (#53, #61).
+#[derive(Debug, Clone)]
+struct PrefixTrie {
+    root: TrieNode,
+}
+
+#[derive(Debug, Clone)]
+struct TrieNode {
+    children: HashMap<char, TrieNode>,
+    is_rule: bool, // true if a rule ends at this node
+}
+
+impl PrefixTrie {
+    fn new() -> Self {
+        Self {
+            root: TrieNode {
+                children: HashMap::new(),
+                is_rule: false,
+            },
+        }
+    }
+
+    /// Insert a prefix rule into the trie.
+    fn insert(&mut self, rule: &str) {
+        let mut node = &mut self.root;
+        for ch in rule.chars() {
+            node = node.children.entry(ch).or_insert_with(|| TrieNode {
+                children: HashMap::new(),
+                is_rule: false,
+            });
+        }
+        node.is_rule = true;
+    }
+
+    /// Find the longest prefix match for a path. Returns the length of the longest matching rule.
+    fn longest_match(&self, path: &str) -> usize {
+        let mut node = &self.root;
+        let mut longest = 0;
+        let mut chars_matched = 0;
+
+        for ch in path.chars() {
+            if let Some(next) = node.children.get(&ch) {
+                node = next;
+                chars_matched += ch.len_utf8();
+                if node.is_rule {
+                    longest = chars_matched;
+                }
+            } else {
+                break;
+            }
+        }
+        longest
+    }
+}
+
 /// A parsed `robots.txt` for a single domain.
 #[derive(Debug, Clone)]
 pub struct RobotsTxt {
-    /// Disallowed path prefixes for our user-agent (`*` or `trading-bot`).
-    disallowed: Vec<String>,
-    /// Explicitly allowed path prefixes (longest-match beats Disallow).
-    allowed: Vec<String>,
+    /// Trie of disallowed path prefixes for longest-prefix matching (#61).
+    disallowed_trie: PrefixTrie,
+    /// Trie of explicitly allowed path prefixes (longest-match beats Disallow) (#53).
+    allowed_trie: PrefixTrie,
     fetched_at: std::time::SystemTime,
 }
 
@@ -102,9 +156,8 @@ impl RobotsTxt {
     ///   rules from later, non-matching agent blocks are not applied (M-8).
     /// * `Allow:` directives are honoured (longest-match-wins, per spec) (L-1).
     pub fn parse(content: &str) -> Self {
-        // Capacity hint: most robots.txt files have fewer than 16 rules.
-        let mut disallowed: Vec<String> = Vec::with_capacity(16);
-        let mut allowed: Vec<String> = Vec::with_capacity(16);
+        let mut disallowed_trie = PrefixTrie::new();
+        let mut allowed_trie = PrefixTrie::new();
         let mut in_applicable_section = false;
 
         for line in content.lines() {
@@ -119,28 +172,22 @@ impl RobotsTxt {
                 in_applicable_section = ua == "*" || ua == "trading-bot";
             } else if in_applicable_section {
                 if let Some(rest) = line.strip_prefix("Disallow:") {
-                    let path = rest.trim().to_owned();
+                    let path = rest.trim();
                     if !path.is_empty() {
-                        disallowed.push(path);
+                        disallowed_trie.insert(path);
                     }
                 } else if let Some(rest) = line.strip_prefix("Allow:") {
-                    let path = rest.trim().to_owned();
+                    let path = rest.trim();
                     if !path.is_empty() {
-                        allowed.push(path);
+                        allowed_trie.insert(path);
                     }
                 }
             }
         }
 
-        // Sort by length descending so the first match is always the longest
-        // (most specific) rule — allows early exit via `find()` instead of
-        // scanning the whole list to compute the maximum (#61).
-        disallowed.sort_unstable_by_key(|b| Reverse(b.len()));
-        allowed.sort_unstable_by_key(|b| Reverse(b.len()));
-
         Self {
-            disallowed,
-            allowed,
+            disallowed_trie,
+            allowed_trie,
             fetched_at: std::time::SystemTime::now(),
         }
     }
@@ -149,24 +196,10 @@ impl RobotsTxt {
     ///
     /// Uses longest-match-wins: an `Allow:` rule longer than the matching
     /// `Disallow:` rule takes precedence (per the robots spec).
-    /// Rules are pre-sorted by length descending so the first matching rule
-    /// is always the longest — O(n) with early exit (#61).
+    /// Trie-based lookup: O(path_length) per check (#53, #61).
     pub fn is_allowed(&self, path: &str) -> bool {
-        // First match is longest match because rules are sorted longest-first.
-        let disallow_len = self
-            .disallowed
-            .iter()
-            .find(|d| path.starts_with(d.as_str()))
-            .map(|d| d.len())
-            .unwrap_or(0);
-
-        let allow_len = self
-            .allowed
-            .iter()
-            .find(|a| path.starts_with(a.as_str()))
-            .map(|a| a.len())
-            .unwrap_or(0);
-
+        let disallow_len = self.disallowed_trie.longest_match(path);
+        let allow_len = self.allowed_trie.longest_match(path);
         // Allow wins on a tie or when more specific than Disallow.
         allow_len >= disallow_len
     }

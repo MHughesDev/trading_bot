@@ -36,7 +36,6 @@ pub struct InstrumentMention {
 )]
 #[rkyv(derive(Debug))]
 pub struct SocialPostPayload {
-    pub schema_version: String,
     /// Source platform (e.g. `"reddit"`).
     pub source_platform: String,
     /// Opaque platform-assigned post ID.
@@ -68,7 +67,6 @@ impl SocialPostPayload {
         score: i64,
     ) -> Self {
         Self {
-            schema_version: Self::schema_version().into(),
             source_platform: source_platform.into(),
             post_id: post_id.into(),
             author: author.into(),
@@ -88,5 +86,36 @@ impl Payload for SocialPostPayload {
 
     fn schema_version() -> &'static str {
         "1"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rkyv_round_trip() {
+        let p = SocialPostPayload::new(
+            "reddit",
+            "post-abc",
+            "user123",
+            "CryptoCurrency",
+            "BTC to the moon",
+            "I think $BTC will rally.",
+            vec![InstrumentMention {
+                instrument_id: "BTC-USD".to_owned(),
+                confidence: 0.9,
+            }],
+            42,
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&p).unwrap();
+        // SAFETY: bytes were produced by rkyv::to_bytes immediately above.
+        #[allow(unsafe_code)]
+        let archived =
+            unsafe { rkyv::access_unchecked::<rkyv::Archived<SocialPostPayload>>(bytes.as_ref()) };
+        let back: SocialPostPayload =
+            rkyv::deserialize::<_, rkyv::rancor::Error>(archived).unwrap();
+        assert_eq!(p.score, back.score);
+        assert_eq!(p.instrument_mentions.len(), back.instrument_mentions.len());
     }
 }

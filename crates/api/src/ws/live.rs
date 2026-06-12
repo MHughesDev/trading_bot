@@ -107,10 +107,10 @@ async fn handle_client_message(
 
     for spec in &msg.subscribe {
         match gateway.subscribe(
-            msg.panel_id.clone(),
-            user_id.to_owned(),
+            &msg.panel_id,
+            user_id,
             &spec.lane,
-            spec.instrument.clone(),
+            &spec.instrument,
             user_id,
             spec.depth,
             spec.max_fps,

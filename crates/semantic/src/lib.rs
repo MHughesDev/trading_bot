@@ -77,19 +77,19 @@ impl MilvusConfig {
 }
 
 /// Collection specification for social-post embeddings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct CollectionSpec {
-    pub name: String,
+    pub name: &'static str,
     pub dims: u32,
-    pub embedding_model: String,
+    pub embedding_model: &'static str,
 }
 
 impl CollectionSpec {
     pub fn social_posts() -> Self {
         Self {
-            name: SOCIAL_COLLECTION.to_owned(),
+            name: SOCIAL_COLLECTION,
             dims: EMBEDDING_DIMS,
-            embedding_model: EMBEDDING_MODEL.to_owned(),
+            embedding_model: EMBEDDING_MODEL,
         }
     }
 }

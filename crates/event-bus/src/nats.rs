@@ -37,13 +37,6 @@ pub async fn connect(url: &str) -> Result<NatsClient, BusError> {
     Ok(NatsClient { client, js })
 }
 
-/// Per-lane stream configuration.
-struct LaneConfig {
-    stream_name: String,
-    subjects: Vec<String>,
-    replicas: usize,
-}
-
 /// Create JetStream streams for every lane.
 ///
 /// If a stream already exists the function logs and skips it — idempotent.
@@ -63,44 +56,34 @@ pub async fn setup_streams(js: &async_nats::jetstream::Context) -> Result<(), Bu
         QUARANTINE,
     ];
 
-    let configs: Vec<LaneConfig> = lanes
-        .iter()
-        .map(|lane| {
-            let stream_name = lane.replace('.', "-");
-            let subject = if *lane == QUARANTINE {
-                QUARANTINE.to_owned()
-            } else {
-                format!("{lane}.>")
-            };
-            LaneConfig {
-                stream_name,
-                subjects: vec![subject],
-                replicas: 1,
-            }
-        })
-        .collect();
+    for lane in &lanes {
+        let stream_name = lane.replace('.', "-");
+        let subject = if *lane == QUARANTINE {
+            QUARANTINE.to_owned()
+        } else {
+            format!("{lane}.>")
+        };
 
-    for cfg in configs {
         // Use Limits retention so every durable consumer sees every message
         // (fan-out). WorkQueue deletes a message once any one consumer acks it,
         // which silently starves all other consumers on the same lane.
         // ORDERS_COMMANDS is intentionally handled by a single executor, but
         // even there Limits+durable-consumer is safer than WorkQueue.
         let stream_config = stream::Config {
-            name: cfg.stream_name.clone(),
-            subjects: cfg.subjects,
-            num_replicas: cfg.replicas,
+            name: stream_name.clone(),
+            subjects: vec![subject],
+            num_replicas: 1,
             retention: stream::RetentionPolicy::Limits,
             ..Default::default()
         };
 
         match js.create_stream(stream_config).await {
             Ok(_) => {
-                info!(stream = %cfg.stream_name, "JetStream stream created");
+                info!(stream = %stream_name, "JetStream stream created");
             }
             Err(e) => {
                 // Stream already exists or other non-fatal error — log and continue.
-                warn!(stream = %cfg.stream_name, error = %e, "stream already exists or could not be created, skipping");
+                warn!(stream = %stream_name, error = %e, "stream already exists or could not be created, skipping");
             }
         }
     }

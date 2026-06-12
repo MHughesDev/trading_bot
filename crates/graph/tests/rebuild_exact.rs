@@ -8,7 +8,7 @@ use graph::populate::{InstrumentSpec, RegistrySnapshot, VenueSpec};
 #[test]
 fn registry_snapshot_builds() {
     let snap = RegistrySnapshot {
-        asset_classes: vec!["crypto_spot_cex".into(), "equity".into()],
+        asset_classes: vec!["crypto_spot_cex", "equity"],
         instruments: vec![InstrumentSpec {
             instrument_id: "BTC-USDT".into(),
             asset_class: "crypto_spot_cex".into(),
@@ -21,7 +21,7 @@ fn registry_snapshot_builds() {
             data_types: vec!["market.ohlcv".into(), "market.trade".into()],
             asset_classes: vec!["crypto_spot_cex".into()],
         }],
-        data_types: vec!["market.ohlcv".into()],
+        data_types: vec!["market.ohlcv"],
         strategies: vec![],
     };
     assert_eq!(snap.instruments.len(), 1);
@@ -44,15 +44,15 @@ fn domain_defaults_snapshot_is_non_empty() {
 fn domain_defaults_include_known_types() {
     let snap = RegistrySnapshot::from_domain_defaults();
     assert!(
-        snap.asset_classes.iter().any(|a| a == "crypto_spot_cex"),
+        snap.asset_classes.contains(&"crypto_spot_cex"),
         "crypto_spot_cex should be in defaults"
     );
     assert!(
-        snap.data_types.iter().any(|d| d == "market.ohlcv"),
+        snap.data_types.contains(&"market.ohlcv"),
         "market.ohlcv should be in defaults"
     );
     assert!(
-        snap.data_types.iter().any(|d| d == "web.page_snapshot"),
+        snap.data_types.contains(&"web.page_snapshot"),
         "web.page_snapshot should be in defaults"
     );
 }
