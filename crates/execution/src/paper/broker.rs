@@ -14,6 +14,7 @@ use domain::instrument::AssetClass;
 use risk::ApprovedOrder;
 use tracing::info;
 
+use super::simulator_for;
 use crate::broker::{Broker, BrokerError, BrokerOrderStatus, BrokerPosition};
 
 use super::engine::PaperTradingEngine;
@@ -30,6 +31,14 @@ impl PaperBroker {
     pub fn for_engine(engine: Arc<PaperTradingEngine>, asset_class: AssetClass) -> Self {
         Self {
             engine,
+    /// Create a paper broker and return the shared mark-price handle.
+    ///
+    /// The caller should keep the returned `Arc<RwLock<Price>>` and write
+    /// fresh prices into it as ticks arrive. The broker reads it on each `submit`.
+    pub fn new(asset_class: AssetClass) -> (Self, Arc<RwLock<Price>>) {
+        let mark = Arc::new(RwLock::new(Price::from_decimal(Decimal::ONE)));
+        let broker = Self {
+            mark: Arc::clone(&mark),
             asset_class,
         }
     }
@@ -78,6 +87,8 @@ impl Broker for PaperBroker {
         self.engine
             .order_status(broker_order_id)
             .ok_or_else(|| BrokerError::OrderNotFound(broker_order_id.to_owned()))
+        // Paper orders fill immediately on submit; nothing is pending afterward.
+        Err(BrokerError::OrderNotFound(broker_order_id.to_owned()))
     }
 
     async fn query_open_orders(&self) -> Result<Vec<BrokerOrderStatus>, BrokerError> {
