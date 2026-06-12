@@ -1,10 +1,8 @@
-//! Alpaca paper trading broker adapter.
+//! Alpaca live/paper trading broker adapter.
 //!
-//! Implements `Broker` against the Alpaca paper trading REST API:
-//! `https://paper-api.alpaca.markets/v2`
-//!
-//! Credentials are read from env vars `ALPACA_API_KEY_ID` and
-//! `ALPACA_API_SECRET_KEY`.
+//! Implements `Broker` against the Alpaca REST API.
+//! Credentials must be loaded from the database credential store and passed
+//! via `AlpacaBroker::new()` — never read from environment variables.
 
 use async_trait::async_trait;
 use reqwest::{header, Client};
@@ -46,13 +44,6 @@ impl AlpacaBroker {
             api_secret: api_secret.into(),
             base_url: PAPER_BASE_URL.to_owned(),
         }
-    }
-
-    /// Load credentials from environment variables.
-    pub fn from_env() -> Result<Self, std::env::VarError> {
-        let key = std::env::var("ALPACA_API_KEY_ID")?;
-        let secret = std::env::var("ALPACA_API_SECRET_KEY")?;
-        Ok(Self::new(key, secret))
     }
 
     fn auth_headers(&self) -> header::HeaderMap {

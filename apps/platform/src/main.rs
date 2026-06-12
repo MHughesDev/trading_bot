@@ -8,6 +8,7 @@ mod tee;
 use std::sync::Arc;
 
 use anyhow::Context;
+use domain::instrument::AssetClass;
 use tracing::info;
 
 #[tokio::main]
@@ -41,21 +42,12 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&kill_switch),
     ));
 
-    // Build execution engine with the Alpaca paper broker.
-    let broker: Arc<dyn execution::broker::Broker> =
-        match execution::alpaca::AlpacaBroker::from_env() {
-            Ok(b) => {
-                info!("Alpaca paper broker configured from environment");
-                Arc::new(b)
-            }
-            Err(_) => {
-                tracing::warn!(
-                    "ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY not set — using no-op broker"
-                );
-                Arc::new(NoBroker)
-            }
-        };
-    let execution_engine = Arc::new(execution::ExecutionEngine::new(broker));
+    // Build in-house paper execution engine — no external broker API credentials needed.
+    // Live broker adapters are loaded per-user from the database credential store when
+    // the user has deposited live trading credentials; the default path is always paper.
+    let (paper_broker, mark_price) = execution::paper::PaperBroker::new(AssetClass::CryptoSpotCex);
+    let execution_engine = Arc::new(execution::ExecutionEngine::new(Arc::new(paper_broker)));
+    info!("in-house paper execution engine initialised (all asset classes covered)");
 
     // Build demand manager and UI gateway.
     let demand_registry = Arc::new(demand_manager::DemandRegistry::new(Arc::new(
@@ -93,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
         tee_tx,
         Arc::clone(&execution_engine),
         Arc::clone(&risk_gate),
+        mark_price,
     );
     info!("hot-path pipeline (BTC/USD) started");
 
@@ -147,42 +140,3 @@ async fn load_kill_switch_state(pg: &sqlx::PgPool) -> bool {
     }
 }
 
-/// Placeholder broker used when Alpaca credentials are unavailable.
-struct NoBroker;
-
-#[async_trait::async_trait]
-impl execution::broker::Broker for NoBroker {
-    async fn submit(
-        &self,
-        _order: &risk::ApprovedOrder,
-    ) -> Result<String, execution::broker::BrokerError> {
-        Err(execution::broker::BrokerError::Rejected(
-            "no broker configured".to_owned(),
-        ))
-    }
-
-    async fn cancel(&self, _broker_order_id: &str) -> Result<(), execution::broker::BrokerError> {
-        Ok(())
-    }
-
-    async fn query_order(
-        &self,
-        broker_order_id: &str,
-    ) -> Result<execution::broker::BrokerOrderStatus, execution::broker::BrokerError> {
-        Err(execution::broker::BrokerError::OrderNotFound(
-            broker_order_id.to_owned(),
-        ))
-    }
-
-    async fn query_open_orders(
-        &self,
-    ) -> Result<Vec<execution::broker::BrokerOrderStatus>, execution::broker::BrokerError> {
-        Ok(vec![])
-    }
-
-    async fn query_positions(
-        &self,
-    ) -> Result<Vec<execution::broker::BrokerPosition>, execution::broker::BrokerError> {
-        Ok(vec![])
-    }
-}
