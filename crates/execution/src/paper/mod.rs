@@ -1,13 +1,27 @@
 //! Internal paper-execution surface (C-056).
 //!
-//! One trait, four market-structure simulators, and a DEX paper wallet.
-//! **No external venue calls** in any simulator — paper fills are always
-//! computed locally.
+//! Layers, bottom to top — **no external venue calls anywhere**:
+//! - four market-structure fill simulators (`clob`, `broker_quote`,
+//!   `amm_swap`, `prediction`) plus a DEX paper wallet;
+//! - [`policy`]: an ad hoc account model per asset class (cash / margin /
+//!   binary, leverage, contract multiplier, starting cash);
+//! - [`account`] + [`ledger`]: internal cash, positions, realized P&L, and an
+//!   append-only transaction journal per asset class;
+//! - [`engine`]: the [`PaperTradingEngine`] — mark-price board, order store
+//!   with resting limit orders, one account per asset class;
+//! - [`broker`] / [`account_source`]: `Broker` and `AccountSource`
+//!   implementations backed entirely by the engine, so trading and account
+//!   data never require venue credentials or network access.
 
+pub mod account;
+pub mod account_source;
 pub mod amm_swap;
 pub mod broker;
 pub mod broker_quote;
 pub mod clob;
+pub mod engine;
+pub mod ledger;
+pub mod policy;
 pub mod prediction;
 pub mod wallet;
 
@@ -20,10 +34,17 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub use account::{
+    PaperAccount, PaperAccountSnapshot, PaperPosition, PaperPositionView, PaperTradeError,
+};
+pub use account_source::PaperAccountSource;
 pub use amm_swap::AmmQuoteSwapSimulator;
 pub use broker::PaperBroker;
 pub use broker_quote::BrokerQuoteFillSimulator;
 pub use clob::ClobFillSimulator;
+pub use engine::{PaperOrderRecord, PaperTradingEngine, SimulatorSet};
+pub use ledger::{PaperLedgerEntry, PaperLedgerKind};
+pub use policy::{AccountKind, AccountPolicy, ALL_ASSET_CLASSES};
 pub use prediction::PredictionMarketFillSimulator;
 pub use wallet::DexPaperWallet;
 
