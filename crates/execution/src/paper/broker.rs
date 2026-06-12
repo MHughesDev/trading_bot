@@ -13,8 +13,8 @@ use rust_decimal::Decimal;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::broker::{Broker, BrokerError, BrokerOrderStatus, BrokerPosition};
 use super::simulator_for;
+use crate::broker::{Broker, BrokerError, BrokerOrderStatus, BrokerPosition};
 
 /// In-house paper fill broker for a single asset class.
 ///
@@ -32,9 +32,7 @@ impl PaperBroker {
     /// The caller should keep the returned `Arc<RwLock<Price>>` and write
     /// fresh prices into it as ticks arrive. The broker reads it on each `submit`.
     pub fn new(asset_class: AssetClass) -> (Self, Arc<RwLock<Price>>) {
-        let mark = Arc::new(RwLock::new(
-            Price::from_decimal(Decimal::ONE),
-        ));
+        let mark = Arc::new(RwLock::new(Price::from_decimal(Decimal::ONE)));
         let broker = Self {
             mark: Arc::clone(&mark),
             asset_class,
@@ -66,10 +64,7 @@ impl Broker for PaperBroker {
         Ok(())
     }
 
-    async fn query_order(
-        &self,
-        broker_order_id: &str,
-    ) -> Result<BrokerOrderStatus, BrokerError> {
+    async fn query_order(&self, broker_order_id: &str) -> Result<BrokerOrderStatus, BrokerError> {
         // Paper orders fill immediately on submit; nothing is pending afterward.
         Err(BrokerError::OrderNotFound(broker_order_id.to_owned()))
     }

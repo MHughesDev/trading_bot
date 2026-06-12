@@ -93,7 +93,7 @@ impl SubscriptionRegistry {
         });
 
         self.demand.add(&demand_lane, instrument);
-        self.subs.lock().unwrap().insert(sub.id, Arc::clone(&sub));
+        self.subs.insert(sub.id, Arc::clone(&sub));
         Ok(sub)
     }
 

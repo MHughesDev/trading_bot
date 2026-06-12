@@ -15,7 +15,10 @@ use crate::nodes::UniverseEntry;
 /// `feature(...)` calls in the program are resolved against each entry's
 /// feature map; `bar(...)` is not available in universe-mode evaluation and
 /// will return false if referenced.
-pub fn filter_compiled(universe: &[UniverseEntry], program: &bytecode::Program) -> Vec<UniverseEntry> {
+pub fn filter_compiled(
+    universe: &[UniverseEntry],
+    program: &bytecode::Program,
+) -> Vec<UniverseEntry> {
     let empty_bars = HashMap::new();
     universe
         .iter()
