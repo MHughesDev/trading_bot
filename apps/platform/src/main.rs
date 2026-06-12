@@ -101,8 +101,7 @@ async fn main() -> anyhow::Result<()> {
             let live = rows.len() - paper;
             info!(
                 paper,
-                live,
-                "armed automations resumed — running server-side independent of UI sessions"
+                live, "armed automations resumed — running server-side independent of UI sessions"
             );
         }
         Err(e) => tracing::warn!(error = %e, "could not load armed automations at startup"),

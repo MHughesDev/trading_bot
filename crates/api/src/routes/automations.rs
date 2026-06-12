@@ -171,11 +171,7 @@ pub async fn delete_automation(
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn bad_request(message: &str) -> axum::response::Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({ "error": message })),
-    )
-        .into_response()
+    (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
 }
 
 fn not_found(id: Uuid) -> axum::response::Response {

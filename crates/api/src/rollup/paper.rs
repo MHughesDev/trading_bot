@@ -120,8 +120,11 @@ pub fn paper_rollup(engine: &PaperTradingEngine) -> RollupResponse {
                 totals.equity_usd += snap.equity;
                 totals.cash_usd += snap.cash;
                 totals.realized_pnl_usd += snap.realized_pnl;
-                totals.unrealized_pnl_usd +=
-                    snap.positions.iter().map(|p| p.unrealized_pnl).sum::<Decimal>();
+                totals.unrealized_pnl_usd += snap
+                    .positions
+                    .iter()
+                    .map(|p| p.unrealized_pnl)
+                    .sum::<Decimal>();
                 totals.fees_paid_usd += snap.fees_paid;
             } else if !totals
                 .excluded_currencies

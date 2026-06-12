@@ -114,10 +114,7 @@ impl SimulatorSet {
 
     fn for_asset_class(&self, asset_class: AssetClass) -> &dyn PaperFillSimulator {
         match asset_class.market_structure() {
-            MarketStructure::Clob => self
-                .clob_overrides
-                .get(&asset_class)
-                .unwrap_or(&self.clob),
+            MarketStructure::Clob => self.clob_overrides.get(&asset_class).unwrap_or(&self.clob),
             MarketStructure::BrokerQuote => &self.broker_quote,
             MarketStructure::AmmSwap => &self.amm,
             MarketStructure::PredictionBinary => &self.prediction,
@@ -820,10 +817,7 @@ mod tests {
         let eng = engine();
         eng.on_mark("EUR-USD", Price::from_decimal(dec!(1.1000)));
         let id = eng
-            .submit(
-                AssetClass::Fx,
-                &market("EUR-USD", Side::Buy, dec!(10_000)),
-            )
+            .submit(AssetClass::Fx, &market("EUR-USD", Side::Buy, dec!(10_000)))
             .unwrap();
         let fx_fill = eng
             .order_status(&id)
