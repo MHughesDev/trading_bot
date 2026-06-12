@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
 import type { DragEvent } from 'react'
 import {
-  ReactFlow, Background, BackgroundVariant, Controls, MiniMap,
+  ReactFlow, Background, BackgroundVariant, Controls,
   addEdge, useNodesState, useEdgesState, ReactFlowProvider, useReactFlow,
 } from '@xyflow/react'
 import type { Node, Edge, NodeTypes, Connection, NodeMouseHandler } from '@xyflow/react'
@@ -45,9 +45,6 @@ const INITIAL_EDGES: Edge[] = [
   { id: 'e6', source: 'act-1',  sourceHandle: 'exit-out',   target: 'exit-2', targetHandle: 'exit-in',   animated: false },
 ]
 
-const MINIMAP_COLOR = (node: Node) =>
-  ({ indicator: '#7C3AED', condition: '#B45309', ai_forecast: '#0E7490', logic: '#1E40AF', action: '#15803D', size: '#0D9488', exit: '#9F1239' }[node.type ?? ''] ?? 'var(--tb-border-2)')
-
 let _counter = 200
 const genId = () => `n-${++_counter}`
 
@@ -57,96 +54,6 @@ function activeGraph(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges: Edge
     nodes: nodes.filter(n => activeIds.has(n.id)),
     edges: edges.filter(e => activeIds.has(e.source) && activeIds.has(e.target)),
   }
-}
-
-// ── Preview bar ───────────────────────────────────────────────────────────────
-
-function PreviewBar({ nodes, edges, name, editingId, onSaved }: {
-  nodes: Node[]; edges: Edge[]; name: string
-  editingId: string | null; onSaved: (s: SavedStrategy) => void
-}) {
-  const [explanation, setExplanation] = useState('')
-  const [valid, setValid] = useState(false)
-  const [errors, setErrors] = useState<string[]>([])
-  const [warnings, setWarnings] = useState<string[]>([])
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState('')
-
-  useEffect(() => {
-    const active = activeGraph(nodes, edges)
-    const { spec, errors: errs, warnings: warns } = compile(active.nodes, active.edges, name)
-    setErrors(errs); setWarnings(warns)
-    if (errs.length > 0 || !spec) { setExplanation(''); setValid(false); return }
-
-    const t = setTimeout(async () => {
-      try {
-        const r = await api.post<{ valid: boolean; explanation?: string; errors?: string[] }>(
-          '/strategies/custom/preview', spec)
-        setExplanation(r.data.explanation ?? '')
-        setValid(r.data.valid ?? false)
-        if (r.data.errors?.length) setErrors(r.data.errors)
-      } catch {
-        setValid(false)
-      }
-    }, 500)
-    return () => clearTimeout(t)
-  }, [nodes, edges, name])
-
-  async function handleSave() {
-    const active = activeGraph(nodes, edges)
-    const { spec, errors: errs } = compile(active.nodes, active.edges, name)
-    if (!spec || errs.length > 0) return
-    setSaving(true); setSaveError('')
-    try {
-      const r = editingId
-        ? await api.put<SavedStrategy>(`/strategies/custom/${editingId}`, spec)
-        : await api.post<SavedStrategy>('/strategies/custom', spec)
-      onSaved(r.data)
-    } catch (e) {
-      setSaveError((e as Error).message)
-    } finally { setSaving(false) }
-  }
-
-  const allErrors = errors
-
-  return (
-    <div style={{
-      height: 68, background: 'var(--tb-surface)', borderTop: '1px solid var(--tb-border)',
-      display: 'flex', alignItems: 'center', padding: '0 20px', gap: 16, flexShrink: 0,
-    }}>
-      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-        {allErrors.length > 0 ? (
-          <div style={{ color: 'var(--tb-pnl-down)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            ✗ {allErrors[0]}
-            {allErrors.length > 1 && <span style={{ color: 'var(--tb-text-dim)', marginLeft: 8 }}>+{allErrors.length - 1} more</span>}
-          </div>
-        ) : explanation ? (
-          <div style={{ color: 'var(--tb-text)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <span style={{ color: 'var(--tb-text-dim)', marginRight: 8 }}>Preview:</span>{explanation}
-          </div>
-        ) : (
-          <div style={{ color: 'var(--tb-border-2)', fontSize: 12 }}>Connect nodes to build your strategy…</div>
-        )}
-        {warnings.length > 0 && (
-          <div style={{ color: 'var(--tb-warning)', fontSize: 11, marginTop: 2 }}>⚠ {warnings[0]}</div>
-        )}
-        {saveError && <div style={{ color: 'var(--tb-pnl-down)', fontSize: 11, marginTop: 2 }}>{saveError}</div>}
-      </div>
-      <button
-        onClick={handleSave}
-        disabled={!valid || saving}
-        style={{
-          background: valid ? '#15803D' : 'var(--tb-background)', color: valid ? '#fff' : 'var(--tb-border-2)',
-          border: `1px solid ${valid ? '#15803D' : 'var(--tb-border)'}`, borderRadius: 8,
-          padding: '8px 22px', fontSize: 13, fontWeight: 600,
-          cursor: valid && !saving ? 'pointer' : 'not-allowed',
-          fontFamily: 'inherit', whiteSpace: 'nowrap', transition: 'all 0.15s', flexShrink: 0,
-        }}
-      >
-        {saving ? 'Saving…' : editingId ? 'Save changes' : 'Save strategy'}
-      </button>
-    </div>
-  )
 }
 
 // ── Canvas ────────────────────────────────────────────────────────────────────
@@ -159,7 +66,37 @@ function Canvas() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [savedLabel, setSavedLabel] = useState('')
   const [menu, setMenu] = useState<NodeMenuState | null>(null)
+  const [valid, setValid] = useState(false)
+  const [saving, setSaving] = useState(false)
   const { screenToFlowPosition } = useReactFlow()
+
+  useEffect(() => {
+    const active = activeGraph(nodes, edges)
+    const { spec, errors: errs } = compile(active.nodes, active.edges, name)
+    if (errs.length > 0 || !spec) { setValid(false); return }
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.post<{ valid: boolean }>('/strategies/custom/preview', spec)
+        setValid(r.data.valid ?? false)
+      } catch { setValid(false) }
+    }, 500)
+    return () => clearTimeout(t)
+  }, [nodes, edges, name])
+
+  async function handleSave() {
+    const active = activeGraph(nodes, edges)
+    const { spec, errors: errs } = compile(active.nodes, active.edges, name)
+    if (!spec || errs.length > 0) return
+    setSaving(true)
+    try {
+      const r = editingId
+        ? await api.put<SavedStrategy>(`/strategies/custom/${editingId}`, spec)
+        : await api.post<SavedStrategy>('/strategies/custom', spec)
+      setEditingId(r.data.id)
+      setSavedLabel(`"${r.data.name}" saved`)
+      setTimeout(() => setSavedLabel(''), 3000)
+    } catch { /* no-op */ } finally { setSaving(false) }
+  }
 
   const onConnect = useCallback(
     (params: Connection) => setEdges(eds => addEdge({ ...params, id: `e-${Date.now()}` }, eds)),
@@ -212,12 +149,6 @@ function Canvas() {
     setNodes(nds => [...nds, { id: genId(), type, position, data: { ...data } }])
   }, [screenToFlowPosition, setNodes])
 
-  function handleSaved(s: SavedStrategy) {
-    setEditingId(s.id)
-    setSavedLabel(`"${s.name}" saved`)
-    setTimeout(() => setSavedLabel(''), 3000)
-  }
-
   function handleClear() {
     if (!confirm('Clear the canvas and start fresh?')) return
     setNodes([]); setEdges([]); setEditingId(null); setName('My Strategy')
@@ -256,6 +187,19 @@ function Canvas() {
         >
           Clear
         </button>
+        <button
+          onClick={handleSave}
+          disabled={!valid || saving}
+          style={{
+            background: valid ? '#15803D' : 'var(--tb-background)', color: valid ? '#fff' : 'var(--tb-border-2)',
+            border: `1px solid ${valid ? '#15803D' : 'var(--tb-border)'}`, borderRadius: 7,
+            padding: '5px 14px', fontSize: 12, fontWeight: 600,
+            cursor: valid && !saving ? 'pointer' : 'not-allowed',
+            fontFamily: 'inherit', whiteSpace: 'nowrap', transition: 'all 0.15s',
+          }}
+        >
+          {saving ? 'Saving…' : editingId ? 'Save changes' : 'Save strategy'}
+        </button>
       </div>
 
       {/* Palette + canvas */}
@@ -282,12 +226,6 @@ function Canvas() {
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="var(--tb-border-2)" />
             <Controls position="bottom-right" />
-            <MiniMap
-              nodeColor={MINIMAP_COLOR}
-              maskColor="rgba(3,7,18,0.7)"
-              style={{ background: 'var(--tb-surface)', border: '1px solid var(--tb-border)', borderRadius: 8 }}
-              position="top-right"
-            />
           </ReactFlow>
           {menu && (
             <NodeContextMenu
@@ -301,8 +239,6 @@ function Canvas() {
           )}
         </div>
       </div>
-
-      <PreviewBar nodes={nodes} edges={edges} name={name} editingId={editingId} onSaved={handleSaved} />
     </div>
   )
 }

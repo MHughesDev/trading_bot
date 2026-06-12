@@ -6,7 +6,6 @@ import { useModeStore } from '@/store/mode'
 import { useDashboardRollup } from '@/hooks/useDashboardRollup'
 import { PlatformSummary } from '@/components/dashboard/PlatformSummary'
 import { AssetClassSlider } from '@/components/dashboard/AssetClassSlider'
-import { ModeBadge } from '@/components/layout/ModeBadge'
 import { RefreshCw, Loader2 } from 'lucide-react'
 
 export function DashboardPage() {
@@ -15,26 +14,6 @@ export function DashboardPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Header bar */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-surface shrink-0">
-        <h1 className="text-sm font-semibold text-text">Dashboard</h1>
-        <div className="ml-auto flex items-center gap-2">
-          <ModeBadge />
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs text-text-muted hover:text-text hover:bg-border border border-border transition-colors disabled:opacity-40"
-          >
-            {loading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
-            )}
-            Refresh
-          </button>
-        </div>
-      </div>
-
       {/* Loading state */}
       {loading && !rollup && (
         <div className="flex flex-1 items-center justify-center">
@@ -63,8 +42,22 @@ export function DashboardPage() {
       {/* Content */}
       {rollup && (
         <div className="flex flex-col flex-1 overflow-hidden">
-          {/* Top tier: platform summary */}
-          <PlatformSummary rollup={rollup} mode={mode} />
+          {/* Top tier: platform summary + refresh */}
+          <div className="relative">
+            <PlatformSummary rollup={rollup} />
+            <button
+              onClick={refresh}
+              disabled={loading}
+              className="absolute top-3 right-4 rounded-lg p-1.5 text-text-dim hover:text-text hover:bg-border border border-border transition-colors disabled:opacity-40"
+              aria-label="Refresh"
+            >
+              {loading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
 
           {/* Middle + bottom tier: asset-class slider with venue tiles */}
           <div className="flex-1 overflow-hidden">

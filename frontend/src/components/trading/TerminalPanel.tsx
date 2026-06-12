@@ -10,6 +10,7 @@ import { useAuthStore } from '@/store/auth'
 import { tradeApi, portfolioApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import type { OrderStatus } from '@/lib/types'
+import { ChevronDown, ChevronRight as ChevronRightIcon } from 'lucide-react'
 
 // ── Asset-class helpers ────────────────────────────────────────────────────────
 
@@ -390,15 +391,33 @@ function Fills({ instrument }: { instrument: string }) {
   )
 }
 
-// ── Section header ─────────────────────────────────────────────────────────────
+// ── Collapsible section ────────────────────────────────────────────────────────
 
-function SectionHeader({ children }: { children: React.ReactNode }) {
+function CollapsibleSection({
+  title,
+  defaultOpen = true,
+  children,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className="px-3 py-1.5 border-t border-b border-border bg-surface-2">
-      <span className="text-xs font-semibold uppercase tracking-wider text-text-dim">
-        {children}
-      </span>
-    </div>
+    <>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 w-full px-3 py-1.5 border-t border-b border-border bg-surface-2 hover:bg-border transition-colors text-left"
+      >
+        {open
+          ? <ChevronDown className="h-3 w-3 text-text-dim shrink-0" />
+          : <ChevronRightIcon className="h-3 w-3 text-text-dim shrink-0" />}
+        <span className="text-xs font-semibold uppercase tracking-wider text-text-dim">
+          {title}
+        </span>
+      </button>
+      {open && children}
+    </>
   )
 }
 
@@ -419,34 +438,25 @@ export function TerminalPanel({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Chart */}
-      <div className="shrink-0">
+      <CollapsibleSection title="Chart">
         <ChartPanel instrument={instrument} initialBars={initialBars} />
-      </div>
+      </CollapsibleSection>
 
-      {/* Order ticket */}
-      <SectionHeader>Order</SectionHeader>
-      <div className="shrink-0">
+      <CollapsibleSection title="Order">
         <OrderTicket instrument={instrument} assetClass={assetClass} />
-      </div>
+      </CollapsibleSection>
 
-      {/* Positions */}
-      <SectionHeader>Positions</SectionHeader>
-      {user && (
-        <div className="shrink-0">
-          <PositionsPanel userId={user.id} />
-        </div>
-      )}
+      <CollapsibleSection title="Positions">
+        {user ? <PositionsPanel userId={user.id} /> : null}
+      </CollapsibleSection>
 
-      {/* Working orders */}
-      <SectionHeader>Working orders</SectionHeader>
-      <div className="shrink-0">
+      <CollapsibleSection title="Working orders">
         <WorkingOrders instrument={instrument} />
-      </div>
+      </CollapsibleSection>
 
-      {/* Fills */}
-      <SectionHeader>Fills</SectionHeader>
-      <Fills instrument={instrument} />
+      <CollapsibleSection title="Fills">
+        <Fills instrument={instrument} />
+      </CollapsibleSection>
     </div>
   )
 }

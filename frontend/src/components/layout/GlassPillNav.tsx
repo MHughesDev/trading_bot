@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Monitor, Zap, Layers, Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ModeBadge } from './ModeBadge'
 
 const SECTIONS = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -37,8 +38,14 @@ export function GlassPillNav() {
   return (
     <nav
       aria-label="Main navigation"
-      className="flex items-center justify-center gap-0 px-4 py-2 border-b border-border bg-surface/80 backdrop-blur-sm shrink-0"
+      className="flex items-center px-4 py-2 border-b border-border bg-surface/80 backdrop-blur-sm shrink-0"
     >
+      {/* Left spacer — badge hugs the pill's left edge at 15px */}
+      <div className="flex-1 flex items-center justify-end pr-[15px]">
+        <ModeBadge />
+      </div>
+
+      {/* Centered pill */}
       <div className="relative flex items-center rounded-full bg-surface-2 p-1 gap-0.5">
         {SECTIONS.map((section, i) => {
           const isActive = i === activeIdx
@@ -66,6 +73,9 @@ export function GlassPillNav() {
           )
         })}
       </div>
+
+      {/* Right spacer — mirrors left so pill stays centered */}
+      <div className="flex-1" />
     </nav>
   )
 }

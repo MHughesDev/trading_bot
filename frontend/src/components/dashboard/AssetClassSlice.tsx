@@ -27,9 +27,9 @@ export function AssetClassSlice({ tile }: AssetClassSliceProps) {
   const label = AC_LABELS[tile.asset_class] ?? tile.asset_class
 
   return (
-    <div className="flex flex-col gap-3 shrink-0 w-64 border-r border-border px-4 py-4">
-      {/* Slice header */}
-      <div>
+    <div className="flex flex-col shrink-0 w-64 h-full border-r border-border">
+      {/* Slice header — fixed */}
+      <div className="px-4 py-4 shrink-0">
         <h3 className="text-sm font-semibold text-text">{label}</h3>
         <div className="flex items-baseline gap-2 mt-1">
           <span className={cn('text-xl font-mono font-semibold tabular-nums', pnlClass(total))}>
@@ -41,16 +41,18 @@ export function AssetClassSlice({ tile }: AssetClassSliceProps) {
         </div>
       </div>
 
-      {/* Venue tiles */}
-      {tile.venues.length === 0 ? (
-        <div className="text-xs text-text-dim">No trades</div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {tile.venues.map((v) => (
-            <VenueTile key={v.venue} tile={v} />
-          ))}
-        </div>
-      )}
+      {/* Venue tiles — independently scrollable */}
+      <div className="flex-1 overflow-y-auto px-4 pb-4">
+        {tile.venues.length === 0 ? (
+          <div className="text-xs text-text-dim">No trades</div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {tile.venues.map((v) => (
+              <VenueTile key={v.venue} tile={v} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

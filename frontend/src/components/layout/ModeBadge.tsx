@@ -9,7 +9,7 @@ export function ModeBadge({ className }: { className?: string }) {
     <button
       onClick={toggleMode}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-colors border',
+        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide transition-colors border',
         isPaper
           ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
           : 'bg-green-500/10 text-green-400 border-green-500/30 hover:bg-green-500/20',
@@ -19,7 +19,7 @@ export function ModeBadge({ className }: { className?: string }) {
     >
       <span
         className={cn(
-          'h-1.5 w-1.5 rounded-full',
+          'h-1.5 w-1.5 rounded-full shrink-0',
           isPaper ? 'bg-amber-400' : 'bg-green-400',
         )}
       />

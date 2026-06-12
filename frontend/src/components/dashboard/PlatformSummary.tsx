@@ -1,31 +1,17 @@
 import type { DashboardRollup } from '@/hooks/useDashboardRollup'
-import type { TradingMode } from '@/store/mode'
 import { cn, fmtCurrency, pnlClass } from '@/lib/utils'
 
 interface PlatformSummaryProps {
   rollup: DashboardRollup
-  mode: TradingMode
 }
 
-export function PlatformSummary({ rollup, mode }: PlatformSummaryProps) {
+export function PlatformSummary({ rollup }: PlatformSummaryProps) {
   const realized = parseFloat(rollup.realized_pnl_usd)
   const unrealized = parseFloat(rollup.unrealized_pnl_usd)
   const total = realized + unrealized
 
   return (
     <div className="flex items-center gap-8 px-6 py-4 border-b border-border bg-surface shrink-0">
-      {/* Mode badge */}
-      <div
-        className={cn(
-          'rounded-full px-3 py-1 text-xs font-semibold border',
-          mode === 'PAPER'
-            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-            : 'bg-green-500/10 text-green-400 border-green-500/30',
-        )}
-      >
-        {mode}
-      </div>
-
       {/* Platform P&L */}
       <div>
         <div className="text-xs text-text-dim mb-0.5">Total P&L (USD)</div>
