@@ -98,9 +98,9 @@ impl KalshiCollector {
                 reason: e.to_string(),
             })?;
 
-        let volume = market.volume.and_then(|v| {
-            Decimal::try_from(v).ok().map(Price::from_decimal)
-        });
+        let volume = market
+            .volume
+            .and_then(|v| Decimal::try_from(v).ok().map(Price::from_decimal));
 
         let payload = PredictionPricePayload::new(yes_price, no_price, volume);
 

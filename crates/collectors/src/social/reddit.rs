@@ -300,8 +300,7 @@ mod tests {
     #[test]
     fn multiple_cashtags_all_linked() {
         let mut scratch = HashMap::new();
-        let mentions =
-            extract_mentions("Buying $BTC and $ETH today", &known(), &mut scratch);
+        let mentions = extract_mentions("Buying $BTC and $ETH today", &known(), &mut scratch);
         assert_eq!(mentions.len(), 2, "both BTC and ETH should link");
     }
 
