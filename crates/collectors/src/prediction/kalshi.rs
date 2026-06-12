@@ -107,8 +107,9 @@ impl KalshiCollector {
 
         let payload = PredictionPricePayload::new(yes_price, no_price, volume);
 
-        let payload_bytes =
-            serde_json::to_vec(&payload).map_err(|e| NormalizeError::Deserialize(e.to_string()))?;
+        let payload_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
+            .map_err(|e| NormalizeError::Deserialize(e.to_string()))?
+            .into_vec();
 
         let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
@@ -270,7 +271,7 @@ mod tests {
             domain::instrument_name(env.instrument_id).as_deref(),
             Some("BTC-ABOVE-60K")
         );
-        let payload: PredictionPricePayload = serde_json::from_slice(&env.payload).unwrap();
+        let payload: PredictionPricePayload = env.decode_payload().unwrap();
         let yes: f64 = payload.yes_price.to_string().parse().unwrap();
         let no: f64 = payload.no_price.to_string().parse().unwrap();
         assert!((0.0..=1.0).contains(&yes), "yes_price out of range: {yes}");

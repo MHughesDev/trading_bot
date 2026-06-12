@@ -5,7 +5,17 @@ use serde::{Deserialize, Serialize};
 use crate::payloads::Payload;
 
 /// How the page was fetched.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug, PartialEq))]
 #[serde(rename_all = "snake_case")]
 pub enum FetchMethod {
     Http,
@@ -13,7 +23,17 @@ pub enum FetchMethod {
 }
 
 /// A scraped web-page snapshot normalized for the platform.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(Debug))]
 pub struct WebPageSnapshotPayload {
     pub schema_version: String,
     /// Full URL of the fetched page.
