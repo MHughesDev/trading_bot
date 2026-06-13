@@ -147,7 +147,7 @@ pub fn run_simulation(
     );
 
     // Account currency must exist in the simulator's currency registry.
-    sdk::currency_or_register(&inputs.quote_currency, price_precision);
+    let _ = sdk::currency_or_register(&inputs.quote_currency, price_precision);
     let starting = Money::from(
         format!(
             "{} {}",

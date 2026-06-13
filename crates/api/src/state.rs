@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use backtest::BacktestManager;
 use demand_manager::{DemandRegistry, NoopPipelineFactory};
 use execution::paper::PaperTradingEngine;
 use execution::ExecutionEngine;
@@ -30,9 +31,12 @@ pub struct AppState {
     pub instance_manager: Arc<Mutex<InstanceManager>>,
     /// Wall clock used when initializing new strategy instances.
     pub clock: Arc<WallClock>,
+    /// Backtest job orchestrator (connects to the market_simulator SDK).
+    pub backtest: Arc<BacktestManager>,
 }
 
 impl AppState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pg: PgPool,
         risk_gate: Arc<RiskGate>,
@@ -40,6 +44,7 @@ impl AppState {
         execution: Arc<ExecutionEngine>,
         paper_engine: Arc<PaperTradingEngine>,
         gateway: Arc<SubscriptionRegistry>,
+        backtest: Arc<BacktestManager>,
     ) -> Self {
         let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
         Self {
@@ -52,6 +57,7 @@ impl AppState {
             strategy_store: Arc::new(Mutex::new(HashMap::new())),
             instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),
             clock: Arc::new(WallClock),
+            backtest,
         }
     }
 }

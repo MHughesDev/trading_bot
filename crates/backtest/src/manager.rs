@@ -196,7 +196,7 @@ impl BacktestManager {
         self.hydrate().await;
         let jobs = self.jobs.read().await;
         let mut out: Vec<BacktestSnapshot> = jobs.values().map(|j| j.snapshot()).collect();
-        out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        out.sort_by_key(|s| std::cmp::Reverse(s.created_at));
         out
     }
 

@@ -31,4 +31,6 @@ pub mod store;
 pub mod types;
 
 pub use manager::BacktestManager;
-pub use types::{BacktestRequest, BacktestSnapshot, BacktestStatus, DataCoverage, ResolvedSpec};
+pub use types::{
+    BacktestRequest, BacktestSnapshot, BacktestStatus, DataCoverage, ResolvedSpec, TimeframeExt,
+};

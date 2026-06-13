@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod automations;
+pub mod backtests;
 pub mod dashboard;
 pub mod orders;
 pub mod strategies;
@@ -69,5 +70,16 @@ pub fn router(state: AppState) -> Router {
         )
         // P3-T03 apply-list
         .route("/api/strategies/apply-list", get(strategies::apply_list))
+        // Back Testing — simulation runs against the market_simulator engine
+        .route(
+            "/api/backtests",
+            get(backtests::list_backtests).post(backtests::create_backtest),
+        )
+        .route(
+            "/api/backtests/:id",
+            get(backtests::get_backtest).delete(backtests::delete_backtest),
+        )
+        .route("/api/backtests/:id/stop", post(backtests::stop_backtest))
+        .route("/api/backtests/:id/rerun", post(backtests::rerun_backtest))
         .with_state(state)
 }
