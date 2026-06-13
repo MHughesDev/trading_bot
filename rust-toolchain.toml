@@ -1,3 +1,6 @@
 [toolchain]
-channel = "stable"
+# Pinned to the market_simulator SDK MSRV at the pinned git rev (its
+# rust-toolchain is 1.96.0).  Keeping the host toolchain in lock-step keeps the
+# in-process nautilus build reproducible across CI and fresh checkouts.
+channel = "1.96.0"
 components = ["rustfmt", "clippy"]

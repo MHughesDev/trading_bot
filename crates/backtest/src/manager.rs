@@ -4,7 +4,7 @@
 //! blocking pool.  Live progress is derived on demand from phase + atomic
 //! counters, so there is no background updater to fall behind.  Snapshots
 //! are persisted to Postgres (`backtest_runs`) best-effort at every phase
-//! transition; ClickHouse remains the only owner of market data.
+//! transition; `ClickHouse` remains the only owner of market data.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -21,11 +21,9 @@ use nautilus_backtest::sdk::SimulationControl;
 use crate::collect::{collect_ranges, CollectorPlan};
 use crate::gaps::{self, ScheduleKind};
 use crate::requirements::derive_requirements;
-use crate::sim::{run_simulation, SimulationInputs};
+use crate::sim::{run_simulation, InstrumentPrecisions, SimulationInputs};
 use crate::store::BarStore;
-use crate::types::{
-    BacktestSnapshot, BacktestStatus, DataCoverage, ResolvedSpec, TimeframeExt,
-};
+use crate::types::{BacktestSnapshot, BacktestStatus, DataCoverage, ResolvedSpec, TimeframeExt};
 
 struct JobState {
     status: BacktestStatus,
@@ -39,6 +37,8 @@ struct JobState {
 
 struct Job {
     id: Uuid,
+    /// Owning user (see `api::auth::BearerToken::user_id`).
+    user_id: Uuid,
     spec: ResolvedSpec,
     created_at: DateTime<Utc>,
     state: StdRwLock<JobState>,
@@ -49,9 +49,10 @@ struct Job {
 }
 
 impl Job {
-    fn new(id: Uuid, spec: ResolvedSpec, created_at: DateTime<Utc>) -> Arc<Self> {
+    fn new(id: Uuid, user_id: Uuid, spec: ResolvedSpec, created_at: DateTime<Utc>) -> Arc<Self> {
         Arc::new(Self {
             id,
+            user_id,
             spec,
             created_at,
             state: StdRwLock::new(JobState {
@@ -145,6 +146,12 @@ impl Job {
     }
 }
 
+/// Maximum number of backtest jobs that may be in their heavy (collect /
+/// load / simulate) phases at once.  Creating more simply queues them: the
+/// extra jobs sit in `Queued` until a permit frees up, so N concurrent
+/// creates can't spawn N simultaneous full simulations and exhaust the box.
+const MAX_CONCURRENT_RUNS: usize = 3;
+
 /// Owns all backtest jobs for the platform process.
 pub struct BacktestManager {
     jobs: RwLock<HashMap<Uuid, Arc<Job>>>,
@@ -152,21 +159,35 @@ pub struct BacktestManager {
     pg: PgPool,
     http: reqwest::Client,
     hydrated: AtomicBool,
+    /// Caps the number of jobs running their heavy phases concurrently.
+    run_permits: Arc<tokio::sync::Semaphore>,
 }
 
 impl BacktestManager {
     pub fn new(clickhouse_url: impl Into<String>, pg: PgPool) -> Arc<Self> {
+        // Collectors hit third-party REST APIs; bound both the connect and the
+        // whole-request time so a hung upstream can't wedge a job forever.
+        let http = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .unwrap_or_default();
         Arc::new(Self {
             jobs: RwLock::new(HashMap::new()),
             ch_url: clickhouse_url.into(),
             pg,
-            http: reqwest::Client::new(),
+            http,
             hydrated: AtomicBool::new(false),
+            run_permits: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
         })
     }
 
-    /// Creates a job and starts driving it immediately.
-    pub async fn create(self: &Arc<Self>, spec: ResolvedSpec) -> anyhow::Result<Uuid> {
+    /// Creates a job owned by `user_id` and starts driving it immediately.
+    pub async fn create(
+        self: &Arc<Self>,
+        user_id: Uuid,
+        spec: ResolvedSpec,
+    ) -> anyhow::Result<Uuid> {
         anyhow::ensure!(spec.start < spec.end, "start must be before end");
         anyhow::ensure!(
             !spec.instrument_id.trim().is_empty(),
@@ -179,7 +200,7 @@ impl BacktestManager {
         anyhow::ensure!(balance > Decimal::ZERO, "initial_balance must be positive");
 
         let id = Uuid::new_v4();
-        let job = Job::new(id, spec, Utc::now());
+        let job = Job::new(id, user_id, spec, Utc::now());
         self.jobs.write().await.insert(id, Arc::clone(&job));
         self.persist(&job).await;
 
@@ -191,24 +212,35 @@ impl BacktestManager {
         Ok(id)
     }
 
-    /// All jobs, newest first.
-    pub async fn list(&self) -> Vec<BacktestSnapshot> {
+    /// This user's jobs, newest first.
+    pub async fn list(&self, user_id: Uuid) -> Vec<BacktestSnapshot> {
         self.hydrate().await;
         let jobs = self.jobs.read().await;
-        let mut out: Vec<BacktestSnapshot> = jobs.values().map(|j| j.snapshot()).collect();
+        let mut out: Vec<BacktestSnapshot> = jobs
+            .values()
+            .filter(|j| j.user_id == user_id)
+            .map(|j| j.snapshot())
+            .collect();
         out.sort_by_key(|s| std::cmp::Reverse(s.created_at));
         out
     }
 
-    pub async fn get(&self, id: Uuid) -> Option<BacktestSnapshot> {
+    /// One job, but only if owned by `user_id` (otherwise `None`, so a run's
+    /// existence isn't leaked across users).
+    pub async fn get(&self, user_id: Uuid, id: Uuid) -> Option<BacktestSnapshot> {
         self.hydrate().await;
-        self.jobs.read().await.get(&id).map(|j| j.snapshot())
+        self.jobs
+            .read()
+            .await
+            .get(&id)
+            .filter(|j| j.user_id == user_id)
+            .map(|j| j.snapshot())
     }
 
     /// Requests a stop; the job lands in `Cancelled` at the next boundary.
-    pub async fn stop(&self, id: Uuid) -> anyhow::Result<()> {
+    pub async fn stop(&self, user_id: Uuid, id: Uuid) -> anyhow::Result<()> {
         let jobs = self.jobs.read().await;
-        let job = jobs.get(&id).ok_or_else(|| anyhow::anyhow!("not found"))?;
+        let job = owned(&jobs, user_id, id)?;
         let status = job.state.read().expect("job state lock poisoned").status;
         anyhow::ensure!(!status.is_terminal(), "backtest already finished");
         job.cancel.store(true, Ordering::Relaxed);
@@ -217,46 +249,60 @@ impl BacktestManager {
     }
 
     /// Removes a finished job and its persisted row.
-    pub async fn delete(&self, id: Uuid) -> anyhow::Result<()> {
+    pub async fn delete(&self, user_id: Uuid, id: Uuid) -> anyhow::Result<()> {
         let mut jobs = self.jobs.write().await;
-        let job = jobs.get(&id).ok_or_else(|| anyhow::anyhow!("not found"))?;
-        let status = job.state.read().expect("job state lock poisoned").status;
-        anyhow::ensure!(
-            status.is_terminal(),
-            "stop the backtest before deleting it"
-        );
+        let status = {
+            let job = owned(&jobs, user_id, id)?;
+            job.state.read().expect("job state lock poisoned").status
+        };
+        anyhow::ensure!(status.is_terminal(), "stop the backtest before deleting it");
         jobs.remove(&id);
         drop(jobs);
-        let _ = sqlx::query("DELETE FROM backtest_runs WHERE id = $1")
+        let _ = sqlx::query("DELETE FROM backtest_runs WHERE id = $1 AND user_id = $2")
             .bind(id)
+            .bind(user_id)
             .execute(&self.pg)
             .await;
         Ok(())
     }
 
-    /// Starts a fresh run with the same specification.
-    pub async fn rerun(self: &Arc<Self>, id: Uuid) -> anyhow::Result<Uuid> {
+    /// Starts a fresh run with the same specification (same owner).
+    pub async fn rerun(self: &Arc<Self>, user_id: Uuid, id: Uuid) -> anyhow::Result<Uuid> {
         let spec = {
             let jobs = self.jobs.read().await;
-            let job = jobs.get(&id).ok_or_else(|| anyhow::anyhow!("not found"))?;
-            job.spec.clone()
+            owned(&jobs, user_id, id)?.spec.clone()
         };
-        self.create(spec).await
+        self.create(user_id, spec).await
     }
 
     // ── Job driver ───────────────────────────────────────────────────────────
 
     async fn drive(self: &Arc<Self>, job: Arc<Job>) {
+        // Hold a run permit for the whole job so at most MAX_CONCURRENT_RUNS
+        // jobs occupy the collect/load/simulate phases at once.  While waiting
+        // the job stays `Queued`; a cancel requested before the permit is
+        // granted is honoured immediately without ever starting work.
+        let _permit = tokio::select! {
+            permit = self.run_permits.clone().acquire_owned() => match permit {
+                Ok(p) => p,
+                Err(_) => return, // semaphore closed (shutdown)
+            },
+            () = wait_for_cancel(&job) => {
+                job.set_status(BacktestStatus::Cancelled);
+                return;
+            }
+        };
+        if job.cancel.load(Ordering::Relaxed) {
+            job.set_status(BacktestStatus::Cancelled);
+            return;
+        }
         if let Err((phase, error)) = self.drive_inner(&job).await {
             tracing::warn!(id = %job.id, phase = phase.as_str(), %error, "backtest failed");
             job.fail(phase, error);
         }
     }
 
-    async fn drive_inner(
-        self: &Arc<Self>,
-        job: &Arc<Job>,
-    ) -> Result<(), (BacktestStatus, String)> {
+    async fn drive_inner(self: &Arc<Self>, job: &Arc<Job>) -> Result<(), (BacktestStatus, String)> {
         let spec = &job.spec;
         let fail = |phase: BacktestStatus| move |e: anyhow::Error| (phase, e.to_string());
 
@@ -312,8 +358,7 @@ impl BacktestManager {
                 .map_err(fail(BacktestStatus::CollectingData))?;
             coverage = gaps::analyze(data_from, spec.end, &counts, timeframe, schedule);
             coverage.collected_bars = collected;
-            job.state.write().expect("job state lock poisoned").coverage =
-                Some(coverage.clone());
+            job.state.write().expect("job state lock poisoned").coverage = Some(coverage.clone());
         }
 
         if job.cancel.load(Ordering::Relaxed) {
@@ -358,6 +403,7 @@ impl BacktestManager {
             .initial_balance
             .parse()
             .map_err(|e| (BacktestStatus::Simulating, format!("invalid balance: {e}")))?;
+        let precisions = self.instrument_precisions(&spec.instrument_id).await;
         let inputs = SimulationInputs {
             definition: spec.definition.clone(),
             instrument_id: spec.instrument_id.clone(),
@@ -366,6 +412,7 @@ impl BacktestManager {
             timeframe,
             quote_currency: spec.quote_currency.clone(),
             initial_balance,
+            precisions,
             sim_start_ns: spec.start.timestamp_nanos_opt().unwrap_or(0),
             bars,
             features: requirements.features.clone(),
@@ -373,7 +420,12 @@ impl BacktestManager {
         let control = Arc::clone(&job.control);
         let report = tokio::task::spawn_blocking(move || run_simulation(inputs, &control))
             .await
-            .map_err(|e| (BacktestStatus::Simulating, format!("simulation panicked: {e}")))?
+            .map_err(|e| {
+                (
+                    BacktestStatus::Simulating,
+                    format!("simulation panicked: {e}"),
+                )
+            })?
             .map_err(fail(BacktestStatus::Simulating))?;
 
         if report.cancelled || job.cancel.load(Ordering::Relaxed) {
@@ -390,18 +442,48 @@ impl BacktestManager {
         Ok(())
     }
 
+    /// Looks up real venue precisions from the `instruments` table.
+    ///
+    /// Price precision is the decimal scale of the tick size; size precision is
+    /// the scale of the lot size.  Returns `None` (and the simulation infers
+    /// precision from the data) when the instrument is unknown or carries no
+    /// usable tick/lot metadata.
+    async fn instrument_precisions(&self, instrument_id: &str) -> Option<InstrumentPrecisions> {
+        let inst = match storage::postgres::instruments::fetch_by_id(&self.pg, instrument_id).await
+        {
+            Ok(Some(inst)) => inst,
+            Ok(None) => return None,
+            Err(e) => {
+                tracing::warn!(instrument_id, error = %e, "instrument precision lookup failed");
+                return None;
+            }
+        };
+        if inst.tick_size.is_zero() || inst.lot_size.is_zero() {
+            return None;
+        }
+        let scale = |d: Decimal| u8::try_from(d.normalize().scale()).unwrap_or(9).min(9);
+        Some(InstrumentPrecisions {
+            price: scale(inst.tick_size),
+            size: scale(inst.lot_size),
+        })
+    }
+
     // ── Persistence (best-effort) ────────────────────────────────────────────
 
     async fn persist(&self, job: &Arc<Job>) {
         let snap = job.snapshot();
         let definition = serde_json::to_value(&job.spec.definition).unwrap_or_default();
-        let coverage = snap.coverage.as_ref().and_then(|c| serde_json::to_value(c).ok());
+        let coverage = snap
+            .coverage
+            .as_ref()
+            .and_then(|c| serde_json::to_value(c).ok());
         let result = sqlx::query(
             "INSERT INTO backtest_runs \
              (id, name, strategy_slug, definition, instrument_id, venue_id, asset_class, \
               timeframe, start_time, end_time, initial_balance, quote_currency, auto_collect, \
-              status, progress, error, failed_phase, coverage, result, created_at, started_at, finished_at) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) \
+              status, progress, error, failed_phase, coverage, result, created_at, started_at, finished_at, \
+              user_id) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) \
              ON CONFLICT (id) DO UPDATE SET \
                status = EXCLUDED.status, progress = EXCLUDED.progress, \
                error = EXCLUDED.error, failed_phase = EXCLUDED.failed_phase, \
@@ -434,6 +516,7 @@ impl BacktestManager {
         .bind(snap.created_at)
         .bind(snap.started_at)
         .bind(snap.finished_at)
+        .bind(job.user_id)
         .execute(&self.pg)
         .await;
 
@@ -453,7 +536,8 @@ impl BacktestManager {
         let rows: Vec<PersistedRun> = match sqlx::query_as(
             "SELECT id, name, definition, instrument_id, venue_id, asset_class, timeframe, \
                     start_time, end_time, initial_balance, quote_currency, auto_collect, \
-                    status, error, failed_phase, coverage, result, created_at, started_at, finished_at \
+                    status, error, failed_phase, coverage, result, created_at, started_at, finished_at, \
+                    user_id \
              FROM backtest_runs ORDER BY created_at DESC LIMIT 500",
         )
         .fetch_all(&self.pg)
@@ -487,6 +571,7 @@ impl BacktestManager {
             }
             let job = Job::new(
                 row.id,
+                row.user_id.unwrap_or_else(Uuid::nil),
                 ResolvedSpec {
                     name: row.name,
                     definition,
@@ -517,6 +602,22 @@ impl BacktestManager {
     }
 }
 
+/// Looks a job up and confirms `user_id` owns it; otherwise reports "not found"
+/// so a run's existence isn't leaked across users.
+fn owned(jobs: &HashMap<Uuid, Arc<Job>>, user_id: Uuid, id: Uuid) -> anyhow::Result<&Arc<Job>> {
+    jobs.get(&id)
+        .filter(|j| j.user_id == user_id)
+        .ok_or_else(|| anyhow::anyhow!("not found"))
+}
+
+/// Resolves once the job has been asked to cancel.  Used to abandon a job that
+/// is still waiting for a run permit without ever starting its work.
+async fn wait_for_cancel(job: &Arc<Job>) {
+    while !job.cancel.load(Ordering::Relaxed) {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
 /// Row shape of `backtest_runs` for hydration.
 #[derive(sqlx::FromRow)]
 struct PersistedRun {
@@ -540,4 +641,5 @@ struct PersistedRun {
     created_at: DateTime<Utc>,
     started_at: Option<DateTime<Utc>>,
     finished_at: Option<DateTime<Utc>>,
+    user_id: Option<Uuid>,
 }

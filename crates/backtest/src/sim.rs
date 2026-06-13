@@ -1,4 +1,4 @@
-//! Bridge between platform strategy definitions and the market_simulator SDK.
+//! Bridge between platform strategy definitions and the `market_simulator` SDK.
 //!
 //! The platform side owns: the strategy definition (interpreted with the same
 //! pure `strategy-runtime` evaluator that runs live), the indicator
@@ -7,6 +7,7 @@
 //! matching, fills, fees, and result statistics.
 
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use domain::order::Side;
@@ -24,7 +25,30 @@ use nautilus_model::data::{Bar, BarSpecification, BarType};
 use nautilus_model::enums::{AggregationSource, BarAggregation, OrderSide, PriceType};
 use nautilus_model::identifiers::Venue;
 use nautilus_model::instruments::Instrument;
-use nautilus_model::types::{Money, Quantity};
+use nautilus_model::types::{Money, Price, Quantity};
+
+/// Price/size decimal precision for the simulated instrument.
+///
+/// When sourced from instrument metadata these are the venue's real tick/lot
+/// precisions (so a 0-dp JPY-style or 8-dp crypto instrument quantizes
+/// correctly); when absent, [`run_simulation`] infers them from the data.
+#[derive(Clone, Copy, Debug)]
+pub struct InstrumentPrecisions {
+    pub price: u8,
+    pub size: u8,
+}
+
+/// Non-panicking nautilus value constructors.  Malformed input returns an
+/// error instead of panicking inside `spawn_blocking` (#21).
+fn price(s: &str) -> anyhow::Result<Price> {
+    Price::from_str(s).map_err(|e| anyhow::anyhow!("invalid price '{s}': {e}"))
+}
+fn quantity(s: &str) -> anyhow::Result<Quantity> {
+    Quantity::from_str(s).map_err(|e| anyhow::anyhow!("invalid quantity '{s}': {e}"))
+}
+fn money(s: &str) -> anyhow::Result<Money> {
+    Money::from_str(s).map_err(|e| anyhow::anyhow!("invalid money '{s}': {e}"))
+}
 
 use crate::requirements::{FeatureKind, FeatureSpec};
 use crate::store::LoadedBar;
@@ -40,6 +64,9 @@ pub struct SimulationInputs {
     pub quote_currency: String,
     /// Decimal — never a float.
     pub initial_balance: Decimal,
+    /// Real venue precisions from instrument metadata; `None` falls back to
+    /// inferring precision from the data (#8).
+    pub precisions: Option<InstrumentPrecisions>,
     /// Orders are suppressed for bars before this timestamp (warm-up lead-in).
     pub sim_start_ns: i64,
     pub bars: Vec<LoadedBar>,
@@ -90,54 +117,58 @@ pub fn run_simulation(
 ) -> anyhow::Result<SimulationReport> {
     anyhow::ensure!(!inputs.bars.is_empty(), "no bars to simulate");
 
-    // Precisions are derived from the data and order sizes themselves; the
-    // engine rejects mismatched precisions, so everything is quantized to
-    // these two values on the way in.
-    let price_precision = max_scale(
-        inputs
-            .bars
-            .iter()
-            .flat_map(|b| [b.open, b.high, b.low, b.close].into_iter()),
-    )
-    .clamp(1, 9) as u8;
-
     let order_specs = order_specs(&inputs.definition)?;
-    let size_scale = max_scale(
-        inputs
-            .bars
-            .iter()
-            .map(|b| b.volume)
-            .chain(order_specs.iter().map(|(_, _, s)| *s)),
-    );
-    let size_precision = size_scale.clamp(1, 9) as u8;
+
+    // Precision comes from the instrument's real tick/lot metadata when known
+    // (so JPY-style 0-dp and 8-dp crypto instruments quantize correctly).
+    // Without metadata it is inferred from the data and order sizes; the engine
+    // rejects mismatched precisions, so everything is quantized on the way in.
+    let (price_precision, size_precision) = if let Some(p) = inputs.precisions {
+        (p.price, p.size)
+    } else {
+        let price_precision = max_scale(
+            inputs
+                .bars
+                .iter()
+                .flat_map(|b| [b.open, b.high, b.low, b.close].into_iter()),
+        )
+        .clamp(1, 9) as u8;
+        let size_precision = max_scale(
+            inputs
+                .bars
+                .iter()
+                .map(|b| b.volume)
+                .chain(order_specs.iter().map(|(_, _, s)| *s)),
+        )
+        .clamp(1, 9) as u8;
+        (price_precision, size_precision)
+    };
 
     // Simulated venue + instrument per asset class.
     let venue = Venue::from(inputs.venue_id.to_uppercase().as_str());
     let preset = VenuePreset::from_asset_class(&inputs.asset_class);
-    let price_increment =
-        nautilus_model::types::Price::from(increment_str(price_precision).as_str());
-    let instrument = match preset {
-        VenuePreset::Equity => sdk::equity_instrument(
+    let price_increment = price(&increment_str(price_precision))?;
+    let instrument = if preset == VenuePreset::Equity {
+        sdk::equity_instrument(
             venue,
             &inputs.instrument_id,
             &inputs.quote_currency,
             price_precision,
             price_increment,
-        ),
-        _ => {
-            let (base, quote) = split_pair(&inputs.instrument_id, &inputs.quote_currency);
-            let size_increment = Quantity::from(increment_str(size_precision).as_str());
-            sdk::spot_pair_instrument(
-                venue,
-                &inputs.instrument_id,
-                &base,
-                &quote,
-                price_precision,
-                size_precision,
-                price_increment,
-                size_increment,
-            )
-        }
+        )
+    } else {
+        let (base, quote) = split_pair(&inputs.instrument_id, &inputs.quote_currency);
+        let size_increment = quantity(&increment_str(size_precision))?;
+        sdk::spot_pair_instrument(
+            venue,
+            &inputs.instrument_id,
+            &base,
+            &quote,
+            price_precision,
+            size_precision,
+            price_increment,
+            size_increment,
+        )
     };
 
     let bar_type = BarType::new(
@@ -148,14 +179,11 @@ pub fn run_simulation(
 
     // Account currency must exist in the simulator's currency registry.
     let _ = sdk::currency_or_register(&inputs.quote_currency, price_precision);
-    let starting = Money::from(
-        format!(
-            "{} {}",
-            dec_str(inputs.initial_balance, 2),
-            inputs.quote_currency
-        )
-        .as_str(),
-    );
+    let starting = money(&format!(
+        "{} {}",
+        dec_str(inputs.initial_balance, 2),
+        inputs.quote_currency
+    ))?;
 
     let engine_bars = to_engine_bars(&inputs.bars, bar_type, price_precision, size_precision)?;
 
@@ -168,7 +196,7 @@ pub fn run_simulation(
         chunk_size: chunk_size_for(engine_bars.len()),
     };
 
-    let handler = build_handler(&inputs, order_specs, size_precision);
+    let handler = build_handler(&inputs, order_specs, size_precision)?;
     let outcome = sdk::run_bar_simulation(spec, engine_bars, handler, control)?;
 
     Ok(SimulationReport {
@@ -240,11 +268,11 @@ fn to_engine_bars(
             let ts = UnixNanos::from(u64::try_from(b.ts_ns).unwrap_or(0));
             Ok(Bar::new(
                 bar_type,
-                nautilus_model::types::Price::from(dec_str(b.open, pp).as_str()),
-                nautilus_model::types::Price::from(dec_str(b.high, pp).as_str()),
-                nautilus_model::types::Price::from(dec_str(b.low, pp).as_str()),
-                nautilus_model::types::Price::from(dec_str(b.close, pp).as_str()),
-                Quantity::from(dec_str(b.volume.abs(), sp).as_str()),
+                price(&dec_str(b.open, pp))?,
+                price(&dec_str(b.high, pp))?,
+                price(&dec_str(b.low, pp))?,
+                price(&dec_str(b.close, pp))?,
+                quantity(&dec_str(b.volume.abs(), sp))?,
                 ts,
                 ts,
             ))
@@ -263,10 +291,25 @@ fn build_handler(
     inputs: &SimulationInputs,
     order_specs: Vec<(String, Side, Decimal)>,
     size_precision: u8,
-) -> BarHandler {
+) -> anyhow::Result<BarHandler> {
     let nodes = inputs.definition.nodes.clone();
     let timeframe = inputs.timeframe;
     let sim_start_ns = inputs.sim_start_ns;
+
+    // Pre-quantize each order's size to a nautilus `Quantity` once, up front, so
+    // a malformed size is an error here rather than a panic inside the per-bar
+    // callback (which the engine runs on the blocking pool).
+    let order_specs: Vec<(String, OrderSide, Quantity)> = order_specs
+        .into_iter()
+        .map(|(signal, side, size)| {
+            let qty = quantity(&dec_str(size, u32::from(size_precision)))?;
+            let order_side = match side {
+                Side::Buy => OrderSide::Buy,
+                Side::Sell => OrderSide::Sell,
+            };
+            Ok((signal, order_side, qty))
+        })
+        .collect::<anyhow::Result<_>>()?;
 
     let mut indicators: Vec<(String, IndicatorState)> = inputs
         .features
@@ -284,7 +327,7 @@ fn build_handler(
     let mut bar_map: HashMap<Timeframe, BarPayload> = HashMap::new();
     let mut active_signals: HashSet<String> = HashSet::new();
 
-    Box::new(move |bar: &Bar| {
+    Ok(Box::new(move |bar: &Bar| {
         let close_value = bar.close.as_decimal();
 
         // Indicators consume the close (same convention as the live feature
@@ -325,16 +368,11 @@ fn build_handler(
         let in_window = bar.ts_event.as_u64() as i64 >= sim_start_ns;
         if in_window {
             for signal in fired.difference(&active_signals) {
-                for (on_signal, side, size) in &order_specs {
+                for (on_signal, side, qty) in &order_specs {
                     if on_signal == signal {
                         commands.push(SimOrderCommand::Market {
-                            side: match side {
-                                Side::Buy => OrderSide::Buy,
-                                Side::Sell => OrderSide::Sell,
-                            },
-                            quantity: Quantity::from(
-                                dec_str(*size, u32::from(size_precision)).as_str(),
-                            ),
+                            side: *side,
+                            quantity: *qty,
                         });
                     }
                 }
@@ -342,7 +380,7 @@ fn build_handler(
         }
         active_signals = fired;
         commands
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -384,5 +422,107 @@ mod tests {
     fn max_scale_normalizes_trailing_zeros() {
         assert_eq!(max_scale([dec!(1.50), dec!(2.125)].into_iter()), 3);
         assert_eq!(max_scale([dec!(100), dec!(200)].into_iter()), 0);
+    }
+
+    #[test]
+    fn increment_str_supports_zero_dp_and_crypto_precision() {
+        // 0-dp (JPY-style) instrument: the tick is a whole unit.
+        assert_eq!(increment_str(0), "1");
+        // 2-dp equity tick.
+        assert_eq!(increment_str(2), "0.01");
+        // 8-dp crypto lot.
+        assert_eq!(increment_str(8), "0.00000001");
+    }
+
+    fn ema_cross_long_def() -> StrategyDefinition {
+        serde_json::from_str(
+            r#"{
+                "strategy_id": "ema_cross_v1",
+                "definition_version": "1.0",
+                "asset_class": "crypto_spot_cex",
+                "inputs": [
+                    { "lane": "market.bars.1m", "instrument": "$bound_at_init" },
+                    { "lane": "features.technical", "instrument": "$bound_at_init", "features": ["ema_7", "ema_21"] }
+                ],
+                "nodes": [
+                    { "id": "n1", "type": "condition", "expr": "feature('ema_7') > feature('ema_21')" },
+                    { "id": "n2", "type": "signal", "when": "n1", "emit": "long" }
+                ],
+                "actions": [
+                    { "on_signal": "long", "type": "place_order",
+                      "order": { "side": "buy", "size_mode": "fixed", "size": "0.01" } }
+                ]
+            }"#,
+        )
+        .expect("valid fixture definition")
+    }
+
+    /// Hermetic end-to-end bridge test (#24, pins #6 rising-edge semantics): a
+    /// deterministic EMA-cross over a monotonically rising price series runs
+    /// fully through the in-process engine and places exactly one order — the
+    /// fast EMA crosses above the slow EMA once and stays above, so the signal
+    /// fires on a single rising edge.
+    #[test]
+    fn ema_cross_over_rising_bars_places_one_order() {
+        let features = vec![
+            FeatureSpec {
+                name: "ema_7".into(),
+                kind: FeatureKind::Ema,
+                period: 7,
+            },
+            FeatureSpec {
+                name: "ema_21".into(),
+                kind: FeatureKind::Ema,
+                period: 21,
+            },
+        ];
+        // 60 one-minute bars with a strictly rising close (100.00 → 159.00).
+        let bars: Vec<LoadedBar> = (0..60)
+            .map(|i| {
+                let close = dec!(100) + Decimal::from(i);
+                LoadedBar {
+                    ts_ns: i64::from(i) * 60_000_000_000,
+                    open: close,
+                    high: close,
+                    low: close,
+                    close,
+                    volume: dec!(1),
+                    trade_count: 1,
+                }
+            })
+            .collect();
+
+        let inputs = SimulationInputs {
+            definition: ema_cross_long_def(),
+            instrument_id: "BTC-USDT".into(),
+            venue_id: "binance".into(),
+            asset_class: "crypto_spot_cex".into(),
+            timeframe: Timeframe::Minutes1,
+            quote_currency: "USDT".into(),
+            initial_balance: dec!(100000),
+            precisions: None,
+            sim_start_ns: 0,
+            bars,
+            features,
+        };
+
+        let control = SimulationControl::new();
+        let report = run_simulation(inputs, &control).expect("simulation runs");
+        assert!(!report.cancelled);
+        let total_orders = report.result["total_orders"].as_u64().unwrap_or(0);
+        assert_eq!(total_orders, 1, "one rising-edge crossover ⇒ one order");
+    }
+
+    #[test]
+    fn value_constructors_reject_malformed_input_without_panicking() {
+        // 0-dp and 8-dp values parse cleanly...
+        assert!(price("100").is_ok());
+        assert!(price("0.00000001").is_ok());
+        assert!(quantity("1").is_ok());
+        assert!(money("100.00 USD").is_ok());
+        // ...and garbage returns an error instead of panicking (#21).
+        assert!(price("not-a-number").is_err());
+        assert!(quantity("1/0").is_err());
+        assert!(money("abc USD").is_err());
     }
 }

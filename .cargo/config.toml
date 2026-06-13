@@ -7,5 +7,11 @@
 xt = "run --package xtask --"
 xtask = "run --package xtask --"
 
+# Fetch git dependencies (the pinned market_simulator SDK) with the system git
+# binary so it uses the environment's credentials / proxy, rather than cargo's
+# built-in libgit2 transport.
+[net]
+git-fetch-with-cli = true
+
 [env]
 RUST_LOG = { value = "info", force = false }

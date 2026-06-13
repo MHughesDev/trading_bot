@@ -88,24 +88,40 @@ pub fn derive_requirements(
         specs.push(parse_feature(&name)?);
     }
 
-    // EMA converges asymptotically — 5× the longest period is a conservative
-    // warm-up; RSI needs period+1.  Floor at 30 bars whenever any indicator
-    // is in play so short-period strategies still get a stable lead-in.
     let warmup_bars = specs
         .iter()
-        .map(|s| match s.kind {
-            FeatureKind::Ema => (s.period as u64) * 5,
-            FeatureKind::Rsi => (s.period as u64) + 1,
-        })
+        .map(|s| warmup_bars_for(s.kind, s.period as u64))
         .max()
-        .map(|w| w.max(30))
-        .unwrap_or(0);
+        .map_or(0, |w| w.max(MIN_WARMUP_BARS));
 
     Ok(DataRequirements {
         timeframe,
         features: specs,
         warmup_bars,
     })
+}
+
+/// EMA warm-up multiplier — bars of lead-in per period of the longest EMA.
+///
+/// An EMA with period *p* has smoothing factor α = 2/(p+1); after *n* bars the
+/// weight still carried by the seed value is (1−α)ⁿ.  At n = 5p that weight is
+/// (1 − 2/(p+1))^{5p} ≈ e^{−10} ≈ 4.5·10⁻⁵ for any non-trivial period — i.e.
+/// the indicator has effectively forgotten its initialization.  Five periods is
+/// therefore a principled (not arbitrary) convergence bound, not merely a round
+/// number.  RSI, by contrast, is exact after `period + 1` bars (its first
+/// average needs `period` deltas), so it gets no multiplier.
+const EMA_WARMUP_PERIODS: u64 = 5;
+
+/// Floor on warm-up whenever any indicator is in play, so very short-period
+/// strategies still get a stable lead-in before the first tradable bar.
+const MIN_WARMUP_BARS: u64 = 30;
+
+/// Bars of warm-up lead-in an indicator needs before its output is trustworthy.
+fn warmup_bars_for(kind: FeatureKind, period: u64) -> u64 {
+    match kind {
+        FeatureKind::Ema => period * EMA_WARMUP_PERIODS,
+        FeatureKind::Rsi => period + 1,
+    }
 }
 
 /// Extracts the names inside `feature('...')` calls from an expression.

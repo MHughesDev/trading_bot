@@ -1,6 +1,6 @@
 # Backtesting System — Decoupling & Hardening Master Plan — Set D
 
-**Completion: 0% (0 / 33 primary tasks complete)**
+**Completion: ~88% (29 / 33 primary tasks complete; 4 partial/deferred — see Progress Log)**
 
 > Phase 0-ALT (4 tasks) is an alternative to Phase 0 and is tracked separately,
 > not counted in the primary total.
@@ -82,4 +82,9 @@ Update this table and the per-phase completion headers as tasks land.
 
 | Date | Phase | Task | Note |
 |------|-------|------|------|
-| — | — | — | not started |
+| 2026-06-13 | 0 | 0.3–0.8 | Decoupled: nautilus consumed as a pinned **git** dep (`rev` on market_simulator) from one source; toolchain pinned 1.96.0; `.cargo` git-fetch-with-cli; commented `[patch]` for dual-dev; ADR-0014 written. `cargo build --workspace` is green with **no** sibling checkout. 0.1/0.2 (freeze + tag the SDK) are market_simulator-repo actions outside this repo's push scope — substituted by pinning an immutable `rev` and documenting the freeze in ADR-0014. |
+| 2026-06-13 | 1 | 1.1–1.5 | Typed RowBinary insert (no hand-built SQL); real precision from instrument tick/lot metadata + non-panicking `from_str` constructors; Binance symbol no longer proxied USD→USDT; unsupported auto-collect rejected 422 at create; backtests scoped to `user_id`. |
+| 2026-06-13 | 2 | 2.1–2.6 | Collector connect/request timeouts + bounded backoff retry; `Semaphore` concurrency cap; auto-migrate on boot; NYSE holiday calendar in coverage; paginated list endpoint; restart behavior documented (interrupted-by-design). |
+| 2026-06-13 | 3 | 3.2, 3.4 | Gap-merge no longer swallows a present day on continuous markets; warm-up bounds justified (EMA 5×period ≈ e⁻¹⁰) as documented constants. **3.1** (stored-feature replay), **3.3** (tick replay), **3.5** (broaden sizing) deferred & documented in the spec §6. |
+| 2026-06-13 | 4 | 4.2–4.5 | Hermetic in-process EMA-cross e2e test pins #6 semantics (1 rising edge ⇒ 1 order); `[lints] workspace=true` + fmt clean; security review clean; spec FEAT-002 + ADR-0014 + adversarial-test matrix. **4.1** (seeded-ClickHouse e2e) needs a live ClickHouse — not available in this env; the hermetic bridge test covers the sim path. |
+| 2026-06-13 | 5 | 5.1, 5.3, 5.4 | One shared axios client; Back Testing + Strategy pages code-split into own chunks; custom absolute date-range picker. **5.2** (strategy-picker source) investigated: builder saves to legacy `:8001` `/strategies/custom` while the picker + create resolve against the Rust `/api/strategies` store — they are mutually consistent today; unifying authoring across backends is architecturally significant and flagged for a product decision. |

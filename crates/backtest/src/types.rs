@@ -135,7 +135,7 @@ pub struct MissingRange {
 pub struct DataCoverage {
     /// Bars the window would contain with full data.
     pub expected_bars: u64,
-    /// Bars currently present in ClickHouse.
+    /// Bars currently present in `ClickHouse`.
     pub present_bars: u64,
     /// Bars backfilled by the collection phase of this job.
     pub collected_bars: u64,
@@ -166,7 +166,7 @@ pub struct BacktestSnapshot {
     /// Phase the job was in when it failed (for mid-processing diagnosis).
     pub failed_phase: Option<String>,
     pub coverage: Option<DataCoverage>,
-    /// Simulator result document (orders, positions, PnL and return stats).
+    /// Simulator result document (orders, positions, `PnL` and return stats).
     pub result: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,

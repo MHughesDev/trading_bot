@@ -3,7 +3,7 @@
 //! Driven by the data requirements of the strategy under test: the manager
 //! computes the missing ranges for the strategy's timeframe (plus indicator
 //! warm-up) and this module fills them from a venue REST API in paged
-//! 1000-bar requests, writing straight into the platform's ClickHouse store.
+//! 1000-bar requests, writing straight into the platform's `ClickHouse` store.
 //!
 //! Sources are additive — new asset classes plug in by extending
 //! [`CollectorPlan::for_asset_class`].
@@ -40,17 +40,20 @@ impl CollectorPlan {
     pub fn for_asset_class(asset_class: &str, instrument_id: &str) -> anyhow::Result<Self> {
         match asset_class {
             "crypto_spot_cex" | "crypto_spot_dex" | "perpetual_swap" => {
-                // "BTC-USDT" → "BTCUSDT"; plain-USD pairs are proxied to the
-                // USDT market, which Binance actually lists.
-                let compact: String = instrument_id
+                // "BTC-USDT" → "BTCUSDT": strip separators only, never rewrite
+                // the quote currency.  A `-USD` instrument is a genuinely
+                // different market from the `-USDT` one (USD vs. a stablecoin);
+                // silently proxying it would backfill the wrong market's
+                // history.  If Binance does not list the exact symbol the page
+                // fetch fails with a clear error, which is the correct outcome.
+                let symbol: String = instrument_id
                     .chars()
-                    .filter(|c| c.is_ascii_alphanumeric())
+                    .filter(char::is_ascii_alphanumeric)
                     .collect();
-                let symbol = if compact.ends_with("USD") {
-                    format!("{compact}T")
-                } else {
-                    compact
-                };
+                anyhow::ensure!(
+                    !symbol.is_empty(),
+                    "instrument '{instrument_id}' has no usable Binance symbol"
+                );
                 Ok(Self::BinanceKlines {
                     symbol,
                     source: "binance_rest".to_string(),
@@ -72,6 +75,29 @@ impl CollectorPlan {
             other => anyhow::bail!(
                 "automated historical collection is not yet available for asset class '{other}'"
             ),
+        }
+    }
+
+    /// Whether automated backfill exists for an asset-class / timeframe pair,
+    /// independent of credentials.
+    ///
+    /// Used to reject unsupported create requests up front (422) instead of
+    /// letting a job reach `CollectingData` only to fail there (#15).  Mirrors
+    /// the capability of the concrete collectors:
+    /// [`binance_interval`] (all timeframes) and [`alpaca_interval`] (no 1s).
+    pub fn auto_collect_support(asset_class: &str, timeframe: Timeframe) -> Result<(), String> {
+        match asset_class {
+            "crypto_spot_cex" | "crypto_spot_dex" | "perpetual_swap" => Ok(()),
+            "equity" | "etf" => {
+                if timeframe == Timeframe::Seconds1 {
+                    Err("the equity backfill (Alpaca) does not provide 1-second bars".to_string())
+                } else {
+                    Ok(())
+                }
+            }
+            other => Err(format!(
+                "automated historical collection is not available for asset class '{other}'"
+            )),
         }
     }
 
@@ -114,8 +140,16 @@ pub async fn collect_ranges(
         total += match plan {
             CollectorPlan::BinanceKlines { symbol, .. } => {
                 collect_binance(
-                    http, store, plan, symbol, instrument_id, venue_id, timeframe, range,
-                    collected, cancel,
+                    http,
+                    store,
+                    plan,
+                    symbol,
+                    instrument_id,
+                    venue_id,
+                    timeframe,
+                    range,
+                    collected,
+                    cancel,
                 )
                 .await?
             }
@@ -125,14 +159,86 @@ pub async fn collect_ranges(
                 secret,
             } => {
                 collect_alpaca(
-                    http, store, plan, symbol, key_id, secret, instrument_id, venue_id,
-                    timeframe, range, collected, cancel,
+                    http,
+                    store,
+                    plan,
+                    symbol,
+                    key_id,
+                    secret,
+                    instrument_id,
+                    venue_id,
+                    timeframe,
+                    range,
+                    collected,
+                    cancel,
                 )
                 .await?
             }
         };
     }
     Ok(total)
+}
+
+/// Maximum attempts (1 try + retries) for a single collector page fetch.
+const MAX_FETCH_ATTEMPTS: u32 = 5;
+
+/// GETs `url` with bounded exponential backoff (2s, 4s, 8s, 16s).
+///
+/// Transport errors and retryable HTTP statuses (429 + any 5xx) are retried;
+/// other non-success statuses fail fast.  `headers` applies per-request auth
+/// (Alpaca); Binance passes an empty slice.  Cancellation short-circuits the
+/// backoff so a stop request doesn't have to wait out the sleep.
+async fn fetch_json_with_retry(
+    http: &reqwest::Client,
+    url: &str,
+    headers: &[(&str, &str)],
+    cancel: &AtomicBool,
+) -> anyhow::Result<Value> {
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        let mut req = http.get(url);
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
+        let outcome = req.send().await;
+
+        let retryable_status = |status: reqwest::StatusCode| {
+            status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+        };
+
+        match outcome {
+            Ok(resp) if resp.status().is_success() => {
+                return Ok(resp.json().await?);
+            }
+            Ok(resp) if retryable_status(resp.status()) && attempt < MAX_FETCH_ATTEMPTS => {
+                tracing::warn!(url, status = %resp.status(), attempt, "collector fetch retrying");
+            }
+            Ok(resp) => {
+                anyhow::bail!("collector request failed: HTTP {}", resp.status());
+            }
+            Err(e) if attempt < MAX_FETCH_ATTEMPTS => {
+                tracing::warn!(url, error = %e, attempt, "collector fetch transport error, retrying");
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(e)
+                    .context(format!("collector request failed after {attempt} attempts")));
+            }
+        }
+
+        // Exponential backoff: 2s, 4s, 8s, 16s — interruptible by cancel.
+        let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt));
+        let mut waited = std::time::Duration::ZERO;
+        while waited < backoff {
+            if cancel.load(Ordering::Relaxed) {
+                anyhow::bail!("collection cancelled");
+            }
+            let step =
+                std::time::Duration::from_millis(200).min(backoff.checked_sub(waited).unwrap());
+            tokio::time::sleep(step).await;
+            waited += step;
+        }
+    }
 }
 
 fn binance_interval(tf: Timeframe) -> &'static str {
@@ -185,13 +291,10 @@ async fn collect_binance(
             "https://api.binance.com/api/v3/klines?symbol={symbol}&interval={}&startTime={cursor_ms}&endTime={end_ms}&limit=1000",
             binance_interval(timeframe)
         );
-        let resp = http.get(&url).send().await?;
-        anyhow::ensure!(
-            resp.status().is_success(),
-            "binance klines request failed for {symbol}: HTTP {}",
-            resp.status()
-        );
-        let klines: Vec<Vec<Value>> = resp.json().await?;
+        let body = fetch_json_with_retry(http, &url, &[], cancel)
+            .await
+            .map_err(|e| anyhow::anyhow!("binance klines for {symbol}: {e}"))?;
+        let klines: Vec<Vec<Value>> = serde_json::from_value(body)?;
         if klines.is_empty() {
             // No data listed for this stretch (pre-listing or outage): skip
             // ahead a full page so collection cannot spin in place.
@@ -275,23 +378,16 @@ async fn collect_alpaca(
         if let Some(token) = &page_token {
             url.push_str(&format!("&page_token={token}"));
         }
-        let resp = http
-            .get(&url)
-            .header("APCA-API-KEY-ID", key_id)
-            .header("APCA-API-SECRET-KEY", secret)
-            .send()
-            .await?;
-        anyhow::ensure!(
-            resp.status().is_success(),
-            "alpaca bars request failed for {symbol}: HTTP {}",
-            resp.status()
-        );
-        let body: Value = resp.json().await?;
+        let body = fetch_json_with_retry(
+            http,
+            &url,
+            &[("APCA-API-KEY-ID", key_id), ("APCA-API-SECRET-KEY", secret)],
+            cancel,
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("alpaca bars for {symbol}: {e}"))?;
         let empty = Vec::new();
-        let raw_bars = body
-            .get("bars")
-            .and_then(Value::as_array)
-            .unwrap_or(&empty);
+        let raw_bars = body.get("bars").and_then(Value::as_array).unwrap_or(&empty);
 
         let mut bars = Vec::with_capacity(raw_bars.len());
         for b in raw_bars {
@@ -360,10 +456,14 @@ mod tests {
             CollectorPlan::AlpacaBars { .. } => panic!("expected binance plan"),
         }
 
-        // Plain-USD pairs proxy to the USDT market.
+        // Plain-USD pairs are NOT rewritten to the USDT market: USD and USDT
+        // are different markets, so the exact symbol is preserved (#10).
         let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "BTC-USD").unwrap();
         match &plan {
-            CollectorPlan::BinanceKlines { symbol, .. } => assert_eq!(symbol, "BTCUSDT"),
+            CollectorPlan::BinanceKlines { symbol, .. } => {
+                assert_eq!(symbol, "BTCUSD");
+                assert_ne!(symbol, "BTCUSDT");
+            }
             CollectorPlan::AlpacaBars { .. } => panic!("expected binance plan"),
         }
     }
