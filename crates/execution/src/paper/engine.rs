@@ -53,9 +53,14 @@ pub struct SimulatorSet {
     pub clob_overrides: HashMap<AssetClass, ClobFillSimulator>,
     /// Default broker-quote simulator (equity defaults).
     pub broker_quote: BrokerQuoteFillSimulator,
-    /// Per-asset-class broker-quote tuning (options trade much wider).
+    /// Per-asset-class broker-quote tuning (options trade much wider; bonds
+    /// carry wider spread and a nominal commission).
     pub broker_quote_overrides: HashMap<AssetClass, BrokerQuoteFillSimulator>,
+    /// Default AMM simulator (DEX spot: Uniswap v2-style 0.3% fee + impact).
     pub amm: AmmQuoteSwapSimulator,
+    /// Per-asset-class AMM overrides (NFT trades carry royalty + platform fees
+    /// on top of gas, significantly higher than DEX spot).
+    pub amm_overrides: HashMap<AssetClass, AmmQuoteSwapSimulator>,
     pub prediction: PredictionMarketFillSimulator,
 }
 
@@ -64,6 +69,7 @@ impl Default for SimulatorSet {
         Self::realistic()
     }
 }
+
 
 impl SimulatorSet {
     /// Per-asset-class tuned simulators approximating real venue economics:
@@ -74,6 +80,9 @@ impl SimulatorSet {
     /// - Perpetual swaps: 0.1 tick, taker fee ~5 bps.
     /// - Crypto spot keeps its defaults but gains a size-impact curve.
     /// - Options: ~1% half-spread (orders of magnitude wider than equities).
+    /// - Bonds: wider NBBO (~25 bps) + $1/bond nominal commission.
+    /// - DEX spot: default 0.3% impact + 0.3% protocol fee + $2 gas.
+    /// - NFT: 0.5% price impact, 2.5% combined platform+royalty fees, $15 gas.
     ///
     /// All CLOB classes carry a linear size-impact model capped per class, so
     /// a $5M market order pays visibly more than a $5k one.
@@ -134,7 +143,30 @@ impl SimulatorSet {
             AssetClass::Option,
             BrokerQuoteFillSimulator {
                 half_spread_bps: dec!(100),  // ~1% of premium — options trade wide
-                commission_flat: dec!(0.65), // typical flat option commission
+                commission_flat: dec!(0.65), // typical per-contract commission
+                ..BrokerQuoteFillSimulator::default()
+            },
+        );
+        // Bonds have wider NBBO than equities (~25 bps retail) and nominal commission.
+        broker_quote_overrides.insert(
+            AssetClass::Bond,
+            BrokerQuoteFillSimulator {
+                half_spread_bps: dec!(25),   // 25 bps — typical retail bond spread
+                commission_flat: dec!(1),    // $1/bond nominal commission
+                ..BrokerQuoteFillSimulator::default()
+            },
+        );
+
+        // NFT trades: 0.5% floor-price impact + 2.5% platform/royalty fee + 0.005 ETH gas.
+        // Gas is denominated in ETH (the NFT account's quote currency), not USD.
+        // 0.005 ETH ≈ $15 at $3 000/ETH — higher than DEX due to heavier on-chain writes.
+        let mut amm_overrides = HashMap::new();
+        amm_overrides.insert(
+            AssetClass::Nft,
+            AmmQuoteSwapSimulator {
+                price_impact_bps: dec!(50),    // 0.5% — floor price is volatile
+                protocol_fee_bps: dec!(250),   // 2.5% combined platform + royalty fees
+                flat_fee: dec!(0.005),         // 0.005 ETH gas per NFT transaction
             },
         );
 
@@ -143,7 +175,8 @@ impl SimulatorSet {
             clob_overrides,
             broker_quote: BrokerQuoteFillSimulator::default(),
             broker_quote_overrides,
-            amm: AmmQuoteSwapSimulator::default(),
+            amm: AmmQuoteSwapSimulator::default(), // DEX: 30 bps impact + 0.3% fee + $2 gas
+            amm_overrides,
             prediction: PredictionMarketFillSimulator::default(),
         }
     }
@@ -155,7 +188,7 @@ impl SimulatorSet {
                 .broker_quote_overrides
                 .get(&asset_class)
                 .unwrap_or(&self.broker_quote),
-            MarketStructure::AmmSwap => &self.amm,
+            MarketStructure::AmmSwap => self.amm_overrides.get(&asset_class).unwrap_or(&self.amm),
             MarketStructure::PredictionBinary => &self.prediction,
         }
     }
