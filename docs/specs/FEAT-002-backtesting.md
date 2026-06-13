@@ -26,6 +26,8 @@ the job lifecycle; the simulator owns only execution.
   with timeouts and bounded retry/backoff.
 - The strategy-definition → per-bar callback bridge (`sim.rs`) and its
   rising-edge signal semantics.
+- Stored-feature replay: versioned `features_technical` values are replayed at
+  their `available_time` when present, falling back to recompute otherwise.
 - Per-user scoping, pagination, concurrency limiting, and best-effort
   persistence of runs (`backtest_runs`).
 
@@ -87,14 +89,30 @@ there is demand (ADR-0014 §5).
   endpoint pages; collectors have connect/request timeouts and bounded
   exponential backoff.
 
-## 6. Deferred (documented surface)
+## 6. Supported surface & deferred items
 
-- **Tick/quote replay** (bars-only today) — would feed `QuoteTick`/`TradeTick`
-  from `market_trades` through an SDK intake helper.
-- **Sizing modes** beyond `Fixed` (`PercentOfBalance`, `RiskUnit` are
-  parse-only) and **v1.5 universe nodes** (Rank/Filter/TakeTopN/DataSource).
-- **Stored-feature replay** — feeding versioned `market_features` values at
-  their `available_time` instead of recomputing indicators during replay.
+**Implemented:**
+- **Stored-feature replay** — versioned `features_technical` values are replayed
+  at their `available_time` (deduplicated with `argMax(value, ingested_time)`),
+  recomputing only the features/bars the store doesn't cover. This keeps
+  live/replay parity exact (ADR-0008): the simulation sees the very values the
+  live pipeline recorded. (`store.rs::load_features`, `sim.rs` resolve path.)
+
+**Deferred — and why:**
+- **Tick/quote replay** (bars-only today). Would feed `QuoteTick`/`TradeTick`
+  from `market_trades` through an SDK intake helper — but the frozen
+  `nautilus_backtest::sdk` surface (pinned at an immutable `rev`) exposes only a
+  bar handler. Adding tick intake requires changing the **separate**
+  `market_simulator` repository (ADR-0014), outside this repo's scope; it waits
+  on a coordinated SDK release there.
+- **Sizing modes beyond `Fixed`** (`PercentOfBalance`, `RiskUnit`). These are
+  parse-only in the **shared** `strategy-runtime` (non-executable live as well as
+  in replay). Implementing them in `sim.rs` alone would make replay trade where
+  live would not, breaking live/replay parity — so they must land in the shared
+  runtime first, with account equity plumbed through intent construction.
+- **v1.5 universe nodes** (Rank/Filter/TakeTopN/DataSource/Surface) — these
+  select across many instruments, whereas a run is bound to one instrument; they
+  belong to a future portfolio-level backtest, not this single-instrument one.
 
 ## 7. Adversarial tests (Invariant 8)
 
@@ -111,6 +129,8 @@ hostile or boundary input, co-located with the code:
 | Gap merge over-reach | a present day between two gaps is not swallowed | `gaps.rs::continuous_market_does_not_swallow_a_present_day` |
 | Holiday calendar | a weekday market holiday isn't counted/collected | `gaps.rs::session_market_skips_holidays` |
 | Signal semantics | one rising-edge crossover ⇒ exactly one order | `sim.rs::ema_cross_over_rising_bars_places_one_order` |
+| Stored-feature replay | injected stored values override recomputed indicators and drive the order | `sim.rs::stored_features_override_recomputed_indicators` |
+| ClickHouse round-trip (e2e) | seed → dedup read → simulate yields one order | `tests/e2e.rs::seeded_clickhouse_insert_load_and_simulate` |
 
 ## 8. Traceability
 

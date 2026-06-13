@@ -1,6 +1,6 @@
 # Backtesting System — Decoupling & Hardening Master Plan — Set D
 
-**Completion: ~91% (30 / 33 primary tasks complete; 3 deferred — see Progress Log)**
+**Completion: ~94% (31 / 33 primary tasks complete; 2 deferred — see Progress Log)**
 
 > Phase 0-ALT (4 tasks) is an alternative to Phase 0 and is tracked separately,
 > not counted in the primary total.
@@ -24,13 +24,13 @@ items, each cross-referenced to the original concern number (`#n`).
 
 | Phase | File | Label | Tasks | Completion | Goal |
 |-------|------|-------|-------|------------|------|
-| 0 | [phase-0.md](phase-0.md) | Decouple the repos | 8 | 0% | market_simulator as a pinned git dependency; no sibling checkout |
-| 0-ALT | [phase-0-alt.md](phase-0-alt.md) | Out-of-process boundary | 4 | 0% | *(alternative)* full runtime/toolchain separation via JSON service |
-| 1 | [phase-1.md](phase-1.md) | Correctness & security | 5 | 0% | parameterized inserts, real precision, scoped auth, input validation |
-| 2 | [phase-2.md](phase-2.md) | Robustness & operations | 6 | 0% | timeouts/retries, concurrency cap, auto-migrate, holiday calendar |
-| 3 | [phase-3.md](phase-3.md) | Simulation fidelity | 5 | 0% | replay stored features, gap-merge fix, tick replay, warm-up |
-| 4 | [phase-4.md](phase-4.md) | Testing & conventions | 5 | 0% | e2e test, manager/sim coverage, lints, security review, specs/ADR |
-| 5 | [phase-5.md](phase-5.md) | Frontend | 4 | 0% | client consolidation, strategy picker, code-split, date picker |
+| 0 | [phase-0.md](phase-0.md) | Decouple the repos | 8 | 75% | market_simulator as a pinned git dependency; no sibling checkout |
+| 0-ALT | [phase-0-alt.md](phase-0-alt.md) | Out-of-process boundary | 4 | n/a | *(alternative to Phase 0 — not pursued)* full runtime/toolchain separation via JSON service |
+| 1 | [phase-1.md](phase-1.md) | Correctness & security | 5 | 100% | parameterized inserts, real precision, scoped auth, input validation |
+| 2 | [phase-2.md](phase-2.md) | Robustness & operations | 6 | 100% | timeouts/retries, concurrency cap, auto-migrate, holiday calendar |
+| 3 | [phase-3.md](phase-3.md) | Simulation fidelity | 5 | 60% | replay stored features, gap-merge fix, tick replay, warm-up |
+| 4 | [phase-4.md](phase-4.md) | Testing & conventions | 5 | 100% | e2e test, manager/sim coverage, lints, security review, specs/ADR |
+| 5 | [phase-5.md](phase-5.md) | Frontend | 4 | 100% | client consolidation, strategy picker, code-split, date picker |
 
 **Recommended sequencing:** 0 → 1 → 2 yields a decoupled, correct, safe-to-run
 system. 3 → 4 → 5 is fidelity, test depth, and polish. Run 0-ALT **instead of**
@@ -86,5 +86,7 @@ Update this table and the per-phase completion headers as tasks land.
 | 2026-06-13 | 1 | 1.1–1.5 | Typed RowBinary insert (no hand-built SQL); real precision from instrument tick/lot metadata + non-panicking `from_str` constructors; Binance symbol no longer proxied USD→USDT; unsupported auto-collect rejected 422 at create; backtests scoped to `user_id`. |
 | 2026-06-13 | 2 | 2.1–2.6 | Collector connect/request timeouts + bounded backoff retry; `Semaphore` concurrency cap; auto-migrate on boot; NYSE holiday calendar in coverage; paginated list endpoint; restart behavior documented (interrupted-by-design). |
 | 2026-06-13 | 3 | 3.2, 3.4 | Gap-merge no longer swallows a present day on continuous markets; warm-up bounds justified (EMA 5×period ≈ e⁻¹⁰) as documented constants. **3.1** (stored-feature replay), **3.3** (tick replay), **3.5** (broaden sizing) deferred & documented in the spec §6. |
+| 2026-06-13 | 3 | 3.1 | **Stored-feature replay implemented:** `BarStore::load_features` reads `features_technical` (dedup `argMax(value, ingested_time)`); the manager loads them in the LoadingData phase and the sim resolves each feature to its stored live value at the bar's `available_time`, recomputing only what the store doesn't cover (fallback indicators stay warm). Preserves live/replay parity (ADR-0008). Pinned by `sim.rs::stored_features_override_recomputed_indicators`. **3.5** partially landed: rising-edge semantics pinned + supported surface documented; **non-`Fixed` sizing stays deferred** because it is parse-only in the shared `strategy-runtime` (would break live/replay parity if added backtest-only). **3.3** stays deferred — needs a tick-intake helper in the separate, pinned `market_simulator` SDK (outside push scope). |
+| 2026-06-13 | 4 | 4.1 | **Seeded-ClickHouse e2e added** (`crates/backtest/tests/e2e.rs`): seeds `market_bars` via the typed insert, reads back through the dedup `argMax` path, and simulates over the round-tripped bars asserting one rising-edge order. Network-hermetic (no collectors); gated on `BACKTEST_E2E_CLICKHOUSE_URL` so it self-skips where ClickHouse is unavailable. |
 | 2026-06-13 | 4 | 4.2–4.5 | Hermetic in-process EMA-cross e2e test pins #6 semantics (1 rising edge ⇒ 1 order); `[lints] workspace=true` + fmt clean; security review clean; spec FEAT-002 + ADR-0014 + adversarial-test matrix. **4.1** (seeded-ClickHouse e2e) needs a live ClickHouse — not available in this env; the hermetic bridge test covers the sim path. |
 | 2026-06-13 | 5 | 5.1–5.4 | One shared axios client; Back Testing + Strategy pages code-split into own chunks; custom absolute date-range picker. **5.2**: the visual builder now compiles its rule graph to the canonical v1.0 `StrategyDefinition` (`frontend/src/utils/toDefinition.ts`) and saves to the Rust `/api/strategies` store, so builder-authored strategies appear in the backtest picker (unifying authoring on one canonical surface per ADR-0010). v1.0-format limits (no boolean AND/OR in expressions; no exit nodes) are surfaced as clear errors/warnings rather than silently dropped. |

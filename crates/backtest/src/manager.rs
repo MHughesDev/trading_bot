@@ -397,6 +397,22 @@ impl BacktestManager {
             ));
         }
 
+        // Replay versioned feature values the live pipeline recorded, when
+        // present, instead of recomputing them (#4, ADR-0008).  Absence is not
+        // an error: the simulation recomputes any feature/bar the store doesn't
+        // cover, so a run with no stored features behaves exactly as before.
+        let stored_features = if requirements.features.is_empty() {
+            crate::store::StoredFeatures::new()
+        } else {
+            store
+                .load_features(&spec.instrument_id, data_from, spec.end)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!(id = %job.id, error = %e, "feature replay load failed; recomputing");
+                    crate::store::StoredFeatures::new()
+                })
+        };
+
         // ── Phase 4: simulate via the market_simulator SDK ───────────────────
         job.set_status(BacktestStatus::Simulating);
         self.persist(job).await;
@@ -418,6 +434,7 @@ impl BacktestManager {
             sim_start_ns: spec.start.timestamp_nanos_opt().unwrap_or(0),
             bars,
             features: requirements.features.clone(),
+            stored_features,
         };
         let control = Arc::clone(&job.control);
         let report = tokio::task::spawn_blocking(move || run_simulation(inputs, &control))

@@ -3,6 +3,12 @@
 **Last Updated:** 2026-06-10 (v2 — post-implementation pass)
 **Scope:** Entire repository — all stubs, placeholders, `#[ignore]` tests, incomplete integrations, and unimplemented features
 
+> **Implementation plan:** every open item below (plus 8 findings from the
+> 2026-06-13 sweep this log missed — dead `/auth/*` routes, frontend builder
+> gaps, parse-only sizing, hot-path stage-3, unused graph/semantic infra) is
+> sequenced in [`plans/set-E/`](plans/set-E/MASTER.md). See its Item → Phase Map
+> for the cross-reference.
+
 ---
 
 ## Column Definitions
