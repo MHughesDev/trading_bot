@@ -23,7 +23,7 @@ architecture, and specs into executable milestones. **A plan is derived, never a
 ## Workflow
 
 ### 1. Determine plan type
-All plans live in `plans/`; the `Type:` field distinguishes them.
+All plans live in `docs/plans/plan-sets/`; the `Type:` field distinguishes them.
 
 | Use `Type: Working` when... | Use `Type: Formal` when... |
 |-----------------------------|----------------------------|

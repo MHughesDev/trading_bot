@@ -1,7 +1,7 @@
 # Procedure: Add Plan
 
 ## Purpose
-Create a plan document — either a lightweight working plan or a formal versioned project plan — in `plans/`.
+Create a plan document — either a lightweight working plan or a formal versioned project plan — in `docs/plans/plan-sets/`.
 
 > **Plans are derived, never assumed.** A formal plan does not invent work — it sequences work that
 > the artifact, architecture, specs, ADRs, and research have already established. Every milestone and
@@ -47,7 +47,7 @@ formal plan with no sources is a guess, not a plan.
 | A session scratchpad, quick scope outline, or spike note | Working |
 | A formal roadmap, release plan, or multi-phase migration | Formal |
 
-All plans go in `plans/`. The `Type:` field in the file header distinguishes them.
+All plans go in `docs/plans/plan-sets/`. The `Type:` field in the file header distinguishes them.
 
 ### 2. Create the plan file
 
@@ -197,7 +197,7 @@ A plan that passes both checks is complete. A plan that fails either check is in
 resolve the gaps before marking the plan `Active` or handing it to an agent for execution.
 
 ### 6. Update the folder index
-1. Open `plans/README.md`.
+1. Open `docs/plans/plan-sets/` and the relevant set's README or MASTER.md.
 2. Add a row to the Index table with the file name, type, description, and status.
 
 ---
@@ -217,8 +217,8 @@ To re-derive a stale plan:
 ---
 
 ## Outputs
-- A new file in `plans/`
-- Updated index in `plans/README.md`
+- A new file in `docs/plans/plan-sets/`
+- Updated index in the relevant set's MASTER.md or README
 
 ## Checklist
 - [ ] `Type:` field is set (Working or Formal)

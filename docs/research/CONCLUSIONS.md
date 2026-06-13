@@ -142,3 +142,108 @@ Entries reference the conversation session that resolved them.
 | C-127 | Chart trade annotations — orders, stops, take-profits, and fills visible on graph | **Charts should display trade-related annotations directly on the price graph.** The graph should show where orders were placed, where fills occurred, and where active stop-loss or take-profit levels are located when those exist. Recommended UX: compact entry/exit markers on candles or bars, horizontal price lines for active stop/take-profit levels, distinct paper/live styling inherited from the current page mode, hover tooltips for order details, and unobtrusive layering so annotations do not block price reading. This is a chart/terminal UX requirement, independent of order-book display. | Sources: User direction on 2026-06-10: "in the charts I want to see WHERE a order was placed in the graph, as well as where the stop loss or take profit is at, trade related things should be visible in the graph"; C-115 removes order-book/trade-level tables; C-116 keeps full terminal trading capability; C-123 separates paper/live account levels. | 2026-06-10 |
 | C-128 | Collector-to-automation data path — canonical bus, not UI WebSocket or HTTP polling | **Collectors submit normalized market data to the canonical event bus, and automations consume that canonical stream through declared demand; they do not receive collector data through the UI WebSocket or HTTP polling.** Collectors normalize venue/source data and publish events to NATS/JetStream lanes. Automations/strategies declare the lanes they need, the demand system starts or shares collectors, and the automation pipeline evaluates against canonical data. HTTP/REST remains for control actions such as create/apply/stop, while browser WebSocket/NATS.ws is for live UI visualization only. | Sources: User asked on 2026-06-10 how collectors submit information to automations; C-060 selects NATS.ws for browser live data transport; C-068 defines event-sourced design; C-085 defines pipeline runtime membership from live triggers; C-091 defines shared collector demand and lane keys; `docs/Specs/COMP-003-ui-streaming-gateway.md` states strategy/runtime consumers never read gateway-shaped UI feed. | 2026-06-10 |
 | C-129 | Professional terminal controls by asset class — order ticket first, no depth/trade tape widgets | **Terminal panels provide full professional trade-entry and order-management controls while excluding order-book, DOM/depth, and recent-trade/tick-list market-data widgets.** Universal terminal shell: instrument/venue header, current Paper/Live mode, credential/venue availability state, chart with C-127 trade annotations, order ticket, working orders, position summary, fills for the user's own account, balances/buying-power or venue-required account context, cancel/replace controls, close-position action where supported, and strategy-population context where applicable. Asset controls: Crypto Spot = buy/sell, base or quote sizing, market/limit/stop-limit/bracket where venue-supported, TIF, fee estimate, balances. Equities = buy/sell, shares or notional/fractional sizing, market/limit/stop/stop-limit/trailing-stop, TIF, extended-hours toggle, bracket/OCO where supported, position/orders/fills. Options = underlying selector, expiration/strike/call-put contract selector, chain snapshot with bid/ask/mid/IV/Greeks, contract quantity/multiplier, buy-to-open call/put and sell-to-close MVP actions, market/limit/day controls, breakeven and premium display; multi-leg spreads remain out of MVP. Futures = contract/expiry selector, tick size/value, contract quantity, market/limit/stop/stop-limit, TIF, bracket/OCO/OSO/ATM-style protective exits where supported, close/reverse/cancel controls, venue-provided margin/account requirement display only as execution context. FX = pair selector, buy/sell, units or lot sizing, market/limit/stop, stop-loss/take-profit/trailing-stop-on-fill where supported, TIF, spread and pip-value display. Perpetuals = contract selector, side, contracts/notional, market/limit plus reduce-only close controls where venue-supported, mark/index/funding display from C-112 snapshots, TP/SL lines when supported. DEX/AMM = swap ticket instead of order ticket: chain/wallet, token-in/token-out, amount, quote refresh, route/source, expected output, minimum received, slippage tolerance, gas estimate, approval status, approve/swap actions, and transaction status. Prediction = market/outcome selector, YES/NO side, buy/sell framing, contract count, limit price in cents/dollars, max cost, max payout/profit at resolution, event close/resolution time, cancel/replace, and quick-order behavior only when venue-supported. Closes OQ-057. | Sources: C-111/C-116 require terminals as Trading panels with full trading capability; C-115 removes order-book/DOM/recent-trade market-data lists; C-127 requires chart order/TP/SL annotations. Professional/order-source references: Interactive Brokers TWS order entry and bracket-order docs describe order tickets and bracket/OCO-style child exits; TradingView support/docs show stop-loss/take-profit levels in the order panel/chart; Alpaca order docs list equity/crypto/options order types and TIF differences; Coinbase Advanced Trade docs describe Orders API, market/limit/stop-limit/bracket orders, and TP/SL for derivatives; Tradier options docs expose option chains with Greeks/IV and trading/advanced orders; OANDA v20 docs define take-profit, stop-loss, and trailing-stop orders linked to trades; Tradovate API docs state supported app order types can be placed by REST API; 0x Swap API docs define aggregator swap/quote routing; Kalshi order docs define YES/NO order fields, count, price, and order lifecycle. | 2026-06-10 |
+
+---
+
+## Complacency Audit Verdicts (2026-06-10)
+
+**Method:** Each item from `docs/governance/COMPLACENCY_LOG.md` was investigated with targeted code inspection. This section records the **verdict** — is the claim accurate, how serious is it really, and what to do.
+
+> **Headline:** Of the 23 logged items, **3 were inaccurate** (collectors actually work, builders have tests, graph edges are populated), several "stubs" are **correctly-deferred future scope**, and the investigation surfaced **one NEW critical finding the original audit missed** (the money-safety CI check is a no-op showing false-green).
+
+### Severity Re-Rank After Investigation
+
+| Rank | Item | Original | Revised | Why |
+|------|------|----------|---------|-----|
+| 1 | Money-safety CI is a no-op (false green) | LOW | **CRITICAL** | A core invariant ("no f64 on price/size") is advertised as enforced by CI but the xtask just prints and exits 0. Worst kind of debt: looks safe, isn't. |
+| 2 | Manual order gate uses position=0 | HIGH | **CRITICAL** | Not a conservative default — it's *false-permissive*. Gate thinks you hold nothing, permits over-leverage. |
+| 3 | Auth placeholder | CRITICAL | **CRITICAL** | Confirmed: any non-empty Bearer token accepted. |
+| 4 | Missing migrations 0006–0008 | CRITICAL | **HIGH** | Confirmed missing; DB-backed P&L + registry tests can't run. But P&L engine is in-memory, so it doesn't block paper trading on its own. |
+| 5 | Hardcoded credentials | CRITICAL | **LOW** | Investigated: they're local-dev docker defaults; real secrets are env-injected via `resolve_secrets()`. Pattern is correct. |
+
+### Verdicts (item by item)
+
+**Item 1 — Auth placeholder (`crates/api/src/auth/session.rs`)**
+Claim accurate: YES. The `BearerToken` extractor checks for a `Bearer ` prefix and non-empty token, then accepts unconditionally. CRITICAL, but contained — keep API on `127.0.0.1` only until M-17 (session table + constant-time comparison) is implemented.
+
+**Item 2 — Missing migrations 0006–0008 (`migrations/`)**
+Claim accurate: YES (partially). Files 0006, 0007, 0008 are genuinely absent. `FifoEngine` is pure in-memory so paper trading is unaffected; missing migrations block DB-backed P&L persistence and ignored integration tests. Verdict: HIGH (downgraded from CRITICAL).
+
+**Item 3 — Hardcoded credentials (`config/default.toml`)**
+Claim accurate: TECHNICALLY, but misleading. Only `trading:trading@localhost` — standard docker-compose dev defaults. Real secrets are env-injected via `resolve_secrets()`. Verdict: LOW (downgraded from CRITICAL).
+
+**Item 4 — Crypto collector "not wired" (`crates/collectors/src/crypto/mod.rs`)**
+Claim accurate: NO — claim is WRONG. `crates/collectors/src/crypto/kraken.rs` is a complete 266-line production collector. Stale `TODO(Phase 1)` comment in `mod.rs` caused a false alarm. Delete the stale comment.
+
+**Item 5 — Equity collector "not wired" (`crates/collectors/src/equity/mod.rs`)**
+Claim accurate: NO — claim is WRONG. `crates/collectors/src/equity/alpaca_data.rs` is a complete 361-line collector with tests. Same story as Item 4 — stale comment. Delete the stale `TODO(Phase 6)` comment.
+
+**Item 6 — Coinbase live adapter stub (`crates/execution/src/coinbase.rs`)**
+Claim accurate: YES — one-line stub. ACCEPTABLE/EXPECTED — Alpaca covers equity execution, paper sim covers crypto. Post-Phase 6.
+
+**Item 7 — Tradovate account adapter stub (`crates/execution/src/account/tradovate.rs`)**
+Claim accurate: YES — `fetch_balances`/`fetch_positions` return `Ok(vec![])`. ACCEPTABLE/EXPECTED — Phase 4 scope. Consider returning `Err(NotImplemented)` instead of empty vecs.
+
+**Item 8 — Tradier account adapter stub (`crates/execution/src/account/tradier.rs`)**
+Claim accurate: YES — same pattern. ACCEPTABLE/EXPECTED — Phase 4. Same `Err(NotImplemented)` suggestion.
+
+**Item 9 — 0x DEX adapter `query_order` stub (`crates/execution/src/venues/zerox.rs`)**
+Claim accurate: YES for `query_order` (always returns `Filled`); NO for whole adapter — `submit()` makes real HTTP calls. Hybrid. ACCEPTABLE for current scope; Phase 4 — implement real tx-receipt polling.
+
+**Item 10 — AMM paper simulator skeleton (`crates/execution/src/paper/amm_swap.rs`)**
+Claim accurate: YES — Phase 1 skeleton with parameterized price-impact model. ACCEPTABLE/EXPECTED. Phase 4 — wire to 0x `/price` for real slippage.
+
+**Item 11 — Manual order gate uses hardcoded zeros (`crates/api/src/routes/orders.rs:109-118`)**
+Claim accurate: YES, and more serious than logged. `position=0` is false-permissive: gate thinks you hold nothing, permits over-leverage. `instrument_active=true` lets halted instruments through. Verdict: CRITICAL (upgraded). Disable manual orders or wire real context before enabling against a funded account.
+
+**Item 12 — Dashboard returns zero P&L (`crates/api/src/routes/dashboard.rs:47`)**
+Claim accurate: YES — all-zero `RollupResponse`. MEDIUM — cosmetic, not a safety issue. Depends on Item 2 (migrations). Phase 2 — wire the rollup once migration 0008 lands.
+
+**Item 13 — Prometheus metrics are no-ops (`crates/observability/src/metrics.rs`)**
+Claim accurate: YES — empty function bodies. MEDIUM — no observability into message rates/quarantine/gaps. Phase 2.
+
+**Item 14 — Correctness metrics are no-ops (`crates/observability/src/correctness.rs`)**
+Claim accurate: YES — empty bodies. MEDIUM. Phase 2.
+
+**Item 15 — Builders has zero tests (`crates/builders/`)**
+Claim accurate: NO — claim is WRONG. `crates/builders/src/bars.rs` has 3 passing tests (windowing, window-close, late-trade revision). Bar builder is tested. Orderbook builder is a separate, genuinely-unimplemented item (see Item 18).
+
+**Item 16 — MCP server has zero tests (`crates/mcp-server/`)**
+Claim accurate: YES — no tests at time of audit. MEDIUM (addressed in Set F: full integration test suite added).
+
+**Item 17 — MCP discovery uses static data (`crates/mcp-server/src/tools/discovery.rs`)**
+Claim accurate: YES, and intentional/documented. LOW — by design. Phase 5 — query live registries.
+
+**Item 18 — Order book builder not implemented (`crates/builders/src/orderbook.rs`)**
+Claim accurate: YES — 18-line skeleton. MEDIUM. Phase 2. Only blocks depth-based strategies.
+
+**Item 19 — Parquet compaction stub (`crates/storage/src/parquet/compaction.rs`)**
+Claim accurate: YES — `compact_partition` returns `Ok(())` doing nothing. LOW now, but flag the silent-success behavior. Phase 2 — implement or log "compaction not implemented".
+
+**Item 20 — User management placeholder (`crates/storage/src/postgres/users.rs`)**
+Claim accurate: PARTIALLY. The doc-comment says "placeholder," but `count()` is implemented. LOW — flesh out CRUD when auth (Item 1) is implemented.
+
+**Item 21 — Money-safety xtask stub (`xtask/src/main.rs`) — ESCALATED TO CRITICAL**
+Claim accurate: YES on stub, but bigger than logged. `xtask check-money-f64` is `println!("...stub...")` then exits 0. CI job "Money safety (no f64 on price/size)" shows GREEN while enforcing nothing. CRITICAL — a safety invariant advertised as enforced, displaying false-green, with zero coverage. Implement the scanner or rename the CI job.
+
+**Item 22 — Graph edges never populated, M-6 (`crates/graph/src/populate.rs`)**
+Claim accurate: NO — comment is STALE. Lines 226–272 actively populate all three edge types. NOT A GAP. Delete the stale comment.
+
+**Item 23 — `#[ignore]`d integration tests (repo-wide)**
+Claim accurate: YES — 8 ignored tests across 6 files, all with legitimate external deps. LOW/by-design. Stand up `docker compose up` and run the ignored suite once before declaring storage/graph/semantic layers trustworthy.
+
+### Bottom Line
+
+**What actually blocks paper trading:**
+1. Item 21 (money-safety CI false-green) — fix or relabel; verify no current f64-on-money.
+2. Item 11 (manual-order gate false-permissive) — disable manual orders or wire real context.
+3. Item 1 (auth) — keep API on loopback only.
+4. Item 2 (migrations) — needed for durable P&L + to run the ignored integration tests.
+
+**What does NOT block paper trading (corrected myths):**
+- Collectors work (Items 4, 5) — Kraken + Alpaca are fully functional.
+- Bar builder is tested (Item 15).
+- Graph edges are populated (Item 22).
+- Credentials are dev-defaults with proper env override (Item 3).
+
+**The one thing to do first:** Stand up `docker compose up` and run the 8 `#[ignore]`d tests. That single action validates the migrations, the TigerGraph/Milvus port fixes, and the DB-backed P&L path all at once.

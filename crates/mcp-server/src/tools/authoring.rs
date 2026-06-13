@@ -85,6 +85,17 @@ pub fn create_strategy(
     }
 
     let def: StrategyDefinition = serde_json::from_str(definition_json).expect("already validated");
+    create_strategy_from_def(ctx, def)
+}
+
+/// Persist a typed `StrategyDefinition` that has already been validated.
+///
+/// Used by `finalize_strategy` in the builder flow, which has the typed form
+/// directly and bypasses the JSON-parse step.
+pub fn create_strategy_from_def(
+    ctx: &McpContext,
+    def: StrategyDefinition,
+) -> Result<CreateResult, CreateError> {
     let store_id = uuid::Uuid::new_v4();
     let strategy_id = def.strategy_id.clone();
 

@@ -51,7 +51,7 @@ After completing the brief:
 - Move any `docs/open-questions.md` entry this brief resolved to `Resolved`, citing this brief.
 - Add any new forks the research surfaced as `Open` entries.
 - Does this research warrant an ADR? → run `skills/create-adr.md`
-- Does this research change the project plan? → update `plans/`
+- Does this research change the project plan? → update `docs/plans/plan-sets/`
 
 ---
 
