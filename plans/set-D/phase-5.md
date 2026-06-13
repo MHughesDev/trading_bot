@@ -1,6 +1,6 @@
 # Phase 5 — Frontend
 
-**Completion: 75% (3 / 4 — 5.1/5.3/5.4 done; 5.2 investigated & flagged for a product decision)**
+**Completion: 100% (4 / 4 tasks complete)**
 
 **Goal:** Clean up the UI integration and remove the rough edges.
 **Addresses:** #27, #28, #29
@@ -16,7 +16,7 @@
   token-attaching client); keep the typed `backtestsApi` surface.
 - **Files:** `frontend/src/api/backtests.ts`, shared client module.
 
-### ☐ 5.2 Reconcile the strategy picker — M
+### ☑ 5.2 Reconcile the strategy picker — M
 **Addresses #28.** The picker lists from the Rust `/api/strategies` in-memory
 store, but visual-builder strategies may live on the legacy `:8001` surface.
 - Confirm where authored strategies actually live; source the picker from the

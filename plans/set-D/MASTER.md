@@ -1,6 +1,6 @@
 # Backtesting System — Decoupling & Hardening Master Plan — Set D
 
-**Completion: ~88% (29 / 33 primary tasks complete; 4 partial/deferred — see Progress Log)**
+**Completion: ~91% (30 / 33 primary tasks complete; 3 deferred — see Progress Log)**
 
 > Phase 0-ALT (4 tasks) is an alternative to Phase 0 and is tracked separately,
 > not counted in the primary total.
@@ -87,4 +87,4 @@ Update this table and the per-phase completion headers as tasks land.
 | 2026-06-13 | 2 | 2.1–2.6 | Collector connect/request timeouts + bounded backoff retry; `Semaphore` concurrency cap; auto-migrate on boot; NYSE holiday calendar in coverage; paginated list endpoint; restart behavior documented (interrupted-by-design). |
 | 2026-06-13 | 3 | 3.2, 3.4 | Gap-merge no longer swallows a present day on continuous markets; warm-up bounds justified (EMA 5×period ≈ e⁻¹⁰) as documented constants. **3.1** (stored-feature replay), **3.3** (tick replay), **3.5** (broaden sizing) deferred & documented in the spec §6. |
 | 2026-06-13 | 4 | 4.2–4.5 | Hermetic in-process EMA-cross e2e test pins #6 semantics (1 rising edge ⇒ 1 order); `[lints] workspace=true` + fmt clean; security review clean; spec FEAT-002 + ADR-0014 + adversarial-test matrix. **4.1** (seeded-ClickHouse e2e) needs a live ClickHouse — not available in this env; the hermetic bridge test covers the sim path. |
-| 2026-06-13 | 5 | 5.1, 5.3, 5.4 | One shared axios client; Back Testing + Strategy pages code-split into own chunks; custom absolute date-range picker. **5.2** (strategy-picker source) investigated: builder saves to legacy `:8001` `/strategies/custom` while the picker + create resolve against the Rust `/api/strategies` store — they are mutually consistent today; unifying authoring across backends is architecturally significant and flagged for a product decision. |
+| 2026-06-13 | 5 | 5.1–5.4 | One shared axios client; Back Testing + Strategy pages code-split into own chunks; custom absolute date-range picker. **5.2**: the visual builder now compiles its rule graph to the canonical v1.0 `StrategyDefinition` (`frontend/src/utils/toDefinition.ts`) and saves to the Rust `/api/strategies` store, so builder-authored strategies appear in the backtest picker (unifying authoring on one canonical surface per ADR-0010). v1.0-format limits (no boolean AND/OR in expressions; no exit nodes) are surfaced as clear errors/warnings rather than silently dropped. |
