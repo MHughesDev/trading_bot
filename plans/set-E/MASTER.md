@@ -1,6 +1,6 @@
 # Production-Readiness — Stub, Placeholder & Tech-Debt Master Plan — Set E
 
-**Completion: 0% (0 / 28 primary tasks; 3 deferred-by-design — see Progress Log)**
+**Completion: 17% (5 / 30 primary tasks; 1 deferred-by-design — see Progress Log)**
 
 > Future-scope items (TigerGraph, Milvus) live in [future-scope.md](future-scope.md)
 > and are **not** counted in the primary total.
@@ -59,10 +59,10 @@ Two findings the log under-rated are promoted here to **safety/correctness**:
 
 | Phase | File | Label | Tasks | Completion | Goal |
 |-------|------|-------|-------|------------|------|
-| 0 | [phase-0.md](phase-0.md) | Correctness & safety quick wins | 5 | 0% | fix the live-trading hazards that are cheap to fix now |
+| 0 | [phase-0.md](phase-0.md) | Correctness & safety quick wins | 5 | 100% | fix the live-trading hazards that are cheap to fix now |
 | 1 | [phase-1.md](phase-1.md) | Authentication & multi-user | 7 | 0% | real session auth; unlock network binding |
 | 2 | [phase-2.md](phase-2.md) | Live P&L, manual orders & shared data | 3 | 0% | real $ rollup + paper manual orders via real risk context |
-| 3 | [phase-3.md](phase-3.md) | Execution venue adapters | 4 | 0% | Tradier/Tradovate account sources; real DEX quotes |
+| 3 | [phase-3.md](phase-3.md) | Execution venue adapters | 6 | 0% | Tradier/Tradovate account sources; real DEX quotes + on-chain; Coinbase live |
 | 4 | [phase-4.md](phase-4.md) | Strategy surface & sizing | 4 | 0% | SMA/ATR, %-of-balance sizing, scanner, v1.5 format |
 | 5 | [phase-5.md](phase-5.md) | Data pipeline & observability | 5 | 0% | metrics, compaction, order book, hot-path strategies |
 | FS | [future-scope.md](future-scope.md) | Future scope (not counted) | — | — | TigerGraph / Milvus — keep code, gate infra |
@@ -86,10 +86,10 @@ Every finding from the sweep and its home. `CL` = row in `/COMPLACENCY_LOG.md`;
 | 4 | CL | `storage/postgres/users.rs` placeholder (count only) | 1.1 |
 | 5 | CL+NF | Automations scoped to `DEV_USER` nil; `streams.rs` raw-token id | 1.4 |
 | 6 | NF | Frontend `dev-local` hardcoded bearer token | 1.5 |
-| 7 | CL | Coinbase live broker stub (HIGH, post-Phase 6) | 3 (deferred 3.x) |
+| 7 | CL | Coinbase live broker stub (HIGH) | 3.5 |
 | 8 | CL | Tradier account adapter `NotImplemented` (HIGH) | 3.1 |
 | 9 | CL | Tradovate account adapter `NotImplemented` (HIGH) | 3.2 |
-| 10 | CL | 0x `query_order` hardcoded `Filled` + tx-hash stub (MED) | 0.2 / 3 (deferred) |
+| 10 | CL | 0x `query_order` hardcoded `Filled` + tx-hash stub (MED) | 0.2 / 3.4 |
 | 11 | CL | AMM paper sim uses mocked `FirmQuote` (MED) | 3.3 |
 | 12 | CL | Manual order placement disabled (503) (HIGH) | 2.3 |
 | 13 | CL | Dashboard live P&L rollup all-zero (HIGH) | 2.2 |
@@ -125,16 +125,18 @@ directive was **take the most robust option, no shortcuts**.
 | 4 | 2 | Mark source / staleness | **Trade-last from Redis, surface staleness.** Latest trade-lane price is the mark; missing/expired marks are surfaced to the user, never silently zeroed. |
 | 5 | 2 | Manual orders first cut | **Paper-only.** Wire paper-mode now; gate live behind "broker not available." |
 | 6 | 3 | Tradovate credentials | **`username:password` in-adapter exchange.** Adapter calls `/auth/accesstoken`, handles token renewal. |
-| 7 | 3 | 0x execution model | **Quote-only + external signer.** No private keys/broadcast in this crate; full on-chain submit/poll stays deferred (3.4). **No live trading.** |
-| 8 | 3 | Coinbase live | **Deferred / out of scope.** No ES256 JWT signing this cycle. **No live trading.** |
+| 7 | 3 | 0x execution model | **Full on-chain submit + poll.** Adapter signs + broadcasts the swap and polls `eth_getTransactionReceipt` for status; needs a signer wallet + RPC + secure key management. Task **3.4 promoted into scope**. |
+| 8 | 3 | Coinbase live | **In scope — build live.** Full Coinbase Advanced Trade `Broker` with ES256 JWT per-request signing (`jsonwebtoken`). Real-money path. Task **3.5 promoted into scope**. |
 | 9 | 4 | Strategy format | **Approve additive v1.5 bump** for AND/OR + exit nodes; v1.0 strategies keep working. |
 | 10 | 4 | Equity basis (PoB) | **Total account equity** (cash + open-position value), identical figure live and in the SDK. |
 | 11 | 4 | Universe feed | **One shared feed** for ScannerPanel discovery and future Automations pipelines. |
-| 12 | 5 | Hot-path hand-off | **arc-swap snapshot** of compiled instances; lock-free reads in stage 3, atomic swap on add/remove. |
+| 12 | 5 | Hot-path hand-off | **Real `PipelineFactory` in the demand-manager** (replaces `NoopPipelineFactory`, owns pipeline+instance lifecycle), using an arc-swap snapshot internally for the lock-free stage-3 read. |
 
-Phase files reflect these choices. Two safety notes carried forward: (3) armed
-automations are disarmed before deletion; (7,8) 0x and Coinbase remain
-**quote/stub only — no live order broadcast**.
+Phase files reflect these choices. Safety notes: (3) armed automations are
+disarmed before deletion; (7,8) the 0x on-chain adapter and the Coinbase live
+broker are **real-money paths** — keys/secrets live in secure storage (never
+config/repo), and each is gated by a `/security-review` of key handling before
+live/mainnet enablement.
 
 ---
 
@@ -144,4 +146,6 @@ Update this table and the per-phase completion headers as tasks land.
 
 | Date | Phase | Task | Note |
 |------|-------|------|------|
-| 2026-06-13 | — | plan | Set E created from the repo-wide stub/stale sweep + 5-cluster deep research; consolidates COMPLACENCY_LOG v2 (21 items) + 8 new findings. **Deferred-by-design:** 3.4 (0x on-chain submit/poll — off-repo signer/RPC), 3.5 (Coinbase live — out of scope, ES256 JWT), 4.5 (RiskUnit — blocked on exit nodes), plus the future-scope appendix (TigerGraph, Milvus). |
+| 2026-06-13 | — | plan | Set E created from the repo-wide stub/stale sweep + 5-cluster deep research; consolidates COMPLACENCY_LOG v2 (21 items) + 8 new findings. **Deferred-by-design:** 4.5 (RiskUnit — blocked on exit nodes), plus the future-scope appendix (TigerGraph, Milvus). |
+| 2026-06-13 | — | decisions | All 12 design decisions locked. **3.4 (0x full on-chain submit/poll) and 3.5 (Coinbase live) promoted from deferred into scope** per decisions 7 & 8 — both real-money paths, gated by a key-handling security review. Decision 12 set to a real `PipelineFactory` in the demand-manager (arc-swap internally). |
+| 2026-06-13 | 0 | all 5 tasks | **Phase 0 complete.** 0.1: freshness.rs now converts UTC→venue local time via `chrono-tz` before comparing to session windows; 6 new timezone-correct tests. 0.2: zerox.rs `query_order` returns `Unknown` (not `Filled`); token scaling uses per-symbol decimal map (USDC/USDT=6). 0.3: `list_lanes`/`list_instruments` use `domain::lanes::ALL_LANES` and `domain::instrument::ALL_ASSET_CLASSES`; `list_instruments` now queries the live Postgres `instruments` table (async MCP server, `DATABASE_URL`-driven). 0.4: `json_msg` returns `Option<Message>`; serialize failures are logged and frame is dropped. 0.5: TigerGraph/Milvus/etcd/minio behind `profiles: ["vector-graph"]`; embedder `MILVUS_HTTP_PORT` default corrected to 19530. |

@@ -9,24 +9,35 @@
 //! - `tools/list`  — advertise available tools
 //! - `tools/call`  — dispatch to a tool handler
 
-use std::io::{BufRead, Write};
+use std::io::Write;
+
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 use mcp_server_lib::{dispatch_tool, tool_definitions, McpContext};
 
-fn main() {
-    let ctx = McpContext::new();
-    let stdin = std::io::stdin();
+#[tokio::main]
+async fn main() {
+    let ctx = McpContext::new().await;
+    let stdin = tokio::io::stdin();
+    let mut reader = BufReader::new(stdin);
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
 
-    for line in stdin.lock().lines() {
-        let line = match line {
-            Ok(l) if l.trim().is_empty() => continue,
-            Ok(l) => l,
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => break, // EOF
+            Ok(_) => {}
             Err(_) => break,
-        };
+        }
 
-        let request: serde_json::Value = match serde_json::from_str(&line) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let request: serde_json::Value = match serde_json::from_str(trimmed) {
             Ok(v) => v,
             Err(e) => {
                 let response = serde_json::json!({
@@ -71,7 +82,7 @@ fn main() {
                     .get("arguments")
                     .cloned()
                     .unwrap_or(serde_json::Value::Object(Default::default()));
-                let result = dispatch_tool(&ctx, tool_name, &tool_args);
+                let result = dispatch_tool(&ctx, tool_name, &tool_args).await;
                 serde_json::json!({
                     "jsonrpc": "2.0",
                     "id": id,

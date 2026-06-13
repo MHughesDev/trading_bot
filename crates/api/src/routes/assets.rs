@@ -4,26 +4,14 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use domain::instrument::ALL_ASSET_CLASSES;
 use serde_json::json;
 
 use crate::{auth::BearerToken, state::AppState};
 
 /// GET /api/assets — list all supported asset classes.
 pub async fn list_assets(_token: BearerToken) -> impl IntoResponse {
-    let classes = [
-        "crypto_spot_cex",
-        "equity",
-        "etf",
-        "crypto_spot_dex",
-        "futures_expiring",
-        "perpetual_swap",
-        "option",
-        "bond",
-        "fx",
-        "nft",
-        "prediction_market",
-    ];
-    Json(json!({ "asset_classes": classes }))
+    Json(json!({ "asset_classes": ALL_ASSET_CLASSES }))
 }
 
 /// GET /api/instruments/:id — fetch one instrument by its ID.

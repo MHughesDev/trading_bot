@@ -11,7 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
-use tracing::debug;
+use tracing::{debug, error};
 use ui_gateway::{
     transport::{ClientMessage, WsOutMessage},
     SubscriptionRegistry,
@@ -40,12 +40,10 @@ pub async fn ws_live(
 
 async fn handle_ws(mut socket: WebSocket, gateway: Arc<SubscriptionRegistry>, user_id: String) {
     // Send initial heartbeat to confirm connection.
-    if socket
-        .send(json_msg(&WsOutMessage::Heartbeat { ts: now_iso() }))
-        .await
-        .is_err()
-    {
-        return;
+    if let Some(m) = json_msg(&WsOutMessage::Heartbeat { ts: now_iso() }) {
+        if socket.send(m).await.is_err() {
+            return;
+        }
     }
 
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
@@ -66,12 +64,10 @@ async fn handle_ws(mut socket: WebSocket, gateway: Arc<SubscriptionRegistry>, us
                 }
             }
             _ = heartbeat.tick() => {
-                if socket
-                    .send(json_msg(&WsOutMessage::Heartbeat { ts: now_iso() }))
-                    .await
-                    .is_err()
-                {
-                    break;
+                if let Some(m) = json_msg(&WsOutMessage::Heartbeat { ts: now_iso() }) {
+                    if socket.send(m).await.is_err() {
+                        break;
+                    }
                 }
             }
         }
@@ -90,12 +86,12 @@ async fn handle_client_message(
     let msg: ClientMessage = match serde_json::from_str(text) {
         Ok(m) => m,
         Err(e) => {
-            let _ = socket
-                .send(json_msg(&WsOutMessage::Error {
-                    code: "parse_error".to_owned(),
-                    message: e.to_string(),
-                }))
-                .await;
+            if let Some(m) = json_msg(&WsOutMessage::Error {
+                code: "parse_error".to_owned(),
+                message: e.to_string(),
+            }) {
+                let _ = socket.send(m).await;
+            }
             return;
         }
     };
@@ -116,34 +112,41 @@ async fn handle_client_message(
             spec.max_fps,
         ) {
             Ok(sub) => {
-                let _ = socket
-                    .send(json_msg(&WsOutMessage::Subscribed {
-                        sub_id: sub.id,
-                        panel_id: sub.panel_id.clone(),
-                        lane: sub.lane.clone(),
-                        instrument: sub.instrument.clone(),
-                    }))
-                    .await;
+                if let Some(m) = json_msg(&WsOutMessage::Subscribed {
+                    sub_id: sub.id,
+                    panel_id: sub.panel_id.clone(),
+                    lane: sub.lane.clone(),
+                    instrument: sub.instrument.clone(),
+                }) {
+                    let _ = socket.send(m).await;
+                }
             }
             Err(e) => {
-                let _ = socket
-                    .send(json_msg(&WsOutMessage::Error {
-                        code: "subscription_error".to_owned(),
-                        message: e.to_string(),
-                    }))
-                    .await;
+                if let Some(m) = json_msg(&WsOutMessage::Error {
+                    code: "subscription_error".to_owned(),
+                    message: e.to_string(),
+                }) {
+                    let _ = socket.send(m).await;
+                }
             }
         }
     }
 }
 
-fn json_msg(msg: &WsOutMessage) -> Message {
-    // to_vec avoids the redundant UTF-8 validation pass that to_string performs
-    // after serialization (serde_json output is always valid UTF-8).
-    let bytes = serde_json::to_vec(msg).unwrap_or_default();
-    // SAFETY: serde_json always produces valid UTF-8.
-    let s = unsafe { String::from_utf8_unchecked(bytes) };
-    Message::Text(s.into())
+/// Serialize a WS message to a text frame, returning `None` on failure.
+/// Logs and drops the frame rather than sending an empty text frame.
+fn json_msg(msg: &WsOutMessage) -> Option<Message> {
+    match serde_json::to_vec(msg) {
+        Ok(bytes) => {
+            // SAFETY: serde_json always produces valid UTF-8.
+            let s = unsafe { String::from_utf8_unchecked(bytes) };
+            Some(Message::Text(s.into()))
+        }
+        Err(e) => {
+            error!(error = %e, "ws: serialization failed; dropping frame");
+            None
+        }
+    }
 }
 
 fn now_iso() -> String {

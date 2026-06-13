@@ -1,6 +1,6 @@
 # Phase 0 — Correctness & Safety Quick Wins
 
-**Completion: 0% (0 / 5 tasks complete)**
+**Completion: 100% (5 / 5 tasks complete)**
 
 **Goal:** Fix the cheap-to-fix hazards that affect live-trading correctness or
 safety *now*, independent of the larger features. Every task here is small,
@@ -10,7 +10,7 @@ self-contained, and reduces real risk. **Addresses:** #10, #17, #19, #20, #27.
 
 ## Tasks
 
-### ☐ 0.1 Freshness check honours instrument timezone — S — **safety**
+### ☑ 0.1 Freshness check honours instrument timezone — S — **safety**
 **Addresses #17 (CL freshness).** The kill-switch staleness watchdog compares
 **UTC** wall-clock to venue-local session strings, so during live US
 equity/options hours (~14:00–21:00 UTC for a `09:30–16:00` NY session) it
@@ -27,7 +27,7 @@ timezone is already on the struct (`domain::instrument::TradingSchedule.timezone
   `America/New_York` case asserting a 14:00–21:00 UTC outage **trips** the
   switch, and an overnight gap does not.
 
-### ☐ 0.2 0x adapter: fail-honest order status + correct decimals — S — **correctness**
+### ☑ 0.2 0x adapter: fail-honest order status + correct decimals — S — **correctness**
 **Addresses #10 (CL zerox:57,116).** `query_order` returns a hardcoded
 `Filled` with dummy `qty=1`, empty instrument, `Side::Buy` — telling the
 reconciler (`reconciliation/positions.rs` queries via `&dyn Broker`) a trade
@@ -42,7 +42,7 @@ settled when it may not have. Separately, token scaling hardcodes `10^18`
 - **Verify:** unit test that `query_order` does not report `Filled` without a
   real status, and that a 6-decimal token quantizes correctly.
 
-### ☐ 0.3 MCP discovery queries real registries — S — **trust**
+### ☑ 0.3 MCP discovery queries real registries — S — **trust**
 **Addresses #19 (CL discovery).** `list_lanes()` / `list_instruments()`
 (`discovery.rs:26-71`) return hardcoded BTC/ETH/SOL on Binance + 2 lanes; this
 path is **live** (dispatched at `mcp-server/src/lib.rs:54-60`), so an agent
@@ -58,14 +58,14 @@ reasons over fiction.
 - **Verify:** discovery returns the same instrument set the `/api/assets` route
   does (drives part of #21 / 5.5 test coverage).
 
-### ☐ 0.4 WebSocket serialize failure is not swallowed — S
+### ☑ 0.4 WebSocket serialize failure is not swallowed — S
 **Addresses #20 (CL ws/live.rs:141).** `serde_json::to_string(msg).unwrap_or_default()`
 sends an **empty text frame** to the client on a serialization error.
 - Log and skip the frame (or send a typed error frame); never emit empty text.
 - **Files:** `crates/api/src/ws/live.rs:141`.
 - **Verify:** unit test that a serialize error yields no empty frame.
 
-### ☐ 0.5 Infra hygiene: gate unused services + fix Milvus port — S
+### ☑ 0.5 Infra hygiene: gate unused services + fix Milvus port — S
 **Addresses #27 (NF).** TigerGraph, Milvus, etcd, and minio all start by default
 (`docker-compose.yml:66-126`) for components with no functional consumer
 (see future-scope). Also a latent bug: `semantic` defaults to port 19530
