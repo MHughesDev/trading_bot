@@ -1,149 +1,188 @@
 # INTG-001: MCP Server
 
 **Status:** Implemented
-**Version:** 1.0
+**Version:** 2.0 (Set F)
 **ADR(s):** ADR-0010
 **Success Conditions:** SC-2
 
 ## 1. Purpose
 
-Defines the MCP (Model Context Protocol) server: a thin front door that enables an AI agent (e.g. Claude) to author, validate, and apply trading strategies by producing the same canonical strategy definition JSON that the visual builder and the JSON API produce. The MCP server adds no privileged path — everything it does routes through the same validator, the same risk gate, and the same runtime as the other two front doors. It is a translator from agent intent to canonical JSON, nothing more.
+Defines the MCP (Model Context Protocol) server: a fully capable AI agent platform that enables
+an agent (e.g. Claude) to construct strategies incrementally, run backtests, and configure
+automations. All operations route through the same validator, risk gate, and runtime as the
+visual builder and JSON API. The MCP server adds no privileged path.
 
-## 2. Scope & Non-Goals
+## 2. Transport
 
-**In scope:**
-- MCP server as one of three strategy front doors (visual builder, JSON API, MCP server).
-- Tool definitions: the initial set of MCP tools and their purposes.
-- No-privilege-escalation invariant: MCP cannot do anything the JSON API cannot do.
-- Canonical strategy definition JSON as the single output artifact.
-- Validation requirement before `create`/`apply`.
-- Risk overrides tighten-only enforcement (same as DATA-004).
-- Round-trip compatibility with the visual builder (node ids and graph positions are preserved).
-- Guardrails: no order placement tool, mandatory validation, trust tier respected.
+**Streamable HTTP (MCP spec 2025-03-26).** The server exposes:
 
-**Not in scope (deliberate):**
-- MCP server transport/protocol implementation details — uses the MCP SDK.
-- Authentication of MCP callers — resolved at the API layer that the MCP server calls.
-- Strategy execution runtime — specified in FEAT-001.
-- Strategy definition format details — specified in DATA-004.
-- Risk gate enforcement logic — specified in COMP-002.
-- Visual builder UI — frontend concern.
-- Direct order placement via MCP — explicitly excluded in v1 (see §3.3).
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/mcp` | POST | JSON-RPC 2.0 request/response. Returns `text/event-stream` when client sends `Accept: text/event-stream`. |
+| `/health` | GET | Liveness check — returns `{"status":"ok"}` with HTTP 200. |
 
-## 3. Design
+**Bind address:** `127.0.0.1:3002` by default. Configurable via `MCP_PORT` env var.
+The server binds to loopback only until Set E Phase 1 (cookie-session auth) lands.
 
-### 3.1 Three Front Doors, One Room
+**SSE upgrade:** When the client sends `Accept: text/event-stream`, the single response
+is encoded as:
+```
+event: message
+data: <JSON-RPC response JSON>
 
 ```
-Visual Builder (n8n-style) ─┐
-JSON Strategy API ──────────┼──▶  Strategy Definition JSON  ──▶  Validator  ──▶  Runtime
-MCP Server (this spec) ─────┘
+
+## 3. McpContext Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `strategy_store` | `Arc<Mutex<HashMap<Uuid, StrategyDefinition>>>` | In-process strategy library |
+| `instance_manager` | `Arc<Mutex<InstanceManager>>` | Running strategy instances |
+| `pg` | `Option<PgPool>` | Postgres pool; `None` when `DATABASE_URL` unset |
+| `draft_store` | `Arc<Mutex<HashMap<Uuid, StrategyDraft>>>` | In-memory draft state for builder |
+| `backtest_manager` | `Option<Arc<BacktestManager>>` | Backtest engine; `None` when `CLICKHOUSE_URL` or `DATABASE_URL` unset |
+
+## 4. Tool Surface
+
+### 4.1 Discovery Tools
+
+| Tool | Required Params | Returns |
+|------|----------------|---------|
+| `list_lanes` | — | `{ lanes: [{ lane }] }` |
+| `list_instruments` | — | `{ instruments: [...] }` |
+
+Optional: `list_instruments` accepts `asset_class` filter.
+
+### 4.2 Authoring Tools
+
+| Tool | Required Params | Returns |
+|------|----------------|---------|
+| `validate_strategy` | `definition_json` | `{ valid, errors }` |
+| `create_strategy` | `definition_json` | `{ strategy_id, store_id }` or `{ error, errors }` |
+
+### 4.3 Lifecycle Tools
+
+| Tool | Required Params | Returns |
+|------|----------------|---------|
+| `list_strategies` | — | `{ strategies: [{ store_id, strategy_id }] }` |
+| `apply_strategy` | `store_id`, `user_id`, `instrument_id` | `{ store_id, user_id, instrument_id, status }` or error |
+| `stop_strategy` | `user_id`, `instrument_id` | `{ user_id, instrument_id, stopped }` |
+
+### 4.4 Strategy Builder Tools
+
+An agent creates a draft, adds components incrementally, then finalizes. Drafts are
+in-memory only (lost on restart). A `draft_id` UUID is the key passed to all builder tools.
+
+| Tool | Required Params | Optional Params | Effect |
+|------|----------------|-----------------|--------|
+| `new_strategy_draft` | — | — | Returns `{ draft_id }` |
+| `discard_draft` | `draft_id` | — | Returns `{ discarded: bool }` |
+| `set_strategy_meta` | `draft_id`, `strategy_id`, `asset_class` | `min_trust_tier` | Sets top-level fields |
+| `add_strategy_input` | `draft_id`, `lane` | `instrument`, `features` | Appends `InputDeclaration` |
+| `add_condition_node` | `draft_id`, `node_id`, `expr` | — | Appends Condition node; duplicate `node_id` → `{ error: "duplicate_node_id" }` |
+| `add_signal_node` | `draft_id`, `node_id`, `when`, `emit` | — | Appends Signal node |
+| `add_strategy_action` | `draft_id`, `on_signal`, `side`, `size_mode`, `size` | — | Appends PlaceOrder action |
+| `set_risk_overrides` | `draft_id` | `max_position`, `max_order_rate_per_minute`, `max_order_rate_per_second` | Overwrites risk overrides |
+| `get_draft_summary` | `draft_id` | — | Returns current draft definition JSON (no mutation) |
+| `finalize_strategy` | `draft_id` | — | Validate → persist → return `{ store_id, strategy_id, valid: true }` or `{ valid: false, errors }` |
+
+**Mutation tool response shape (success):**
+```json
+{ "draft_id": "<uuid>", "strategy_id": "ema_cross_v1", "inputs_count": 2, "nodes_count": 2, "actions_count": 1 }
 ```
 
-The MCP server is a sibling to the visual builder and JSON API, not a layer above them. All three produce the same document format (DATA-004). All three route to the same validator and runtime. This is the most important constraint: if the MCP server had its own definition format or its own runtime path, there would be two formats and two runtimes to keep in sync — exactly the divergence trap.
-
-### 3.2 Why Thin Matters
-
-The MCP server must target the canonical definition format from DATA-004. It is a translator from agent intent → canonical JSON. Any capability it exposes that is not also available through the JSON API or visual builder is a violation of the single-room principle. The no-bypass rule (SC-2) applies: orders triggered by MCP-authored strategies still pass through the risk gate like any other order intent.
-
-### 3.3 MCP Tools (Initial Set)
-
-| Tool | Purpose |
-|------|---------|
-| `list_lanes` | Return available lanes and which instruments publish them |
-| `list_instruments` | Return instruments with asset class, metadata (hours, tick, trust tier) |
-| `validate_strategy` | Validate a candidate definition JSON without persisting it; returns structured errors the agent can act on |
-| `create_strategy` | Persist a validated definition to the user's strategy library |
-| `apply_strategy` | Start a strategy instance on an instrument (initializes the instance in the runtime) |
-| `stop_strategy` | Stop a running strategy instance |
-| `list_strategies` | List defined and running strategies |
-| `run_backtest` | Submit a definition and time range to the backtest service |
-| `get_backtest_result` | Fetch metrics, P&L, and risk report for a completed backtest |
-
-### 3.4 Guardrails
-
-**No order placement tool.** The MCP server defines and runs strategies; any orders those strategies emit still pass the risk gate. There is no `place_order` MCP tool in v1. An agent cannot directly submit an order — it can only define a strategy that, when initialized and triggered by market data, emits order intents through the risk gate.
-
-**Validation is mandatory before `create`/`apply`.** A `create_strategy` call that receives an invalid definition returns a structured `ValidationError` that the agent can parse and act on (e.g. fix the offending field and retry). Malformed or risk-loosening definitions are rejected before any state is mutated.
-
-**Risk overrides tighten only.** The MCP server cannot author a definition that loosens the global risk gate. This is enforced by the shared validator (DATA-004 §3.6), not by trust in the MCP caller. The MCP server cannot sidestep the validator.
-
-**Trust tier respected.** Strategies authored via MCP carry a `min_trust_tier` field like any other definition. The risk gate enforces it at order-submission time.
-
-**No privilege escalation.** An agent using the MCP server operates with the same permissions as the authenticated user. It cannot access other users' strategies, positions, or data. Authentication and authorization are resolved at the API layer the MCP tools call.
-
-### 3.5 Round-Trip with Visual Builder
-
-The visual builder and MCP server are siblings: both emit canonical JSON. An agent can:
-1. Draft a strategy via `create_strategy` (MCP).
-2. A human then opens it in the visual builder and edits the node graph.
-3. The JSON round-trips because the canonical format is the single source of truth.
-
-Node `id` fields and optional graph positions are preserved in the definition JSON. The format is expressive enough that a graph survives the round trip without losing structure.
-
-### 3.6 Relationship to the Three-Front-Door Architecture
-
-The three-front-door architecture is a deliberate invariant: any new capability that one front door gets must be achievable by the others (or be genuinely UI/agent-specific with no impact on the canonical format). Adding a new node type to the strategy format means:
-- The validator accepts it.
-- The visual builder can render it.
-- The MCP server can produce it via `create_strategy`.
-- No special handling is needed in any of the three entry points.
-
-## 4. Interfaces
-
-**MCP tool signatures (logical):**
-
-```
-list_lanes()
-  → [{ lane: string, instruments: string[], description: string }]
-
-list_instruments(asset_class?: string)
-  → [{ instrument_id: string, asset_class: string, venue_id: string,
-       trading_hours: TradingSchedule, tick_size: string, trust_tier: string }]
-
-validate_strategy(definition_json: string)
-  → { valid: bool, errors: ValidationError[] }
-
-create_strategy(definition_json: string)
-  → { strategy_id: string } | ValidationError[]
-
-apply_strategy(strategy_id: string, instrument_id: string)
-  → { instance_id: string } | Error
-
-stop_strategy(instance_id: string)
-  → { stopped: bool }
-
-list_strategies()
-  → [{ strategy_id: string, status: "defined"|"running", instance_id?: string, instrument_id?: string }]
-
-run_backtest(strategy_id: string, instrument_id: string, from: string, to: string)
-  → { backtest_id: string }
-
-get_backtest_result(backtest_id: string)
-  → { status: "pending"|"complete"|"failed", metrics?: BacktestMetrics }
+**Unknown draft_id response:**
+```json
+{ "error": "draft_not_found", "draft_id": "<uuid>" }
 ```
 
-**Internal routing:** Each MCP tool call translates to the equivalent REST API call against the platform's internal API. The MCP server is a thin translation layer — it does not have its own database connections or business logic.
+### 4.5 Backtest Tools
 
-**Strategy definition format:** see DATA-004 for the full JSON contract.
+Requires both `CLICKHOUSE_URL` and `DATABASE_URL` to be set. Otherwise all three tools
+return `{ "error": "service_unavailable", "reason": "backtest service not configured" }`.
 
-## 5. Dependencies
+| Tool | Required Params | Optional Params | Returns |
+|------|----------------|-----------------|---------|
+| `list_backtests` | — | — | `{ backtests: [...] }` (empty if no runs) |
+| `get_backtest` | `backtest_id` | — | Full `BacktestSnapshot` or `{ error: "not_found" }` |
+| `create_backtest` | `store_id`, `instrument_id`, `asset_class`, `timeframe`, `start`, `end` | `name`, `initial_balance`, `quote_currency`, `auto_collect` | `{ backtest_id, status: "Queued" }` |
 
-- DATA-004 — canonical strategy definition format that all MCP tools target.
-- FEAT-001 — strategy runtime; `apply_strategy` starts an instance here.
-- COMP-002 — risk gate; orders from MCP-authored strategies pass through it identically.
-- COMP-004 — backtest service; `run_backtest` and `get_backtest_result` call the adapter.
-- MCP SDK — protocol implementation (not owned by this repo).
+Valid timeframes: `"1s"`, `"1m"`, `"5m"`, `"15m"`, `"1h"`, `"4h"`, `"1d"`.
 
-## 6. Acceptance Criteria
+`create_backtest` error cases:
+- `strategy_not_found` — `store_id` not in strategy store
+- `invalid_timeframe` — includes `valid_values` array
+- `invalid_date_range` — `end ≤ start`
+- `service_unavailable` — BacktestManager not configured
 
-- [x] AC-1: A strategy definition created via `create_strategy` is identical in structure to one submitted via `POST /api/strategies` with the same JSON — the same validator accepts or rejects both — Verified by: `mcp-server` crate tests (tool dispatch); `apps/mcp-server` compiles
-- [x] AC-2: An agent calling `apply_strategy` results in an order intent that passes through `RiskGate::check()` before reaching any broker adapter — Verified by: `mcp-server::tools::authoring::tests::validate_before_create` (validation required before create/apply)
-- [x] AC-3: `validate_strategy` called with a definition containing `risk_overrides` that loosen a global limit returns a structured `ValidationError` and does not persist the definition — Verified by: Compile-time: no order-placement tool exists in `tool_definitions()`; no broker path in `dispatch_tool()`
-- [x] AC-4: There is no MCP tool that directly submits an order to a broker or bypasses the risk gate — Verified by: `mcp-server::tools::discovery::tests` (list_lanes, list_instruments)
-- [x] AC-5: A definition created via `create_strategy` (MCP) can be opened in the visual builder and its node graph is structurally intact (node ids and edge references are preserved) — Verified by: `mcp-server::tools::backtest::tests` (run_backtest, get_backtest_result)
-- [x] AC-6: An MCP tool call authenticated as user A cannot read or modify user B's strategies or positions — Verified by: `McpContext` is session-scoped; strategy store keyed by `Uuid` with no cross-user reads; bearer token scoped per user on all mutating calls.
+### 4.6 Automation Tools
 
-## 7. Open Questions
+Requires `DATABASE_URL`. All write tools return `{ error: "service_unavailable" }` if `pg` is `None`.
 
-None at this revision. The MCP SDK transport and authentication handshake are infrastructure concerns resolved at deployment time.
+| Tool | Required Params | Optional Params | Returns |
+|------|----------------|-----------------|---------|
+| `list_automations` | — | — | `{ automations: [...] }` (empty list on error or no pg) |
+| `create_automation` | `execution_strategy_id`, `instrument_id`, `asset_class`, `account_mode` | `armed`, `time_window_start`, `time_window_end`, `time_window_tz` | `{ automation_id, armed, kind }` or error |
+| `arm_automation` | `automation_id` | — | `{ automation_id, armed: true }` or `{ error: "not_found" }` |
+| `disarm_automation` | `automation_id` | — | `{ automation_id, armed: false }` or `{ error: "not_found" }` |
+
+**Live automation gate:** `create_automation` with `account_mode: "live"` returns
+`{ error: "live_automations_disabled" }` unless `MCP_ALLOW_LIVE_AUTOMATIONS=true` (or `=1`) is set.
+Paper mode is unrestricted. Default: off.
+
+## 5. Guardrails
+
+**No order placement tool.** There is no `place_order` MCP tool. Strategies emit order intents
+only through the runtime, which passes them through `RiskGate::check()`.
+
+**Validation is mandatory before persist.** `create_strategy` and `finalize_strategy` both run
+the shared `strategy_validator::validate()` before inserting into the strategy store.
+
+**Risk overrides tighten only.** The shared validator enforces this; MCP cannot sidestep it.
+
+**Trust tier respected.** Strategies carry `min_trust_tier`; the risk gate enforces it at order time.
+
+**Loopback bind.** The HTTP server binds to `127.0.0.1` only. This guard is removed only after
+Set E Phase 1 (cookie-session auth) and TLS are in place.
+
+**Live automation gate.** `create_automation` with `account_mode: "live"` is blocked by default.
+Set `MCP_ALLOW_LIVE_AUTOMATIONS=true` to enable. Paper mode is unrestricted.
+
+**DEV_USER placeholder.** Backtest and automation tools use `Uuid::nil()` as the user identity
+until Set E Phase 1 auth lands — matching the REST API's current state.
+
+## 6. Scope & Non-Goals
+
+**In scope (v2.0):**
+- Streamable HTTP transport (replaces stdio)
+- Step-by-step strategy builder (10 tools)
+- Backtest trigger/poll/read (3 tools)
+- Automation assign/arm/disarm (4 tools)
+- Health endpoint
+- Live automation gate
+- Integration tests for all three agent workflows
+
+**Not in scope:**
+- Pipeline automations (Set E / future scope)
+- Authentication of MCP callers (Set E Phase 1)
+- TLS / public bind (requires auth first)
+- New node or action kinds (ADR-0007 frozen)
+
+## 7. Dependencies
+
+- DATA-004 — canonical strategy definition format (v1.0, frozen)
+- FEAT-001 — strategy runtime
+- COMP-002 — risk gate
+- ADR-0014 — backtests via BacktestManager only
+
+## 8. Acceptance Criteria
+
+- [x] AC-1: `cargo build -p mcp-server` succeeds with no new warnings.
+- [x] AC-2: `POST /mcp` with `tools/list` returns all 27 tool definitions.
+- [x] AC-3: `GET /health` returns `{"status":"ok"}`.
+- [x] AC-4: Server binds to `127.0.0.1` only.
+- [x] AC-5: `finalize_strategy` on a valid draft removes the draft and returns `store_id`.
+- [x] AC-6: `finalize_strategy` on an invalid draft returns `valid: false` with errors; draft intact.
+- [x] AC-7: `create_automation` with `account_mode: "live"` (default env) returns `live_automations_disabled`.
+- [x] AC-8: `cargo test -p mcp-server-lib` passes all workflow integration tests.
+- [x] AC-9: No stdin/stdout references remain in `apps/mcp-server/src/main.rs`.
