@@ -112,48 +112,29 @@ Every finding from the sweep and its home. `CL` = row in `/COMPLACENCY_LOG.md`;
 
 ---
 
-## Open decisions (need a human)
+## Locked decisions (2026-06-13)
 
-These gate design and are surfaced from the cluster research. Resolve before the
-relevant phase starts.
+All 12 design decisions were resolved by the product owner. The consistent
+directive was **take the most robust option, no shortcuts**.
 
-1. **Session vs JWT (Phase 1).** Evidence strongly favours **opaque
-   server-side sessions in a cookie** (`withCredentials: true`, `/auth/touch`
-   sliding expiry, `/auth/logout` revocation). Confirm — it decides whether the
-   frontend change is "delete the dev-token interceptor" or "rewrite token
-   storage," and whether CSRF protection is needed.
-2. **Single-operator vs multi-tenant (Phase 1).** Schema is built multi-user
-   (per-user `venue_credentials`, backtest/automation `user_id`) but comments say
-   "single local operator." Decides registration policy (open / invite / seeded)
-   and whether cross-user isolation is a hard security requirement.
-3. **Legacy data migration (Phase 1).** Existing automations/backtests under
-   `Uuid::nil()` and the old UUIDv5-of-token identity orphan once real `user_id`s
-   land. **Armed live automations** under nil could detach from any owner — needs
-   an explicit reassignment migration, not a silent "treat nil as legacy."
-4. **Mark source of truth (Phase 2).** Which Redis lane is the canonical mark
-   for risk/rollup (trade-last vs a dedicated mark lane), and the staleness
-   policy when a mark is missing/expired (skip vs reject vs surface).
-5. **Live manual orders (Phase 2).** Confirm **paper-only** is acceptable for
-   the first cut (live needs a broker adapter + position feed that don't exist).
-6. **Tradovate credential format (Phase 3).** Does the decrypted blob carry a
-   pre-exchanged bearer token or `username:password:appId` requiring a
-   `/auth/accesstoken` exchange inside the adapter? Drives S-vs-M effort.
-7. **0x execution model (Phase 3).** Should `submit` broadcast on-chain in this
-   crate at all, or remain a quote-only adapter handing tx-data to an external
-   signer? Real on-chain submit+poll needs an off-repo signer/RPC component.
-8. **Coinbase scope (Phase 3).** Confirm live Coinbase execution stays
-   out-of-scope before investing in ES256 JWT signing (`jsonwebtoken` dep).
-9. **Strategy-definition version bump (Phase 4).** Approve a **v1.5** bump for
-   exit nodes + AND/OR (with a validator migration story) before touching the
-   frozen grammar. SMA/ATR and `PercentOfBalance` need no bump.
-10. **Equity definition parity (Phase 4).** Confirm live (`free_collateral` vs
-    `cash` vs `equity`) and the backtest SDK use the **identical** equity figure
-    for `PercentOfBalance` sizing.
-11. **One universe feed (Phase 4).** Decide up front that ScannerPanel discovery
-    and future Automations pipelines share one universe-feed path, not two.
-12. **Hot-path strategy hand-off (Phase 5).** arc-swap snapshot vs SPSC command
-    channel vs a real `PipelineFactory` replacing `NoopPipelineFactory` — and
-    whether the API or the demand-manager owns instance lifecycle.
+| # | Phase | Decision | Locked choice |
+|---|-------|----------|---------------|
+| 1 | 1 | Auth mechanism | **Opaque server-side cookie sessions** (`HttpOnly`+`SameSite`, session table). Frontend change = delete the dev-token interceptor; add CSRF protection. |
+| 2 | 1 | Tenancy | **Multi-tenant with hard cross-user isolation.** Every resource filtered by owner; isolation is a security requirement. |
+| 3 | 1 | Legacy `Uuid::nil()` data | **Delete legacy rows.** Wipe nil-user automations/backtests on the auth cutover (disarm any armed automation first as a safety step). |
+| 4 | 2 | Mark source / staleness | **Trade-last from Redis, surface staleness.** Latest trade-lane price is the mark; missing/expired marks are surfaced to the user, never silently zeroed. |
+| 5 | 2 | Manual orders first cut | **Paper-only.** Wire paper-mode now; gate live behind "broker not available." |
+| 6 | 3 | Tradovate credentials | **`username:password` in-adapter exchange.** Adapter calls `/auth/accesstoken`, handles token renewal. |
+| 7 | 3 | 0x execution model | **Quote-only + external signer.** No private keys/broadcast in this crate; full on-chain submit/poll stays deferred (3.4). **No live trading.** |
+| 8 | 3 | Coinbase live | **Deferred / out of scope.** No ES256 JWT signing this cycle. **No live trading.** |
+| 9 | 4 | Strategy format | **Approve additive v1.5 bump** for AND/OR + exit nodes; v1.0 strategies keep working. |
+| 10 | 4 | Equity basis (PoB) | **Total account equity** (cash + open-position value), identical figure live and in the SDK. |
+| 11 | 4 | Universe feed | **One shared feed** for ScannerPanel discovery and future Automations pipelines. |
+| 12 | 5 | Hot-path hand-off | **arc-swap snapshot** of compiled instances; lock-free reads in stage 3, atomic swap on add/remove. |
+
+Phase files reflect these choices. Two safety notes carried forward: (3) armed
+automations are disarmed before deletion; (7,8) 0x and Coinbase remain
+**quote/stub only — no live order broadcast**.
 
 ---
 

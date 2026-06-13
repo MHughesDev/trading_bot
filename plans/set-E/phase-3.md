@@ -35,11 +35,14 @@ and Bearer auth are already proven in the companion `venues/tradier.rs` broker.
 **Addresses #9 (CL tradovate).** No `parse_creds` at all; methods ignore creds
 and return `NotImplemented`. Tradovate uses a **token-exchange flow**
 (`/auth/accesstoken`), and positions report numeric `contractId`, not symbols.
-- **Resolve Open Decision 6** (credential blob format) first.
+- **Locked decision 6:** the credential blob is **`username:password`** (matches
+  the frontend form); the adapter performs the **`/auth/accesstoken` exchange
+  in-adapter** and handles token renewal.
 - Template: `account/alpaca.rs` + host/shape from `venues/tradovate.rs:36-47,
-  237-273`. Add `parse_creds`; `/cashBalance/...` → `Balance`; `/position/list`
-  (reuse the mapping) → positions; `/fill/list` → transactions. Add a
-  `contractId`→symbol resolve step and token-renewal handling.
+  237-273`. Add `parse_creds` (`username:password[:appId]`) + an
+  `access_token()` exchange/refresh helper; `/cashBalance/...` → `Balance`;
+  `/position/list` (reuse the mapping) → positions; `/fill/list` → transactions.
+  Add a `contractId`→symbol resolve step.
 - **Files:** `crates/execution/src/account/tradovate.rs`.
 - **Verify:** adapter tests; token-expiry path exercised.
 
@@ -74,15 +77,16 @@ or keep for future venues.
 broadcasting a tx + `query_order` polling `eth_getTransactionReceipt` needs a
 **signer wallet + RPC component that does not exist in this crate** — and the
 code comment (`zerox.rs:56-59`) already defers broadcast to an external signer.
-**Open Decision 7** (broadcast-in-crate vs quote-only handing tx-data to an
-off-repo signer) must be settled; likely a cross-repo component. Deferred.
+**Locked decision 7: quote-only + external signer** — no private keys/broadcast
+in this crate; the full on-chain submit/poll is a cross-repo signer/RPC
+component. **No live order broadcast.** Deferred.
 
 ### ⏸ 3.5 Coinbase live broker — L
 **Addresses #7 (CL coinbase, HIGH/post-Phase 6).** Empty stub
 (`coinbase.rs:1`). Needs Coinbase Advanced Trade **ES256 JWT per-request
-signing** (new `jsonwebtoken` dep) and is a live-money path. Documented
-**out of current scope** (Open Decision 8). Schedule separately when crypto live
-execution is in scope.
+signing** (new `jsonwebtoken` dep) and is a live-money path. **Locked decision 8:
+out of scope** — no ES256 JWT signing this cycle, **no live trading**. Schedule
+separately when crypto live execution is in scope.
 
 ---
 

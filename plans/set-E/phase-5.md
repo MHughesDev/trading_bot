@@ -69,12 +69,11 @@ pops `WorldEvent`s and produces **no intents**. The machinery is complete
 (`StrategyInstance::process_event`, `InstanceManager::dispatch`) but the API owns
 the single `Arc<Mutex<InstanceManager>>`, and `spawn_pipeline` takes no strategy
 handle; demand-manager uses `NoopPipelineFactory`.
-- Resolve **Open Decision 12** (arc-swap snapshot vs SPSC command channel vs a
-  real `PipelineFactory` replacing `NoopPipelineFactory`; API vs demand-manager
-  owns lifecycle). **No lock or allocation per `WorldEvent`** — the SPSC hot path
-  forbids it.
-- Thread the per-instrument instance set into `spawn_pipeline`; in stage 3,
-  iterate the current instances calling `process_event` and push intents to
+- **Locked decision 12: arc-swap snapshot.** Stage 3 reads an `Arc` snapshot of
+  the compiled per-instrument instances; the API swaps it atomically on
+  add/remove. Lock-free reads — **no lock or allocation per `WorldEvent`**.
+- Thread the arc-swapped instance handle into `spawn_pipeline`; in stage 3,
+  iterate the current snapshot calling `process_event` and push intents to
   `ring_intent` (the body of `dispatch` minus the per-event `Mutex`). Replace the
   stage-4 dummy `GateContext` (`hot_path.rs:184`) with the real one from 2.1/2.3.
 - **Files:** `apps/platform/src/hot_path.rs`, `crates/demand-manager`,

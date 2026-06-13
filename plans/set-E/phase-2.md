@@ -24,7 +24,8 @@ The compute is done and tested (`api/src/rollup/compute_rollup`,
 - Add **instrument-registry access** for tick/lot size, venue mapping, and
   active/session/halt state.
 - Confirm `user_id` extraction is available on these handlers (from Phase 1).
-- Resolve **Open Decision 4** (canonical mark lane + staleness policy).
+- **Locked decision 4:** the canonical mark is **trade-last from Redis**;
+  missing/expired marks are **surfaced** to the user, never silently zeroed.
 - **Files:** `crates/api/src/state.rs`, platform startup wiring.
 - **Verify:** `AppState` exposes Redis + registry; a smoke test reads a mark.
 
@@ -57,8 +58,9 @@ unwired — a deliberate fail-closed guard against zero-position over-leverage.
   `#[allow(dead_code)]`).
 - Wire real per-instrument **rate-limit counters** (passing `0,0` disables rate
   limiting).
-- **Defer live manual orders** until a broker adapter + position feed exist
-  (Open Decision 5); gate on `mode`.
+- **Locked decision 5: paper-only first cut.** Defer live manual orders until a
+  broker adapter + position feed exist; gate on `mode` with a clear
+  "live broker not available" response.
 - **Files:** `crates/api/src/routes/orders.rs:31,104-118,154`.
 - **Verify:** a paper order within limits fills; one breaching position/rate
   limits is rejected with the mapped status; the zero-position bypass cannot

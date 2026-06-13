@@ -14,7 +14,10 @@ scope every resource to its owner, and only then unlock network binding.
 > any `Cargo.toml`). Building that route module (1.2) is the missing backend the
 > other items depend on.
 >
-> **Open decisions 1–3 in MASTER must be resolved before starting.**
+> **Locked decisions (2026-06-13):** (1) opaque server-side **cookie sessions**;
+> (2) **multi-tenant with hard cross-user isolation**; (3) legacy `Uuid::nil()`
+> rows are **deleted** on cutover (armed automations disarmed first). Add CSRF
+> protection (cookie auth). See MASTER → Locked decisions.
 
 ---
 
@@ -40,8 +43,8 @@ the `users` table (`migrations/0001`) has **no password column**.
 - `register`, `login` (mint a session, set cookie), `me`, `logout` (revoke),
   `touch` (sliding expiry); wire the existing `credentials/crypto.rs`
   venue-credentials endpoints. Register all in `routes/mod.rs`.
-- Cookie shape per Open Decision 1 (default: opaque session cookie,
-  `SameSite=Lax/Strict`, `HttpOnly`, `Secure`).
+- Cookie shape (locked decision 1): opaque session cookie,
+  `SameSite=Lax/Strict`, `HttpOnly`, `Secure`.
 - **Files:** new `crates/api/src/routes/auth.rs`, `routes/mod.rs:20-85`,
   `crates/api/src/credentials/`.
 - **Verify:** integration test of register → login → me → logout against a test
@@ -69,8 +72,8 @@ backtests use `token.user_id()`.
   filters `WHERE user_id=$1`; arm/disarm/delete take `(user_id, id)` and 404 on
   non-ownership. The `automations.user_id` column already exists (no schema
   change).
-- Unify `streams.rs:48` onto the real `user_id` (confirm Open Decision: not an
-  intentional gateway keying scheme).
+- Unify `streams.rs:48` onto the real `user_id` (it currently keys the gateway
+  on the raw token string — an inconsistency to fix, not an intentional scheme).
 - **Files:** `crates/api/src/routes/automations.rs`,
   `crates/storage/src/automation.rs`, `crates/api/src/routes/streams.rs:48`.
 - **Verify:** cross-user list/arm/delete returns 404; create stamps the caller.
@@ -81,21 +84,24 @@ every request (`api.ts:11-16`). With real cookie sessions (`withCredentials`
 already set) this is no longer needed.
 - Delete the request interceptor; keep `withCredentials: true`. `authApi`,
   `useAuthStore`, `LoginPage`, `SignUpPage` are already correct for a cookie
-  backend. (If Open Decision 1 picks JWT instead, this becomes a token-storage
-  rewrite — confirm first.)
+  backend. (Locked decision 1 is cookie sessions, so this is a clean deletion,
+  not a token-storage rewrite.)
 - **Files:** `frontend/src/lib/api.ts:11-16`.
 - **Verify:** authenticated requests succeed via cookie alone; 401 redirects to
   `/login` (interceptor at `api.ts:18-31` already does this).
 
-### ☐ 1.6 Legacy nil-user data migration — S
-**Addresses Open Decision 3.** Existing automations/backtests under
+### ☐ 1.6 Delete legacy nil-user data — S
+**Locked decision 3: delete.** Existing automations/backtests under
 `Uuid::nil()` and the old UUIDv5-of-token identity orphan once real `user_id`s
-land. **Armed live automations under nil move real money** — they must not
-silently detach.
-- Migration (or one-off admin task) to reassign or quarantine nil-user rows to
-  a seeded operator account; surface armed-automation reassignment explicitly.
-- **Files:** `migrations/0014_legacy_user_reassignment.sql` (or admin tool).
-- **Verify:** no armed automation is left owner-less after migration.
+land. The cutover **deletes** them — but **armed live automations under nil move
+real money**, so they must be **disarmed first** as a safety step, then removed.
+- Migration: first set `armed = false` for any nil-user automation, then
+  `DELETE FROM automations WHERE user_id = '00000000-...'` and the matching
+  `backtest_runs` nil-user rows. Order matters: disarm before delete so nothing
+  fires during the migration.
+- **Files:** `migrations/0014_drop_legacy_nil_user_data.sql`.
+- **Verify:** post-migration there are zero nil-user automations/backtests and no
+  automation was left armed mid-migration.
 
 ### ☐ 1.7 Flip the loopback bind guard — S — **security gate, LAST**
 **Addresses #2 (CL main.rs guardrail).** `main.rs:169-180` refuses to bind

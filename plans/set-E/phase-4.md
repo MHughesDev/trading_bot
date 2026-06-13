@@ -10,8 +10,8 @@ what the engine executes, **without ever breaking live/replay parity**
 > (`features`, `strategy-runtime`) consumed identically live and in replay. SMA/
 > ATR and `PercentOfBalance` are additive and need **no** format change; AND/OR
 > conditions and exit nodes change the grammar and need a **v1.5 definition-
-> version bump** (Open Decision 9) — precedent: the v1.5 universe nodes already
-> in `NodeKind`.
+> version bump** (locked decision 9: approved) — precedent: the v1.5 universe
+> nodes already in `NodeKind`.
 
 ---
 
@@ -47,7 +47,9 @@ across live/replay.
   `paper/account_source.rs:48-58`).
 - **Replay:** replace the Fixed-only guard with the **same** shared sizer, fed
   per-bar equity from the SDK account + bar close as mark.
-- Resolve **Open Decision 10** (identical equity figure both sides).
+- **Locked decision 10:** size against **total account equity** (cash +
+  open-position value) — the identical figure fed to the shared sizer both live
+  and in the SDK handler.
 - Clear the builder `percent_of_equity` warning (`toDefinition.ts:167-173`).
 - **Files:** `crates/strategy-runtime/src/intents.rs`, `runtime.rs`,
   `crates/backtest/src/sim.rs`, `frontend/src/utils/toDefinition.ts`.
@@ -65,8 +67,8 @@ pipeline's `initial_universe` is unsourced outside tests.
   return `{ instruments: [...] }` (ideally with per-instrument score/feature data
   for `WatchTileData`).
 - Wire `ScannerPanel` to call it and `setTiles`.
-- Resolve **Open Decision 11**: the universe feed is **one shared path** for
-  ScannerPanel discovery and future Automations pipelines.
+- **Locked decision 11:** the universe feed is **one shared path** for
+  ScannerPanel discovery and future Automations pipelines (not two).
 - **Files:** `crates/api/src/routes/strategies.rs`, universe-feed module,
   `frontend/src/components/trading/ScannerPanel.tsx`.
 - **Verify:** a discovery strategy surfaces a real instrument set end-to-end;
@@ -76,8 +78,8 @@ pipeline's `initial_universe` is unsourced outside tests.
 **Addresses #24 (NF).** v1.0 grammar has no boolean operators and no exit nodes
 (`nodes.rs`, ADR-0007); the builder hard-errors on AND/mixed conditions and
 drops exit rules (`toDefinition.ts:130-165`). Both require grammar/vocabulary
-changes → an **additive v1.5 bump** (Open Decision 9), mirroring the existing
-v1.5 universe-node precedent.
+changes → an **additive v1.5 bump** (locked decision 9: approved), mirroring the
+existing v1.5 universe-node precedent.
 - Extend the expression grammar (or add compositional condition nodes) for
   AND/OR; add exit node/action types (stop / take-profit / trailing) honoured
   **both live and in the SDK sim**. Update the validator (fail-closed on unknown)
