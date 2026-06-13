@@ -59,15 +59,15 @@ docs/
 │   ├─ CANONICAL_PRECEDENCE.MD                       # (NEW - from consolidated Specs/)
 │   └─ README.md                 # Spec index
 │
-├─ plans/                       # 📅 Formal plan copies (Phase 0-7 + special plans)
+├─ plans/                       # 📅 Formal plan copies (all plan sets A–G)
 │   ├─ README.md
-│   ├─ phase-0-foundations.md
-│   ├─ phase-1-spine.md
-│   ├─ ... (through phase-7)
-│   ├─ PHASE_DESIGN_CHECKLIST.md                     # (NEW - moved from root)
-│   ├─ PHASE_QUICK_REFERENCE.md                      # (NEW - moved from root)
-│   ├─ MICROSERVICES_SPLIT_PLAN.md                   # (NEW - moved from root)
-│   └─ RESTART_DATA_HEALTH_AND_FORECASTER_PLAN.md
+│   ├─ plan-sets/               # All plan sets live here
+│   │   ├─ set-A/               # Original Phase A–7 refactor plans
+│   │   ├─ set-B/ … set-E/      # Subsequent refactor and optimization sets
+│   │   ├─ set-F/               # AI Agent MCP Platform
+│   │   └─ set-G/               # Documentation restructuring
+│   ├─ reference/               # Checklists and quick-reference docs
+│   └─ special-plans/           # Microservices split and similar one-off plans
 │
 ├─ procedures/                  # 🔧 Atomic step-by-step task instructions
 │   ├─ README.md
@@ -173,7 +173,7 @@ docs/
 - **After:** specs/ only (24 consolidated files)
 
 ### Proper Categorization
-- All planning docs → plans/
+- All planning docs → docs/plans/plan-sets/
 - All operational docs → operations/
 - All governance → governance/
 - All ADRs properly numbered → adr/
@@ -189,7 +189,7 @@ docs/
 | System overview | `artifact.md` + `architecture.md` |
 | Architecture decisions | `adr/` (0001-0013) |
 | System specs | `specs/` (detailed) + `Specs/` README (overview) |
-| Implementation plans | `plans/` (phase-0 through phase-7) |
+| Implementation plans | `docs/plans/plan-sets/` (set-A through set-G) |
 | How-to procedures | `procedures/` + `skills/` |
 | Operational docs | `operations/` + `runbooks.md` |
 | APEX canonical specs | `Human Provided Specs/new_specs/canonical/` |

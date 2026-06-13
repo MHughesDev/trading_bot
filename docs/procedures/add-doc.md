@@ -17,7 +17,7 @@ Use this procedure whenever a new doc file needs to be created — ADR, spec, pl
 |---|---|---|---|
 | Architecture Decision Record | `docs/adr/` | `NNNN-kebab-slug.md` (next sequential number) | `docs/adr/README.md` |
 | Component / data / integration spec | `docs/specs/` | `COMP-NNN-`, `DATA-NNN-`, `INTG-NNN-`, `FEAT-NNN-`, or `SYS-NNN-` | `docs/specs/README.MD` |
-| Phase plan | `docs/plans/plans-set-A/` | `phase-N-slug.md` | `docs/plans/plans-set-A/README.md` |
+| Phase plan | `docs/plans/plan-sets/set-X/` | `phase-N-slug.md` | relevant set's MASTER.md |
 | Atomic procedure | `docs/procedures/` | `verb-noun.md` | `docs/procedures/README.md` |
 | Agent skill | `docs/skills/` | `verb-noun.md` | `docs/skills/README.md` |
 | Research conclusion | `docs/research/CONCLUSIONS.md` | Append a C-NNN row to the table (never create a new file) | — (table is self-indexing) |

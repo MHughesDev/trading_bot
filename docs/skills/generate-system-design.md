@@ -39,7 +39,7 @@ For each open question identified in the artifact and for each significant techn
 ### Phase 2: Plan
 > Plans are derived, never assumed. If you cannot yet derive a milestone from a spec, decision, or
 > success condition, you are not ready to plan that part — return to research or specs first.
-1. Apply `procedures/add-plan.md` to create a Formal plan in `plans/`
+1. Apply `procedures/add-plan.md` to create a Formal plan in `docs/plans/plan-sets/`
 2. Derive the plan from existing artifacts — record them in the plan's **Derived From** section:
    - Milestones map to the artifact's success conditions and the specs that satisfy them
    - Build order follows the architecture's component dependencies
@@ -83,7 +83,7 @@ At the end of a full system design session, the following should exist:
 
 - [ ] `docs/artifact.md` is filled in and confirmed
 - [ ] At least one research brief per major technology choice or open question
-- [ ] A Formal plan in `plans/` with milestones linked to the artifact's success conditions
+- [ ] A Formal plan in `docs/plans/plan-sets/` with milestones linked to the artifact's success conditions
 - [ ] Specs for each major component and user-facing feature
 - [ ] ADRs for each significant architectural decision
 - [ ] All folder READMEs updated with new index entries
