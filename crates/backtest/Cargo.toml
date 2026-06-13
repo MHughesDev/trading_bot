@@ -1,0 +1,45 @@
+[package]
+name = "backtest"
+version = "0.1.0"
+edition = "2021"
+
+# Backtesting orchestrator — connects the trading bot to the market_simulator
+# engine (NautilusTrader fork) used strictly as an embedded SDK.
+#
+# IMPORTANT: the nautilus-* dependencies are path dependencies on a sibling
+# checkout of MHughesDev/market_simulator.  Clone both repositories next to
+# each other:
+#
+#   workspace/
+#     trading_bot/
+#     market_simulator/
+#
+# The simulator never owns data: bars are loaded from this platform's
+# ClickHouse store, handed to the engine in memory, and dropped when the
+# run finishes.
+
+[dependencies]
+domain = { workspace = true }
+features = { workspace = true }
+strategy-runtime = { workspace = true }
+
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+rust_decimal = { workspace = true }
+clickhouse = { workspace = true }
+reqwest = { workspace = true }
+sqlx = { workspace = true }
+
+# Market simulator SDK (sibling checkout — see header note).
+nautilus-backtest = { path = "../../../market_simulator/crates/backtest" }
+nautilus-model = { path = "../../../market_simulator/crates/model" }
+nautilus-core = { path = "../../../market_simulator/crates/core" }
+
+[dev-dependencies]
+rust_decimal_macros = { workspace = true }
