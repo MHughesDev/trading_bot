@@ -1,5 +1,8 @@
 //! 0x Swap API broker adapter — DEX swap execution via firm quote.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use async_trait::async_trait;
 use domain::order::{OrderType, Side};
 use reqwest::{header, Client};
@@ -15,15 +18,34 @@ pub struct ZeroXBroker {
     client: Client,
     api_key: String,
     pub base_url: String,
+    /// ERC-20 token decimal places by symbol. Defaults to 18 for unlisted tokens.
+    token_decimals: HashMap<String, u32>,
+    /// Submitted orders: broker_order_id → (instrument_id, side, qty).
+    /// Populated by `submit`; read by `query_order` until on-chain poll (task 3.4).
+    pending: Arc<Mutex<HashMap<String, (String, Side, Decimal)>>>,
 }
 
 impl ZeroXBroker {
     pub fn new(api_key: impl Into<String>) -> Self {
+        let mut token_decimals = HashMap::new();
+        // Common ERC-20 tokens with non-18 decimal precision.
+        token_decimals.insert("USDC".to_owned(), 6u32);
+        token_decimals.insert("USDT".to_owned(), 6u32);
+        token_decimals.insert("WBTC".to_owned(), 8u32);
+        token_decimals.insert("WETH".to_owned(), 18u32);
         Self {
             client: Client::new(),
             api_key: api_key.into(),
             base_url: BASE_URL.to_owned(),
+            token_decimals,
+            pending: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Override token decimal precision (e.g. from the instrument registry).
+    pub fn with_token_decimals(mut self, decimals: HashMap<String, u32>) -> Self {
+        self.token_decimals.extend(decimals);
+        self
     }
 
     fn auth_headers(&self) -> header::HeaderMap {
@@ -73,7 +95,8 @@ impl Broker for ZeroXBroker {
             Side::Sell => (sell_token, buy_token),
         };
 
-        let sell_amount = (order.intent.size.inner() * Decimal::from(10u64.pow(18)))
+        let decimals = self.token_decimals.get(sell_token).copied().unwrap_or(18);
+        let sell_amount = (order.intent.size.inner() * Decimal::from(10u64.pow(decimals)))
             .round()
             .to_string();
 
@@ -100,29 +123,47 @@ impl Broker for ZeroXBroker {
             .await
             .map_err(|e| BrokerError::Serialization(e.to_string()))?;
 
-        // Return the contract address as the broker order ID (used to poll status).
-        Ok(format!("0x:{}", quote.to))
+        // Store order metadata so query_order can return accurate fields.
+        let broker_id = format!("0x:{}", quote.to);
+        if let Ok(mut map) = self.pending.lock() {
+            map.insert(
+                broker_id.clone(),
+                (order.intent.instrument_id.clone(), order.intent.side, order.intent.size.inner()),
+            );
+        }
+        Ok(broker_id)
     }
 
     async fn cancel(&self, _broker_order_id: &str) -> Result<(), BrokerError> {
-        // DEX swaps are atomic and cannot be cancelled once submitted.
+        // DEX swaps are atomic and cannot be cancelled once broadcast.
         Err(BrokerError::Rejected(
             "DEX swaps cannot be cancelled after broadcast".to_owned(),
         ))
     }
 
     async fn query_order(&self, broker_order_id: &str) -> Result<BrokerOrderStatus, BrokerError> {
-        // For DEX, "query" means checking on-chain transaction status.
-        // In this adapter stub we return the order as Filled since 0x swaps are atomic.
+        // Full on-chain receipt polling is implemented in task 3.4.
+        // Return Unknown rather than fabricating a Filled status.
+        let info = self
+            .pending
+            .lock()
+            .ok()
+            .and_then(|m| m.get(broker_order_id).cloned());
+
+        let (instrument_id, side, qty) =
+            info.unwrap_or_else(|| (String::new(), Side::Buy, Decimal::ZERO));
+
         Ok(BrokerOrderStatus {
             broker_order_id: broker_order_id.to_owned(),
-            instrument_id: String::new(),
-            side: Side::Buy,
+            instrument_id,
+            side,
             order_type: OrderType::Market,
-            submitted_qty: Decimal::ONE,
-            filled_qty: Decimal::ONE,
+            submitted_qty: qty,
+            filled_qty: Decimal::ZERO,
             avg_fill_price: None,
-            state: BrokerOrderState::Filled,
+            state: BrokerOrderState::Unknown(
+                "on-chain receipt poll not yet implemented (task 3.4)".to_owned(),
+            ),
         })
     }
 

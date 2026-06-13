@@ -82,6 +82,23 @@ pub enum AssetClass {
     PredictionMarket,
 }
 
+/// All supported asset class identifiers in canonical snake_case form.
+/// Shared between the API `/api/assets` route and the MCP `list_instruments` tool
+/// so they can never diverge.
+pub const ALL_ASSET_CLASSES: &[&str] = &[
+    "crypto_spot_cex",
+    "equity",
+    "etf",
+    "crypto_spot_dex",
+    "futures_expiring",
+    "perpetual_swap",
+    "option",
+    "bond",
+    "fx",
+    "nft",
+    "prediction_market",
+];
+
 impl AssetClass {
     /// Canonical snake_case string key (matches serde `rename_all = "snake_case"`).
     ///

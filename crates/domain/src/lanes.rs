@@ -21,6 +21,24 @@ pub const ORDERS_COMMANDS: &str = "orders.commands";
 pub const ORDERS_EVENTS: &str = "orders.events";
 pub const POSITIONS_EVENTS: &str = "positions.events";
 pub const QUARANTINE: &str = "quarantine";
+/// Virtual UI-only lane exposed via the WebSocket gateway.
+pub const UI_ORDERBOOK_SNAPSHOT: &str = "ui.orderbook.snapshot";
+
+/// All public data lanes visible via `/api/streams/available` and MCP `list_lanes`.
+pub const ALL_LANES: &[&str] = &[
+    MARKET_TRADES,
+    MARKET_QUOTES,
+    MARKET_ORDERBOOK_L2,
+    MARKET_BARS_1S,
+    MARKET_BARS_1M,
+    MARKET_BARS_1M_REVISED,
+    FEATURES_TECHNICAL,
+    STRATEGY_SIGNALS,
+    ORDERS_COMMANDS,
+    ORDERS_EVENTS,
+    POSITIONS_EVENTS,
+    UI_ORDERBOOK_SNAPSHOT,
+];
 
 /// Typed representation of a NATS lane.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

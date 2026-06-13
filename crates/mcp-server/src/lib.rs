@@ -8,6 +8,7 @@ pub mod tools;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use demand_manager::{DemandRegistry, NoopPipelineFactory};
@@ -22,28 +23,47 @@ use strategy_runtime::InstanceManager;
 pub struct McpContext {
     pub strategy_store: Arc<Mutex<HashMap<Uuid, StrategyDefinition>>>,
     pub instance_manager: Arc<Mutex<InstanceManager>>,
+    /// Postgres connection pool — `None` when `DATABASE_URL` is not set.
+    pub pg: Option<PgPool>,
 }
 
 impl McpContext {
-    pub fn new() -> Self {
+    pub fn new_without_db() -> Self {
         let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
         Self {
             strategy_store: Arc::new(Mutex::new(HashMap::new())),
             instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),
+            pg: None,
         }
     }
-}
 
-impl Default for McpContext {
-    fn default() -> Self {
-        Self::new()
+    pub async fn new() -> Self {
+        let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
+        let pg = match std::env::var("DATABASE_URL") {
+            Ok(url) => match PgPool::connect(&url).await {
+                Ok(pool) => Some(pool),
+                Err(e) => {
+                    tracing::warn!(error = %e, "MCP: DATABASE_URL set but connection failed; discovery will return empty instrument list");
+                    None
+                }
+            },
+            Err(_) => {
+                tracing::info!("MCP: DATABASE_URL not set; discovery will return empty instrument list");
+                None
+            }
+        };
+        Self {
+            strategy_store: Arc::new(Mutex::new(HashMap::new())),
+            instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),
+            pg,
+        }
     }
 }
 
 /// Dispatch an MCP JSON-RPC tool call and return the result as a JSON Value.
 ///
 /// This is the single entry point used by the transport layer.
-pub fn dispatch_tool(
+pub async fn dispatch_tool(
     ctx: &McpContext,
     tool_name: &str,
     params: &serde_json::Value,
@@ -57,7 +77,10 @@ pub fn dispatch_tool(
         }
         "list_instruments" => {
             let asset_class = params.get("asset_class").and_then(|v| v.as_str());
-            let instruments = tools::discovery::list_instruments(asset_class);
+            let instruments = match &ctx.pg {
+                Some(pg) => tools::discovery::list_instruments(pg, asset_class).await,
+                None => vec![],
+            };
             json!({ "instruments": instruments })
         }
         "validate_strategy" => {

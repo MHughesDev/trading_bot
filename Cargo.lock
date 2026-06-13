@@ -2686,6 +2686,7 @@ dependencies = [
  "domain",
  "serde",
  "serde_json",
+ "sqlx",
  "strategy-runtime",
  "strategy-validator",
  "thiserror 2.0.18",
@@ -3895,6 +3896,7 @@ name = "reconciliation"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "chrono-tz",
  "domain",
  "execution",
  "risk",

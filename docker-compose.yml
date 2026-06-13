@@ -1,5 +1,11 @@
 version: "3.9"
 
+# Default stack: nats, postgres, clickhouse, redis.
+# Vector/graph services are off by default — enable with:
+#   docker compose --profile vector-graph up
+#
+# The vector-graph profile starts: milvus (+ etcd + minio), tigergraph.
+
 services:
   nats:
     image: nats:2.10-alpine
@@ -40,7 +46,7 @@ services:
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports:
       - "8123:8123"   # HTTP
-      - "9001:9000"   # native (host 9001 avoids collision with TigerGraph REST++ on 9000, M-16)
+      - "9001:9000"   # native (host 9001 avoids collision with TigerGraph REST++ on 9000)
     volumes:
       - ch_data:/var/lib/clickhouse
       - ./clickhouse:/docker-entrypoint-initdb.d
@@ -63,12 +69,13 @@ services:
       timeout: 3s
       retries: 10
 
-  # TigerGraph graph store (P2-T12).
+  # TigerGraph graph store — gated behind the "vector-graph" profile (no functional
+  # consumer yet; see future-scope.md). Enable with: docker compose --profile vector-graph up
   # Port assignments:
-  #   9000  (internal) — REST++ data API  → exposed on host as 9200 to avoid
-  #                      collision with ClickHouse's native port (M-16).
-  #   14240 (internal) — GSQL admin API + Studio UI.
+  #   9000  (internal) — REST++ data API  → exposed as 9200 (avoids ClickHouse native collision)
+  #   14240 (internal) — GSQL admin API + Studio UI
   tigergraph:
+    profiles: ["vector-graph"]
     image: docker.tigergraph.com/tigergraph:3.9.3
     ports:
       - "9200:9000"   # REST++ data API (set TIGERGRAPH_PORT=9200 in .env)
@@ -78,8 +85,11 @@ services:
     environment:
       TIGERGRAPH_AGREED_TO_EULA: "yes"
 
-  # Milvus vector store (P2-T12) — requires etcd + minio.
+  # Milvus vector store — gated behind the "vector-graph" profile.
+  # Milvus REST v2 API and gRPC both run on port 19530 (Milvus 2.3+).
+  # Port 9091 is the legacy metrics/monitoring port only.
   etcd:
+    profiles: ["vector-graph"]
     image: quay.io/coreos/etcd:v3.5.5
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
@@ -95,13 +105,14 @@ services:
       - etcd_data:/etcd
 
   minio:
+    profiles: ["vector-graph"]
     image: minio/minio:RELEASE.2023-03-13T19-46-17Z
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-    command: minio server /minio_data --console-address ":9001"
+    command: minio server /minio_data --console-address ":9092"
     ports:
-      - "9001:9001"
+      - "9092:9092"   # MinIO console (9001 is taken by ClickHouse native)
     volumes:
       - minio_data:/minio_data
     healthcheck:
@@ -111,14 +122,15 @@ services:
       retries: 3
 
   milvus:
+    profiles: ["vector-graph"]
     image: milvusdb/milvus:v2.4.0
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
     ports:
-      - "19530:19530"  # gRPC
-      - "9091:9091"    # HTTP/metrics
+      - "19530:19530"  # gRPC + REST v2 API (MILVUS_HTTP_PORT=19530)
+      - "9091:9091"    # legacy metrics/monitoring only
     volumes:
       - milvus_data:/var/lib/milvus
     depends_on:

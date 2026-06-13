@@ -4,7 +4,7 @@
 //! Configuration (env vars):
 //!   OPENAI_API_KEY       — required
 //!   MILVUS_HOST          — default: localhost
-//!   MILVUS_HTTP_PORT     — default: 9091
+//!   MILVUS_HTTP_PORT     — default: 19530 (Milvus REST v2 / gRPC port; 9091 is metrics-only)
 //!   NATS_URL             — read via platform config
 
 #[cfg(not(test))]

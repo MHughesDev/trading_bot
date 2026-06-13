@@ -1,10 +1,14 @@
 # Phase 3 — Execution Venue Adapters
 
-**Completion: 0% (0 / 4 tasks complete; 2 deferred-by-design)**
+**Completion: 0% (0 / 6 tasks complete)**
 
-**Goal:** Complete the read-only account-source adapters and real DEX quoting,
-following the existing complete adapters as templates. **Addresses:** #8, #9,
-#11 (+ #10 full, #7 — deferred).
+**Goal:** Complete the account-source adapters, real DEX quoting **and on-chain
+execution**, and the **live Coinbase broker**, following the existing complete
+adapters as templates. **Addresses:** #7, #8, #9, #10 (full), #11.
+
+> **Real-money paths (3.4, 3.5):** both touch live funds. Keys/secrets live in
+> secure storage (env/KMS) — **never** config or repo — and each is gated by a
+> `/security-review` of key handling before live/mainnet keys are enabled.
 
 > **Templates already in-repo (read these first):** `Broker` →
 > `execution/src/alpaca.rs` (full CRUD); complete venue brokers exist at
@@ -70,29 +74,52 @@ or keep for future venues.
 
 ---
 
-## Deferred-by-design (tracked, not scheduled here)
+### ☐ 3.4 0x full on-chain submit + status poll — L — **real-money**
+**Addresses #10 (full); locked decision 7.** Builds on the 0.2 fail-honest pass.
+- `submit` signs and broadcasts the 0x swap and returns the **real tx hash**;
+  `query_order` polls `eth_getTransactionReceipt` and maps confirmations →
+  `New` (0 conf) / `Filled` (success) / `Rejected` (reverted). `cancel` stays an
+  error (atomic swaps); `query_open_orders`/`query_positions` stay empty.
+- **New component:** a signer + RPC client (wallet key + chain RPC endpoint).
+  Keys come from secure secret storage (env/KMS), **never** config/repo. Decide
+  whether the signer lives in this crate or a small dedicated module.
+- Template: `alpaca.rs` for the query→state mapping; 0x request style already in
+  `zerox.rs`.
+- **Files:** `crates/execution/src/venues/zerox.rs`, new signer/RPC module,
+  `crates/execution/Cargo.toml` (alloy/ethers + signing deps).
+- **Verify:** against a **testnet/fork** — a broadcast swap returns a real hash
+  and `query_order` reflects the receipt; a reverted tx → `Rejected`. **Gated by
+  a `/security-review` of key handling before mainnet enablement.**
 
-### ⏸ 3.4 0x full on-chain submit + status poll — L
-**Addresses #10 (full).** The safe bug-fix pass is **0.2**. Real `submit`
-broadcasting a tx + `query_order` polling `eth_getTransactionReceipt` needs a
-**signer wallet + RPC component that does not exist in this crate** — and the
-code comment (`zerox.rs:56-59`) already defers broadcast to an external signer.
-**Locked decision 7: quote-only + external signer** — no private keys/broadcast
-in this crate; the full on-chain submit/poll is a cross-repo signer/RPC
-component. **No live order broadcast.** Deferred.
-
-### ⏸ 3.5 Coinbase live broker — L
-**Addresses #7 (CL coinbase, HIGH/post-Phase 6).** Empty stub
-(`coinbase.rs:1`). Needs Coinbase Advanced Trade **ES256 JWT per-request
-signing** (new `jsonwebtoken` dep) and is a live-money path. **Locked decision 8:
-out of scope** — no ES256 JWT signing this cycle, **no live trading**. Schedule
-separately when crypto live execution is in scope.
+### ☐ 3.5 Coinbase live broker — L — **real-money**
+**Addresses #7 (CL coinbase); locked decision 8.** Replace the `coinbase.rs:1`
+stub with a full `Broker` against Coinbase Advanced Trade for `CryptoSpotCex`
+(`venue.rs:77`, `provides_execution() == true`).
+- **Auth:** ES256 JWT per request (add `jsonwebtoken`); handle clock-skew
+  rejection.
+- `POST /api/v3/brokerage/orders` (`client_order_id = idempotency_key`,
+  `product_id`, `order_configuration.{market_market_ioc|limit_limit_gtc}`);
+  batch-cancel via `POST /orders/batch_cancel`; `query_order` →
+  `GET /orders/historical/{order_id}`; positions from the portfolio breakdown.
+  Map `OPEN`→New, `FILLED`→Filled, `CANCELLED`→Cancelled, partial via
+  `filled_size`.
+- Template: `alpaca.rs` (Broker shape) + `account/coinbase.rs` (host/product
+  conventions); signed-header pattern from `venues/kalshi.rs`. Register via
+  `ExecRouter::register`.
+- **Files:** `crates/execution/src/coinbase.rs`, `crates/execution/Cargo.toml`,
+  exec-router wiring.
+- **Verify:** Coinbase **sandbox** order submit/query/cancel round-trip;
+  idempotency on retry (query-not-resubmit per the Broker contract,
+  `broker.rs:70-71`). **Gated by a `/security-review` before live keys.** Respect
+  Coinbase private-endpoint rate limits (~30 req/s).
 
 ---
 
 ## Definition of Done
 Tradier and Tradovate account state queries return real balances/positions/
 transactions (no `NotImplemented`); paper DEX fills use real 0x indicative
-quotes with correct token decimals; the `NotImplemented` sentinel is retired or
-consciously retained. 0x on-chain execution and Coinbase live trading remain
-explicitly deferred with their blockers recorded.
+quotes with correct token decimals; the 0x adapter executes real on-chain swaps
+with receipt-polled status; and the Coinbase live broker round-trips orders on
+sandbox. The `NotImplemented` sentinel is retired or consciously retained. Both
+real-money paths (3.4, 3.5) pass a key-handling `/security-review` before any
+live/mainnet keys are enabled.

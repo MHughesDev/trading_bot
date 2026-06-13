@@ -1,16 +1,16 @@
 //! Discovery tools: `list_lanes` and `list_instruments`.
 //!
-//! Returns static metadata about available data lanes and instruments.
-//! In production these would query the platform; in Phase 5 they return
-//! representative static data so an agent can reason about what is available.
+//! `list_lanes` returns canonical lane names from domain constants.
+//! `list_instruments` queries the live Postgres `instruments` table; the
+//! caller must supply a `PgPool` obtained from the environment's `DATABASE_URL`.
 
+use domain::lanes::ALL_LANES;
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LaneInfo {
     pub lane: String,
-    pub description: String,
-    pub example_instruments: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -20,52 +20,61 @@ pub struct InstrumentInfo {
     pub venue_id: String,
     pub tick_size: String,
     pub trust_tier: String,
+    pub active: bool,
 }
 
-/// `list_lanes` — return available data lanes.
+/// `list_lanes` — return canonical data lanes from the shared domain constant.
 pub fn list_lanes() -> Vec<LaneInfo> {
-    vec![
-        LaneInfo {
-            lane: "market.bars.1m".into(),
-            description: "1-minute OHLCV bars for a given instrument".into(),
-            example_instruments: vec!["BTC-USDT".into(), "ETH-USDT".into()],
-        },
-        LaneInfo {
-            lane: "features.technical".into(),
-            description: "Technical indicator feature values (EMA, RSI, …)".into(),
-            example_instruments: vec!["BTC-USDT".into(), "ETH-USDT".into()],
-        },
-    ]
+    ALL_LANES
+        .iter()
+        .map(|&lane| LaneInfo { lane: lane.to_owned() })
+        .collect()
 }
 
-/// `list_instruments` — return instruments, optionally filtered by `asset_class`.
-pub fn list_instruments(asset_class: Option<&str>) -> Vec<InstrumentInfo> {
-    let all = vec![
-        InstrumentInfo {
-            instrument_id: "BTC-USDT".into(),
-            asset_class: "crypto_spot_cex".into(),
-            venue_id: "binance".into(),
-            tick_size: "0.01".into(),
-            trust_tier: "centralized_exchange".into(),
-        },
-        InstrumentInfo {
-            instrument_id: "ETH-USDT".into(),
-            asset_class: "crypto_spot_cex".into(),
-            venue_id: "binance".into(),
-            tick_size: "0.01".into(),
-            trust_tier: "centralized_exchange".into(),
-        },
-        InstrumentInfo {
-            instrument_id: "SOL-USDT".into(),
-            asset_class: "crypto_spot_cex".into(),
-            venue_id: "binance".into(),
-            tick_size: "0.001".into(),
-            trust_tier: "centralized_exchange".into(),
-        },
-    ];
+/// `list_instruments` — query the Postgres `instruments` table.
+/// Returns an empty list (with a tracing warning) when the DB is unavailable.
+pub async fn list_instruments(pg: &PgPool, asset_class: Option<&str>) -> Vec<InstrumentInfo> {
+    let rows: Result<Vec<(String, String, String, String, String, bool)>, _> = match asset_class {
+        None => {
+            sqlx::query_as(
+                "SELECT instrument_id, asset_class, venue_id, \
+                        tick_size::TEXT, trust_tier, active \
+                 FROM instruments ORDER BY instrument_id",
+            )
+            .fetch_all(pg)
+            .await
+        }
+        Some(ac) => {
+            sqlx::query_as(
+                "SELECT instrument_id, asset_class, venue_id, \
+                        tick_size::TEXT, trust_tier, active \
+                 FROM instruments WHERE asset_class = $1 ORDER BY instrument_id",
+            )
+            .bind(ac)
+            .fetch_all(pg)
+            .await
+        }
+    };
 
-    match asset_class {
-        None => all,
-        Some(ac) => all.into_iter().filter(|i| i.asset_class == ac).collect(),
+    match rows {
+        Ok(rs) => rs
+            .into_iter()
+            .map(
+                |(instrument_id, asset_class, venue_id, tick_size, trust_tier, active)| {
+                    InstrumentInfo {
+                        instrument_id,
+                        asset_class,
+                        venue_id,
+                        tick_size,
+                        trust_tier,
+                        active,
+                    }
+                },
+            )
+            .collect(),
+        Err(e) => {
+            tracing::warn!(error = %e, "list_instruments: DB query failed; returning empty list");
+            vec![]
+        }
     }
 }
