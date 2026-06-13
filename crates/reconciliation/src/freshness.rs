@@ -248,7 +248,15 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 6, 8, 12, 0, 0).unwrap();
         let last = now - Duration::seconds(120);
         // Should not panic; may trip or not depending on UTC time
-        let _ = check_freshness("AAPL", "market.trades", last, now, &bad_tz_schedule(), 60, &ks);
+        let _ = check_freshness(
+            "AAPL",
+            "market.trades",
+            last,
+            now,
+            &bad_tz_schedule(),
+            60,
+            &ks,
+        );
     }
 
     /// Midnight-crossing FX session (e.g. 22:00–06:00): a time inside the

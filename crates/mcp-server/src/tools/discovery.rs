@@ -27,14 +27,19 @@ pub struct InstrumentInfo {
 pub fn list_lanes() -> Vec<LaneInfo> {
     ALL_LANES
         .iter()
-        .map(|&lane| LaneInfo { lane: lane.to_owned() })
+        .map(|&lane| LaneInfo {
+            lane: lane.to_owned(),
+        })
         .collect()
 }
+
+/// Raw row returned by the instruments query.
+type InstrumentRow = (String, String, String, String, String, bool);
 
 /// `list_instruments` — query the Postgres `instruments` table.
 /// Returns an empty list (with a tracing warning) when the DB is unavailable.
 pub async fn list_instruments(pg: &PgPool, asset_class: Option<&str>) -> Vec<InstrumentInfo> {
-    let rows: Result<Vec<(String, String, String, String, String, bool)>, _> = match asset_class {
+    let rows: Result<Vec<InstrumentRow>, _> = match asset_class {
         None => {
             sqlx::query_as(
                 "SELECT instrument_id, asset_class, venue_id, \

@@ -14,6 +14,9 @@ use crate::broker::{Broker, BrokerError, BrokerOrderState, BrokerOrderStatus, Br
 
 pub const BASE_URL: &str = "https://api.0x.org";
 
+/// In-flight order metadata: (instrument_id, side, qty).
+type PendingEntry = (String, Side, Decimal);
+
 pub struct ZeroXBroker {
     client: Client,
     api_key: String,
@@ -22,7 +25,7 @@ pub struct ZeroXBroker {
     token_decimals: HashMap<String, u32>,
     /// Submitted orders: broker_order_id → (instrument_id, side, qty).
     /// Populated by `submit`; read by `query_order` until on-chain poll (task 3.4).
-    pending: Arc<Mutex<HashMap<String, (String, Side, Decimal)>>>,
+    pending: Arc<Mutex<HashMap<String, PendingEntry>>>,
 }
 
 impl ZeroXBroker {
@@ -128,7 +131,11 @@ impl Broker for ZeroXBroker {
         if let Ok(mut map) = self.pending.lock() {
             map.insert(
                 broker_id.clone(),
-                (order.intent.instrument_id.clone(), order.intent.side, order.intent.size.inner()),
+                (
+                    order.intent.instrument_id.clone(),
+                    order.intent.side,
+                    order.intent.size.inner(),
+                ),
             );
         }
         Ok(broker_id)

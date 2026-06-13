@@ -48,7 +48,9 @@ impl McpContext {
                 }
             },
             Err(_) => {
-                tracing::info!("MCP: DATABASE_URL not set; discovery will return empty instrument list");
+                tracing::info!(
+                    "MCP: DATABASE_URL not set; discovery will return empty instrument list"
+                );
                 None
             }
         };
