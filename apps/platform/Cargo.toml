@@ -15,6 +15,7 @@ strategy-runtime = { workspace = true }
 storage = { workspace = true }
 ui-gateway = { workspace = true }
 demand-manager = { workspace = true }
+backtest = { workspace = true }
 event-bus = { workspace = true }
 collectors = { workspace = true }
 async-nats = { workspace = true }

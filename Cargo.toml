@@ -17,6 +17,7 @@ members = [
     "crates/demand-manager",
     "crates/venue-router",
     "crates/ui-gateway",
+    "crates/backtest",
     "crates/api",
     "crates/mcp-server",
     "crates/graph",
@@ -117,6 +118,7 @@ strategy-validator = { path = "crates/strategy-validator" }
 demand-manager = { path = "crates/demand-manager" }
 venue-router = { path = "crates/venue-router" }
 ui-gateway = { path = "crates/ui-gateway" }
+backtest = { path = "crates/backtest" }
 api = { path = "crates/api" }
 mcp-server-lib = { path = "crates/mcp-server" }
 graph = { path = "crates/graph" }

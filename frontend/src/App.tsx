@@ -9,6 +9,7 @@ import { DashboardPage } from '@/pages/DashboardPage'
 import { TradingPage } from '@/pages/TradingPage'
 import { AutomationsPage } from '@/pages/AutomationsPage'
 import { StrategyCreationPage } from '@/pages/StrategyCreationPage'
+import { BackTestingPage } from '@/pages/BackTestingPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 // Legacy routes kept for backwards-compat deep links.
 import { AssetPage } from '@/pages/AssetPage'
@@ -44,6 +45,7 @@ export default function App() {
               <Route path="/trading" element={<TradingPage />} />
               <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/strategy" element={<StrategyCreationPage />} />
+              <Route path="/backtesting" element={<BackTestingPage />} />
               <Route path="/settings" element={<SettingsPage />} />
 
               {/* Legacy / deep-link routes */}

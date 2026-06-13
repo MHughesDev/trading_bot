@@ -141,6 +141,12 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => tracing::warn!(error = %e, "could not load armed automations at startup"),
     }
 
+    // Backtest orchestrator — owns simulation jobs and drives the
+    // market_simulator engine (used purely as an embedded SDK). Reads bars
+    // from this platform's ClickHouse store; the simulator owns no data.
+    let backtest_manager = backtest::BacktestManager::new(cfg.clickhouse.url.clone(), pg.clone());
+    info!("backtest orchestrator initialised (market_simulator SDK)");
+
     // Build the API router.
     let app_state = api::AppState::new(
         pg,
@@ -149,6 +155,7 @@ async fn main() -> anyhow::Result<()> {
         execution_engine,
         Arc::clone(&paper_engine),
         gateway,
+        backtest_manager,
     );
     let router = api::router(app_state);
 
