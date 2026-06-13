@@ -1,16 +1,9 @@
 // Typed client for the Back Testing API (Rust backend, /api/backtests).
-import axios from 'axios'
-
-// Dedicated instance: attaches the M-17 placeholder bearer token the Rust
-// API requires (any non-empty token, loopback only) — same convention as
-// lib/api.ts.
-const client = axios.create({ baseURL: '/', withCredentials: true })
-client.interceptors.request.use((config) => {
-  if (!config.headers.Authorization) {
-    config.headers.Authorization = 'Bearer dev-local'
-  }
-  return config
-})
+//
+// Uses the single shared `api` instance from lib/api so there is one
+// token-attaching client and one 401 interceptor across the app, rather than a
+// per-feature axios instance (#27).
+import { api as client } from '@/lib/api'
 
 export type BacktestStatus =
   | 'queued'
@@ -86,9 +79,16 @@ export interface CreateBacktestRequest {
   auto_collect: boolean
 }
 
+export interface BacktestListPage {
+  backtests: BacktestSnapshot[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export const backtestsApi = {
-  list: () =>
-    client.get<{ backtests: BacktestSnapshot[] }>('/api/backtests'),
+  list: (params?: { limit?: number; offset?: number }) =>
+    client.get<BacktestListPage>('/api/backtests', { params }),
   get: (id: string) => client.get<BacktestSnapshot>(`/api/backtests/${id}`),
   create: (req: CreateBacktestRequest) =>
     client.post<{ id: string }>('/api/backtests', req),

@@ -32,6 +32,13 @@ async fn main() -> anyhow::Result<()> {
 
     info!("postgres connected");
 
+    // Apply pending schema migrations on boot so a fresh database is always at
+    // the current schema (backtest_runs, etc.) without a manual step (#20).
+    storage::postgres::run_migrations(&pg)
+        .await
+        .context("failed to apply database migrations")?;
+    info!("database migrations applied");
+
     // Load kill switch state from Postgres (trading_enabled column).
     let initially_halted = load_kill_switch_state(&pg).await;
     let kill_switch = Arc::new(risk::KillSwitch::new(initially_halted));

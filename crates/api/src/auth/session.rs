@@ -15,6 +15,21 @@ use axum::{
 #[derive(Debug, Clone)]
 pub struct BearerToken(pub String);
 
+impl BearerToken {
+    /// A stable per-token user identity.
+    ///
+    /// Until real session validation lands (the M-17 upgrade), the token *is*
+    /// the identity: the same token always maps to the same `user_id` and two
+    /// different tokens map to two different ids.  That is enough to scope
+    /// resources (e.g. backtests) to their creator and stop cross-user
+    /// visibility/control.  Derived as a UUIDv5 so it is deterministic and
+    /// carries no secret material.
+    #[must_use]
+    pub fn user_id(&self) -> uuid::Uuid {
+        uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, self.0.as_bytes())
+    }
+}
+
 #[derive(Debug)]
 pub struct Unauthorized;
 

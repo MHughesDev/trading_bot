@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useEffect } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import {
   ReactFlow, Background, BackgroundVariant, Controls,
@@ -8,7 +8,7 @@ import type { Node, Edge, NodeTypes, Connection, NodeMouseHandler } from '@xyflo
 import '@xyflow/react/dist/style.css'
 import { api } from '@/lib/api'
 import { compile } from '@/utils/compiler'
-import type { SavedStrategy } from '@/types/spec'
+import { ruleSpecToDefinition } from '@/utils/toDefinition'
 import {
   IndicatorNode, ConditionNode, AIForecastNode, LogicNode, ActionNode, SizeNode, ExitNode,
 } from '@/nodes'
@@ -66,36 +66,51 @@ function Canvas() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [savedLabel, setSavedLabel] = useState('')
   const [menu, setMenu] = useState<NodeMenuState | null>(null)
-  const [valid, setValid] = useState(false)
   const [saving, setSaving] = useState(false)
   const { screenToFlowPosition } = useReactFlow()
 
-  useEffect(() => {
+  // Live validity, derived during render: the graph compiles to a rule spec AND
+  // that spec converts to a canonical v1.0 definition with no errors.  Validation
+  // is client-side; the Rust validator runs again on save and is the source of
+  // truth.
+  const valid = useMemo(() => {
     const active = activeGraph(nodes, edges)
     const { spec, errors: errs } = compile(active.nodes, active.edges, name)
-    if (errs.length > 0 || !spec) { setValid(false); return }
-    const t = setTimeout(async () => {
-      try {
-        const r = await api.post<{ valid: boolean }>('/strategies/custom/preview', spec)
-        setValid(r.data.valid ?? false)
-      } catch { setValid(false) }
-    }, 500)
-    return () => clearTimeout(t)
+    if (errs.length > 0 || !spec) return false
+    const { definition, errors: convErrs } = ruleSpecToDefinition(spec)
+    return !!definition && convErrs.length === 0
   }, [nodes, edges, name])
 
   async function handleSave() {
     const active = activeGraph(nodes, edges)
     const { spec, errors: errs } = compile(active.nodes, active.edges, name)
     if (!spec || errs.length > 0) return
+    const { definition, errors: convErrs, warnings } = ruleSpecToDefinition(spec)
+    if (!definition || convErrs.length > 0) {
+      setSavedLabel(convErrs[0] ?? 'Could not convert strategy')
+      setTimeout(() => setSavedLabel(''), 5000)
+      return
+    }
     setSaving(true)
     try {
-      const r = editingId
-        ? await api.put<SavedStrategy>(`/strategies/custom/${editingId}`, spec)
-        : await api.post<SavedStrategy>('/strategies/custom', spec)
+      // Persist the canonical definition to the Rust strategy store so it is
+      // available to the runtime, the MCP server, and the backtest picker
+      // (one canonical surface — ADR-0010).
+      const r = await api.post<{ id: string; strategy_id: string }>(
+        '/api/strategies',
+        definition,
+      )
       setEditingId(r.data.id)
-      setSavedLabel(`"${r.data.name}" saved`)
-      setTimeout(() => setSavedLabel(''), 3000)
-    } catch { /* no-op */ } finally { setSaving(false) }
+      const note = warnings.length > 0 ? ` (${warnings.length} note${warnings.length > 1 ? 's' : ''})` : ''
+      setSavedLabel(`"${definition.strategy_id}" saved${note}`)
+      setTimeout(() => setSavedLabel(''), 4000)
+    } catch (e) {
+      const msg =
+        (e as { response?: { data?: { errors?: Array<{ message?: string }> } } })?.response?.data
+          ?.errors?.[0]?.message ?? 'Save failed'
+      setSavedLabel(msg)
+      setTimeout(() => setSavedLabel(''), 5000)
+    } finally { setSaving(false) }
   }
 
   const onConnect = useCallback(

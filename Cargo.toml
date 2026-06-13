@@ -59,8 +59,8 @@ rust_decimal = { version = "1", features = ["serde-with-str", "db-postgres"] }
 rust_decimal_macros = "1"
 
 # databases / cache
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "rust_decimal"] }
-clickhouse = "0.13"
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "rust_decimal", "migrate"] }
+clickhouse = { version = "0.13", features = ["uuid"] }
 redis = { version = "0.29", features = ["aio", "tokio-comp"] }
 
 # event fabric
@@ -123,6 +123,31 @@ api = { path = "crates/api" }
 mcp-server-lib = { path = "crates/mcp-server" }
 graph = { path = "crates/graph" }
 semantic = { path = "crates/semantic" }
+
+# ── market_simulator SDK (external, pinned git dependency) ───────────────────
+# The backtesting engine lives in its own repository and is consumed only
+# through its frozen `sdk` surface (see crates/backtest).  All three crates are
+# pinned to a single git revision so Cargo resolves one unified copy — pinning
+# different revs would build two incompatible nautilus trees.
+#
+# The rev below is the SDK commit on market_simulator
+# (`Add embeddable bar-simulation SDK for external host applications`).  When an
+# `sdk-vX.Y.Z` tag is published on market_simulator, swap `rev = "…"` for
+# `tag = "sdk-vX.Y.Z"` here in this one place.
+nautilus-backtest = { git = "https://github.com/MHughesDev/market_simulator", rev = "f915b050cc6a4284b5a6f6e327a46cd926714df4" }
+nautilus-model = { git = "https://github.com/MHughesDev/market_simulator", rev = "f915b050cc6a4284b5a6f6e327a46cd926714df4" }
+nautilus-core = { git = "https://github.com/MHughesDev/market_simulator", rev = "f915b050cc6a4284b5a6f6e327a46cd926714df4" }
+
+# ── Local dual-development of trading_bot + market_simulator ──────────────────
+# To hack on both repos at once, clone market_simulator beside trading_bot and
+# uncomment the patch below; Cargo will then build the SDK from your local
+# checkout without touching the pinned `rev` above.  Keep this commented in CI
+# and on `main` so builds stay reproducible.
+#
+# [patch."https://github.com/MHughesDev/market_simulator"]
+# nautilus-backtest = { path = "../market_simulator/crates/backtest" }
+# nautilus-model    = { path = "../market_simulator/crates/model" }
+# nautilus-core     = { path = "../market_simulator/crates/core" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

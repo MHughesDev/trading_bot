@@ -1,6 +1,6 @@
 # Phase 0 — Decouple the Repos
 
-**Completion: 0% (0 / 8 tasks complete)**
+**Completion: 75% (6 / 8 — 0.3–0.8 done; 0.1 freeze + 0.2 tag are market_simulator-repo actions, substituted here by pinning an immutable git `rev` + ADR-0014)**
 
 **Goal:** `market_simulator` becomes a standalone GitHub repository that
 `trading_bot` consumes as a **pinned git dependency** through the frozen `sdk`
@@ -25,7 +25,7 @@ The `sdk` module is the only surface consumers may touch; make that explicit.
 - Record tag ↔ commit in the simulator PR body.
 - **Verify:** `git ls-remote --tags origin` shows `sdk-v0.1.0`.
 
-### ☐ 0.3 Centralize the nautilus deps on one git source — M
+### ☑ 0.3 Centralize the nautilus deps on one git source — M
 A single source/rev keeps the three crates unified (no duplicate builds).
 - In `trading_bot/Cargo.toml` `[workspace.dependencies]`:
   ```toml
@@ -40,12 +40,12 @@ A single source/rev keeps the three crates unified (no duplicate builds).
   git rev or Cargo builds two copies. The shared tag guarantees unification.
 - **Repo:** trading_bot. **Files:** `Cargo.toml`, `crates/backtest/Cargo.toml`.
 
-### ☐ 0.4 Pin the toolchain in-repo — S
+### ☑ 0.4 Pin the toolchain in-repo — S
 - Set `trading_bot/rust-toolchain.toml` to `channel = "1.96.0"` (match the
   simulator MSRV at the pinned tag) so CI/fresh checkouts don't drift.
 - **Files:** `rust-toolchain.toml`.
 
-### ☐ 0.5 Make the build fetch the private repo — M
+### ☑ 0.5 Make the build fetch the private repo — M
 - Configure cargo git auth for this environment: `CARGO_NET_GIT_FETCH_WITH_CLI=true`
   plus the existing git proxy/credentials, or a `.cargo/config.toml` `[source]`
   replacement pointing the GitHub URL at the proxy.
@@ -53,20 +53,20 @@ A single source/rev keeps the three crates unified (no duplicate builds).
 - **Files:** `.cargo/config.toml`, SessionStart hook.
 - **Verify:** clean fetch into a fresh `target/`.
 
-### ☐ 0.6 Prove independence — S
+### ☑ 0.6 Prove independence — S
 - Temporarily rename `/home/user/market_simulator` → `_msim_hidden`, then
   `cargo build -p platform` (must build purely from the git dep).
 - Commit `Cargo.lock`.
 - **Verify:** `cargo build -p platform` green with the sibling dir gone;
   `cargo test -p backtest`.
 
-### ☐ 0.7 Document the local dual-dev workflow — S
+### ☑ 0.7 Document the local dual-dev workflow — S
 - Add a commented `[patch."https://github.com/MHughesDev/market_simulator"]`
   example in `trading_bot/Cargo.toml` so a dev hacking on both can point back to
   a local path without editing the real deps.
 - Note it in `crates/backtest` module docs / README.
 
-### ☐ 0.8 Reconcile scope + write the ADR — S
+### ☑ 0.8 Reconcile scope + write the ADR — S
 - Backtesting was deliberately removed on 2026-06-10. Confirm re-introduction is
   intended; write an ADR recording the decision and the "simulator-as-SDK, owns
   no data" boundary. Note the manual-migration requirement here too (→ 2.3).

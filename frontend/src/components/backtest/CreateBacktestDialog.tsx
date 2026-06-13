@@ -21,15 +21,23 @@ import {
 import { backtestsApi, strategyPickerApi, type CreateBacktestRequest } from '@/api/backtests'
 import { toast } from '@/hooks/useToast'
 
+// `collect` marks which asset classes have an automated historical collector
+// (crypto via Binance, equities/ETFs via Alpaca).  Classes without one can
+// still be backtested, but only against data already in storage — the
+// auto-collect option is disabled and labelled for them (#15).
 const ASSET_CLASSES = [
-  { value: 'crypto_spot_cex', label: 'Crypto (spot, CEX)' },
-  { value: 'perpetual_swap', label: 'Crypto perpetual swap' },
-  { value: 'equity', label: 'Equity' },
-  { value: 'etf', label: 'ETF' },
-  { value: 'fx', label: 'FX' },
-  { value: 'futures_expiring', label: 'Futures' },
-  { value: 'option', label: 'Option' },
+  { value: 'crypto_spot_cex', label: 'Crypto (spot, CEX)', collect: true },
+  { value: 'perpetual_swap', label: 'Crypto perpetual swap', collect: true },
+  { value: 'equity', label: 'Equity', collect: true },
+  { value: 'etf', label: 'ETF', collect: true },
+  { value: 'fx', label: 'FX (no auto-collect)', collect: false },
+  { value: 'futures_expiring', label: 'Futures (no auto-collect)', collect: false },
+  { value: 'option', label: 'Option (no auto-collect)', collect: false },
 ]
+
+function supportsCollect(assetClass: string): boolean {
+  return ASSET_CLASSES.find((a) => a.value === assetClass)?.collect ?? false
+}
 
 const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
 
@@ -40,6 +48,7 @@ const DURATIONS = [
   { value: '180', label: '6 months' },
   { value: '365', label: '1 year' },
   { value: '730', label: '2 years' },
+  { value: 'custom', label: 'Custom range…' },
 ]
 
 function isoDaysAgo(days: number): string {
@@ -47,6 +56,18 @@ function isoDaysAgo(days: number): string {
   d.setUTCDate(d.getUTCDate() - days)
   d.setUTCHours(0, 0, 0, 0)
   return d.toISOString()
+}
+
+/** Parses a `yyyy-mm-dd` date input as a UTC midnight ISO timestamp. */
+function isoFromDateInput(value: string): string | null {
+  if (!value) return null
+  const d = new Date(`${value}T00:00:00.000Z`)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString()
+}
+
+/** `yyyy-mm-dd` for `days` ago (UTC), for date-input defaults. */
+function dateInputDaysAgo(days: number): string {
+  return isoDaysAgo(days).slice(0, 10)
 }
 
 export function CreateBacktestDialog({
@@ -64,9 +85,14 @@ export function CreateBacktestDialog({
   const [instrument, setInstrument] = useState('BTC-USDT')
   const [timeframe, setTimeframe] = useState('1h')
   const [durationDays, setDurationDays] = useState('90')
+  const [customStart, setCustomStart] = useState(dateInputDaysAgo(90))
+  const [customEnd, setCustomEnd] = useState(dateInputDaysAgo(0))
   const [balance, setBalance] = useState('100000')
   const [quote, setQuote] = useState('USD')
   const [autoCollect, setAutoCollect] = useState(true)
+
+  const canAutoCollect = supportsCollect(assetClass)
+  const effectiveAutoCollect = canAutoCollect && autoCollect
 
   const { data: strategies } = useQuery({
     queryKey: ['backtest-strategy-picker'],
@@ -101,7 +127,23 @@ export function CreateBacktestDialog({
       toast({ title: 'Enter an instrument', variant: 'error' })
       return
     }
-    const days = Number(durationDays)
+
+    let start: string
+    let end: string
+    if (durationDays === 'custom') {
+      const s = isoFromDateInput(customStart)
+      const e = isoFromDateInput(customEnd)
+      if (!s || !e || s >= e) {
+        toast({ title: 'Pick a valid start and end date', variant: 'error' })
+        return
+      }
+      start = s
+      end = e
+    } else {
+      start = isoDaysAgo(Number(durationDays))
+      end = isoDaysAgo(0)
+    }
+
     create.mutate({
       name: name.trim() || undefined,
       strategy_ref: strategyRef,
@@ -109,11 +151,11 @@ export function CreateBacktestDialog({
       // venue_id omitted — the backend picks a sensible default per asset class.
       asset_class: assetClass,
       timeframe,
-      start: isoDaysAgo(days),
-      end: isoDaysAgo(0),
+      start,
+      end,
       initial_balance: balance.trim() || '100000',
       quote_currency: quote.trim() || 'USD',
-      auto_collect: autoCollect,
+      auto_collect: effectiveAutoCollect,
     })
   }
 
@@ -207,6 +249,29 @@ export function CreateBacktestDialog({
             </Select>
           </div>
 
+          {durationDays === 'custom' && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label>Start date (UTC)</Label>
+                <Input
+                  type="date"
+                  value={customStart}
+                  max={customEnd}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>End date (UTC)</Label>
+                <Input
+                  type="date"
+                  value={customEnd}
+                  min={customStart}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+
           <div className="flex flex-col gap-1.5">
             <Label>Starting balance</Label>
             <Input
@@ -233,12 +298,19 @@ export function CreateBacktestDialog({
           <label className="col-span-2 flex items-center gap-2 text-sm text-text-muted">
             <input
               type="checkbox"
-              checked={autoCollect}
+              checked={effectiveAutoCollect}
+              disabled={!canAutoCollect}
               onChange={(e) => setAutoCollect(e.target.checked)}
-              className="h-4 w-4 accent-blue-500"
+              className="h-4 w-4 accent-blue-500 disabled:opacity-50"
             />
             Automatically collect missing historical data before running
           </label>
+          {!canAutoCollect && (
+            <p className="col-span-2 -mt-2 text-xs text-text-dim">
+              No automated collector for this asset class — the run uses only
+              data already in storage.
+            </p>
+          )}
         </div>
 
         <div className="mt-6 flex justify-end gap-2">

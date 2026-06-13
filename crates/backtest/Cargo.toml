@@ -6,13 +6,11 @@ edition = "2021"
 # Backtesting orchestrator — connects the trading bot to the market_simulator
 # engine (NautilusTrader fork) used strictly as an embedded SDK.
 #
-# IMPORTANT: the nautilus-* dependencies are path dependencies on a sibling
-# checkout of MHughesDev/market_simulator.  Clone both repositories next to
-# each other:
-#
-#   workspace/
-#     trading_bot/
-#     market_simulator/
+# The nautilus-* dependencies are pinned git dependencies on the standalone
+# MHughesDev/market_simulator repository (see the root Cargo.toml
+# `[workspace.dependencies]`).  There is no sibling-checkout requirement; a
+# fresh `trading_bot` clone builds purely from the pinned revision.  To develop
+# both repos together, see the commented `[patch]` block in the root manifest.
 #
 # The simulator never owns data: bars are loaded from this platform's
 # ClickHouse store, handed to the engine in memory, and dropped when the
@@ -22,6 +20,7 @@ edition = "2021"
 domain = { workspace = true }
 features = { workspace = true }
 strategy-runtime = { workspace = true }
+storage = { workspace = true }
 
 anyhow = { workspace = true }
 thiserror = { workspace = true }
@@ -36,10 +35,14 @@ clickhouse = { workspace = true }
 reqwest = { workspace = true }
 sqlx = { workspace = true }
 
-# Market simulator SDK (sibling checkout — see header note).
-nautilus-backtest = { path = "../../../market_simulator/crates/backtest" }
-nautilus-model = { path = "../../../market_simulator/crates/model" }
-nautilus-core = { path = "../../../market_simulator/crates/core" }
+# Market simulator SDK — pinned git dependency on the standalone repo, consumed
+# only through its frozen `sdk` surface (see the root `[workspace.dependencies]`).
+nautilus-backtest = { workspace = true }
+nautilus-model = { workspace = true }
+nautilus-core = { workspace = true }
 
 [dev-dependencies]
 rust_decimal_macros = { workspace = true }
+
+[lints]
+workspace = true

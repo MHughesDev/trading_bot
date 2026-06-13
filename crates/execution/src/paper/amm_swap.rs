@@ -52,9 +52,9 @@ pub struct AmmQuoteSwapSimulator {
 impl Default for AmmQuoteSwapSimulator {
     fn default() -> Self {
         Self {
-            price_impact_bps: dec!(30),  // 0.3% impact — mid-size Uniswap v2 swap
-            protocol_fee_bps: dec!(30),  // Uniswap v2 standard 0.3% pool fee
-            flat_fee: dec!(2),           // ~$2 gas (Ethereum moderate congestion)
+            price_impact_bps: dec!(30), // 0.3% impact — mid-size Uniswap v2 swap
+            protocol_fee_bps: dec!(30), // Uniswap v2 standard 0.3% pool fee
+            flat_fee: dec!(2),          // ~$2 gas (Ethereum moderate congestion)
         }
     }
 }

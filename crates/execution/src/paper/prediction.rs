@@ -31,7 +31,7 @@ pub struct PredictionMarketFillSimulator {
 impl Default for PredictionMarketFillSimulator {
     fn default() -> Self {
         Self {
-            fee_coefficient: dec!(0.07),  // Kalshi general schedule
+            fee_coefficient: dec!(0.07),   // Kalshi general schedule
             half_spread_cents: dec!(0.01), // 1-cent half-spread = 2-cent-wide market
         }
     }
@@ -72,7 +72,11 @@ impl PaperFillSimulator for PredictionMarketFillSimulator {
                     };
                     (
                         Price::from_decimal(p),
-                        if fills { intent.size.inner() } else { Decimal::ZERO },
+                        if fills {
+                            intent.size.inner()
+                        } else {
+                            Decimal::ZERO
+                        },
                     )
                 } else {
                     // No limit price — treat as market.

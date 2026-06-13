@@ -21,3 +21,12 @@ pub async fn connect(database_url: &str) -> Result<PgPool, PgError> {
         .connect(database_url)
         .await?)
 }
+
+/// Applies all pending SQL migrations from the repo `migrations/` directory.
+///
+/// Embedded at compile time and run on startup so a fresh database always has
+/// the current schema (e.g. `backtest_runs`) without a manual migration step
+/// (#20).  Idempotent: already-applied migrations are skipped.
+pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+    sqlx::migrate!("../../migrations").run(pool).await
+}

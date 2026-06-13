@@ -1,6 +1,6 @@
 # Phase 3 — Simulation Fidelity
 
-**Completion: 0% (0 / 5 tasks complete)**
+**Completion: 40% (2 / 5 — 3.2, 3.4 done; 3.1/3.3/3.5 deferred & documented in FEAT-002 §6)**
 
 **Goal:** Bring backtest behavior closer to live, and fix the fidelity-affecting
 heuristics. **Addresses:** #4, #5, #6, #7, #9, #14
@@ -19,7 +19,7 @@ heuristics. **Addresses:** #4, #5, #6, #7, #9, #14
 - **Verify:** a run asserting stored vs recomputed values match on overlapping
   bars.
 
-### ☐ 3.2 Fix the gap-merge over-reach — S
+### ☑ 3.2 Fix the gap-merge over-reach — S
 **Addresses #14.** On continuous markets, two missing days separated by a
 *present* day can merge and swallow the present day into the reported range.
 - In `gaps::merge_days`, only merge across genuinely non-trading days; don't
@@ -34,7 +34,7 @@ heuristics. **Addresses:** #4, #5, #6, #7, #9, #14
 - **Files:** `crates/backtest/src/store.rs`, `sim.rs`; SDK may need a quote/trade
   intake helper (market_simulator `sdk.rs`).
 
-### ☐ 3.4 Validate warm-up empirically — M
+### ☑ 3.4 Validate warm-up empirically — M
 **Addresses #9.**
 - Replace the 5×period / period+1 / floor-30 heuristics with measured indicator
   convergence (or expose them as config) and document the rationale.

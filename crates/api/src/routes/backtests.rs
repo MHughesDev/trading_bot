@@ -6,15 +6,16 @@
 //! strategy definition and translate manager results into HTTP responses.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
+use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
-use backtest::{BacktestRequest, ResolvedSpec, TimeframeExt};
+use backtest::{BacktestRequest, CollectorPlan, ResolvedSpec, TimeframeExt};
 use domain::payloads::bar::Timeframe;
 use domain::strategy_def::StrategyDefinition;
 use strategy_validator::validate;
@@ -40,7 +41,7 @@ fn timeframe_from_key(key: &str) -> Option<Timeframe> {
 /// POST /api/backtests — create and start a backtest run.
 pub async fn create_backtest(
     State(state): State<AppState>,
-    _token: BearerToken,
+    token: BearerToken,
     Json(req): Json<BacktestRequest>,
 ) -> impl IntoResponse {
     // Resolve the strategy definition: inline body or stored UUID.
@@ -93,6 +94,19 @@ pub async fn create_backtest(
             .into_response();
     };
 
+    // When auto-collect is on, reject asset-class/timeframe combinations that
+    // have no collector up front (422) rather than letting the job fail later
+    // in the CollectingData phase (#15).
+    if req.auto_collect {
+        if let Err(message) = CollectorPlan::auto_collect_support(&req.asset_class, timeframe) {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": "unsupported_auto_collect", "message": message })),
+            )
+                .into_response();
+        }
+    }
+
     let venue_id = req
         .venue_id
         .clone()
@@ -118,7 +132,7 @@ pub async fn create_backtest(
         auto_collect: req.auto_collect,
     };
 
-    match state.backtest.create(spec).await {
+    match state.backtest.create(token.user_id(), spec).await {
         Ok(id) => (StatusCode::CREATED, Json(json!({ "id": id }))).into_response(),
         Err(e) => (
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -128,19 +142,49 @@ pub async fn create_backtest(
     }
 }
 
-/// GET /api/backtests — list all runs as tiles (newest first).
-pub async fn list_backtests(State(state): State<AppState>, _token: BearerToken) -> impl IntoResponse {
-    let runs = state.backtest.list().await;
-    Json(json!({ "backtests": runs }))
+/// Pagination for the list endpoint.
+#[derive(Debug, Deserialize)]
+pub struct ListParams {
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    offset: Option<usize>,
+}
+
+/// Largest page the list endpoint will return in one response.
+const MAX_LIST_LIMIT: usize = 100;
+const DEFAULT_LIST_LIMIT: usize = 50;
+
+/// GET /api/backtests — list this user's runs as tiles (newest first), paged.
+pub async fn list_backtests(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Query(params): Query<ListParams>,
+) -> impl IntoResponse {
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_LIST_LIMIT)
+        .clamp(1, MAX_LIST_LIMIT);
+    let offset = params.offset.unwrap_or(0);
+
+    let all = state.backtest.list(token.user_id()).await;
+    let total = all.len();
+    let page: Vec<_> = all.into_iter().skip(offset).take(limit).collect();
+    Json(json!({
+        "backtests": page,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }))
 }
 
 /// GET /api/backtests/:id — full snapshot for one run (progress, result, error).
 pub async fn get_backtest(
     State(state): State<AppState>,
-    _token: BearerToken,
+    token: BearerToken,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
-    match state.backtest.get(id).await {
+    match state.backtest.get(token.user_id(), id).await {
         Some(snap) => Json(snap).into_response(),
         None => (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response(),
     }
@@ -149,19 +193,19 @@ pub async fn get_backtest(
 /// POST /api/backtests/:id/stop — request cancellation of a running job.
 pub async fn stop_backtest(
     State(state): State<AppState>,
-    _token: BearerToken,
+    token: BearerToken,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
-    map_action(state.backtest.stop(id).await)
+    map_action(state.backtest.stop(token.user_id(), id).await)
 }
 
 /// POST /api/backtests/:id/rerun — start a fresh run with the same spec.
 pub async fn rerun_backtest(
     State(state): State<AppState>,
-    _token: BearerToken,
+    token: BearerToken,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
-    match state.backtest.rerun(id).await {
+    match state.backtest.rerun(token.user_id(), id).await {
         Ok(new_id) => (StatusCode::CREATED, Json(json!({ "id": new_id }))).into_response(),
         Err(e) => (
             StatusCode::BAD_REQUEST,
@@ -174,10 +218,10 @@ pub async fn rerun_backtest(
 /// DELETE /api/backtests/:id — remove a finished run.
 pub async fn delete_backtest(
     State(state): State<AppState>,
-    _token: BearerToken,
+    token: BearerToken,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
-    map_action(state.backtest.delete(id).await)
+    map_action(state.backtest.delete(token.user_id(), id).await)
 }
 
 fn map_action<E: std::fmt::Display>(result: Result<(), E>) -> axum::response::Response {
@@ -190,7 +234,11 @@ fn map_action<E: std::fmt::Display>(result: Result<(), E>) -> axum::response::Re
             } else {
                 StatusCode::CONFLICT
             };
-            (code, Json(json!({ "error": "action_failed", "message": msg }))).into_response()
+            (
+                code,
+                Json(json!({ "error": "action_failed", "message": msg })),
+            )
+                .into_response()
         }
     }
 }
