@@ -70,7 +70,6 @@ impl Default for SimulatorSet {
     }
 }
 
-
 impl SimulatorSet {
     /// Per-asset-class tuned simulators approximating real venue economics:
     /// - FX majors: sub-pip spreads, pip tick, no per-trade commission
@@ -151,8 +150,8 @@ impl SimulatorSet {
         broker_quote_overrides.insert(
             AssetClass::Bond,
             BrokerQuoteFillSimulator {
-                half_spread_bps: dec!(25),   // 25 bps — typical retail bond spread
-                commission_flat: dec!(1),    // $1/bond nominal commission
+                half_spread_bps: dec!(25), // 25 bps — typical retail bond spread
+                commission_flat: dec!(1),  // $1/bond nominal commission
                 ..BrokerQuoteFillSimulator::default()
             },
         );
@@ -164,9 +163,9 @@ impl SimulatorSet {
         amm_overrides.insert(
             AssetClass::Nft,
             AmmQuoteSwapSimulator {
-                price_impact_bps: dec!(50),    // 0.5% — floor price is volatile
-                protocol_fee_bps: dec!(250),   // 2.5% combined platform + royalty fees
-                flat_fee: dec!(0.005),         // 0.005 ETH gas per NFT transaction
+                price_impact_bps: dec!(50),  // 0.5% — floor price is volatile
+                protocol_fee_bps: dec!(250), // 2.5% combined platform + royalty fees
+                flat_fee: dec!(0.005),       // 0.005 ETH gas per NFT transaction
             },
         );
 

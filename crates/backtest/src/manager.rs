@@ -302,6 +302,7 @@ impl BacktestManager {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn drive_inner(self: &Arc<Self>, job: &Arc<Job>) -> Result<(), (BacktestStatus, String)> {
         let spec = &job.spec;
         let fail = |phase: BacktestStatus| move |e: anyhow::Error| (phase, e.to_string());
@@ -315,7 +316,8 @@ impl BacktestManager {
         let timeframe = requirements.timeframe;
         let schedule = ScheduleKind::for_asset_class(&spec.asset_class);
         let warmup_secs = requirements.warmup_bars * timeframe.seconds();
-        let data_from = spec.start - Duration::seconds(warmup_secs as i64);
+        let data_from =
+            spec.start - Duration::seconds(i64::try_from(warmup_secs).unwrap_or(i64::MAX));
 
         let store = BarStore::connect(&self.ch_url);
         let counts = store

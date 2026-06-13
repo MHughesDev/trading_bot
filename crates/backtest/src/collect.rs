@@ -278,7 +278,7 @@ async fn collect_binance(
     collected: &AtomicU64,
     cancel: &AtomicBool,
 ) -> anyhow::Result<u64> {
-    let tf_ms = (timeframe.seconds() * 1_000) as i64;
+    let tf_ms = i64::try_from(timeframe.seconds() * 1_000).unwrap_or(i64::MAX);
     let end_ms = range.to.timestamp_millis();
     let mut cursor_ms = range.from.timestamp_millis();
     let mut total = 0u64;
@@ -319,7 +319,7 @@ async fn collect_binance(
             };
             bars.push(CollectedBar {
                 available_time: ms_to_utc(open_ms + tf_ms),
-                sequence: open_ms as u64,
+                sequence: u64::try_from(open_ms).unwrap_or(0),
                 open: field(1)?,
                 high: field(2)?,
                 low: field(3)?,
@@ -362,7 +362,7 @@ async fn collect_alpaca(
     cancel: &AtomicBool,
 ) -> anyhow::Result<u64> {
     let interval = alpaca_interval(timeframe)?;
-    let tf_secs = timeframe.seconds() as i64;
+    let tf_secs = i64::try_from(timeframe.seconds()).unwrap_or(i64::MAX);
     let mut page_token: Option<String> = None;
     let mut total = 0u64;
 
@@ -376,7 +376,8 @@ async fn collect_alpaca(
             range.to.to_rfc3339(),
         );
         if let Some(token) = &page_token {
-            url.push_str(&format!("&page_token={token}"));
+            url.push_str("&page_token=");
+            url.push_str(token);
         }
         let body = fetch_json_with_retry(
             http,
@@ -406,7 +407,7 @@ async fn collect_alpaca(
             };
             bars.push(CollectedBar {
                 available_time: open_time + chrono::Duration::seconds(tf_secs),
-                sequence: open_time.timestamp_millis() as u64,
+                sequence: u64::try_from(open_time.timestamp_millis()).unwrap_or(0),
                 open: field("o")?,
                 high: field("h")?,
                 low: field("l")?,

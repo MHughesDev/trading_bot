@@ -111,6 +111,7 @@ fn timeframe_spec(tf: Timeframe) -> BarSpecification {
 ///
 /// Progress and cancellation are exposed through `control`, which the caller
 /// polls from async land while this runs.
+#[allow(clippy::needless_pass_by_value)] // caller hands off ownership of the bar buffer to the blocking task
 pub fn run_simulation(
     inputs: SimulationInputs,
     control: &Arc<SimulationControl>,
@@ -365,7 +366,7 @@ fn build_handler(
         let fired: HashSet<String> = fired.into_iter().collect();
 
         let mut commands = Vec::new();
-        let in_window = bar.ts_event.as_u64() as i64 >= sim_start_ns;
+        let in_window = i64::try_from(bar.ts_event.as_u64()).unwrap_or(i64::MAX) >= sim_start_ns;
         if in_window {
             for signal in fired.difference(&active_signals) {
                 for (on_signal, side, qty) in &order_specs {

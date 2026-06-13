@@ -137,6 +137,7 @@ pub fn expected_bars_per_day(timeframe: Timeframe, schedule: ScheduleKind) -> u6
 }
 
 /// Computes coverage for `[from, to)` given per-day bar counts from storage.
+#[allow(clippy::implicit_hasher)]
 pub fn analyze(
     from: DateTime<Utc>,
     to: DateTime<Utc>,
