@@ -24,13 +24,13 @@ items, each cross-referenced to the original concern number (`#n`).
 
 | Phase | File | Label | Tasks | Completion | Goal |
 |-------|------|-------|-------|------------|------|
-| 0 | [phase-0.md](phase-0.md) | Decouple the repos | 8 | 0% | market_simulator as a pinned git dependency; no sibling checkout |
-| 0-ALT | [phase-0-alt.md](phase-0-alt.md) | Out-of-process boundary | 4 | 0% | *(alternative)* full runtime/toolchain separation via JSON service |
-| 1 | [phase-1.md](phase-1.md) | Correctness & security | 5 | 0% | parameterized inserts, real precision, scoped auth, input validation |
-| 2 | [phase-2.md](phase-2.md) | Robustness & operations | 6 | 0% | timeouts/retries, concurrency cap, auto-migrate, holiday calendar |
+| 0 | [phase-0.md](phase-0.md) | Decouple the repos | 8 | 75% | market_simulator as a pinned git dependency; no sibling checkout |
+| 0-ALT | [phase-0-alt.md](phase-0-alt.md) | Out-of-process boundary | 4 | n/a | *(alternative to Phase 0 — not pursued)* full runtime/toolchain separation via JSON service |
+| 1 | [phase-1.md](phase-1.md) | Correctness & security | 5 | 100% | parameterized inserts, real precision, scoped auth, input validation |
+| 2 | [phase-2.md](phase-2.md) | Robustness & operations | 6 | 100% | timeouts/retries, concurrency cap, auto-migrate, holiday calendar |
 | 3 | [phase-3.md](phase-3.md) | Simulation fidelity | 5 | 60% | replay stored features, gap-merge fix, tick replay, warm-up |
 | 4 | [phase-4.md](phase-4.md) | Testing & conventions | 5 | 100% | e2e test, manager/sim coverage, lints, security review, specs/ADR |
-| 5 | [phase-5.md](phase-5.md) | Frontend | 4 | 0% | client consolidation, strategy picker, code-split, date picker |
+| 5 | [phase-5.md](phase-5.md) | Frontend | 4 | 100% | client consolidation, strategy picker, code-split, date picker |
 
 **Recommended sequencing:** 0 → 1 → 2 yields a decoupled, correct, safe-to-run
 system. 3 → 4 → 5 is fidelity, test depth, and polish. Run 0-ALT **instead of**
