@@ -25,6 +25,15 @@ const BackTestingPage = lazy(() =>
 const StrategyCreationPage = lazy(() =>
   import('@/pages/StrategyCreationPage').then((m) => ({ default: m.StrategyCreationPage })),
 )
+const ModelStudioPage = lazy(() =>
+  import('@/pages/ModelStudioPage').then((m) => ({ default: m.ModelStudioPage })),
+)
+const ModelDetailPage = lazy(() =>
+  import('@/pages/ModelDetailPage').then((m) => ({ default: m.ModelDetailPage })),
+)
+const ModelCreatePage = lazy(() =>
+  import('@/pages/ModelCreatePage').then((m) => ({ default: m.ModelCreatePage })),
+)
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -80,6 +89,9 @@ export default function App() {
               <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/strategy" element={<StrategyCreationPage />} />
               <Route path="/backtesting" element={<BackTestingPage />} />
+              <Route path="/models" element={<ModelStudioPage />} />
+              <Route path="/models/create" element={<ModelCreatePage />} />
+              <Route path="/models/:id" element={<ModelDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
 
               {/* Legacy / deep-link routes */}
