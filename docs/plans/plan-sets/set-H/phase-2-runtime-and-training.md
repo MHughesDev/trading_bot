@@ -1,6 +1,6 @@
 # Phase 2 — Hybrid Runtime & Training
 
-**Completion: 0% (0 / 12 tasks)**
+**Completion: 100% (12 / 12 tasks)**
 
 **Goal:** Replace Phase 1's stub driver with **real machine learning**. Stand up
 the Python sidecars (`apps/model-trainer`, `apps/model-inference`), define the
@@ -72,7 +72,7 @@ Rust.
 
 ## Tasks
 
-### ☐ H-2.1 `apps/model-trainer` service skeleton (FastAPI) — L
+### ☑ H-2.1 `apps/model-trainer` service skeleton (FastAPI) — L
 New Python app (its own `pyproject.toml`, Dockerfile, `docker-compose` service).
 Endpoints: `POST /train`, `GET /health`, `GET /capabilities` (frameworks +
 versions). NATS + ArtifactStore (S3/MinIO/FS) clients. Job runs in a worker task;
@@ -82,7 +82,7 @@ lists `xgboost,lightgbm,sklearn,torch`; a `POST /train` against a fixture datase
 publishes ≥2 progress messages and returns a `succeeded` body with a real artifact
 in the store.
 
-### ☐ H-2.2 Trainer: framework adapters — L
+### ☑ H-2.2 Trainer: framework adapters — L
 Pluggable `train(definition, dataset, emit_progress) -> (artifact, metrics)` per
 `framework`: `xgboost`, `lightgbm`, `sklearn` (classical), `torch` (NN +
 time-series). Each emits progress (boosting round / epoch) and a standard metrics
@@ -91,7 +91,7 @@ dict. Artifact serialization standardized (native format + a `metadata.json`).
 artifact; metrics dict has the documented keys; `torch` adapter emits per-epoch
 `train_loss/val_loss`.
 
-### ☐ H-2.3 Port legacy `forecaster_model/` + `nightly_retrain.py` — L
+### ☑ H-2.3 Port legacy `forecaster_model/` + `nightly_retrain.py` — L
 Migrate the legacy torch forecaster and the train/eval/log pipeline (see
 `docs/specs/MODELS_AND_ORCHESTRATION.MD`) into the trainer as the reference
 `forecaster` implementation. Drop the Prefect/MLflow coupling — the registry +
@@ -100,7 +100,7 @@ NATS now play those roles.
 comparable holdout metrics to the legacy pipeline on the same data window
 (documented in the task's results note).
 
-### ☐ H-2.4 `apps/model-inference` service — L
+### ☑ H-2.4 `apps/model-inference` service — L
 FastAPI scoring service: `POST /predict`, `POST /predict/llm` (adapter proxy),
 `GET /health`. Loads artifacts by URI with an LRU cache keyed by
 `(model_id, version, sha256)`; verifies hash on load. Returns the canonical
@@ -109,7 +109,7 @@ prediction envelope.
 hash mismatch → 409 (never serves a tampered artifact); cold vs warm load latency
 reported.
 
-### ☐ H-2.5 Inference sidecar: external LLM adapter proxy — M
+### ☑ H-2.5 Inference sidecar: external LLM adapter proxy — M
 Implement `external_llm_adapter` inference: proxy to `provider` (`ollama`,
 `openai`, …) per the definition's `adapter` block, normalize the response to
 `{ text, tokens, latency_ms, cost_usd, trace_id }`, compute cost from
@@ -118,7 +118,7 @@ Implement `external_llm_adapter` inference: proxy to `provider` (`ollama`,
 with token + latency + cost fields; provider error surfaces as a structured error,
 not a 500 crash.
 
-### ☐ H-2.6 Rust sidecar client (`model-registry/src/sidecar.rs`) — M
+### ☑ H-2.6 Rust sidecar client (`model-registry/src/sidecar.rs`) — M
 Typed `reqwest` client: `dispatch_train(req) -> RunHandle`, `predict(req) ->
 Vec<Forecast>`, `predict_llm(req)`. Endpoints from config
 (`MODEL_TRAINER_URL`, `MODEL_INFERENCE_URL`). Timeouts, retries with backoff,
@@ -126,7 +126,7 @@ and circuit-break on repeated failure (satellite may be down).
 **Acceptance:** client round-trips against the live sidecars; trainer-down yields a
 clean `RunStatus::Failed` with a diagnostic, not a hang.
 
-### ☐ H-2.7 NATS progress bridge — M
+### ☑ H-2.7 NATS progress bridge — M
 `ModelManager` subscribes to `models.run.*.progress`, maps frames onto the owning
 `Job`'s atomic counters + metric series, persists throttled (like the backtest
 persist cadence), and rebroadcasts to the `models.jobs` WS lane.
@@ -134,7 +134,7 @@ persist cadence), and rebroadcasts to the `models.jobs` WS lane.
 `val_loss` series visible over both poll and WS; dropped/duplicate NATS frames do
 not corrupt the series (idempotent by `step`).
 
-### ☐ H-2.8 Feature sets on the `features` crate — M
+### ☑ H-2.8 Feature sets on the `features` crate — M
 A **feature set** is a named, versioned list of features the `features` crate
 already computes (EMA/RSI/rolling windows) plus an extensibility hook. `POST
 /api/datasets`-adjacent endpoints register feature sets; the resolver maps a
@@ -142,7 +142,7 @@ already computes (EMA/RSI/rolling windows) plus an extensibility hook. `POST
 **Acceptance:** `fs_core_ohlcv_v3` resolves to a deterministic, ordered feature
 list; an unknown feature name is rejected at registration, not at train time.
 
-### ☐ H-2.9 Dataset materialization (Rust) — L
+### ☑ H-2.9 Dataset materialization (Rust) — L
 Given a `feature_set_ref` + instrument(s) + window + `label_spec`, Rust builds an
 immutable **dataset version**: pull canonical bars (ClickHouse), compute features
 via the `features` crate (same builders live + replay, ADR-0008), generate labels
@@ -152,7 +152,7 @@ Arrow/Parquet), and record `dataset_versions` with a `content_hash`.
 the Parquet loads in the trainer; row counts + available-time ordering verified;
 no look-ahead leakage (labels strictly future of features).
 
-### ☐ H-2.10 Wire real training into `ModelManager::drive` — M
+### ☑ H-2.10 Wire real training into `ModelManager::drive` — M
 Replace the Phase-1 stub: `drive(Train)` = materialize-or-resolve dataset →
 `sidecar.dispatch_train` → consume progress → on success write version/artifact
 rows + move model to `Evaluating`; on failure mark `Failed` with the trainer
@@ -161,14 +161,14 @@ diagnostic. Concurrency bounded by the existing semaphore.
 an artifact + metrics; the model lands in `Evaluating`; a forced trainer error
 lands `Failed` with a readable reason.
 
-### ☐ H-2.11 Test Lab inference wiring — M
+### ☑ H-2.11 Test Lab inference wiring — M
 `POST …/versions/{v}/test` calls the inference sidecar for trainable kinds and the
 LLM proxy for adapters; persists the call as a trace (Phase 0 ClickHouse) and
 returns the prediction + latency/cost. Heavy kinds may return a `job_id`.
 **Acceptance:** testing a trained forecaster returns a `Forecast` with latency;
 testing an adapter returns text+tokens+cost; every test writes one trace row.
 
-### ☐ H-2.12 Packaging, config, `.env.example`, compose — S
+### ☑ H-2.12 Packaging, config, `.env.example`, compose — S
 Add `MODEL_TRAINER_URL`, `MODEL_INFERENCE_URL`, `ARTIFACT_STORE`, MinIO creds to
 `.env.example`; add `model-trainer`, `model-inference`, and (dev) `minio` services
 to `docker-compose.yml`; document GPU-optional torch.

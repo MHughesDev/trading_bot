@@ -189,8 +189,26 @@ async fn main() -> anyhow::Result<()> {
 
     // AI Model Studio orchestrator — owns model identity, training/eval jobs,
     // alias management, and drives async job execution.
-    let model_manager = model_registry::ModelManager::new(pg.clone());
+    let model_manager = model_registry::ModelManager::from_env(pg.clone());
     info!("model registry initialised");
+
+    // Best-effort NATS progress bridge: drives ModelManager job state from
+    // training/eval progress frames published by the Python trainer sidecar.
+    {
+        let mm = Arc::clone(&model_manager);
+        let nats_url = cfg.nats.url.clone();
+        tokio::spawn(async move {
+            match async_nats::connect(&nats_url).await {
+                Ok(client) => {
+                    info!("model NATS progress bridge connected");
+                    model_registry::nats_bridge::run(client, mm).await;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "model NATS progress bridge disabled");
+                }
+            }
+        });
+    }
 
     // Build the API router.
     let app_state = api::AppState::new(

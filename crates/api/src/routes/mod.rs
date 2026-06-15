@@ -155,6 +155,14 @@ pub fn router(state: AppState) -> Router {
             post(models::test_inference),
         )
         .route("/api/models/{id}/evaluations", get(models::list_evals))
+        .route(
+            "/api/models/{id}/evaluations/compare",
+            get(models::compare_evals),
+        )
+        .route(
+            "/api/models/{id}/evaluations/{eval_id}",
+            get(models::get_eval),
+        )
         .route("/api/models/{id}/aliases", get(models::get_aliases))
         .route(
             "/api/models/{id}/aliases/{alias}/rollback",
