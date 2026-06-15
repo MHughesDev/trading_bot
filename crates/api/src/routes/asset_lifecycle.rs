@@ -218,13 +218,11 @@ async fn seed_bars(
     )
     .await?;
 
-    let _ = sqlx::query(
-        "UPDATE asset_init_jobs SET bars_collected = $1 WHERE job_id = $2",
-    )
-    .bind(collected.load(std::sync::atomic::Ordering::Relaxed) as i64)
-    .bind(job_id)
-    .execute(pg)
-    .await;
+    let _ = sqlx::query("UPDATE asset_init_jobs SET bars_collected = $1 WHERE job_id = $2")
+        .bind(collected.load(std::sync::atomic::Ordering::Relaxed) as i64)
+        .bind(job_id)
+        .execute(pg)
+        .await;
 
     // Pass 2 — 1m bars so 5m/15m/30m views are immediately populated from
     // stored data rather than waiting for live accumulation.
@@ -241,13 +239,11 @@ async fn seed_bars(
     )
     .await?;
 
-    let _ = sqlx::query(
-        "UPDATE asset_init_jobs SET bars_collected = $1 WHERE job_id = $2",
-    )
-    .bind(collected.load(std::sync::atomic::Ordering::Relaxed) as i64)
-    .bind(job_id)
-    .execute(pg)
-    .await;
+    let _ = sqlx::query("UPDATE asset_init_jobs SET bars_collected = $1 WHERE job_id = $2")
+        .bind(collected.load(std::sync::atomic::Ordering::Relaxed) as i64)
+        .bind(job_id)
+        .execute(pg)
+        .await;
 
     Ok(h1_total + m1_total)
 }
@@ -279,7 +275,11 @@ pub async fn get_init_job(
             "error": error,
         }))
         .into_response(),
-        None => (StatusCode::NOT_FOUND, Json(json!({ "error": "job not found" }))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "job not found" })),
+        )
+            .into_response(),
     }
 }
 
@@ -492,10 +492,7 @@ pub async fn delete_exec_mode(
 
 // ── GET /assets/models/:symbol ────────────────────────────────────────────────
 
-pub async fn get_models(
-    _token: BearerToken,
-    Path(symbol): Path<String>,
-) -> impl IntoResponse {
+pub async fn get_models(_token: BearerToken, Path(symbol): Path<String>) -> impl IntoResponse {
     Json(json!({ "symbol": symbol }))
 }
 
@@ -514,6 +511,10 @@ pub async fn get_chart_bars(
     State(state): State<AppState>,
     Query(q): Query<BarsQuery>,
 ) -> impl IntoResponse {
+    // Ensure the live 1-minute pipeline is running so the graph receives fresh
+    // bars as they close.  Resolves asset class from DB with heuristic fallback.
+    state.ensure_pipeline_for_instrument(&q.symbol).await;
+
     let interval = q.interval_seconds.unwrap_or(3600);
 
     let parse_dt = |s: &str| {
@@ -534,7 +535,11 @@ pub async fn get_chart_bars(
     // the same data source and eliminates gaps that can appear in the
     // separately-seeded Timeframe::Hours1 rows.
     let result = match interval {
-        60 => store.load_bars(&q.symbol, Timeframe::Minutes1, from, to).await,
+        60 => {
+            store
+                .load_bars(&q.symbol, Timeframe::Minutes1, from, to)
+                .await
+        }
         secs => {
             store
                 .load_bars_bucketed(&q.symbol, Timeframe::Minutes1, secs, from, to)

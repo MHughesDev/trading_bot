@@ -7,8 +7,8 @@
 //! (resume) and on demand when a new asset is initialized.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use domain::instrument::AssetClass;
@@ -138,7 +138,10 @@ async fn gap_fill(ch_url: &str, instrument_id: &str, asset_class: &str) -> anyho
     // incomplete bar that the live aggregator is still building.
     let fill_to = now - chrono::Duration::seconds(90);
 
-    let fill_from = match store.last_bar_time(instrument_id, Timeframe::Minutes1).await? {
+    let fill_from = match store
+        .last_bar_time(instrument_id, Timeframe::Minutes1)
+        .await?
+    {
         Some(last_ts) => {
             if fill_to <= last_ts + chrono::Duration::seconds(60) {
                 return Ok(()); // less than one complete bar behind — nothing to do
@@ -169,15 +172,26 @@ async fn gap_fill(ch_url: &str, instrument_id: &str, asset_class: &str) -> anyho
         backtest::collect::CollectorPlan::BinanceKlines { .. } => "binance",
         backtest::collect::CollectorPlan::AlpacaBars { .. } => "alpaca",
     };
-    let range = backtest::MissingRange { from: fill_from, to: fill_to };
+    let range = backtest::MissingRange {
+        from: fill_from,
+        to: fill_to,
+    };
     let http = reqwest::Client::new();
     let collected = AtomicU64::new(0);
     let cancel = AtomicBool::new(false);
 
     let bars = backtest::collect::collect_ranges(
-        &http, &store, &plan, instrument_id, venue_id,
-        Timeframe::Minutes1, &[range], &collected, &cancel,
-    ).await?;
+        &http,
+        &store,
+        &plan,
+        instrument_id,
+        venue_id,
+        Timeframe::Minutes1,
+        &[range],
+        &collected,
+        &cancel,
+    )
+    .await?;
 
     info!(instrument_id, bars, "gap fill complete");
     Ok(())

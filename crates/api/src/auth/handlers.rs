@@ -18,11 +18,7 @@ use crate::state::AppState;
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 fn new_session_token() -> String {
-    format!(
-        "{}{}",
-        Uuid::new_v4().simple(),
-        Uuid::new_v4().simple()
-    )
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
 fn six_digit_code() -> String {
@@ -42,7 +38,11 @@ fn hash_password(password: &str) -> Result<String, StatusCode> {
 fn verify_password(password: &str, hash: &str) -> bool {
     PasswordHash::new(hash)
         .ok()
-        .and_then(|h| Argon2::default().verify_password(password.as_bytes(), &h).ok())
+        .and_then(|h| {
+            Argon2::default()
+                .verify_password(password.as_bytes(), &h)
+                .ok()
+        })
         .is_some()
 }
 
@@ -74,7 +74,11 @@ pub async fn register(
     Json(body): Json<RegisterBody>,
 ) -> Result<Json<LoginResponse>, Response> {
     if body.password.len() < 8 {
-        return Err((StatusCode::BAD_REQUEST, "password must be at least 8 characters").into_response());
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "password must be at least 8 characters",
+        )
+            .into_response());
     }
 
     let hash = hash_password(&body.password).map_err(|s| s.into_response())?;
@@ -190,8 +194,8 @@ pub async fn me(
         StatusCode::INTERNAL_SERVER_ERROR.into_response()
     })?;
 
-    let (user_id, email, created_at) =
-        row.ok_or_else(|| (StatusCode::UNAUTHORIZED, "session expired or invalid").into_response())?;
+    let (user_id, email, created_at) = row
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "session expired or invalid").into_response())?;
 
     Ok(Json(UserResponse {
         id: user_id.to_string(),
@@ -236,20 +240,19 @@ pub async fn forgot_password(
     };
 
     // Invalidate any existing unused codes for this user.
-    let _ = sqlx::query("UPDATE password_resets SET used = true WHERE user_id = $1 AND used = false")
-        .bind(user_id)
-        .execute(&state.pg)
-        .await;
+    let _ =
+        sqlx::query("UPDATE password_resets SET used = true WHERE user_id = $1 AND used = false")
+            .bind(user_id)
+            .execute(&state.pg)
+            .await;
 
     let code = six_digit_code();
 
-    let _ = sqlx::query(
-        "INSERT INTO password_resets (user_id, code) VALUES ($1, $2)",
-    )
-    .bind(user_id)
-    .bind(&code)
-    .execute(&state.pg)
-    .await;
+    let _ = sqlx::query("INSERT INTO password_resets (user_id, code) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(&code)
+        .execute(&state.pg)
+        .await;
 
     send_reset_code(&state.email, &body.email, &code);
 
@@ -301,7 +304,11 @@ pub async fn reset_password(
     Json(body): Json<ResetPasswordBody>,
 ) -> Result<StatusCode, Response> {
     if body.new_password.len() < 8 {
-        return Err((StatusCode::BAD_REQUEST, "password must be at least 8 characters").into_response());
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "password must be at least 8 characters",
+        )
+            .into_response());
     }
 
     let row: Option<(Uuid, Uuid)> = sqlx::query_as(
@@ -323,9 +330,8 @@ pub async fn reset_password(
         StatusCode::INTERNAL_SERVER_ERROR.into_response()
     })?;
 
-    let (reset_id, user_id) = row.ok_or_else(|| {
-        (StatusCode::BAD_REQUEST, "invalid or expired code").into_response()
-    })?;
+    let (reset_id, user_id) =
+        row.ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid or expired code").into_response())?;
 
     let new_hash = hash_password(&body.new_password).map_err(|s| s.into_response())?;
 

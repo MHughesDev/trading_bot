@@ -130,7 +130,10 @@ async fn main() -> anyhow::Result<()> {
     // here, so minute-level history accrues for as long as the platform runs —
     // independent of whether any strategy or automation is subscribed.
     let (bar_tx, bar_rx) = tokio::sync::mpsc::unbounded_channel::<bar_persist::PersistBar>();
-    tokio::spawn(bar_persist::run_bar_persist(cfg.clickhouse.url.clone(), bar_rx));
+    tokio::spawn(bar_persist::run_bar_persist(
+        cfg.clickhouse.url.clone(),
+        bar_rx,
+    ));
 
     // Owns one in-process pipeline per initialized instrument.
     let pipeline_manager = Arc::new(pipeline_manager::PipelineManager::new(
@@ -160,8 +163,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Start pipelines on demand when new assets are initialized (no restart).
-    let (stream_tx, mut stream_rx) =
-        tokio::sync::mpsc::unbounded_channel::<api::StreamRequest>();
+    let (stream_tx, mut stream_rx) = tokio::sync::mpsc::unbounded_channel::<api::StreamRequest>();
     {
         let mgr = Arc::clone(&pipeline_manager);
         tokio::spawn(async move {
@@ -171,19 +173,12 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Resume armed automations (paper AND live) from Postgres.  Automations
-    // are server-side state: they stay armed while the platform runs, no
-    // matter which mode any UI tab is displaying or whether a UI is open.
-    match storage::automation::armed_automations(&pg).await {
-        Ok(rows) => {
-            let paper = rows.iter().filter(|r| r.account_mode == "paper").count();
-            let live = rows.len() - paper;
-            info!(
-                paper,
-                live, "armed automations resumed — running server-side independent of UI sessions"
-            );
-        }
-        Err(e) => tracing::warn!(error = %e, "could not load armed automations at startup"),
+    // Reset all automations to disarmed on startup.  Users must explicitly
+    // re-arm after each server restart — this prevents stale automations from
+    // executing without deliberate user action.
+    match storage::automation::disarm_all_automations(&pg).await {
+        Ok(count) => info!(count, "all automations reset to disarmed on server start"),
+        Err(e) => tracing::warn!(error = %e, "could not reset automations at startup"),
     }
 
     // Backtest orchestrator — owns simulation jobs and drives the

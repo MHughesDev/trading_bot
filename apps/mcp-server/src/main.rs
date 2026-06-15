@@ -62,7 +62,10 @@ async fn mcp_handler(
         }
     };
 
-    let id = request.get("id").cloned().unwrap_or(serde_json::Value::Null);
+    let id = request
+        .get("id")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let method = request.get("method").and_then(|v| v.as_str()).unwrap_or("");
     let params = request
         .get("params")
