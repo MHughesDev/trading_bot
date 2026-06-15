@@ -6,7 +6,8 @@
 use std::sync::Arc;
 
 use backtest::CollectedBar;
-use domain::{EventEnvelope, OrderIntent};
+use collectors::CollectorError;
+use domain::{instrument::AssetClass, EventEnvelope, OrderIntent};
 use execution::paper::PaperTradingEngine;
 use rust_decimal::Decimal;
 use strategy_runtime::world::WorldEvent;
@@ -44,7 +45,7 @@ pub struct PipelineHandle {
 pub fn spawn_pipeline(
     symbol: String,
     instrument_id: String,
-    asset_class: domain::instrument::AssetClass,
+    asset_class: AssetClass,
     tee_tx: tokio::sync::mpsc::UnboundedSender<RawTick>,
     execution_engine: Arc<execution::ExecutionEngine>,
     risk_gate: Arc<risk::RiskGate>,
@@ -62,7 +63,7 @@ pub fn spawn_pipeline(
     let (world_prod, world_cons) = rtrb::RingBuffer::<WorldEvent>::new(1024);
     let (intent_prod, intent_cons) = rtrb::RingBuffer::<OrderIntent>::new(256);
 
-    let t1 = tokio::spawn(stage_socket_reader(symbol, raw_prod, tee_tx));
+    let t1 = tokio::spawn(stage_socket_reader(symbol, asset_class, raw_prod, tee_tx));
     let t2 = tokio::spawn(stage_bar_builder(
         instrument_id.clone(),
         raw_cons,
@@ -88,14 +89,28 @@ pub fn spawn_pipeline(
 }
 
 /// Stage 1: own the WS connection, push `RawTick` into `ring_raw`, tee to JetStream.
+/// Dispatches to the appropriate collector based on asset class:
+///   - CryptoSpotCex → KrakenCollector (Kraken WS v2)
+///   - Equity / Etf   → AlpacaDataCollector (Alpaca WS IEX feed)
 async fn stage_socket_reader(
     symbol: String,
+    asset_class: AssetClass,
     raw_prod: rtrb::Producer<RawTick>,
     tee_tx: tokio::sync::mpsc::UnboundedSender<RawTick>,
 ) {
-    info!(symbol, "hot-path stage 1 (socket-reader) starting");
-    let collector = collectors::crypto::kraken::KrakenCollector::new(symbol.clone());
-    if let Err(e) = collector.run_in_process(raw_prod, tee_tx).await {
+    info!(symbol, ?asset_class, "hot-path stage 1 (socket-reader) starting");
+    let result: Result<(), CollectorError> = match asset_class {
+        AssetClass::Equity | AssetClass::Etf => {
+            let collector =
+                collectors::equity::alpaca_data::AlpacaDataCollector::new(symbol.clone());
+            collector.run_in_process(raw_prod, tee_tx).await
+        }
+        _ => {
+            let collector = collectors::crypto::kraken::KrakenCollector::new(symbol.clone());
+            collector.run_in_process(raw_prod, tee_tx).await
+        }
+    };
+    if let Err(e) = result {
         warn!(symbol, error = %e, "stage 1 (socket-reader) exited with error");
     }
 }

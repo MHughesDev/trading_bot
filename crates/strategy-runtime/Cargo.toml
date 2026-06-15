@@ -17,3 +17,6 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 rust_decimal = { workspace = true }
 smallvec = { workspace = true }
+
+[dev-dependencies]
+reconciliation = { workspace = true }

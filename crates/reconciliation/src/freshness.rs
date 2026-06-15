@@ -74,7 +74,8 @@ pub fn check_freshness(
 
 /// Returns `true` if `now` (UTC) falls within any of the schedule's sessions,
 /// correctly accounting for the instrument's IANA timezone (e.g. America/New_York).
-fn is_within_trading_hours(now: DateTime<Utc>, schedule: &TradingSchedule) -> bool {
+/// A schedule with no sessions (24/7) always returns `true`.
+pub fn is_within_trading_hours(now: DateTime<Utc>, schedule: &TradingSchedule) -> bool {
     if schedule.is_24_7() {
         return true;
     }

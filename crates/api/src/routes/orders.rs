@@ -7,11 +7,14 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
+use chrono::Utc;
 use domain::{
+    instrument::{HaltPolicy, TradingSchedule},
     money::{Price, Size},
     order::{OrderIntent, OrderType, Side},
     RiskRejection,
 };
+use reconciliation::freshness::is_within_trading_hours;
 use risk::GateContext;
 use rust_decimal::Decimal;
 
@@ -168,12 +171,41 @@ pub async fn place_order(
         .map(|p| p.quantity)
         .unwrap_or(Decimal::ZERO);
 
+    // Resolve session / halt state from instrument metadata (P6-T03).
+    // For crypto (24/7, non-haltable) the defaults remain; for equities the
+    // NYSE session window and haltable policy are applied — matching the spec
+    // invariant "session/halt checks live in metadata, not in core code."
+    let (is_in_session, halt_policy) = {
+        let row: Option<(serde_json::Value, String)> = sqlx::query_as(
+            "SELECT trading_hours_json, halt_policy FROM instruments WHERE instrument_id = $1",
+        )
+        .bind(&req.instrument_id)
+        .fetch_optional(&state.pg)
+        .await
+        .ok()
+        .flatten();
+
+        match row {
+            Some((hours_json, hp_str)) => {
+                let schedule: TradingSchedule =
+                    serde_json::from_value(hours_json).unwrap_or_else(|_| TradingSchedule::always_open());
+                let in_session = is_within_trading_hours(Utc::now(), &schedule);
+                let hp = if hp_str == "haltable" {
+                    HaltPolicy::Haltable
+                } else {
+                    HaltPolicy::NonHaltable
+                };
+                (in_session, hp)
+            }
+            // Instrument not in metadata table — default to 24/7 non-haltable (crypto behaviour).
+            None => (true, HaltPolicy::NonHaltable),
+        }
+    };
+
     // Manual-order risk context.  tick_size and lot_size are 0 — which disables
-    // those two checks (no per-instrument metadata is wired, and a nonzero lot
-    // would wrongly reject fractional crypto like 0.01 BTC).  Daily-loss is 0
-    // until P&L wiring lands; the mark still drives price-sanity and the live
-    // position still drives position limits.
-    let ctx = GateContext::for_manual_order(
+    // those two checks (a nonzero lot would wrongly reject fractional crypto like
+    // 0.01 BTC).  Daily-loss is 0 until P&L wiring lands.
+    let mut ctx = GateContext::for_manual_order(
         current_position,
         Some(market_price),
         Decimal::ZERO,
@@ -183,6 +215,10 @@ pub async fn place_order(
         0,
         0,
     );
+    ctx.is_in_session = is_in_session;
+    ctx.halt_policy = halt_policy;
+    // is_halted defaults to false — we do not yet subscribe to exchange halt events,
+    // so the gate catches session violations but not intra-session halts at this phase.
 
     match state.risk_gate.check(intent, &ctx) {
         Ok(approved) => {

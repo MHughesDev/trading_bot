@@ -210,13 +210,28 @@ struct CollectorBinding {
 impl CollectorBinding {
     fn for_asset_class(asset_class: &str, instrument_id: &str) -> Option<Self> {
         match asset_class {
-            // Kraken is the only in-process collector.  `BTC-USD` → `BTC/USD`.
+            // Kraken is the crypto in-process collector.  `BTC-USD` → `BTC/USD`.
             "crypto_spot_cex" => Some(Self {
                 asset_class: AssetClass::CryptoSpotCex,
                 symbol: instrument_id.replace('-', "/"),
                 venue_id: "kraken".to_string(),
                 source: "kraken_ws".to_string(),
                 trust_tier: "centralized_exchange".to_string(),
+            }),
+            // Alpaca is the equity in-process collector. Symbol is the ticker as-is.
+            "equity" => Some(Self {
+                asset_class: AssetClass::Equity,
+                symbol: instrument_id.to_string(),
+                venue_id: "alpaca".to_string(),
+                source: "alpaca_ws".to_string(),
+                trust_tier: "regulated".to_string(),
+            }),
+            "etf" => Some(Self {
+                asset_class: AssetClass::Etf,
+                symbol: instrument_id.to_string(),
+                venue_id: "alpaca".to_string(),
+                source: "alpaca_ws".to_string(),
+                trust_tier: "regulated".to_string(),
             }),
             _ => None,
         }
