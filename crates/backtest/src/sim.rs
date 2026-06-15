@@ -51,7 +51,7 @@ fn money(s: &str) -> anyhow::Result<Money> {
 }
 
 use crate::requirements::{FeatureKind, FeatureSpec};
-use crate::store::{LoadedBar, StoredFeatures};
+use crate::store::LoadedBar;
 
 /// Everything needed to run one simulation.
 #[derive(Clone, Debug)]
@@ -71,11 +71,6 @@ pub struct SimulationInputs {
     pub sim_start_ns: i64,
     pub bars: Vec<LoadedBar>,
     pub features: Vec<FeatureSpec>,
-    /// Versioned feature values recorded live, keyed by `available_time` (ns).
-    /// When a bar's timestamp carries a stored value for a feature, replay uses
-    /// that exact value (#4, ADR-0008); indicators are recomputed only for the
-    /// features/bars the store doesn't cover.  Empty ⇒ recompute everything.
-    pub stored_features: StoredFeatures,
 }
 
 /// Simulation outcome: the simulator's result document plus run flags.
@@ -288,17 +283,11 @@ fn to_engine_bars(
 
 /// Builds the bar handler that interprets the strategy definition.
 ///
-/// Per bar: resolve each feature to its stored live value when one exists for
-/// that bar's `available_time` (replaying the versioned feature pipeline, #4),
-/// otherwise recompute it with the pure `features` crate; evaluate the node
-/// graph (pure `strategy-runtime` interpreter); and emit orders for signals on
-/// their rising edge — a signal must clear and re-fire before it places another
-/// order, which is the crossover semantics live strategies get from
-/// event-driven dispatch.
-///
-/// Fallback indicators are advanced on every bar even when a stored value is
-/// used, so they stay warm and produce correct values for any bar the store
-/// doesn't cover.
+/// Per bar: recompute each indicator from the close price using the pure
+/// `features` crate; evaluate the node graph (pure `strategy-runtime`
+/// interpreter); and emit orders for signals on their rising edge — a signal
+/// must clear and re-fire before it places another order, which is the
+/// crossover semantics live strategies get from event-driven dispatch.
 fn build_handler(
     inputs: &SimulationInputs,
     order_specs: Vec<(String, Side, Decimal)>,
@@ -307,7 +296,6 @@ fn build_handler(
     let nodes = inputs.definition.nodes.clone();
     let timeframe = inputs.timeframe;
     let sim_start_ns = inputs.sim_start_ns;
-    let stored_features = inputs.stored_features.clone();
 
     // Pre-quantize each order's size to a nautilus `Quantity` once, up front, so
     // a malformed size is an error here rather than a panic inside the per-bar
@@ -344,20 +332,13 @@ fn build_handler(
         let close_value = bar.close.as_decimal();
 
         // Indicators consume the close (same convention as the live feature
-        // pipeline).  Advance every indicator each bar so fallbacks stay warm,
-        // then let any stored value for this bar's timestamp win — replaying the
-        // exact versioned value the live pipeline recorded (#4, ADR-0008).
+        // pipeline).  All indicators are recomputed from bars each session.
         let close_input = close_value.to_f64().unwrap_or(0.0);
-        let stored_at_bar =
-            stored_features.get(&i64::try_from(bar.ts_event.as_u64()).unwrap_or(i64::MAX));
         for (name, state) in &mut indicators {
-            let recomputed = match state {
+            let value = match state {
                 IndicatorState::Ema(ema) => Some(ema.update(close_input)),
                 IndicatorState::Rsi(rsi) => rsi.update(close_input),
             };
-            let value = stored_at_bar
-                .and_then(|m| m.get(name).copied())
-                .or(recomputed);
             if let Some(v) = value {
                 feature_values.insert(name.clone(), v);
             }
@@ -521,7 +502,6 @@ mod tests {
             sim_start_ns: 0,
             bars,
             features,
-            stored_features: HashMap::new(),
         };
 
         let control = SimulationControl::new();
@@ -529,79 +509,6 @@ mod tests {
         assert!(!report.cancelled);
         let total_orders = report.result["total_orders"].as_u64().unwrap_or(0);
         assert_eq!(total_orders, 1, "one rising-edge crossover ⇒ one order");
-    }
-
-    /// Stored feature replay (#4): when the store carries a value for a bar's
-    /// timestamp, the simulation uses that exact value instead of recomputing
-    /// the indicator.  Here the *recomputed* EMAs would never cross (fast stays
-    /// below slow on a falling series), but injected stored values flip
-    /// `ema_7 > ema_21` true on a single bar, so exactly one order is placed —
-    /// proving the stored value drove the decision, not the recomputed one.
-    #[test]
-    fn stored_features_override_recomputed_indicators() {
-        let features = vec![
-            FeatureSpec {
-                name: "ema_7".into(),
-                kind: FeatureKind::Ema,
-                period: 7,
-            },
-            FeatureSpec {
-                name: "ema_21".into(),
-                kind: FeatureKind::Ema,
-                period: 21,
-            },
-        ];
-        // Strictly *falling* closes: recomputed ema_7 < ema_21 throughout, so a
-        // recompute-only run would place zero orders.
-        let bars: Vec<LoadedBar> = (0..40)
-            .map(|i| {
-                let close = dec!(200) - Decimal::from(i);
-                LoadedBar {
-                    ts_ns: i64::from(i) * 60_000_000_000,
-                    open: close,
-                    high: close,
-                    low: close,
-                    close,
-                    volume: dec!(1),
-                    trade_count: 1,
-                }
-            })
-            .collect();
-
-        // Inject stored features that cross long on bar 30 and stay crossed.
-        let mut stored_features = HashMap::new();
-        for i in 0..40i64 {
-            let ts = i * 60_000_000_000;
-            let (fast, slow) = if i >= 30 { (2.0, 1.0) } else { (1.0, 2.0) };
-            stored_features.insert(
-                ts,
-                HashMap::from([("ema_7".to_string(), fast), ("ema_21".to_string(), slow)]),
-            );
-        }
-
-        let inputs = SimulationInputs {
-            definition: ema_cross_long_def(),
-            instrument_id: "BTC-USDT".into(),
-            venue_id: "binance".into(),
-            asset_class: "crypto_spot_cex".into(),
-            timeframe: Timeframe::Minutes1,
-            quote_currency: "USDT".into(),
-            initial_balance: dec!(100000),
-            precisions: None,
-            sim_start_ns: 0,
-            bars,
-            features,
-            stored_features,
-        };
-
-        let control = SimulationControl::new();
-        let report = run_simulation(inputs, &control).expect("simulation runs");
-        assert!(!report.cancelled);
-        let total_orders = report.result["total_orders"].as_u64().unwrap_or(0);
-        assert_eq!(
-            total_orders, 1,
-            "stored values crossed once ⇒ one order (recompute alone would place none)"
-        );
     }
 
     #[test]
