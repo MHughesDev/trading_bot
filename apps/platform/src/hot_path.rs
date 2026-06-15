@@ -230,9 +230,7 @@ async fn stage_bar_builder(
 
                 // Aggregate into the 1-minute bar; persist a completed minute.
                 let ts_secs = tick.timestamp_ns / 1_000_000_000;
-                if let Some(completed) =
-                    agg.on_trade(price.inner(), trade.size.inner(), ts_secs)
-                {
+                if let Some(completed) = agg.on_trade(price.inner(), trade.size.inner(), ts_secs) {
                     emit_bar(completed);
                 }
 

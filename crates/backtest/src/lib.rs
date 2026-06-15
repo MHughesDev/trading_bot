@@ -32,8 +32,8 @@ pub mod types;
 
 pub use collect::CollectorPlan;
 pub use manager::BacktestManager;
+pub use store::{BarStore, CollectedBar};
 pub use types::{
     BacktestRequest, BacktestSnapshot, BacktestStatus, DataCoverage, MissingRange, ResolvedSpec,
     TimeframeExt,
 };
-pub use store::{BarStore, CollectedBar};

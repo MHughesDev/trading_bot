@@ -101,12 +101,11 @@ pub async fn list_strategies(
     State(state): State<AppState>,
     _token: BearerToken,
 ) -> impl IntoResponse {
-    let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT strategy_id FROM strategy_definitions ORDER BY created_at DESC",
-    )
-    .fetch_all(&state.pg)
-    .await
-    .unwrap_or_default();
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT strategy_id FROM strategy_definitions ORDER BY created_at DESC")
+            .fetch_all(&state.pg)
+            .await
+            .unwrap_or_default();
 
     let list: Vec<serde_json::Value> = rows
         .into_iter()
@@ -124,14 +123,13 @@ pub async fn get_strategy(
     _token: BearerToken,
     Path(strategy_id): Path<String>,
 ) -> impl IntoResponse {
-    let row: Option<(serde_json::Value,)> = sqlx::query_as(
-        "SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1",
-    )
-    .bind(&strategy_id)
-    .fetch_optional(&state.pg)
-    .await
-    .ok()
-    .flatten();
+    let row: Option<(serde_json::Value,)> =
+        sqlx::query_as("SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1")
+            .bind(&strategy_id)
+            .fetch_optional(&state.pg)
+            .await
+            .ok()
+            .flatten();
 
     match row {
         None => (
@@ -213,7 +211,9 @@ pub async fn start_strategy(
 
     // Ensure a live data pipeline is running for this instrument before the
     // strategy starts evaluating — it needs fresh bar/trade data to operate.
-    state.ensure_pipeline_for_instrument(&req.instrument_id).await;
+    state
+        .ensure_pipeline_for_instrument(&req.instrument_id)
+        .await;
 
     let clock: Arc<dyn strategy_runtime::StrategyClock> = state.clock.clone();
     let mut manager = state

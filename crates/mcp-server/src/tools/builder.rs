@@ -7,15 +7,15 @@
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use domain::strategy_def::StrategyDefinition;
 use domain::strategy_def::actions::{Action, ActionKind, OrderSpec, SizeMode};
 use domain::strategy_def::inputs::InputDeclaration;
 use domain::strategy_def::nodes::{Node, NodeKind};
 use domain::strategy_def::risk_overrides::RiskOverrides;
+use domain::strategy_def::StrategyDefinition;
 use domain::trust::TrustTier;
 
+use crate::tools::authoring::{create_strategy_from_def, ValidationErrorItem};
 use crate::McpContext;
-use crate::tools::authoring::{ValidationErrorItem, create_strategy_from_def};
 
 /// In-memory draft accumulator.
 pub struct StrategyDraft {
@@ -70,7 +70,10 @@ pub fn new_strategy_draft(ctx: &McpContext) -> Value {
 
 /// `discard_draft` — remove a draft by ID.
 pub fn discard_draft(ctx: &McpContext, params: &Value) -> Value {
-    let draft_id_str = params.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
+    let draft_id_str = params
+        .get("draft_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(draft_id) = Uuid::parse_str(draft_id_str) else {
         return json!({ "discarded": false });
     };
@@ -85,7 +88,10 @@ pub fn discard_draft(ctx: &McpContext, params: &Value) -> Value {
 
 /// `set_strategy_meta` — set top-level strategy fields on a draft.
 pub fn set_strategy_meta(ctx: &McpContext, params: &Value) -> Value {
-    let draft_id_str = params.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
+    let draft_id_str = params
+        .get("draft_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(draft_id) = Uuid::parse_str(draft_id_str) else {
         return draft_not_found(draft_id_str);
     };
@@ -109,7 +115,10 @@ pub fn set_strategy_meta(ctx: &McpContext, params: &Value) -> Value {
 
 /// `add_strategy_input` — append an `InputDeclaration` to a draft.
 pub fn add_strategy_input(ctx: &McpContext, params: &Value) -> Value {
-    let draft_id_str = params.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
+    let draft_id_str = params
+        .get("draft_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(draft_id) = Uuid::parse_str(draft_id_str) else {
         return draft_not_found(draft_id_str);
     };
@@ -146,7 +155,10 @@ pub fn add_strategy_input(ctx: &McpContext, params: &Value) -> Value {
 
 /// `add_condition_node` — append a Condition node to a draft.
 pub fn add_condition_node(ctx: &McpContext, params: &Value) -> Value {
-    let draft_id_str = params.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
+    let draft_id_str = params
+        .get("draft_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(draft_id) = Uuid::parse_str(draft_id_str) else {
         return draft_not_found(draft_id_str);
     };
@@ -176,7 +188,10 @@ pub fn add_condition_node(ctx: &McpContext, params: &Value) -> Value {
 
 /// `add_signal_node` — append a Signal node to a draft.
 pub fn add_signal_node(ctx: &McpContext, params: &Value) -> Value {
-    let draft_id_str = params.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
+    let draft_id_str = params
+        .get("draft_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(draft_id) = Uuid::parse_str(draft_id_str) else {
         return draft_not_found(draft_id_str);
     };
@@ -211,7 +226,10 @@ pub fn add_signal_node(ctx: &McpContext, params: &Value) -> Value {
 
 /// `add_strategy_action` — append a PlaceOrder action to a draft.
 pub fn add_strategy_action(ctx: &McpContext, params: &Value) -> Value {
-    let draft_id_str = params.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
+    let draft_id_str = params
+        .get("draft_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(draft_id) = Uuid::parse_str(draft_id_str) else {
         return draft_not_found(draft_id_str);
     };
@@ -225,12 +243,11 @@ pub fn add_strategy_action(ctx: &McpContext, params: &Value) -> Value {
         .unwrap_or("")
         .to_owned();
     let side_str = params.get("side").and_then(|v| v.as_str()).unwrap_or("buy");
-    let side = match serde_json::from_value::<domain::order::Side>(Value::String(
-        side_str.to_owned(),
-    )) {
-        Ok(s) => s,
-        Err(_) => return json!({ "error": "invalid_side", "valid_values": ["buy", "sell"] }),
-    };
+    let side =
+        match serde_json::from_value::<domain::order::Side>(Value::String(side_str.to_owned())) {
+            Ok(s) => s,
+            Err(_) => return json!({ "error": "invalid_side", "valid_values": ["buy", "sell"] }),
+        };
     let size_mode_str = params
         .get("size_mode")
         .and_then(|v| v.as_str())
@@ -239,7 +256,9 @@ pub fn add_strategy_action(ctx: &McpContext, params: &Value) -> Value {
         "fixed" => SizeMode::Fixed,
         "percent_of_balance" => SizeMode::PercentOfBalance,
         "risk_unit" => SizeMode::RiskUnit,
-        _ => return json!({ "error": "invalid_size_mode", "valid_values": ["fixed", "percent_of_balance", "risk_unit"] }),
+        _ => {
+            return json!({ "error": "invalid_size_mode", "valid_values": ["fixed", "percent_of_balance", "risk_unit"] })
+        }
     };
     let size = params
         .get("size")
@@ -249,7 +268,11 @@ pub fn add_strategy_action(ctx: &McpContext, params: &Value) -> Value {
     draft.actions.push(Action {
         on_signal,
         kind: ActionKind::PlaceOrder {
-            order: OrderSpec { side, size_mode, size },
+            order: OrderSpec {
+                side,
+                size_mode,
+                size,
+            },
         },
     });
     draft.summary(draft_id)
@@ -257,7 +280,10 @@ pub fn add_strategy_action(ctx: &McpContext, params: &Value) -> Value {
 
 /// `set_risk_overrides` — overwrite risk overrides on a draft.
 pub fn set_risk_overrides(ctx: &McpContext, params: &Value) -> Value {
-    let draft_id_str = params.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
+    let draft_id_str = params
+        .get("draft_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(draft_id) = Uuid::parse_str(draft_id_str) else {
         return draft_not_found(draft_id_str);
     };
@@ -271,10 +297,16 @@ pub fn set_risk_overrides(ctx: &McpContext, params: &Value) -> Value {
             Err(_) => return json!({ "error": "invalid_decimal", "field": "max_position" }),
         }
     }
-    if let Some(v) = params.get("max_order_rate_per_minute").and_then(|v| v.as_u64()) {
+    if let Some(v) = params
+        .get("max_order_rate_per_minute")
+        .and_then(|v| v.as_u64())
+    {
         draft.risk_overrides.max_order_rate_per_minute = Some(v as u32);
     }
-    if let Some(v) = params.get("max_order_rate_per_second").and_then(|v| v.as_u64()) {
+    if let Some(v) = params
+        .get("max_order_rate_per_second")
+        .and_then(|v| v.as_u64())
+    {
         draft.risk_overrides.max_order_rate_per_second = Some(v as u32);
     }
     draft.summary(draft_id)
@@ -282,7 +314,10 @@ pub fn set_risk_overrides(ctx: &McpContext, params: &Value) -> Value {
 
 /// `get_draft_summary` — return the current draft as JSON without mutating.
 pub fn get_draft_summary(ctx: &McpContext, params: &Value) -> Value {
-    let draft_id_str = params.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
+    let draft_id_str = params
+        .get("draft_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(draft_id) = Uuid::parse_str(draft_id_str) else {
         return draft_not_found(draft_id_str);
     };
@@ -293,20 +328,16 @@ pub fn get_draft_summary(ctx: &McpContext, params: &Value) -> Value {
     // Return the full typed definition so the agent can inspect it.
     let def = draft_to_definition(draft);
     match def {
-        Ok(d) => serde_json::to_value(&d).unwrap_or_else(|_| json!({"error": "serialization_error"})),
+        Ok(d) => {
+            serde_json::to_value(&d).unwrap_or_else(|_| json!({"error": "serialization_error"}))
+        }
         Err(msg) => json!({ "draft_id": draft_id.to_string(), "incomplete": true, "reason": msg }),
     }
 }
 
 fn draft_to_definition(draft: &StrategyDraft) -> Result<StrategyDefinition, String> {
-    let strategy_id = draft
-        .strategy_id
-        .clone()
-        .ok_or("strategy_id not set")?;
-    let asset_class = draft
-        .asset_class
-        .clone()
-        .ok_or("asset_class not set")?;
+    let strategy_id = draft.strategy_id.clone().ok_or("strategy_id not set")?;
+    let asset_class = draft.asset_class.clone().ok_or("asset_class not set")?;
     Ok(StrategyDefinition {
         strategy_id,
         definition_version: draft.definition_version.clone(),
@@ -323,7 +354,10 @@ fn draft_to_definition(draft: &StrategyDraft) -> Result<StrategyDefinition, Stri
 
 /// `finalize_strategy` — assemble draft → validate → persist.
 pub fn finalize_strategy(ctx: &McpContext, params: &Value) -> Value {
-    let draft_id_str = params.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
+    let draft_id_str = params
+        .get("draft_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(draft_id) = Uuid::parse_str(draft_id_str) else {
         return draft_not_found(draft_id_str);
     };

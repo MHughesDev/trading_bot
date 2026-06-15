@@ -114,15 +114,15 @@ impl CollectorPlan {
         match asset_class {
             "crypto_spot_cex" => match timeframe {
                 // Coinbase's candle granularities omit 1s and 4h (it offers 6h).
-                Timeframe::Seconds1 => {
-                    Err("the crypto spot backfill (Coinbase) does not provide 1-second candles"
-                        .to_string())
-                }
-                Timeframe::Hours4 => {
-                    Err("the crypto spot backfill (Coinbase) does not provide 4-hour candles \
+                Timeframe::Seconds1 => Err(
+                    "the crypto spot backfill (Coinbase) does not provide 1-second candles"
+                        .to_string(),
+                ),
+                Timeframe::Hours4 => Err(
+                    "the crypto spot backfill (Coinbase) does not provide 4-hour candles \
                          (use 1h or daily)"
-                        .to_string())
-                }
+                        .to_string(),
+                ),
                 _ => Ok(()),
             },
             "crypto_spot_dex" | "perpetual_swap" => Ok(()),
@@ -304,7 +304,9 @@ fn coinbase_granularity(tf: Timeframe) -> anyhow::Result<u32> {
         Timeframe::Minutes5 => 300,
         Timeframe::Minutes15 => 900,
         Timeframe::Hours1 => 3600,
-        Timeframe::Hours4 => anyhow::bail!("Coinbase does not provide 4-hour candles (use 1h or daily)"),
+        Timeframe::Hours4 => {
+            anyhow::bail!("Coinbase does not provide 4-hour candles (use 1h or daily)")
+        }
         Timeframe::Daily => 86400,
     })
 }

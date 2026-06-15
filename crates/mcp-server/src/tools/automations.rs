@@ -9,7 +9,9 @@ use chrono::Utc;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use storage::automation::{AutomationRow, insert_automation, list_automations, set_automation_armed};
+use storage::automation::{
+    insert_automation, list_automations, set_automation_armed, AutomationRow,
+};
 
 use crate::McpContext;
 
@@ -64,7 +66,10 @@ pub async fn create_automation(ctx: &McpContext, params: &Value) -> Value {
         return json!({ "error": "invalid_uuid", "field": "execution_strategy_id" });
     };
     {
-        let store = ctx.strategy_store.lock().expect("strategy_store lock poisoned");
+        let store = ctx
+            .strategy_store
+            .lock()
+            .expect("strategy_store lock poisoned");
         if !store.contains_key(&sid) {
             return json!({ "error": "strategy_not_found" });
         }
@@ -93,7 +98,10 @@ pub async fn create_automation(ctx: &McpContext, params: &Value) -> Value {
         });
     }
 
-    let armed = params.get("armed").and_then(|v| v.as_bool()).unwrap_or(false);
+    let armed = params
+        .get("armed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let time_window_start = params
         .get("time_window_start")

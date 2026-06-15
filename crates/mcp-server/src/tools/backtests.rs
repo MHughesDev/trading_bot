@@ -54,12 +54,17 @@ pub async fn get_backtest(ctx: &McpContext, params: &Value) -> Value {
     let Some(mgr) = &ctx.backtest_manager else {
         return service_unavailable();
     };
-    let id_str = params.get("backtest_id").and_then(|v| v.as_str()).unwrap_or("");
+    let id_str = params
+        .get("backtest_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(id) = Uuid::parse_str(id_str) else {
         return json!({ "error": "invalid_uuid", "backtest_id": id_str });
     };
     match mgr.get(DEV_USER, id).await {
-        Some(s) => serde_json::to_value(&s).unwrap_or_else(|_| json!({"error": "serialization_error"})),
+        Some(s) => {
+            serde_json::to_value(&s).unwrap_or_else(|_| json!({"error": "serialization_error"}))
+        }
         None => json!({ "error": "not_found" }),
     }
 }
@@ -71,25 +76,41 @@ pub async fn create_backtest(ctx: &McpContext, params: &Value) -> Value {
     };
 
     // Resolve strategy from store.
-    let store_id_str = params.get("store_id").and_then(|v| v.as_str()).unwrap_or("");
+    let store_id_str = params
+        .get("store_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Ok(store_id) = Uuid::parse_str(store_id_str) else {
         return json!({ "error": "invalid_uuid", "field": "store_id" });
     };
     let def = {
-        let store = ctx.strategy_store.lock().expect("strategy_store lock poisoned");
+        let store = ctx
+            .strategy_store
+            .lock()
+            .expect("strategy_store lock poisoned");
         store.get(&store_id).cloned()
     };
     let Some(definition) = def else {
         return json!({ "error": "strategy_not_found" });
     };
 
-    let instrument_id = params.get("instrument_id").and_then(|v| v.as_str()).unwrap_or("");
+    let instrument_id = params
+        .get("instrument_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if instrument_id.is_empty() {
         return json!({ "error": "invalid_instrument_id" });
     }
 
-    let asset_class = params.get("asset_class").and_then(|v| v.as_str()).unwrap_or("").to_owned();
-    let timeframe_key = params.get("timeframe").and_then(|v| v.as_str()).unwrap_or("");
+    let asset_class = params
+        .get("asset_class")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
+    let timeframe_key = params
+        .get("timeframe")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Some(timeframe) = <Timeframe as TimeframeExt>::from_key(timeframe_key) else {
         return json!({
             "error": "invalid_timeframe",
@@ -117,9 +138,7 @@ pub async fn create_backtest(ctx: &McpContext, params: &Value) -> Value {
         .get("name")
         .and_then(|v| v.as_str())
         .map(|s| s.to_owned())
-        .unwrap_or_else(|| {
-            format!("{strategy_id} · {instrument_id} · {timeframe_key}")
-        });
+        .unwrap_or_else(|| format!("{strategy_id} · {instrument_id} · {timeframe_key}"));
 
     let initial_balance = params
         .get("initial_balance")

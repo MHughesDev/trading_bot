@@ -130,7 +130,10 @@ async fn main() -> anyhow::Result<()> {
     // here, so minute-level history accrues for as long as the platform runs —
     // independent of whether any strategy or automation is subscribed.
     let (bar_tx, bar_rx) = tokio::sync::mpsc::unbounded_channel::<bar_persist::PersistBar>();
-    tokio::spawn(bar_persist::run_bar_persist(cfg.clickhouse.url.clone(), bar_rx));
+    tokio::spawn(bar_persist::run_bar_persist(
+        cfg.clickhouse.url.clone(),
+        bar_rx,
+    ));
 
     // Owns one in-process pipeline per initialized instrument.
     let pipeline_manager = Arc::new(pipeline_manager::PipelineManager::new(
@@ -160,8 +163,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Start pipelines on demand when new assets are initialized (no restart).
-    let (stream_tx, mut stream_rx) =
-        tokio::sync::mpsc::unbounded_channel::<api::StreamRequest>();
+    let (stream_tx, mut stream_rx) = tokio::sync::mpsc::unbounded_channel::<api::StreamRequest>();
     {
         let mgr = Arc::clone(&pipeline_manager);
         tokio::spawn(async move {
