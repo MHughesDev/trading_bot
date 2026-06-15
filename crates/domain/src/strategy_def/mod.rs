@@ -35,6 +35,8 @@ use risk_overrides::RiskOverrides;
 /// Future breaking changes introduce a new version string value, not an
 /// in-place edit of the v1.0 schema.
 pub const DEFINITION_VERSION: &str = "1.0";
+/// Format version for v1.1 additions (ModelForecast node).
+pub const DEFINITION_VERSION_V1_1: &str = "1.1";
 
 /// A complete strategy definition — the artifact all three front doors produce.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

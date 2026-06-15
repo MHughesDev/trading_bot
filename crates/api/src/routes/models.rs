@@ -519,22 +519,52 @@ pub async fn get_lineage(
     map_result(state.models.get_lineage(&id, token.user_id()).await)
 }
 
-/// GET /api/models/:id/traces  (stub -- real data in Phase 4 ClickHouse query)
+#[derive(Debug, Deserialize)]
+pub struct TracesParams {
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// GET /api/models/:id/traces
+///
+/// Returns recent inference traces from model_events (kind = 'inference_trace').
+/// Each trace record includes version, instrument, latency_ms, result, and recorded_at.
 pub async fn get_traces(
-    State(_state): State<AppState>,
-    _token: BearerToken,
+    State(state): State<AppState>,
+    token: BearerToken,
     Path(id): Path<String>,
+    Query(params): Query<TracesParams>,
 ) -> impl IntoResponse {
-    Json(json!({ "model_id": id, "traces": [], "note": "inference traces available in Phase 4" }))
+    let limit = params.limit.unwrap_or(100).clamp(1, 1000);
+    match state
+        .models
+        .get_traces_for_model(&id, token.user_id(), limit)
+        .await
+    {
+        Ok(traces) => Json(json!({ "model_id": id, "traces": traces })).into_response(),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") {
+                not_found()
+            } else {
+                unprocessable(msg)
+            }
+        }
+    }
 }
 
 /// GET /api/models/:id/used-by
+///
+/// Returns a list of strategies that reference this model in their node graph.
 pub async fn get_used_by(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     _token: BearerToken,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    Json(
-        json!({ "model_id": id, "strategies": [], "note": "cross-reference available in Phase 4" }),
-    )
+    match state.models.get_used_by(&id).await {
+        Ok(strategies) => {
+            Json(json!({ "model_id": id, "strategies": strategies })).into_response()
+        }
+        Err(e) => unprocessable(e),
+    }
 }

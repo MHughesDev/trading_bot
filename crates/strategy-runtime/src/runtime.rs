@@ -48,6 +48,10 @@ pub struct StrategyInstance {
     program_slots: HashMap<NodeId, Vec<u16>>,
     /// String node IDs indexed by NodeId for fallback interpreter path.
     _node_id_to_str: HashMap<NodeId, String>,
+    /// Pre-populated model forecast results for ModelForecast nodes.
+    /// Must be set before process_event() if any ModelForecast nodes exist.
+    /// Maps node_id → whether the forecast condition fired.
+    model_forecast_results: HashMap<String, bool>,
 }
 
 impl StrategyInstance {
@@ -83,6 +87,7 @@ impl StrategyInstance {
             registry,
             program_slots,
             _node_id_to_str: node_id_to_str,
+            model_forecast_results: HashMap::new(),
         }
     }
 
@@ -106,6 +111,23 @@ impl StrategyInstance {
             }
         }
         (programs, id_map)
+    }
+
+    /// Set pre-fetched model forecast results (for ModelForecast nodes).
+    ///
+    /// Call this before `process_event()` when the definition contains
+    /// `ModelForecast` nodes. The results are consumed by `run_signals()`.
+    pub fn set_model_forecast_results(&mut self, results: HashMap<String, bool>) {
+        self.model_forecast_results = results;
+    }
+
+    /// Returns true if any node in the definition is a ModelForecast node.
+    pub fn has_model_forecasts(&self) -> bool {
+        use domain::strategy_def::nodes::NodeKind;
+        self.definition
+            .nodes
+            .iter()
+            .any(|n| matches!(n.kind, NodeKind::ModelForecast { .. }))
     }
 
     /// Process a world event.
@@ -143,32 +165,44 @@ impl StrategyInstance {
         // NodeId → fired: keyed by u32 so Signal nodes can look up by string id.
         let mut conditions: HashMap<&str, bool> = HashMap::new();
         for (idx, node) in self.definition.nodes.iter().enumerate() {
-            if let NodeKind::Condition { expr } = &node.kind {
-                let node_id = NodeId(idx as u32);
-                let fired = if let (Some(program), Some(local_to_global)) = (
-                    self.compiled_conditions.get(&node_id),
-                    self.program_slots.get(&node_id),
-                ) {
-                    bytecode::run_slots(program, local_to_global, feature_slots, &self.state.bars)
-                } else {
-                    // Fallback for conditions that failed to compile — build a
-                    // temporary name→value map from the slot array for the
-                    // tree-walking interpreter.
-                    let features: HashMap<String, f64> = self
-                        .registry
-                        .iter_slots()
-                        .filter_map(|(name, slot)| {
-                            let v = self.state.feature_slots.get(slot as usize).copied()?;
-                            if v.is_nan() {
-                                None
-                            } else {
-                                Some((name.to_owned(), v))
-                            }
-                        })
-                        .collect();
-                    evaluate_condition(expr, &features, &self.state.bars)
-                };
-                conditions.insert(&node.id, fired);
+            match &node.kind {
+                NodeKind::Condition { expr } => {
+                    let node_id = NodeId(idx as u32);
+                    let fired = if let (Some(program), Some(local_to_global)) = (
+                        self.compiled_conditions.get(&node_id),
+                        self.program_slots.get(&node_id),
+                    ) {
+                        bytecode::run_slots(program, local_to_global, feature_slots, &self.state.bars)
+                    } else {
+                        // Fallback for conditions that failed to compile — build a
+                        // temporary name→value map from the slot array for the
+                        // tree-walking interpreter.
+                        let features: HashMap<String, f64> = self
+                            .registry
+                            .iter_slots()
+                            .filter_map(|(name, slot)| {
+                                let v = self.state.feature_slots.get(slot as usize).copied()?;
+                                if v.is_nan() {
+                                    None
+                                } else {
+                                    Some((name.to_owned(), v))
+                                }
+                            })
+                            .collect();
+                        evaluate_condition(expr, &features, &self.state.bars)
+                    };
+                    conditions.insert(&node.id, fired);
+                }
+                NodeKind::ModelForecast { .. } => {
+                    // Look up pre-fetched result. If not available, abstain (false).
+                    let fired = self
+                        .model_forecast_results
+                        .get(&node.id)
+                        .copied()
+                        .unwrap_or(false);
+                    conditions.insert(&node.id, fired);
+                }
+                _ => {}
             }
         }
 
@@ -498,5 +532,100 @@ mod tests {
         assert_eq!(manager.active_count(), 1);
         manager.stop("user1", "BTC-USDT");
         assert_eq!(manager.active_count(), 0);
+    }
+
+    #[test]
+    fn model_forecast_node_fires_when_result_set() {
+        use domain::strategy_def::{
+            actions::{Action, ActionKind, OrderSpec, SizeMode},
+            inputs::InputDeclaration,
+            nodes::{Node, NodeKind},
+            StrategyDefinition,
+        };
+
+        let def = StrategyDefinition {
+            strategy_id: "model_forecast_test".into(),
+            definition_version: "1.1".into(),
+            asset_class: "crypto_spot_cex".into(),
+            min_trust_tier: domain::TrustTier::CentralizedExchange,
+            inputs: vec![InputDeclaration {
+                lane: "market.bars.1m".into(),
+                instrument: "$bound_at_init".into(),
+                features: vec![],
+            }],
+            nodes: vec![
+                Node {
+                    id: "mf1".into(),
+                    kind: NodeKind::ModelForecast {
+                        model_ref: "mdl_test".into(),
+                        alias: "production".into(),
+                        direction: "bullish".into(),
+                        min_confidence: 0.7,
+                    },
+                },
+                Node {
+                    id: "s1".into(),
+                    kind: NodeKind::Signal {
+                        when: "mf1".into(),
+                        emit: "long".into(),
+                    },
+                },
+            ],
+            actions: vec![Action {
+                on_signal: "long".into(),
+                kind: ActionKind::PlaceOrder {
+                    order: OrderSpec {
+                        side: domain::order::Side::Buy,
+                        size_mode: SizeMode::Fixed,
+                        size: "0.01".into(),
+                    },
+                },
+            }],
+            risk_overrides: domain::strategy_def::risk_overrides::RiskOverrides::default(),
+        };
+
+        let clock = Arc::new(WallClock) as Arc<dyn StrategyClock>;
+        let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
+        let mut instance = StrategyInstance::new("user1", "BTC-USDT", def, clock.now());
+
+        assert!(instance.has_model_forecasts());
+
+        // Without setting model forecast results, should not fire.
+        use chrono::Utc;
+        use domain::money::{Price, Size};
+        use domain::payloads::bar::{BarPayload, Timeframe};
+        use std::str::FromStr;
+
+        let bar = BarPayload::new(
+            Timeframe::Minutes1,
+            Price::from_str("100").unwrap(),
+            Price::from_str("110").unwrap(),
+            Price::from_str("95").unwrap(),
+            Price::from_str("105").unwrap(),
+            Size::from_str("500").unwrap(),
+            200,
+        );
+        let event = WorldEvent::Bar {
+            instrument_id: "BTC-USDT".into(),
+            timeframe: Timeframe::Minutes1,
+            bar: bar.clone(),
+            available_time: Utc::now(),
+        };
+        let intents = instance.process_event(&event);
+        assert!(intents.is_empty(), "should not fire without forecast results");
+
+        // Set forecast result to true
+        let mut results = HashMap::new();
+        results.insert("mf1".to_string(), true);
+        instance.set_model_forecast_results(results);
+
+        let event2 = WorldEvent::Bar {
+            instrument_id: "BTC-USDT".into(),
+            timeframe: Timeframe::Minutes1,
+            bar,
+            available_time: Utc::now(),
+        };
+        let intents2 = instance.process_event(&event2);
+        assert_eq!(intents2.len(), 1, "should fire when forecast result is true");
     }
 }

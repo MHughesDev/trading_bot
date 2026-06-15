@@ -7,15 +7,18 @@
 
 pub mod backtest_bridge;
 pub mod datasets;
+pub mod inference_gateway;
 pub mod job;
 pub mod manager;
 pub mod metrics;
 pub mod nats_bridge;
 pub mod regression;
+pub mod scheduler;
 pub mod scorecard;
 pub mod sidecar;
 pub mod types;
 
+pub use inference_gateway::InferenceGateway;
 pub use manager::ModelManager;
 pub use types::{
     CreateModelRequest, ModelRecord, ModelRunKind, ModelRunSnapshot, RunStatus, TrainRequest,
