@@ -2,10 +2,14 @@
 //! Runs a reference strategy with `model_forecast` pointing to a specific version.
 
 use anyhow::Result;
+use rust_decimal::Decimal;
 
 pub struct BacktestSummary {
-    pub pnl_usd: f64,
+    /// Net P&L in USD — Decimal per ADR-0002 (no f64 on monetary fields).
+    pub pnl_usd: Decimal,
+    /// Annualised Sharpe ratio (dimensionless ratio, f64 acceptable).
     pub sharpe: f64,
+    /// Max drawdown as a fraction 0..1 (dimensionless, f64 acceptable).
     pub max_drawdown_pct: f64,
     pub n_trades: u64,
 }
@@ -19,12 +23,11 @@ pub async fn run_model_eval_backtest(
     instrument_id: &str,
     days: u32,
 ) -> Result<BacktestSummary> {
-    // Stub implementation — returns plausible-looking results.
-    // Phase 4 will wire this to the real BacktestManager once strategy-runtime
-    // can resolve model_forecast by (model_id, version).
+    // Stub — Phase 4 wires the real BacktestManager once strategy-runtime can
+    // resolve model_forecast by (model_id, version).
     let _ = (model_id, version, instrument_id, days);
     Ok(BacktestSummary {
-        pnl_usd: 0.0,
+        pnl_usd: Decimal::ZERO,
         sharpe: 0.0,
         max_drawdown_pct: 0.0,
         n_trades: 0,

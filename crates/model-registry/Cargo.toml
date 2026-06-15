@@ -20,6 +20,7 @@ reqwest = { workspace = true }
 async-nats = { workspace = true }
 futures-util = "0.3"
 sha2 = "0.10"
+rust_decimal = { workspace = true }
 
 [lints]
 workspace = true
