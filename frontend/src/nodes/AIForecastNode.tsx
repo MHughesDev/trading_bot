@@ -1,12 +1,20 @@
 import { Handle, Position, useReactFlow } from '@xyflow/react'
 import type { NodeProps, Node } from '@xyflow/react'
+import { useQuery } from '@tanstack/react-query'
 import type { ForecastDirection } from '@/types/spec'
+import { modelsApi } from '@/api/models'
 
 export type AIForecastNodeData = { model: string; direction: ForecastDirection; minConfidence: number; disabled?: boolean }
 export type AIForecastNodeType = Node<AIForecastNodeData, 'ai_forecast'>
 
 export function AIForecastNode({ data, id, selected }: NodeProps<AIForecastNodeType>) {
   const { updateNodeData } = useReactFlow()
+
+  const { data: availableModels } = useQuery({
+    queryKey: ['models', 'for-node', 'forecaster'],
+    queryFn: () => modelsApi.forNode('forecaster').then((r) => r.data.models),
+    staleTime: 30_000,
+  })
 
   return (
     <div className={`tb-node${selected ? ' selected' : ''}${data.disabled ? ' disabled' : ''}`} style={{ minWidth: 230 }}>
@@ -19,7 +27,22 @@ export function AIForecastNode({ data, id, selected }: NodeProps<AIForecastNodeT
         <div className="tb-node-row">
           <span className="tb-node-label">Model</span>
           <select className="tb-select" value={data.model} onChange={e => updateNodeData(id, { model: e.target.value })}>
-            <option value="price_forecaster">Price Forecaster</option>
+            {availableModels && availableModels.length > 0 ? (
+              availableModels.map((m) => (
+                <option
+                  key={m.id}
+                  value={m.slug}
+                  disabled={m.status !== 'active' || !m.has_production}
+                >
+                  {m.display_name}
+                  {(m.status !== 'active' || !m.has_production) ? ' (unavailable)' : ''}
+                </option>
+              ))
+            ) : (
+              <option value="" disabled>
+                No models available
+              </option>
+            )}
           </select>
         </div>
         <div className="tb-node-row">

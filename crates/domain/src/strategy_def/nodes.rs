@@ -34,11 +34,19 @@
 
 use serde::{Deserialize, Serialize};
 
+fn default_production_alias() -> String {
+    "production".to_string()
+}
+
+fn is_production(s: &str) -> bool {
+    s == "production"
+}
+
 /// A node in the strategy computation graph.
 ///
 /// The validator (Phase 5) parses `Node::kind` and rejects unknown types.
 /// This is the **fail-closed** rule: an unknown `type` field → validation error.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     /// Unique stable node ID within this definition (e.g. `"n1"`, `"n2"`).
     pub id: String,
@@ -48,7 +56,7 @@ pub struct Node {
 }
 
 /// Discriminated node type.  Unknown variants are rejected by the validator.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeKind {
     /// Evaluates a predicate expression over the current `WorldContext`.
@@ -97,5 +105,20 @@ pub enum NodeKind {
     SurfaceAction {
         /// ID of the upstream node supplying the final universe.
         input: String,
+    },
+    /// v1.1: AI model forecast condition.
+    /// The condition is true when the model's forecast direction matches `direction`
+    /// and confidence ≥ min_confidence. Returns false when the inference gateway
+    /// abstains (sidecar down, circuit-break open, or model not found).
+    ModelForecast {
+        /// Model ID or slug.
+        model_ref: String,
+        /// Alias to resolve (default: "production").
+        #[serde(default = "default_production_alias", skip_serializing_if = "is_production")]
+        alias: String,
+        /// Expected forecast direction: "bullish" | "bearish" | "any".
+        direction: String,
+        /// Minimum confidence threshold (0.0–1.0).
+        min_confidence: f64,
     },
 }

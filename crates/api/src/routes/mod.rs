@@ -120,6 +120,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/backtests/{id}/stop", post(backtests::stop_backtest))
         .route("/api/backtests/{id}/rerun", post(backtests::rerun_backtest))
         // AI Model Studio -- registry, training, evaluation, promotion, deployment
+        // NB: /api/models/for-node must be registered before /api/models/{id}
+        // so the static literal path wins over the dynamic capture.
+        .route("/api/models/for-node", get(models::for_node))
         .route(
             "/api/models",
             get(models::list_models).post(models::create_model),

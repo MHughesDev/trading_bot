@@ -211,6 +211,107 @@ impl AlpacaDataCollector {
         let _ = raw;
         Ok(envelope)
     }
+
+    /// Run in-process, writing ticks to an rtrb ring (hot-path stage 1).
+    ///
+    /// Mirrors `KrakenCollector::run_in_process`: same reconnect loop, same dedup,
+    /// same tee to JetStream — proving the abstraction works across venues.
+    pub async fn run_in_process(
+        &self,
+        mut raw_prod: rtrb::Producer<domain::EventEnvelope>,
+        tee_tx: tokio::sync::mpsc::UnboundedSender<domain::EventEnvelope>,
+    ) -> Result<(), CollectorError> {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+        let api_key = std::env::var("ALPACA_API_KEY_ID").unwrap_or_default();
+        let api_secret = std::env::var("ALPACA_API_SECRET_KEY").unwrap_or_default();
+        let mut policy = ReconnectPolicy::default();
+        let mut gap_detector = GapDetector::new(&self.symbol, MARKET_TRADES);
+        let mut seq: u64 = 0;
+
+        loop {
+            info!(symbol = %self.symbol, "connecting to Alpaca WS (in-process)");
+            let (mut ws_stream, _) = match connect_async(ALPACA_WS_URL).await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    warn!(error = %e, "Alpaca WS connect failed, retrying");
+                    policy.wait().await;
+                    continue;
+                }
+            };
+
+            let auth_msg = serde_json::json!({
+                "action": "auth", "key": api_key, "secret": api_secret
+            });
+            if let Err(e) = ws_stream.send(Message::Text(auth_msg.to_string())).await {
+                warn!(error = %e, "Alpaca WS auth send failed");
+                policy.wait().await;
+                continue;
+            }
+            let sub_msg = serde_json::json!({
+                "action": "subscribe", "trades": [self.symbol]
+            });
+            if let Err(e) = ws_stream.send(Message::Text(sub_msg.to_string())).await {
+                warn!(error = %e, "Alpaca WS subscribe send failed");
+                policy.wait().await;
+                continue;
+            }
+
+            policy.reset();
+            gap_detector.reset();
+            info!(symbol = %self.symbol, "subscribed to Alpaca trades (in-process)");
+
+            loop {
+                match ws_stream.next().await {
+                    None | Some(Err(_)) => break,
+                    Some(Ok(Message::Text(text))) => {
+                        let raw = text.as_bytes().to_vec();
+                        let messages: Vec<AlpacaMessage<'_>> =
+                            match serde_json::from_str(&text) {
+                                Ok(v) => v,
+                                Err(_) => continue,
+                            };
+                        for am in &messages {
+                            if am.msg_type != "t" {
+                                continue;
+                            }
+                            seq += 1;
+                            if let Some(gap) = gap_detector.check(seq) {
+                                warn!(
+                                    instrument_id = %gap.instrument_id,
+                                    lane = %gap.lane,
+                                    expected = gap.expected,
+                                    got = gap.got,
+                                    "sequence gap detected"
+                                );
+                            }
+                            match self.normalize(am, &raw, seq) {
+                                Ok(envelope) => {
+                                    // Push to hot-path ring (non-blocking, best-effort).
+                                    if raw_prod.push(envelope.clone()).is_err() {
+                                        warn!(symbol = %self.symbol, "hot-path ring full, dropping tick");
+                                    }
+                                    // Tee to JetStream (best-effort).
+                                    let _ = tee_tx.send(envelope);
+                                }
+                                Err(e) => {
+                                    warn!(symbol = %self.symbol, error = %e, "normalize error");
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(data))) => {
+                        let _ = ws_stream.send(Message::Pong(data)).await;
+                    }
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+            warn!(symbol = %self.symbol, "Alpaca WS disconnected, reconnecting");
+            policy.wait().await;
+        }
+    }
 }
 
 #[async_trait]

@@ -1647,3 +1647,66 @@ impl ModelRow {
         })
     }
 }
+
+impl ModelManager {
+    /// Expose PgPool reference for internal use (e.g., scheduler).
+    pub fn pg_ref(&self) -> &sqlx::PgPool {
+        &self.pg
+    }
+
+    /// Return strategy definitions that reference this model.
+    pub async fn get_used_by(&self, model_id: &str) -> anyhow::Result<Vec<serde_json::Value>> {
+        // Query strategies whose definition_json nodes contain a model_ref matching this model.
+        let rows: Vec<(String, String, serde_json::Value)> = sqlx::query_as(
+            "SELECT strategy_id, display_name, definition_json \
+             FROM strategies \
+             WHERE definition_json::text LIKE $1 \
+             ORDER BY created_at DESC \
+             LIMIT 100",
+        )
+        .bind(format!("%{model_id}%"))
+        .fetch_all(&self.pg)
+        .await
+        .unwrap_or_default();
+
+        let result = rows
+            .into_iter()
+            .map(|(sid, name, _def)| {
+                serde_json::json!({
+                    "strategy_id": sid,
+                    "display_name": name,
+                })
+            })
+            .collect();
+
+        Ok(result)
+    }
+
+    /// Return recent inference traces for this model.
+    pub async fn get_traces_for_model(
+        &self,
+        model_id: &str,
+        user_id: uuid::Uuid,
+        limit: i64,
+    ) -> anyhow::Result<Vec<serde_json::Value>> {
+        self.ensure_model_owned(model_id, user_id).await?;
+
+        let rows: Vec<(serde_json::Value, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+            "SELECT payload, created_at FROM model_events \
+             WHERE model_id = $1 AND kind = 'inference_trace' \
+             ORDER BY created_at DESC LIMIT $2",
+        )
+        .bind(model_id)
+        .bind(limit)
+        .fetch_all(&self.pg)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(mut payload, created_at)| {
+                payload["recorded_at"] = serde_json::json!(created_at);
+                payload
+            })
+            .collect())
+    }
+}

@@ -8,7 +8,7 @@ use backtest::BacktestManager;
 use demand_manager::{DemandRegistry, NoopPipelineFactory};
 use execution::paper::PaperTradingEngine;
 use execution::ExecutionEngine;
-use model_registry::ModelManager;
+use model_registry::{InferenceGateway, ModelManager};
 use risk::{KillSwitch, RiskGate};
 use strategy_runtime::{InstanceManager, WallClock};
 use ui_gateway::SubscriptionRegistry;
@@ -46,6 +46,8 @@ pub struct AppState {
     pub backtest: Arc<BacktestManager>,
     /// AI Model Studio orchestrator.
     pub models: Arc<ModelManager>,
+    /// Inference gateway — alias resolution, prediction caching, circuit breaking.
+    pub inference: Arc<InferenceGateway>,
     /// Email config for password-reset codes.
     pub email: cfg::model::EmailConfig,
     /// ClickHouse URL — used by asset init jobs and the chart bars endpoint.
@@ -126,6 +128,7 @@ impl AppState {
         gateway: Arc<SubscriptionRegistry>,
         backtest: Arc<BacktestManager>,
         models: Arc<ModelManager>,
+        inference: Arc<InferenceGateway>,
         email: cfg::model::EmailConfig,
         clickhouse_url: String,
         stream_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamRequest>>,
@@ -143,6 +146,7 @@ impl AppState {
             clock: Arc::new(WallClock),
             backtest,
             models,
+            inference,
             email,
             clickhouse_url,
             stream_tx,

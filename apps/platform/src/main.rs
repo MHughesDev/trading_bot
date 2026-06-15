@@ -192,6 +192,11 @@ async fn main() -> anyhow::Result<()> {
     let model_manager = model_registry::ModelManager::from_env(pg.clone());
     info!("model registry initialised");
 
+    // Inference gateway — alias resolution, prediction caching, circuit breaking.
+    let sidecar = Arc::new(model_registry::sidecar::SidecarClient::from_env());
+    let inference_gateway = model_registry::InferenceGateway::new(pg.clone(), sidecar);
+    info!("inference gateway initialised");
+
     // Best-effort NATS progress bridge: drives ModelManager job state from
     // training/eval progress frames published by the Python trainer sidecar.
     {
@@ -220,6 +225,7 @@ async fn main() -> anyhow::Result<()> {
         gateway,
         backtest_manager,
         model_manager,
+        inference_gateway,
         cfg.email.clone(),
         cfg.clickhouse.url.clone(),
         Some(stream_tx),
