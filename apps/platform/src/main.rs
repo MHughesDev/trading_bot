@@ -100,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
     )));
     let gateway = Arc::new(ui_gateway::SubscriptionRegistry::new(demand_registry));
 
-    // ── In-process hot-path pipeline ──────────────────────────────────────────
+    // -- In-process hot-path pipeline --
     //
     // Connect to NATS for the JetStream tee (best-effort persistence).
     // If NATS is unavailable the tee is skipped; the hot path still runs.
@@ -123,11 +123,11 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // ── Continuous live-data pipelines ────────────────────────────────────────
+    // -- Continuous live-data pipelines --
     //
     // The single writer of live 1-minute bars to ClickHouse.  Every initialized
     // asset's pipeline aggregates trades into 1m OHLCV and sends completed bars
-    // here, so minute-level history accrues for as long as the platform runs —
+    // here, so minute-level history accrues for as long as the platform runs --
     // independent of whether any strategy or automation is subscribed.
     let (bar_tx, bar_rx) = tokio::sync::mpsc::unbounded_channel::<bar_persist::PersistBar>();
     tokio::spawn(bar_persist::run_bar_persist(
@@ -187,6 +187,11 @@ async fn main() -> anyhow::Result<()> {
     let backtest_manager = backtest::BacktestManager::new(cfg.clickhouse.url.clone(), pg.clone());
     info!("backtest orchestrator initialised (market_simulator SDK)");
 
+    // AI Model Studio orchestrator — owns model identity, training/eval jobs,
+    // alias management, and drives async job execution.
+    let model_manager = model_registry::ModelManager::new(pg.clone());
+    info!("model registry initialised");
+
     // Build the API router.
     let app_state = api::AppState::new(
         pg,
@@ -196,6 +201,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&paper_engine),
         gateway,
         backtest_manager,
+        model_manager,
         cfg.email.clone(),
         cfg.clickhouse.url.clone(),
         Some(stream_tx),

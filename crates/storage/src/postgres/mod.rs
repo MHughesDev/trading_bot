@@ -1,5 +1,6 @@
 //! sqlx pool + transaction helpers.
 pub mod instruments;
+pub mod models;
 pub mod orders;
 pub mod strategies;
 pub mod users;

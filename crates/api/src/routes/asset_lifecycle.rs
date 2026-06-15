@@ -212,7 +212,7 @@ async fn seed_bars(
         symbol,
         venue_id,
         Timeframe::Hours1,
-        &[range.clone()],
+        std::slice::from_ref(&range),
         &collected,
         &cancel,
     )
@@ -492,8 +492,16 @@ pub async fn delete_exec_mode(
 
 // ── GET /assets/models/:symbol ────────────────────────────────────────────────
 
-pub async fn get_models(_token: BearerToken, Path(symbol): Path<String>) -> impl IntoResponse {
-    Json(json!({ "symbol": symbol }))
+pub async fn get_models(
+    _token: BearerToken,
+    State(state): State<AppState>,
+    Path(symbol): Path<String>,
+) -> impl IntoResponse {
+    let asset_class = state.resolve_asset_class(&symbol).await;
+    match state.models.list_models_by_asset_class(&asset_class).await {
+        Ok(models) => Json(json!({ "symbol": symbol, "models": models })).into_response(),
+        Err(_) => Json(json!({ "symbol": symbol, "models": [] })).into_response(),
+    }
 }
 
 // ── GET /assets/chart/bars ────────────────────────────────────────────────────

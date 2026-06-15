@@ -14,6 +14,7 @@ storage = { workspace = true }
 ui-gateway = { workspace = true }
 demand-manager = { workspace = true }
 backtest = { workspace = true }
+model-registry = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }

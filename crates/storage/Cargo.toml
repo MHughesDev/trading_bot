@@ -19,6 +19,8 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 rust_decimal = { workspace = true }
 uuid = { workspace = true }
+xxhash-rust = { workspace = true }
+anyhow = { workspace = true }
 
 [dev-dependencies]
 rust_decimal_macros = { workspace = true }

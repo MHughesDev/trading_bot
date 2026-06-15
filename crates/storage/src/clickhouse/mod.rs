@@ -1,6 +1,7 @@
 //! ClickHouse client + batched insert helpers.
 pub mod bars;
 pub mod features;
+pub mod model_traces;
 pub mod trades;
 
 use thiserror::Error;

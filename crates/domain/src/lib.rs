@@ -56,3 +56,9 @@ pub use strategy_def::StrategyDefinition;
 pub use timestamp::{compute_available_time, AvailableTimeParams, Timestamps};
 pub use trust::TrustTier;
 pub use venue::{SupportedVenue, UnknownVenue};
+
+pub mod model;
+pub mod model_def;
+
+pub use model::{AliasName, Direction, Forecast, ModelStatus, RunStatus};
+pub use model_def::{validate::validate as validate_model_def, ModelDefinition};

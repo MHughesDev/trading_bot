@@ -3,6 +3,7 @@ pub mod assets;
 pub mod automations;
 pub mod backtests;
 pub mod dashboard;
+pub mod models;
 pub mod orders;
 pub mod strategies;
 pub mod streams;
@@ -118,5 +119,57 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/backtests/{id}/stop", post(backtests::stop_backtest))
         .route("/api/backtests/{id}/rerun", post(backtests::rerun_backtest))
+        // AI Model Studio -- registry, training, evaluation, promotion, deployment
+        .route(
+            "/api/models",
+            get(models::list_models).post(models::create_model),
+        )
+        .route(
+            "/api/models/{id}",
+            get(models::get_model)
+                .patch(models::patch_model)
+                .delete(models::delete_model),
+        )
+        .route("/api/models/{id}/archive", post(models::archive_model))
+        .route("/api/models/{id}/train", post(models::start_train))
+        .route("/api/models/{id}/runs", get(models::list_runs))
+        .route("/api/models/{id}/runs/{run_id}", get(models::get_run))
+        .route(
+            "/api/models/{id}/runs/{run_id}/cancel",
+            post(models::cancel_run),
+        )
+        .route(
+            "/api/models/{id}/versions",
+            get(models::list_versions).post(models::register_version),
+        )
+        .route(
+            "/api/models/{id}/versions/{v}/evaluate",
+            post(models::start_eval),
+        )
+        .route(
+            "/api/models/{id}/versions/{v}/promote",
+            post(models::promote),
+        )
+        .route(
+            "/api/models/{id}/versions/{v}/test",
+            post(models::test_inference),
+        )
+        .route("/api/models/{id}/evaluations", get(models::list_evals))
+        .route("/api/models/{id}/aliases", get(models::get_aliases))
+        .route(
+            "/api/models/{id}/aliases/{alias}/rollback",
+            post(models::rollback),
+        )
+        .route(
+            "/api/models/{id}/deployments",
+            get(models::list_deployments).post(models::create_deployment),
+        )
+        .route(
+            "/api/models/{id}/test-cases",
+            get(models::list_test_cases).post(models::add_test_case),
+        )
+        .route("/api/models/{id}/lineage", get(models::get_lineage))
+        .route("/api/models/{id}/traces", get(models::get_traces))
+        .route("/api/models/{id}/used-by", get(models::get_used_by))
         .with_state(state)
 }

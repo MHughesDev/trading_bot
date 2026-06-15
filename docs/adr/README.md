@@ -22,6 +22,7 @@ ADR that replaces it.
 | [ADR-0009](0009-append-only-raw-event-archive-as-ground-truth.md) | Append-Only Raw Event Archive as Ground Truth | Accepted | 2026-06-08 |
 | [ADR-0010](0010-three-front-doors-one-canonical-strategy-json.md) | Three Front Doors, One Canonical Strategy JSON | Accepted | 2026-06-08 |
 | [ADR-0011](0011-demand-driven-data-engines-no-auto-start.md) | Demand-Driven Data Engines — No Auto-Start | Accepted | 2026-06-08 |
+| [ADR-0015](0015-freeze-model-definition-format-v1.md) | Freeze Model Definition Format v1.0 | Accepted | 2026-06-15 |
 
 ## Decision Relationships
 
@@ -35,6 +36,7 @@ The following ADRs have explicit dependencies or cross-references:
 - **ADR-0006** (broker architecture) resolves open questions Q-1 and Q-2 from spec/10-open-questions.md.
 - **ADR-0007** resolves open question Q-3 from spec/10-open-questions.md.
 - **ADR-0011** (demand-driven pipelines) depends on **ADR-0008** (pure function builders) being true; stateful builders would make pipeline stop/restart expensive.
+- **ADR-0015** (model format freeze) mirrors **ADR-0007** and is a prerequisite for all Set-H phases.
 
 ## Format
 

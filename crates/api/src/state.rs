@@ -8,6 +8,7 @@ use backtest::BacktestManager;
 use demand_manager::{DemandRegistry, NoopPipelineFactory};
 use execution::paper::PaperTradingEngine;
 use execution::ExecutionEngine;
+use model_registry::ModelManager;
 use risk::{KillSwitch, RiskGate};
 use strategy_runtime::{InstanceManager, WallClock};
 use ui_gateway::SubscriptionRegistry;
@@ -43,6 +44,8 @@ pub struct AppState {
     pub clock: Arc<WallClock>,
     /// Backtest job orchestrator (connects to the market_simulator SDK).
     pub backtest: Arc<BacktestManager>,
+    /// AI Model Studio orchestrator.
+    pub models: Arc<ModelManager>,
     /// Email config for password-reset codes.
     pub email: cfg::model::EmailConfig,
     /// ClickHouse URL — used by asset init jobs and the chart bars endpoint.
@@ -78,7 +81,7 @@ impl AppState {
         self.ensure_pipeline(instrument_id, &asset_class);
     }
 
-    async fn resolve_asset_class(&self, instrument_id: &str) -> String {
+    pub(crate) async fn resolve_asset_class(&self, instrument_id: &str) -> String {
         if let Ok(Some((ac,))) = sqlx::query_as::<_, (String,)>(
             "SELECT asset_class FROM asset_lifecycle WHERE symbol = $1",
         )
@@ -122,6 +125,7 @@ impl AppState {
         paper_engine: Arc<PaperTradingEngine>,
         gateway: Arc<SubscriptionRegistry>,
         backtest: Arc<BacktestManager>,
+        models: Arc<ModelManager>,
         email: cfg::model::EmailConfig,
         clickhouse_url: String,
         stream_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamRequest>>,
@@ -138,6 +142,7 @@ impl AppState {
             instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),
             clock: Arc::new(WallClock),
             backtest,
+            models,
             email,
             clickhouse_url,
             stream_tx,
