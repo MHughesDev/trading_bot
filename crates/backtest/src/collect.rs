@@ -141,8 +141,7 @@ impl CollectorPlan {
 
     pub fn source_name(&self) -> &str {
         match self {
-            Self::CoinbaseCandles { source, .. } => source,
-            Self::BinanceKlines { source, .. } => source,
+            Self::CoinbaseCandles { source, .. } | Self::BinanceKlines { source, .. } => source,
             Self::AlpacaBars { .. } => "alpaca_rest",
         }
     }

@@ -1,9 +1,9 @@
 //! In-memory OHLCV bar aggregation.
 //!
 //! Rolls base-timeframe bars (e.g. 1 min) up into a higher timeframe
-//! (e.g. 5 min) without hitting ClickHouse.  The same aggregation rules
+//! (e.g. 5 min) without hitting `ClickHouse`.  The same aggregation rules
 //! apply as the live bar builder: open = first, high = max, low = min,
-//! close = last, volume/trade_count = sum.  The output bar's `ts_ns` is
+//! close = last, `volume/trade_count` = sum.  The output bar's `ts_ns` is
 //! the bucket's close time (matching `available_time` semantics used
 //! throughout the platform).
 
@@ -37,8 +37,8 @@ pub fn aggregate_bars(bars: &[LoadedBar], target: Timeframe, base: Timeframe) ->
         "target timeframe must be a whole multiple of base timeframe"
     );
 
-    let mut out: Vec<LoadedBar> =
-        Vec::with_capacity(bars.len() / (target_ns / base_ns) as usize + 1);
+    let ratio = usize::try_from(target_ns / base_ns).unwrap_or(1);
+    let mut out: Vec<LoadedBar> = Vec::with_capacity(bars.len() / ratio + 1);
 
     // Accumulator for the bar currently being built.
     let mut acc: Option<BucketAcc> = None;
@@ -67,8 +67,8 @@ pub fn aggregate_bars(bars: &[LoadedBar], target: Timeframe, base: Timeframe) ->
 /// Computes the close timestamp (nanoseconds) of the target-timeframe bucket
 /// that contains a bar closing at `ts_ns`.
 ///
-/// A bar closing exactly ON a boundary (ts_ns % target_ns == 0) is the LAST
-/// bar of that bucket, so its bucket close is ts_ns itself.
+/// A bar closing exactly ON a boundary (`ts_ns` % `target_ns` == 0) is the LAST
+/// bar of that bucket, so its bucket close is `ts_ns` itself.
 fn bucket_close_ns(ts_ns: i64, target_ns: i64) -> i64 {
     let remainder = ts_ns.rem_euclid(target_ns);
     if remainder == 0 {

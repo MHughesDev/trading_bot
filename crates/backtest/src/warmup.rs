@@ -11,7 +11,7 @@
 //!    periods (via [`DataRequirements::warmup_bars`]).
 //! 2. Compute how many 1 min bars that translates to for the chosen
 //!    timeframe, adding a small buffer for partial buckets and market gaps.
-//! 3. Load those 1 min bars from ClickHouse.
+//! 3. Load those 1 min bars from `ClickHouse`.
 //! 4. Aggregate in-memory to the target timeframe ([`aggregate_bars`]).
 //! 5. Run all indicators over every aggregated bar, returning the final
 //!    (warm) state.
@@ -55,7 +55,7 @@ pub struct WarmState {
     pub bars: Vec<LoadedBar>,
 }
 
-/// Loads 1 min bars from ClickHouse, aggregates them to `target_timeframe`,
+/// Loads 1 min bars from `ClickHouse`, aggregates them to `target_timeframe`,
 /// and runs all indicators in `requirements` over the full history to produce
 /// a warm [`WarmState`].
 ///
@@ -79,8 +79,7 @@ pub async fn load_warm_state(
 
     anyhow::ensure!(
         target_secs % base_secs == 0,
-        "target timeframe {:?} ({target_secs}s) is not a whole multiple of 1 min",
-        target_timeframe,
+        "target timeframe {target_timeframe:?} ({target_secs}s) is not a whole multiple of 1 min",
     );
 
     // How many 1 min base bars do we need?
