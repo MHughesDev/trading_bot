@@ -12,11 +12,38 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use domain::model_def::validate::validate as validate_def;
 use model_registry::{CreateModelRequest, TrainRequest};
 
 use crate::{auth::BearerToken, state::AppState};
+
+// In-memory rate limiter for test_inference: 20 calls per 60s per (user_id, model_id).
+static TEST_RATE_LIMITER: Mutex<Option<HashMap<(String, String), VecDeque<Instant>>>> =
+    Mutex::new(None);
+
+fn check_test_rate_limit(user_id: &str, model_id: &str) -> bool {
+    const MAX_CALLS: usize = 20;
+    const WINDOW: Duration = Duration::from_secs(60);
+
+    let mut guard = TEST_RATE_LIMITER.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    let key = (user_id.to_string(), model_id.to_string());
+    let now = Instant::now();
+    let deque = map.entry(key).or_default();
+    // Drop timestamps older than the window.
+    while deque.front().map(|t| now.duration_since(*t) > WINDOW).unwrap_or(false) {
+        deque.pop_front();
+    }
+    if deque.len() >= MAX_CALLS {
+        return false;
+    }
+    deque.push_back(now);
+    true
+}
 
 fn not_found() -> axum::response::Response {
     (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response()
@@ -500,6 +527,18 @@ pub async fn test_inference(
     Path((id, version)): Path<(String, i32)>,
     Json(req): Json<TestInferenceRequest>,
 ) -> impl IntoResponse {
+    let uid = token.user_id().to_string();
+    if !check_test_rate_limit(&uid, &id) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "rate_limit_exceeded",
+                "message": "maximum 20 test inference calls per minute per model",
+                "retry_after_secs": 60,
+            })),
+        )
+            .into_response();
+    }
     map_result(
         state
             .models
@@ -566,5 +605,61 @@ pub async fn get_used_by(
             Json(json!({ "model_id": id, "strategies": strategies })).into_response()
         }
         Err(e) => unprocessable(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ForNodeParams {
+    pub kind: Option<String>,
+    pub asset_class: Option<String>,
+}
+
+/// GET /api/models/for-node
+///
+/// Returns lightweight model records suitable for populating the strategy-builder
+/// AIForecastNode dropdown.  Only non-archived models are returned; each entry
+/// includes whether a `production` alias has been promoted so the UI can disable
+/// non-ready models.
+pub async fn for_node(
+    State(state): State<AppState>,
+    _token: BearerToken,
+    Query(params): Query<ForNodeParams>,
+) -> impl IntoResponse {
+    // Query models by kind and optional asset_class, excluding archived.
+    let rows: Result<Vec<(String, String, String, String, bool)>, sqlx::Error> = sqlx::query_as(
+        "SELECT m.model_id, m.slug, m.display_name, m.status, \
+         EXISTS(SELECT 1 FROM model_aliases a WHERE a.model_id = m.model_id AND a.alias = 'production') AS has_production \
+         FROM ai_models m \
+         WHERE ($1::text IS NULL OR m.model_kind = $1) \
+           AND ($2::text IS NULL OR m.asset_class = $2) \
+           AND m.status != 'archived' \
+         ORDER BY m.display_name",
+    )
+    .bind(params.kind.as_deref())
+    .bind(params.asset_class.as_deref())
+    .fetch_all(&state.pg)
+    .await;
+
+    match rows {
+        Ok(rs) => {
+            let models: Vec<serde_json::Value> = rs
+                .into_iter()
+                .map(|(id, slug, display_name, status, has_production)| {
+                    json!({
+                        "id": id,
+                        "slug": slug,
+                        "display_name": display_name,
+                        "status": status,
+                        "has_production": has_production,
+                    })
+                })
+                .collect();
+            Json(json!({ "models": models })).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }

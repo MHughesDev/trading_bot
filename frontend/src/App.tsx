@@ -34,6 +34,9 @@ const ModelDetailPage = lazy(() =>
 const ModelCreatePage = lazy(() =>
   import('@/pages/ModelCreatePage').then((m) => ({ default: m.ModelCreatePage })),
 )
+const ModelLineagePage = lazy(() =>
+  import('@/pages/ModelLineagePage').then((m) => ({ default: m.ModelLineagePage })),
+)
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -91,6 +94,7 @@ export default function App() {
               <Route path="/backtesting" element={<BackTestingPage />} />
               <Route path="/models" element={<ModelStudioPage />} />
               <Route path="/models/create" element={<ModelCreatePage />} />
+              <Route path="/models/graph" element={<ModelLineagePage />} />
               <Route path="/models/:id" element={<ModelDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
 
