@@ -128,3 +128,25 @@ pub async fn delete_automation(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Er
         .await?;
     Ok(result.rows_affected() > 0)
 }
+
+/// Set `armed = false` for every automation.  Called at server startup so no
+/// automation runs until the user explicitly re-arms it.  Returns the number
+/// of rows updated.
+pub async fn disarm_all_automations(pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query("UPDATE automations SET armed = false WHERE armed = true")
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+
+/// Fetch a single automation row by id.
+pub async fn get_automation(pool: &PgPool, id: Uuid) -> Result<Option<AutomationRow>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT id, user_id, kind, account_mode, spec, armed, created_at \
+         FROM automations WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.as_ref().map(row_to_automation))
+}

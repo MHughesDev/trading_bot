@@ -118,7 +118,11 @@ impl BarStore {
             .or_else(|| url.strip_prefix("https://"))
             .unwrap_or(url);
 
-        let scheme = if url.starts_with("https") { "https" } else { "http" };
+        let scheme = if url.starts_with("https") {
+            "https"
+        } else {
+            "http"
+        };
 
         // Split "user:pass@host:port/db" → (credentials, host_and_path)
         let (creds, host_path) = if let Some(at) = after_scheme.rfind('@') {

@@ -54,6 +54,65 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Fire-and-forget: send a request to start a live 1-minute aggregation
+    /// pipeline for `instrument_id` with a known `asset_class`.  Idempotent —
+    /// the pipeline manager ignores the request when a pipeline is already
+    /// running for that instrument.
+    pub fn ensure_pipeline(&self, instrument_id: &str, asset_class: &str) {
+        if let Some(tx) = &self.stream_tx {
+            let _ = tx.send(StreamRequest {
+                instrument_id: instrument_id.to_owned(),
+                asset_class: asset_class.to_owned(),
+            });
+        }
+    }
+
+    /// Like `ensure_pipeline` but resolves `asset_class` from the database,
+    /// falling back to a symbol-name heuristic when the instrument is not yet
+    /// in `asset_lifecycle` or `instruments`.
+    pub async fn ensure_pipeline_for_instrument(&self, instrument_id: &str) {
+        if self.stream_tx.is_none() {
+            return;
+        }
+        let asset_class = self.resolve_asset_class(instrument_id).await;
+        self.ensure_pipeline(instrument_id, &asset_class);
+    }
+
+    async fn resolve_asset_class(&self, instrument_id: &str) -> String {
+        if let Ok(Some((ac,))) = sqlx::query_as::<_, (String,)>(
+            "SELECT asset_class FROM asset_lifecycle WHERE symbol = $1",
+        )
+        .bind(instrument_id)
+        .fetch_optional(&self.pg)
+        .await
+        {
+            return ac;
+        }
+        if let Ok(Some((ac,))) = sqlx::query_as::<_, (String,)>(
+            "SELECT asset_class FROM instruments WHERE instrument_id = $1",
+        )
+        .bind(instrument_id)
+        .fetch_optional(&self.pg)
+        .await
+        {
+            return ac;
+        }
+        // Heuristic: crypto pairs typically end with -USD/-USDT/-USDC/-BTC/-ETH.
+        let u = instrument_id.to_uppercase();
+        if u.ends_with("-USD")
+            || u.ends_with("-USDT")
+            || u.ends_with("-USDC")
+            || u.ends_with("-BTC")
+            || u.ends_with("-ETH")
+            || u.ends_with("USDT")
+            || u.ends_with("USDC")
+        {
+            "crypto_spot_cex".to_string()
+        } else {
+            "equity".to_string()
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         pg: PgPool,

@@ -82,7 +82,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/strategies/{id}/stop", post(strategies::stop_strategy))
         // P2-T05 venue health checks
-        .route("/api/venues/{venue}/health", get(venue_health::venue_health))
+        .route(
+            "/api/venues/{venue}/health",
+            get(venue_health::venue_health),
+        )
         // P4-T06 dashboard rollup
         .route("/api/dashboard/rollup", get(dashboard::get_rollup))
         // Automations — persisted server-side; paper and live coexist
