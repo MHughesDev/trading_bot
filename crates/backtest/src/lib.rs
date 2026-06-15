@@ -22,6 +22,7 @@
 //! `CollectingData` speed-runs a historical backfill from a venue REST API
 //! (paged 1000-bar requests) straight into `ClickHouse`, then re-checks.
 
+pub mod aggregate;
 pub mod collect;
 pub mod gaps;
 pub mod manager;
@@ -29,7 +30,9 @@ pub mod requirements;
 pub mod sim;
 pub mod store;
 pub mod types;
+pub mod warmup;
 
+pub use aggregate::aggregate_bars;
 pub use collect::CollectorPlan;
 pub use manager::BacktestManager;
 pub use types::{
@@ -37,3 +40,4 @@ pub use types::{
     TimeframeExt,
 };
 pub use store::{BarStore, CollectedBar};
+pub use warmup::{WarmState, load_warm_state, run_indicators};
