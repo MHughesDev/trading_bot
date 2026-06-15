@@ -148,6 +148,34 @@ async fn set_armed(
     Path(id): Path<Uuid>,
     armed: bool,
 ) -> axum::response::Response {
+    // Before arming, load the automation's spec and start a live data pipeline
+    // for every instrument it references so data is ready when the first
+    // evaluation fires.
+    if armed {
+        if let Ok(Some(row)) = automation::get_automation(&state.pg, id).await {
+            let spec = &row.spec;
+            let asset_class = spec
+                .get("asset_class")
+                .and_then(|v| v.as_str())
+                .unwrap_or("crypto_spot_cex");
+            let instruments: Vec<&str> = match row.kind.as_str() {
+                "single_instrument" => spec
+                    .get("instrument_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| vec![s])
+                    .unwrap_or_default(),
+                "pipeline" => spec
+                    .get("universe")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default(),
+                _ => vec![],
+            };
+            for instrument_id in instruments {
+                state.ensure_pipeline(instrument_id, asset_class);
+            }
+        }
+    }
     match automation::set_automation_armed(&state.pg, id, armed).await {
         Ok(true) => Json(json!({ "id": id, "armed": armed })).into_response(),
         Ok(false) => not_found(id),

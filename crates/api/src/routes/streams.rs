@@ -36,6 +36,10 @@ pub async fn create_ui_subscriptions(
     let mut errors = Vec::new();
 
     for spec in &req.subscribe {
+        // Ensure a live data pipeline is running for each subscribed instrument
+        // so the graph panel has fresh data to display.
+        state.ensure_pipeline_for_instrument(&spec.instrument).await;
+
         match state.gateway.subscribe(
             &req.panel_id,
             &user_id,

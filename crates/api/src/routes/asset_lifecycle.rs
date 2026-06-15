@@ -514,6 +514,10 @@ pub async fn get_chart_bars(
     State(state): State<AppState>,
     Query(q): Query<BarsQuery>,
 ) -> impl IntoResponse {
+    // Ensure the live 1-minute pipeline is running so the graph receives fresh
+    // bars as they close.  Resolves asset class from DB with heuristic fallback.
+    state.ensure_pipeline_for_instrument(&q.symbol).await;
+
     let interval = q.interval_seconds.unwrap_or(3600);
 
     let parse_dt = |s: &str| {

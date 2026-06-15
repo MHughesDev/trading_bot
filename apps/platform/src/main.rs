@@ -171,19 +171,12 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Resume armed automations (paper AND live) from Postgres.  Automations
-    // are server-side state: they stay armed while the platform runs, no
-    // matter which mode any UI tab is displaying or whether a UI is open.
-    match storage::automation::armed_automations(&pg).await {
-        Ok(rows) => {
-            let paper = rows.iter().filter(|r| r.account_mode == "paper").count();
-            let live = rows.len() - paper;
-            info!(
-                paper,
-                live, "armed automations resumed — running server-side independent of UI sessions"
-            );
-        }
-        Err(e) => tracing::warn!(error = %e, "could not load armed automations at startup"),
+    // Reset all automations to disarmed on startup.  Users must explicitly
+    // re-arm after each server restart — this prevents stale automations from
+    // executing without deliberate user action.
+    match storage::automation::disarm_all_automations(&pg).await {
+        Ok(count) => info!(count, "all automations reset to disarmed on server start"),
+        Err(e) => tracing::warn!(error = %e, "could not reset automations at startup"),
     }
 
     // Backtest orchestrator — owns simulation jobs and drives the

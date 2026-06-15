@@ -211,6 +211,10 @@ pub async fn start_strategy(
         }
     };
 
+    // Ensure a live data pipeline is running for this instrument before the
+    // strategy starts evaluating — it needs fresh bar/trade data to operate.
+    state.ensure_pipeline_for_instrument(&req.instrument_id).await;
+
     let clock: Arc<dyn strategy_runtime::StrategyClock> = state.clock.clone();
     let mut manager = state
         .instance_manager
