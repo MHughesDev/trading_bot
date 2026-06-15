@@ -1,5 +1,6 @@
 //! Storage backends split by access pattern.
 //! Postgres=transactional, ClickHouse=time-series, Parquet=raw archive, Redis=latest-state cache.
+pub mod artifacts;
 pub mod automation;
 pub mod clickhouse;
 pub mod ledger;

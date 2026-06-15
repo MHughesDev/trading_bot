@@ -6,7 +6,7 @@
 pub fn is_private_lane(lane_str: &str) -> bool {
     matches!(
         lane_str,
-        "orders.commands" | "orders.events" | "positions.events" | "strategy.signals"
+        "orders.commands" | "orders.events" | "positions.events" | "strategy.signals" | "models.jobs"
     )
 }
 

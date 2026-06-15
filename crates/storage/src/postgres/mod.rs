@@ -2,6 +2,7 @@
 pub mod instruments;
 pub mod orders;
 pub mod strategies;
+pub mod models;
 pub mod users;
 
 use sqlx::postgres::PgPoolOptions;

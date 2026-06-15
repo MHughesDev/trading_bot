@@ -2,6 +2,7 @@
 pub mod bars;
 pub mod features;
 pub mod trades;
+pub mod model_traces;
 
 use thiserror::Error;
 

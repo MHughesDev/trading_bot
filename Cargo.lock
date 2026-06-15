@@ -130,6 +130,7 @@ dependencies = [
  "execution",
  "hex",
  "lettre",
+ "model-registry",
  "reqwest",
  "risk",
  "rust_decimal",
@@ -2838,6 +2839,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "model-registry"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "domain",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "storage",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "munge"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3643,6 +3660,7 @@ dependencies = [
  "event-bus",
  "execution",
  "mimalloc",
+ "model-registry",
  "observability",
  "reconciliation",
  "reqwest",
@@ -5056,6 +5074,7 @@ name = "storage"
 version = "0.1.0"
 dependencies = [
  "ahash 0.8.12",
+ "anyhow",
  "arrow",
  "chrono",
  "clickhouse",
@@ -5072,6 +5091,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "xxhash-rust",
 ]
 
 [[package]]
