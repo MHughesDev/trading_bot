@@ -129,14 +129,6 @@ async fn seeded_clickhouse_insert_load_and_simulate() {
     assert_eq!(bars[0].close, Decimal::from(100));
     assert_eq!(bars[59].close, Decimal::from(159));
 
-    // Stored-feature replay path (#4): absent features simply recompute, so this
-    // returns an empty map on a fresh table — asserting only that the query
-    // round-trips cleanly against the real schema.
-    let stored_features = store
-        .load_features(&instrument_id, from, to)
-        .await
-        .expect("load_features round-trips");
-
     // Drive the full simulation over the freshly loaded bars.
     let inputs = SimulationInputs {
         definition: ema_cross_long_def(),
@@ -150,7 +142,6 @@ async fn seeded_clickhouse_insert_load_and_simulate() {
         sim_start_ns: 0,
         bars,
         features: feature_specs(),
-        stored_features,
     };
 
     let control = SimulationControl::new();

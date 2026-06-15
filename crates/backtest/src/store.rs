@@ -66,21 +66,6 @@ struct BarRowOut {
     trade_count: u64,
 }
 
-#[derive(Row, Deserialize)]
-struct FeatureRowOut {
-    ts_ns: i64,
-    feature_name: String,
-    value: String,
-}
-
-/// Versioned feature values recorded by the live feature engine, keyed by
-/// `available_time` (Unix nanoseconds) then feature name.
-///
-/// Replaying these instead of recomputing preserves the platform's
-/// versioned-feature invariant and keeps live/replay parity exact (ADR-0008):
-/// the simulation sees the very values the live pipeline produced.
-pub type StoredFeatures = HashMap<i64, HashMap<String, f64>>;
-
 /// Scale of the `market_bars` OHLCV columns: `Decimal128(10)` (`Decimal(38,10)`).
 const BAR_DECIMAL_SCALE: u32 = 10;
 
@@ -313,55 +298,6 @@ impl BarStore {
                 })
             })
             .collect()
-    }
-
-    /// Loads stored feature values for an instrument over `[from, to)`.
-    ///
-    /// Reads `features_technical` (see `clickhouse/03_features.sql`) and
-    /// deduplicates revisions with `argMax(value, ingested_time)` so the
-    /// latest-ingested value wins, matching the `ReplacingMergeTree` intent.
-    /// The result is keyed by `available_time` (nanoseconds) then feature name,
-    /// ready for the simulation to replay in place of recomputed indicators.
-    ///
-    /// Values are `Decimal128(18)` on the wire; they are read as strings and
-    /// parsed to `f64` to match the `features` crate's indicator type (feature
-    /// values are explicitly float — see `features::FeatureValue`).
-    pub async fn load_features(
-        &self,
-        instrument_id: &str,
-        from: DateTime<Utc>,
-        to: DateTime<Utc>,
-    ) -> anyhow::Result<StoredFeatures> {
-        let rows: Vec<FeatureRowOut> = self
-            .client
-            .query(
-                "SELECT toUnixTimestamp64Nano(available_time) AS ts_ns, \
-                        feature_name, \
-                        argMax(toString(value), ingested_time) AS value \
-                 FROM features_technical \
-                 WHERE instrument_id = ? \
-                   AND available_time >= fromUnixTimestamp64Nano(?) \
-                   AND available_time < fromUnixTimestamp64Nano(?) \
-                 GROUP BY available_time, feature_name \
-                 ORDER BY ts_ns",
-            )
-            .bind(instrument_id)
-            .bind(nanos(from))
-            .bind(nanos(to))
-            .fetch_all()
-            .await?;
-
-        let mut out: StoredFeatures = HashMap::new();
-        for row in rows {
-            let value: f64 = row
-                .value
-                .parse()
-                .map_err(|e| anyhow::anyhow!("invalid feature value '{}': {e}", row.value))?;
-            out.entry(row.ts_ns)
-                .or_default()
-                .insert(row.feature_name, value);
-        }
-        Ok(out)
     }
 
     /// Returns the `available_time` of the most recent stored bar for the given
