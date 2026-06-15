@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 domain = { workspace = true }
 storage = { workspace = true }
+features = { workspace = true }
 
 anyhow = { workspace = true }
 tokio = { workspace = true }
@@ -15,6 +16,10 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 sqlx = { workspace = true }
 tracing = { workspace = true }
+reqwest = { workspace = true }
+async-nats = { workspace = true }
+futures-util = "0.3"
+sha2 = "0.10"
 
 [lints]
 workspace = true

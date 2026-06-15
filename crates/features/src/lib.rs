@@ -8,10 +8,12 @@
 //! produced rather than recomputing them.
 
 pub mod ema;
+pub mod feature_sets;
 pub mod rsi;
 pub mod window;
 
 pub use ema::{Ema, EMA_FEATURE_VERSION};
+pub use feature_sets::resolve as resolve_feature_set;
 pub use rsi::{Rsi, RSI_FEATURE_VERSION};
 pub use window::Window;
 

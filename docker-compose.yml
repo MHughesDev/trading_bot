@@ -137,6 +137,64 @@ services:
       - etcd
       - minio
 
+  # ── AI Model Studio (Set H) ──────────────────────────────────────────────────
+  # Dedicated artifact-store MinIO for trained model artifacts (separate from the
+  # milvus-stack `minio` above; different ports + volume to avoid collisions).
+  artifact-minio:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    command: server /data --console-address ":9101"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9100:9000"
+      - "9101:9101"
+    volumes:
+      - artifact_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  model-trainer:
+    build:
+      context: ./apps/model-trainer
+      dockerfile: Dockerfile
+    environment:
+      NATS_URL: nats://nats:4222
+      ARTIFACT_STORE: fs
+      ARTIFACT_STORE_PATH: /artifacts
+    volumes:
+      - artifacts_data:/artifacts
+    ports:
+      - "8001:8001"
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  model-inference:
+    build:
+      context: ./apps/model-inference
+      dockerfile: Dockerfile
+    environment:
+      ARTIFACT_STORE: fs
+      ARTIFACT_STORE_PATH: /artifacts
+    volumes:
+      - artifacts_data:/artifacts
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   nats_data:
   pg_data:
@@ -146,3 +204,5 @@ volumes:
   etcd_data:
   minio_data:
   milvus_data:
+  artifact_minio_data:
+  artifacts_data:

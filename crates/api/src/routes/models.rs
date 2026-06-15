@@ -322,15 +322,62 @@ pub async fn list_evals(
     )
 }
 
+/// GET /api/models/:id/evaluations/:eval_id
+pub async fn get_eval(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path((id, eval_id)): Path<(String, Uuid)>,
+) -> impl IntoResponse {
+    map_result(state.models.get_eval(&id, eval_id, token.user_id()).await)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CompareParams {
+    pub versions: String,
+}
+
+/// GET /api/models/:id/evaluations/compare?versions=a,b
+pub async fn compare_evals(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<String>,
+    Query(params): Query<CompareParams>,
+) -> impl IntoResponse {
+    map_result(
+        state
+            .models
+            .compare_evals(&id, &params.versions, token.user_id())
+            .await,
+    )
+}
+
 // -- Promote / rollback / aliases --
+
+#[derive(Debug, Deserialize)]
+pub struct PromoteRequest {
+    pub environment: Option<String>,
+    pub override_reason: Option<String>,
+}
 
 /// POST /api/models/:id/versions/:v/promote
 pub async fn promote(
     State(state): State<AppState>,
     token: BearerToken,
     Path((id, version)): Path<(String, i32)>,
+    Json(req): Json<PromoteRequest>,
 ) -> impl IntoResponse {
-    map_action(state.models.promote(&id, token.user_id(), version).await)
+    map_result(
+        state
+            .models
+            .promote_gated(
+                &id,
+                token.user_id(),
+                version,
+                req.environment.as_deref().unwrap_or("paper"),
+                req.override_reason.as_deref(),
+            )
+            .await,
+    )
 }
 
 /// POST /api/models/:id/aliases/:alias/rollback
@@ -372,6 +419,8 @@ pub async fn list_deployments(
 pub struct CreateDeploymentRequest {
     pub version: i32,
     pub environment: String,
+    #[serde(default)]
+    pub traffic_pct: Option<i32>,
 }
 
 /// POST /api/models/:id/deployments
@@ -383,7 +432,13 @@ pub async fn create_deployment(
 ) -> impl IntoResponse {
     match state
         .models
-        .create_deployment(&id, req.version, &req.environment, token.user_id())
+        .create_deployment(
+            &id,
+            req.version,
+            &req.environment,
+            req.traffic_pct.unwrap_or(100),
+            token.user_id(),
+        )
         .await
     {
         Ok(did) => (StatusCode::CREATED, Json(json!({ "deployment_id": did }))).into_response(),
@@ -432,21 +487,25 @@ pub async fn add_test_case(
     }
 }
 
-/// POST /api/models/:id/versions/:v/test (sync stub)
+#[derive(Debug, Deserialize)]
+pub struct TestInferenceRequest {
+    #[serde(default)]
+    pub instances: Vec<serde_json::Value>,
+}
+
+/// POST /api/models/:id/versions/:v/test
 pub async fn test_inference(
-    State(_state): State<AppState>,
-    _token: BearerToken,
+    State(state): State<AppState>,
+    token: BearerToken,
     Path((id, version)): Path<(String, i32)>,
-    Json(input): Json<serde_json::Value>,
+    Json(req): Json<TestInferenceRequest>,
 ) -> impl IntoResponse {
-    Json(json!({
-        "model_id": id,
-        "version": version,
-        "status": "stub",
-        "note": "real inference available in Phase 4",
-        "input_echo": input,
-        "output": { "direction": "flat", "magnitude": "0", "confidence": 0.5 },
-    }))
+    map_result(
+        state
+            .models
+            .test_inference(&id, version, token.user_id(), req.instances)
+            .await,
+    )
 }
 
 // -- Lineage / traces / used-by --

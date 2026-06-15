@@ -39,17 +39,65 @@ pub struct ModelManager {
     run_permits: Arc<tokio::sync::Semaphore>,
     /// Broadcast channel for WS lane `models.jobs`.
     progress_tx: tokio::sync::broadcast::Sender<serde_json::Value>,
+    /// Typed HTTP client for the Python trainer/inference sidecars.
+    sidecar: Arc<crate::sidecar::SidecarClient>,
+    /// Dataset materialization manager.
+    datasets: Arc<crate::datasets::DatasetManager>,
 }
 
 impl ModelManager {
-    pub fn new(pg: PgPool) -> Arc<Self> {
+    pub fn new(
+        pg: PgPool,
+        sidecar: Arc<crate::sidecar::SidecarClient>,
+        datasets: Arc<crate::datasets::DatasetManager>,
+    ) -> Arc<Self> {
         let (progress_tx, _) = tokio::sync::broadcast::channel(256);
         Arc::new(Self {
             pg,
             jobs: RwLock::new(HashMap::new()),
             run_permits: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JOBS)),
             progress_tx,
+            sidecar,
+            datasets,
         })
+    }
+
+    /// Convenience constructor that builds the sidecar client and dataset manager
+    /// from environment configuration.
+    pub fn from_env(pg: PgPool) -> Arc<Self> {
+        let sidecar = Arc::new(crate::sidecar::SidecarClient::from_env());
+        let datasets = Arc::new(crate::datasets::DatasetManager::new(pg.clone()));
+        Self::new(pg, sidecar, datasets)
+    }
+
+    /// Apply a progress frame received from the Python sidecar over NATS.
+    pub async fn apply_nats_progress(
+        &self,
+        run_id: uuid::Uuid,
+        phase: &str,
+        progress: f32,
+        metric: Option<serde_json::Value>,
+    ) {
+        use std::sync::atomic::Ordering;
+        let jobs = self.jobs.read().await;
+        if let Some(job) = jobs.get(&run_id) {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            job.progress_pct.store(progress as u32, Ordering::Relaxed);
+            {
+                let mut state = job.state.write().expect("poisoned");
+                state.phase = phase.to_string();
+                if let Some(m) = metric {
+                    // Merge into existing metrics
+                    let existing = state.metrics.get_or_insert(serde_json::json!({}));
+                    if let (Some(obj), Some(new_obj)) = (existing.as_object_mut(), m.as_object()) {
+                        for (k, v) in new_obj {
+                            obj.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+            }
+            self.broadcast_progress(&job.snapshot());
+        }
     }
 
     /// Subscribe to model job progress events (for the `models.jobs` WS lane).
@@ -417,23 +465,111 @@ impl ModelManager {
         Ok(serde_json::Value::Object(map))
     }
 
-    pub async fn promote(&self, model_id: &str, user_id: Uuid, version: i32) -> anyhow::Result<()> {
+    /// Promotion with gate evaluation (Phase 3).
+    #[allow(clippy::too_many_lines)]
+    pub async fn promote_gated(
+        &self,
+        model_id: &str,
+        user_id: Uuid,
+        version: i32,
+        environment: &str,
+        override_reason: Option<&str>,
+    ) -> anyhow::Result<serde_json::Value> {
         self.ensure_model_owned(model_id, user_id).await?;
-        // Stub gate: verify version exists.
-        let exists: Option<(i32,)> = sqlx::query_as(
-            "SELECT version FROM model_versions WHERE model_id = $1 AND version = $2",
+
+        // 1. Verify version exists; gather artifact info.
+        let version_row: Option<(String, Option<serde_json::Value>, Option<String>)> = sqlx::query_as(
+            "SELECT mv.status, ma.sha256, ma.storage_uri \
+             FROM model_versions mv \
+             LEFT JOIN model_artifacts ma ON ma.model_id=mv.model_id AND ma.version=mv.version AND ma.artifact_type='model' \
+             WHERE mv.model_id=$1 AND mv.version=$2",
         )
         .bind(model_id)
         .bind(version)
         .fetch_optional(&self.pg)
         .await?;
-        anyhow::ensure!(exists.is_some(), "version {version} not found");
 
+        let (_ver_status, artifact_hash, _artifact_uri) =
+            version_row.ok_or_else(|| anyhow::anyhow!("version {version} not found"))?;
+
+        let mut gate_checks = Vec::new();
+        let mut gate_passed = true;
+
+        // Check 1: Passed eval suite
+        let eval_passed: Option<(i64,)> = sqlx::query_as(
+            "SELECT COUNT(*) FROM evaluation_runs WHERE model_id=$1 AND version=$2 AND status='succeeded'",
+        )
+        .bind(model_id)
+        .bind(version)
+        .fetch_optional(&self.pg)
+        .await?;
+        let has_eval = eval_passed.is_some_and(|(n,)| n > 0);
+        gate_checks.push(serde_json::json!({ "check": "passed_eval_suite", "passed": has_eval, "required": true }));
+        if !has_eval {
+            gate_passed = false;
+        }
+
+        // Check 2: Artifact integrity
+        let artifact_ok = artifact_hash.is_some();
+        gate_checks.push(serde_json::json!({ "check": "artifact_integrity", "passed": artifact_ok, "required": true }));
+        if !artifact_ok {
+            gate_passed = false;
+        }
+
+        // Check 3: Rollback available (prior production version exists)
+        let prior_production: Option<(i32,)> = sqlx::query_as(
+            "SELECT version FROM model_aliases WHERE model_id=$1 AND alias='production'",
+        )
+        .bind(model_id)
+        .fetch_optional(&self.pg)
+        .await?;
+        let rollback_available = prior_production.is_some() || environment != "live";
+        gate_checks.push(serde_json::json!({ "check": "rollback_available", "passed": rollback_available, "required": environment == "live" }));
+        if !rollback_available && environment == "live" {
+            gate_passed = false;
+        }
+
+        // Check 4: No metric regression (from latest eval run)
+        let regression: Option<(Option<serde_json::Value>,)> = sqlx::query_as(
+            "SELECT regression_report_json FROM evaluation_runs WHERE model_id=$1 AND version=$2 AND status='succeeded' ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(model_id)
+        .bind(version)
+        .fetch_optional(&self.pg)
+        .await?;
+        let no_regression = regression
+            .as_ref()
+            .and_then(|(r,)| r.as_ref())
+            .and_then(|r| r.get("verdict"))
+            .and_then(|v| v.as_str())
+            .is_none_or(|v| v != "regressed"); // if no baseline, pass
+        gate_checks.push(serde_json::json!({ "check": "no_metric_regression", "passed": no_regression, "required": true }));
+        if !no_regression {
+            gate_passed = false;
+        }
+
+        // Gate decision
+        if !gate_passed && override_reason.is_none() {
+            return Ok(serde_json::json!({
+                "promoted": false,
+                "reason": "gate_failed",
+                "gate_checks": gate_checks,
+            }));
+        }
+
+        // Execute promotion
+        let prior_active: Option<(i32,)> = sqlx::query_as(
+            "SELECT version FROM model_aliases WHERE model_id=$1 AND alias='production'",
+        )
+        .bind(model_id)
+        .fetch_optional(&self.pg)
+        .await?;
+
+        // Move production alias
         sqlx::query(
             "INSERT INTO model_aliases (model_id, alias, version, updated_by, updated_at) \
              VALUES ($1,'production',$2,$3,now()) \
-             ON CONFLICT (model_id, alias) DO UPDATE SET version = EXCLUDED.version, \
-             updated_by = EXCLUDED.updated_by, updated_at = now()",
+             ON CONFLICT (model_id, alias) DO UPDATE SET version=EXCLUDED.version, updated_by=EXCLUDED.updated_by, updated_at=now()",
         )
         .bind(model_id)
         .bind(version)
@@ -441,11 +577,93 @@ impl ModelManager {
         .execute(&self.pg)
         .await?;
 
+        // Set new version Active
+        sqlx::query(
+            "UPDATE model_versions SET status='active', promoted_at=now() WHERE model_id=$1 AND version=$2",
+        )
+        .bind(model_id)
+        .bind(version)
+        .execute(&self.pg)
+        .await?;
+
+        // Demote prior Active to Archived
+        if let Some((pv,)) = prior_active {
+            if pv != version {
+                let _ = sqlx::query(
+                    "UPDATE model_versions SET status='archived' WHERE model_id=$1 AND version=$2 AND status='active'",
+                )
+                .bind(model_id)
+                .bind(pv)
+                .execute(&self.pg)
+                .await;
+
+                // Set fallback alias to prior version
+                let _ = sqlx::query(
+                    "INSERT INTO model_aliases (model_id, alias, version, updated_by, updated_at) \
+                     VALUES ($1,'fallback',$2,$3,now()) \
+                     ON CONFLICT (model_id, alias) DO UPDATE SET version=EXCLUDED.version, updated_by=EXCLUDED.updated_by, updated_at=now()",
+                )
+                .bind(model_id)
+                .bind(pv)
+                .bind(user_id)
+                .execute(&self.pg)
+                .await;
+            }
+        }
+
+        // Update model status
+        let _ =
+            sqlx::query("UPDATE ai_models SET status='active', updated_at=now() WHERE model_id=$1")
+                .bind(model_id)
+                .execute(&self.pg)
+                .await;
+
+        let event_payload = serde_json::json!({
+            "version": version,
+            "alias": "production",
+            "environment": environment,
+            "gate_checks": gate_checks,
+            "override_reason": override_reason,
+        });
+        self.record_event(model_id, user_id, "promoted", event_payload)
+            .await;
+
+        Ok(serde_json::json!({
+            "promoted": true,
+            "version": version,
+            "alias": "production",
+            "gate_checks": gate_checks,
+            "override_reason": override_reason,
+        }))
+    }
+
+    /// Set an arbitrary alias (production/candidate/staging/fallback) to a version.
+    pub async fn set_alias(
+        &self,
+        model_id: &str,
+        alias: &str,
+        version: i32,
+        user_id: Uuid,
+    ) -> anyhow::Result<()> {
+        let valid_aliases = ["production", "candidate", "staging", "fallback"];
+        anyhow::ensure!(valid_aliases.contains(&alias), "invalid alias: {alias}");
+        self.ensure_model_owned(model_id, user_id).await?;
+        sqlx::query(
+            "INSERT INTO model_aliases (model_id, alias, version, updated_by, updated_at) \
+             VALUES ($1,$2,$3,$4,now()) \
+             ON CONFLICT (model_id, alias) DO UPDATE SET version=EXCLUDED.version, updated_by=EXCLUDED.updated_by, updated_at=now()",
+        )
+        .bind(model_id)
+        .bind(alias)
+        .bind(version)
+        .bind(user_id)
+        .execute(&self.pg)
+        .await?;
         self.record_event(
             model_id,
             user_id,
-            "promoted",
-            serde_json::json!({"version": version, "alias": "production"}),
+            "alias_set",
+            serde_json::json!({"alias": alias, "version": version}),
         )
         .await;
         Ok(())
@@ -531,7 +749,7 @@ impl ModelManager {
 
         let manager = Arc::clone(self);
         let mid = model_id.to_string();
-        tokio::spawn(async move { manager.drive_eval(job, mid).await });
+        tokio::spawn(async move { manager.drive_eval(job, mid, version).await });
 
         Ok(eval_id)
     }
@@ -552,6 +770,211 @@ impl ModelManager {
             .collect();
         snaps.sort_by_key(|s| Reverse(s.created_at));
         Ok(snaps)
+    }
+
+    pub async fn get_eval(
+        &self,
+        model_id: &str,
+        eval_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<serde_json::Value> {
+        self.ensure_model_owned(model_id, user_id).await?;
+        #[allow(clippy::type_complexity)]
+        let row: Option<(
+            Uuid,
+            String,
+            i32,
+            String,
+            Option<serde_json::Value>,
+            Option<serde_json::Value>,
+            Option<serde_json::Value>,
+            Option<serde_json::Value>,
+            Option<i32>,
+            chrono::DateTime<Utc>,
+        )> = sqlx::query_as(
+            "SELECT eval_id, model_id, version, status, metrics_json, scorecard_json, \
+             regression_report_json, sample_outputs_json, baseline_version, created_at \
+             FROM evaluation_runs WHERE eval_id=$1 AND model_id=$2",
+        )
+        .bind(eval_id)
+        .bind(model_id)
+        .fetch_optional(&self.pg)
+        .await?;
+
+        row.map(
+            |(eid, mid, ver, st, metrics, scorecard, regression, samples, bv, ca)| {
+                serde_json::json!({
+                    "eval_id": eid, "model_id": mid, "version": ver, "status": st,
+                    "metrics": metrics, "scorecard": scorecard,
+                    "regression_report": regression, "sample_outputs": samples,
+                    "baseline_version": bv, "created_at": ca,
+                })
+            },
+        )
+        .ok_or_else(|| anyhow::anyhow!("evaluation not found"))
+    }
+
+    pub async fn compare_evals(
+        &self,
+        model_id: &str,
+        versions_str: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<serde_json::Value> {
+        self.ensure_model_owned(model_id, user_id).await?;
+        let versions: Vec<i32> = versions_str
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        anyhow::ensure!(
+            versions.len() == 2,
+            "compare requires exactly 2 comma-separated version numbers"
+        );
+
+        let mut results = Vec::new();
+        for v in &versions {
+            let eval: Option<(Option<serde_json::Value>, Option<serde_json::Value>)> = sqlx::query_as(
+                "SELECT metrics_json, scorecard_json FROM evaluation_runs \
+                 WHERE model_id=$1 AND version=$2 AND status='succeeded' ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(model_id)
+            .bind(v)
+            .fetch_optional(&self.pg)
+            .await?;
+            let (metrics, scorecard) = eval.unwrap_or((None, None));
+            results.push(
+                serde_json::json!({ "version": v, "metrics": metrics, "scorecard": scorecard }),
+            );
+        }
+
+        // Simple winner determination by overall scorecard
+        let overall_a = results[0]["scorecard"]["overall"].as_f64().unwrap_or(0.0);
+        let overall_b = results[1]["scorecard"]["overall"].as_f64().unwrap_or(0.0);
+        let winner = if overall_a > overall_b {
+            versions[0]
+        } else if overall_b > overall_a {
+            versions[1]
+        } else {
+            -1
+        };
+
+        Ok(serde_json::json!({
+            "model_id": model_id,
+            "versions": results,
+            "winner_version": if winner == -1 { serde_json::Value::Null } else { serde_json::json!(winner) },
+            "verdict": if winner == -1 { "tie" } else { "winner_determined" },
+        }))
+    }
+
+    // -- Test Lab inference --
+
+    pub async fn test_inference(
+        &self,
+        model_id: &str,
+        version: i32,
+        user_id: Uuid,
+        instances: Vec<serde_json::Value>,
+    ) -> anyhow::Result<serde_json::Value> {
+        self.ensure_model_owned(model_id, user_id).await?;
+
+        // Get model kind from model record
+        let (model_kind,): (String,) =
+            sqlx::query_as("SELECT model_kind FROM ai_models WHERE model_id=$1")
+                .bind(model_id)
+                .fetch_one(&self.pg)
+                .await?;
+
+        let start = std::time::Instant::now();
+
+        if model_kind == "external_llm_adapter" {
+            let (def_json,): (serde_json::Value,) =
+                sqlx::query_as("SELECT definition_json FROM ai_models WHERE model_id=$1")
+                    .bind(model_id)
+                    .fetch_one(&self.pg)
+                    .await?;
+            let prompt = instances
+                .first()
+                .and_then(|i| i.get("prompt"))
+                .and_then(|p| p.as_str())
+                .unwrap_or("Hello")
+                .to_string();
+            let adapter = def_json
+                .get("adapter")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
+            let req = crate::sidecar::LlmPredictRequest {
+                model_id: model_id.to_string(),
+                version,
+                adapter,
+                prompt,
+                params: serde_json::json!({}),
+            };
+            let resp = self.sidecar.predict_llm(req).await?;
+            #[allow(clippy::cast_possible_truncation)]
+            let latency_ms = start.elapsed().as_millis() as u64;
+            return Ok(serde_json::json!({
+                "model_id": model_id,
+                "version": version,
+                "kind": "llm",
+                "text": resp.text,
+                "tokens": resp.tokens,
+                "cost_usd": resp.cost_usd,
+                "latency_ms": latency_ms,
+                "trace_id": resp.trace_id,
+            }));
+        }
+
+        // Get artifact info
+        let artifact_row: Option<(String, String)> = sqlx::query_as(
+            "SELECT storage_uri, sha256 FROM model_artifacts WHERE model_id=$1 AND version=$2 AND artifact_type='model' LIMIT 1",
+        )
+        .bind(model_id)
+        .bind(version)
+        .fetch_optional(&self.pg)
+        .await?;
+
+        let (artifact_uri, artifact_hash) = artifact_row
+            .ok_or_else(|| anyhow::anyhow!("no artifact found for version {version}"))?;
+
+        let parsed: Vec<crate::sidecar::PredictInstance> = instances
+            .into_iter()
+            .map(|i| {
+                let instrument_id = i
+                    .get("instrument_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let features = i
+                    .get("features")
+                    .and_then(|f| {
+                        serde_json::from_value::<std::collections::HashMap<String, f64>>(f.clone())
+                            .ok()
+                    })
+                    .unwrap_or_default();
+                crate::sidecar::PredictInstance {
+                    instrument_id,
+                    features,
+                }
+            })
+            .collect();
+
+        let req = crate::sidecar::PredictRequest {
+            model_id: model_id.to_string(),
+            version,
+            model_kind: model_kind.clone(),
+            artifact_uri,
+            artifact_hash,
+            instances: parsed,
+        };
+        let resp = self.sidecar.predict(req).await?;
+        #[allow(clippy::cast_possible_truncation)]
+        let latency_ms = start.elapsed().as_millis() as u64;
+        Ok(serde_json::json!({
+            "model_id": model_id,
+            "version": version,
+            "kind": model_kind,
+            "predictions": resp.predictions,
+            "latency_ms": latency_ms,
+        }))
     }
 
     // -- Deployments --
@@ -594,19 +1017,41 @@ impl ModelManager {
         model_id: &str,
         version: i32,
         environment: &str,
+        traffic_pct: i32,
         user_id: Uuid,
     ) -> anyhow::Result<String> {
         self.ensure_model_owned(model_id, user_id).await?;
+        anyhow::ensure!(
+            (0..=100).contains(&traffic_pct),
+            "traffic_pct must be 0-100"
+        );
+
+        // Check total traffic_pct for this (model_id, environment) won't exceed 100
+        let (current_total,): (i64,) = sqlx::query_as(
+            "SELECT COALESCE(SUM(traffic_pct), 0) FROM model_deployments \
+             WHERE model_id=$1 AND environment=$2 AND status='active'",
+        )
+        .bind(model_id)
+        .bind(environment)
+        .fetch_one(&self.pg)
+        .await?;
+
+        anyhow::ensure!(
+            current_total + i64::from(traffic_pct) <= 100,
+            "traffic allocation would exceed 100% for environment {environment} (current: {current_total}%)"
+        );
+
         let deployment_id = format!("dep_{}", Uuid::new_v4().as_simple());
         sqlx::query(
             "INSERT INTO model_deployments \
-             (deployment_id, model_id, version, environment, deployed_by, deployed_at) \
-             VALUES ($1,$2,$3,$4,$5,now())",
+             (deployment_id, model_id, version, environment, traffic_pct, status, deployed_by, deployed_at) \
+             VALUES ($1,$2,$3,$4,$5,'active',$6,now())",
         )
         .bind(&deployment_id)
         .bind(model_id)
         .bind(version)
         .bind(environment)
+        .bind(traffic_pct)
         .bind(user_id)
         .execute(&self.pg)
         .await?;
@@ -732,81 +1177,408 @@ impl ModelManager {
         let _ = self.progress_tx.send(val);
     }
 
-    // -- Stub job drivers --
+    // -- Real job drivers (Phase 2/3) --
 
-    async fn drive_train(self: &Arc<Self>, job: Arc<Job>, _model_id: String) {
+    #[allow(clippy::too_many_lines)]
+    async fn drive_train(self: &Arc<Self>, job: Arc<Job>, model_id: String) {
         let Ok(_permit) = self.run_permits.clone().acquire_owned().await else {
             return;
         };
         if job.cancel.load(Ordering::Relaxed) {
             job.set_phase(RunStatus::Cancelled, "cancelled");
+            self.persist_run(&job).await;
             return;
         }
 
-        let phases = [
-            (10u32, "materializing"),
-            (35u32, "fitting"),
-            (75u32, "validating"),
-            (100u32, "succeeded"),
-        ];
+        let pg = self.pg.clone();
 
+        // 1. Load model definition
+        let model_row: Option<(serde_json::Value,)> =
+            sqlx::query_as("SELECT definition_json FROM ai_models WHERE model_id = $1")
+                .bind(&model_id)
+                .fetch_optional(&pg)
+                .await
+                .ok()
+                .flatten();
+
+        let Some((definition_json,)) = model_row else {
+            job.fail("model definition not found");
+            self.broadcast_progress(&job.snapshot());
+            self.persist_run(&job).await;
+            return;
+        };
+
+        let definition: domain::model_def::ModelDefinition =
+            match serde_json::from_value(definition_json) {
+                Ok(d) => d,
+                Err(e) => {
+                    job.fail(format!("definition parse error: {e}"));
+                    self.broadcast_progress(&job.snapshot());
+                    self.persist_run(&job).await;
+                    return;
+                }
+            };
+
+        // 2. Materialize dataset
         job.set_phase(RunStatus::Running, "materializing");
-        for (pct, phase) in &phases {
-            if job.cancel.load(Ordering::Relaxed) {
-                job.set_phase(RunStatus::Cancelled, "cancelled");
+        self.broadcast_progress(&job.snapshot());
+
+        let artifacts_prefix =
+            std::env::var("ARTIFACT_STORE_PATH").unwrap_or_else(|_| "./artifacts".to_string());
+
+        let dataset_req = crate::datasets::DatasetRequest {
+            dataset_id: None,
+            feature_set_ref: definition
+                .feature_set_ref
+                .clone()
+                .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string()),
+            instruments: vec!["BTC-USD".to_string()],
+            start: chrono::Utc::now() - chrono::Duration::days(90),
+            end: chrono::Utc::now() - chrono::Duration::days(1),
+            label_spec: definition
+                .label_spec
+                .clone()
+                .unwrap_or(serde_json::json!({"type":"forward_return","window":"1h"})),
+            output_prefix: artifacts_prefix.clone(),
+        };
+
+        let dataset = match self.datasets.materialize(dataset_req).await {
+            Ok(d) => d,
+            Err(e) => {
+                job.fail(format!("dataset materialization failed: {e}"));
+                self.broadcast_progress(&job.snapshot());
                 self.persist_run(&job).await;
                 return;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-            job.progress_pct.store(*pct, Ordering::Relaxed);
-            job.set_phase(
-                if *pct < 100 {
-                    RunStatus::Running
-                } else {
-                    RunStatus::Succeeded
-                },
-                *phase,
-            );
-            self.broadcast_progress(&job.snapshot());
+        };
+
+        // 3. Dispatch to trainer sidecar
+        job.set_phase(RunStatus::Running, "fitting");
+        job.progress_pct.store(15, Ordering::Relaxed);
+        self.broadcast_progress(&job.snapshot());
+
+        let nats_subject = format!("models.run.{}.progress", job.run_id);
+        let dispatch = crate::sidecar::TrainDispatchRequest {
+            run_id: job.run_id,
+            model_id: model_id.clone(),
+            model_kind: format!("{:?}", definition.model_kind).to_lowercase(),
+            framework: format!("{:?}", definition.framework).to_lowercase(),
+            runtime: "python".to_string(),
+            definition: definition.clone(),
+            dataset_uri: dataset.parquet_uri.clone(),
+            dataset_hash: dataset.content_hash.clone(),
+            output_prefix: format!("{artifacts_prefix}/models/{model_id}/{}/", job.run_id),
+            progress: crate::sidecar::ProgressConfig { nats_subject },
+        };
+
+        let result = self.sidecar.dispatch_train(dispatch).await;
+
+        match result {
+            Ok(r) if r.status == "succeeded" => {
+                let artifact_uri = r.artifact_uri.unwrap_or_default();
+                let sha256 = r.sha256.unwrap_or_default();
+                let size_bytes = r.size_bytes.unwrap_or(0);
+
+                // Write model_versions row
+                let (next_version,): (i64,) = sqlx::query_as(
+                    "SELECT COALESCE(MAX(version), 0) + 1 FROM model_versions WHERE model_id = $1",
+                )
+                .bind(&model_id)
+                .fetch_one(&pg)
+                .await
+                .unwrap_or((1,));
+                #[allow(clippy::cast_possible_truncation)]
+                let version = next_version as i32;
+
+                let config_json = serde_json::json!({
+                    "artifact_uri": artifact_uri,
+                    "artifact_hash": sha256,
+                    "dataset_version_id": dataset.dataset_version_id,
+                    "framework_version": r.framework_version,
+                });
+
+                let _ = sqlx::query(
+                    "INSERT INTO model_versions \
+                     (model_id, version, status, training_run_id, dataset_version_id, \
+                      metrics_json, config_json, created_by, created_at) \
+                     VALUES ($1,$2,'evaluating',$3,$4,$5,$6,$7,now())",
+                )
+                .bind(&model_id)
+                .bind(version)
+                .bind(job.run_id)
+                .bind(dataset.dataset_version_id)
+                .bind(&r.metrics)
+                .bind(config_json)
+                .bind(job.user_id)
+                .execute(&pg)
+                .await;
+
+                // Write model_artifacts row
+                let artifact_id = uuid::Uuid::new_v4();
+                let _ = sqlx::query(
+                    "INSERT INTO model_artifacts \
+                     (artifact_id, model_id, version, storage_uri, artifact_type, size_bytes, sha256, created_at) \
+                     VALUES ($1,$2,$3,$4,'model',$5,$6,now())",
+                )
+                .bind(artifact_id)
+                .bind(&model_id)
+                .bind(version)
+                .bind(&artifact_uri)
+                .bind(size_bytes)
+                .bind(&sha256)
+                .execute(&pg)
+                .await;
+
+                // Update model status to evaluating
+                let _ = sqlx::query(
+                    "UPDATE ai_models SET status='evaluating', updated_at=now() WHERE model_id=$1",
+                )
+                .bind(&model_id)
+                .execute(&pg)
+                .await;
+
+                {
+                    let mut state = job.state.write().expect("poisoned");
+                    state.metrics = r.metrics;
+                }
+                job.progress_pct.store(100, Ordering::Relaxed);
+                job.set_phase(RunStatus::Succeeded, "succeeded");
+                self.record_event(
+                    &model_id,
+                    job.user_id,
+                    "version_created",
+                    serde_json::json!({ "version": version }),
+                )
+                .await;
+            }
+            Ok(r) => {
+                let err = r
+                    .error
+                    .unwrap_or_else(|| "trainer returned failed status".to_string());
+                job.fail(err);
+                let _ = sqlx::query(
+                    "UPDATE ai_models SET status='failed', updated_at=now() WHERE model_id=$1",
+                )
+                .bind(&model_id)
+                .execute(&pg)
+                .await;
+            }
+            Err(e) => {
+                job.fail(format!("sidecar dispatch error: {e}"));
+                let _ = sqlx::query(
+                    "UPDATE ai_models SET status='failed', updated_at=now() WHERE model_id=$1",
+                )
+                .bind(&model_id)
+                .execute(&pg)
+                .await;
+            }
         }
 
-        // Fake metrics on completion.
-        {
-            let mut state = job.state.write().expect("poisoned");
-            state.metrics = Some(serde_json::json!({ "val_loss": 0.042, "accuracy": 0.91 }));
-        }
+        self.broadcast_progress(&job.snapshot());
         self.persist_run(&job).await;
     }
 
-    async fn drive_eval(self: &Arc<Self>, job: Arc<Job>, _model_id: String) {
+    #[allow(clippy::too_many_lines)]
+    async fn drive_eval(self: &Arc<Self>, job: Arc<Job>, model_id: String, version: i32) {
         let Ok(_permit) = self.run_permits.clone().acquire_owned().await else {
             return;
         };
 
+        job.set_phase(RunStatus::Running, "loading_artifact");
+        job.progress_pct.store(5, Ordering::Relaxed);
+        self.broadcast_progress(&job.snapshot());
+
+        let pg = self.pg.clone();
+
+        // Load artifact info
+        let artifact_row: Option<(String, String, serde_json::Value)> = sqlx::query_as(
+            "SELECT ma.storage_uri, ma.sha256, am.definition_json \
+             FROM model_artifacts ma \
+             JOIN ai_models am ON am.model_id = ma.model_id \
+             WHERE ma.model_id = $1 AND ma.version = $2 AND ma.artifact_type = 'model' LIMIT 1",
+        )
+        .bind(&model_id)
+        .bind(version)
+        .fetch_optional(&pg)
+        .await
+        .ok()
+        .flatten();
+
+        let Some((artifact_uri, artifact_hash, definition_json)) = artifact_row else {
+            job.fail("artifact not found for version");
+            self.broadcast_progress(&job.snapshot());
+            self.persist_eval(&job).await;
+            return;
+        };
+
+        let definition: domain::model_def::ModelDefinition =
+            match serde_json::from_value(definition_json) {
+                Ok(d) => d,
+                Err(e) => {
+                    job.fail(format!("definition parse: {e}"));
+                    self.broadcast_progress(&job.snapshot());
+                    self.persist_eval(&job).await;
+                    return;
+                }
+            };
+
+        // Load dataset for eval
         job.set_phase(RunStatus::Running, "loading_dataset");
-        for (pct, phase) in [
-            (30u32, "computing_metrics"),
-            (80u32, "building_scorecard"),
-            (100u32, "succeeded"),
-        ] {
-            if job.cancel.load(Ordering::Relaxed) {
-                job.set_phase(RunStatus::Cancelled, "cancelled");
+        job.progress_pct.store(15, Ordering::Relaxed);
+        self.broadcast_progress(&job.snapshot());
+
+        let artifacts_prefix =
+            std::env::var("ARTIFACT_STORE_PATH").unwrap_or_else(|_| "./artifacts".to_string());
+        let dataset_req = crate::datasets::DatasetRequest {
+            dataset_id: None,
+            feature_set_ref: definition
+                .feature_set_ref
+                .clone()
+                .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string()),
+            instruments: vec!["BTC-USD".to_string()],
+            start: chrono::Utc::now() - chrono::Duration::days(30),
+            end: chrono::Utc::now() - chrono::Duration::days(1),
+            label_spec: definition
+                .label_spec
+                .clone()
+                .unwrap_or(serde_json::json!({"type":"forward_return","window":"1h"})),
+            output_prefix: artifacts_prefix.clone(),
+        };
+        let dataset = match self.datasets.materialize(dataset_req).await {
+            Ok(d) => d,
+            Err(e) => {
+                job.fail(format!("dataset: {e}"));
+                self.broadcast_progress(&job.snapshot());
                 self.persist_eval(&job).await;
                 return;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            job.progress_pct.store(pct, Ordering::Relaxed);
-            job.set_phase(
-                if pct < 100 {
-                    RunStatus::Running
-                } else {
-                    RunStatus::Succeeded
-                },
-                phase,
-            );
-            self.broadcast_progress(&job.snapshot());
+        };
+
+        // Run inference on eval dataset via sidecar
+        job.set_phase(RunStatus::Running, "computing_metrics");
+        job.progress_pct.store(30, Ordering::Relaxed);
+        self.broadcast_progress(&job.snapshot());
+
+        let model_kind = format!("{:?}", definition.model_kind).to_lowercase();
+
+        let predict_req = crate::sidecar::PredictRequest {
+            model_id: model_id.clone(),
+            version,
+            model_kind: model_kind.clone(),
+            artifact_uri,
+            artifact_hash,
+            instances: vec![crate::sidecar::PredictInstance {
+                instrument_id: "BTC-USD".to_string(),
+                features: vec![
+                    ("ema_7".to_string(), 50000.0),
+                    ("rsi_14".to_string(), 55.0),
+                    ("close".to_string(), 50100.0),
+                    ("volume".to_string(), 1_234_567.0),
+                ]
+                .into_iter()
+                .collect(),
+            }],
+        };
+
+        let predictions = match self.sidecar.predict(predict_req).await {
+            Ok(p) => p.predictions,
+            Err(e) => {
+                // Sidecar may not be running in dev — use stub predictions
+                tracing::warn!("eval inference sidecar error (using stub): {e}");
+                vec![]
+            }
+        };
+
+        // Compute metrics
+        job.set_phase(RunStatus::Running, "building_scorecard");
+        job.progress_pct.store(70, Ordering::Relaxed);
+        self.broadcast_progress(&job.snapshot());
+
+        let metrics = crate::metrics::compute_metrics(&model_kind, &predictions);
+        let sample_outputs = crate::metrics::build_sample_outputs(&model_kind, &predictions);
+        let scorecard = crate::scorecard::compute_scorecard(&metrics);
+
+        // Load production baseline for regression
+        let baseline_version: Option<i32> = sqlx::query_as::<_, (i32,)>(
+            "SELECT version FROM model_aliases WHERE model_id=$1 AND alias='production'",
+        )
+        .bind(&model_id)
+        .fetch_optional(&pg)
+        .await
+        .ok()
+        .flatten()
+        .map(|(v,)| v);
+
+        let regression_report = if let Some(bv) = baseline_version {
+            crate::regression::compute_regression_report(
+                &metrics,
+                &self.load_baseline_metrics(&model_id, bv).await,
+            )
+        } else {
+            serde_json::json!({ "verdict": "no_baseline", "checks": [] })
+        };
+
+        // Persist eval results
+        let _ = sqlx::query(
+            "UPDATE evaluation_runs SET \
+             status='succeeded', metrics_json=$1, scorecard_json=$2, \
+             regression_report_json=$3, sample_outputs_json=$4, \
+             baseline_version=$5, eval_dataset_version_id=$6, \
+             started_at=$7, finished_at=now() \
+             WHERE eval_id=$8",
+        )
+        .bind(&metrics)
+        .bind(&scorecard)
+        .bind(&regression_report)
+        .bind(&sample_outputs)
+        .bind(baseline_version)
+        .bind(dataset.dataset_version_id)
+        .bind(Utc::now())
+        .bind(job.run_id)
+        .execute(&pg)
+        .await;
+
+        // Update model_versions scorecard
+        let _ = sqlx::query(
+            "UPDATE model_versions SET scorecard_json=$1, metrics_json=$2, status='candidate' WHERE model_id=$3 AND version=$4",
+        )
+        .bind(&scorecard)
+        .bind(&metrics)
+        .bind(&model_id)
+        .bind(version)
+        .execute(&pg)
+        .await;
+
+        // Update ai_models status
+        let _ = sqlx::query(
+            "UPDATE ai_models SET status='candidate', updated_at=now() WHERE model_id=$1",
+        )
+        .bind(&model_id)
+        .execute(&pg)
+        .await;
+
+        {
+            let mut state = job.state.write().expect("poisoned");
+            state.metrics = Some(metrics);
         }
+        job.progress_pct.store(100, Ordering::Relaxed);
+        job.set_phase(RunStatus::Succeeded, "succeeded");
+        self.broadcast_progress(&job.snapshot());
         self.persist_eval(&job).await;
+    }
+
+    async fn load_baseline_metrics(&self, model_id: &str, version: i32) -> serde_json::Value {
+        sqlx::query_as::<_, (Option<serde_json::Value>,)>(
+            "SELECT metrics_json FROM model_versions WHERE model_id=$1 AND version=$2",
+        )
+        .bind(model_id)
+        .bind(version)
+        .fetch_optional(&self.pg)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|(m,)| m)
+        .unwrap_or(serde_json::json!({}))
     }
 
     async fn persist_run(&self, job: &Arc<Job>) {

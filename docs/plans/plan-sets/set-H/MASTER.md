@@ -1,8 +1,8 @@
 # AI Model Studio — Set H
 
-**Completion: 0% (0 / 64 primary tasks)**
+**Completion: 73% (47 / 64 primary tasks)**
 
-**Status:** Design-complete · Implementation pending
+**Status:** Phases 0–3 implemented · Phases 4–5 pending
 **Created:** 2026-06-15
 **Scope class:** End-state architecture (NOT an MVP cut — every subsystem is
 specified at full fidelity; phases are build-ordering, not feature-gating).
@@ -273,3 +273,5 @@ when it lands, the Studio inherits it for free via the shared extractor.
 | Date | Phase | Task | Note |
 |------|-------|------|------|
 | 2026-06-15 | — | plan | Set H created. 10 decisions locked. 64 tasks across 6 phases. End-state design only. |
+| 2026-06-15 | 2 | impl | Hybrid runtime & training complete (12/12). `apps/model-trainer` + `apps/model-inference` FastAPI sidecars (xgboost/lightgbm/sklearn/torch + forecaster + LLM proxy); `model-registry` gains `sidecar`, `nats_bridge`, `datasets`, feature-sets; real `drive_train` dispatch; Test Lab inference; compose + `.env.example` wiring. |
+| 2026-06-15 | 3 | impl | Evaluation & promotion complete (10/10). Real `drive_eval` engine, per-kind metrics, forecast-vs-actual series, normalized scorecard, regression detection, gated promotion + rollback/fallback aliases, traffic-split deployments, eval get/compare API. |

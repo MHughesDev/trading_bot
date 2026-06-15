@@ -5,8 +5,15 @@
 //! are stub drivers that advance through phases on a timer.  Phase 2 replaces
 //! the driver body with real Python sidecar calls without changing the public API.
 
+pub mod backtest_bridge;
+pub mod datasets;
 pub mod job;
 pub mod manager;
+pub mod metrics;
+pub mod nats_bridge;
+pub mod regression;
+pub mod scorecard;
+pub mod sidecar;
 pub mod types;
 
 pub use manager::ModelManager;

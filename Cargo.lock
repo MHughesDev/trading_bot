@@ -1772,6 +1772,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "domain",
+ "once_cell",
+ "serde",
 ]
 
 [[package]]
@@ -2843,10 +2845,15 @@ name = "model-registry"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-nats",
  "chrono",
  "domain",
+ "features",
+ "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sqlx",
  "storage",
  "tokio",
