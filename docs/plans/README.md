@@ -4,7 +4,10 @@ Formal plans for the Python → Rust trading platform refactor. Each plan file i
 
 > **Execution order is mandatory.** Phases run A → B → 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7, with the single allowed parallelism being Phase 4 starting once Phase 2 is done (Phase 3 not required). See the master plan for sequencing rules and decision gates.
 
-All plan sets (A through G) live under `plan-sets/` in this directory.
+All plan sets (A through H) live under `plan-sets/` in this directory. Set H
+(`plan-sets/set-H/`) specifies the **AI Model Studio** — the end-state design for
+creating, training, testing, evaluating, versioning, and deploying the models the
+trading system uses.
 
 ---
 

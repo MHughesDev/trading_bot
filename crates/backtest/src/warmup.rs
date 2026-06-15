@@ -11,7 +11,7 @@
 //!    periods (via [`DataRequirements::warmup_bars`]).
 //! 2. Compute how many 1 min bars that translates to for the chosen
 //!    timeframe, adding a small buffer for partial buckets and market gaps.
-//! 3. Load those 1 min bars from ClickHouse.
+//! 3. Load those 1 min bars from `ClickHouse`.
 //! 4. Aggregate in-memory to the target timeframe ([`aggregate_bars`]).
 //! 5. Run all indicators over every aggregated bar, returning the final
 //!    (warm) state.
@@ -55,7 +55,7 @@ pub struct WarmState {
     pub bars: Vec<LoadedBar>,
 }
 
-/// Loads 1 min bars from ClickHouse, aggregates them to `target_timeframe`,
+/// Loads 1 min bars from `ClickHouse`, aggregates them to `target_timeframe`,
 /// and runs all indicators in `requirements` over the full history to produce
 /// a warm [`WarmState`].
 ///
@@ -79,15 +79,13 @@ pub async fn load_warm_state(
 
     anyhow::ensure!(
         target_secs % base_secs == 0,
-        "target timeframe {:?} ({target_secs}s) is not a whole multiple of 1 min",
-        target_timeframe,
+        "target timeframe {target_timeframe:?} ({target_secs}s) is not a whole multiple of 1 min",
     );
 
     // How many 1 min base bars do we need?
     let bars_needed = requirements.warmup_bars + BUFFER_BARS;
     let base_bars_needed = bars_needed * (target_secs / base_secs);
-    let window_secs = i64::try_from(base_bars_needed * base_secs)
-        .unwrap_or(i64::MAX / 2);
+    let window_secs = i64::try_from(base_bars_needed * base_secs).unwrap_or(i64::MAX / 2);
     let data_from = as_of - Duration::seconds(window_secs);
 
     let base_bars = store
@@ -146,7 +144,7 @@ pub fn run_indicators(bars: &[LoadedBar], requirements: &DataRequirements) -> Ha
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::requirements::{FeatureSpec, FeatureKind};
+    use crate::requirements::{FeatureKind, FeatureSpec};
     use rust_decimal_macros::dec;
 
     fn rising_bars(n: usize) -> Vec<LoadedBar> {
@@ -210,7 +208,10 @@ mod tests {
         let values = run_indicators(&bars, &req);
         let ema = values["ema_7"];
         // After 50 rising bars, EMA(7) should be between 100 and 150
-        assert!(ema > 100.0 && ema < 155.0, "EMA out of expected range: {ema}");
+        assert!(
+            ema > 100.0 && ema < 155.0,
+            "EMA out of expected range: {ema}"
+        );
     }
 
     #[test]

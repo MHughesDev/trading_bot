@@ -103,7 +103,7 @@ struct CollectedBarRow {
 }
 
 impl BarStore {
-    /// Connect to ClickHouse using a full URL that may include credentials and
+    /// Connect to `ClickHouse` using a full URL that may include credentials and
     /// a database path (e.g. `http://user:pass@host:8123/dbname`).
     ///
     /// The clickhouse crate does not parse user/password/database from the URL
@@ -138,7 +138,7 @@ impl BarStore {
             (host_path, None)
         };
 
-        client = client.with_url(format!("{}://{}", scheme, host_port));
+        client = client.with_url(format!("{scheme}://{host_port}"));
 
         if let Some(cred_str) = creds {
             if let Some((user, pass)) = cred_str.split_once(':') {
@@ -241,7 +241,7 @@ impl BarStore {
     /// Each stored bar is first deduplicated per `available_time` (latest
     /// revision wins), then grouped into fixed `bucket_seconds` windows: open is
     /// the first bar's open, close the last bar's close, high/low the extrema,
-    /// and volume/trade_count the sums.  `ts_ns` is the bucket start.
+    /// and `volume/trade_count` the sums.  `ts_ns` is the bucket start.
     pub async fn load_bars_bucketed(
         &self,
         instrument_id: &str,
@@ -324,12 +324,12 @@ impl BarStore {
             .fetch_all()
             .await?;
 
-        let ts_ns = rows.into_iter().next().map(|r| r.ts_ns).unwrap_or(0);
+        let ts_ns = rows.into_iter().next().map_or(0, |r| r.ts_ns);
         if ts_ns == 0 {
             return Ok(None);
         }
         let secs = ts_ns / 1_000_000_000;
-        let nanos_rem = (ts_ns % 1_000_000_000) as u32;
+        let nanos_rem = u32::try_from(ts_ns % 1_000_000_000).unwrap_or(0);
         Ok(DateTime::from_timestamp(secs, nanos_rem))
     }
 
@@ -399,7 +399,7 @@ fn nanos(t: DateTime<Utc>) -> i64 {
 }
 
 /// Converts a plain decimal literal to the unscaled `i128` mantissa a
-/// `Decimal128(10)` ClickHouse column expects on the `RowBinary` wire
+/// `Decimal128(10)` `ClickHouse` column expects on the `RowBinary` wire
 /// (value × 10^10, rounded half-up to 10 decimal places).
 fn scaled_decimal(s: &str) -> anyhow::Result<i128> {
     let d: Decimal = s
