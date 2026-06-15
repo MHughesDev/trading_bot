@@ -1,8 +1,8 @@
 //! sqlx pool + transaction helpers.
 pub mod instruments;
+pub mod models;
 pub mod orders;
 pub mod strategies;
-pub mod models;
 pub mod users;
 
 use sqlx::postgres::PgPoolOptions;

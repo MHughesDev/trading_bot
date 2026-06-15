@@ -13,8 +13,8 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
-use model_registry::{CreateModelRequest, TrainRequest};
 use domain::model_def::validate::validate as validate_def;
+use model_registry::{CreateModelRequest, TrainRequest};
 
 use crate::{auth::BearerToken, state::AppState};
 
@@ -23,7 +23,11 @@ fn not_found() -> axum::response::Response {
 }
 
 fn unprocessable(msg: impl std::fmt::Display) -> axum::response::Response {
-    (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": "invalid_request", "message": msg.to_string() }))).into_response()
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({ "error": "invalid_request", "message": msg.to_string() })),
+    )
+        .into_response()
 }
 
 fn map_result<T: serde::Serialize>(result: anyhow::Result<T>) -> axum::response::Response {
@@ -50,7 +54,11 @@ fn map_action(result: anyhow::Result<()>) -> axum::response::Response {
             } else {
                 StatusCode::UNPROCESSABLE_ENTITY
             };
-            (code, Json(json!({ "error": "action_failed", "message": msg }))).into_response()
+            (
+                code,
+                Json(json!({ "error": "action_failed", "message": msg })),
+            )
+                .into_response()
         }
     }
 }
@@ -76,12 +84,16 @@ pub async fn list_models(
     Query(params): Query<ModelListParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
-    match state.models.list_models(
-        token.user_id(),
-        params.kind.as_deref(),
-        params.status.as_deref(),
-        params.asset_class.as_deref(),
-    ).await {
+    match state
+        .models
+        .list_models(
+            token.user_id(),
+            params.kind.as_deref(),
+            params.status.as_deref(),
+            params.asset_class.as_deref(),
+        )
+        .await
+    {
         Ok(models) => {
             let total = models.len();
             let page: Vec<_> = models.into_iter().take(limit).collect();
@@ -98,11 +110,20 @@ pub async fn create_model(
     Json(req): Json<CreateModelRequest>,
 ) -> impl IntoResponse {
     if let Err(errors) = validate_def(&req.definition) {
-        let formatted: Vec<_> = errors.iter().map(|e| json!({ "path": e.path, "message": e.message })).collect();
-        return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": "invalid_definition", "errors": formatted }))).into_response();
+        let formatted: Vec<_> = errors
+            .iter()
+            .map(|e| json!({ "path": e.path, "message": e.message }))
+            .collect();
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "invalid_definition", "errors": formatted })),
+        )
+            .into_response();
     }
     match state.models.create_model(token.user_id(), req).await {
-        Ok(model_id) => (StatusCode::CREATED, Json(json!({ "model_id": model_id }))).into_response(),
+        Ok(model_id) => {
+            (StatusCode::CREATED, Json(json!({ "model_id": model_id }))).into_response()
+        }
         Err(e) => unprocessable(e),
     }
 }
@@ -135,9 +156,25 @@ pub async fn patch_model(
 ) -> impl IntoResponse {
     let display_name = match req.display_name {
         Some(ref n) => n.as_str(),
-        None => return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": "display_name required" }))).into_response(),
+        None => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": "display_name required" })),
+            )
+                .into_response()
+        }
     };
-    map_action(state.models.rename_model(&id, token.user_id(), display_name, req.description.as_deref()).await)
+    map_action(
+        state
+            .models
+            .rename_model(
+                &id,
+                token.user_id(),
+                display_name,
+                req.description.as_deref(),
+            )
+            .await,
+    )
 }
 
 /// DELETE /api/models/:id
@@ -179,7 +216,13 @@ pub async fn list_runs(
     token: BearerToken,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    map_result(state.models.list_runs(&id, token.user_id()).await.map(|runs| json!({ "runs": runs })))
+    map_result(
+        state
+            .models
+            .list_runs(&id, token.user_id())
+            .await
+            .map(|runs| json!({ "runs": runs })),
+    )
 }
 
 /// GET /api/models/:id/runs/:run_id
@@ -211,7 +254,13 @@ pub async fn list_versions(
     token: BearerToken,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    map_result(state.models.list_versions(&id, token.user_id()).await.map(|v| json!({ "versions": v })))
+    map_result(
+        state
+            .models
+            .list_versions(&id, token.user_id())
+            .await
+            .map(|v| json!({ "versions": v })),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,7 +277,17 @@ pub async fn register_version(
     Path(id): Path<String>,
     Json(req): Json<RegisterVersionRequest>,
 ) -> impl IntoResponse {
-    match state.models.register_version(&id, token.user_id(), &req.artifact_uri, &req.artifact_hash, req.notes.as_deref()).await {
+    match state
+        .models
+        .register_version(
+            &id,
+            token.user_id(),
+            &req.artifact_uri,
+            &req.artifact_hash,
+            req.notes.as_deref(),
+        )
+        .await
+    {
         Ok(v) => (StatusCode::CREATED, Json(json!({ "version": v }))).into_response(),
         Err(e) => unprocessable(e),
     }
@@ -254,7 +313,13 @@ pub async fn list_evals(
     token: BearerToken,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    map_result(state.models.list_evals(&id, token.user_id()).await.map(|e| json!({ "evaluations": e })))
+    map_result(
+        state
+            .models
+            .list_evals(&id, token.user_id())
+            .await
+            .map(|e| json!({ "evaluations": e })),
+    )
 }
 
 // -- Promote / rollback / aliases --
@@ -294,7 +359,13 @@ pub async fn list_deployments(
     token: BearerToken,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    map_result(state.models.list_deployments(&id, token.user_id()).await.map(|d| json!({ "deployments": d })))
+    map_result(
+        state
+            .models
+            .list_deployments(&id, token.user_id())
+            .await
+            .map(|d| json!({ "deployments": d })),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -310,7 +381,11 @@ pub async fn create_deployment(
     Path(id): Path<String>,
     Json(req): Json<CreateDeploymentRequest>,
 ) -> impl IntoResponse {
-    match state.models.create_deployment(&id, req.version, &req.environment, token.user_id()).await {
+    match state
+        .models
+        .create_deployment(&id, req.version, &req.environment, token.user_id())
+        .await
+    {
         Ok(did) => (StatusCode::CREATED, Json(json!({ "deployment_id": did }))).into_response(),
         Err(e) => unprocessable(e),
     }
@@ -324,7 +399,13 @@ pub async fn list_test_cases(
     token: BearerToken,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    map_result(state.models.list_test_cases(&id, token.user_id()).await.map(|c| json!({ "test_cases": c })))
+    map_result(
+        state
+            .models
+            .list_test_cases(&id, token.user_id())
+            .await
+            .map(|c| json!({ "test_cases": c })),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -341,7 +422,11 @@ pub async fn add_test_case(
     Path(id): Path<String>,
     Json(req): Json<AddTestCaseRequest>,
 ) -> impl IntoResponse {
-    match state.models.add_test_case(&id, token.user_id(), &req.name, req.input, req.expected).await {
+    match state
+        .models
+        .add_test_case(&id, token.user_id(), &req.name, req.input, req.expected)
+        .await
+    {
         Ok(case_id) => (StatusCode::CREATED, Json(json!({ "case_id": case_id }))).into_response(),
         Err(e) => unprocessable(e),
     }
@@ -390,5 +475,7 @@ pub async fn get_used_by(
     _token: BearerToken,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    Json(json!({ "model_id": id, "strategies": [], "note": "cross-reference available in Phase 4" }))
+    Json(
+        json!({ "model_id": id, "strategies": [], "note": "cross-reference available in Phase 4" }),
+    )
 }

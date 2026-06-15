@@ -40,6 +40,7 @@ pub struct PipelineHandle {
 ///   2. bar-builder    →  ring_world (cap: 1 024)
 ///   3. strategy-eval  →  ring_intent (cap: 256)
 ///   4. risk/exec      →  broker
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_pipeline(
     symbol: String,
     instrument_id: String,

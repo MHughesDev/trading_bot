@@ -148,12 +148,12 @@ mod tests {
     #[test]
     fn identity_when_same_timeframe() {
         let bars = vec![
-            bar(1 * MIN_NS, 100, 110, 95, 105, 10),
+            bar(MIN_NS, 100, 110, 95, 105, 10),
             bar(2 * MIN_NS, 105, 115, 100, 108, 12),
         ];
         let out = aggregate_bars(&bars, Timeframe::Minutes1, Timeframe::Minutes1);
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].ts_ns, 1 * MIN_NS);
+        assert_eq!(out[0].ts_ns, MIN_NS);
         assert_eq!(out[1].ts_ns, 2 * MIN_NS);
     }
 

@@ -25,7 +25,8 @@ impl ArtifactStore for S3ArtifactStore {
         anyhow::bail!(
             "S3ArtifactStore is not yet fully implemented. \
              Bucket={}, prefix={}, key={key}",
-            self.bucket, self.prefix
+            self.bucket,
+            self.prefix
         )
     }
 

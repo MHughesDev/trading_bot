@@ -34,11 +34,11 @@ pub async fn create_strategy(
                 .iter()
                 .map(|e| json!({ "path": e.path, "message": e.message }))
                 .collect();
-            return (
+            (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({ "error": "validation_failed", "errors": formatted })),
             )
-                .into_response();
+                .into_response()
         }
         Ok(validated) => {
             let inner = validated.into_inner();

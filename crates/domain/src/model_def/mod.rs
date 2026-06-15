@@ -6,9 +6,9 @@ pub mod kinds;
 pub mod target;
 pub mod validate;
 
-use serde::{Deserialize, Serialize};
 use adapter::AdapterSpec;
 use kinds::{Framework, ModelKind, Runtime};
+use serde::{Deserialize, Serialize};
 use target::{InferenceCfg, TargetSpec};
 
 pub const DEFINITION_VERSION: &str = "1.0";
@@ -39,7 +39,7 @@ pub struct ModelDefinition {
 mod tests {
     use super::*;
     use kinds::Framework;
-    use target::{TargetField, TargetSpec, TargetTransform};
+    use target::{TargetField, TargetTransform};
 
     #[test]
     fn forecaster_round_trips() {

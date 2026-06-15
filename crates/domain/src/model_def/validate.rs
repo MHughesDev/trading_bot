@@ -8,7 +8,10 @@ pub struct ValidationError {
 
 impl ValidationError {
     fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { path: path.into(), message: message.into() }
+        Self {
+            path: path.into(),
+            message: message.into(),
+        }
     }
 }
 
@@ -18,7 +21,10 @@ pub fn validate(def: &ModelDefinition) -> Result<(), Vec<ValidationError>> {
     if def.schema_version != DEFINITION_VERSION {
         errors.push(ValidationError::new(
             "schema_version",
-            format!("must be \"{DEFINITION_VERSION}\"; got \"{}\"", def.schema_version),
+            format!(
+                "must be \"{DEFINITION_VERSION}\"; got \"{}\"",
+                def.schema_version
+            ),
         ));
     }
 
@@ -29,7 +35,10 @@ pub fn validate(def: &ModelDefinition) -> Result<(), Vec<ValidationError>> {
     if !is_compatible(def.model_kind, def.framework) {
         errors.push(ValidationError::new(
             "framework",
-            format!("{:?} is not compatible with kind {:?}", def.framework, def.model_kind),
+            format!(
+                "{:?} is not compatible with kind {:?}",
+                def.framework, def.model_kind
+            ),
         ));
     }
 
@@ -61,5 +70,9 @@ pub fn validate(def: &ModelDefinition) -> Result<(), Vec<ValidationError>> {
         }
     }
 
-    if errors.is_empty() { Ok(()) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }

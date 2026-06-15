@@ -13,7 +13,9 @@ pub struct FsArtifactStore {
 
 impl FsArtifactStore {
     pub fn new(root: impl AsRef<Path>) -> Self {
-        Self { root: root.as_ref().to_path_buf() }
+        Self {
+            root: root.as_ref().to_path_buf(),
+        }
     }
 }
 

@@ -12,18 +12,13 @@ pub enum TargetField {
     SizeFraction,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetTransform {
+    #[default]
     None,
     Logret,
     Zscore,
-}
-
-impl Default for TargetTransform {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,8 +40,13 @@ pub struct InferenceCfg {
 
 impl Default for InferenceCfg {
     fn default() -> Self {
-        Self { min_confidence: 0.0, calibrate: true }
+        Self {
+            min_confidence: 0.0,
+            calibrate: true,
+        }
     }
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}

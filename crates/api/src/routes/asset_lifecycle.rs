@@ -212,7 +212,7 @@ async fn seed_bars(
         symbol,
         venue_id,
         Timeframe::Hours1,
-        &[range.clone()],
+        std::slice::from_ref(&range),
         &collected,
         &cancel,
     )

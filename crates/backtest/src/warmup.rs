@@ -150,10 +150,12 @@ mod tests {
     fn rising_bars(n: usize) -> Vec<LoadedBar> {
         (1..=n)
             .map(|i| LoadedBar {
+                #[allow(clippy::cast_possible_wrap)]
                 ts_ns: i as i64 * 60_000_000_000,
                 open: dec!(100),
                 high: dec!(100),
                 low: dec!(100),
+                #[allow(clippy::cast_possible_wrap)]
                 close: rust_decimal::Decimal::from(100 + i as i64),
                 volume: dec!(1),
                 trade_count: 1,

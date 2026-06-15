@@ -19,7 +19,7 @@ impl AliasName {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "production" => Some(Self::Production),
             "candidate" => Some(Self::Candidate),

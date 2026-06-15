@@ -15,4 +15,6 @@ pub struct AdapterSpec {
     pub cost_per_1k_tokens: String,
 }
 
-fn default_cost() -> String { "0.0".to_string() }
+fn default_cost() -> String {
+    "0.0".to_string()
+}

@@ -149,7 +149,7 @@ pub async fn login(
         StatusCode::INTERNAL_SERVER_ERROR.into_response()
     })?;
 
-    let (user_id, hash, created_at) = row
+    let (user_id, _hash, created_at) = row
         .filter(|(_, hash, _)| !hash.is_empty() && verify_password(&body.password, hash))
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "invalid email or password").into_response())?;
 

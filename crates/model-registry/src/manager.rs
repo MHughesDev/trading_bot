@@ -6,7 +6,7 @@
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -36,7 +36,6 @@ fn slugify(name: &str) -> String {
 pub struct ModelManager {
     pg: PgPool,
     jobs: RwLock<HashMap<Uuid, Arc<Job>>>,
-    hydrated: AtomicBool,
     run_permits: Arc<tokio::sync::Semaphore>,
     /// Broadcast channel for WS lane `models.jobs`.
     progress_tx: tokio::sync::broadcast::Sender<serde_json::Value>,
@@ -48,7 +47,6 @@ impl ModelManager {
         Arc::new(Self {
             pg,
             jobs: RwLock::new(HashMap::new()),
-            hydrated: AtomicBool::new(false),
             run_permits: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JOBS)),
             progress_tx,
         })
@@ -67,7 +65,10 @@ impl ModelManager {
         req: CreateModelRequest,
     ) -> anyhow::Result<String> {
         validate(&req.definition).map_err(|errs| {
-            let msgs: Vec<_> = errs.iter().map(|e| format!("{}: {}", e.path, e.message)).collect();
+            let msgs: Vec<_> = errs
+                .iter()
+                .map(|e| format!("{}: {}", e.path, e.message))
+                .collect();
             anyhow::anyhow!("validation failed: {}", msgs.join("; "))
         })?;
 
@@ -94,12 +95,22 @@ impl ModelManager {
         .execute(&self.pg)
         .await?;
 
-        self.record_event(&model_id, user_id, "created", serde_json::json!({"display_name": &req.display_name})).await;
+        self.record_event(
+            &model_id,
+            user_id,
+            "created",
+            serde_json::json!({"display_name": &req.display_name}),
+        )
+        .await;
 
         Ok(model_id)
     }
 
-    pub async fn get_model(&self, model_id: &str, user_id: Uuid) -> anyhow::Result<Option<ModelRecord>> {
+    pub async fn get_model(
+        &self,
+        model_id: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<ModelRecord>> {
         let row: Option<ModelRow> = sqlx::query_as(
             "SELECT model_id, slug, display_name, description, model_kind, asset_class, \
              definition_json, status, created_by, created_at, updated_at \
@@ -109,7 +120,7 @@ impl ModelManager {
         .bind(user_id)
         .fetch_optional(&self.pg)
         .await?;
-        Ok(row.and_then(|r| r.into_record()))
+        Ok(row.and_then(ModelRow::into_record))
     }
 
     pub async fn list_models(
@@ -136,10 +147,13 @@ impl ModelManager {
         .bind(asset_class)
         .fetch_all(&self.pg)
         .await?;
-        Ok(rows.into_iter().filter_map(|r| r.into_record()).collect())
+        Ok(rows.into_iter().filter_map(ModelRow::into_record).collect())
     }
 
-    pub async fn list_models_by_asset_class(&self, asset_class: &str) -> anyhow::Result<Vec<ModelRecord>> {
+    pub async fn list_models_by_asset_class(
+        &self,
+        asset_class: &str,
+    ) -> anyhow::Result<Vec<ModelRecord>> {
         let rows: Vec<ModelRow> = sqlx::query_as(
             "SELECT model_id, slug, display_name, description, model_kind, asset_class, \
              definition_json, status, created_by, created_at, updated_at \
@@ -148,7 +162,7 @@ impl ModelManager {
         .bind(asset_class)
         .fetch_all(&self.pg)
         .await?;
-        Ok(rows.into_iter().filter_map(|r| r.into_record()).collect())
+        Ok(rows.into_iter().filter_map(ModelRow::into_record).collect())
     }
 
     pub async fn rename_model(
@@ -158,7 +172,10 @@ impl ModelManager {
         new_display_name: &str,
         new_description: Option<&str>,
     ) -> anyhow::Result<()> {
-        let old = self.get_model(model_id, user_id).await?.ok_or_else(|| anyhow::anyhow!("not found"))?;
+        let old = self
+            .get_model(model_id, user_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("not found"))?;
         sqlx::query(
             "UPDATE ai_models SET display_name = $1, description = COALESCE($2, description), updated_at = now() \
              WHERE model_id = $3 AND created_by = $4",
@@ -169,9 +186,15 @@ impl ModelManager {
         .bind(user_id)
         .execute(&self.pg)
         .await?;
-        self.record_event(model_id, user_id, "renamed", serde_json::json!({
-            "from": old.display_name, "to": new_display_name
-        })).await;
+        self.record_event(
+            model_id,
+            user_id,
+            "renamed",
+            serde_json::json!({
+                "from": old.display_name, "to": new_display_name
+            }),
+        )
+        .await;
         Ok(())
     }
 
@@ -188,7 +211,8 @@ impl ModelManager {
         if rows_affected == 0 {
             anyhow::bail!("not found");
         }
-        self.record_event(model_id, user_id, "archived", serde_json::json!({})).await;
+        self.record_event(model_id, user_id, "archived", serde_json::json!({}))
+            .await;
         Ok(())
     }
 
@@ -216,16 +240,27 @@ impl ModelManager {
         req: TrainRequest,
     ) -> anyhow::Result<Uuid> {
         // Verify model exists and is trainable.
-        let model = self.get_model(model_id, user_id).await?.ok_or_else(|| anyhow::anyhow!("not found"))?;
+        let model = self
+            .get_model(model_id, user_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("not found"))?;
         if model.model_kind == "external_llm_adapter" {
             anyhow::bail!("external_llm_adapter models do not train (D-3)");
         }
 
         let run_id = Uuid::new_v4();
-        let job = Job::new(run_id, model_id.to_string(), user_id, ModelRunKind::Train, Utc::now());
+        let job = Job::new(
+            run_id,
+            model_id.to_string(),
+            user_id,
+            ModelRunKind::Train,
+            Utc::now(),
+        );
 
         // Persist initial row.
-        let hp = req.hyperparameter_overrides.unwrap_or(serde_json::Value::Null);
+        let hp = req
+            .hyperparameter_overrides
+            .unwrap_or(serde_json::Value::Null);
         let _ = sqlx::query(
             "INSERT INTO training_runs \
              (run_id, model_id, dataset_version_id, status, progress, phase, hyperparameters_json, created_by, created_at) \
@@ -248,12 +283,18 @@ impl ModelManager {
         Ok(run_id)
     }
 
-    pub async fn list_runs(&self, model_id: &str, user_id: Uuid) -> anyhow::Result<Vec<ModelRunSnapshot>> {
+    pub async fn list_runs(
+        &self,
+        model_id: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<ModelRunSnapshot>> {
         self.ensure_model_owned(model_id, user_id).await?;
         let jobs = self.jobs.read().await;
         let mut snaps: Vec<ModelRunSnapshot> = jobs
             .values()
-            .filter(|j| j.model_id == model_id && j.user_id == user_id && j.kind == ModelRunKind::Train)
+            .filter(|j| {
+                j.model_id == model_id && j.user_id == user_id && j.kind == ModelRunKind::Train
+            })
             .map(|j| j.snapshot())
             .collect();
         snaps.sort_by_key(|s| Reverse(s.created_at));
@@ -269,27 +310,50 @@ impl ModelManager {
 
     pub async fn cancel_run(&self, run_id: Uuid, user_id: Uuid) -> anyhow::Result<()> {
         let jobs = self.jobs.read().await;
-        let job = jobs.get(&run_id).filter(|j| j.user_id == user_id).ok_or_else(|| anyhow::anyhow!("not found"))?;
-        anyhow::ensure!(!job.state.read().expect("poisoned").status.is_terminal(), "run already finished");
+        let job = jobs
+            .get(&run_id)
+            .filter(|j| j.user_id == user_id)
+            .ok_or_else(|| anyhow::anyhow!("not found"))?;
+        anyhow::ensure!(
+            !job.state.read().expect("poisoned").status.is_terminal(),
+            "run already finished"
+        );
         job.cancel.store(true, Ordering::Relaxed);
         Ok(())
     }
 
     // -- Versions --
 
-    pub async fn list_versions(&self, model_id: &str, user_id: Uuid) -> anyhow::Result<Vec<serde_json::Value>> {
+    pub async fn list_versions(
+        &self,
+        model_id: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<serde_json::Value>> {
         self.ensure_model_owned(model_id, user_id).await?;
-        let rows: Vec<(i32, String, Option<serde_json::Value>, Option<serde_json::Value>, chrono::DateTime<Utc>, Option<chrono::DateTime<Utc>>)> = sqlx::query_as(
+        #[allow(clippy::type_complexity)]
+        let rows: Vec<(
+            i32,
+            String,
+            Option<serde_json::Value>,
+            Option<serde_json::Value>,
+            chrono::DateTime<Utc>,
+            Option<chrono::DateTime<Utc>>,
+        )> = sqlx::query_as(
             "SELECT version, status, metrics_json, scorecard_json, created_at, promoted_at \
              FROM model_versions WHERE model_id = $1 ORDER BY version DESC",
         )
         .bind(model_id)
         .fetch_all(&self.pg)
         .await?;
-        Ok(rows.iter().map(|(v, s, m, sc, ca, pa)| serde_json::json!({
-            "version": v, "status": s, "metrics": m, "scorecard": sc,
-            "created_at": ca, "promoted_at": pa,
-        })).collect())
+        Ok(rows
+            .iter()
+            .map(|(v, s, m, sc, ca, pa)| {
+                serde_json::json!({
+                    "version": v, "status": s, "metrics": m, "scorecard": sc,
+                    "created_at": ca, "promoted_at": pa,
+                })
+            })
+            .collect())
     }
 
     pub async fn register_version(
@@ -309,6 +373,7 @@ impl ModelManager {
         .bind(model_id)
         .fetch_one(&self.pg)
         .await?;
+        #[allow(clippy::cast_possible_truncation)]
         let version = next_version as i32;
 
         let config_json = serde_json::json!({
@@ -333,7 +398,11 @@ impl ModelManager {
 
     // -- Aliases --
 
-    pub async fn get_aliases(&self, model_id: &str, user_id: Uuid) -> anyhow::Result<serde_json::Value> {
+    pub async fn get_aliases(
+        &self,
+        model_id: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<serde_json::Value> {
         self.ensure_model_owned(model_id, user_id).await?;
         let rows: Vec<(String, i32)> = sqlx::query_as(
             "SELECT alias, version FROM model_aliases WHERE model_id = $1 ORDER BY alias",
@@ -341,18 +410,14 @@ impl ModelManager {
         .bind(model_id)
         .fetch_all(&self.pg)
         .await?;
-        let map: serde_json::Map<String, serde_json::Value> = rows.into_iter()
+        let map: serde_json::Map<String, serde_json::Value> = rows
+            .into_iter()
             .map(|(a, v)| (a, serde_json::json!(v)))
             .collect();
         Ok(serde_json::Value::Object(map))
     }
 
-    pub async fn promote(
-        &self,
-        model_id: &str,
-        user_id: Uuid,
-        version: i32,
-    ) -> anyhow::Result<()> {
+    pub async fn promote(&self, model_id: &str, user_id: Uuid, version: i32) -> anyhow::Result<()> {
         self.ensure_model_owned(model_id, user_id).await?;
         // Stub gate: verify version exists.
         let exists: Option<(i32,)> = sqlx::query_as(
@@ -376,25 +441,27 @@ impl ModelManager {
         .execute(&self.pg)
         .await?;
 
-        self.record_event(model_id, user_id, "promoted", serde_json::json!({"version": version, "alias": "production"})).await;
+        self.record_event(
+            model_id,
+            user_id,
+            "promoted",
+            serde_json::json!({"version": version, "alias": "production"}),
+        )
+        .await;
         Ok(())
     }
 
-    pub async fn rollback(
-        &self,
-        model_id: &str,
-        alias: &str,
-        user_id: Uuid,
-    ) -> anyhow::Result<()> {
+    pub async fn rollback(&self, model_id: &str, alias: &str, user_id: Uuid) -> anyhow::Result<()> {
         self.ensure_model_owned(model_id, user_id).await?;
-        let current: Option<(i32,)> = sqlx::query_as(
-            "SELECT version FROM model_aliases WHERE model_id = $1 AND alias = $2",
-        )
-        .bind(model_id)
-        .bind(alias)
-        .fetch_optional(&self.pg)
-        .await?;
-        let current_version = current.map(|(v,)| v).ok_or_else(|| anyhow::anyhow!("alias not found"))?;
+        let current: Option<(i32,)> =
+            sqlx::query_as("SELECT version FROM model_aliases WHERE model_id = $1 AND alias = $2")
+                .bind(model_id)
+                .bind(alias)
+                .fetch_optional(&self.pg)
+                .await?;
+        let current_version = current
+            .map(|(v,)| v)
+            .ok_or_else(|| anyhow::anyhow!("alias not found"))?;
 
         let prev: Option<(i32,)> = sqlx::query_as(
             "SELECT version FROM model_versions WHERE model_id = $1 AND version < $2 ORDER BY version DESC LIMIT 1",
@@ -403,7 +470,9 @@ impl ModelManager {
         .bind(current_version)
         .fetch_optional(&self.pg)
         .await?;
-        let prev_version = prev.map(|(v,)| v).ok_or_else(|| anyhow::anyhow!("no previous version to roll back to"))?;
+        let prev_version = prev
+            .map(|(v,)| v)
+            .ok_or_else(|| anyhow::anyhow!("no previous version to roll back to"))?;
 
         sqlx::query(
             "UPDATE model_aliases SET version = $1, updated_by = $2, updated_at = now() \
@@ -416,9 +485,15 @@ impl ModelManager {
         .execute(&self.pg)
         .await?;
 
-        self.record_event(model_id, user_id, "rolled_back", serde_json::json!({
-            "alias": alias, "from_version": current_version, "to_version": prev_version
-        })).await;
+        self.record_event(
+            model_id,
+            user_id,
+            "rolled_back",
+            serde_json::json!({
+                "alias": alias, "from_version": current_version, "to_version": prev_version
+            }),
+        )
+        .await;
         Ok(())
     }
 
@@ -432,7 +507,13 @@ impl ModelManager {
     ) -> anyhow::Result<Uuid> {
         self.ensure_model_owned(model_id, user_id).await?;
         let eval_id = Uuid::new_v4();
-        let job = Job::new(eval_id, model_id.to_string(), user_id, ModelRunKind::Evaluate, Utc::now());
+        let job = Job::new(
+            eval_id,
+            model_id.to_string(),
+            user_id,
+            ModelRunKind::Evaluate,
+            Utc::now(),
+        );
 
         let _ = sqlx::query(
             "INSERT INTO evaluation_runs \
@@ -455,12 +536,18 @@ impl ModelManager {
         Ok(eval_id)
     }
 
-    pub async fn list_evals(&self, model_id: &str, user_id: Uuid) -> anyhow::Result<Vec<ModelRunSnapshot>> {
+    pub async fn list_evals(
+        &self,
+        model_id: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<ModelRunSnapshot>> {
         self.ensure_model_owned(model_id, user_id).await?;
         let jobs = self.jobs.read().await;
         let mut snaps: Vec<ModelRunSnapshot> = jobs
             .values()
-            .filter(|j| j.model_id == model_id && j.user_id == user_id && j.kind == ModelRunKind::Evaluate)
+            .filter(|j| {
+                j.model_id == model_id && j.user_id == user_id && j.kind == ModelRunKind::Evaluate
+            })
             .map(|j| j.snapshot())
             .collect();
         snaps.sort_by_key(|s| Reverse(s.created_at));
@@ -469,19 +556,37 @@ impl ModelManager {
 
     // -- Deployments --
 
-    pub async fn list_deployments(&self, model_id: &str, user_id: Uuid) -> anyhow::Result<Vec<serde_json::Value>> {
+    pub async fn list_deployments(
+        &self,
+        model_id: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<serde_json::Value>> {
         self.ensure_model_owned(model_id, user_id).await?;
-        let rows: Vec<(String, i32, String, Option<String>, String, i32, chrono::DateTime<Utc>)> = sqlx::query_as(
+        #[allow(clippy::type_complexity)]
+        let rows: Vec<(
+            String,
+            i32,
+            String,
+            Option<String>,
+            String,
+            i32,
+            chrono::DateTime<Utc>,
+        )> = sqlx::query_as(
             "SELECT deployment_id, version, environment, alias, status, traffic_pct, deployed_at \
              FROM model_deployments WHERE model_id = $1 ORDER BY deployed_at DESC",
         )
         .bind(model_id)
         .fetch_all(&self.pg)
         .await?;
-        Ok(rows.iter().map(|(did, v, env, alias, st, tp, da)| serde_json::json!({
-            "deployment_id": did, "version": v, "environment": env,
-            "alias": alias, "status": st, "traffic_pct": tp, "deployed_at": da,
-        })).collect())
+        Ok(rows
+            .iter()
+            .map(|(did, v, env, alias, st, tp, da)| {
+                serde_json::json!({
+                    "deployment_id": did, "version": v, "environment": env,
+                    "alias": alias, "status": st, "traffic_pct": tp, "deployed_at": da,
+                })
+            })
+            .collect())
     }
 
     pub async fn create_deployment(
@@ -510,18 +615,34 @@ impl ModelManager {
 
     // -- Test cases --
 
-    pub async fn list_test_cases(&self, model_id: &str, user_id: Uuid) -> anyhow::Result<Vec<serde_json::Value>> {
+    pub async fn list_test_cases(
+        &self,
+        model_id: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<serde_json::Value>> {
         self.ensure_model_owned(model_id, user_id).await?;
-        let rows: Vec<(Uuid, String, serde_json::Value, Option<serde_json::Value>, chrono::DateTime<Utc>)> = sqlx::query_as(
+        #[allow(clippy::type_complexity)]
+        let rows: Vec<(
+            Uuid,
+            String,
+            serde_json::Value,
+            Option<serde_json::Value>,
+            chrono::DateTime<Utc>,
+        )> = sqlx::query_as(
             "SELECT case_id, name, input_json, expected_json, created_at \
              FROM model_test_cases WHERE model_id = $1 ORDER BY created_at DESC",
         )
         .bind(model_id)
         .fetch_all(&self.pg)
         .await?;
-        Ok(rows.iter().map(|(cid, name, inp, exp, ca)| serde_json::json!({
-            "case_id": cid, "name": name, "input": inp, "expected": exp, "created_at": ca,
-        })).collect())
+        Ok(rows
+            .iter()
+            .map(|(cid, name, inp, exp, ca)| {
+                serde_json::json!({
+                    "case_id": cid, "name": name, "input": inp, "expected": exp, "created_at": ca,
+                })
+            })
+            .collect())
     }
 
     pub async fn add_test_case(
@@ -549,9 +670,16 @@ impl ModelManager {
 
     // -- Lineage / used-by --
 
-    pub async fn get_lineage(&self, model_id: &str, user_id: Uuid) -> anyhow::Result<serde_json::Value> {
+    pub async fn get_lineage(
+        &self,
+        model_id: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<serde_json::Value> {
         self.ensure_model_owned(model_id, user_id).await?;
-        let aliases = self.get_aliases(model_id, user_id).await.unwrap_or(serde_json::json!({}));
+        let aliases = self
+            .get_aliases(model_id, user_id)
+            .await
+            .unwrap_or(serde_json::json!({}));
         Ok(serde_json::json!({
             "model_id": model_id,
             "aliases": aliases,
@@ -573,7 +701,13 @@ impl ModelManager {
         Ok(())
     }
 
-    async fn record_event(&self, model_id: &str, actor: Uuid, kind: &str, payload: serde_json::Value) {
+    async fn record_event(
+        &self,
+        model_id: &str,
+        actor: Uuid,
+        kind: &str,
+        payload: serde_json::Value,
+    ) {
         let _ = sqlx::query(
             "INSERT INTO model_events (model_id, kind, payload, actor, created_at) \
              VALUES ($1,$2,$3,$4,now())",
@@ -601,9 +735,8 @@ impl ModelManager {
     // -- Stub job drivers --
 
     async fn drive_train(self: &Arc<Self>, job: Arc<Job>, _model_id: String) {
-        let _permit = match self.run_permits.clone().acquire_owned().await {
-            Ok(p) => p,
-            Err(_) => return,
+        let Ok(_permit) = self.run_permits.clone().acquire_owned().await else {
+            return;
         };
         if job.cancel.load(Ordering::Relaxed) {
             job.set_phase(RunStatus::Cancelled, "cancelled");
@@ -627,7 +760,11 @@ impl ModelManager {
             tokio::time::sleep(std::time::Duration::from_millis(400)).await;
             job.progress_pct.store(*pct, Ordering::Relaxed);
             job.set_phase(
-                if *pct < 100 { RunStatus::Running } else { RunStatus::Succeeded },
+                if *pct < 100 {
+                    RunStatus::Running
+                } else {
+                    RunStatus::Succeeded
+                },
                 *phase,
             );
             self.broadcast_progress(&job.snapshot());
@@ -642,13 +779,16 @@ impl ModelManager {
     }
 
     async fn drive_eval(self: &Arc<Self>, job: Arc<Job>, _model_id: String) {
-        let _permit = match self.run_permits.clone().acquire_owned().await {
-            Ok(p) => p,
-            Err(_) => return,
+        let Ok(_permit) = self.run_permits.clone().acquire_owned().await else {
+            return;
         };
 
         job.set_phase(RunStatus::Running, "loading_dataset");
-        for (pct, phase) in [(30u32, "computing_metrics"), (80u32, "building_scorecard"), (100u32, "succeeded")] {
+        for (pct, phase) in [
+            (30u32, "computing_metrics"),
+            (80u32, "building_scorecard"),
+            (100u32, "succeeded"),
+        ] {
             if job.cancel.load(Ordering::Relaxed) {
                 job.set_phase(RunStatus::Cancelled, "cancelled");
                 self.persist_eval(&job).await;
@@ -657,7 +797,11 @@ impl ModelManager {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             job.progress_pct.store(pct, Ordering::Relaxed);
             job.set_phase(
-                if pct < 100 { RunStatus::Running } else { RunStatus::Succeeded },
+                if pct < 100 {
+                    RunStatus::Running
+                } else {
+                    RunStatus::Succeeded
+                },
                 phase,
             );
             self.broadcast_progress(&job.snapshot());

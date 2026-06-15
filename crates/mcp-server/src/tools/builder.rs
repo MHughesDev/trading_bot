@@ -29,6 +29,12 @@ pub struct StrategyDraft {
     pub risk_overrides: RiskOverrides,
 }
 
+impl Default for StrategyDraft {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StrategyDraft {
     pub fn new() -> Self {
         Self {

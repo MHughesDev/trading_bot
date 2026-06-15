@@ -27,17 +27,12 @@ pub enum Framework {
     ExternalApi,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Runtime {
+    #[default]
     Python,
     Rust,
-}
-
-impl Default for Runtime {
-    fn default() -> Self {
-        Self::Python
-    }
 }
 
 /// Returns true if the (kind, framework) combination is valid.

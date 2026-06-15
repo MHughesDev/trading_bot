@@ -32,7 +32,10 @@ pub async fn insert_predictions(client: &Client, rows: &[PredictionRow]) -> Resu
             .await
             .map_err(|e| ChError::Insert(e.to_string()))?;
     }
-    insert.end().await.map_err(|e| ChError::Insert(e.to_string()))
+    insert
+        .end()
+        .await
+        .map_err(|e| ChError::Insert(e.to_string()))
 }
 
 #[derive(Row, Serialize)]
@@ -60,5 +63,8 @@ pub async fn insert_traces(client: &Client, rows: &[TraceRow]) -> Result<(), ChE
             .await
             .map_err(|e| ChError::Insert(e.to_string()))?;
     }
-    insert.end().await.map_err(|e| ChError::Insert(e.to_string()))
+    insert
+        .end()
+        .await
+        .map_err(|e| ChError::Insert(e.to_string()))
 }

@@ -61,6 +61,7 @@ impl Job {
             model_id: self.model_id.clone(),
             kind: self.kind,
             status: state.status,
+            #[allow(clippy::cast_precision_loss)]
             progress: self.progress_pct.load(Ordering::Relaxed) as f32,
             phase: state.phase.clone(),
             error: state.error.clone(),
@@ -83,6 +84,8 @@ impl Job {
         }
     }
 
+    // Phase 2 will call this from the sidecar error path.
+    #[allow(dead_code)]
     pub fn fail(&self, error: impl Into<String>) {
         let mut state = self.state.write().expect("job state lock poisoned");
         state.status = RunStatus::Failed;
