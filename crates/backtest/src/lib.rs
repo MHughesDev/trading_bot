@@ -35,9 +35,9 @@ pub mod warmup;
 pub use aggregate::aggregate_bars;
 pub use collect::CollectorPlan;
 pub use manager::BacktestManager;
+pub use store::{BarStore, CollectedBar};
 pub use types::{
     BacktestRequest, BacktestSnapshot, BacktestStatus, DataCoverage, MissingRange, ResolvedSpec,
     TimeframeExt,
 };
-pub use store::{BarStore, CollectedBar};
-pub use warmup::{WarmState, load_warm_state, run_indicators};
+pub use warmup::{load_warm_state, run_indicators, WarmState};

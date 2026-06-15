@@ -37,7 +37,8 @@ pub fn aggregate_bars(bars: &[LoadedBar], target: Timeframe, base: Timeframe) ->
         "target timeframe must be a whole multiple of base timeframe"
     );
 
-    let mut out: Vec<LoadedBar> = Vec::with_capacity(bars.len() / (target_ns / base_ns) as usize + 1);
+    let mut out: Vec<LoadedBar> =
+        Vec::with_capacity(bars.len() / (target_ns / base_ns) as usize + 1);
 
     // Accumulator for the bar currently being built.
     let mut acc: Option<BucketAcc> = None;
@@ -219,10 +220,7 @@ mod tests {
     #[test]
     fn bar_one_minute_past_boundary_closes_next_bucket() {
         // Bar at 6 * MIN_NS belongs to bucket closing at 10 * MIN_NS.
-        assert_eq!(
-            bucket_close_ns(6 * MIN_NS, 5 * MIN_NS),
-            10 * MIN_NS
-        );
+        assert_eq!(bucket_close_ns(6 * MIN_NS, 5 * MIN_NS), 10 * MIN_NS);
     }
 
     #[test]
