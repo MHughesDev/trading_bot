@@ -14,6 +14,29 @@ pub struct Config {
     pub api: ApiConfig,
     #[serde(default)]
     pub observability: ObservabilityConfig,
+    #[serde(default)]
+    pub email: EmailConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EmailConfig {
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_user: String,
+    pub smtp_password: String,
+    pub from_address: String,
+}
+
+impl Default for EmailConfig {
+    fn default() -> Self {
+        Self {
+            smtp_host: String::new(),
+            smtp_port: 587,
+            smtp_user: String::new(),
+            smtp_password: String::new(),
+            from_address: "noreply@tradingbot.local".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -32,6 +32,7 @@ export function SizeNode({ data, id, selected }: NodeProps<SizeNodeType>) {
         </div>
       </div>
       <Handle type="target" position={Position.Left} id="size-in" />
+      <Handle type="target" position={Position.Right} id="size-in-r" />
     </div>
   )
 }

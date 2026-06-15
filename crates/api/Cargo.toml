@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 domain = { workspace = true }
+cfg = { workspace = true }
 risk = { workspace = true }
 execution = { workspace = true }
 strategy-runtime = { workspace = true }
@@ -26,8 +27,11 @@ rust_decimal = { workspace = true }
 sqlx = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
+anyhow = { workspace = true }
 aes-gcm = "0.10"
 hex = "0.4"
+argon2 = "0.5"
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 
 [dev-dependencies]
 rust_decimal_macros = { workspace = true }

@@ -33,6 +33,7 @@ export function ExitNode({ data, id, selected }: NodeProps<ExitNodeType>) {
         </div>
       </div>
       <Handle type="target" position={Position.Left} id="exit-in" />
+      <Handle type="target" position={Position.Right} id="exit-in-r" />
     </div>
   )
 }

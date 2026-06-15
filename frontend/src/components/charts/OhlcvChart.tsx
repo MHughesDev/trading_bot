@@ -40,6 +40,7 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
   const chartRef = useRef<IChartApi | null>(null)
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const priceLineRefs = useRef<Map<string, unknown>>(new Map())
+  const lastBarCountRef = useRef<number>(0)
   const theme = useThemeStore((s) => s.theme)
 
   useEffect(() => {
@@ -84,6 +85,7 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
       chart.remove()
       candleRef.current = null
       chartRef.current = null
+      lastBarCountRef.current = 0
     }
   }, [theme])
 
@@ -105,7 +107,34 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
       low: b.low,
       close: b.close,
     }))
-    candleRef.current.setData(data)
+
+    // Determine whether this is a fresh dataset (initial load or timeframe
+    // switch) vs. an incremental live tick (last bar updated or one new bar
+    // appended).  Only fitContent() on fresh loads — calling it on every tick
+    // resets the user's zoom/scroll position.
+    const prevCount = lastBarCountRef.current
+    const isFullReload = prevCount === 0 || Math.abs(data.length - prevCount) > 2
+    lastBarCountRef.current = data.length
+
+    if (isFullReload) {
+      candleRef.current.setData(data)
+      // Show the most recent ~120 bars at a readable zoom rather than
+      // squeezing all bars into the visible area (fitContent on 700+ 1h bars
+      // makes every candle sub-pixel wide).
+      if (data.length > 0) {
+        const ts = chartRef.current?.timeScale()
+        if (ts) {
+          const last = data[data.length - 1].time
+          const from = data[Math.max(0, data.length - 120)].time
+          ts.setVisibleRange({ from, to: last })
+        }
+      }
+    } else {
+      // Incremental update: push only the last bar (updated or new) so the
+      // viewport stays exactly where the user left it.
+      const last = data[data.length - 1]
+      if (last) candleRef.current.update(last)
+    }
 
     if (markers.length > 0) {
       const colors = chartColors()
@@ -118,8 +147,6 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
       }))
       createSeriesMarkers(candleRef.current, seriesMarkers)
     }
-
-    chartRef.current?.timeScale().fitContent()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bars, markers])
 

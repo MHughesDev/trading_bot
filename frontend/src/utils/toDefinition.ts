@@ -104,6 +104,75 @@ function conditionToExpr(
 }
 
 /**
+ * Converts scanner conditions directly into a canonical v1.0 StrategyDefinition
+ * with `actions: []`, producing a Discovery strategy.
+ */
+export function scannerToDefinition(
+  name: string,
+  indicators: IndicatorSpec[],
+  allOf: Condition[],
+  anyOf: Condition[],
+  assetClass = 'crypto_spot_cex',
+): ConvertResult {
+  const errors: string[] = []
+  const warnings: string[] = []
+  const indById = new Map(indicators.map((i) => [i.id, i]))
+  const features = new Set<string>()
+
+  if (indicators.some((i) => i.kind === 'sma' || i.kind === 'atr')) {
+    warnings.push('SMA / ATR indicators are not yet supported by the backtest engine.')
+  }
+
+  if (allOf.length > 1) {
+    errors.push(
+      'The saved v1.0 format supports a single entry condition (or OR alternatives); combine the AND-ed conditions into one.',
+    )
+  }
+  if (allOf.length >= 1 && anyOf.length >= 1) {
+    errors.push(
+      'Mixing required (AND) and alternative (OR) conditions is not supported by the saved v1.0 format yet.',
+    )
+  }
+
+  const conditions = allOf.length === 1 ? allOf : anyOf
+  if (conditions.length === 0 && errors.length === 0) {
+    errors.push('Add at least one entry condition.')
+  }
+
+  const nodes: StrategyDefinition['nodes'] = []
+  const emit = 'scanner_signal'
+  conditions.forEach((cond, idx) => {
+    const compiled = conditionToExpr(cond, indById, features)
+    if ('error' in compiled) { errors.push(compiled.error); return }
+    const condId = `c${idx + 1}`
+    nodes.push({ id: condId, type: 'condition', expr: compiled.expr })
+    nodes.push({ id: `s${idx + 1}`, type: 'signal', when: condId, emit })
+  })
+
+  if (errors.length > 0) return { definition: null, errors, warnings }
+
+  const inputs: StrategyDefinition['inputs'] = [
+    { lane: 'market.bars.1m', instrument: '$bound_at_init' },
+  ]
+  if (features.size > 0) {
+    inputs.push({ lane: 'features.technical', instrument: '$bound_at_init', features: [...features] })
+  }
+
+  return {
+    definition: {
+      strategy_id: slugify(name),
+      definition_version: '1.0',
+      asset_class: assetClass,
+      inputs,
+      nodes,
+      actions: [],
+    },
+    errors,
+    warnings,
+  }
+}
+
+/**
  * Converts a builder RuleStrategySpec into a canonical v1.0 StrategyDefinition.
  *
  * `assetClass` scopes which instruments the definition may run on (the visual

@@ -34,22 +34,60 @@ pub async fn create_strategy(
                 .iter()
                 .map(|e| json!({ "path": e.path, "message": e.message }))
                 .collect();
-            (
+            return (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({ "error": "validation_failed", "errors": formatted })),
             )
-                .into_response()
+                .into_response();
         }
         Ok(validated) => {
-            let id = Uuid::new_v4();
-            let mut store = state
-                .strategy_store
-                .lock()
-                .expect("strategy_store lock poisoned");
-            store.insert(id, validated.into_inner());
+            let inner = validated.into_inner();
+            let def_json = match serde_json::to_value(&inner) {
+                Ok(v) => v,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": e.to_string() })),
+                    )
+                        .into_response()
+                }
+            };
+
+            // Persist to Postgres (upsert so re-saving a strategy updates it).
+            if let Err(e) = sqlx::query(
+                "INSERT INTO strategy_definitions (strategy_id, asset_class, definition_json) \
+                 VALUES ($1, $2, $3) \
+                 ON CONFLICT (strategy_id) DO UPDATE SET \
+                   definition_json = EXCLUDED.definition_json, \
+                   updated_at = now()",
+            )
+            .bind(&inner.strategy_id)
+            .bind(&inner.asset_class)
+            .bind(&def_json)
+            .execute(&state.pg)
+            .await
+            {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": e.to_string() })),
+                )
+                    .into_response();
+            }
+
+            // Also keep in the in-memory store so the runtime can use it
+            // without an extra DB round-trip (apply-list, start).
+            {
+                let id = Uuid::new_v4();
+                let mut store = state
+                    .strategy_store
+                    .lock()
+                    .expect("strategy_store lock poisoned");
+                store.insert(id, inner.clone());
+            }
+
             (
                 StatusCode::CREATED,
-                Json(json!({ "id": id, "strategy_id": def.strategy_id })),
+                Json(json!({ "id": inner.strategy_id, "strategy_id": inner.strategy_id })),
             )
                 .into_response()
         }
@@ -63,36 +101,52 @@ pub async fn list_strategies(
     State(state): State<AppState>,
     _token: BearerToken,
 ) -> impl IntoResponse {
-    let store = state
-        .strategy_store
-        .lock()
-        .expect("strategy_store lock poisoned");
-    let list: Vec<serde_json::Value> = store
-        .iter()
-        .map(|(id, def)| json!({ "id": id, "strategy_id": def.strategy_id }))
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT strategy_id FROM strategy_definitions ORDER BY created_at DESC",
+    )
+    .fetch_all(&state.pg)
+    .await
+    .unwrap_or_default();
+
+    let list: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(sid,)| json!({ "id": sid, "strategy_id": sid }))
         .collect();
+
     Json(json!({ "strategies": list }))
 }
 
 // ── Get ───────────────────────────────────────────────────────────────────────
 
-/// GET /api/strategies/:id/config — fetch a strategy definition by store ID.
+/// GET /api/strategies/:id/config — fetch a strategy definition by strategy_id.
 pub async fn get_strategy(
     State(state): State<AppState>,
     _token: BearerToken,
-    Path(id): Path<Uuid>,
+    Path(strategy_id): Path<String>,
 ) -> impl IntoResponse {
-    let store = state
-        .strategy_store
-        .lock()
-        .expect("strategy_store lock poisoned");
-    match store.get(&id) {
+    let row: Option<(serde_json::Value,)> = sqlx::query_as(
+        "SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1",
+    )
+    .bind(&strategy_id)
+    .fetch_optional(&state.pg)
+    .await
+    .ok()
+    .flatten();
+
+    match row {
         None => (
             StatusCode::NOT_FOUND,
-            Json(json!({ "error": "not_found", "id": id })),
+            Json(json!({ "error": "not_found", "id": strategy_id })),
         )
             .into_response(),
-        Some(def) => Json(json!({ "id": id, "definition": def })).into_response(),
+        Some((def_json,)) => match serde_json::from_value::<StrategyDefinition>(def_json) {
+            Ok(def) => Json(json!({ "id": strategy_id, "definition": def })).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        },
     }
 }
 
@@ -108,23 +162,52 @@ pub struct StartRequest {
 pub async fn start_strategy(
     State(state): State<AppState>,
     _token: BearerToken,
-    Path(id): Path<Uuid>,
+    Path(strategy_id): Path<String>,
     Json(req): Json<StartRequest>,
 ) -> impl IntoResponse {
-    let def = {
+    // Try the in-memory cache first, then fall back to Postgres.
+    let def_opt = {
         let store = state
             .strategy_store
             .lock()
             .expect("strategy_store lock poisoned");
-        match store.get(&id).cloned() {
-            None => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({ "error": "not_found", "id": id })),
-                )
-                    .into_response()
+        store
+            .values()
+            .find(|d| d.strategy_id == strategy_id)
+            .cloned()
+    };
+
+    let def = match def_opt {
+        Some(d) => d,
+        None => {
+            let row: Option<(serde_json::Value,)> = sqlx::query_as(
+                "SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1",
+            )
+            .bind(&strategy_id)
+            .fetch_optional(&state.pg)
+            .await
+            .ok()
+            .flatten();
+
+            match row {
+                None => {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({ "error": "not_found", "id": strategy_id })),
+                    )
+                        .into_response()
+                }
+                Some((def_json,)) => match serde_json::from_value::<StrategyDefinition>(def_json) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({ "error": e.to_string() })),
+                        )
+                            .into_response()
+                    }
+                },
             }
-            Some(d) => d,
         }
     };
 
@@ -138,7 +221,7 @@ pub async fn start_strategy(
         Ok(()) => (
             StatusCode::CREATED,
             Json(json!({
-                "strategy_store_id": id,
+                "strategy_id": strategy_id,
                 "user_id": req.user_id,
                 "instrument_id": req.instrument_id,
                 "status": "running"
@@ -225,18 +308,22 @@ pub async fn apply_list(
         },
     };
 
-    let store = state
-        .strategy_store
-        .lock()
-        .expect("strategy_store lock poisoned");
+    // Read definitions from Postgres so the list survives restarts.
+    let rows: Vec<(String, serde_json::Value)> = sqlx::query_as(
+        "SELECT strategy_id, definition_json FROM strategy_definitions ORDER BY created_at DESC",
+    )
+    .fetch_all(&state.pg)
+    .await
+    .unwrap_or_default();
 
-    let compatible: Vec<serde_json::Value> = store
-        .iter()
-        .filter_map(|(id, def)| {
-            let manifest = compile_manifest(def);
+    let compatible: Vec<serde_json::Value> = rows
+        .into_iter()
+        .filter_map(|(sid, def_json)| {
+            let def = serde_json::from_value::<StrategyDefinition>(def_json).ok()?;
+            let manifest = compile_manifest(&def);
             if is_compatible(&manifest, &caps) {
                 Some(json!({
-                    "id": id,
+                    "id": sid,
                     "strategy_id": def.strategy_id,
                     "strategy_kind": manifest.strategy_kind.as_str(),
                     "evaluation_trigger": manifest.evaluation_trigger.as_str(),
@@ -288,6 +375,6 @@ fn all_lanes() -> Vec<domain::data_type::DataType> {
 
 #[derive(Debug, Serialize)]
 pub struct StrategyListItem {
-    pub id: Uuid,
+    pub id: String,
     pub strategy_id: String,
 }

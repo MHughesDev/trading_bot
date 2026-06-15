@@ -5,7 +5,7 @@ host = "0.0.0.0"
 [nats]
 url = "nats://localhost:4222"
 
-[postgres]
+[database]
 url = "postgres://trading:trading@localhost:5432/trading"
 max_connections = 20
 

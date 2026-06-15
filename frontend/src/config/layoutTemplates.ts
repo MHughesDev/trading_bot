@@ -1,10 +1,12 @@
-export type PanelKind = 'scanner' | 'terminal'
+export type PanelKind = 'scanner' | 'chart' | 'terminal'
 
 export interface PanelSpec {
   id: string
   kind: PanelKind
   instrument?: string
+  instruments?: string[]
   strategyId?: string
+  timeframe?: string
   venue?: string
   assetClass?: string
 }
@@ -23,8 +25,11 @@ export const layoutTemplates: LayoutTemplateRegistry = {
     name: 'Default',
     panels: [
       {
-        id: 'scanner-1',
-        kind: 'scanner',
+        id: 'chart-1',
+        kind: 'chart',
+        instrument: 'BTC-USD',
+        venue: 'kraken',
+        assetClass: 'crypto_spot_cex',
       },
       {
         id: 'terminal-1',

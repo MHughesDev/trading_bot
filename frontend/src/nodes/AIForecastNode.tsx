@@ -37,6 +37,7 @@ export function AIForecastNode({ data, id, selected }: NodeProps<AIForecastNodeT
           <span className="tb-unit">0–1</span>
         </div>
       </div>
+      <Handle type="source" position={Position.Left} id="forecast-out-l" />
       <Handle type="source" position={Position.Right} id="forecast-out" />
     </div>
   )

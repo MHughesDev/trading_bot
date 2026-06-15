@@ -4,6 +4,22 @@ An all-in-one, **data & asset scalable** trading platform built in Rust. Designe
 
 ---
 
+## Screenshots
+
+### Multi-asset dashboard
+
+Real-time P&L, account equity, and win rate across every supported asset class — crypto spot, equities, ETFs, FX, prediction markets, options, DEX/AMM, and perpetuals — on a single screen.
+
+![Multi-asset dashboard showing per-asset-class P&L, cash, and equity cards](docs/images/dashboard.png)
+
+### Visual strategy builder
+
+Compose strategies on a node canvas — indicators, conditions, AI forecasts, position sizing, and exit rules wired together, then compiled to one canonical strategy definition. No code required.
+
+![Visual strategy builder with an EMA crossover strategy on a node canvas](docs/images/strategy-builder.png)
+
+---
+
 ## Documentation
 
 **Start here:** [`docs/README.md`](docs/README.md) — central navigation hub for all design content.

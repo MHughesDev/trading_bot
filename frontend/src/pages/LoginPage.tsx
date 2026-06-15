@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,8 @@ import { Label } from '@/components/ui/label'
 export function LoginPage() {
   const { user, login, loading } = useAuthStore()
   const navigate = useNavigate()
+  const location = useLocation()
+  const resetSuccess = (location.state as { resetSuccess?: boolean } | null)?.resetSuccess
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -34,6 +36,12 @@ export function LoginPage() {
           <p className="text-sm text-text-muted">TradingBot control plane</p>
         </div>
 
+        {resetSuccess && (
+          <p className="text-sm text-green-400 text-center rounded-lg bg-green-400/10 px-3 py-2">
+            Password reset! Sign in with your new password.
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="email">Email</Label>
@@ -48,7 +56,12 @@ export function LoginPage() {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="password">Password</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="password">Password</Label>
+              <Link to="/forgot-password" className="text-xs text-blue-400 hover:underline">
+                Forgot password?
+              </Link>
+            </div>
             <Input
               id="password"
               type="password"

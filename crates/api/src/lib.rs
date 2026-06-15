@@ -7,4 +7,4 @@ pub mod state;
 pub mod ws;
 
 pub use routes::router;
-pub use state::AppState;
+pub use state::{AppState, StreamRequest};

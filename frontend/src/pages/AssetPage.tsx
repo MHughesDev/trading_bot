@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Star, Play, Square, RefreshCw, AlertTriangle, Zap, Search,
+  Star, Play, Square, RefreshCw, AlertTriangle, Zap, Search, X,
 } from 'lucide-react'
 import { assetApi, strategiesApi, tradeApi, universeApi } from '@/lib/api'
 import { useWatchlistStore } from '@/store/watchlist'
@@ -18,6 +18,125 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { subHours, subDays, format } from 'date-fns'
+
+// ── Init dialog ───────────────────────────────────────────────────────────────
+
+const LOOKBACK_PRESETS = [
+  { label: '30 days',  days: 30  },
+  { label: '90 days',  days: 90  },
+  { label: '180 days', days: 180 },
+  { label: '1 year',   days: 365 },
+  { label: '2 years',  days: 730 },
+]
+
+const ASSET_CLASS_OPTIONS = [
+  { value: 'crypto_spot_cex', label: 'Crypto (CEX)' },
+  { value: 'equity',          label: 'Equity' },
+  { value: 'etf',             label: 'ETF' },
+  { value: 'perpetual_swap',  label: 'Perpetual Swap' },
+]
+
+interface InitDialogProps {
+  symbol: string
+  onConfirm: (lookbackDays: number, assetClass: string) => void
+  onCancel: () => void
+}
+
+function InitDialog({ symbol, onConfirm, onCancel }: InitDialogProps) {
+  const defaultAc = symbol.includes('-') ? 'crypto_spot_cex' : 'equity'
+  const [days, setDays] = useState(90)
+  const [customDays, setCustomDays] = useState('')
+  const [assetClass, setAssetClass] = useState(defaultAc)
+  const [useCustom, setUseCustom] = useState(false)
+
+  const effectiveDays = useCustom
+    ? Math.max(1, Math.min(3650, parseInt(customDays) || 90))
+    : days
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-6 space-y-5 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-text">Initialize <span className="font-mono text-blue-400">{symbol}</span></h2>
+          <button onClick={onCancel} className="text-text-dim hover:text-text rounded p-0.5 transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Asset class</Label>
+          <Select value={assetClass} onValueChange={setAssetClass}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {ASSET_CLASS_OPTIONS.map(o => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Historical lookback</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {LOOKBACK_PRESETS.map(p => (
+              <button
+                key={p.days}
+                onClick={() => { setDays(p.days); setUseCustom(false) }}
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-xs font-medium border transition-colors',
+                  !useCustom && days === p.days
+                    ? 'bg-blue-500/20 border-blue-500/60 text-blue-300'
+                    : 'border-border text-text-muted hover:border-border-2 hover:text-text',
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+            <button
+              onClick={() => setUseCustom(true)}
+              className={cn(
+                'rounded-md px-2.5 py-1 text-xs font-medium border transition-colors',
+                useCustom
+                  ? 'bg-blue-500/20 border-blue-500/60 text-blue-300'
+                  : 'border-border text-text-muted hover:border-border-2 hover:text-text',
+              )}
+            >
+              Custom
+            </button>
+          </div>
+
+          {useCustom && (
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                max={3650}
+                placeholder="90"
+                value={customDays}
+                onChange={e => setCustomDays(e.target.value)}
+                className="w-24 text-sm"
+                autoFocus
+              />
+              <span className="text-sm text-text-muted">days</span>
+            </div>
+          )}
+
+          <p className="text-xs text-text-dim">
+            Will seed ~{effectiveDays * 24} hourly bars from {effectiveDays} days ago to now.
+          </p>
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <Button variant="outline" size="sm" className="flex-1" onClick={onCancel}>Cancel</Button>
+          <Button size="sm" className="flex-1" onClick={() => onConfirm(effectiveDays, assetClass)}>
+            <RefreshCw className="h-3.5 w-3.5" />
+            Start seeding
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const INTERVALS = [
   { label: '1m', seconds: 60 },
@@ -153,9 +272,15 @@ export function AssetPage() {
     enabled: !!symbol,
   })
 
+  const [showInitDialog, setShowInitDialog] = useState(false)
+
   const initMut = useMutation({
-    mutationFn: () => assetApi.init(symbol!),
-    onSuccess: () => { toast({ title: 'Initialization started', variant: 'success' }); qc.invalidateQueries({ queryKey: ['lifecycle', symbol] }) },
+    mutationFn: ({ lookbackDays, assetClass }: { lookbackDays: number; assetClass: string }) =>
+      assetApi.init(symbol!, lookbackDays, assetClass),
+    onSuccess: () => {
+      toast({ title: 'Seeding historical bars…', variant: 'success' })
+      qc.invalidateQueries({ queryKey: ['lifecycle', symbol] })
+    },
     onError: () => toast({ title: 'Init failed', variant: 'error' }),
   })
 
@@ -198,6 +323,11 @@ export function AssetPage() {
   const lc = lifecycle?.lifecycle ?? lifecycle?.state
   const watchlisted = symbol ? has(symbol) : false
 
+  const handleInitConfirm = (lookbackDays: number, assetClass: string) => {
+    setShowInitDialog(false)
+    initMut.mutate({ lookbackDays, assetClass })
+  }
+
   if (!symbol) {
     return (
       <div className="p-6 space-y-4 max-w-2xl">
@@ -210,6 +340,14 @@ export function AssetPage() {
 
   return (
     <div className="p-6 space-y-4">
+      {showInitDialog && symbol && (
+        <InitDialog
+          symbol={symbol}
+          onConfirm={handleInitConfirm}
+          onCancel={() => setShowInitDialog(false)}
+        />
+      )}
+
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold font-mono text-text">{symbol}</h1>
@@ -225,9 +363,9 @@ export function AssetPage() {
 
         <div className="ml-auto flex items-center gap-2">
           {lc === 'uninitialized' && (
-            <Button size="sm" onClick={() => initMut.mutate()} disabled={initMut.isPending}>
+            <Button size="sm" onClick={() => setShowInitDialog(true)} disabled={initMut.isPending}>
               <RefreshCw className="h-4 w-4" />
-              Initialize
+              {initMut.isPending ? 'Seeding…' : 'Initialize'}
             </Button>
           )}
           {lc === 'initialized_not_active' && (

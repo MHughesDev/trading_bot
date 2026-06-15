@@ -1,15 +1,22 @@
+import { useEffect } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
-import { Sidebar } from './Sidebar'
 import { GlassPillNav } from './GlassPillNav'
 import { ToastContainer } from '@/components/ToastContainer'
+import { initWsClient, destroyWsClient } from '@/api/ws'
+import { getStoredToken } from '@/lib/api'
 
-// The Trading page fills the viewport — no vertical scroll on the main outlet.
 const FULL_HEIGHT_ROUTES = ['/trading', '/dashboard']
 
 export function AppLayout() {
   const { user, initialized } = useAuthStore()
   const location = useLocation()
+
+  useEffect(() => {
+    if (!user) return
+    initWsClient(getStoredToken() ?? 'dev-local')
+    return () => destroyWsClient()
+  }, [user])
 
   if (!initialized) {
     return (
@@ -27,23 +34,10 @@ export function AppLayout() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
-      {/* Glass-pill top navigation */}
       <GlassPillNav />
-
-      {/* Body: sidebar + main */}
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <main
-          className={
-            isFullHeight
-              ? 'flex-1 overflow-hidden'
-              : 'flex-1 overflow-y-auto'
-          }
-        >
-          <Outlet />
-        </main>
-      </div>
-
+      <main className={isFullHeight ? 'flex-1 overflow-hidden' : 'flex-1 overflow-y-auto'}>
+        <Outlet />
+      </main>
       <ToastContainer />
     </div>
   )

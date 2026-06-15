@@ -3,7 +3,6 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChartPanel } from '@/panels/ChartPanel'
 import { PositionsPanel } from '@/panels/PositionsPanel'
 import { useModeStore } from '@/store/mode'
 import { useAuthStore } from '@/store/auth'
@@ -165,7 +164,8 @@ function OrderTicket({
       const body: Record<string, unknown> = {
         instrument_id: instrument,
         side: prediction ? predSide : side,
-        order_type: orderType,
+        // Backend order types are market | limit | stop_limit.
+        order_type: orderType === 'stop' ? 'stop_limit' : orderType,
         qty,
         execution_mode: mode,
       }
@@ -426,22 +426,16 @@ function CollapsibleSection({
 interface TerminalPanelProps {
   instrument: string
   assetClass?: TerminalAssetClass
-  initialBars?: import('@/lib/types').Bar[]
 }
 
 export function TerminalPanel({
   instrument,
   assetClass = 'crypto_spot_cex',
-  initialBars = [],
 }: TerminalPanelProps) {
   const { user } = useAuthStore()
 
   return (
     <div className="flex flex-col h-full">
-      <CollapsibleSection title="Chart">
-        <ChartPanel instrument={instrument} initialBars={initialBars} />
-      </CollapsibleSection>
-
       <CollapsibleSection title="Order">
         <OrderTicket instrument={instrument} assetClass={assetClass} />
       </CollapsibleSection>

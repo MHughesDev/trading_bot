@@ -1,10 +1,12 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, Component } from 'react'
+import type { ReactNode, ErrorInfo } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/auth'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { LoginPage } from '@/pages/LoginPage'
 import { SignUpPage } from '@/pages/SignUpPage'
+import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { TradingPage } from '@/pages/TradingPage'
 import { AutomationsPage } from '@/pages/AutomationsPage'
@@ -30,6 +32,27 @@ const qc = new QueryClient({
   },
 })
 
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  componentDidCatch(_: Error, info: ErrorInfo) { console.error('[ErrorBoundary]', _, info) }
+  render() {
+    if (this.state.error) {
+      const msg = (this.state.error as Error).message
+      return (
+        <div style={{ padding: 32, fontFamily: 'monospace', color: '#f87171', background: '#0d1117', minHeight: '100vh' }}>
+          <strong>Runtime crash — open DevTools console for full trace</strong>
+          <pre style={{ marginTop: 12, whiteSpace: 'pre-wrap', fontSize: 13 }}>{msg}</pre>
+          <button onClick={() => this.setState({ error: null })} style={{ marginTop: 16, padding: '6px 14px', cursor: 'pointer' }}>
+            Try again
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 function AuthInit({ children }: { children: React.ReactNode }) {
   const { fetchMe } = useAuthStore()
   useEffect(() => { fetchMe() }, [fetchMe])
@@ -41,10 +64,12 @@ export default function App() {
     <QueryClientProvider client={qc}>
       <BrowserRouter>
         <AuthInit>
+          <ErrorBoundary>
           <Suspense fallback={<div className="p-8 text-sm text-muted-foreground">Loading…</div>}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignUpPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
             <Route element={<AppLayout />}>
               <Route index element={<Navigate to="/dashboard" replace />} />
@@ -68,6 +93,7 @@ export default function App() {
             </Route>
           </Routes>
           </Suspense>
+          </ErrorBoundary>
         </AuthInit>
       </BrowserRouter>
     </QueryClientProvider>

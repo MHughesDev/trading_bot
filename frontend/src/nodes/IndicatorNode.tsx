@@ -33,6 +33,7 @@ export function IndicatorNode({ data, id, selected }: NodeProps<IndicatorNodeTyp
           <input className="tb-input" type="number" min={1} max={500} value={data.period} onChange={e => updateNodeData(id, { period: Math.max(1, parseInt(e.target.value) || 1) })} />
         </div>
       </div>
+      <Handle type="source" position={Position.Left} id="value-out-l" />
       <Handle type="source" position={Position.Right} id="value-out" />
     </div>
   )

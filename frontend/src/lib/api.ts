@@ -5,12 +5,15 @@ export const api = axios.create({
   withCredentials: true,
 })
 
-// The Rust API's bearer auth is the M-17 placeholder (any non-empty token,
-// loopback only).  Attach a dev token so /api/* routes are reachable from
-// the SPA until Phase 2 session validation lands.
+const TOKEN_KEY = 'auth_token'
+export const getStoredToken = () => localStorage.getItem(TOKEN_KEY)
+export const setStoredToken = (t: string) => localStorage.setItem(TOKEN_KEY, t)
+export const clearStoredToken = () => localStorage.removeItem(TOKEN_KEY)
+
 api.interceptors.request.use((config) => {
   if (!config.headers.Authorization) {
-    config.headers.Authorization = 'Bearer dev-local'
+    const token = getStoredToken()
+    config.headers.Authorization = token ? `Bearer ${token}` : 'Bearer dev-local'
   }
   return config
 })
@@ -40,12 +43,18 @@ export interface User {
 
 export const authApi = {
   login: (email: string, password: string) =>
-    api.post('/auth/login', { email, password }),
+    api.post<{ token: string; user: User }>('/auth/login', { email, password }),
   register: (email: string, password: string) =>
-    api.post('/auth/register', { email, password }),
+    api.post<{ token: string; user: User }>('/auth/register', { email, password }),
   me: () => api.get<User>('/auth/me'),
   logout: () => api.post('/auth/logout'),
   touch: () => api.post('/auth/touch'),
+  forgotPassword: (email: string) =>
+    api.post('/auth/forgot-password', { email }),
+  verifyResetCode: (email: string, code: string) =>
+    api.post('/auth/verify-reset-code', { email, code }),
+  resetPassword: (email: string, code: string, new_password: string) =>
+    api.post('/auth/reset-password', { email, code, new_password }),
   getVenueCredentials: () => api.get('/auth/venue-credentials'),
   putVenueCredentials: (data: Record<string, string>) =>
     api.put('/auth/venue-credentials', data),
@@ -68,9 +77,10 @@ export const systemApi = {
 // ── Assets ────────────────────────────────────────────────────────────────────
 
 export const assetApi = {
+  initialized: () => api.get<{ assets: { symbol: string; asset_class: string }[] }>('/assets/initialized'),
   lifecycle: (symbol: string) => api.get(`/assets/lifecycle/${symbol}`),
-  init: (symbol: string, lookback_days?: number) =>
-    api.post(`/assets/init/${symbol}`, lookback_days ? { lookback_days } : {}),
+  init: (symbol: string, lookback_days: number, asset_class?: string) =>
+    api.post(`/assets/init/${symbol}`, { lookback_days, asset_class }),
   initJob: (jobId: string) => api.get(`/assets/init/jobs/${jobId}`),
   start: (symbol: string) => api.post(`/assets/lifecycle/${symbol}/start`),
   stop: (symbol: string) => api.post(`/assets/lifecycle/${symbol}/stop`),
@@ -104,7 +114,9 @@ export const portfolioApi = {
 // ── Trade ─────────────────────────────────────────────────────────────────────
 
 export const tradeApi = {
-  order: (data: Record<string, unknown>) => api.post('/trade/order', data),
+  // Manual orders go through the Rust platform's risk-gated order endpoint
+  // (/api/orders on :8080), not the legacy Python /trade route.
+  order: (data: Record<string, unknown>) => api.post('/api/orders', data),
   flatten: (symbol: string) => api.post('/trade/flatten', { symbol }),
 }
 
@@ -122,10 +134,14 @@ export const universeApi = {
 // ── Strategies ────────────────────────────────────────────────────────────────
 
 export const strategiesApi = {
-  list: () => api.get('/strategies'),
-  get: (id: string) => api.get(`/strategies/${id}`),
-  create: (data: Record<string, unknown>) => api.post('/strategies', data),
+  list: () => api.get('/api/strategies'),
+  applyList: (assetClass?: string) =>
+    api.get('/api/strategies/apply-list', {
+      params: assetClass ? { asset_class: assetClass } : undefined,
+    }),
+  get: (id: string) => api.get(`/api/strategies/${id}/config`),
+  create: (data: Record<string, unknown>) => api.post('/api/strategies', data),
   update: (id: string, data: Record<string, unknown>) =>
-    api.put(`/strategies/${id}`, data),
-  delete: (id: string) => api.delete(`/strategies/${id}`),
+    api.put(`/api/strategies/${id}`, data),
+  delete: (id: string) => api.delete(`/api/strategies/${id}`),
 }

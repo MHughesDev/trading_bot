@@ -116,6 +116,17 @@ export function initWsClient(token: string) {
   _client = new WsClient(token)
 }
 
+// Eagerly create the client at module load time if the user has a stored token.
+// This ensures getWsClient() is non-null when components first mount, avoiding
+// a race where child useEffect() runs before the parent AppLayout's useEffect
+// (React fires children's effects before parents').
+{
+  const stored = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+  if (stored) {
+    _client = new WsClient(stored)
+  }
+}
+
 export function getWsClient(): WsClient | null {
   return _client
 }

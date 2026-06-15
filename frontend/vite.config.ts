@@ -13,8 +13,10 @@ export default defineConfig({
       // Rust platform (REST + WebSocket) — see README quickstart.
       '/api': 'http://127.0.0.1:8080',
       '/ws': { target: 'ws://127.0.0.1:8080', ws: true },
-      '/auth': 'http://127.0.0.1:8001',
-      '/assets': 'http://127.0.0.1:8001',
+      '/auth': 'http://127.0.0.1:8080',
+      // Asset lifecycle + chart bars are served by the Rust platform (8080),
+      // not the legacy Python backend (8001).
+      '/assets': 'http://127.0.0.1:8080',
       '/trade': 'http://127.0.0.1:8001',
       '/portfolio': 'http://127.0.0.1:8001',
       '/positions': 'http://127.0.0.1:8001',

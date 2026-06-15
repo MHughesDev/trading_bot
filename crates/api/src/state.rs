@@ -14,6 +14,16 @@ use ui_gateway::SubscriptionRegistry;
 
 use domain::strategy_def::StrategyDefinition;
 
+/// Request to start a continuous live-data pipeline for an instrument.  Sent by
+/// the asset-init handler after seeding so a newly initialized asset begins
+/// 1-minute aggregation immediately, without a platform restart.  The platform
+/// binary owns the receiver and the actual pipeline machinery.
+#[derive(Clone, Debug)]
+pub struct StreamRequest {
+    pub instrument_id: String,
+    pub asset_class: String,
+}
+
 /// Shared application state injected into every Axum handler.
 #[derive(Clone)]
 pub struct AppState {
@@ -33,6 +43,14 @@ pub struct AppState {
     pub clock: Arc<WallClock>,
     /// Backtest job orchestrator (connects to the market_simulator SDK).
     pub backtest: Arc<BacktestManager>,
+    /// Email config for password-reset codes.
+    pub email: cfg::model::EmailConfig,
+    /// ClickHouse URL — used by asset init jobs and the chart bars endpoint.
+    pub clickhouse_url: String,
+    /// Channel to request a live 1-minute aggregation pipeline for a newly
+    /// initialized instrument.  `None` in contexts with no platform pipeline
+    /// host (e.g. tests).
+    pub stream_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamRequest>>,
 }
 
 impl AppState {
@@ -45,6 +63,9 @@ impl AppState {
         paper_engine: Arc<PaperTradingEngine>,
         gateway: Arc<SubscriptionRegistry>,
         backtest: Arc<BacktestManager>,
+        email: cfg::model::EmailConfig,
+        clickhouse_url: String,
+        stream_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamRequest>>,
     ) -> Self {
         let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
         Self {
@@ -58,6 +79,9 @@ impl AppState {
             instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),
             clock: Arc::new(WallClock),
             backtest,
+            email,
+            clickhouse_url,
+            stream_tx,
         }
     }
 }

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { authApi, type User } from '@/lib/api'
+import { authApi, clearStoredToken, setStoredToken, type User } from '@/lib/api'
+import { initWsClient, destroyWsClient } from '@/api/ws'
 
 interface AuthState {
   user: User | null
@@ -27,9 +28,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (email, password) => {
     set({ loading: true })
     try {
-      await authApi.login(email, password)
-      const { data } = await authApi.me()
-      set({ user: data, loading: false })
+      const { data } = await authApi.login(email, password)
+      setStoredToken(data.token)
+      initWsClient(data.token)
+      set({ user: data.user, loading: false })
     } catch (err) {
       set({ loading: false })
       throw err
@@ -37,7 +39,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
-    await authApi.logout()
+    try { await authApi.logout() } catch { /* ignore */ }
+    clearStoredToken()
+    destroyWsClient()
     set({ user: null })
     window.location.href = '/login'
   },

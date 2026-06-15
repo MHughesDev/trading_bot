@@ -20,7 +20,13 @@ use crate::types::{MissingRange, TimeframeExt};
 /// Which upstream source fills gaps for a given instrument.
 #[derive(Clone, Debug)]
 pub enum CollectorPlan {
-    /// Binance public klines — fast, unauthenticated crypto history.
+    /// Coinbase public candles — US-accessible, unauthenticated spot crypto
+    /// history.  The product id is `BASE-QUOTE` (e.g. `BTC-USD`), matching our
+    /// `instrument_id` form exactly.
+    CoinbaseCandles { product_id: String, source: String },
+    /// Binance public klines — unauthenticated crypto history.  Geo-blocked
+    /// from US IPs (HTTP 451), so only used for classes with no Coinbase
+    /// spot equivalent (perps, DEX).
     BinanceKlines { symbol: String, source: String },
     /// Alpaca market-data bars — equities/ETFs (requires API credentials).
     AlpacaBars {
@@ -39,7 +45,26 @@ impl CollectorPlan {
     /// `ALPACA_API_SECRET_KEY`).
     pub fn for_asset_class(asset_class: &str, instrument_id: &str) -> anyhow::Result<Self> {
         match asset_class {
-            "crypto_spot_cex" | "crypto_spot_dex" | "perpetual_swap" => {
+            "crypto_spot_cex" => {
+                // Coinbase consumes the `BASE-QUOTE` product id verbatim, which
+                // already matches our `instrument_id` form (e.g. "BTC-USD").
+                // The quote currency is preserved exactly: a `-USD` market is
+                // genuinely different from `-USDT`, and if Coinbase does not
+                // list the pair the page fetch fails with a clear error, which
+                // is the correct outcome.  Coinbase is chosen over Binance for
+                // spot because Binance geo-blocks US IPs (HTTP 451).
+                let product_id = instrument_id.to_uppercase();
+                anyhow::ensure!(
+                    product_id.contains('-'),
+                    "instrument '{instrument_id}' is not a valid Coinbase product id \
+                     (expected BASE-QUOTE, e.g. BTC-USD)"
+                );
+                Ok(Self::CoinbaseCandles {
+                    product_id,
+                    source: "coinbase_rest".to_string(),
+                })
+            }
+            "crypto_spot_dex" | "perpetual_swap" => {
                 // "BTC-USDT" → "BTCUSDT": strip separators only, never rewrite
                 // the quote currency.  A `-USD` instrument is a genuinely
                 // different market from the `-USDT` one (USD vs. a stablecoin);
@@ -87,7 +112,20 @@ impl CollectorPlan {
     /// [`binance_interval`] (all timeframes) and [`alpaca_interval`] (no 1s).
     pub fn auto_collect_support(asset_class: &str, timeframe: Timeframe) -> Result<(), String> {
         match asset_class {
-            "crypto_spot_cex" | "crypto_spot_dex" | "perpetual_swap" => Ok(()),
+            "crypto_spot_cex" => match timeframe {
+                // Coinbase's candle granularities omit 1s and 4h (it offers 6h).
+                Timeframe::Seconds1 => {
+                    Err("the crypto spot backfill (Coinbase) does not provide 1-second candles"
+                        .to_string())
+                }
+                Timeframe::Hours4 => {
+                    Err("the crypto spot backfill (Coinbase) does not provide 4-hour candles \
+                         (use 1h or daily)"
+                        .to_string())
+                }
+                _ => Ok(()),
+            },
+            "crypto_spot_dex" | "perpetual_swap" => Ok(()),
             "equity" | "etf" => {
                 if timeframe == Timeframe::Seconds1 {
                     Err("the equity backfill (Alpaca) does not provide 1-second bars".to_string())
@@ -103,6 +141,7 @@ impl CollectorPlan {
 
     pub fn source_name(&self) -> &str {
         match self {
+            Self::CoinbaseCandles { source, .. } => source,
             Self::BinanceKlines { source, .. } => source,
             Self::AlpacaBars { .. } => "alpaca_rest",
         }
@@ -110,7 +149,7 @@ impl CollectorPlan {
 
     pub fn trust_tier(&self) -> &'static str {
         match self {
-            Self::BinanceKlines { .. } => "centralized_exchange",
+            Self::CoinbaseCandles { .. } | Self::BinanceKlines { .. } => "centralized_exchange",
             Self::AlpacaBars { .. } => "regulated",
         }
     }
@@ -138,6 +177,21 @@ pub async fn collect_ranges(
             break;
         }
         total += match plan {
+            CollectorPlan::CoinbaseCandles { product_id, .. } => {
+                collect_coinbase(
+                    http,
+                    store,
+                    plan,
+                    product_id,
+                    instrument_id,
+                    venue_id,
+                    timeframe,
+                    range,
+                    collected,
+                    cancel,
+                )
+                .await?
+            }
             CollectorPlan::BinanceKlines { symbol, .. } => {
                 collect_binance(
                     http,
@@ -241,6 +295,20 @@ async fn fetch_json_with_retry(
     }
 }
 
+/// Coinbase candle granularity (seconds).  Coinbase only accepts a fixed set
+/// {60, 300, 900, 3600, 21600, 86400}; 1s and 4h have no equivalent.
+fn coinbase_granularity(tf: Timeframe) -> anyhow::Result<u32> {
+    Ok(match tf {
+        Timeframe::Seconds1 => anyhow::bail!("Coinbase does not provide 1-second candles"),
+        Timeframe::Minutes1 => 60,
+        Timeframe::Minutes5 => 300,
+        Timeframe::Minutes15 => 900,
+        Timeframe::Hours1 => 3600,
+        Timeframe::Hours4 => anyhow::bail!("Coinbase does not provide 4-hour candles (use 1h or daily)"),
+        Timeframe::Daily => 86400,
+    })
+}
+
 fn binance_interval(tf: Timeframe) -> &'static str {
     match tf {
         Timeframe::Seconds1 => "1s",
@@ -263,6 +331,91 @@ fn alpaca_interval(tf: Timeframe) -> anyhow::Result<&'static str> {
         Timeframe::Hours4 => "4Hour",
         Timeframe::Daily => "1Day",
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn collect_coinbase(
+    http: &reqwest::Client,
+    store: &BarStore,
+    plan: &CollectorPlan,
+    product_id: &str,
+    instrument_id: &str,
+    venue_id: &str,
+    timeframe: Timeframe,
+    range: &MissingRange,
+    collected: &AtomicU64,
+    cancel: &AtomicBool,
+) -> anyhow::Result<u64> {
+    let gran = coinbase_granularity(timeframe)?;
+    let tf_secs = i64::from(gran);
+    // Coinbase returns at most 300 candles per request, so the time window is
+    // sized to <=300 buckets and advanced one full window at a time.
+    let window_secs = tf_secs * 300;
+    let end_s = range.to.timestamp();
+    let mut cursor_s = range.from.timestamp();
+    let mut total = 0u64;
+
+    while cursor_s < end_s {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let window_end = (cursor_s + window_secs).min(end_s);
+        let url = format!(
+            "https://api.exchange.coinbase.com/products/{product_id}/candles\
+             ?granularity={gran}&start={}&end={}",
+            secs_to_utc(cursor_s).to_rfc3339(),
+            secs_to_utc(window_end).to_rfc3339(),
+        );
+        // Coinbase rejects requests without a User-Agent.
+        let body = fetch_json_with_retry(http, &url, &[("User-Agent", "trading-bot/1.0")], cancel)
+            .await
+            .map_err(|e| anyhow::anyhow!("coinbase candles for {product_id}: {e}"))?;
+        let candles: Vec<Vec<Value>> = serde_json::from_value(body)?;
+
+        let mut bars = Vec::with_capacity(candles.len());
+        for c in &candles {
+            // [ time, low, high, open, close, volume ] — time is the bucket
+            // start in Unix seconds; values are JSON numbers.
+            let open_s = c
+                .first()
+                .and_then(Value::as_i64)
+                .ok_or_else(|| anyhow::anyhow!("malformed candle: missing time"))?;
+            // Stringify JSON numbers at this ingestion boundary (parsed as
+            // Decimal downstream) — same convention as the Alpaca collector.
+            let field = |idx: usize| -> anyhow::Result<String> {
+                Ok(c.get(idx)
+                    .ok_or_else(|| anyhow::anyhow!("malformed candle field {idx}"))?
+                    .to_string())
+            };
+            bars.push(CollectedBar {
+                available_time: secs_to_utc(open_s + tf_secs),
+                sequence: u64::try_from(open_s * 1_000).unwrap_or(0),
+                open: field(3)?,
+                high: field(2)?,
+                low: field(1)?,
+                close: field(4)?,
+                volume: field(5)?,
+                trade_count: 0,
+            });
+        }
+
+        if !bars.is_empty() {
+            store
+                .insert_collected(
+                    instrument_id,
+                    venue_id,
+                    plan.source_name(),
+                    plan.trust_tier(),
+                    timeframe,
+                    &bars,
+                )
+                .await?;
+            total += bars.len() as u64;
+            collected.fetch_add(bars.len() as u64, Ordering::Relaxed);
+        }
+        cursor_s = window_end;
+    }
+    Ok(total)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -445,27 +598,45 @@ fn ms_to_utc(ms: i64) -> DateTime<Utc> {
     Utc.timestamp_millis_opt(ms).single().unwrap_or_default()
 }
 
+fn secs_to_utc(s: i64) -> DateTime<Utc> {
+    Utc.timestamp_opt(s, 0).single().unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn binance_symbol_mapping() {
-        let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "BTC-USDT").unwrap();
-        match &plan {
-            CollectorPlan::BinanceKlines { symbol, .. } => assert_eq!(symbol, "BTCUSDT"),
-            CollectorPlan::AlpacaBars { .. } => panic!("expected binance plan"),
-        }
-
-        // Plain-USD pairs are NOT rewritten to the USDT market: USD and USDT
-        // are different markets, so the exact symbol is preserved (#10).
+    fn coinbase_product_mapping() {
+        // Spot CEX crypto backfills from Coinbase, whose product id is the
+        // verbatim BASE-QUOTE instrument id (no separator stripping).
         let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "BTC-USD").unwrap();
         match &plan {
-            CollectorPlan::BinanceKlines { symbol, .. } => {
-                assert_eq!(symbol, "BTCUSD");
-                assert_ne!(symbol, "BTCUSDT");
+            CollectorPlan::CoinbaseCandles { product_id, .. } => assert_eq!(product_id, "BTC-USD"),
+            other => panic!("expected coinbase plan, got {other:?}"),
+        }
+
+        // The quote currency is preserved exactly: USD and USDT are different
+        // markets, so the pair is never proxied (#10).
+        let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "btc-usdt").unwrap();
+        match &plan {
+            CollectorPlan::CoinbaseCandles { product_id, .. } => {
+                assert_eq!(product_id, "BTC-USDT");
             }
-            CollectorPlan::AlpacaBars { .. } => panic!("expected binance plan"),
+            other => panic!("expected coinbase plan, got {other:?}"),
+        }
+
+        // A separatorless symbol is not a valid Coinbase product id.
+        assert!(CollectorPlan::for_asset_class("crypto_spot_cex", "BTCUSD").is_err());
+    }
+
+    #[test]
+    fn binance_symbol_mapping() {
+        // Perps/DEX still use Binance with separators stripped.
+        let plan = CollectorPlan::for_asset_class("perpetual_swap", "BTC-USDT").unwrap();
+        match &plan {
+            CollectorPlan::BinanceKlines { symbol, .. } => assert_eq!(symbol, "BTCUSDT"),
+            other => panic!("expected binance plan, got {other:?}"),
         }
     }
 

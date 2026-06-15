@@ -2,7 +2,9 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+mod bar_persist;
 mod hot_path;
+mod pipeline_manager;
 mod tee;
 
 use std::sync::Arc;
@@ -121,17 +123,53 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Spawn the Kraken in-process pipeline for BTC/USD.
-    let _pipeline = hot_path::spawn_pipeline(
-        "BTC/USD".to_owned(),
-        "BTC-USD".to_owned(),
-        AssetClass::CryptoSpotCex,
+    // ── Continuous live-data pipelines ────────────────────────────────────────
+    //
+    // The single writer of live 1-minute bars to ClickHouse.  Every initialized
+    // asset's pipeline aggregates trades into 1m OHLCV and sends completed bars
+    // here, so minute-level history accrues for as long as the platform runs —
+    // independent of whether any strategy or automation is subscribed.
+    let (bar_tx, bar_rx) = tokio::sync::mpsc::unbounded_channel::<bar_persist::PersistBar>();
+    tokio::spawn(bar_persist::run_bar_persist(cfg.clickhouse.url.clone(), bar_rx));
+
+    // Owns one in-process pipeline per initialized instrument.
+    let pipeline_manager = Arc::new(pipeline_manager::PipelineManager::new(
         tee_tx,
+        bar_tx,
         Arc::clone(&execution_engine),
         Arc::clone(&risk_gate),
         Arc::clone(&paper_engine),
+        cfg.clickhouse.url.clone(),
+    ));
+
+    // Resume a pipeline for every already-initialized asset (asset_lifecycle).
+    let initialized: Vec<(String, String)> =
+        sqlx::query_as("SELECT symbol, asset_class FROM asset_lifecycle")
+            .fetch_all(&pg)
+            .await
+            .unwrap_or_default();
+    for (symbol, asset_class) in &initialized {
+        pipeline_manager.ensure(symbol, asset_class);
+    }
+    // Keep BTC-USD streaming by default (the bundled in-process crypto feed)
+    // even before it is formally initialized.
+    pipeline_manager.ensure("BTC-USD", "crypto_spot_cex");
+    info!(
+        pipelines = pipeline_manager.active_count(),
+        "live 1m aggregation pipelines running"
     );
-    info!("hot-path pipeline (BTC/USD) started");
+
+    // Start pipelines on demand when new assets are initialized (no restart).
+    let (stream_tx, mut stream_rx) =
+        tokio::sync::mpsc::unbounded_channel::<api::StreamRequest>();
+    {
+        let mgr = Arc::clone(&pipeline_manager);
+        tokio::spawn(async move {
+            while let Some(req) = stream_rx.recv().await {
+                mgr.ensure(&req.instrument_id, &req.asset_class);
+            }
+        });
+    }
 
     // Resume armed automations (paper AND live) from Postgres.  Automations
     // are server-side state: they stay armed while the platform runs, no
@@ -163,6 +201,9 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&paper_engine),
         gateway,
         backtest_manager,
+        cfg.email.clone(),
+        cfg.clickhouse.url.clone(),
+        Some(stream_tx),
     );
     let router = api::router(app_state);
 

@@ -95,6 +95,62 @@ export interface CompileResult {
   warnings: string[]
 }
 
+export interface ScannerCompileResult {
+  indicators: IndicatorSpec[]
+  allOf: Condition[]
+  anyOf: Condition[]
+  errors: string[]
+  warnings: string[]
+}
+
+/** Compile a Discovery (scanner) strategy — no action/size/exit nodes required. */
+export function compileScanner(nodes: Node[], edges: Edge[], name: string): ScannerCompileResult {
+  const errors: string[] = []
+  const warnings: string[] = []
+  const indicators = new Map<string, IndicatorSpec>()
+  const allOf: Condition[] = []
+  const anyOf: Condition[] = []
+
+  // Root signal nodes = condition/logic/ai_forecast nodes whose output does NOT
+  // feed into another condition/logic node.  These are the ones that would
+  // normally wire into a Trade Action node.
+  const condOrLogicIds = new Set(
+    nodes
+      .filter(n => n.type === 'condition' || n.type === 'logic' || n.type === 'ai_forecast')
+      .map(n => n.id),
+  )
+  const sourcesOfCondEdges = new Set(
+    edges
+      .filter(e => condOrLogicIds.has(e.source) && condOrLogicIds.has(e.target))
+      .map(e => e.source),
+  )
+  const rootNodes = nodes.filter(n => condOrLogicIds.has(n.id) && !sourcesOfCondEdges.has(n.id))
+
+  if (rootNodes.length === 0) {
+    errors.push('Add at least one Condition node to your scanner strategy.')
+  }
+
+  rootNodes.forEach(node => {
+    const { allOf: a, anyOf: b } = resolveConditions(node, nodes, edges, indicators)
+    allOf.push(...a)
+    anyOf.push(...b)
+  })
+
+  if ([...allOf, ...anyOf].some(c => c.type === 'model_forecast')) {
+    warnings.push('AI Forecast conditions require the forecaster service to be running.')
+  }
+
+  if (!name.trim()) errors.push('Give your scanner strategy a name.')
+
+  return {
+    indicators: Array.from(indicators.values()),
+    allOf,
+    anyOf,
+    errors,
+    warnings,
+  }
+}
+
 export function compile(nodes: Node[], edges: Edge[], name: string): CompileResult {
   const errors: string[] = []
   const warnings: string[] = []

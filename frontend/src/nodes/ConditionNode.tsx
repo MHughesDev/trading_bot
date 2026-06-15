@@ -44,7 +44,7 @@ export function ConditionNode({ data, id, selected }: NodeProps<ConditionNodeTyp
         )}
         {!isUnary && data.rightMode === 'indicator' && (
           <div className="tb-node-row">
-            <span style={{ color: 'var(--tb-text-dim)', fontSize: 10 }}>connect an indicator to the right handle</span>
+            <span style={{ color: 'var(--tb-text-dim)', fontSize: 10 }}>connect an indicator to either side</span>
           </div>
         )}
       </div>
@@ -56,6 +56,15 @@ export function ConditionNode({ data, id, selected }: NodeProps<ConditionNodeTyp
           <span className="tb-handle-label" style={{ left: 14, top: 'calc(65% - 14px)' }}>right</span>
         </>
       )}
+      <Handle type="target" position={Position.Right} id="left-in-r" style={{ top: isUnary ? '70%' : '35%' }} />
+      <span className="tb-handle-label" style={{ right: 14, top: isUnary ? 'calc(70% - 14px)' : 'calc(35% - 14px)' }}>left</span>
+      {!isUnary && data.rightMode === 'indicator' && (
+        <>
+          <Handle type="target" position={Position.Right} id="right-in-r" style={{ top: '65%' }} />
+          <span className="tb-handle-label" style={{ right: 14, top: 'calc(65% - 14px)' }}>right</span>
+        </>
+      )}
+      <Handle type="source" position={Position.Left} id="cond-out-l" style={{ top: isUnary ? '20%' : undefined }} />
       <Handle type="source" position={Position.Right} id="cond-out" />
     </div>
   )

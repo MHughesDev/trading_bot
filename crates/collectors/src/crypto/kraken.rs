@@ -17,6 +17,7 @@ use domain::{
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use std::str::FromStr;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
@@ -71,18 +72,28 @@ struct KrakenTrade<'a> {
     symbol: &'a str,
     #[serde(borrow)]
     side: &'a str,
-    /// Raw price string — parsed directly to Decimal (no f64 intermediate).
+    /// Raw price token from the WS frame.  Kraken WS **v2** sends price/qty as
+    /// JSON *numbers* (e.g. `64449.5`), not the v1 strings.  Borrowing the raw
+    /// JSON text and parsing it straight to `Decimal` handles either form with
+    /// no f64 intermediate — preserving the repo-wide no-float convention.
     #[serde(borrow)]
-    price: &'a str,
-    /// Raw qty string — parsed directly to Decimal (no f64 intermediate).
+    price: &'a RawValue,
+    /// Raw qty token — parsed directly to Decimal (no f64 intermediate).
     #[serde(borrow)]
-    qty: &'a str,
+    qty: &'a RawValue,
     trade_id: u64,
     #[serde(borrow)]
     timestamp: &'a str,
     #[serde(default, borrow)]
     #[allow(dead_code)]
     ord_type: &'a str,
+}
+
+/// Parse a raw JSON token (number `64449.5` or quoted string `"64449.5"`) into a
+/// `Decimal` without an f64 step.  Quotes are stripped so both Kraken WS v1
+/// (string) and v2 (number) encodings are accepted.
+fn decimal_from_raw(raw: &RawValue) -> Result<Decimal, rust_decimal::Error> {
+    Decimal::from_str(raw.get().trim_matches('"'))
 }
 
 /// Kraken WS v2 connector for trade events.
@@ -113,14 +124,14 @@ impl KrakenCollector {
         trade: &KrakenTrade<'_>,
         raw: &[u8],
     ) -> Result<EventEnvelope, NormalizeError> {
-        let price = Decimal::from_str(trade.price)
+        let price = decimal_from_raw(trade.price)
             .map(Price::from_decimal)
             .map_err(|e| NormalizeError::InvalidPrice {
                 field: "price".to_owned(),
                 reason: e.to_string(),
             })?;
 
-        let size = Decimal::from_str(trade.qty)
+        let size = decimal_from_raw(trade.qty)
             .map(Size::from_decimal)
             .map_err(|e| NormalizeError::InvalidSize {
                 field: "qty".to_owned(),

@@ -25,14 +25,19 @@ export function ActionNode({ data, id, selected }: NodeProps<ActionNodeType>) {
           </select>
         </div>
         <div style={{ fontSize: 9, color: 'var(--tb-text-dim)', lineHeight: 1.4, paddingTop: 2 }}>
-          Connect conditions to the left.<br />Connect Size and Exit nodes to the right.
+          Condition in → left or right.<br />Size and Exit out → left or right.
         </div>
       </div>
       <Handle type="target" position={Position.Left} id="action-in" />
+      <Handle type="target" position={Position.Right} id="action-in-r" />
       <Handle type="source" position={Position.Right} id="size-out" style={{ top: '35%' }} />
       <span className="tb-handle-label" style={{ right: 14, top: 'calc(35% - 14px)' }}>size</span>
       <Handle type="source" position={Position.Right} id="exit-out" style={{ top: '65%' }} />
       <span className="tb-handle-label" style={{ right: 14, top: 'calc(65% - 14px)' }}>exits</span>
+      <Handle type="source" position={Position.Left} id="size-out-l" style={{ top: '35%' }} />
+      <span className="tb-handle-label" style={{ left: 14, top: 'calc(35% - 14px)' }}>size</span>
+      <Handle type="source" position={Position.Left} id="exit-out-l" style={{ top: '65%' }} />
+      <span className="tb-handle-label" style={{ left: 14, top: 'calc(65% - 14px)' }}>exits</span>
     </div>
   )
 }

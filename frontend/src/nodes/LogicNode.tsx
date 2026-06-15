@@ -33,7 +33,12 @@ export function LogicNode({ data, id, selected }: NodeProps<LogicNodeType>) {
         <Handle key={`in-${i}`} type="target" position={Position.Left} id={`logic-in-${i}`}
           style={{ top: `${((i + 1) / (data.inputCount + 1)) * 100}%` }} />
       ))}
-      <Handle type="source" position={Position.Right} id="logic-out" />
+      {Array.from({ length: data.inputCount }, (_, i) => (
+        <Handle key={`in-r-${i}`} type="target" position={Position.Right} id={`logic-in-r-${i}`}
+          style={{ top: `${((i + 1) / (data.inputCount + 1)) * 100}%` }} />
+      ))}
+      <Handle type="source" position={Position.Left} id="logic-out-l" style={{ top: '15%' }} />
+      <Handle type="source" position={Position.Right} id="logic-out" style={{ top: '15%' }} />
     </div>
   )
 }

@@ -12,6 +12,8 @@ use domain::{
     order::{OrderIntent, OrderType, Side},
     RiskRejection,
 };
+use risk::GateContext;
+use rust_decimal::Decimal;
 
 use crate::{auth::BearerToken, state::AppState};
 
@@ -20,17 +22,37 @@ pub struct PlaceOrderRequest {
     pub instrument_id: String,
     pub side: String,
     pub order_type: String,
+    /// Order quantity.  The frontend order ticket sends this as `qty`; both
+    /// names are accepted.
+    #[serde(alias = "qty")]
     pub size: String,
     pub limit_price: Option<String>,
     pub idempotency_key: Option<uuid::Uuid>,
+    /// `"paper"` (default) or `"live"`.  Only paper is wired in-house; live is
+    /// rejected until per-user broker adapters are connected.
+    #[serde(default)]
+    pub execution_mode: Option<String>,
 }
 
 /// POST /api/orders — submit a manual order through the risk gate.
 pub async fn place_order(
     _token: BearerToken,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<PlaceOrderRequest>,
 ) -> impl IntoResponse {
+    // Only paper mode is wired in-house; live needs per-user broker adapters.
+    let execution_mode = req.execution_mode.as_deref().unwrap_or("paper");
+    if execution_mode == "live" {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "error": "live execution is not yet available",
+                "detail": "connect live venue credentials in Settings; only paper mode is wired"
+            })),
+        )
+            .into_response();
+    }
+
     // Parse side.
     let side = match req.side.as_str() {
         "buy" => Side::Buy,
@@ -101,20 +123,93 @@ pub async fn place_order(
         intent.idempotency_key = key;
     }
 
-    // Position data is not yet wired (Phase 2).  Returning position=0 would let
-    // risk checks pass even when the account already holds a position — a
-    // false-permissive failure mode that could allow over-leverage.  Reject
-    // manual orders until real position, mark price, and P&L data are available.
-    (
-        StatusCode::SERVICE_UNAVAILABLE,
-        Json(json!({
-            "error": "manual order placement not yet available",
-            "detail": "position and mark-price data are not yet wired (Phase 2); \
-                       accepting orders with zero-position defaults would bypass \
-                       position-limit checks"
-        })),
-    )
-        .into_response()
+    // Resolve the instrument's asset class from the paper engine's registry.
+    // An unregistered instrument has no in-process pipeline feeding it marks, so
+    // it cannot be paper-traded — reject with a clear message rather than a mark
+    // error deeper in the engine.
+    let Some(asset_class) = state.paper_engine.asset_class_of(&req.instrument_id) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "instrument not initialized for trading",
+                "detail": format!(
+                    "no live pipeline is feeding marks for '{}'; initialize the asset first",
+                    req.instrument_id
+                ),
+            })),
+        )
+            .into_response();
+    };
+
+    // A mark is required: the paper engine fills against the latest observed
+    // price and rejects stale/absent marks.  Surface a precise error if the
+    // feed has not produced one yet (e.g. just after startup).
+    let Some(market_price) = state.paper_engine.mark(&req.instrument_id) else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "error": "market data not ready",
+                "detail": format!(
+                    "no mark price for '{}' yet — wait for the live feed to tick",
+                    req.instrument_id
+                ),
+            })),
+        )
+            .into_response();
+    };
+
+    // Current net position for this instrument, so the risk gate's
+    // position-limit check sees real exposure rather than a zero default.
+    let current_position = state
+        .paper_engine
+        .positions(asset_class)
+        .into_iter()
+        .find(|p| p.instrument_id == req.instrument_id)
+        .map(|p| p.quantity)
+        .unwrap_or(Decimal::ZERO);
+
+    // Manual-order risk context.  tick_size and lot_size are 0 — which disables
+    // those two checks (no per-instrument metadata is wired, and a nonzero lot
+    // would wrongly reject fractional crypto like 0.01 BTC).  Daily-loss is 0
+    // until P&L wiring lands; the mark still drives price-sanity and the live
+    // position still drives position limits.
+    let ctx = GateContext::for_manual_order(
+        current_position,
+        Some(market_price),
+        Decimal::ZERO,
+        Decimal::ZERO,
+        Decimal::ZERO,
+        true,
+        0,
+        0,
+    );
+
+    match state.risk_gate.check(intent, &ctx) {
+        Ok(approved) => {
+            let idempotency_key = approved.intent.idempotency_key;
+            match state.execution.submit(approved).await {
+                Ok(result) => (
+                    StatusCode::OK,
+                    Json(json!({
+                        "status": "submitted",
+                        "broker_order_id": result.broker_order_id,
+                        "idempotency_key": idempotency_key,
+                        "execution_mode": "paper",
+                    })),
+                )
+                    .into_response(),
+                Err(e) => (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({ "error": "order submission failed", "detail": e.to_string() })),
+                )
+                    .into_response(),
+            }
+        }
+        Err(rejection) => {
+            let (status, message) = risk_rejection_response(&rejection);
+            (status, Json(json!({ "error": message }))).into_response()
+        }
+    }
 }
 
 /// GET /api/orders/:id — look up an order by idempotency key.
@@ -151,7 +246,6 @@ pub async fn get_order(
     }
 }
 
-#[allow(dead_code)]
 fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
     match r {
         RiskRejection::KillSwitchActive | RiskRejection::TradingDisabled => (
