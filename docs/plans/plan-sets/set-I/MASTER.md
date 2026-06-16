@@ -1,8 +1,8 @@
 # AI Models — Probabilistic Forecasting Suite — Set I
 
-**Completion: 0% (0 / 77 primary tasks)**
+**Completion: 4% (3 / 77 primary tasks)**
 
-**Status:** Not started — plan authored
+**Status:** In progress — Phase 0 trust-foundation core landed (CV spec + generator + ADR-0017)
 **Created:** 2026-06-16
 **Scope class:** End-state architecture (NOT an MVP cut — every subsystem is
 specified at full fidelity; phases are build-ordering, not feature-gating).
@@ -314,3 +314,6 @@ platform-wide upgrade lands.
 | Date | Phase | Task | Note |
 |------|-------|------|------|
 | 2026-06-16 | — | plan | Set I created. 12 decisions locked. 77 tasks across 7 phases (0–6). Probabilistic core on top of the Set H spine; capability spec recorded at `docs/specs/AI_MODELS_SUITE_CAPABILITY_SPEC.md`. End-state design. |
+| 2026-06-16 | 0 | I-0.1 | ADR-0017 (walk-forward CV & leakage discipline) authored and Accepted; indexed in `docs/adr/README.md`. |
+| 2026-06-16 | 0 | I-0.2 | `WalkForwardSpec` + `WindowMode` added (`crates/domain/src/model_def/cv.rs`); optional additive `cv` block wired into `ModelDefinition`; shape validation in the definition validator + horizon-aware `validate`. v1.0 specs unaffected. `cargo test -p domain` green. |
+| 2026-06-16 | 0 | I-0.3 | PURE `features::walk_forward::walk_forward_folds` generator (train/cal/test, expanding\|rolling, purge≥horizon enforced, embargo). Property sweep asserts no-overlap + no label-window crosses a role boundary. `cargo test -p features` green. |

@@ -10,11 +10,13 @@
 pub mod ema;
 pub mod feature_sets;
 pub mod rsi;
+pub mod walk_forward;
 pub mod window;
 
 pub use ema::{Ema, EMA_FEATURE_VERSION};
 pub use feature_sets::resolve as resolve_feature_set;
 pub use rsi::{Rsi, RSI_FEATURE_VERSION};
+pub use walk_forward::{walk_forward_folds, Fold, FoldError};
 pub use window::Window;
 
 use chrono::{DateTime, Utc};

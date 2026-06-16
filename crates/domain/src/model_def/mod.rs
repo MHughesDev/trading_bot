@@ -2,11 +2,13 @@
 //! Mirrors `crates/domain/src/strategy_def/`.
 
 pub mod adapter;
+pub mod cv;
 pub mod kinds;
 pub mod target;
 pub mod validate;
 
 use adapter::AdapterSpec;
+use cv::WalkForwardSpec;
 use kinds::{Framework, ModelKind, Runtime};
 use serde::{Deserialize, Serialize};
 use target::{InferenceCfg, TargetSpec};
@@ -33,6 +35,11 @@ pub struct ModelDefinition {
     pub inference: InferenceCfg,
     #[serde(default)]
     pub adapter: Option<AdapterSpec>,
+    /// Optional walk-forward CV plan (Set I, ADR-0017). When absent, training
+    /// falls back to today's single-expanding-fold behaviour, so every v1.0
+    /// definition keeps validating and training unchanged.
+    #[serde(default)]
+    pub cv: Option<WalkForwardSpec>,
 }
 
 #[cfg(test)]
@@ -100,6 +107,65 @@ mod tests {
         let def: ModelDefinition = serde_json::from_str(json).unwrap();
         let errs = validate::validate(&def).unwrap_err();
         assert!(errs.iter().any(|e| e.path == "schema_version"));
+    }
+
+    #[test]
+    fn v1_0_definition_without_cv_still_validates() {
+        // A definition that predates Set I has no `cv` block; it must keep
+        // validating and deserialize with `cv == None`.
+        let json = r#"{
+            "schema_version": "1.0",
+            "model_kind": "forecaster",
+            "framework": "xgboost",
+            "asset_class": "crypto_spot_cex",
+            "target": { "field": "return", "horizon": "1h" }
+        }"#;
+        let def: ModelDefinition = serde_json::from_str(json).unwrap();
+        assert!(def.cv.is_none());
+        assert!(validate::validate(&def).is_ok());
+    }
+
+    #[test]
+    fn definition_with_cv_round_trips_and_validates() {
+        let json = r#"{
+            "schema_version": "1.0",
+            "model_kind": "forecaster",
+            "framework": "xgboost",
+            "asset_class": "crypto_spot_cex",
+            "target": { "field": "return", "horizon": "1h" },
+            "cv": {
+                "mode": "rolling",
+                "folds": 5,
+                "train_bars": 1000,
+                "cal_bars": 200,
+                "test_bars": 200,
+                "purge_bars": 12,
+                "embargo_bars": 12
+            }
+        }"#;
+        let def: ModelDefinition = serde_json::from_str(json).unwrap();
+        let cv = def.cv.as_ref().unwrap();
+        assert_eq!(cv.mode, cv::WindowMode::Rolling);
+        assert_eq!(cv.folds, 5);
+        assert!(validate::validate(&def).is_ok());
+        let def2: ModelDefinition =
+            serde_json::from_str(&serde_json::to_string(&def).unwrap()).unwrap();
+        assert_eq!(def, def2);
+    }
+
+    #[test]
+    fn validate_rejects_cv_with_zero_folds() {
+        let json = r#"{
+            "schema_version": "1.0",
+            "model_kind": "forecaster",
+            "framework": "xgboost",
+            "asset_class": "crypto_spot_cex",
+            "target": { "field": "return", "horizon": "1h" },
+            "cv": { "folds": 0, "train_bars": 1000, "cal_bars": 200, "test_bars": 200, "embargo_bars": 12 }
+        }"#;
+        let def: ModelDefinition = serde_json::from_str(json).unwrap();
+        let errs = validate::validate(&def).unwrap_err();
+        assert!(errs.iter().any(|e| e.path == "cv.folds"));
     }
 
     #[test]

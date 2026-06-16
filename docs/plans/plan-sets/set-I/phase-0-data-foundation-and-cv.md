@@ -1,6 +1,9 @@
 # Phase 0 — Leakage-safe data & walk-forward CV
 
-**Completion: 0% (0 / 11 tasks)**
+**Completion: 27% (3 / 11 tasks)** — the pure trust-foundation core (ADR-0017, the
+`WalkForwardSpec` domain type, and the PURE fold generator) is landed and tested.
+The remaining tasks (I-0.4 – I-0.11) are the DB/sidecar-integrated layer
+(materialization, data view, leakage harness, trainer wiring, REST).
 
 **Goal:** Stand up the **trust substrate** the whole suite rests on: a
 point-in-time, forming-bar-safe data view; a **walk-forward CV engine** with three
@@ -72,14 +75,14 @@ immutable snapshot every reproduce-from-hash run (Phase 3) reloads.
 
 ## Tasks
 
-### ☐ I-0.1 Author ADR-0017 (walk-forward CV & leakage discipline) — S
+### ☑ I-0.1 Author ADR-0017 (walk-forward CV & leakage discipline) — S
 Write `docs/adr/0017-walk-forward-cv-and-leakage-discipline.md` (Context / Decision
 / Rationale / Consequences / Alternatives). Record: three-role split, purge +
 embargo defaults (embargo ≥ label horizon), expanding vs rolling, and the rule
 that **every** pipeline runs a leakage test. Cite ADR-0008/0009. Mark Accepted.
 **Acceptance:** ADR-0017 exists, linked from `docs/adr/README.md` and Set I MASTER §9.
 
-### ☐ I-0.2 `WalkForwardSpec` domain type + validation — M
+### ☑ I-0.2 `WalkForwardSpec` domain type + validation — M
 Add `crates/domain/src/model_def/cv.rs` with `WalkForwardSpec`, `WindowMode`, and
 validation (folds ≥ 1; all bar counts > 0; `embargo_bars ≥` label horizon in bars;
 total span ≤ available history is checked at materialization, not here). Wire an
@@ -89,7 +92,7 @@ behavior, so v1.0 specs are unchanged.
 **Acceptance:** `cargo test -p domain` covers round-trip + each validation reject; a
 v1.0 definition without `cv` still validates.
 
-### ☐ I-0.3 Pure walk-forward window generator — M
+### ☑ I-0.3 Pure walk-forward window generator — M
 Add a pure function (no I/O) `walk_forward_folds(index: &[AvailableTime], spec: &WalkForwardSpec, horizon_bars: u64) -> Vec<Fold>` where `Fold { train: Range, cal: Range, test: Range }` are index ranges, with purge applied at every boundary and embargo between folds. Place in `crates/features` (the PURE crate) so it is parity-safe and unit-testable. Property test: no index appears in two roles; no train/cal index's `[i, i+horizon]` overlaps a later role.
 **Acceptance:** unit + property tests green; an expanding 5-fold and a rolling 5-fold over a synthetic index produce non-overlapping, purged, embargoed folds.
 
