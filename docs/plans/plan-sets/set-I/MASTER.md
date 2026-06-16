@@ -1,8 +1,8 @@
 # AI Models — Probabilistic Forecasting Suite — Set I
 
-**Completion: 4% (3 / 77 primary tasks)**
+**Completion: 5% (4 / 77 primary tasks)**
 
-**Status:** In progress — Phase 0 trust-foundation core landed (CV spec + generator + ADR-0017)
+**Status:** In progress — Phase 0 trust-foundation core + leakage-safe DataView landed
 **Created:** 2026-06-16
 **Scope class:** End-state architecture (NOT an MVP cut — every subsystem is
 specified at full fidelity; phases are build-ordering, not feature-gating).
@@ -317,3 +317,4 @@ platform-wide upgrade lands.
 | 2026-06-16 | 0 | I-0.1 | ADR-0017 (walk-forward CV & leakage discipline) authored and Accepted; indexed in `docs/adr/README.md`. |
 | 2026-06-16 | 0 | I-0.2 | `WalkForwardSpec` + `WindowMode` added (`crates/domain/src/model_def/cv.rs`); optional additive `cv` block wired into `ModelDefinition`; shape validation in the definition validator + horizon-aware `validate`. v1.0 specs unaffected. `cargo test -p domain` green. |
 | 2026-06-16 | 0 | I-0.3 | PURE `features::walk_forward::walk_forward_folds` generator (train/cal/test, expanding\|rolling, purge≥horizon enforced, embargo). Property sweep asserts no-overlap + no label-window crosses a role boundary. `cargo test -p features` green. |
+| 2026-06-16 | 0 | I-0.4 | Leakage-safe `model_registry::data_view::DataView` over `backtest::BarStore` + `aggregate_bars` with a non-optional `AsOf` ceiling (forming-bar-safe). Pure `filter_as_of`/`guard_as_of` + bar-level `data_quality` (I-0.7 compute core: robust-MAD outliers w/ std fallback). 7 unit tests green (`cargo test -p model-registry`). Added `backtest` dep to model-registry. I-0.7 endpoint + I-0.8 sidecar-CH-removal still pending. |
