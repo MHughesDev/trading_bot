@@ -20,12 +20,13 @@ use crate::types::{MissingRange, TimeframeExt};
 /// Which upstream source fills gaps for a given instrument.
 #[derive(Clone, Debug)]
 pub enum CollectorPlan {
-    /// Coinbase public candles — US-accessible, unauthenticated spot crypto
-    /// history.  The product id is `BASE-QUOTE` (e.g. `BTC-USD`), matching our
-    /// `instrument_id` form exactly.
-    CoinbaseCandles { product_id: String, source: String },
+    /// Kraken public OHLC — unauthenticated spot crypto history.  Matches the
+    /// live data venue for all crypto instruments in this system.  The pair is
+    /// derived from `instrument_id` by stripping the separator and mapping
+    /// `BTC` → `XBT` (Kraken's name for Bitcoin), e.g. `BTC-USD` → `XBTUSD`.
+    KrakenOhlc { pair: String, source: String },
     /// Binance public klines — unauthenticated crypto history.  Geo-blocked
-    /// from US IPs (HTTP 451), so only used for classes with no Coinbase
+    /// from US IPs (HTTP 451), so only used for classes with no Kraken
     /// spot equivalent (perps, DEX).
     BinanceKlines { symbol: String, source: String },
     /// Alpaca market-data bars — equities/ETFs (requires API credentials).
@@ -39,29 +40,30 @@ pub enum CollectorPlan {
 impl CollectorPlan {
     /// Chooses a backfill source for the instrument, based on asset class.
     ///
-    /// Crypto uses Binance's public klines API (deep history, 1000 bars per
-    /// page, no credentials).  Equities/ETFs use Alpaca's data API with the
-    /// same credentials the live collector uses (`ALPACA_API_KEY_ID` /
-    /// `ALPACA_API_SECRET_KEY`).
+    /// Crypto spot uses Kraken's public OHLC API — the same venue as the live
+    /// data feed — so backtest and live history are consistent.  Perps/DEX use
+    /// Binance (Kraken has limited perpetual coverage).  Equities/ETFs use
+    /// Alpaca's data API with the same credentials the live collector uses
+    /// (`ALPACA_API_KEY_ID` / `ALPACA_API_SECRET_KEY`).
     pub fn for_asset_class(asset_class: &str, instrument_id: &str) -> anyhow::Result<Self> {
         match asset_class {
             "crypto_spot_cex" => {
-                // Coinbase consumes the `BASE-QUOTE` product id verbatim, which
-                // already matches our `instrument_id` form (e.g. "BTC-USD").
-                // The quote currency is preserved exactly: a `-USD` market is
-                // genuinely different from `-USDT`, and if Coinbase does not
-                // list the pair the page fetch fails with a clear error, which
-                // is the correct outcome.  Coinbase is chosen over Binance for
-                // spot because Binance geo-blocks US IPs (HTTP 451).
-                let product_id = instrument_id.to_uppercase();
+                // Kraken expects the pair without a separator and uses `XBT`
+                // instead of `BTC`, e.g. "BTC-USD" → "XBTUSD".  The quote
+                // currency is preserved exactly: USD and USDT are different
+                // markets and must never be proxied.  If Kraken does not list
+                // the pair the fetch fails with a clear API error.
                 anyhow::ensure!(
-                    product_id.contains('-'),
-                    "instrument '{instrument_id}' is not a valid Coinbase product id \
-                     (expected BASE-QUOTE, e.g. BTC-USD)"
+                    instrument_id.contains('-'),
+                    "instrument '{instrument_id}' must be BASE-QUOTE form (e.g. BTC-USD)"
                 );
-                Ok(Self::CoinbaseCandles {
-                    product_id,
-                    source: "coinbase_rest".to_string(),
+                let pair = instrument_id
+                    .to_uppercase()
+                    .replace('-', "")
+                    .replace("BTC", "XBT");
+                Ok(Self::KrakenOhlc {
+                    pair,
+                    source: "kraken_rest".to_string(),
                 })
             }
             "crypto_spot_dex" | "perpetual_swap" => {
@@ -109,18 +111,14 @@ impl CollectorPlan {
     /// Used to reject unsupported create requests up front (422) instead of
     /// letting a job reach `CollectingData` only to fail there (#15).  Mirrors
     /// the capability of the concrete collectors:
-    /// [`binance_interval`] (all timeframes) and [`alpaca_interval`] (no 1s).
+    /// [`kraken_interval`] (no 1s), [`binance_interval`] (all timeframes),
+    /// and [`alpaca_interval`] (no 1s).
     pub fn auto_collect_support(asset_class: &str, timeframe: Timeframe) -> Result<(), String> {
         match asset_class {
             "crypto_spot_cex" => match timeframe {
-                // Coinbase's candle granularities omit 1s and 4h (it offers 6h).
+                // Kraken OHLC supports 1m, 5m, 15m, 1h, 4h, 1d — only 1s is absent.
                 Timeframe::Seconds1 => Err(
-                    "the crypto spot backfill (Coinbase) does not provide 1-second candles"
-                        .to_string(),
-                ),
-                Timeframe::Hours4 => Err(
-                    "the crypto spot backfill (Coinbase) does not provide 4-hour candles \
-                         (use 1h or daily)"
+                    "the crypto spot backfill (Kraken) does not provide 1-second bars"
                         .to_string(),
                 ),
                 _ => Ok(()),
@@ -141,14 +139,14 @@ impl CollectorPlan {
 
     pub fn source_name(&self) -> &str {
         match self {
-            Self::CoinbaseCandles { source, .. } | Self::BinanceKlines { source, .. } => source,
+            Self::KrakenOhlc { source, .. } | Self::BinanceKlines { source, .. } => source,
             Self::AlpacaBars { .. } => "alpaca_rest",
         }
     }
 
     pub fn trust_tier(&self) -> &'static str {
         match self {
-            Self::CoinbaseCandles { .. } | Self::BinanceKlines { .. } => "centralized_exchange",
+            Self::KrakenOhlc { .. } | Self::BinanceKlines { .. } => "centralized_exchange",
             Self::AlpacaBars { .. } => "regulated",
         }
     }
@@ -176,12 +174,12 @@ pub async fn collect_ranges(
             break;
         }
         total += match plan {
-            CollectorPlan::CoinbaseCandles { product_id, .. } => {
-                collect_coinbase(
+            CollectorPlan::KrakenOhlc { pair, .. } => {
+                collect_kraken(
                     http,
                     store,
                     plan,
-                    product_id,
+                    pair,
                     instrument_id,
                     venue_id,
                     timeframe,
@@ -294,19 +292,16 @@ async fn fetch_json_with_retry(
     }
 }
 
-/// Coinbase candle granularity (seconds).  Coinbase only accepts a fixed set
-/// {60, 300, 900, 3600, 21600, 86400}; 1s and 4h have no equivalent.
-fn coinbase_granularity(tf: Timeframe) -> anyhow::Result<u32> {
+/// Kraken OHLC interval in minutes.  Supported: 1, 5, 15, 60, 240, 1440.
+fn kraken_interval(tf: Timeframe) -> anyhow::Result<u32> {
     Ok(match tf {
-        Timeframe::Seconds1 => anyhow::bail!("Coinbase does not provide 1-second candles"),
-        Timeframe::Minutes1 => 60,
-        Timeframe::Minutes5 => 300,
-        Timeframe::Minutes15 => 900,
-        Timeframe::Hours1 => 3600,
-        Timeframe::Hours4 => {
-            anyhow::bail!("Coinbase does not provide 4-hour candles (use 1h or daily)")
-        }
-        Timeframe::Daily => 86400,
+        Timeframe::Seconds1 => anyhow::bail!("Kraken does not provide 1-second bars"),
+        Timeframe::Minutes1 => 1,
+        Timeframe::Minutes5 => 5,
+        Timeframe::Minutes15 => 15,
+        Timeframe::Hours1 => 60,
+        Timeframe::Hours4 => 240,
+        Timeframe::Daily => 1440,
     })
 }
 
@@ -335,11 +330,11 @@ fn alpaca_interval(tf: Timeframe) -> anyhow::Result<&'static str> {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn collect_coinbase(
+async fn collect_kraken(
     http: &reqwest::Client,
     store: &BarStore,
     plan: &CollectorPlan,
-    product_id: &str,
+    pair: &str,
     instrument_id: &str,
     venue_id: &str,
     timeframe: Timeframe,
@@ -347,56 +342,74 @@ async fn collect_coinbase(
     collected: &AtomicU64,
     cancel: &AtomicBool,
 ) -> anyhow::Result<u64> {
-    let gran = coinbase_granularity(timeframe)?;
-    let tf_secs = i64::from(gran);
-    // Coinbase returns at most 300 candles per request, so the time window is
-    // sized to <=300 buckets and advanced one full window at a time.
-    let window_secs = tf_secs * 300;
+    let interval = kraken_interval(timeframe)?;
+    let tf_secs = i64::try_from(timeframe.seconds()).unwrap_or(i64::MAX);
     let end_s = range.to.timestamp();
-    let mut cursor_s = range.from.timestamp();
+    // Kraken returns bars with time > since.  Subtract 1 so the first bar
+    // at range.from is included.
+    let mut since = range.from.timestamp() - 1;
     let mut total = 0u64;
 
-    while cursor_s < end_s {
+    loop {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        let window_end = (cursor_s + window_secs).min(end_s);
         let url = format!(
-            "https://api.exchange.coinbase.com/products/{product_id}/candles\
-             ?granularity={gran}&start={}&end={}",
-            secs_to_utc(cursor_s).to_rfc3339(),
-            secs_to_utc(window_end).to_rfc3339(),
+            "https://api.kraken.com/0/public/OHLC?pair={pair}&interval={interval}&since={since}"
         );
-        // Coinbase rejects requests without a User-Agent.
-        let body = fetch_json_with_retry(http, &url, &[("User-Agent", "trading-bot/1.0")], cancel)
+        let body = fetch_json_with_retry(http, &url, &[], cancel)
             .await
-            .map_err(|e| anyhow::anyhow!("coinbase candles for {product_id}: {e}"))?;
-        let candles: Vec<Vec<Value>> = serde_json::from_value(body)?;
+            .map_err(|e| anyhow::anyhow!("kraken OHLC for {pair}: {e}"))?;
 
-        let mut bars = Vec::with_capacity(candles.len());
-        for c in &candles {
-            // [ time, low, high, open, close, volume ] — time is the bucket
-            // start in Unix seconds; values are JSON numbers.
-            let open_s = c
-                .first()
+        if let Some(errs) = body.get("error").and_then(Value::as_array) {
+            if !errs.is_empty() {
+                anyhow::bail!("kraken OHLC error for {pair}: {:?}", errs);
+            }
+        }
+        let result = body
+            .get("result")
+            .ok_or_else(|| anyhow::anyhow!("kraken OHLC: missing result for {pair}"))?;
+
+        let next_since = result.get("last").and_then(Value::as_i64).unwrap_or(i64::MAX);
+
+        // The pair key in the response may differ from the request (e.g.
+        // XBTUSD → XXBTZUSD).  Take the first key that is not "last".
+        let ohlc = result
+            .as_object()
+            .and_then(|m| m.iter().find(|(k, _)| *k != "last").map(|(_, v)| v))
+            .and_then(Value::as_array)
+            .ok_or_else(|| anyhow::anyhow!("kraken OHLC: no bar array for {pair}"))?;
+
+        if ohlc.is_empty() {
+            break;
+        }
+
+        let mut bars = Vec::with_capacity(ohlc.len());
+        for entry in ohlc {
+            // [time, open, high, low, close, vwap, volume, count] — all strings except time.
+            let open_s = entry
+                .get(0)
                 .and_then(Value::as_i64)
-                .ok_or_else(|| anyhow::anyhow!("malformed candle: missing time"))?;
-            // Stringify JSON numbers at this ingestion boundary (parsed as
-            // Decimal downstream) — same convention as the Alpaca collector.
+                .ok_or_else(|| anyhow::anyhow!("kraken OHLC: missing time field"))?;
+            if open_s < range.from.timestamp() || open_s >= end_s {
+                continue;
+            }
             let field = |idx: usize| -> anyhow::Result<String> {
-                Ok(c.get(idx)
-                    .ok_or_else(|| anyhow::anyhow!("malformed candle field {idx}"))?
+                Ok(entry
+                    .get(idx)
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow::anyhow!("kraken OHLC: missing field {idx}"))?
                     .to_string())
             };
             bars.push(CollectedBar {
                 available_time: secs_to_utc(open_s + tf_secs),
                 sequence: u64::try_from(open_s * 1_000).unwrap_or(0),
-                open: field(3)?,
+                open: field(1)?,
                 high: field(2)?,
-                low: field(1)?,
+                low: field(3)?,
                 close: field(4)?,
-                volume: field(5)?,
-                trade_count: 0,
+                volume: field(6)?,
+                trade_count: entry.get(7).and_then(Value::as_u64).unwrap_or(0),
             });
         }
 
@@ -414,7 +427,14 @@ async fn collect_coinbase(
             total += bars.len() as u64;
             collected.fetch_add(bars.len() as u64, Ordering::Relaxed);
         }
-        cursor_s = window_end;
+
+        // `last` from the response is the next `since` cursor.  Stop when the
+        // API signals no more data, the cursor didn't advance, or we've passed
+        // the end of the requested range.
+        if next_since >= end_s || next_since <= since {
+            break;
+        }
+        since = next_since;
     }
     Ok(total)
 }
@@ -608,26 +628,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn coinbase_product_mapping() {
-        // Spot CEX crypto backfills from Coinbase, whose product id is the
-        // verbatim BASE-QUOTE instrument id (no separator stripping).
+    fn kraken_pair_mapping() {
+        // BTC maps to XBT (Kraken's name for Bitcoin); separator is stripped.
         let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "BTC-USD").unwrap();
         match &plan {
-            CollectorPlan::CoinbaseCandles { product_id, .. } => assert_eq!(product_id, "BTC-USD"),
-            other => panic!("expected coinbase plan, got {other:?}"),
+            CollectorPlan::KrakenOhlc { pair, .. } => assert_eq!(pair, "XBTUSD"),
+            other => panic!("expected kraken plan, got {other:?}"),
         }
 
-        // The quote currency is preserved exactly: USD and USDT are different
-        // markets, so the pair is never proxied (#10).
+        // Lower-case input is normalised; BTC→XBT still applies.
         let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "btc-usdt").unwrap();
         match &plan {
-            CollectorPlan::CoinbaseCandles { product_id, .. } => {
-                assert_eq!(product_id, "BTC-USDT");
-            }
-            other => panic!("expected coinbase plan, got {other:?}"),
+            CollectorPlan::KrakenOhlc { pair, .. } => assert_eq!(pair, "XBTUSDT"),
+            other => panic!("expected kraken plan, got {other:?}"),
         }
 
-        // A separatorless symbol is not a valid Coinbase product id.
+        // ETH does not get the BTC→XBT substitution.
+        let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "ETH-USD").unwrap();
+        match &plan {
+            CollectorPlan::KrakenOhlc { pair, .. } => assert_eq!(pair, "ETHUSD"),
+            other => panic!("expected kraken plan, got {other:?}"),
+        }
+
+        // A separatorless symbol is rejected (ambiguous BASE/QUOTE split).
         assert!(CollectorPlan::for_asset_class("crypto_spot_cex", "BTCUSD").is_err());
     }
 
