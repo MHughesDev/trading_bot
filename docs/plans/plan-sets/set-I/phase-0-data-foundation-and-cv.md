@@ -1,12 +1,17 @@
 # Phase 0 — Leakage-safe data & walk-forward CV
 
-**Completion: 36% (4 / 11 tasks)** — the pure trust-foundation core (ADR-0017, the
+**Completion: 45% (5 / 11 tasks)** — the pure trust-foundation core (ADR-0017, the
 `WalkForwardSpec` domain type, the PURE fold generator) plus the leakage-safe
 `DataView` is landed and tested. The bar-level data-quality compute core (I-0.7)
-also landed (its REST endpoint is pending under I-0.11). The remaining tasks are
-the DB/sidecar-integrated layer (real materialization, snapshots, leakage harness,
-trainer dispatch wiring, REST) — these touch live ClickHouse/Postgres and the
-Python sidecar and are not runtime-verifiable in CI without those services.
+also landed (its REST endpoint is pending under I-0.11). The real
+`DatasetManager::materialize` (I-0.5) — PIT pull → feature columns → forward-label
+→ Parquet write → content hash — has now **replaced the `row_count = 0` stub**: the
+pure feature/label builder and the Parquet encode/hash path are landed and
+unit-tested; the end-to-end acceptance (non-empty Parquet from a real ClickHouse
+window) needs live ClickHouse and is marked as such below. The remaining tasks are
+the DB/sidecar-integrated layer (snapshots, leakage harness, trainer dispatch
+wiring, REST) — these touch live ClickHouse/Postgres and the Python sidecar and
+are not runtime-verifiable in CI without those services.
 
 **Goal:** Stand up the **trust substrate** the whole suite rests on: a
 point-in-time, forming-bar-safe data view; a **walk-forward CV engine** with three
@@ -107,7 +112,7 @@ Add a thin `DataView` in `model-registry` that wraps `BarStore::load_bars_bucket
 bucket. No new query path — reuse the backtest store.
 **Acceptance:** a request with `as_of` mid-series returns only settled bars ≤ `as_of`; a unit test asserts the last partial bucket is excluded.
 
-### ☐ I-0.5 Real `DatasetManager::materialize` (close the stub) — L
+### ◐ I-0.5 Real `DatasetManager::materialize` (close the stub) — L
 Replace the `datasets.rs` stub (`row_count = 0`, params-only hash) with a real
 materialization: PIT pull → resample → compute feature columns (column set matches
 `apps/model-trainer/app/features.py`) → forward-label per `label_spec` → drop NaN →
@@ -115,6 +120,19 @@ write Parquet to `ArtifactStore` → persist true `row_count`, `content_hash =
 sha256(params ‖ bytes)`, `parquet_uri`, and the realized `[from, to]` span in
 `dataset_versions`. Idempotent: identical params + data ⇒ identical hash ⇒ reuse.
 **Acceptance:** materializing a real ClickHouse window writes a non-empty Parquet, `row_count > 0`, and a stable hash; re-running returns the same `dataset_version_id` without rewriting.
+> _Status: **landed (compile-checked + unit-tested); live-CH end-to-end pending.**
+> The stub is gone. `DatasetManager::materialize` now pulls bars through the
+> leakage-safe `DataView` (`as_of = end`, non-optional), builds features+label via
+> the new PURE `features::build_training_frame` (mirrors `features.py`'s column set
+> but computes through the **same `Ema`/`Rsi`/rolling primitives the live path
+> uses**, so train/serve agree by construction), encodes Arrow→Parquet, and hashes
+> `sha256(params ‖ parquet_bytes)`. Idempotent reuse keys on that hash; the realized
+> `[min, max] available_time` span is persisted. Unit-tested: the frame builder
+> (warm-up/label drops, sample-std rolling, horizon-bars), Parquet round-trip
+> (row-count + schema), encode determinism, and the cross-instrument accumulator.
+> The single piece not runtime-verifiable here is the acceptance's "real ClickHouse
+> window" leg — that needs a live CH and is the natural first check in the
+> services-up environment. Source-revision capture for snapshots is left to I-0.6._
 
 ### ☐ I-0.6 Pinned dataset snapshots — S
 Guarantee snapshot immutability: once a `dataset_version` is written, its

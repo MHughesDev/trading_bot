@@ -2847,12 +2847,15 @@ name = "model-registry"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow",
  "async-nats",
  "backtest",
+ "bytes",
  "chrono",
  "domain",
  "features",
  "futures-util",
+ "parquet",
  "reqwest",
  "rust_decimal",
  "serde",
