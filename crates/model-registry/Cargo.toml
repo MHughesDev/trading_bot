@@ -22,6 +22,11 @@ async-nats = { workspace = true }
 futures-util = "0.3"
 sha2 = "0.10"
 rust_decimal = { workspace = true }
+arrow = { workspace = true }
+parquet = { workspace = true }
+
+[dev-dependencies]
+bytes = "1"
 
 [lints]
 workspace = true
