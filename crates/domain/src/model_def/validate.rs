@@ -70,6 +70,17 @@ pub fn validate(def: &ModelDefinition) -> Result<(), Vec<ValidationError>> {
         }
     }
 
+    // Walk-forward CV block (Set I, ADR-0017): optional, additive. Only the
+    // shape (positive fold/bar counts) is checked here; the embargo-≥-horizon
+    // leakage guard needs the base timeframe and runs at materialization.
+    if let Some(cv) = &def.cv {
+        if let Err(cv_errs) = cv.validate_shape() {
+            for e in cv_errs {
+                errors.push(ValidationError::new(e.path, e.message));
+            }
+        }
+    }
+
     if errors.is_empty() {
         Ok(())
     } else {

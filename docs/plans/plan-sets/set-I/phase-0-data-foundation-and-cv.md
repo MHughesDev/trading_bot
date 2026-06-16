@@ -1,6 +1,12 @@
 # Phase 0 — Leakage-safe data & walk-forward CV
 
-**Completion: 0% (0 / 11 tasks)**
+**Completion: 36% (4 / 11 tasks)** — the pure trust-foundation core (ADR-0017, the
+`WalkForwardSpec` domain type, the PURE fold generator) plus the leakage-safe
+`DataView` is landed and tested. The bar-level data-quality compute core (I-0.7)
+also landed (its REST endpoint is pending under I-0.11). The remaining tasks are
+the DB/sidecar-integrated layer (real materialization, snapshots, leakage harness,
+trainer dispatch wiring, REST) — these touch live ClickHouse/Postgres and the
+Python sidecar and are not runtime-verifiable in CI without those services.
 
 **Goal:** Stand up the **trust substrate** the whole suite rests on: a
 point-in-time, forming-bar-safe data view; a **walk-forward CV engine** with three
@@ -72,14 +78,14 @@ immutable snapshot every reproduce-from-hash run (Phase 3) reloads.
 
 ## Tasks
 
-### ☐ I-0.1 Author ADR-0017 (walk-forward CV & leakage discipline) — S
+### ☑ I-0.1 Author ADR-0017 (walk-forward CV & leakage discipline) — S
 Write `docs/adr/0017-walk-forward-cv-and-leakage-discipline.md` (Context / Decision
 / Rationale / Consequences / Alternatives). Record: three-role split, purge +
 embargo defaults (embargo ≥ label horizon), expanding vs rolling, and the rule
 that **every** pipeline runs a leakage test. Cite ADR-0008/0009. Mark Accepted.
 **Acceptance:** ADR-0017 exists, linked from `docs/adr/README.md` and Set I MASTER §9.
 
-### ☐ I-0.2 `WalkForwardSpec` domain type + validation — M
+### ☑ I-0.2 `WalkForwardSpec` domain type + validation — M
 Add `crates/domain/src/model_def/cv.rs` with `WalkForwardSpec`, `WindowMode`, and
 validation (folds ≥ 1; all bar counts > 0; `embargo_bars ≥` label horizon in bars;
 total span ≤ available history is checked at materialization, not here). Wire an
@@ -89,11 +95,11 @@ behavior, so v1.0 specs are unchanged.
 **Acceptance:** `cargo test -p domain` covers round-trip + each validation reject; a
 v1.0 definition without `cv` still validates.
 
-### ☐ I-0.3 Pure walk-forward window generator — M
+### ☑ I-0.3 Pure walk-forward window generator — M
 Add a pure function (no I/O) `walk_forward_folds(index: &[AvailableTime], spec: &WalkForwardSpec, horizon_bars: u64) -> Vec<Fold>` where `Fold { train: Range, cal: Range, test: Range }` are index ranges, with purge applied at every boundary and embargo between folds. Place in `crates/features` (the PURE crate) so it is parity-safe and unit-testable. Property test: no index appears in two roles; no train/cal index's `[i, i+horizon]` overlaps a later role.
 **Acceptance:** unit + property tests green; an expanding 5-fold and a rolling 5-fold over a synthetic index produce non-overlapping, purged, embargoed folds.
 
-### ☐ I-0.4 Suite point-in-time data view (forming-bar-safe resample) — M
+### ☑ I-0.4 Suite point-in-time data view (forming-bar-safe resample) — M
 Add a thin `DataView` in `model-registry` that wraps `BarStore::load_bars_bucketed`
 + `aggregate_bars` behind an `as_of: AvailableTime` ceiling, exposing
 `bars(instrument, timeframe, from, to, as_of)` that **filters out any bar with
@@ -123,6 +129,11 @@ and outliers (|return| beyond an N-σ robust band) over a selected (instrument,
 timeframe, range), returned **before** training. Add `GET /api/models/data/quality`.
 Source: COMP-001. No mutation — read-only diagnostics.
 **Acceptance:** endpoint returns `{gaps, dupes, outliers, bar_count, coverage_pct}` for a real window; a planted gap and a planted dupe in a fixture are both detected.
+> _Status: the pure compute core (`model_registry::data_view::data_quality` →
+> `DataQualityReport{gaps,dupes,outliers,bar_count,coverage_pct}`, robust-MAD
+> outliers with a std fallback) is **landed and unit-tested** (planted gap + dupe +
+> spike). The `GET /api/models/data/quality` endpoint wiring remains (folds into
+> I-0.11)._
 
 ### ☐ I-0.8 Leakage guard on the data view — M
 Make the guard structural: `DataView` and `materialize` take `as_of` and it is
@@ -130,6 +141,12 @@ Make the guard structural: `DataView` and `materialize` take `as_of` and it is
 error, not data. Document the one rule (ADR-0008) at the call sites. Forbid the
 sidecar from issuing its own bar queries — it receives only pre-windowed Parquet.
 **Acceptance:** a test that asks for a bar past `as_of` gets an `Err`, never a value; grep confirms the trainer sidecar has no ClickHouse client.
+> _Status: the structural guard is **half-landed** — `DataView::bars` takes a
+> non-optional `AsOf` and `guard_as_of` returns `Err` on any future bar
+> (unit-tested). The second half — removing `apps/model-trainer/app/clickhouse.py`
+> so the sidecar can only consume pre-windowed Parquet — depends on the
+> materialization rewrite (I-0.5/I-0.10) and is **not yet done**; the sidecar still
+> holds its own ClickHouse client today._
 
 ### ☐ I-0.9 Automated leakage test harness — M
 Add a reusable harness (Rust integration test + a sidecar self-check) that, for any
