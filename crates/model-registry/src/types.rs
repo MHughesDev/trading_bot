@@ -75,13 +75,52 @@ pub struct CreateModelRequest {
     pub definition: ModelDefinition,
 }
 
+/// User-chosen training data: which instruments, timeframe, and how far back.
+/// When present on a `TrainRequest`, the trainer pulls these exact bars from
+/// ClickHouse instead of falling back to synthetic data.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TrainDataSelection {
+    /// Instrument IDs to train on, e.g. `["BTC-USD"]`.
+    pub instruments: Vec<String>,
+    /// Bar timeframe key: `"1m" | "5m" | "1h" | ...`.
+    #[serde(default = "default_timeframe")]
+    pub timeframe: String,
+    /// Window size: bars from `now - lookback_days` up to `now`.
+    #[serde(default = "default_lookback_days")]
+    pub lookback_days: u32,
+    /// Override the model's feature set; falls back to the definition / default.
+    #[serde(default)]
+    pub feature_set_ref: Option<String>,
+    /// Forward-return label horizon, e.g. `"1h"`; falls back to the definition.
+    #[serde(default)]
+    pub label_horizon: Option<String>,
+}
+
+fn default_timeframe() -> String {
+    "1m".to_string()
+}
+
+const fn default_lookback_days() -> u32 {
+    30
+}
+
 /// Request to start a training run.
 #[derive(Debug, Deserialize)]
 pub struct TrainRequest {
     #[serde(default)]
     pub dataset_version_id: Option<Uuid>,
-    #[serde(default)]
+    /// Hyperparameter overrides applied on top of the model definition before
+    /// dispatch. The UI sends this as `hyperparams`; older callers may send
+    /// `hyperparameter_overrides`.
+    #[serde(default, alias = "hyperparams")]
     pub hyperparameter_overrides: Option<serde_json::Value>,
+    /// Optional note recorded on the resulting model version.
+    #[serde(default)]
+    pub version_note: Option<String>,
+    /// Explicit data selection from the UI.  When omitted, the trainer uses
+    /// definition defaults (back-compat with older clients).
+    #[serde(default)]
+    pub data: Option<TrainDataSelection>,
 }
 
 /// A model record as stored and served via the API.

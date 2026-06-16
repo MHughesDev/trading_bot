@@ -29,6 +29,19 @@ pub struct LoadedBar {
     pub trade_count: u64,
 }
 
+/// Coverage summary for one (`instrument_id`, `timeframe`) pair in `market_bars`.
+#[derive(Clone, Debug)]
+pub struct BarCoverage {
+    pub instrument_id: String,
+    pub timeframe: String,
+    /// Distinct bar count.
+    pub bars: u64,
+    /// First `available_time` in Unix nanoseconds.
+    pub first_ns: i64,
+    /// Last `available_time` in Unix nanoseconds.
+    pub last_ns: i64,
+}
+
 /// A bar produced by the historical collection system, ready for insert.
 #[derive(Clone, Debug)]
 pub struct CollectedBar {
@@ -298,6 +311,47 @@ impl BarStore {
                 })
             })
             .collect()
+    }
+
+    /// Lists every (`instrument_id`, `timeframe`) pair that currently has bars,
+    /// with the distinct bar count and the first/last `available_time` (as Unix
+    /// nanoseconds).  Powers the AI Model Studio data-selection dropdown so a
+    /// user only trains on instruments that actually have stored history.
+    pub async fn list_coverage(&self) -> anyhow::Result<Vec<BarCoverage>> {
+        #[derive(Row, Deserialize)]
+        struct CoverageRow {
+            instrument_id: String,
+            timeframe: String,
+            bars: u64,
+            first_ns: i64,
+            last_ns: i64,
+        }
+
+        let rows: Vec<CoverageRow> = self
+            .client
+            .query(
+                "SELECT instrument_id, \
+                        timeframe, \
+                        uniqExact(available_time) AS bars, \
+                        toUnixTimestamp64Nano(min(available_time)) AS first_ns, \
+                        toUnixTimestamp64Nano(max(available_time)) AS last_ns \
+                 FROM market_bars \
+                 GROUP BY instrument_id, timeframe \
+                 ORDER BY instrument_id, timeframe",
+            )
+            .fetch_all()
+            .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| BarCoverage {
+                instrument_id: r.instrument_id,
+                timeframe: r.timeframe,
+                bars: r.bars,
+                first_ns: r.first_ns,
+                last_ns: r.last_ns,
+            })
+            .collect())
     }
 
     /// Returns the `available_time` of the most recent stored bar for the given

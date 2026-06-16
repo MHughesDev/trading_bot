@@ -6,6 +6,17 @@ class ProgressConfig(BaseModel):
     nats_subject: str
 
 
+class DataSpec(BaseModel):
+    """Resolved data selection: which real bars to pull from ClickHouse."""
+
+    instruments: list[str]
+    timeframe: str
+    start: str  # RFC-3339, inclusive
+    end: str    # RFC-3339, exclusive
+    features: list[str]
+    label_horizon: str
+
+
 class TrainRequest(BaseModel):
     run_id: str
     model_id: str
@@ -17,6 +28,7 @@ class TrainRequest(BaseModel):
     dataset_hash: str
     output_prefix: str
     progress: ProgressConfig
+    data: Optional[DataSpec] = None
 
 
 class TrainResponse(BaseModel):

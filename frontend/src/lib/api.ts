@@ -100,6 +100,46 @@ export const assetApi = {
     api.get('/assets/chart/trade-markers', { params: { symbol, start, end } }),
 }
 
+// ── Paper trading (internal engine) ─────────────────────────────────────────────
+
+export interface PaperOrderView {
+  order_id: string
+  instrument_id: string
+  asset_class: string
+  side: 'buy' | 'sell'
+  order_type: 'market' | 'limit' | 'stop_limit'
+  qty: string
+  filled_qty: string
+  avg_fill_price: string | null
+  status: 'new' | 'partially_filled' | 'filled' | 'cancelled' | 'rejected' | 'unknown'
+  created_at: string
+  updated_at: string
+}
+
+export interface PaperPositionLite {
+  instrument_id: string
+  quantity: string
+  average_entry_price: string
+}
+
+export interface PaperInstrumentActivity {
+  instrument_id: string
+  orders: PaperOrderView[]
+  position: PaperPositionLite | null
+}
+
+export const paperApi = {
+  instrumentActivity: (instrumentId: string) =>
+    api.get<PaperInstrumentActivity>(
+      `/api/paper/instrument/${encodeURIComponent(instrumentId)}`,
+    ),
+  resetAll: () => api.post<{ ok: boolean; scope: string }>('/api/paper/reset'),
+  resetAccount: (assetClass: string) =>
+    api.post<{ ok: boolean; scope: string }>(
+      `/api/paper/accounts/${assetClass}/reset`,
+    ),
+}
+
 // ── Portfolio ─────────────────────────────────────────────────────────────────
 
 export const portfolioApi = {

@@ -23,14 +23,27 @@ use crate::types::{
 
 const MAX_CONCURRENT_JOBS: usize = 3;
 
-/// Uniquifier suffix to avoid slug collisions (e.g. "my-model-2").
+/// Convert a display name to a URL-safe slug base.  Collapses runs of
+/// non-alphanumerics to a single `-` and trims leading/trailing dashes.
+/// Falls back to `"model"` when the name has no alphanumerics.
 fn slugify(name: &str) -> String {
-    name.to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string()
+    let mut out = String::with_capacity(name.len());
+    let mut prev_dash = false;
+    for c in name.to_lowercase().chars() {
+        if c.is_alphanumeric() {
+            out.push(c);
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "model".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 pub struct ModelManager {
@@ -121,7 +134,7 @@ impl ModelManager {
         })?;
 
         let model_id = format!("mdl_{}", Uuid::new_v4().as_simple());
-        let slug = slugify(&req.display_name);
+        let slug = self.unique_slug(&slugify(&req.display_name)).await?;
         let definition_json = serde_json::to_value(&req.definition)?;
         let model_kind = format!("{:?}", req.definition.model_kind).to_lowercase();
         let asset_class = req.definition.asset_class.clone();
@@ -152,6 +165,28 @@ impl ModelManager {
         .await;
 
         Ok(model_id)
+    }
+
+    /// Return a slug unique across `ai_models`: `base`, else `base-2`, `base-3`,
+    /// … (the `slug` column has a global UNIQUE constraint).  Bounded so a
+    /// pathological loop can't hang; the final fallback appends a uuid fragment.
+    async fn unique_slug(&self, base: &str) -> anyhow::Result<String> {
+        for n in 1..=999 {
+            let candidate = if n == 1 {
+                base.to_string()
+            } else {
+                format!("{base}-{n}")
+            };
+            let exists: Option<(String,)> =
+                sqlx::query_as("SELECT slug FROM ai_models WHERE slug = $1 LIMIT 1")
+                    .bind(&candidate)
+                    .fetch_optional(&self.pg)
+                    .await?;
+            if exists.is_none() {
+                return Ok(candidate);
+            }
+        }
+        Ok(format!("{base}-{}", Uuid::new_v4().as_simple()))
     }
 
     pub async fn get_model(
@@ -317,7 +352,7 @@ impl ModelManager {
         .bind(run_id)
         .bind(model_id)
         .bind(req.dataset_version_id)
-        .bind(hp)
+        .bind(&hp)
         .bind(user_id)
         .execute(&self.pg)
         .await;
@@ -326,7 +361,9 @@ impl ModelManager {
 
         let manager = Arc::clone(self);
         let mid = model_id.to_string();
-        tokio::spawn(async move { manager.drive_train(job, mid).await });
+        let data = req.data;
+        let version_note = req.version_note;
+        tokio::spawn(async move { manager.drive_train(job, mid, data, hp, version_note).await });
 
         Ok(run_id)
     }
@@ -1113,6 +1150,21 @@ impl ModelManager {
         Ok(case_id)
     }
 
+    pub async fn delete_test_case(
+        &self,
+        model_id: &str,
+        case_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<()> {
+        self.ensure_model_owned(model_id, user_id).await?;
+        sqlx::query("DELETE FROM model_test_cases WHERE case_id = $1 AND model_id = $2")
+            .bind(case_id)
+            .bind(model_id)
+            .execute(&self.pg)
+            .await?;
+        Ok(())
+    }
+
     // -- Lineage / used-by --
 
     pub async fn get_lineage(
@@ -1180,7 +1232,14 @@ impl ModelManager {
     // -- Real job drivers (Phase 2/3) --
 
     #[allow(clippy::too_many_lines)]
-    async fn drive_train(self: &Arc<Self>, job: Arc<Job>, model_id: String) {
+    async fn drive_train(
+        self: &Arc<Self>,
+        job: Arc<Job>,
+        model_id: String,
+        data: Option<crate::types::TrainDataSelection>,
+        hyperparam_overrides: serde_json::Value,
+        version_note: Option<String>,
+    ) {
         let Ok(_permit) = self.run_permits.clone().acquire_owned().await else {
             return;
         };
@@ -1208,7 +1267,7 @@ impl ModelManager {
             return;
         };
 
-        let definition: domain::model_def::ModelDefinition =
+        let mut definition: domain::model_def::ModelDefinition =
             match serde_json::from_value(definition_json) {
                 Ok(d) => d,
                 Err(e) => {
@@ -1219,6 +1278,26 @@ impl ModelManager {
                 }
             };
 
+        // Apply per-run hyperparameter overrides on top of the definition's
+        // baked-in hyperparameters. Object keys are shallow-merged (override
+        // wins); a non-object override replaces the block wholesale.
+        if let serde_json::Value::Object(over) = &hyperparam_overrides {
+            if !over.is_empty() {
+                let base = definition
+                    .hyperparameters
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+                let mut merged = base;
+                for (k, v) in over {
+                    merged.insert(k.clone(), v.clone());
+                }
+                definition.hyperparameters = serde_json::Value::Object(merged);
+            }
+        } else if !hyperparam_overrides.is_null() {
+            definition.hyperparameters = hyperparam_overrides.clone();
+        }
+
         // 2. Materialize dataset
         job.set_phase(RunStatus::Running, "materializing");
         self.broadcast_progress(&job.snapshot());
@@ -1226,19 +1305,53 @@ impl ModelManager {
         let artifacts_prefix =
             std::env::var("ARTIFACT_STORE_PATH").unwrap_or_else(|_| "./artifacts".to_string());
 
+        // Resolve the effective data selection: explicit UI selection wins, then
+        // the model definition, then sensible defaults.
+        let feature_set_ref = data
+            .as_ref()
+            .and_then(|d| d.feature_set_ref.clone())
+            .or_else(|| definition.feature_set_ref.clone())
+            .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string());
+        let instruments = data
+            .as_ref()
+            .filter(|d| !d.instruments.is_empty())
+            .map(|d| d.instruments.clone())
+            .unwrap_or_else(|| vec!["BTC-USD".to_string()]);
+        let timeframe = data
+            .as_ref()
+            .map_or_else(|| "1m".to_string(), |d| d.timeframe.clone());
+        let lookback_days = data.as_ref().map_or(30, |d| d.lookback_days);
+        let label_horizon = data
+            .as_ref()
+            .and_then(|d| d.label_horizon.clone())
+            .or_else(|| {
+                definition
+                    .label_spec
+                    .as_ref()
+                    .and_then(|s| s.get("window"))
+                    .and_then(|w| w.as_str().map(str::to_string))
+            })
+            .unwrap_or_else(|| "1h".to_string());
+
+        let window_end = chrono::Utc::now();
+        let window_start = window_end - chrono::Duration::days(i64::from(lookback_days));
+
+        // Concrete feature column list the trainer must compute.
+        let features: Vec<String> = features::resolve_feature_set(&feature_set_ref)
+            .map(|fs| fs.features.clone())
+            .unwrap_or_default();
+
         let dataset_req = crate::datasets::DatasetRequest {
             dataset_id: None,
-            feature_set_ref: definition
-                .feature_set_ref
-                .clone()
-                .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string()),
-            instruments: vec!["BTC-USD".to_string()],
-            start: chrono::Utc::now() - chrono::Duration::days(90),
-            end: chrono::Utc::now() - chrono::Duration::days(1),
-            label_spec: definition
-                .label_spec
-                .clone()
-                .unwrap_or(serde_json::json!({"type":"forward_return","window":"1h"})),
+            feature_set_ref: feature_set_ref.clone(),
+            instruments: instruments.clone(),
+            timeframe: timeframe.clone(),
+            start: window_start,
+            end: window_end,
+            label_spec: serde_json::json!({
+                "type": "forward_return",
+                "window": label_horizon,
+            }),
             output_prefix: artifacts_prefix.clone(),
         };
 
@@ -1263,12 +1376,20 @@ impl ModelManager {
             model_id: model_id.clone(),
             model_kind: format!("{:?}", definition.model_kind).to_lowercase(),
             framework: format!("{:?}", definition.framework).to_lowercase(),
-            runtime: "python".to_string(),
+            runtime: format!("{:?}", definition.runtime).to_lowercase(),
             definition: definition.clone(),
             dataset_uri: dataset.parquet_uri.clone(),
             dataset_hash: dataset.content_hash.clone(),
             output_prefix: format!("{artifacts_prefix}/models/{model_id}/{}/", job.run_id),
             progress: crate::sidecar::ProgressConfig { nats_subject },
+            data: Some(crate::sidecar::TrainDataSpec {
+                instruments,
+                timeframe,
+                start: window_start.to_rfc3339(),
+                end: window_end.to_rfc3339(),
+                features,
+                label_horizon,
+            }),
         };
 
         let result = self.sidecar.dispatch_train(dispatch).await;
@@ -1295,13 +1416,16 @@ impl ModelManager {
                     "artifact_hash": sha256,
                     "dataset_version_id": dataset.dataset_version_id,
                     "framework_version": r.framework_version,
+                    "framework": format!("{:?}", definition.framework).to_lowercase(),
+                    "runtime": format!("{:?}", definition.runtime).to_lowercase(),
+                    "hyperparameters": definition.hyperparameters,
                 });
 
                 let _ = sqlx::query(
                     "INSERT INTO model_versions \
                      (model_id, version, status, training_run_id, dataset_version_id, \
-                      metrics_json, config_json, created_by, created_at) \
-                     VALUES ($1,$2,'evaluating',$3,$4,$5,$6,$7,now())",
+                      metrics_json, config_json, notes, created_by, created_at) \
+                     VALUES ($1,$2,'evaluating',$3,$4,$5,$6,$7,$8,now())",
                 )
                 .bind(&model_id)
                 .bind(version)
@@ -1309,6 +1433,7 @@ impl ModelManager {
                 .bind(dataset.dataset_version_id)
                 .bind(&r.metrics)
                 .bind(config_json)
+                .bind(version_note.as_deref())
                 .bind(job.user_id)
                 .execute(&pg)
                 .await;
@@ -1436,6 +1561,7 @@ impl ModelManager {
                 .clone()
                 .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string()),
             instruments: vec!["BTC-USD".to_string()],
+            timeframe: "1m".to_string(),
             start: chrono::Utc::now() - chrono::Duration::days(30),
             end: chrono::Utc::now() - chrono::Duration::days(1),
             label_spec: definition

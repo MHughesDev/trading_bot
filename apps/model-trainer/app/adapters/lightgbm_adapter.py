@@ -1,42 +1,40 @@
 import numpy as np
 import lightgbm as lgb
 
-from .base import split_label, train_val_split
-
-
-def _binarize(y):
-    nunique = y.nunique(dropna=True)
-    if nunique > 2:
-        y = (y > y.median()).astype(int)
-    else:
-        y = y.astype(int)
-    return y
+from .. import engine
 
 
 def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
-    hp = definition.get("hyperparameters", {}) or {}
-
-    X, y = split_label(df)
-    y = _binarize(y)
-
-    X_tr, y_tr, X_val, y_val = train_val_split(X, y, frac=0.8)
+    engine.seed_everything(definition)
+    p = engine.prepare(definition, df)
+    hp = p.hp
 
     n_estimators = int(hp.get("n_estimators", 200))
-    max_depth = int(hp.get("max_depth", -1))
-    learning_rate = float(hp.get("learning_rate", 0.05))
-
-    dtrain = lgb.Dataset(X_tr, label=y_tr)
-    dval = lgb.Dataset(X_val, label=y_val, reference=dtrain)
-
     params = {
-        "objective": "binary",
-        "metric": ["auc", "binary_logloss"],
-        "max_depth": max_depth,
-        "learning_rate": learning_rate,
+        "max_depth": int(hp.get("max_depth", -1)),
+        "learning_rate": float(hp.get("learning_rate", 0.05)),
+        "num_leaves": int(hp.get("num_leaves", 31)),
+        "feature_fraction": float(hp.get("feature_fraction", 1.0)),
+        "bagging_fraction": float(hp.get("bagging_fraction", 1.0)),
+        "min_child_samples": int(hp.get("min_child_samples", 20)),
+        "lambda_l1": float(hp.get("reg_alpha", 0.0)),
+        "lambda_l2": float(hp.get("reg_lambda", 0.0)),
+        "seed": p.seed,
         "verbose": -1,
     }
+    if p.objective == "classification":
+        params.update(objective="binary", metric=["auc", "binary_logloss"])
+    else:
+        params.update(objective="regression", metric=["l2", "l1"])
 
-    evals_result: dict = {}
+    dtrain = lgb.Dataset(p.X_tr, label=p.y_tr)
+    valid_sets = [dtrain]
+    valid_names = ["train"]
+    has_val = len(p.X_val) > 0
+    if has_val:
+        dval = lgb.Dataset(p.X_val, label=p.y_val, reference=dtrain)
+        valid_sets.append(dval)
+        valid_names.append("validation")
 
     def progress_callback(env):
         i = env.iteration
@@ -44,40 +42,56 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
             pct = (i / max(n_estimators, 1)) * 100.0
             metric = {"round": i}
             for item in env.evaluation_result_list:
-                # item: (data_name, eval_name, result, is_higher_better)
                 metric[f"{item[0]}_{item[1]}"] = float(item[2])
             emit_progress("fitting", pct, metric)
+
+    callbacks = [progress_callback]
+    if has_val:
+        early = int(hp.get("early_stopping_rounds", 30))
+        if early > 0:
+            callbacks.append(lgb.early_stopping(stopping_rounds=early, verbose=False))
 
     booster = lgb.train(
         params,
         dtrain,
         num_boost_round=n_estimators,
-        valid_sets=[dtrain, dval],
-        valid_names=["train", "validation"],
-        callbacks=[
-            lgb.record_evaluation(evals_result),
-            progress_callback,
-        ],
+        valid_sets=valid_sets,
+        valid_names=valid_names,
+        callbacks=callbacks,
     )
 
-    val_auc = None
-    val_logloss = None
-    try:
-        val_metrics = evals_result.get("validation", {})
-        if len(np.unique(y_val)) >= 2 and val_metrics.get("auc"):
-            val_auc = float(val_metrics["auc"][-1])
-        if val_metrics.get("binary_logloss"):
-            val_logloss = float(val_metrics["binary_logloss"][-1])
-    except Exception:
-        pass
+    def predict(X):
+        if len(X) == 0:
+            return np.array([])
+        return booster.predict(X)
 
-    artifact_bytes = booster.model_to_string().encode()
+    if p.objective == "classification":
+        parts = [
+            engine.classification_metrics("val", p.y_val, predict(p.X_val)),
+            engine.classification_metrics("test", p.y_te, predict(p.X_te)),
+        ]
+    else:
+        parts = [
+            engine.regression_metrics("val", p.y_val, predict(p.X_val)),
+            engine.regression_metrics("test", p.y_te, predict(p.X_te)),
+        ]
 
-    metrics = {
-        "val_auc": val_auc,
-        "val_logloss": val_logloss,
-        "n_train": int(len(X_tr)),
-        "n_val": int(len(X_val)),
-        "framework_version": lgb.__version__,
-    }
-    return artifact_bytes, metrics
+    metrics = engine.assemble_metrics(
+        p.objective,
+        parts,
+        framework_version=lgb.__version__,
+        n_train=len(p.X_tr),
+        n_val=len(p.X_val),
+        n_test=len(p.X_te),
+        extra={"best_iteration": booster.best_iteration},
+    )
+
+    inner = booster.model_to_string().encode()
+    bundle = engine.wrap_bundle(
+        inner,
+        framework="lightgbm",
+        objective=p.objective,
+        feature_order=p.feature_order,
+        scaler=p.scaler,
+    )
+    return bundle, metrics

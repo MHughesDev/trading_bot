@@ -10,26 +10,12 @@ from .schemas import (
     LLMPredictResponse,
 )
 from .loader import CACHE
-from .predictors import (
-    xgboost_predictor,
-    lightgbm_predictor,
-    sklearn_predictor,
-    torch_predictor,
-    base,
-)
+from .predictors import base, run_predict
 from .predictors.llm_predictor import predict_llm
 
 app = FastAPI(title="model-inference", version="0.1.0")
 
 DEFAULT_HORIZON = "1h"
-
-# Tolerant ordering: try each predictor; the first that succeeds wins.
-_PREDICTORS = [
-    xgboost_predictor.predict,
-    lightgbm_predictor.predict,
-    sklearn_predictor.predict,
-    torch_predictor.predict,
-]
 
 
 @app.get("/health")
@@ -60,14 +46,9 @@ async def predict(req: PredictRequest):
             latency_ms=latency_ms,
         )
 
-    predictions: list[Forecast] | None = None
-    for fn in _PREDICTORS:
-        try:
-            predictions = fn(artifact_bytes, req.instances, req.model_kind, DEFAULT_HORIZON)
-            if predictions is not None:
-                break
-        except Exception:
-            continue
+    predictions: list[Forecast] | None = run_predict(
+        artifact_bytes, req.instances, req.model_kind, DEFAULT_HORIZON
+    )
 
     if predictions is None:
         # Total failure across all predictors — never 500 in dev.

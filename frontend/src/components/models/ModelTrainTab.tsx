@@ -1,14 +1,34 @@
-import { useState, useEffect, useRef } from 'react'
-import { Play, Square, Loader2 } from 'lucide-react'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { Play, Square, Loader2, Database } from 'lucide-react'
 import * as Progress from '@radix-ui/react-progress'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useModelRuns, useStartTrain, useCancelRun } from '@/hooks/useModels'
+import {
+  useModel,
+  useModelRuns,
+  useStartTrain,
+  useCancelRun,
+  useMarketInstruments,
+} from '@/hooks/useModels'
 import type { ModelRunSnapshot } from '@/api/models'
 import { formatDistanceToNow } from 'date-fns'
+import { HyperparamEditor } from './HyperparamEditor'
 
 interface Props {
   modelId: string
+}
+
+const LOOKBACK_OPTIONS = [
+  { label: '7 days', value: 7 },
+  { label: '30 days', value: 30 },
+  { label: '90 days', value: 90 },
+  { label: '180 days', value: 180 },
+]
+
+const LABEL_HORIZONS = ['15m', '1h', '4h', '1d']
+
+function fmtDate(ms: number): string {
+  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 function elapsed(run: ModelRunSnapshot): string {
@@ -62,14 +82,49 @@ function CircularProgress({ value }: { value: number }) {
 
 export function ModelTrainTab({ modelId }: Props) {
   const [versionNote, setVersionNote] = useState('')
-  const [hyperparamsText, setHyperparamsText] = useState('{}')
-  const [hyperparamsError, setHyperparamsError] = useState<string | null>(null)
+  const [hyperparams, setHyperparams] = useState<Record<string, unknown>>({})
+  const [hyperparamsValid, setHyperparamsValid] = useState(true)
   const [logLines, setLogLines] = useState<string[]>([])
   const logEndRef = useRef<HTMLDivElement>(null)
 
+  // Data selection
+  const [instrument, setInstrument] = useState<string>('')
+  const [timeframe, setTimeframe] = useState<string>('')
+  const [lookbackDays, setLookbackDays] = useState<number>(30)
+  const [labelHorizon, setLabelHorizon] = useState<string>('1h')
+
+  const { data: model } = useModel(modelId)
+  const framework = model?.definition.framework ?? 'xgboost'
+  const runtime = model?.definition.runtime ?? 'python'
+
   const { data: runs, isLoading: runsLoading } = useModelRuns(modelId)
+  const { data: marketInstruments } = useMarketInstruments()
   const startMut = useStartTrain(modelId)
   const cancelMut = useCancelRun(modelId)
+
+  // Distinct instruments available, and the timeframes each has.
+  const instrumentOptions = useMemo(() => {
+    const map = new Map<string, typeof marketInstruments>()
+    for (const mi of marketInstruments ?? []) {
+      const list = map.get(mi.instrument_id) ?? []
+      list.push(mi)
+      map.set(mi.instrument_id, list)
+    }
+    return map
+  }, [marketInstruments])
+
+  // Default the selection once data loads.
+  useEffect(() => {
+    if (!marketInstruments || marketInstruments.length === 0) return
+    if (!instrument) {
+      const first = marketInstruments[0]
+      setInstrument(first.instrument_id)
+      setTimeframe(first.timeframe)
+    }
+  }, [marketInstruments, instrument])
+
+  const timeframesForInstrument = instrumentOptions.get(instrument) ?? []
+  const selectedCoverage = timeframesForInstrument.find((m) => m.timeframe === timeframe)
 
   const activeRun = runs?.find((r) => r.status === 'running')
   const latestRun = runs?.[0]
@@ -77,43 +132,35 @@ export function ModelTrainTab({ modelId }: Props) {
   // Accumulate log lines from phase changes
   useEffect(() => {
     if (!activeRun) return
-    const line = `[${new Date().toLocaleTimeString()}] Phase: ${activeRun.phase} (${Math.round(activeRun.progress_pct)}%)`
+    const line = `[${new Date().toLocaleTimeString()}] Phase: ${activeRun.phase} (${Math.round(activeRun.progress)}%)`
     setLogLines((prev) => {
       const last = prev[prev.length - 1]
       // Avoid duplicate lines
-      if (last && last.includes(activeRun.phase) && last.includes(Math.round(activeRun.progress_pct).toString())) {
+      if (last && last.includes(activeRun.phase) && last.includes(Math.round(activeRun.progress).toString())) {
         return prev
       }
       return [...prev.slice(-200), line]
     })
-  }, [activeRun?.phase, activeRun?.progress_pct])
+  }, [activeRun?.phase, activeRun?.progress])
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logLines])
 
-  function handleHyperparamsChange(text: string) {
-    setHyperparamsText(text)
-    try {
-      JSON.parse(text)
-      setHyperparamsError(null)
-    } catch {
-      setHyperparamsError('Invalid JSON')
-    }
-  }
-
   async function handleStart() {
-    let hyperparams: Record<string, unknown> = {}
-    try {
-      hyperparams = JSON.parse(hyperparamsText)
-    } catch {
-      setHyperparamsError('Invalid JSON')
-      return
-    }
+    if (!hyperparamsValid) return
     setLogLines([])
     await startMut.mutateAsync({
       version_note: versionNote.trim() || undefined,
       hyperparams: Object.keys(hyperparams).length > 0 ? hyperparams : undefined,
+      data: instrument
+        ? {
+            instruments: [instrument],
+            timeframe: timeframe || '1m',
+            lookback_days: lookbackDays,
+            label_horizon: labelHorizon,
+          }
+        : undefined,
     })
   }
 
@@ -131,6 +178,110 @@ export function ModelTrainTab({ modelId }: Props) {
       <div className="rounded-xl border border-border bg-surface p-4 space-y-4">
         <h3 className="text-sm font-medium text-text">Training config</h3>
 
+        {/* Data selection */}
+        <div className="space-y-3 rounded-lg border border-border bg-surface-2 p-3">
+          <div className="flex items-center gap-1.5">
+            <Database className="h-3.5 w-3.5 text-accent" />
+            <span className="text-xs font-medium text-text">Training data</span>
+          </div>
+
+          {!marketInstruments || marketInstruments.length === 0 ? (
+            <p className="text-xs text-text-dim">
+              No stored market data found. Initialize an asset first so bars
+              accumulate in ClickHouse.
+            </p>
+          ) : (
+            <>
+              <div>
+                <label className="block text-[11px] font-medium text-text-muted mb-1">
+                  Instrument
+                </label>
+                <select
+                  value={instrument}
+                  onChange={(e) => {
+                    const next = e.target.value
+                    setInstrument(next)
+                    const tfs = instrumentOptions.get(next) ?? []
+                    if (tfs.length && !tfs.some((m) => m.timeframe === timeframe)) {
+                      setTimeframe(tfs[0].timeframe)
+                    }
+                  }}
+                  disabled={!!activeRun}
+                  className="w-full h-8 rounded-lg border border-border bg-surface px-2 text-xs text-text focus:outline-none focus:border-accent disabled:opacity-50"
+                >
+                  {[...instrumentOptions.keys()].map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-text-muted mb-1">
+                    Timeframe
+                  </label>
+                  <select
+                    value={timeframe}
+                    onChange={(e) => setTimeframe(e.target.value)}
+                    disabled={!!activeRun}
+                    className="w-full h-8 rounded-lg border border-border bg-surface px-2 text-xs text-text focus:outline-none focus:border-accent disabled:opacity-50"
+                  >
+                    {timeframesForInstrument.map((m) => (
+                      <option key={m.timeframe} value={m.timeframe}>
+                        {m.timeframe}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-text-muted mb-1">
+                    Lookback
+                  </label>
+                  <select
+                    value={lookbackDays}
+                    onChange={(e) => setLookbackDays(Number(e.target.value))}
+                    disabled={!!activeRun}
+                    className="w-full h-8 rounded-lg border border-border bg-surface px-2 text-xs text-text focus:outline-none focus:border-accent disabled:opacity-50"
+                  >
+                    {LOOKBACK_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-text-muted mb-1">
+                  Label horizon (forward return)
+                </label>
+                <select
+                  value={labelHorizon}
+                  onChange={(e) => setLabelHorizon(e.target.value)}
+                  disabled={!!activeRun}
+                  className="w-full h-8 rounded-lg border border-border bg-surface px-2 text-xs text-text focus:outline-none focus:border-accent disabled:opacity-50"
+                >
+                  {LABEL_HORIZONS.map((h) => (
+                    <option key={h} value={h}>
+                      {h}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedCoverage && (
+                <p className="text-[11px] text-text-dim leading-relaxed">
+                  {selectedCoverage.bars.toLocaleString()} bars stored ·{' '}
+                  {fmtDate(selectedCoverage.first_ms)} – {fmtDate(selectedCoverage.last_ms)}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
         <div>
           <label className="block text-xs font-medium text-text-muted mb-1.5">
             Version note
@@ -145,30 +296,30 @@ export function ModelTrainTab({ modelId }: Props) {
           />
         </div>
 
-        <div>
-          <label className="block text-xs font-medium text-text-muted mb-1.5">
-            Hyperparameters (JSON)
-          </label>
-          <textarea
-            value={hyperparamsText}
-            onChange={(e) => handleHyperparamsChange(e.target.value)}
-            rows={8}
-            disabled={!!activeRun}
-            className={cn(
-              'w-full rounded-lg border bg-surface px-2.5 py-2 text-xs font-mono text-text focus:outline-none resize-none disabled:opacity-50',
-              hyperparamsError ? 'border-pnl-down' : 'border-border focus:border-accent',
-            )}
-          />
-          {hyperparamsError && (
-            <p className="text-xs text-pnl-down mt-1">{hyperparamsError}</p>
-          )}
+        <div className="flex items-center gap-1.5 text-[11px]">
+          <span className="rounded-md bg-surface-2 px-2 py-0.5 font-mono text-text-muted">
+            {framework}
+          </span>
+          <span className="rounded-md bg-surface-2 px-2 py-0.5 font-mono text-text-muted">
+            {runtime}
+          </span>
         </div>
+
+        <HyperparamEditor
+          key={framework}
+          framework={framework}
+          disabled={!!activeRun}
+          onChange={(hp, valid) => {
+            setHyperparams(hp)
+            setHyperparamsValid(valid)
+          }}
+        />
 
         <div className="flex gap-2">
           <Button
             className="flex-1 text-xs h-8"
             onClick={handleStart}
-            disabled={!!activeRun || startMut.isPending || !!hyperparamsError}
+            disabled={!!activeRun || startMut.isPending || !hyperparamsValid}
           >
             {startMut.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -199,7 +350,7 @@ export function ModelTrainTab({ modelId }: Props) {
           <Loader2 className="h-8 w-8 animate-spin text-text-dim" />
         ) : displayRun ? (
           <>
-            <CircularProgress value={displayRun.progress_pct} />
+            <CircularProgress value={displayRun.progress} />
 
             <div className="text-center">
               <p className="text-sm font-medium text-text capitalize">
@@ -213,12 +364,12 @@ export function ModelTrainTab({ modelId }: Props) {
             {/* Linear progress bar for smaller detail */}
             <div className="w-full max-w-xs">
               <Progress.Root
-                value={displayRun.progress_pct}
+                value={displayRun.progress}
                 className="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-2"
               >
                 <Progress.Indicator
                   className="h-full bg-accent transition-transform duration-500 ease-out"
-                  style={{ transform: `translateX(-${100 - displayRun.progress_pct}%)` }}
+                  style={{ transform: `translateX(-${100 - displayRun.progress}%)` }}
                 />
               </Progress.Root>
             </div>
@@ -282,7 +433,7 @@ export function ModelTrainTab({ modelId }: Props) {
                       'h-1.5 w-1.5 rounded-full shrink-0',
                       run.status === 'running'
                         ? 'bg-blue-400'
-                        : run.status === 'completed'
+                        : run.status === 'succeeded'
                           ? 'bg-pnl-up'
                           : run.status === 'failed'
                             ? 'bg-pnl-down'

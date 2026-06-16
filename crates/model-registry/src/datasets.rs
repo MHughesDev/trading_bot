@@ -12,11 +12,18 @@ pub struct DatasetRequest {
     pub dataset_id: Option<String>,
     pub feature_set_ref: String,
     pub instruments: Vec<String>,
+    /// Bar timeframe key, e.g. `"1m"`.
+    #[serde(default = "default_timeframe")]
+    pub timeframe: String,
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
     /// JSON label spec, e.g. {"type": "`forward_return`", "window": "1h", "clip": [-0.2, 0.2]}
     pub label_spec: serde_json::Value,
     pub output_prefix: String,
+}
+
+fn default_timeframe() -> String {
+    "1m".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +68,7 @@ impl DatasetManager {
         let param_str = serde_json::to_string(&serde_json::json!({
             "feature_set_ref": req.feature_set_ref,
             "instruments": req.instruments,
+            "timeframe": req.timeframe,
             "start": req.start,
             "end": req.end,
             "label_spec": req.label_spec,
@@ -109,14 +117,12 @@ impl DatasetManager {
         .await?;
 
         // 6. Insert dataset_version row
-        let (next_version,): (i64,) = sqlx::query_as(
+        let (version,): (i32,) = sqlx::query_as(
             "SELECT COALESCE(MAX(version), 0) + 1 FROM dataset_versions WHERE dataset_id = $1",
         )
         .bind(&dataset_id)
         .fetch_one(&self.pg)
         .await?;
-        #[allow(clippy::cast_possible_truncation)]
-        let version = next_version as i32;
 
         let dataset_version_id = Uuid::new_v4();
         let parquet_uri = format!(

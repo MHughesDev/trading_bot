@@ -8,15 +8,17 @@ from ..schemas import Forecast
 from . import base
 
 
-def predict(artifact_bytes: bytes, instances: list, model_kind: str, horizon: str) -> list[Forecast]:
-    # Determine feature order deterministically (sorted union of keys).
-    keys = set()
-    for inst in instances:
-        f = getattr(inst, "features", {}) or {}
-        keys.update(f.keys())
-    feature_order = sorted(keys)
-
-    X = base.features_matrix(instances, feature_order=feature_order)
+def predict(
+    artifact_bytes: bytes,
+    instances: list,
+    model_kind: str,
+    horizon: str,
+    header: dict | None = None,
+) -> list[Forecast]:
+    # Columns follow the training feature order (from the bundle) and are scaled
+    # with the persisted scaler. The model was trained on positional numpy
+    # columns, so we predict positionally too — no feature_names.
+    X, objective = base.build_matrix(instances, header)
 
     path = None
     try:
@@ -33,8 +35,8 @@ def predict(artifact_bytes: bytes, instances: list, model_kind: str, horizon: st
             except OSError:
                 pass
 
-    dmat = xgb.DMatrix(X, feature_names=feature_order if feature_order else None)
-    probs = booster.predict(dmat)
-    probs = np.atleast_1d(np.asarray(probs, dtype=float))
+    raw = np.atleast_1d(np.asarray(booster.predict(xgb.DMatrix(X)), dtype=float))
 
-    return [base.to_forecast(float(p), horizon) for p in probs]
+    if objective == "regression":
+        return [base.to_forecast_return(float(v), horizon) for v in raw]
+    return [base.to_forecast(float(p), horizon) for p in raw]

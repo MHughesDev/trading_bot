@@ -33,17 +33,18 @@ def _load_booster(artifact_bytes: bytes):
                 pass
 
 
-def predict(artifact_bytes: bytes, instances: list, model_kind: str, horizon: str) -> list[Forecast]:
-    keys = set()
-    for inst in instances:
-        f = getattr(inst, "features", {}) or {}
-        keys.update(f.keys())
-    feature_order = sorted(keys)
-
-    X = base.features_matrix(instances, feature_order=feature_order)
+def predict(
+    artifact_bytes: bytes,
+    instances: list,
+    model_kind: str,
+    horizon: str,
+    header: dict | None = None,
+) -> list[Forecast]:
+    X, objective = base.build_matrix(instances, header)
 
     booster = _load_booster(artifact_bytes)
-    probs = booster.predict(X)
-    probs = np.atleast_1d(np.asarray(probs, dtype=float))
+    raw = np.atleast_1d(np.asarray(booster.predict(X), dtype=float))
 
-    return [base.to_forecast(float(p), horizon) for p in probs]
+    if objective == "regression":
+        return [base.to_forecast_return(float(v), horizon) for v in raw]
+    return [base.to_forecast(float(p), horizon) for p in raw]

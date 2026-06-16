@@ -20,6 +20,28 @@ pub struct TrainDispatchRequest {
     pub dataset_hash: String,
     pub output_prefix: String,
     pub progress: ProgressConfig,
+    /// Explicit data selection so the trainer pulls real bars from ClickHouse.
+    /// `None` keeps the legacy synthetic-data path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<TrainDataSpec>,
+}
+
+/// Resolved data-selection passed to the trainer sidecar.  Unlike the API-facing
+/// `TrainDataSelection`, the window is already resolved to concrete RFC-3339
+/// timestamps and the feature set to a concrete column list, so the Python side
+/// queries ClickHouse without re-resolving anything.
+#[derive(Debug, Clone, Serialize)]
+pub struct TrainDataSpec {
+    pub instruments: Vec<String>,
+    pub timeframe: String,
+    /// Inclusive window start (RFC-3339, UTC).
+    pub start: String,
+    /// Exclusive window end (RFC-3339, UTC).
+    pub end: String,
+    /// Concrete ordered feature column list to compute.
+    pub features: Vec<String>,
+    /// Forward-return label horizon, e.g. `"1h"`.
+    pub label_horizon: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

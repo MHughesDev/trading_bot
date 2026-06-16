@@ -1,65 +1,97 @@
 import io
 
 import joblib
+import numpy as np
 import sklearn
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    GradientBoostingRegressor,
+    RandomForestClassifier,
+    RandomForestRegressor,
+)
+from sklearn.linear_model import LogisticRegression, Ridge
 
-from .base import split_label, train_val_split
+from .. import engine
 
+# Estimator name -> (classifier, regressor) so the same UI choice maps to the
+# right family once the objective is known.
 _ESTIMATORS = {
-    "RandomForestClassifier": RandomForestClassifier,
-    "GradientBoostingClassifier": GradientBoostingClassifier,
-    "LogisticRegression": LogisticRegression,
+    "RandomForestClassifier": (RandomForestClassifier, RandomForestRegressor),
+    "GradientBoostingClassifier": (GradientBoostingClassifier, GradientBoostingRegressor),
+    "LogisticRegression": (LogisticRegression, Ridge),
 }
 
-
-def _binarize(y):
-    nunique = y.nunique(dropna=True)
-    if nunique > 2:
-        y = (y > y.median()).astype(int)
-    else:
-        y = y.astype(int)
-    return y
+# Kwargs that aren't estimator constructor params.
+_RESERVED = {"estimator", "objective", "direction_threshold", "seed", "early_stopping_rounds"}
 
 
 def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
-    hp = definition.get("hyperparameters", {}) or {}
+    engine.seed_everything(definition)
+    p = engine.prepare(definition, df)
+    hp = p.hp
+
     estimator_name = hp.get("estimator", "RandomForestClassifier")
-    estimator_cls = _ESTIMATORS.get(estimator_name, RandomForestClassifier)
+    classifier_cls, regressor_cls = _ESTIMATORS.get(
+        estimator_name, (RandomForestClassifier, RandomForestRegressor)
+    )
+    estimator_cls = classifier_cls if p.objective == "classification" else regressor_cls
 
-    X, y = split_label(df)
-    y = _binarize(y)
-
-    X_tr, y_tr, X_val, y_val = train_val_split(X, y, frac=0.8)
-
-    # Build estimator with any passthrough kwargs the estimator accepts.
-    kwargs = {k: v for k, v in hp.items() if k != "estimator"}
+    kwargs = {k: v for k, v in hp.items() if k not in _RESERVED}
+    # Seed estimators that accept random_state for reproducibility.
+    if "random_state" not in kwargs:
+        kwargs["random_state"] = p.seed
     try:
         model = estimator_cls(**kwargs)
     except TypeError:
-        model = estimator_cls()
+        try:
+            model = estimator_cls(random_state=p.seed)
+        except TypeError:
+            model = estimator_cls()
 
-    emit_progress("fitting", 50.0, {"estimator": estimator_name})
-    model.fit(X_tr, y_tr)
+    emit_progress("fitting", 40.0, {"estimator": estimator_cls.__name__})
+    model.fit(p.X_tr, p.y_tr)
+    emit_progress("evaluating", 80.0, {"estimator": estimator_cls.__name__})
 
-    val_accuracy = None
-    try:
-        if len(X_val) > 0:
-            val_accuracy = float(model.score(X_val, y_val))
-    except Exception:
-        pass
+    def predict_scores(X):
+        if len(X) == 0:
+            return np.array([])
+        if p.objective == "classification":
+            if hasattr(model, "predict_proba"):
+                proba = np.asarray(model.predict_proba(X))
+                return proba[:, 1] if proba.ndim == 2 and proba.shape[1] >= 2 else proba.ravel()
+            if hasattr(model, "decision_function"):
+                raw = np.asarray(model.decision_function(X), dtype=float).ravel()
+                return 1.0 / (1.0 + np.exp(-raw))
+        return np.asarray(model.predict(X), dtype=float).ravel()
 
-    emit_progress("done", 100.0, {"val_accuracy": val_accuracy})
+    if p.objective == "classification":
+        parts = [
+            engine.classification_metrics("val", p.y_val, predict_scores(p.X_val)),
+            engine.classification_metrics("test", p.y_te, predict_scores(p.X_te)),
+        ]
+    else:
+        parts = [
+            engine.regression_metrics("val", p.y_val, predict_scores(p.X_val)),
+            engine.regression_metrics("test", p.y_te, predict_scores(p.X_te)),
+        ]
+
+    metrics = engine.assemble_metrics(
+        p.objective,
+        parts,
+        framework_version=sklearn.__version__,
+        n_train=len(p.X_tr),
+        n_val=len(p.X_val),
+        n_test=len(p.X_te),
+        extra={"estimator": estimator_cls.__name__},
+    )
 
     buf = io.BytesIO()
     joblib.dump(model, buf)
-    artifact_bytes = buf.getvalue()
-
-    metrics = {
-        "val_accuracy": val_accuracy,
-        "n_train": int(len(X_tr)),
-        "n_val": int(len(X_val)),
-        "framework_version": sklearn.__version__,
-    }
-    return artifact_bytes, metrics
+    bundle = engine.wrap_bundle(
+        buf.getvalue(),
+        framework="sklearn",
+        objective=p.objective,
+        feature_order=p.feature_order,
+        scaler=p.scaler,
+    )
+    return bundle, metrics

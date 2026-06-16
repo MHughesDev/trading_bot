@@ -5,6 +5,7 @@ pub mod backtests;
 pub mod dashboard;
 pub mod models;
 pub mod orders;
+pub mod paper;
 pub mod strategies;
 pub mod streams;
 pub mod trading;
@@ -56,6 +57,7 @@ pub fn router(state: AppState) -> Router {
         .route("/assets/chart/trade-markers", get(al::get_trade_markers))
         // Phase 1 data-plane queries
         .route("/api/assets", get(assets::list_assets))
+        .route("/api/market/instruments", get(assets::list_market_instruments))
         .route("/api/instruments/{id}", get(assets::get_instrument))
         .route("/api/streams/available", get(streams::list_available))
         // Phase 2 order flow
@@ -89,6 +91,16 @@ pub fn router(state: AppState) -> Router {
         )
         // P4-T06 dashboard rollup
         .route("/api/dashboard/rollup", get(dashboard::get_rollup))
+        // Paper-trading data + reset (internal engine; paper mode only)
+        .route(
+            "/api/paper/instrument/{instrument_id}",
+            get(paper::get_instrument_activity),
+        )
+        .route("/api/paper/reset", post(paper::reset_all))
+        .route(
+            "/api/paper/accounts/{asset_class}/reset",
+            post(paper::reset_account),
+        )
         // Automations — persisted server-side; paper and live coexist
         .route(
             "/api/automations",
@@ -179,6 +191,11 @@ pub fn router(state: AppState) -> Router {
             "/api/models/{id}/test-cases",
             get(models::list_test_cases).post(models::add_test_case),
         )
+        .route(
+            "/api/models/{id}/test-cases/{case_id}",
+            axum::routing::delete(models::delete_test_case),
+        )
+        .route("/api/models/{id}/feature-vector", get(models::feature_vector))
         .route("/api/models/{id}/lineage", get(models::get_lineage))
         .route("/api/models/{id}/traces", get(models::get_traces))
         .route("/api/models/{id}/used-by", get(models::get_used_by))

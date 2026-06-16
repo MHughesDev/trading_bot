@@ -12,6 +12,12 @@ import {
   ChevronLeft,
   Check,
   Loader2,
+  Trees,
+  Network,
+  GitBranch,
+  Boxes,
+  Cpu,
+  Server,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -66,6 +72,75 @@ const KIND_OPTIONS: KindOption[] = [
   },
 ]
 
+type Framework = 'xgboost' | 'lightgbm' | 'sklearn' | 'torch' | 'external_api'
+type Runtime = 'python' | 'rust'
+
+interface FrameworkOption {
+  framework: Framework
+  label: string
+  icon: React.ElementType
+  description: string
+}
+
+// Trainable frameworks the trainer actually routes to (see worker.py `_route`).
+const FRAMEWORK_OPTIONS: FrameworkOption[] = [
+  {
+    framework: 'xgboost',
+    label: 'XGBoost',
+    icon: Trees,
+    description: 'Gradient-boosted trees. Strong default for tabular market features.',
+  },
+  {
+    framework: 'lightgbm',
+    label: 'LightGBM',
+    icon: GitBranch,
+    description: 'Fast histogram-based boosting. Great on large bar histories.',
+  },
+  {
+    framework: 'sklearn',
+    label: 'scikit-learn',
+    icon: Boxes,
+    description: 'Classic linear / ensemble estimators. Simple and interpretable.',
+  },
+  {
+    framework: 'torch',
+    label: 'PyTorch',
+    icon: Network,
+    description: 'Neural nets for sequence / deep forecasting. Most flexible, slowest.',
+  },
+]
+
+// Frameworks valid for a given model kind (mirrors domain is_compatible).
+function frameworksForKind(kind: ModelKind | null): FrameworkOption[] {
+  if (kind === 'external_llm_adapter' || kind === 'embedding') return []
+  return FRAMEWORK_OPTIONS
+}
+
+interface RuntimeOption {
+  runtime: Runtime
+  label: string
+  icon: React.ElementType
+  description: string
+  comingSoon?: boolean
+}
+
+const RUNTIME_OPTIONS: RuntimeOption[] = [
+  {
+    runtime: 'python',
+    label: 'Python sidecar',
+    icon: Cpu,
+    description: 'Trains in the Python trainer service. Full library support (default).',
+  },
+  {
+    runtime: 'rust',
+    label: 'Rust (in-process)',
+    icon: Server,
+    description:
+      'Native in-process training. Coming soon — the trainer still routes through the Python runtime.',
+    comingSoon: true,
+  },
+]
+
 const ASSET_CLASSES = [
   'crypto_spot_cex',
   'crypto_spot_dex',
@@ -105,7 +180,7 @@ function StepIndicator({ step, total }: { step: number; total: number }) {
   )
 }
 
-const STEP_LABELS = ['Purpose', 'Source', 'Data', 'Identity']
+const STEP_LABELS = ['Purpose', 'Engine', 'Data', 'Identity']
 
 export function ModelCreatePage() {
   const navigate = useNavigate()
@@ -114,6 +189,8 @@ export function ModelCreatePage() {
 
   const [step, setStep] = useState(0)
   const [selectedKind, setSelectedKind] = useState<ModelKind | null>(null)
+  const [framework, setFramework] = useState<Framework>('xgboost')
+  const [runtime, setRuntime] = useState<Runtime>('python')
   const [assetClass, setAssetClass] = useState('crypto_spot_cex')
   const [autoRetrain, setAutoRetrain] = useState(false)
   const [versionNote, setVersionNote] = useState('')
@@ -121,6 +198,23 @@ export function ModelCreatePage() {
   const [description, setDescription] = useState('')
 
   const slug = slugify(displayName)
+
+  // External kinds (LLM adapter / embedding) are not user-trainable and always
+  // use the external_api framework — hide the framework picker for them.
+  const isExternalKind =
+    selectedKind === 'external_llm_adapter' || selectedKind === 'embedding'
+  const availableFrameworks = frameworksForKind(selectedKind)
+
+  // Keep framework valid when the kind changes.
+  function selectKind(kind: ModelKind) {
+    setSelectedKind(kind)
+    if (kind === 'external_llm_adapter' || kind === 'embedding') {
+      setFramework('external_api')
+      setRuntime('python')
+    } else if (framework === 'external_api') {
+      setFramework('xgboost')
+    }
+  }
 
   const canNext =
     step === 0
@@ -134,14 +228,39 @@ export function ModelCreatePage() {
   async function handleSubmit() {
     if (!selectedKind) return
     try {
+      const isExternal =
+        selectedKind === 'external_llm_adapter' || selectedKind === 'embedding'
+      const effectiveFramework = isExternal ? 'external_api' : framework
+
+      const defaultTargetField: Record<string, string> = {
+        forecaster: 'return',
+        signal_ranker: 'score',
+        trade_decision: 'action',
+        risk_sizing: 'size_fraction',
+        embedding: 'score',
+      }
+      const target =
+        selectedKind === 'external_llm_adapter'
+          ? undefined
+          : { field: defaultTargetField[selectedKind] ?? 'return', horizon: '1h', transform: 'logret' }
+
+      const adapter =
+        selectedKind === 'external_llm_adapter'
+          ? { provider: '', model: '', endpoint: '' }
+          : undefined
+
       const res = await createMutation.mutateAsync({
         display_name: displayName.trim(),
         description: description.trim() || undefined,
         definition: {
+          schema_version: '1.0',
           model_kind: selectedKind,
+          framework: effectiveFramework,
+          runtime,
           asset_class: assetClass,
           auto_retrain: autoRetrain,
-          version_note: versionNote || undefined,
+          target,
+          adapter,
         },
       })
       navigate(`/models/${res.data.model_id}`)
@@ -181,7 +300,7 @@ export function ModelCreatePage() {
                 {KIND_OPTIONS.map(({ kind, label, icon: Icon, description: desc }) => (
                   <button
                     key={kind}
-                    onClick={() => setSelectedKind(kind)}
+                    onClick={() => selectKind(kind)}
                     className={cn(
                       'text-left rounded-xl border p-4 transition-all',
                       selectedKind === kind
@@ -211,37 +330,131 @@ export function ModelCreatePage() {
           )}
 
           {step === 1 && (
-            <div className="space-y-4">
-              <h2 className="text-base font-medium text-text mb-4">
-                Model source
-              </h2>
-              <div className="rounded-xl border border-accent bg-accent/5 p-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
-                    <Brain className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-text">Train from scratch</p>
-                    <p className="text-xs text-text-muted">
-                      Define architecture and train with your own data via the built-in trainer.
-                    </p>
-                  </div>
-                  <Check className="h-4 w-4 text-accent ml-auto shrink-0" />
-                </div>
-              </div>
-              <div className="rounded-xl border border-border bg-surface p-4 opacity-50 cursor-not-allowed">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-2 text-text-dim">
-                    <Bot className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-text-muted">Import pre-trained</p>
-                    <p className="text-xs text-text-dim">
-                      Coming soon — upload an artifact from ONNX, PyTorch, or scikit-learn.
-                    </p>
+            <div className="space-y-6">
+              {isExternalKind ? (
+                <div>
+                  <h2 className="text-base font-medium text-text mb-4">
+                    Engine
+                  </h2>
+                  <div className="rounded-xl border border-accent bg-accent/5 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
+                        <Bot className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-text">External API</p>
+                        <p className="text-xs text-text-muted">
+                          This model kind wraps an external provider — no in-house
+                          training framework or runtime to choose.
+                        </p>
+                      </div>
+                      <Check className="h-4 w-4 text-accent ml-auto shrink-0" />
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <div>
+                    <h2 className="text-base font-medium text-text mb-1">
+                      Training framework
+                    </h2>
+                    <p className="text-xs text-text-muted mb-4">
+                      Which library trains the model. You can fine-tune its
+                      hyperparameters later in the training playground.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {availableFrameworks.map(
+                        ({ framework: fw, label, icon: Icon, description: desc }) => (
+                          <button
+                            key={fw}
+                            onClick={() => setFramework(fw)}
+                            className={cn(
+                              'text-left rounded-xl border p-4 transition-all',
+                              framework === fw
+                                ? 'border-accent bg-accent/5 shadow-sm'
+                                : 'border-border bg-surface hover:border-border-2 hover:bg-surface-2',
+                            )}
+                          >
+                            <div className="flex items-center gap-3 mb-2">
+                              <div
+                                className={cn(
+                                  'flex h-8 w-8 items-center justify-center rounded-lg',
+                                  framework === fw
+                                    ? 'bg-accent/15 text-accent'
+                                    : 'bg-surface-2 text-text-muted',
+                                )}
+                              >
+                                <Icon className="h-4 w-4" />
+                              </div>
+                              <span className="font-medium text-sm text-text">
+                                {label}
+                              </span>
+                              {framework === fw && (
+                                <Check className="h-4 w-4 text-accent ml-auto" />
+                              )}
+                            </div>
+                            <p className="text-xs text-text-muted">{desc}</p>
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h2 className="text-base font-medium text-text mb-1">
+                      Runtime
+                    </h2>
+                    <p className="text-xs text-text-muted mb-4">
+                      Where the model executes for training and inference.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {RUNTIME_OPTIONS.map(
+                        ({ runtime: rt, label, icon: Icon, description: desc, comingSoon }) => (
+                          <button
+                            key={rt}
+                            disabled={comingSoon}
+                            onClick={() => !comingSoon && setRuntime(rt)}
+                            className={cn(
+                              'text-left rounded-xl border p-4 transition-all',
+                              comingSoon
+                                ? 'border-border bg-surface opacity-50 cursor-not-allowed'
+                                : runtime === rt
+                                  ? 'border-accent bg-accent/5 shadow-sm'
+                                  : 'border-border bg-surface hover:border-border-2 hover:bg-surface-2',
+                            )}
+                          >
+                            <div className="flex items-center gap-3 mb-2">
+                              <div
+                                className={cn(
+                                  'flex h-8 w-8 items-center justify-center rounded-lg',
+                                  !comingSoon && runtime === rt
+                                    ? 'bg-accent/15 text-accent'
+                                    : 'bg-surface-2 text-text-muted',
+                                )}
+                              >
+                                <Icon className="h-4 w-4" />
+                              </div>
+                              <span className="font-medium text-sm text-text">
+                                {label}
+                              </span>
+                              {comingSoon ? (
+                                <span className="ml-auto rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-medium text-text-dim">
+                                  Soon
+                                </span>
+                              ) : (
+                                runtime === rt && (
+                                  <Check className="h-4 w-4 text-accent ml-auto" />
+                                )
+                              )}
+                            </div>
+                            <p className="text-xs text-text-muted">{desc}</p>
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -354,6 +567,16 @@ export function ModelCreatePage() {
                   <span className="text-text font-medium">
                     {KIND_OPTIONS.find((k) => k.kind === selectedKind)?.label}
                   </span>
+                  <span className="text-text-muted">Framework</span>
+                  <span className="text-text font-mono text-xs">
+                    {isExternalKind ? 'external_api' : framework}
+                  </span>
+                  {!isExternalKind && (
+                    <>
+                      <span className="text-text-muted">Runtime</span>
+                      <span className="text-text font-mono text-xs">{runtime}</span>
+                    </>
+                  )}
                   <span className="text-text-muted">Asset class</span>
                   <span className="text-text font-mono text-xs">{assetClass}</span>
                   <span className="text-text-muted">Auto-retrain</span>

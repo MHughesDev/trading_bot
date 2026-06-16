@@ -55,7 +55,9 @@ export interface ModelVersion {
   artifact_hash?: string
   size_bytes?: number
   version_note?: string
-  metrics?: Record<string, number>
+  // Mixed-type: numeric scores plus objective/arch strings, feature_importance
+  // objects, best_iteration null, etc. Consumers must guard before formatting.
+  metrics?: Record<string, unknown>
   framework_version?: string
   created_at: string
 }
@@ -64,8 +66,8 @@ export interface ModelRunSnapshot {
   run_id: string
   model_id: string
   kind: 'training' | 'evaluation'
-  status: 'running' | 'completed' | 'failed' | 'cancelled'
-  progress_pct: number
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  progress: number
   phase: string
   metrics?: Record<string, unknown>
   error?: string
@@ -121,6 +123,66 @@ export interface ForNodeModel {
   has_production: boolean
 }
 
+/// A single model forecast, as returned by the inference service.
+export interface Forecast {
+  direction: 'up' | 'down' | 'flat'
+  magnitude: string
+  confidence: number
+  horizon: string
+}
+
+/// Response from a Test Lab inference run.
+export interface TestInferenceResponse {
+  model_id: string
+  version: number
+  kind: string
+  predictions?: Forecast[]
+  latency_ms: number
+  // LLM-kind responses carry text instead of predictions.
+  text?: string
+  tokens?: number
+  cost_usd?: string
+}
+
+/// The model's expected feature schema + (optionally) a computed sample vector.
+export interface FeatureVectorResponse {
+  feature_set: string
+  feature_order: string[]
+  features: Record<string, number>
+  source: 'computed' | 'schema'
+  instrument_id?: string
+  timeframe?: string
+  as_of_ms?: number
+  bars_used?: number
+}
+
+/// A saved Test Lab case.
+export interface TestCase {
+  case_id: string
+  name: string
+  input: { instrument_id?: string; features?: Record<string, number> }
+  expected?: unknown
+  created_at: string
+}
+
+/// One (instrument, timeframe) pair with stored-bar coverage in ClickHouse.
+export interface MarketInstrument {
+  instrument_id: string
+  timeframe: string
+  bars: number
+  first_ms: number
+  last_ms: number
+}
+
+/// Data selection sent with a training run — which real bars to train on.
+export interface TrainDataSelection {
+  instruments: string[]
+  timeframe: string
+  lookback_days: number
+  feature_set_ref?: string
+  label_horizon?: string
+}
+
 export const modelsApi = {
   list: (params?: { kind?: ModelKind; status?: ModelStatus; asset_class?: string; q?: string }) =>
     client.get<{ models: AiModel[]; total: number }>('/api/models', { params }),
@@ -147,8 +209,13 @@ export const modelsApi = {
       dataset_id?: string
       version_note?: string
       hyperparams?: Record<string, unknown>
+      data?: TrainDataSelection
     },
   ) => client.post<{ run_id: string }>(`/api/models/${id}/train`, body),
+
+  // Market data coverage — what instruments/timeframes have stored bars.
+  marketInstruments: () =>
+    client.get<{ instruments: MarketInstrument[] }>('/api/market/instruments'),
 
   listRuns: (id: string) =>
     client.get<{ runs: ModelRunSnapshot[] }>(`/api/models/${id}/runs`),
@@ -169,11 +236,34 @@ export const modelsApi = {
   promote: (id: string, version: number, reason: string) =>
     client.post(`/api/models/${id}/versions/${version}/promote`, { reason }),
 
+  // Test Lab inference — the backend expects a list of instances.
   testVersion: (
     id: string,
     version: number,
-    body: { instrument_id: string; features: Record<string, number> },
-  ) => client.post<unknown>(`/api/models/${id}/versions/${version}/test`, body),
+    instances: Array<{ instrument_id: string; features: Record<string, number> }>,
+  ) =>
+    client.post<TestInferenceResponse>(`/api/models/${id}/versions/${version}/test`, {
+      instances,
+    }),
+
+  // Compute / fetch the model's expected feature vector for prefill.
+  featureVector: (
+    id: string,
+    params?: { instrument_id?: string; timeframe?: string },
+  ) =>
+    client.get<FeatureVectorResponse>(`/api/models/${id}/feature-vector`, { params }),
+
+  // Saved test cases.
+  listTestCases: (id: string) =>
+    client.get<{ test_cases: TestCase[] }>(`/api/models/${id}/test-cases`),
+
+  addTestCase: (
+    id: string,
+    body: { name: string; input: unknown; expected?: unknown },
+  ) => client.post<{ case_id: string }>(`/api/models/${id}/test-cases`, body),
+
+  deleteTestCase: (id: string, caseId: string) =>
+    client.delete(`/api/models/${id}/test-cases/${caseId}`),
 
   // Evaluations
   listEvals: (id: string) =>

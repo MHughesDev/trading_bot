@@ -21,9 +21,11 @@ const ALL_CLASSES = [
 
 interface AssetClassSliderProps {
   tiles: AssetClassTile[]
+  /** Paper mode only: called after a per-class reset to refresh the rollup. */
+  onReset?: () => void
 }
 
-export function AssetClassSlider({ tiles }: AssetClassSliderProps) {
+export function AssetClassSlider({ tiles, onReset }: AssetClassSliderProps) {
   const tileMap = new Map(tiles.map((t) => [t.asset_class, t]))
 
   return (
@@ -36,7 +38,7 @@ export function AssetClassSlider({ tiles }: AssetClassSliderProps) {
           win_rate: 0,
           venues: [],
         }
-        return <AssetClassSlice key={ac} tile={tile} />
+        return <AssetClassSlice key={ac} tile={tile} onReset={onReset} />
       })}
     </div>
   )

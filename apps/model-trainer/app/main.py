@@ -20,8 +20,8 @@ async def capabilities():
 
 @app.post("/train")
 async def train(req: TrainRequest):
-    asyncio.create_task(run_training(req))
-    return {"run_id": req.run_id, "status": "accepted"}
+    result = await run_training(req)
+    return result.model_dump()
 
 
 @app.get("/train/{run_id}")

@@ -1,5 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { modelsApi, type ModelKind, type ModelStatus } from '@/api/models'
+import {
+  modelsApi,
+  type ModelKind,
+  type ModelStatus,
+  type TrainDataSelection,
+} from '@/api/models'
 
 export const MODEL_KEYS = {
   all: ['models'] as const,
@@ -12,6 +17,7 @@ export const MODEL_KEYS = {
   deployments: (id: string) => ['models', id, 'deployments'] as const,
   usedBy: (id: string) => ['models', id, 'used-by'] as const,
   forNode: (kind: ModelKind) => ['models', 'for-node', kind] as const,
+  testCases: (id: string) => ['models', id, 'test-cases'] as const,
 }
 
 export function useModels(filters?: {
@@ -128,6 +134,14 @@ export function useArchiveModel() {
   })
 }
 
+export function useMarketInstruments() {
+  return useQuery({
+    queryKey: ['market', 'instruments'],
+    queryFn: () => modelsApi.marketInstruments().then((r) => r.data.instruments),
+    staleTime: 30_000,
+  })
+}
+
 export function useStartTrain(id: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -135,6 +149,7 @@ export function useStartTrain(id: string) {
       dataset_id?: string
       version_note?: string
       hyperparams?: Record<string, unknown>
+      data?: TrainDataSelection
     }) => modelsApi.startTrain(id, body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: MODEL_KEYS.runs(id) })
@@ -184,6 +199,35 @@ export function useRollback(modelId: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: MODEL_KEYS.aliases(modelId) })
       void qc.invalidateQueries({ queryKey: MODEL_KEYS.deployments(modelId) })
+    },
+  })
+}
+
+export function useTestCases(id: string) {
+  return useQuery({
+    queryKey: MODEL_KEYS.testCases(id),
+    queryFn: () => modelsApi.listTestCases(id).then((r) => r.data.test_cases),
+    enabled: !!id,
+  })
+}
+
+export function useAddTestCase(modelId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { name: string; input: unknown; expected?: unknown }) =>
+      modelsApi.addTestCase(modelId, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: MODEL_KEYS.testCases(modelId) })
+    },
+  })
+}
+
+export function useDeleteTestCase(modelId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (caseId: string) => modelsApi.deleteTestCase(modelId, caseId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: MODEL_KEYS.testCases(modelId) })
     },
   })
 }

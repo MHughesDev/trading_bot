@@ -44,10 +44,15 @@ impl RetrainScheduler {
         for (model_id, _def_json, created_by) in rows {
             let req = TrainRequest {
                 dataset_version_id: None,
-                hyperparameter_overrides: Some(serde_json::json!({
-                    "triggered_by": "auto_retrain",
-                    "date": Utc::now().date_naive().to_string(),
-                })),
+                // Auto-retrain reuses the model definition's baked-in
+                // hyperparameters; no per-run overrides.
+                hyperparameter_overrides: None,
+                version_note: Some(format!(
+                    "auto-retrain {}",
+                    Utc::now().date_naive()
+                )),
+                // Auto-retrain reuses the model definition's data defaults.
+                data: None,
             };
 
             if let Err(e) = self.manager.start_train(&model_id, created_by, req).await {

@@ -17,6 +17,24 @@ interface Props {
   modelId: string
 }
 
+// Headline quality metrics shown first; everything else (n_train, …) follows.
+const METRIC_PRIORITY = [
+  'val_auc',
+  'accuracy',
+  'val_accuracy',
+  'val_logloss',
+  'rmse',
+  'mae',
+  'val_rmse',
+  'val_mae',
+  'val_r2',
+  'val_directional_accuracy',
+  'test_auc',
+  'test_accuracy',
+  'test_rmse',
+  'test_mae',
+]
+
 function PromoteModal({
   version,
   modelId,
@@ -148,7 +166,23 @@ function VersionRow({
   const evaluateMut = useEvaluateVersion(modelId)
 
   const isProduction = version.version === productionVersion
-  const metricEntries = version.metrics ? Object.entries(version.metrics) : []
+  // Metrics carry mixed types now (objective string, feature_importance object,
+  // best_iteration null, …). Only numeric ones are displayable; surface the
+  // headline quality metrics first.
+  const metricEntries: Array<[string, number]> = (
+    version.metrics ? Object.entries(version.metrics) : []
+  )
+    .filter(
+      (e): e is [string, number] =>
+        typeof e[1] === 'number' && Number.isFinite(e[1]),
+    )
+    .sort((a, b) => {
+      const rank = (k: string) => {
+        const i = METRIC_PRIORITY.indexOf(k)
+        return i === -1 ? METRIC_PRIORITY.length : i
+      }
+      return rank(a[0]) - rank(b[0])
+    })
 
   return (
     <>

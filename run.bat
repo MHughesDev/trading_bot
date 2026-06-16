@@ -6,10 +6,10 @@ title Trading Bot
 :: ----------------------------------------------------------------
 ::  run.bat -- one-command startup for the trading platform
 ::  Usage:  run.bat
-::  Stop:   Ctrl+C in this window
+::  Stop:   Ctrl+C in this window, then close the frontend window
 :: ----------------------------------------------------------------
 
-:: Add default Rust install location to PATH in case it's not in shell PATH
+set "ROOT=%~dp0"
 set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
 
 echo.
@@ -19,86 +19,82 @@ echo ==============================================================
 echo.
 
 :: ── 1. Rust ───────────────────────────────────────────────────
-where cargo >nul 2>&1
+where cargo >nul 2>nul
 if errorlevel 1 (
     echo [MISSING]  Rust / cargo not found.
-    echo.
-    echo   Install Rust by running this in PowerShell:
-    echo     winget install Rustlang.Rustup
-    echo   OR download the installer from https://rustup.rs
-    echo.
-    echo   After installing, close this window and run run.bat again.
+    echo            Install: winget install Rustlang.Rustup
     goto :fail
 )
-for /f "tokens=*" %%v in ('cargo --version 2^>^&1') do echo [OK]       %%v
+cargo --version
+echo [OK]       Rust found
 
 :: ── 2. Docker ─────────────────────────────────────────────────
-where docker >nul 2>&1
+where docker >nul 2>nul
 if errorlevel 1 (
-    echo [MISSING]  Docker not found.
-    echo            Install Docker Desktop from https://docker.com then re-run.
+    echo [MISSING]  Docker not found. Install Docker Desktop.
     goto :fail
 )
-docker info >nul 2>&1
+docker info >nul 2>nul
 if errorlevel 1 (
-    echo [OFFLINE]  Docker is installed but not running.
-    echo            Start Docker Desktop, wait for it to be ready, then re-run.
+    echo [OFFLINE]  Docker is installed but not running. Start Docker Desktop.
     goto :fail
 )
-for /f "tokens=*" %%v in ('docker --version 2^>^&1') do echo [OK]       %%v
+docker --version
+echo [OK]       Docker running
 
 :: ── 3. sqlx-cli ───────────────────────────────────────────────
-where sqlx >nul 2>&1
+where sqlx >nul 2>nul
 if errorlevel 1 (
-    echo [INSTALLING] sqlx-cli not found -- installing now (this takes a few minutes)...
+    echo [INSTALLING] sqlx-cli not found -- installing now...
     cargo install sqlx-cli --no-default-features --features postgres
     if errorlevel 1 (
-        echo [FAIL] sqlx-cli install failed. Check your internet connection.
+        echo [FAIL] sqlx-cli install failed.
         goto :fail
     )
-    echo [OK]       sqlx-cli installed
-) else (
-    for /f "tokens=*" %%v in ('sqlx --version 2^>^&1') do echo [OK]       %%v
 )
+sqlx --version
+echo [OK]       sqlx-cli found
 
 :: ── 4. .env file ──────────────────────────────────────────────
-if not exist ".env" (
-    echo [SETUP]    .env not found -- copying from .env.example
-    copy .env.example .env >nul
-    echo [OK]       .env created. Edit it to add API keys if needed.
+if not exist "%ROOT%.env" (
+    if exist "%ROOT%.env.example" (
+        copy "%ROOT%.env.example" "%ROOT%.env" >nul
+        echo [SETUP]    .env created from .env.example
+    ) else (
+        echo [WARN]     No .env or .env.example found
+    )
 ) else (
     echo [OK]       .env present
 )
 
-:: ── 5. Infrastructure (Docker Compose) ───────────────────────
+:: ── 5. Infrastructure (Docker Compose) ────────────────────────
 echo.
 echo -- Starting infrastructure services ---------------------
+cd /d "%ROOT%"
 docker compose up -d
 if errorlevel 1 (
     echo [FAIL]  docker compose up failed.
     goto :fail
 )
 
-:: ── 6. Wait for all services to be healthy ────────────────────
+:: ── 6. Wait for services to be healthy ────────────────────────
 echo.
 echo -- Waiting for services to be healthy -------------------
 set /a attempts=0
 :wait_loop
     set /a attempts+=1
     if !attempts! gtr 60 (
-        echo [FAIL]  Services not healthy after 60s.
-        echo         Run: docker compose logs
+        echo [FAIL]  Services not healthy after 60s. Run: docker compose logs
         goto :fail
     )
 
-    for /f %%c in ('docker compose ps --format "{{.Health}}" 2^>nul ^| findstr /i "starting unhealthy" ^| find /c /v ""') do set unready=%%c
+    docker compose ps 2>nul | findstr /i "starting\|unhealthy" >nul 2>nul
+    if not errorlevel 1 (
+        echo        Waiting... (!attempts!/60^)
+        timeout /t 2 /nobreak >nul
+        goto :wait_loop
+    )
 
-    if "!unready!"=="0" goto :services_ready
-    echo        Waiting... (!attempts!/60)
-    timeout /t 1 >nul
-    goto :wait_loop
-
-:services_ready
 echo [OK]       All services healthy
 
 :: ── 7. Database migrations ────────────────────────────────────
@@ -108,36 +104,51 @@ set DATABASE_URL=postgres://trading:trading@localhost:5432/trading
 sqlx migrate run
 if errorlevel 1 (
     echo [FAIL]  Migrations failed.
-    echo         Check Postgres is running: docker compose ps
     goto :fail
 )
 echo [OK]       Migrations up to date
 
-:: ── 8. Build (incremental -- fast after first build) ─────────
+:: ── 8. Build ──────────────────────────────────────────────────
 echo.
 echo -- Building platform ------------------------------------
 cargo build -p platform
 if errorlevel 1 (
-    echo [FAIL]  Build failed. Fix compile errors above then re-run.
+    echo [FAIL]  Build failed.
     goto :fail
 )
 echo [OK]       Build successful
 
-:: ── 9. Launch ─────────────────────────────────────────────────
+:: ── 9. Launch frontend in a new window ────────────────────────
+echo.
+echo -- Starting React frontend ------------------------------
+if not exist "%ROOT%frontend\node_modules" (
+    echo [SETUP]    Installing npm dependencies...
+    cd /d "%ROOT%frontend"
+    npm install
+    cd /d "%ROOT%"
+)
+start "Trading Bot - Frontend :5173" cmd /k "cd /d "%ROOT%frontend" && npm run dev"
+echo [OK]       Frontend starting at http://localhost:5173
+
+:: ── 10. Run platform ──────────────────────────────────────────
 echo.
 echo ==============================================================
 echo   All checks passed. Starting trading platform...
 echo   API:       http://localhost:8080
-echo   WebSocket: ws://localhost:8081
-echo   Press Ctrl+C to stop
+echo   Frontend:  http://localhost:5173  (separate window)
+echo   Press Ctrl+C to stop  (close frontend window separately)
 echo ==============================================================
 echo.
 
 cargo run -p platform
+goto :end
 
 :fail
 echo.
 echo [STOPPED]  Fix the issues above and re-run.
 echo.
 pause
+exit /b 1
+
+:end
 endlocal

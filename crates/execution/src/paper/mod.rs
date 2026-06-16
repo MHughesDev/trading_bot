@@ -45,7 +45,9 @@ pub use broker::PaperBroker;
 pub use broker_quote::BrokerQuoteFillSimulator;
 pub use clob::ClobFillSimulator;
 pub use dispatch::MultiAssetPaperBroker;
-pub use engine::{PaperEngineConfig, PaperOrderRecord, PaperTradingEngine, SimulatorSet};
+pub use engine::{
+    PaperEngineConfig, PaperOrderRecord, PaperOrderView, PaperTradingEngine, SimulatorSet,
+};
 pub use ledger::{PaperLedgerEntry, PaperLedgerKind};
 pub use policy::{AccountKind, AccountPolicy, ALL_ASSET_CLASSES};
 pub use prediction::PredictionMarketFillSimulator;

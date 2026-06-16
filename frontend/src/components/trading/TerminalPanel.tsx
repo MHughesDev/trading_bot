@@ -3,13 +3,13 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { PositionsPanel } from '@/panels/PositionsPanel'
 import { useModeStore } from '@/store/mode'
-import { useAuthStore } from '@/store/auth'
-import { tradeApi, portfolioApi } from '@/lib/api'
+import { tradeApi, paperApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import type { OrderStatus } from '@/lib/types'
 import { ChevronDown, ChevronRight as ChevronRightIcon } from 'lucide-react'
+
+// Shared react-query key for an instrument's paper activity (orders + position).
+const activityKey = (instrument: string) => ['paper-activity', instrument]
 
 // ── Asset-class helpers ────────────────────────────────────────────────────────
 
@@ -178,8 +178,7 @@ function OrderTicket({
       return tradeApi.order(body)
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['orders', instrument] })
-      void qc.invalidateQueries({ queryKey: ['positions'] })
+      void qc.invalidateQueries({ queryKey: activityKey(instrument) })
       setQty('')
       setLimitPrice('')
       setTpPrice('')
@@ -310,29 +309,56 @@ function OrderTicket({
   )
 }
 
+// ── Paper activity hook ─────────────────────────────────────────────────────────
+
+function useInstrumentActivity(instrument: string) {
+  return useQuery({
+    queryKey: activityKey(instrument),
+    queryFn: () => paperApi.instrumentActivity(instrument).then((r) => r.data),
+    refetchInterval: 4000,
+  })
+}
+
+// ── Positions ────────────────────────────────────────────────────────────────────
+
+function TerminalPositions({ instrument }: { instrument: string }) {
+  const { data } = useInstrumentActivity(instrument)
+  const pos = data?.position
+
+  if (!pos) {
+    return <div className="px-3 py-2 text-xs text-text-dim">No open position</div>
+  }
+
+  const qtyNum = parseFloat(pos.quantity)
+  return (
+    <div className="px-3 py-2">
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-mono text-text">{pos.instrument_id}</span>
+        <span className={cn('font-mono', qtyNum >= 0 ? 'text-green-400' : 'text-red-400')}>
+          {pos.quantity}
+        </span>
+        <span className="text-text-muted">@ {pos.average_entry_price}</span>
+      </div>
+    </div>
+  )
+}
+
 // ── Working orders ─────────────────────────────────────────────────────────────
 
 function WorkingOrders({ instrument }: { instrument: string }) {
-  const { data } = useQuery({
-    queryKey: ['orders', instrument],
-    queryFn: () => portfolioApi.transactions({ symbol: instrument }).then((r) => r.data),
-    refetchInterval: 5000,
-  })
-
-  const orders: OrderStatus[] = Array.isArray(data)
-    ? (data as OrderStatus[]).filter((o) => o.status === 'working' || o.status === 'pending')
-    : []
+  const { data } = useInstrumentActivity(instrument)
+  const orders = (data?.orders ?? []).filter(
+    (o) => o.status === 'new' || o.status === 'partially_filled',
+  )
 
   if (orders.length === 0) {
-    return (
-      <div className="px-3 py-2 text-xs text-text-dim">No working orders</div>
-    )
+    return <div className="px-3 py-2 text-xs text-text-dim">No working orders</div>
   }
 
   return (
     <div className="px-3 py-2 space-y-1">
       {orders.map((o) => (
-        <div key={o.id} className="flex items-center justify-between text-xs">
+        <div key={o.order_id} className="flex items-center justify-between text-xs">
           <span
             className={cn(
               'font-semibold uppercase',
@@ -353,26 +379,19 @@ function WorkingOrders({ instrument }: { instrument: string }) {
 // ── Fills ──────────────────────────────────────────────────────────────────────
 
 function Fills({ instrument }: { instrument: string }) {
-  const { data } = useQuery({
-    queryKey: ['fills', instrument],
-    queryFn: () => portfolioApi.transactions({ symbol: instrument }).then((r) => r.data),
-    refetchInterval: 10000,
-  })
-
-  const fills: OrderStatus[] = Array.isArray(data)
-    ? (data as OrderStatus[]).filter((o) => o.status === 'filled')
-    : []
+  const { data } = useInstrumentActivity(instrument)
+  const fills = (data?.orders ?? []).filter(
+    (o) => o.status === 'filled' || o.status === 'partially_filled',
+  )
 
   if (fills.length === 0) {
-    return (
-      <div className="px-3 py-2 text-xs text-text-dim">No fills</div>
-    )
+    return <div className="px-3 py-2 text-xs text-text-dim">No fills</div>
   }
 
   return (
     <div className="px-3 py-2 space-y-1 max-h-40 overflow-y-auto">
       {fills.slice(0, 20).map((o) => (
-        <div key={o.id} className="flex items-center justify-between text-xs">
+        <div key={o.order_id} className="flex items-center justify-between text-xs">
           <span
             className={cn(
               'font-semibold uppercase',
@@ -381,9 +400,12 @@ function Fills({ instrument }: { instrument: string }) {
           >
             {o.side}
           </span>
-          <span className="font-mono text-text">{o.qty}</span>
+          <span className="font-mono text-text">{o.filled_qty}</span>
+          <span className="text-text-muted">
+            {o.avg_fill_price ? `@ ${parseFloat(o.avg_fill_price).toLocaleString()}` : '—'}
+          </span>
           <span className="text-text-dim">
-            {new Date(o.created_at).toLocaleTimeString()}
+            {new Date(o.updated_at).toLocaleTimeString()}
           </span>
         </div>
       ))}
@@ -432,8 +454,6 @@ export function TerminalPanel({
   instrument,
   assetClass = 'crypto_spot_cex',
 }: TerminalPanelProps) {
-  const { user } = useAuthStore()
-
   return (
     <div className="flex flex-col h-full">
       <CollapsibleSection title="Order">
@@ -441,7 +461,7 @@ export function TerminalPanel({
       </CollapsibleSection>
 
       <CollapsibleSection title="Positions">
-        {user ? <PositionsPanel userId={user.id} /> : null}
+        <TerminalPositions instrument={instrument} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Working orders">

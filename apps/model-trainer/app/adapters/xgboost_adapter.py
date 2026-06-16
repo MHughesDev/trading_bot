@@ -3,88 +3,106 @@ import tempfile
 import numpy as np
 import xgboost as xgb
 
-from .base import split_label, train_val_split
-
-
-def _binarize(y):
-    """Coerce y to a binary 0/1 label. If continuous (>2 unique), split at median."""
-    nunique = y.nunique(dropna=True)
-    if nunique > 2:
-        y = (y > y.median()).astype(int)
-    else:
-        y = y.astype(int)
-    return y
+from .. import engine
 
 
 def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
-    hp = definition.get("hyperparameters", {}) or {}
-
-    X, y = split_label(df)
-    y = _binarize(y)
-
-    X_tr, y_tr, X_val, y_val = train_val_split(X, y, frac=0.8)
-
-    dtrain = xgb.DMatrix(X_tr, label=y_tr)
-    dval = xgb.DMatrix(X_val, label=y_val)
+    engine.seed_everything(definition)
+    p = engine.prepare(definition, df)
+    hp = p.hp
 
     n_estimators = int(hp.get("n_estimators", 200))
-    max_depth = int(hp.get("max_depth", 6))
-    learning_rate = float(hp.get("learning_rate", 0.05))
-
     params = {
-        "objective": "binary:logistic",
-        "eval_metric": ["auc", "logloss"],
-        "max_depth": max_depth,
-        "eta": learning_rate,
+        "max_depth": int(hp.get("max_depth", 6)),
+        "eta": float(hp.get("learning_rate", 0.05)),
+        "subsample": float(hp.get("subsample", 1.0)),
+        "colsample_bytree": float(hp.get("colsample_bytree", 1.0)),
+        "min_child_weight": float(hp.get("min_child_weight", 1.0)),
+        "gamma": float(hp.get("gamma", 0.0)),
+        "reg_alpha": float(hp.get("reg_alpha", 0.0)),
+        "reg_lambda": float(hp.get("reg_lambda", 1.0)),
+        "seed": p.seed,
     }
+    if p.objective == "classification":
+        params.update(objective="binary:logistic", eval_metric=["auc", "logloss"])
+    else:
+        params.update(objective="reg:squarederror", eval_metric="rmse")
+
+    dtrain = xgb.DMatrix(p.X_tr, label=p.y_tr)
+    evals = [(dtrain, "train")]
+    dval = None
+    if len(p.X_val):
+        dval = xgb.DMatrix(p.X_val, label=p.y_val)
+        evals.append((dval, "validation"))
+
+    early = int(hp.get("early_stopping_rounds", 30)) if dval is not None else 0
+
+    class ProgressCallback(xgb.callback.TrainingCallback):
+        def after_iteration(self, model, epoch, evals_log):
+            if epoch % 10 == 0:
+                pct = (epoch / max(n_estimators, 1)) * 100.0
+                metric = {"round": epoch}
+                for dataset, metrics in evals_log.items():
+                    for name, vals in metrics.items():
+                        metric[f"{dataset}_{name}"] = float(vals[-1])
+                emit_progress("fitting", pct, metric)
+            return False
 
     evals_result: dict = {}
-
-    def callback(env):
-        i = env.iteration
-        if i % 10 == 0:
-            pct = (i / max(n_estimators, 1)) * 100.0
-            metric = {"round": i}
-            for name, vals in env.evaluation_result_list:
-                metric[name] = float(vals)
-            emit_progress("fitting", pct, metric)
-
     booster = xgb.train(
         params,
         dtrain,
         num_boost_round=n_estimators,
-        evals=[(dtrain, "train"), (dval, "validation")],
+        evals=evals,
         evals_result=evals_result,
-        callbacks=[callback],
+        early_stopping_rounds=early or None,
+        callbacks=[ProgressCallback()],
         verbose_eval=False,
     )
 
-    # Single-class guard for AUC
-    val_auc = None
-    val_logloss = None
-    try:
-        val_metrics = evals_result.get("validation", {})
-        if len(np.unique(y_val)) >= 2 and val_metrics.get("auc"):
-            val_auc = float(val_metrics["auc"][-1])
-        if val_metrics.get("logloss"):
-            val_logloss = float(val_metrics["logloss"][-1])
-    except Exception:
-        pass
+    def predict(X):
+        if len(X) == 0:
+            return np.array([])
+        return booster.predict(xgb.DMatrix(X))
 
-    feature_importance = {k: float(v) for k, v in booster.get_score(importance_type="gain").items()}
+    if p.objective == "classification":
+        parts = [
+            engine.classification_metrics("val", p.y_val, predict(p.X_val)),
+            engine.classification_metrics("test", p.y_te, predict(p.X_te)),
+        ]
+    else:
+        parts = [
+            engine.regression_metrics("val", p.y_val, predict(p.X_val)),
+            engine.regression_metrics("test", p.y_te, predict(p.X_te)),
+        ]
+
+    feature_importance = {
+        k: float(v) for k, v in booster.get_score(importance_type="gain").items()
+    }
+    metrics = engine.assemble_metrics(
+        p.objective,
+        parts,
+        framework_version=xgb.__version__,
+        n_train=len(p.X_tr),
+        n_val=len(p.X_val),
+        n_test=len(p.X_te),
+        extra={
+            "feature_importance": feature_importance,
+            "best_iteration": getattr(booster, "best_iteration", None),
+        },
+    )
 
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
         booster.save_model(tmp.name)
         tmp.flush()
         with open(tmp.name, "rb") as f:
-            artifact_bytes = f.read()
+            inner = f.read()
 
-    metrics = {
-        "val_auc": val_auc,
-        "val_logloss": val_logloss,
-        "n_train": int(len(X_tr)),
-        "n_val": int(len(X_val)),
-        "feature_importance": feature_importance,
-        "framework_version": xgb.__version__,
-    }
-    return artifact_bytes, metrics
+    bundle = engine.wrap_bundle(
+        inner,
+        framework="xgboost",
+        objective=p.objective,
+        feature_order=p.feature_order,
+        scaler=p.scaler,
+    )
+    return bundle, metrics

@@ -7,6 +7,8 @@ import pandas as pd
 from .schemas import TrainRequest, TrainResponse
 from .artifact_store import get_store
 from .nats_client import NatsPublisher
+from .clickhouse import fetch_bars
+from .features import build_training_frame
 from .adapters import xgboost_adapter, lightgbm_adapter, sklearn_adapter, torch_adapter, forecaster
 
 # In-memory result store keyed by run_id (Test Lab / polling fallback).
@@ -47,12 +49,16 @@ async def run_training(req: TrainRequest) -> TrainResponse:
     try:
         await publisher.publish(subject, {"run_id": req.run_id, "phase": "loading_dataset", "progress": 5.0})
         store = get_store()
-        try:
-            raw = store.get(req.dataset_uri)
-            df = pd.read_parquet(io.BytesIO(raw))
-        except Exception:
-            # Dataset may be a stub URI in dev — synthesize a deterministic frame.
-            df = _synthetic_frame()
+        df = _load_dataframe(req)
+
+        # Embargo gap (in bars) between train/val/test so a row's forward-return
+        # label can't leak into the next split. Resolved from the data selection.
+        if req.data is not None:
+            from .features import horizon_in_bars
+
+            req.definition["_embargo_bars"] = horizon_in_bars(
+                req.data.label_horizon, req.data.timeframe
+            )
 
         train_fn = _route(req.framework, req.model_kind)
 
@@ -89,6 +95,45 @@ async def run_training(req: TrainRequest) -> TrainResponse:
 
     RESULTS[req.run_id] = resp
     return resp
+
+
+def _load_dataframe(req: TrainRequest) -> pd.DataFrame:
+    """Resolve the training frame.
+
+    When the request carries a `data` selection, pull real bars from ClickHouse
+    for each instrument, compute the requested features + forward-return label,
+    and concatenate. Fails loudly if the selection yields no usable rows — we do
+    NOT silently fall back to synthetic data when real data was requested.
+
+    When there is no `data` selection (legacy/back-compat path), try the dataset
+    URI and otherwise synthesize a deterministic frame.
+    """
+    if req.data is not None:
+        spec = req.data
+        frames: list[pd.DataFrame] = []
+        for inst in spec.instruments:
+            bars = fetch_bars(inst, spec.timeframe, spec.start, spec.end)
+            frame = build_training_frame(
+                bars, spec.features, spec.timeframe, spec.label_horizon
+            )
+            if not frame.empty:
+                frames.append(frame)
+        if not frames:
+            raise ValueError(
+                "no training rows from ClickHouse for "
+                f"instruments={spec.instruments} timeframe={spec.timeframe} "
+                f"window={spec.start}..{spec.end} — widen the lookback or pick an "
+                "instrument with stored bars"
+            )
+        return pd.concat(frames, ignore_index=True)
+
+    # Legacy path: no explicit selection.
+    store = get_store()
+    try:
+        raw = store.get(req.dataset_uri)
+        return pd.read_parquet(io.BytesIO(raw))
+    except Exception:
+        return _synthetic_frame()
 
 
 def _synthetic_frame(n: int = 500):

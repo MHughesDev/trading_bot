@@ -24,6 +24,7 @@ use domain::{
     order::{OrderIntent, OrderType, TimeInForce},
 };
 use rust_decimal::Decimal;
+use serde::Serialize;
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -261,6 +262,60 @@ impl PaperOrderRecord {
     }
 }
 
+/// Serializable, instrument-scoped view of a paper order for the trading
+/// terminal (working orders + fills).
+#[derive(Clone, Debug, Serialize)]
+pub struct PaperOrderView {
+    pub order_id: String,
+    pub instrument_id: String,
+    pub asset_class: String,
+    pub side: String,
+    pub order_type: String,
+    pub qty: Decimal,
+    pub filled_qty: Decimal,
+    pub avg_fill_price: Option<Decimal>,
+    /// new | partially_filled | filled | cancelled | rejected
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl PaperOrderView {
+    fn from_record(r: &PaperOrderRecord) -> Self {
+        use domain::order::{OrderType, Side};
+        let status = match &r.state {
+            BrokerOrderState::New => "new",
+            BrokerOrderState::PartiallyFilled => "partially_filled",
+            BrokerOrderState::Filled => "filled",
+            BrokerOrderState::Cancelled => "cancelled",
+            BrokerOrderState::Rejected => "rejected",
+            BrokerOrderState::Unknown(_) => "unknown",
+        };
+        let side = match r.intent.side {
+            Side::Buy => "buy",
+            Side::Sell => "sell",
+        };
+        let order_type = match r.intent.order_type {
+            OrderType::Market => "market",
+            OrderType::Limit => "limit",
+            OrderType::StopLimit => "stop_limit",
+        };
+        Self {
+            order_id: r.order_id.clone(),
+            instrument_id: r.intent.instrument_id.clone(),
+            asset_class: r.asset_class.as_str().to_owned(),
+            side: side.to_owned(),
+            order_type: order_type.to_owned(),
+            qty: r.intent.size.inner(),
+            filled_qty: r.filled_qty,
+            avg_fill_price: r.avg_fill_price.map(Price::inner),
+            status: status.to_owned(),
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+    }
+}
+
 /// Latest observed mark for one instrument.
 #[derive(Clone, Copy, Debug)]
 struct MarkEntry {
@@ -296,6 +351,9 @@ impl PaperEngineConfig {
 /// Internal paper execution venue covering every asset class.
 pub struct PaperTradingEngine {
     accounts: HashMap<AssetClass, Mutex<PaperAccount>>,
+    /// Starting cash each account was seeded with, so [`Self::reset_account`]
+    /// can restore the exact opening balance.
+    starting_cash: HashMap<AssetClass, Decimal>,
     /// Latest mark (price + observation time) per instrument id.
     marks: DashMap<String, MarkEntry>,
     /// Instrument id → asset class, registered by the data pipelines, so the
@@ -348,6 +406,7 @@ impl PaperTradingEngine {
         sims: SimulatorSet,
         config: PaperEngineConfig,
     ) -> Self {
+        let mut starting_cash = HashMap::new();
         let accounts = ALL_ASSET_CLASSES
             .into_iter()
             .map(|ac| {
@@ -355,6 +414,7 @@ impl PaperTradingEngine {
                     .get(&ac)
                     .copied()
                     .unwrap_or_else(|| AccountPolicy::for_asset_class(ac).default_starting_cash);
+                starting_cash.insert(ac, cash);
                 (ac, Mutex::new(PaperAccount::new(ac, cash)))
             })
             .collect();
@@ -364,6 +424,7 @@ impl PaperTradingEngine {
         );
         Self {
             accounts,
+            starting_cash,
             marks: DashMap::new(),
             instrument_classes: DashMap::new(),
             orders: DashMap::new(),
@@ -650,6 +711,87 @@ impl PaperTradingEngine {
             .lock()
             .expect("paper account lock")
             .transactions_since(since)
+    }
+
+    /// Every order the engine retains for `instrument_id` (open and terminal),
+    /// newest first.  Powers the trading-terminal working-orders and fills lists.
+    pub fn orders_for_instrument(&self, instrument_id: &str) -> Vec<PaperOrderView> {
+        let mut out: Vec<PaperOrderView> = self
+            .orders
+            .iter()
+            .filter(|r| r.intent.instrument_id == instrument_id)
+            .map(|r| PaperOrderView::from_record(&r))
+            .collect();
+        out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        out
+    }
+
+    // ── Reset (paper-only admin) ─────────────────────────────────────────────
+
+    /// Reset one asset-class account to its opening state: cash and equity back
+    /// to the seeded starting balance, all positions closed, and the entire
+    /// transaction journal wiped.  Orders belonging to this class are purged
+    /// from the engine's order/resting/idempotency maps.
+    pub fn reset_account(&self, asset_class: AssetClass) {
+        let cash = self
+            .starting_cash
+            .get(&asset_class)
+            .copied()
+            .unwrap_or_else(|| AccountPolicy::for_asset_class(asset_class).default_starting_cash);
+        {
+            let mut account = self.account(asset_class).lock().expect("paper account lock");
+            *account = PaperAccount::new(asset_class, cash);
+        }
+        self.purge_orders(|r| r.asset_class == asset_class);
+        info!(asset_class = %asset_class.as_str(), "paper account reset to opening balance");
+    }
+
+    /// Reset every paper account to its opening state and clear all order
+    /// bookkeeping.  Marks and the instrument→class registry are left intact —
+    /// they reflect live market data, not user funds.
+    pub fn reset_all(&self) {
+        for ac in ALL_ASSET_CLASSES {
+            let cash = self
+                .starting_cash
+                .get(&ac)
+                .copied()
+                .unwrap_or_else(|| AccountPolicy::for_asset_class(ac).default_starting_cash);
+            let mut account = self.account(ac).lock().expect("paper account lock");
+            *account = PaperAccount::new(ac, cash);
+        }
+        self.orders.clear();
+        self.resting.clear();
+        self.idempotency.clear();
+        self.terminal_fifo.lock().expect("terminal fifo lock").clear();
+        info!("all paper accounts reset to opening balances");
+    }
+
+    /// Remove every order matching `pred` from the order store, its resting
+    /// index, idempotency map, and the terminal FIFO.
+    fn purge_orders(&self, pred: impl Fn(&PaperOrderRecord) -> bool) {
+        let to_remove: Vec<(String, Uuid, String)> = self
+            .orders
+            .iter()
+            .filter(|r| pred(&r))
+            .map(|r| {
+                (
+                    r.order_id.clone(),
+                    r.intent.idempotency_key,
+                    r.intent.instrument_id.clone(),
+                )
+            })
+            .collect();
+        for (order_id, key, instrument_id) in &to_remove {
+            self.orders.remove(order_id);
+            self.idempotency.remove(key);
+            self.remove_from_resting(instrument_id, std::slice::from_ref(order_id));
+        }
+        let removed: std::collections::HashSet<&String> =
+            to_remove.iter().map(|(id, _, _)| id).collect();
+        self.terminal_fifo
+            .lock()
+            .expect("terminal fifo lock")
+            .retain(|id| !removed.contains(id));
     }
 
     // ── Internal admin operations (settlement / funding) ─────────────────────

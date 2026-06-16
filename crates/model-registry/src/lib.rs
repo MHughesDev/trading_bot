@@ -21,5 +21,6 @@ pub mod types;
 pub use inference_gateway::InferenceGateway;
 pub use manager::ModelManager;
 pub use types::{
-    CreateModelRequest, ModelRecord, ModelRunKind, ModelRunSnapshot, RunStatus, TrainRequest,
+    CreateModelRequest, ModelRecord, ModelRunKind, ModelRunSnapshot, RunStatus, TrainDataSelection,
+    TrainRequest,
 };

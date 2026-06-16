@@ -514,6 +514,20 @@ pub async fn add_test_case(
     }
 }
 
+/// DELETE /api/models/:id/test-cases/:case_id
+pub async fn delete_test_case(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path((id, case_id)): Path<(String, Uuid)>,
+) -> impl IntoResponse {
+    map_action(
+        state
+            .models
+            .delete_test_case(&id, case_id, token.user_id())
+            .await,
+    )
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TestInferenceRequest {
     #[serde(default)]
@@ -545,6 +559,112 @@ pub async fn test_inference(
             .test_inference(&id, version, token.user_id(), req.instances)
             .await,
     )
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FeatureVectorQuery {
+    #[serde(default)]
+    pub instrument_id: Option<String>,
+    #[serde(default)]
+    pub timeframe: Option<String>,
+}
+
+/// Lookback window (days) used to load enough warm-up bars for the timeframe.
+fn lookback_days_for(tf_key: &str) -> i64 {
+    match tf_key {
+        "1m" => 2,
+        "5m" => 10,
+        "15m" | "30m" => 30,
+        "1h" => 120,
+        "4h" => 365,
+        "1d" => 1095,
+        _ => 30,
+    }
+}
+
+/// GET /api/models/:id/feature-vector?instrument_id=&timeframe=
+///
+/// Returns the model's expected feature schema, computed from recent ClickHouse
+/// bars when an instrument + timeframe are given (so the Test Lab can prefill a
+/// realistic input), or zeros otherwise.
+pub async fn feature_vector(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<String>,
+    Query(q): Query<FeatureVectorQuery>,
+) -> impl IntoResponse {
+    use backtest::{BarStore, TimeframeExt};
+    use domain::payloads::bar::Timeframe;
+
+    let model = match state.models.get_model(&id, token.user_id()).await {
+        Ok(Some(m)) => m,
+        Ok(None) => return not_found(),
+        Err(e) => return unprocessable(e),
+    };
+
+    let fs_ref = model
+        .definition
+        .feature_set_ref
+        .clone()
+        .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string());
+    let names: Vec<String> = features::resolve_feature_set(&fs_ref)
+        .map(|s| s.features.clone())
+        .unwrap_or_default();
+
+    let instrument = q
+        .instrument_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let tf_key = q
+        .timeframe
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    if let (Some(inst), Some(tf_key)) = (instrument.as_deref(), tf_key.as_deref()) {
+        if let Some(tf) = <Timeframe as TimeframeExt>::from_key(tf_key) {
+            let store = BarStore::connect(&state.clickhouse_url);
+            let to = chrono::Utc::now();
+            let from = to - chrono::Duration::days(lookback_days_for(tf_key));
+            match store.load_bars(inst, tf, from, to).await {
+                Ok(bars) if !bars.is_empty() => {
+                    let feats = crate::features_compute::latest_vector(&bars, &names);
+                    let as_of_ms = bars.last().map_or(0, |b| b.ts_ns / 1_000_000);
+                    return Json(json!({
+                        "feature_set": fs_ref,
+                        "feature_order": names,
+                        "features": feats,
+                        "source": "computed",
+                        "instrument_id": inst,
+                        "timeframe": tf_key,
+                        "as_of_ms": as_of_ms,
+                        "bars_used": bars.len(),
+                    }))
+                    .into_response();
+                }
+                Ok(_) => {} // no stored bars — fall through to schema zeros
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": e.to_string() })),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
+
+    // Schema fallback: expected feature names with placeholder zeros.
+    let feats: serde_json::Map<String, serde_json::Value> =
+        names.iter().map(|n| (n.clone(), json!(0.0))).collect();
+    Json(json!({
+        "feature_set": fs_ref,
+        "feature_order": names,
+        "features": feats,
+        "source": "schema",
+    }))
+    .into_response()
 }
 
 // -- Lineage / traces / used-by --
