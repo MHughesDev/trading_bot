@@ -183,9 +183,10 @@ impl DatasetManager {
         let store = self.artifacts.clone();
         let bytes = parquet_bytes;
         let key_for_put = key.clone();
-        let artifact = tokio::task::spawn_blocking(move || store.put_blocking(&key_for_put, &bytes))
-            .await
-            .context("artifact put task panicked")??;
+        let artifact =
+            tokio::task::spawn_blocking(move || store.put_blocking(&key_for_put, &bytes))
+                .await
+                .context("artifact put task panicked")??;
         let parquet_uri = artifact.uri;
 
         // 6. Upsert dataset identity + version row.
@@ -246,7 +247,9 @@ impl DatasetManager {
 
     /// Look up a fully-populated record by `content_hash` (idempotent reuse).
     async fn find_by_hash(&self, content_hash: &str) -> Result<Option<DatasetVersionRecord>> {
-        let row = self.fetch_one_where("content_hash = $1", content_hash).await?;
+        let row = self
+            .fetch_one_where("content_hash = $1", content_hash)
+            .await?;
         Ok(row)
     }
 
@@ -254,8 +257,11 @@ impl DatasetManager {
         &self,
         dataset_version_id: Uuid,
     ) -> Result<Option<DatasetVersionRecord>> {
-        self.fetch_one_where("dataset_version_id = $1::uuid", &dataset_version_id.to_string())
-            .await
+        self.fetch_one_where(
+            "dataset_version_id = $1::uuid",
+            &dataset_version_id.to_string(),
+        )
+        .await
     }
 
     /// Shared row → record loader for the single-column lookups above.
@@ -406,9 +412,11 @@ impl FrameAccumulator {
     /// Encode the accumulated columns as a single Parquet buffer. Schema:
     /// `ts_ns: Int64, instrument: Utf8, <feature: Float64>…, label: Float64`.
     fn encode_parquet(&self) -> Result<Vec<u8>> {
-        use arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray};
-        use arrow::datatypes::{DataType, Field, Schema};
-        use arrow::record_batch::RecordBatch;
+        use arrow::{
+            array::{ArrayRef, Float64Array, Int64Array, StringArray},
+            datatypes::{DataType, Field, Schema},
+            record_batch::RecordBatch,
+        };
         use parquet::arrow::ArrowWriter;
 
         let mut fields = vec![
@@ -424,7 +432,10 @@ impl FrameAccumulator {
         let mut arrays: Vec<ArrayRef> = vec![
             Arc::new(Int64Array::from(self.ts_ns.clone())),
             Arc::new(StringArray::from(
-                self.instrument.iter().map(String::as_str).collect::<Vec<_>>(),
+                self.instrument
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
             )),
         ];
         for col in &self.columns {
@@ -432,13 +443,13 @@ impl FrameAccumulator {
         }
         arrays.push(Arc::new(Float64Array::from(self.label.clone())));
 
-        let batch = RecordBatch::try_new(schema.clone(), arrays)
-            .context("arrow record batch assembly")?;
+        let batch =
+            RecordBatch::try_new(schema.clone(), arrays).context("arrow record batch assembly")?;
 
         let mut buf: Vec<u8> = Vec::new();
         {
-            let mut writer = ArrowWriter::try_new(&mut buf, schema, None)
-                .context("parquet writer init")?;
+            let mut writer =
+                ArrowWriter::try_new(&mut buf, schema, None).context("parquet writer init")?;
             writer.write(&batch).context("parquet write")?;
             writer.close().context("parquet finalize")?;
         }

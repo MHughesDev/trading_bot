@@ -202,7 +202,10 @@ fn compute_column(name: &str, bars: &[OhlcvRow], close: &[f64]) -> Vec<Option<f6
                 return vec![None; n];
             }
             let mut rsi = Rsi::new(period);
-            close.iter().map(|&c| rsi.update(c).and_then(finite)).collect()
+            close
+                .iter()
+                .map(|&c| rsi.update(c).and_then(finite))
+                .collect()
         }
         _ if name.starts_with("rolling_mean_") => {
             let w = suffix_usize(name, "rolling_mean_").unwrap_or(0);

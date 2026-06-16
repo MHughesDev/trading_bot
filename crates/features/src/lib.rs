@@ -14,14 +14,13 @@ pub mod training_frame;
 pub mod walk_forward;
 pub mod window;
 
+use chrono::{DateTime, Utc};
 pub use ema::{Ema, EMA_FEATURE_VERSION};
 pub use feature_sets::resolve as resolve_feature_set;
 pub use rsi::{Rsi, RSI_FEATURE_VERSION};
 pub use training_frame::{build_training_frame, label_horizon_bars, OhlcvRow, TrainingFrame};
 pub use walk_forward::{walk_forward_folds, Fold, FoldError};
 pub use window::Window;
-
-use chrono::{DateTime, Utc};
 
 /// A computed indicator value carrying its algorithm version and availability time.
 ///
