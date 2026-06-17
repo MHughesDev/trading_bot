@@ -19,9 +19,12 @@
 //! for the tighten-only invariant.
 
 pub mod actions;
+pub mod inference_output;
 pub mod inputs;
 pub mod nodes;
 pub mod risk_overrides;
+
+pub use inference_output::InferenceOutput;
 
 use serde::{Deserialize, Serialize};
 

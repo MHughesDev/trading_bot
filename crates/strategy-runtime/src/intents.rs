@@ -33,6 +33,10 @@ pub fn build_intent_from_action(
         }
         // PercentOfBalance and RiskUnit are v1.0 parse-only; not executable yet.
         SizeMode::PercentOfBalance | SizeMode::RiskUnit => None,
+        // Model sizing (v1.1): the size fraction comes from a Sizing node's
+        // InferenceOutput.size_fraction.  Phase 2 will wire this through the
+        // intents builder; for now it is schema-valid but not yet executed.
+        SizeMode::Model { .. } => None,
     }
 }
 

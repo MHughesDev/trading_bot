@@ -108,10 +108,22 @@ pub fn evaluate_universe_pipeline(nodes: &[Node], initial_universe: Universe) ->
                     node_outputs.insert(node.id.clone(), Arc::clone(universe));
                 }
             }
-            // v1.0 and v1.1 nodes — not part of the universe pipeline.
+            // Signal/condition/AI nodes — not part of the universe pipeline.
             NodeKind::Condition { .. }
             | NodeKind::Signal { .. }
-            | NodeKind::ModelForecast { .. } => {}
+            | NodeKind::ModelForecast { .. }
+            | NodeKind::Inference { .. }
+            | NodeKind::Sizing { .. }
+            | NodeKind::Decision { .. }
+            | NodeKind::LlmInference { .. }
+            | NodeKind::Combine { .. } => {}
+            // ModelRank is the AI-powered universe-pipeline ranking node (Phase 3).
+            // For now treat it as a pass-through (no scoring model wired yet).
+            NodeKind::ModelRank { input, .. } => {
+                if let Some(universe) = node_outputs.get(input) {
+                    node_outputs.insert(node.id.clone(), Arc::clone(universe));
+                }
+            }
         }
     }
 
