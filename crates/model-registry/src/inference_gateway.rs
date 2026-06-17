@@ -139,7 +139,9 @@ impl InferenceGateway {
         };
 
         // Resolve alias → version.
-        let version = if let Some(v) = self.resolve_alias(&model_id, effective_alias).await { v } else {
+        let version = if let Some(v) = self.resolve_alias(&model_id, effective_alias).await {
+            v
+        } else {
             warn!("alias '{effective_alias}' not found for model {model_id}");
             self.write_trace(&model_id, 0, instrument_id, 0, "abstain")
                 .await;
@@ -174,7 +176,9 @@ impl InferenceGateway {
         .ok()
         .flatten();
 
-        let (artifact_uri, artifact_hash, model_kind) = if let Some(row) = artifact_row { row } else {
+        let (artifact_uri, artifact_hash, model_kind) = if let Some(row) = artifact_row {
+            row
+        } else {
             warn!("artifact not found for model {model_id} v{version}");
             self.write_trace(&model_id, version, instrument_id, 0, "abstain")
                 .await;
@@ -349,7 +353,9 @@ impl InferenceGateway {
         features: &HashMap<String, f64>,
     ) -> Option<ForecastResult> {
         let (artifact_uri, artifact_hash, version) =
-            if let Some(t) = self.resolve_ensemble_artifact(ensemble_ref, alias).await { t } else {
+            if let Some(t) = self.resolve_ensemble_artifact(ensemble_ref, alias).await {
+                t
+            } else {
                 warn!(
                     ensemble = ensemble_ref,
                     alias, "ensemble alias not found — abstaining"

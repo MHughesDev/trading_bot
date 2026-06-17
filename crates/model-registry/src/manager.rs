@@ -1314,7 +1314,8 @@ impl ModelManager {
             .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string());
         let instruments = data
             .as_ref()
-            .filter(|d| !d.instruments.is_empty()).map_or_else(|| vec!["BTC-USD".to_string()], |d| d.instruments.clone());
+            .filter(|d| !d.instruments.is_empty())
+            .map_or_else(|| vec!["BTC-USD".to_string()], |d| d.instruments.clone());
         let timeframe = data
             .as_ref()
             .map_or_else(|| "1m".to_string(), |d| d.timeframe.clone());

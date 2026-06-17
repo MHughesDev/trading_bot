@@ -80,7 +80,9 @@ pub async fn query_leaderboard(
                 created_at,
             )| {
                 let m = metrics.as_ref();
-                let crps = m.and_then(|v| v.get("crps")).and_then(serde_json::Value::as_f64);
+                let crps = m
+                    .and_then(|v| v.get("crps"))
+                    .and_then(serde_json::Value::as_f64);
                 let crps_deflated = m
                     .and_then(|v| v.get("crps_deflated"))
                     .and_then(serde_json::Value::as_f64);

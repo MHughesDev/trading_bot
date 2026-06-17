@@ -422,13 +422,16 @@ impl PipelineManager {
             anyhow::bail!("pipeline {pipeline_id} is a template and cannot be run directly");
         }
 
-        let cells = def.matrix.as_ref().map_or_else(|| {
-            vec![MatrixCell {
-                asset: None,
-                timeframe: None,
-                window: None,
-            }]
-        }, domain::PipelineMatrix::cells);
+        let cells = def.matrix.as_ref().map_or_else(
+            || {
+                vec![MatrixCell {
+                    asset: None,
+                    timeframe: None,
+                    window: None,
+                }]
+            },
+            domain::PipelineMatrix::cells,
+        );
 
         let cell_count = cells.len();
 
