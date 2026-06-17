@@ -1,13 +1,17 @@
 # Backtest Suite — Honest-Evaluation Core — Set J
 
-**Completion: 64% (38 / 59 primary tasks)**
+**Completion: 91% (54 / 59 primary tasks)**
 
-**Status:** IN PROGRESS — Phases 0–3 shipped (object model + sealed Study layer +
-Experiment/counter/vault + Null Library, in `crates/backtest/src/{run,study,experiment,nulls}/`;
-126 tests green; ADR-0019 & ADR-0020 Accepted). Phases 4–5 (staged-gate funnel,
-reconciliation/UX) remain. 6 phases (0–5) total. Object model
-(Run/Study/Experiment) + Null Library + staged-gate funnel, layered on the
-existing `crates/backtest` Run engine. End-state design.
+**Status:** IN PROGRESS — Phases 0–4 shipped and Phase 5's backend shipped (object
+model + sealed Study layer + Experiment/counter/vault + Null Library + staged-gate
+funnel + significance math + reconciliation/calibration, in
+`crates/backtest/src/{run,study,experiment,nulls,gates,stats,reconcile}/`; 139 lib
++ 10 integration tests green; ADR-0019/0020/0021 Accepted). **Remaining:** the
+Phase 5 UI integration leg only — the REST/WS surface (J-5.4) and the React
+workbench (J-5.5–J-5.8); the Rust computations they consume are done and tested.
+6 phases (0–5) total. Object model (Run/Study/Experiment) + Null Library +
+staged-gate funnel, layered on the existing `crates/backtest` Run engine.
+End-state design.
 **Created:** 2026-06-17
 **Scope class:** End-state architecture (NOT an MVP cut — every subsystem is
 specified at full fidelity; phases are build-ordering, not feature-gating).
@@ -304,3 +308,5 @@ untouched.
 | 2026-06-17 | 1 | J-1.1–J-1.10 | **Phase 1 complete.** `crates/backtest/src/study/`: `StudyConfig`/`VarySpec`/`StudyKind` + kind↔vary validation, sealed `StudyResult`/`Distribution` (no best-member API), `StudyEngine` fan-out with `trial_delta` counting all members (cache hits + failures), pre-declared `SelectionRule`→`carried_forward` (never argmax), all 10 study kinds (sweep/neighborhood/walk-forward/CPCV/nested/permutation/synthetic/cost-sweep/regime/trade-MC), `combinations`/`cpcv_assignments` with disjoint-partition property test, `StudyStore` (+ `migrations/0027`), and the INV-2 adversarial suite (`tests/sealed_distributions.rs`). 3 integration tests green. Deferred live leg: Pg-backed study persistence (J-1.9). |
 | 2026-06-17 | 2 | J-2.1–J-2.9 | **Phase 2 complete.** `crates/backtest/src/experiment/`: `Experiment` aggregate with a private monotonic `trial_counter` (only `record_study` adds; no reset/decrement), `run_study` as the sole attached-Study entry (auto-increments before returning), `ExperimentState` one-directional lifecycle (`allows`/`transition`), holdout lock (research Studies intersecting the vault tail are refused), one-shot self-sealing `run_vault` (spent-first refusal, gate3 precondition, unsafe-barred, logs access, validates), immutable up-front `primary_test`, `unsafe` propagation, `ExperimentStore` + `migrations/0028` (triggers enforce monotonicity / no-unspend / no-return-to-candidate). |
 | 2026-06-17 | 3 | J-3.1–J-3.9 | **Phase 3 complete.** ADR-0020 Accepted. `crates/backtest/src/nulls/`: `Null` contract (content-addressed `null_id`, non-empty `preserves`/`destroys`) + `NullGenerator` trait + all 7 generators (signal_return_decouple, block_permutation, stationary_bootstrap, bar_permutation, synthetic_garch, regime_block, random_entry_matched), each with a property test on what it keeps/breaks; `recommend_null` (prompt) + `NullChoice` (override needs a logged reason); `NullStore` + `migrations/0029`; INV-3 `SignificanceResult` seam (no constructor omits null or trial count). 126 lib+integration tests green; lib clippy clean. |
+| 2026-06-17 | 4 | J-4.1–J-4.12 | **Phase 4 complete.** ADR-0021 Accepted. `crates/backtest/src/gates/` + `src/stats/`: `Gate`/`GateLedger`/`GateRunner` with prerequisite-enforced ordering; Gate 0 integrity (close-stamp leak scan + cost-floor + label-overlap, hard stop); Gate 1 single-path; Gate 2 distribution-shape robustness (CPCV+synthetic+neighborhood); Gate 3 primary permutation p + Šidák selection-bias correction → INV-3 `SignificanceResult`, with DSR (PSR + expected-max-Gaussian, normal CDF + Acklam inverse) and PBO (CSCV) corroborators (disagreement blocks pass); Gate 4 vault delegate; `migrations/0030`; `tests/funnel_e2e.rs` proves the five mutual-enforcement properties. 139 lib + 6 funnel tests green. |
+| 2026-06-17 | 5 | J-5.1–J-5.3, J-5.9 | **Phase 5 backend shipped (4/9).** `crates/backtest/src/reconcile/`: `reconcile_point`/`reconciliation_verdict`/`reconcile_experiment` (live-vs-backtest, live/decaying-only) with auto-transition to `decaying` on worst-5% drift; `suite_calibration` + `pit` ECDF for the suite-calibration meta-view; walkthrough `docs/procedures/run-a-backtest-experiment.md`. **Remaining:** the UI integration leg — REST/WS surface (J-5.4) + React workbench (J-5.5–J-5.8); the Rust computations they consume are done and tested. |
