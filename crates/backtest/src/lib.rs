@@ -27,8 +27,11 @@ pub mod collect;
 pub mod gaps;
 pub mod manager;
 pub mod requirements;
+pub mod rng;
+pub mod run;
 pub mod sim;
 pub mod store;
+pub mod study;
 pub mod types;
 pub mod warmup;
 

@@ -26,6 +26,7 @@ ADR that replaces it.
 | [ADR-0016](0016-distributional-forecast-contract.md) | Distributional Forecast Contract v1.1 | Accepted | 2026-06-16 |
 | [ADR-0017](0017-walk-forward-cv-and-leakage-discipline.md) | Walk-Forward Cross-Validation and Leakage Discipline | Accepted | 2026-06-16 |
 | [ADR-0018](0018-ensemble-combination-and-conformal-calibration.md) | Ensemble Combination and Conformal Calibration | Accepted | 2026-06-16 |
+| [ADR-0019](0019-run-study-experiment-object-model.md) | Run / Study / Experiment Object Model + Sealed Distributions | Accepted | 2026-06-17 |
 
 ## Decision Relationships
 

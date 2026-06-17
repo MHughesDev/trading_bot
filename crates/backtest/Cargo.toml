@@ -34,6 +34,8 @@ rust_decimal = { workspace = true }
 clickhouse = { workspace = true }
 reqwest = { workspace = true }
 sqlx = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
 
 # Market simulator SDK — pinned git dependency on the standalone repo, consumed
 # only through its frozen `sdk` surface (see the root `[workspace.dependencies]`).

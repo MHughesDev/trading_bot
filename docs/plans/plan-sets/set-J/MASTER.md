@@ -1,8 +1,11 @@
 # Backtest Suite — Honest-Evaluation Core — Set J
 
-**Completion: 0% (0 / 59 primary tasks)**
+**Completion: 34% (20 / 59 primary tasks)**
 
-**Status:** PLANNED — not started. 6 phases (0–5). Object model
+**Status:** IN PROGRESS — Phases 0 & 1 shipped (object model + sealed Study
+layer, in `crates/backtest/src/run/` and `crates/backtest/src/study/`; 97 tests
+green; ADR-0019 Accepted). Phases 2–5 (Experiment/counter/vault, Null Library,
+staged gates, reconciliation/UX) remain. 6 phases (0–5) total. Object model
 (Run/Study/Experiment) + Null Library + staged-gate funnel, layered on the
 existing `crates/backtest` Run engine. End-state design.
 **Created:** 2026-06-17
@@ -297,3 +300,5 @@ untouched.
 | Date | Phase | Task | Note |
 |------|-------|------|------|
 | 2026-06-17 | — | plan | Set J created. 12 decisions locked. 59 tasks across 6 phases (0–5). Honest-evaluation core (Run/Study/Experiment + Null Library + staged gates) on top of the `crates/backtest` Run engine; core spec recorded at `docs/specs/BACKTEST_SUITE_CORE_SPEC.md`. End-state design. |
+| 2026-06-17 | 0 | J-0.1–J-0.10 | **Phase 0 complete.** `crates/backtest/src/run/`: content-addressed `RunConfig`/`RunId` (SHA-256, map-order-insensitive), standardized `MetricSet` with null honesty hooks, `Trade`/`RunResult`, `RunExecutor` trait + `map_sim_result` core, idempotent immutable `RunStore` (+ `migrations/0026` & `clickhouse/05`), cache-aware `Backtest::run` (`RunOrigin`), INV-1 `UnsafeFlags`, `ENGINE_VERSION` provenance. ADR-0019 Accepted. 94 lib tests green. Deferred live legs: SimRunExecutor bit-for-bit (J-0.6), Pg/CH-backed stores (J-0.7). |
+| 2026-06-17 | 1 | J-1.1–J-1.10 | **Phase 1 complete.** `crates/backtest/src/study/`: `StudyConfig`/`VarySpec`/`StudyKind` + kind↔vary validation, sealed `StudyResult`/`Distribution` (no best-member API), `StudyEngine` fan-out with `trial_delta` counting all members (cache hits + failures), pre-declared `SelectionRule`→`carried_forward` (never argmax), all 10 study kinds (sweep/neighborhood/walk-forward/CPCV/nested/permutation/synthetic/cost-sweep/regime/trade-MC), `combinations`/`cpcv_assignments` with disjoint-partition property test, `StudyStore` (+ `migrations/0027`), and the INV-2 adversarial suite (`tests/sealed_distributions.rs`). 3 integration tests green. Deferred live leg: Pg-backed study persistence (J-1.9). |

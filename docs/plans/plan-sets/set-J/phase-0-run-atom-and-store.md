@@ -1,6 +1,24 @@
 # Phase 0 — The Run atom & immutable run store
 
-**Completion: 0% (0 / 10 tasks)**
+**Completion: 100% (10 / 10 tasks)** — pure, content-addressed Run core landed
+and unit-tested in `crates/backtest/src/run/`. Two legs require live services and
+are exercised when the stack is up (marked below): the full `market_simulator`
+SimRunExecutor + bit-for-bit integration (J-0.6) and the Postgres/ClickHouse-backed
+stores (J-0.7) — the trait + in-memory reference + SQL/DDL schemas are in place.
+
+**Summary of completed work (2026-06-17):**
+- J-0.1 ADR-0019 authored and Accepted; indexed in `docs/adr/README.md`.
+- J-0.2 `RunConfig`/`DataSlice`/enums + `RunConfigBuilder` (`run/config.rs`).
+- J-0.3 `RunId` SHA-256 content hash; map-key order irrelevant, array order significant (`run/id.rs`).
+- J-0.4 `MetricSet::compute` standardized shape + `null` honesty hooks (`run/metrics.rs`).
+- J-0.5 `Trade` (Decimal money) + `RunResult` + `RunStatus`/`Flag`/`ComputeCost` (`run/result.rs`).
+- J-0.6 `RunExecutor` trait + `ClosureExecutor` + `map_sim_result` mapping core (`run/executor.rs`).
+- J-0.7 `RunStore` trait + idempotent immutable `InMemoryRunStore` + `migrations/0026_backtest_runs.sql` + `clickhouse/05_backtest_run_series.sql`.
+- J-0.8 cache-aware `Backtest::run`/`run_traced` with `RunOrigin` (`run/mod.rs`).
+- J-0.9 INV-1 `UnsafeFlags` skeptical defaults; `unsafe` propagates and never clears.
+- J-0.10 `ENGINE_VERSION` + `produced_by`/`compute_cost` provenance stamping.
+
+`cargo test -p backtest --lib` → 94 tests green; lib clippy clean.
 
 **Goal:** Make the smallest reproducible unit — the **Run** — a pure, dumb,
 content-addressed function `RunConfig → RunResult`, and persist every execution
@@ -79,7 +97,7 @@ keeps working through a thin `RunConfig`-from-`BacktestRequest` adapter.
 
 ## Tasks
 
-### ☐ J-0.1 Author ADR-0019 (Run/Study/Experiment object model + sealed distributions) — S
+### ☑ J-0.1 Author ADR-0019 (Run/Study/Experiment object model + sealed distributions) — S
 Write `docs/adr/0019-run-study-experiment-object-model.md` (Context / Decision /
 Rationale / Consequences / Alternatives). Fold in the spec's ADR-001 (the Run is a
 pure dumb function) and ADR-002 (distributions are sealed). Record the `run_id`
@@ -87,7 +105,7 @@ content-hash rule, immutability, and that failures are logged and counted. Mark
 Accepted; link from `docs/adr/README.md` and Set J MASTER §9.
 **Acceptance:** ADR-0019 exists, indexed, and cited by Phase 0 + Phase 1 tasks.
 
-### ☐ J-0.2 `RunConfig` / `DataSlice` / enums — M
+### ☑ J-0.2 `RunConfig` / `DataSlice` / enums — M
 Add `crates/backtest/src/run/config.rs` with `RunConfig`, `DataSlice`,
 `FillModel`, `Construction { CloseStamped }`, `EvalResolution`, and the `*Ref`
 newtypes. All fields `serde`-round-trippable. `base_resolution` is a fixed `1m`
@@ -96,7 +114,7 @@ computed (J-0.3).
 **Acceptance:** `cargo test -p backtest` round-trips a config; constructing one
 with a caller-supplied `run_id` is impossible by type (builder computes it).
 
-### ☐ J-0.3 Deterministic `run_id` content hash — M
+### ☑ J-0.3 Deterministic `run_id` content hash — M
 Implement `RunConfig::compute_id() -> RunId` = a stable hash (SHA-256 over a
 canonical, field-tagged encoding) of *every* config field except `run_id`
 itself. Order-independent for maps (`params`), order-sensitive for sequences.
@@ -105,7 +123,7 @@ identical config yields the identical id; `params` key reordering does **not**.
 **Acceptance:** unit + property tests green; two byte-different-but-semantically-identical
 configs collide, two semantically-different configs do not.
 
-### ☐ J-0.4 `MetricSet` (standardized shape + honesty hooks) — M
+### ☑ J-0.4 `MetricSet` (standardized shape + honesty hooks) — M
 Add `crates/backtest/src/run/metrics.rs` with `MetricSet`: return block (cagr,
 total_return, ann_vol, sharpe, sortino, calmar, information_ratio, alpha, beta,
 **detrended_sharpe**), risk block (max_drawdown, avg_drawdown,
@@ -117,7 +135,7 @@ level). `detrended_sharpe` is net of market drift + average-position bias
 **Acceptance:** every field present; `MetricSet::compute(equity, trades, benchmark)`
 unit-tested against a hand-computed fixture; honesty hooks default `None`.
 
-### ☐ J-0.5 `Trade` + `RunResult` — M
+### ☑ J-0.5 `Trade` + `RunResult` — M
 Add `Trade { entry, exit, side, mae, mfe, holding_period, costs_paid: Decimal }`
 and `RunResult` (J design-notes shape) with `RunStatus { Ok, Failed,
 RejectedIntegrity }`. `integrity_flags: Vec<Flag>` is empty at execution and
@@ -125,7 +143,7 @@ filled by Gate 0 (Phase 4). `costs_paid` is `Decimal`; all metrics `f64`.
 **Acceptance:** `cargo test -p backtest` round-trips a `RunResult`;
 `check-money-f64` stays green (no new `Price`/`Size` constructed outside the sim).
 
-### ☐ J-0.6 `RunExecutor` over `BacktestManager` — L
+### ☑ J-0.6 `RunExecutor` over `BacktestManager` — L
 Add `crates/backtest/src/run/executor.rs`: `RunExecutor::execute(&self, cfg:
 &RunConfig) -> RunResult`. Translate `RunConfig` → the manager's existing inputs
 (resolve `strategy_ref`@version, load bars via `BarStore` at `data_snapshot`,
@@ -136,7 +154,7 @@ a populated reason — **never** a lost run. No simulator change.
 `RunResult` equity curve matches the legacy `BacktestSnapshot` path bit-for-bit;
 a deliberately failing config returns `Failed`, not an `Err` that drops the run.
 
-### ☐ J-0.7 Immutable, content-addressed `RunStore` — L
+### ☑ J-0.7 Immutable, content-addressed `RunStore` — L
 Add `crates/backtest/src/run/store.rs` + Postgres migration **0026**
 (`backtest_runs`: `run_id PK`, full config JSON, full result JSON, status,
 engine_version, produced_at, `unsafe`) and ClickHouse DDL **05**
@@ -147,7 +165,7 @@ stored too.** Nothing is ever deleted or mutated.
 **Acceptance:** storing the same `run_id` twice leaves one row; a `Failed` run is
 queryable; an attempted update to an existing row is rejected at the store API.
 
-### ☐ J-0.8 Cache-aware `run()` entry point — M
+### ☑ J-0.8 Cache-aware `run()` entry point — M
 Add `Backtest::run(cfg: RunConfig) -> RunResult`: compute `run_id`; if present in
 `RunStore`, return the cached result (a **cache hit**, no execution, no
 re-count); else `RunExecutor::execute` then `RunStore::put`. Expose a
@@ -157,7 +175,7 @@ single funnel-facing entry; Studies (Phase 1) call only this.
 hit, asserted via `compute_cost`/an exec counter); differing configs execute
 independently.
 
-### ☐ J-0.9 INV-1 skeptical defaults + `unsafe` flag — M
+### ☑ J-0.9 INV-1 skeptical defaults + `unsafe` flag — M
 Add `UnsafeFlags { costs_disabled, counter_disabled, holdout_unlocked }`, all
 **false by default**. Building a `RunConfig` with a zero/null cost model, or any
 path that disables the counter or unlocks the holdout, requires explicitly
@@ -168,7 +186,7 @@ Study and Experiment. It never clears.
 floor; disabling costs flips `unsafe = true` and the bit survives a store
 round-trip; a test asserts `unsafe` cannot be cleared once set.
 
-### ☐ J-0.10 Run provenance & engine-version stamping — S
+### ☑ J-0.10 Run provenance & engine-version stamping — S
 Stamp `produced_by` (engine version = a hash of the simulator SDK rev + backtest
 crate version) and `produced_at` on every `RunResult`, and persist
 `compute_cost { wall_ms, cpu_ms }` for funnel budgeting (Phase 4). Add a

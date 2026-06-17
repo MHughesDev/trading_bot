@@ -1,6 +1,24 @@
 # Phase 1 — The Study layer & sealed distributions
 
-**Completion: 0% (0 / 10 tasks)**
+**Completion: 100% (10 / 10 tasks)** — the sealed Study layer landed and
+unit-tested in `crates/backtest/src/study/`. The synthetic-path and regime
+generators are wired as seed/window-varying loops here; their statistical null
+generators arrive in Phase 3 (J-3.5/J-3.6). Postgres-backed study persistence is
+the live leg of J-1.9 (trait + in-memory reference + `migrations/0027` in place).
+
+**Summary of completed work (2026-06-17):**
+- J-1.1 `StudyConfig`/`VarySpec`/`StudyKind` + kind↔vary validation (`study/config.rs`).
+- J-1.2 Sealed `StudyResult` + `Distribution` (median/IQR/worst-5%/spread), no best-member API (`study/result.rs`).
+- J-1.3 `StudyEngine::run` fan-out over cache-aware `Backtest::run`; `trial_delta` counts every member (`study/engine.rs`).
+- J-1.4 Pre-declared `SelectionRule` → `carried_forward` (median-centroid / worst-case), never argmax.
+- J-1.5 `parameter_sweep` + `neighborhood` with plateau-vs-spike verdict.
+- J-1.6 `walk_forward` (data windows) + `cpcv`/`nested_cv` (`cpcv_assignments`, disjoint train/test property test) + `combinations`.
+- J-1.7 `synthetic_paths`/`cost_sweep`/`regime_conditional` (cost-ladder edge-death detection).
+- J-1.8 `trade_monte_carlo` block-bootstrap over the realized trade sequence.
+- J-1.9 `StudyStore` trait + `InMemoryStudyStore` (question logged before result) + `migrations/0027_backtest_studies.sql`.
+- J-1.10 INV-2 adversarial suite `crates/backtest/tests/sealed_distributions.rs`.
+
+`cargo test -p backtest` → 94 lib + 3 integration tests green; lib clippy clean.
 
 **Goal:** Build the layer that orchestrates many Runs along **one** varying
 dimension and reports the *distribution* of outcomes — and enforce **INV-2**: a
@@ -72,7 +90,7 @@ is structural — this removes the single largest p-hacking surface.
 
 ## Tasks
 
-### ☐ J-1.1 `StudyConfig` + `VarySpec` + `StudyKind` — M
+### ☑ J-1.1 `StudyConfig` + `VarySpec` + `StudyKind` — M
 Add `crates/backtest/src/study/config.rs` with the design-notes shapes.
 `VarySpec` is an enum mirroring `StudyKind` so an ill-typed pairing (e.g.
 `WalkForward` with a `params` grid) does not construct. `question` is mandatory
@@ -82,7 +100,7 @@ at construction.
 `PermutationNull` study without `null_ref`, or any study with an empty
 `question`, is rejected.
 
-### ☐ J-1.2 Sealed `StudyResult` + `Distribution` — M
+### ☑ J-1.2 Sealed `StudyResult` + `Distribution` — M
 Add `Distribution { metric: MetricKind, dist: Vec<f64>, median, iqr: [f64;2],
 worst_5pct, spread }` and `StudyResult` with `sealed: bool` (constructed `true`,
 no setter to `false`). **No field, method, or trait on `StudyResult` returns a
@@ -92,7 +110,7 @@ and a code-review checklist item. `member_run_ids` returns insertion order only.
 members reachable from `StudyResult`; `worst_5pct` and `median` compute correctly
 on a fixture distribution.
 
-### ☐ J-1.3 `StudyEngine` driver (fan-out over `Backtest::run`) — L
+### ☑ J-1.3 `StudyEngine` driver (fan-out over `Backtest::run`) — L
 Add `crates/backtest/src/study/engine.rs`: `StudyEngine::run(StudyConfig) ->
 StudyResult`. Expand `VarySpec` into N `RunConfig`s, execute each via the
 cache-aware `Backtest::run` (Phase 0) — in parallel, respecting `budget` — collect
@@ -104,7 +122,7 @@ excluded from `dist` (with a logged note).
 `trial_delta = 50`, and a distribution over the surviving (non-failed) members;
 re-running the identical study re-uses cache but still reports `trial_delta = 50`.
 
-### ☐ J-1.4 Pre-declared in-Study `SelectionRule` — M
+### ☑ J-1.4 Pre-declared in-Study `SelectionRule` — M
 Add `SelectionRule` (e.g. `None`, `MedianStableCentroid`, `WorstCaseRobust`) and
 `StudyResult::carry_forward() -> Option<RunConfig>` that applies the
 **pre-declared** rule — never an argmax. The rule is fixed in `StudyConfig`
@@ -114,7 +132,7 @@ uses the same mechanism (a rule, declared up front).
 region-centroid config, not the peak; with `None` returns `None`; the rule is
 immutable post-construction (test).
 
-### ☐ J-1.5 `parameter_sweep` + `neighborhood` — M
+### ☑ J-1.5 `parameter_sweep` + `neighborhood` — M
 Implement `ParameterSweep` (grid/Latin-hypercube sample over `params`) and
 `Neighborhood` (perturb each param ±k steps around `base_config`). The
 `Neighborhood` verdict reports **plateau vs spike** (ratio of neighbor median to
@@ -123,7 +141,7 @@ center). Both seal their distributions.
 verdict; an isolated spike yields a spike verdict; neither exposes the peak
 config except via a declared `SelectionRule`.
 
-### ☐ J-1.6 `walk_forward` + `cpcv` + `nested_cv` — L
+### ☑ J-1.6 `walk_forward` + `cpcv` + `nested_cv` — L
 Implement `WalkForward` (rolling IS/OOS windows over `data_slice`, re-fit per
 window via the declared selection rule), `Cpcv` (combinatorial purged CV — all
 C(N,k) train/test group combinations, with purge + embargo reused from
@@ -133,7 +151,7 @@ C(N,k) train/test group combinations, with purge + embargo reused from
 into its own training fold (property test); the OOS distribution's worst-5% is
 reported and the best path is not addressable.
 
-### ☐ J-1.7 `synthetic_paths` + `cost_sweep` + `regime_conditional` — M
+### ☑ J-1.7 `synthetic_paths` + `cost_sweep` + `regime_conditional` — M
 Implement `SyntheticPaths` (vary synthetic-history seed; generator supplied by
 the Null Library in Phase 3 — here, wire the seed-varying loop), `CostSweep`
 (vary `cost_model_ref` along an optimistic→pessimistic ladder; report where the
@@ -142,7 +160,7 @@ label per member).
 **Acceptance:** `CostSweep` reports the cost level at which median return crosses
 zero; `RegimeConditional` produces a per-regime sub-distribution; both sealed.
 
-### ☐ J-1.8 `trade_monte_carlo` — M
+### ☑ J-1.8 `trade_monte_carlo` — M
 Implement `TradeMonteCarlo`: resample/reorder the executed trade sequence (block
 bootstrap over trades) to produce a distribution of path-dependent metrics (max
 drawdown, terminal equity) holding the trade set fixed. Answers *"how lucky was
@@ -150,7 +168,7 @@ this particular ordering?"*.
 **Acceptance:** the distribution's worst-5% drawdown is materially worse than the
 single realized path on a fixture with autocorrelated trades; sealed.
 
-### ☐ J-1.9 Study persistence + `question` log — M
+### ☑ J-1.9 Study persistence + `question` log — M
 Persist `StudyConfig` (including `question`, `null_ref`, `selection_rule`),
 `StudyResult` (distribution + verdict + `trial_delta`), and `member_run_ids`
 references via Postgres migration **0027** (`backtest_studies`,
@@ -160,7 +178,7 @@ references via Postgres migration **0027** (`backtest_studies`,
 creation time (asserted by a timestamp earlier than the result); member ids
 resolve back to `RunStore` rows.
 
-### ☐ J-1.10 INV-2 adversarial test suite — S
+### ☑ J-1.10 INV-2 adversarial test suite — S
 Add `crates/backtest/tests/sealed_distributions.rs`: attempt, by every reachable
 API path, to obtain the best-performing member of each study kind — and assert
 each path is absent or returns only the pre-declared `SelectionRule` output. Add
