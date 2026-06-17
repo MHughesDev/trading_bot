@@ -109,7 +109,9 @@ pub fn evaluate_universe_pipeline(nodes: &[Node], initial_universe: Universe) ->
                 }
             }
             // v1.0 and v1.1 nodes — not part of the universe pipeline.
-            NodeKind::Condition { .. } | NodeKind::Signal { .. } | NodeKind::ModelForecast { .. } => {}
+            NodeKind::Condition { .. }
+            | NodeKind::Signal { .. }
+            | NodeKind::ModelForecast { .. } => {}
         }
     }
 

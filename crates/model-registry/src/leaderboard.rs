@@ -68,51 +68,65 @@ pub async fn query_leaderboard(
 
     let mut entries: Vec<LeaderboardEntry> = rows
         .into_iter()
-        .map(|(model_id, display_name, model_kind_val, version, metrics, scorecard, eval_id, created_at)| {
-            let m = metrics.as_ref();
-            let crps = m.and_then(|v| v.get("crps")).and_then(|v| v.as_f64());
-            let crps_deflated = m.and_then(|v| v.get("crps_deflated")).and_then(|v| v.as_f64());
-            let pit_calibrated = m
-                .and_then(|v| v.get("pit"))
-                .and_then(|v| v.get("calibrated"))
-                .and_then(|v| v.as_bool());
-            let beats_naive = m.and_then(|v| v.get("beats_naive")).and_then(|v| v.as_bool());
-            let scorecard_overall = scorecard
-                .as_ref()
-                .and_then(|v| v.get("overall"))
-                .and_then(|v| v.as_f64());
-
-            // Extract 90% interval coverage gap (coverage[3] for typical 7-level grid)
-            let coverage_90 = m
-                .and_then(|v| v.get("coverage"))
-                .and_then(|v| v.as_array())
-                .and_then(|arr| {
-                    arr.iter()
-                        .find(|e| {
-                            e.get("lower_level")
-                                .and_then(|l| l.as_f64())
-                                .map(|l| (l - 0.05).abs() < 1e-6)
-                                .unwrap_or(false)
-                        })
-                        .and_then(|e| e.get("empirical"))
-                        .and_then(|v| v.as_f64())
-                });
-
-            LeaderboardEntry {
+        .map(
+            |(
                 model_id,
                 display_name,
-                model_kind: model_kind_val,
+                model_kind_val,
                 version,
-                crps,
-                crps_deflated,
-                coverage_90,
-                pit_calibrated,
-                beats_naive,
-                scorecard_overall,
+                metrics,
+                scorecard,
                 eval_id,
                 created_at,
-            }
-        })
+            )| {
+                let m = metrics.as_ref();
+                let crps = m.and_then(|v| v.get("crps")).and_then(serde_json::Value::as_f64);
+                let crps_deflated = m
+                    .and_then(|v| v.get("crps_deflated"))
+                    .and_then(serde_json::Value::as_f64);
+                let pit_calibrated = m
+                    .and_then(|v| v.get("pit"))
+                    .and_then(|v| v.get("calibrated"))
+                    .and_then(serde_json::Value::as_bool);
+                let beats_naive = m
+                    .and_then(|v| v.get("beats_naive"))
+                    .and_then(serde_json::Value::as_bool);
+                let scorecard_overall = scorecard
+                    .as_ref()
+                    .and_then(|v| v.get("overall"))
+                    .and_then(serde_json::Value::as_f64);
+
+                // Extract 90% interval coverage gap (coverage[3] for typical 7-level grid)
+                let coverage_90 = m
+                    .and_then(|v| v.get("coverage"))
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| {
+                        arr.iter()
+                            .find(|e| {
+                                e.get("lower_level")
+                                    .and_then(serde_json::Value::as_f64)
+                                    .is_some_and(|l| (l - 0.05).abs() < 1e-6)
+                            })
+                            .and_then(|e| e.get("empirical"))
+                            .and_then(serde_json::Value::as_f64)
+                    });
+
+                LeaderboardEntry {
+                    model_id,
+                    display_name,
+                    model_kind: model_kind_val,
+                    version,
+                    crps,
+                    crps_deflated,
+                    coverage_90,
+                    pit_calibrated,
+                    beats_naive,
+                    scorecard_overall,
+                    eval_id,
+                    created_at,
+                }
+            },
+        )
         .collect();
 
     // Sort by chosen metric (lower CRPS = better; higher scorecard = better)
@@ -120,8 +134,16 @@ pub async fn query_leaderboard(
     match sort_metric {
         "crps" | "crps_deflated" => {
             entries.sort_by(|a, b| {
-                let va = if sort_metric == "crps" { a.crps } else { a.crps_deflated };
-                let vb = if sort_metric == "crps" { b.crps } else { b.crps_deflated };
+                let va = if sort_metric == "crps" {
+                    a.crps
+                } else {
+                    a.crps_deflated
+                };
+                let vb = if sort_metric == "crps" {
+                    b.crps
+                } else {
+                    b.crps_deflated
+                };
                 // None sorts last; lower is better
                 match (va, vb) {
                     (Some(x), Some(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),

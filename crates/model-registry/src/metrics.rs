@@ -1,6 +1,6 @@
 //! Per-model-kind metric helpers for training-time preview metrics only.
 //!
-//! Proper evaluation (CRPS, PIT, VaR, etc.) is computed by the Python scoring
+//! Proper evaluation (CRPS, PIT, `VaR`, etc.) is computed by the Python scoring
 //! sidecar via `dispatch_evaluate` (I-2.1).  These functions are used solely
 //! for the *training-run* metrics preview — not the authoritative eval scorecard.
 

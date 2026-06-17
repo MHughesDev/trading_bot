@@ -23,8 +23,8 @@ use domain::{
 use features::FeatureValue;
 use reconciliation::freshness::{check_freshness, is_within_trading_hours, FreshnessOutcome};
 use risk::{GateContext, GlobalRiskLimits, KillSwitch, RiskGate};
-use std::sync::Arc;
 use rust_decimal::Decimal;
+use std::sync::Arc;
 use strategy_runtime::{StrategyInstance, WorldEvent};
 
 // ── shared strategy definition ─────────────────────────────────────────────
@@ -119,19 +119,10 @@ fn same_strategy_fires_same_signals_on_crypto_and_equity() {
     let now = Utc::now();
 
     // Crypto instance (BTC-USD)
-    let mut crypto_instance = StrategyInstance::new(
-        "user1",
-        "BTC-USD",
-        ema_cross_def("crypto_spot_cex"),
-        now,
-    );
+    let mut crypto_instance =
+        StrategyInstance::new("user1", "BTC-USD", ema_cross_def("crypto_spot_cex"), now);
     // Equity instance (AAPL)
-    let mut equity_instance = StrategyInstance::new(
-        "user1",
-        "AAPL",
-        ema_cross_def("equity"),
-        now,
-    );
+    let mut equity_instance = StrategyInstance::new("user1", "AAPL", ema_cross_def("equity"), now);
 
     // Feed identical feature values to both (ema_7 crosses above ema_21).
     let events: Vec<WorldEvent> = vec![
@@ -161,7 +152,10 @@ fn same_strategy_fires_same_signals_on_crypto_and_equity() {
         equity_intents.len(),
         "crypto and equity must emit identical intent counts for the same feature values"
     );
-    assert!(!crypto_intents.is_empty(), "EMA cross should emit a long intent");
+    assert!(
+        !crypto_intents.is_empty(),
+        "EMA cross should emit a long intent"
+    );
 
     let c = &crypto_intents[0];
     let e = &equity_intents[0];
@@ -410,5 +404,8 @@ fn risk_gate_approves_equity_in_session_not_halted() {
     ctx.is_halted = false;
 
     let result = gate.check(intent, &ctx);
-    assert!(result.is_ok(), "in-session, non-halted equity order must be approved");
+    assert!(
+        result.is_ok(),
+        "in-session, non-halted equity order must be approved"
+    );
 }

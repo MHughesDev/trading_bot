@@ -22,6 +22,7 @@ use model_registry::{CreateModelRequest, TrainRequest};
 use crate::{auth::BearerToken, state::AppState};
 
 // In-memory rate limiter for test_inference: 20 calls per 60s per (user_id, model_id).
+#[allow(clippy::type_complexity)]
 static TEST_RATE_LIMITER: Mutex<Option<HashMap<(String, String), VecDeque<Instant>>>> =
     Mutex::new(None);
 
@@ -865,6 +866,7 @@ pub async fn for_node(
     Query(params): Query<ForNodeParams>,
 ) -> impl IntoResponse {
     // Query models by kind and optional asset_class, excluding archived.
+    #[allow(clippy::type_complexity)]
     let rows: Result<Vec<(String, String, String, String, bool)>, sqlx::Error> = sqlx::query_as(
         "SELECT m.model_id, m.slug, m.display_name, m.status, \
          EXISTS(SELECT 1 FROM model_aliases a WHERE a.model_id = m.model_id AND a.alias = 'production') AS has_production \
@@ -1155,7 +1157,11 @@ pub async fn export_report(
     token: BearerToken,
     Path((id, version)): Path<(String, i32)>,
 ) -> impl IntoResponse {
-    match state.models.export_report(&id, version, token.user_id()).await {
+    match state
+        .models
+        .export_report(&id, version, token.user_id())
+        .await
+    {
         Ok(bytes) => (
             StatusCode::OK,
             [

@@ -1,18 +1,18 @@
-//! EnsembleManager — first-class ensemble artifact lifecycle (I-4.3, ADR-0018).
+//! `EnsembleManager` — first-class ensemble artifact lifecycle (I-4.3, ADR-0018).
 //!
-//! Mirrors ModelManager: persists ensembles + versions + aliases; reuses gated
+//! Mirrors `ModelManager`: persists ensembles + versions + aliases; reuses gated
 //! promotion, rollback, and the `models.jobs` WS lane.
 //!
 //! Postgres tables (migration 0026+):
-//!   ensembles        (id TEXT PK, name TEXT, created_by TEXT,
-//!                     definition_json JSONB, created_at TIMESTAMPTZ)
-//!   ensemble_versions (id TEXT PK, ensemble_id TEXT, version INT,
-//!                      artifact_uri TEXT, artifact_hash TEXT,
-//!                      metrics_json JSONB, scorecard_json JSONB, report_json JSONB,
-//!                      created_at TIMESTAMPTZ)
-//!   ensemble_aliases  (ensemble_id TEXT, alias TEXT, version INT, updated_at TIMESTAMPTZ,
-//!                      PRIMARY KEY (ensemble_id, alias))
-//!   ensemble_members  (ensemble_id TEXT, version INT, model_ref TEXT,
+//!   ensembles        (id TEXT PK, name TEXT, `created_by` TEXT,
+//!                     `definition_json` JSONB, `created_at` TIMESTAMPTZ)
+//!   `ensemble_versions` (id TEXT PK, `ensemble_id` TEXT, version INT,
+//!                      `artifact_uri` TEXT, `artifact_hash` TEXT,
+//!                      `metrics_json` JSONB, `scorecard_json` JSONB, `report_json` JSONB,
+//!                      `created_at` TIMESTAMPTZ)
+//!   `ensemble_aliases`  (`ensemble_id` TEXT, alias TEXT, version INT, `updated_at` TIMESTAMPTZ,
+//!                      PRIMARY KEY (`ensemble_id`, alias))
+//!   `ensemble_members`  (`ensemble_id` TEXT, version INT, `model_ref` TEXT,
 //!                      alias TEXT, sigma DOUBLE PRECISION, crps DOUBLE PRECISION)
 //!
 //! Uses `sqlx::query()` (runtime verification) so the code compiles before
@@ -66,7 +66,7 @@ pub struct EnsembleVersionRecord {
 pub struct EnsembleManager {
     pg: PgPool,
     sidecar: Arc<SidecarClient>,
-    /// Broadcast channel (same WS lane as ModelManager — `models.jobs`).
+    /// Broadcast channel (same WS lane as `ModelManager` — `models.jobs`).
     progress_tx: tokio::sync::broadcast::Sender<Value>,
 }
 
@@ -93,7 +93,7 @@ impl EnsembleManager {
         user_id: &str,
     ) -> anyhow::Result<EnsembleRecord> {
         validate_ensemble(&req.definition)
-            .map_err(|errs| anyhow::anyhow!("invalid ensemble definition: {:?}", errs))?;
+            .map_err(|errs| anyhow::anyhow!("invalid ensemble definition: {errs:?}"))?;
 
         let id = format!("ens_{}", Uuid::new_v4().simple());
         let def_json = serde_json::to_value(&req.definition)?;
@@ -153,15 +153,14 @@ impl EnsembleManager {
         ensemble_id: &str,
         user_id: &str,
     ) -> anyhow::Result<EnsembleRecord> {
-        let row: Option<(String, String, String, Value, chrono::DateTime<Utc>)> =
-            sqlx::query_as(
-                "SELECT id, name, created_by, definition_json, created_at \
+        let row: Option<(String, String, String, Value, chrono::DateTime<Utc>)> = sqlx::query_as(
+            "SELECT id, name, created_by, definition_json, created_at \
                  FROM ensembles WHERE id = $1 AND created_by = $2",
-            )
-            .bind(ensemble_id)
-            .bind(user_id)
-            .fetch_optional(&self.pg)
-            .await?;
+        )
+        .bind(ensemble_id)
+        .bind(user_id)
+        .fetch_optional(&self.pg)
+        .await?;
 
         let (id, name, created_by, def_json, created_at) =
             row.ok_or_else(|| anyhow::anyhow!("ensemble not found: {ensemble_id}"))?;
@@ -203,7 +202,7 @@ impl EnsembleManager {
         .bind(ensemble_id)
         .fetch_optional(&self.pg)
         .await?;
-        let version: i32 = row.map(|(v,)| v as i32).unwrap_or(1);
+        let version: i32 = row.map_or(1, |(v,)| v as i32);
 
         // Build roster for dispatch — resolve member artifact URIs from the registry.
         let mut roster: Vec<EnsembleRosterMember> = Vec::new();
@@ -221,12 +220,7 @@ impl EnsembleManager {
             .await?;
 
             let (artifact_uri, artifact_hash) = art
-                .map(|(u, h)| {
-                    (
-                        u.unwrap_or_default(),
-                        h.unwrap_or_default(),
-                    )
-                })
+                .map(|(u, h)| (u.unwrap_or_default(), h.unwrap_or_default()))
                 .unwrap_or_default();
 
             roster.push(EnsembleRosterMember {

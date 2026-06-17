@@ -77,7 +77,7 @@ pub struct CreateModelRequest {
 
 /// User-chosen training data: which instruments, timeframe, and how far back.
 /// When present on a `TrainRequest`, the trainer pulls these exact bars from
-/// ClickHouse instead of falling back to synthetic data.
+/// `ClickHouse` instead of falling back to synthetic data.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TrainDataSelection {
     /// Instrument IDs to train on, e.g. `["BTC-USD"]`.

@@ -221,7 +221,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/models/{id}/traces", get(models::get_traces))
         .route("/api/models/{id}/used-by", get(models::get_used_by))
         // I-2.12 evaluation reports
-        .route("/api/models/{id}/versions/{v}/report", get(models::get_report))
+        .route(
+            "/api/models/{id}/versions/{v}/report",
+            get(models::get_report),
+        )
         .route(
             "/api/models/{id}/versions/{v}/report/export",
             get(models::export_report),
@@ -239,18 +242,21 @@ pub fn router(state: AppState) -> Router {
             get(ensembles::list_ensembles).post(ensembles::create_ensemble),
         )
         .route("/api/ensembles/{id}", get(ensembles::get_ensemble))
-        .route("/api/ensembles/{id}/combine", post(ensembles::combine_ensemble))
-        .route("/api/ensembles/{id}/versions", get(ensembles::list_ensemble_versions))
+        .route(
+            "/api/ensembles/{id}/combine",
+            post(ensembles::combine_ensemble),
+        )
+        .route(
+            "/api/ensembles/{id}/versions",
+            get(ensembles::list_ensemble_versions),
+        )
         .route(
             "/api/ensembles/{id}/versions/{v}/promote/{alias}",
             post(ensembles::promote_ensemble_version),
         )
         // Phase 5 — Pipeline factory + quality monitoring (I-5.12)
         // Static paths before dynamic captures.
-        .route(
-            "/api/pipelines/runs/{run_id}",
-            get(pipelines::get_run),
-        )
+        .route("/api/pipelines/runs/{run_id}", get(pipelines::get_run))
         .route(
             "/api/pipelines/runs/{run_id}/nodes",
             get(pipelines::list_node_runs),
@@ -270,18 +276,42 @@ pub fn router(state: AppState) -> Router {
             post(pipelines::cancel_run),
         )
         // I-5.9/I-5.10 — per-model rolling quality + alerts
-        .route("/api/models/{id}/quality", get(pipelines::get_model_quality))
+        .route(
+            "/api/models/{id}/quality",
+            get(pipelines::get_model_quality),
+        )
         // I-6.1 — distributional publish contract
         .route("/api/models/{id}/predict", get(models_phase6::predict))
         // I-6.4 — tags (static before dynamic)
-        .route("/api/registry/tags/search", get(models_phase6::search_by_tag))
-        .route("/api/registry/tags/{id}/{kind}", get(models_phase6::list_tags).post(models_phase6::add_tag))
-        .route("/api/registry/tags/{id}/{kind}/{tag}", axum::routing::delete(models_phase6::remove_tag))
+        .route(
+            "/api/registry/tags/search",
+            get(models_phase6::search_by_tag),
+        )
+        .route(
+            "/api/registry/tags/{id}/{kind}",
+            get(models_phase6::list_tags).post(models_phase6::add_tag),
+        )
+        .route(
+            "/api/registry/tags/{id}/{kind}/{tag}",
+            axum::routing::delete(models_phase6::remove_tag),
+        )
         // I-6.4 — annotations
-        .route("/api/registry/annots/{id}/{kind}", get(models_phase6::get_annotations))
-        .route("/api/registry/annots/{id}/{kind}/{key}", axum::routing::put(models_phase6::set_annotation))
+        .route(
+            "/api/registry/annots/{id}/{kind}",
+            get(models_phase6::get_annotations),
+        )
+        .route(
+            "/api/registry/annots/{id}/{kind}/{key}",
+            axum::routing::put(models_phase6::set_annotation),
+        )
         // I-6.4 — templates
-        .route("/api/registry/templates", get(models_phase6::list_templates).post(models_phase6::create_template))
-        .route("/api/registry/templates/{id}/fork", post(models_phase6::fork_template))
+        .route(
+            "/api/registry/templates",
+            get(models_phase6::list_templates).post(models_phase6::create_template),
+        )
+        .route(
+            "/api/registry/templates/{id}/fork",
+            post(models_phase6::fork_template),
+        )
         .with_state(state)
 }

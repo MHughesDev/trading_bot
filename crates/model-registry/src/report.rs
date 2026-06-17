@@ -1,4 +1,4 @@
-//! Shareable, immutable evaluation reports keyed by (model_id, version, dataset_hash) (I-2.12).
+//! Shareable, immutable evaluation reports keyed by (`model_id`, version, `dataset_hash`) (I-2.12).
 
 use serde_json::{json, Value};
 use sqlx::PgPool;
@@ -6,7 +6,7 @@ use sqlx::PgPool;
 /// Fetch the full evaluation report for a model version.
 ///
 /// Returns the raw report JSON persisted by `drive_eval`, which includes:
-/// CRPS, pinball, log-score, PIT, coverage, reliability, VaR backtests,
+/// CRPS, pinball, log-score, PIT, coverage, reliability, `VaR` backtests,
 /// baselines, DM, overfitting diagnostics, per-fold, and per-regime scores.
 pub async fn get_report(
     pg: &PgPool,

@@ -98,7 +98,11 @@ async fn stage_socket_reader(
     raw_prod: rtrb::Producer<RawTick>,
     tee_tx: tokio::sync::mpsc::UnboundedSender<RawTick>,
 ) {
-    info!(symbol, ?asset_class, "hot-path stage 1 (socket-reader) starting");
+    info!(
+        symbol,
+        ?asset_class,
+        "hot-path stage 1 (socket-reader) starting"
+    );
     let result: Result<(), CollectorError> = match asset_class {
         AssetClass::Equity | AssetClass::Etf => {
             let collector =

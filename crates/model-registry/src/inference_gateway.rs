@@ -33,9 +33,9 @@ pub struct ForecastResult {
 pub struct InferenceGateway {
     pg: PgPool,
     sidecar: Arc<SidecarClient>,
-    /// (model_id, alias) → (version, cached_at)
+    /// (`model_id`, alias) → (version, `cached_at`)
     alias_cache: RwLock<HashMap<(String, String), (i32, Instant)>>,
-    /// (model_id, version, feature_hash) → (result, cached_at)
+    /// (`model_id`, version, `feature_hash`) → (result, `cached_at`)
     pred_cache: RwLock<HashMap<(String, i32, u64), (ForecastResult, Instant)>>,
     /// Per-model consecutive failure counts for circuit breaking.
     fail_counts: RwLock<HashMap<String, u32>>,
@@ -139,14 +139,11 @@ impl InferenceGateway {
         };
 
         // Resolve alias → version.
-        let version = match self.resolve_alias(&model_id, effective_alias).await {
-            Some(v) => v,
-            None => {
-                warn!("alias '{effective_alias}' not found for model {model_id}");
-                self.write_trace(&model_id, 0, instrument_id, 0, "abstain")
-                    .await;
-                return None;
-            }
+        let version = if let Some(v) = self.resolve_alias(&model_id, effective_alias).await { v } else {
+            warn!("alias '{effective_alias}' not found for model {model_id}");
+            self.write_trace(&model_id, 0, instrument_id, 0, "abstain")
+                .await;
+            return None;
         };
 
         let feature_hash = Self::hash_features(instrument_id, features);
@@ -177,14 +174,11 @@ impl InferenceGateway {
         .ok()
         .flatten();
 
-        let (artifact_uri, artifact_hash, model_kind) = match artifact_row {
-            Some(row) => row,
-            None => {
-                warn!("artifact not found for model {model_id} v{version}");
-                self.write_trace(&model_id, version, instrument_id, 0, "abstain")
-                    .await;
-                return None;
-            }
+        let (artifact_uri, artifact_hash, model_kind) = if let Some(row) = artifact_row { row } else {
+            warn!("artifact not found for model {model_id} v{version}");
+            self.write_trace(&model_id, version, instrument_id, 0, "abstain")
+                .await;
+            return None;
         };
 
         let start = Instant::now();
@@ -355,15 +349,12 @@ impl InferenceGateway {
         features: &HashMap<String, f64>,
     ) -> Option<ForecastResult> {
         let (artifact_uri, artifact_hash, version) =
-            match self.resolve_ensemble_artifact(ensemble_ref, alias).await {
-                Some(t) => t,
-                None => {
-                    warn!(
-                        ensemble = ensemble_ref,
-                        alias, "ensemble alias not found — abstaining"
-                    );
-                    return None;
-                }
+            if let Some(t) = self.resolve_ensemble_artifact(ensemble_ref, alias).await { t } else {
+                warn!(
+                    ensemble = ensemble_ref,
+                    alias, "ensemble alias not found — abstaining"
+                );
+                return None;
             };
 
         let start = Instant::now();
@@ -399,7 +390,7 @@ impl InferenceGateway {
         }
     }
 
-    /// Refresh model forecast results for a node list into a cache HashMap.
+    /// Refresh model forecast results for a node list into a cache `HashMap`.
     /// Called by the strategy runtime layer before dispatch to pre-populate sync-readable results.
     ///
     /// Phase 2: `target_kind` is now consumed.
@@ -457,7 +448,7 @@ impl InferenceGateway {
         }
     }
 
-    /// Write a trace record to model_events table.
+    /// Write a trace record to `model_events` table.
     async fn write_trace(
         &self,
         model_id: &str,
@@ -514,7 +505,7 @@ impl InferenceGateway {
         }
     }
 
-    /// Return recent inference traces from model_events.
+    /// Return recent inference traces from `model_events`.
     pub async fn get_traces(
         &self,
         model_id: &str,

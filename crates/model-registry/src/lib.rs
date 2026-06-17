@@ -18,12 +18,12 @@ pub mod nats_bridge;
 pub mod pipeline_manager;
 pub mod quality_monitor;
 pub mod regression;
-pub mod tags;
 pub mod report;
 pub mod scheduler;
 pub mod scorecard;
 pub mod sidecar;
 pub mod spec_hash;
+pub mod tags;
 pub mod types;
 
 pub use inference_gateway::InferenceGateway;

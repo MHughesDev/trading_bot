@@ -13,6 +13,7 @@
 //! mutex (resting-order fills do this); the reverse never happens.  Account
 //! mutexes are always released before touching the order/resting maps.
 
+use std::cmp::Reverse;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -743,7 +744,7 @@ impl PaperTradingEngine {
             .filter(|r| r.intent.instrument_id == instrument_id)
             .map(|r| PaperOrderView::from_record(&r))
             .collect();
-        out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        out.sort_by_key(|b| Reverse(b.created_at));
         out
     }
 
@@ -760,7 +761,10 @@ impl PaperTradingEngine {
             .copied()
             .unwrap_or_else(|| AccountPolicy::for_asset_class(asset_class).default_starting_cash);
         {
-            let mut account = self.account(asset_class).lock().expect("paper account lock");
+            let mut account = self
+                .account(asset_class)
+                .lock()
+                .expect("paper account lock");
             *account = PaperAccount::new(asset_class, cash);
         }
         self.purge_orders(|r| r.asset_class == asset_class);
@@ -783,7 +787,10 @@ impl PaperTradingEngine {
         self.orders.clear();
         self.resting.clear();
         self.idempotency.clear();
-        self.terminal_fifo.lock().expect("terminal fifo lock").clear();
+        self.terminal_fifo
+            .lock()
+            .expect("terminal fifo lock")
+            .clear();
         info!("all paper accounts reset to opening balances");
     }
 
@@ -793,7 +800,7 @@ impl PaperTradingEngine {
         let to_remove: Vec<(String, Uuid, String)> = self
             .orders
             .iter()
-            .filter(|r| pred(&r))
+            .filter(|r| pred(r))
             .map(|r| {
                 (
                     r.order_id.clone(),

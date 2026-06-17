@@ -592,7 +592,7 @@ mod tests {
         };
 
         let clock = Arc::new(WallClock) as Arc<dyn StrategyClock>;
-        let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
+        let _demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
         let mut instance = StrategyInstance::new("user1", "BTC-USDT", def, clock.now());
 
         assert!(instance.has_model_forecasts());
