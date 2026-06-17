@@ -11,7 +11,7 @@ import { compile, compileScanner } from '@/utils/compiler'
 import { ruleSpecToDefinition, scannerToDefinition } from '@/utils/toDefinition'
 import { fromDefinition } from '@/utils/fromDefinition'
 import {
-  IndicatorNode, ConditionNode, AIForecastNode, LogicNode, ActionNode, SizeNode, ExitNode,
+  IndicatorNode, ConditionNode, AIInferenceNode, LogicNode, ActionNode, SizeNode, ExitNode,
 } from '@/nodes'
 import { Palette } from '@/components/strategy/Palette'
 import { NodeContextMenu } from '@/components/strategy/NodeContextMenu'
@@ -20,7 +20,7 @@ import type { NodeMenuState } from '@/components/strategy/NodeContextMenu'
 const nodeTypes: NodeTypes = {
   indicator: IndicatorNode,
   condition: ConditionNode,
-  ai_forecast: AIForecastNode,
+  ai_inference: AIInferenceNode,
   logic: LogicNode,
   action: ActionNode,
   size: SizeNode,

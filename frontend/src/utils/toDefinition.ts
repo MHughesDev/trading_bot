@@ -1,29 +1,69 @@
-// Compiles the visual builder's RuleStrategySpec into the canonical v1.0
+// Compiles the visual builder's RuleStrategySpec into the canonical
 // StrategyDefinition that the Rust backend (`/api/strategies`), the validator,
 // and the backtest engine all consume (ADR-0010, DATA-004).
 //
-// The v1.0 expression grammar is deliberately minimal: a condition node holds a
+// The expression grammar is deliberately minimal: a condition node holds a
 // single comparison (no boolean `&&`/`||`), a signal node watches one condition,
-// and signals that share an `emit` name OR-combine.  Exits and AI-forecast
-// conditions have no representation in v1.0 and are reported as warnings/errors
-// rather than silently dropped.
+// and signals that share an `emit` name OR-combine.
+//
+// AI inference is a first-class node (`model_forecast`, canonical v1.1): the
+// block runs data through a model, ensemble, or pipeline and gates a signal on
+// the resolved forecast. A definition that uses one is emitted at version 1.1;
+// otherwise 1.0. Exits still have no representation and are reported as warnings.
 
 import type { Condition, IndicatorSpec, RuleStrategySpec } from '@/types/spec'
 
+/** Canonical `model_forecast` node (mirrors Rust `NodeKind::ModelForecast`). */
+export interface ModelForecastNode {
+  id: string
+  type: 'model_forecast'
+  model_ref: string
+  target_kind?: 'model' | 'ensemble' | 'pipeline'
+  alias?: string
+  direction: string
+  min_confidence: number
+  input?: { feature_set?: string; timeframe: string; lookback: number }
+}
+
 export interface StrategyDefinition {
   strategy_id: string
-  definition_version: '1.0'
+  definition_version: '1.0' | '1.1'
   asset_class: string
   inputs: Array<{ lane: string; instrument: string; features?: string[] }>
   nodes: Array<
     | { id: string; type: 'condition'; expr: string }
     | { id: string; type: 'signal'; when: string; emit: string }
+    | ModelForecastNode
   >
   actions: Array<{
     on_signal: string
     type: 'place_order'
     order: { side: string; size_mode: string; size: string }
   }>
+}
+
+/** Builds a canonical `model_forecast` node from an AI condition, or an error. */
+function aiForecastNode(cond: Condition, id: string): ModelForecastNode | { error: string } {
+  const ai = cond.ai
+  if (!ai || !ai.targetRef) {
+    return { error: 'AI Inference block is missing its target (model / ensemble / pipeline).' }
+  }
+  const node: ModelForecastNode = {
+    id,
+    type: 'model_forecast',
+    model_ref: ai.targetRef,
+    direction: ai.direction,
+    min_confidence: ai.minConfidence,
+    input: {
+      ...(ai.input.featureSet ? { feature_set: ai.input.featureSet } : {}),
+      timeframe: ai.input.timeframe,
+      lookback: ai.input.lookback,
+    },
+  }
+  // Omit defaults so the JSON round-trips cleanly with the Rust skip_serializing_if.
+  if (ai.targetKind !== 'model') node.target_kind = ai.targetKind
+  if (ai.alias && ai.alias !== 'production') node.alias = ai.alias
+  return node
 }
 
 export interface ConvertResult {
@@ -141,11 +181,19 @@ export function scannerToDefinition(
 
   const nodes: StrategyDefinition['nodes'] = []
   const emit = 'scanner_signal'
+  let usedAi = false
   conditions.forEach((cond, idx) => {
-    const compiled = conditionToExpr(cond, indById, features)
-    if ('error' in compiled) { errors.push(compiled.error); return }
     const condId = `c${idx + 1}`
-    nodes.push({ id: condId, type: 'condition', expr: compiled.expr })
+    if (cond.type === 'model_forecast') {
+      const node = aiForecastNode(cond, condId)
+      if ('error' in node) { errors.push(node.error); return }
+      nodes.push(node)
+      usedAi = true
+    } else {
+      const compiled = conditionToExpr(cond, indById, features)
+      if ('error' in compiled) { errors.push(compiled.error); return }
+      nodes.push({ id: condId, type: 'condition', expr: compiled.expr })
+    }
     nodes.push({ id: `s${idx + 1}`, type: 'signal', when: condId, emit })
   })
 
@@ -161,7 +209,7 @@ export function scannerToDefinition(
   return {
     definition: {
       strategy_id: slugify(name),
-      definition_version: '1.0',
+      definition_version: usedAi ? '1.1' : '1.0',
       asset_class: assetClass,
       inputs,
       nodes,
@@ -216,14 +264,22 @@ export function ruleSpecToDefinition(
 
   const nodes: StrategyDefinition['nodes'] = []
   const emit = 'entry'
+  let usedAi = false
   conditions.forEach((cond, idx) => {
-    const compiled = conditionToExpr(cond, indById, features)
-    if ('error' in compiled) {
-      errors.push(compiled.error)
-      return
-    }
     const condId = `c${idx + 1}`
-    nodes.push({ id: condId, type: 'condition', expr: compiled.expr })
+    if (cond.type === 'model_forecast') {
+      const node = aiForecastNode(cond, condId)
+      if ('error' in node) { errors.push(node.error); return }
+      nodes.push(node)
+      usedAi = true
+    } else {
+      const compiled = conditionToExpr(cond, indById, features)
+      if ('error' in compiled) {
+        errors.push(compiled.error)
+        return
+      }
+      nodes.push({ id: condId, type: 'condition', expr: compiled.expr })
+    }
     nodes.push({ id: `s${idx + 1}`, type: 'signal', when: condId, emit })
   })
 
@@ -259,7 +315,7 @@ export function ruleSpecToDefinition(
   return {
     definition: {
       strategy_id: slugify(spec.name),
-      definition_version: '1.0',
+      definition_version: usedAi ? '1.1' : '1.0',
       asset_class: assetClass,
       inputs,
       nodes,

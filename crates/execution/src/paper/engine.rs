@@ -92,9 +92,30 @@ impl SimulatorSet {
         clob_overrides.insert(
             AssetClass::CryptoSpotCex,
             ClobFillSimulator {
+                // Paper crypto mirrors the Alpaca crypto account (the v1 paper
+                // venue): 0.25% taker. The CLOB default's 0.1% matched no venue
+                // in this build — it was a Binance-style number, well below both
+                // Alpaca (25 bps) and the Coinbase Advanced live target (40 bps+),
+                // so paper P&L understated trading costs by 2.5–12×.
+                fee_rate: dec!(0.0025), // 25 bps — Alpaca crypto taker
                 depth_notional: Some(dec!(1_000_000)),
                 impact_bps_at_depth: dec!(5),
                 max_impact_bps: dec!(50),
+                ..ClobFillSimulator::default()
+            },
+        );
+        // ETFs route through the CLOB structure but trade like commission-free
+        // equities (Alpaca/Schwab): no per-trade commission and a tight penny
+        // spread. Without this override they inherited the crypto-spot default
+        // (10 bps commission), a phantom fee no ETF venue charges.
+        clob_overrides.insert(
+            AssetClass::Etf,
+            ClobFillSimulator {
+                half_spread_bps: dec!(1), // ~1 bp — liquid ETFs quote tight
+                fee_rate: Decimal::ZERO,  // commission-free
+                depth_notional: Some(dec!(5_000_000)),
+                impact_bps_at_depth: dec!(2),
+                max_impact_bps: dec!(20),
                 ..ClobFillSimulator::default()
             },
         );

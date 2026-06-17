@@ -5,8 +5,9 @@ import { Panel } from '@/components/trading/Panel'
 import { ScannerPanel } from '@/components/trading/ScannerPanel'
 import { TerminalPanel, type TerminalAssetClass } from '@/components/trading/TerminalPanel'
 import { ChartPanel } from '@/panels/ChartPanel'
-import { layoutTemplates } from '@/config/layoutTemplates'
 import type { PanelSpec } from '@/config/layoutTemplates'
+import { useWorkspaceStore } from '@/store/workspace'
+import { useModeStore } from '@/store/mode'
 import { assetApi, strategiesApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Plus, X, ChevronLeft } from 'lucide-react'
@@ -406,20 +407,35 @@ function ScannerPicker({
 type PickerKind = 'chart' | 'terminal' | 'scanner' | null
 
 export function TradingPage() {
-  const [panels, setPanels] = useState<PanelSpec[]>(layoutTemplates.default.panels)
+  // Panel layout is persisted per trading mode (localStorage via the workspace
+  // store) so a refresh keeps every open chart / terminal / scanner, and a
+  // PAPER window keeps a different layout from a LIVE window.
+  const mode = useModeStore((s) => s.mode)
+  const panels = useWorkspaceStore((s) => s.byMode[mode].panels)
+  const setPanelsForMode = useWorkspaceStore((s) => s.setPanels)
+  const removeChartSettings = useWorkspaceStore((s) => s.removeChartSettings)
   const [pickerKind, setPickerKind] = useState<PickerKind>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
+  // Bind the panel mutators to the current mode so every edit lands in this
+  // window's mode slice.
+  const setPanels = useCallback(
+    (updater: (prev: PanelSpec[]) => PanelSpec[]) => setPanelsForMode(mode, updater),
+    [setPanelsForMode, mode],
+  )
+
   const removePanel = useCallback((id: string) => {
     setPanels((prev) => prev.filter((p) => p.id !== id))
-  }, [])
+    // Drop the closed chart's persisted view settings so storage doesn't grow.
+    removeChartSettings(mode, id)
+  }, [setPanels, removeChartSettings, mode])
 
   const addPanel = useCallback((instrument: string, assetClass: string, kind: 'chart' | 'terminal') => {
     const id = `${kind}-${Date.now()}`
     setPanels((prev) => [...prev, { id, kind, instrument, venue: 'kraken', assetClass }])
     setPickerKind(null)
-  }, [])
+  }, [setPanels])
 
   const addScannerFromPicker = useCallback((cfg: ScannerConfig) => {
     const id = `scanner-${Date.now()}`
@@ -431,7 +447,7 @@ export function TradingPage() {
       instruments: cfg.instruments,
     }])
     setPickerKind(null)
-  }, [])
+  }, [setPanels])
 
   const handleDragStart = useCallback((index: number, e: React.DragEvent) => {
     setDragIndex(index)
@@ -457,7 +473,7 @@ export function TradingPage() {
       return null
     })
     setDragOverIndex(null)
-  }, [])
+  }, [setPanels])
 
   const handleDragEnd = useCallback(() => {
     setDragIndex(null)
@@ -469,7 +485,7 @@ export function TradingPage() {
       <WorkspaceScroll className="flex-1">
         {panels.map((spec, i) => (
           <Panel
-            key={spec.id}
+            key={`${mode}:${spec.id}`}
             title={panelTitle(spec)}
             width={panelWidth(spec)}
             onClose={() => removePanel(spec.id)}
@@ -489,6 +505,7 @@ export function TradingPage() {
             ) : spec.kind === 'chart' ? (
               <div className="h-full overflow-y-auto">
                 <ChartPanel
+                  persistKey={spec.id}
                   instrument={spec.instrument ?? 'BTC-USD'}
                   assetClass={spec.assetClass ?? 'crypto_spot_cex'}
                 />

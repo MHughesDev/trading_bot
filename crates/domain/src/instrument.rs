@@ -126,10 +126,16 @@ impl AssetClass {
             AssetClass::CryptoSpotCex
             | AssetClass::Fx
             | AssetClass::Etf
-            | AssetClass::Bond
             | AssetClass::FuturesExpiring
             | AssetClass::PerpetualSwap => MarketStructure::Clob,
-            AssetClass::Equity | AssetClass::Option => MarketStructure::BrokerQuote,
+            // Bonds are dealer-quote markets, not central-limit-order-books, so
+            // they fill via the broker-quote simulator (wider NBBO + a flat
+            // per-bond commission). Previously routed to Clob, which left the
+            // intended Bond broker-quote tuning unreachable and filled bonds at
+            // the crypto-spot defaults.
+            AssetClass::Equity | AssetClass::Option | AssetClass::Bond => {
+                MarketStructure::BrokerQuote
+            }
             AssetClass::CryptoSpotDex | AssetClass::Nft => MarketStructure::AmmSwap,
             AssetClass::PredictionMarket => MarketStructure::PredictionBinary,
         }

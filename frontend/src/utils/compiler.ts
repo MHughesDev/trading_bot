@@ -2,7 +2,7 @@ import type { Node, Edge } from '@xyflow/react'
 import type { RuleStrategySpec, IndicatorSpec, Condition, ExitRule, SizeRule } from '@/types/spec'
 import type { IndicatorNodeData } from '@/nodes/IndicatorNode'
 import type { ConditionNodeData } from '@/nodes/ConditionNode'
-import type { AIForecastNodeData } from '@/nodes/AIForecastNode'
+import type { AIInferenceNodeData } from '@/nodes/AIInferenceNode'
 import type { LogicNodeData } from '@/nodes/LogicNode'
 import type { ActionNodeData } from '@/nodes/ActionNode'
 import type { SizeNodeData } from '@/nodes/SizeNode'
@@ -65,11 +65,25 @@ function resolveConditions(
     return { allOf: [cond], anyOf: [] }
   }
 
-  if (node.type === 'ai_forecast') {
-    const d = node.data as AIForecastNodeData
-    const cond: Condition = { type: 'model_forecast', left: 'price', right_value: d.minConfidence }
-    ;(cond as unknown as Record<string, unknown>).model = d.model
-    ;(cond as unknown as Record<string, unknown>).direction = d.direction
+  if (node.type === 'ai_inference') {
+    const d = node.data as AIInferenceNodeData
+    const cond: Condition = {
+      type: 'model_forecast',
+      left: 'price',
+      right_value: d.minConfidence,
+      ai: {
+        targetKind: d.targetKind,
+        targetRef: d.targetRef,
+        alias: d.alias || 'production',
+        direction: d.direction,
+        minConfidence: d.minConfidence,
+        input: {
+          featureSet: d.featureSet,
+          timeframe: d.timeframe,
+          lookback: d.lookback,
+        },
+      },
+    }
     return { allOf: [cond], anyOf: [] }
   }
 
@@ -87,6 +101,17 @@ function resolveConditions(
   }
 
   return { allOf: [], anyOf: [] }
+}
+
+/** Validates AI inference conditions: a target must be selected; emits a
+ *  runtime-dependency note for any AI block. */
+function collectAiWarnings(conds: Condition[], errors: string[], warnings: string[]): void {
+  const ai = conds.filter(c => c.type === 'model_forecast')
+  if (ai.length === 0) return
+  if (ai.some(c => !c.ai?.targetRef)) {
+    errors.push('Select a model, ensemble, or pipeline for every AI Inference block.')
+  }
+  warnings.push('AI Inference blocks require the inference service to be running.')
 }
 
 export interface CompileResult {
@@ -111,12 +136,12 @@ export function compileScanner(nodes: Node[], edges: Edge[], name: string): Scan
   const allOf: Condition[] = []
   const anyOf: Condition[] = []
 
-  // Root signal nodes = condition/logic/ai_forecast nodes whose output does NOT
+  // Root signal nodes = condition/logic/ai_inference nodes whose output does NOT
   // feed into another condition/logic node.  These are the ones that would
   // normally wire into a Trade Action node.
   const condOrLogicIds = new Set(
     nodes
-      .filter(n => n.type === 'condition' || n.type === 'logic' || n.type === 'ai_forecast')
+      .filter(n => n.type === 'condition' || n.type === 'logic' || n.type === 'ai_inference')
       .map(n => n.id),
   )
   const sourcesOfCondEdges = new Set(
@@ -136,9 +161,7 @@ export function compileScanner(nodes: Node[], edges: Edge[], name: string): Scan
     anyOf.push(...b)
   })
 
-  if ([...allOf, ...anyOf].some(c => c.type === 'model_forecast')) {
-    warnings.push('AI Forecast conditions require the forecaster service to be running.')
-  }
+  collectAiWarnings([...allOf, ...anyOf], errors, warnings)
 
   if (!name.trim()) errors.push('Give your scanner strategy a name.')
 
@@ -175,8 +198,7 @@ export function compile(nodes: Node[], edges: Edge[], name: string): CompileResu
     allOf.push(...a); anyOf.push(...b)
   })
 
-  if ([...allOf, ...anyOf].some(c => c.type === 'model_forecast'))
-    warnings.push('AI Forecast conditions require the forecaster service to be running.')
+  collectAiWarnings([...allOf, ...anyOf], errors, warnings)
 
   const sizeEdges = edgesFrom(edges, actionNode.id, 'size-out')
   if (sizeEdges.length === 0)

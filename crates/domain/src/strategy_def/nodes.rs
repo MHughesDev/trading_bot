@@ -42,6 +42,33 @@ fn is_production(s: &str) -> bool {
     s == "production"
 }
 
+fn default_target_kind() -> String {
+    "model".to_string()
+}
+
+fn is_model(s: &str) -> bool {
+    s == "model"
+}
+
+/// Input-data contract for an AI inference node — declares *what* data and *how
+/// much* of it the target receives on every evaluation (live, scanner, or
+/// backtest). The strategy builder fills this from the target's declared
+/// requirement so a target only runs on a window it supports.
+///
+/// Phase 1 carries this as part of the canonical schema; the strategy runtime
+/// begins consuming it (assembling the feature window for inference) in Phase 2.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelInput {
+    /// Named feature set the target consumes (the model's `feature_set_ref`).
+    /// `None` = the target's default feature set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feature_set: Option<String>,
+    /// Timeframe of the bars/features fed in (e.g. `"1m"`, `"5m"`, `"1h"`).
+    pub timeframe: String,
+    /// Lookback window — number of bars of history provided on each run.
+    pub lookback: u32,
+}
+
 /// A node in the strategy computation graph.
 ///
 /// The validator (Phase 5) parses `Node::kind` and rejects unknown types.
@@ -106,19 +133,121 @@ pub enum NodeKind {
         /// ID of the upstream node supplying the final universe.
         input: String,
     },
-    /// v1.1: AI model forecast condition.
-    /// The condition is true when the model's forecast direction matches `direction`
-    /// and confidence ≥ min_confidence. Returns false when the inference gateway
-    /// abstains (sidecar down, circuit-break open, or model not found).
+    /// v1.1: AI inference condition (model, ensemble, or pipeline).
+    ///
+    /// `model_ref` + `target_kind` identify the inference target; all three
+    /// target kinds resolve to a single forecast through the inference gateway,
+    /// so the strategy schema is agnostic to which kind it is. The condition is
+    /// true when the resolved forecast's direction matches `direction` and its
+    /// confidence ≥ `min_confidence`. Returns false when inference abstains
+    /// (sidecar down, circuit-break open, or target not found).
     ModelForecast {
-        /// Model ID or slug.
+        /// Inference target reference — a model, ensemble, or pipeline ID/slug
+        /// (see `target_kind`). Named `model_ref` for backward compatibility.
         model_ref: String,
+        /// Target kind: `"model"` (default) | `"ensemble"` | `"pipeline"`.
+        #[serde(default = "default_target_kind", skip_serializing_if = "is_model")]
+        target_kind: String,
         /// Alias to resolve (default: "production").
-        #[serde(default = "default_production_alias", skip_serializing_if = "is_production")]
+        #[serde(
+            default = "default_production_alias",
+            skip_serializing_if = "is_production"
+        )]
         alias: String,
         /// Expected forecast direction: "bullish" | "bearish" | "any".
         direction: String,
         /// Minimum confidence threshold (0.0–1.0).
         min_confidence: f64,
+        /// Input-data contract: what data and how much the target receives.
+        /// `None` = let the target use its declared default window.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<ModelInput>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The minimal AI node the builder emits for a single model defaults
+    /// `target_kind` to "model" and carries no `input` when omitted.
+    #[test]
+    fn model_forecast_minimal_defaults() {
+        let json = r#"{
+            "id": "mf1",
+            "type": "model_forecast",
+            "model_ref": "price_forecaster",
+            "direction": "bullish",
+            "min_confidence": 0.6
+        }"#;
+        let node: Node = serde_json::from_str(json).unwrap();
+        match node.kind {
+            NodeKind::ModelForecast {
+                model_ref,
+                target_kind,
+                alias,
+                direction,
+                min_confidence,
+                input,
+            } => {
+                assert_eq!(model_ref, "price_forecaster");
+                assert_eq!(target_kind, "model");
+                assert_eq!(alias, "production");
+                assert_eq!(direction, "bullish");
+                assert_eq!(min_confidence, 0.6);
+                assert!(input.is_none());
+            }
+            other => panic!("expected ModelForecast, got {other:?}"),
+        }
+    }
+
+    /// The full AI node the builder emits for an ensemble with an input window
+    /// deserializes every field, and re-serializes without the default
+    /// `target_kind`/`alias` keys (skip_serializing_if).
+    #[test]
+    fn model_forecast_full_roundtrip() {
+        let json = r#"{
+            "id": "mf1",
+            "type": "model_forecast",
+            "model_ref": "vol_ensemble",
+            "target_kind": "ensemble",
+            "alias": "candidate",
+            "direction": "any",
+            "min_confidence": 0.7,
+            "input": { "feature_set": "fs_core_v3", "timeframe": "5m", "lookback": 256 }
+        }"#;
+        let node: Node = serde_json::from_str(json).unwrap();
+        match &node.kind {
+            NodeKind::ModelForecast {
+                target_kind, input, ..
+            } => {
+                assert_eq!(target_kind, "ensemble");
+                let input = input.as_ref().expect("input present");
+                assert_eq!(input.feature_set.as_deref(), Some("fs_core_v3"));
+                assert_eq!(input.timeframe, "5m");
+                assert_eq!(input.lookback, 256);
+            }
+            other => panic!("expected ModelForecast, got {other:?}"),
+        }
+
+        // Round-trips: a model-kind node with production alias omits both keys.
+        let model_node = Node {
+            id: "mf2".into(),
+            kind: NodeKind::ModelForecast {
+                model_ref: "m".into(),
+                target_kind: "model".into(),
+                alias: "production".into(),
+                direction: "bearish".into(),
+                min_confidence: 0.5,
+                input: None,
+            },
+        };
+        let s = serde_json::to_string(&model_node).unwrap();
+        assert!(
+            !s.contains("target_kind"),
+            "default target_kind omitted: {s}"
+        );
+        assert!(!s.contains("alias"), "default alias omitted: {s}");
+        assert!(!s.contains("input"), "absent input omitted: {s}");
+    }
 }

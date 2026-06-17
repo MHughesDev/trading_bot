@@ -319,6 +319,10 @@ impl InferenceGateway {
                 alias,
                 direction,
                 min_confidence,
+                // `target_kind` + `input` are consumed in Phase 2 (ensemble/
+                // pipeline resolution and windowed feature assembly); model
+                // forecasts resolve through `forecast()` as before.
+                ..
             } = &node.kind
             {
                 let forecast = self

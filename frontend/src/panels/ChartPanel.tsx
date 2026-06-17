@@ -10,12 +10,16 @@ import { assetApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import type { Bar, WsOutMessage } from '@/lib/types'
 import type { PriceLineAnnotation } from '@/components/charts/Annotations'
+import { useWorkspaceStore } from '@/store/workspace'
+import { useModeStore } from '@/store/mode'
 
 interface ChartPanelProps {
   instrument: string
   initialBars?: Bar[]
   priceLines?: PriceLineAnnotation[]
   assetClass?: string
+  /** Stable panel id used to persist timeframe + indicators across refreshes. */
+  persistKey?: string
 }
 
 const PANEL_ID_PREFIX = 'chart_'
@@ -387,16 +391,40 @@ export function ChartPanel({
   initialBars = [],
   priceLines = [],
   assetClass = 'crypto_spot_cex',
+  persistKey,
 }: ChartPanelProps) {
   const panelId = useRef(`${PANEL_ID_PREFIX}${instrument}`).current
   const [liveBars, setLiveBars] = useState<Bar[]>(() => initialBars)
   const [connState, setConnState] = useState<ConnectionState>('disconnected')
   const [initDone, setInitDone] = useState(false)
-  const [tfSecs, setTfSecs] = useState(3600)
   const [showReseed, setShowReseed] = useState(false)
 
-  const [activeIndicators, setActiveIndicators] = useState<IndicatorInstance[]>([])
+  // Timeframe + indicators are restored from the persisted workspace store
+  // (scoped to the current trading mode) so a page refresh keeps this chart's
+  // view and PAPER/LIVE windows stay independent. Read once via getState() in
+  // the lazy initializer to avoid subscribing (which would re-render on our own
+  // writes). The panel is keyed by mode upstream, so `mode` is stable for this
+  // instance's lifetime.
+  const mode = useModeStore((s) => s.mode)
+  const setChartSettings = useWorkspaceStore((s) => s.setChartSettings)
+  const [tfSecs, setTfSecs] = useState(
+    () =>
+      (persistKey ? useWorkspaceStore.getState().byMode[mode].chartSettings[persistKey]?.tfSecs : undefined) ??
+      3600,
+  )
+  const [activeIndicators, setActiveIndicators] = useState<IndicatorInstance[]>(
+    () =>
+      (persistKey
+        ? useWorkspaceStore.getState().byMode[mode].chartSettings[persistKey]?.indicators
+        : undefined) ?? [],
+  )
   const [showIndicatorPicker, setShowIndicatorPicker] = useState(false)
+
+  // Persist timeframe + indicators whenever they change.
+  useEffect(() => {
+    if (!persistKey) return
+    setChartSettings(mode, persistKey, { tfSecs, indicators: activeIndicators })
+  }, [mode, persistKey, tfSecs, activeIndicators, setChartSettings])
 
   const tf = TIMEFRAMES.find((t) => t.secs === tfSecs) ?? TIMEFRAMES[4]
 
