@@ -149,7 +149,10 @@ pub enum NodeKind {
         #[serde(default = "default_target_kind", skip_serializing_if = "is_model")]
         target_kind: String,
         /// Alias to resolve (default: "production").
-        #[serde(default = "default_production_alias", skip_serializing_if = "is_production")]
+        #[serde(
+            default = "default_production_alias",
+            skip_serializing_if = "is_production"
+        )]
         alias: String,
         /// Expected forecast direction: "bullish" | "bearish" | "any".
         direction: String,
@@ -240,7 +243,10 @@ mod tests {
             },
         };
         let s = serde_json::to_string(&model_node).unwrap();
-        assert!(!s.contains("target_kind"), "default target_kind omitted: {s}");
+        assert!(
+            !s.contains("target_kind"),
+            "default target_kind omitted: {s}"
+        );
         assert!(!s.contains("alias"), "default alias omitted: {s}");
         assert!(!s.contains("input"), "absent input omitted: {s}");
     }

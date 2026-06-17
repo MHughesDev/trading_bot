@@ -172,7 +172,12 @@ impl StrategyInstance {
                         self.compiled_conditions.get(&node_id),
                         self.program_slots.get(&node_id),
                     ) {
-                        bytecode::run_slots(program, local_to_global, feature_slots, &self.state.bars)
+                        bytecode::run_slots(
+                            program,
+                            local_to_global,
+                            feature_slots,
+                            &self.state.bars,
+                        )
                     } else {
                         // Fallback for conditions that failed to compile — build a
                         // temporary name→value map from the slot array for the
@@ -614,7 +619,10 @@ mod tests {
             available_time: Utc::now(),
         };
         let intents = instance.process_event(&event);
-        assert!(intents.is_empty(), "should not fire without forecast results");
+        assert!(
+            intents.is_empty(),
+            "should not fire without forecast results"
+        );
 
         // Set forecast result to true
         let mut results = HashMap::new();
@@ -628,6 +636,10 @@ mod tests {
             available_time: Utc::now(),
         };
         let intents2 = instance.process_event(&event2);
-        assert_eq!(intents2.len(), 1, "should fire when forecast result is true");
+        assert_eq!(
+            intents2.len(),
+            1,
+            "should fire when forecast result is true"
+        );
     }
 }
