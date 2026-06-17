@@ -52,8 +52,14 @@ pub fn compute_scorecard(metrics: &Value) -> Value {
 
     // Quality: prefer CRPS from the eval sidecar (I-2.10); fall back to the
     // val_auc / avg_confidence proxy for training-run previews.
-    let quality = if let Some(crps) = metrics.get("crps").and_then(|v| v.as_f64()) {
-        quality_from_crps(crps, metrics.get("pit_calibrated").and_then(|v| v.as_bool()).unwrap_or(false))
+    let quality = if let Some(crps) = metrics.get("crps").and_then(serde_json::Value::as_f64) {
+        quality_from_crps(
+            crps,
+            metrics
+                .get("pit_calibrated")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        )
     } else {
         metrics
             .get("val_auc")
@@ -107,7 +113,11 @@ fn quality_from_crps(crps: f64, calibrated: bool) -> f64 {
 /// Called by `drive_eval` after `dispatch_evaluate` succeeds.
 pub fn compute_scorecard_from_eval(eval_result: &Value) -> Value {
     // The sidecar already computed a scorecard — use it directly if present.
-    if let Some(sc) = eval_result.get("scorecard").and_then(|v| if v.is_null() { None } else { Some(v) }) {
+    if let Some(sc) =
+        eval_result
+            .get("scorecard")
+            .and_then(|v| if v.is_null() { None } else { Some(v) })
+    {
         return sc.clone();
     }
     // Fall back to computing from the metrics block.

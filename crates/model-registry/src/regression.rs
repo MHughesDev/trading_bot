@@ -115,7 +115,10 @@ mod parity_tests {
         .expect("valid distribution");
 
         // Serve path quantiles == eval path quantiles (one bundle, one path).
-        assert_eq!(cf.quantiles_return, eval_quantiles, "serve path diverged from eval path");
+        assert_eq!(
+            cf.quantiles_return, eval_quantiles,
+            "serve path diverged from eval path"
+        );
         assert!(cf.point_in_time, "published forecast must be point-in-time");
     }
 
@@ -140,7 +143,11 @@ mod parity_tests {
 
         // VaR_95 (5th-pct) must equal the quantile directly — no second estimator.
         let diff = (cf.risk.var_95.var - expected_var95).abs();
-        assert!(diff < 1e-12, "VaR_95={} expected={expected_var95}", cf.risk.var_95.var);
+        assert!(
+            diff < 1e-12,
+            "VaR_95={} expected={expected_var95}",
+            cf.risk.var_95.var
+        );
     }
 
     /// A deliberate serve-side scaler tweak would change sigma and break this.
@@ -149,10 +156,18 @@ mod parity_tests {
         let sigma = 0.015_f64;
         let dist = fixture_dist(sigma);
         let cf = CalibratedForecast::from_distribution(
-            "m".into(), 1, "ETH-USD".into(), "5m".into(), Utc::now(), dist,
+            "m".into(),
+            1,
+            "ETH-USD".into(),
+            "5m".into(),
+            Utc::now(),
+            dist,
         )
         .unwrap();
-        assert!((cf.sigma - sigma).abs() < 1e-15, "sigma mutated in serve path");
+        assert!(
+            (cf.sigma - sigma).abs() < 1e-15,
+            "sigma mutated in serve path"
+        );
     }
 
     /// A future `as_of` must not leak: the contract stores the as_of ceiling
@@ -162,7 +177,12 @@ mod parity_tests {
         let as_of = Utc::now();
         let dist = fixture_dist(0.01);
         let cf = CalibratedForecast::from_distribution(
-            "m".into(), 1, "BTC-USD".into(), "1h".into(), as_of, dist,
+            "m".into(),
+            1,
+            "BTC-USD".into(),
+            "1h".into(),
+            as_of,
+            dist,
         )
         .unwrap();
         assert!(cf.point_in_time);

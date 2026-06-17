@@ -31,30 +31,52 @@ pub struct FeatureSetSpec {
 fn known_features_static() -> Vec<&'static str> {
     vec![
         // ── Passthrough ──────────────────────────────────────────────────
-        "open", "high", "low", "close", "volume",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
         // ── EMA family ───────────────────────────────────────────────────
-        "ema_7", "ema_14", "ema_21", "ema_50", "ema_200",
+        "ema_7",
+        "ema_14",
+        "ema_21",
+        "ema_50",
+        "ema_200",
         // ── RSI family ───────────────────────────────────────────────────
-        "rsi_14", "rsi_21",
+        "rsi_14",
+        "rsi_21",
         // ── Rolling moments ──────────────────────────────────────────────
-        "rolling_mean_7", "rolling_mean_14", "rolling_mean_20", "rolling_mean_50",
-        "rolling_std_7", "rolling_std_14", "rolling_std_20",
+        "rolling_mean_7",
+        "rolling_mean_14",
+        "rolling_mean_20",
+        "rolling_mean_50",
+        "rolling_std_7",
+        "rolling_std_14",
+        "rolling_std_20",
         // ── Returns / lags (I-3.2) ───────────────────────────────────────
-        "returns_1", "returns_5", "returns_10", "returns_20",
+        "returns_1",
+        "returns_5",
+        "returns_10",
+        "returns_20",
         "log_returns_1",
         // ── Volatility estimators (I-3.2) ────────────────────────────────
-        "parkinson_vol_20",   // Parkinson range-based vol, 20-bar rolling
+        "parkinson_vol_20",    // Parkinson range-based vol, 20-bar rolling
         "garman_klass_vol_20", // Garman–Klass vol, 20-bar rolling
         // ── Momentum (I-3.2) ─────────────────────────────────────────────
-        "momentum_5", "momentum_10", "momentum_20",
+        "momentum_5",
+        "momentum_10",
+        "momentum_20",
         // ── Mean-reversion / z-score (I-3.2) ────────────────────────────
-        "zscore_20", "zscore_50",
+        "zscore_20",
+        "zscore_50",
         // ── Volume (I-3.2) ───────────────────────────────────────────────
         "rel_volume_20",
-        "obv",               // On-balance volume (cumulative)
+        "obv", // On-balance volume (cumulative)
         // ── Calendar / session (I-3.2) ───────────────────────────────────
-        "hour_sin", "hour_cos",
-        "dow_sin",  "dow_cos",
+        "hour_sin",
+        "hour_cos",
+        "dow_sin",
+        "dow_cos",
     ]
 }
 
@@ -75,12 +97,23 @@ static BUILT_IN_SETS: Lazy<HashMap<String, FeatureSetSpec>> = Lazy::new(|| {
             name: "fs_core_ohlcv_v3".to_string(),
             version: "3".to_string(),
             features: vec![
-                "open", "high", "low", "close", "volume",
-                "ema_7", "ema_14", "ema_21",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "ema_7",
+                "ema_14",
+                "ema_21",
                 "rsi_14",
-                "rolling_mean_7", "rolling_std_7",
-                "returns_1", "log_returns_1",
-            ].into_iter().map(str::to_string).collect(),
+                "rolling_mean_7",
+                "rolling_std_7",
+                "returns_1",
+                "log_returns_1",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
             description: "Core OHLCV + EMA/RSI/rolling features v3",
         },
     );
@@ -92,15 +125,30 @@ static BUILT_IN_SETS: Lazy<HashMap<String, FeatureSetSpec>> = Lazy::new(|| {
             name: "fs_extended_v1".to_string(),
             version: "1".to_string(),
             features: vec![
-                "open", "high", "low", "close", "volume",
-                "ema_7", "ema_14", "ema_21", "ema_50",
-                "rsi_14", "rsi_21",
-                "rolling_mean_20", "rolling_std_20",
-                "returns_1", "returns_5", "log_returns_1",
-                "parkinson_vol_20", "garman_klass_vol_20",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "ema_7",
+                "ema_14",
+                "ema_21",
+                "ema_50",
+                "rsi_14",
+                "rsi_21",
+                "rolling_mean_20",
+                "rolling_std_20",
+                "returns_1",
+                "returns_5",
+                "log_returns_1",
+                "parkinson_vol_20",
+                "garman_klass_vol_20",
                 "zscore_20",
                 "rel_volume_20",
-            ].into_iter().map(str::to_string).collect(),
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
             description: "Extended OHLCV + vol estimators + z-score + relative volume v1",
         },
     );
@@ -112,15 +160,27 @@ static BUILT_IN_SETS: Lazy<HashMap<String, FeatureSetSpec>> = Lazy::new(|| {
             name: "fs_momentum_v1".to_string(),
             version: "1".to_string(),
             features: vec![
-                "close", "volume",
-                "ema_7", "ema_21", "ema_50",
+                "close",
+                "volume",
+                "ema_7",
+                "ema_21",
+                "ema_50",
                 "rsi_14",
-                "momentum_5", "momentum_10", "momentum_20",
-                "returns_1", "returns_5", "returns_10",
+                "momentum_5",
+                "momentum_10",
+                "momentum_20",
+                "returns_1",
+                "returns_5",
+                "returns_10",
                 "zscore_20",
-                "hour_sin", "hour_cos",
-                "dow_sin", "dow_cos",
-            ].into_iter().map(str::to_string).collect(),
+                "hour_sin",
+                "hour_cos",
+                "dow_sin",
+                "dow_cos",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
             description: "Momentum + calendar features v1",
         },
     );
@@ -251,7 +311,11 @@ mod tests {
         let spec = FeatureSetSpec {
             name: "my_set".to_string(),
             version: "1".to_string(),
-            features: vec!["close".to_string(), "rsi_14".to_string(), "momentum_10".to_string()],
+            features: vec![
+                "close".to_string(),
+                "rsi_14".to_string(),
+                "momentum_10".to_string(),
+            ],
             description: "test valid",
         };
         assert!(validate_user_spec(&spec).is_ok());

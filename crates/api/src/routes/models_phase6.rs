@@ -70,7 +70,11 @@ pub async fn predict(
     };
 
     let features_map = std::collections::HashMap::<String, f64>::new();
-    match state.inference.forecast(&id, &alias_str, &id, &features_map).await {
+    match state
+        .inference
+        .forecast(&id, &alias_str, &id, &features_map)
+        .await
+    {
         Some(result) => {
             if let Some(dist) = result.distribution {
                 match CalibratedForecast::from_distribution(
@@ -82,27 +86,41 @@ pub async fn predict(
                     dist,
                 ) {
                     Ok(cf) => Json(serde_json::to_value(cf).unwrap()).into_response(),
-                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+                    Err(e) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": e })),
+                    )
+                        .into_response(),
                 }
             } else {
                 Json(json!({
                     "model_id": id, "version": version, "as_of": as_of,
                     "direction": result.direction, "confidence": result.confidence,
                     "point_in_time": true,
-                })).into_response()
+                }))
+                .into_response()
             }
         }
-        None => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": "no forecast available" }))).into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "no forecast available" })),
+        )
+            .into_response(),
     }
 }
 
 // ── I-6.4: Tags ───────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub struct TagBody { pub tag: String }
+pub struct TagBody {
+    pub tag: String,
+}
 
 #[derive(Deserialize)]
-pub struct TagSearchQuery { pub tag: String, pub kind: Option<String> }
+pub struct TagSearchQuery {
+    pub tag: String,
+    pub kind: Option<String>,
+}
 
 pub async fn add_tag(
     State(state): State<AppState>,
@@ -112,7 +130,11 @@ pub async fn add_tag(
 ) -> impl IntoResponse {
     match state.tags.add_tag(&id, &kind, &body.tag).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -123,7 +145,11 @@ pub async fn remove_tag(
 ) -> impl IntoResponse {
     match state.tags.remove_tag(&id, &kind, &tag).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -134,7 +160,11 @@ pub async fn list_tags(
 ) -> impl IntoResponse {
     match state.tags.list_tags(&id, &kind).await {
         Ok(tags) => Json(serde_json::to_value(tags).unwrap()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -146,7 +176,11 @@ pub async fn search_by_tag(
     let kind = params.kind.as_deref().unwrap_or("model");
     match state.tags.search_by_tag(kind, &params.tag).await {
         Ok(ids) => Json(json!({ "kind": kind, "tag": params.tag, "ids": ids })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -158,7 +192,11 @@ pub async fn set_annotation(
 ) -> impl IntoResponse {
     match state.tags.set_annotation(&id, &kind, &key, value).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -169,7 +207,11 @@ pub async fn get_annotations(
 ) -> impl IntoResponse {
     match state.tags.get_annotations(&id, &kind).await {
         Ok(annots) => Json(serde_json::to_value(annots).unwrap()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -180,8 +222,16 @@ pub async fn create_template(
 ) -> impl IntoResponse {
     let uid = token.user_id().to_string();
     match state.tags.create_template(req, &uid).await {
-        Ok(tmpl) => (StatusCode::CREATED, Json(serde_json::to_value(tmpl).unwrap())).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Ok(tmpl) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(tmpl).unwrap()),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -193,7 +243,11 @@ pub async fn list_templates(
     let kind = params.get("kind").map(|s| s.as_str());
     match state.tags.list_templates(kind).await {
         Ok(tmpls) => Json(serde_json::to_value(tmpls).unwrap()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -204,6 +258,10 @@ pub async fn fork_template(
 ) -> impl IntoResponse {
     match state.tags.fork_template(&id).await {
         Ok(def) => Json(json!({ "definition": def })).into_response(),
-        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }

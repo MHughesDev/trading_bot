@@ -20,7 +20,7 @@ use crate::types::TrainRequest;
 pub struct QualityAlert {
     pub id: String,
     pub model_id: String,
-    pub kind: String,      // "calibration_drift" | "feature_drift" | "staleness"
+    pub kind: String, // "calibration_drift" | "feature_drift" | "staleness"
     pub message: String,
     pub metric_value: Option<f64>,
     pub threshold: Option<f64>,
@@ -42,8 +42,8 @@ pub struct QualityPoint {
 
 // ── Thresholds ────────────────────────────────────────────────────────────────
 
-/// Default CRPS relative degradation threshold (CRPS_now / CRPS_baseline − 1 > 0.20).
-const DEFAULT_CRPS_DRIFT_THRESHOLD: f64 = 0.20;
+/// Default CRPS relative degradation threshold (`CRPS_now` / `CRPS_baseline` − 1 > 0.20).
+const _DEFAULT_CRPS_DRIFT_THRESHOLD: f64 = 0.20;
 /// Default PIT uniformity KS threshold (D statistic).
 const DEFAULT_PIT_KS_THRESHOLD: f64 = 0.15;
 /// Default feature PSI threshold.
@@ -63,7 +63,12 @@ pub struct QualityMonitor {
 impl QualityMonitor {
     pub fn new(pg: PgPool, models: Arc<ModelManager>, poll_interval: Duration) -> Arc<Self> {
         let (progress_tx, _) = tokio::sync::broadcast::channel(256);
-        Arc::new(Self { pg, models, poll_interval, progress_tx })
+        Arc::new(Self {
+            pg,
+            models,
+            poll_interval,
+            progress_tx,
+        })
     }
 
     pub fn subscribe_progress(&self) -> tokio::sync::broadcast::Receiver<Value> {
@@ -107,11 +112,7 @@ impl QualityMonitor {
         Ok(())
     }
 
-    async fn score_model(
-        &self,
-        model_id: &str,
-        _user_id: &uuid::Uuid,
-    ) -> anyhow::Result<()> {
+    async fn score_model(&self, model_id: &str, _user_id: &uuid::Uuid) -> anyhow::Result<()> {
         // Fetch recent realized vs predicted forecasts from the forecasts table.
         // Falls back gracefully when no rows exist yet.
         let rows: Vec<(f64, f64, f64, f64)> = sqlx::query_as(
@@ -137,15 +138,27 @@ impl QualityMonitor {
             .iter()
             .map(|(_, q50, _, r)| {
                 let e = r - q50;
-                if e >= 0.0 { 0.5 * e } else { -0.5 * e }
+                if e >= 0.0 {
+                    0.5 * e
+                } else {
+                    -0.5 * e
+                }
             })
             .sum::<f64>()
             / n;
 
         // Empirical coverage at 50% and 90% intervals.
-        let cov50 = rows.iter().filter(|(q10, _, q90, r)| r >= q10 && r <= q90).count() as f64 / n;
+        let cov50 = rows
+            .iter()
+            .filter(|(q10, _, q90, r)| r >= q10 && r <= q90)
+            .count() as f64
+            / n;
         // Use q10/q90 for the 90% proxy (outer interval).
-        let cov90 = rows.iter().filter(|(q10, _, q90, r)| r >= q10 && r <= q90).count() as f64 / n;
+        let cov90 = rows
+            .iter()
+            .filter(|(q10, _, q90, r)| r >= q10 && r <= q90)
+            .count() as f64
+            / n;
 
         let now = Utc::now();
 
@@ -209,18 +222,12 @@ impl QualityMonitor {
         Ok(())
     }
 
-    async fn check_feature_drift(
-        &self,
-        model_id: &str,
-        psi: f64,
-    ) -> anyhow::Result<()> {
+    async fn check_feature_drift(&self, model_id: &str, psi: f64) -> anyhow::Result<()> {
         if psi > DEFAULT_PSI_THRESHOLD {
             self.raise_alert(
                 model_id,
                 "feature_drift",
-                &format!(
-                    "feature PSI={psi:.4} exceeds threshold={DEFAULT_PSI_THRESHOLD}"
-                ),
+                &format!("feature PSI={psi:.4} exceeds threshold={DEFAULT_PSI_THRESHOLD}"),
                 Some(psi),
                 Some(DEFAULT_PSI_THRESHOLD),
             )
@@ -264,9 +271,7 @@ impl QualityMonitor {
             self.raise_alert(
                 model_id,
                 "staleness",
-                &format!(
-                    "no successful retrain in the last {DEFAULT_STALENESS_DAYS} days"
-                ),
+                &format!("no successful retrain in the last {DEFAULT_STALENESS_DAYS} days"),
                 None,
                 Some(DEFAULT_STALENESS_DAYS as f64),
             )
@@ -344,9 +349,14 @@ impl QualityMonitor {
         Ok(())
     }
 
-    /// Kick off a ModelManager training run tagged with the triggering alert.
-    /// Returns the run_id on success, None if no auto-retrain model config found.
-    async fn trigger_retrain(&self, model_id: &str, alert_kind: &str, alert_id: &str) -> Option<String> {
+    /// Kick off a `ModelManager` training run tagged with the triggering alert.
+    /// Returns the `run_id` on success, None if no auto-retrain model config found.
+    async fn trigger_retrain(
+        &self,
+        model_id: &str,
+        alert_kind: &str,
+        alert_id: &str,
+    ) -> Option<String> {
         // Only trigger if the model has auto_retrain enabled.
         let user_str: Option<String> = sqlx::query_scalar(
             "SELECT created_by::text FROM ai_models \
@@ -406,9 +416,18 @@ impl QualityMonitor {
 
         Ok(rows
             .into_iter()
-            .map(|(model_id, window_end, crps, coverage_50, coverage_90, n_forecasts)| {
-                QualityPoint { model_id, window_end, crps, coverage_50, coverage_90, n_forecasts }
-            })
+            .map(
+                |(model_id, window_end, crps, coverage_50, coverage_90, n_forecasts)| {
+                    QualityPoint {
+                        model_id,
+                        window_end,
+                        crps,
+                        coverage_50,
+                        coverage_90,
+                        n_forecasts,
+                    }
+                },
+            )
             .collect())
     }
 
@@ -440,9 +459,29 @@ impl QualityMonitor {
 
         Ok(rows
             .into_iter()
-            .map(|(id, model_id, kind, message, metric_value, threshold, triggered_at, retrain_run_id)| {
-                QualityAlert { id, model_id, kind, message, metric_value, threshold, triggered_at, retrain_run_id }
-            })
+            .map(
+                |(
+                    id,
+                    model_id,
+                    kind,
+                    message,
+                    metric_value,
+                    threshold,
+                    triggered_at,
+                    retrain_run_id,
+                )| {
+                    QualityAlert {
+                        id,
+                        model_id,
+                        kind,
+                        message,
+                        metric_value,
+                        threshold,
+                        triggered_at,
+                        retrain_run_id,
+                    }
+                },
+            )
             .collect())
     }
 }

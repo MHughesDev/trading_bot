@@ -151,9 +151,7 @@ pub fn validate_ensemble(def: &EnsembleDefinition) -> Result<(), Vec<EnsembleVal
             path: "weight_floor".into(),
             message: "weight_floor must be in (0, 1]".into(),
         });
-    } else if !def.roster.is_empty()
-        && def.weight_floor * def.roster.len() as f64 > 1.0 + 1e-9
-    {
+    } else if !def.roster.is_empty() && def.weight_floor * def.roster.len() as f64 > 1.0 + 1e-9 {
         errs.push(EnsembleValidationError {
             path: "weight_floor".into(),
             message: format!(
@@ -263,7 +261,10 @@ mod tests {
         for combiner in ["linear_opinion_pool", "crps_weighted", "stacking"] {
             let mut def = two_member_def();
             def.combiner = combiner.into();
-            assert!(validate_ensemble(&def).is_ok(), "combiner={combiner} rejected");
+            assert!(
+                validate_ensemble(&def).is_ok(),
+                "combiner={combiner} rejected"
+            );
         }
     }
 

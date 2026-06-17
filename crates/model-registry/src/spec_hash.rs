@@ -45,9 +45,9 @@ pub fn compute_spec_hash(
 
 fn hash_field(h: &mut Sha256, tag: &[u8], value: &[u8]) {
     // tag_len(4) || tag || value_len(8) || value
-    h.update(&(tag.len() as u32).to_le_bytes());
+    h.update((tag.len() as u32).to_le_bytes());
     h.update(tag);
-    h.update(&(value.len() as u64).to_le_bytes());
+    h.update((value.len() as u64).to_le_bytes());
     h.update(value);
 }
 

@@ -12,7 +12,13 @@ pub const PIPELINE_SCHEMA_VERSION: &str = "1.1";
 
 /// All ops recognized by the DAG executor.
 pub const TRAINING_OPS: &[&str] = &[
-    "materialize", "features", "target", "train", "calibrate", "evaluate", "register",
+    "materialize",
+    "features",
+    "target",
+    "train",
+    "calibrate",
+    "evaluate",
+    "register",
 ];
 pub const INFERENCE_OPS: &[&str] = &["load_bundle", "predict", "calibrate", "publish"];
 
@@ -56,11 +62,7 @@ impl PipelineMatrix {
     /// Returns true when the matrix produces ≥ 2 cells.
     pub fn is_fan_out(&self) -> bool {
         let lens = [self.asset.len(), self.timeframe.len(), self.window.len()];
-        lens.iter()
-            .filter(|&&n| n > 0)
-            .map(|&n| n)
-            .product::<usize>()
-            > 1
+        lens.iter().filter(|&&n| n > 0).copied().product::<usize>() > 1
     }
 
     /// Enumerate every (asset, timeframe, window) cell in the cross-product.
@@ -177,9 +179,7 @@ pub struct PipelineValidationError {
 }
 
 /// Validate a `PipelineDefinition`.  Returns `Ok(())` or a non-empty error list.
-pub fn validate_pipeline(
-    def: &PipelineDefinition,
-) -> Result<(), Vec<PipelineValidationError>> {
+pub fn validate_pipeline(def: &PipelineDefinition) -> Result<(), Vec<PipelineValidationError>> {
     let mut errs: Vec<PipelineValidationError> = Vec::new();
 
     if def.dag.is_empty() {
@@ -190,8 +190,7 @@ pub fn validate_pipeline(
     }
 
     // Collect node IDs for edge resolution.
-    let node_ids: std::collections::HashSet<&str> =
-        def.dag.iter().map(|n| n.id.as_str()).collect();
+    let node_ids: std::collections::HashSet<&str> = def.dag.iter().map(|n| n.id.as_str()).collect();
 
     // Duplicate node IDs.
     let mut seen = std::collections::HashSet::new();
@@ -242,19 +241,13 @@ pub fn validate_pipeline(
         if def.kind == "training" && INFERENCE_ONLY.contains(&node.op.as_str()) {
             errs.push(PipelineValidationError {
                 path: format!("dag[{}].op", node.id),
-                message: format!(
-                    "op '{}' is only legal in an inference pipeline",
-                    node.op
-                ),
+                message: format!("op '{}' is only legal in an inference pipeline", node.op),
             });
         }
         if def.kind == "inference" && TRAINING_ONLY.contains(&node.op.as_str()) {
             errs.push(PipelineValidationError {
                 path: format!("dag[{}].op", node.id),
-                message: format!(
-                    "op '{}' is only legal in a training pipeline",
-                    node.op
-                ),
+                message: format!("op '{}' is only legal in a training pipeline", node.op),
             });
         }
 
@@ -277,7 +270,11 @@ pub fn validate_pipeline(
         });
     }
 
-    if errs.is_empty() { Ok(()) } else { Err(errs) }
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(errs)
+    }
 }
 
 /// Returns true if the DAG contains a directed cycle.
@@ -401,9 +398,7 @@ mod tests {
         let mut def = training_def();
         def.dag[1].needs.push("ghost_node".into());
         let errs = validate_pipeline(&def).unwrap_err();
-        assert!(errs
-            .iter()
-            .any(|e| e.message.contains("ghost_node")));
+        assert!(errs.iter().any(|e| e.message.contains("ghost_node")));
     }
 
     #[test]
@@ -411,7 +406,9 @@ mod tests {
         let mut def = training_def();
         def.dag[0].op = "predict".into();
         let errs = validate_pipeline(&def).unwrap_err();
-        assert!(errs.iter().any(|e| e.message.contains("inference pipeline")));
+        assert!(errs
+            .iter()
+            .any(|e| e.message.contains("inference pipeline")));
     }
 
     #[test]
@@ -419,9 +416,7 @@ mod tests {
         let mut def = training_def();
         def.kind = "inference".into();
         let errs = validate_pipeline(&def).unwrap_err();
-        assert!(errs
-            .iter()
-            .any(|e| e.message.contains("training pipeline")));
+        assert!(errs.iter().any(|e| e.message.contains("training pipeline")));
     }
 
     #[test]

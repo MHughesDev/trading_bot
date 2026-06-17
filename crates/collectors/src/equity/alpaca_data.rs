@@ -267,11 +267,10 @@ impl AlpacaDataCollector {
                     None | Some(Err(_)) => break,
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
-                        let messages: Vec<AlpacaMessage<'_>> =
-                            match serde_json::from_str(&text) {
-                                Ok(v) => v,
-                                Err(_) => continue,
-                            };
+                        let messages: Vec<AlpacaMessage<'_>> = match serde_json::from_str(&text) {
+                            Ok(v) => v,
+                            Err(_) => continue,
+                        };
                         for am in &messages {
                             if am.msg_type != "t" {
                                 continue;

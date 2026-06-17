@@ -92,21 +92,21 @@ fn parse_period(name: &str) -> Option<usize> {
     name.rsplit('_').next().and_then(|s| s.parse().ok())
 }
 
-fn window_mean(closes: &[f64], p: usize) -> f64 {
-    if p == 0 || closes.len() < p {
+fn window_mean(closes: &[f64], period: usize) -> f64 {
+    if period == 0 || closes.len() < period {
         return 0.0;
     }
-    let w = &closes[closes.len() - p..];
-    w.iter().sum::<f64>() / p as f64
+    let w = &closes[closes.len() - period..];
+    w.iter().sum::<f64>() / period as f64
 }
 
-/// Sample standard deviation (ddof=1), matching pandas `.rolling(p).std()`.
-fn window_std(closes: &[f64], p: usize) -> f64 {
-    if p < 2 || closes.len() < p {
+/// Sample standard deviation (ddof=1), matching pandas `.rolling(period).std()`.
+fn window_std(closes: &[f64], period: usize) -> f64 {
+    if period < 2 || closes.len() < period {
         return 0.0;
     }
-    let w = &closes[closes.len() - p..];
-    let mean = w.iter().sum::<f64>() / p as f64;
-    let var = w.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (p as f64 - 1.0);
+    let w = &closes[closes.len() - period..];
+    let mean = w.iter().sum::<f64>() / period as f64;
+    let var = w.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (period as f64 - 1.0);
     var.sqrt()
 }

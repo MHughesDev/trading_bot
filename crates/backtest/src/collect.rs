@@ -118,8 +118,7 @@ impl CollectorPlan {
             "crypto_spot_cex" => match timeframe {
                 // Kraken OHLC supports 1m, 5m, 15m, 1h, 4h, 1d — only 1s is absent.
                 Timeframe::Seconds1 => Err(
-                    "the crypto spot backfill (Kraken) does not provide 1-second bars"
-                        .to_string(),
+                    "the crypto spot backfill (Kraken) does not provide 1-second bars".to_string(),
                 ),
                 _ => Ok(()),
             },
@@ -363,14 +362,17 @@ async fn collect_kraken(
 
         if let Some(errs) = body.get("error").and_then(Value::as_array) {
             if !errs.is_empty() {
-                anyhow::bail!("kraken OHLC error for {pair}: {:?}", errs);
+                anyhow::bail!("kraken OHLC error for {pair}: {errs:?}");
             }
         }
         let result = body
             .get("result")
             .ok_or_else(|| anyhow::anyhow!("kraken OHLC: missing result for {pair}"))?;
 
-        let next_since = result.get("last").and_then(Value::as_i64).unwrap_or(i64::MAX);
+        let next_since = result
+            .get("last")
+            .and_then(Value::as_i64)
+            .unwrap_or(i64::MAX);
 
         // The pair key in the response may differ from the request (e.g.
         // XBTUSD → XXBTZUSD).  Take the first key that is not "last".

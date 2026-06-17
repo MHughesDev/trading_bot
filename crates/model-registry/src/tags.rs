@@ -5,10 +5,10 @@
 //! Templates:   forkable starter specs (`spec_templates` table); feed Create wizards.
 //!
 //! Postgres tables (runtime sqlx, no compile-time macros):
-//!   artifact_tags   (artifact_id TEXT, artifact_kind TEXT, tag TEXT, created_at)
-//!   artifact_annots (artifact_id TEXT, artifact_kind TEXT, key TEXT, value JSONB, updated_at)
-//!   spec_templates  (id TEXT PK, name TEXT, kind TEXT, description TEXT,
-//!                    definition_json JSONB, created_by TEXT, created_at)
+//!   `artifact_tags`   (`artifact_id` TEXT, `artifact_kind` TEXT, tag TEXT, `created_at`)
+//!   `artifact_annots` (`artifact_id` TEXT, `artifact_kind` TEXT, key TEXT, value JSONB, `updated_at`)
+//!   `spec_templates`  (id TEXT PK, name TEXT, kind TEXT, description TEXT,
+//!                    `definition_json` JSONB, `created_by` TEXT, `created_at`)
 
 use chrono::Utc;
 use serde_json::Value;
@@ -125,12 +125,14 @@ impl TagRegistry {
 
         Ok(rows
             .into_iter()
-            .map(|(artifact_id, artifact_kind, tag, created_at)| ArtifactTag {
-                artifact_id,
-                artifact_kind,
-                tag,
-                created_at,
-            })
+            .map(
+                |(artifact_id, artifact_kind, tag, created_at)| ArtifactTag {
+                    artifact_id,
+                    artifact_kind,
+                    tag,
+                    created_at,
+                },
+            )
             .collect())
     }
 
@@ -246,47 +248,55 @@ impl TagRegistry {
     }
 
     pub async fn list_templates(&self, kind: Option<&str>) -> anyhow::Result<Vec<SpecTemplate>> {
-        let rows: Vec<(String, String, String, String, Value, String, chrono::DateTime<Utc>)> =
-            if let Some(k) = kind {
-                sqlx::query_as(
-                    "SELECT id, name, kind, description, definition_json, created_by, created_at \
+        let rows: Vec<(
+            String,
+            String,
+            String,
+            String,
+            Value,
+            String,
+            chrono::DateTime<Utc>,
+        )> = if let Some(k) = kind {
+            sqlx::query_as(
+                "SELECT id, name, kind, description, definition_json, created_by, created_at \
                      FROM spec_templates WHERE kind = $1 ORDER BY created_at DESC",
-                )
-                .bind(k)
-                .fetch_all(&self.pg)
-                .await
-            } else {
-                sqlx::query_as(
-                    "SELECT id, name, kind, description, definition_json, created_by, created_at \
+            )
+            .bind(k)
+            .fetch_all(&self.pg)
+            .await
+        } else {
+            sqlx::query_as(
+                "SELECT id, name, kind, description, definition_json, created_by, created_at \
                      FROM spec_templates ORDER BY created_at DESC",
-                )
-                .fetch_all(&self.pg)
-                .await
-            }
-            .unwrap_or_default();
+            )
+            .fetch_all(&self.pg)
+            .await
+        }
+        .unwrap_or_default();
 
         Ok(rows
             .into_iter()
-            .map(|(id, name, kind, description, def, created_by, created_at)| SpecTemplate {
-                id,
-                name,
-                kind,
-                description,
-                definition: def,
-                created_by,
-                created_at,
-            })
+            .map(
+                |(id, name, kind, description, def, created_by, created_at)| SpecTemplate {
+                    id,
+                    name,
+                    kind,
+                    description,
+                    definition: def,
+                    created_by,
+                    created_at,
+                },
+            )
             .collect())
     }
 
     /// Fork a template: return the definition so the caller can create a new artifact.
     pub async fn fork_template(&self, template_id: &str) -> anyhow::Result<Value> {
-        let row: Option<(Value,)> = sqlx::query_as(
-            "SELECT definition_json FROM spec_templates WHERE id = $1",
-        )
-        .bind(template_id)
-        .fetch_optional(&self.pg)
-        .await?;
+        let row: Option<(Value,)> =
+            sqlx::query_as("SELECT definition_json FROM spec_templates WHERE id = $1")
+                .bind(template_id)
+                .fetch_optional(&self.pg)
+                .await?;
 
         let (def,) = row.ok_or_else(|| anyhow::anyhow!("template not found: {template_id}"))?;
         Ok(def)

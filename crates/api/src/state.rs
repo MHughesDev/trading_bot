@@ -9,11 +9,8 @@ use demand_manager::{DemandRegistry, NoopPipelineFactory};
 use execution::paper::PaperTradingEngine;
 use execution::ExecutionEngine;
 use model_registry::{
-    ensemble_manager::EnsembleManager,
-    pipeline_manager::PipelineManager,
-    quality_monitor::QualityMonitor,
-    tags::TagRegistry,
-    InferenceGateway, ModelManager,
+    ensemble_manager::EnsembleManager, pipeline_manager::PipelineManager,
+    quality_monitor::QualityMonitor, tags::TagRegistry, InferenceGateway, ModelManager,
 };
 use risk::{KillSwitch, RiskGate};
 use strategy_runtime::{InstanceManager, WallClock};

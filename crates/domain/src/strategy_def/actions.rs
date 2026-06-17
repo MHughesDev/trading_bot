@@ -17,6 +17,16 @@ pub enum SizeMode {
     PercentOfBalance,
     /// R-multiple risk units (future — v1.0 parse-only).
     RiskUnit,
+    /// v1.1: size fraction provided by a `Sizing` node (RiskSizing model).
+    ///
+    /// `node_ref` is the `id` of a `NodeKind::Sizing` node in the same
+    /// definition.  The runtime looks up the model's predicted `size_fraction`
+    /// (decimal string from the sidecar), parses it to `Decimal` (ADR-0002),
+    /// and uses it as the order quantity.
+    Model {
+        /// ID of the `Sizing` node that provides the fraction.
+        node_ref: String,
+    },
 }
 
 /// The order specification embedded in a `PlaceOrder` action.

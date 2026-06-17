@@ -303,7 +303,7 @@ mod tests {
     fn data_quality_detects_planted_gap_and_dupe() {
         // Grid at 1m: bars at minutes 1,2,2(dupe),4(gap at minute 3),5.
         let bars = vec![
-            bar(1 * MIN_NS, 100),
+            bar(MIN_NS, 100),
             bar(2 * MIN_NS, 101),
             bar(2 * MIN_NS, 101), // duplicate available_time
             bar(4 * MIN_NS, 103), // minute 3 missing

@@ -83,6 +83,7 @@ impl ForecastDistribution {
 ///   - `direction` = sign of `median_return`
 ///   - `magnitude` = `Decimal(median_return)`
 ///   - `confidence` = f(interval_width / 2σ)
+///
 /// Strategies that pinned the point view are unaffected — they read the same fields.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Forecast {
@@ -228,8 +229,14 @@ impl ForecastRisk {
         };
 
         ForecastRisk {
-            var_95: RiskAtLevel { var: var_95, es: es_95 },
-            var_99: RiskAtLevel { var: var_99, es: es_99 },
+            var_95: RiskAtLevel {
+                var: var_95,
+                es: es_95,
+            },
+            var_99: RiskAtLevel {
+                var: var_99,
+                es: es_99,
+            },
             skew,
             spread_90: q95 - q05,
         }

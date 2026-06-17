@@ -163,18 +163,13 @@ pub struct HigherTfBar {
 /// least one higher-TF bar has settled.
 ///
 /// Both slices must be sorted ascending by `ts_ns`.
-pub fn align_higher_tf(
-    base_ts_ns: &[i64],
-    higher_tf_bars: &[HigherTfBar],
-) -> Vec<Option<f64>> {
+pub fn align_higher_tf(base_ts_ns: &[i64], higher_tf_bars: &[HigherTfBar]) -> Vec<Option<f64>> {
     let mut out = vec![None; base_ts_ns.len()];
     let mut htf_idx = 0usize;
 
     for (i, &base_ts) in base_ts_ns.iter().enumerate() {
         // Advance higher-TF pointer as far as possible without exceeding base_ts.
-        while htf_idx + 1 < higher_tf_bars.len()
-            && higher_tf_bars[htf_idx + 1].ts_ns <= base_ts
-        {
+        while htf_idx + 1 < higher_tf_bars.len() && higher_tf_bars[htf_idx + 1].ts_ns <= base_ts {
             htf_idx += 1;
         }
         // The settled bar must have ts_ns ≤ base_ts.
@@ -473,21 +468,21 @@ fn compute_column(name: &str, bars: &[OhlcvRow], close: &[f64]) -> Vec<Option<f6
 }
 
 /// Rolling window reducer over a `Vec<Option<f64>>` (None propagates as None in window).
-fn rolling_option<F>(values: &[Option<f64>], w: usize, f: F) -> Vec<Option<f64>>
+fn rolling_option<F>(values: &[Option<f64>], window: usize, f: F) -> Vec<Option<f64>>
 where
     F: Fn(&Vec<f64>) -> Option<f64>,
 {
     let n = values.len();
     (0..n)
         .map(|i| {
-            if w == 0 || i + 1 < w {
+            if window == 0 || i + 1 < window {
                 return None;
             }
-            let win: Vec<f64> = values[i + 1 - w..=i]
+            let win: Vec<f64> = values[i + 1 - window..=i]
                 .iter()
                 .filter_map(|v| *v)
                 .collect();
-            if win.len() < w {
+            if win.len() < window {
                 None
             } else {
                 f(&win)
@@ -496,16 +491,16 @@ where
         .collect()
 }
 
-/// Apply a window reducer over the trailing `w` closes; `None` until `w` samples
-/// exist (pandas `rolling(w)` semantics).
-fn rolling(close: &[f64], w: usize, f: fn(&[f64]) -> Option<f64>) -> Vec<Option<f64>> {
+/// Apply a window reducer over the trailing `window` closes; `None` until `window` samples
+/// exist (pandas `rolling(window)` semantics).
+fn rolling(close: &[f64], window: usize, f: fn(&[f64]) -> Option<f64>) -> Vec<Option<f64>> {
     let n = close.len();
     (0..n)
         .map(|i| {
-            if w == 0 || i + 1 < w {
+            if window == 0 || i + 1 < window {
                 None
             } else {
-                f(&close[i + 1 - w..=i])
+                f(&close[i + 1 - window..=i])
             }
         })
         .collect()

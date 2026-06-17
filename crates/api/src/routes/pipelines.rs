@@ -56,7 +56,11 @@ pub async fn create_pipeline(
 ) -> impl IntoResponse {
     let uid = token.user_id().to_string();
     match state.pipelines.clone().create_pipeline(req, &uid).await {
-        Ok(rec) => (StatusCode::CREATED, Json(serde_json::to_value(rec).unwrap())).into_response(),
+        Ok(rec) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(rec).unwrap()),
+        )
+            .into_response(),
         Err(e) => bad(e).into_response(),
     }
 }
@@ -111,13 +115,12 @@ pub async fn run_pipeline(
     Json(req): Json<RunPipelineRequest>,
 ) -> impl IntoResponse {
     let uid = token.user_id().to_string();
-    match state
-        .pipelines
-        .clone()
-        .run_pipeline(&id, &uid, req)
-        .await
-    {
-        Ok(result) => (StatusCode::ACCEPTED, Json(serde_json::to_value(result).unwrap())).into_response(),
+    match state.pipelines.clone().run_pipeline(&id, &uid, req).await {
+        Ok(result) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::to_value(result).unwrap()),
+        )
+            .into_response(),
         Err(e) => bad(e).into_response(),
     }
 }

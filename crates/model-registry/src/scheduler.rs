@@ -1,4 +1,4 @@
-//! Nightly retrain orchestrator — polls for auto_retrain models on a schedule.
+//! Nightly retrain orchestrator — polls for `auto_retrain` models on a schedule.
 
 use crate::manager::ModelManager;
 use crate::types::TrainRequest;
@@ -32,10 +32,10 @@ impl RetrainScheduler {
 
     async fn run_cycle(&self) -> anyhow::Result<()> {
         let rows: Vec<(String, serde_json::Value, Uuid)> = sqlx::query_as(
-            r#"SELECT model_id, definition_json, created_by
-               FROM ai_models
-               WHERE status NOT IN ('archived', 'failed')
-                 AND (definition_json -> 'auto_retrain')::boolean = true"#,
+            "SELECT model_id, definition_json, created_by \
+               FROM ai_models \
+               WHERE status NOT IN ('archived', 'failed') \
+                 AND (definition_json -> 'auto_retrain')::boolean = true",
         )
         .fetch_all(self.manager.pg_ref())
         .await

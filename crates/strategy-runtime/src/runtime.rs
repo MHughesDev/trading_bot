@@ -22,6 +22,8 @@ use crate::interpreter::evaluate_condition;
 use crate::registry::FeatureRegistry;
 use crate::world::{WorldEvent, WorldState};
 
+pub use domain::strategy_def::InferenceOutput;
+
 /// Errors produced by the instance manager.
 #[derive(Debug, Error)]
 pub enum RuntimeError {
@@ -48,10 +50,17 @@ pub struct StrategyInstance {
     program_slots: HashMap<NodeId, Vec<u16>>,
     /// String node IDs indexed by NodeId for fallback interpreter path.
     _node_id_to_str: HashMap<NodeId, String>,
-    /// Pre-populated model forecast results for ModelForecast nodes.
-    /// Must be set before process_event() if any ModelForecast nodes exist.
+    /// Pre-populated model forecast results for `ModelForecast` nodes (v1.0/v1.1 compat).
     /// Maps node_id → whether the forecast condition fired.
     model_forecast_results: HashMap<String, bool>,
+    /// Full inference outputs for v1.1 `Inference` / `Decision` nodes.
+    /// Written into feature slots before `run_signals()`, and checked for
+    /// `Decision` class-to-signal mapping.
+    inference_outputs: HashMap<String, InferenceOutput>,
+    /// Slot indices for each bound output name, pre-computed at init from
+    /// `Inference.outputs`.  Keyed by node ID, value is list of
+    /// `(field_name, slot_index)` pairs.
+    inference_slot_map: HashMap<String, Vec<(String, u16)>>,
 }
 
 impl StrategyInstance {
@@ -75,6 +84,11 @@ impl StrategyInstance {
             })
             .collect();
 
+        // Pre-register feature slots for every Inference / Combine output binding
+        // declared in the definition.  This must happen before WorldState is
+        // allocated so the capacity covers all slots.
+        let inference_slot_map = Self::register_inference_slots(&definition.nodes, &mut registry);
+
         // Pre-allocate the slot array with NAN sentinels.
         let state = WorldState::with_capacity(instrument_id.clone(), start_time, registry.len());
 
@@ -88,6 +102,8 @@ impl StrategyInstance {
             program_slots,
             _node_id_to_str: node_id_to_str,
             model_forecast_results: HashMap::new(),
+            inference_outputs: HashMap::new(),
+            inference_slot_map,
         }
     }
 
@@ -113,12 +129,65 @@ impl StrategyInstance {
         (programs, id_map)
     }
 
+    /// Walk `Inference` and `Combine` nodes in the definition and pre-register
+    /// a global feature slot for every output binding.
+    ///
+    /// Returns a map from node_id → Vec<(field_name, slot_index)> so
+    /// `apply_inference_outputs` can write values without any string look-ups
+    /// in the hot path.
+    fn register_inference_slots(
+        nodes: &[domain::strategy_def::nodes::Node],
+        registry: &mut FeatureRegistry,
+    ) -> HashMap<String, Vec<(String, u16)>> {
+        use domain::strategy_def::nodes::NodeKind;
+        let mut map: HashMap<String, Vec<(String, u16)>> = HashMap::new();
+        for node in nodes {
+            let bindings: Vec<&domain::strategy_def::nodes::OutputBinding> = match &node.kind {
+                NodeKind::Inference { outputs, .. } => outputs.iter().collect(),
+                NodeKind::Combine {
+                    inputs: _,
+                    op: _,
+                    as_,
+                } => {
+                    // Combine writes a single synthetic slot; we create a
+                    // pseudo-binding with field = "__combine__" here.
+                    let slot = registry.get_or_assign(as_);
+                    map.entry(node.id.clone())
+                        .or_default()
+                        .push(("__combine__".to_owned(), slot));
+                    continue;
+                }
+                _ => continue,
+            };
+            let slots: Vec<(String, u16)> = bindings
+                .into_iter()
+                .map(|b| {
+                    let slot = registry.get_or_assign(&b.as_);
+                    (b.field.clone(), slot)
+                })
+                .collect();
+            if !slots.is_empty() {
+                map.insert(node.id.clone(), slots);
+            }
+        }
+        map
+    }
+
     /// Set pre-fetched model forecast results (for ModelForecast nodes).
     ///
     /// Call this before `process_event()` when the definition contains
     /// `ModelForecast` nodes. The results are consumed by `run_signals()`.
     pub fn set_model_forecast_results(&mut self, results: HashMap<String, bool>) {
         self.model_forecast_results = results;
+    }
+
+    /// Set full inference outputs for v1.1 `Inference` / `Decision` nodes.
+    ///
+    /// Call this before `process_event()` for definitions with these nodes.
+    /// The runtime will write bound fields into feature slots and evaluate
+    /// `Decision` class maps.
+    pub fn set_inference_outputs(&mut self, outputs: HashMap<String, InferenceOutput>) {
+        self.inference_outputs = outputs;
     }
 
     /// Returns true if any node in the definition is a ModelForecast node.
@@ -128,6 +197,45 @@ impl StrategyInstance {
             .nodes
             .iter()
             .any(|n| matches!(n.kind, NodeKind::ModelForecast { .. }))
+    }
+
+    /// Returns true if the definition contains any v1.1 AI nodes that produce
+    /// outputs (`Inference`, `Decision`, `Sizing`, `LlmInference`, `Combine`).
+    pub fn has_inference_nodes(&self) -> bool {
+        use domain::strategy_def::nodes::NodeKind;
+        self.definition.nodes.iter().any(|n| {
+            matches!(
+                n.kind,
+                NodeKind::Inference { .. }
+                    | NodeKind::Decision { .. }
+                    | NodeKind::Sizing { .. }
+                    | NodeKind::LlmInference { .. }
+                    | NodeKind::Combine { .. }
+            )
+        })
+    }
+
+    /// Write the current `inference_outputs` into the feature slot array.
+    ///
+    /// Called at the start of `process_event` so conditions evaluated in the
+    /// same tick can see fresh inference values.  Missing fields write NaN
+    /// (consistent with the `Flat` abstain policy).
+    fn apply_inference_outputs(&mut self) {
+        for (node_id, bindings) in &self.inference_slot_map {
+            if let Some(output) = self.inference_outputs.get(node_id) {
+                for (field, slot) in bindings {
+                    if field == "__combine__" {
+                        // Combine nodes are handled separately.
+                        continue;
+                    }
+                    let value = output.get_field(field).unwrap_or(f64::NAN);
+                    self.state.set_feature(*slot, value);
+                }
+            }
+            // If no output for this node, do nothing (HoldLast) or NaN was
+            // already the slot's initial value (Flat).  The abstain policy
+            // write is handled by the gateway before calling set_inference_outputs.
+        }
     }
 
     /// Process a world event.
@@ -146,15 +254,47 @@ impl StrategyInstance {
 
         self.state.apply_event(event);
 
+        // Write v1.1 Inference outputs into feature slots before evaluating conditions.
+        if !self.inference_slot_map.is_empty() {
+            self.apply_inference_outputs();
+        }
+
         // Feature slot array passed directly — no allocation, no string clone.
         let signals = self.run_signals();
+
+        // Resolve Sizing-node fractions for any SizeMode::Model actions.
+        let size_overrides = self.size_overrides();
 
         build_intents_for_signals(
             &self.definition.actions,
             &signals,
             &self.instrument_id,
             &self.definition.strategy_id,
+            &size_overrides,
         )
+    }
+
+    /// Collect resolved size fractions from `Sizing` nodes that produced an
+    /// `InferenceOutput.size_fraction` this tick.
+    ///
+    /// Maps `Sizing` node ID → decimal-string fraction, consumed by
+    /// `SizeMode::Model` actions.  Nodes that abstained (no output, or an
+    /// output with no fraction) are simply absent from the map.
+    fn size_overrides(&self) -> HashMap<String, String> {
+        use domain::strategy_def::nodes::NodeKind;
+        let mut overrides = HashMap::new();
+        for node in &self.definition.nodes {
+            if matches!(node.kind, NodeKind::Sizing { .. }) {
+                if let Some(fraction) = self
+                    .inference_outputs
+                    .get(&node.id)
+                    .and_then(|o| o.size_fraction.clone())
+                {
+                    overrides.insert(node.id.clone(), fraction);
+                }
+            }
+        }
+        overrides
     }
 
     fn run_signals(&self) -> HashSet<String> {
@@ -207,11 +347,47 @@ impl StrategyInstance {
                         .unwrap_or(false);
                     conditions.insert(&node.id, fired);
                 }
+                NodeKind::Inference { condition, .. } => {
+                    // Only evaluates as a condition when MatchSpec is present.
+                    let fired = if let Some(spec) = condition {
+                        self.inference_outputs
+                            .get(&node.id)
+                            .map(|o| {
+                                o.direction_matches(&spec.direction)
+                                    && o.confidence >= spec.min_confidence
+                            })
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
+                    conditions.insert(&node.id, fired);
+                }
                 _ => {}
             }
         }
 
-        self.definition
+        // Collect Decision node signals (class-map → signal name).
+        let mut decision_signals: HashSet<String> = HashSet::new();
+        for node in &self.definition.nodes {
+            if let NodeKind::Decision {
+                class_map,
+                min_confidence,
+                ..
+            } = &node.kind
+            {
+                if let Some(output) = self.inference_outputs.get(&node.id) {
+                    if output.confidence >= *min_confidence {
+                        let class = output.action_class.as_deref().unwrap_or(&output.direction);
+                        if let Some(signal) = class_map.get(class) {
+                            decision_signals.insert(signal.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut signals: HashSet<String> = self
+            .definition
             .nodes
             .iter()
             .filter_map(|node| {
@@ -225,7 +401,9 @@ impl StrategyInstance {
                     None
                 }
             })
-            .collect()
+            .collect();
+        signals.extend(decision_signals);
+        signals
     }
 
     /// The `available_time` of the most recently processed event.
@@ -592,7 +770,7 @@ mod tests {
         };
 
         let clock = Arc::new(WallClock) as Arc<dyn StrategyClock>;
-        let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
+        let _demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
         let mut instance = StrategyInstance::new("user1", "BTC-USDT", def, clock.now());
 
         assert!(instance.has_model_forecasts());

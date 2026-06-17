@@ -1,4 +1,4 @@
-//! Strategy node types and expression language (frozen at v1.0).
+//! Strategy node types and expression language (v1.0 frozen; v1.1 additive AI nodes).
 //!
 //! # Expression grammar (v1.0, frozen)
 //!
@@ -32,7 +32,123 @@
 //! Unknown functions or variable names → parse error in `strategy-validator`.
 //! The validator fails closed: unknown node types are rejected, not silently ignored.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
+
+// ── v1.1 AI-node helpers ──────────────────────────────────────────────────────
+
+/// Binds one field of an inference output to a named feature slot.
+///
+/// After each inference cycle the runtime writes `value` → `feature_slots[as_]`
+/// so that downstream `Condition`, `Filter`, `Rank`, and `Sizing` nodes can
+/// reference the field with the existing `feature('name')` grammar — no grammar
+/// extension is needed.
+///
+/// **Valid `field` values** (case-sensitive):
+/// `"confidence"`, `"direction"`, `"median_return"`, `"sigma"`,
+/// `"q05"` / `"q10"` / `"q25"` / `"q50"` / `"q75"` / `"q90"` / `"q95"`,
+/// `"var_95"`, `"var_99"`, `"es_95"`, `"skew"`, `"spread_90"`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutputBinding {
+    /// Which field of the `InferenceOutput` to publish.
+    pub field: String,
+    /// Name under which the value appears in the `feature('…')` namespace.
+    #[serde(rename = "as")]
+    pub as_: String,
+}
+
+/// What the runtime does when an inference call abstains (sidecar down,
+/// circuit-break open, or no result).
+///
+/// - `Flat` (default): write `NaN` to all bound output slots.  Any condition
+///   referencing a `NaN` slot evaluates to `false` — the safest choice for
+///   live trading (never accidentally enters a trade on a missing signal).
+/// - `HoldLast`: leave the slots unchanged, so they retain the most recent
+///   successful inference value.  Useful for models that run on slow cadences.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AbstainPolicy {
+    #[default]
+    Flat,
+    HoldLast,
+}
+
+/// Optional boolean condition on an `Inference` node.
+///
+/// When present, the node can be used directly in `Signal.when` (like
+/// `ModelForecast`).  When absent, the node only publishes output slots and
+/// must be combined with an explicit `Condition` node that references the
+/// bound feature names.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MatchSpec {
+    /// `"bullish"` | `"bearish"` | `"flat"` | `"any"`.
+    pub direction: String,
+    /// Minimum confidence to fire, 0.0–1.0.
+    pub min_confidence: f64,
+}
+
+/// An inline ensemble: combines the outputs of multiple member models without
+/// requiring a pre-registered ensemble in the model registry.
+///
+/// The gateway runs each member and combines them using `combiner`.
+/// This is suitable for quick A/B experiments; for production ensembles with
+/// calibration history, use `target_kind = "ensemble"` and a registry ensemble.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InlineEnsemble {
+    /// Member model refs (ID or slug) to combine.
+    pub roster: Vec<InlineRosterMember>,
+    /// `"linear_opinion_pool"` (default) | `"crps_weighted"`.
+    #[serde(default = "default_linear_pool")]
+    pub combiner: String,
+    /// Minimum weight floor per member.  `weight_floor * roster.len() ≤ 1.0`.
+    #[serde(default = "default_weight_floor")]
+    pub weight_floor: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InlineRosterMember {
+    pub model_ref: String,
+    #[serde(default = "default_production_alias")]
+    pub alias: String,
+}
+
+fn default_linear_pool() -> String {
+    "linear_opinion_pool".to_string()
+}
+
+fn default_weight_floor() -> f64 {
+    0.05
+}
+
+fn is_flat_policy(p: &AbstainPolicy) -> bool {
+    *p == AbstainPolicy::Flat
+}
+
+/// LLM call configuration for an `LlmInference` node.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LlmCall {
+    /// Prompt template.  Supports `{{feature('name')}}` interpolation so
+    /// live feature values can be injected at evaluation time.
+    pub prompt: String,
+    /// Arbitrary JSON params forwarded to the sidecar (temperature, max_tokens, …).
+    #[serde(default)]
+    pub params: serde_json::Value,
+    /// How to extract an `f64` or `bool` from the LLM text response.
+    pub parse: LlmParseMode,
+}
+
+/// How the LLM text response is mapped to a usable value.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum LlmParseMode {
+    /// Boolean: true if `keyword` appears in the response (case-insensitive).
+    Bool { keyword: String },
+    /// Extract a single float: look for `field` key in a JSON response or regex capture.
+    F64 { field: String, as_: String },
+    /// Extract multiple floats from a JSON object response.
+    Json { outputs: Vec<OutputBinding> },
+}
 
 fn default_production_alias() -> String {
     "production".to_string()
@@ -163,6 +279,178 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input: Option<ModelInput>,
     },
+
+    // ── v1.1 AI blocks (requires definition_version "1.1") ───────────────────
+    /// Value-producing AI inference node.
+    ///
+    /// Calls a `Forecaster` (or an `ensemble`/`pipeline`) and publishes named
+    /// output fields into the feature slot namespace so downstream `Condition`,
+    /// `Filter`, `Rank`, and `Sizing` nodes can reference them with the
+    /// standard `feature('name')` grammar.
+    ///
+    /// Optionally also evaluates as a boolean condition (via `condition`) so
+    /// it can be used directly in `Signal.when` without a separate `Condition`
+    /// node.
+    Inference {
+        /// Forecaster model reference (ID or slug).
+        model_ref: String,
+        /// `"model"` (default) | `"ensemble"` | `"pipeline"`.
+        #[serde(default = "default_target_kind", skip_serializing_if = "is_model")]
+        target_kind: String,
+        /// Version alias to resolve (default: `"production"`).
+        #[serde(
+            default = "default_production_alias",
+            skip_serializing_if = "is_production"
+        )]
+        alias: String,
+        /// Input-data contract.  `None` = use the model's declared default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<ModelInput>,
+        /// Fields to publish into the feature slot namespace.  Each binding
+        /// maps one output field to a feature name the strategy graph can read.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        outputs: Vec<OutputBinding>,
+        /// What to do when inference abstains (default: `flat` — write NaN).
+        #[serde(default, skip_serializing_if = "is_flat_policy")]
+        abstain: AbstainPolicy,
+        /// Optional inline ensemble of member models, evaluated client-side
+        /// without requiring a registry ensemble.  Mutually exclusive with
+        /// `target_kind = "ensemble"`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ensemble: Option<InlineEnsemble>,
+        /// Optional boolean condition.  When `Some`, the node can be used in
+        /// `Signal.when` directly.  When `None`, it only publishes slots.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        condition: Option<MatchSpec>,
+    },
+
+    /// AI-driven position sizing node (requires a `RiskSizing` model).
+    ///
+    /// The model returns a `size_fraction` (decimal string) which `PlaceOrder`
+    /// actions reference via `size_mode: model, node_ref: "<this node's id>"`.
+    /// The fraction is converted to `Decimal` at the action boundary (ADR-0002).
+    Sizing {
+        /// `RiskSizing` model reference.
+        model_ref: String,
+        #[serde(
+            default = "default_production_alias",
+            skip_serializing_if = "is_production"
+        )]
+        alias: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<ModelInput>,
+        /// Clamp the returned fraction to `[min, max]`.
+        /// Values are decimal strings (ADR-0002).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clamp: Option<[String; 2]>,
+        /// Fallback fixed size (decimal string) when the model abstains.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fallback: Option<String>,
+        #[serde(default, skip_serializing_if = "is_flat_policy")]
+        abstain: AbstainPolicy,
+    },
+
+    /// AI decision node (requires a `TradeDecision` model).
+    ///
+    /// Maps the model's predicted action class to a named signal via `class_map`.
+    /// Acts like a `Signal` node — fires when the model's class matches a key in
+    /// `class_map` and confidence ≥ `min_confidence`.
+    Decision {
+        /// `TradeDecision` model reference.
+        model_ref: String,
+        #[serde(
+            default = "default_production_alias",
+            skip_serializing_if = "is_production"
+        )]
+        alias: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<ModelInput>,
+        /// Maps predicted class name → emitted signal name.
+        /// E.g. `{"long": "enter_long", "short": "enter_short", "flat": "exit"}`.
+        class_map: HashMap<String, String>,
+        /// Minimum confidence to emit a signal (0.0–1.0).
+        #[serde(default)]
+        min_confidence: f64,
+        #[serde(default, skip_serializing_if = "is_flat_policy")]
+        abstain: AbstainPolicy,
+    },
+
+    /// Universe-pipeline ranking by `SignalRanker` model score.
+    ///
+    /// Replaces / augments `Rank` when the ranking criterion comes from an AI
+    /// model rather than a named feature.  The model's confidence score is
+    /// used as the rank key (descending by default).
+    ModelRank {
+        /// ID of the upstream universe node.
+        input: String,
+        /// `SignalRanker` model reference.
+        model_ref: String,
+        #[serde(
+            default = "default_production_alias",
+            skip_serializing_if = "is_production"
+        )]
+        alias: String,
+        /// `true` = ascending (lowest score first).
+        #[serde(default)]
+        ascending: bool,
+    },
+
+    /// LLM / external-adapter inference node.
+    ///
+    /// Calls an `ExternalLlmAdapter` model, renders the prompt with live
+    /// feature values, and parses the response into the feature namespace
+    /// and/or a boolean condition.
+    LlmInference {
+        /// `ExternalLlmAdapter` model reference.
+        model_ref: String,
+        #[serde(
+            default = "default_production_alias",
+            skip_serializing_if = "is_production"
+        )]
+        alias: String,
+        /// The call specification: prompt template, model params, and parse mode.
+        call: LlmCall,
+        /// Cache LLM responses for this many seconds (default 0 = no cache).
+        #[serde(default)]
+        cache_ttl_s: u32,
+        /// Maximum per-call cost in USD (decimal string).  The node abstains
+        /// rather than exceeding this limit.  `None` = unlimited.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_cost_usd: Option<String>,
+        #[serde(default, skip_serializing_if = "is_flat_policy")]
+        abstain: AbstainPolicy,
+        /// Optional boolean condition (same semantics as `Inference.condition`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        condition: Option<MatchSpec>,
+    },
+
+    /// Derives a new feature from two or more bound `Inference` output slots.
+    ///
+    /// Useful for in-graph aggregation (e.g. average of two models' `median_return`)
+    /// without pre-registering a registry ensemble.
+    Combine {
+        /// Feature names (bound via `Inference.outputs`) to combine.
+        inputs: Vec<String>,
+        /// Combination operation.
+        op: CombineOp,
+        /// Name under which the combined value is written to the feature namespace.
+        #[serde(rename = "as")]
+        as_: String,
+    },
+}
+
+/// How a `Combine` node aggregates its input slots.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CombineOp {
+    /// Weighted average.  `weights` must have the same length as `inputs`.
+    WeightedAverage { weights: Vec<f64> },
+    /// Element-wise maximum.
+    Max,
+    /// Element-wise minimum.
+    Min,
+    /// Sum of all inputs.
+    Sum,
 }
 
 #[cfg(test)]

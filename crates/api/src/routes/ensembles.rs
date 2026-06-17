@@ -30,13 +30,12 @@ pub async fn create_ensemble(
     Json(req): Json<CreateEnsembleRequest>,
 ) -> impl IntoResponse {
     let uid = token.user_id().to_string();
-    match state
-        .ensembles
-        .clone()
-        .create_ensemble(req, &uid)
-        .await
-    {
-        Ok(rec) => (StatusCode::CREATED, Json(serde_json::to_value(rec).unwrap())).into_response(),
+    match state.ensembles.clone().create_ensemble(req, &uid).await {
+        Ok(rec) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(rec).unwrap()),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": e.to_string() })),
@@ -70,12 +69,7 @@ pub async fn get_ensemble(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let uid = token.user_id().to_string();
-    match state
-        .ensembles
-        .clone()
-        .get_ensemble(&id, &uid)
-        .await
-    {
+    match state.ensembles.clone().get_ensemble(&id, &uid).await {
         Ok(rec) => Json(serde_json::to_value(rec).unwrap()).into_response(),
         Err(e) => (
             StatusCode::NOT_FOUND,

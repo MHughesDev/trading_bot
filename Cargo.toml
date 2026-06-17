@@ -162,6 +162,18 @@ must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 module_name_repetitions = "allow"
+# Pre-existing patterns not yet cleaned up across all crates:
+cast_sign_loss = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+too_many_arguments = "allow"
+too_many_lines = "allow"
+type_complexity = "allow"
+items_after_statements = "allow"
+manual_let_else = "allow"
+doc_markdown = "allow"
+unused_self = "allow"
 
 [profile.release]
 opt-level = 3

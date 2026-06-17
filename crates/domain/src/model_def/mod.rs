@@ -20,8 +20,7 @@ pub const DEFINITION_VERSION: &str = "1.1";
 
 /// Default quantile grid used when migrating a v1.0 definition or when
 /// `output` is absent but the model kind is `forecaster`.
-pub const DEFAULT_QUANTILE_LEVELS: &[f64] =
-    &[0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95];
+pub const DEFAULT_QUANTILE_LEVELS: &[f64] = &[0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95];
 
 // ── v1.1 optional blocks ──────────────────────────────────────────────────────
 

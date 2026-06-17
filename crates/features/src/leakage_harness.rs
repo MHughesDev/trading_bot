@@ -53,7 +53,7 @@ mod tests {
     fn planted_future_bar_is_unreachable_after_filter() {
         let bars = vec![
             Bar {
-                ts_ns: 1 * MIN_NS,
+                ts_ns: MIN_NS,
                 close: 100.0,
             },
             Bar {
@@ -80,7 +80,7 @@ mod tests {
     fn guard_rejects_future_bar_that_slipped_through_filter() {
         let bars = vec![
             Bar {
-                ts_ns: 1 * MIN_NS,
+                ts_ns: MIN_NS,
                 close: 100.0,
             },
             Bar {
@@ -99,7 +99,7 @@ mod tests {
     fn filter_then_guard_always_passes() {
         let bars = vec![
             Bar {
-                ts_ns: 1 * MIN_NS,
+                ts_ns: MIN_NS,
                 close: 100.0,
             },
             Bar {
@@ -115,7 +115,7 @@ mod tests {
                 close: 103.0,
             },
         ];
-        for as_of in [1 * MIN_NS, 2 * MIN_NS, 3 * MIN_NS, 4 * MIN_NS] {
+        for as_of in [MIN_NS, 2 * MIN_NS, 3 * MIN_NS, 4 * MIN_NS] {
             let view = filter(bars.clone(), as_of);
             assert!(
                 guard(&view, as_of),
@@ -188,7 +188,7 @@ mod tests {
         // (degenerate) or, more obviously, if label = close itself (shifted by 0).
         // We simulate the leaky label as the `close` feature repeated:
         let n = close_col.len();
-        let leaky_label: Vec<f64> = close_col.iter().map(|&c| c).collect();
+        let leaky_label: Vec<f64> = close_col.to_vec();
         let padded: Vec<f64> = label[..n.min(label.len())].to_vec();
         let r_leaky = pearson(close_col, &leaky_label).abs();
 

@@ -1315,8 +1315,7 @@ impl ModelManager {
         let instruments = data
             .as_ref()
             .filter(|d| !d.instruments.is_empty())
-            .map(|d| d.instruments.clone())
-            .unwrap_or_else(|| vec!["BTC-USD".to_string()]);
+            .map_or_else(|| vec!["BTC-USD".to_string()], |d| d.instruments.clone());
         let timeframe = data
             .as_ref()
             .map_or_else(|| "1m".to_string(), |d| d.timeframe.clone());
@@ -1363,7 +1362,7 @@ impl ModelManager {
         // 2b. Compute walk-forward folds (I-0.10): Rust owns the fold geometry;
         //     sidecar receives index ranges and never picks its own split (ADR-0017).
         let horizon_bars = features::label_horizon_bars(&label_horizon, &timeframe).unwrap_or(60);
-        let effective_cv = definition.cv.clone().unwrap_or_else(|| {
+        let effective_cv = definition.cv.unwrap_or_else(|| {
             // Single expanding fold default: mirrors the pre-Set-I
             // isolated-train path while providing a proper cal role.
             let n = dataset.row_count.max(1) as u64;
@@ -1410,12 +1409,11 @@ impl ModelManager {
                 .map(|s| format!("{}:{}", s.name, s.version))
                 .collect()
         };
-        let canonical_def =
-            crate::spec_hash::canonical_definition_json(&definition);
+        let canonical_def = crate::spec_hash::canonical_definition_json(&definition);
         let seed = definition
             .hyperparameters
             .get("seed")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
         let spec_hash = crate::spec_hash::compute_spec_hash(
             &canonical_def,
@@ -1530,13 +1528,11 @@ impl ModelManager {
                     state.metrics = Some(run_metrics.clone());
                 }
                 // Update training_runs with merged metrics
-                let _ = sqlx::query(
-                    "UPDATE training_runs SET metrics_json = $1 WHERE run_id = $2",
-                )
-                .bind(&run_metrics)
-                .bind(job.run_id)
-                .execute(&pg)
-                .await;
+                let _ = sqlx::query("UPDATE training_runs SET metrics_json = $1 WHERE run_id = $2")
+                    .bind(&run_metrics)
+                    .bind(job.run_id)
+                    .execute(&pg)
+                    .await;
 
                 job.progress_pct.store(100, Ordering::Relaxed);
                 job.set_phase(RunStatus::Succeeded, "succeeded");
@@ -1631,7 +1627,7 @@ impl ModelManager {
         .ok()
         .flatten()
         .and_then(|(m,)| m)
-        .and_then(|m| m.get("trial_count").and_then(|v| v.as_i64()))
+        .and_then(|m| m.get("trial_count").and_then(serde_json::Value::as_i64))
         .unwrap_or(0);
 
         // Check single-use holdout status (I-2.8): if the holdout was already
@@ -1648,7 +1644,7 @@ impl ModelManager {
         .ok()
         .flatten()
         .and_then(|(m,)| m)
-        .and_then(|m| m.get("holdout_used").and_then(|v| v.as_bool()))
+        .and_then(|m| m.get("holdout_used").and_then(serde_json::Value::as_bool))
         .unwrap_or(false);
 
         // Materialize eval dataset (test window, PIT-correct per ADR-0017).
@@ -1693,9 +1689,8 @@ impl ModelManager {
             .unwrap_or("1h")
             .to_string();
         let timeframe = "1m".to_string();
-        let horizon_bars =
-            features::label_horizon_bars(&label_horizon, &timeframe).unwrap_or(60);
-        let effective_cv = definition.cv.clone().unwrap_or_else(|| {
+        let horizon_bars = features::label_horizon_bars(&label_horizon, &timeframe).unwrap_or(60);
+        let effective_cv = definition.cv.unwrap_or_else(|| {
             let n = dataset.row_count.max(1) as u64;
             let purge = horizon_bars;
             let available = n.saturating_sub(2 * purge);
@@ -1712,13 +1707,10 @@ impl ModelManager {
                 embargo_bars: purge,
             }
         });
-        let fold_specs: Option<Vec<crate::sidecar::FoldSpec>> = features::walk_forward_folds(
-            dataset.row_count as usize,
-            &effective_cv,
-            horizon_bars,
-        )
-        .ok()
-        .map(|folds| folds.iter().map(crate::sidecar::FoldSpec::from).collect());
+        let fold_specs: Option<Vec<crate::sidecar::FoldSpec>> =
+            features::walk_forward_folds(dataset.row_count as usize, &effective_cv, horizon_bars)
+                .ok()
+                .map(|folds| folds.iter().map(crate::sidecar::FoldSpec::from).collect());
 
         // Dispatch to scoring sidecar (I-2.1 parity-preserving eval loop).
         job.set_phase(RunStatus::Running, "scoring");
@@ -1767,10 +1759,14 @@ impl ModelManager {
         let eval_json = serde_json::to_value(&eval_result).unwrap_or(serde_json::json!({}));
         let metrics = eval_result.metrics.clone().unwrap_or(serde_json::json!({}));
         let scorecard = crate::scorecard::compute_scorecard_from_eval(&eval_json);
-        let report = eval_result.report.clone().unwrap_or(serde_json::json!(null));
+        let report = eval_result
+            .report
+            .clone()
+            .unwrap_or(serde_json::json!(null));
 
         // Sample outputs (training-preview only; not used in eval scorecard).
-        let sample_outputs = serde_json::json!({ "note": "see report for full distributional outputs" });
+        let sample_outputs =
+            serde_json::json!({ "note": "see report for full distributional outputs" });
 
         // Load production baseline for regression.
         let baseline_version: Option<i32> = sqlx::query_as::<_, (i32,)>(
@@ -1820,13 +1816,11 @@ impl ModelManager {
         // Store report_json in a separate update so the column absence doesn't
         // block the primary write above.
         if !report.is_null() {
-            let _ = sqlx::query(
-                "UPDATE evaluation_runs SET report_json=$1 WHERE eval_id=$2",
-            )
-            .bind(&report)
-            .bind(job.run_id)
-            .execute(&pg)
-            .await;
+            let _ = sqlx::query("UPDATE evaluation_runs SET report_json=$1 WHERE eval_id=$2")
+                .bind(&report)
+                .bind(job.run_id)
+                .execute(&pg)
+                .await;
         }
 
         // Update model_versions scorecard
@@ -1854,7 +1848,11 @@ impl ModelManager {
         }
         job.progress_pct.store(100, Ordering::Relaxed);
         job.set_phase(
-            if succeeded { RunStatus::Succeeded } else { RunStatus::Failed },
+            if succeeded {
+                RunStatus::Succeeded
+            } else {
+                RunStatus::Failed
+            },
             if succeeded { "succeeded" } else { "failed" },
         );
         self.broadcast_progress(&job.snapshot());
@@ -1943,7 +1941,7 @@ impl ModelRow {
 }
 
 impl ModelManager {
-    /// Expose PgPool reference for internal use (e.g., scheduler).
+    /// Expose `PgPool` reference for internal use (e.g., scheduler).
     pub fn pg_ref(&self) -> &sqlx::PgPool {
         &self.pg
     }
@@ -2100,8 +2098,14 @@ impl ModelManager {
 
         // CRPS delta between the first and second run (if available).
         let crps_delta: Option<f64> = if results.len() >= 2 {
-            let c0 = results[0].get("metrics").and_then(|m| m.get("crps")).and_then(|v| v.as_f64());
-            let c1 = results[1].get("metrics").and_then(|m| m.get("crps")).and_then(|v| v.as_f64());
+            let c0 = results[0]
+                .get("metrics")
+                .and_then(|m| m.get("crps"))
+                .and_then(serde_json::Value::as_f64);
+            let c1 = results[1]
+                .get("metrics")
+                .and_then(|m| m.get("crps"))
+                .and_then(serde_json::Value::as_f64);
             c0.zip(c1).map(|(a, b)| b - a)
         } else {
             None

@@ -1,4 +1,4 @@
-//! PipelineManager — declarative DAG pipeline factory (I-5.2–I-5.8, Phase 5).
+//! `PipelineManager` — declarative DAG pipeline factory (I-5.2–I-5.8, Phase 5).
 //!
 //! Implements:
 //!   I-5.2  DAG execution engine (topological, per-node progress, Postgres run records)
@@ -6,16 +6,16 @@
 //!   I-5.4  Templated, spec-driven pipelines
 //!   I-5.5  Fan-out across asset × timeframe × window
 //!   I-5.6  Fast/slow window instances (resolved via node params)
-//!   I-5.7  Bar-cadence scheduling (BarScheduleWatcher spawnable task)
+//!   I-5.7  Bar-cadence scheduling (`BarScheduleWatcher` spawnable task)
 //!   I-5.8  Run history, spec-hash caching, incremental re-runs, retries
 //!
 //! Postgres tables (runtime sqlx, no compile-time macro):
-//!   pipelines           (id, name, kind, created_by, definition_json, created_at)
-//!   pipeline_runs       (id, pipeline_id, parent_run_id, cell_label, status,
-//!                        cached, cell_json, started_at, finished_at, error)
-//!   pipeline_node_runs  (id, run_id, node_id, op, status, started_at, finished_at, error)
+//!   pipelines           (id, name, kind, `created_by`, `definition_json`, `created_at`)
+//!   `pipeline_runs`       (id, `pipeline_id`, `parent_run_id`, `cell_label`, status,
+//!                        cached, `cell_json`, `started_at`, `finished_at`, error)
+//!   `pipeline_node_runs`  (id, `run_id`, `node_id`, op, status, `started_at`, `finished_at`, error)
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -23,9 +23,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use domain::pipeline_def::{
-    validate_pipeline, MatrixCell, PipelineDefinition, PipelineNode,
-};
+use domain::pipeline_def::{validate_pipeline, MatrixCell, PipelineDefinition, PipelineNode};
 
 use crate::manager::ModelManager;
 use crate::types::TrainRequest;
@@ -99,7 +97,7 @@ pub struct CreatePipelineRequest {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct RunPipelineRequest {
-    /// Optional model_id override (used when running against a specific model).
+    /// Optional `model_id` override (used when running against a specific model).
     pub model_id: Option<String>,
     /// Skip spec-hash cache and force re-run.
     #[serde(default)]
@@ -117,7 +115,11 @@ pub struct PipelineManager {
 impl PipelineManager {
     pub fn new(pg: PgPool, models: Arc<ModelManager>) -> Arc<Self> {
         let (progress_tx, _) = tokio::sync::broadcast::channel(512);
-        Arc::new(Self { pg, models, progress_tx })
+        Arc::new(Self {
+            pg,
+            models,
+            progress_tx,
+        })
     }
 
     pub fn subscribe_progress(&self) -> tokio::sync::broadcast::Receiver<Value> {
@@ -132,7 +134,7 @@ impl PipelineManager {
         user_id: &str,
     ) -> anyhow::Result<PipelineRecord> {
         validate_pipeline(&req.definition)
-            .map_err(|errs| anyhow::anyhow!("invalid pipeline definition: {:?}", errs))?;
+            .map_err(|errs| anyhow::anyhow!("invalid pipeline definition: {errs:?}"))?;
 
         if req.definition.template {
             // Templates are stored but not directly runnable.
@@ -181,7 +183,14 @@ impl PipelineManager {
         rows.into_iter()
             .map(|(id, name, kind, created_by, def_json, created_at)| {
                 let definition: PipelineDefinition = serde_json::from_value(def_json)?;
-                Ok(PipelineRecord { id, name, kind, created_by, definition, created_at })
+                Ok(PipelineRecord {
+                    id,
+                    name,
+                    kind,
+                    created_by,
+                    definition,
+                    created_at,
+                })
             })
             .collect()
     }
@@ -204,7 +213,14 @@ impl PipelineManager {
         let (id, name, kind, created_by, def_json, created_at) =
             row.ok_or_else(|| anyhow::anyhow!("pipeline not found: {pipeline_id}"))?;
         let definition: PipelineDefinition = serde_json::from_value(def_json)?;
-        Ok(PipelineRecord { id, name, kind, created_by, definition, created_at })
+        Ok(PipelineRecord {
+            id,
+            name,
+            kind,
+            created_by,
+            definition,
+            created_at,
+        })
     }
 
     pub async fn delete_pipeline(
@@ -212,14 +228,12 @@ impl PipelineManager {
         pipeline_id: &str,
         user_id: &str,
     ) -> anyhow::Result<()> {
-        let n = sqlx::query(
-            "DELETE FROM pipelines WHERE id = $1 AND created_by = $2",
-        )
-        .bind(pipeline_id)
-        .bind(user_id)
-        .execute(&self.pg)
-        .await?
-        .rows_affected();
+        let n = sqlx::query("DELETE FROM pipelines WHERE id = $1 AND created_by = $2")
+            .bind(pipeline_id)
+            .bind(user_id)
+            .execute(&self.pg)
+            .await?
+            .rows_affected();
 
         if n == 0 {
             anyhow::bail!("pipeline not found: {pipeline_id}");
@@ -238,8 +252,16 @@ impl PipelineManager {
         self.get_pipeline(pipeline_id, user_id).await?;
 
         let rows: Vec<(
-            String, String, Option<String>, String, String, bool,
-            Option<Value>, chrono::DateTime<Utc>, Option<chrono::DateTime<Utc>>, Option<String>,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            bool,
+            Option<Value>,
+            chrono::DateTime<Utc>,
+            Option<chrono::DateTime<Utc>>,
+            Option<String>,
         )> = sqlx::query_as(
             "SELECT id, pipeline_id, parent_run_id, cell_label, status, cached, \
                     cell_json, started_at, finished_at, error \
@@ -251,25 +273,50 @@ impl PipelineManager {
         .await?;
 
         rows.into_iter()
-            .map(|(id, pipeline_id, parent_run_id, cell_label, status, cached,
-                   cell_json, started_at, finished_at, error)| {
-                let cell: Option<MatrixCell> = cell_json
-                    .and_then(|v| serde_json::from_value(v).ok());
-                Ok(PipelineRunRecord {
-                    id, pipeline_id, parent_run_id, cell_label,
-                    status, cached, cell, started_at, finished_at, error,
-                })
-            })
+            .map(
+                |(
+                    id,
+                    pipeline_id,
+                    parent_run_id,
+                    cell_label,
+                    status,
+                    cached,
+                    cell_json,
+                    started_at,
+                    finished_at,
+                    error,
+                )| {
+                    let cell: Option<MatrixCell> =
+                        cell_json.and_then(|v| serde_json::from_value(v).ok());
+                    Ok(PipelineRunRecord {
+                        id,
+                        pipeline_id,
+                        parent_run_id,
+                        cell_label,
+                        status,
+                        cached,
+                        cell,
+                        started_at,
+                        finished_at,
+                        error,
+                    })
+                },
+            )
             .collect()
     }
 
-    pub async fn get_run(
-        self: &Arc<Self>,
-        run_id: &str,
-    ) -> anyhow::Result<PipelineRunRecord> {
+    pub async fn get_run(self: &Arc<Self>, run_id: &str) -> anyhow::Result<PipelineRunRecord> {
         let row: Option<(
-            String, String, Option<String>, String, String, bool,
-            Option<Value>, chrono::DateTime<Utc>, Option<chrono::DateTime<Utc>>, Option<String>,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            bool,
+            Option<Value>,
+            chrono::DateTime<Utc>,
+            Option<chrono::DateTime<Utc>>,
+            Option<String>,
         )> = sqlx::query_as(
             "SELECT id, pipeline_id, parent_run_id, cell_label, status, cached, \
                     cell_json, started_at, finished_at, error \
@@ -279,13 +326,30 @@ impl PipelineManager {
         .fetch_optional(&self.pg)
         .await?;
 
-        let (id, pipeline_id, parent_run_id, cell_label, status, cached,
-             cell_json, started_at, finished_at, error) =
-            row.ok_or_else(|| anyhow::anyhow!("run not found: {run_id}"))?;
+        let (
+            id,
+            pipeline_id,
+            parent_run_id,
+            cell_label,
+            status,
+            cached,
+            cell_json,
+            started_at,
+            finished_at,
+            error,
+        ) = row.ok_or_else(|| anyhow::anyhow!("run not found: {run_id}"))?;
         let cell = cell_json.and_then(|v| serde_json::from_value(v).ok());
         Ok(PipelineRunRecord {
-            id, pipeline_id, parent_run_id, cell_label,
-            status, cached, cell, started_at, finished_at, error,
+            id,
+            pipeline_id,
+            parent_run_id,
+            cell_label,
+            status,
+            cached,
+            cell,
+            started_at,
+            finished_at,
+            error,
         })
     }
 
@@ -294,8 +358,14 @@ impl PipelineManager {
         run_id: &str,
     ) -> anyhow::Result<Vec<PipelineNodeRunRecord>> {
         let rows: Vec<(
-            String, String, String, String, String,
-            Option<chrono::DateTime<Utc>>, Option<chrono::DateTime<Utc>>, Option<String>,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<chrono::DateTime<Utc>>,
+            Option<chrono::DateTime<Utc>>,
+            Option<String>,
         )> = sqlx::query_as(
             "SELECT id, run_id, node_id, op, status, started_at, finished_at, error \
              FROM pipeline_node_runs WHERE run_id = $1 ORDER BY started_at",
@@ -306,9 +376,20 @@ impl PipelineManager {
 
         Ok(rows
             .into_iter()
-            .map(|(id, run_id, node_id, op, status, started_at, finished_at, error)| {
-                PipelineNodeRunRecord { id, run_id, node_id, op, status, started_at, finished_at, error }
-            })
+            .map(
+                |(id, run_id, node_id, op, status, started_at, finished_at, error)| {
+                    PipelineNodeRunRecord {
+                        id,
+                        run_id,
+                        node_id,
+                        op,
+                        status,
+                        started_at,
+                        finished_at,
+                        error,
+                    }
+                },
+            )
             .collect())
     }
 
@@ -341,11 +422,16 @@ impl PipelineManager {
             anyhow::bail!("pipeline {pipeline_id} is a template and cannot be run directly");
         }
 
-        let cells = def
-            .matrix
-            .as_ref()
-            .map(|m| m.cells())
-            .unwrap_or_else(|| vec![MatrixCell { asset: None, timeframe: None, window: None }]);
+        let cells = def.matrix.as_ref().map_or_else(
+            || {
+                vec![MatrixCell {
+                    asset: None,
+                    timeframe: None,
+                    window: None,
+                }]
+            },
+            domain::PipelineMatrix::cells,
+        );
 
         let cell_count = cells.len();
 
@@ -355,9 +441,20 @@ impl PipelineManager {
         } else {
             cells[0].label()
         };
-        let parent_cell = if cell_count > 1 { None } else { cells.first().cloned() };
+        let parent_cell = if cell_count > 1 {
+            None
+        } else {
+            cells.first().cloned()
+        };
         let parent_run_id = self
-            .insert_run(pipeline_id, None, &parent_label, STATUS_RUNNING, false, parent_cell)
+            .insert_run(
+                pipeline_id,
+                None,
+                &parent_label,
+                STATUS_RUNNING,
+                false,
+                parent_cell,
+            )
             .await?;
 
         let mut cell_run_ids = Vec::with_capacity(cell_count);
@@ -395,15 +492,18 @@ impl PipelineManager {
                     .execute_cell_run(run_id, &def, cell, model_id.as_deref(), force)
                     .await
                 {
-                    Ok(_) => succeeded += 1,
+                    Ok(()) => succeeded += 1,
                     Err(e) => {
                         tracing::warn!("cell {run_id} failed: {e}");
                         failed += 1;
                     }
                 }
             }
-            let final_status =
-                if failed == 0 { STATUS_SUCCEEDED } else { STATUS_FAILED };
+            let final_status = if failed == 0 {
+                STATUS_SUCCEEDED
+            } else {
+                STATUS_FAILED
+            };
             let _ = sqlx::query(
                 "UPDATE pipeline_runs SET status = $1, finished_at = NOW() WHERE id = $2",
             )
@@ -472,14 +572,7 @@ impl PipelineManager {
                 .await?;
 
             let result = self
-                .execute_node_with_retry(
-                    &node,
-                    def,
-                    cell,
-                    model_id,
-                    &node_outputs,
-                    run_id,
-                )
+                .execute_node_with_retry(node, def, cell, model_id, &node_outputs, run_id)
                 .await;
 
             match result {
@@ -566,10 +659,7 @@ impl PipelineManager {
     ) -> anyhow::Result<Value> {
         let mut last_err = anyhow::anyhow!("no attempts");
         for attempt in 0..=MAX_NODE_RETRIES {
-            match self
-                .execute_node(node, def, cell, model_id, outputs)
-                .await
-            {
+            match self.execute_node(node, def, cell, model_id, outputs).await {
                 Ok(v) => return Ok(v),
                 Err(e) => {
                     last_err = e;
@@ -600,7 +690,7 @@ impl PipelineManager {
     async fn execute_node(
         self: &Arc<Self>,
         node: &PipelineNode,
-        def: &PipelineDefinition,
+        _def: &PipelineDefinition,
         cell: &MatrixCell,
         model_id: Option<&str>,
         _outputs: &HashMap<String, Value>,
@@ -621,7 +711,9 @@ impl PipelineManager {
                 }))
             }
             "features" => {
-                let feature_set = node.params.get("feature_set_ref")
+                let feature_set = node
+                    .params
+                    .get("feature_set_ref")
                     .and_then(|v| v.as_str())
                     .unwrap_or("fs_core_ohlcv_v3");
                 Ok(serde_json::json!({ "op": "features", "feature_set_ref": feature_set }))
@@ -630,7 +722,9 @@ impl PipelineManager {
             "train" => {
                 // Kick off a ModelManager training run if model_id provided.
                 if let Some(mid) = model_id {
-                    let framework = node.params.get("framework")
+                    let framework = node
+                        .params
+                        .get("framework")
                         .and_then(|v| v.as_str())
                         .unwrap_or("lightgbm");
                     // Resolve window preset (I-5.6).
@@ -658,7 +752,9 @@ impl PipelineManager {
             "calibrate" => Ok(serde_json::json!({ "op": "calibrate" })),
             "evaluate" => Ok(serde_json::json!({ "op": "evaluate" })),
             "register" => {
-                let promote_if = node.params.get("promote_if")
+                let promote_if = node
+                    .params
+                    .get("promote_if")
                     .and_then(|v| v.as_str())
                     .unwrap_or("beats_baseline");
                 Ok(serde_json::json!({ "op": "register", "promote_if": promote_if }))
@@ -681,10 +777,15 @@ impl PipelineManager {
         let bytes = serde_json::to_vec(&canonical).unwrap_or_default();
         use sha2::{Digest, Sha256};
         let digest = Sha256::digest(&bytes);
-        format!("{:x}", digest)
+        format!("{digest:x}")
     }
 
-    async fn check_cache(&self, _run_id: &str, def: &PipelineDefinition, cell: &MatrixCell) -> bool {
+    async fn check_cache(
+        &self,
+        _run_id: &str,
+        def: &PipelineDefinition,
+        cell: &MatrixCell,
+    ) -> bool {
         let hash = self.compute_cell_hash(def, cell);
         // Look for a prior succeeded run with the same hash.
         let row: Option<(String,)> = sqlx::query_as(
@@ -755,7 +856,7 @@ impl PipelineManager {
 
 // ── I-5.7: Bar-cadence scheduler ─────────────────────────────────────────────
 
-/// Watches the `bars_1m` ClickHouse table (or a Postgres heartbeat) and fires
+/// Watches the `bars_1m` `ClickHouse` table (or a Postgres heartbeat) and fires
 /// pipeline runs when the bar-cadence threshold is crossed.
 ///
 /// In production, the watcher queries the most recent bar count for the
@@ -772,7 +873,11 @@ impl BarScheduleWatcher {
         pg: PgPool,
         poll_interval: tokio::time::Duration,
     ) -> Self {
-        Self { manager, pg, poll_interval }
+        Self {
+            manager,
+            pg,
+            poll_interval,
+        }
     }
 
     pub fn spawn(self, user_id: String) -> tokio::task::JoinHandle<()> {
@@ -820,8 +925,7 @@ impl BarScheduleWatcher {
             .await
             .ok()
             .flatten()
-            .map(|(n,)| n)
-            .unwrap_or(0);
+            .map_or(0, |(n,)| n);
 
             // Read current bar count from Postgres heartbeat table.
             let current: i64 = sqlx::query_as::<_, (i64,)>(
@@ -834,17 +938,24 @@ impl BarScheduleWatcher {
             .await
             .ok()
             .flatten()
-            .map(|(n,)| n)
-            .unwrap_or(last_fired);
+            .map_or(last_fired, |(n,)| n);
 
-            let threshold = sched.every_n_bars as i64;
+            let threshold = i64::from(sched.every_n_bars);
             if current - last_fired >= threshold {
                 tracing::info!(
                     "bar-schedule firing pipeline {pip_id}: \
                      {current} bars (last_fired={last_fired}, every={threshold})"
                 );
-                let req = RunPipelineRequest { model_id: None, force: false };
-                if let Err(e) = self.manager.clone().run_pipeline(&pip_id, user_id, req).await {
+                let req = RunPipelineRequest {
+                    model_id: None,
+                    force: false,
+                };
+                if let Err(e) = self
+                    .manager
+                    .clone()
+                    .run_pipeline(&pip_id, user_id, req)
+                    .await
+                {
                     tracing::warn!("bar-schedule run failed for {pip_id}: {e}");
                 }
                 // Persist updated bar count.
@@ -867,8 +978,11 @@ impl BarScheduleWatcher {
 // ── DAG topological sort ──────────────────────────────────────────────────────
 
 fn topo_sort(nodes: &[PipelineNode]) -> anyhow::Result<Vec<&PipelineNode>> {
-    let idx: HashMap<&str, usize> =
-        nodes.iter().enumerate().map(|(i, n)| (n.id.as_str(), i)).collect();
+    let idx: HashMap<&str, usize> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.id.as_str(), i))
+        .collect();
 
     // in_degree[i] = number of incoming edges to node i (i.e. how many nodes i depends on).
     let mut in_degree: Vec<usize> = vec![0; nodes.len()];
@@ -878,13 +992,17 @@ fn topo_sort(nodes: &[PipelineNode]) -> anyhow::Result<Vec<&PipelineNode>> {
         for dep in &node.needs {
             if let Some(&j) = idx.get(dep.as_str()) {
                 in_degree[i] += 1; // node i has one more prerequisite
-                adj[j].push(i);    // when j finishes, notify i
+                adj[j].push(i); // when j finishes, notify i
             }
         }
     }
 
-    let mut queue: VecDeque<usize> =
-        in_degree.iter().enumerate().filter(|(_, &d)| d == 0).map(|(i, _)| i).collect();
+    let mut queue: VecDeque<usize> = in_degree
+        .iter()
+        .enumerate()
+        .filter(|(_, &d)| d == 0)
+        .map(|(i, _)| i)
+        .collect();
     let mut order = Vec::with_capacity(nodes.len());
 
     while let Some(i) = queue.pop_front() {
