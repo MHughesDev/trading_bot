@@ -37,6 +37,15 @@ const ModelCreatePage = lazy(() =>
 const ModelLineagePage = lazy(() =>
   import('@/pages/ModelLineagePage').then((m) => ({ default: m.ModelLineagePage })),
 )
+const LeaderboardPage = lazy(() =>
+  import('@/pages/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage })),
+)
+const EnsemblesPage = lazy(() =>
+  import('@/pages/EnsemblesPage').then((m) => ({ default: m.EnsemblesPage })),
+)
+const PipelinesPage = lazy(() =>
+  import('@/pages/PipelinesPage').then((m) => ({ default: m.PipelinesPage })),
+)
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -95,7 +104,10 @@ export default function App() {
               <Route path="/models" element={<ModelStudioPage />} />
               <Route path="/models/create" element={<ModelCreatePage />} />
               <Route path="/models/graph" element={<ModelLineagePage />} />
+              <Route path="/models/leaderboard" element={<LeaderboardPage />} />
               <Route path="/models/:id" element={<ModelDetailPage />} />
+              <Route path="/ensembles" element={<EnsemblesPage />} />
+              <Route path="/pipelines" element={<PipelinesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
 
               {/* Legacy / deep-link routes */}

@@ -1,4 +1,6 @@
-use super::{kinds::is_compatible, ModelDefinition, DEFINITION_VERSION};
+use super::{kinds::is_compatible, ModelDefinition};
+
+const ACCEPTED_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 #[derive(Debug, PartialEq)]
 pub struct ValidationError {
@@ -18,12 +20,12 @@ impl ValidationError {
 pub fn validate(def: &ModelDefinition) -> Result<(), Vec<ValidationError>> {
     let mut errors = Vec::new();
 
-    if def.schema_version != DEFINITION_VERSION {
+    if !ACCEPTED_VERSIONS.contains(&def.schema_version.as_str()) {
         errors.push(ValidationError::new(
             "schema_version",
             format!(
-                "must be \"{DEFINITION_VERSION}\"; got \"{}\"",
-                def.schema_version
+                "must be one of {:?}; got \"{}\"",
+                ACCEPTED_VERSIONS, def.schema_version
             ),
         ));
     }
@@ -70,13 +72,39 @@ pub fn validate(def: &ModelDefinition) -> Result<(), Vec<ValidationError>> {
         }
     }
 
-    // Walk-forward CV block (Set I, ADR-0017): optional, additive. Only the
-    // shape (positive fold/bar counts) is checked here; the embargo-≥-horizon
-    // leakage guard needs the base timeframe and runs at materialization.
+    // Walk-forward CV block (ADR-0017): optional, shape-only check here.
     if let Some(cv) = &def.cv {
         if let Err(cv_errs) = cv.validate_shape() {
             for e in cv_errs {
                 errors.push(ValidationError::new(e.path, e.message));
+            }
+        }
+    }
+
+    // Distributional output block (ADR-0016, v1.1): optional; validate when present.
+    if let Some(output) = &def.output {
+        let levels = &output.quantile_levels;
+        if levels.is_empty() {
+            errors.push(ValidationError::new(
+                "output.quantile_levels",
+                "must not be empty",
+            ));
+        } else {
+            for (i, &l) in levels.iter().enumerate() {
+                if l <= 0.0 || l >= 1.0 {
+                    errors.push(ValidationError::new(
+                        "output.quantile_levels",
+                        format!("level[{i}]={l} not in (0, 1)"),
+                    ));
+                    break;
+                }
+                if i > 0 && l <= levels[i - 1] {
+                    errors.push(ValidationError::new(
+                        "output.quantile_levels",
+                        format!("levels not strictly increasing at index {i}"),
+                    ));
+                    break;
+                }
             }
         }
     }

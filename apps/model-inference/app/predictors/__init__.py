@@ -1,10 +1,9 @@
 """Predictor dispatch.
 
 A trained artifact is either a self-describing *bundle* (new format, carries the
-framework + feature order + scaler + objective) or a bare legacy artifact. For
-bundles we dispatch straight to the matching framework predictor; for bare
-artifacts we keep the tolerant "try each predictor" fallback so already-trained
-models keep serving.
+framework + feature order + scaler + objective + distribution metadata) or a bare
+legacy artifact. For bundles we dispatch straight to the matching framework
+predictor; for bare artifacts we fall back to the tolerant "try each" path.
 """
 
 from . import (
@@ -14,6 +13,10 @@ from . import (
     sklearn_predictor,
     torch_predictor,
     xgboost_predictor,
+    lightgbm_q_predictor,
+    xgboost_q_predictor,
+    sklearn_q_predictor,
+    garch_predictor,
 )
 
 _BY_FRAMEWORK = {
@@ -21,6 +24,12 @@ _BY_FRAMEWORK = {
     "lightgbm": lightgbm_predictor.predict,
     "sklearn": sklearn_predictor.predict,
     "torch": torch_predictor.predict,
+    # Distributional frameworks (I-1.5, I-1.6)
+    "lightgbm_q": lightgbm_q_predictor.predict,
+    "xgboost_q": xgboost_q_predictor.predict,
+    "xgboost_q_compat": xgboost_q_predictor.predict,
+    "sklearn_q": sklearn_q_predictor.predict,
+    "garch": garch_predictor.predict,
 }
 
 _FALLBACK_ORDER = [
@@ -48,8 +57,7 @@ def run_predict(artifact_bytes: bytes, instances: list, model_kind: str, horizon
             except Exception:
                 continue
 
-    # Bare/legacy artifact (or bundle that failed every framework): try each
-    # predictor against the raw bytes with no bundle metadata.
+    # Bare/legacy artifact: try each point predictor.
     for predict in _FALLBACK_ORDER:
         try:
             result = predict(artifact_bytes, instances, model_kind, horizon, None)

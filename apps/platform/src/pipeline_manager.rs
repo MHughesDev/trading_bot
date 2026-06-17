@@ -168,7 +168,7 @@ async fn gap_fill(ch_url: &str, instrument_id: &str, asset_class: &str) -> anyho
 
     let plan = backtest::collect::CollectorPlan::for_asset_class(asset_class, instrument_id)?;
     let venue_id = match &plan {
-        backtest::collect::CollectorPlan::CoinbaseCandles { .. } => "coinbase",
+        backtest::collect::CollectorPlan::KrakenOhlc { .. } => "kraken",
         backtest::collect::CollectorPlan::BinanceKlines { .. } => "binance",
         backtest::collect::CollectorPlan::AlpacaBars { .. } => "alpaca",
     };

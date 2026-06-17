@@ -564,4 +564,89 @@ mod tests {
         assert!(lo <= hi);
         assert_ne!(lo, fallback_start, "real bounds, not the fallback");
     }
+
+    // ------------------------------------------------------------------ //
+    // I-0.6: Pinned snapshot immutability
+    // ------------------------------------------------------------------ //
+
+    /// Same parameters + same data ⇒ identical hash (idempotency key).
+    #[test]
+    fn same_data_produces_same_hash() {
+        let names = vec!["close".to_string()];
+        let build_hash = || {
+            let mut acc = FrameAccumulator::new(names.clone());
+            acc.push("BTC-USD", &frame(&["close"]));
+            let bytes = acc.encode_parquet().expect("encode");
+            let param = b"params";
+            let mut input = param.to_vec();
+            input.extend_from_slice(&bytes);
+            hex_sha256(&input)
+        };
+        assert_eq!(
+            build_hash(),
+            build_hash(),
+            "identical params+data ⇒ identical hash"
+        );
+    }
+
+    /// Different data (a different instrument or bar range) produces a
+    /// different hash, ensuring late-data revisions yield a new snapshot
+    /// version rather than silently mutating the existing one (I-0.6).
+    #[test]
+    fn different_data_produces_different_hash() {
+        let names = vec!["close".to_string()];
+        let hash_for = |instrument: &str| {
+            let mut acc = FrameAccumulator::new(names.clone());
+            // Use the same feature frame but tag it to a different instrument
+            // so the `instrument` column differs → different Parquet bytes →
+            // different hash → a separate dataset_version row would be inserted.
+            acc.push(instrument, &frame(&["close"]));
+            let bytes = acc.encode_parquet().expect("encode");
+            let param = b"params";
+            let mut input = param.to_vec();
+            input.extend_from_slice(&bytes);
+            hex_sha256(&input)
+        };
+        assert_ne!(
+            hash_for("BTC-USD"),
+            hash_for("ETH-USD"),
+            "different data (instrument tag changes Parquet bytes) ⇒ different hash ⇒ new snapshot version"
+        );
+    }
+
+    /// Snapshots are immutable by construction: the INSERT has no ON CONFLICT
+    /// UPDATE clause, so re-running with the same hash returns the existing
+    /// row untouched (the `find_by_hash` early-return path in `materialize`).
+    /// This test verifies the hash logic that drives that idempotency key.
+    #[test]
+    fn hash_covers_both_params_and_bytes() {
+        let names = vec!["close".to_string()];
+        let mut acc = FrameAccumulator::new(names.clone());
+        acc.push("BTC-USD", &frame(&["close"]));
+        let bytes = acc.encode_parquet().expect("encode");
+
+        // Same bytes, different param string → different hash.
+        let h1 = {
+            let mut input = b"params_v1".to_vec();
+            input.extend_from_slice(&bytes);
+            hex_sha256(&input)
+        };
+        let h2 = {
+            let mut input = b"params_v2".to_vec();
+            input.extend_from_slice(&bytes);
+            hex_sha256(&input)
+        };
+        assert_ne!(h1, h2, "param change alone must change the hash");
+
+        // Same param, different bytes (different accumulator content) → different hash.
+        let mut acc2 = FrameAccumulator::new(names);
+        acc2.push("ETH-USD", &frame(&["close"]));
+        let bytes2 = acc2.encode_parquet().expect("encode");
+        let h3 = {
+            let mut input = b"params_v1".to_vec();
+            input.extend_from_slice(&bytes2);
+            hex_sha256(&input)
+        };
+        assert_ne!(h1, h3, "data change alone must change the hash");
+    }
 }

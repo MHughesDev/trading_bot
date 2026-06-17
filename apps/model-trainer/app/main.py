@@ -2,8 +2,8 @@ import asyncio
 
 from fastapi import FastAPI
 
-from .schemas import TrainRequest
-from .worker import run_training, RESULTS
+from .schemas import TrainRequest, EvalRequest, EnsembleCombineRequest
+from .worker import run_training, run_evaluation, run_ensemble_combine, RESULTS
 
 app = FastAPI(title="model-trainer", version="0.1.0")
 
@@ -30,3 +30,27 @@ async def train_status(run_id: str):
     if res is None:
         return {"run_id": run_id, "status": "running"}
     return res.model_dump()
+
+
+@app.post("/evaluate")
+async def evaluate(req: EvalRequest):
+    """Parity-preserving evaluation endpoint (I-2.1).
+
+    Receives the artifact + test-window dataset; runs inference through the
+    stored bundle (same path as serve); scores predicted distributions against
+    realized outcomes; returns full metrics + scorecard + report.
+    """
+    result = await run_evaluation(req)
+    return result.model_dump()
+
+
+@app.post("/ensemble/combine")
+async def ensemble_combine(req: EnsembleCombineRequest):
+    """Ensemble combine + conformal calibration + scoring (I-4.11).
+
+    Loads all member artifacts, combines in σ-coordinate space, applies adaptive
+    conformal calibration on the cal rows, repairs crossings, scores with the
+    full Phase 2 suite, and persists an ensemble bundle.
+    """
+    result = await run_ensemble_combine(req)
+    return result.model_dump()

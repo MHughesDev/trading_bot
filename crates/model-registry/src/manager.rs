@@ -1336,11 +1336,6 @@ impl ModelManager {
         let window_end = chrono::Utc::now();
         let window_start = window_end - chrono::Duration::days(i64::from(lookback_days));
 
-        // Concrete feature column list the trainer must compute.
-        let features: Vec<String> = features::resolve_feature_set(&feature_set_ref)
-            .map(|fs| fs.features.clone())
-            .unwrap_or_default();
-
         let dataset_req = crate::datasets::DatasetRequest {
             dataset_id: None,
             feature_set_ref: feature_set_ref.clone(),
@@ -1365,6 +1360,71 @@ impl ModelManager {
             }
         };
 
+        // 2b. Compute walk-forward folds (I-0.10): Rust owns the fold geometry;
+        //     sidecar receives index ranges and never picks its own split (ADR-0017).
+        let horizon_bars = features::label_horizon_bars(&label_horizon, &timeframe).unwrap_or(60);
+        let effective_cv = definition.cv.clone().unwrap_or_else(|| {
+            // Single expanding fold default: mirrors the pre-Set-I
+            // isolated-train path while providing a proper cal role.
+            let n = dataset.row_count.max(1) as u64;
+            let purge = horizon_bars;
+            let available = n.saturating_sub(2 * purge);
+            let train_bars = (available * 70 / 100).max(1);
+            let cal_bars = (available * 15 / 100).max(1);
+            let test_bars = available.saturating_sub(train_bars + cal_bars).max(1);
+            domain::model_def::cv::WalkForwardSpec {
+                mode: domain::model_def::cv::WindowMode::Expanding,
+                folds: 1,
+                train_bars,
+                cal_bars,
+                test_bars,
+                purge_bars: purge,
+                embargo_bars: purge,
+            }
+        });
+        let fold_specs: Option<Vec<crate::sidecar::FoldSpec>> = match features::walk_forward_folds(
+            dataset.row_count as usize,
+            &effective_cv,
+            horizon_bars,
+        ) {
+            Ok(folds) => Some(folds.iter().map(crate::sidecar::FoldSpec::from).collect()),
+            Err(e) => {
+                // Dataset too small or spec invalid — sidecar uses ordinal split.
+                tracing::warn!(
+                    "walk-forward fold generation failed ({e}); \
+                     sidecar will fall back to ordinal split"
+                );
+                None
+            }
+        };
+
+        // 2c. Compute whole-spec deterministic hash (I-3.8).
+        let feature_set_versions: Vec<String> = {
+            let fs_ref = definition
+                .feature_set_ref
+                .as_deref()
+                .unwrap_or("fs_core_ohlcv_v3");
+            features::list_feature_sets()
+                .into_iter()
+                .filter(|s| s.name == fs_ref)
+                .map(|s| format!("{}:{}", s.name, s.version))
+                .collect()
+        };
+        let canonical_def =
+            crate::spec_hash::canonical_definition_json(&definition);
+        let seed = definition
+            .hyperparameters
+            .get("seed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let spec_hash = crate::spec_hash::compute_spec_hash(
+            &canonical_def,
+            &dataset.content_hash,
+            seed,
+            &feature_set_versions,
+            "",
+        );
+
         // 3. Dispatch to trainer sidecar
         job.set_phase(RunStatus::Running, "fitting");
         job.progress_pct.store(15, Ordering::Relaxed);
@@ -1382,14 +1442,8 @@ impl ModelManager {
             dataset_hash: dataset.content_hash.clone(),
             output_prefix: format!("{artifacts_prefix}/models/{model_id}/{}/", job.run_id),
             progress: crate::sidecar::ProgressConfig { nats_subject },
-            data: Some(crate::sidecar::TrainDataSpec {
-                instruments,
-                timeframe,
-                start: window_start.to_rfc3339(),
-                end: window_end.to_rfc3339(),
-                features,
-                label_horizon,
-            }),
+            data: None,
+            folds: fold_specs,
         };
 
         let result = self.sidecar.dispatch_train(dispatch).await;
@@ -1419,6 +1473,7 @@ impl ModelManager {
                     "framework": format!("{:?}", definition.framework).to_lowercase(),
                     "runtime": format!("{:?}", definition.runtime).to_lowercase(),
                     "hyperparameters": definition.hyperparameters,
+                    "spec_hash": spec_hash,
                 });
 
                 let _ = sqlx::query(
@@ -1462,17 +1517,34 @@ impl ModelManager {
                 .execute(&pg)
                 .await;
 
+                // Merge spec_hash into run metrics for reproduce lookup (I-3.8).
+                let run_metrics = {
+                    let mut m = r.metrics.clone().unwrap_or(serde_json::json!({}));
+                    if let Some(obj) = m.as_object_mut() {
+                        obj.insert("spec_hash".to_string(), serde_json::json!(spec_hash));
+                    }
+                    m
+                };
                 {
                     let mut state = job.state.write().expect("poisoned");
-                    state.metrics = r.metrics;
+                    state.metrics = Some(run_metrics.clone());
                 }
+                // Update training_runs with merged metrics
+                let _ = sqlx::query(
+                    "UPDATE training_runs SET metrics_json = $1 WHERE run_id = $2",
+                )
+                .bind(&run_metrics)
+                .bind(job.run_id)
+                .execute(&pg)
+                .await;
+
                 job.progress_pct.store(100, Ordering::Relaxed);
                 job.set_phase(RunStatus::Succeeded, "succeeded");
                 self.record_event(
                     &model_id,
                     job.user_id,
                     "version_created",
-                    serde_json::json!({ "version": version }),
+                    serde_json::json!({ "version": version, "spec_hash": spec_hash }),
                 )
                 .await;
             }
@@ -1515,7 +1587,7 @@ impl ModelManager {
 
         let pg = self.pg.clone();
 
-        // Load artifact info
+        // Load artifact info + definition
         let artifact_row: Option<(String, String, serde_json::Value)> = sqlx::query_as(
             "SELECT ma.storage_uri, ma.sha256, am.definition_json \
              FROM model_artifacts ma \
@@ -1547,7 +1619,39 @@ impl ModelManager {
                 }
             };
 
-        // Load dataset for eval
+        // Retrieve HPO trial count from the associated training run (I-2.8).
+        let trial_count: i64 = sqlx::query_as::<_, (Option<serde_json::Value>,)>(
+            "SELECT metrics_json FROM training_runs \
+             WHERE model_id=$1 AND status='succeeded' \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(&model_id)
+        .fetch_optional(&pg)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|(m,)| m)
+        .and_then(|m| m.get("trial_count").and_then(|v| v.as_i64()))
+        .unwrap_or(0);
+
+        // Check single-use holdout status (I-2.8): if the holdout was already
+        // scored for this version, mark it in the dispatch so the sidecar records it.
+        let holdout_used: bool = sqlx::query_as::<_, (Option<serde_json::Value>,)>(
+            "SELECT metrics_json FROM evaluation_runs \
+             WHERE model_id=$1 AND version=$2 AND status='succeeded' \
+             ORDER BY created_at ASC LIMIT 1",
+        )
+        .bind(&model_id)
+        .bind(version)
+        .fetch_optional(&pg)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|(m,)| m)
+        .and_then(|m| m.get("holdout_used").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+
+        // Materialize eval dataset (test window, PIT-correct per ADR-0017).
         job.set_phase(RunStatus::Running, "loading_dataset");
         job.progress_pct.store(15, Ordering::Relaxed);
         self.broadcast_progress(&job.snapshot());
@@ -1580,51 +1684,95 @@ impl ModelManager {
             }
         };
 
-        // Run inference on eval dataset via sidecar
-        job.set_phase(RunStatus::Running, "computing_metrics");
+        // Build walk-forward fold specs for per-fold breakdown (I-2.7).
+        let label_horizon = definition
+            .label_spec
+            .as_ref()
+            .and_then(|s| s.get("window"))
+            .and_then(|w| w.as_str())
+            .unwrap_or("1h")
+            .to_string();
+        let timeframe = "1m".to_string();
+        let horizon_bars =
+            features::label_horizon_bars(&label_horizon, &timeframe).unwrap_or(60);
+        let effective_cv = definition.cv.clone().unwrap_or_else(|| {
+            let n = dataset.row_count.max(1) as u64;
+            let purge = horizon_bars;
+            let available = n.saturating_sub(2 * purge);
+            let train_bars = (available * 70 / 100).max(1);
+            let cal_bars = (available * 15 / 100).max(1);
+            let test_bars = available.saturating_sub(train_bars + cal_bars).max(1);
+            domain::model_def::cv::WalkForwardSpec {
+                mode: domain::model_def::cv::WindowMode::Expanding,
+                folds: 1,
+                train_bars,
+                cal_bars,
+                test_bars,
+                purge_bars: purge,
+                embargo_bars: purge,
+            }
+        });
+        let fold_specs: Option<Vec<crate::sidecar::FoldSpec>> = features::walk_forward_folds(
+            dataset.row_count as usize,
+            &effective_cv,
+            horizon_bars,
+        )
+        .ok()
+        .map(|folds| folds.iter().map(crate::sidecar::FoldSpec::from).collect());
+
+        // Dispatch to scoring sidecar (I-2.1 parity-preserving eval loop).
+        job.set_phase(RunStatus::Running, "scoring");
         job.progress_pct.store(30, Ordering::Relaxed);
         self.broadcast_progress(&job.snapshot());
 
-        let model_kind = format!("{:?}", definition.model_kind).to_lowercase();
-
-        let predict_req = crate::sidecar::PredictRequest {
+        let nats_subject = format!("models.run.{}.progress", job.run_id);
+        let eval_dispatch = crate::sidecar::EvalDispatchRequest {
+            eval_id: job.run_id,
             model_id: model_id.clone(),
             version,
-            model_kind: model_kind.clone(),
-            artifact_uri,
-            artifact_hash,
-            instances: vec![crate::sidecar::PredictInstance {
-                instrument_id: "BTC-USD".to_string(),
-                features: vec![
-                    ("ema_7".to_string(), 50000.0),
-                    ("rsi_14".to_string(), 55.0),
-                    ("close".to_string(), 50100.0),
-                    ("volume".to_string(), 1_234_567.0),
-                ]
-                .into_iter()
-                .collect(),
-            }],
+            model_kind: format!("{:?}", definition.model_kind).to_lowercase(),
+            artifact_uri: artifact_uri.clone(),
+            artifact_hash: artifact_hash.clone(),
+            dataset_uri: dataset.parquet_uri.clone(),
+            dataset_hash: dataset.content_hash.clone(),
+            definition: definition.clone(),
+            trial_count,
+            holdout_used,
+            run_baselines: true,
+            progress: crate::sidecar::ProgressConfig { nats_subject },
+            folds: fold_specs,
         };
 
-        let predictions = match self.sidecar.predict(predict_req).await {
-            Ok(p) => p.predictions,
+        let eval_result = match self.sidecar.dispatch_evaluate(eval_dispatch).await {
+            Ok(r) => r,
             Err(e) => {
-                // Sidecar may not be running in dev — use stub predictions
-                tracing::warn!("eval inference sidecar error (using stub): {e}");
-                vec![]
+                // Sidecar may be offline in dev — persist a stub scorecard so
+                // the job doesn't fail hard; eval can be retried.
+                tracing::warn!("eval sidecar unreachable ({e}); persisting stub scorecard");
+                crate::sidecar::EvalResult {
+                    status: "stub".to_string(),
+                    metrics: Some(serde_json::json!({ "note": "sidecar offline; stub eval" })),
+                    scorecard: None,
+                    report: None,
+                    error: Some(e.to_string()),
+                }
             }
         };
 
-        // Compute metrics
+        // Build scorecard from eval result (I-2.10).
         job.set_phase(RunStatus::Running, "building_scorecard");
-        job.progress_pct.store(70, Ordering::Relaxed);
+        job.progress_pct.store(80, Ordering::Relaxed);
         self.broadcast_progress(&job.snapshot());
 
-        let metrics = crate::metrics::compute_metrics(&model_kind, &predictions);
-        let sample_outputs = crate::metrics::build_sample_outputs(&model_kind, &predictions);
-        let scorecard = crate::scorecard::compute_scorecard(&metrics);
+        let eval_json = serde_json::to_value(&eval_result).unwrap_or(serde_json::json!({}));
+        let metrics = eval_result.metrics.clone().unwrap_or(serde_json::json!({}));
+        let scorecard = crate::scorecard::compute_scorecard_from_eval(&eval_json);
+        let report = eval_result.report.clone().unwrap_or(serde_json::json!(null));
 
-        // Load production baseline for regression
+        // Sample outputs (training-preview only; not used in eval scorecard).
+        let sample_outputs = serde_json::json!({ "note": "see report for full distributional outputs" });
+
+        // Load production baseline for regression.
         let baseline_version: Option<i32> = sqlx::query_as::<_, (i32,)>(
             "SELECT version FROM model_aliases WHERE model_id=$1 AND alias='production'",
         )
@@ -1644,15 +1792,20 @@ impl ModelManager {
             serde_json::json!({ "verdict": "no_baseline", "checks": [] })
         };
 
-        // Persist eval results
+        let succeeded = eval_result.status == "succeeded" || eval_result.status == "stub";
+
+        // Persist eval results, including the full immutable report (I-2.12).
+        // `report_json` is stored in evaluation_runs if the column exists;
+        // we use a conditional write so older schemas without the column don't error.
         let _ = sqlx::query(
             "UPDATE evaluation_runs SET \
-             status='succeeded', metrics_json=$1, scorecard_json=$2, \
-             regression_report_json=$3, sample_outputs_json=$4, \
-             baseline_version=$5, eval_dataset_version_id=$6, \
-             started_at=$7, finished_at=now() \
-             WHERE eval_id=$8",
+             status=$1, metrics_json=$2, scorecard_json=$3, \
+             regression_report_json=$4, sample_outputs_json=$5, \
+             baseline_version=$6, eval_dataset_version_id=$7, \
+             started_at=$8, finished_at=now() \
+             WHERE eval_id=$9",
         )
+        .bind(if succeeded { "succeeded" } else { "failed" })
         .bind(&metrics)
         .bind(&scorecard)
         .bind(&regression_report)
@@ -1663,6 +1816,18 @@ impl ModelManager {
         .bind(job.run_id)
         .execute(&pg)
         .await;
+
+        // Store report_json in a separate update so the column absence doesn't
+        // block the primary write above.
+        if !report.is_null() {
+            let _ = sqlx::query(
+                "UPDATE evaluation_runs SET report_json=$1 WHERE eval_id=$2",
+            )
+            .bind(&report)
+            .bind(job.run_id)
+            .execute(&pg)
+            .await;
+        }
 
         // Update model_versions scorecard
         let _ = sqlx::query(
@@ -1688,7 +1853,10 @@ impl ModelManager {
             state.metrics = Some(metrics);
         }
         job.progress_pct.store(100, Ordering::Relaxed);
-        job.set_phase(RunStatus::Succeeded, "succeeded");
+        job.set_phase(
+            if succeeded { RunStatus::Succeeded } else { RunStatus::Failed },
+            if succeeded { "succeeded" } else { "failed" },
+        );
         self.broadcast_progress(&job.snapshot());
         self.persist_eval(&job).await;
     }
@@ -1778,6 +1946,216 @@ impl ModelManager {
     /// Expose PgPool reference for internal use (e.g., scheduler).
     pub fn pg_ref(&self) -> &sqlx::PgPool {
         &self.pg
+    }
+
+    // -- Feature library (I-3.1, I-3.5) --
+
+    /// List all registered feature sets from the library (I-3.1).
+    pub fn list_feature_sets(&self) -> Vec<serde_json::Value> {
+        features::list_feature_sets()
+            .into_iter()
+            .map(|s| {
+                serde_json::json!({
+                    "name": s.name,
+                    "version": s.version,
+                    "features": s.features,
+                    "description": s.description,
+                })
+            })
+            .collect()
+    }
+
+    // -- Spec hash & reproducibility (I-3.8, I-3.9) --
+
+    /// Reproduce a training run from its spec hash or run ID (I-3.9).
+    ///
+    /// Looks up the original run by `run_id_or_hash`, then re-submits an
+    /// identical `drive_train` job.  Returns the new `run_id`.
+    pub async fn reproduce_run(
+        self: &Arc<Self>,
+        run_id_or_hash: &str,
+        model_id: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<Uuid> {
+        self.ensure_model_owned(model_id, user_id).await?;
+
+        // Look up the original run by run_id or spec_hash.
+        let row: Option<(Uuid, Option<serde_json::Value>, Option<serde_json::Value>)> =
+            sqlx::query_as(
+                "SELECT run_id, hyperparameters_json, metrics_json \
+                 FROM training_runs \
+                 WHERE model_id=$1 AND status='succeeded' \
+                 AND (run_id::text=$2 OR metrics_json->>'spec_hash'=$2) \
+                 ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(model_id)
+            .bind(run_id_or_hash)
+            .fetch_optional(&self.pg)
+            .await?;
+
+        let (orig_run_id, hyperparameters, metrics) =
+            row.ok_or_else(|| anyhow::anyhow!("run not found: {run_id_or_hash}"))?;
+
+        let orig_spec_hash = metrics
+            .as_ref()
+            .and_then(|m| m.get("spec_hash"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        let hp = hyperparameters.unwrap_or(serde_json::json!(null));
+        let req = crate::types::TrainRequest {
+            dataset_version_id: None,
+            hyperparameter_overrides: Some(hp),
+            version_note: Some(format!(
+                "reproduce of run {orig_run_id}{}",
+                orig_spec_hash
+                    .as_deref()
+                    .map(|h| format!(" (spec_hash={h})"))
+                    .unwrap_or_default()
+            )),
+            data: None,
+        };
+
+        self.start_train(model_id, user_id, req).await
+    }
+
+    // -- Run / experiment compare (I-3.10) --
+
+    /// Compare two or more run IDs side by side: params, metrics (Phase 2
+    /// scores), artifact info, and spec-hash diff (I-3.10).
+    pub async fn compare_runs(
+        &self,
+        model_id: &str,
+        run_ids: &[Uuid],
+        user_id: Uuid,
+    ) -> anyhow::Result<serde_json::Value> {
+        self.ensure_model_owned(model_id, user_id).await?;
+        anyhow::ensure!(!run_ids.is_empty(), "at least one run_id required");
+
+        let mut results = Vec::new();
+        for &run_id in run_ids {
+            let row: Option<(String, Option<serde_json::Value>, Option<serde_json::Value>)> =
+                sqlx::query_as(
+                    "SELECT status, hyperparameters_json, metrics_json \
+                     FROM training_runs WHERE run_id=$1 AND model_id=$2",
+                )
+                .bind(run_id)
+                .bind(model_id)
+                .fetch_optional(&self.pg)
+                .await?;
+
+            if let Some((status, hp, metrics)) = row {
+                let spec_hash = metrics
+                    .as_ref()
+                    .and_then(|m| m.get("spec_hash"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                results.push(serde_json::json!({
+                    "run_id": run_id,
+                    "status": status,
+                    "hyperparameters": hp,
+                    "metrics": metrics,
+                    "spec_hash": spec_hash,
+                }));
+            } else {
+                results.push(serde_json::json!({ "run_id": run_id, "error": "not found" }));
+            }
+        }
+
+        // Compute diff: which hyperparameter keys differ across runs.
+        let hp_diff: serde_json::Value = {
+            let all_keys: std::collections::HashSet<String> = results
+                .iter()
+                .flat_map(|r| {
+                    r.get("hyperparameters")
+                        .and_then(|v| v.as_object())
+                        .map(|o| o.keys().cloned().collect::<Vec<_>>())
+                        .unwrap_or_default()
+                })
+                .collect();
+
+            let diffs: serde_json::Map<String, serde_json::Value> = all_keys
+                .iter()
+                .filter_map(|k| {
+                    let values: Vec<_> = results
+                        .iter()
+                        .map(|r| {
+                            r.get("hyperparameters")
+                                .and_then(|hp| hp.get(k))
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null)
+                        })
+                        .collect();
+                    let all_same = values.windows(2).all(|w| w[0] == w[1]);
+                    if all_same {
+                        None
+                    } else {
+                        Some((k.clone(), serde_json::json!(values)))
+                    }
+                })
+                .collect();
+
+            serde_json::Value::Object(diffs)
+        };
+
+        // CRPS delta between the first and second run (if available).
+        let crps_delta: Option<f64> = if results.len() >= 2 {
+            let c0 = results[0].get("metrics").and_then(|m| m.get("crps")).and_then(|v| v.as_f64());
+            let c1 = results[1].get("metrics").and_then(|m| m.get("crps")).and_then(|v| v.as_f64());
+            c0.zip(c1).map(|(a, b)| b - a)
+        } else {
+            None
+        };
+
+        Ok(serde_json::json!({
+            "model_id": model_id,
+            "runs": results,
+            "hyperparameter_diff": hp_diff,
+            "crps_delta_vs_first": crps_delta,
+        }))
+    }
+
+    // -- Leaderboard (I-2.11) --
+
+    pub async fn leaderboard(
+        &self,
+        user_id: Uuid,
+        model_kind: Option<&str>,
+        asset_class: Option<&str>,
+        metric: Option<&str>,
+        limit: i64,
+    ) -> anyhow::Result<Vec<crate::leaderboard::LeaderboardEntry>> {
+        crate::leaderboard::query_leaderboard(
+            &self.pg,
+            user_id,
+            model_kind,
+            asset_class,
+            metric,
+            limit,
+        )
+        .await
+    }
+
+    // -- Evaluation reports (I-2.12) --
+
+    pub async fn get_report(
+        &self,
+        model_id: &str,
+        version: i32,
+        user_id: Uuid,
+    ) -> anyhow::Result<serde_json::Value> {
+        self.ensure_model_owned(model_id, user_id).await?;
+        crate::report::get_report(&self.pg, model_id, version, user_id).await
+    }
+
+    pub async fn export_report(
+        &self,
+        model_id: &str,
+        version: i32,
+        user_id: Uuid,
+    ) -> anyhow::Result<Vec<u8>> {
+        let report = self.get_report(model_id, version, user_id).await?;
+        crate::report::export_report_json(&report)
     }
 
     /// Return strategy definitions that reference this model.

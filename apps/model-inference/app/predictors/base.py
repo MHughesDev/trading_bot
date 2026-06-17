@@ -5,6 +5,32 @@ import numpy as np
 from ..schemas import Forecast
 
 
+# --------------------------------------------------------------------------- #
+# Distribution contract validation (I-1.12, serve side)
+# --------------------------------------------------------------------------- #
+
+def validate_distribution_serve(quantiles: np.ndarray, levels: list[float], sigma: float) -> bool:
+    """Return True if the distribution output is valid; log and return False otherwise."""
+    import logging
+    log = logging.getLogger(__name__)
+    n = len(levels)
+    if n == 0 or quantiles.shape[-1] != n or sigma <= 0:
+        log.warning("distribution contract violation: lengths or sigma invalid")
+        return False
+    for i in range(1, n):
+        if levels[i] <= levels[i - 1]:
+            log.warning("distribution contract violation: levels not sorted")
+            return False
+    for row in np.atleast_2d(quantiles):
+        if not np.all(np.isfinite(row)):
+            log.warning("distribution contract violation: non-finite quantiles")
+            return False
+        if not np.all(np.diff(row) >= 0):
+            log.warning("distribution contract violation: quantiles not monotone")
+            return False
+    return True
+
+
 def predict(artifact_bytes: bytes, instances: list, model_kind: str, horizon: str) -> list[Forecast]:
     """Abstract predictor signature.
 
@@ -77,6 +103,51 @@ def to_forecast_return(ret: float, horizon: str, scale: float = 0.01) -> Forecas
         confidence=confidence,
         horizon=horizon,
     )
+
+
+def to_distribution_forecast(
+    q_sigma: np.ndarray,
+    levels: list[float],
+    sigma: float,
+    horizon: str,
+) -> Forecast:
+    """Build a distributional Forecast from σ-unit quantiles (I-1.11).
+
+    - Rescales σ-units → return units
+    - Derives point view (direction, magnitude, confidence) from the median
+    - Returns point-only Forecast if validation fails (never crash on serve)
+    """
+    q_return = q_sigma * sigma
+    # Median: interpolate to level 0.5
+    median = float(np.interp(0.5, levels, q_return))
+
+    if not validate_distribution_serve(q_sigma.reshape(1, -1), levels, sigma):
+        return to_forecast_return(median, horizon)
+
+    direction = "up" if median > 1e-8 else ("down" if median < -1e-8 else "flat")
+    conf = _interval_confidence(q_return, levels, sigma)
+    magnitude = str(Decimal(str(median)).quantize(Decimal("0.000001")))
+
+    return Forecast(
+        direction=direction,
+        magnitude=magnitude,
+        confidence=conf,
+        horizon=horizon,
+        quantile_levels=list(levels),
+        quantiles_return=[float(v) for v in q_return],
+        median_return=median,
+        sigma=float(sigma),
+    )
+
+
+def _interval_confidence(q_return: np.ndarray, levels: list[float], sigma: float) -> float:
+    q10 = float(np.interp(0.1, levels, q_return))
+    q90 = float(np.interp(0.9, levels, q_return))
+    spread = abs(q90 - q10)
+    denom = 2.0 * sigma
+    if denom <= 0:
+        return 0.0
+    return float(np.clip(1.0 - spread / denom, 0.0, 1.0))
 
 
 def apply_scaler(X: np.ndarray, scaler) -> np.ndarray:
