@@ -4,7 +4,7 @@ Formal plans for the Python → Rust trading platform refactor. Each plan file i
 
 > **Execution order is mandatory.** Phases run A → B → 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7, with the single allowed parallelism being Phase 4 starting once Phase 2 is done (Phase 3 not required). See the master plan for sequencing rules and decision gates.
 
-All plan sets (A through I) live under `plan-sets/` in this directory. Set H
+All plan sets (A through J) live under `plan-sets/` in this directory. Set H
 (`plan-sets/set-H/`) specifies the **AI Model Studio** — the end-state design for
 creating, training, testing, evaluating, versioning, and deploying the models the
 trading system uses. Set I (`plan-sets/set-I/`) builds the **probabilistic
@@ -12,6 +12,11 @@ forecasting core** on top of that spine — distributional outputs, walk-forward
 proper-scoring evaluation (CRPS/calibration/VaR), ensembles, the pipeline factory,
 and forecast-quality monitoring — derived from
 [`specs/AI_MODELS_SUITE_CAPABILITY_SPEC.md`](../specs/AI_MODELS_SUITE_CAPABILITY_SPEC.md).
+Set J (`plan-sets/set-J/`) builds the **Backtest Suite honest-evaluation core** on
+top of the existing `crates/backtest` Run engine — the Run/Study/Experiment object
+model (content-addressed runs, sealed distributions, a monotonic trial counter, a
+one-shot holdout vault), the Null Library, and the staged-gate funnel (0→4) — derived
+from [`specs/BACKTEST_SUITE_CORE_SPEC.md`](../specs/BACKTEST_SUITE_CORE_SPEC.md).
 
 ---
 
