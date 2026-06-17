@@ -155,7 +155,10 @@ impl StudyConfig {
             (StudyKind::ParameterSweep, VarySpec::Params { .. })
                 | (StudyKind::Neighborhood, VarySpec::Neighborhood { .. })
                 | (StudyKind::WalkForward, VarySpec::DataWindows { .. })
-                | (StudyKind::Cpcv | StudyKind::NestedCv, VarySpec::CpcvGroups { .. })
+                | (
+                    StudyKind::Cpcv | StudyKind::NestedCv,
+                    VarySpec::CpcvGroups { .. }
+                )
                 | (
                     StudyKind::PermutationNull | StudyKind::SyntheticPaths,
                     VarySpec::Seeds { .. }
@@ -210,7 +213,12 @@ mod tests {
         RunConfigBuilder::new("s", "v", s, "c", "z", "snap").build()
     }
 
-    fn cfg(kind: StudyKind, vary: VarySpec, question: &str, null_ref: Option<String>) -> StudyConfig {
+    fn cfg(
+        kind: StudyKind,
+        vary: VarySpec,
+        question: &str,
+        null_ref: Option<String>,
+    ) -> StudyConfig {
         StudyConfig {
             study_id: "study-1".into(),
             kind,
@@ -237,13 +245,23 @@ mod tests {
 
     #[test]
     fn empty_question_rejected() {
-        let c = cfg(StudyKind::ParameterSweep, VarySpec::Params { grid: vec![] }, "  ", None);
+        let c = cfg(
+            StudyKind::ParameterSweep,
+            VarySpec::Params { grid: vec![] },
+            "  ",
+            None,
+        );
         assert_eq!(c.validate(), Err(StudyConfigError::EmptyQuestion));
     }
 
     #[test]
     fn permutation_requires_null() {
-        let c = cfg(StudyKind::PermutationNull, VarySpec::Seeds { n: 100 }, "is it real?", None);
+        let c = cfg(
+            StudyKind::PermutationNull,
+            VarySpec::Seeds { n: 100 },
+            "is it real?",
+            None,
+        );
         assert_eq!(c.validate(), Err(StudyConfigError::MissingNull));
         let ok = cfg(
             StudyKind::PermutationNull,
@@ -267,7 +285,12 @@ mod tests {
 
     #[test]
     fn kind_vary_mismatch_rejected() {
-        let c = cfg(StudyKind::ParameterSweep, VarySpec::Seeds { n: 10 }, "q", None);
+        let c = cfg(
+            StudyKind::ParameterSweep,
+            VarySpec::Seeds { n: 10 },
+            "q",
+            None,
+        );
         assert!(matches!(
             c.validate(),
             Err(StudyConfigError::KindVaryMismatch { .. })
@@ -278,7 +301,10 @@ mod tests {
     fn cpcv_group_bounds_checked() {
         let c = cfg(
             StudyKind::Cpcv,
-            VarySpec::CpcvGroups { n_groups: 5, k_test: 5 },
+            VarySpec::CpcvGroups {
+                n_groups: 5,
+                k_test: 5,
+            },
             "q",
             None,
         );

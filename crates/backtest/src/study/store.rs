@@ -73,7 +73,11 @@ impl StudyStore for InMemoryStudyStore {
     }
 
     fn get(&self, study_id: &str) -> Option<StudyRecord> {
-        self.inner.lock().expect("study store poisoned").get(study_id).cloned()
+        self.inner
+            .lock()
+            .expect("study store poisoned")
+            .get(study_id)
+            .cloned()
     }
 }
 

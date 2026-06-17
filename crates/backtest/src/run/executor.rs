@@ -71,7 +71,11 @@ pub fn map_sim_result(
         equity_returns: &returns,
         trades: &trades,
         benchmark_returns: None,
-        net_exposure: if exposure.is_empty() { None } else { Some(&exposure) },
+        net_exposure: if exposure.is_empty() {
+            None
+        } else {
+            Some(&exposure)
+        },
         periods_per_year: periods_per_year(cfg),
     });
     RunResult {
@@ -94,7 +98,13 @@ pub fn map_sim_result(
 pub fn returns_from_equity(equity: &[(DateTime<Utc>, f64)]) -> Vec<f64> {
     equity
         .windows(2)
-        .map(|w| if w[0].1 == 0.0 { 0.0 } else { w[1].1 / w[0].1 - 1.0 })
+        .map(|w| {
+            if w[0].1 == 0.0 {
+                0.0
+            } else {
+                w[1].1 / w[0].1 - 1.0
+            }
+        })
         .collect()
 }
 
@@ -157,7 +167,10 @@ mod tests {
             equity,
             vec![],
             vec![sample_trade(dec!(3))],
-            ComputeCost { wall_ms: 1, cpu_ms: 1 },
+            ComputeCost {
+                wall_ms: 1,
+                cpu_ms: 1,
+            },
             "engine@test",
         );
         assert_eq!(r.status, RunStatus::Ok);

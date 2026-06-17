@@ -7,14 +7,12 @@
 //! removing the corresponding protection breaks exactly one of these tests.
 
 use backtest::experiment::{Experiment, ExperimentError, ExperimentState};
-use backtest::gates::{
-    CorroboratorInputs, Gate, GateError, GateRunner, IntegrityInputs, SignalStamp,
-};
+use backtest::gates::{CorroboratorInputs, Gate, GateError, GateRunner, IntegrityInputs};
 use backtest::nulls::{Null, NullKind, NullParams};
 use backtest::run::executor::{daily_curve, map_sim_result};
 use backtest::run::{
-    Backtest, ClosureExecutor, ComputeCost, DataSlice, EvalResolution, InMemoryRunStore, MetricKind,
-    ParamMap, RunConfig, RunConfigBuilder, ENGINE_VERSION,
+    Backtest, ClosureExecutor, ComputeCost, DataSlice, EvalResolution, InMemoryRunStore,
+    MetricKind, ParamMap, RunConfig, RunConfigBuilder, ENGINE_VERSION,
 };
 use backtest::study::{
     SelectionRule, StudyBudget, StudyConfig, StudyEngine, StudyKind, StudyResult, VarySpec,
@@ -101,7 +99,10 @@ fn property_1_funnel_cannot_be_skipped() {
     let s = good_study("s", 4);
     assert!(matches!(
         runner.gate1(&s),
-        Err(GateError::PrerequisiteNotPassed { gate: Gate::SinglePath, required: Gate::Integrity })
+        Err(GateError::PrerequisiteNotPassed {
+            gate: Gate::SinglePath,
+            required: Gate::Integrity
+        })
     ));
 }
 
@@ -116,7 +117,9 @@ fn property_2_counter_cannot_be_gamed() {
             study_id: id.into(),
             kind: StudyKind::ParameterSweep,
             base_config: candidate(),
-            vary: VarySpec::Params { grid: (0..10).map(|_| ParamMap::new()).collect() },
+            vary: VarySpec::Params {
+                grid: (0..10).map(|_| ParamMap::new()).collect(),
+            },
             metric: MetricKind::TotalReturn,
             null_ref: None,
             budget: StudyBudget::default(),
@@ -136,7 +139,10 @@ fn property_3_vault_cannot_be_peeked() {
     let mut runner = GateRunner::new(&mut e);
     assert!(matches!(
         runner.gate4(&candidate(), &bt, "mallory"),
-        Err(GateError::PrerequisiteNotPassed { gate: Gate::Vault, required: Gate::Significance })
+        Err(GateError::PrerequisiteNotPassed {
+            gate: Gate::Vault,
+            required: Gate::Significance
+        })
     ));
 }
 
@@ -146,13 +152,18 @@ fn property_4_null_cannot_be_hidden() {
     // the trial count — there is no bare-p path. We thread a real null id and
     // assert the verdict renders all three.
     let mut e = experiment();
-    let bt = profitable_bt();
+    let _bt = profitable_bt();
     let null = Null::new(NullKind::BlockPermutation, NullParams::default()).unwrap();
     let mut runner = GateRunner::new(&mut e);
     runner.gate0(&clean_integrity()).unwrap();
     runner.gate1(&good_study("wf", 3)).unwrap();
     runner
-        .gate2(&good_study("cpcv", 6), &good_study("syn", 4), &plateau_study("nbhd"), -0.5)
+        .gate2(
+            &good_study("cpcv", 6),
+            &good_study("syn", 4),
+            &plateau_study("nbhd"),
+            -0.5,
+        )
         .unwrap();
     let perf = vec![vec![1.0; 8], vec![0.2; 8], vec![0.3; 8]];
     let strong_null: Vec<f64> = (0..999).map(|i| f64::from(i) / 1000.0).collect();
@@ -174,8 +185,14 @@ fn property_4_null_cannot_be_hidden() {
         )
         .unwrap();
     let rendered = outcome.significance.render();
-    assert!(rendered.contains(null.null_id.as_str()), "null must travel with the p-value");
-    assert!(rendered.contains("trials"), "trial count must travel with the p-value");
+    assert!(
+        rendered.contains(null.null_id.as_str()),
+        "null must travel with the p-value"
+    );
+    assert!(
+        rendered.contains("trials"),
+        "trial count must travel with the p-value"
+    );
 }
 
 #[test]
@@ -184,7 +201,10 @@ fn property_5_best_member_cannot_be_cherry_picked() {
     // SelectionRule yields one config, and it is never the peak.
     let res = good_study("sealed", 8);
     assert!(res.sealed);
-    assert!(res.carried_forward.is_none(), "SelectionRule::None carries nothing");
+    assert!(
+        res.carried_forward.is_none(),
+        "SelectionRule::None carries nothing"
+    );
 }
 
 #[test]
@@ -198,7 +218,12 @@ fn full_funnel_validates_a_genuine_edge_in_order() {
     assert!(runner.ledger().passed(Gate::Integrity));
     runner.gate1(&good_study("wf", 3)).unwrap();
     runner
-        .gate2(&good_study("cpcv", 6), &good_study("syn", 4), &plateau_study("nbhd"), -0.5)
+        .gate2(
+            &good_study("cpcv", 6),
+            &good_study("syn", 4),
+            &plateau_study("nbhd"),
+            -0.5,
+        )
         .unwrap();
     let perf = vec![vec![1.0; 8], vec![0.2; 8], vec![0.3; 8]];
     let strong_null: Vec<f64> = (0..999).map(|i| f64::from(i) / 1000.0).collect();
@@ -231,7 +256,9 @@ fn full_funnel_validates_a_genuine_edge_in_order() {
         study_id: "post".into(),
         kind: StudyKind::ParameterSweep,
         base_config: candidate(),
-        vary: VarySpec::Params { grid: vec![ParamMap::new()] },
+        vary: VarySpec::Params {
+            grid: vec![ParamMap::new()],
+        },
         metric: MetricKind::TotalReturn,
         null_ref: None,
         budget: StudyBudget::default(),
@@ -250,14 +277,26 @@ fn plateau_study(id: &str) -> StudyResult {
         InMemoryRunStore::new(),
         ClosureExecutor(|cfg: &RunConfig| {
             // Flat, positive return regardless of params → low spread → plateau.
-            map_sim_result(cfg, daily_curve(&[100.0, 101.0, 102.0]), vec![], vec![], ComputeCost::default(), ENGINE_VERSION)
+            map_sim_result(
+                cfg,
+                daily_curve(&[100.0, 101.0, 102.0]),
+                vec![],
+                vec![],
+                ComputeCost::default(),
+                ENGINE_VERSION,
+            )
         }),
     );
     let study = StudyConfig {
         study_id: id.into(),
         kind: StudyKind::Neighborhood,
         base_config: candidate(),
-        vary: VarySpec::Neighborhood { param: "fast".into(), center: 12.0, step: 1.0, k: 4 },
+        vary: VarySpec::Neighborhood {
+            param: "fast".into(),
+            center: 12.0,
+            step: 1.0,
+            k: 4,
+        },
         metric: MetricKind::TotalReturn,
         null_ref: None,
         budget: StudyBudget::default(),

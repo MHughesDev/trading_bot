@@ -11,9 +11,7 @@ pub mod engine;
 pub mod result;
 pub mod store;
 
-pub use config::{
-    SelectionRule, StudyBudget, StudyConfig, StudyConfigError, StudyKind, VarySpec,
-};
-pub use engine::{cpcv_assignments, combinations, CpcvSplit, StudyEngine};
+pub use config::{SelectionRule, StudyBudget, StudyConfig, StudyConfigError, StudyKind, VarySpec};
+pub use engine::{combinations, cpcv_assignments, CpcvSplit, StudyEngine};
 pub use result::{percentile, Distribution, StudyResult, StudyVerdict};
 pub use store::{InMemoryStudyStore, StudyStore};

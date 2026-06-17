@@ -252,6 +252,10 @@ mod tests {
             })
             .collect();
         let cal2 = suite_calibration(&good);
-        assert!(!cal2.optimistic, "mean={} cov={}", cal2.mean_percentile, cal2.worst5_coverage);
+        assert!(
+            !cal2.optimistic,
+            "mean={} cov={}",
+            cal2.mean_percentile, cal2.worst5_coverage
+        );
     }
 }

@@ -107,7 +107,13 @@ pub fn inverse_normal_cdf(p: f64) -> f64 {
 /// sample size `n`, and the return distribution's `skew`/`kurtosis` (Bailey &
 /// López de Prado).
 #[must_use]
-pub fn probabilistic_sharpe_ratio(sharpe: f64, sr0: f64, n: usize, skew: f64, kurtosis: f64) -> f64 {
+pub fn probabilistic_sharpe_ratio(
+    sharpe: f64,
+    sr0: f64,
+    n: usize,
+    skew: f64,
+    kurtosis: f64,
+) -> f64 {
     if n < 2 {
         return 0.5;
     }
@@ -137,7 +143,8 @@ pub fn deflated_sharpe_ratio(
     trials: i64,
     sharpe_variance_across_trials: f64,
 ) -> f64 {
-    let sr0 = sharpe_variance_across_trials.max(0.0).sqrt() * expected_max_standard_gaussian(trials);
+    let sr0 =
+        sharpe_variance_across_trials.max(0.0).sqrt() * expected_max_standard_gaussian(trials);
     probabilistic_sharpe_ratio(sharpe, sr0, n, skew, kurtosis)
 }
 
@@ -174,7 +181,11 @@ pub fn probability_of_backtest_overfitting(performance: &[Vec<f64>], n_groups: u
                     cnt += 1.0;
                 }
             }
-            let m = if cnt > 0.0 { sum / cnt } else { f64::NEG_INFINITY };
+            let m = if cnt > 0.0 {
+                sum / cnt
+            } else {
+                f64::NEG_INFINITY
+            };
             if m > best_is {
                 best_is = m;
                 best_cfg = c;
@@ -214,6 +225,7 @@ pub fn probability_of_backtest_overfitting(performance: &[Vec<f64>], n_groups: u
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp, clippy::needless_range_loop)]
 mod tests {
     use super::*;
 
@@ -237,7 +249,10 @@ mod tests {
         let p3000 = selection_bias_correction(raw, 3000);
         assert!(p3 > raw);
         assert!(p3000 > p3);
-        assert!(p3000 > 0.99, "3000 trials make a raw p=0.01 nearly certain under H0");
+        assert!(
+            p3000 > 0.99,
+            "3000 trials make a raw p=0.01 nearly certain under H0"
+        );
         assert!(p3 < 0.05, "3 trials keep it borderline-significant");
     }
 
@@ -285,7 +300,10 @@ mod tests {
             m
         };
         let pbo_genuine = probability_of_backtest_overfitting(&genuine, 6);
-        assert!(pbo_genuine < 0.5, "a uniformly-best config should not look overfit: {pbo_genuine}");
+        assert!(
+            pbo_genuine < 0.5,
+            "a uniformly-best config should not look overfit: {pbo_genuine}"
+        );
 
         // Pure noise: alternating which config "wins" by period parity → the
         // in-sample winner flips OOS.
@@ -300,6 +318,9 @@ mod tests {
             m
         };
         let pbo_noise = probability_of_backtest_overfitting(&noise, 4);
-        assert!(pbo_noise >= pbo_genuine, "noise should be at least as overfit: noise={pbo_noise} genuine={pbo_genuine}");
+        assert!(
+            pbo_noise >= pbo_genuine,
+            "noise should be at least as overfit: noise={pbo_noise} genuine={pbo_genuine}"
+        );
     }
 }

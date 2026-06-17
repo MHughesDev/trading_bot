@@ -141,16 +141,28 @@ impl MetricSet {
         } else {
             (1.0 + total_return).powf(ppy / n as f64) - 1.0
         };
-        let sharpe = if std > 0.0 { mean / std * ppy.sqrt() } else { 0.0 };
+        let sharpe = if std > 0.0 {
+            mean / std * ppy.sqrt()
+        } else {
+            0.0
+        };
 
         // Sortino: downside deviation about 0.
         let dvar = r.iter().map(|x| x.min(0.0).powi(2)).sum::<f64>() / n as f64;
         let dstd = dvar.sqrt();
-        let sortino = if dstd > 0.0 { mean / dstd * ppy.sqrt() } else { 0.0 };
+        let sortino = if dstd > 0.0 {
+            mean / dstd * ppy.sqrt()
+        } else {
+            0.0
+        };
 
         // Drawdown series from the cumulative equity curve.
         let (max_dd, avg_dd, tid_pct, ulcer) = drawdown_stats(r);
-        let calmar = if max_dd.abs() > 0.0 { cagr / max_dd.abs() } else { 0.0 };
+        let calmar = if max_dd.abs() > 0.0 {
+            cagr / max_dd.abs()
+        } else {
+            0.0
+        };
 
         // CVaR 95%: mean of the worst 5% of returns.
         let cvar_95 = cvar(r, 0.95);
@@ -174,11 +186,19 @@ impl MetricSet {
                 let astd = (active.iter().map(|x| (x - amean).powi(2)).sum::<f64>()
                     / (n - 1) as f64)
                     .sqrt();
-                let ir = if astd > 0.0 { amean / astd * ppy.sqrt() } else { 0.0 };
+                let ir = if astd > 0.0 {
+                    amean / astd * ppy.sqrt()
+                } else {
+                    0.0
+                };
                 // Detrended Sharpe: Sharpe of returns net of market drift
                 // (active returns). A pragmatic stand-in for Aronson's full
                 // detrending (also net of average-position bias).
-                let dsh = if astd > 0.0 { amean / astd * ppy.sqrt() } else { 0.0 };
+                let dsh = if astd > 0.0 {
+                    amean / astd * ppy.sqrt()
+                } else {
+                    0.0
+                };
                 (alpha, beta, ir, dsh)
             }
             _ => {
@@ -211,7 +231,11 @@ impl MetricSet {
             let qty = t.qty.to_f64().unwrap_or(0.0);
             notional += (entry * qty).abs();
         }
-        let hit_rate = if n_trades > 0 { wins as f64 / n_trades as f64 } else { 0.0 };
+        let hit_rate = if n_trades > 0 {
+            wins as f64 / n_trades as f64
+        } else {
+            0.0
+        };
         let profit_factor = if losses > 0.0 {
             gains / losses
         } else if gains > 0.0 {
@@ -283,9 +307,21 @@ fn drawdown_stats(returns: &[f64]) -> (f64, f64, f64, f64) {
         }
         sq_sum += dd * dd;
     }
-    let avg_dd = if dd_count > 0 { dd_sum / dd_count as f64 } else { 0.0 };
-    let tid_pct = if n > 0 { dd_count as f64 / n as f64 * 100.0 } else { 0.0 };
-    let ulcer = if n > 0 { (sq_sum / n as f64).sqrt() } else { 0.0 };
+    let avg_dd = if dd_count > 0 {
+        dd_sum / dd_count as f64
+    } else {
+        0.0
+    };
+    let tid_pct = if n > 0 {
+        dd_count as f64 / n as f64 * 100.0
+    } else {
+        0.0
+    };
+    let ulcer = if n > 0 {
+        (sq_sum / n as f64).sqrt()
+    } else {
+        0.0
+    };
     (max_dd, avg_dd, tid_pct, ulcer)
 }
 
@@ -302,6 +338,7 @@ fn cvar(returns: &[f64], level: f64) -> f64 {
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 

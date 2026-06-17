@@ -82,7 +82,11 @@ impl NullStore for InMemoryNullStore {
         map.entry(null.null_id.clone()).or_insert(null);
     }
     fn get(&self, null_id: &NullId) -> Option<Null> {
-        self.nulls.lock().expect("null store poisoned").get(null_id).cloned()
+        self.nulls
+            .lock()
+            .expect("null store poisoned")
+            .get(null_id)
+            .cloned()
     }
     fn record_choice(&self, choice: NullChoice) {
         self.choices
@@ -91,7 +95,11 @@ impl NullStore for InMemoryNullStore {
             .insert(choice.experiment_id.clone(), choice);
     }
     fn choice_for(&self, experiment_id: &str) -> Option<NullChoice> {
-        self.choices.lock().expect("null store poisoned").get(experiment_id).cloned()
+        self.choices
+            .lock()
+            .expect("null store poisoned")
+            .get(experiment_id)
+            .cloned()
     }
 }
 
@@ -124,9 +132,13 @@ mod tests {
         // No reason → rejected.
         assert!(NullChoice::record("exp-1", &chosen, recommended, None).is_err());
         // With a reason → recorded as an override.
-        let choice =
-            NullChoice::record("exp-1", &chosen, recommended, Some("signal is the hypothesis".into()))
-                .unwrap();
+        let choice = NullChoice::record(
+            "exp-1",
+            &chosen,
+            recommended,
+            Some("signal is the hypothesis".into()),
+        )
+        .unwrap();
         assert!(choice.was_override);
         assert!(choice.override_reason.is_some());
     }

@@ -79,7 +79,10 @@ impl ExperimentState {
             ExperimentState::Live => matches!(op, Operation::ReconciliationStudy),
             // Decaying permits reconciliation + diagnostic (research) Studies.
             ExperimentState::Decaying => {
-                matches!(op, Operation::ReconciliationStudy | Operation::ResearchStudy)
+                matches!(
+                    op,
+                    Operation::ReconciliationStudy | Operation::ResearchStudy
+                )
             }
             ExperimentState::Retired => false,
         }
@@ -464,7 +467,10 @@ mod tests {
         let bt = Backtest::new(InMemoryRunStore::new(), ok_executor());
         // A sweep whose base slice IS the holdout tail.
         let bad = sweep_over(holdout_slice());
-        assert_eq!(e.run_study(&bad, &bt).err(), Some(ExperimentError::TouchesHoldout));
+        assert_eq!(
+            e.run_study(&bad, &bt).err(),
+            Some(ExperimentError::TouchesHoldout)
+        );
         assert_eq!(e.trial_counter(), 0, "a refused study never counts");
     }
 
@@ -523,12 +529,13 @@ mod tests {
         let bt = Backtest::new(InMemoryRunStore::new(), unsafe_exec);
         // A sweep whose base config disabled costs → unsafe runs.
         let mut s = sweep_over(research_slice());
-        s.base_config = RunConfigBuilder::new("ema", "v1", research_slice(), "cost:none", "sz", "snap")
-            .disable_protection(UnsafeFlags {
-                costs_disabled: true,
-                ..Default::default()
-            })
-            .build();
+        s.base_config =
+            RunConfigBuilder::new("ema", "v1", research_slice(), "cost:none", "sz", "snap")
+                .disable_protection(UnsafeFlags {
+                    costs_disabled: true,
+                    ..Default::default()
+                })
+                .build();
         e.run_study(&s, &bt).unwrap();
         assert!(e.is_unsafe());
         e.mark_gate3_passed();
@@ -544,7 +551,8 @@ mod tests {
         let mut e = experiment();
         e.mark_gate3_passed();
         let bt = Backtest::new(InMemoryRunStore::new(), ok_executor());
-        e.run_vault(&base_config(research_slice()), &bt, "a").unwrap();
+        e.run_vault(&base_config(research_slice()), &bt, "a")
+            .unwrap();
         assert_eq!(e.state, ExperimentState::Validated);
         // Cannot drop back to candidate.
         assert!(e.transition(ExperimentState::Candidate).is_err());
@@ -561,7 +569,8 @@ mod tests {
         let mut e = experiment();
         e.mark_gate3_passed();
         let bt = Backtest::new(InMemoryRunStore::new(), ok_executor());
-        e.run_vault(&base_config(research_slice()), &bt, "a").unwrap();
+        e.run_vault(&base_config(research_slice()), &bt, "a")
+            .unwrap();
         let s = sweep_over(research_slice());
         assert_eq!(
             e.run_study(&s, &bt).err(),
@@ -583,7 +592,11 @@ mod tests {
         let after = e.trial_counter();
         assert_eq!(after, 10);
         let fresh = Experiment::new("exp-2", "ema-family", holdout_slice(), "null:block_perm");
-        assert_eq!(fresh.trial_counter(), 0, "a new experiment cannot inherit a lower count");
+        assert_eq!(
+            fresh.trial_counter(),
+            0,
+            "a new experiment cannot inherit a lower count"
+        );
     }
 
     #[test]

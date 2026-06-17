@@ -93,7 +93,9 @@ mod tests {
             Utc.with_ymd_and_hms(2024, 2, 1, 0, 0, 0).unwrap(),
             EvalResolution::Day1,
         );
-        RunConfigBuilder::new("s", "v", s, "c", "z", "snap").seed(seed).build()
+        RunConfigBuilder::new("s", "v", s, "c", "z", "snap")
+            .seed(seed)
+            .build()
     }
 
     /// An executor that counts how many times it actually ran.
