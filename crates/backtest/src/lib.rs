@@ -24,11 +24,19 @@
 
 pub mod aggregate;
 pub mod collect;
+pub mod experiment;
 pub mod gaps;
+pub mod gates;
 pub mod manager;
+pub mod nulls;
+pub mod reconcile;
 pub mod requirements;
+pub mod rng;
+pub mod run;
 pub mod sim;
+pub mod stats;
 pub mod store;
+pub mod study;
 pub mod types;
 pub mod warmup;
 
