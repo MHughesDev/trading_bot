@@ -190,16 +190,45 @@ mod tests {
 
     #[test]
     fn identical_kind_and_params_collide_on_id() {
-        let a = Null::new(NullKind::BlockPermutation, NullParams { block_length: Some(5), ..Default::default() }).unwrap();
-        let b = Null::new(NullKind::BlockPermutation, NullParams { block_length: Some(5), ..Default::default() }).unwrap();
+        let a = Null::new(
+            NullKind::BlockPermutation,
+            NullParams {
+                block_length: Some(5),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let b = Null::new(
+            NullKind::BlockPermutation,
+            NullParams {
+                block_length: Some(5),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(a.null_id, b.null_id);
-        let c = Null::new(NullKind::BlockPermutation, NullParams { block_length: Some(7), ..Default::default() }).unwrap();
+        let c = Null::new(
+            NullKind::BlockPermutation,
+            NullParams {
+                block_length: Some(7),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_ne!(a.null_id, c.null_id);
     }
 
     #[test]
     fn round_trips_serde() {
-        let n = Null::new(NullKind::SyntheticGarch, NullParams { garch_alpha: Some(0.1), garch_beta: Some(0.85), ..Default::default() }).unwrap();
+        let n = Null::new(
+            NullKind::SyntheticGarch,
+            NullParams {
+                garch_alpha: Some(0.1),
+                garch_beta: Some(0.85),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let back: Null = serde_json::from_str(&serde_json::to_string(&n).unwrap()).unwrap();
         assert_eq!(n, back);
     }

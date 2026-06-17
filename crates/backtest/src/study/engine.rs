@@ -117,7 +117,8 @@ fn expand_members(study: &StudyConfig) -> Vec<RunConfig> {
             })
             .collect(),
         VarySpec::CpcvGroups { n_groups, k_test } => {
-            let group_windows = split_windows(base.data_slice.start, base.data_slice.end, *n_groups);
+            let group_windows =
+                split_windows(base.data_slice.start, base.data_slice.end, *n_groups);
             cpcv_assignments(*n_groups as usize, *k_test as usize)
                 .into_iter()
                 .map(|split| {
@@ -302,7 +303,11 @@ fn is_plateau(dist: &Distribution) -> bool {
 // ── pure window/combination helpers ─────────────────────────────────────────
 
 /// Split `[start, end)` into `n` contiguous equal windows.
-fn split_windows(start: DateTime<Utc>, end: DateTime<Utc>, n: u32) -> Vec<(DateTime<Utc>, DateTime<Utc>)> {
+fn split_windows(
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    n: u32,
+) -> Vec<(DateTime<Utc>, DateTime<Utc>)> {
     let n = i64::from(n.max(1));
     let total = (end - start).num_seconds().max(0);
     let step = total / n;
@@ -323,13 +328,23 @@ fn bounding_window(
     windows: &[(DateTime<Utc>, DateTime<Utc>)],
     groups: &[usize],
 ) -> (DateTime<Utc>, DateTime<Utc>) {
-    let lo = groups.iter().map(|&g| windows[g].0).min().unwrap_or(windows[0].0);
-    let hi = groups.iter().map(|&g| windows[g].1).max().unwrap_or(windows[0].1);
+    let lo = groups
+        .iter()
+        .map(|&g| windows[g].0)
+        .min()
+        .unwrap_or(windows[0].0);
+    let hi = groups
+        .iter()
+        .map(|&g| windows[g].1)
+        .max()
+        .unwrap_or(windows[0].1);
     (lo, hi)
 }
 
 fn split_seed(test: &[usize]) -> u64 {
-    test.iter().fold(0u64, |acc, &g| acc.wrapping_mul(31).wrapping_add(g as u64 + 1))
+    test.iter().fold(0u64, |acc, &g| {
+        acc.wrapping_mul(31).wrapping_add(g as u64 + 1)
+    })
 }
 
 /// A combinatorial purged CV split: which groups are test vs train.
@@ -381,6 +396,7 @@ pub fn combinations(n: usize, k: usize) -> Vec<Vec<usize>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
     use crate::run::executor::{daily_curve, map_sim_result};
@@ -406,7 +422,11 @@ mod tests {
     /// peak at 12 (spike) unless `plateau` is set, in which case it is flat-high.
     fn objective_executor(plateau: bool) -> impl RunExecutor {
         ClosureExecutor(move |cfg: &RunConfig| {
-            let fast = cfg.params.get("fast").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let fast = cfg
+                .params
+                .get("fast")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
             let level = if plateau {
                 0.01 // flat, high-ish daily return everywhere
             } else if (fast - 12.0).abs() < 0.5 {
@@ -415,7 +435,14 @@ mod tests {
                 0.0001
             };
             let curve = daily_curve(&[100.0, 100.0 * (1.0 + level), 100.0 * (1.0 + level).powi(2)]);
-            map_sim_result(cfg, curve, vec![], vec![], ComputeCost::default(), ENGINE_VERSION)
+            map_sim_result(
+                cfg,
+                curve,
+                vec![],
+                vec![],
+                ComputeCost::default(),
+                ENGINE_VERSION,
+            )
         })
     }
 
@@ -442,9 +469,17 @@ mod tests {
     #[test]
     fn combinations_count_is_binomial() {
         assert_eq!(combinations(5, 2).len(), 10);
-        assert_eq!(combinations(4, 2), vec![
-            vec![0, 1], vec![0, 2], vec![0, 3], vec![1, 2], vec![1, 3], vec![2, 3]
-        ]);
+        assert_eq!(
+            combinations(4, 2),
+            vec![
+                vec![0, 1],
+                vec![0, 2],
+                vec![0, 3],
+                vec![1, 2],
+                vec![1, 3],
+                vec![2, 3]
+            ]
+        );
         assert!(combinations(3, 0).is_empty());
         assert!(combinations(2, 3).is_empty());
     }
@@ -462,7 +497,7 @@ mod tests {
     #[test]
     fn sweep_counts_every_member_and_seals() {
         let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true));
-        let grid: Vec<ParamMap> = (0..50).map(|i| param(i as f64)).collect();
+        let grid: Vec<ParamMap> = (0..50).map(|i| param(f64::from(i))).collect();
         let res = StudyEngine::run(&sweep_cfg(grid), &bt).unwrap();
         assert_eq!(res.members().len(), 50);
         assert_eq!(res.trial_delta, 50);
@@ -472,7 +507,7 @@ mod tests {
     #[test]
     fn rerunning_uses_cache_but_still_reports_full_trial_delta() {
         let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true));
-        let grid: Vec<ParamMap> = (0..10).map(|i| param(i as f64)).collect();
+        let grid: Vec<ParamMap> = (0..10).map(|i| param(f64::from(i))).collect();
         let cfg = sweep_cfg(grid);
         let first = StudyEngine::run(&cfg, &bt).unwrap();
         let again = StudyEngine::run(&cfg, &bt).unwrap();
@@ -488,7 +523,12 @@ mod tests {
             study_id: "nbhd".into(),
             kind: StudyKind::Neighborhood,
             base_config: base(),
-            vary: VarySpec::Neighborhood { param: "fast".into(), center: 12.0, step: 1.0, k: 5 },
+            vary: VarySpec::Neighborhood {
+                param: "fast".into(),
+                center: 12.0,
+                step: 1.0,
+                k: 5,
+            },
             metric: MetricKind::TotalReturn,
             null_ref: None,
             budget: StudyBudget::default(),
@@ -509,10 +549,14 @@ mod tests {
         // Spike objective: peak at fast==12 (level 0.05); rest near zero. The
         // MedianStableCentroid rule must NOT return the peak.
         let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(false));
-        let grid: Vec<ParamMap> = (8..=16).map(|i| param(i as f64)).collect();
+        let grid: Vec<ParamMap> = (8..=16).map(|i| param(f64::from(i))).collect();
         let res = StudyEngine::run(&sweep_cfg(grid), &bt).unwrap();
         let carried = res.carried_forward.expect("a config is carried forward");
-        let fast = carried.params.get("fast").and_then(|v| v.as_f64()).unwrap();
+        let fast = carried
+            .params
+            .get("fast")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap();
         assert_ne!(fast, 12.0, "must not carry the peak forward");
     }
 
@@ -530,7 +574,10 @@ mod tests {
             question: "is it real?".into(),
             selection_rule: SelectionRule::None,
         };
-        assert_eq!(StudyEngine::run(&study, &bt).err(), Some(StudyConfigError::MissingNull));
+        assert_eq!(
+            StudyEngine::run(&study, &bt).err(),
+            Some(StudyConfigError::MissingNull)
+        );
     }
 
     #[test]
@@ -540,7 +587,10 @@ mod tests {
             study_id: "cpcv".into(),
             kind: StudyKind::Cpcv,
             base_config: base(),
-            vary: VarySpec::CpcvGroups { n_groups: 6, k_test: 2 },
+            vary: VarySpec::CpcvGroups {
+                n_groups: 6,
+                k_test: 2,
+            },
             metric: MetricKind::TotalReturn,
             null_ref: None,
             budget: StudyBudget::default(),
@@ -562,7 +612,14 @@ mod tests {
                 _ => -0.01,
             };
             let curve = daily_curve(&[100.0, 100.0 * (1.0 + level)]);
-            map_sim_result(cfg, curve, vec![], vec![], ComputeCost::default(), ENGINE_VERSION)
+            map_sim_result(
+                cfg,
+                curve,
+                vec![],
+                vec![],
+                ComputeCost::default(),
+                ENGINE_VERSION,
+            )
         });
         let bt = Backtest::new(InMemoryRunStore::new(), exec);
         let study = StudyConfig {
@@ -570,7 +627,11 @@ mod tests {
             kind: StudyKind::CostSweep,
             base_config: base(),
             vary: VarySpec::CostLadder {
-                cost_model_refs: vec!["cost:optimistic".into(), "cost:mid".into(), "cost:pessimistic".into()],
+                cost_model_refs: vec![
+                    "cost:optimistic".into(),
+                    "cost:mid".into(),
+                    "cost:pessimistic".into(),
+                ],
             },
             metric: MetricKind::TotalReturn,
             null_ref: None,
@@ -580,7 +641,10 @@ mod tests {
         };
         let res = StudyEngine::run(&study, &bt).unwrap();
         assert_eq!(res.members().len(), 3);
-        assert!(res.distribution.worst_5pct < 0.0, "pessimistic costs kill it");
+        assert!(
+            res.distribution.worst_5pct < 0.0,
+            "pessimistic costs kill it"
+        );
     }
 
     #[test]
@@ -597,7 +661,14 @@ mod tests {
                 sample_trade(dec!(-0.20)),
                 sample_trade(dec!(0.08)),
             ];
-            map_sim_result(cfg, daily_curve(&[100.0, 100.0]), vec![], trades, ComputeCost::default(), ENGINE_VERSION)
+            map_sim_result(
+                cfg,
+                daily_curve(&[100.0, 100.0]),
+                vec![],
+                trades,
+                ComputeCost::default(),
+                ENGINE_VERSION,
+            )
         });
         let bt = Backtest::new(InMemoryRunStore::new(), exec);
         let study = StudyConfig {

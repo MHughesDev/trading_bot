@@ -319,7 +319,14 @@ mod tests {
     }
 
     fn builder() -> RunConfigBuilder {
-        RunConfigBuilder::new("ema_cross", "v-abc", slice(), "cost:floor", "sizing:fixed", "snap:1")
+        RunConfigBuilder::new(
+            "ema_cross",
+            "v-abc",
+            slice(),
+            "cost:floor",
+            "sizing:fixed",
+            "snap:1",
+        )
     }
 
     #[test]
@@ -349,7 +356,10 @@ mod tests {
         assert_ne!(base.run_id, builder().seed(8).build().run_id);
         assert_ne!(
             base.run_id,
-            builder().fill_model(FillModel::PessimisticIntrabar).build().run_id
+            builder()
+                .fill_model(FillModel::PessimisticIntrabar)
+                .build()
+                .run_id
         );
         let mut p = ParamMap::new();
         p.insert("fast".into(), json!(12));
@@ -388,8 +398,7 @@ mod tests {
             })
             .build();
         assert!(cfg.unsafe_);
-        let back: RunConfig =
-            serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        let back: RunConfig = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
         assert!(back.unsafe_);
         assert!(back.unsafe_flags.costs_disabled);
     }

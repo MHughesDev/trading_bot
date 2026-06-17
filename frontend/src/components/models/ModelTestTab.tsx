@@ -413,11 +413,11 @@ export function ModelTestTab({ modelId }: Props) {
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-xs font-medium text-text-muted">
               Features{' '}
-              {model?.definition.feature_set_ref && (
+              {model?.definition.feature_set_ref ? (
                 <span className="text-text-dim font-mono">
-                  ({model.definition.feature_set_ref})
+                  ({String(model.definition.feature_set_ref)})
                 </span>
-              )}
+              ) : null}
             </label>
             <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 p-0.5">
               <button

@@ -46,6 +46,9 @@ const EnsemblesPage = lazy(() =>
 const PipelinesPage = lazy(() =>
   import('@/pages/PipelinesPage').then((m) => ({ default: m.PipelinesPage })),
 )
+const WorkbenchPage = lazy(() =>
+  import('@/pages/WorkbenchPage').then((m) => ({ default: m.WorkbenchPage })),
+)
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -101,6 +104,7 @@ export default function App() {
               <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/strategy" element={<StrategyCreationPage />} />
               <Route path="/backtesting" element={<BackTestingPage />} />
+              <Route path="/workbench" element={<WorkbenchPage />} />
               <Route path="/models" element={<ModelStudioPage />} />
               <Route path="/models/create" element={<ModelCreatePage />} />
               <Route path="/models/graph" element={<ModelLineagePage />} />

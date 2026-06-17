@@ -315,7 +315,10 @@ impl NullGenerator for RandomEntryMatched {
 #[must_use]
 pub fn recommend_null(strategy_type: &str) -> NullKind {
     match strategy_type.to_ascii_lowercase().as_str() {
-        s if s.contains("intraday") || s.contains("mean_reversion") || s.contains("mean-reversion") => {
+        s if s.contains("intraday")
+            || s.contains("mean_reversion")
+            || s.contains("mean-reversion") =>
+        {
             NullKind::BlockPermutation
         }
         s if s.contains("trend") || s.contains("daily") => NullKind::StationaryBootstrap,
@@ -358,13 +361,25 @@ mod tests {
     #[test]
     fn block_permutation_preserves_block_contents() {
         let data = ret_data((0..20).map(f64::from).collect());
-        let null = Null::new(NullKind::BlockPermutation, NullParams { block_length: Some(5), ..Default::default() }).unwrap();
+        let null = Null::new(
+            NullKind::BlockPermutation,
+            NullParams {
+                block_length: Some(5),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let out = null.generate(&data, 7);
         // Same multiset overall.
         assert_eq!(sorted(&out.forward_returns), sorted(&data.forward_returns));
         // Each original block (contiguous run of 5) must survive intact somewhere.
-        let orig_blocks: Vec<Vec<f64>> = data.forward_returns.chunks(5).map(<[f64]>::to_vec).collect();
-        let out_blocks: Vec<Vec<f64>> = out.forward_returns.chunks(5).map(<[f64]>::to_vec).collect();
+        let orig_blocks: Vec<Vec<f64>> = data
+            .forward_returns
+            .chunks(5)
+            .map(<[f64]>::to_vec)
+            .collect();
+        let out_blocks: Vec<Vec<f64>> =
+            out.forward_returns.chunks(5).map(<[f64]>::to_vec).collect();
         for b in &orig_blocks {
             assert!(out_blocks.contains(b), "block {b:?} not preserved intact");
         }
@@ -374,26 +389,60 @@ mod tests {
     fn stationary_bootstrap_draws_only_from_source_and_keeps_length() {
         let src = vec![0.1, -0.2, 0.3, 0.0, 0.05];
         let data = ret_data(src.clone());
-        let null = Null::new(NullKind::StationaryBootstrap, NullParams { mean_block: Some(2), ..Default::default() }).unwrap();
+        let null = Null::new(
+            NullKind::StationaryBootstrap,
+            NullParams {
+                mean_block: Some(2),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let out = null.generate(&data, 9);
         assert_eq!(out.forward_returns.len(), src.len());
         for v in &out.forward_returns {
-            assert!(src.iter().any(|s| (s - v).abs() < 1e-12), "value {v} not from source");
+            assert!(
+                src.iter().any(|s| (s - v).abs() < 1e-12),
+                "value {v} not from source"
+            );
         }
     }
 
     #[test]
     fn bar_permutation_keeps_ohlc_integrity_and_multiset() {
         let bars = vec![
-            Bar { ts_ns: 1, open: 10.0, high: 12.0, low: 9.0, close: 11.0 },
-            Bar { ts_ns: 2, open: 11.0, high: 13.0, low: 10.5, close: 12.5 },
-            Bar { ts_ns: 3, open: 12.5, high: 12.6, low: 11.0, close: 11.2 },
+            Bar {
+                ts_ns: 1,
+                open: 10.0,
+                high: 12.0,
+                low: 9.0,
+                close: 11.0,
+            },
+            Bar {
+                ts_ns: 2,
+                open: 11.0,
+                high: 13.0,
+                low: 10.5,
+                close: 12.5,
+            },
+            Bar {
+                ts_ns: 3,
+                open: 12.5,
+                high: 12.6,
+                low: 11.0,
+                close: 11.2,
+            },
         ];
         assert!(bars.iter().all(Bar::is_valid));
-        let data = NullData { bars: bars.clone(), ..Default::default() };
+        let data = NullData {
+            bars: bars.clone(),
+            ..Default::default()
+        };
         let null = Null::new(NullKind::BarPermutation, NullParams::default()).unwrap();
         let out = null.generate(&data, 3);
-        assert!(out.bars.iter().all(Bar::is_valid), "OHLC integrity preserved");
+        assert!(
+            out.bars.iter().all(Bar::is_valid),
+            "OHLC integrity preserved"
+        );
         assert_eq!(out.bars.len(), bars.len());
         for b in &bars {
             assert!(out.bars.contains(b));
@@ -404,16 +453,25 @@ mod tests {
     fn synthetic_garch_is_deterministic_and_shows_clustering() {
         // Build a clustered series: calm then volatile.
         let mut returns = vec![0.001; 100];
-        returns.extend(vec![0.05, -0.06, 0.055, -0.05, 0.06, -0.058].repeat(20));
+        returns.extend([0.05, -0.06, 0.055, -0.05, 0.06, -0.058].repeat(20));
         let data = ret_data(returns);
         let null = Null::new(NullKind::SyntheticGarch, NullParams::default()).unwrap();
         let a = null.generate(&data, 11);
         let b = null.generate(&data, 11);
-        assert_eq!(a.forward_returns, b.forward_returns, "deterministic per seed");
+        assert_eq!(
+            a.forward_returns, b.forward_returns,
+            "deterministic per seed"
+        );
         let c = null.generate(&data, 12);
-        assert_ne!(a.forward_returns, c.forward_returns, "distinct seeds differ");
+        assert_ne!(
+            a.forward_returns, c.forward_returns,
+            "distinct seeds differ"
+        );
         // Vol clustering: lag-1 autocorrelation of squared returns is positive.
-        assert!(acf1_squared(&a.forward_returns) > 0.0, "GARCH output should cluster volatility");
+        assert!(
+            acf1_squared(&a.forward_returns) > 0.0,
+            "GARCH output should cluster volatility"
+        );
     }
 
     #[test]
@@ -430,7 +488,11 @@ mod tests {
         for label in [0u32, 1, 2] {
             let orig = values_for_label(&data, label);
             let now = values_for_label(&out, label);
-            assert_eq!(sorted(&orig), sorted(&now), "regime {label} structure preserved");
+            assert_eq!(
+                sorted(&orig),
+                sorted(&now),
+                "regime {label} structure preserved"
+            );
         }
     }
 
@@ -444,10 +506,17 @@ mod tests {
         };
         let null = Null::new(NullKind::RandomEntryMatched, NullParams::default()).unwrap();
         let out = null.generate(&data, 8);
-        assert_eq!(out.entry_indices.len(), data.entry_indices.len(), "trade count preserved");
+        assert_eq!(
+            out.entry_indices.len(),
+            data.entry_indices.len(),
+            "trade count preserved"
+        );
         assert_eq!(out.holding_periods.len(), data.holding_periods.len());
         for h in &out.holding_periods {
-            assert!(data.holding_periods.contains(h), "holding {h} drawn from source set");
+            assert!(
+                data.holding_periods.contains(h),
+                "holding {h} drawn from source set"
+            );
         }
         // Entries are within the series.
         assert!(out.entry_indices.iter().all(|&i| i < 100));
@@ -455,7 +524,10 @@ mod tests {
 
     #[test]
     fn recommendation_matches_the_catalog() {
-        assert_eq!(recommend_null("intraday_mean_reversion"), NullKind::BlockPermutation);
+        assert_eq!(
+            recommend_null("intraday_mean_reversion"),
+            NullKind::BlockPermutation
+        );
         assert_eq!(recommend_null("daily_trend"), NullKind::StationaryBootstrap);
         assert_eq!(recommend_null("regime_switch"), NullKind::RegimeBlock);
         assert_eq!(recommend_null("entry_timing"), NullKind::RandomEntryMatched);

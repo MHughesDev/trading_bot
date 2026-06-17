@@ -133,8 +133,8 @@ function activeGraph(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges: Edge
 
 function Canvas() {
   const wrapper = useRef<HTMLDivElement>(null)
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [name, setName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [savedLabel, setSavedLabel] = useState('')

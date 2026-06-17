@@ -94,7 +94,11 @@ impl RunResult {
     /// Build a `Failed` result for `cfg` with a reason flag — used so an
     /// erroring execution is still a recorded, counted Run (never dropped).
     #[must_use]
-    pub fn failed(cfg: &RunConfig, reason: impl Into<String>, produced_by: impl Into<String>) -> Self {
+    pub fn failed(
+        cfg: &RunConfig,
+        reason: impl Into<String>,
+        produced_by: impl Into<String>,
+    ) -> Self {
         Self {
             run_id: cfg.run_id.clone(),
             status: RunStatus::Failed,
@@ -177,13 +181,15 @@ mod tests {
             }],
             metrics: MetricSet::empty(),
             integrity_flags: vec![],
-            compute_cost: ComputeCost { wall_ms: 5, cpu_ms: 4 },
+            compute_cost: ComputeCost {
+                wall_ms: 5,
+                cpu_ms: 4,
+            },
             produced_at: Utc::now(),
             produced_by: "engine@test".into(),
             unsafe_: false,
         };
-        let back: RunResult =
-            serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        let back: RunResult = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
         assert_eq!(r, back);
     }
 

@@ -255,7 +255,8 @@ impl<'e> GateRunner<'e> {
         let flags = integrity_scan(inputs);
         let passed = flags.is_empty();
         let summary = if passed {
-            "integrity clean: close-stamped, gross edge clears the cost floor, no label overlap".into()
+            "integrity clean: close-stamped, gross edge clears the cost floor, no label overlap"
+                .into()
         } else {
             format!("{} integrity violation(s): {}", flags.len(), flags[0].code)
         };
@@ -275,7 +276,11 @@ impl<'e> GateRunner<'e> {
         let summary = format!(
             "single honest walk-forward (pessimistic costs): median {:.4} ({})",
             walk_forward.distribution.median,
-            if passed { "profitable" } else { "not profitable — stop" }
+            if passed {
+                "profitable"
+            } else {
+                "not profitable — stop"
+            }
         );
         self.ledger.record(GateVerdict::new(
             Gate::SinglePath,
@@ -370,7 +375,11 @@ impl<'e> GateRunner<'e> {
             significance.render(),
             dsr,
             pbo,
-            if corroborators_agree { "agree" } else { "DISAGREE — investigate" }
+            if corroborators_agree {
+                "agree"
+            } else {
+                "DISAGREE — investigate"
+            }
         );
         self.ledger.record(GateVerdict::new(
             Gate::Significance,
@@ -410,7 +419,11 @@ impl<'e> GateRunner<'e> {
         let summary = format!(
             "vault: single holdout evaluation → {:?} ({})",
             result.status,
-            if passed { "validated" } else { "dead for this holdout" }
+            if passed {
+                "validated"
+            } else {
+                "dead for this holdout"
+            }
         );
         self.ledger.record(GateVerdict::new(
             Gate::Vault,
@@ -428,7 +441,7 @@ mod tests {
     use crate::run::executor::{daily_curve, map_sim_result};
     use crate::run::{
         Backtest, ClosureExecutor, ComputeCost, DataSlice, EvalResolution, InMemoryRunStore,
-        MetricKind, ParamMap, RunConfig, RunConfigBuilder, ENGINE_VERSION,
+        MetricKind, RunConfig, RunConfigBuilder, ENGINE_VERSION,
     };
     use crate::study::{Distribution, StudyResult, StudyVerdict};
     use chrono::TimeZone;
@@ -477,7 +490,10 @@ mod tests {
 
     #[test]
     fn close_stamp_leak_is_caught() {
-        let leaky = [SignalStamp { acted_at_ns: 100, bar_close_ns: 200 }];
+        let leaky = [SignalStamp {
+            acted_at_ns: 100,
+            bar_close_ns: 200,
+        }];
         let inputs = IntegrityInputs {
             signals: &leaky,
             gross_return: 0.10,
@@ -521,9 +537,18 @@ mod tests {
     fn gate0_hard_stops_on_leak() {
         let mut e = experiment();
         let mut runner = GateRunner::new(&mut e);
-        let leaky = [SignalStamp { acted_at_ns: 1, bar_close_ns: 2 }];
-        let inputs = IntegrityInputs { signals: &leaky, ..clean_integrity() };
-        assert_eq!(runner.gate0(&inputs).err(), Some(GateError::IntegrityHardStop));
+        let leaky = [SignalStamp {
+            acted_at_ns: 1,
+            bar_close_ns: 2,
+        }];
+        let inputs = IntegrityInputs {
+            signals: &leaky,
+            ..clean_integrity()
+        };
+        assert_eq!(
+            runner.gate0(&inputs).err(),
+            Some(GateError::IntegrityHardStop)
+        );
         assert!(!runner.ledger().passed(Gate::Integrity));
     }
 
@@ -533,7 +558,14 @@ mod tests {
         let bt = Backtest::new(
             InMemoryRunStore::new(),
             ClosureExecutor(|cfg: &RunConfig| {
-                map_sim_result(cfg, daily_curve(&[100.0, 101.0, 103.0]), vec![], vec![], ComputeCost::default(), ENGINE_VERSION)
+                map_sim_result(
+                    cfg,
+                    daily_curve(&[100.0, 101.0, 103.0]),
+                    vec![],
+                    vec![],
+                    ComputeCost::default(),
+                    ENGINE_VERSION,
+                )
             }),
         );
         let candidate = RunConfigBuilder::new(
@@ -555,16 +587,25 @@ mod tests {
         // Vault before Gate 3 is refused.
         assert!(matches!(
             runner.gate4(&candidate, &bt, "a"),
-            Err(GateError::PrerequisiteNotPassed { gate: Gate::Vault, required: Gate::Significance })
+            Err(GateError::PrerequisiteNotPassed {
+                gate: Gate::Vault,
+                required: Gate::Significance
+            })
         ));
 
         runner.gate0(&clean_integrity()).unwrap();
-        runner.gate1(&study("wf", vec![0.1, 0.2, 0.15], verdict(true, None))).unwrap();
+        runner
+            .gate1(&study("wf", vec![0.1, 0.2, 0.15], verdict(true, None)))
+            .unwrap();
         runner
             .gate2(
                 &study("cpcv", vec![0.1, 0.2, 0.15, 0.12], verdict(true, None)),
                 &study("syn", vec![0.08, 0.12, 0.10], verdict(true, None)),
-                &study("nbhd", vec![0.10, 0.11, 0.10, 0.11], verdict(true, Some(true))),
+                &study(
+                    "nbhd",
+                    vec![0.10, 0.11, 0.10, 0.11],
+                    verdict(true, Some(true)),
+                ),
                 -0.5,
             )
             .unwrap();
@@ -576,9 +617,12 @@ mod tests {
             .gate3(
                 5.0,
                 &null,
-                crate::nulls::Null::new(crate::nulls::NullKind::BlockPermutation, crate::nulls::NullParams::default())
-                    .unwrap()
-                    .null_id,
+                crate::nulls::Null::new(
+                    crate::nulls::NullKind::BlockPermutation,
+                    crate::nulls::NullParams::default(),
+                )
+                .unwrap()
+                .null_id,
                 &CorroboratorInputs {
                     sharpe: 2.5,
                     n_obs: 252,
@@ -591,7 +635,11 @@ mod tests {
                 0.05,
             )
             .unwrap();
-        assert!(passed, "strong + few trials should pass: {}", outcome.significance.render());
+        assert!(
+            passed,
+            "strong + few trials should pass: {}",
+            outcome.significance.render()
+        );
         assert!(runner.ledger().passed(Gate::Significance));
 
         let (vault_result, v) = runner.gate4(&candidate, &bt, "alice").unwrap();
@@ -608,7 +656,9 @@ mod tests {
         // constructed disagreement.
         let mut runner = GateRunner::new(&mut e);
         runner.gate0(&clean_integrity()).unwrap();
-        runner.gate1(&study("wf", vec![0.1], verdict(true, None))).unwrap();
+        runner
+            .gate1(&study("wf", vec![0.1], verdict(true, None)))
+            .unwrap();
         runner
             .gate2(
                 &study("cpcv", vec![0.1, 0.2], verdict(true, None)),
@@ -624,9 +674,12 @@ mod tests {
             .gate3(
                 -10.0, // far below the null → p≈1, not significant
                 &null,
-                crate::nulls::Null::new(crate::nulls::NullKind::SignalReturnDecouple, crate::nulls::NullParams::default())
-                    .unwrap()
-                    .null_id,
+                crate::nulls::Null::new(
+                    crate::nulls::NullKind::SignalReturnDecouple,
+                    crate::nulls::NullParams::default(),
+                )
+                .unwrap()
+                .null_id,
                 &CorroboratorInputs {
                     sharpe: 3.0, // but DSR says strong → disagreement with primary
                     n_obs: 252,
@@ -639,6 +692,9 @@ mod tests {
                 0.05,
             )
             .unwrap();
-        assert!(!passed, "a non-significant primary must not pass even if a corroborator is strong");
+        assert!(
+            !passed,
+            "a non-significant primary must not pass even if a corroborator is strong"
+        );
     }
 }

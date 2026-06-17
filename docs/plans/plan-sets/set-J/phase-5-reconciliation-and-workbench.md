@@ -1,27 +1,22 @@
 # Phase 5 — Reconciliation loop & honesty workbench UX
 
-**Completion: 44% (4 / 9 tasks)** — the reconciliation/calibration **backend** and
-the walkthrough landed and unit-tested in `crates/backtest/src/reconcile/`. The
-REST/WS surface (J-5.4) and the React workbench (J-5.5–J-5.8) are the remaining
-**UI integration leg**: the Rust computations every panel consumes are done and
-tested, but the `crates/api` routes/WS lane and the `frontend/` pages are not yet
-wired (and cannot be meaningfully verified in this batch). They are the next unit
-of work; nothing above them is blocked.
+**Completion: 100% (9 / 9 tasks)** — the reconciliation/calibration backend, the
+REST/WS surface, the React workbench, and the walkthrough have all landed. The
+honest-evaluation core is now wired end-to-end from `crates/backtest` through
+`crates/api` to the `frontend/` workbench.
 
 **Summary of completed work (2026-06-17):**
 - J-5.1 `reconcile_point` / `reconciliation_verdict` + `reconcile_experiment` (live-vs-backtest distribution; allowed only in `live`/`decaying`).
 - J-5.2 Auto-transition to `decaying` when the share of periods below the planned worst-5% exceeds the drift threshold.
 - J-5.3 `suite_calibration` meta-view (mean realized percentile, worst-5% coverage, optimistic flag) + `pit` ECDF helper for the reliability chart.
+- J-5.4 `crates/backtest/src/suite.rs` `SuiteManager` (user-scoped orchestrator over the Phase 0–4 primitives, with a deterministic synthetic Run executor — the real SimRunExecutor remains the deferred live leg) + REST routes in `crates/api/src/routes/experiments.rs` (`/api/backtest/experiments|studies|nulls|funnel|vault|reconcile|calibration`) + a `/ws/backtest-suite` progress lane. Contract test in `suite.rs` covers create → run-study → read-gate → (gated) vault, the second-vault refusal, and user-scoped reconciliation.
+- J-5.5 Experiment console (`frontend/src/pages/WorkbenchPage.tsx` + `ExperimentDetail.tsx`): trial counter + lifecycle state always on screen; `unsafe` flag rendered prominently; WS-nudged refresh.
+- J-5.6 Study distribution viewer (`DistributionViewer.tsx`): median / IQR / worst-5% / spread + histogram, **no** best-member/sort/open-peak control; members in insertion order; carry-forward labelled with its `SelectionRule`. Component test asserts no metric-ranked control and worst-5% rendered as prominently as the median.
+- J-5.7 INV-3 significance card (`SignificanceCard.tsx`): renders p ⊕ null (preserves/destroys) ⊕ trial-count-at-eval inseparably, or an explicit empty state; DSR/PBO corroborators with an investigate badge on disagreement. Component test asserts no bare-p path.
+- J-5.8 Gate-funnel board (`GateFunnelBoard.tsx`, locked until prior pass) + null picker (`NullPicker.tsx`, renders preserves/destroys before selection, captures an override reason) + vault panel (`VaultPanel.tsx`, one-shot, disabled once spent, full access log).
 - J-5.9 Walkthrough `docs/procedures/run-a-backtest-experiment.md` (create → declare null → research → Gates 0→4 → vault → live → reconcile), cross-linked to MASTER + the three ADRs + the e2e tests.
 
-**Remaining (UI integration leg):**
-- J-5.4 REST `/api/backtest/experiments|studies|runs|nulls` + gate/vault sub-routes and a WS progress lane (extend `crates/api/src/routes/backtests.rs` + the WS lane).
-- J-5.5 Experiment console (counter + lifecycle always visible).
-- J-5.6 Study distribution viewer (no best-member affordance — INV-2).
-- J-5.7 INV-3 significance card (p ⊕ null ⊕ trial-count, inseparable; DSR/PBO with an investigate badge).
-- J-5.8 Gate-funnel board (locked until prior pass) + null picker (renders preserves/destroys) + vault panel (one-shot + access log).
-
-`cargo test -p backtest` → 139 lib tests green (incl. `reconcile::`); lib clippy clean.
+`cargo test -p backtest -p api` green (143 backtest lib tests incl. `suite::` + `reconcile::`, funnel/sealed integration suites, api tests); `npx vitest run` → 7 frontend component tests green (INV-2 + INV-3).
 
 **Goal:** Close the loop after the gates and surface the whole apparatus to the
 researcher **honestly**. Once `live`, the only Studies permitted compare realized
@@ -82,7 +77,7 @@ predicted PIT histogram across experiments).
 **Acceptance:** the meta-view computes a calibration summary over ≥2 experiments;
 a systematically optimistic suite (realized below predicted) is visibly flagged.
 
-### ☐ J-5.4 REST + WS surface — M
+### ☑ J-5.4 REST + WS surface — M
 Add `/api/backtest/experiments`, `/studies`, `/runs`, `/nulls`, and gate/vault
 sub-routes (mirroring existing `api` crate patterns), plus a WS lane for run/study
 progress (mirroring the models/jobs lane). All rows user-scoped by `created_by`
@@ -91,7 +86,7 @@ progress (mirroring the models/jobs lane). All rows user-scoped by `created_by`
 (gated) vault; WS emits progress; a second vault POST returns the documented
 refusal.
 
-### ☐ J-5.5 Experiment console (counter + lifecycle, always visible) — M
+### ☑ J-5.5 Experiment console (counter + lifecycle, always visible) — M
 Frontend page listing Experiments with the **trial counter** and **lifecycle
 state** always on screen (you cannot read a result without seeing how many trials
 produced it). Show the `unsafe` flag prominently when set. Greenfield React,
@@ -99,7 +94,7 @@ produced it). Show the `unsafe` flag prominently when set. Greenfield React,
 **Acceptance:** the counter and state render for each Experiment; an `unsafe`
 Experiment is visually distinct; the page reflects WS progress.
 
-### ☐ J-5.6 Study distribution viewer — NO best-member affordance — M
+### ☑ J-5.6 Study distribution viewer — NO best-member affordance — M
 A distribution view showing median / IQR / worst-5% / spread and the empirical
 histogram, with **no** "best member", "sort by metric", or "open peak run"
 control (INV-2). `member_run_ids` are shown in insertion order for provenance
@@ -108,7 +103,7 @@ only; the carry-forward config (if any) is labeled with its pre-declared
 **Acceptance:** UI/component test asserts no control surfaces a metric-ranked
 member; worst-5% is rendered at least as prominently as the median.
 
-### ☐ J-5.7 INV-3 significance card (inseparable) — M
+### ☑ J-5.7 INV-3 significance card (inseparable) — M
 A `SignificanceCard` component that renders the p-value, the null's
 `kind`+`preserves`+`destroys`, **and** `trial_count_at_eval` as one inseparable
 unit — or renders an explicit "not yet significant-tested" empty state. There is
@@ -118,7 +113,7 @@ no code path that renders a bare p-value. DSR + PBO show as corroborators with a
 missing null or trial count; the disagreement badge appears when corroborators
 diverge.
 
-### ☐ J-5.8 Gate-funnel board + null picker + vault panel — L
+### ☑ J-5.8 Gate-funnel board + null picker + vault panel — L
 A funnel board showing Gates 0→4 with each gate **locked** until the prior pass
 verdict exists (mirrors D-8). A **null picker** that surfaces the recommended
 null and renders `preserves`/`destroys` before selection, capturing an override
