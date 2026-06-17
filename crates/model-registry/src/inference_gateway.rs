@@ -311,7 +311,11 @@ impl InferenceGateway {
         ensemble_ref: &str,
         alias: &str,
     ) -> Option<(String, String, i32)> {
-        let effective_alias = if alias.is_empty() { "production" } else { alias };
+        let effective_alias = if alias.is_empty() {
+            "production"
+        } else {
+            alias
+        };
 
         // ensemble_ref is expected to be the ensemble UUID id.
         let id_row: Option<(String,)> =
@@ -434,7 +438,10 @@ impl InferenceGateway {
                         None
                     }
                     // "model" and any unknown value fall through to the model path.
-                    _ => self.forecast(model_ref, alias, instrument_id, features).await,
+                    _ => {
+                        self.forecast(model_ref, alias, instrument_id, features)
+                            .await
+                    }
                 };
 
                 let fired = match forecast {
@@ -480,9 +487,7 @@ impl InferenceGateway {
     /// Returns `None` when the response carries no distribution fields, or when the
     /// reconstructed distribution fails its invariant check (contract violation is
     /// logged as a warning; the point view still serves).
-    fn build_distribution(
-        pred: &crate::sidecar::ForecastResponse,
-    ) -> Option<ForecastDistribution> {
+    fn build_distribution(pred: &crate::sidecar::ForecastResponse) -> Option<ForecastDistribution> {
         let levels = pred.quantile_levels.as_ref()?;
         let qr = pred.quantiles_return.as_ref()?;
         let median = pred.median_return?;

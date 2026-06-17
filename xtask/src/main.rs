@@ -127,7 +127,19 @@ fn check_money_f64() {
             // Match lowercase keywords only — this avoids false positives from
             // Decimal wrapper types like `Price`, `Size` that appear in return
             // type annotations (`-> Result<Price, ...>`).
-            let has_money_keyword = money_keywords.iter().any(|kw| line.contains(kw));
+            //
+            // Special-case "size": exclude occurrences that only appear as part
+            // of "usize" or "isize" (e.g. `w: usize`) to avoid false positives
+            // in statistical helper functions.
+            let has_money_keyword = money_keywords.iter().any(|kw| {
+                if *kw == "size" {
+                    // Strip "usize" and "isize" from the line before checking.
+                    let stripped = line.replace("usize", "____").replace("isize", "____");
+                    stripped.contains("size")
+                } else {
+                    line.contains(kw)
+                }
+            });
             if has_money_keyword {
                 violations.push(format!(
                     "{}:{}: f64/f32 on monetary field — use Decimal\n  {}",
