@@ -180,6 +180,30 @@ Roadmap (remaining):
    delay and fill fragmentation so strategy code experiences live-like
    asynchrony in paper mode.
 
+### Addendum 2026-06-17 — fee realism re-audit
+
+A follow-up pass checked every class's fee constant against current (2026)
+real schedules. Three corrections shipped:
+
+- **Crypto spot taker fee 10 bps → 25 bps.** The CLOB default (`0.001`) matched
+  no venue in this build — it was a Binance-style number, well below both the
+  paper venue (Alpaca crypto, 25 bps taker) and the Coinbase Advanced live
+  target (40 bps+ at entry tiers). Paper P&L understated trading cost 2.5–12×.
+  Fixed via an explicit `fee_rate` on the `CryptoSpotCex` CLOB override (the
+  global default is deliberately left alone so ETFs don't inherit a commission).
+- **ETF phantom commission removed.** `Etf` is CLOB-structured but had no
+  override, so it inherited the crypto default's 10 bps commission + penny tick.
+  ETFs trade commission-free with tight spreads; added an `Etf` CLOB override
+  (0 commission, ~1 bp spread).
+- **Bond tuning was dead code.** The "25 bps + $1/bond" tuning lived in
+  `broker_quote_overrides`, but `Bond` routed to `Clob`, so it was never
+  consulted — bonds filled at the crypto defaults. Bonds are dealer-quote
+  markets, so `Bond` now maps to `MarketStructure::BrokerQuote`, activating the
+  intended tuning.
+
+All other classes (FX, futures, perps, options, equity, DEX, NFT, Kalshi)
+were verified realistic against 2026 schedules and left unchanged.
+
 ### Architecture note: paper as its own half
 
 After this round the execution layer splits cleanly:
