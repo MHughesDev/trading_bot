@@ -1,11 +1,11 @@
 //! Nightly retrain orchestrator — polls for auto_retrain models on a schedule.
 
-use std::sync::Arc;
-use chrono::Utc;
-use tokio::time::{interval, Duration};
-use uuid::Uuid;
 use crate::manager::ModelManager;
 use crate::types::TrainRequest;
+use chrono::Utc;
+use std::sync::Arc;
+use tokio::time::{interval, Duration};
+use uuid::Uuid;
 
 pub struct RetrainScheduler {
     manager: Arc<ModelManager>,
@@ -47,10 +47,7 @@ impl RetrainScheduler {
                 // Auto-retrain reuses the model definition's baked-in
                 // hyperparameters; no per-run overrides.
                 hyperparameter_overrides: None,
-                version_note: Some(format!(
-                    "auto-retrain {}",
-                    Utc::now().date_naive()
-                )),
+                version_note: Some(format!("auto-retrain {}", Utc::now().date_naive())),
                 // Auto-retrain reuses the model definition's data defaults.
                 data: None,
             };

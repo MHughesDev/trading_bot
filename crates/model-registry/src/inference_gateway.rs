@@ -1,13 +1,15 @@
 //! Inference gateway — alias resolution, prediction caching, circuit breaking, and trace logging.
 
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use sqlx::PgPool;
 use tracing::{debug, warn};
+
+use domain::model::forecast::ForecastDistribution;
 
 use crate::sidecar::{PredictInstance, PredictRequest, SidecarClient};
 
@@ -20,9 +22,12 @@ const CIRCUIT_BREAK_THRESHOLD: u32 = 5;
 
 #[derive(Clone, Debug)]
 pub struct ForecastResult {
-    pub direction: String,   // "bullish" | "bearish" | "neutral"
+    pub direction: String,
     pub confidence: f64,
     pub latency_ms: u64,
+    /// Full distribution from a probabilistic forecaster (ADR-0016).
+    /// `None` for point/classification models.
+    pub distribution: Option<ForecastDistribution>,
 }
 
 pub struct InferenceGateway {
@@ -62,15 +67,14 @@ impl InferenceGateway {
         }
 
         // Cache miss — query Postgres.
-        let row: Option<(i32,)> = sqlx::query_as(
-            "SELECT version FROM model_aliases WHERE model_id = $1 AND alias = $2",
-        )
-        .bind(model_id)
-        .bind(alias)
-        .fetch_optional(&self.pg)
-        .await
-        .ok()
-        .flatten();
+        let row: Option<(i32,)> =
+            sqlx::query_as("SELECT version FROM model_aliases WHERE model_id = $1 AND alias = $2")
+                .bind(model_id)
+                .bind(alias)
+                .fetch_optional(&self.pg)
+                .await
+                .ok()
+                .flatten();
 
         if let Some((version,)) = row {
             let mut cache = self.alias_cache.write().unwrap();
@@ -115,24 +119,32 @@ impl InferenceGateway {
 
         let model_id = row.map(|(id,)| id)?;
 
-        // Circuit break check.
-        {
+        // Circuit break check — extract bool before any .await so the guard is
+        // dropped and the future stays Send (RwLockReadGuard is !Send).
+        let circuit_open = {
             let counts = self.fail_counts.read().unwrap();
-            if counts.get(&model_id).copied().unwrap_or(0) >= CIRCUIT_BREAK_THRESHOLD {
-                debug!("circuit break open for model {model_id}, abstaining");
-                self.write_trace(&model_id, 0, instrument_id, 0, "abstain").await;
-                return None;
-            }
+            counts.get(&model_id).copied().unwrap_or(0) >= CIRCUIT_BREAK_THRESHOLD
+        };
+        if circuit_open {
+            debug!("circuit break open for model {model_id}, abstaining");
+            self.write_trace(&model_id, 0, instrument_id, 0, "abstain")
+                .await;
+            return None;
         }
 
-        let effective_alias = if alias.is_empty() { "production" } else { alias };
+        let effective_alias = if alias.is_empty() {
+            "production"
+        } else {
+            alias
+        };
 
         // Resolve alias → version.
         let version = match self.resolve_alias(&model_id, effective_alias).await {
             Some(v) => v,
             None => {
                 warn!("alias '{effective_alias}' not found for model {model_id}");
-                self.write_trace(&model_id, 0, instrument_id, 0, "abstain").await;
+                self.write_trace(&model_id, 0, instrument_id, 0, "abstain")
+                    .await;
                 return None;
             }
         };
@@ -169,7 +181,8 @@ impl InferenceGateway {
             Some(row) => row,
             None => {
                 warn!("artifact not found for model {model_id} v{version}");
-                self.write_trace(&model_id, version, instrument_id, 0, "abstain").await;
+                self.write_trace(&model_id, version, instrument_id, 0, "abstain")
+                    .await;
                 return None;
             }
         };
@@ -200,10 +213,14 @@ impl InferenceGateway {
                 // Use first prediction from the response.
                 let prediction = response.predictions.into_iter().next()?;
 
+                // Reconstruct distribution from sidecar response and validate (I-1.12).
+                let distribution = Self::build_distribution(&prediction);
+
                 let result = ForecastResult {
                     direction: prediction.direction.clone(),
                     confidence: prediction.confidence,
                     latency_ms,
+                    distribution,
                 };
 
                 // Update prediction cache.
@@ -212,7 +229,8 @@ impl InferenceGateway {
                     cache.insert(cache_key, (result.clone(), Instant::now()));
                 }
 
-                self.write_trace(&model_id, version, instrument_id, latency_ms, "hit").await;
+                self.write_trace(&model_id, version, instrument_id, latency_ms, "hit")
+                    .await;
                 Some(result)
             }
             Err(e) => {
@@ -226,7 +244,8 @@ impl InferenceGateway {
 
                 // Try fallback alias if we weren't already using it.
                 if effective_alias != "fallback" {
-                    if let Some(fallback_version) = self.resolve_alias(&model_id, "fallback").await {
+                    if let Some(fallback_version) = self.resolve_alias(&model_id, "fallback").await
+                    {
                         let fallback_artifact: Option<(String, String, String)> = sqlx::query_as(
                             "SELECT ma.storage_uri, ma.sha256, am.model_kind \
                              FROM model_artifacts ma \
@@ -254,12 +273,21 @@ impl InferenceGateway {
                             };
                             if let Ok(fb_resp) = self.sidecar.predict(fb_req).await {
                                 if let Some(fb_pred) = fb_resp.predictions.into_iter().next() {
+                                    let distribution = Self::build_distribution(&fb_pred);
                                     let result = ForecastResult {
                                         direction: fb_pred.direction.clone(),
                                         confidence: fb_pred.confidence,
                                         latency_ms,
+                                        distribution,
                                     };
-                                    self.write_trace(&model_id, fallback_version, instrument_id, latency_ms, "miss").await;
+                                    self.write_trace(
+                                        &model_id,
+                                        fallback_version,
+                                        instrument_id,
+                                        latency_ms,
+                                        "miss",
+                                    )
+                                    .await;
                                     return Some(result);
                                 }
                             }
@@ -267,7 +295,8 @@ impl InferenceGateway {
                     }
                 }
 
-                self.write_trace(&model_id, version, instrument_id, latency_ms, "error").await;
+                self.write_trace(&model_id, version, instrument_id, latency_ms, "error")
+                    .await;
                 None
             }
         }
@@ -333,6 +362,39 @@ impl InferenceGateway {
         .bind(&payload)
         .execute(&self.pg)
         .await;
+    }
+
+    /// Reconstruct a `ForecastDistribution` from a sidecar `ForecastResponse` (I-1.12).
+    /// Returns `None` when the response carries no distribution fields, or when the
+    /// reconstructed distribution fails its invariant check (contract violation is
+    /// logged as a warning; the point view still serves).
+    fn build_distribution(
+        pred: &crate::sidecar::ForecastResponse,
+    ) -> Option<ForecastDistribution> {
+        let levels = pred.quantile_levels.as_ref()?;
+        let qr = pred.quantiles_return.as_ref()?;
+        let median = pred.median_return?;
+        let sigma = pred.sigma?;
+
+        // σ-units: quantiles_return / sigma (guard zero sigma).
+        let sigma_safe = if sigma > 0.0 { sigma } else { return None };
+        let quantiles_sigma: Vec<f64> = qr.iter().map(|&v| v / sigma_safe).collect();
+
+        let dist = ForecastDistribution {
+            quantile_levels: levels.clone(),
+            quantiles_sigma,
+            quantiles_return: qr.clone(),
+            median_return: median,
+            sigma,
+        };
+
+        match dist.validate() {
+            Ok(()) => Some(dist),
+            Err(e) => {
+                warn!("distribute contract violation from sidecar (discarding): {e}");
+                None
+            }
+        }
     }
 
     /// Return recent inference traces from model_events.

@@ -21,6 +21,11 @@ class Forecast(BaseModel):
     magnitude: str  # decimal string (ADR-0002)
     confidence: float
     horizon: str
+    # Distribution fields (ADR-0016) — absent for point/classification models.
+    quantile_levels: Optional[list[float]] = None
+    quantiles_return: Optional[list[float]] = None
+    median_return: Optional[float] = None
+    sigma: Optional[float] = None
 
 
 class PredictResponse(BaseModel):

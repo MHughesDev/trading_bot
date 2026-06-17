@@ -1,6 +1,6 @@
 # Phase 5 — Pipeline factory, fan-out & quality monitoring
 
-**Completion: 0% (0 / 12 tasks)**
+**Completion: 100% (12 / 12 tasks)**
 
 **Goal:** Turn one-off training into a **factory**. A declarative pipeline DAG
 (data → features → target → train → calibrate → evaluate → register), templated and
@@ -61,72 +61,72 @@ scheduler only half-served.
 
 ## Tasks
 
-### ☐ I-5.1 `PipelineDefinition` (DAG) domain type + validation — M
+### ☑ I-5.1 `PipelineDefinition` (DAG) domain type + validation — M
 Add the pipeline definition (shape above) to `crates/domain`: nodes with `op`,
 `needs` (DAG edges), params, `kind`, and an optional `matrix`. Validate: acyclic,
 all `needs` resolvable, ops known, training-vs-inference node legality.
 **Acceptance:** `cargo test -p domain`: a valid DAG round-trips; a cycle and an unknown op are rejected; an inference-only op in a training pipeline is rejected.
 
-### ☐ I-5.2 `PipelineManager` DAG execution engine — L
+### ☑ I-5.2 `PipelineManager` DAG execution engine — L
 Add `PipelineManager` (mirroring `ModelManager`'s job model) that topologically
 executes the DAG, each node delegating to the existing capability, with per-node
 progress on a WS lane and a persisted run record. Migrations (Postgres 0026+:
 `pipelines`, `pipeline_versions`, `pipeline_runs`, `pipeline_node_runs`).
 **Acceptance:** a 4-node training pipeline runs end to end, producing a registered version; node progress streams; the run is persisted and queryable.
 
-### ☐ I-5.3 Training vs inference pipeline kinds — M
+### ☑ I-5.3 Training vs inference pipeline kinds — M
 Implement both kinds: **training** produces+registers bundles; **inference**
 assembles published bundles (model or ensemble) into a calibrated forecast and is the
 unit that gets published (Phase 6). Enforce kind-appropriate node sets.
 **Acceptance:** a training pipeline yields a registered artifact; an inference pipeline, given published bundles, yields a calibrated distribution through the parity path.
 
-### ☐ I-5.4 Templated, spec-driven pipelines — M
+### ☑ I-5.4 Templated, spec-driven pipelines — M
 Allow a pipeline to be a **template** parameterized by (asset, timeframe, window),
 cloneable and reusable; store templates in the registry (feeds Phase 6 presets).
 **Acceptance:** one template instantiates for two different assets without edits; the instantiations differ only by bound parameters and have distinct spec hashes.
 
-### ☐ I-5.5 Fan-out across asset × timeframe × window — L
+### ☑ I-5.5 Fan-out across asset × timeframe × window — L
 Execute the `matrix` cross-product as one logical run spawning a child run per cell,
 scheduled under the concurrency semaphore, with an aggregate status (N succeeded /
 M failed) and per-cell drill-down.
 **Acceptance:** a 2×3×2 matrix launches 12 child runs from one request; the parent reports aggregate + per-cell status; a single cell's failure does not abort the others.
 
-### ☐ I-5.6 Fast/slow window instances — S
+### ☑ I-5.6 Fast/slow window instances — S
 Define named window presets (`fast`, `slow`) as window-length bindings of one
 architecture; usable as a matrix axis.
 **Acceptance:** `fast` and `slow` instances of one pipeline train on different spans and register as distinct versions tagged by window.
 
-### ☐ I-5.7 Bar-cadence scheduling — M
+### ☑ I-5.7 Bar-cadence scheduling — M
 Extend the Set H `RetrainScheduler` into a bar-based scheduler: trigger a pipeline
 every K bars of a reference instrument/timeframe (not only wall-clock nightly), with
 the next-run state persisted.
 **Acceptance:** a pipeline scheduled "every 96×15m bars" fires on bar cadence in a simulated clock; schedule state survives a restart.
 
-### ☐ I-5.8 Run history, caching, incremental re-runs, retries — M
+### ☑ I-5.8 Run history, caching, incremental re-runs, retries — M
 Use the Phase 3 spec hash to **cache** node outputs (skip a node whose inputs are
 unchanged), support partial/incremental re-runs (resume from a failed node), and
 retry transient failures with backoff. Persist full run history.
 **Acceptance:** re-running an unchanged pipeline is a cache hit (no recompute); a run that failed at `evaluate` resumes from there; a transient sidecar error is retried, not failed outright.
 
-### ☐ I-5.9 Rolling forecast-quality drift — M
+### ☑ I-5.9 Rolling forecast-quality drift — M
 For each published artifact, periodically re-score recent forecasts (Phase 2 loop)
 and persist a **rolling CRPS/coverage** series to ClickHouse (DDL 05+:
 `forecast_quality`); expose it for the UI and alerts.
 **Acceptance:** the rolling series populates for a published model; a synthetic quality decline shows up as rising CRPS / falling coverage over time.
 
-### ☐ I-5.10 Calibration & data/feature drift alerts — M
+### ☑ I-5.10 Calibration & data/feature drift alerts — M
 Detect calibration drift (PIT drifting off uniform) and data/feature drift (input
 distribution shift vs the training snapshot, e.g. PSI/KS) and raise alerts (NATS +
 persisted) with thresholds.
 **Acceptance:** a shifted input distribution and a decalibrated forecast each raise a distinct alert; within-tolerance behavior raises none.
 
-### ☐ I-5.11 Staleness → retrain trigger — M
+### ☑ I-5.11 Staleness → retrain trigger — M
 Wire drift/staleness alerts to **trigger a retrain pipeline** (I-5.2) for the affected
 artifact; record the causal link (alert → run). Staleness = no successful retrain in N
 bars.
 **Acceptance:** crossing a drift threshold (or staleness) enqueues a retrain pipeline run tagged with the triggering alert; the link is queryable.
 
-### ☐ I-5.12 Pipeline & monitoring REST + WS surface — S
+### ☑ I-5.12 Pipeline & monitoring REST + WS surface — S
 Add `/api/pipelines/**` (CRUD, run, fan-out status, history) and
 `/api/models/{id}/quality` (rolling series + alerts); stream pipeline/node progress on
 a WS lane. Additive to the Set H contract.

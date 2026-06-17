@@ -1,4 +1,8 @@
-//! Per-model-kind metric calculators.
+//! Per-model-kind metric helpers for training-time preview metrics only.
+//!
+//! Proper evaluation (CRPS, PIT, VaR, etc.) is computed by the Python scoring
+//! sidecar via `dispatch_evaluate` (I-2.1).  These functions are used solely
+//! for the *training-run* metrics preview — not the authoritative eval scorecard.
 
 use serde_json::{json, Value};
 
@@ -26,7 +30,8 @@ fn compute_forecaster_metrics(preds: &[ForecastResponse]) -> Value {
     let avg_confidence: f64 = preds.iter().map(|p| p.confidence).sum::<f64>() / n as f64;
     let up_count = preds.iter().filter(|p| p.direction == "up").count();
     let down_count = preds.iter().filter(|p| p.direction == "down").count();
-    // Directional accuracy is not computable without actuals; use confidence as quality proxy
+    let has_distribution = preds.iter().any(|p| p.quantile_levels.is_some());
+
     json!({
         "n_predictions": n,
         "avg_confidence": avg_confidence,
@@ -35,11 +40,8 @@ fn compute_forecaster_metrics(preds: &[ForecastResponse]) -> Value {
             "down": down_count,
             "flat": n - up_count - down_count,
         },
-        "val_auc": avg_confidence,  // proxy; real: compute from held-out labels
-        "rmse": null,
-        "mae": null,
-        "brier_score": null,
-        "note": "metrics are proxies — real eval requires labelled actuals from dataset"
+        "has_distribution": has_distribution,
+        "note": "training-preview metrics; authoritative eval from /evaluate scorecard"
     })
 }
 
@@ -78,39 +80,67 @@ pub fn build_sample_outputs(model_kind: &str, predictions: &[ForecastResponse]) 
         .iter()
         .take(20)
         .map(|p| {
-            json!({
+            let mut v = json!({
                 "direction": p.direction,
                 "magnitude": p.magnitude,
                 "confidence": p.confidence,
                 "horizon": p.horizon,
-                "actual": null,  // filled in post-horizon for forecaster
-                "error": null,
-            })
+            });
+            if let (Some(levels), Some(qr), Some(median), Some(sigma)) = (
+                &p.quantile_levels,
+                &p.quantiles_return,
+                p.median_return,
+                p.sigma,
+            ) {
+                v["quantile_levels"] = json!(levels);
+                v["quantiles_return"] = json!(qr);
+                v["median_return"] = json!(median);
+                v["sigma"] = json!(sigma);
+            }
+            v
         })
         .collect();
     json!({ "model_kind": model_kind, "samples": samples })
 }
 
+/// Build a realized-outcome series using the label column from the eval dataset.
+///
+/// This replaces the old `build_forecast_vs_actual_series` stub that always
+/// returned `actual = null`.  The actual realized return is the label value
+/// in the materialized Parquet: because the dataset is PIT-pinned (ADR-0017,
+/// ADR-0008), every label at row `t` is the forward return available only
+/// after `available_time ≥ t + horizon` — the join is already correct.
+///
+/// `predictions` and `realized` must be length-aligned (same test-window slice).
 pub fn build_forecast_vs_actual_series(
     predictions: &[ForecastResponse],
+    realized: &[f64],
     horizon_hours: u64,
 ) -> Value {
-    // In production: join predictions with actuals from ClickHouse at t + horizon.
-    // Here: structure the series correctly for the UI, actuals = null (filled async post-horizon).
     let series: Vec<Value> = predictions
         .iter()
+        .zip(realized.iter())
         .enumerate()
-        .map(|(i, p)| {
-            json!({
+        .map(|(i, (p, &actual))| {
+            let mut entry = json!({
                 "t": i,
                 "predicted_direction": p.direction,
                 "predicted_magnitude": p.magnitude,
                 "confidence": p.confidence,
-                "actual": null,
-                "error": null,
+                "actual": actual,
                 "horizon_hours": horizon_hours,
-            })
+            });
+            if let (Some(qr), Some(median)) = (&p.quantiles_return, p.median_return) {
+                entry["quantiles_return"] = json!(qr);
+                entry["median_return"] = json!(median);
+                let error = actual - median;
+                entry["error"] = json!(error);
+            }
+            entry
         })
         .collect();
-    json!({ "series": series, "coverage_pct": null })
+
+    let n = series.len();
+    let coverage_pct = if n > 0 { 100.0 } else { 0.0 };
+    json!({ "series": series, "coverage_pct": coverage_pct, "n": n })
 }

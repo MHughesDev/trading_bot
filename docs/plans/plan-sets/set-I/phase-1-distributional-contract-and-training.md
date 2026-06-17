@@ -1,6 +1,6 @@
 # Phase 1 — Distributional contract & probabilistic training
 
-**Completion: 0% (0 / 12 tasks)**
+**Completion: 100% (12 / 12 tasks)**
 
 **Goal:** Turn the Studio's **point** forecaster into a **distributional** one.
 Freeze the distributional output contract (sorted quantiles in σ-units → return
@@ -71,14 +71,14 @@ results. New Python deps land behind the sidecar's `pyproject.toml` (e.g.
 
 ## Tasks
 
-### ☐ I-1.1 Author ADR-0016 (Distributional Forecast Contract v1.1) — S
+### ☑ I-1.1 Author ADR-0016 (Distributional Forecast Contract v1.1) — S
 Write `docs/adr/0016-distributional-forecast-contract.md`: sorted quantiles in
 σ-units → return units, median, σ; point fields become a derived view; risk
 read-outs are derived; f64/Decimal boundary (D-4). Record the v1.0→v1.1 evolution
 as additive per ADR-0015. Mark Accepted; link from `docs/adr/README.md` + MASTER §9.
 **Acceptance:** ADR-0016 exists and is referenced by the `ForecastDistribution` doc comment.
 
-### ☐ I-1.2 `ForecastDistribution` domain type + derived point view — M
+### ☑ I-1.2 `ForecastDistribution` domain type + derived point view — M
 Add `ForecastDistribution` (shape above) to `crates/domain/src/model/forecast.rs`;
 add `Forecast.distribution: Option<ForecastDistribution>` (`#[serde(default)]`).
 Implement `Forecast::from_distribution(...)` deriving `direction`/`magnitude`
@@ -86,7 +86,7 @@ Implement `Forecast::from_distribution(...)` deriving `direction`/`magnitude`
 (`quantiles_sigma` sorted). f64 arrays only — no `Price`/`Size`.
 **Acceptance:** `cargo test -p domain`: round-trip; derived point view matches a hand-computed example; non-monotone quantiles rejected by a constructor check.
 
-### ☐ I-1.3 Model Definition v1.1 + migrator — M
+### ☑ I-1.3 Model Definition v1.1 + migrator — M
 Bump `DEFINITION_VERSION` to `"1.1"`; add `output: Option<OutputSpec>`,
 `hpo: Option<HpoSpec>`, `calibration: Option<CalibrationSpec>` (and `cv` from
 Phase 0) to `ModelDefinition`; update `validate.rs` (accept 1.0 *and* 1.1) and add
@@ -94,7 +94,7 @@ Phase 0) to `ModelDefinition`; update `validate.rs` (accept 1.0 *and* 1.1) and a
 strategy-format migration precedent.
 **Acceptance:** a stored v1.0 definition loads, migrates to 1.1, and validates; a 1.1 definition round-trips; validator rejects an unsorted/empty `quantile_levels`.
 
-### ☐ I-1.4 Probabilistic targets & labeling — M
+### ☑ I-1.4 Probabilistic targets & labeling — M
 Extend `TargetField` with `MoveSize`; add labelers in the sidecar for
 **triple-barrier** (pt/sl/vertical), **quantile** targets, and **volatility**; add
 **devolatized target construction** (divide label by a realized-σ estimate fit on
@@ -102,7 +102,7 @@ train). Emit **label-overlap metadata** (effective label horizon in bars) so Pha
 purge is correct. Keep `return`/`direction` working unchanged.
 **Acceptance:** sidecar unit tests produce correct triple-barrier labels on a fixture; devolatized targets have ~unit variance on train; label-overlap is reported to the windowing layer.
 
-### ☐ I-1.5 Quantile-regression adapters — L
+### ☑ I-1.5 Quantile-regression adapters — L
 Add distributional adapters in `apps/model-trainer/app/adapters/`: LightGBM-Q
 (`objective=quantile`, one model per level or a multi-quantile head), XGBoost
 pinball, and sklearn `GradientBoostingRegressor(loss="quantile")`. Each emits the
@@ -110,48 +110,48 @@ full sorted quantile vector in σ-units. Register them in `_route` by
 `(framework, output=quantile)`.
 **Acceptance:** training a LightGBM-Q forecaster yields a bundle whose predictions are a sorted quantile vector at the configured levels; pinball loss decreases vs a flat baseline on a fixture.
 
-### ☐ I-1.6 GARCH-t volatility adapter — L
+### ☑ I-1.6 GARCH-t volatility adapter — L
 Add a GARCH-t adapter (Python `arch`) producing a **distributional volatility**
 forecast (σ + Student-t shape → quantiles). This is both a first-class
 `field=volatility` forecaster and the σ source for devolatization/rescale. Gate the
 new dep behind the sidecar extra; document it.
 **Acceptance:** a GARCH-t run produces a horizon-H predictive distribution; its 1-step σ tracks realized vol on a fixture within tolerance; absence of the `arch` extra degrades to a clear "unavailable" error, not a crash.
 
-### ☐ I-1.7 Devolatization / σ-rescale in train & serve — M
+### ☑ I-1.7 Devolatization / σ-rescale in train & serve — M
 Fit the σ scaler on **train only** (no leakage), standardize targets/features as
 configured, and persist σ in the bundle so serve-time rescales σ-units → return
 units identically. This is the "spine as coordinate-setter": models predict
 standardized shapes; σ restores scale.
 **Acceptance:** train and serve produce identical return-unit quantiles for the same input (parity); σ is read from the bundle, never recomputed at serve.
 
-### ☐ I-1.8 Quantile-crossing repair — S
+### ☑ I-1.8 Quantile-crossing repair — S
 After prediction (and before scoring/serving), enforce monotone quantiles via
 sort/isotonic projection in the sidecar; record how many repairs occurred as a
 quality signal.
 **Acceptance:** a deliberately non-monotone raw output is repaired to monotone; the contract check (I-1.12) then passes; repair count is reported in run metrics.
 
-### ☐ I-1.9 In-fold overfitting-aware HPO — L
+### ☑ I-1.9 In-fold overfitting-aware HPO — L
 Add HPO (Optuna) that runs **inside the walk-forward folds** (Phase 0), optimizing a
 proper score (CRPS/pinball) on the test role only, never the calibration role.
 **Count and persist the trial count** (feeds Phase 2 deflated metrics). Respect
 `hpo.max_trials`; seed for reproducibility.
 **Acceptance:** an HPO run reports `trials = N`, selects params by CRPS across folds, and persists the trial count on the training run; with `hpo.enabled=false` the path is a no-op.
 
-### ☐ I-1.10 Extend the parity bundle for distributions — M
+### ☑ I-1.10 Extend the parity bundle for distributions — M
 Extend the `tb-bundle-1` header (`engine.wrap_bundle`) to carry `quantile_levels`,
 the σ scaler, the calibration placeholder (Phase 4), and `output_kind=distribution`,
 **without breaking** existing point bundles (version the header; old bundles still
 load). Inference reads the new header to reconstruct the exact distribution path.
 **Acceptance:** a distributional bundle round-trips train→serve to identical quantiles; a legacy point bundle still loads and serves its derived point view.
 
-### ☐ I-1.11 Inference emits a calibrated distribution — M
+### ☑ I-1.11 Inference emits a calibrated distribution — M
 `apps/model-inference` returns the full sorted distribution + median; the Rust
 `InferenceGateway::forecast` returns a `Forecast` with `distribution: Some(..)`. The
 strategy `model_forecast` evaluator reads the **derived point view** unchanged
 (no strategy migration needed). Caching keys include the quantile grid.
 **Acceptance:** `/predict` returns sorted quantiles + median; the gateway surfaces them; an existing strategy using `model_forecast` still evaluates against the derived direction/magnitude.
 
-### ☐ I-1.12 Enforce the output contract everywhere — S
+### ☑ I-1.12 Enforce the output contract everywhere — S
 Add a single `validate_distribution(...)` check (levels sorted & in (0,1), quantiles
 finite & monotone, σ > 0) invoked at **train completion** and at **serve**; a model
 that cannot produce a valid distribution fails its run rather than publishing a

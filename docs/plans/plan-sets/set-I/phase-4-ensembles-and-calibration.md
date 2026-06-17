@@ -1,6 +1,6 @@
 # Phase 4 — Ensembles & conformal calibration
 
-**Completion: 0% (0 / 11 tasks)**
+**Completion: 100% (11 / 11 tasks)**
 
 **Goal:** Make an **Ensemble** a first-class, versioned, publishable artifact in the
 *same* registry and lifecycle as a model. Compose a roster, choose a combiner
@@ -62,62 +62,62 @@ calibration guarantee the eval suite then verifies (PIT/coverage in Phase 2).
 
 ## Tasks
 
-### ☐ I-4.1 Author ADR-0018 (ensemble combination & conformal calibration) — S
+### ☑ I-4.1 Author ADR-0018 (ensemble combination & conformal calibration) — S
 Write `docs/adr/0018-ensemble-combination-and-conformal-calibration.md`: the three
 combiners, σ-coordinate combination, the conformal-on-cal-role rule, and quantile
 repair. Cite ADR-0016 (distribution contract) + ADR-0017 (CV roles). Mark Accepted.
 **Acceptance:** ADR-0018 exists, linked from `docs/adr/README.md` + MASTER §9.
 
-### ☐ I-4.2 `EnsembleDefinition` domain type + validation — M
+### ☑ I-4.2 `EnsembleDefinition` domain type + validation — M
 Add the ensemble definition (shape above) to `crates/domain` (e.g. `model_def`),
 with validation: roster non-empty, all `model_ref` resolvable, weight_floor·|roster|
 ≤ 1, temperature > 0, valid combiner/calibration. Carries `schema_version`.
 **Acceptance:** `cargo test -p domain`: round-trip + each validation reject (empty roster, infeasible weight floor, bad combiner).
 
-### ☐ I-4.3 `EnsembleManager` — first-class artifact in the registry — M
+### ☑ I-4.3 `EnsembleManager` — first-class artifact in the registry — M
 Add `EnsembleManager` mirroring `ModelManager`: persist ensembles + versions +
 aliases; reuse gated promotion, rollback, deployments, and the `models.jobs` WS lane.
 Add migrations (Postgres 0026+: `ensembles`, `ensemble_versions`, `ensemble_members`).
 **Acceptance:** an ensemble is created, versioned, promoted, and rolled back through the same lifecycle/API shape as a model; rows are user-scoped.
 
-### ☐ I-4.4 Combiner: linear opinion pool — M
+### ☑ I-4.4 Combiner: linear opinion pool — M
 Implement the LOP combiner in the sidecar: weighted average of member quantile
 functions in σ-space, then rescale.
 **Acceptance:** a 2-member LOP on a fixture yields a distribution between the members; equal weights give the symmetric pool; output is monotone after repair (I-4.10).
 
-### ☐ I-4.5 Combiner: CRPS-weighted (adaptive) — M
+### ☑ I-4.5 Combiner: CRPS-weighted (adaptive) — M
 Implement rolling inverse-CRPS weighting (using Phase 2 per-member CRPS over a window),
 with `temperature` sharpening and `weight_floor` flooring; weights recomputed as new
 outcomes arrive.
 **Acceptance:** the better member (lower CRPS) receives higher weight; flooring keeps every member ≥ weight_floor; a member that degrades loses weight over the window.
 
-### ☐ I-4.6 Combiner: stacking — M
+### ☑ I-4.6 Combiner: stacking — M
 Implement a stacking meta-learner trained on the **calibration role only** mapping
 member outputs → combined distribution; never fit on test (leakage).
 **Acceptance:** stacking trains on cal, scores on test, and the leakage harness passes; on a fixture where one member is noise, stacking down-weights it.
 
-### ☐ I-4.7 Weight floors & temperature — S
+### ☑ I-4.7 Weight floors & temperature — S
 Wire `weight_floor` and `temperature` through all weighted combiners; validate
 feasibility; expose in the definition + API.
 **Acceptance:** changing temperature visibly sharpens/softens weights; an infeasible floor is rejected at validation, not at run time.
 
-### ☐ I-4.8 Spine-as-coordinate-setter (σ-combine + rescale) — M
+### ☑ I-4.8 Spine-as-coordinate-setter (σ-combine + rescale) — M
 Combine members in σ-units against a shared coordinate frame (spine), then rescale
 the combined distribution by a single σ to return units. Document which member/σ sets
 the frame.
 **Acceptance:** members trained at different σ scales combine correctly; a unit test shows the combined return-unit distribution is invariant to a uniform σ re-scaling of inputs.
 
-### ☐ I-4.9 Adaptive conformal calibration wrapper — L
+### ☑ I-4.9 Adaptive conformal calibration wrapper — L
 Add an adaptive conformal layer fit on the calibration role that adjusts the combined
 intervals to hit nominal coverage; persist its state in the bundle (parity).
 **Acceptance:** post-conformal coverage on test is within tolerance of nominal where pre-conformal was miscalibrated; the wrapper state serves identically (train/serve parity).
 
-### ☐ I-4.10 Quantile-crossing repair on ensemble output — S
+### ☑ I-4.10 Quantile-crossing repair on ensemble output — S
 Apply the Phase 1 monotone repair to the combined+calibrated output; record repair
 counts.
 **Acceptance:** a crossing introduced by combination is repaired to monotone before scoring/serving.
 
-### ☐ I-4.11 Evaluate ensembles with the same suite — S
+### ☑ I-4.11 Evaluate ensembles with the same suite — S
 Run an ensemble through the **identical** Phase 2 eval loop (CRPS/pinball/log-score,
 PIT/coverage, VaR, baselines, DM) and onto the leaderboard alongside models.
 **Acceptance:** an ensemble produces a full evaluation report and a leaderboard row; DM compares the ensemble vs its best member.

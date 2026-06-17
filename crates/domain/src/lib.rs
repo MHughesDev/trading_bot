@@ -57,8 +57,21 @@ pub use timestamp::{compute_available_time, AvailableTimeParams, Timestamps};
 pub use trust::TrustTier;
 pub use venue::{SupportedVenue, UnknownVenue};
 
+pub mod ensemble_def;
 pub mod model;
 pub mod model_def;
+pub mod pipeline_def;
 
-pub use model::{AliasName, Direction, Forecast, ModelStatus, RunStatus};
+pub use ensemble_def::{
+    validate_ensemble, EnsembleCalibrationSpec, EnsembleDefinition, EnsembleValidationError,
+    RosterMember, ENSEMBLE_SCHEMA_VERSION,
+};
+pub use model::{
+    AliasName, CalibratedForecast, Direction, Forecast, ForecastRisk, ModelStatus, RiskAtLevel,
+    RunStatus,
+};
 pub use model_def::{validate::validate as validate_model_def, ModelDefinition};
+pub use pipeline_def::{
+    validate_pipeline, BarSchedule, MatrixCell, PipelineDefinition, PipelineMatrix, PipelineNode,
+    PipelineValidationError, PIPELINE_SCHEMA_VERSION,
+};

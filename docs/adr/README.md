@@ -23,7 +23,9 @@ ADR that replaces it.
 | [ADR-0010](0010-three-front-doors-one-canonical-strategy-json.md) | Three Front Doors, One Canonical Strategy JSON | Accepted | 2026-06-08 |
 | [ADR-0011](0011-demand-driven-data-engines-no-auto-start.md) | Demand-Driven Data Engines — No Auto-Start | Accepted | 2026-06-08 |
 | [ADR-0015](0015-freeze-model-definition-format-v1.md) | Freeze Model Definition Format v1.0 | Accepted | 2026-06-15 |
+| [ADR-0016](0016-distributional-forecast-contract.md) | Distributional Forecast Contract v1.1 | Accepted | 2026-06-16 |
 | [ADR-0017](0017-walk-forward-cv-and-leakage-discipline.md) | Walk-Forward Cross-Validation and Leakage Discipline | Accepted | 2026-06-16 |
+| [ADR-0018](0018-ensemble-combination-and-conformal-calibration.md) | Ensemble Combination and Conformal Calibration | Accepted | 2026-06-16 |
 
 ## Decision Relationships
 
@@ -38,7 +40,9 @@ The following ADRs have explicit dependencies or cross-references:
 - **ADR-0007** resolves open question Q-3 from spec/10-open-questions.md.
 - **ADR-0011** (demand-driven pipelines) depends on **ADR-0008** (pure function builders) being true; stateful builders would make pipeline stop/restart expensive.
 - **ADR-0015** (model format freeze) mirrors **ADR-0007** and is a prerequisite for all Set-H phases.
+- **ADR-0016** (distributional forecast contract) extends **ADR-0015** (model format) additively to v1.1; distribution arrays are f64 per **ADR-0002** D-4; σ scaler must be fit on train-only data per **ADR-0017** (no lookahead).
 - **ADR-0017** (walk-forward CV & leakage discipline) extends **ADR-0008** (lookahead impossible by construction) from event ordering to cross-validation boundaries, and uses the additive-migrator mechanism of **ADR-0015**; it is the trust foundation for Set I.
+- **ADR-0018** (ensemble combination & conformal calibration) builds on **ADR-0016** (σ-unit distributional output) and **ADR-0017** (calibration role); the stacking combiner is trained only on the calibration role to prevent leakage.
 
 ## Format
 

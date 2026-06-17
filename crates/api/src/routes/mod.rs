@@ -3,9 +3,12 @@ pub mod assets;
 pub mod automations;
 pub mod backtests;
 pub mod dashboard;
+pub mod ensembles;
 pub mod models;
+pub mod models_phase6;
 pub mod orders;
 pub mod paper;
+pub mod pipelines;
 pub mod strategies;
 pub mod streams;
 pub mod trading;
@@ -57,7 +60,10 @@ pub fn router(state: AppState) -> Router {
         .route("/assets/chart/trade-markers", get(al::get_trade_markers))
         // Phase 1 data-plane queries
         .route("/api/assets", get(assets::list_assets))
-        .route("/api/market/instruments", get(assets::list_market_instruments))
+        .route(
+            "/api/market/instruments",
+            get(assets::list_market_instruments),
+        )
         .route("/api/instruments/{id}", get(assets::get_instrument))
         .route("/api/streams/available", get(streams::list_available))
         // Phase 2 order flow
@@ -132,9 +138,21 @@ pub fn router(state: AppState) -> Router {
         .route("/api/backtests/{id}/stop", post(backtests::stop_backtest))
         .route("/api/backtests/{id}/rerun", post(backtests::rerun_backtest))
         // AI Model Studio -- registry, training, evaluation, promotion, deployment
-        // NB: /api/models/for-node must be registered before /api/models/{id}
-        // so the static literal path wins over the dynamic capture.
+        // NB: static /api/models/* paths must be registered before /api/models/{id}
+        // so the literal paths win over the dynamic capture.
         .route("/api/models/for-node", get(models::for_node))
+        // I-2.11 leaderboard (static path must precede dynamic /{id})
+        .route("/api/models/leaderboard", get(models::leaderboard))
+        // I-3.1 feature library
+        .route("/api/models/feature-sets", get(models::list_feature_sets))
+        // I-3.5 feature preview
+        .route(
+            "/api/models/features/preview",
+            post(models::feature_preview),
+        )
+        // Set I — data quality preview (I-0.7) and walk-forward windows (I-0.11)
+        .route("/api/models/data/quality", get(models::data_quality))
+        .route("/api/models/data/windows", post(models::data_windows))
         .route(
             "/api/models",
             get(models::list_models).post(models::create_model),
@@ -195,9 +213,75 @@ pub fn router(state: AppState) -> Router {
             "/api/models/{id}/test-cases/{case_id}",
             axum::routing::delete(models::delete_test_case),
         )
-        .route("/api/models/{id}/feature-vector", get(models::feature_vector))
+        .route(
+            "/api/models/{id}/feature-vector",
+            get(models::feature_vector),
+        )
         .route("/api/models/{id}/lineage", get(models::get_lineage))
         .route("/api/models/{id}/traces", get(models::get_traces))
         .route("/api/models/{id}/used-by", get(models::get_used_by))
+        // I-2.12 evaluation reports
+        .route("/api/models/{id}/versions/{v}/report", get(models::get_report))
+        .route(
+            "/api/models/{id}/versions/{v}/report/export",
+            get(models::export_report),
+        )
+        // I-3.9 reproduce-from-hash
+        .route(
+            "/api/models/{id}/runs/reproduce",
+            post(models::reproduce_run),
+        )
+        // I-3.10 run compare
+        .route("/api/models/{id}/runs/compare", get(models::compare_runs))
+        // Phase 4 — Ensemble Studio (I-4.3)
+        .route(
+            "/api/ensembles",
+            get(ensembles::list_ensembles).post(ensembles::create_ensemble),
+        )
+        .route("/api/ensembles/{id}", get(ensembles::get_ensemble))
+        .route("/api/ensembles/{id}/combine", post(ensembles::combine_ensemble))
+        .route("/api/ensembles/{id}/versions", get(ensembles::list_ensemble_versions))
+        .route(
+            "/api/ensembles/{id}/versions/{v}/promote/{alias}",
+            post(ensembles::promote_ensemble_version),
+        )
+        // Phase 5 — Pipeline factory + quality monitoring (I-5.12)
+        // Static paths before dynamic captures.
+        .route(
+            "/api/pipelines/runs/{run_id}",
+            get(pipelines::get_run),
+        )
+        .route(
+            "/api/pipelines/runs/{run_id}/nodes",
+            get(pipelines::list_node_runs),
+        )
+        .route(
+            "/api/pipelines",
+            get(pipelines::list_pipelines).post(pipelines::create_pipeline),
+        )
+        .route(
+            "/api/pipelines/{id}",
+            get(pipelines::get_pipeline).delete(pipelines::delete_pipeline),
+        )
+        .route("/api/pipelines/{id}/run", post(pipelines::run_pipeline))
+        .route("/api/pipelines/{id}/runs", get(pipelines::list_runs))
+        .route(
+            "/api/pipelines/{id}/runs/{run_id}/cancel",
+            post(pipelines::cancel_run),
+        )
+        // I-5.9/I-5.10 — per-model rolling quality + alerts
+        .route("/api/models/{id}/quality", get(pipelines::get_model_quality))
+        // I-6.1 — distributional publish contract
+        .route("/api/models/{id}/predict", get(models_phase6::predict))
+        // I-6.4 — tags (static before dynamic)
+        .route("/api/registry/tags/search", get(models_phase6::search_by_tag))
+        .route("/api/registry/tags/{id}/{kind}", get(models_phase6::list_tags).post(models_phase6::add_tag))
+        .route("/api/registry/tags/{id}/{kind}/{tag}", axum::routing::delete(models_phase6::remove_tag))
+        // I-6.4 — annotations
+        .route("/api/registry/annots/{id}/{kind}", get(models_phase6::get_annotations))
+        .route("/api/registry/annots/{id}/{kind}/{key}", axum::routing::put(models_phase6::set_annotation))
+        // I-6.4 — templates
+        .route("/api/registry/templates", get(models_phase6::list_templates).post(models_phase6::create_template))
+        .route("/api/registry/templates/{id}/fork", post(models_phase6::fork_template))
         .with_state(state)
 }

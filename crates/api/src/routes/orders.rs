@@ -187,8 +187,8 @@ pub async fn place_order(
 
         match row {
             Some((hours_json, hp_str)) => {
-                let schedule: TradingSchedule =
-                    serde_json::from_value(hours_json).unwrap_or_else(|_| TradingSchedule::always_open());
+                let schedule: TradingSchedule = serde_json::from_value(hours_json)
+                    .unwrap_or_else(|_| TradingSchedule::always_open());
                 let in_session = is_within_trading_hours(Utc::now(), &schedule);
                 let hp = if hp_str == "haltable" {
                     HaltPolicy::Haltable

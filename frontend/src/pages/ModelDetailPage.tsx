@@ -31,6 +31,7 @@ import { ModelTrainTab } from '@/components/models/ModelTrainTab'
 import { ModelTestTab } from '@/components/models/ModelTestTab'
 import { ModelEvalsTab } from '@/components/models/ModelEvalsTab'
 import { ModelDeploymentsTab } from '@/components/models/ModelDeploymentsTab'
+import { ForecastChartsTab } from '@/components/models/ForecastChartsTab'
 import type { ModelKind } from '@/api/models'
 
 const KIND_ICONS: Record<ModelKind, React.ElementType> = {
@@ -51,7 +52,7 @@ const KIND_LABELS: Record<ModelKind, string> = {
   external_llm_adapter: 'LLM Adapter',
 }
 
-type Tab = 'overview' | 'versions' | 'train' | 'test' | 'evaluations' | 'deployments'
+type Tab = 'overview' | 'versions' | 'train' | 'test' | 'evaluations' | 'deployments' | 'forecast'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -60,6 +61,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'test', label: 'Test Lab' },
   { id: 'evaluations', label: 'Evaluations' },
   { id: 'deployments', label: 'Deployments' },
+  { id: 'forecast', label: 'Forecast Quality' },
 ]
 
 const SPRING = { type: 'spring' as const, stiffness: 380, damping: 30 }
@@ -415,6 +417,7 @@ export function ModelDetailPage() {
         {activeTab === 'test' && <ModelTestTab modelId={id!} />}
         {activeTab === 'evaluations' && <ModelEvalsTab modelId={id!} />}
         {activeTab === 'deployments' && <ModelDeploymentsTab modelId={id!} />}
+        {activeTab === 'forecast' && <ForecastChartsTab modelId={id!} />}
       </div>
     </div>
   )

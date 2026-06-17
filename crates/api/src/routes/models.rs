@@ -11,10 +11,10 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use uuid::Uuid;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 use domain::model_def::validate::validate as validate_def;
 use model_registry::{CreateModelRequest, TrainRequest};
@@ -35,7 +35,11 @@ fn check_test_rate_limit(user_id: &str, model_id: &str) -> bool {
     let now = Instant::now();
     let deque = map.entry(key).or_default();
     // Drop timestamps older than the window.
-    while deque.front().map(|t| now.duration_since(*t) > WINDOW).unwrap_or(false) {
+    while deque
+        .front()
+        .map(|t| now.duration_since(*t) > WINDOW)
+        .unwrap_or(false)
+    {
         deque.pop_front();
     }
     if deque.len() >= MAX_CALLS {
@@ -721,10 +725,125 @@ pub async fn get_used_by(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.models.get_used_by(&id).await {
-        Ok(strategies) => {
-            Json(json!({ "model_id": id, "strategies": strategies })).into_response()
-        }
+        Ok(strategies) => Json(json!({ "model_id": id, "strategies": strategies })).into_response(),
         Err(e) => unprocessable(e),
+    }
+}
+
+// -- Data quality + walk-forward windows (I-0.7 / I-0.11) --
+
+#[derive(Debug, Deserialize)]
+pub struct DataQualityParams {
+    pub instrument: String,
+    pub timeframe: String,
+    pub start: String,
+    pub end: String,
+    #[serde(default = "default_sigma")]
+    pub sigma: f64,
+}
+
+fn default_sigma() -> f64 {
+    5.0
+}
+
+/// GET /api/models/data/quality?instrument=&timeframe=&start=&end=&sigma=
+///
+/// Bar-level data-quality diagnostics (gaps, duplicates, outliers) for the
+/// series a training run would train on. Read-only — never mutates state.
+pub async fn data_quality(
+    State(state): State<AppState>,
+    _token: BearerToken,
+    Query(params): Query<DataQualityParams>,
+) -> impl IntoResponse {
+    use backtest::{BarStore, TimeframeExt};
+    use chrono::DateTime;
+    use domain::payloads::bar::Timeframe;
+    use model_registry::data_view::{data_quality as dq_compute, AsOf};
+
+    let tf = match <Timeframe as TimeframeExt>::from_key(&params.timeframe) {
+        Some(t) => t,
+        None => return unprocessable(format!("unknown timeframe: {}", params.timeframe)),
+    };
+    let start = match DateTime::parse_from_rfc3339(&params.start) {
+        Ok(t) => t.with_timezone(&chrono::Utc),
+        Err(e) => return unprocessable(format!("invalid start: {e}")),
+    };
+    let end = match DateTime::parse_from_rfc3339(&params.end) {
+        Ok(t) => t.with_timezone(&chrono::Utc),
+        Err(e) => return unprocessable(format!("invalid end: {e}")),
+    };
+
+    let store = BarStore::connect(&state.clickhouse_url);
+    let as_of = AsOf::from_datetime(end);
+    let bars = match store.load_bars(&params.instrument, tf, start, end).await {
+        Ok(b) => model_registry::data_view::filter_as_of(b, as_of),
+        Err(e) => return unprocessable(format!("bar load failed: {e}")),
+    };
+
+    let step_secs = tf.seconds();
+    let report = dq_compute(&bars, step_secs, params.sigma);
+    Json(serde_json::json!({
+        "instrument": params.instrument,
+        "timeframe": params.timeframe,
+        "start": params.start,
+        "end": params.end,
+        "bar_count": report.bar_count,
+        "coverage_pct": report.coverage_pct,
+        "gaps": report.gaps,
+        "dupes": report.dupes,
+        "outliers": report.outliers,
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DataWindowsRequest {
+    /// Walk-forward CV spec to preview.
+    pub spec: domain::model_def::cv::WalkForwardSpec,
+    /// Total rows in the (already-materialized) dataset.
+    pub row_count: u64,
+    /// Label horizon token (e.g. `"1h"`) used to size purge.
+    pub horizon_token: String,
+    /// Bar timeframe key (e.g. `"1m"`) matching the dataset.
+    pub timeframe: String,
+}
+
+/// POST /api/models/data/windows
+///
+/// Preview the walk-forward fold boundaries (train/cal/test index ranges) that
+/// Rust would compute for the given spec over a dataset with `row_count` rows.
+/// Lets the UI show fold geometry before committing to a full training run.
+pub async fn data_windows(
+    State(_state): State<AppState>,
+    _token: BearerToken,
+    Json(req): Json<DataWindowsRequest>,
+) -> impl IntoResponse {
+    use features::walk_forward_folds;
+
+    let horizon_bars =
+        features::label_horizon_bars(&req.horizon_token, &req.timeframe).unwrap_or(60);
+
+    match walk_forward_folds(req.row_count as usize, &req.spec, horizon_bars) {
+        Ok(folds) => {
+            let windows: Vec<serde_json::Value> = folds
+                .iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "fold": f.index,
+                        "train": { "start": f.train.start, "end": f.train.end, "len": f.train.len() },
+                        "cal":   { "start": f.cal.start,   "end": f.cal.end,   "len": f.cal.len()   },
+                        "test":  { "start": f.test.start,  "end": f.test.end,  "len": f.test.len()  },
+                    })
+                })
+                .collect();
+            Json(serde_json::json!({
+                "row_count": req.row_count,
+                "horizon_bars": horizon_bars,
+                "folds": windows,
+            }))
+            .into_response()
+        }
+        Err(e) => unprocessable(format!("fold generation failed: {e}")),
     }
 }
 
@@ -781,5 +900,285 @@ pub async fn for_node(
             Json(json!({ "error": e.to_string() })),
         )
             .into_response(),
+    }
+}
+
+// -- Feature library (I-3.1, I-3.5) --
+
+/// GET /api/models/feature-sets  — list all registered feature sets.
+pub async fn list_feature_sets(
+    State(state): State<AppState>,
+    _token: BearerToken,
+) -> impl IntoResponse {
+    let sets = state.models.list_feature_sets();
+    Json(json!({ "feature_sets": sets, "registry_version": features::REGISTRY_VERSION }))
+        .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FeaturePreviewRequest {
+    pub feature_set_ref: String,
+    pub features: Option<Vec<String>>,
+}
+
+/// POST /api/models/features/preview  — compute sample feature values + stats (I-3.5).
+pub async fn feature_preview(
+    State(_state): State<AppState>,
+    _token: BearerToken,
+    Json(req): Json<FeaturePreviewRequest>,
+) -> impl IntoResponse {
+    use features::{build_training_frame, resolve_feature_set, OhlcvRow};
+
+    // Resolve feature set.
+    let feature_names: Vec<String> = if let Some(names) = req.features {
+        names
+    } else if let Some(spec) = resolve_feature_set(&req.feature_set_ref) {
+        spec.features.clone()
+    } else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": format!("unknown feature_set_ref: {}", req.feature_set_ref) })),
+        )
+            .into_response();
+    };
+
+    // Validate feature names.
+    let unknown = features::validate_features(&feature_names);
+    if !unknown.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "unknown features", "unknown": unknown })),
+        )
+            .into_response();
+    }
+
+    // Generate a synthetic fixture for preview (100 bars of BTC-style prices).
+    let n = 120usize;
+    let bars: Vec<OhlcvRow> = (0..n)
+        .map(|i| {
+            let base = 50_000.0 + (i as f64) * 10.0;
+            let ts_ns = (1_700_000_000i64 + i as i64 * 60) * 1_000_000_000;
+            OhlcvRow {
+                ts_ns,
+                open: base,
+                high: base * 1.002,
+                low: base * 0.998,
+                close: base + (i as f64 % 5.0 - 2.0) * 20.0,
+                volume: 1_000_000.0 + (i as f64) * 100.0,
+            }
+        })
+        .collect();
+
+    let frame = build_training_frame(&bars, &feature_names, 1);
+
+    // Per-feature stats.
+    #[allow(clippy::cast_precision_loss)]
+    let stats: Vec<serde_json::Value> = frame
+        .feature_names
+        .iter()
+        .zip(frame.columns.iter())
+        .map(|(name, col)| {
+            let n = col.len() as f64;
+            if n == 0.0 {
+                return json!({ "name": name, "n": 0, "mean": null, "std": null, "nan_rate": 1.0 });
+            }
+            let mean = col.iter().sum::<f64>() / n;
+            let std = if n > 1.0 {
+                (col.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt()
+            } else {
+                0.0
+            };
+            json!({ "name": name, "n": col.len(), "mean": mean, "std": std, "nan_rate": 0.0 })
+        })
+        .collect();
+
+    // Sample rows (up to 10).
+    let sample_rows: Vec<serde_json::Value> = (0..frame.row_count().min(10))
+        .map(|i| {
+            let row: serde_json::Map<String, serde_json::Value> = frame
+                .feature_names
+                .iter()
+                .zip(frame.columns.iter())
+                .map(|(name, col)| (name.clone(), json!(col[i])))
+                .collect();
+            serde_json::Value::Object(row)
+        })
+        .collect();
+
+    Json(json!({
+        "feature_set_ref": req.feature_set_ref,
+        "features": feature_names,
+        "n_rows": frame.row_count(),
+        "stats": stats,
+        "sample": sample_rows,
+        "note": "stats computed on a 120-bar synthetic fixture for preview only",
+    }))
+    .into_response()
+}
+
+// -- Reproducibility (I-3.9) --
+
+#[derive(Debug, Deserialize)]
+pub struct ReproduceRequest {
+    pub run_id_or_hash: String,
+}
+
+/// POST /api/models/:id/runs/reproduce  — re-execute a run from its spec hash (I-3.9).
+pub async fn reproduce_run(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<String>,
+    Json(req): Json<ReproduceRequest>,
+) -> impl IntoResponse {
+    match state
+        .models
+        .reproduce_run(&req.run_id_or_hash, &id, token.user_id())
+        .await
+    {
+        Ok(run_id) => (
+            StatusCode::ACCEPTED,
+            Json(json!({ "run_id": run_id, "reproduced_from": req.run_id_or_hash })),
+        )
+            .into_response(),
+        Err(e) => map_result::<serde_json::Value>(Err(e)),
+    }
+}
+
+// -- Run compare (I-3.10) --
+
+#[derive(Debug, Deserialize)]
+pub struct RunCompareParams {
+    pub ids: String, // comma-separated run UUIDs
+}
+
+/// GET /api/models/:id/runs/compare?ids=run1,run2  — side-by-side run diff (I-3.10).
+pub async fn compare_runs(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<String>,
+    Query(params): Query<RunCompareParams>,
+) -> impl IntoResponse {
+    let run_ids: Vec<uuid::Uuid> = params
+        .ids
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    if run_ids.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "ids must be comma-separated UUIDs" })),
+        )
+            .into_response();
+    }
+    match state
+        .models
+        .compare_runs(&id, &run_ids, token.user_id())
+        .await
+    {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => map_result::<serde_json::Value>(Err(e)),
+    }
+}
+
+// -- Leaderboard (I-2.11) --
+
+#[derive(Debug, Deserialize)]
+pub struct LeaderboardParams {
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub asset_class: Option<String>,
+    #[serde(default)]
+    pub metric: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// GET /api/models/leaderboard
+pub async fn leaderboard(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Query(params): Query<LeaderboardParams>,
+) -> impl IntoResponse {
+    let limit = params.limit.unwrap_or(50).clamp(1, 200);
+    match state
+        .models
+        .leaderboard(
+            token.user_id(),
+            params.kind.as_deref(),
+            params.asset_class.as_deref(),
+            params.metric.as_deref(),
+            limit,
+        )
+        .await
+    {
+        Ok(entries) => {
+            let total = entries.len();
+            Json(json!({ "leaderboard": entries, "total": total })).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+// -- Evaluation report (I-2.12) --
+
+/// GET /api/models/:id/versions/:v/report
+pub async fn get_report(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path((id, version)): Path<(String, i32)>,
+) -> impl IntoResponse {
+    match state.models.get_report(&id, version, token.user_id()).await {
+        Ok(report) => Json(report).into_response(),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") || msg.contains("no completed eval") {
+                not_found()
+            } else {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": msg })),
+                )
+                    .into_response()
+            }
+        }
+    }
+}
+
+/// GET /api/models/:id/versions/:v/report/export  (JSON download)
+pub async fn export_report(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path((id, version)): Path<(String, i32)>,
+) -> impl IntoResponse {
+    match state.models.export_report(&id, version, token.user_id()).await {
+        Ok(bytes) => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                (
+                    "Content-Disposition",
+                    "attachment; filename=\"eval_report.json\"",
+                ),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") || msg.contains("no completed eval") {
+                not_found()
+            } else {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": msg })),
+                )
+                    .into_response()
+            }
+        }
     }
 }

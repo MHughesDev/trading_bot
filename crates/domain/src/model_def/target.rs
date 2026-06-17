@@ -10,6 +10,8 @@ pub enum TargetField {
     Action,
     Score,
     SizeFraction,
+    /// Absolute move size (|return|); used for triple-barrier and distributional labeling.
+    MoveSize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

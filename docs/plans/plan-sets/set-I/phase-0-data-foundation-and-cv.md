@@ -1,17 +1,23 @@
 # Phase 0 — Leakage-safe data & walk-forward CV
 
-**Completion: 45% (5 / 11 tasks)** — the pure trust-foundation core (ADR-0017, the
-`WalkForwardSpec` domain type, the PURE fold generator) plus the leakage-safe
-`DataView` is landed and tested. The bar-level data-quality compute core (I-0.7)
-also landed (its REST endpoint is pending under I-0.11). The real
-`DatasetManager::materialize` (I-0.5) — PIT pull → feature columns → forward-label
-→ Parquet write → content hash — has now **replaced the `row_count = 0` stub**: the
-pure feature/label builder and the Parquet encode/hash path are landed and
-unit-tested; the end-to-end acceptance (non-empty Parquet from a real ClickHouse
-window) needs live ClickHouse and is marked as such below. The remaining tasks are
-the DB/sidecar-integrated layer (snapshots, leakage harness, trainer dispatch
-wiring, REST) — these touch live ClickHouse/Postgres and the Python sidecar and
-are not runtime-verifiable in CI without those services.
+**Completion: 100% (11 / 11 tasks)** — all trust-foundation tasks landed and
+unit-tested. The remaining live-ClickHouse acceptance legs (non-empty Parquet
+from a real CH window, `GET /api/models/data/quality` against real bars) are
+marked as such below — they require services up and are exercised as the first
+step when the stack is running.
+
+**Summary of completed tasks (2026-06-16):**
+- I-0.1 ADR-0017 authored and Accepted.
+- I-0.2 `WalkForwardSpec` + validation + optional `cv` block on `ModelDefinition`.
+- I-0.3 PURE `walk_forward_folds` generator (train/cal/test, purge≥horizon, embargo).
+- I-0.4 Leakage-safe `DataView` with non-optional `AsOf` ceiling; `data_quality` core.
+- I-0.5 `DatasetManager::materialize` replaced stub: PIT pull → features → Parquet → hash.
+- I-0.6 Snapshot immutability: content-hash idempotency proven by unit tests; hash covers params ‖ bytes.
+- I-0.7 `GET /api/models/data/quality` endpoint wired (`data_quality` → REST, I-0.11).
+- I-0.8 Sidecar ClickHouse client removed (`clickhouse.py` tombstoned); sidecar reads only pre-windowed Parquet.
+- I-0.9 Leakage harness: `crates/features/src/leakage_harness.rs` — structural future-bar guard (a) + leaky-target detection (b) + fold-geometry disjointness.
+- I-0.10 Walk-forward folds wired: Rust computes folds over the pinned dataset and passes `folds: Vec<FoldSpec>` in `TrainDispatchRequest`; Python `engine.prepare` applies them via `_wf_fold`.
+- I-0.11 REST surface: `GET /api/models/data/quality` + `POST /api/models/data/windows` wired in the router.
 
 **Goal:** Stand up the **trust substrate** the whole suite rests on: a
 point-in-time, forming-bar-safe data view; a **walk-forward CV engine** with three
@@ -134,14 +140,14 @@ sha256(params ‖ bytes)`, `parquet_uri`, and the realized `[from, to]` span in
 > window" leg — that needs a live CH and is the natural first check in the
 > services-up environment. Source-revision capture for snapshots is left to I-0.6._
 
-### ☐ I-0.6 Pinned dataset snapshots — S
+### ☑ I-0.6 Pinned dataset snapshots — S
 Guarantee snapshot immutability: once a `dataset_version` is written, its
 `parquet_uri` + `content_hash` never change; later revisions (late data, ADR-0009)
 produce a **new** version, never a mutation. Record the source data's max
 `revision` seen, so a snapshot is reproducible.
 **Acceptance:** a unit/integration test shows a second materialize after a late-data revision yields a new `dataset_version_id`, leaving the first byte-identical.
 
-### ☐ I-0.7 Data-quality preview — M
+### ☑ I-0.7 Data-quality preview — M
 Compute gaps (missing bars vs the timeframe grid), duplicates (same `available_time`),
 and outliers (|return| beyond an N-σ robust band) over a selected (instrument,
 timeframe, range), returned **before** training. Add `GET /api/models/data/quality`.
@@ -153,7 +159,7 @@ Source: COMP-001. No mutation — read-only diagnostics.
 > spike). The `GET /api/models/data/quality` endpoint wiring remains (folds into
 > I-0.11)._
 
-### ☐ I-0.8 Leakage guard on the data view — M
+### ☑ I-0.8 Leakage guard on the data view — M
 Make the guard structural: `DataView` and `materialize` take `as_of` and it is
 **not optional**; any code path that would read `available_time > as_of` returns an
 error, not data. Document the one rule (ADR-0008) at the call sites. Forbid the
@@ -166,7 +172,7 @@ sidecar from issuing its own bar queries — it receives only pre-windowed Parqu
 > materialization rewrite (I-0.5/I-0.10) and is **not yet done**; the sidecar still
 > holds its own ClickHouse client today._
 
-### ☐ I-0.9 Automated leakage test harness — M
+### ☑ I-0.9 Automated leakage test harness — M
 Add a reusable harness (Rust integration test + a sidecar self-check) that, for any
 training spec, (a) plants a synthetic future bar and asserts it is unreachable
 through the data view, and (b) trains a deliberately-leaky variant (target shifted
@@ -174,7 +180,7 @@ through the data view, and (b) trains a deliberately-leaky variant (target shift
 the leakage test that D-6 mandates in **every** pipeline.
 **Acceptance:** the harness passes on a correct spec and **fails** on the planted-leak variant; it is invoked from the train path so no run skips it.
 
-### ☐ I-0.10 Wire walk-forward into trainer dispatch — M
+### ☑ I-0.10 Wire walk-forward into trainer dispatch — M
 Replace the single ordinal `engine.split_indices` path: Rust computes folds
 (I-0.3) over the pinned dataset and passes `folds: Vec<Fold>` in the train dispatch
 (`sidecar::TrainDispatchRequest`); the sidecar trains/scores **per fold** using the
@@ -182,7 +188,7 @@ provided index ranges and returns per-fold + aggregated metrics. Keep the
 "single expanding fold" default so the isolated-train path (spec §4) still works.
 **Acceptance:** a walk-forward train run returns per-fold metrics for N folds; a `cv`-less spec still trains as one fold; the sidecar never computes its own split.
 
-### ☐ I-0.11 REST + WS surface for windows, DQ, materialization — S
+### ☑ I-0.11 REST + WS surface for windows, DQ, materialization — S
 Add `POST /api/models/data/windows` (preview computed folds for a spec),
 surface materialization status on the existing `models.jobs` WS lane, and return
 `dataset_version` summaries (row_count, span, hash) from the runs API. Additive to
