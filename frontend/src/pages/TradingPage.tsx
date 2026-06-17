@@ -7,6 +7,7 @@ import { TerminalPanel, type TerminalAssetClass } from '@/components/trading/Ter
 import { ChartPanel } from '@/panels/ChartPanel'
 import type { PanelSpec } from '@/config/layoutTemplates'
 import { useWorkspaceStore } from '@/store/workspace'
+import { useModeStore } from '@/store/mode'
 import { assetApi, strategiesApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Plus, X, ChevronLeft } from 'lucide-react'
@@ -406,21 +407,29 @@ function ScannerPicker({
 type PickerKind = 'chart' | 'terminal' | 'scanner' | null
 
 export function TradingPage() {
-  // Panel layout is persisted (localStorage via the workspace store) so a page
-  // refresh keeps every open chart / terminal / scanner instead of resetting to
-  // the default template.
-  const panels = useWorkspaceStore((s) => s.panels)
-  const setPanels = useWorkspaceStore((s) => s.setPanels)
+  // Panel layout is persisted per trading mode (localStorage via the workspace
+  // store) so a refresh keeps every open chart / terminal / scanner, and a
+  // PAPER window keeps a different layout from a LIVE window.
+  const mode = useModeStore((s) => s.mode)
+  const panels = useWorkspaceStore((s) => s.byMode[mode].panels)
+  const setPanelsForMode = useWorkspaceStore((s) => s.setPanels)
   const removeChartSettings = useWorkspaceStore((s) => s.removeChartSettings)
   const [pickerKind, setPickerKind] = useState<PickerKind>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
+  // Bind the panel mutators to the current mode so every edit lands in this
+  // window's mode slice.
+  const setPanels = useCallback(
+    (updater: (prev: PanelSpec[]) => PanelSpec[]) => setPanelsForMode(mode, updater),
+    [setPanelsForMode, mode],
+  )
+
   const removePanel = useCallback((id: string) => {
     setPanels((prev) => prev.filter((p) => p.id !== id))
     // Drop the closed chart's persisted view settings so storage doesn't grow.
-    removeChartSettings(id)
-  }, [setPanels, removeChartSettings])
+    removeChartSettings(mode, id)
+  }, [setPanels, removeChartSettings, mode])
 
   const addPanel = useCallback((instrument: string, assetClass: string, kind: 'chart' | 'terminal') => {
     const id = `${kind}-${Date.now()}`
@@ -476,7 +485,7 @@ export function TradingPage() {
       <WorkspaceScroll className="flex-1">
         {panels.map((spec, i) => (
           <Panel
-            key={spec.id}
+            key={`${mode}:${spec.id}`}
             title={panelTitle(spec)}
             width={panelWidth(spec)}
             onClose={() => removePanel(spec.id)}

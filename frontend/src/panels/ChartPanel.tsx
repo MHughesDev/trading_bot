@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import type { Bar, WsOutMessage } from '@/lib/types'
 import type { PriceLineAnnotation } from '@/components/charts/Annotations'
 import { useWorkspaceStore } from '@/store/workspace'
+import { useModeStore } from '@/store/mode'
 
 interface ChartPanelProps {
   instrument: string
@@ -398,23 +399,32 @@ export function ChartPanel({
   const [initDone, setInitDone] = useState(false)
   const [showReseed, setShowReseed] = useState(false)
 
-  // Timeframe + indicators are restored from the persisted workspace store so a
-  // page refresh keeps this chart's view. Read once via getState() in the lazy
-  // initializer to avoid subscribing (which would re-render on our own writes).
+  // Timeframe + indicators are restored from the persisted workspace store
+  // (scoped to the current trading mode) so a page refresh keeps this chart's
+  // view and PAPER/LIVE windows stay independent. Read once via getState() in
+  // the lazy initializer to avoid subscribing (which would re-render on our own
+  // writes). The panel is keyed by mode upstream, so `mode` is stable for this
+  // instance's lifetime.
+  const mode = useModeStore((s) => s.mode)
   const setChartSettings = useWorkspaceStore((s) => s.setChartSettings)
   const [tfSecs, setTfSecs] = useState(
-    () => (persistKey ? useWorkspaceStore.getState().chartSettings[persistKey]?.tfSecs : undefined) ?? 3600,
+    () =>
+      (persistKey ? useWorkspaceStore.getState().byMode[mode].chartSettings[persistKey]?.tfSecs : undefined) ??
+      3600,
   )
   const [activeIndicators, setActiveIndicators] = useState<IndicatorInstance[]>(
-    () => (persistKey ? useWorkspaceStore.getState().chartSettings[persistKey]?.indicators : undefined) ?? [],
+    () =>
+      (persistKey
+        ? useWorkspaceStore.getState().byMode[mode].chartSettings[persistKey]?.indicators
+        : undefined) ?? [],
   )
   const [showIndicatorPicker, setShowIndicatorPicker] = useState(false)
 
   // Persist timeframe + indicators whenever they change.
   useEffect(() => {
     if (!persistKey) return
-    setChartSettings(persistKey, { tfSecs, indicators: activeIndicators })
-  }, [persistKey, tfSecs, activeIndicators, setChartSettings])
+    setChartSettings(mode, persistKey, { tfSecs, indicators: activeIndicators })
+  }, [mode, persistKey, tfSecs, activeIndicators, setChartSettings])
 
   const tf = TIMEFRAMES.find((t) => t.secs === tfSecs) ?? TIMEFRAMES[4]
 
