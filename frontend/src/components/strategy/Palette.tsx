@@ -37,7 +37,14 @@ const CATEGORIES: Category[] = [
   {
     label: 'AI', color: '#0E7490',
     items: [
-      { type: 'ai_forecast', label: 'AI Forecast', icon: '◎', data: { model: 'price_forecaster', direction: 'bullish', minConfidence: 0.6 } },
+      {
+        type: 'ai_inference', label: 'AI Inference', icon: '◎',
+        data: {
+          targetKind: 'model', targetRef: '', alias: 'production',
+          direction: 'bullish', minConfidence: 0.6,
+          timeframe: '1m', lookback: 200,
+        },
+      },
     ],
   },
   {
