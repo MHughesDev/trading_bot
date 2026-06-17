@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use backtest::BacktestManager;
+use backtest::{BacktestManager, SuiteManager};
 use demand_manager::{DemandRegistry, NoopPipelineFactory};
 use execution::paper::PaperTradingEngine;
 use execution::ExecutionEngine;
@@ -47,6 +47,9 @@ pub struct AppState {
     pub clock: Arc<WallClock>,
     /// Backtest job orchestrator (connects to the market_simulator SDK).
     pub backtest: Arc<BacktestManager>,
+    /// Backtest-suite orchestrator (Set J: experiments, studies, gates, vault,
+    /// reconciliation) — the honest-evaluation core behind `/api/backtest/*`.
+    pub suite: Arc<SuiteManager>,
     /// AI Model Studio orchestrator.
     pub models: Arc<ModelManager>,
     /// Ensemble orchestrator — mirrors ModelManager lifecycle for ensemble artifacts.
@@ -165,6 +168,7 @@ impl AppState {
             instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),
             clock: Arc::new(WallClock),
             backtest,
+            suite: Arc::new(SuiteManager::new()),
             models,
             ensembles,
             pipelines,

@@ -4,6 +4,7 @@ pub mod automations;
 pub mod backtests;
 pub mod dashboard;
 pub mod ensembles;
+pub mod experiments;
 pub mod models;
 pub mod models_phase6;
 pub mod orders;
@@ -21,6 +22,7 @@ use axum::{
 
 use crate::auth::handlers;
 use crate::state::AppState;
+use crate::ws::backtest::ws_backtest_suite;
 use crate::ws::live::ws_live;
 
 use asset_lifecycle as al;
@@ -137,6 +139,53 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/backtests/{id}/stop", post(backtests::stop_backtest))
         .route("/api/backtests/{id}/rerun", post(backtests::rerun_backtest))
+        // Backtest Suite (Set J) — honest-evaluation core: experiments, studies,
+        // nulls, the staged-gate funnel, the one-shot vault, reconciliation.
+        .route("/ws/backtest-suite", get(ws_backtest_suite))
+        .route(
+            "/api/backtest/calibration",
+            get(experiments::suite_calibration),
+        )
+        .route(
+            "/api/backtest/experiments",
+            get(experiments::list_experiments).post(experiments::create_experiment),
+        )
+        .route(
+            "/api/backtest/experiments/{id}",
+            get(experiments::get_experiment),
+        )
+        .route(
+            "/api/backtest/experiments/{id}/promote",
+            post(experiments::promote_experiment),
+        )
+        .route(
+            "/api/backtest/experiments/{id}/retire",
+            post(experiments::retire_experiment),
+        )
+        .route(
+            "/api/backtest/experiments/{id}/studies",
+            get(experiments::list_studies).post(experiments::run_study),
+        )
+        .route(
+            "/api/backtest/experiments/{id}/nulls",
+            get(experiments::null_picker).post(experiments::choose_null),
+        )
+        .route(
+            "/api/backtest/experiments/{id}/funnel",
+            get(experiments::get_funnel),
+        )
+        .route(
+            "/api/backtest/experiments/{id}/funnel/advance",
+            post(experiments::advance_funnel),
+        )
+        .route(
+            "/api/backtest/experiments/{id}/vault",
+            get(experiments::get_vault).post(experiments::run_vault),
+        )
+        .route(
+            "/api/backtest/experiments/{id}/reconcile",
+            post(experiments::reconcile),
+        )
         // AI Model Studio -- registry, training, evaluation, promotion, deployment
         // NB: static /api/models/* paths must be registered before /api/models/{id}
         // so the literal paths win over the dynamic capture.

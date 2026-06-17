@@ -37,6 +37,7 @@ pub mod sim;
 pub mod stats;
 pub mod store;
 pub mod study;
+pub mod suite;
 pub mod types;
 pub mod warmup;
 
@@ -44,6 +45,7 @@ pub use aggregate::aggregate_bars;
 pub use collect::CollectorPlan;
 pub use manager::BacktestManager;
 pub use store::{BarCoverage, BarStore, CollectedBar};
+pub use suite::SuiteManager;
 pub use types::{
     BacktestRequest, BacktestSnapshot, BacktestStatus, DataCoverage, MissingRange, ResolvedSpec,
     TimeframeExt,
