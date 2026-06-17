@@ -33,9 +33,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-use crate::experiment::{
-    Experiment, ExperimentError, ExperimentState, Holdout, VaultAccess,
-};
+use crate::experiment::{Experiment, ExperimentError, ExperimentState, Holdout, VaultAccess};
 use crate::gates::{
     CorroboratorInputs, Gate, Gate3Outcome, GateError, GateRunner, GateVerdict, IntegrityInputs,
 };
@@ -690,12 +688,7 @@ impl SuiteManager {
             .ok_or(SuiteError::NotFound)?;
         let recommended = recommend_null(&r.strategy_type);
         let was_override = kind != recommended;
-        if was_override
-            && override_reason
-                .as_deref()
-                .map_or("", str::trim)
-                .is_empty()
-        {
+        if was_override && override_reason.as_deref().map_or("", str::trim).is_empty() {
             return Err(SuiteError::Null(
                 "overriding the recommended null requires a logged reason".into(),
             ));
