@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 use sqlx::PgPool;
 use tracing::{debug, warn};
 
-use domain::model::forecast::ForecastDistribution;
+use domain::model::forecast::{ForecastDistribution, ForecastRisk};
+use domain::strategy_def::InferenceOutput;
+use rust_decimal::Decimal;
 
 use crate::sidecar::{PredictInstance, PredictRequest, SidecarClient};
 
@@ -25,6 +27,12 @@ pub struct ForecastResult {
     pub direction: String,
     pub confidence: f64,
     pub latency_ms: u64,
+    /// Raw magnitude string from the sidecar response.
+    ///
+    /// For `RiskSizing` models this carries the decimal-string size fraction;
+    /// for other model kinds it is the model's reported magnitude. Kept as a
+    /// `String` so the size-fraction path stays decimal-exact (ADR-0002).
+    pub magnitude: String,
     /// Full distribution from a probabilistic forecaster (ADR-0016).
     /// `None` for point/classification models.
     pub distribution: Option<ForecastDistribution>,
@@ -218,6 +226,7 @@ impl InferenceGateway {
                     direction: prediction.direction.clone(),
                     confidence: prediction.confidence,
                     latency_ms,
+                    magnitude: prediction.magnitude.clone(),
                     distribution,
                 };
 
@@ -276,6 +285,7 @@ impl InferenceGateway {
                                         direction: fb_pred.direction.clone(),
                                         confidence: fb_pred.confidence,
                                         latency_ms,
+                                        magnitude: fb_pred.magnitude.clone(),
                                         distribution,
                                     };
                                     self.write_trace(
@@ -386,6 +396,7 @@ impl InferenceGateway {
                     direction: pred.direction,
                     confidence: pred.confidence,
                     latency_ms,
+                    magnitude: pred.magnitude,
                     distribution,
                 })
             }
@@ -451,6 +462,194 @@ impl InferenceGateway {
 
                 results.insert(node.id.clone(), fired);
             }
+        }
+    }
+
+    /// Resolve an inference target by `target_kind`, returning a `ForecastResult`.
+    ///
+    /// `"ensemble"` routes through `forecast_ensemble`; `"pipeline"` is not yet
+    /// implemented (abstains); everything else routes through `forecast`.
+    async fn run_target(
+        &self,
+        model_ref: &str,
+        target_kind: &str,
+        alias: &str,
+        instrument_id: &str,
+        features: &HashMap<String, f64>,
+    ) -> Option<ForecastResult> {
+        match target_kind {
+            "ensemble" => {
+                self.forecast_ensemble(model_ref, alias, instrument_id, features)
+                    .await
+            }
+            "pipeline" => {
+                warn!(
+                    model_ref,
+                    "Inference target_kind='pipeline' is not yet implemented — abstaining"
+                );
+                None
+            }
+            _ => {
+                self.forecast(model_ref, alias, instrument_id, features)
+                    .await
+            }
+        }
+    }
+
+    /// Build the rich `InferenceOutput` carrier from a raw `ForecastResult`.
+    ///
+    /// Distributional fields (median, sigma, quantiles) and derived risk
+    /// read-outs (`var_95`, `es_95`, `skew`, `spread_90`) are populated only
+    /// when the forecast carried a validated distribution.
+    fn forecast_to_output(f: &ForecastResult) -> InferenceOutput {
+        let mut out = InferenceOutput {
+            direction: f.direction.clone(),
+            confidence: f.confidence,
+            ..Default::default()
+        };
+        if let Some(dist) = &f.distribution {
+            out.median_return = Some(dist.median_return);
+            out.sigma = Some(dist.sigma);
+            out.quantile_levels = Some(dist.quantile_levels.clone());
+            out.quantiles_return = Some(dist.quantiles_return.clone());
+            let risk = ForecastRisk::from_distribution(dist);
+            out.var_95 = Some(risk.var_95.var);
+            out.var_99 = Some(risk.var_99.var);
+            out.es_95 = Some(risk.var_95.es);
+            out.skew = Some(risk.skew);
+            out.spread_90 = Some(risk.spread_90);
+        }
+        out
+    }
+
+    /// Clamp a decimal-string size fraction into `[min, max]` (also decimal
+    /// strings).  Comparison is done with `Decimal` to stay money-safe
+    /// (ADR-0002) — no `f64` ever touches a size value.  Returns the original
+    /// string unchanged if it (or a bound) fails to parse.
+    fn clamp_fraction(raw: &str, clamp: Option<&[String; 2]>) -> String {
+        let Some([min_s, max_s]) = clamp else {
+            return raw.to_owned();
+        };
+        let (Ok(v), Ok(min), Ok(max)) = (
+            Decimal::from_str_exact(raw),
+            Decimal::from_str_exact(min_s),
+            Decimal::from_str_exact(max_s),
+        ) else {
+            return raw.to_owned();
+        };
+        v.clamp(min, max).normalize().to_string()
+    }
+
+    /// Refresh full `InferenceOutput`s for value-producing AI nodes
+    /// (`Inference`, `Sizing`, `Decision`) into `outputs`.
+    ///
+    /// The strategy runtime calls this before dispatch so it can write bound
+    /// fields into feature slots and route `Sizing`/`Decision` results.
+    ///
+    /// Abstention honours each node's `AbstainPolicy`:
+    ///   - `Flat`     → inserts a default (NaN/zero) `InferenceOutput`.
+    ///   - `HoldLast` → leaves any prior value in `outputs` untouched.
+    ///
+    /// `Sizing` nodes additionally fall back to their `fallback` fixed size
+    /// (when set) on abstention before consulting the policy.
+    pub async fn refresh_node_inferences(
+        &self,
+        nodes: &[domain::strategy_def::nodes::Node],
+        instrument_id: &str,
+        features: &HashMap<String, f64>,
+        outputs: &mut HashMap<String, InferenceOutput>,
+    ) {
+        use domain::strategy_def::nodes::NodeKind;
+
+        for node in nodes {
+            match &node.kind {
+                NodeKind::Inference {
+                    model_ref,
+                    target_kind,
+                    alias,
+                    abstain,
+                    ..
+                } => {
+                    match self
+                        .run_target(model_ref, target_kind, alias, instrument_id, features)
+                        .await
+                    {
+                        Some(f) => {
+                            outputs.insert(node.id.clone(), Self::forecast_to_output(&f));
+                        }
+                        None => Self::apply_abstain(&node.id, abstain, outputs),
+                    }
+                }
+                NodeKind::Sizing {
+                    model_ref,
+                    alias,
+                    clamp,
+                    fallback,
+                    abstain,
+                    ..
+                } => {
+                    match self
+                        .forecast(model_ref, alias, instrument_id, features)
+                        .await
+                    {
+                        Some(f) => {
+                            let mut out = Self::forecast_to_output(&f);
+                            out.size_fraction =
+                                Some(Self::clamp_fraction(&f.magnitude, clamp.as_ref()));
+                            outputs.insert(node.id.clone(), out);
+                        }
+                        None => {
+                            if let Some(fb) = fallback {
+                                outputs.insert(
+                                    node.id.clone(),
+                                    InferenceOutput {
+                                        size_fraction: Some(fb.clone()),
+                                        ..Default::default()
+                                    },
+                                );
+                            } else {
+                                Self::apply_abstain(&node.id, abstain, outputs);
+                            }
+                        }
+                    }
+                }
+                NodeKind::Decision {
+                    model_ref,
+                    alias,
+                    abstain,
+                    ..
+                } => {
+                    match self
+                        .forecast(model_ref, alias, instrument_id, features)
+                        .await
+                    {
+                        Some(f) => {
+                            let mut out = Self::forecast_to_output(&f);
+                            out.action_class = Some(f.direction.clone());
+                            outputs.insert(node.id.clone(), out);
+                        }
+                        None => Self::apply_abstain(&node.id, abstain, outputs),
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Apply the abstention policy for one node.
+    fn apply_abstain(
+        node_id: &str,
+        abstain: &domain::strategy_def::nodes::AbstainPolicy,
+        outputs: &mut HashMap<String, InferenceOutput>,
+    ) {
+        use domain::strategy_def::nodes::AbstainPolicy;
+        match abstain {
+            // Flat: publish a default (zero/NaN) output — safe, neutral values.
+            AbstainPolicy::Flat => {
+                outputs.insert(node_id.to_owned(), InferenceOutput::default());
+            }
+            // HoldLast: keep whatever was last published (do nothing).
+            AbstainPolicy::HoldLast => {}
         }
     }
 
@@ -534,5 +733,110 @@ impl InferenceGateway {
                 payload
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result_with_dist() -> ForecastResult {
+        ForecastResult {
+            direction: "up".into(),
+            confidence: 0.8,
+            latency_ms: 1,
+            magnitude: "0.04".into(),
+            distribution: Some(ForecastDistribution {
+                quantile_levels: vec![0.05, 0.25, 0.50, 0.75, 0.95],
+                quantiles_sigma: vec![-1.5, -0.5, 0.0, 0.5, 1.5],
+                quantiles_return: vec![-0.03, -0.01, 0.002, 0.012, 0.04],
+                median_return: 0.002,
+                sigma: 0.02,
+            }),
+        }
+    }
+
+    #[test]
+    fn clamp_fraction_passes_through_without_bounds() {
+        assert_eq!(InferenceGateway::clamp_fraction("0.5", None), "0.5");
+    }
+
+    #[test]
+    fn clamp_fraction_bounds_value() {
+        let clamp = ["0.01".to_string(), "0.10".to_string()];
+        // Clamped to the max bound; `normalize()` drops the trailing zero.
+        assert_eq!(
+            InferenceGateway::clamp_fraction("0.25", Some(&clamp)),
+            "0.1"
+        );
+        assert_eq!(
+            InferenceGateway::clamp_fraction("0.001", Some(&clamp)),
+            "0.01"
+        );
+        assert_eq!(
+            InferenceGateway::clamp_fraction("0.05", Some(&clamp)),
+            "0.05"
+        );
+    }
+
+    #[test]
+    fn clamp_fraction_unparseable_returns_raw() {
+        let clamp = ["0.01".to_string(), "0.10".to_string()];
+        assert_eq!(
+            InferenceGateway::clamp_fraction("oops", Some(&clamp)),
+            "oops"
+        );
+    }
+
+    #[test]
+    fn forecast_to_output_populates_distribution_fields() {
+        let out = InferenceGateway::forecast_to_output(&result_with_dist());
+        assert_eq!(out.direction, "up");
+        assert!((out.confidence - 0.8).abs() < f64::EPSILON);
+        assert_eq!(out.median_return, Some(0.002));
+        assert_eq!(out.sigma, Some(0.02));
+        assert_eq!(out.var_95, Some(-0.03));
+        assert!(out.spread_90.is_some());
+    }
+
+    #[test]
+    fn forecast_to_output_point_model_has_no_dist_fields() {
+        let f = ForecastResult {
+            direction: "down".into(),
+            confidence: 0.6,
+            latency_ms: 1,
+            magnitude: "0.0".into(),
+            distribution: None,
+        };
+        let out = InferenceGateway::forecast_to_output(&f);
+        assert_eq!(out.direction, "down");
+        assert!(out.median_return.is_none());
+        assert!(out.var_95.is_none());
+    }
+
+    #[test]
+    fn apply_abstain_flat_inserts_default() {
+        use domain::strategy_def::nodes::AbstainPolicy;
+        let mut outputs = HashMap::new();
+        InferenceGateway::apply_abstain("n1", &AbstainPolicy::Flat, &mut outputs);
+        assert!(outputs.contains_key("n1"));
+        assert!(outputs["n1"].confidence.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn apply_abstain_hold_last_keeps_prior() {
+        use domain::strategy_def::nodes::AbstainPolicy;
+        let mut outputs = HashMap::new();
+        outputs.insert(
+            "n1".to_string(),
+            InferenceOutput {
+                direction: "up".into(),
+                confidence: 0.9,
+                ..Default::default()
+            },
+        );
+        InferenceGateway::apply_abstain("n1", &AbstainPolicy::HoldLast, &mut outputs);
+        // Prior value is untouched.
+        assert!((outputs["n1"].confidence - 0.9).abs() < f64::EPSILON);
     }
 }

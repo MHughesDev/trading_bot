@@ -262,12 +262,39 @@ impl StrategyInstance {
         // Feature slot array passed directly — no allocation, no string clone.
         let signals = self.run_signals();
 
+        // Resolve Sizing-node fractions for any SizeMode::Model actions.
+        let size_overrides = self.size_overrides();
+
         build_intents_for_signals(
             &self.definition.actions,
             &signals,
             &self.instrument_id,
             &self.definition.strategy_id,
+            &size_overrides,
         )
+    }
+
+    /// Collect resolved size fractions from `Sizing` nodes that produced an
+    /// `InferenceOutput.size_fraction` this tick.
+    ///
+    /// Maps `Sizing` node ID → decimal-string fraction, consumed by
+    /// `SizeMode::Model` actions.  Nodes that abstained (no output, or an
+    /// output with no fraction) are simply absent from the map.
+    fn size_overrides(&self) -> HashMap<String, String> {
+        use domain::strategy_def::nodes::NodeKind;
+        let mut overrides = HashMap::new();
+        for node in &self.definition.nodes {
+            if matches!(node.kind, NodeKind::Sizing { .. }) {
+                if let Some(fraction) = self
+                    .inference_outputs
+                    .get(&node.id)
+                    .and_then(|o| o.size_fraction.clone())
+                {
+                    overrides.insert(node.id.clone(), fraction);
+                }
+            }
+        }
+        overrides
     }
 
     fn run_signals(&self) -> HashSet<String> {
