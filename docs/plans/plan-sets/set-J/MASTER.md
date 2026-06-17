@@ -1,11 +1,11 @@
 # Backtest Suite — Honest-Evaluation Core — Set J
 
-**Completion: 34% (20 / 59 primary tasks)**
+**Completion: 64% (38 / 59 primary tasks)**
 
-**Status:** IN PROGRESS — Phases 0 & 1 shipped (object model + sealed Study
-layer, in `crates/backtest/src/run/` and `crates/backtest/src/study/`; 97 tests
-green; ADR-0019 Accepted). Phases 2–5 (Experiment/counter/vault, Null Library,
-staged gates, reconciliation/UX) remain. 6 phases (0–5) total. Object model
+**Status:** IN PROGRESS — Phases 0–3 shipped (object model + sealed Study layer +
+Experiment/counter/vault + Null Library, in `crates/backtest/src/{run,study,experiment,nulls}/`;
+126 tests green; ADR-0019 & ADR-0020 Accepted). Phases 4–5 (staged-gate funnel,
+reconciliation/UX) remain. 6 phases (0–5) total. Object model
 (Run/Study/Experiment) + Null Library + staged-gate funnel, layered on the
 existing `crates/backtest` Run engine. End-state design.
 **Created:** 2026-06-17
@@ -302,3 +302,5 @@ untouched.
 | 2026-06-17 | — | plan | Set J created. 12 decisions locked. 59 tasks across 6 phases (0–5). Honest-evaluation core (Run/Study/Experiment + Null Library + staged gates) on top of the `crates/backtest` Run engine; core spec recorded at `docs/specs/BACKTEST_SUITE_CORE_SPEC.md`. End-state design. |
 | 2026-06-17 | 0 | J-0.1–J-0.10 | **Phase 0 complete.** `crates/backtest/src/run/`: content-addressed `RunConfig`/`RunId` (SHA-256, map-order-insensitive), standardized `MetricSet` with null honesty hooks, `Trade`/`RunResult`, `RunExecutor` trait + `map_sim_result` core, idempotent immutable `RunStore` (+ `migrations/0026` & `clickhouse/05`), cache-aware `Backtest::run` (`RunOrigin`), INV-1 `UnsafeFlags`, `ENGINE_VERSION` provenance. ADR-0019 Accepted. 94 lib tests green. Deferred live legs: SimRunExecutor bit-for-bit (J-0.6), Pg/CH-backed stores (J-0.7). |
 | 2026-06-17 | 1 | J-1.1–J-1.10 | **Phase 1 complete.** `crates/backtest/src/study/`: `StudyConfig`/`VarySpec`/`StudyKind` + kind↔vary validation, sealed `StudyResult`/`Distribution` (no best-member API), `StudyEngine` fan-out with `trial_delta` counting all members (cache hits + failures), pre-declared `SelectionRule`→`carried_forward` (never argmax), all 10 study kinds (sweep/neighborhood/walk-forward/CPCV/nested/permutation/synthetic/cost-sweep/regime/trade-MC), `combinations`/`cpcv_assignments` with disjoint-partition property test, `StudyStore` (+ `migrations/0027`), and the INV-2 adversarial suite (`tests/sealed_distributions.rs`). 3 integration tests green. Deferred live leg: Pg-backed study persistence (J-1.9). |
+| 2026-06-17 | 2 | J-2.1–J-2.9 | **Phase 2 complete.** `crates/backtest/src/experiment/`: `Experiment` aggregate with a private monotonic `trial_counter` (only `record_study` adds; no reset/decrement), `run_study` as the sole attached-Study entry (auto-increments before returning), `ExperimentState` one-directional lifecycle (`allows`/`transition`), holdout lock (research Studies intersecting the vault tail are refused), one-shot self-sealing `run_vault` (spent-first refusal, gate3 precondition, unsafe-barred, logs access, validates), immutable up-front `primary_test`, `unsafe` propagation, `ExperimentStore` + `migrations/0028` (triggers enforce monotonicity / no-unspend / no-return-to-candidate). |
+| 2026-06-17 | 3 | J-3.1–J-3.9 | **Phase 3 complete.** ADR-0020 Accepted. `crates/backtest/src/nulls/`: `Null` contract (content-addressed `null_id`, non-empty `preserves`/`destroys`) + `NullGenerator` trait + all 7 generators (signal_return_decouple, block_permutation, stationary_bootstrap, bar_permutation, synthetic_garch, regime_block, random_entry_matched), each with a property test on what it keeps/breaks; `recommend_null` (prompt) + `NullChoice` (override needs a logged reason); `NullStore` + `migrations/0029`; INV-3 `SignificanceResult` seam (no constructor omits null or trial count). 126 lib+integration tests green; lib clippy clean. |

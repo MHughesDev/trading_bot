@@ -24,8 +24,10 @@
 
 pub mod aggregate;
 pub mod collect;
+pub mod experiment;
 pub mod gaps;
 pub mod manager;
+pub mod nulls;
 pub mod requirements;
 pub mod rng;
 pub mod run;

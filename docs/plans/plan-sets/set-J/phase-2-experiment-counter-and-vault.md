@@ -1,6 +1,23 @@
 # Phase 2 — Experiment, trial counter & holdout vault
 
-**Completion: 0% (0 / 9 tasks)**
+**Completion: 100% (9 / 9 tasks)** — the Experiment aggregate, monotonic counter,
+one-shot vault, and one-directional lifecycle landed and unit-tested in
+`crates/backtest/src/experiment/`. Postgres-backed persistence is the live leg of
+J-2.1 (trait + in-memory reference + `migrations/0028`, whose triggers enforce
+counter monotonicity, no-unspend, and no-return-to-candidate at the schema level).
+
+**Summary of completed work (2026-06-17):**
+- J-2.1 `Experiment` aggregate + `ExperimentStore` + `migrations/0028_backtest_experiments.sql`.
+- J-2.2 Monotonic `trial_counter` (private; only `record_study` adds; no decrement/reset path).
+- J-2.3 Auto-increment wiring: `Experiment::run_study` is the only attached-Study entry; it records before returning.
+- J-2.4 `ExperimentState` + `transition`/`allows` one-directional state machine.
+- J-2.5 Holdout lock: research Studies whose slice intersects the vault tail are refused (`study_touches_holdout`).
+- J-2.6 One-shot self-sealing `run_vault` (spent-first refusal, gate3 precondition, logs access, seals, validates).
+- J-2.7 `primary_test` declared at creation, immutable (read-only getter, no setter).
+- J-2.8 `unsafe` propagation; an unsafe Experiment is barred from the vault.
+- J-2.9 No-laundering test: counter has no reset/decrement; a fresh Experiment starts at 0.
+
+`cargo test -p backtest` → 122 lib tests green; lib clippy clean.
 
 **Goal:** Build the container for the whole investigation of one strategy idea —
 the **Experiment** — and the two things that make the suite honest: the **global
@@ -64,7 +81,7 @@ a fresh holdout (new data) and a fresh Experiment.
 
 ## Tasks
 
-### ☐ J-2.1 `Experiment` aggregate + persistence — M
+### ☑ J-2.1 `Experiment` aggregate + persistence — M
 Add `crates/backtest/src/experiment/mod.rs` with the design-notes shape and
 Postgres migration **0028** (`backtest_experiments`: id, strategy_family, state,
 trial_counter, primary_test, holdout JSON, verdict, timestamps;
@@ -74,7 +91,7 @@ trial_counter, primary_test, holdout JSON, verdict, timestamps;
 **Acceptance:** create→load round-trip; a new Experiment starts `candidate`,
 counter 0, vault unspent; `primary_test` is mandatory at creation.
 
-### ☐ J-2.2 Monotonic, irreversible trial counter — M
+### ☑ J-2.2 Monotonic, irreversible trial counter — M
 `Experiment::record_study(study_result)` increments `trial_counter +=
 study_result.trial_delta` and appends the `StudyRef`. There is **no** decrement,
 reset, or setter. The increment is the *only* way the counter changes, and it is
@@ -82,7 +99,7 @@ called automatically by the study-run path (J-2.3), never by user API.
 **Acceptance:** the counter only goes up; a test asserts no public method
 decreases it; recording three studies of deltas 200/120/1000 yields 1320.
 
-### ☐ J-2.3 Auto-increment wiring (no human in the loop) — M
+### ☑ J-2.3 Auto-increment wiring (no human in the loop) — M
 Wire `StudyEngine::run` (Phase 1) so that running a Study **within an
 Experiment** automatically calls `record_study` *before* the `StudyResult` is
 returned to the caller. A Study cannot be run "off the books": the only public
@@ -91,7 +108,7 @@ entry to run a Study attached to an Experiment routes through the counter.
 incremented before it can read the result; there is no code path that returns a
 `StudyResult` for an Experiment without having incremented.
 
-### ☐ J-2.4 Lifecycle state machine — M
+### ☑ J-2.4 Lifecycle state machine — M
 Add `ExperimentState` + `Experiment::transition(to)` enforcing the legal,
 one-directional graph: `candidate→validated→live→{decaying↔live}→retired`, with
 no edge back to `candidate` after `validated`. Each state exposes
@@ -100,7 +117,7 @@ transitions return an error.
 **Acceptance:** every legal edge succeeds; `validated→candidate` is rejected;
 running a research Study in `validated`/`live` is rejected with a clear error.
 
-### ☐ J-2.5 Holdout vault definition + lock — M
+### ☑ J-2.5 Holdout vault definition + lock — M
 On Experiment creation, carve the **locked tail** (`holdout.slice`, typically the
 most-recent data window) out of the addressable range. While `candidate` or
 `validated`, **no Study's `data_slice` may intersect `holdout.slice`** — enforced
@@ -110,7 +127,7 @@ vault range is refused.
 `candidate`; the holdout range is excluded from all research-Study data loads
 (test).
 
-### ☐ J-2.6 One-shot vault access + self-seal — L
+### ☑ J-2.6 One-shot vault access + self-seal — L
 Add `Experiment::run_vault(run_config) -> Result<RunResult>` callable **only**
 from a Gate-3-passed Experiment (the gate dependency lands in Phase 4; here,
 expose a `gate3_passed` precondition flag). It: (1) refuses if `holdout.spent`;
@@ -121,7 +138,7 @@ second call is refused at the API level. `spent` never flips back.
 refused; `spent` cannot be reset (no setter); the access log is append-only and
 survives a round-trip.
 
-### ☐ J-2.7 `primary_test` declared up front — S
+### ☑ J-2.7 `primary_test` declared up front — S
 `primary_test: NullRef` is set at Experiment creation and is **immutable**
 thereafter (changing the significance test after seeing results is p-hacking).
 Gate 3 (Phase 4) reads exactly this null. The null object itself lands in
@@ -129,7 +146,7 @@ Phase 3; here, store and freeze the reference.
 **Acceptance:** `primary_test` cannot be changed after creation (test); a missing
 `primary_test` blocks creation.
 
-### ☐ J-2.8 `unsafe` propagation to Experiment — S
+### ☑ J-2.8 `unsafe` propagation to Experiment — S
 If any Study or Run within an Experiment is `unsafe` (INV-1, Phase 0), the
 Experiment is permanently flagged `unsafe = true`, surfaced in its verdict and
 the workbench, and **barred from the vault** (you cannot validate an idea whose
@@ -137,7 +154,7 @@ research disabled protections). The flag never clears.
 **Acceptance:** an Experiment containing one `unsafe` run is flagged and its
 `run_vault` is refused; the flag survives round-trip and cannot be cleared.
 
-### ☐ J-2.9 No-laundering test (rename ≠ fresh start) — S
+### ☑ J-2.9 No-laundering test (rename ≠ fresh start) — S
 Add a test asserting that "starting over" is structurally a *new* Experiment with
 its own zeroed counter and fresh holdout — there is no operation that resets an
 existing Experiment's counter or re-locks a spent vault. Document the
