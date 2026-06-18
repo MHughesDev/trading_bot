@@ -13,9 +13,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/useToast'
-import { useSuiteProgress } from '@/hooks/useSuiteProgress'
+import { useSuiteProgress, type SuiteProgress } from '@/hooks/useSuiteProgress'
 import { ExperimentDetail } from '@/components/workbench/ExperimentDetail'
 import { RunStudyPanel } from '@/components/proving-ground/RunStudyPanel'
+import { FleetBoard } from '@/components/proving-ground/FleetBoard'
 
 const STATE_VARIANT: Record<string, 'default' | 'active' | 'inactive' | 'warning'> = {
   candidate: 'default',
@@ -28,13 +29,18 @@ const STATE_VARIANT: Record<string, 'default' | 'active' | 'inactive' | 'warning
 export function ProvingGroundPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  // Latest progress frame per experiment, fed to the live fleet board.
+  const [progressByExp, setProgressByExp] = useState<Record<string, SuiteProgress>>({})
 
   const experiments = useQuery({
     queryKey: ['suite', 'experiments'],
     queryFn: () => experimentsApi.list().then((r) => r.data.experiments),
     refetchInterval: 8000,
   })
-  useSuiteProgress(() => experiments.refetch())
+  useSuiteProgress((p) => {
+    setProgressByExp((m) => ({ ...m, [p.experiment_id]: p }))
+    experiments.refetch()
+  })
 
   const selectedExp = experiments.data?.find((e) => e.id === selected) ?? null
 
@@ -53,6 +59,8 @@ export function ProvingGroundPage() {
           New experiment
         </Button>
       </header>
+
+      <FleetBoard experiments={experiments.data ?? []} progress={progressByExp} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[20rem_1fr]">
         {/* Experiment console — counter + lifecycle always on screen. */}
