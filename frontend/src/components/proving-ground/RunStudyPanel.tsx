@@ -10,7 +10,7 @@
 // so an ill-typed request is never sent.
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, FlaskConical, Loader2 } from 'lucide-react'
+import { AlertTriangle, FlaskConical, Loader2, Plus, X } from 'lucide-react'
 import {
   experimentsApi,
   type StudyKind,
@@ -78,7 +78,12 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
   const [mcN, setMcN] = useState('1000')
   const [mcBlock, setMcBlock] = useState('10')
   const [costRefs, setCostRefs] = useState('cost:optimistic, cost:base, cost:pessimistic')
-  const [json, setJson] = useState('[]')
+  // parameter_sweep: one param over an explicit list of values (the common case).
+  const [sweepParam, setSweepParam] = useState('fast')
+  const [sweepValues, setSweepValues] = useState('5, 10, 20')
+  // walk_forward / regime_conditional: repeatable date-range rows.
+  const [windows, setWindows] = useState<DateRange[]>([{ start: '', end: '' }])
+  const [regimes, setRegimes] = useState<DateRange[]>([{ start: '', end: '', label: '' }])
 
   // For permutation_null we must pass the chosen null's id (INV-3).
   const nulls = useQuery({
@@ -114,11 +119,14 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
   function buildVary(): VarySpec {
     switch (kind) {
       case 'parameter_sweep':
-        return { vary: 'params', grid: parseJson(json) as Record<string, unknown>[] }
+        return { vary: 'params', grid: sweepGrid(sweepParam, sweepValues) }
       case 'neighborhood':
         return { vary: 'neighborhood', param, center: +center, step: +step, k: +k }
       case 'walk_forward':
-        return { vary: 'data_windows', windows: parseJson(json) as [string, string][] }
+        return {
+          vary: 'data_windows',
+          windows: windows.map((w) => [toIso(w.start), toIso(w.end)] as [string, string]),
+        }
       case 'cpcv':
       case 'nested_cv':
         return { vary: 'cpcv_groups', n_groups: +nGroups, k_test: +kTest }
@@ -133,7 +141,10 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
       case 'trade_monte_carlo':
         return { vary: 'trade_resamples', n: +mcN, block: +mcBlock }
       case 'regime_conditional':
-        return { vary: 'regimes', windows: parseJson(json) as [string, string, string][] }
+        return {
+          vary: 'regimes',
+          windows: regimes.map((r) => [toIso(r.start), toIso(r.end), r.label ?? ''] as [string, string, string]),
+        }
     }
   }
 
@@ -144,9 +155,12 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
     if (needsNull && !chosenNullId) return 'Choose a null for this experiment before a permutation test.'
     if ((kind === 'cpcv' || kind === 'nested_cv') && !(+kTest > 0 && +kTest < +nGroups))
       return 'CPCV requires 0 < k_test < n_groups.'
-    if ((kind === 'parameter_sweep' || kind === 'walk_forward' || kind === 'regime_conditional') &&
-      parseJsonSafe(json) === undefined)
-      return 'The list field must be valid JSON.'
+    if (kind === 'parameter_sweep' && sweepGrid(sweepParam, sweepValues).length === 0)
+      return 'Enter a parameter name and at least one value to sweep.'
+    if (kind === 'walk_forward' && !windows.every((w) => w.start && w.end))
+      return 'Every walk-forward window needs a start and an end.'
+    if (kind === 'regime_conditional' && !regimes.every((r) => r.start && r.end && r.label?.trim()))
+      return 'Every regime needs a start, end, and label.'
     return null
   }
 
@@ -211,24 +225,30 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
             <Input value={costRefs} onChange={(e) => setCostRefs(e.target.value)} />
           </Field>
         )}
-        {(kind === 'parameter_sweep' || kind === 'walk_forward' || kind === 'regime_conditional') && (
-          <Field
-            label={
-              kind === 'parameter_sweep'
-                ? 'Param grid (JSON array of override maps)'
-                : kind === 'walk_forward'
-                  ? 'Windows (JSON: [[start, end], …])'
-                  : 'Regimes (JSON: [[start, end, label], …])'
-            }
-          >
-            <textarea
-              value={json}
-              onChange={(e) => setJson(e.target.value)}
-              rows={3}
-              spellCheck={false}
-              className="w-full rounded-md border border-border-2 bg-surface px-2 py-1 font-mono text-xs text-text"
-            />
-          </Field>
+        {kind === 'parameter_sweep' && (
+          <div className="grid grid-cols-[1fr_2fr] gap-2">
+            <Field label="Parameter"><Input value={sweepParam} onChange={(e) => setSweepParam(e.target.value)} /></Field>
+            <Field label="Values (comma-separated)">
+              <Input value={sweepValues} onChange={(e) => setSweepValues(e.target.value)} placeholder="5, 10, 20" />
+            </Field>
+          </div>
+        )}
+        {kind === 'walk_forward' && (
+          <RangeEditor
+            label="Walk-forward windows"
+            rows={windows}
+            onChange={setWindows}
+            blank={{ start: '', end: '' }}
+          />
+        )}
+        {kind === 'regime_conditional' && (
+          <RangeEditor
+            label="Regime windows"
+            rows={regimes}
+            onChange={setRegimes}
+            blank={{ start: '', end: '', label: '' }}
+            withLabel
+          />
         )}
 
         {needsNull && (
@@ -294,16 +314,83 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-function parseJson(s: string): unknown {
-  return JSON.parse(s)
+type DateRange = { start: string; end: string; label?: string }
+
+// A repeatable list of [start, end] (optionally + label) datetime rows, shared by
+// the walk_forward and regime_conditional vary forms.
+function RangeEditor({
+  label,
+  rows,
+  onChange,
+  blank,
+  withLabel = false,
+}: {
+  label: string
+  rows: DateRange[]
+  onChange: (rows: DateRange[]) => void
+  blank: DateRange
+  withLabel?: boolean
+}) {
+  const set = (i: number, patch: Partial<DateRange>) =>
+    onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  return (
+    <Field label={label}>
+      <div className="flex flex-col gap-2">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <Input
+              type="datetime-local"
+              value={r.start}
+              onChange={(e) => set(i, { start: e.target.value })}
+            />
+            <span className="text-text-dim">→</span>
+            <Input
+              type="datetime-local"
+              value={r.end}
+              onChange={(e) => set(i, { end: e.target.value })}
+            />
+            {withLabel && (
+              <Input
+                placeholder="label"
+                value={r.label ?? ''}
+                onChange={(e) => set(i, { label: e.target.value })}
+              />
+            )}
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              disabled={rows.length === 1}
+              onClick={() => onChange(rows.filter((_, j) => j !== i))}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ))}
+        <Button type="button" size="sm" variant="ghost" className="self-start" onClick={() => onChange([...rows, { ...blank }])}>
+          <Plus className="h-3.5 w-3.5" />
+          Add window
+        </Button>
+      </div>
+    </Field>
+  )
 }
-function parseJsonSafe(s: string): unknown {
-  try {
-    return JSON.parse(s)
-  } catch {
-    return undefined
-  }
+
+// "5, 10, 20" → [{fast: 5}, {fast: 10}, {fast: 20}], numeric where parseable.
+function sweepGrid(param: string, values: string): Record<string, unknown>[] {
+  if (!param.trim()) return []
+  return values
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((v) => ({ [param.trim()]: Number.isNaN(Number(v)) ? v : Number(v) }))
 }
+
+// datetime-local ("2024-01-01T00:00") → RFC3339 UTC the Rust DateTime<Utc> expects.
+function toIso(local: string): string {
+  return local ? new Date(local).toISOString() : ''
+}
+
 function errMsg(e: unknown, fallback: string): string {
   const resp = (e as { response?: { data?: { message?: string } } })?.response
   return resp?.data?.message ?? fallback
