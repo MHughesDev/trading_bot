@@ -67,9 +67,14 @@ function resolveConditions(
 
   if (node.type === 'ai_forecast') {
     const d = node.data as AIForecastNodeData
-    const cond: Condition = { type: 'model_forecast', left: 'price', right_value: d.minConfidence }
-    ;(cond as unknown as Record<string, unknown>).model = d.model
-    ;(cond as unknown as Record<string, unknown>).direction = d.direction
+    const cond: Condition = {
+      type: 'model_forecast',
+      left: 'price',
+      right_value: d.minConfidence,
+      model: d.model,
+      direction: d.direction,
+      alias: d.alias || 'production',
+    }
     return { allOf: [cond], anyOf: [] }
   }
 

@@ -20,7 +20,9 @@ pub mod world;
 
 pub use bytecode::{compile as compile_expr, run as run_expr, BarField, Op, Program};
 pub use clock::{ReplayClock, StrategyClock, WallClock};
-pub use interpreter::{evaluate_condition, evaluate_signals, EvalError};
+pub use interpreter::{
+    evaluate_condition, evaluate_signals, evaluate_signals_with_models, EvalError,
+};
 pub use registry::FeatureRegistry;
 pub use runtime::{InstanceManager, RuntimeError, StrategyInstance};
 pub use world::{StrategyResult, WorldContext, WorldEvent, WorldState};

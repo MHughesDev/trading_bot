@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useModels } from '@/hooks/useModels'
 import { ModelStatusPill } from '@/components/models/ModelStatusPill'
+import { MLOpsSubNav } from '@/components/mlops/MLOpsSubNav'
 import type { AiModel, ModelKind, ModelStatus } from '@/api/models'
 import { format } from 'date-fns'
 
@@ -99,7 +100,7 @@ function ModelCard({ model }: { model: AiModel }) {
       exit={{ opacity: 0, y: -8 }}
       transition={shouldReduce ? { duration: 0.001 } : SPRING}
       className="group rounded-xl border border-border bg-surface p-5 hover:border-border-2 hover:shadow-sm transition-shadow cursor-pointer"
-      onClick={() => navigate(`/models/${model.model_id}`)}
+      onClick={() => navigate(`/mlops/models/${model.model_id}`)}
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
@@ -149,7 +150,7 @@ function ModelCard({ model }: { model: AiModel }) {
           className="flex-1 text-xs h-7"
           onClick={(e) => {
             e.stopPropagation()
-            navigate(`/models/${model.model_id}`)
+            navigate(`/mlops/models/${model.model_id}`)
           }}
         >
           Open
@@ -161,7 +162,7 @@ function ModelCard({ model }: { model: AiModel }) {
           className="text-xs h-7"
           onClick={(e) => {
             e.stopPropagation()
-            navigate(`/models/${model.model_id}?tab=test`)
+            navigate(`/mlops/models/${model.model_id}?tab=test`)
           }}
         >
           <ExternalLink className="h-3 w-3 mr-1" />
@@ -179,7 +180,7 @@ function ModelTableRow({ model }: { model: AiModel }) {
   return (
     <tr
       className="border-b border-border hover:bg-surface-2 cursor-pointer transition-colors"
-      onClick={() => navigate(`/models/${model.model_id}`)}
+      onClick={() => navigate(`/mlops/models/${model.model_id}`)}
     >
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
@@ -220,21 +221,23 @@ export function ModelStudioPage() {
   return (
     <div className="mx-auto w-full max-w-7xl px-6 py-6">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold text-text">
             <Brain className="h-6 w-6 text-accent" />
-            AI Model Studio
+            MLOps
           </h1>
           <p className="mt-1 text-sm text-text-muted">
-            Manage, train, and deploy machine learning models for your trading strategies.
+            Train, evaluate, deploy, and monitor machine learning models for your trading strategies.
           </p>
         </div>
-        <Button onClick={() => navigate('/models/create')}>
+        <Button onClick={() => navigate('/mlops/create')}>
           <Plus className="h-4 w-4" />
           Create Model
         </Button>
       </div>
+
+      <MLOpsSubNav />
 
       {/* Filter bar */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
@@ -327,7 +330,7 @@ export function ModelStudioPage() {
               Create your first model to get started with AI-powered trading.
             </p>
           </div>
-          <Button onClick={() => navigate('/models/create')}>
+          <Button onClick={() => navigate('/mlops/create')}>
             <Plus className="h-4 w-4" />
             Create Model
           </Button>

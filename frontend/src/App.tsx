@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, Component } from 'react'
 import type { ReactNode, ErrorInfo } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/auth'
 import { AppLayout } from '@/components/layout/AppLayout'
@@ -40,8 +40,8 @@ const ModelLineagePage = lazy(() =>
 const LeaderboardPage = lazy(() =>
   import('@/pages/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage })),
 )
-const EnsemblesPage = lazy(() =>
-  import('@/pages/EnsemblesPage').then((m) => ({ default: m.EnsemblesPage })),
+const DataWorkbenchPage = lazy(() =>
+  import('@/pages/DataWorkbenchPage').then((m) => ({ default: m.DataWorkbenchPage })),
 )
 const PipelinesPage = lazy(() =>
   import('@/pages/PipelinesPage').then((m) => ({ default: m.PipelinesPage })),
@@ -74,6 +74,13 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
+/** Redirect old /models/:id deep links to /mlops/models/:id, preserving id + query. */
+function RedirectModelDetail() {
+  const { id } = useParams<{ id: string }>()
+  const { search } = useLocation()
+  return <Navigate to={`/mlops/models/${id}${search}`} replace />
+}
+
 function AuthInit({ children }: { children: React.ReactNode }) {
   const { fetchMe } = useAuthStore()
   useEffect(() => { fetchMe() }, [fetchMe])
@@ -101,14 +108,24 @@ export default function App() {
               <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/strategy" element={<StrategyCreationPage />} />
               <Route path="/backtesting" element={<BackTestingPage />} />
-              <Route path="/models" element={<ModelStudioPage />} />
-              <Route path="/models/create" element={<ModelCreatePage />} />
-              <Route path="/models/graph" element={<ModelLineagePage />} />
-              <Route path="/models/leaderboard" element={<LeaderboardPage />} />
-              <Route path="/models/:id" element={<ModelDetailPage />} />
-              <Route path="/ensembles" element={<EnsemblesPage />} />
-              <Route path="/pipelines" element={<PipelinesPage />} />
+              {/* MLOps — unified AI model lifecycle, data, and automation */}
+              <Route path="/mlops" element={<ModelStudioPage />} />
+              <Route path="/mlops/create" element={<ModelCreatePage />} />
+              <Route path="/mlops/data" element={<DataWorkbenchPage />} />
+              <Route path="/mlops/automation" element={<PipelinesPage />} />
+              <Route path="/mlops/leaderboard" element={<LeaderboardPage />} />
+              <Route path="/mlops/lineage" element={<ModelLineagePage />} />
+              <Route path="/mlops/models/:id" element={<ModelDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+
+              {/* Backwards-compat redirects from the old AI Models / Pipelines / Ensembles URLs */}
+              <Route path="/models" element={<Navigate to="/mlops" replace />} />
+              <Route path="/models/create" element={<Navigate to="/mlops/create" replace />} />
+              <Route path="/models/graph" element={<Navigate to="/mlops/lineage" replace />} />
+              <Route path="/models/leaderboard" element={<Navigate to="/mlops/leaderboard" replace />} />
+              <Route path="/models/:id" element={<RedirectModelDetail />} />
+              <Route path="/pipelines" element={<Navigate to="/mlops/automation" replace />} />
+              <Route path="/ensembles" element={<Navigate to="/mlops" replace />} />
 
               {/* Legacy / deep-link routes */}
               <Route path="/asset/:symbol" element={<AssetPage />} />

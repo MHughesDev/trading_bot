@@ -413,7 +413,7 @@ export function ModelTestTab({ modelId }: Props) {
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-xs font-medium text-text-muted">
               Features{' '}
-              {model?.definition.feature_set_ref && (
+              {typeof model?.definition.feature_set_ref === 'string' && (
                 <span className="text-text-dim font-mono">
                   ({model.definition.feature_set_ref})
                 </span>

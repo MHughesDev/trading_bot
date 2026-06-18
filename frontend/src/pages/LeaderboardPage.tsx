@@ -15,6 +15,7 @@ import {
   ChevronDown, ChevronUp, ExternalLink, Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { MLOpsSubNav } from '@/components/mlops/MLOpsSubNav'
 
 interface LeaderboardEntry {
   rank: number
@@ -109,6 +110,7 @@ export function LeaderboardPage() {
 
   return (
     <div className="mx-auto w-full max-w-5xl px-6 py-6">
+      <MLOpsSubNav />
       <div className="flex items-center gap-3 mb-6">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface-2 text-accent">
           <Trophy className="h-4.5 w-4.5" />
@@ -202,7 +204,7 @@ export function LeaderboardPage() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        navigate(`/models/${entry.model_id}`)
+                        navigate(`/mlops/models/${entry.model_id}`)
                       }}
                       className="text-text-muted hover:text-accent transition-colors"
                       title="Open model"
@@ -251,11 +253,11 @@ function EvalReportPanel({ modelId, onClose }: { modelId: string; onClose: () =>
           </p>
           <div className="flex gap-2">
             <button
-              onClick={() => window.open(`/models/${modelId}?tab=forecast`, '_blank')}
+              onClick={() => window.open(`/mlops/models/${modelId}?tab=monitoring`, '_blank')}
               className="inline-flex items-center gap-1.5 text-xs text-accent hover:underline"
             >
               <ExternalLink className="h-3 w-3" />
-              Open Forecast Quality tab
+              Open Monitoring tab
             </button>
           </div>
         </div>

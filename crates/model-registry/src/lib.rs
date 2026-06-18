@@ -6,6 +6,7 @@
 //! the driver body with real Python sidecar calls without changing the public API.
 
 pub mod backtest_bridge;
+pub mod backtest_forecast;
 pub mod data_view;
 pub mod datasets;
 pub mod ensemble_manager;

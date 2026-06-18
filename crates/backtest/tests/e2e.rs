@@ -142,6 +142,7 @@ async fn seeded_clickhouse_insert_load_and_simulate() {
         sim_start_ns: 0,
         bars,
         features: feature_specs(),
+        model_results: std::collections::HashMap::new(),
     };
 
     let control = SimulationControl::new();

@@ -71,6 +71,11 @@ pub struct SimulationInputs {
     pub sim_start_ns: i64,
     pub bars: Vec<LoadedBar>,
     pub features: Vec<FeatureSpec>,
+    /// Pre-computed per-bar results for `ModelForecast` nodes: node id → one
+    /// boolean per bar (aligned to `bars` order).  Empty when the definition has
+    /// no model nodes or no forecast provider was wired.  Populated in the async
+    /// `BacktestManager` before the blocking sim, since inference is async.
+    pub model_results: HashMap<String, Vec<bool>>,
 }
 
 /// Simulation outcome: the simulator's result document plus run flags.
@@ -296,6 +301,7 @@ fn build_handler(
     let nodes = inputs.definition.nodes.clone();
     let timeframe = inputs.timeframe;
     let sim_start_ns = inputs.sim_start_ns;
+    let model_results = inputs.model_results.clone();
 
     // Pre-quantize each order's size to a nautilus `Quantity` once, up front, so
     // a malformed size is an error here rather than a panic inside the per-bar
@@ -327,6 +333,8 @@ fn build_handler(
     let mut feature_values: HashMap<String, f64> = HashMap::new();
     let mut bar_map: HashMap<Timeframe, BarPayload> = HashMap::new();
     let mut active_signals: HashSet<String> = HashSet::new();
+    // Per-bar cursor into `model_results` so each bar reads its own forecast.
+    let mut bar_idx: usize = 0;
 
     Ok(Box::new(move |bar: &Bar| {
         let close_value = bar.close.as_decimal();
@@ -359,7 +367,25 @@ fn build_handler(
         bar_map.insert(timeframe, payload.clone());
         bar_map.insert(Timeframe::Minutes1, payload);
 
-        let fired = strategy_runtime::evaluate_signals(&nodes, &feature_values, &bar_map);
+        // Seed this bar's pre-computed ModelForecast results (if any).
+        let model_now: HashMap<String, bool> = if model_results.is_empty() {
+            HashMap::new()
+        } else {
+            model_results
+                .iter()
+                .filter_map(|(node_id, series)| {
+                    series.get(bar_idx).map(|fired| (node_id.clone(), *fired))
+                })
+                .collect()
+        };
+        bar_idx += 1;
+
+        let fired = strategy_runtime::evaluate_signals_with_models(
+            &nodes,
+            &feature_values,
+            &bar_map,
+            &model_now,
+        );
         let fired: HashSet<String> = fired.into_iter().collect();
 
         let mut commands = Vec::new();
@@ -502,6 +528,7 @@ mod tests {
             sim_start_ns: 0,
             bars,
             features,
+            model_results: HashMap::new(),
         };
 
         let control = SimulationControl::new();

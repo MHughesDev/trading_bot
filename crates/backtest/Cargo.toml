@@ -22,6 +22,7 @@ features = { workspace = true }
 strategy-runtime = { workspace = true }
 storage = { workspace = true }
 
+async-trait = "0.1"
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

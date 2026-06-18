@@ -24,6 +24,7 @@
 
 pub mod aggregate;
 pub mod collect;
+pub mod forecast;
 pub mod gaps;
 pub mod manager;
 pub mod requirements;
@@ -34,6 +35,7 @@ pub mod warmup;
 
 pub use aggregate::aggregate_bars;
 pub use collect::CollectorPlan;
+pub use forecast::ForecastProvider;
 pub use manager::BacktestManager;
 pub use store::{BarCoverage, BarStore, CollectedBar};
 pub use types::{

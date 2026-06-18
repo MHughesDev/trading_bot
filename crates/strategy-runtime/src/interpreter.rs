@@ -72,11 +72,32 @@ pub fn evaluate_signals(
     features: &HashMap<String, f64>,
     bars: &HashMap<Timeframe, BarPayload>,
 ) -> Vec<String> {
-    // Pass 1: evaluate conditions.
+    evaluate_signals_with_models(nodes, features, bars, &HashMap::new())
+}
+
+/// Like [`evaluate_signals`], but seeds the boolean results of `ModelForecast`
+/// nodes from `model_results` (node id → fired).  Used by backtest/live to feed
+/// pre-fetched forecast outcomes into the same signal-evaluation pass that
+/// expression `Condition` nodes go through.  A model node missing from the map
+/// abstains (false).
+pub fn evaluate_signals_with_models(
+    nodes: &[Node],
+    features: &HashMap<String, f64>,
+    bars: &HashMap<Timeframe, BarPayload>,
+    model_results: &HashMap<String, bool>,
+) -> Vec<String> {
+    // Pass 1: evaluate conditions + seed model-forecast results.
     let mut conditions: HashMap<&str, bool> = HashMap::new();
     for node in nodes {
-        if let NodeKind::Condition { expr } = &node.kind {
-            conditions.insert(&node.id, evaluate_condition(expr, features, bars));
+        match &node.kind {
+            NodeKind::Condition { expr } => {
+                conditions.insert(&node.id, evaluate_condition(expr, features, bars));
+            }
+            NodeKind::ModelForecast { .. } => {
+                let fired = model_results.get(&node.id).copied().unwrap_or(false);
+                conditions.insert(&node.id, fired);
+            }
+            _ => {}
         }
     }
 

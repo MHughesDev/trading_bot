@@ -12,12 +12,14 @@ import type { Condition, IndicatorSpec, RuleStrategySpec } from '@/types/spec'
 
 export interface StrategyDefinition {
   strategy_id: string
-  definition_version: '1.0'
+  definition_version: '1.0' | '1.1'
   asset_class: string
   inputs: Array<{ lane: string; instrument: string; features?: string[] }>
   nodes: Array<
     | { id: string; type: 'condition'; expr: string }
     | { id: string; type: 'signal'; when: string; emit: string }
+    // v1.1 — AI model forecast node (matches domain NodeKind::ModelForecast)
+    | { id: string; type: 'model_forecast'; model_ref: string; alias?: string; direction: string; min_confidence: number }
   >
   actions: Array<{
     on_signal: string
@@ -86,12 +88,8 @@ function conditionToExpr(
         "'Is Rising' / 'Is Falling' conditions aren't supported by the saved v1.0 format yet (it has no access to prior bars).",
     }
   }
-  if (cond.type === 'model_forecast') {
-    return {
-      error:
-        "AI Forecast conditions can't be saved to the canonical strategy format yet.",
-    }
-  }
+  // model_forecast conditions are emitted as a dedicated v1.1 node by
+  // `emitConditionNode`, never as an expression — they never reach here.
   const op = COMPARATOR[cond.type]
   if (!op) return { error: `unsupported condition type '${cond.type}'` }
 
@@ -101,6 +99,48 @@ function conditionToExpr(
   if ('error' in right) return right
 
   return { expr: `${left.expr} ${op} ${right.expr}` }
+}
+
+/**
+ * Emits the node(s) for a single builder condition into `nodes` and wires a
+ * signal that fires on `emit`.  A `model_forecast` condition becomes a v1.1
+ * `model_forecast` node; everything else becomes a v1.0 `condition` expression
+ * node.  Returns whether a model node was emitted (forces definition_version
+ * 1.1) and any compile error.
+ */
+function emitConditionNode(
+  cond: Condition,
+  idx: number,
+  indById: Map<string, IndicatorSpec>,
+  features: Set<string>,
+  emit: string,
+  nodes: StrategyDefinition['nodes'],
+): { hasModel: boolean; error?: string } {
+  const signalId = `s${idx + 1}`
+
+  if (cond.type === 'model_forecast') {
+    if (!cond.model || !cond.model.trim()) {
+      return { hasModel: true, error: 'AI Model node has no model selected.' }
+    }
+    const nodeId = `m${idx + 1}`
+    nodes.push({
+      id: nodeId,
+      type: 'model_forecast',
+      model_ref: cond.model,
+      alias: cond.alias || 'production',
+      direction: cond.direction ?? 'any',
+      min_confidence: cond.right_value ?? 0,
+    })
+    nodes.push({ id: signalId, type: 'signal', when: nodeId, emit })
+    return { hasModel: true }
+  }
+
+  const compiled = conditionToExpr(cond, indById, features)
+  if ('error' in compiled) return { hasModel: false, error: compiled.error }
+  const condId = `c${idx + 1}`
+  nodes.push({ id: condId, type: 'condition', expr: compiled.expr })
+  nodes.push({ id: signalId, type: 'signal', when: condId, emit })
+  return { hasModel: false }
 }
 
 /**
@@ -141,12 +181,11 @@ export function scannerToDefinition(
 
   const nodes: StrategyDefinition['nodes'] = []
   const emit = 'scanner_signal'
+  let hasModel = false
   conditions.forEach((cond, idx) => {
-    const compiled = conditionToExpr(cond, indById, features)
-    if ('error' in compiled) { errors.push(compiled.error); return }
-    const condId = `c${idx + 1}`
-    nodes.push({ id: condId, type: 'condition', expr: compiled.expr })
-    nodes.push({ id: `s${idx + 1}`, type: 'signal', when: condId, emit })
+    const res = emitConditionNode(cond, idx, indById, features, emit, nodes)
+    if (res.error) { errors.push(res.error); return }
+    if (res.hasModel) hasModel = true
   })
 
   if (errors.length > 0) return { definition: null, errors, warnings }
@@ -161,7 +200,7 @@ export function scannerToDefinition(
   return {
     definition: {
       strategy_id: slugify(name),
-      definition_version: '1.0',
+      definition_version: hasModel ? '1.1' : '1.0',
       asset_class: assetClass,
       inputs,
       nodes,
@@ -216,15 +255,11 @@ export function ruleSpecToDefinition(
 
   const nodes: StrategyDefinition['nodes'] = []
   const emit = 'entry'
+  let hasModel = false
   conditions.forEach((cond, idx) => {
-    const compiled = conditionToExpr(cond, indById, features)
-    if ('error' in compiled) {
-      errors.push(compiled.error)
-      return
-    }
-    const condId = `c${idx + 1}`
-    nodes.push({ id: condId, type: 'condition', expr: compiled.expr })
-    nodes.push({ id: `s${idx + 1}`, type: 'signal', when: condId, emit })
+    const res = emitConditionNode(cond, idx, indById, features, emit, nodes)
+    if (res.error) { errors.push(res.error); return }
+    if (res.hasModel) hasModel = true
   })
 
   if (spec.exits.length > 0) {
@@ -259,7 +294,7 @@ export function ruleSpecToDefinition(
   return {
     definition: {
       strategy_id: slugify(spec.name),
-      definition_version: '1.0',
+      definition_version: hasModel ? '1.1' : '1.0',
       asset_class: assetClass,
       inputs,
       nodes,

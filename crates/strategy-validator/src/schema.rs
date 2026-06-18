@@ -17,11 +17,11 @@ use crate::ValidationError;
 pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
     let mut errors = Vec::new();
 
-    if def.definition_version != "1.0" {
+    if def.definition_version != "1.0" && def.definition_version != "1.1" {
         errors.push(ValidationError {
             path: "definition_version".into(),
             message: format!(
-                "expected '1.0', got '{}'; only v1.0 definitions are accepted",
+                "expected '1.0' or '1.1', got '{}'; only v1.0/v1.1 definitions are accepted",
                 def.definition_version
             ),
         });
@@ -45,17 +45,55 @@ pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
         }
     }
 
+    // Nodes a `signal.when` may reference: anything that produces a boolean.
+    // That is both expression `Condition` nodes and v1.1 `ModelForecast` nodes
+    // (the runtime evaluates ModelForecast into the same condition results map).
     let condition_ids: HashSet<&str> = def
         .nodes
         .iter()
         .filter_map(|n| {
-            if matches!(n.kind, NodeKind::Condition { .. }) {
+            if matches!(
+                n.kind,
+                NodeKind::Condition { .. } | NodeKind::ModelForecast { .. }
+            ) {
                 Some(n.id.as_str())
             } else {
                 None
             }
         })
         .collect();
+
+    // Validate v1.1 ModelForecast node fields.
+    for node in &def.nodes {
+        if let NodeKind::ModelForecast {
+            model_ref,
+            direction,
+            min_confidence,
+            ..
+        } = &node.kind
+        {
+            if model_ref.trim().is_empty() {
+                errors.push(ValidationError {
+                    path: format!("nodes[{}].model_ref", node.id),
+                    message: "must not be empty; select a model".into(),
+                });
+            }
+            if !matches!(direction.as_str(), "bullish" | "bearish" | "any") {
+                errors.push(ValidationError {
+                    path: format!("nodes[{}].direction", node.id),
+                    message: format!(
+                        "expected 'bullish', 'bearish', or 'any', got '{direction}'"
+                    ),
+                });
+            }
+            if !(0.0..=1.0).contains(min_confidence) {
+                errors.push(ValidationError {
+                    path: format!("nodes[{}].min_confidence", node.id),
+                    message: format!("must be between 0.0 and 1.0, got {min_confidence}"),
+                });
+            }
+        }
+    }
 
     let signal_emits: HashSet<&str> = def
         .nodes
@@ -165,6 +203,44 @@ mod tests {
         d.definition_version = "2.0".into();
         let errs = validate_schema(&d);
         assert!(errs.iter().any(|e| e.path == "definition_version"));
+    }
+
+    fn with_model_node(direction: &str, min_confidence: f64, model_ref: &str) -> StrategyDefinition {
+        let mut d = minimal();
+        d.definition_version = "1.1".into();
+        d.nodes = vec![
+            Node {
+                id: "m1".into(),
+                kind: NodeKind::ModelForecast {
+                    model_ref: model_ref.into(),
+                    alias: "production".into(),
+                    direction: direction.into(),
+                    min_confidence,
+                },
+            },
+            Node {
+                id: "s1".into(),
+                kind: NodeKind::Signal {
+                    when: "m1".into(),
+                    emit: "long".into(),
+                },
+            },
+        ];
+        d
+    }
+
+    #[test]
+    fn v1_1_model_forecast_passes() {
+        // A signal watching a ModelForecast node is valid, and v1.1 is accepted.
+        assert!(validate_schema(&with_model_node("bullish", 0.6, "btc_forecaster")).is_empty());
+    }
+
+    #[test]
+    fn model_forecast_bad_fields_rejected() {
+        let errs = validate_schema(&with_model_node("sideways", 1.5, "   "));
+        assert!(errs.iter().any(|e| e.path.ends_with("direction")));
+        assert!(errs.iter().any(|e| e.path.ends_with("min_confidence")));
+        assert!(errs.iter().any(|e| e.path.ends_with("model_ref")));
     }
 
     #[test]

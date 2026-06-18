@@ -38,6 +38,10 @@ export interface Condition {
   left: string
   right_id?: string
   right_value?: number
+  // model_forecast-only fields (v1.1 AI Model node)
+  model?: string
+  alias?: string
+  direction?: ForecastDirection
 }
 
 export interface EntryRule {

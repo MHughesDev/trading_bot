@@ -263,7 +263,7 @@ export function ModelCreatePage() {
           adapter,
         },
       })
-      navigate(`/models/${res.data.model_id}`)
+      navigate(`/mlops/models/${res.data.model_id}`)
     } catch {
       // error shown via mutation state
     }
@@ -598,7 +598,7 @@ export function ModelCreatePage() {
       <div className="mt-8 flex items-center justify-between">
         <Button
           variant="outline"
-          onClick={() => (step === 0 ? navigate('/models') : setStep(step - 1))}
+          onClick={() => (step === 0 ? navigate('/mlops') : setStep(step - 1))}
         >
           <ChevronLeft className="h-4 w-4" />
           {step === 0 ? 'Cancel' : 'Back'}

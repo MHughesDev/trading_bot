@@ -566,6 +566,7 @@ name = "backtest"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "clickhouse",
  "domain",
@@ -2849,6 +2850,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-nats",
+ "async-trait",
  "backtest",
  "bytes",
  "chrono",

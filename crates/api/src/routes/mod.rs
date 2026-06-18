@@ -233,18 +233,9 @@ pub fn router(state: AppState) -> Router {
         )
         // I-3.10 run compare
         .route("/api/models/{id}/runs/compare", get(models::compare_runs))
-        // Phase 4 — Ensemble Studio (I-4.3)
-        .route(
-            "/api/ensembles",
-            get(ensembles::list_ensembles).post(ensembles::create_ensemble),
-        )
-        .route("/api/ensembles/{id}", get(ensembles::get_ensemble))
-        .route("/api/ensembles/{id}/combine", post(ensembles::combine_ensemble))
-        .route("/api/ensembles/{id}/versions", get(ensembles::list_ensemble_versions))
-        .route(
-            "/api/ensembles/{id}/versions/{v}/promote/{alias}",
-            post(ensembles::promote_ensemble_version),
-        )
+        // Phase 4 — Ensemble Studio (I-4.3) routes removed: ensembles are being
+        // folded into the Strategy builder (Phase 2). The ensemble_manager and its
+        // DB tables remain in place; only the HTTP surface is unwired for now.
         // Phase 5 — Pipeline factory + quality monitoring (I-5.12)
         // Static paths before dynamic captures.
         .route(

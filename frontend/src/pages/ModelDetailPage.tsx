@@ -52,7 +52,7 @@ const KIND_LABELS: Record<ModelKind, string> = {
   external_llm_adapter: 'LLM Adapter',
 }
 
-type Tab = 'overview' | 'versions' | 'train' | 'test' | 'evaluations' | 'deployments' | 'forecast'
+type Tab = 'overview' | 'versions' | 'train' | 'test' | 'evaluations' | 'deployments' | 'monitoring'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -61,7 +61,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'test', label: 'Test Lab' },
   { id: 'evaluations', label: 'Evaluations' },
   { id: 'deployments', label: 'Deployments' },
-  { id: 'forecast', label: 'Forecast Quality' },
+  { id: 'monitoring', label: 'Monitoring' },
 ]
 
 const SPRING = { type: 'spring' as const, stiffness: 380, damping: 30 }
@@ -294,7 +294,9 @@ export function ModelDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const shouldReduce = useReducedMotion()
 
-  const tabParam = searchParams.get('tab') as Tab | null
+  // Map legacy ?tab=forecast deep links onto the renamed Monitoring tab.
+  const rawTabParam = searchParams.get('tab')
+  const tabParam = (rawTabParam === 'forecast' ? 'monitoring' : rawTabParam) as Tab | null
   const [activeTab, setActiveTab] = useState<Tab>(
     TABS.find((t) => t.id === tabParam)?.id ?? 'overview',
   )
@@ -322,7 +324,7 @@ export function ModelDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center gap-4">
         <p className="text-base font-medium text-text">Model not found</p>
-        <Button variant="outline" onClick={() => navigate('/models')}>
+        <Button variant="outline" onClick={() => navigate('/mlops')}>
           <ChevronLeft className="h-4 w-4" />
           Back to models
         </Button>
@@ -334,11 +336,11 @@ export function ModelDetailPage() {
     <div className="mx-auto w-full max-w-6xl px-6 py-6">
       {/* Back nav */}
       <button
-        onClick={() => navigate('/models')}
+        onClick={() => navigate('/mlops')}
         className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text transition-colors mb-5"
       >
         <ChevronLeft className="h-4 w-4" />
-        AI Model Studio
+        MLOps
       </button>
 
       {/* Glass header */}
@@ -417,7 +419,7 @@ export function ModelDetailPage() {
         {activeTab === 'test' && <ModelTestTab modelId={id!} />}
         {activeTab === 'evaluations' && <ModelEvalsTab modelId={id!} />}
         {activeTab === 'deployments' && <ModelDeploymentsTab modelId={id!} />}
-        {activeTab === 'forecast' && <ForecastChartsTab modelId={id!} />}
+        {activeTab === 'monitoring' && <ForecastChartsTab modelId={id!} />}
       </div>
     </div>
   )

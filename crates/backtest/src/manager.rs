@@ -161,6 +161,10 @@ pub struct BacktestManager {
     hydrated: AtomicBool,
     /// Caps the number of jobs running their heavy phases concurrently.
     run_permits: Arc<tokio::sync::Semaphore>,
+    /// Optional provider that turns `ModelForecast` nodes into per-bar booleans.
+    /// Injected once at startup by the platform (which owns the inference
+    /// gateway).  When unset, model nodes abstain.
+    forecast_provider: std::sync::OnceLock<Arc<dyn crate::forecast::ForecastProvider>>,
 }
 
 impl BacktestManager {
@@ -179,7 +183,14 @@ impl BacktestManager {
             http,
             hydrated: AtomicBool::new(false),
             run_permits: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
+            forecast_provider: std::sync::OnceLock::new(),
         })
+    }
+
+    /// Inject the forecast provider used to evaluate `ModelForecast` nodes in
+    /// backtests.  Call once at startup; later calls are ignored.
+    pub fn set_forecast_provider(&self, provider: Arc<dyn crate::forecast::ForecastProvider>) {
+        let _ = self.forecast_provider.set(provider);
     }
 
     /// Creates a job owned by `user_id` and starts driving it immediately.
@@ -406,6 +417,28 @@ impl BacktestManager {
             .parse()
             .map_err(|e| (BacktestStatus::Simulating, format!("invalid balance: {e}")))?;
         let precisions = self.instrument_precisions(&spec.instrument_id).await;
+
+        // Pre-compute per-bar ModelForecast outcomes (async inference) before
+        // handing the bars to the blocking simulation.  Only when the definition
+        // has model nodes and a provider is wired; otherwise model nodes abstain.
+        let has_model_nodes = spec.definition.nodes.iter().any(|n| {
+            matches!(n.kind, domain::strategy_def::nodes::NodeKind::ModelForecast { .. })
+        });
+        let model_results = match (has_model_nodes, self.forecast_provider.get()) {
+            (true, Some(provider)) => {
+                provider
+                    .forecasts(
+                        &spec.definition,
+                        &spec.instrument_id,
+                        timeframe,
+                        &bars,
+                        &requirements.features,
+                    )
+                    .await
+            }
+            _ => std::collections::HashMap::new(),
+        };
+
         let inputs = SimulationInputs {
             definition: spec.definition.clone(),
             instrument_id: spec.instrument_id.clone(),
@@ -418,6 +451,7 @@ impl BacktestManager {
             sim_start_ns: spec.start.timestamp_nanos_opt().unwrap_or(0),
             bars,
             features: requirements.features.clone(),
+            model_results,
         };
         let control = Arc::clone(&job.control);
         let report = tokio::task::spawn_blocking(move || run_simulation(inputs, &control))

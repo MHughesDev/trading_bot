@@ -197,6 +197,15 @@ async fn main() -> anyhow::Result<()> {
     let inference_gateway = model_registry::InferenceGateway::new(pg.clone(), sidecar);
     info!("inference gateway initialised");
 
+    // Wire the gateway into the backtest manager so `ModelForecast` strategy
+    // nodes are evaluated (per-bar forecasts) during historical simulation.
+    backtest_manager.set_forecast_provider(
+        model_registry::backtest_forecast::GatewayForecastProvider::new(Arc::clone(
+            &inference_gateway,
+        )),
+    );
+    info!("backtest forecast provider wired (ModelForecast nodes now backtestable)");
+
     // Best-effort NATS progress bridge: drives ModelManager job state from
     // training/eval progress frames published by the Python trainer sidecar.
     {

@@ -161,6 +161,27 @@ export function fromDefinition(def: StrategyDefinition): {
     condY += 180
   }
 
+  // Create AIForecastNodes from v1.1 model_forecast nodes.
+  const modelNodeId = new Map<string, string>() // def node id → reactflow nodeId
+  let modelY = condY
+  for (const n of def.nodes) {
+    if (n.type !== 'model_forecast') continue
+    const nodeId = uid()
+    modelNodeId.set(n.id, nodeId)
+    nodes.push({
+      id: nodeId,
+      type: 'ai_forecast',
+      position: { x: 360, y: modelY },
+      data: {
+        model: n.model_ref,
+        direction: (n.direction as 'bullish' | 'bearish' | 'any') ?? 'any',
+        minConfidence: n.min_confidence ?? 0,
+        alias: n.alias ?? 'production',
+      },
+    })
+    modelY += 180
+  }
+
   // Create ActionNode + SizeNode for each action.
   const actionCenterY = Math.max(condY / 2, 150)
   let actOffset = 0
@@ -182,6 +203,20 @@ export function fromDefinition(def: StrategyDefinition): {
           id: uid(),
           source: rfNodeId,
           sourceHandle: 'cond-out',
+          target: actId,
+          targetHandle: 'action-in',
+          animated: true,
+        })
+      }
+    }
+
+    // Wire AI model nodes whose signals trigger this action.
+    for (const [defModelId, rfNodeId] of modelNodeId) {
+      if (condEmit.get(defModelId) === action.on_signal) {
+        edges.push({
+          id: uid(),
+          source: rfNodeId,
+          sourceHandle: 'forecast-out',
           target: actId,
           targetHandle: 'action-in',
           animated: true,
