@@ -93,6 +93,28 @@ pub fn map_sim_result(
     }
 }
 
+/// Map a [`crate::sim::DetailedOutcome`] (real-engine trades + reconstructed
+/// equity curve) into a [`RunResult`]. This is the suite executor's bridge from
+/// the `market_simulator` to the standardized run shape — net exposure is absent
+/// (the engine reports realized positions, not per-bar exposure), so exposure
+/// metrics are simply unavailable, never wrong.
+#[must_use]
+pub fn map_detailed_result(
+    cfg: &RunConfig,
+    outcome: crate::sim::DetailedOutcome,
+    compute_cost: ComputeCost,
+    produced_by: impl Into<String>,
+) -> RunResult {
+    map_sim_result(
+        cfg,
+        outcome.equity,
+        Vec::new(),
+        outcome.trades,
+        compute_cost,
+        produced_by,
+    )
+}
+
 /// Per-period simple returns from an equity curve.
 #[must_use]
 pub fn returns_from_equity(equity: &[(DateTime<Utc>, f64)]) -> Vec<f64> {
@@ -178,6 +200,29 @@ mod tests {
         assert!(r.metrics.total_return > 0.0);
         assert_eq!(r.metrics.n_trades, 1);
         assert!((r.metrics.hit_rate - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn maps_detailed_outcome_to_metrics() {
+        let c = cfg();
+        let outcome = crate::sim::DetailedOutcome {
+            cancelled: false,
+            equity: daily_curve(&[100.0, 101.0, 102.0]),
+            trades: vec![sample_trade(dec!(2))],
+            stats: serde_json::Value::Null,
+        };
+        let r = map_detailed_result(
+            &c,
+            outcome,
+            ComputeCost {
+                wall_ms: 1,
+                cpu_ms: 1,
+            },
+            "engine@test",
+        );
+        assert_eq!(r.status, RunStatus::Ok);
+        assert_eq!(r.metrics.n_trades, 1);
+        assert!(r.metrics.total_return > 0.0);
     }
 
     #[test]

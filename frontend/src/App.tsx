@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, Component } from 'react'
 import type { ReactNode, ErrorInfo } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/auth'
 import { AppLayout } from '@/components/layout/AppLayout'
@@ -25,8 +25,8 @@ const BackTestingPage = lazy(() =>
 const StrategyCreationPage = lazy(() =>
   import('@/pages/StrategyCreationPage').then((m) => ({ default: m.StrategyCreationPage })),
 )
-const ModelStudioPage = lazy(() =>
-  import('@/pages/ModelStudioPage').then((m) => ({ default: m.ModelStudioPage })),
+const MlOpsPage = lazy(() =>
+  import('@/pages/MlOpsPage').then((m) => ({ default: m.MlOpsPage })),
 )
 const ModelDetailPage = lazy(() =>
   import('@/pages/ModelDetailPage').then((m) => ({ default: m.ModelDetailPage })),
@@ -42,6 +42,9 @@ const LeaderboardPage = lazy(() =>
 )
 const WorkbenchPage = lazy(() =>
   import('@/pages/WorkbenchPage').then((m) => ({ default: m.WorkbenchPage })),
+)
+const ProvingGroundPage = lazy(() =>
+  import('@/pages/ProvingGroundPage').then((m) => ({ default: m.ProvingGroundPage })),
 )
 
 const qc = new QueryClient({
@@ -69,6 +72,14 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
     }
     return this.props.children
   }
+}
+
+// Forwards legacy "/models/..." deep links to the renamed "/mlops/..." routes,
+// preserving the sub-path and query string (e.g. /models/abc?tab=test).
+function ModelsRedirect() {
+  const loc = useLocation()
+  const target = loc.pathname.replace(/^\/models/, '/mlops') + loc.search
+  return <Navigate to={target} replace />
 }
 
 function AuthInit({ children }: { children: React.ReactNode }) {
@@ -99,11 +110,12 @@ export default function App() {
               <Route path="/strategy" element={<StrategyCreationPage />} />
               <Route path="/backtesting" element={<BackTestingPage />} />
               <Route path="/workbench" element={<WorkbenchPage />} />
-              <Route path="/models" element={<ModelStudioPage />} />
-              <Route path="/models/create" element={<ModelCreatePage />} />
-              <Route path="/models/graph" element={<ModelLineagePage />} />
-              <Route path="/models/leaderboard" element={<LeaderboardPage />} />
-              <Route path="/models/:id" element={<ModelDetailPage />} />
+              <Route path="/proving-ground" element={<ProvingGroundPage />} />
+              <Route path="/mlops" element={<MlOpsPage />} />
+              <Route path="/mlops/create" element={<ModelCreatePage />} />
+              <Route path="/mlops/graph" element={<ModelLineagePage />} />
+              <Route path="/mlops/leaderboard" element={<LeaderboardPage />} />
+              <Route path="/mlops/:id" element={<ModelDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
 
               {/* Legacy / deep-link routes */}
@@ -112,6 +124,8 @@ export default function App() {
               <Route path="/account" element={<AccountPage />} />
               <Route path="/transactions" element={<TransactionsPage />} />
               <Route path="/strategy-builder" element={<Navigate to="/strategy" replace />} />
+              {/* ML Ops was renamed from "AI Models"; keep old /models* deep links alive. */}
+              <Route path="/models/*" element={<ModelsRedirect />} />
 
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>

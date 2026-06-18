@@ -24,15 +24,15 @@ import {
   useModelEvals,
   useArchiveModel,
   usePatchModel,
-} from '@/hooks/useModels'
-import { ModelStatusPill } from '@/components/models/ModelStatusPill'
-import { ModelVersionsTab } from '@/components/models/ModelVersionsTab'
-import { ModelTrainTab } from '@/components/models/ModelTrainTab'
-import { ModelTestTab } from '@/components/models/ModelTestTab'
-import { ModelEvalsTab } from '@/components/models/ModelEvalsTab'
-import { ModelDeploymentsTab } from '@/components/models/ModelDeploymentsTab'
-import { ForecastChartsTab } from '@/components/models/ForecastChartsTab'
-import type { ModelKind } from '@/api/models'
+} from '@/hooks/useMlOps'
+import { ModelStatusPill } from '@/components/mlops/ModelStatusPill'
+import { ModelVersionsTab } from '@/components/mlops/ModelVersionsTab'
+import { ModelTrainTab } from '@/components/mlops/ModelTrainTab'
+import { ModelTestTab } from '@/components/mlops/ModelTestTab'
+import { ModelEvalsTab } from '@/components/mlops/ModelEvalsTab'
+import { ModelDeploymentsTab } from '@/components/mlops/ModelDeploymentsTab'
+import { ForecastChartsTab } from '@/components/mlops/ForecastChartsTab'
+import type { ModelKind } from '@/api/mlops'
 
 const KIND_ICONS: Record<ModelKind, React.ElementType> = {
   forecaster: Brain,
@@ -322,7 +322,7 @@ export function ModelDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center gap-4">
         <p className="text-base font-medium text-text">Model not found</p>
-        <Button variant="outline" onClick={() => navigate('/models')}>
+        <Button variant="outline" onClick={() => navigate('/mlops')}>
           <ChevronLeft className="h-4 w-4" />
           Back to models
         </Button>
@@ -334,11 +334,11 @@ export function ModelDetailPage() {
     <div className="mx-auto w-full max-w-6xl px-6 py-6">
       {/* Back nav */}
       <button
-        onClick={() => navigate('/models')}
+        onClick={() => navigate('/mlops')}
         className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text transition-colors mb-5"
       >
         <ChevronLeft className="h-4 w-4" />
-        AI Model Studio
+        ML Ops
       </button>
 
       {/* Glass header */}
