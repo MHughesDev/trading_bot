@@ -8,9 +8,9 @@ import {
   useModelAliases,
   usePromoteVersion,
   useEvaluateVersion,
-} from '@/hooks/useModels'
+} from '@/hooks/useMlOps'
 import { ModelStatusPill } from './ModelStatusPill'
-import type { ModelVersion } from '@/api/models'
+import type { ModelVersion } from '@/api/mlops'
 import { format } from 'date-fns'
 
 interface Props {

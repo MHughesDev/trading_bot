@@ -1,4 +1,4 @@
-// Typed client for the AI Model Studio API (Rust backend, /api/models).
+// Typed client for the ML Ops API (Rust backend, /api/models).
 //
 // Uses the single shared `api` instance from lib/api so there is one
 // token-attaching client and one 401 interceptor across the app.

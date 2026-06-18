@@ -9,8 +9,8 @@ import {
   useStartTrain,
   useCancelRun,
   useMarketInstruments,
-} from '@/hooks/useModels'
-import type { ModelRunSnapshot } from '@/api/models'
+} from '@/hooks/useMlOps'
+import type { ModelRunSnapshot } from '@/api/mlops'
 import { formatDistanceToNow } from 'date-fns'
 import { HyperparamEditor } from './HyperparamEditor'
 

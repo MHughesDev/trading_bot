@@ -17,7 +17,7 @@ import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { ForecastDirection, InferenceTargetKind } from '@/types/spec'
 import { INFERENCE_TARGET_LABELS } from '@/types/spec'
-import { modelsApi, inferenceTargetsApi } from '@/api/models'
+import { modelsApi, inferenceTargetsApi } from '@/api/mlops'
 
 // A plain type literal (not an interface intersection) so the data satisfies
 // ReactFlow's `Record<string, unknown>` node-data constraint. Mirrors the

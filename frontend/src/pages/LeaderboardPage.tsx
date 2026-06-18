@@ -202,7 +202,7 @@ export function LeaderboardPage() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        navigate(`/models/${entry.model_id}`)
+                        navigate(`/mlops/${entry.model_id}`)
                       }}
                       className="text-text-muted hover:text-accent transition-colors"
                       title="Open model"
@@ -251,7 +251,7 @@ function EvalReportPanel({ modelId, onClose }: { modelId: string; onClose: () =>
           </p>
           <div className="flex gap-2">
             <button
-              onClick={() => window.open(`/models/${modelId}?tab=forecast`, '_blank')}
+              onClick={() => window.open(`/mlops/${modelId}?tab=forecast`, '_blank')}
               className="inline-flex items-center gap-1.5 text-xs text-accent hover:underline"
             >
               <ExternalLink className="h-3 w-3" />

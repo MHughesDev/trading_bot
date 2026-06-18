@@ -1,4 +1,4 @@
-// Lineage Graph — /models/graph
+// Lineage Graph — /mlops/graph
 //
 // Renders the global model lineage graph using @xyflow/react.  Each node
 // represents an entity in the pipeline (dataset version → training run →
@@ -20,7 +20,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useQuery } from '@tanstack/react-query'
 import { useParams, Link } from 'react-router-dom'
-import { modelsApi, type LineageGraph } from '@/api/models'
+import { modelsApi, type LineageGraph } from '@/api/mlops'
 
 // ── Node styles matching the .tb-node design language ────────────────────────
 
@@ -230,7 +230,7 @@ export function ModelLineagePage() {
           ))}
         </div>
         <Link
-          to="/models"
+          to="/mlops"
           className="text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           ← All models

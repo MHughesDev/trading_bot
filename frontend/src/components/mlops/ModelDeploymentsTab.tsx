@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Loader2, RotateCcw, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useModelAliases, useModelDeployments, useRollback, useCreateDeployment, useModelVersions } from '@/hooks/useModels'
+import { useModelAliases, useModelDeployments, useRollback, useCreateDeployment, useModelVersions } from '@/hooks/useMlOps'
 import { format } from 'date-fns'
 
 interface Props {

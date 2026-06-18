@@ -3,9 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Loader2, GitCompare, CheckCircle2, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useModelEvals } from '@/hooks/useModels'
-import { modelsApi } from '@/api/models'
-import type { EvaluationRun } from '@/api/models'
+import { useModelEvals } from '@/hooks/useMlOps'
+import { modelsApi } from '@/api/mlops'
+import type { EvaluationRun } from '@/api/mlops'
 import { format } from 'date-fns'
 
 interface Props {

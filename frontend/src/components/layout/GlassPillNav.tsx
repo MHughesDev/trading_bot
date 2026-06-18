@@ -13,7 +13,7 @@ const SECTIONS = [
   { path: '/strategy', label: 'Strategy', icon: Layers },
   { path: '/backtesting', label: 'Back Testing', icon: FlaskConical },
   { path: '/workbench', label: 'Workbench', icon: Microscope },
-  { path: '/models', label: 'AI Models', icon: Brain },
+  { path: '/mlops', label: 'ML Ops', icon: Brain },
   { path: '/settings', label: 'Settings', icon: Settings },
 ]
 

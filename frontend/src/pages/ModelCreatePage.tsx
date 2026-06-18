@@ -21,8 +21,8 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useCreateModel } from '@/hooks/useModels'
-import type { ModelKind } from '@/api/models'
+import { useCreateModel } from '@/hooks/useMlOps'
+import type { ModelKind } from '@/api/mlops'
 
 const SPRING = { type: 'spring' as const, stiffness: 380, damping: 30 }
 
@@ -263,7 +263,7 @@ export function ModelCreatePage() {
           adapter,
         },
       })
-      navigate(`/models/${res.data.model_id}`)
+      navigate(`/mlops/${res.data.model_id}`)
     } catch {
       // error shown via mutation state
     }
@@ -598,7 +598,7 @@ export function ModelCreatePage() {
       <div className="mt-8 flex items-center justify-between">
         <Button
           variant="outline"
-          onClick={() => (step === 0 ? navigate('/models') : setStep(step - 1))}
+          onClick={() => (step === 0 ? navigate('/mlops') : setStep(step - 1))}
         >
           <ChevronLeft className="h-4 w-4" />
           {step === 0 ? 'Cancel' : 'Back'}

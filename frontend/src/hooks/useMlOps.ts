@@ -4,7 +4,7 @@ import {
   type ModelKind,
   type ModelStatus,
   type TrainDataSelection,
-} from '@/api/models'
+} from '@/api/mlops'
 
 export const MODEL_KEYS = {
   all: ['models'] as const,

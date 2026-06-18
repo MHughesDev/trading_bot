@@ -18,9 +18,9 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useModels } from '@/hooks/useModels'
-import { ModelStatusPill } from '@/components/models/ModelStatusPill'
-import type { AiModel, ModelKind, ModelStatus } from '@/api/models'
+import { useModels } from '@/hooks/useMlOps'
+import { ModelStatusPill } from '@/components/mlops/ModelStatusPill'
+import type { AiModel, ModelKind, ModelStatus } from '@/api/mlops'
 import { format } from 'date-fns'
 
 const KIND_ICONS: Record<ModelKind, React.ElementType> = {
@@ -99,7 +99,7 @@ function ModelCard({ model }: { model: AiModel }) {
       exit={{ opacity: 0, y: -8 }}
       transition={shouldReduce ? { duration: 0.001 } : SPRING}
       className="group rounded-xl border border-border bg-surface p-5 hover:border-border-2 hover:shadow-sm transition-shadow cursor-pointer"
-      onClick={() => navigate(`/models/${model.model_id}`)}
+      onClick={() => navigate(`/mlops/${model.model_id}`)}
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
@@ -149,7 +149,7 @@ function ModelCard({ model }: { model: AiModel }) {
           className="flex-1 text-xs h-7"
           onClick={(e) => {
             e.stopPropagation()
-            navigate(`/models/${model.model_id}`)
+            navigate(`/mlops/${model.model_id}`)
           }}
         >
           Open
@@ -161,7 +161,7 @@ function ModelCard({ model }: { model: AiModel }) {
           className="text-xs h-7"
           onClick={(e) => {
             e.stopPropagation()
-            navigate(`/models/${model.model_id}?tab=test`)
+            navigate(`/mlops/${model.model_id}?tab=test`)
           }}
         >
           <ExternalLink className="h-3 w-3 mr-1" />
@@ -179,7 +179,7 @@ function ModelTableRow({ model }: { model: AiModel }) {
   return (
     <tr
       className="border-b border-border hover:bg-surface-2 cursor-pointer transition-colors"
-      onClick={() => navigate(`/models/${model.model_id}`)}
+      onClick={() => navigate(`/mlops/${model.model_id}`)}
     >
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
@@ -202,7 +202,7 @@ function ModelTableRow({ model }: { model: AiModel }) {
   )
 }
 
-export function ModelStudioPage() {
+export function MlOpsPage() {
   const navigate = useNavigate()
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid')
   const [kindFilter, setKindFilter] = useState<ModelKind | ''>('')
@@ -224,13 +224,13 @@ export function ModelStudioPage() {
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold text-text">
             <Brain className="h-6 w-6 text-accent" />
-            AI Model Studio
+            ML Ops
           </h1>
           <p className="mt-1 text-sm text-text-muted">
             Manage, train, and deploy machine learning models for your trading strategies.
           </p>
         </div>
-        <Button onClick={() => navigate('/models/create')}>
+        <Button onClick={() => navigate('/mlops/create')}>
           <Plus className="h-4 w-4" />
           Create Model
         </Button>
@@ -327,7 +327,7 @@ export function ModelStudioPage() {
               Create your first model to get started with AI-powered trading.
             </p>
           </div>
-          <Button onClick={() => navigate('/models/create')}>
+          <Button onClick={() => navigate('/mlops/create')}>
             <Plus className="h-4 w-4" />
             Create Model
           </Button>

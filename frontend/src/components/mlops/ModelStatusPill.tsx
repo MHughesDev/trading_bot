@@ -1,6 +1,6 @@
 import { motion, useReducedMotion } from 'framer-motion'
 import { cn } from '@/lib/utils'
-import type { ModelStatus } from '@/api/models'
+import type { ModelStatus } from '@/api/mlops'
 
 interface ModelStatusPillProps {
   status: ModelStatus
