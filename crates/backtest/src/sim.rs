@@ -17,6 +17,7 @@ use domain::strategy_def::StrategyDefinition;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
+use crate::run::result::{Side as TradeSide, Trade};
 use chrono::{DateTime, Utc};
 use nautilus_backtest::config::BacktestEngineConfig;
 use nautilus_backtest::engine::BacktestEngine;
@@ -26,12 +27,13 @@ use nautilus_backtest::sdk::{
 };
 use nautilus_core::UnixNanos;
 use nautilus_model::data::{Bar, BarSpecification, BarType, Data};
-use nautilus_model::enums::{AggregationSource, BarAggregation, OrderSide, PositionSide, PriceType};
+use nautilus_model::enums::{
+    AggregationSource, BarAggregation, OrderSide, PositionSide, PriceType,
+};
 use nautilus_model::identifiers::Venue;
 use nautilus_model::instruments::Instrument;
 use nautilus_model::position::Position;
 use nautilus_model::types::{Money, Price, Quantity};
-use crate::run::result::{Side as TradeSide, Trade};
 
 /// Price/size decimal precision for the simulated instrument.
 ///
@@ -662,8 +664,16 @@ mod tests {
     #[test]
     fn detailed_run_matches_sdk_and_reconstructs_equity() {
         let features = vec![
-            FeatureSpec { name: "ema_7".into(), kind: FeatureKind::Ema, period: 7 },
-            FeatureSpec { name: "ema_21".into(), kind: FeatureKind::Ema, period: 21 },
+            FeatureSpec {
+                name: "ema_7".into(),
+                kind: FeatureKind::Ema,
+                period: 7,
+            },
+            FeatureSpec {
+                name: "ema_21".into(),
+                kind: FeatureKind::Ema,
+                period: 21,
+            },
         ];
         let bars: Vec<LoadedBar> = (0..60)
             .map(|i| {
@@ -699,7 +709,11 @@ mod tests {
         // The direct-drive loop must produce the same orders as the SDK path.
         assert_eq!(outcome.stats["total_orders"].as_u64(), Some(1));
         // Equity is the realized-pnl step curve: one start point + one per closed trade.
-        let expected = if outcome.trades.is_empty() { 0 } else { outcome.trades.len() + 1 };
+        let expected = if outcome.trades.is_empty() {
+            0
+        } else {
+            outcome.trades.len() + 1
+        };
         assert_eq!(outcome.equity.len(), expected);
     }
 
