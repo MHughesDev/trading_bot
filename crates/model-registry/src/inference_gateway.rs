@@ -310,110 +310,10 @@ impl InferenceGateway {
         }
     }
 
-    /// Resolve an ensemble alias → artifact URI + hash for sidecar predict.
-    ///
-    /// Queries `ensemble_aliases` → `ensemble_versions` using the same pattern
-    /// as `resolve_alias` + artifact look-up for individual models.
-    async fn resolve_ensemble_artifact(
-        &self,
-        ensemble_ref: &str,
-        alias: &str,
-    ) -> Option<(String, String, i32)> {
-        let effective_alias = if alias.is_empty() {
-            "production"
-        } else {
-            alias
-        };
-
-        // ensemble_ref is expected to be the ensemble UUID id.
-        let id_row: Option<(String,)> =
-            sqlx::query_as("SELECT id FROM ensembles WHERE id = $1 LIMIT 1")
-                .bind(ensemble_ref)
-                .fetch_optional(&self.pg)
-                .await
-                .ok()
-                .flatten();
-
-        let ensemble_id = id_row.map(|(id,)| id)?;
-
-        let row: Option<(i32, String, String)> = sqlx::query_as(
-            "SELECT ev.version, ev.artifact_uri, ev.artifact_hash \
-             FROM ensemble_versions ev \
-             JOIN ensemble_aliases ea \
-               ON ea.ensemble_id = ev.ensemble_id AND ea.version = ev.version \
-             WHERE ea.ensemble_id = $1 AND ea.alias = $2 \
-             LIMIT 1",
-        )
-        .bind(&ensemble_id)
-        .bind(effective_alias)
-        .fetch_optional(&self.pg)
-        .await
-        .ok()
-        .flatten();
-
-        row.map(|(version, uri, hash)| (uri, hash, version))
-    }
-
-    /// Run inference for a single ensemble node.  Abstains on missing alias or sidecar error.
-    async fn forecast_ensemble(
-        &self,
-        ensemble_ref: &str,
-        alias: &str,
-        instrument_id: &str,
-        features: &HashMap<String, f64>,
-    ) -> Option<ForecastResult> {
-        let (artifact_uri, artifact_hash, version) =
-            if let Some(t) = self.resolve_ensemble_artifact(ensemble_ref, alias).await {
-                t
-            } else {
-                warn!(
-                    ensemble = ensemble_ref,
-                    alias, "ensemble alias not found — abstaining"
-                );
-                return None;
-            };
-
-        let start = Instant::now();
-        let req = PredictRequest {
-            // Reuse ensemble_ref as the model_id field the sidecar logs against.
-            model_id: ensemble_ref.to_string(),
-            version,
-            model_kind: "ensemble".to_string(),
-            artifact_uri,
-            artifact_hash,
-            instances: vec![PredictInstance {
-                instrument_id: instrument_id.to_string(),
-                features: features.clone(),
-            }],
-        };
-
-        match self.sidecar.predict(req).await {
-            Ok(resp) => {
-                let latency_ms = start.elapsed().as_millis() as u64;
-                let pred = resp.predictions.into_iter().next()?;
-                let distribution = Self::build_distribution(&pred);
-                Some(ForecastResult {
-                    direction: pred.direction,
-                    confidence: pred.confidence,
-                    latency_ms,
-                    magnitude: pred.magnitude,
-                    distribution,
-                })
-            }
-            Err(e) => {
-                warn!(ensemble = ensemble_ref, error = %e, "ensemble sidecar predict failed — abstaining");
-                None
-            }
-        }
-    }
-
     /// Refresh model forecast results for a node list into a cache `HashMap`.
     /// Called by the strategy runtime layer before dispatch to pre-populate sync-readable results.
     ///
-    /// Phase 2: `target_kind` is now consumed.
-    ///   - `"model"` (default) → resolved through `forecast()` as before.
-    ///   - `"ensemble"` → resolved through `forecast_ensemble()`.
-    ///   - `"pipeline"` → abstains (not yet implemented; logs a warning once).
+    /// All `ModelForecast` nodes resolve through `forecast()`.
     pub async fn refresh_node_forecasts(
         &self,
         nodes: &[domain::strategy_def::nodes::Node],
@@ -426,31 +326,15 @@ impl InferenceGateway {
         for node in nodes {
             if let NodeKind::ModelForecast {
                 model_ref,
-                target_kind,
                 alias,
                 direction,
                 min_confidence,
                 ..
             } = &node.kind
             {
-                let forecast = match target_kind.as_str() {
-                    "ensemble" => {
-                        self.forecast_ensemble(model_ref, alias, instrument_id, features)
-                            .await
-                    }
-                    "pipeline" => {
-                        warn!(
-                            node_id = %node.id,
-                            "ModelForecast target_kind='pipeline' is not yet implemented — abstaining"
-                        );
-                        None
-                    }
-                    // "model" and any unknown value fall through to the model path.
-                    _ => {
-                        self.forecast(model_ref, alias, instrument_id, features)
-                            .await
-                    }
-                };
+                let forecast = self
+                    .forecast(model_ref, alias, instrument_id, features)
+                    .await;
 
                 let fired = match forecast {
                     None => false,
@@ -461,37 +345,6 @@ impl InferenceGateway {
                 };
 
                 results.insert(node.id.clone(), fired);
-            }
-        }
-    }
-
-    /// Resolve an inference target by `target_kind`, returning a `ForecastResult`.
-    ///
-    /// `"ensemble"` routes through `forecast_ensemble`; `"pipeline"` is not yet
-    /// implemented (abstains); everything else routes through `forecast`.
-    async fn run_target(
-        &self,
-        model_ref: &str,
-        target_kind: &str,
-        alias: &str,
-        instrument_id: &str,
-        features: &HashMap<String, f64>,
-    ) -> Option<ForecastResult> {
-        match target_kind {
-            "ensemble" => {
-                self.forecast_ensemble(model_ref, alias, instrument_id, features)
-                    .await
-            }
-            "pipeline" => {
-                warn!(
-                    model_ref,
-                    "Inference target_kind='pipeline' is not yet implemented — abstaining"
-                );
-                None
-            }
-            _ => {
-                self.forecast(model_ref, alias, instrument_id, features)
-                    .await
             }
         }
     }
@@ -565,13 +418,12 @@ impl InferenceGateway {
             match &node.kind {
                 NodeKind::Inference {
                     model_ref,
-                    target_kind,
                     alias,
                     abstain,
                     ..
                 } => {
                     match self
-                        .run_target(model_ref, target_kind, alias, instrument_id, features)
+                        .forecast(model_ref, alias, instrument_id, features)
                         .await
                     {
                         Some(f) => {

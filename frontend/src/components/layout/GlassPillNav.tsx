@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { motion, useReducedMotion } from 'framer-motion'
 import {
-  LayoutDashboard, Monitor, Zap, Layers, Settings, FlaskConical, Brain, GitMerge, Workflow, Microscope,
+  LayoutDashboard, Monitor, Zap, Layers, Settings, FlaskConical, Brain, Microscope,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ModeBadge } from './ModeBadge'
@@ -14,8 +14,6 @@ const SECTIONS = [
   { path: '/backtesting', label: 'Back Testing', icon: FlaskConical },
   { path: '/workbench', label: 'Workbench', icon: Microscope },
   { path: '/models', label: 'AI Models', icon: Brain },
-  { path: '/ensembles', label: 'Ensembles', icon: GitMerge },
-  { path: '/pipelines', label: 'Pipelines', icon: Workflow },
   { path: '/settings', label: 'Settings', icon: Settings },
 ]
 

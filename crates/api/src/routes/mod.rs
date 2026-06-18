@@ -3,13 +3,11 @@ pub mod assets;
 pub mod automations;
 pub mod backtests;
 pub mod dashboard;
-pub mod ensembles;
 pub mod experiments;
 pub mod models;
 pub mod models_phase6;
 pub mod orders;
 pub mod paper;
-pub mod pipelines;
 pub mod strategies;
 pub mod streams;
 pub mod trading;
@@ -285,50 +283,8 @@ pub fn router(state: AppState) -> Router {
         )
         // I-3.10 run compare
         .route("/api/models/{id}/runs/compare", get(models::compare_runs))
-        // Phase 4 — Ensemble Studio (I-4.3)
-        .route(
-            "/api/ensembles",
-            get(ensembles::list_ensembles).post(ensembles::create_ensemble),
-        )
-        .route("/api/ensembles/{id}", get(ensembles::get_ensemble))
-        .route(
-            "/api/ensembles/{id}/combine",
-            post(ensembles::combine_ensemble),
-        )
-        .route(
-            "/api/ensembles/{id}/versions",
-            get(ensembles::list_ensemble_versions),
-        )
-        .route(
-            "/api/ensembles/{id}/versions/{v}/promote/{alias}",
-            post(ensembles::promote_ensemble_version),
-        )
-        // Phase 5 — Pipeline factory + quality monitoring (I-5.12)
-        // Static paths before dynamic captures.
-        .route("/api/pipelines/runs/{run_id}", get(pipelines::get_run))
-        .route(
-            "/api/pipelines/runs/{run_id}/nodes",
-            get(pipelines::list_node_runs),
-        )
-        .route(
-            "/api/pipelines",
-            get(pipelines::list_pipelines).post(pipelines::create_pipeline),
-        )
-        .route(
-            "/api/pipelines/{id}",
-            get(pipelines::get_pipeline).delete(pipelines::delete_pipeline),
-        )
-        .route("/api/pipelines/{id}/run", post(pipelines::run_pipeline))
-        .route("/api/pipelines/{id}/runs", get(pipelines::list_runs))
-        .route(
-            "/api/pipelines/{id}/runs/{run_id}/cancel",
-            post(pipelines::cancel_run),
-        )
         // I-5.9/I-5.10 — per-model rolling quality + alerts
-        .route(
-            "/api/models/{id}/quality",
-            get(pipelines::get_model_quality),
-        )
+        .route("/api/models/{id}/quality", get(models::get_model_quality))
         // I-6.1 — distributional publish contract
         .route("/api/models/{id}/predict", get(models_phase6::predict))
         // I-6.4 — tags (static before dynamic)

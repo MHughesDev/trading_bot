@@ -34,15 +34,12 @@ export interface IndicatorSpec {
 }
 
 // ── AI inference target ───────────────────────────────────────────────────────
-// An AI block runs data through one of three target kinds, all of which resolve
-// to a single forecast through the inference gateway, so the rest of the
-// strategy is agnostic to which kind it is.
-export type InferenceTargetKind = 'model' | 'ensemble' | 'pipeline'
+// An AI block runs data through a model, which resolves to a single forecast
+// through the inference gateway.
+export type InferenceTargetKind = 'model'
 
 export const INFERENCE_TARGET_LABELS: Record<InferenceTargetKind, string> = {
   model: 'Model',
-  ensemble: 'Ensemble',
-  pipeline: 'Model Pipeline',
 }
 
 /** The input-data contract — what data and how much the target receives each run. */

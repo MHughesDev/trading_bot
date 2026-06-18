@@ -2,8 +2,8 @@ import asyncio
 
 from fastapi import FastAPI
 
-from .schemas import TrainRequest, EvalRequest, EnsembleCombineRequest
-from .worker import run_training, run_evaluation, run_ensemble_combine, RESULTS
+from .schemas import TrainRequest, EvalRequest
+from .worker import run_training, run_evaluation, RESULTS
 
 app = FastAPI(title="model-trainer", version="0.1.0")
 
@@ -41,16 +41,4 @@ async def evaluate(req: EvalRequest):
     realized outcomes; returns full metrics + scorecard + report.
     """
     result = await run_evaluation(req)
-    return result.model_dump()
-
-
-@app.post("/ensemble/combine")
-async def ensemble_combine(req: EnsembleCombineRequest):
-    """Ensemble combine + conformal calibration + scoring (I-4.11).
-
-    Loads all member artifacts, combines in σ-coordinate space, applies adaptive
-    conformal calibration on the cal rows, repairs crossings, scores with the
-    full Phase 2 suite, and persists an ensemble bundle.
-    """
-    result = await run_ensemble_combine(req)
     return result.model_dump()

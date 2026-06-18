@@ -741,7 +741,6 @@ mod tests {
                     id: "mf1".into(),
                     kind: NodeKind::ModelForecast {
                         model_ref: "mdl_test".into(),
-                        target_kind: "model".into(),
                         alias: "production".into(),
                         direction: "bullish".into(),
                         min_confidence: 0.7,

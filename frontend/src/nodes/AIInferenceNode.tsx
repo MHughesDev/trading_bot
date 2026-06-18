@@ -1,10 +1,9 @@
 // AI Inference block — rebuilt from scratch.
 //
-// One block runs incoming market data through an inference *target* (a single
-// model, an ensemble, or a model pipeline) and produces a single forecast that
-// gates entries (fires when the forecast direction matches and confidence ≥
-// the threshold). The three target kinds all resolve to one forecast through
-// the inference gateway, so the saved strategy is agnostic to which kind it is.
+// One block runs incoming market data through an inference *target* (a model)
+// and produces a single forecast that gates entries (fires when the forecast
+// direction matches and confidence ≥ the threshold). The target resolves to a
+// forecast through the inference gateway.
 //
 // The block also declares the *input-data contract* — which feature set, at
 // what timeframe, and how many bars of lookback — so automations, scanners, and
@@ -25,7 +24,7 @@ import { modelsApi, inferenceTargetsApi } from '@/api/models'
 // `AiInputContract` fields (featureSet/timeframe/lookback) inline.
 export type AIInferenceNodeData = {
   targetKind: InferenceTargetKind
-  /** Model / ensemble / pipeline slug. */
+  /** Model slug. */
   targetRef: string
   alias: string
   direction: ForecastDirection
@@ -41,7 +40,7 @@ export type AIInferenceNodeData = {
 
 export type AIInferenceNodeType = Node<AIInferenceNodeData, 'ai_inference'>
 
-const TARGET_KINDS: InferenceTargetKind[] = ['model', 'ensemble', 'pipeline']
+const TARGET_KINDS: InferenceTargetKind[] = ['model']
 
 const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d'] as const
 
@@ -54,12 +53,6 @@ export function AIInferenceNode({ data, id, selected }: NodeProps<AIInferenceNod
     queryKey: ['inference-targets', 'model'],
     queryFn: () => inferenceTargetsApi.models().then((r) => r.data.models),
     enabled: data.targetKind === 'model',
-    staleTime: 30_000,
-  })
-  const { data: ensembles } = useQuery({
-    queryKey: ['inference-targets', 'ensemble'],
-    queryFn: () => inferenceTargetsApi.ensembles().then((r) => r.data.ensembles),
-    enabled: data.targetKind === 'ensemble',
     staleTime: 30_000,
   })
 
@@ -130,19 +123,6 @@ export function AIInferenceNode({ data, id, selected }: NodeProps<AIInferenceNod
                   {m.display_name}{(m.status !== 'active' || !m.has_production) ? ' (unavailable)' : ''}
                 </option>
               ))}
-            </select>
-          )}
-          {data.targetKind === 'ensemble' && (
-            <select className="tb-select" value={data.targetRef} onChange={(e) => set({ targetRef: e.target.value })}>
-              <option value="" disabled>Select an ensemble…</option>
-              {(ensembles ?? []).map((en) => (
-                <option key={en.ensemble_id} value={en.slug}>{en.display_name}</option>
-              ))}
-            </select>
-          )}
-          {data.targetKind === 'pipeline' && (
-            <select className="tb-select" value="" disabled>
-              <option value="">Pipelines coming soon</option>
             </select>
           )}
         </div>

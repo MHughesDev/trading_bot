@@ -9,7 +9,6 @@ use demand_manager::{DemandRegistry, NoopPipelineFactory};
 use execution::paper::PaperTradingEngine;
 use execution::ExecutionEngine;
 use model_registry::{
-    ensemble_manager::EnsembleManager, pipeline_manager::PipelineManager,
     quality_monitor::QualityMonitor, tags::TagRegistry, InferenceGateway, ModelManager,
 };
 use risk::{KillSwitch, RiskGate};
@@ -52,10 +51,6 @@ pub struct AppState {
     pub suite: Arc<SuiteManager>,
     /// AI Model Studio orchestrator.
     pub models: Arc<ModelManager>,
-    /// Ensemble orchestrator — mirrors ModelManager lifecycle for ensemble artifacts.
-    pub ensembles: Arc<EnsembleManager>,
-    /// Pipeline factory — declarative DAG pipelines with fan-out (Phase 5).
-    pub pipelines: Arc<PipelineManager>,
     /// Rolling forecast quality monitor — drift detection, staleness, retrain triggers.
     pub quality_monitor: Arc<QualityMonitor>,
     /// Tags, annotations, and spec templates (I-6.4).
@@ -148,9 +143,6 @@ impl AppState {
         stream_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamRequest>>,
     ) -> Self {
         let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
-        let ensemble_sidecar = Arc::new(model_registry::sidecar::SidecarClient::from_env());
-        let ensembles = EnsembleManager::new(pg.clone(), ensemble_sidecar);
-        let pipelines = PipelineManager::new(pg.clone(), models.clone());
         let quality_monitor = QualityMonitor::new(
             pg.clone(),
             models.clone(),
@@ -170,8 +162,6 @@ impl AppState {
             backtest,
             suite: Arc::new(SuiteManager::new()),
             models,
-            ensembles,
-            pipelines,
             quality_monitor,
             tags,
             inference,

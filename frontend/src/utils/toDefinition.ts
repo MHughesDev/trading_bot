@@ -7,7 +7,7 @@
 // and signals that share an `emit` name OR-combine.
 //
 // AI inference is a first-class node (`model_forecast`, canonical v1.1): the
-// block runs data through a model, ensemble, or pipeline and gates a signal on
+// block runs data through a model and gates a signal on
 // the resolved forecast. A definition that uses one is emitted at version 1.1;
 // otherwise 1.0. Exits still have no representation and are reported as warnings.
 
@@ -18,7 +18,7 @@ export interface ModelForecastNode {
   id: string
   type: 'model_forecast'
   model_ref: string
-  target_kind?: 'model' | 'ensemble' | 'pipeline'
+  target_kind?: 'model'
   alias?: string
   direction: string
   min_confidence: number
@@ -46,7 +46,7 @@ export interface StrategyDefinition {
 function aiForecastNode(cond: Condition, id: string): ModelForecastNode | { error: string } {
   const ai = cond.ai
   if (!ai || !ai.targetRef) {
-    return { error: 'AI Inference block is missing its target (model / ensemble / pipeline).' }
+    return { error: 'AI Inference block is missing its target model.' }
   }
   const node: ModelForecastNode = {
     id,
