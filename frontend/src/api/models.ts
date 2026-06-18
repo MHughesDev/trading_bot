@@ -306,17 +306,8 @@ export const modelsApi = {
     }),
 }
 
-/// One selectable inference target (model or ensemble) for an AI strategy block.
-export interface EnsembleOption {
-  ensemble_id: string
-  slug: string
-  display_name: string
-}
-
-/// Pickers for the AI inference block. All three target kinds (model, ensemble,
-/// pipeline) resolve to a single forecast; pipelines are defined server-side in
-/// a later phase, so only models and ensembles are listed today.
+/// Pickers for the AI inference block. The target resolves to a single forecast
+/// through the inference gateway.
 export const inferenceTargetsApi = {
   models: (assetClass?: string) => modelsApi.forNode('forecaster', assetClass),
-  ensembles: () => client.get<{ ensembles: EnsembleOption[] }>('/api/ensembles'),
 }

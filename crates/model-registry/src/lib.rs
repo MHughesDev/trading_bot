@@ -8,14 +8,12 @@
 pub mod backtest_bridge;
 pub mod data_view;
 pub mod datasets;
-pub mod ensemble_manager;
 pub mod inference_gateway;
 pub mod job;
 pub mod leaderboard;
 pub mod manager;
 pub mod metrics;
 pub mod nats_bridge;
-pub mod pipeline_manager;
 pub mod quality_monitor;
 pub mod regression;
 pub mod report;

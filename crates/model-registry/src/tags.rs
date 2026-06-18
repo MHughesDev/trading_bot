@@ -1,6 +1,6 @@
 //! Registry tags, annotations & spec templates (I-6.4, Phase 6).
 //!
-//! Tags:        free-form labels on models/ensembles/pipelines; searchable.
+//! Tags:        free-form labels on models; searchable.
 //! Annotations: key-value metadata attached to any artifact.
 //! Templates:   forkable starter specs (`spec_templates` table); feed Create wizards.
 //!
@@ -38,7 +38,7 @@ pub struct ArtifactAnnotation {
 pub struct SpecTemplate {
     pub id: String,
     pub name: String,
-    /// `"model"` | `"ensemble"` | `"pipeline"`
+    /// `"model"`
     pub kind: String,
     pub description: String,
     pub definition: Value,

@@ -1188,3 +1188,29 @@ pub async fn export_report(
         }
     }
 }
+
+// ── Rolling forecast quality series + alerts (I-5.9/I-5.10) ──────────────────
+
+pub async fn get_model_quality(
+    State(state): State<AppState>,
+    _token: BearerToken,
+    Path(model_id): Path<String>,
+) -> impl IntoResponse {
+    let series = state
+        .quality_monitor
+        .get_quality_series(&model_id, 200)
+        .await
+        .unwrap_or_default();
+    let alerts = state
+        .quality_monitor
+        .get_alerts(&model_id, 50)
+        .await
+        .unwrap_or_default();
+
+    Json(json!({
+        "model_id": model_id,
+        "series": series,
+        "alerts": alerts,
+    }))
+    .into_response()
+}

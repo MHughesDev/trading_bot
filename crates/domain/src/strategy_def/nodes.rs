@@ -88,39 +88,6 @@ pub struct MatchSpec {
     pub min_confidence: f64,
 }
 
-/// An inline ensemble: combines the outputs of multiple member models without
-/// requiring a pre-registered ensemble in the model registry.
-///
-/// The gateway runs each member and combines them using `combiner`.
-/// This is suitable for quick A/B experiments; for production ensembles with
-/// calibration history, use `target_kind = "ensemble"` and a registry ensemble.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct InlineEnsemble {
-    /// Member model refs (ID or slug) to combine.
-    pub roster: Vec<InlineRosterMember>,
-    /// `"linear_opinion_pool"` (default) | `"crps_weighted"`.
-    #[serde(default = "default_linear_pool")]
-    pub combiner: String,
-    /// Minimum weight floor per member.  `weight_floor * roster.len() ≤ 1.0`.
-    #[serde(default = "default_weight_floor")]
-    pub weight_floor: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct InlineRosterMember {
-    pub model_ref: String,
-    #[serde(default = "default_production_alias")]
-    pub alias: String,
-}
-
-fn default_linear_pool() -> String {
-    "linear_opinion_pool".to_string()
-}
-
-fn default_weight_floor() -> f64 {
-    0.05
-}
-
 fn is_flat_policy(p: &AbstainPolicy) -> bool {
     *p == AbstainPolicy::Flat
 }
@@ -156,14 +123,6 @@ fn default_production_alias() -> String {
 
 fn is_production(s: &str) -> bool {
     s == "production"
-}
-
-fn default_target_kind() -> String {
-    "model".to_string()
-}
-
-fn is_model(s: &str) -> bool {
-    s == "model"
 }
 
 /// Input-data contract for an AI inference node — declares *what* data and *how
@@ -249,21 +208,16 @@ pub enum NodeKind {
         /// ID of the upstream node supplying the final universe.
         input: String,
     },
-    /// v1.1: AI inference condition (model, ensemble, or pipeline).
+    /// v1.1: AI inference condition.
     ///
-    /// `model_ref` + `target_kind` identify the inference target; all three
-    /// target kinds resolve to a single forecast through the inference gateway,
-    /// so the strategy schema is agnostic to which kind it is. The condition is
-    /// true when the resolved forecast's direction matches `direction` and its
-    /// confidence ≥ `min_confidence`. Returns false when inference abstains
-    /// (sidecar down, circuit-break open, or target not found).
+    /// `model_ref` identifies the model; it resolves to a single forecast
+    /// through the inference gateway. The condition is true when the resolved
+    /// forecast's direction matches `direction` and its confidence ≥
+    /// `min_confidence`. Returns false when inference abstains (sidecar down,
+    /// circuit-break open, or model not found).
     ModelForecast {
-        /// Inference target reference — a model, ensemble, or pipeline ID/slug
-        /// (see `target_kind`). Named `model_ref` for backward compatibility.
+        /// Model reference — a model ID/slug.
         model_ref: String,
-        /// Target kind: `"model"` (default) | `"ensemble"` | `"pipeline"`.
-        #[serde(default = "default_target_kind", skip_serializing_if = "is_model")]
-        target_kind: String,
         /// Alias to resolve (default: "production").
         #[serde(
             default = "default_production_alias",
@@ -283,10 +237,9 @@ pub enum NodeKind {
     // ── v1.1 AI blocks (requires definition_version "1.1") ───────────────────
     /// Value-producing AI inference node.
     ///
-    /// Calls a `Forecaster` (or an `ensemble`/`pipeline`) and publishes named
-    /// output fields into the feature slot namespace so downstream `Condition`,
-    /// `Filter`, `Rank`, and `Sizing` nodes can reference them with the
-    /// standard `feature('name')` grammar.
+    /// Calls a `Forecaster` and publishes named output fields into the feature
+    /// slot namespace so downstream `Condition`, `Filter`, `Rank`, and `Sizing`
+    /// nodes can reference them with the standard `feature('name')` grammar.
     ///
     /// Optionally also evaluates as a boolean condition (via `condition`) so
     /// it can be used directly in `Signal.when` without a separate `Condition`
@@ -294,9 +247,6 @@ pub enum NodeKind {
     Inference {
         /// Forecaster model reference (ID or slug).
         model_ref: String,
-        /// `"model"` (default) | `"ensemble"` | `"pipeline"`.
-        #[serde(default = "default_target_kind", skip_serializing_if = "is_model")]
-        target_kind: String,
         /// Version alias to resolve (default: `"production"`).
         #[serde(
             default = "default_production_alias",
@@ -313,11 +263,6 @@ pub enum NodeKind {
         /// What to do when inference abstains (default: `flat` — write NaN).
         #[serde(default, skip_serializing_if = "is_flat_policy")]
         abstain: AbstainPolicy,
-        /// Optional inline ensemble of member models, evaluated client-side
-        /// without requiring a registry ensemble.  Mutually exclusive with
-        /// `target_kind = "ensemble"`.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        ensemble: Option<InlineEnsemble>,
         /// Optional boolean condition.  When `Some`, the node can be used in
         /// `Signal.when` directly.  When `None`, it only publishes slots.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -457,8 +402,8 @@ pub enum CombineOp {
 mod tests {
     use super::*;
 
-    /// The minimal AI node the builder emits for a single model defaults
-    /// `target_kind` to "model" and carries no `input` when omitted.
+    /// The minimal AI node the builder emits for a single model carries no
+    /// `input` when omitted and defaults `alias` to "production".
     #[test]
     fn model_forecast_minimal_defaults() {
         let json = r#"{
@@ -472,14 +417,12 @@ mod tests {
         match node.kind {
             NodeKind::ModelForecast {
                 model_ref,
-                target_kind,
                 alias,
                 direction,
                 min_confidence,
                 input,
             } => {
                 assert_eq!(model_ref, "price_forecaster");
-                assert_eq!(target_kind, "model");
                 assert_eq!(alias, "production");
                 assert_eq!(direction, "bullish");
                 assert_eq!(min_confidence, 0.6);
@@ -489,16 +432,15 @@ mod tests {
         }
     }
 
-    /// The full AI node the builder emits for an ensemble with an input window
-    /// deserializes every field, and re-serializes without the default
-    /// `target_kind`/`alias` keys (skip_serializing_if).
+    /// The full AI node the builder emits with an input window deserializes
+    /// every field, and re-serializes without the default `alias` key
+    /// (skip_serializing_if).
     #[test]
     fn model_forecast_full_roundtrip() {
         let json = r#"{
             "id": "mf1",
             "type": "model_forecast",
-            "model_ref": "vol_ensemble",
-            "target_kind": "ensemble",
+            "model_ref": "vol_model",
             "alias": "candidate",
             "direction": "any",
             "min_confidence": 0.7,
@@ -507,9 +449,9 @@ mod tests {
         let node: Node = serde_json::from_str(json).unwrap();
         match &node.kind {
             NodeKind::ModelForecast {
-                target_kind, input, ..
+                model_ref, input, ..
             } => {
-                assert_eq!(target_kind, "ensemble");
+                assert_eq!(model_ref, "vol_model");
                 let input = input.as_ref().expect("input present");
                 assert_eq!(input.feature_set.as_deref(), Some("fs_core_v3"));
                 assert_eq!(input.timeframe, "5m");
@@ -518,12 +460,11 @@ mod tests {
             other => panic!("expected ModelForecast, got {other:?}"),
         }
 
-        // Round-trips: a model-kind node with production alias omits both keys.
+        // Round-trips: a node with production alias omits the default keys.
         let model_node = Node {
             id: "mf2".into(),
             kind: NodeKind::ModelForecast {
                 model_ref: "m".into(),
-                target_kind: "model".into(),
                 alias: "production".into(),
                 direction: "bearish".into(),
                 min_confidence: 0.5,
@@ -531,10 +472,6 @@ mod tests {
             },
         };
         let s = serde_json::to_string(&model_node).unwrap();
-        assert!(
-            !s.contains("target_kind"),
-            "default target_kind omitted: {s}"
-        );
         assert!(!s.contains("alias"), "default alias omitted: {s}");
         assert!(!s.contains("input"), "absent input omitted: {s}");
     }

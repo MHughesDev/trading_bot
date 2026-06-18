@@ -168,52 +168,6 @@ pub struct EvalResult {
     pub error: Option<String>,
 }
 
-/// Roster member as resolved by Rust (artifact URI + σ from bundle header).
-#[derive(Debug, Clone, Serialize)]
-pub struct EnsembleRosterMember {
-    pub model_ref: String,
-    pub alias: String,
-    pub artifact_uri: String,
-    pub artifact_hash: String,
-    pub sigma: f64,
-    pub crps: Option<f64>,
-}
-
-/// Ensemble combine dispatch (I-4.3 / I-4.11).
-#[derive(Debug, Clone, Serialize)]
-pub struct EnsembleCombineDispatch {
-    pub ensemble_id: String,
-    pub version: i32,
-    pub roster: Vec<EnsembleRosterMember>,
-    pub combiner: String,
-    pub weight_floor: f64,
-    pub temperature: f64,
-    pub calibration_method: String,
-    pub calibration_adaptive: bool,
-    pub dataset_uri: String,
-    pub dataset_hash: String,
-    pub cal_start: usize,
-    pub cal_end: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub levels: Option<Vec<f64>>,
-    pub run_baselines: bool,
-    pub progress: ProgressConfig,
-}
-
-/// Result from the ensemble/combine endpoint.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct EnsembleCombineResult {
-    pub status: String,
-    pub artifact_uri: Option<String>,
-    pub artifact_hash: Option<String>,
-    pub metrics: Option<serde_json::Value>,
-    pub scorecard: Option<serde_json::Value>,
-    pub report: Option<serde_json::Value>,
-    pub weights: Option<Vec<f64>>,
-    pub crossing_count: Option<i64>,
-    pub error: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct LlmPredictRequest {
     pub model_id: String,
@@ -353,34 +307,6 @@ impl SidecarClient {
         }
         self.infer_failures.store(0, Ordering::Relaxed);
         Ok(resp.json::<LlmPredictResponse>().await?)
-    }
-
-    pub async fn dispatch_ensemble_combine(
-        &self,
-        req: EnsembleCombineDispatch,
-    ) -> anyhow::Result<EnsembleCombineResult> {
-        use std::sync::atomic::Ordering;
-        if self.train_failures.load(Ordering::Relaxed) >= 5 {
-            anyhow::bail!("trainer sidecar circuit-breaker open");
-        }
-        let resp = self
-            .http
-            .post(format!("{}/ensemble/combine", self.trainer_url))
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| {
-                self.train_failures.fetch_add(1, Ordering::Relaxed);
-                anyhow::anyhow!("trainer ensemble/combine unreachable: {e}")
-            })?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            self.train_failures.fetch_add(1, Ordering::Relaxed);
-            anyhow::bail!("trainer ensemble/combine returned {status}: {body}");
-        }
-        self.train_failures.store(0, Ordering::Relaxed);
-        Ok(resp.json::<EnsembleCombineResult>().await?)
     }
 
     pub async fn trainer_health(&self) -> bool {

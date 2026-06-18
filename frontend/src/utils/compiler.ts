@@ -109,7 +109,7 @@ function collectAiWarnings(conds: Condition[], errors: string[], warnings: strin
   const ai = conds.filter(c => c.type === 'model_forecast')
   if (ai.length === 0) return
   if (ai.some(c => !c.ai?.targetRef)) {
-    errors.push('Select a model, ensemble, or pipeline for every AI Inference block.')
+    errors.push('Select a model for every AI Inference block.')
   }
   warnings.push('AI Inference blocks require the inference service to be running.')
 }

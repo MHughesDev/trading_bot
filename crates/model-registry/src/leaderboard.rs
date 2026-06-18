@@ -1,4 +1,4 @@
-//! Model leaderboard: rank models and ensembles by CRPS / coverage (I-2.11).
+//! Model leaderboard: rank models by CRPS / coverage (I-2.11).
 
 use sqlx::PgPool;
 use uuid::Uuid;
