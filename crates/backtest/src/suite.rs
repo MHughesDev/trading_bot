@@ -43,14 +43,16 @@ use crate::reconcile::{
     reconcile_experiment, suite_calibration, ReconciliationVerdict, SuiteCalibration,
 };
 use crate::run::executor::{daily_curve, map_sim_result};
+use crate::run::sim_executor::SimRunExecutor;
 use crate::run::{
     Backtest, ClosureExecutor, ComputeCost, DataSlice, EvalResolution, InMemoryRunStore,
-    MetricKind, ParamMap, RunConfig, RunConfigBuilder, RunResult, ENGINE_VERSION,
+    MetricKind, ParamMap, RunConfig, RunConfigBuilder, RunExecutor, RunResult, ENGINE_VERSION,
 };
 use crate::study::{
     Distribution, SelectionRule, StudyBudget, StudyConfig, StudyKind, StudyResult, StudyVerdict,
     VarySpec,
 };
+use sqlx::PgPool;
 
 /// Synthetic, deterministic Run executor (the real one is the deferred live leg).
 ///
@@ -86,8 +88,25 @@ fn synthetic_execute(cfg: &RunConfig) -> RunResult {
     )
 }
 
-/// The synthetic engine the manager runs every Study/Run through.
-type SyntheticEngine = Backtest<InMemoryRunStore, ClosureExecutor<fn(&RunConfig) -> RunResult>>;
+/// The suite's executor: the deterministic synthetic curve (hermetic tests) or
+/// the real `market_simulator` (production). Both flow through the identical
+/// `bt.run → executor.execute` chain, so the funnel/counter/vault logic is shared.
+pub enum SuiteExec {
+    Synthetic(ClosureExecutor<fn(&RunConfig) -> RunResult>),
+    Sim(SimRunExecutor),
+}
+
+impl RunExecutor for SuiteExec {
+    fn execute(&self, cfg: &RunConfig) -> RunResult {
+        match self {
+            SuiteExec::Synthetic(e) => e.execute(cfg),
+            SuiteExec::Sim(e) => e.execute(cfg),
+        }
+    }
+}
+
+/// The engine the manager runs every Study/Run through (synthetic or real).
+type SuiteEngine = Backtest<InMemoryRunStore, SuiteExec>;
 
 // ── view models (what the frontend renders) ──────────────────────────────────
 
@@ -342,7 +361,7 @@ struct Record {
 /// [`SuiteManager::subscribe_progress`].
 pub struct SuiteManager {
     records: RwLock<HashMap<Uuid, Record>>,
-    bt: SyntheticEngine,
+    bt: SuiteEngine,
     progress_tx: broadcast::Sender<serde_json::Value>,
 }
 
@@ -355,11 +374,25 @@ impl Default for SuiteManager {
 impl SuiteManager {
     #[must_use]
     pub fn new() -> Self {
-        let (progress_tx, _) = broadcast::channel(256);
         let exec: fn(&RunConfig) -> RunResult = synthetic_execute;
+        Self::with_executor(SuiteExec::Synthetic(ClosureExecutor(exec)))
+    }
+
+    /// Production constructor: runs **real** `market_simulator` backtests,
+    /// resolving strategy definitions + bars from Postgres/ClickHouse per study.
+    #[must_use]
+    pub fn with_sim(pg: PgPool, clickhouse_url: impl Into<String>) -> Self {
+        Self::with_executor(SuiteExec::Sim(SimRunExecutor::new(
+            pg,
+            clickhouse_url.into(),
+        )))
+    }
+
+    fn with_executor(exec: SuiteExec) -> Self {
+        let (progress_tx, _) = broadcast::channel(256);
         Self {
             records: RwLock::new(HashMap::new()),
-            bt: Backtest::new(InMemoryRunStore::new(), ClosureExecutor(exec)),
+            bt: Backtest::new(InMemoryRunStore::new(), exec),
             progress_tx,
         }
     }

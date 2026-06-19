@@ -13,6 +13,7 @@ pub mod executor;
 pub mod id;
 pub mod metrics;
 pub mod result;
+pub mod sim_executor;
 pub mod store;
 
 pub use config::{

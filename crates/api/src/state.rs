@@ -149,6 +149,9 @@ impl AppState {
             tokio::time::Duration::from_secs(3600),
         );
         let tags = Arc::new(TagRegistry::new(pg.clone()));
+        // Real market_simulator-backed suite (resolves strategies + bars from
+        // Postgres/ClickHouse). Constructed here so it captures the Tokio handle.
+        let suite = Arc::new(SuiteManager::with_sim(pg.clone(), clickhouse_url.clone()));
         Self {
             pg,
             risk_gate,
@@ -160,7 +163,7 @@ impl AppState {
             instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),
             clock: Arc::new(WallClock),
             backtest,
-            suite: Arc::new(SuiteManager::new()),
+            suite,
             models,
             quality_monitor,
             tags,
