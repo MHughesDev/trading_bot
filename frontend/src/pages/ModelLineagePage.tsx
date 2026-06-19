@@ -85,47 +85,19 @@ function buildEdges(raw: LineageGraph['edges']): Edge[] {
   }))
 }
 
-// ── Stub graph shown when no model is selected and no global data exists ─────
+// ── Empty state when no lineage data is available ─────────────────────────────
 
-const STUB_NODES: Node[] = [
-  {
-    id: 'ds-1',
-    position: { x: 0, y: 60 },
-    data: { label: 'Dataset v1' },
-    style: { background: '#1a1d23', border: '1px solid #3b82f6', borderRadius: 8, padding: '8px 12px', color: '#f1f5f9' },
-  },
-  {
-    id: 'run-1',
-    position: { x: 220, y: 60 },
-    data: { label: 'Training run' },
-    style: { background: '#1a1d23', border: '1px solid #f59e0b', borderRadius: 8, padding: '8px 12px', color: '#f1f5f9' },
-  },
-  {
-    id: 'mv-1',
-    position: { x: 440, y: 60 },
-    data: { label: 'Model v1' },
-    style: { background: '#1a1d23', border: '1px solid #22c55e', borderRadius: 8, padding: '8px 12px', color: '#f1f5f9' },
-  },
-  {
-    id: 'dep-1',
-    position: { x: 660, y: 60 },
-    data: { label: 'Deployment (paper)' },
-    style: { background: '#1a1d23', border: '1px solid #a855f7', borderRadius: 8, padding: '8px 12px', color: '#f1f5f9' },
-  },
-  {
-    id: 'strat-1',
-    position: { x: 880, y: 60 },
-    data: { label: 'EMA + Forecast strategy' },
-    style: { background: '#1a1d23', border: '1px solid #06b6d4', borderRadius: 8, padding: '8px 12px', color: '#f1f5f9' },
-  },
-]
-
-const STUB_EDGES: Edge[] = [
-  { id: 'e1', source: 'ds-1', target: 'run-1', style: { stroke: '#334155', strokeWidth: 1.5 } },
-  { id: 'e2', source: 'run-1', target: 'mv-1', style: { stroke: '#334155', strokeWidth: 1.5 } },
-  { id: 'e3', source: 'mv-1', target: 'dep-1', style: { stroke: '#334155', strokeWidth: 1.5 } },
-  { id: 'e4', source: 'dep-1', target: 'strat-1', style: { stroke: '#334155', strokeWidth: 1.5 } },
-]
+function EmptyState({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-4">
+      <div className="text-6xl">📊</div>
+      <div className="text-center">
+        <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+        <p className="text-sm text-muted-foreground max-w-sm mt-1">{message}</p>
+      </div>
+    </div>
+  )
+}
 
 // ── Per-model lineage panel ───────────────────────────────────────────────────
 
@@ -138,17 +110,12 @@ function ModelLineagePanel({ modelId }: { modelId: string }) {
   const rawNodes = data?.nodes ?? []
   const rawEdges = data?.edges ?? []
 
-  const initialNodes = useMemo(
-    () => (rawNodes.length > 0 ? buildNodes(rawNodes) : STUB_NODES),
-    [rawNodes],
+  const [nodes, , onNodesChange] = useNodesState(
+    rawNodes.length > 0 ? buildNodes(rawNodes) : [],
   )
-  const initialEdges = useMemo(
-    () => (rawEdges.length > 0 ? buildEdges(rawEdges) : STUB_EDGES),
-    [rawEdges],
+  const [edges, , onEdgesChange] = useEdgesState(
+    rawEdges.length > 0 ? buildEdges(rawEdges) : [],
   )
-
-  const [nodes, , onNodesChange] = useNodesState(initialNodes)
-  const [edges, , onEdgesChange] = useEdgesState(initialEdges)
 
   if (isLoading) {
     return (
@@ -160,9 +127,19 @@ function ModelLineagePanel({ modelId }: { modelId: string }) {
 
   if (isError) {
     return (
-      <div className="flex items-center justify-center h-full text-sm text-destructive">
-        Failed to load lineage graph
-      </div>
+      <EmptyState
+        title="Lineage unavailable"
+        message="Could not load the model's lineage graph. Try again later."
+      />
+    )
+  }
+
+  if (rawNodes.length === 0) {
+    return (
+      <EmptyState
+        title="No lineage data yet"
+        message="Once you train versions and deploy this model to a strategy, its lineage history will appear here."
+      />
     )
   }
 
@@ -251,26 +228,10 @@ export function ModelLineagePage() {
 }
 
 function GlobalLineageCanvas() {
-  const [nodes, , onNodesChange] = useNodesState(STUB_NODES)
-  const [edges, , onEdgesChange] = useEdgesState(STUB_EDGES)
-
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      fitView
-      fitViewOptions={{ padding: 0.3 }}
-      nodesDraggable={false}
-      nodesConnectable={false}
-      elementsSelectable={false}
-      panOnDrag
-      zoomOnScroll
-    >
-      <Background color="var(--border, #1e293b)" gap={24} />
-      <Controls showInteractive={false} />
-      <MiniMap maskColor="rgba(0,0,0,0.4)" />
-    </ReactFlow>
+    <EmptyState
+      title="Global lineage coming soon"
+      message="The cross-model artifact flow visualization is being developed. For now, view individual model lineage from the model detail pages."
+    />
   )
 }

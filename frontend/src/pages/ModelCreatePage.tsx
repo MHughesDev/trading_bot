@@ -135,8 +135,7 @@ const RUNTIME_OPTIONS: RuntimeOption[] = [
     runtime: 'rust',
     label: 'Rust (in-process)',
     icon: Server,
-    description:
-      'Native in-process training. Coming soon — the trainer still routes through the Python runtime.',
+    description: 'Native in-process training. Planned for a future release.',
     comingSoon: true,
   },
 ]
