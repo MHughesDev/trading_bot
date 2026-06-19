@@ -6,7 +6,7 @@ port = 8080
 
 [api]
 host = "127.0.0.1"
-port = 8080
+port = 7080
 
 [data]
 default_watermark_secs = 2
