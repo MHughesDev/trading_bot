@@ -34,6 +34,7 @@ pub mod requirements;
 pub mod rng;
 pub mod run;
 pub mod sim;
+pub mod sim_executor;
 pub mod stats;
 pub mod store;
 pub mod study;
