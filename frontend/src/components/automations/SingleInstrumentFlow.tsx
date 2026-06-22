@@ -1,5 +1,5 @@
 // Single-instrument automation creation flow.
-// Steps: asset class → instrument → execution strategy → time window → arm.
+// Steps: asset class → instrument → execution strategy → time window → trigger → arm.
 
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
@@ -7,6 +7,7 @@ import { strategiesApi, api } from '@/lib/api'
 import { useModeStore } from '@/store/mode'
 import { cn } from '@/lib/utils'
 import { ChevronDown } from 'lucide-react'
+import { TriggerStep, DEFAULT_TRIGGER, type TriggerSpec } from './TriggerStep'
 
 const ASSET_CLASSES = [
   { value: 'crypto_spot_cex', label: 'Crypto Spot (CEX)' },
@@ -83,11 +84,12 @@ export function SingleInstrumentFlow({ onArmed }: SingleInstrumentFlowProps) {
   const [instrument, setInstrument] = useState('')
   const [strategyId, setStrategyId] = useState('')
   const [timeWindow, setTimeWindow] = useState<'24_7' | 'sessioned'>('24_7')
+  const [trigger, setTrigger] = useState<TriggerSpec>(DEFAULT_TRIGGER)
 
   const { data: strategiesResp } = useQuery({
     queryKey: ['strategies', 'apply-list', assetClass],
     queryFn: () =>
-      strategiesApi.list().then((r) => r.data),
+      strategiesApi.applyList(assetClass).then((r) => r.data),
     enabled: !!assetClass,
   })
 
@@ -121,6 +123,7 @@ export function SingleInstrumentFlow({ onArmed }: SingleInstrumentFlowProps) {
             timeWindow === '24_7'
               ? { start: null, end: null, timezone: 'UTC' }
               : { start: '09:30', end: '16:00', timezone: 'America/New_York' },
+          trigger,
         },
         armed: true,
       }),
@@ -196,6 +199,12 @@ export function SingleInstrumentFlow({ onArmed }: SingleInstrumentFlowProps) {
               : 'This asset class has market sessions.'}
           </p>
         )}
+      </div>
+
+      {/* Step 5: Trigger */}
+      <div>
+        <StepLabel n={5}>Trigger</StepLabel>
+        <TriggerStep value={trigger} onChange={setTrigger} />
       </div>
 
       {mutation.isError && (

@@ -1,5 +1,5 @@
 // Pipeline automation creation flow.
-// Steps: asset class + universe → ordered filter stages → final execution action → arm.
+// Steps: asset class + universe → ordered filter stages → final execution action → trigger → arm.
 
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
@@ -7,6 +7,7 @@ import { strategiesApi, api } from '@/lib/api'
 import { useModeStore } from '@/store/mode'
 import { cn } from '@/lib/utils'
 import { Plus, X, ChevronDown } from 'lucide-react'
+import { TriggerStep, DEFAULT_TRIGGER, type TriggerSpec } from './TriggerStep'
 
 const ASSET_CLASSES = [
   { value: 'crypto_spot_cex', label: 'Crypto Spot (CEX)' },
@@ -36,6 +37,7 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
   const [stages, setStages] = useState<FilterStage[]>([])
   const [execStrategyId, setExecStrategyId] = useState('')
   const [newStageStrategyId, setNewStageStrategyId] = useState('')
+  const [trigger, setTrigger] = useState<TriggerSpec>(DEFAULT_TRIGGER)
 
   const { data: strategiesResp } = useQuery({
     queryKey: ['strategies', 'apply-list', assetClass],
@@ -93,6 +95,7 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
           execution_action: {
             execution_strategy_id: execStrategyId,
           },
+          trigger,
         },
         armed: true,
       }),
@@ -207,6 +210,14 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
           </select>
           <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-dim" />
         </div>
+      </div>
+
+      {/* Trigger */}
+      <div>
+        <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+          Trigger
+        </label>
+        <TriggerStep value={trigger} onChange={setTrigger} />
       </div>
 
       {mutation.isError && (

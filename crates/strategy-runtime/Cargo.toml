@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 domain = { workspace = true }
+builders = { workspace = true }
 risk = { workspace = true }
 features = { workspace = true }
 demand-manager = { workspace = true }

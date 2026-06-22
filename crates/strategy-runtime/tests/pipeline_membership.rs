@@ -7,6 +7,7 @@ use strategy_runtime::automation::pipeline::PipelineRuntime;
 use strategy_runtime::automation::plan::{
     AutomationAccountMode, AutomationPlan, AutomationSpec, ExecutionAction, FilterStage,
 };
+use strategy_runtime::automation::trigger::TriggerSpec;
 
 fn make_plan(universe: Vec<String>, stages: Vec<FilterStage>) -> AutomationPlan {
     AutomationPlan {
@@ -18,8 +19,9 @@ fn make_plan(universe: Vec<String>, stages: Vec<FilterStage>) -> AutomationPlan 
             universe,
             stages,
             execution_action: ExecutionAction {
-                execution_strategy_id: Uuid::new_v4(),
+                execution_strategy_id: "test_exec_strategy".into(),
             },
+            trigger: TriggerSpec::default(),
         },
         armed: false,
         created_at: Utc::now(),
@@ -29,7 +31,7 @@ fn make_plan(universe: Vec<String>, stages: Vec<FilterStage>) -> AutomationPlan 
 fn stage(id: &str) -> FilterStage {
     FilterStage {
         stage_id: id.into(),
-        strategy_id: Uuid::new_v4(),
+        strategy_id: format!("strategy_{id}"),
         label: None,
     }
 }

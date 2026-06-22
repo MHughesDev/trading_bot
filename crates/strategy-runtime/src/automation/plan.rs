@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 use domain::instrument::AssetClass;
 
+use crate::automation::trigger::TriggerSpec;
+
 /// Whether the automation runs against the paper account or live.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -30,8 +32,8 @@ pub struct TimeWindow {
 pub struct FilterStage {
     /// Stable stage label (e.g. `"stage_1"`, `"momentum_filter"`).
     pub stage_id: String,
-    /// UUID of the discovery strategy used as the filter for this stage.
-    pub strategy_id: Uuid,
+    /// String ID of the discovery strategy used as the filter for this stage.
+    pub strategy_id: String,
     /// Optional human-readable label shown in the pipeline board.
     pub label: Option<String>,
 }
@@ -39,8 +41,8 @@ pub struct FilterStage {
 /// The execution action triggered when instruments clear all pipeline stages.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionAction {
-    /// UUID of the execution strategy used to place orders.
-    pub execution_strategy_id: Uuid,
+    /// String ID of the execution strategy used to place orders.
+    pub execution_strategy_id: String,
 }
 
 /// The shape-specific payload of an automation plan.
@@ -51,8 +53,11 @@ pub enum AutomationSpec {
     SingleInstrument {
         asset_class: AssetClass,
         instrument_id: String,
-        execution_strategy_id: Uuid,
+        execution_strategy_id: String,
         time_window: TimeWindow,
+        /// What event fires the strategy evaluation. Defaults to the 1m bar close.
+        #[serde(default)]
+        trigger: TriggerSpec,
     },
     /// Filters a universe through ordered discovery stages then executes.
     Pipeline {
@@ -62,6 +67,9 @@ pub enum AutomationSpec {
         /// Ordered filter stages — instruments must clear all stages in sequence.
         stages: Vec<FilterStage>,
         execution_action: ExecutionAction,
+        /// What event fires each pipeline evaluation pass. Defaults to the 1m bar close.
+        #[serde(default)]
+        trigger: TriggerSpec,
     },
 }
 
