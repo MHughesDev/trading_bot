@@ -70,8 +70,15 @@ mod tests {
             chrono::Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap(),
             EvalResolution::Day1,
         );
-        RunConfigBuilder::new("test-strategy", "v1", slice, "cost:floor", "sizing:default", "snap:1")
-            .build()
+        RunConfigBuilder::new(
+            "test-strategy",
+            "v1",
+            slice,
+            "cost:floor",
+            "sizing:default",
+            "snap:1",
+        )
+        .build()
     }
 
     #[test]
@@ -91,11 +98,11 @@ mod tests {
         // Verify that SimRunExecutor implements RunExecutor and can be
         // injected into Backtest::new().
         let executor = SimRunExecutor::new();
-        let _store = crate::run::InMemoryRunStore::new();
-        let _bt: crate::run::Backtest<_, _> =
-            crate::run::Backtest::new(_store, crate::run::ClosureExecutor(|cfg| {
-                executor.execute(cfg)
-            }));
+        let store = crate::run::InMemoryRunStore::new();
+        let _bt: crate::run::Backtest<_, _> = crate::run::Backtest::new(
+            store,
+            crate::run::ClosureExecutor(|cfg| executor.execute(cfg)),
+        );
         // If this compiles, the trait is satisfied.
     }
 }

@@ -229,14 +229,26 @@ mod tests {
         let mut agg = HtfBarAggregator::new(Timeframe::Minutes5);
 
         // 10:00–10:04 — all in the same 5m window (10:00)
-        assert!(agg.feed_1m_bar(&bar("100", "105", "98", "102", "1"), t(10, 0)).is_none());
-        assert!(agg.feed_1m_bar(&bar("102", "108", "100", "106", "2"), t(10, 1)).is_none());
-        assert!(agg.feed_1m_bar(&bar("106", "110", "104", "108", "1"), t(10, 2)).is_none());
-        assert!(agg.feed_1m_bar(&bar("108", "112", "106", "110", "3"), t(10, 3)).is_none());
+        assert!(agg
+            .feed_1m_bar(&bar("100", "105", "98", "102", "1"), t(10, 0))
+            .is_none());
+        assert!(agg
+            .feed_1m_bar(&bar("102", "108", "100", "106", "2"), t(10, 1))
+            .is_none());
+        assert!(agg
+            .feed_1m_bar(&bar("106", "110", "104", "108", "1"), t(10, 2))
+            .is_none());
+        assert!(agg
+            .feed_1m_bar(&bar("108", "112", "106", "110", "3"), t(10, 3))
+            .is_none());
 
         // 10:05 — rolls into next 5m window; prior window emitted
         let fired = agg.feed_1m_bar(&bar("110", "115", "109", "113", "1"), t(10, 5));
-        let TriggerFired::Bar { bar: htf, window_start } = fired.unwrap() else {
+        let TriggerFired::Bar {
+            bar: htf,
+            window_start,
+        } = fired.unwrap()
+        else {
             panic!("expected Bar");
         };
 
