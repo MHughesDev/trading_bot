@@ -9,13 +9,14 @@ use storage::automation::{AutomationRow, StageMembershipRow};
 use strategy_runtime::automation::plan::{
     AutomationAccountMode, AutomationPlan, AutomationSpec, ExecutionAction, FilterStage,
 };
+use strategy_runtime::automation::trigger::TriggerSpec;
 use uuid::Uuid;
 
 fn three_stage_pipeline_plan() -> AutomationPlan {
     let stages: Vec<FilterStage> = (1..=3)
         .map(|i| FilterStage {
             stage_id: format!("stage_{i}"),
-            strategy_id: Uuid::new_v4(),
+            strategy_id: Uuid::new_v4().to_string(),
             label: Some(format!("Stage {i}")),
         })
         .collect();
@@ -28,8 +29,9 @@ fn three_stage_pipeline_plan() -> AutomationPlan {
             asset_class: AssetClass::CryptoSpotCex,
             universe: vec!["BTC-USDT".into(), "ETH-USDT".into()],
             stages,
+            trigger: TriggerSpec::default(),
             execution_action: ExecutionAction {
-                execution_strategy_id: Uuid::new_v4(),
+                execution_strategy_id: Uuid::new_v4().to_string(),
             },
         },
         armed: false,
