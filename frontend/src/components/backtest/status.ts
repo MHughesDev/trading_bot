@@ -33,6 +33,19 @@ export function isActive(status: BacktestStatus): boolean {
   return !['completed', 'failed', 'cancelled'].includes(status)
 }
 
+/** Converts a snake_case phase key to a human-readable label. */
+export function phaseLabel(phase: string | null | undefined): string {
+  if (!phase) return 'processing'
+  switch (phase) {
+    case 'checking_data':    return 'data check'
+    case 'collecting_data':  return 'data collection'
+    case 'loading_data':     return 'data load'
+    case 'simulating':       return 'simulation'
+    case 'queued':           return 'queue'
+    default:                 return phase.replace(/_/g, ' ')
+  }
+}
+
 /** Pulls a few headline numbers out of the simulator result document. */
 export function resultHighlights(
   result: NonNullable<import('@/api/backtests').BacktestResult> | null,

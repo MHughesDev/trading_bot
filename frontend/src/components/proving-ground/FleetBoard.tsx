@@ -41,7 +41,7 @@ export function FleetBoard({
       <CardHeader className="flex flex-row items-center justify-between py-3">
         <CardTitle className="flex items-center gap-2 text-sm">
           <Activity className={`h-4 w-4 ${runningCount > 0 ? 'text-accent' : 'text-text-dim'}`} />
-          Fleet
+          Active Runs
         </CardTitle>
         <span className="text-xs text-text-dim">
           {runningCount > 0 ? `${runningCount} running` : 'idle'}
@@ -50,7 +50,7 @@ export function FleetBoard({
       <CardContent className="flex flex-col gap-2">
         {rows.length === 0 ? (
           <p className="text-xs text-text-dim">
-            No studies running. Start one below — each appears here live while it executes.
+            No tests running. Start one below — each appears here live while it executes.
           </p>
         ) : (
           rows.map(({ exp, p }) => (
@@ -61,7 +61,7 @@ export function FleetBoard({
                   <Badge variant="outline" className="font-mono text-[10px]">{p.phase}</Badge>
                 </span>
                 <span className="shrink-0 tabular-nums text-text-dim">
-                  {Math.round(p.progress)}% · {exp.trial_counter.toLocaleString()} trials
+                  {Math.round(p.progress)}% · {exp.trial_counter.toLocaleString()} searches used
                 </span>
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">

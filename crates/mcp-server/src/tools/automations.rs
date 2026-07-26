@@ -57,22 +57,12 @@ pub async fn create_automation(ctx: &McpContext, params: &Value) -> Value {
         return db_unavailable();
     };
 
-    // Validate execution_strategy_id exists.
     let sid_str = params
         .get("execution_strategy_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let Ok(sid) = Uuid::parse_str(sid_str) else {
-        return json!({ "error": "invalid_uuid", "field": "execution_strategy_id" });
-    };
-    {
-        let store = ctx
-            .strategy_store
-            .lock()
-            .expect("strategy_store lock poisoned");
-        if !store.contains_key(&sid) {
-            return json!({ "error": "strategy_not_found" });
-        }
+    if sid_str.is_empty() {
+        return json!({ "error": "missing_field", "field": "execution_strategy_id" });
     }
 
     let instrument_id = params
@@ -120,7 +110,7 @@ pub async fn create_automation(ctx: &McpContext, params: &Value) -> Value {
     let spec = json!({
         "asset_class": asset_class,
         "instrument_id": instrument_id,
-        "execution_strategy_id": sid.to_string(),
+        "execution_strategy_id": sid_str,
         "time_window": {
             "start": time_window_start,
             "end": time_window_end,

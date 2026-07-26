@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { backtestsApi, type BacktestSnapshot } from '@/api/backtests'
 import { toast } from '@/hooks/useToast'
-import { statusPresentation, isActive, resultHighlights } from './status'
+import { statusPresentation, isActive, resultHighlights, phaseLabel } from './status'
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -156,14 +156,25 @@ export function BacktestTile({
 
       {/* Failure surfacing */}
       {run.status === 'failed' && run.error && (
-        <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <div>
-            <div className="font-medium">
-              Failed during {run.failed_phase ?? 'processing'}
+        <div className="flex flex-col gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">
+                Failed during {phaseLabel(run.failed_phase)}
+              </div>
+              <div className="mt-0.5 break-words opacity-90 line-clamp-3" title={run.error}>
+                {run.error}
+              </div>
             </div>
-            <div className="mt-0.5 break-words opacity-90">{run.error}</div>
           </div>
+          <button
+            className="self-end text-[11px] text-red-400 underline underline-offset-2 hover:text-red-200"
+            onClick={(e) => { e.stopPropagation(); rerun.mutate() }}
+            disabled={rerun.isPending}
+          >
+            {rerun.isPending ? 'Re-running…' : 'Try re-running →'}
+          </button>
         </div>
       )}
 

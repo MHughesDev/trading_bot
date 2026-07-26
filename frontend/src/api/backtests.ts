@@ -108,3 +108,17 @@ export const strategyPickerApi = {
   list: () =>
     client.get<{ strategies: StrategyListItem[] }>('/api/strategies'),
 }
+
+// Coverage: instruments that have bar data in ClickHouse.
+export interface InstrumentCoverage {
+  instrument_id: string
+  timeframe: string
+  bars: number
+  first_ns: number
+  last_ns: number
+}
+
+export const coverageApi = {
+  list: () =>
+    client.get<{ coverage: InstrumentCoverage[] }>('/api/backtests/coverage'),
+}

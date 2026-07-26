@@ -120,7 +120,7 @@ export function ExperimentDetail({ exp }: { exp: ExperimentView }) {
         </div>
         <div className="flex items-center gap-4">
           <div className="text-right">
-            <div className="text-[10px] uppercase tracking-wide text-text-dim">trial counter</div>
+            <div className="text-[10px] uppercase tracking-wide text-text-dim">searches used</div>
             <div className="text-xl font-bold tabular-nums text-text">
               {exp.trial_counter.toLocaleString()}
             </div>
@@ -165,7 +165,7 @@ export function ExperimentDetail({ exp }: { exp: ExperimentView }) {
 
       {/* Sealed Study distributions (INV-2). */}
       <div>
-        <h3 className="mb-2 text-sm font-semibold text-text">Studies</h3>
+        <h3 className="mb-2 text-sm font-semibold text-text">Test runs</h3>
         {studies.isLoading ? (
           <div className="text-sm text-text-dim">Loading…</div>
         ) : studies.data && studies.data.length > 0 ? (
@@ -176,7 +176,7 @@ export function ExperimentDetail({ exp }: { exp: ExperimentView }) {
           </div>
         ) : (
           <div className="text-sm text-text-dim">
-            No studies yet. Advancing the funnel runs the evidence studies the gates consume.
+            No test runs yet. Running the next checkpoint will execute the tests it needs.
           </div>
         )}
       </div>

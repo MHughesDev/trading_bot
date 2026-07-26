@@ -1,4 +1,4 @@
-//! sqlx pool + transaction helpers.
+//! sqlx pool + transaction helpers. (0032 seed complex strategies)
 pub mod instruments;
 pub mod models;
 pub mod orders;
@@ -29,5 +29,6 @@ pub async fn connect(database_url: &str) -> Result<PgPool, PgError> {
 /// the current schema (e.g. `backtest_runs`) without a manual migration step
 /// (#20).  Idempotent: already-applied migrations are skipped.
 pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+    // migrations dir is embedded at compile time via sqlx::migrate!
     sqlx::migrate!("../../migrations").run(pool).await
 }

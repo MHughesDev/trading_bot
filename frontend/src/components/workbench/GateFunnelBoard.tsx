@@ -9,11 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 
 const GATE_LABELS: Record<string, { n: number; title: string; blurb: string }> = {
-  integrity: { n: 0, title: 'Integrity', blurb: 'close-stamp leak scan + cost floor' },
-  single_path: { n: 1, title: 'Single-path', blurb: 'one honest walk-forward, median > 0' },
-  robustness: { n: 2, title: 'Robustness', blurb: 'CPCV + synthetic + neighborhood shape' },
-  significance: { n: 3, title: 'Significance', blurb: 'permutation p + DSR/PBO corroborators' },
-  vault: { n: 4, title: 'Vault', blurb: 'one-shot holdout evaluation' },
+  integrity: { n: 0, title: 'Integrity', blurb: 'Checks for data leaks and minimum cost floor' },
+  single_path: { n: 1, title: 'Single-path', blurb: 'One walk-forward test — median return must beat zero' },
+  robustness: { n: 2, title: 'Robustness', blurb: 'Tests across parameter variations and synthetic data' },
+  significance: { n: 3, title: 'Significance', blurb: 'Beats randomized baseline with statistical confidence' },
+  vault: { n: 4, title: 'Final test', blurb: 'One-time test on reserved data you have never seen' },
 }
 
 export function GateFunnelBoard({
@@ -30,16 +30,16 @@ export function GateFunnelBoard({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-sm">Gate funnel</CardTitle>
+        <CardTitle className="text-sm">Validation checkpoints</CardTitle>
         <Button size="sm" onClick={onAdvance} disabled={advancing || !canAdvance}>
           {advancing && <Loader2 className="h-3 w-3 animate-spin" />}
-          Advance funnel
+          Run next checkpoint
         </Button>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {!canAdvance && (
           <p className="text-xs text-text-dim">
-            Choose a significance null before running the funnel (INV-3).
+            Choose a randomized baseline before running validation.
           </p>
         )}
         {funnel.gates.map((g) => (

@@ -15,7 +15,7 @@ export function SignificanceCard({ significance }: { significance: SignificanceV
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2 text-sm">
           <FlaskConical className="h-4 w-4 text-accent" />
-          Significance (INV-3)
+          Significance check
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -23,9 +23,9 @@ export function SignificanceCard({ significance }: { significance: SignificanceV
           <SignificanceBody s={significance} />
         ) : (
           <div className="rounded-md border border-dashed border-border-2 p-4 text-sm text-text-dim">
-            Not yet significance-tested. A p-value only exists once Gate&nbsp;3 runs the
-            primary permutation test against the chosen null — and it is rendered with its
-            null and trial count, never alone.
+            Not yet tested. A result appears once the Significance checkpoint runs your
+            strategy against its randomized baseline — and it is always shown alongside
+            how many times you searched.
           </div>
         )}
       </CardContent>

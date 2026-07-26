@@ -127,6 +127,7 @@ pub fn router(state: AppState) -> Router {
         // P3-T03 apply-list
         .route("/api/strategies/apply-list", get(strategies::apply_list))
         // Back Testing — simulation runs against the market_simulator engine
+        .route("/api/backtests/coverage", get(backtests::coverage))
         .route(
             "/api/backtests",
             get(backtests::list_backtests).post(backtests::create_backtest),

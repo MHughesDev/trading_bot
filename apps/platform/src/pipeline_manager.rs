@@ -114,22 +114,25 @@ impl PipelineManager {
     }
 }
 
-/// Default historical depth used when no 1m bars exist at all (e.g. first
-/// pipeline start, or asset was seeded before 1m collection was added).
-const DEFAULT_LOOKBACK_DAYS: i64 = 30;
+/// How far back to scan for gaps on startup.  Kraken's 1m OHLC endpoint
+/// provides up to ~10 hours of rolling history; for gaps older than that the
+/// collection will return 0 bars (Kraken has no data), which is logged but not
+/// treated as an error.  30 days catches every internal gap that accumulated
+/// across multiple restarts and maximises what the exchange API can actually
+/// deliver.
+const BACKFILL_LOOKBACK_DAYS: i64 = 30;
 
-/// Ensures continuous 1m bar history for `instrument_id`.
+/// Scans the last [`BACKFILL_LOOKBACK_DAYS`] days for coverage gaps in the 1m
+/// history of `instrument_id` and fills each one via the appropriate REST
+/// collector.
 ///
-/// Two cases:
-/// - **No 1m bars at all**: backfills the last `DEFAULT_LOOKBACK_DAYS` days in
-///   full.  This fires automatically the moment the pipeline starts (i.e. on
-///   the first Kraken tick), so the chart gets 30 days of history without any
-///   manual reseed.
-/// - **Gap since last bar**: fills only from the last stored bar to now (e.g.
-///   after a platform restart).
+/// Unlike the old trailing-gap approach (fill from last bar to now) this uses
+/// the same `daily_counts` + `gaps::analyze` logic as the backtest system, so
+/// it catches **all** internal gaps from previous outages, not just the most
+/// recent one.
 ///
 /// Re-inserting bars that already exist is safe — ClickHouse's
-/// `ReplacingMergeTree` + UUIDv5 dedup key makes it idempotent.
+/// `ReplacingMergeTree` + UUIDv5 dedup key makes the operation idempotent.
 async fn gap_fill(ch_url: &str, instrument_id: &str, asset_class: &str) -> anyhow::Result<()> {
     let store = backtest::store::BarStore::connect(ch_url);
 
@@ -137,44 +140,34 @@ async fn gap_fill(ch_url: &str, instrument_id: &str, asset_class: &str) -> anyho
     // Leave a 90-second buffer so we don't try to backfill the current
     // incomplete bar that the live aggregator is still building.
     let fill_to = now - chrono::Duration::seconds(90);
+    let fill_from = now - chrono::Duration::days(BACKFILL_LOOKBACK_DAYS);
 
-    let fill_from = match store
-        .last_bar_time(instrument_id, Timeframe::Minutes1)
-        .await?
-    {
-        Some(last_ts) => {
-            if fill_to <= last_ts + chrono::Duration::seconds(60) {
-                return Ok(()); // less than one complete bar behind — nothing to do
-            }
-            info!(
-                instrument_id,
-                gap_minutes = (fill_to - last_ts).num_minutes(),
-                "gap fill: filling since last bar"
-            );
-            last_ts
-        }
-        None => {
-            // No 1m bars at all — backfill the full default window so 5m/15m/30m
-            // views are immediately populated when the pipeline first comes live.
-            let start = now - chrono::Duration::days(DEFAULT_LOOKBACK_DAYS);
-            info!(
-                instrument_id,
-                days = DEFAULT_LOOKBACK_DAYS,
-                "gap fill: no 1m history found, seeding full lookback"
-            );
-            start
-        }
-    };
+    // Per-day bar counts for the window.
+    let counts = store
+        .daily_counts(instrument_id, Timeframe::Minutes1, fill_from, fill_to)
+        .await?;
+
+    // If we have no data at all, seed from the beginning of the window.
+    // Otherwise use gap analysis to find all under-covered days.
+    let schedule = backtest::gaps::ScheduleKind::for_asset_class(asset_class);
+    let coverage = backtest::gaps::analyze(fill_from, fill_to, &counts, Timeframe::Minutes1, schedule);
+
+    if coverage.missing_ranges.is_empty() {
+        return Ok(()); // nothing to fill
+    }
+
+    info!(
+        instrument_id,
+        gaps = coverage.missing_ranges.len(),
+        missing_bars = coverage.expected_bars.saturating_sub(coverage.present_bars),
+        "gap fill: found missing ranges, backfilling"
+    );
 
     let plan = backtest::collect::CollectorPlan::for_asset_class(asset_class, instrument_id)?;
     let venue_id = match &plan {
         backtest::collect::CollectorPlan::KrakenOhlc { .. } => "kraken",
         backtest::collect::CollectorPlan::BinanceKlines { .. } => "binance",
         backtest::collect::CollectorPlan::AlpacaBars { .. } => "alpaca",
-    };
-    let range = backtest::MissingRange {
-        from: fill_from,
-        to: fill_to,
     };
     let http = reqwest::Client::new();
     let collected = AtomicU64::new(0);
@@ -187,7 +180,7 @@ async fn gap_fill(ch_url: &str, instrument_id: &str, asset_class: &str) -> anyho
         instrument_id,
         venue_id,
         Timeframe::Minutes1,
-        &[range],
+        &coverage.missing_ranges,
         &collected,
         &cancel,
     )

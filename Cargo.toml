@@ -138,6 +138,7 @@ semantic = { path = "crates/semantic" }
 # `sdk-vX.Y.Z` tag is published on market_simulator, swap `rev = "…"` for
 # `tag = "sdk-vX.Y.Z"` here in this one place.
 nautilus-backtest = { git = "https://github.com/MHughesDev/market_simulator", rev = "f915b050cc6a4284b5a6f6e327a46cd926714df4" }
+nautilus-common = { git = "https://github.com/MHughesDev/market_simulator", rev = "f915b050cc6a4284b5a6f6e327a46cd926714df4" }
 nautilus-model = { git = "https://github.com/MHughesDev/market_simulator", rev = "f915b050cc6a4284b5a6f6e327a46cd926714df4" }
 nautilus-core = { git = "https://github.com/MHughesDev/market_simulator", rev = "f915b050cc6a4284b5a6f6e327a46cd926714df4" }
 

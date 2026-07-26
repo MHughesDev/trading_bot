@@ -3,7 +3,7 @@
 //! Jobs run as spawned tasks; the heavy simulation itself runs on the
 //! blocking pool.  Live progress is derived on demand from phase + atomic
 //! counters, so there is no background updater to fall behind.  Snapshots
-//! are persisted to Postgres (`backtest_runs`) best-effort at every phase
+//! are persisted to Postgres (`backtest_jobs`) best-effort at every phase
 //! transition; `ClickHouse` remains the only owner of market data.
 
 use std::collections::HashMap;
@@ -22,7 +22,7 @@ use crate::collect::{collect_ranges, CollectorPlan};
 use crate::gaps::{self, ScheduleKind};
 use crate::requirements::derive_requirements;
 use crate::sim::{run_simulation, InstrumentPrecisions, SimulationInputs};
-use crate::store::BarStore;
+use crate::store::{BarCoverage, BarStore};
 use crate::types::{BacktestSnapshot, BacktestStatus, DataCoverage, ResolvedSpec, TimeframeExt};
 
 struct JobState {
@@ -256,13 +256,16 @@ impl BacktestManager {
             job.state.read().expect("job state lock poisoned").status
         };
         anyhow::ensure!(status.is_terminal(), "stop the backtest before deleting it");
-        jobs.remove(&id);
-        drop(jobs);
-        let _ = sqlx::query("DELETE FROM backtest_runs WHERE id = $1 AND user_id = $2")
+        // Delete from the DB first: if this fails the in-memory entry is untouched
+        // and the client gets an error it can retry, rather than a ghost entry that
+        // reappears on the next platform restart.
+        sqlx::query("DELETE FROM backtest_jobs WHERE id = $1 AND user_id = $2")
             .bind(id)
             .bind(user_id)
             .execute(&self.pg)
-            .await;
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to delete backtest from database: {e}"))?;
+        jobs.remove(&id);
         Ok(())
     }
 
@@ -273,6 +276,13 @@ impl BacktestManager {
             owned(&jobs, user_id, id)?.spec.clone()
         };
         self.create(user_id, spec).await
+    }
+
+    /// Returns the distinct (`instrument_id`, `timeframe`) pairs that have bar
+    /// data in ClickHouse.  Powers the create-backtest guardrail so the UI can
+    /// warn before submitting a run that will fail at the data-check phase.
+    pub async fn available_instruments(&self) -> anyhow::Result<Vec<BarCoverage>> {
+        BarStore::connect(&self.ch_url).list_coverage().await
     }
 
     // ── Job driver ───────────────────────────────────────────────────────────
@@ -305,7 +315,7 @@ impl BacktestManager {
     #[allow(clippy::too_many_lines)]
     async fn drive_inner(self: &Arc<Self>, job: &Arc<Job>) -> Result<(), (BacktestStatus, String)> {
         let spec = &job.spec;
-        let fail = |phase: BacktestStatus| move |e: anyhow::Error| (phase, e.to_string());
+        let fail = |phase: BacktestStatus| move |e: anyhow::Error| (phase, humanize_error(&e.to_string()));
 
         // ── Phase 1: check stored data against the strategy's requirements ──
         job.set_status(BacktestStatus::CheckingData);
@@ -480,7 +490,7 @@ impl BacktestManager {
             .as_ref()
             .and_then(|c| serde_json::to_value(c).ok());
         let result = sqlx::query(
-            "INSERT INTO backtest_runs \
+            "INSERT INTO backtest_jobs \
              (id, name, strategy_slug, definition, instrument_id, venue_id, asset_class, \
               timeframe, start_time, end_time, initial_balance, quote_currency, auto_collect, \
               status, progress, error, failed_phase, coverage, result, created_at, started_at, finished_at, \
@@ -540,7 +550,7 @@ impl BacktestManager {
                     start_time, end_time, initial_balance, quote_currency, auto_collect, \
                     status, error, failed_phase, coverage, result, created_at, started_at, finished_at, \
                     user_id \
-             FROM backtest_runs ORDER BY created_at DESC LIMIT 500",
+             FROM backtest_jobs ORDER BY created_at DESC LIMIT 500",
         )
         .fetch_all(&self.pg)
         .await
@@ -620,7 +630,66 @@ async fn wait_for_cancel(job: &Arc<Job>) {
     }
 }
 
-/// Row shape of `backtest_runs` for hydration.
+/// Maps known cryptic internal error strings to plain-English messages.
+///
+/// The simulation engine and data pipeline produce low-level Rust/SDK errors
+/// that are meaningless to a user ("non-Nautilus logger already registered").
+/// This function translates the most common ones before they reach the UI.
+fn humanize_error(raw: &str) -> String {
+    // Simulation engine logging conflict (old run shown after platform restart).
+    if raw.contains("non-Nautilus logger") || raw.contains("initialize Nautilus logging") {
+        return "The simulation engine conflicted with the platform logger. \
+                This was a transient startup issue — use Re-run to try again."
+            .to_string();
+    }
+    // Strategy uses percent-of-balance sizing instead of fixed.
+    if raw.contains("fixed-size orders only") || raw.contains("PercentOfBalance") {
+        return "Strategy uses percent-of-balance sizing, but the simulator requires a fixed \
+                quantity per trade. Open the strategy and set order size_mode to 'fixed' \
+                with a specific quantity (e.g. 0.01)."
+            .to_string();
+    }
+    // No bars returned by the store after coverage check passed.
+    if raw.contains("no bars to simulate") || raw.contains("bar load returned no rows") {
+        return "No price bars were found for this instrument and time window. \
+                Try enabling auto-collect, or choose a more recent date range."
+            .to_string();
+    }
+    // Kraken unknown pair (typo or wrong venue symbol).
+    if raw.contains("EQuery:Unknown asset pair") || raw.contains("Unknown asset pair") {
+        return format!(
+            "The exchange doesn't recognise this trading pair. \
+             Check the instrument symbol (e.g. use BTC-USD not XBTUSD). \
+             Detail: {raw}"
+        );
+    }
+    // Kraken OHLC errors (rate limit, maintenance, etc.).
+    if raw.contains("kraken OHLC error") {
+        return format!(
+            "Historical data collection from Kraken failed. \
+             This is usually a temporary API issue — try re-running. \
+             Detail: {raw}"
+        );
+    }
+    // Simulation task panicked (should be rare with bypass_logging fix).
+    if raw.starts_with("simulation panicked") {
+        return format!(
+            "The simulation engine crashed unexpectedly. \
+             This is a bug — please report it. \
+             Detail: {raw}"
+        );
+    }
+    // No collector for this asset class / timeframe combination.
+    if raw.contains("no collector") || raw.contains("unsupported_auto_collect") {
+        return "No automated data collector is available for this asset class. \
+                Disable auto-collect and ensure the required history is already in storage."
+            .to_string();
+    }
+    // Default: return raw but trim excessive whitespace.
+    raw.trim().to_string()
+}
+
+/// Row shape of `backtest_jobs` for hydration.
 #[derive(sqlx::FromRow)]
 struct PersistedRun {
     id: Uuid,

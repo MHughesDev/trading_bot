@@ -22,7 +22,7 @@ export function VaultPanel({
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2 text-sm">
           <Lock className="h-4 w-4 text-accent" />
-          Holdout vault
+          Final test
         </CardTitle>
         {vault.spent ? (
           <Badge variant="inactive">spent</Badge>
@@ -34,17 +34,17 @@ export function VaultPanel({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-xs text-text-dim">
-          The vault grants exactly one logged evaluation against data no Study has touched.
-          {!vault.gate3_passed && ' It is reachable only after Gate 3 passes.'}
-          {vault.unsafe && ' This experiment is flagged unsafe and cannot be validated through the vault.'}
+          One-time test on data that has been locked away and never touched by any run.
+          {!vault.gate3_passed && ' Only available after passing all 4 checkpoints.'}
+          {vault.unsafe && ' This strategy is flagged unsafe and cannot be validated here.'}
         </p>
 
         <div className="flex items-center justify-between">
           <span className="text-xs text-text-dim">
             {vault.spent
-              ? 'This holdout is spent — continuing requires a new experiment with genuinely new data.'
+              ? 'Already used. Starting fresh requires a new strategy test with new data.'
               : vault.can_run
-                ? 'Ready for its single evaluation.'
+                ? 'Ready for your one-time final test.'
                 : 'Not yet reachable.'}
           </span>
           <Button
@@ -54,7 +54,7 @@ export function VaultPanel({
             onClick={onRun}
           >
             {running && <Loader2 className="h-3 w-3 animate-spin" />}
-            {vault.spent ? 'Spent' : 'Spend vault (once)'}
+            {vault.spent ? 'Used' : 'Run final test'}
           </Button>
         </div>
 

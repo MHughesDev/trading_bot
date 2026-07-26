@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
-use backtest::{BacktestRequest, CollectorPlan, ResolvedSpec, TimeframeExt};
+use backtest::{BacktestRequest, BarCoverage, CollectorPlan, ResolvedSpec, TimeframeExt};
 use domain::payloads::bar::Timeframe;
 use domain::strategy_def::StrategyDefinition;
 use strategy_validator::validate;
@@ -30,7 +30,8 @@ fn default_venue(asset_class: &str) -> &'static str {
         "futures_expiring" => "cme",
         "option" => "opra",
         "prediction_market" => "kalshi",
-        _ => "binance",
+        "crypto_spot_cex" | "perpetual_swap" => "coinbase",
+        _ => "coinbase",
     }
 }
 
@@ -44,20 +45,34 @@ pub async fn create_backtest(
     token: BearerToken,
     Json(req): Json<BacktestRequest>,
 ) -> impl IntoResponse {
-    // Resolve the strategy definition: inline body or stored UUID.
-    let definition: StrategyDefinition = match (&req.definition, req.strategy_ref) {
+    // Resolve the strategy definition: inline body or stored slug.
+    let definition: StrategyDefinition = match (&req.definition, &req.strategy_ref) {
         (Some(def), _) => def.clone(),
-        (None, Some(id)) => {
-            let store = state
-                .strategy_store
-                .lock()
-                .expect("strategy_store lock poisoned");
-            match store.get(&id) {
-                Some(def) => def.clone(),
+        (None, Some(slug)) => {
+            let row: Option<(serde_json::Value,)> = sqlx::query_as(
+                "SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1",
+            )
+            .bind(slug)
+            .fetch_optional(&state.pg)
+            .await
+            .ok()
+            .flatten();
+
+            match row {
+                Some((def_json,)) => match serde_json::from_value::<StrategyDefinition>(def_json) {
+                    Ok(def) => def,
+                    Err(e) => {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({ "error": "invalid_definition", "detail": e.to_string() })),
+                        )
+                            .into_response();
+                    }
+                },
                 None => {
                     return (
                         StatusCode::NOT_FOUND,
-                        Json(json!({ "error": "strategy_not_found", "strategy_ref": id })),
+                        Json(json!({ "error": "strategy_not_found", "strategy_ref": slug })),
                     )
                         .into_response();
                 }
@@ -222,6 +237,35 @@ pub async fn delete_backtest(
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
     map_action(state.backtest.delete(token.user_id(), id).await)
+}
+
+/// GET /api/backtests/coverage — instruments that have bar data in ClickHouse.
+///
+/// Powers the create-backtest guardrail: the UI fetches this once and warns
+/// when the user types an instrument with no stored history.
+pub async fn coverage(State(state): State<AppState>) -> impl IntoResponse {
+    match state.backtest.available_instruments().await {
+        Ok(entries) => {
+            let items: Vec<serde_json::Value> = entries
+                .iter()
+                .map(|c: &BarCoverage| {
+                    json!({
+                        "instrument_id": c.instrument_id,
+                        "timeframe":     c.timeframe,
+                        "bars":          c.bars,
+                        "first_ns":      c.first_ns,
+                        "last_ns":       c.last_ns,
+                    })
+                })
+                .collect();
+            Json(json!({ "coverage": items })).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "coverage_unavailable", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 fn map_action<E: std::fmt::Display>(result: Result<(), E>) -> axum::response::Response {

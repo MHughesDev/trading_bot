@@ -572,6 +572,7 @@ dependencies = [
  "features",
  "hex",
  "nautilus-backtest",
+ "nautilus-common",
  "nautilus-core",
  "nautilus-model",
  "reqwest",
@@ -5114,6 +5115,7 @@ dependencies = [
 name = "strategy-runtime"
 version = "0.1.0"
 dependencies = [
+ "builders",
  "chrono",
  "demand-manager",
  "domain",

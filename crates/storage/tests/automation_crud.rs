@@ -16,7 +16,7 @@ fn three_stage_pipeline_plan() -> AutomationPlan {
     let stages: Vec<FilterStage> = (1..=3)
         .map(|i| FilterStage {
             stage_id: format!("stage_{i}"),
-            strategy_id: Uuid::new_v4().to_string(),
+            strategy_id: format!("discovery_strategy_{i}"),
             label: Some(format!("Stage {i}")),
         })
         .collect();
@@ -31,7 +31,7 @@ fn three_stage_pipeline_plan() -> AutomationPlan {
             stages,
             trigger: TriggerSpec::default(),
             execution_action: ExecutionAction {
-                execution_strategy_id: Uuid::new_v4().to_string(),
+                execution_strategy_id: "exec_strategy".into(),
             },
         },
         armed: false,

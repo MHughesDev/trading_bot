@@ -1,3 +1,7 @@
+-- Rename the legacy backtest job-tracker (created in 0011_backtest_runs.sql)
+-- to free the name for the new content-addressed run store below.
+ALTER TABLE IF EXISTS backtest_runs RENAME TO backtest_jobs;
+
 -- Set-J Phase 0: the immutable, content-addressed run store (spec §1.1).
 --
 -- Every executed Run — ok, failed, or rejected_integrity — is written here

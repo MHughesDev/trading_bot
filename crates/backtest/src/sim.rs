@@ -21,6 +21,7 @@ use crate::run::result::{Side as TradeSide, Trade};
 use chrono::{DateTime, Utc};
 use nautilus_backtest::config::BacktestEngineConfig;
 use nautilus_backtest::engine::BacktestEngine;
+use nautilus_common::logging::config::LoggerConfig;
 use nautilus_backtest::sdk::{
     self, BarHandler, BarSimulationSpec, CallbackStrategy, SimOrderCommand, SimulationControl,
     VenuePreset,
@@ -212,10 +213,49 @@ pub fn run_simulation(
     control: &Arc<SimulationControl>,
 ) -> anyhow::Result<SimulationReport> {
     let (spec, engine_bars, handler) = build_setup(&inputs)?;
-    let outcome = sdk::run_bar_simulation(spec, engine_bars, handler, control)?;
+    let BarSimulationSpec {
+        venue,
+        preset,
+        instrument,
+        starting_balances,
+        bar_types,
+        chunk_size,
+    } = spec;
+
+    // The LoggerConfig bypass prevents Nautilus from emitting its own log lines.
+    // The platform's tracing subscriber owns all console output; we only need
+    // the Nautilus kernel to register successfully as the log::Log backend (which
+    // it can do now because tracing_setup skips the LogTracer log bridge).
+    let bypass_logger = LoggerConfig::builder().bypass_logging(true).build();
+    let mut engine = BacktestEngine::new(
+        BacktestEngineConfig::builder().logging(bypass_logger).build(),
+    )?;
+    engine.add_venue(preset.venue_config(venue, starting_balances))?;
+    engine.add_instrument(&instrument)?;
+    engine.add_strategy(CallbackStrategy::new(instrument.id(), bar_types, handler))?;
+
+    let cs = chunk_size.max(1);
+    let mut cancelled = false;
+    let mut chunks = engine_bars.into_iter().peekable();
+    let mut first = true;
+    while chunks.peek().is_some() {
+        if control.is_cancelled() {
+            cancelled = true;
+            break;
+        }
+        let batch: Vec<Data> = chunks.by_ref().take(cs).map(Data::Bar).collect();
+        if !first {
+            engine.clear_data();
+        }
+        engine.add_data(batch, None, true, true)?;
+        engine.run(None, None, None, true)?;
+        first = false;
+    }
+    engine.end();
+
     Ok(SimulationReport {
-        cancelled: outcome.cancelled,
-        result: serde_json::to_value(&outcome.result)?,
+        cancelled,
+        result: serde_json::to_value(engine.get_result())?,
     })
 }
 
@@ -238,7 +278,10 @@ pub fn run_simulation_detailed(
         chunk_size,
     } = spec;
 
-    let mut engine = BacktestEngine::new(BacktestEngineConfig::default())?;
+    let bypass_logger = LoggerConfig::builder().bypass_logging(true).build();
+    let mut engine = BacktestEngine::new(
+        BacktestEngineConfig::builder().logging(bypass_logger).build(),
+    )?;
     engine.add_venue(preset.venue_config(venue, starting_balances))?;
     engine.add_instrument(&instrument)?;
     let instrument_id = instrument.id();

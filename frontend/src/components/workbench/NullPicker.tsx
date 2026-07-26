@@ -26,13 +26,13 @@ export function NullPicker({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Null picker</CardTitle>
+        <CardTitle className="text-sm">Randomized baseline</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-xs text-text-dim">
-          Recommended for this strategy type:{' '}
-          <span className="font-mono text-text-muted">{picker.recommended}</span>. The null is a
-          stated hypothesis — choose deliberately; an override needs a reason.
+          We recommend this randomized baseline for your strategy type:{' '}
+          <span className="font-mono text-text-muted">{picker.recommended}</span>. Your strategy must beat
+          this to show it has a real edge. Changing the recommendation requires a reason.
         </p>
 
         <div className="flex flex-col gap-2">
@@ -69,14 +69,14 @@ export function NullPicker({
               {picker.chosen.was_override && ' (override logged)'}
             </span>
           ) : (
-            <span className="text-xs text-text-dim">no null chosen yet</span>
+            <span className="text-xs text-text-dim">no baseline chosen yet</span>
           )}
           <Button
             size="sm"
             disabled={saving || blocked}
             onClick={() => onChoose(selected, isOverride ? reason.trim() : undefined)}
           >
-            {picker.chosen ? 'Update null' : 'Choose null'}
+            {picker.chosen ? 'Update baseline' : 'Choose baseline'}
           </Button>
         </div>
       </CardContent>

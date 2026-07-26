@@ -169,7 +169,7 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm">
           <FlaskConical className="h-4 w-4 text-blue-400" />
-          Run a study
+          New Backtest
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -177,12 +177,12 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
         <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
-            Every run permanently increments this experiment's trial counter and raises the
-            significance bar it must clear. Explore freely — but there are no free looks.
+            Every run permanently increments your search count and raises the bar your
+            strategy must clear to be considered significant. Explore freely — but every look counts.
           </span>
         </div>
 
-        <Field label="Study kind">
+        <Field label="Test type">
           <Select value={kind} onValueChange={(v) => setKind(v as StudyKind)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -285,11 +285,11 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
           </Field>
         </div>
 
-        <Field label="Question (pre-declared, logged before the run)">
+        <Field label="What are you testing? (logged before the run)">
           <Input
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="e.g. Does the edge survive realistic costs?"
+            placeholder="e.g. Does this strategy survive realistic trading costs?"
           />
         </Field>
 
@@ -297,7 +297,7 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
           <span className="text-[11px] text-pnl-down">{invalid ?? ''}</span>
           <Button size="sm" disabled={!!invalid || run.isPending} onClick={() => run.mutate()}>
             {run.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
-            Run study
+            Run backtest
           </Button>
         </div>
       </CardContent>

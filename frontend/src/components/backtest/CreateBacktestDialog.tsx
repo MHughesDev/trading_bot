@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import { Loader2, AlertTriangle } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { backtestsApi, strategyPickerApi, type CreateBacktestRequest } from '@/api/backtests'
+import { backtestsApi, coverageApi, strategyPickerApi, type CreateBacktestRequest } from '@/api/backtests'
 import { toast } from '@/hooks/useToast'
 
 // `collect` marks which asset classes have an automated historical collector
@@ -99,6 +99,37 @@ export function CreateBacktestDialog({
     queryFn: () => strategyPickerApi.list().then((r) => r.data.strategies),
     enabled: open,
   })
+
+  const { data: coverage } = useQuery({
+    queryKey: ['backtest-coverage'],
+    queryFn: () => coverageApi.list().then((r) => r.data.coverage),
+    enabled: open,
+    staleTime: 30_000,
+  })
+
+  // Warn when the typed instrument has no stored bars for the chosen timeframe.
+  const instrumentWarning = (() => {
+    if (!coverage || !instrument.trim()) return null
+    const id = instrument.trim().toUpperCase()
+    const hasAnyBars = coverage.some(
+      (c) => c.instrument_id.toUpperCase() === id,
+    )
+    if (!hasAnyBars) {
+      return `No bar data found for "${instrument.trim()}" in storage. The run will rely on auto-collect, which only works for supported instruments.`
+    }
+    const hasTfBars = coverage.some(
+      (c) =>
+        c.instrument_id.toUpperCase() === id && c.timeframe === timeframe,
+    )
+    if (!hasTfBars) {
+      const available = coverage
+        .filter((c) => c.instrument_id.toUpperCase() === id)
+        .map((c) => c.timeframe)
+        .join(', ')
+      return `No ${timeframe} bars found for "${instrument.trim()}" — available timeframes: ${available}. Auto-collect will attempt to backfill.`
+    }
+    return null
+  })()
 
   const create = useMutation({
     mutationFn: (req: CreateBacktestRequest) => backtestsApi.create(req),
@@ -216,6 +247,13 @@ export function CreateBacktestDialog({
               placeholder="BTC-USDT"
             />
           </div>
+
+          {instrumentWarning && (
+            <div className="col-span-2 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{instrumentWarning}</span>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <Label>Timeframe</Label>

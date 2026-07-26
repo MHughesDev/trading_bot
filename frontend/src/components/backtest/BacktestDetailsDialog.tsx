@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { backtestsApi, type BacktestSnapshot } from '@/api/backtests'
-import { statusPresentation, isActive } from './status'
+import { statusPresentation, isActive, phaseLabel } from './status'
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -31,6 +31,30 @@ function StatGrid({ entries }: { entries: Array<[string, string]> }) {
       ))}
     </div>
   )
+}
+
+/** Maps asset class to the data source used for backfill/history. */
+function dataSource(assetClass: string): string {
+  switch (assetClass) {
+    case 'crypto_spot_cex': return 'Kraken'
+    case 'crypto_spot_dex':
+    case 'perpetual_swap': return 'Binance'
+    case 'equity':
+    case 'etf': return 'Alpaca'
+    default: return assetClass
+  }
+}
+
+/** Format a simulated-time span (in seconds) as "Xd Yh Zm". */
+function formatSimSpan(secs: number): string {
+  const d = Math.floor(secs / 86400)
+  const h = Math.floor((secs % 86400) / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  const parts: string[] = []
+  if (d > 0) parts.push(`${d}d`)
+  if (h > 0) parts.push(`${h}h`)
+  if (m > 0 || parts.length === 0) parts.push(`${m}m`)
+  return parts.join(' ')
 }
 
 export function BacktestDetailsDialog({
@@ -86,7 +110,7 @@ export function BacktestDetailsDialog({
             <Badge variant={present.variant}>{present.label}</Badge>
           </DialogTitle>
           <DialogDescription>
-            {run.strategy_slug} · {run.instrument_id} · {run.venue_id} ·{' '}
+            {run.strategy_slug} · {run.instrument_id} · {dataSource(run.asset_class)} ·{' '}
             {run.timeframe}
           </DialogDescription>
         </DialogHeader>
@@ -122,16 +146,37 @@ export function BacktestDetailsDialog({
                   ['Gaps found', String(run.coverage.missing_ranges.length)],
                 ]}
               />
+              {run.coverage.missing_ranges.length > 0 && (
+                <div className="mt-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-400/70">
+                    Missing ranges
+                  </div>
+                  <ul className="space-y-0.5">
+                    {run.coverage.missing_ranges.map((r, i) => (
+                      <li key={i} className="text-xs text-amber-300/80 tabular-nums">
+                        {new Date(r.from).toLocaleDateString()} –{' '}
+                        {new Date(r.to).toLocaleDateString()}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </section>
           )}
 
           {/* Failure detail */}
           {run.status === 'failed' && run.error && (
             <section className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-              <div className="font-medium">
-                Failed during {run.failed_phase ?? 'processing'}
+              <div className="font-semibold">
+                Failed during {phaseLabel(run.failed_phase)}
               </div>
-              <div className="mt-1 break-words">{run.error}</div>
+              <div className="mt-2 break-words leading-relaxed">{run.error}</div>
+              {run.coverage && (
+                <div className="mt-2 text-xs text-red-400/70">
+                  {run.coverage.present_bars.toLocaleString()} of{' '}
+                  {run.coverage.expected_bars.toLocaleString()} bars were present at failure.
+                </div>
+              )}
             </section>
           )}
 
@@ -144,14 +189,14 @@ export function BacktestDetailsDialog({
                 </h4>
                 <StatGrid
                   entries={[
-                    ['Orders', String(result.total_orders ?? 0)],
+                    ['Orders filled', String(result.total_orders ?? 0)],
                     ['Positions', String(result.total_positions ?? 0)],
                     ['Events', String(result.total_events ?? 0)],
-                    ['Iterations', String(result.iterations ?? 0)],
+                    ['Bars processed', String(result.iterations ?? 0)],
                     [
-                      'Elapsed',
+                      'Sim span',
                       result.elapsed_time_secs
-                        ? `${result.elapsed_time_secs.toFixed(2)}s`
+                        ? formatSimSpan(result.elapsed_time_secs)
                         : '—',
                     ],
                   ]}

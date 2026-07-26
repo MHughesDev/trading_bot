@@ -40,12 +40,6 @@ const ModelLineagePage = lazy(() =>
 const LeaderboardPage = lazy(() =>
   import('@/pages/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage })),
 )
-const WorkbenchPage = lazy(() =>
-  import('@/pages/WorkbenchPage').then((m) => ({ default: m.WorkbenchPage })),
-)
-const ProvingGroundPage = lazy(() =>
-  import('@/pages/ProvingGroundPage').then((m) => ({ default: m.ProvingGroundPage })),
-)
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -109,8 +103,8 @@ export default function App() {
               <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/strategy" element={<StrategyCreationPage />} />
               <Route path="/backtesting" element={<BackTestingPage />} />
-              <Route path="/workbench" element={<WorkbenchPage />} />
-              <Route path="/proving-ground" element={<ProvingGroundPage />} />
+              <Route path="/workbench" element={<Navigate to="/backtesting" replace />} />
+              <Route path="/proving-ground" element={<Navigate to="/backtesting" replace />} />
               <Route path="/mlops" element={<MlOpsPage />} />
               <Route path="/mlops/create" element={<ModelCreatePage />} />
               <Route path="/mlops/graph" element={<ModelLineagePage />} />

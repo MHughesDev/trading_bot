@@ -64,9 +64,9 @@ pub struct BacktestRequest {
     /// Display name; defaults to "strategy · instrument · timeframe".
     #[serde(default)]
     pub name: Option<String>,
-    /// UUID of a stored strategy definition.
+    /// Slug (strategy_id) of a stored strategy definition.
     #[serde(default)]
-    pub strategy_ref: Option<Uuid>,
+    pub strategy_ref: Option<String>,
     /// Inline strategy definition (validated before use).
     #[serde(default)]
     pub definition: Option<StrategyDefinition>,

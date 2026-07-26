@@ -186,7 +186,7 @@ pub async fn me(
          JOIN users u ON u.user_id = s.user_id
          WHERE s.token = $1 AND s.expires_at > now() AND u.active = true",
     )
-    .bind(&bearer.0)
+    .bind(&bearer.token)
     .fetch_optional(&state.pg)
     .await
     .map_err(|e| {
@@ -211,7 +211,7 @@ pub async fn logout(
     bearer: super::session::BearerToken,
 ) -> StatusCode {
     let _ = sqlx::query("DELETE FROM sessions WHERE token = $1")
-        .bind(&bearer.0)
+        .bind(&bearer.token)
         .execute(&state.pg)
         .await;
     StatusCode::OK

@@ -31,7 +31,7 @@ pub async fn create_ui_subscriptions(
     token: BearerToken,
     Json(req): Json<CreateSubscriptionRequest>,
 ) -> impl IntoResponse {
-    let user_id = token.0;
+    let user_id = token.user_id.to_string();
     let mut registered = Vec::new();
     let mut errors = Vec::new();
 
