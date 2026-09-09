@@ -136,6 +136,7 @@ dependencies = [
  "model-registry",
  "reconciliation",
  "reqwest",
+ "research",
  "risk",
  "rust_decimal",
  "rust_decimal_macros",
@@ -4190,6 +4191,20 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "webpki-roots 1.0.7",
+]
+
+[[package]]
+name = "research"
+version = "0.1.0"
+dependencies = [
+ "backtest",
+ "chrono",
+ "domain",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

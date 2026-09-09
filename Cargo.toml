@@ -22,6 +22,7 @@ members = [
     "crates/api",
     "crates/mcp-server",
     "crates/llm",
+    "crates/research",
     "crates/graph",
     "crates/semantic",
     "apps/platform",
@@ -127,6 +128,7 @@ model-registry = { path = "crates/model-registry" }
 api = { path = "crates/api" }
 mcp-server-lib = { path = "crates/mcp-server" }
 llm = { path = "crates/llm" }
+research = { path = "crates/research" }
 graph = { path = "crates/graph" }
 semantic = { path = "crates/semantic" }
 
