@@ -20,11 +20,14 @@ use crate::types::{MissingRange, TimeframeExt};
 /// Which upstream source fills gaps for a given instrument.
 #[derive(Clone, Debug)]
 pub enum CollectorPlan {
-    /// Kraken public OHLC — unauthenticated spot crypto history.  Matches the
-    /// live data venue for all crypto instruments in this system.  The pair is
-    /// derived from `instrument_id` by stripping the separator and mapping
-    /// `BTC` → `XBT` (Kraken's name for Bitcoin), e.g. `BTC-USD` → `XBTUSD`.
-    KrakenOhlc { pair: String, source: String },
+    /// Coinbase Exchange public candles — unauthenticated spot crypto history
+    /// with true start/end paging (300 candles per request, arbitrary depth).
+    /// Kraken's OHLC endpoint was abandoned here because it serves only the
+    /// most recent ~720 candles per interval: any longer backfill silently
+    /// truncated (12h of 1m, 7.5d of 15m), which broke long backtests, asset
+    /// seeding, and gap-fill alike.  Coinbase products use the same
+    /// `BASE-QUOTE` ids as this platform (e.g. `BTC-USD`).
+    CoinbaseCandles { product: String, source: String },
     /// Binance public klines — unauthenticated crypto history.  Geo-blocked
     /// from US IPs (HTTP 451), so only used for classes with no Kraken
     /// spot equivalent (perps, DEX).
@@ -48,22 +51,18 @@ impl CollectorPlan {
     pub fn for_asset_class(asset_class: &str, instrument_id: &str) -> anyhow::Result<Self> {
         match asset_class {
             "crypto_spot_cex" => {
-                // Kraken expects the pair without a separator and uses `XBT`
-                // instead of `BTC`, e.g. "BTC-USD" → "XBTUSD".  The quote
-                // currency is preserved exactly: USD and USDT are different
-                // markets and must never be proxied.  If Kraken does not list
-                // the pair the fetch fails with a clear API error.
+                // Coinbase product ids are exactly our BASE-QUOTE instrument
+                // ids (e.g. "BTC-USD").  The quote currency is preserved
+                // exactly: USD and USDT are different markets and must never
+                // be proxied.  If Coinbase does not list the product the
+                // fetch fails with a clear API error.
                 anyhow::ensure!(
                     instrument_id.contains('-'),
                     "instrument '{instrument_id}' must be BASE-QUOTE form (e.g. BTC-USD)"
                 );
-                let pair = instrument_id
-                    .to_uppercase()
-                    .replace('-', "")
-                    .replace("BTC", "XBT");
-                Ok(Self::KrakenOhlc {
-                    pair,
-                    source: "kraken_rest".to_string(),
+                Ok(Self::CoinbaseCandles {
+                    product: instrument_id.to_uppercase(),
+                    source: "coinbase_rest".to_string(),
                 })
             }
             "crypto_spot_dex" | "perpetual_swap" => {
@@ -111,14 +110,14 @@ impl CollectorPlan {
     /// Used to reject unsupported create requests up front (422) instead of
     /// letting a job reach `CollectingData` only to fail there (#15).  Mirrors
     /// the capability of the concrete collectors:
-    /// [`kraken_interval`] (no 1s), [`binance_interval`] (all timeframes),
-    /// and [`alpaca_interval`] (no 1s).
+    /// [`coinbase_granularity`] (no 1s; 4h aggregated from 1h),
+    /// [`binance_interval`] (all timeframes), and [`alpaca_interval`] (no 1s).
     pub fn auto_collect_support(asset_class: &str, timeframe: Timeframe) -> Result<(), String> {
         match asset_class {
             "crypto_spot_cex" => match timeframe {
-                // Kraken OHLC supports 1m, 5m, 15m, 1h, 4h, 1d — only 1s is absent.
                 Timeframe::Seconds1 => Err(
-                    "the crypto spot backfill (Kraken) does not provide 1-second bars".to_string(),
+                    "the crypto spot backfill (Coinbase) does not provide 1-second bars"
+                        .to_string(),
                 ),
                 _ => Ok(()),
             },
@@ -138,14 +137,14 @@ impl CollectorPlan {
 
     pub fn source_name(&self) -> &str {
         match self {
-            Self::KrakenOhlc { source, .. } | Self::BinanceKlines { source, .. } => source,
+            Self::CoinbaseCandles { source, .. } | Self::BinanceKlines { source, .. } => source,
             Self::AlpacaBars { .. } => "alpaca_rest",
         }
     }
 
     pub fn trust_tier(&self) -> &'static str {
         match self {
-            Self::KrakenOhlc { .. } | Self::BinanceKlines { .. } => "centralized_exchange",
+            Self::CoinbaseCandles { .. } | Self::BinanceKlines { .. } => "centralized_exchange",
             Self::AlpacaBars { .. } => "regulated",
         }
     }
@@ -173,12 +172,12 @@ pub async fn collect_ranges(
             break;
         }
         total += match plan {
-            CollectorPlan::KrakenOhlc { pair, .. } => {
-                collect_kraken(
+            CollectorPlan::CoinbaseCandles { product, .. } => {
+                collect_coinbase(
                     http,
                     store,
                     plan,
-                    pair,
+                    product,
                     instrument_id,
                     venue_id,
                     timeframe,
@@ -291,16 +290,20 @@ async fn fetch_json_with_retry(
     }
 }
 
-/// Kraken OHLC interval in minutes.  Supported: 1, 5, 15, 60, 240, 1440.
-fn kraken_interval(tf: Timeframe) -> anyhow::Result<u32> {
+/// Coinbase Exchange candle granularity for a timeframe.
+///
+/// Returns `(fetch_granularity_secs, aggregate_factor)`.  Coinbase supports
+/// 60/300/900/3600/21600/86400 seconds; 4h is absent, so it is assembled from
+/// 1h candles (factor 4) at ingestion.
+fn coinbase_granularity(tf: Timeframe) -> anyhow::Result<(i64, usize)> {
     Ok(match tf {
-        Timeframe::Seconds1 => anyhow::bail!("Kraken does not provide 1-second bars"),
-        Timeframe::Minutes1 => 1,
-        Timeframe::Minutes5 => 5,
-        Timeframe::Minutes15 => 15,
-        Timeframe::Hours1 => 60,
-        Timeframe::Hours4 => 240,
-        Timeframe::Daily => 1440,
+        Timeframe::Seconds1 => anyhow::bail!("Coinbase does not provide 1-second candles"),
+        Timeframe::Minutes1 => (60, 1),
+        Timeframe::Minutes5 => (300, 1),
+        Timeframe::Minutes15 => (900, 1),
+        Timeframe::Hours1 => (3600, 1),
+        Timeframe::Hours4 => (3600, 4),
+        Timeframe::Daily => (86_400, 1),
     })
 }
 
@@ -328,12 +331,29 @@ fn alpaca_interval(tf: Timeframe) -> anyhow::Result<&'static str> {
     })
 }
 
+/// One raw Coinbase candle: `(open_secs, low, high, open, close, volume)`.
+type RawCandle = (i64, f64, f64, f64, f64, f64);
+
+/// Renders an ingestion-boundary decimal string from a Coinbase float.
+///
+/// `format!` (not `Value::to_string`) so tiny volumes never come out in
+/// scientific notation, which the downstream `Decimal` parse rejects.
+fn dec_str(v: f64) -> String {
+    let s = format!("{v:.8}");
+    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-async fn collect_kraken(
+async fn collect_coinbase(
     http: &reqwest::Client,
     store: &BarStore,
     plan: &CollectorPlan,
-    pair: &str,
+    product: &str,
     instrument_id: &str,
     venue_id: &str,
     timeframe: Timeframe,
@@ -341,102 +361,137 @@ async fn collect_kraken(
     collected: &AtomicU64,
     cancel: &AtomicBool,
 ) -> anyhow::Result<u64> {
-    let interval = kraken_interval(timeframe)?;
+    let (gran_secs, factor) = coinbase_granularity(timeframe)?;
     let tf_secs = i64::try_from(timeframe.seconds()).unwrap_or(i64::MAX);
+    let start_s = range.from.timestamp();
     let end_s = range.to.timestamp();
-    // Kraken returns bars with time > since.  Subtract 1 so the first bar
-    // at range.from is included.
-    let mut since = range.from.timestamp() - 1;
+    // The API errors when a request spans more than 300 candles, so page in
+    // exactly-300-candle windows.
+    let page_span = gran_secs * 300;
+    let mut cursor = start_s;
     let mut total = 0u64;
+    // Raw sub-candles buffered for aggregated timeframes (4h ← 1h).
+    let mut sub_candles: Vec<RawCandle> = Vec::new();
 
-    loop {
+    while cursor < end_s {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
+        let page_end = (cursor + page_span).min(end_s);
         let url = format!(
-            "https://api.kraken.com/0/public/OHLC?pair={pair}&interval={interval}&since={since}"
+            "https://api.exchange.coinbase.com/products/{product}/candles?granularity={gran_secs}&start={}&end={}",
+            secs_to_utc(cursor).to_rfc3339(),
+            secs_to_utc(page_end).to_rfc3339(),
         );
-        let body = fetch_json_with_retry(http, &url, &[], cancel)
+        // Coinbase rejects requests without a User-Agent.
+        let body = fetch_json_with_retry(http, &url, &[("User-Agent", "trading-bot/1.0")], cancel)
             .await
-            .map_err(|e| anyhow::anyhow!("kraken OHLC for {pair}: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("coinbase candles for {product}: {e}"))?;
+        let entries = body
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("coinbase candles for {product}: {body}"))?;
 
-        if let Some(errs) = body.get("error").and_then(Value::as_array) {
-            if !errs.is_empty() {
-                anyhow::bail!("kraken OHLC error for {pair}: {errs:?}");
-            }
-        }
-        let result = body
-            .get("result")
-            .ok_or_else(|| anyhow::anyhow!("kraken OHLC: missing result for {pair}"))?;
-
-        let next_since = result
-            .get("last")
-            .and_then(Value::as_i64)
-            .unwrap_or(i64::MAX);
-
-        // The pair key in the response may differ from the request (e.g.
-        // XBTUSD → XXBTZUSD).  Take the first key that is not "last".
-        let ohlc = result
-            .as_object()
-            .and_then(|m| m.iter().find(|(k, _)| *k != "last").map(|(_, v)| v))
-            .and_then(Value::as_array)
-            .ok_or_else(|| anyhow::anyhow!("kraken OHLC: no bar array for {pair}"))?;
-
-        if ohlc.is_empty() {
-            break;
-        }
-
-        let mut bars = Vec::with_capacity(ohlc.len());
-        for entry in ohlc {
-            // [time, open, high, low, close, vwap, volume, count] — all strings except time.
+        // Response is newest-first: [ time, low, high, open, close, volume ].
+        let mut page: Vec<RawCandle> = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let num = |idx: usize| -> anyhow::Result<f64> {
+                entry
+                    .get(idx)
+                    .and_then(Value::as_f64)
+                    .ok_or_else(|| anyhow::anyhow!("coinbase candle: missing field {idx}"))
+            };
             let open_s = entry
                 .get(0)
                 .and_then(Value::as_i64)
-                .ok_or_else(|| anyhow::anyhow!("kraken OHLC: missing time field"))?;
-            if open_s < range.from.timestamp() || open_s >= end_s {
+                .ok_or_else(|| anyhow::anyhow!("coinbase candle: missing time"))?;
+            if open_s < start_s || open_s >= end_s {
                 continue;
             }
-            let field = |idx: usize| -> anyhow::Result<String> {
-                Ok(entry
-                    .get(idx)
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| anyhow::anyhow!("kraken OHLC: missing field {idx}"))?
-                    .to_string())
-            };
+            page.push((open_s, num(1)?, num(2)?, num(3)?, num(4)?, num(5)?));
+        }
+        page.sort_by_key(|c| c.0);
+
+        if factor == 1 {
+            let bars: Vec<CollectedBar> = page
+                .iter()
+                .map(|&(open_s, low, high, open, close, volume)| CollectedBar {
+                    available_time: secs_to_utc(open_s + tf_secs),
+                    sequence: u64::try_from(open_s * 1_000).unwrap_or(0),
+                    open: dec_str(open),
+                    high: dec_str(high),
+                    low: dec_str(low),
+                    close: dec_str(close),
+                    volume: dec_str(volume),
+                    trade_count: 0,
+                })
+                .collect();
+            if !bars.is_empty() {
+                store
+                    .insert_collected(
+                        instrument_id,
+                        venue_id,
+                        plan.source_name(),
+                        plan.trust_tier(),
+                        timeframe,
+                        &bars,
+                    )
+                    .await?;
+                total += bars.len() as u64;
+                collected.fetch_add(bars.len() as u64, Ordering::Relaxed);
+            }
+        } else {
+            sub_candles.extend(page);
+        }
+
+        cursor = page_end;
+        // Stay well under Coinbase's public rate limit.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
+
+    // Aggregate buffered sub-candles into the target timeframe (e.g. 4×1h → 4h).
+    if factor > 1 && !sub_candles.is_empty() {
+        sub_candles.sort_by_key(|c| c.0);
+        let bucket_secs = gran_secs * i64::try_from(factor).unwrap_or(i64::MAX);
+        let mut bars: Vec<CollectedBar> = Vec::new();
+        let mut i = 0;
+        while i < sub_candles.len() {
+            let bucket_start = sub_candles[i].0 - sub_candles[i].0.rem_euclid(bucket_secs);
+            let mut low = f64::MAX;
+            let mut high = f64::MIN;
+            let open = sub_candles[i].3;
+            let mut close = sub_candles[i].4;
+            let mut volume = 0.0;
+            while i < sub_candles.len() && sub_candles[i].0 < bucket_start + bucket_secs {
+                let (_, l, h, _, c, v) = sub_candles[i];
+                low = low.min(l);
+                high = high.max(h);
+                close = c;
+                volume += v;
+                i += 1;
+            }
             bars.push(CollectedBar {
-                available_time: secs_to_utc(open_s + tf_secs),
-                sequence: u64::try_from(open_s * 1_000).unwrap_or(0),
-                open: field(1)?,
-                high: field(2)?,
-                low: field(3)?,
-                close: field(4)?,
-                volume: field(6)?,
-                trade_count: entry.get(7).and_then(Value::as_u64).unwrap_or(0),
+                available_time: secs_to_utc(bucket_start + bucket_secs),
+                sequence: u64::try_from(bucket_start * 1_000).unwrap_or(0),
+                open: dec_str(open),
+                high: dec_str(high),
+                low: dec_str(low),
+                close: dec_str(close),
+                volume: dec_str(volume),
+                trade_count: 0,
             });
         }
-
-        if !bars.is_empty() {
-            store
-                .insert_collected(
-                    instrument_id,
-                    venue_id,
-                    plan.source_name(),
-                    plan.trust_tier(),
-                    timeframe,
-                    &bars,
-                )
-                .await?;
-            total += bars.len() as u64;
-            collected.fetch_add(bars.len() as u64, Ordering::Relaxed);
-        }
-
-        // `last` from the response is the next `since` cursor.  Stop when the
-        // API signals no more data, the cursor didn't advance, or we've passed
-        // the end of the requested range.
-        if next_since >= end_s || next_since <= since {
-            break;
-        }
-        since = next_since;
+        store
+            .insert_collected(
+                instrument_id,
+                venue_id,
+                plan.source_name(),
+                plan.trust_tier(),
+                timeframe,
+                &bars,
+            )
+            .await?;
+        total += bars.len() as u64;
+        collected.fetch_add(bars.len() as u64, Ordering::Relaxed);
     }
     Ok(total)
 }
@@ -630,30 +685,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kraken_pair_mapping() {
-        // BTC maps to XBT (Kraken's name for Bitcoin); separator is stripped.
+    fn coinbase_product_mapping() {
+        // Coinbase products use our BASE-QUOTE ids verbatim (upper-cased).
         let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "BTC-USD").unwrap();
         match &plan {
-            CollectorPlan::KrakenOhlc { pair, .. } => assert_eq!(pair, "XBTUSD"),
-            other => panic!("expected kraken plan, got {other:?}"),
+            CollectorPlan::CoinbaseCandles { product, .. } => assert_eq!(product, "BTC-USD"),
+            other => panic!("expected coinbase plan, got {other:?}"),
         }
 
-        // Lower-case input is normalised; BTC→XBT still applies.
-        let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "btc-usdt").unwrap();
+        let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "eth-usdt").unwrap();
         match &plan {
-            CollectorPlan::KrakenOhlc { pair, .. } => assert_eq!(pair, "XBTUSDT"),
-            other => panic!("expected kraken plan, got {other:?}"),
-        }
-
-        // ETH does not get the BTC→XBT substitution.
-        let plan = CollectorPlan::for_asset_class("crypto_spot_cex", "ETH-USD").unwrap();
-        match &plan {
-            CollectorPlan::KrakenOhlc { pair, .. } => assert_eq!(pair, "ETHUSD"),
-            other => panic!("expected kraken plan, got {other:?}"),
+            CollectorPlan::CoinbaseCandles { product, .. } => assert_eq!(product, "ETH-USDT"),
+            other => panic!("expected coinbase plan, got {other:?}"),
         }
 
         // A separatorless symbol is rejected (ambiguous BASE/QUOTE split).
         assert!(CollectorPlan::for_asset_class("crypto_spot_cex", "BTCUSD").is_err());
+    }
+
+    #[test]
+    fn coinbase_granularity_covers_all_but_seconds() {
+        assert!(coinbase_granularity(Timeframe::Seconds1).is_err());
+        assert_eq!(coinbase_granularity(Timeframe::Minutes15).unwrap(), (900, 1));
+        // 4h is assembled from 1h candles.
+        assert_eq!(coinbase_granularity(Timeframe::Hours4).unwrap(), (3600, 4));
+    }
+
+    #[test]
+    fn dec_str_never_emits_scientific_notation() {
+        assert_eq!(dec_str(0.000005), "0.000005");
+        assert_eq!(dec_str(79000.5), "79000.5");
+        assert_eq!(dec_str(0.0), "0");
     }
 
     #[test]

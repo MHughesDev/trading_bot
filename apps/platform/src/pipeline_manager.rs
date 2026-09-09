@@ -150,7 +150,8 @@ async fn gap_fill(ch_url: &str, instrument_id: &str, asset_class: &str) -> anyho
     // If we have no data at all, seed from the beginning of the window.
     // Otherwise use gap analysis to find all under-covered days.
     let schedule = backtest::gaps::ScheduleKind::for_asset_class(asset_class);
-    let coverage = backtest::gaps::analyze(fill_from, fill_to, &counts, Timeframe::Minutes1, schedule);
+    let coverage =
+        backtest::gaps::analyze(fill_from, fill_to, &counts, Timeframe::Minutes1, schedule);
 
     if coverage.missing_ranges.is_empty() {
         return Ok(()); // nothing to fill
@@ -165,7 +166,7 @@ async fn gap_fill(ch_url: &str, instrument_id: &str, asset_class: &str) -> anyho
 
     let plan = backtest::collect::CollectorPlan::for_asset_class(asset_class, instrument_id)?;
     let venue_id = match &plan {
-        backtest::collect::CollectorPlan::KrakenOhlc { .. } => "kraken",
+        backtest::collect::CollectorPlan::CoinbaseCandles { .. } => "coinbase",
         backtest::collect::CollectorPlan::BinanceKlines { .. } => "binance",
         backtest::collect::CollectorPlan::AlpacaBars { .. } => "alpaca",
     };
