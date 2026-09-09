@@ -15,3 +15,11 @@ git-fetch-with-cli = true
 
 [env]
 RUST_LOG = { value = "info", force = false }
+
+# Cap codegen parallelism. At the default (one job per core) a workspace build
+# exhausts the Windows page file on this machine and fails with
+# "memory allocation failed" / os error 1455, which surfaces misleadingly as
+# E0463 "can't find crate" / E0786 "invalid metadata" cascades that look like
+# source errors. Two jobs builds the whole workspace without paging.
+[build]
+jobs = 2
