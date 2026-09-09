@@ -21,6 +21,10 @@ pub enum MetricKind {
     DetrendedSharpe,
     MaxDrawdown,
     ProfitFactor,
+    /// Mean P&L per trade divided by the mean losing trade (R-multiple
+    /// expectancy). Dimensionless; robust to the "tiny take-profit, huge
+    /// stop" win-rate gaming that inflates `hit_rate`.
+    Expectancy,
 }
 
 /// Inputs to [`MetricSet::compute`]. `equity_returns` are per-period simple
@@ -63,6 +67,10 @@ pub struct MetricSet {
     pub exposure_net: f64,
     pub hit_rate: f64,
     pub profit_factor: f64,
+    /// R-multiple expectancy: mean trade P&L / mean losing-trade magnitude.
+    /// Falls back to mean P&L / mean |P&L| when there are no losing trades.
+    #[serde(default)]
+    pub expectancy: f64,
     pub n_trades: i64,
     // honesty hooks (populated by Studies; null at Run level)
     pub trial_count_at_eval: Option<i64>,
@@ -94,6 +102,7 @@ impl MetricSet {
             exposure_net: 0.0,
             hit_rate: 0.0,
             profit_factor: 0.0,
+            expectancy: 0.0,
             n_trades: 0,
             trial_count_at_eval: None,
             is_oos_gap: None,
@@ -112,6 +121,7 @@ impl MetricSet {
             MetricKind::DetrendedSharpe => self.detrended_sharpe,
             MetricKind::MaxDrawdown => self.max_drawdown,
             MetricKind::ProfitFactor => self.profit_factor,
+            MetricKind::Expectancy => self.expectancy,
         }
     }
 
@@ -219,6 +229,7 @@ impl MetricSet {
         // Trade-derived activity stats.
         let n_trades = input.trades.len() as i64;
         let (mut wins, mut gains, mut losses, mut notional) = (0i64, 0.0f64, 0.0f64, 0.0f64);
+        let (mut n_losers, mut abs_sum) = (0i64, 0.0f64);
         for t in input.trades {
             let pnl = t.pnl.to_f64().unwrap_or(0.0);
             if pnl > 0.0 {
@@ -226,7 +237,11 @@ impl MetricSet {
                 gains += pnl;
             } else {
                 losses += -pnl;
+                if pnl < 0.0 {
+                    n_losers += 1;
+                }
             }
+            abs_sum += pnl.abs();
             let entry = t.entry_price.to_f64().unwrap_or(0.0);
             let qty = t.qty.to_f64().unwrap_or(0.0);
             notional += (entry * qty).abs();
@@ -240,6 +255,21 @@ impl MetricSet {
             gains / losses
         } else if gains > 0.0 {
             f64::INFINITY
+        } else {
+            0.0
+        };
+        let expectancy = if n_trades > 0 {
+            let mean_pnl = (gains - losses) / n_trades as f64;
+            let unit = if n_losers > 0 {
+                losses / n_losers as f64
+            } else {
+                abs_sum / n_trades as f64
+            };
+            if unit > 0.0 {
+                mean_pnl / unit
+            } else {
+                0.0
+            }
         } else {
             0.0
         };
@@ -275,6 +305,7 @@ impl MetricSet {
             exposure_net,
             hit_rate,
             profit_factor,
+            expectancy,
             n_trades,
             trial_count_at_eval: None,
             is_oos_gap: None,

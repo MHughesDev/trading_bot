@@ -12,6 +12,7 @@ pub mod config;
 pub mod executor;
 pub mod id;
 pub mod metrics;
+pub mod objective;
 pub mod result;
 pub mod store;
 
@@ -22,6 +23,7 @@ pub use config::{
 pub use executor::{ClosureExecutor, RunExecutor};
 pub use id::RunId;
 pub use metrics::{MetricInputs, MetricKind, MetricSet};
+pub use objective::{Aggregate, Constraint, Objective};
 pub use result::{ComputeCost, Flag, RunResult, RunStatus, Side, Trade};
 pub use store::{InMemoryRunStore, PutOutcome, RunStore};
 

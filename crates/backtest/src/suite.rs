@@ -45,11 +45,12 @@ use crate::reconcile::{
 use crate::run::executor::{daily_curve, map_sim_result};
 use crate::run::{
     Backtest, ClosureExecutor, ComputeCost, DataSlice, EvalResolution, InMemoryRunStore,
-    MetricKind, ParamMap, RunConfig, RunConfigBuilder, RunResult, ENGINE_VERSION,
+    MetricKind, MetricSet, Objective, ParamMap, RunConfig, RunConfigBuilder, RunExecutor, RunId,
+    RunResult, RunStatus, RunStore, ENGINE_VERSION,
 };
 use crate::study::{
-    Distribution, SelectionRule, StudyBudget, StudyConfig, StudyKind, StudyResult, StudyVerdict,
-    VarySpec,
+    Distribution, SelectionRule, StudyBudget, StudyConfig, StudyEngine, StudyKind, StudyResult,
+    StudyVerdict, VarySpec,
 };
 
 /// Synthetic, deterministic Run executor (the real one is the deferred live leg).
@@ -86,8 +87,10 @@ fn synthetic_execute(cfg: &RunConfig) -> RunResult {
     )
 }
 
-/// The synthetic engine the manager runs every Study/Run through.
-type SyntheticEngine = Backtest<InMemoryRunStore, ClosureExecutor<fn(&RunConfig) -> RunResult>>;
+/// The engine the manager runs every Study/Run through. The executor is
+/// injected: synthetic by default (tests, offline), the `market_simulator`-backed
+/// [`crate::sim_executor::SimRunExecutor`] in the platform.
+type SuiteEngine = Backtest<InMemoryRunStore, Box<dyn RunExecutor>>;
 
 // ── view models (what the frontend renders) ──────────────────────────────────
 
@@ -109,6 +112,15 @@ pub struct ExperimentView {
     pub primary_test: String,
     pub holdout_spent: bool,
     pub study_count: usize,
+    /// The stored strategy slug every Run executes.
+    pub strategy_ref: String,
+    /// The declared objective, if one was set at creation (immutable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective: Option<Objective>,
+    /// The research slice's universe (instrument id) and window.
+    pub universe_ref: String,
+    pub research_start: DateTime<Utc>,
+    pub research_end: DateTime<Utc>,
     pub created: DateTime<Utc>,
     pub updated: DateTime<Utc>,
 }
@@ -131,6 +143,11 @@ pub struct StudyView {
     /// Whether the pre-declared selection rule carried a config forward (the
     /// *only* carry-forward path; never an argmax). No metric is exposed.
     pub carried_forward: bool,
+    /// The parameter set the selection rule carried forward, when it did.
+    /// This is the rule's output (the stable centroid / worst-case member),
+    /// never the best member — exposing it is INV-2-compliant by construction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carried_forward_params: Option<ParamMap>,
     #[serde(rename = "unsafe")]
     pub unsafe_flag: bool,
 }
@@ -266,6 +283,14 @@ pub struct CreateExperimentSpec {
     /// One of `1m,5m,10m,15m,30m,1h,1d` (defaults to `1d`).
     #[serde(default)]
     pub eval_resolution: Option<String>,
+    /// The concrete stored strategy (slug in `strategy_definitions`) every Run
+    /// executes. Defaults to `strategy_family` for backwards compatibility.
+    #[serde(default)]
+    pub strategy_ref: Option<String>,
+    /// What sweeps on this Experiment maximise. Immutable once set
+    /// (FEAT-003 §6); a different objective is a different Experiment.
+    #[serde(default)]
+    pub objective: Option<Objective>,
 }
 
 /// Run a research Study attached to an Experiment (auto-increments the counter).
@@ -280,6 +305,33 @@ pub struct RunStudySpec {
     pub selection_rule: Option<SelectionRule>,
     #[serde(default)]
     pub null_ref: Option<String>,
+    /// Parameter values the base config is centred on (e.g. a prior Study's
+    /// `carried_forward_params`) so a `Neighborhood` on one parameter holds
+    /// the others where the research left them.
+    #[serde(default)]
+    pub base_params: Option<ParamMap>,
+}
+
+/// Input to [`SuiteManager::run_param_batch`] (in-process only).
+#[derive(Clone, Debug)]
+pub struct ParamBatchSpec {
+    pub study_id: String,
+    /// Parameter overrides per member, applied over `base_params`.
+    pub grid: Vec<ParamMap>,
+    pub metric: MetricKind,
+    pub selection_rule: SelectionRule,
+    pub question: String,
+    pub base_params: Option<ParamMap>,
+}
+
+/// Output of [`SuiteManager::run_param_batch`]: the sealed view plus, for the
+/// sampler only, each member's full parameter set and metrics (`None` when the
+/// Run failed) in grid order.
+#[derive(Clone, Debug)]
+pub struct ParamBatchOutcome {
+    pub view: StudyView,
+    pub members: Vec<(ParamMap, Option<MetricSet>)>,
+    pub carried_forward: Option<ParamMap>,
 }
 
 /// A reason a suite operation was refused, surfaced to the API as a status code.
@@ -325,6 +377,9 @@ struct Record {
     uuid: Uuid,
     exp: Experiment,
     strategy_type: String,
+    /// Stored strategy slug the executor resolves (defaults to the family).
+    strategy_ref: String,
+    objective: Option<Objective>,
     research_slice: DataSlice,
     studies: Vec<StoredStudy>,
     gate_verdicts: Vec<GateVerdict>,
@@ -342,7 +397,7 @@ struct Record {
 /// [`SuiteManager::subscribe_progress`].
 pub struct SuiteManager {
     records: RwLock<HashMap<Uuid, Record>>,
-    bt: SyntheticEngine,
+    bt: SuiteEngine,
     progress_tx: broadcast::Sender<serde_json::Value>,
 }
 
@@ -353,13 +408,21 @@ impl Default for SuiteManager {
 }
 
 impl SuiteManager {
+    /// A manager over the deterministic synthetic executor (tests / offline).
     #[must_use]
     pub fn new() -> Self {
-        let (progress_tx, _) = broadcast::channel(256);
         let exec: fn(&RunConfig) -> RunResult = synthetic_execute;
+        Self::with_executor(Box::new(ClosureExecutor(exec)))
+    }
+
+    /// A manager over an injected executor — the platform passes the real
+    /// `market_simulator`-backed one so every Study runs real backtests.
+    #[must_use]
+    pub fn with_executor(executor: Box<dyn RunExecutor>) -> Self {
+        let (progress_tx, _) = broadcast::channel(256);
         Self {
             records: RwLock::new(HashMap::new()),
-            bt: Backtest::new(InMemoryRunStore::new(), ClosureExecutor(exec)),
+            bt: Backtest::new(InMemoryRunStore::new(), executor),
             progress_tx,
         }
     }
@@ -403,6 +466,9 @@ impl SuiteManager {
         user_id: Uuid,
         spec: CreateExperimentSpec,
     ) -> Result<ExperimentView, SuiteError> {
+        if let Some(o) = &spec.objective {
+            o.validate().map_err(SuiteError::Invalid)?;
+        }
         let res = Self::eval_resolution(spec.eval_resolution.as_deref());
         let research = DataSlice::new(
             spec.universe_ref.clone(),
@@ -434,23 +500,27 @@ impl SuiteManager {
             return Err(SuiteError::AlreadyExists);
         }
         let uuid = Uuid::new_v4();
-        let view = Self::experiment_view(uuid, &exp, &spec.strategy_type);
-        records.insert(
+        let strategy_ref = spec
+            .strategy_ref
+            .clone()
+            .unwrap_or_else(|| exp.strategy_family.clone());
+        let record = Record {
+            user_id,
             uuid,
-            Record {
-                user_id,
-                uuid,
-                exp,
-                strategy_type: spec.strategy_type,
-                research_slice: research,
-                studies: Vec::new(),
-                gate_verdicts: Vec::new(),
-                gate3: None,
-                null: None,
-                null_choice: None,
-                reconciliation: None,
-            },
-        );
+            exp,
+            strategy_type: spec.strategy_type,
+            strategy_ref,
+            objective: spec.objective,
+            research_slice: research,
+            studies: Vec::new(),
+            gate_verdicts: Vec::new(),
+            gate3: None,
+            null: None,
+            null_choice: None,
+            reconciliation: None,
+        };
+        let view = Self::experiment_view(&record);
+        records.insert(uuid, record);
         Ok(view)
     }
 
@@ -461,7 +531,7 @@ impl SuiteManager {
         let mut views: Vec<ExperimentView> = records
             .values()
             .filter(|r| r.user_id == user_id)
-            .map(|r| Self::experiment_view(r.uuid, &r.exp, &r.strategy_type))
+            .map(Self::experiment_view)
             .collect();
         views.sort_by_key(|v| std::cmp::Reverse(v.created));
         views
@@ -473,15 +543,16 @@ impl SuiteManager {
         records
             .get(&id)
             .filter(|r| r.user_id == user_id)
-            .map(|r| Self::experiment_view(r.uuid, &r.exp, &r.strategy_type))
+            .map(Self::experiment_view)
     }
 
-    fn experiment_view(uuid: Uuid, exp: &Experiment, strategy_type: &str) -> ExperimentView {
+    fn experiment_view(r: &Record) -> ExperimentView {
+        let exp = &r.exp;
         ExperimentView {
-            id: uuid,
+            id: r.uuid,
             experiment_id: exp.experiment_id.clone(),
             strategy_family: exp.strategy_family.clone(),
-            strategy_type: strategy_type.to_string(),
+            strategy_type: r.strategy_type.clone(),
             state: exp.state,
             trial_counter: exp.trial_counter(),
             unsafe_flag: exp.is_unsafe(),
@@ -489,6 +560,11 @@ impl SuiteManager {
             primary_test: exp.primary_test().to_string(),
             holdout_spent: exp.holdout.spent,
             study_count: exp.studies.len(),
+            strategy_ref: r.strategy_ref.clone(),
+            objective: r.objective.clone(),
+            universe_ref: r.research_slice.universe_ref.clone(),
+            research_start: r.research_slice.start,
+            research_end: r.research_slice.end,
             created: exp.created,
             updated: exp.updated,
         }
@@ -502,7 +578,7 @@ impl SuiteManager {
             .filter(|r| r.user_id == user_id)
             .ok_or(SuiteError::NotFound)?;
         r.exp.transition(ExperimentState::Live)?;
-        Ok(Self::experiment_view(r.uuid, &r.exp, &r.strategy_type))
+        Ok(Self::experiment_view(r))
     }
 
     /// Retire an Experiment (terminal). Read-only thereafter.
@@ -513,7 +589,7 @@ impl SuiteManager {
             .filter(|r| r.user_id == user_id)
             .ok_or(SuiteError::NotFound)?;
         r.exp.transition(ExperimentState::Retired)?;
-        Ok(Self::experiment_view(r.uuid, &r.exp, &r.strategy_type))
+        Ok(Self::experiment_view(r))
     }
 
     // ── studies ──────────────────────────────────────────────────────────────
@@ -526,29 +602,50 @@ impl SuiteManager {
         id: Uuid,
         spec: RunStudySpec,
     ) -> Result<StudyView, SuiteError> {
+        // Pre-flight under a short read lock: build + validate the config and
+        // let the Experiment refuse it (state / holdout) *before* any Run.
+        let study = {
+            let records = self.records.read().expect("suite lock poisoned");
+            let r = records
+                .get(&id)
+                .filter(|r| r.user_id == user_id)
+                .ok_or(SuiteError::NotFound)?;
+            let mut base = Self::base_config(&r.strategy_ref, &r.research_slice);
+            if let Some(p) = &spec.base_params {
+                base.params = p.clone();
+                base = base.rehashed();
+            }
+            let study = StudyConfig {
+                study_id: spec.study_id.clone(),
+                kind: spec.kind,
+                base_config: base,
+                vary: spec.vary.clone(),
+                metric: spec.metric,
+                null_ref: spec.null_ref.clone(),
+                budget: StudyBudget::default(),
+                question: spec.question.clone(),
+                selection_rule: spec.selection_rule.unwrap_or(SelectionRule::None),
+            };
+            study
+                .validate()
+                .map_err(|e| SuiteError::Study(e.to_string()))?;
+            r.exp.check_study(&study)?;
+            study
+        };
+
+        // Execute with no lock held — real Runs take minutes and other users'
+        // reads must not block behind them.
+        self.emit(user_id, id, "study_running", 10.0, &spec.question);
+        let result = StudyEngine::run(&study, &self.bt).map_err(|e| SuiteError::Study(e.to_string()))?;
+
+        // Bookkeeping under a short write lock: the counter increments here,
+        // through the Experiment's single mutator (J-2.3).
         let mut records = self.records.write().expect("suite lock poisoned");
         let r = records
             .get_mut(&id)
             .filter(|r| r.user_id == user_id)
             .ok_or(SuiteError::NotFound)?;
-
-        let study = StudyConfig {
-            study_id: spec.study_id,
-            kind: spec.kind,
-            base_config: Self::base_config(&r.exp.strategy_family, &r.research_slice),
-            vary: spec.vary,
-            metric: spec.metric,
-            null_ref: spec.null_ref,
-            budget: StudyBudget::default(),
-            question: spec.question.clone(),
-            selection_rule: spec.selection_rule.unwrap_or(SelectionRule::None),
-        };
-        study
-            .validate()
-            .map_err(|e| SuiteError::Study(e.to_string()))?;
-
-        self.emit(user_id, id, "study_running", 10.0, &spec.question);
-        let result = r.exp.run_study(&study, &self.bt)?;
+        r.exp.record_study_result(study.study_id.clone(), &result);
         let view = Self::study_view(
             spec.kind,
             spec.metric,
@@ -571,6 +668,113 @@ impl SuiteManager {
             &format!("trial counter now {}", r.exp.trial_counter()),
         );
         Ok(view)
+    }
+
+    /// The objective declared on an Experiment (`Some(None)` = found, none set).
+    #[must_use]
+    pub fn experiment_objective(&self, user_id: Uuid, id: Uuid) -> Option<Option<Objective>> {
+        let records = self.records.read().expect("suite lock poisoned");
+        records
+            .get(&id)
+            .filter(|r| r.user_id == user_id)
+            .map(|r| r.objective.clone())
+    }
+
+    /// The parameter set a Study's pre-declared selection rule carried forward
+    /// (the rule's output — never an argmax).
+    #[must_use]
+    pub fn study_carried_forward(&self, user_id: Uuid, id: Uuid, study_id: &str) -> Option<ParamMap> {
+        let records = self.records.read().expect("suite lock poisoned");
+        let r = records.get(&id).filter(|r| r.user_id == user_id)?;
+        r.studies
+            .iter()
+            .rev()
+            .find(|s| s.result.study_id == study_id)
+            .and_then(|s| s.result.carried_forward.as_ref().map(|c| c.params.clone()))
+    }
+
+    /// A stored Run result, reachable only through a Study the user owns
+    /// (provenance access for diagnostics — not a ranking path).
+    #[must_use]
+    pub fn run_result(&self, user_id: Uuid, run_id: &str) -> Option<RunResult> {
+        let records = self.records.read().expect("suite lock poisoned");
+        let rid: &RunId = records
+            .values()
+            .filter(|r| r.user_id == user_id)
+            .flat_map(|r| r.studies.iter())
+            .flat_map(|s| s.result.members().iter())
+            .find(|m| m.as_str() == run_id)?;
+        self.bt.store().get(rid)
+    }
+
+    /// **Sampler-facing** batch evaluation (FEAT-003 §7.3): run one
+    /// `ParameterSweep` Study over `grid` and hand back each member's metrics
+    /// in grid order so an in-process optimiser can decide where to sample
+    /// next. This is exploration, not promotion — the Study is sealed and
+    /// counted like any other, the only carry-forward is the selection rule's
+    /// output, and **this method is never exposed over HTTP**.
+    pub fn run_param_batch(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+        spec: ParamBatchSpec,
+    ) -> Result<ParamBatchOutcome, SuiteError> {
+        let ParamBatchSpec {
+            study_id,
+            grid,
+            metric,
+            selection_rule,
+            question,
+            base_params,
+        } = spec;
+        let view = self.run_study(
+            user_id,
+            id,
+            RunStudySpec {
+                study_id,
+                kind: StudyKind::ParameterSweep,
+                vary: VarySpec::Params { grid: grid.clone() },
+                metric,
+                question,
+                selection_rule: Some(selection_rule),
+                null_ref: None,
+                base_params: base_params.clone(),
+            },
+        )?;
+        let records = self.records.read().expect("suite lock poisoned");
+        let r = records
+            .get(&id)
+            .filter(|r| r.user_id == user_id)
+            .ok_or(SuiteError::NotFound)?;
+        let stored = r
+            .studies
+            .iter()
+            .rev()
+            .find(|s| s.result.study_id == view.study_id)
+            .ok_or(SuiteError::NotFound)?;
+        let base = base_params.unwrap_or_default();
+        let members = stored
+            .result
+            .members()
+            .iter()
+            .zip(grid)
+            .map(|(rid, entry)| {
+                let mut full = base.clone();
+                full.extend(entry);
+                let metrics = self
+                    .bt
+                    .store()
+                    .get(rid)
+                    .filter(|res| res.status == RunStatus::Ok)
+                    .map(|res| res.metrics);
+                (full, metrics)
+            })
+            .collect();
+        Ok(ParamBatchOutcome {
+            carried_forward: view.carried_forward_params.clone(),
+            view,
+            members,
+        })
     }
 
     #[must_use]
@@ -628,6 +832,7 @@ impl SuiteManager {
                 .collect(),
             selection_rule,
             carried_forward: result.carried_forward.is_some(),
+            carried_forward_params: result.carried_forward.as_ref().map(|c| c.params.clone()),
             unsafe_flag: result.unsafe_,
         }
     }
@@ -1121,6 +1326,8 @@ mod tests {
             holdout_start: Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap(),
             holdout_end: Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
             eval_resolution: None,
+            strategy_ref: None,
+            objective: None,
         }
     }
 
@@ -1143,6 +1350,7 @@ mod tests {
             question: "how does perf vary?".into(),
             selection_rule: None,
             null_ref: None,
+            base_params: None,
         }
     }
 

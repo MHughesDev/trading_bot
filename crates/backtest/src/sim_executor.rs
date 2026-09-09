@@ -1,108 +1,236 @@
-//! **Real execution** — the deferred `SimRunExecutor` live leg (Set K phase A).
+//! **Real execution** — the `market_simulator`-backed [`RunExecutor`] (Set K's
+//! live leg, wired for FEAT-003).
 //!
-//! Wires the honest-eval core to the actual `market_simulator` engine, replacing
-//! the synthetic executor. This is the integration seam for the real Runs.
+//! Turns one [`RunConfig`] into one [`RunResult`]:
 //!
-//! **Current scope (Phase A-4, MVP):** The executor trait is injected and can
-//! be compiled. Full data resolution is deferred to B (persistence + API layer).
+//! 1. `strategy_ref` → the stored definition (`strategy_definitions`).
+//! 2. `params` → [`domain::strategy_def::params::materialize`] (typed
+//!    parameters become literals; the simulator sees frozen v1.0 grammar).
+//! 3. `data_slice.eval_resolution` → bar timeframe; the strategy's declared
+//!    lane may narrow it (`derive_requirements`).
+//! 4. `data_slice.universe_ref` → instrument id; venue/precisions from the
+//!    `instruments` table when present, sensible defaults otherwise.
+//! 5. Bars from ClickHouse with indicator warm-up lead-in. **No auto-collect**:
+//!    a Run is a pure function of stored data (ADR-001); a missing history is
+//!    a `Failed` Run with a reason, never a side effect.
+//! 6. `run_simulation_detailed` → [`map_detailed_result`].
 //!
-//! The executor is injected into `SuiteManager::new()` (replacing
-//! `ClosureExecutor(synthetic_execute)`). When the API layer integrates, it will
-//! provide a context-aware resolver and feed full SimulationInputs here.
+//! The [`RunExecutor`] contract is synchronous (Studies iterate members in a
+//! plain loop), so the async data path is bridged with a runtime [`Handle`].
+//! Callers run Studies inside `spawn_blocking`; `block_in_place` also makes it
+//! safe from a multi-thread worker.
 
-use crate::run::{RunConfig, RunResult};
+use std::sync::Arc;
+use std::time::Instant;
 
-/// The real `RunExecutor` — drives the `market_simulator` for each `RunConfig`.
-///
-/// This replaces the synthetic executor in `SuiteManager::new()`. In the MVP
-/// (Phase A-4), this is a stub that defers to the synthetic path — the real
-/// integration will happen in Phase B when Postgres/ClickHouse stores land and
-/// the API layer provides the full data context.
-pub struct SimRunExecutor;
+use anyhow::{anyhow, Context};
+use chrono::Duration;
+use domain::payloads::bar::Timeframe;
+use domain::strategy_def::{params, StrategyDefinition};
+use rust_decimal::Decimal;
+use sqlx::PgPool;
+use tokio::runtime::Handle;
+
+use crate::requirements::derive_requirements;
+use crate::run::executor::map_detailed_result;
+use crate::run::{ComputeCost, EvalResolution, RunConfig, RunExecutor, RunResult};
+use crate::sim::{run_simulation_detailed, DetailedOutcome, InstrumentPrecisions, SimulationInputs};
+use crate::store::BarStore;
+use crate::types::TimeframeExt;
+use nautilus_backtest::sdk::SimulationControl;
+
+/// `produced_by` tag on every result this executor emits.
+pub const EXECUTOR_TAG: &str = "SimRunExecutor@market_simulator";
+
+/// The real executor. Cheap to clone-by-reference; hold it in an `Arc`/`Box`.
+pub struct SimRunExecutor {
+    handle: Handle,
+    pg: PgPool,
+    ch_url: String,
+    initial_balance: Decimal,
+}
+
+/// Default venue per asset class (mirrors the backtest API's routing).
+fn default_venue(asset_class: &str) -> &'static str {
+    match asset_class {
+        "equity" | "etf" => "alpaca",
+        "fx" => "oanda",
+        "futures_expiring" => "cme",
+        "option" => "opra",
+        "prediction_market" => "kalshi",
+        _ => "coinbase",
+    }
+}
+
+/// `BASE-QUOTE` → `QUOTE`; anything else assumes USD.
+fn quote_currency(instrument_id: &str) -> String {
+    instrument_id
+        .rsplit_once('-')
+        .map_or_else(|| "USD".to_string(), |(_, q)| q.to_uppercase())
+}
+
+/// The bar timeframe a config's eval resolution runs on.
+fn timeframe_for(res: EvalResolution) -> anyhow::Result<Timeframe> {
+    Ok(match res {
+        EvalResolution::Min1 => Timeframe::Minutes1,
+        EvalResolution::Min5 => Timeframe::Minutes5,
+        EvalResolution::Min15 => Timeframe::Minutes15,
+        EvalResolution::Hour1 => Timeframe::Hours1,
+        EvalResolution::Day1 => Timeframe::Daily,
+        other => anyhow::bail!(
+            "eval resolution {other:?} has no stored bar timeframe; use 1m, 5m, 15m, 1h or 1d"
+        ),
+    })
+}
 
 impl SimRunExecutor {
-    /// Create a new executor (placeholder for API-layer context).
-    pub fn new() -> Self {
-        Self
+    /// Build over the platform's runtime, Postgres pool and ClickHouse URL.
+    #[must_use]
+    pub fn new(handle: Handle, pg: PgPool, ch_url: impl Into<String>) -> Self {
+        Self {
+            handle,
+            pg,
+            ch_url: ch_url.into(),
+            initial_balance: Decimal::from(10_000),
+        }
     }
-}
 
-impl Default for SimRunExecutor {
-    fn default() -> Self {
-        Self::new()
+    /// Override the starting balance every Run is funded with.
+    #[must_use]
+    pub fn with_initial_balance(mut self, balance: Decimal) -> Self {
+        self.initial_balance = balance;
+        self
     }
-}
 
-impl crate::run::RunExecutor for SimRunExecutor {
-    fn execute(&self, cfg: &RunConfig) -> RunResult {
-        // Phase A-4 MVP: this is a stub.
-        // The real implementation will:
-        // 1. Resolve RunConfig.strategy_version → StrategyDefinition (from Postgres)
-        // 2. Resolve RunConfig.data_slice → bars (from ClickHouse)
-        // 3. Apply RunConfig.params to the definition (task A-3)
-        // 4. Build SimulationInputs and drive run_simulation_detailed
-        // 5. Map the outcome to RunResult
-        //
-        // For now, return a failed result with a diagnostic message.
-        // Once the API layer integration lands, this will be wired properly.
-        RunResult::failed(
-            cfg,
-            "SimRunExecutor is not yet integrated with data sources; \
-             this phase requires Postgres/ClickHouse stores (Phase B) and \
-             API layer context (Phase B integration). \
-             Falling back to synthetic executor (non-deterministic).",
-            "SimRunExecutor@stub",
+    async fn resolve_definition(&self, slug: &str) -> anyhow::Result<StrategyDefinition> {
+        let row: Option<(serde_json::Value,)> = sqlx::query_as(
+            "SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1",
         )
+        .bind(slug)
+        .fetch_optional(&self.pg)
+        .await
+        .context("strategy lookup failed")?;
+        let (json,) = row.ok_or_else(|| anyhow!("strategy '{slug}' not found"))?;
+        serde_json::from_value(json).with_context(|| format!("strategy '{slug}' is not a valid definition"))
+    }
+
+    /// Venue id and precisions from instrument metadata (defaults if unknown).
+    async fn instrument_meta(
+        &self,
+        instrument_id: &str,
+        asset_class: &str,
+    ) -> (String, Option<InstrumentPrecisions>) {
+        match storage::postgres::instruments::fetch_by_id(&self.pg, instrument_id).await {
+            Ok(Some(inst)) => {
+                let precisions = if inst.tick_size.is_zero() || inst.lot_size.is_zero() {
+                    None
+                } else {
+                    let scale = |d: Decimal| u8::try_from(d.normalize().scale()).unwrap_or(9).min(9);
+                    Some(InstrumentPrecisions {
+                        price: scale(inst.tick_size),
+                        size: scale(inst.lot_size),
+                    })
+                };
+                (inst.venue_id, precisions)
+            }
+            Ok(None) => (default_venue(asset_class).to_string(), None),
+            Err(e) => {
+                tracing::warn!(instrument_id, error = %e, "instrument lookup failed; using defaults");
+                (default_venue(asset_class).to_string(), None)
+            }
+        }
+    }
+
+    async fn execute_async(&self, cfg: &RunConfig) -> anyhow::Result<DetailedOutcome> {
+        let definition = self.resolve_definition(&cfg.strategy_ref).await?;
+        let definition = params::materialize(&definition, &cfg.params)
+            .map_err(|e| anyhow!("parameters: {e}"))?;
+
+        let requested = timeframe_for(cfg.data_slice.eval_resolution)?;
+        let requirements = derive_requirements(&definition, requested)
+            .map_err(|e| anyhow!("requirements: {e}"))?;
+        let timeframe = requirements.timeframe;
+        let warmup_secs = i64::try_from(requirements.warmup_bars * timeframe.seconds())
+            .unwrap_or(i64::MAX / 4);
+        let start = cfg.data_slice.start;
+        let end = cfg.data_slice.end;
+        let data_from = start - Duration::seconds(warmup_secs);
+
+        let instrument_id = cfg.data_slice.universe_ref.clone();
+        let asset_class = definition.asset_class.clone();
+        let (venue_id, precisions) = self.instrument_meta(&instrument_id, &asset_class).await;
+
+        let store = BarStore::connect(&self.ch_url);
+        let bars = store
+            .load_bars(&instrument_id, timeframe, data_from, end)
+            .await
+            .context("bar load failed")?;
+        anyhow::ensure!(
+            !bars.is_empty(),
+            "no {} bars stored for {instrument_id} in [{}, {}) — initialise the asset or \
+             run a backtest with auto-collect first (Runs never collect)",
+            timeframe.key(),
+            data_from.format("%Y-%m-%d"),
+            end.format("%Y-%m-%d"),
+        );
+
+        let inputs = SimulationInputs {
+            definition,
+            instrument_id: instrument_id.clone(),
+            venue_id,
+            asset_class,
+            timeframe,
+            quote_currency: quote_currency(&instrument_id),
+            initial_balance: self.initial_balance,
+            precisions,
+            sim_start_ns: start.timestamp_nanos_opt().unwrap_or(0),
+            bars,
+            features: requirements.features,
+        };
+        let control: Arc<SimulationControl> = SimulationControl::new();
+        run_simulation_detailed(inputs, &control)
+    }
+}
+
+impl RunExecutor for SimRunExecutor {
+    fn execute(&self, cfg: &RunConfig) -> RunResult {
+        let started = Instant::now();
+        let outcome =
+            tokio::task::block_in_place(|| self.handle.block_on(self.execute_async(cfg)));
+        let cost = ComputeCost {
+            wall_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            cpu_ms: 0,
+        };
+        match outcome {
+            Ok(o) if o.cancelled => RunResult::failed(cfg, "simulation cancelled", EXECUTOR_TAG),
+            Ok(o) => map_detailed_result(cfg, o, cost, EXECUTOR_TAG),
+            Err(e) => {
+                tracing::warn!(run_id = cfg.run_id.as_str(), error = %format!("{e:#}"), "run failed");
+                RunResult::failed(cfg, format!("{e:#}"), EXECUTOR_TAG)
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::run::config::{DataSlice, EvalResolution, RunConfigBuilder};
-    use crate::run::RunExecutor;
-    use chrono::TimeZone;
 
-    fn test_config() -> RunConfig {
-        let slice = DataSlice::new(
-            "test-universe",
-            chrono::Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
-            chrono::Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap(),
-            EvalResolution::Day1,
-        );
-        RunConfigBuilder::new(
-            "test-strategy",
-            "v1",
-            slice,
-            "cost:floor",
-            "sizing:default",
-            "snap:1",
-        )
-        .build()
+    #[test]
+    fn eval_resolution_maps_to_stored_timeframes() {
+        assert_eq!(timeframe_for(EvalResolution::Min1).unwrap(), Timeframe::Minutes1);
+        assert_eq!(timeframe_for(EvalResolution::Hour1).unwrap(), Timeframe::Hours1);
+        assert_eq!(timeframe_for(EvalResolution::Day1).unwrap(), Timeframe::Daily);
+        assert!(timeframe_for(EvalResolution::Min10).is_err());
+        assert!(timeframe_for(EvalResolution::Min30).is_err());
     }
 
     #[test]
-    fn stub_returns_failed_with_diagnostic_message() {
-        let executor = SimRunExecutor::new();
-        let cfg = test_config();
-        let result = executor.execute(&cfg);
-        assert_eq!(result.status, crate::run::result::RunStatus::Failed);
-        assert!(!result.integrity_flags.is_empty());
-        let flag = &result.integrity_flags[0];
-        assert_eq!(flag.code, "run.failed");
-        assert!(flag.detail.contains("SimRunExecutor is not yet integrated"));
-    }
-
-    #[test]
-    fn executor_is_injectable() {
-        // Verify that SimRunExecutor implements RunExecutor and can be
-        // injected into Backtest::new().
-        let executor = SimRunExecutor::new();
-        let store = crate::run::InMemoryRunStore::new();
-        let _bt: crate::run::Backtest<_, _> = crate::run::Backtest::new(
-            store,
-            crate::run::ClosureExecutor(|cfg| executor.execute(cfg)),
-        );
-        // If this compiles, the trait is satisfied.
+    fn quote_and_venue_defaults() {
+        assert_eq!(quote_currency("BTC-USD"), "USD");
+        assert_eq!(quote_currency("eth-usdt"), "USDT");
+        assert_eq!(quote_currency("AAPL"), "USD");
+        assert_eq!(default_venue("equity"), "alpaca");
+        assert_eq!(default_venue("crypto_spot_cex"), "coinbase");
     }
 }

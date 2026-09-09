@@ -20,6 +20,14 @@ pub trait RunExecutor: Send + Sync {
     fn execute(&self, cfg: &RunConfig) -> RunResult;
 }
 
+/// Boxed executors are executors, so an orchestrator can be generic over the
+/// synthetic and the simulator-backed implementations at runtime.
+impl RunExecutor for Box<dyn RunExecutor> {
+    fn execute(&self, cfg: &RunConfig) -> RunResult {
+        (**self).execute(cfg)
+    }
+}
+
 /// A `RunExecutor` backed by an arbitrary closure — used for composition and in
 /// tests as a stand-in for the simulator-backed executor.
 pub struct ClosureExecutor<F>(pub F)

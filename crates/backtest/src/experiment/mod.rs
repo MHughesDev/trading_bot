@@ -245,6 +245,20 @@ impl Experiment {
         study: &StudyConfig,
         bt: &Backtest<S, E>,
     ) -> Result<StudyResult, ExperimentError> {
+        self.check_study(study)?;
+        let result = StudyEngine::run(study, bt).map_err(ExperimentError::Study)?;
+        self.record_study(study.study_id.clone(), &result);
+        Ok(result)
+    }
+
+    /// The pre-flight half of [`Self::run_study`]: refuse if the state forbids
+    /// research or the Study addresses the holdout. Mutates nothing, so an
+    /// orchestrator can check under a short lock, execute (minutes) without
+    /// holding it, then [`Self::record_study_result`].
+    ///
+    /// # Errors
+    /// See [`ExperimentError`].
+    pub fn check_study(&self, study: &StudyConfig) -> Result<(), ExperimentError> {
         if !self.state.allows(Operation::ResearchStudy) {
             return Err(ExperimentError::OperationNotAllowed {
                 state: self.state,
@@ -254,9 +268,14 @@ impl Experiment {
         if self.study_touches_holdout(study) {
             return Err(ExperimentError::TouchesHoldout);
         }
-        let result = StudyEngine::run(study, bt).map_err(ExperimentError::Study)?;
-        self.record_study(study.study_id.clone(), &result);
-        Ok(result)
+        Ok(())
+    }
+
+    /// The bookkeeping half of [`Self::run_study`] for a result produced by
+    /// `StudyEngine::run` on a config that passed [`Self::check_study`]. Goes
+    /// through the single counter mutator; the counter only ever increases.
+    pub fn record_study_result(&mut self, study_id: String, result: &StudyResult) {
+        self.record_study(study_id, result);
     }
 
     /// Increment the counter, append the Study reference, and propagate `unsafe`.

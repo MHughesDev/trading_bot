@@ -5,6 +5,8 @@
 //! Probability of Backtest Overfitting). These should agree; disagreement is a
 //! flag to investigate, not a result to shop between (spec §2.2 Gate 3).
 
+pub mod diagnostics;
+
 use crate::study::combinations;
 
 const EULER_MASCHERONI: f64 = 0.577_215_664_901_532_9;
