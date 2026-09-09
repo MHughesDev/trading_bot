@@ -60,6 +60,73 @@ function Collapsible({
   )
 }
 
+// The sealed product of a parameter sweep (FEAT-003 §7): a distribution, a
+// surface description and the selection rule's single carry-forward — never a
+// ranked list of samples.
+interface SweepReport {
+  study_ids: string[]
+  trials_consumed: number
+  n_sampled: number
+  n_feasible: number
+  n_failed_runs: number
+  carried_forward: Record<string, unknown> | null
+  neighbourhood_plateau: boolean | null
+  distribution: { metric: string; median: number; worst_5pct: number; spread: number; iqr: [number, number] }
+  surface: { text: string }
+  violation_counts: Record<string, number>
+  objective: { primary: string }
+}
+
+function SweepCard({ report, status }: { report: SweepReport; status: string }) {
+  const d = report.distribution
+  const violations = Object.entries(report.violation_counts ?? {})
+  return (
+    <div className="rounded-lg border border-sky-500/25 bg-sky-500/5 px-3 py-2.5 space-y-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <span className="flex items-center gap-1.5 font-semibold text-sky-400">
+          <FlaskConical className="h-3.5 w-3.5" />
+          Sweep {status || 'completed'}
+        </span>
+        <span className="text-text-muted">
+          {report.trials_consumed} trials · {report.n_feasible}/{report.n_sampled} feasible
+          {report.n_failed_runs > 0 ? ` · ${report.n_failed_runs} failed` : ''}
+        </span>
+        <span className="text-text-muted">
+          {d.metric} median {d.median.toFixed(3)} · worst-5% {d.worst_5pct.toFixed(3)}
+        </span>
+        {report.neighbourhood_plateau != null && (
+          <span
+            className={cn(
+              'rounded px-1.5 py-0.5 text-[10px] font-medium',
+              report.neighbourhood_plateau
+                ? 'bg-green-500/15 text-green-400'
+                : 'bg-amber-500/15 text-amber-400',
+            )}
+          >
+            {report.neighbourhood_plateau ? 'plateau' : 'spike — fragile'}
+          </span>
+        )}
+      </div>
+      {report.carried_forward && (
+        <div className="text-xs">
+          <span className="text-text-dim">carried forward (stable centroid): </span>
+          <span className="font-mono text-text">
+            {Object.entries(report.carried_forward)
+              .map(([k, v]) => `${k}=${String(v)}`)
+              .join('  ')}
+          </span>
+        </div>
+      )}
+      <pre className="whitespace-pre-wrap text-[11px] text-text-muted">{report.surface?.text}</pre>
+      {violations.length > 0 && (
+        <div className="text-[11px] text-text-dim">
+          rejected: {violations.map(([k, n]) => `${k} ×${n}`).join('; ')}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MessageRow({ msg }: { msg: AgentMessage }) {
   const c = msg.content as Record<string, unknown>
   switch (msg.kind) {
@@ -92,20 +159,48 @@ function MessageRow({ msg }: { msg: AgentMessage }) {
       )
     case 'tool_result': {
       const isError = Boolean(c.is_error)
+      const content = (c.content ?? {}) as Record<string, unknown>
+      const sweepReport =
+        c.name === 'run_sweep' && !isError && content.report
+          ? (content.report as SweepReport)
+          : null
       return (
-        <Collapsible
-          tone={isError ? 'error' : 'default'}
-          header={
-            <span className={cn('font-mono', isError && 'text-red-400')}>
-              ↳ {(c.name as string) ?? 'result'} {isError ? '(error)' : ''}
-            </span>
-          }
-        >
-          {JSON.stringify(c.content ?? {}, null, 2)}
-        </Collapsible>
+        <div className="space-y-1.5">
+          {sweepReport && <SweepCard report={sweepReport} status={String(content.status ?? '')} />}
+          <Collapsible
+            tone={isError ? 'error' : 'default'}
+            header={
+              <span className={cn('font-mono', isError && 'text-red-400')}>
+                ↳ {(c.name as string) ?? 'result'} {isError ? '(error)' : ''}
+              </span>
+            }
+          >
+            {JSON.stringify(c.content ?? {}, null, 2)}
+          </Collapsible>
+        </div>
       )
     }
     case 'status': {
+      if (c.phase === 'sweeping') {
+        const done = Number(c.done ?? 0)
+        const planned = Math.max(1, Number(c.planned ?? 1))
+        const pct = Math.min(100, (done / planned) * 100)
+        return (
+          <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2">
+            <div className="flex items-center gap-2 text-xs text-sky-400">
+              <FlaskConical className="h-3.5 w-3.5" />
+              Sweep {String(c.sweep_status ?? 'running')} — {done}/{planned} runs
+              {c.note ? <span className="text-text-dim">· {String(c.note)}</span> : null}
+            </div>
+            <div className="mt-1.5 h-1.5 rounded-full bg-surface overflow-hidden">
+              <div
+                className="h-full rounded-full bg-sky-400 transition-all"
+                style={{ width: `${Math.max(2, pct)}%` }}
+              />
+            </div>
+          </div>
+        )
+      }
       if (c.phase === 'waiting_backtest') {
         const progress = Number(c.progress ?? 0)
         return (
