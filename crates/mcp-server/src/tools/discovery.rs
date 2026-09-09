@@ -1,26 +1,18 @@
 //! Discovery tools: `list_lanes` and `list_instruments`.
 //!
-//! `list_lanes` returns canonical lane names from domain constants.
-//! `list_instruments` queries the live Postgres `instruments` table; the
-//! caller must supply a `PgPool` obtained from the environment's `DATABASE_URL`.
+//! `list_lanes` returns canonical lane names from domain constants (pure).
+//! `list_instruments` calls the platform API's bar-coverage endpoint and
+//! groups rows per instrument so an agent can pick backtest windows.
 
 use domain::lanes::ALL_LANES;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use serde_json::{json, Value};
+
+use crate::ApiClient;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LaneInfo {
     pub lane: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InstrumentInfo {
-    pub instrument_id: String,
-    pub asset_class: String,
-    pub venue_id: String,
-    pub tick_size: String,
-    pub trust_tier: String,
-    pub active: bool,
 }
 
 /// `list_lanes` — return canonical data lanes from the shared domain constant.
@@ -33,53 +25,52 @@ pub fn list_lanes() -> Vec<LaneInfo> {
         .collect()
 }
 
-/// Raw row returned by the instruments query.
-type InstrumentRow = (String, String, String, String, String, bool);
+fn ms_to_rfc3339(ms: i64) -> Value {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .map(|dt| json!(dt.to_rfc3339()))
+        .unwrap_or(Value::Null)
+}
 
-/// `list_instruments` — query the Postgres `instruments` table.
-/// Returns an empty list (with a tracing warning) when the DB is unavailable.
-pub async fn list_instruments(pg: &PgPool, asset_class: Option<&str>) -> Vec<InstrumentInfo> {
-    let rows: Result<Vec<InstrumentRow>, _> = match asset_class {
-        None => {
-            sqlx::query_as(
-                "SELECT instrument_id, asset_class, venue_id, \
-                        tick_size::TEXT, trust_tier, active \
-                 FROM instruments ORDER BY instrument_id",
-            )
-            .fetch_all(pg)
-            .await
-        }
-        Some(ac) => {
-            sqlx::query_as(
-                "SELECT instrument_id, asset_class, venue_id, \
-                        tick_size::TEXT, trust_tier, active \
-                 FROM instruments WHERE asset_class = $1 ORDER BY instrument_id",
-            )
-            .bind(ac)
-            .fetch_all(pg)
-            .await
-        }
+/// `list_instruments` — instruments with stored bar history, grouped with
+/// per-timeframe coverage (bar count, first/last timestamp).
+pub async fn list_instruments(api: &ApiClient) -> Value {
+    let resp = match api.get("/api/market/instruments").await {
+        Ok(v) => v,
+        Err(e) => return e.to_tool_error(),
     };
 
-    match rows {
-        Ok(rs) => rs
-            .into_iter()
-            .map(
-                |(instrument_id, asset_class, venue_id, tick_size, trust_tier, active)| {
-                    InstrumentInfo {
-                        instrument_id,
-                        asset_class,
-                        venue_id,
-                        tick_size,
-                        trust_tier,
-                        active,
-                    }
-                },
-            )
-            .collect(),
-        Err(e) => {
-            tracing::warn!(error = %e, "list_instruments: DB query failed; returning empty list");
-            vec![]
+    // Rows arrive flat (one per instrument×timeframe); group per instrument.
+    let rows = resp
+        .get("instruments")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut grouped: Vec<(String, Vec<Value>)> = Vec::new();
+    for row in rows {
+        let instrument = row
+            .get("instrument_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let entry = json!({
+            "timeframe": row.get("timeframe"),
+            "bars": row.get("bars"),
+            "first": row.get("first_ms").and_then(|v| v.as_i64()).map(ms_to_rfc3339),
+            "last": row.get("last_ms").and_then(|v| v.as_i64()).map(ms_to_rfc3339),
+        });
+        match grouped.iter_mut().find(|(id, _)| *id == instrument) {
+            Some((_, list)) => list.push(entry),
+            None => grouped.push((instrument, vec![entry])),
         }
     }
+
+    let instruments: Vec<Value> = grouped
+        .into_iter()
+        .map(|(instrument_id, coverage)| {
+            json!({ "instrument_id": instrument_id, "coverage": coverage })
+        })
+        .collect();
+
+    json!({ "instruments": instruments })
 }

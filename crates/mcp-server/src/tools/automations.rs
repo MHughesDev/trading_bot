@@ -1,85 +1,43 @@
 //! Automation tools: `list_automations`, `create_automation`,
 //! `arm_automation`, `disarm_automation`.
 //!
-//! Uses `storage::automation` functions directly via the `pg` pool.
-//! `create_automation` with `account_mode: "live"` is blocked unless
-//! `MCP_ALLOW_LIVE_AUTOMATIONS=true`.
+//! All calls go through the platform API (`/api/automations`) so plans carry
+//! the caller's real user identity. `create_automation` with
+//! `account_mode: "live"` is blocked unless `MCP_ALLOW_LIVE_AUTOMATIONS=true`.
 
-use chrono::Utc;
 use serde_json::{json, Value};
-use uuid::Uuid;
 
-use storage::automation::{
-    insert_automation, list_automations, set_automation_armed, AutomationRow,
-};
-
-use crate::McpContext;
-
-const DEV_USER: Uuid = Uuid::nil();
-
-fn db_unavailable() -> Value {
-    json!({ "error": "service_unavailable", "reason": "database not configured" })
-}
+use crate::ApiClient;
 
 /// `list_automations` — list all automation plans.
-pub async fn list_automations_tool(ctx: &McpContext) -> Value {
-    let Some(pg) = &ctx.pg else {
-        tracing::warn!("list_automations: no pg pool configured");
-        return json!({ "automations": [] });
-    };
-    match list_automations(pg).await {
-        Ok(rows) => {
-            let list: Vec<Value> = rows
-                .iter()
-                .map(|r| {
-                    json!({
-                        "id": r.id.to_string(),
-                        "kind": r.kind,
-                        "account_mode": r.account_mode,
-                        "armed": r.armed,
-                        "spec": r.spec,
-                        "created_at": r.created_at.to_rfc3339(),
-                    })
-                })
-                .collect();
-            json!({ "automations": list })
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "list_automations: query failed");
-            json!({ "automations": [] })
-        }
+pub async fn list_automations_tool(api: &ApiClient) -> Value {
+    match api.get("/api/automations").await {
+        Ok(resp) => resp,
+        Err(e) => e.to_tool_error(),
     }
 }
 
 /// `create_automation` — create a SingleInstrument automation.
-pub async fn create_automation(ctx: &McpContext, params: &Value) -> Value {
-    let Some(pg) = &ctx.pg else {
-        return db_unavailable();
-    };
-
-    let sid_str = params
+pub async fn create_automation(api: &ApiClient, params: &Value) -> Value {
+    let strategy_id = params
         .get("execution_strategy_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    if sid_str.is_empty() {
+    if strategy_id.is_empty() {
         return json!({ "error": "missing_field", "field": "execution_strategy_id" });
     }
-
     let instrument_id = params
         .get("instrument_id")
         .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_owned();
+        .unwrap_or("");
     let asset_class = params
         .get("asset_class")
         .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_owned();
+        .unwrap_or("crypto_spot_cex");
     let account_mode = params
         .get("account_mode")
         .and_then(|v| v.as_str())
-        .unwrap_or("paper")
-        .to_owned();
+        .unwrap_or("paper");
 
     if account_mode == "live" && !crate::mcp_live_automations_allowed() {
         return json!({
@@ -93,76 +51,55 @@ pub async fn create_automation(ctx: &McpContext, params: &Value) -> Value {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let time_window_start = params
-        .get("time_window_start")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_owned());
-    let time_window_end = params
-        .get("time_window_end")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_owned());
-    let time_window_tz = params
-        .get("time_window_tz")
-        .and_then(|v| v.as_str())
-        .unwrap_or("UTC")
-        .to_owned();
-
-    let spec = json!({
-        "asset_class": asset_class,
-        "instrument_id": instrument_id,
-        "execution_strategy_id": sid_str,
-        "time_window": {
-            "start": time_window_start,
-            "end": time_window_end,
-            "timezone": time_window_tz,
+    let body = json!({
+        "kind": "single_instrument",
+        "account_mode": account_mode,
+        "armed": armed,
+        "spec": {
+            "asset_class": asset_class,
+            "instrument_id": instrument_id,
+            "execution_strategy_id": strategy_id,
+            "time_window": {
+                "start": params.get("time_window_start").and_then(|v| v.as_str()),
+                "end": params.get("time_window_end").and_then(|v| v.as_str()),
+                "timezone": params
+                    .get("time_window_tz")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("UTC"),
+            }
         }
     });
 
-    let row = AutomationRow {
-        id: Uuid::new_v4(),
-        user_id: DEV_USER,
-        kind: "single_instrument".into(),
-        account_mode,
-        spec,
-        armed,
-        created_at: Utc::now(),
-    };
-    let automation_id = row.id;
-
-    match insert_automation(pg, &row).await {
-        Ok(()) => json!({
-            "automation_id": automation_id.to_string(),
-            "armed": armed,
-            "kind": "single_instrument",
-        }),
-        Err(e) => json!({ "error": "service_unavailable", "reason": e.to_string() }),
+    match api.post("/api/automations", body).await {
+        Ok(resp) => resp,
+        Err(e) => e.to_tool_error(),
     }
 }
 
 /// `arm_automation` — set a specific automation to armed = true.
-pub async fn arm_automation(ctx: &McpContext, params: &Value) -> Value {
-    toggle_armed(ctx, params, true).await
+pub async fn arm_automation(api: &ApiClient, params: &Value) -> Value {
+    toggle_armed(api, params, true).await
 }
 
 /// `disarm_automation` — set a specific automation to armed = false.
-pub async fn disarm_automation(ctx: &McpContext, params: &Value) -> Value {
-    toggle_armed(ctx, params, false).await
+pub async fn disarm_automation(api: &ApiClient, params: &Value) -> Value {
+    toggle_armed(api, params, false).await
 }
 
-async fn toggle_armed(ctx: &McpContext, params: &Value, armed: bool) -> Value {
-    let Some(pg) = &ctx.pg else {
-        return db_unavailable();
-    };
-    let id_str = params
+async fn toggle_armed(api: &ApiClient, params: &Value, armed: bool) -> Value {
+    let id = params
         .get("automation_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let Ok(id) = Uuid::parse_str(id_str) else {
-        return json!({ "error": "invalid_uuid", "automation_id": id_str });
-    };
-    match set_automation_armed(pg, id, armed).await {
-        Ok(true) => json!({ "automation_id": id.to_string(), "armed": armed }),
-        Ok(false) => json!({ "error": "not_found" }),
-        Err(e) => json!({ "error": "service_unavailable", "reason": e.to_string() }),
+    if id.is_empty() {
+        return json!({ "error": "missing_field", "field": "automation_id" });
+    }
+    let action = if armed { "arm" } else { "disarm" };
+    match api
+        .post(&format!("/api/automations/{id}/{action}"), json!({}))
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => e.to_tool_error(),
     }
 }

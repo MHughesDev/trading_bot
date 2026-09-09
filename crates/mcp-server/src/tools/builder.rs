@@ -358,8 +358,8 @@ fn draft_to_definition(draft: &StrategyDraft) -> Result<StrategyDefinition, Stri
     })
 }
 
-/// `finalize_strategy` — assemble draft → validate → persist.
-pub fn finalize_strategy(ctx: &McpContext, params: &Value) -> Value {
+/// `finalize_strategy` — assemble draft → validate → persist via the platform API.
+pub async fn finalize_strategy(ctx: &McpContext, params: &Value) -> Value {
     let draft_id_str = params
         .get("draft_id")
         .and_then(|v| v.as_str())
@@ -402,22 +402,16 @@ pub fn finalize_strategy(ctx: &McpContext, params: &Value) -> Value {
         }
     }
 
-    // Persist via authoring helper (which bypasses JSON-parse step).
-    match create_strategy_from_def(ctx, def) {
-        Ok(r) => {
-            // Remove the draft on success.
-            ctx.draft_store
-                .lock()
-                .expect("draft_store lock poisoned")
-                .remove(&draft_id);
-            json!({
-                "store_id": r.store_id,
-                "strategy_id": r.strategy_id,
-                "valid": true,
-            })
-        }
-        Err(e) => {
-            json!({ "valid": false, "errors": e.errors })
-        }
+    let strategy_id = def.strategy_id.clone();
+    let result = create_strategy_from_def(&ctx.api, def).await;
+    if result.get("error").is_some() {
+        return result;
     }
+
+    // Remove the draft on success.
+    ctx.draft_store
+        .lock()
+        .expect("draft_store lock poisoned")
+        .remove(&draft_id);
+    json!({ "strategy_id": strategy_id, "valid": true })
 }

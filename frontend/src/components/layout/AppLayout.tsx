@@ -6,7 +6,7 @@ import { ToastContainer } from '@/components/ToastContainer'
 import { initWsClient, destroyWsClient } from '@/api/ws'
 import { getStoredToken } from '@/lib/api'
 
-const FULL_HEIGHT_ROUTES = ['/trading', '/dashboard']
+const FULL_HEIGHT_ROUTES = ['/trading', '/dashboard', '/agent']
 
 export function AppLayout() {
   const { user, initialized } = useAuthStore()

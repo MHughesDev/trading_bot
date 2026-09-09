@@ -16,6 +16,8 @@ pub struct Config {
     pub observability: ObservabilityConfig,
     #[serde(default)]
     pub email: EmailConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -119,6 +121,30 @@ impl Default for ObservabilityConfig {
         Self {
             log_level: "info".into(),
             json_logs: false,
+        }
+    }
+}
+
+/// Internal agent (LLM-driven strategy design + backtest loop).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AgentConfig {
+    /// Concurrent agent runs allowed per platform process.
+    pub max_concurrent_runs: usize,
+    /// Default LLM↔tool iterations before a run fails on budget.
+    pub default_max_iterations: i32,
+    /// Default wall-clock budget per run (covers long backtest waits).
+    pub default_wallclock_budget_secs: i64,
+    /// max_tokens sent on each individual LLM call.
+    pub llm_max_tokens_per_call: u32,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_runs: 2,
+            default_max_iterations: 15,
+            default_wallclock_budget_secs: 14_400,
+            llm_max_tokens_per_call: 4096,
         }
     }
 }

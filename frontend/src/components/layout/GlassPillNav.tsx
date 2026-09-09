@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { motion, useReducedMotion } from 'framer-motion'
 import {
-  LayoutDashboard, Monitor, Zap, Layers, Settings, FlaskConical, Brain,
+  LayoutDashboard, Monitor, Zap, Layers, Settings, FlaskConical, Brain, Bot,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ModeBadge } from './ModeBadge'
@@ -13,6 +13,7 @@ const SECTIONS = [
   { path: '/strategy', label: 'Strategy', icon: Layers },
   { path: '/backtesting', label: 'Back Testing', icon: FlaskConical },
   { path: '/mlops', label: 'ML Ops', icon: Brain },
+  { path: '/agent', label: 'Agent', icon: Bot },
   { path: '/settings', label: 'Settings', icon: Settings },
 ]
 

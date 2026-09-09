@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod agent;
 pub mod auth;
 pub mod credentials;
 pub mod features_compute;

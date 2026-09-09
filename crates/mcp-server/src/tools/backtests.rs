@@ -1,185 +1,402 @@
-//! Backtest tools: `list_backtests`, `get_backtest`, `create_backtest`.
+//! Backtest tools: `create_backtest`, `get_backtest`, `wait_for_backtest`,
+//! `list_backtests`, `stop_backtest`.
 //!
-//! Uses `BacktestManager` exclusively (ADR-0014). If the manager is not
-//! configured (missing CLICKHOUSE_URL or DATABASE_URL), tools return a clear
-//! `service_unavailable` error rather than panicking.
+//! All calls go through the platform API (`/api/backtests`), so runs are
+//! user-scoped, visible in the UI, and driven by the platform's single
+//! `BacktestManager` (ADR-0010, ADR-0014).
+
+use std::time::Duration;
 
 use serde_json::{json, Value};
-use uuid::Uuid;
 
-use backtest::types::{ResolvedSpec, TimeframeExt};
-use domain::payloads::bar::Timeframe;
+use domain::strategy_def::StrategyDefinition;
 
-use crate::McpContext;
+use crate::{ApiClient, ProgressUpdate};
 
-const DEV_USER: Uuid = Uuid::nil();
+/// Array length above which summary detail truncates (equity curves, trade
+/// lists — the full document is available with `detail: "full"`).
+const SUMMARY_MAX_ARRAY: usize = 50;
 
-const VALID_TIMEFRAMES: &[&str] = &["1s", "1m", "5m", "15m", "1h", "4h", "1d"];
-
-fn service_unavailable() -> Value {
-    json!({
-        "error": "service_unavailable",
-        "reason": "backtest service not configured"
-    })
+fn is_terminal(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | "cancelled")
 }
 
-/// `list_backtests` — list all backtest runs for the current user.
-pub async fn list_backtests(ctx: &McpContext) -> Value {
-    let Some(mgr) = &ctx.backtest_manager else {
-        return json!({ "backtests": [] });
-    };
-    let snapshots = mgr.list(DEV_USER).await;
-    let list: Vec<Value> = snapshots
-        .iter()
-        .map(|s| {
-            json!({
-                "id": s.id.to_string(),
-                "name": s.name,
-                "status": format!("{:?}", s.status),
-                "progress": s.progress,
-                "instrument_id": s.instrument_id,
-                "timeframe": s.timeframe,
-                "start": s.start.to_rfc3339(),
-                "end": s.end.to_rfc3339(),
-                "created_at": s.created_at.to_rfc3339(),
-                "finished_at": s.finished_at.map(|t| t.to_rfc3339()),
+fn snapshot_status(snapshot: &Value) -> String {
+    snapshot
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Recursively truncate long arrays so summary responses stay small.
+fn summarize_json(value: &Value) -> Value {
+    match value {
+        Value::Array(arr) if arr.len() > SUMMARY_MAX_ARRAY => {
+            let mut kept: Vec<Value> = arr
+                .iter()
+                .take(SUMMARY_MAX_ARRAY)
+                .map(summarize_json)
+                .collect();
+            kept.push(json!({
+                "truncated": true,
+                "omitted": arr.len() - SUMMARY_MAX_ARRAY,
+                "hint": "use get_backtest with detail:'full' for the complete array",
+            }));
+            Value::Array(kept)
+        }
+        Value::Array(arr) => Value::Array(arr.iter().map(summarize_json).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), summarize_json(v)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn shape_snapshot(mut snapshot: Value, detail: &str) -> Value {
+    // Surface partial coverage prominently: a "completed" run that simulated a
+    // fraction of the requested window is a silent trap for agents reading
+    // only status + headline metrics.
+    let missing = snapshot
+        .pointer("/coverage/missing_ranges")
+        .and_then(|v| v.as_array())
+        .map_or(0, Vec::len);
+    if missing > 0 {
+        let expected = snapshot
+            .pointer("/coverage/expected_bars")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let present = snapshot
+            .pointer("/coverage/present_bars")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        if let Some(obj) = snapshot.as_object_mut() {
+            obj.insert(
+                "coverage_warning".into(),
+                json!(format!(
+                    "requested window NOT fully covered: {present} of {expected} expected bars \
+                     present, {missing} missing range(s) — results reflect only the covered \
+                     stretch; see coverage.missing_ranges"
+                )),
+            );
+        }
+    }
+    if detail == "full" {
+        snapshot
+    } else {
+        summarize_json(&snapshot)
+    }
+}
+
+/// `create_backtest` — launch a run via `POST /api/backtests`.
+pub async fn create_backtest(api: &ApiClient, params: &Value) -> Value {
+    let strategy_slug = params.get("strategy_id").and_then(|v| v.as_str());
+    let definition_json = params.get("definition_json").and_then(|v| v.as_str());
+
+    let mut body = serde_json::Map::new();
+    match (strategy_slug, definition_json) {
+        (Some(slug), _) if !slug.is_empty() => {
+            body.insert("strategy_ref".into(), json!(slug));
+        }
+        (_, Some(def_str)) if !def_str.is_empty() => {
+            // Parse so the platform receives a typed definition object.
+            match serde_json::from_str::<StrategyDefinition>(def_str) {
+                Ok(def) => {
+                    body.insert("definition".into(), serde_json::to_value(&def).unwrap());
+                }
+                Err(e) => {
+                    return json!({
+                        "error": "invalid_definition_json",
+                        "detail": e.to_string(),
+                        "hint": "run validate_strategy first",
+                    })
+                }
+            }
+        }
+        _ => {
+            return json!({
+                "error": "missing_strategy",
+                "hint": "provide strategy_id (stored slug) or definition_json (inline)",
             })
-        })
-        .collect();
-    json!({ "backtests": list })
+        }
+    }
+
+    for required in ["instrument_id", "timeframe", "start", "end"] {
+        match params.get(required).and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => {
+                body.insert(required.into(), json!(s));
+            }
+            _ => return json!({ "error": "missing_field", "field": required }),
+        }
+    }
+
+    body.insert(
+        "asset_class".into(),
+        json!(params
+            .get("asset_class")
+            .and_then(|v| v.as_str())
+            .unwrap_or("crypto_spot_cex")),
+    );
+    for optional in ["name", "initial_balance", "quote_currency", "venue_id"] {
+        if let Some(s) = params.get(optional).and_then(|v| v.as_str()) {
+            body.insert(optional.into(), json!(s));
+        }
+    }
+    if let Some(b) = params.get("auto_collect").and_then(|v| v.as_bool()) {
+        body.insert("auto_collect".into(), json!(b));
+    }
+
+    match api.post("/api/backtests", Value::Object(body)).await {
+        Ok(resp) => json!({
+            "backtest_id": resp.get("id"),
+            "status": "queued",
+            "hint": "call wait_for_backtest to block until it finishes",
+        }),
+        Err(e) => e.to_tool_error(),
+    }
 }
 
-/// `get_backtest` — get full snapshot for one backtest run.
-pub async fn get_backtest(ctx: &McpContext, params: &Value) -> Value {
-    let Some(mgr) = &ctx.backtest_manager else {
-        return service_unavailable();
-    };
-    let id_str = params
+/// `get_backtest` — one-shot snapshot via `GET /api/backtests/{id}`.
+pub async fn get_backtest(api: &ApiClient, params: &Value) -> Value {
+    let id = params
         .get("backtest_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let Ok(id) = Uuid::parse_str(id_str) else {
-        return json!({ "error": "invalid_uuid", "backtest_id": id_str });
-    };
-    match mgr.get(DEV_USER, id).await {
-        Some(s) => {
-            serde_json::to_value(&s).unwrap_or_else(|_| json!({"error": "serialization_error"}))
-        }
-        None => json!({ "error": "not_found" }),
+    if id.is_empty() {
+        return json!({ "error": "missing_field", "field": "backtest_id" });
+    }
+    let detail = params
+        .get("detail")
+        .and_then(|v| v.as_str())
+        .unwrap_or("summary");
+    match api.get(&format!("/api/backtests/{id}")).await {
+        Ok(snapshot) => shape_snapshot(snapshot, detail),
+        Err(e) => e.to_tool_error(),
     }
 }
 
-/// `create_backtest` — trigger a new backtest run.
-pub async fn create_backtest(ctx: &McpContext, params: &Value) -> Value {
-    let Some(mgr) = &ctx.backtest_manager else {
-        return service_unavailable();
-    };
-
-    // Resolve strategy from store.
-    let store_id_str = params
-        .get("store_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let Ok(store_id) = Uuid::parse_str(store_id_str) else {
-        return json!({ "error": "invalid_uuid", "field": "store_id" });
-    };
-    let def = {
-        let store = ctx
-            .strategy_store
-            .lock()
-            .expect("strategy_store lock poisoned");
-        store.get(&store_id).cloned()
-    };
-    let Some(definition) = def else {
-        return json!({ "error": "strategy_not_found" });
-    };
-
-    let instrument_id = params
-        .get("instrument_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    if instrument_id.is_empty() {
-        return json!({ "error": "invalid_instrument_id" });
-    }
-
-    let asset_class = params
-        .get("asset_class")
+/// `wait_for_backtest` — poll server-side until terminal or timeout.
+///
+/// Sends `ProgressUpdate`s (forwarded to streaming clients as MCP progress
+/// notifications) so long waits keep the connection alive.
+pub async fn wait_for_backtest(
+    api: &ApiClient,
+    params: &Value,
+    progress: Option<tokio::sync::mpsc::Sender<ProgressUpdate>>,
+) -> Value {
+    let id = params
+        .get("backtest_id")
         .and_then(|v| v.as_str())
         .unwrap_or("")
-        .to_owned();
-    let timeframe_key = params
-        .get("timeframe")
+        .to_string();
+    if id.is_empty() {
+        return json!({ "error": "missing_field", "field": "backtest_id" });
+    }
+    let timeout_secs = params
+        .get("timeout_seconds")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(300)
+        .clamp(10, 600) as u64;
+    let poll_secs = params
+        .get("poll_seconds")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(5)
+        .clamp(2, 60) as u64;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
+    let mut last_snapshot = Value::Null;
+
+    loop {
+        match api.get(&format!("/api/backtests/{id}")).await {
+            Ok(snapshot) => {
+                let status = snapshot_status(&snapshot);
+                let pct = snapshot
+                    .get("progress")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                if let Some(tx) = &progress {
+                    let _ = tx
+                        .send(ProgressUpdate {
+                            progress: pct,
+                            message: format!("backtest {status} — {pct:.0}%"),
+                        })
+                        .await;
+                }
+                if is_terminal(&status) {
+                    return shape_snapshot(snapshot, "summary");
+                }
+                last_snapshot = snapshot;
+            }
+            Err(e) => {
+                // Transient API errors during a wait shouldn't abort the wait;
+                // hard 4xx (bad id) should.
+                if matches!(e.status, Some(s) if s < 500) {
+                    return e.to_tool_error();
+                }
+            }
+        }
+
+        if tokio::time::Instant::now() + Duration::from_secs(poll_secs) > deadline {
+            return json!({
+                "timed_out": true,
+                "backtest_id": id,
+                "status": snapshot_status(&last_snapshot),
+                "progress": last_snapshot.get("progress"),
+                "hint": "still running — call wait_for_backtest again",
+            });
+        }
+        tokio::time::sleep(Duration::from_secs(poll_secs)).await;
+    }
+}
+
+/// `list_backtests` — recent runs, compact rows.
+pub async fn list_backtests(api: &ApiClient, params: &Value) -> Value {
+    let limit = params
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(20)
+        .clamp(1, 100);
+    match api.get(&format!("/api/backtests?limit={limit}")).await {
+        Ok(resp) => {
+            let rows = resp
+                .get("backtests")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let compact: Vec<Value> = rows
+                .iter()
+                .map(|s| {
+                    json!({
+                        "backtest_id": s.get("id"),
+                        "name": s.get("name"),
+                        "strategy_id": s.get("strategy_slug"),
+                        "instrument_id": s.get("instrument_id"),
+                        "timeframe": s.get("timeframe"),
+                        "status": s.get("status"),
+                        "progress": s.get("progress"),
+                        "error": s.get("error"),
+                        "created_at": s.get("created_at"),
+                        "finished_at": s.get("finished_at"),
+                    })
+                })
+                .collect();
+            json!({ "backtests": compact, "total": resp.get("total") })
+        }
+        Err(e) => e.to_tool_error(),
+    }
+}
+
+/// `stop_backtest` — cancel a running job.
+pub async fn stop_backtest(api: &ApiClient, params: &Value) -> Value {
+    let id = params
+        .get("backtest_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let Some(timeframe) = <Timeframe as TimeframeExt>::from_key(timeframe_key) else {
-        return json!({
-            "error": "invalid_timeframe",
-            "valid_values": VALID_TIMEFRAMES,
-        });
-    };
-
-    let start_str = params.get("start").and_then(|v| v.as_str()).unwrap_or("");
-    let end_str = params.get("end").and_then(|v| v.as_str()).unwrap_or("");
-
-    let start = match chrono::DateTime::parse_from_rfc3339(start_str) {
-        Ok(dt) => dt.with_timezone(&chrono::Utc),
-        Err(_) => return json!({ "error": "invalid_start_date" }),
-    };
-    let end = match chrono::DateTime::parse_from_rfc3339(end_str) {
-        Ok(dt) => dt.with_timezone(&chrono::Utc),
-        Err(_) => return json!({ "error": "invalid_end_date" }),
-    };
-    if end <= start {
-        return json!({ "error": "invalid_date_range" });
+    if id.is_empty() {
+        return json!({ "error": "missing_field", "field": "backtest_id" });
     }
+    match api
+        .post(&format!("/api/backtests/{id}/stop"), json!({}))
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => e.to_tool_error(),
+    }
+}
 
-    let strategy_id = definition.strategy_id.clone();
-    let name = params
-        .get("name")
+/// `rerun_backtest` — fresh run with the same spec; returns the new id.
+pub async fn rerun_backtest(api: &ApiClient, params: &Value) -> Value {
+    let id = params
+        .get("backtest_id")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_owned())
-        .unwrap_or_else(|| format!("{strategy_id} · {instrument_id} · {timeframe_key}"));
-
-    let initial_balance = params
-        .get("initial_balance")
-        .and_then(|v| v.as_str())
-        .unwrap_or("100000")
-        .to_owned();
-    let quote_currency = params
-        .get("quote_currency")
-        .and_then(|v| v.as_str())
-        .unwrap_or("USD")
-        .to_owned();
-    let auto_collect = params
-        .get("auto_collect")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-
-    let venue_id = params
-        .get("venue_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_owned();
-
-    let spec = ResolvedSpec {
-        name,
-        definition,
-        instrument_id: instrument_id.to_owned(),
-        venue_id,
-        asset_class,
-        timeframe,
-        start,
-        end,
-        initial_balance,
-        quote_currency,
-        auto_collect,
-    };
-
-    match mgr.create(DEV_USER, spec).await {
-        Ok(backtest_id) => json!({
-            "backtest_id": backtest_id.to_string(),
-            "status": "Queued",
+        .unwrap_or("");
+    if id.is_empty() {
+        return json!({ "error": "missing_field", "field": "backtest_id" });
+    }
+    match api
+        .post(&format!("/api/backtests/{id}/rerun"), json!({}))
+        .await
+    {
+        Ok(resp) => json!({
+            "backtest_id": resp.get("id"),
+            "status": "queued",
+            "hint": "call wait_for_backtest on the new id",
         }),
-        Err(e) => json!({ "error": "create_failed", "reason": e.to_string() }),
+        Err(e) => e.to_tool_error(),
     }
+}
+
+/// `delete_backtest` — remove a finished run (terminal states only).
+pub async fn delete_backtest(api: &ApiClient, params: &Value) -> Value {
+    let id = params
+        .get("backtest_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if id.is_empty() {
+        return json!({ "error": "missing_field", "field": "backtest_id" });
+    }
+    match api.delete(&format!("/api/backtests/{id}")).await {
+        Ok(resp) => resp,
+        Err(e) => e.to_tool_error(),
+    }
+}
+
+/// Result keys worth surfacing in a side-by-side comparison.
+const COMPARE_RESULT_KEYS: &[&str] = &[
+    "summary",
+    "stats_returns",
+    "stats_general",
+    "total_orders",
+    "total_positions",
+];
+
+/// `compare_backtests` — side-by-side headline metrics for 2–5 runs.
+pub async fn compare_backtests(api: &ApiClient, params: &Value) -> Value {
+    let ids: Vec<String> = params
+        .get("backtest_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if ids.len() < 2 || ids.len() > 5 {
+        return json!({
+            "error": "invalid_request",
+            "hint": "pass backtest_ids as an array of 2-5 run UUIDs",
+        });
+    }
+
+    let mut rows = Vec::with_capacity(ids.len());
+    for id in &ids {
+        match api.get(&format!("/api/backtests/{id}")).await {
+            Ok(snap) => {
+                let mut metrics = serde_json::Map::new();
+                if let Some(result) = snap.get("result").filter(|r| !r.is_null()) {
+                    for key in COMPARE_RESULT_KEYS {
+                        if let Some(v) = result.get(*key) {
+                            metrics.insert((*key).to_string(), v.clone());
+                        }
+                    }
+                }
+                rows.push(json!({
+                    "backtest_id": id,
+                    "name": snap.get("name"),
+                    "strategy_id": snap.get("strategy_slug"),
+                    "instrument_id": snap.get("instrument_id"),
+                    "timeframe": snap.get("timeframe"),
+                    "start": snap.get("start"),
+                    "end": snap.get("end"),
+                    "status": snap.get("status"),
+                    "error": snap.get("error"),
+                    "metrics": metrics,
+                }));
+            }
+            Err(e) => rows.push(json!({ "backtest_id": id, "error": e.to_tool_error() })),
+        }
+    }
+    json!({ "comparison": rows })
 }

@@ -6,14 +6,10 @@ edition = "2021"
 [dependencies]
 domain = { workspace = true }
 strategy-validator = { workspace = true }
-strategy-runtime = { workspace = true }
-demand-manager = { workspace = true }
-storage = { workspace = true }
-backtest = { workspace = true }
 rust_decimal = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sqlx = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
@@ -22,3 +18,4 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+axum = { workspace = true }

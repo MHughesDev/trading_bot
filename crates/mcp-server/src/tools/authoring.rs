@@ -1,14 +1,18 @@
-//! Authoring tools: `validate_strategy` and `create_strategy`.
+//! Authoring tools: `validate_strategy`, `create_strategy`, `get_strategy`,
+//! `list_strategies`.
 //!
-//! Mandatory validation before create: a definition is rejected with
-//! structured errors if it is malformed or loosens risk limits.
+//! Validation runs locally (the validator is pure and identical to the one the
+//! platform uses); persistence goes through the platform API per ADR-0010, so
+//! strategies created here are real: visible in the UI, usable by slug in
+//! backtests, and durable across restarts.
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use domain::strategy_def::StrategyDefinition;
 use strategy_validator::validate;
 
-use crate::McpContext;
+use crate::ApiClient;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ValidationResult {
@@ -57,55 +61,77 @@ pub fn validate_strategy(definition_json: &str) -> ValidationResult {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateResult {
-    pub strategy_id: String,
-    pub store_id: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateError {
-    pub error: String,
-    pub errors: Vec<ValidationErrorItem>,
-}
-
-/// `create_strategy` — validate and persist a strategy definition.
-///
-/// Returns the store ID on success, or structured errors on validation failure.
-pub fn create_strategy(
-    ctx: &McpContext,
-    definition_json: &str,
-) -> Result<CreateResult, CreateError> {
+/// `create_strategy` — validate locally, then persist via the platform API.
+pub async fn create_strategy(api: &ApiClient, definition_json: &str) -> Value {
     let vr = validate_strategy(definition_json);
     if !vr.valid {
-        return Err(CreateError {
-            error: "validation_failed".into(),
-            errors: vr.errors,
-        });
+        return json!({ "error": "validation_failed", "errors": vr.errors });
     }
-
     let def: StrategyDefinition = serde_json::from_str(definition_json).expect("already validated");
-    create_strategy_from_def(ctx, def)
+    create_strategy_from_def(api, def).await
 }
 
-/// Persist a typed `StrategyDefinition` that has already been validated.
+/// Persist a typed, already-validated `StrategyDefinition` via the API.
 ///
-/// Used by `finalize_strategy` in the builder flow, which has the typed form
-/// directly and bypasses the JSON-parse step.
-pub fn create_strategy_from_def(
-    ctx: &McpContext,
-    def: StrategyDefinition,
-) -> Result<CreateResult, CreateError> {
-    let store_id = uuid::Uuid::new_v4();
-    let strategy_id = def.strategy_id.clone();
+/// Also used by `finalize_strategy` in the builder flow.
+pub async fn create_strategy_from_def(api: &ApiClient, def: StrategyDefinition) -> Value {
+    let body = match serde_json::to_value(&def) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": "serialization_error", "detail": e.to_string() }),
+    };
+    match api.post("/api/strategies", body).await {
+        Ok(resp) => json!({
+            "strategy_id": resp.get("strategy_id").cloned().unwrap_or(json!(def.strategy_id)),
+            "created": true,
+            "note": "upserted by strategy_id — reusing this slug overwrites the strategy",
+        }),
+        Err(e) => e.to_tool_error(),
+    }
+}
 
-    ctx.strategy_store
-        .lock()
-        .expect("strategy_store lock poisoned")
-        .insert(store_id, def);
+/// `get_strategy` — fetch a stored definition by slug.
+pub async fn get_strategy(api: &ApiClient, params: &Value) -> Value {
+    let slug = params
+        .get("strategy_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if slug.is_empty() {
+        return json!({ "error": "missing_field", "field": "strategy_id" });
+    }
+    match api.get(&format!("/api/strategies/{slug}/config")).await {
+        Ok(resp) => resp,
+        Err(e) => e.to_tool_error(),
+    }
+}
 
-    Ok(CreateResult {
-        strategy_id,
-        store_id: store_id.to_string(),
-    })
+/// `list_strategies` — list stored strategy slugs.
+pub async fn list_strategies(api: &ApiClient) -> Value {
+    match api.get("/api/strategies").await {
+        Ok(resp) => resp,
+        Err(e) => e.to_tool_error(),
+    }
+}
+
+/// `list_compatible_strategies` — strategies whose data requirements the given
+/// instrument/asset-class can satisfy (incompatible ones are omitted).
+pub async fn list_compatible_strategies(api: &ApiClient, params: &Value) -> Value {
+    let mut query = Vec::new();
+    if let Some(i) = params.get("instrument_id").and_then(|v| v.as_str()) {
+        query.push(format!("instrument={}", crate::tools::market::urlencode(i)));
+    }
+    let asset_class = params
+        .get("asset_class")
+        .and_then(|v| v.as_str())
+        .unwrap_or("crypto_spot_cex");
+    query.push(format!(
+        "asset_class={}",
+        crate::tools::market::urlencode(asset_class)
+    ));
+    match api
+        .get(&format!("/api/strategies/apply-list?{}", query.join("&")))
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => e.to_tool_error(),
+    }
 }

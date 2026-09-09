@@ -17,7 +17,7 @@ use crate::state::AppState;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-fn new_session_token() -> String {
+pub(crate) fn new_session_token() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
@@ -215,6 +215,137 @@ pub async fn logout(
         .execute(&state.pg)
         .await;
     StatusCode::OK
+}
+
+// ── Service tokens ────────────────────────────────────────────────────────────
+//
+// Long-lived bearer sessions (kind = 'service') for headless clients: the MCP
+// server process and internal agent runs. The full token is echoed exactly
+// once, at mint time; listings expose only an 8-char prefix.
+
+#[derive(Deserialize)]
+pub struct CreateServiceTokenBody {
+    pub label: String,
+}
+
+#[derive(Serialize)]
+pub struct ServiceTokenCreated {
+    pub token: String,
+    pub token_prefix: String,
+    pub label: String,
+    pub expires_at: String,
+}
+
+#[derive(Serialize)]
+pub struct ServiceTokenSummary {
+    pub token_prefix: String,
+    pub label: Option<String>,
+    pub created_at: String,
+    pub expires_at: String,
+}
+
+pub async fn create_service_token(
+    State(state): State<AppState>,
+    bearer: super::session::BearerToken,
+    Json(body): Json<CreateServiceTokenBody>,
+) -> Result<(StatusCode, Json<ServiceTokenCreated>), Response> {
+    let label = body.label.trim();
+    if label.is_empty() || label.len() > 64 {
+        return Err((StatusCode::BAD_REQUEST, "label must be 1-64 characters").into_response());
+    }
+
+    let token = new_session_token();
+    let expires_at: chrono::DateTime<Utc> = sqlx::query_scalar(
+        "INSERT INTO sessions (token, user_id, label, kind, expires_at)
+         VALUES ($1, $2, $3, 'service', now() + INTERVAL '365 days')
+         RETURNING expires_at",
+    )
+    .bind(&token)
+    .bind(bearer.user_id)
+    .bind(label)
+    .fetch_one(&state.pg)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "create_service_token: db error");
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ServiceTokenCreated {
+            token_prefix: token[..8].to_string(),
+            token,
+            label: label.to_string(),
+            expires_at: expires_at.to_rfc3339(),
+        }),
+    ))
+}
+
+pub async fn list_service_tokens(
+    State(state): State<AppState>,
+    bearer: super::session::BearerToken,
+) -> Result<Json<serde_json::Value>, Response> {
+    // Row shape: (token, label, created_at, expires_at).
+    type TokenRow = (
+        String,
+        Option<String>,
+        chrono::DateTime<Utc>,
+        chrono::DateTime<Utc>,
+    );
+    let rows: Vec<TokenRow> = sqlx::query_as(
+        "SELECT token, label, created_at, expires_at FROM sessions
+             WHERE user_id = $1 AND kind = 'service'
+             ORDER BY created_at DESC",
+    )
+    .bind(bearer.user_id)
+    .fetch_all(&state.pg)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "list_service_tokens: db error");
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    })?;
+
+    let tokens: Vec<ServiceTokenSummary> = rows
+        .into_iter()
+        .map(
+            |(token, label, created_at, expires_at)| ServiceTokenSummary {
+                token_prefix: token.chars().take(8).collect(),
+                label,
+                created_at: created_at.to_rfc3339(),
+                expires_at: expires_at.to_rfc3339(),
+            },
+        )
+        .collect();
+
+    Ok(Json(serde_json::json!({ "tokens": tokens })))
+}
+
+pub async fn delete_service_token(
+    State(state): State<AppState>,
+    bearer: super::session::BearerToken,
+    axum::extract::Path(token_prefix): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, Response> {
+    if token_prefix.len() < 8 {
+        return Err((StatusCode::BAD_REQUEST, "token prefix too short").into_response());
+    }
+
+    let result = sqlx::query(
+        "DELETE FROM sessions
+         WHERE user_id = $1 AND kind = 'service' AND token LIKE $2 || '%'",
+    )
+    .bind(bearer.user_id)
+    .bind(&token_prefix)
+    .execute(&state.pg)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "delete_service_token: db error");
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    })?;
+
+    if result.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, "no matching service token").into_response());
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // ── POST /auth/forgot-password ────────────────────────────────────────────────

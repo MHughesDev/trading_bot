@@ -40,6 +40,9 @@ const ModelLineagePage = lazy(() =>
 const LeaderboardPage = lazy(() =>
   import('@/pages/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage })),
 )
+const AgentPage = lazy(() =>
+  import('@/pages/AgentPage').then((m) => ({ default: m.AgentPage })),
+)
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -110,6 +113,7 @@ export default function App() {
               <Route path="/mlops/graph" element={<ModelLineagePage />} />
               <Route path="/mlops/leaderboard" element={<LeaderboardPage />} />
               <Route path="/mlops/:id" element={<ModelDetailPage />} />
+              <Route path="/agent" element={<AgentPage />} />
               <Route path="/settings" element={<SettingsPage />} />
 
               {/* Legacy / deep-link routes */}

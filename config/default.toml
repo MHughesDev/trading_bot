@@ -30,5 +30,12 @@ storage_batch_size = 10_000
 # Batch flush interval (milliseconds)
 storage_batch_flush_ms = 100
 
-[mcp_server]
-port = 8081
+# MCP server port is read from the MCP_PORT env var (default 3002) by
+# apps/mcp-server; there is no config-file key for it.
+
+[agent]
+# Internal agent (LLM-driven strategy design + backtest loop).
+max_concurrent_runs = 2
+default_max_iterations = 15
+default_wallclock_budget_secs = 14_400
+llm_max_tokens_per_call = 4096

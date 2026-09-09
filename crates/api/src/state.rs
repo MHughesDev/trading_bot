@@ -65,6 +65,12 @@ pub struct AppState {
     /// initialized instrument.  `None` in contexts with no platform pipeline
     /// host (e.g. tests).
     pub stream_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamRequest>>,
+    /// Envelope-encryption service for stored credentials (LLM API keys).
+    /// `None` when the `CRED_KEK` env var is unset — credential routes then
+    /// return 503 rather than storing anything unencrypted.
+    pub cred_crypto: Option<Arc<crate::credentials::CredentialCrypto>>,
+    /// Internal agent orchestrator (LLM-driven strategy design + backtests).
+    pub agent: Arc<crate::agent::AgentManager>,
 }
 
 impl AppState {
@@ -141,6 +147,7 @@ impl AppState {
         email: cfg::model::EmailConfig,
         clickhouse_url: String,
         stream_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamRequest>>,
+        agent: Arc<crate::agent::AgentManager>,
     ) -> Self {
         let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
         let quality_monitor = QualityMonitor::new(
@@ -149,6 +156,15 @@ impl AppState {
             tokio::time::Duration::from_secs(3600),
         );
         let tags = Arc::new(TagRegistry::new(pg.clone()));
+        let cred_crypto = match crate::credentials::CredentialCrypto::from_env() {
+            Ok(c) => Some(Arc::new(c)),
+            Err(_) => {
+                tracing::warn!(
+                    "CRED_KEK not set — LLM credential storage disabled (routes return 503)"
+                );
+                None
+            }
+        };
         Self {
             pg,
             risk_gate,
@@ -168,6 +184,8 @@ impl AppState {
             email,
             clickhouse_url,
             stream_tx,
+            cred_crypto,
+            agent,
         }
     }
 }

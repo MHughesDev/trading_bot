@@ -215,6 +215,16 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Internal agent orchestrator — LLM-driven strategy design + backtest
+    // loop. Its tool calls go through this platform's own HTTP API on
+    // loopback with a run-scoped service token (same path as the MCP server).
+    let agent_manager = Arc::new(api::agent::AgentManager::new(
+        pg.clone(),
+        format!("http://127.0.0.1:{}", cfg.api.port),
+        cfg.agent.clone(),
+    ));
+    agent_manager.recover_orphans().await;
+
     // Build the API router.
     let app_state = api::AppState::new(
         pg,
@@ -229,6 +239,7 @@ async fn main() -> anyhow::Result<()> {
         cfg.email.clone(),
         cfg.clickhouse.url.clone(),
         Some(stream_tx),
+        agent_manager,
     );
     let router = api::router(app_state);
 

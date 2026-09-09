@@ -13,6 +13,10 @@ dev:
     docker compose up -d
     cargo run -p platform
 
+# Run the MCP server (requires PLATFORM_API_TOKEN — see docs/mcp/README.md)
+run-mcp:
+    cargo run -p mcp-server
+
 # Start infra only
 infra:
     docker compose up -d

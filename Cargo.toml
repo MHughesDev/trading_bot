@@ -21,6 +21,7 @@ members = [
     "crates/model-registry",
     "crates/api",
     "crates/mcp-server",
+    "crates/llm",
     "crates/graph",
     "crates/semantic",
     "apps/platform",
@@ -45,6 +46,7 @@ mimalloc = { version = "0.1", default-features = false }
 
 # async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
 
 # web API / middleware
 axum = { version = "0.8", features = ["ws", "macros"] }
@@ -124,6 +126,7 @@ backtest = { path = "crates/backtest" }
 model-registry = { path = "crates/model-registry" }
 api = { path = "crates/api" }
 mcp-server-lib = { path = "crates/mcp-server" }
+llm = { path = "crates/llm" }
 graph = { path = "crates/graph" }
 semantic = { path = "crates/semantic" }
 

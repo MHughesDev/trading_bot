@@ -5,6 +5,8 @@ import { useState } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { VenueCredentials } from '@/components/settings/VenueCredentials'
+import { LlmCredentialForm } from '@/components/agent/LlmCredentialForm'
+import { ApiAccessCard } from '@/components/agent/ApiAccessCard'
 import { cn } from '@/lib/utils'
 
 type SettingsTab = 'profile' | 'appearance' | 'credentials'
@@ -97,12 +99,26 @@ export function SettingsPage() {
       {tab === 'profile' && <ProfileTab />}
       {tab === 'appearance' && <AppearanceTab />}
       {tab === 'credentials' && (
-        <div className="max-w-lg">
-          <p className="text-sm text-text-muted mb-4">
-            Connect your venue accounts. Credentials are verified before saving and
-            never returned in plaintext.
-          </p>
-          <VenueCredentials />
+        <div className="max-w-lg space-y-8">
+          <div>
+            <h2 className="text-sm font-semibold text-text mb-1">AI Providers</h2>
+            <p className="text-sm text-text-muted mb-4">
+              Connect an LLM provider for the internal agent. Keys are verified
+              against the provider, encrypted at rest, and never returned.
+            </p>
+            <LlmCredentialForm />
+          </div>
+
+          <ApiAccessCard />
+
+          <div>
+            <h2 className="text-sm font-semibold text-text mb-1">Venues</h2>
+            <p className="text-sm text-text-muted mb-4">
+              Connect your venue accounts. Credentials are verified before saving and
+              never returned in plaintext.
+            </p>
+            <VenueCredentials />
+          </div>
         </div>
       )}
     </div>

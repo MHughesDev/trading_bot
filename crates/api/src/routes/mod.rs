@@ -4,6 +4,7 @@ pub mod automations;
 pub mod backtests;
 pub mod dashboard;
 pub mod experiments;
+pub mod llm;
 pub mod models;
 pub mod models_phase6;
 pub mod orders;
@@ -36,6 +37,14 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/forgot-password", post(handlers::forgot_password))
         .route("/auth/verify-reset-code", post(handlers::verify_reset_code))
         .route("/auth/reset-password", post(handlers::reset_password))
+        .route(
+            "/auth/service-tokens",
+            get(handlers::list_service_tokens).post(handlers::create_service_token),
+        )
+        .route(
+            "/auth/service-tokens/{token_prefix}",
+            delete(handlers::delete_service_token),
+        )
         // ── Asset lifecycle ───────────────────────────────────────────────────
         .route("/assets/initialized", get(al::list_initialized))
         .route("/assets/lifecycle/{symbol}", get(al::get_lifecycle))
@@ -94,6 +103,27 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/venues/{venue}/health",
             get(venue_health::venue_health),
+        )
+        // LLM provider credentials + model listing (internal agent)
+        .route("/api/llm/credentials", get(llm::credential_status))
+        .route(
+            "/api/llm/credentials/{provider}",
+            axum::routing::put(llm::save_credential).delete(llm::delete_credential),
+        )
+        .route("/api/llm/{provider}/models", post(llm::list_models))
+        // Internal agent runs (LLM-driven strategy design + backtest loop)
+        .route(
+            "/api/agent/runs",
+            get(crate::agent::routes::list_runs).post(crate::agent::routes::start_run),
+        )
+        .route("/api/agent/runs/{id}", get(crate::agent::routes::get_run))
+        .route(
+            "/api/agent/runs/{id}/messages",
+            get(crate::agent::routes::get_messages),
+        )
+        .route(
+            "/api/agent/runs/{id}/cancel",
+            post(crate::agent::routes::cancel_run),
         )
         // P4-T06 dashboard rollup
         .route("/api/dashboard/rollup", get(dashboard::get_rollup))
