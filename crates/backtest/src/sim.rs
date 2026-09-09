@@ -21,11 +21,11 @@ use crate::run::result::{Side as TradeSide, Trade};
 use chrono::{DateTime, Utc};
 use nautilus_backtest::config::BacktestEngineConfig;
 use nautilus_backtest::engine::BacktestEngine;
-use nautilus_common::logging::config::LoggerConfig;
 use nautilus_backtest::sdk::{
     self, BarHandler, BarSimulationSpec, CallbackStrategy, SimOrderCommand, SimulationControl,
     VenuePreset,
 };
+use nautilus_common::logging::config::LoggerConfig;
 use nautilus_core::UnixNanos;
 use nautilus_model::data::{Bar, BarSpecification, BarType, Data};
 use nautilus_model::enums::{
@@ -228,7 +228,9 @@ pub fn run_simulation(
     // it can do now because tracing_setup skips the LogTracer log bridge).
     let bypass_logger = LoggerConfig::builder().bypass_logging(true).build();
     let mut engine = BacktestEngine::new(
-        BacktestEngineConfig::builder().logging(bypass_logger).build(),
+        BacktestEngineConfig::builder()
+            .logging(bypass_logger)
+            .build(),
     )?;
     engine.add_venue(preset.venue_config(venue, starting_balances))?;
     engine.add_instrument(&instrument)?;
@@ -280,7 +282,9 @@ pub fn run_simulation_detailed(
 
     let bypass_logger = LoggerConfig::builder().bypass_logging(true).build();
     let mut engine = BacktestEngine::new(
-        BacktestEngineConfig::builder().logging(bypass_logger).build(),
+        BacktestEngineConfig::builder()
+            .logging(bypass_logger)
+            .build(),
     )?;
     engine.add_venue(preset.venue_config(venue, starting_balances))?;
     engine.add_instrument(&instrument)?;

@@ -199,6 +199,21 @@ impl BacktestManager {
             .map_err(|e| anyhow::anyhow!("invalid initial_balance: {e}"))?;
         anyhow::ensure!(balance > Decimal::ZERO, "initial_balance must be positive");
 
+        // The simulator supports fixed-size orders only (sim.rs enforces the
+        // same at run time) — reject here so the caller gets an immediate 422
+        // instead of a failure minutes later, after data collection.
+        for action in &spec.definition.actions {
+            let domain::strategy_def::actions::ActionKind::PlaceOrder { order } = &action.kind;
+            anyhow::ensure!(
+                order.size_mode == domain::strategy_def::actions::SizeMode::Fixed,
+                "Strategy uses {:?} sizing on action '{}', but the simulator requires a fixed \
+                 quantity per trade. Set order size_mode to 'fixed' with a base-asset quantity \
+                 (e.g. 0.05).",
+                order.size_mode,
+                action.on_signal
+            );
+        }
+
         let id = Uuid::new_v4();
         let job = Job::new(id, user_id, spec, Utc::now());
         self.jobs.write().await.insert(id, Arc::clone(&job));
@@ -315,7 +330,8 @@ impl BacktestManager {
     #[allow(clippy::too_many_lines)]
     async fn drive_inner(self: &Arc<Self>, job: &Arc<Job>) -> Result<(), (BacktestStatus, String)> {
         let spec = &job.spec;
-        let fail = |phase: BacktestStatus| move |e: anyhow::Error| (phase, humanize_error(&e.to_string()));
+        let fail =
+            |phase: BacktestStatus| move |e: anyhow::Error| (phase, humanize_error(&e.to_string()));
 
         // ── Phase 1: check stored data against the strategy's requirements ──
         job.set_status(BacktestStatus::CheckingData);
