@@ -349,6 +349,8 @@ fn dec_str(v: f64) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
+// OHLCV aggregation reads naturally as o/h/l/c/v; renaming would hurt more than help.
+#[allow(clippy::many_single_char_names)]
 async fn collect_coinbase(
     http: &reqwest::Client,
     store: &BarStore,
@@ -713,8 +715,8 @@ mod tests {
 
     #[test]
     fn dec_str_never_emits_scientific_notation() {
-        assert_eq!(dec_str(0.000005), "0.000005");
-        assert_eq!(dec_str(79000.5), "79000.5");
+        assert_eq!(dec_str(0.000_005), "0.000005");
+        assert_eq!(dec_str(79_000.5), "79000.5");
         assert_eq!(dec_str(0.0), "0");
     }
 
