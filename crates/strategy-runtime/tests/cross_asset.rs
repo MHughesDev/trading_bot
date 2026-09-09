@@ -76,6 +76,8 @@ fn ema_cross_def(asset_class: &str) -> StrategyDefinition {
             },
         }],
         risk_overrides: Default::default(),
+        parameters: Default::default(),
+        constraints: Vec::new(),
     }
 }
 

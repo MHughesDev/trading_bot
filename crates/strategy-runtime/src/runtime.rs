@@ -587,6 +587,8 @@ mod tests {
                 },
             }],
             risk_overrides: domain::strategy_def::risk_overrides::RiskOverrides::default(),
+            parameters: Default::default(),
+            constraints: Vec::new(),
         }
     }
 
@@ -766,6 +768,8 @@ mod tests {
                 },
             }],
             risk_overrides: domain::strategy_def::risk_overrides::RiskOverrides::default(),
+            parameters: Default::default(),
+            constraints: Vec::new(),
         };
 
         let clock = Arc::new(WallClock) as Arc<dyn StrategyClock>;

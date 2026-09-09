@@ -17,11 +17,13 @@ use crate::ValidationError;
 pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
     let mut errors = Vec::new();
 
-    if def.definition_version != "1.0" {
+    // v1.2 is additive (typed `parameters`); a v1.0 document is a valid v1.2
+    // document, so both version strings are accepted.
+    if !matches!(def.definition_version.as_str(), "1.0" | "1.2") {
         errors.push(ValidationError {
             path: "definition_version".into(),
             message: format!(
-                "expected '1.0', got '{}'; only v1.0 definitions are accepted",
+                "expected '1.0' or '1.2', got '{}'; only v1.0/v1.2 definitions are accepted",
                 def.definition_version
             ),
         });
@@ -151,6 +153,8 @@ mod tests {
                 },
             }],
             risk_overrides: RiskOverrides::default(),
+            parameters: Default::default(),
+            constraints: Vec::new(),
         }
     }
 

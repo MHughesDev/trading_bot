@@ -48,6 +48,8 @@ fn ema_discovery_def() -> StrategyDefinition {
         ],
         actions: vec![],
         risk_overrides: RiskOverrides::default(),
+        parameters: Default::default(),
+        constraints: Vec::new(),
     }
 }
 
@@ -124,6 +126,8 @@ fn data_source_node_contributes_required_lane() {
         }],
         actions: vec![],
         risk_overrides: RiskOverrides::default(),
+        parameters: Default::default(),
+        constraints: Vec::new(),
     };
     let manifest = compile_manifest(&def);
     assert!(manifest.required_lanes.contains(&DataType::MarketOhlcv));
@@ -151,6 +155,8 @@ fn duplicate_lanes_are_deduplicated() {
         }],
         actions: vec![],
         risk_overrides: RiskOverrides::default(),
+        parameters: Default::default(),
+        constraints: Vec::new(),
     };
     let manifest = compile_manifest(&def);
     assert_eq!(manifest.required_lanes.len(), 1);

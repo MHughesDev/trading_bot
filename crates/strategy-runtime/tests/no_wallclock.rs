@@ -44,6 +44,8 @@ fn minimal_def() -> StrategyDefinition {
             },
         }],
         risk_overrides: RiskOverrides::default(),
+        parameters: Default::default(),
+        constraints: Vec::new(),
     }
 }
 

@@ -31,6 +31,8 @@ fn ohlcv_only_def(id: &str) -> StrategyDefinition {
         }],
         actions: vec![],
         risk_overrides: RiskOverrides::default(),
+        parameters: Default::default(),
+        constraints: Vec::new(),
     }
 }
 
@@ -55,6 +57,8 @@ fn funding_rate_def() -> StrategyDefinition {
         nodes: vec![],
         actions: vec![],
         risk_overrides: RiskOverrides::default(),
+        parameters: Default::default(),
+        constraints: Vec::new(),
     }
 }
 

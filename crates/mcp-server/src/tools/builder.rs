@@ -355,6 +355,10 @@ fn draft_to_definition(draft: &StrategyDraft) -> Result<StrategyDefinition, Stri
         nodes: draft.nodes.clone(),
         actions: draft.actions.clone(),
         risk_overrides: draft.risk_overrides.clone(),
+        // The step-by-step builder emits plain v1.0 definitions; typed
+        // parameters are authored directly in JSON (see the authoring guide).
+        parameters: Default::default(),
+        constraints: Vec::new(),
     })
 }
 

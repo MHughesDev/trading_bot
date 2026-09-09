@@ -7,7 +7,7 @@ pub mod expressions;
 pub mod risk;
 pub mod schema;
 
-use domain::strategy_def::{nodes::NodeKind, StrategyDefinition};
+use domain::strategy_def::{nodes::NodeKind, params, StrategyDefinition};
 
 /// A structured validation error with a JSON-pointer–style path and a human message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,10 +41,14 @@ impl ValidatedDefinition {
 
 /// Validate a strategy definition against the frozen v1.0 rules.
 ///
-/// Runs three passes in order:
+/// Runs four passes in order:
 /// 1. Schema — structural correctness (version, IDs, references).
-/// 2. Expressions — condition expression syntax per the frozen grammar.
-/// 3. Risk — tighten-only invariant against `GlobalRiskLimits::default()`.
+/// 2. Parameters (v1.2) — declarations are well-formed, every `param('x')` /
+///    `{{x}}` reference resolves, cross-parameter constraints hold on defaults.
+/// 3. Expressions — condition expression syntax per the frozen grammar,
+///    checked on the definition **materialized with its defaults** so the
+///    grammar itself never has to know about parameters.
+/// 4. Risk — tighten-only invariant against `GlobalRiskLimits::default()`.
 ///
 /// All errors from all passes are collected before returning, so an agent
 /// can see and fix all problems in one round trip.
@@ -53,7 +57,26 @@ pub fn validate(def: &StrategyDefinition) -> Result<ValidatedDefinition, Vec<Val
 
     errors.extend(schema::validate_schema(def));
 
-    for node in &def.nodes {
+    // Parameters: declarations, references, constraints — then materialize
+    // defaults so the expression pass sees plain literals.
+    if let Err(e) = params::validate_declarations(def) {
+        errors.push(ValidationError {
+            path: "parameters".into(),
+            message: e.to_string(),
+        });
+    }
+    let materialized = match params::materialize(def, &params::ParamValues::new()) {
+        Ok(m) => m,
+        Err(e) => {
+            errors.push(ValidationError {
+                path: "parameters".into(),
+                message: e.to_string(),
+            });
+            def.clone()
+        }
+    };
+
+    for node in &materialized.nodes {
         if let NodeKind::Condition { expr } = &node.kind {
             let path = format!("nodes[{}].expr", node.id);
             errors.extend(expressions::validate_expression(expr, &path));

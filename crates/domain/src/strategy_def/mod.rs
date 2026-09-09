@@ -22,9 +22,13 @@ pub mod actions;
 pub mod inference_output;
 pub mod inputs;
 pub mod nodes;
+pub mod params;
 pub mod risk_overrides;
 
 pub use inference_output::InferenceOutput;
+pub use params::{ParamSpec, ParamValues};
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +44,10 @@ use risk_overrides::RiskOverrides;
 pub const DEFINITION_VERSION: &str = "1.0";
 /// Format version for v1.1 additions (ModelForecast node).
 pub const DEFINITION_VERSION_V1_1: &str = "1.1";
+/// Format version for v1.2 additions (typed `parameters` block, `param('x')`
+/// and `{{x}}` references — see [`params`]). Additive: a v1.0 document is a
+/// valid v1.2 document.
+pub const DEFINITION_VERSION_V1_2: &str = "1.2";
 
 /// A complete strategy definition — the artifact all three front doors produce.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -59,6 +67,15 @@ pub struct StrategyDefinition {
     pub actions: Vec<Action>,
     #[serde(default)]
     pub risk_overrides: RiskOverrides,
+    /// Typed, sweepable parameters (v1.2). Empty for v1.0/v1.1 documents.
+    /// Referenced from expressions as `param('name')` and from any string as
+    /// `{{name}}`; substituted by [`params::materialize`] before execution.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub parameters: BTreeMap<String, ParamSpec>,
+    /// Cross-parameter constraints, e.g. `"param('fast') < param('slow')"`.
+    /// A sample violating one is rejected before a Run exists.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constraints: Vec<String>,
 }
 
 fn default_min_trust_tier() -> TrustTier {

@@ -59,6 +59,8 @@ fn canonical_ema_cross() -> StrategyDefinition {
             },
         }],
         risk_overrides: RiskOverrides::default(),
+        parameters: Default::default(),
+        constraints: Vec::new(),
     }
 }
 

@@ -38,6 +38,8 @@ fn base_def() -> StrategyDefinition {
         ],
         actions: vec![],
         risk_overrides: RiskOverrides::default(),
+        parameters: Default::default(),
+        constraints: Vec::new(),
     }
 }
 

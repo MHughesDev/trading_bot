@@ -87,6 +87,8 @@ fn pipeline_manifest_reflects_data_source_lane() {
         nodes: pipeline_nodes(),
         actions: vec![],
         risk_overrides: RiskOverrides::default(),
+        parameters: Default::default(),
+        constraints: Vec::new(),
     };
     let manifest = compile_manifest(&def);
     assert!(
