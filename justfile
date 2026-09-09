@@ -67,9 +67,15 @@ migrate:
 # Apply ClickHouse DDL
 migrate-ch:
     #!/usr/bin/env bash
+    # The HTTP interface rejects multi-statement bodies (05_backtest_run_series.sql
+    # has two), and without ?database= the tables land in the user's default DB —
+    # split on trailing-semicolon boundaries and post one statement at a time.
     for f in clickhouse/*.sql; do
         echo "Applying $f..."
-        curl -s -X POST "http://trading:trading@localhost:8123/" --data-binary @"$f"
+        awk 'BEGIN{RS=";[[:space:]]*\n"} /[^[:space:]]/ {printf "%s;\0", $0}' "$f" \
+        | while IFS= read -r -d '' stmt; do
+            curl -s -X POST "http://trading:trading@localhost:8123/?database=trading" --data-binary "$stmt"
+        done
     done
 
 # ── Frontend ───────────────────────────────────────────────────────────────────
