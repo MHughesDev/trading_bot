@@ -3,6 +3,7 @@ pub mod agent;
 pub mod auth;
 pub mod credentials;
 pub mod features_compute;
+pub mod research;
 pub mod rollup;
 pub mod routes;
 pub mod state;

@@ -71,6 +71,8 @@ pub struct AppState {
     pub cred_crypto: Option<Arc<crate::credentials::CredentialCrypto>>,
     /// Internal agent orchestrator (LLM-driven strategy design + backtests).
     pub agent: Arc<crate::agent::AgentManager>,
+    /// Research orchestrator (FEAT-003): sweeps over the suite, diagnostics.
+    pub research: Arc<crate::research::ResearchManager>,
 }
 
 impl AppState {
@@ -165,6 +167,20 @@ impl AppState {
                 None
             }
         };
+        // The suite runs real backtests when a runtime is present (the platform);
+        // outside one (unit tests) it falls back to the synthetic executor.
+        let suite = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                let executor = backtest::sim_executor::SimRunExecutor::new(
+                    handle,
+                    pg.clone(),
+                    clickhouse_url.clone(),
+                );
+                Arc::new(SuiteManager::with_executor(Box::new(executor)))
+            }
+            Err(_) => Arc::new(SuiteManager::new()),
+        };
+        let research = crate::research::ResearchManager::new(pg.clone(), Arc::clone(&suite), 2);
         Self {
             pg,
             risk_gate,
@@ -176,7 +192,7 @@ impl AppState {
             instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),
             clock: Arc::new(WallClock),
             backtest,
-            suite: Arc::new(SuiteManager::new()),
+            suite,
             models,
             quality_monitor,
             tags,
@@ -186,6 +202,7 @@ impl AppState {
             stream_tx,
             cred_crypto,
             agent,
+            research,
         }
     }
 }

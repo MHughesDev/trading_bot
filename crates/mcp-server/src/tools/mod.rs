@@ -15,3 +15,4 @@ pub mod discovery;
 pub mod market;
 pub mod models;
 pub mod portfolio;
+pub mod research;

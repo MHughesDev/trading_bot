@@ -307,6 +307,22 @@ pub async fn dispatch_tool(
         "arm_automation" => tools::automations::arm_automation(&ctx.api, params).await,
         "disarm_automation" => tools::automations::disarm_automation(&ctx.api, params).await,
 
+        // ── Research (FEAT-003): Experiments, sweeps, gates, diagnostics ───────
+        "create_experiment" => tools::research::create_experiment(&ctx.api, params).await,
+        "list_experiments" => tools::research::list_experiments(&ctx.api).await,
+        "get_experiment" => tools::research::get_experiment(&ctx.api, params).await,
+        "run_sweep" => tools::research::run_sweep(&ctx.api, params).await,
+        "get_sweep" => tools::research::get_sweep(&ctx.api, params).await,
+        "cancel_sweep" => tools::research::cancel_sweep(&ctx.api, params).await,
+        "run_study" => tools::research::run_study(&ctx.api, params).await,
+        "list_studies" => tools::research::list_studies(&ctx.api, params).await,
+        "get_carried_forward" => tools::research::get_carried_forward(&ctx.api, params).await,
+        "get_diagnostics" => tools::research::get_diagnostics(&ctx.api, params).await,
+        "get_funnel" => tools::research::get_funnel(&ctx.api, params).await,
+        "advance_gate" => tools::research::advance_gate(&ctx.api, params).await,
+        "get_null_picker" => tools::research::get_null_picker(&ctx.api, params).await,
+        "choose_null" => tools::research::choose_null(&ctx.api, params).await,
+
         unknown => {
             json!({ "error": "unknown_tool", "tool": unknown })
         }
@@ -330,7 +346,9 @@ pub enum ToolProfile {
 ///
 /// Everything except the step-by-step draft builder (redundant — the agent
 /// writes full definition JSON) and automations (no standing trading config
-/// from the in-app agent).
+/// from the in-app agent). Raw backtest *creation* is also excluded
+/// (FEAT-003 §11): the agent may only cause Runs through Experiments and
+/// Studies, so every result it sees is sealed and counted.
 const INTERNAL_AGENT_TOOLS: &[&str] = &[
     "get_authoring_guide",
     "list_lanes",
@@ -346,13 +364,9 @@ const INTERNAL_AGENT_TOOLS: &[&str] = &[
     "get_strategy",
     "list_strategies",
     "list_compatible_strategies",
-    "create_backtest",
     "get_backtest",
     "wait_for_backtest",
     "list_backtests",
-    "stop_backtest",
-    "rerun_backtest",
-    "delete_backtest",
     "compare_backtests",
     "get_dashboard_rollup",
     "get_paper_activity",
@@ -360,6 +374,21 @@ const INTERNAL_AGENT_TOOLS: &[&str] = &[
     "get_order",
     "list_models",
     "get_model",
+    // research (FEAT-003)
+    "create_experiment",
+    "list_experiments",
+    "get_experiment",
+    "run_sweep",
+    "get_sweep",
+    "cancel_sweep",
+    "run_study",
+    "list_studies",
+    "get_carried_forward",
+    "get_diagnostics",
+    "get_funnel",
+    "advance_gate",
+    "get_null_picker",
+    "choose_null",
 ];
 
 /// The complete list of tools exposed by this MCP server (MCP profile).
@@ -390,7 +419,7 @@ pub fn tool_definitions_for(profile: ToolProfile) -> Value {
 }
 
 fn all_tool_definitions() -> Value {
-    json!([
+    let mut all = json!([
         // ── Protocol ─────────────────────────────────────────────────────────
         {
             "name": "get_authoring_guide",
@@ -846,5 +875,9 @@ fn all_tool_definitions() -> Value {
                 }
             }
         }
-    ])
+    ]);
+    if let Some(arr) = all.as_array_mut() {
+        arr.extend(tools::research::definitions());
+    }
+    all
 }

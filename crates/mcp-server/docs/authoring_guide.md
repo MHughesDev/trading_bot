@@ -162,3 +162,48 @@ spec unchanged; `delete_backtest` cleans up failed experiments.
 - **Observability (read-only)**: `get_dashboard_rollup`, `get_paper_activity`,
   `get_trading_status`, `get_order`. There is no order-placement tool; nothing you do
   here trades.
+
+## Typed parameters (v1.2, additive) — make a strategy sweepable
+
+Any number you might want to tune belongs in a `parameters` block, not as a
+literal. Reference it from an expression as `param('name')`, or embed it in any
+string — including feature names — as `{{name}}`. The runtime never sees these:
+they are substituted with literals before validation and execution, so the
+frozen v1.0 grammar is unchanged. A v1.0 document without a block is still valid.
+
+```json
+{
+  "strategy_id": "ema_cross_p",
+  "definition_version": "1.2",
+  "asset_class": "crypto_spot_cex",
+  "parameters": {
+    "fast": { "type": "int",   "default": 12,   "min": 5,     "max": 50 },
+    "slow": { "type": "int",   "default": 26,   "min": 20,    "max": 200 },
+    "gate": { "type": "float", "default": 0.02, "min": 0.005, "max": 0.08, "scale": "log" },
+    "exit": { "type": "enum",  "default": "trail", "choices": ["trail", "fixed"] }
+  },
+  "constraints": ["param('fast') < param('slow')"],
+  "inputs": [
+    { "lane": "market.bars.1m", "instrument": "$bound_at_init" },
+    { "lane": "features.technical", "instrument": "$bound_at_init",
+      "features": ["ema_{{fast}}", "ema_{{slow}}"] }
+  ],
+  "nodes": [
+    { "id": "n1", "type": "condition",
+      "expr": "feature('ema_{{fast}}') - feature('ema_{{slow}}') > param('gate')" },
+    { "id": "n2", "type": "signal", "when": "n1", "emit": "long" }
+  ],
+  "actions": [ { "on_signal": "long", "type": "place_order",
+                 "order": { "side": "buy", "size_mode": "fixed", "size": "0.01" } } ]
+}
+```
+
+Rules the validator enforces: every referenced name is declared; defaults sit
+inside `[min, max]`; enum defaults are among `choices`; `constraints` are
+`operand cmp operand` where an operand is `param('x')` or a number; a
+definition with a block runs on its defaults when no overrides are supplied.
+`scale: "log"` tells a sweep to traverse the range multiplicatively.
+
+Declare honest ranges: the sweep can only *narrow* them, never widen. You never
+pick a value yourself — `run_sweep` samples the space, and what comes back is
+the neighbourhood Study's stable centroid, not the best sample.

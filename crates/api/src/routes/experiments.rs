@@ -125,9 +125,17 @@ pub async fn run_study(
     Path(id): Path<Uuid>,
     Json(spec): Json<RunStudySpec>,
 ) -> impl IntoResponse {
-    match state.suite.run_study(token.user_id(), id, spec) {
-        Ok(view) => (StatusCode::CREATED, Json(view)).into_response(),
-        Err(e) => map_err(e),
+    // Real Runs take minutes: keep the async worker free.
+    let suite = state.suite.clone();
+    let user = token.user_id();
+    match tokio::task::spawn_blocking(move || suite.run_study(user, id, spec)).await {
+        Ok(Ok(view)) => (StatusCode::CREATED, Json(view)).into_response(),
+        Ok(Err(e)) => map_err(e),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "study_panicked", "message": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -188,9 +196,18 @@ pub async fn advance_funnel(
     token: BearerToken,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
-    match state.suite.advance_funnel(token.user_id(), id) {
-        Ok(view) => Json(view).into_response(),
-        Err(e) => map_err(e),
+    // Gates 2–3 run CPCV / synthetic-path / permutation Studies — real Runs,
+    // minutes of work — so keep the async worker free.
+    let suite = state.suite.clone();
+    let user = token.user_id();
+    match tokio::task::spawn_blocking(move || suite.advance_funnel(user, id)).await {
+        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Err(e)) => map_err(e),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "funnel_panicked", "message": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -217,9 +234,16 @@ pub async fn run_vault(
     // The vault access log records who touched it; the bearer-derived id is the
     // stable per-user actor (M-17 placeholder auth).
     let by = token.user_id().to_string();
-    match state.suite.run_vault(token.user_id(), id, by) {
-        Ok(view) => Json(view).into_response(),
-        Err(e) => map_err(e),
+    let suite = state.suite.clone();
+    let user = token.user_id();
+    match tokio::task::spawn_blocking(move || suite.run_vault(user, id, by)).await {
+        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Err(e)) => map_err(e),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "vault_panicked", "message": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 

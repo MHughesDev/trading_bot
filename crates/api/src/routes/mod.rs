@@ -9,6 +9,7 @@ pub mod models;
 pub mod models_phase6;
 pub mod orders;
 pub mod paper;
+pub mod research;
 pub mod strategies;
 pub mod streams;
 pub mod trading;
@@ -124,6 +125,25 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/agent/runs/{id}/cancel",
             post(crate::agent::routes::cancel_run),
+        )
+        // Research (FEAT-003): sweeps over the Backtest Suite, diagnostics,
+        // and the selection-rule carry-forward read.
+        .route(
+            "/api/research/sweeps",
+            get(research::list_sweeps).post(research::start_sweep),
+        )
+        .route("/api/research/sweeps/{id}", get(research::get_sweep))
+        .route(
+            "/api/research/sweeps/{id}/cancel",
+            post(research::cancel_sweep),
+        )
+        .route(
+            "/api/research/diagnostics/{run_id}",
+            get(research::get_diagnostics),
+        )
+        .route(
+            "/api/backtest/experiments/{id}/studies/{study_id}/carried-forward",
+            get(research::get_carried_forward),
         )
         // P4-T06 dashboard rollup
         .route("/api/dashboard/rollup", get(dashboard::get_rollup))

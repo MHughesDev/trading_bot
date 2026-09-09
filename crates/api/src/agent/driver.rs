@@ -225,6 +225,85 @@ async fn chat_with_retry(
     unreachable!("retry loop always returns")
 }
 
+/// Start (or resume) a sweep and wait for it inside the driver — the same
+/// zero-token contract as [`wait_for_backtest_inline`]: no per-call cap, status
+/// rows for the timeline, cancel-aware (cancels the sweep too).
+async fn run_sweep_inline(
+    ctx: &mut RunCtx,
+    api: &ApiClient,
+    args: &Value,
+    deadline: Instant,
+    cancel: &AtomicBool,
+) -> Value {
+    let sweep_id = match args.get("sweep_id").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => {
+            let started = match api.post("/api/research/sweeps", args.clone()).await {
+                Ok(v) => v,
+                Err(e) => return e.to_tool_error(),
+            };
+            match started.get("sweep_id").and_then(|v| v.as_str()) {
+                Some(id) => id.to_string(),
+                None => return started,
+            }
+        }
+    };
+    ctx.set_status("waiting_backtest").await;
+    let mut last_status_emit: Option<Instant> = None;
+    let result = loop {
+        if cancel.load(Ordering::SeqCst) {
+            let _ = api
+                .post(&format!("/api/research/sweeps/{sweep_id}/cancel"), json!({}))
+                .await;
+            break json!({ "cancelled": true, "sweep_id": sweep_id, "note": "run cancelled while sweeping" });
+        }
+        if Instant::now() > deadline {
+            break json!({
+                "timed_out": true,
+                "sweep_id": sweep_id,
+                "note": "run wall-clock budget exhausted while sweeping",
+            });
+        }
+        match api.get(&format!("/api/research/sweeps/{sweep_id}")).await {
+            Ok(snapshot) => {
+                let status = snapshot
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let due = last_status_emit
+                    .is_none_or(|t| t.elapsed() >= Duration::from_secs(WAIT_STATUS_EVERY_SECS));
+                if due {
+                    ctx.append(
+                        "status",
+                        json!({
+                            "phase": "sweeping",
+                            "sweep_id": sweep_id,
+                            "sweep_status": status,
+                            "done": snapshot.get("done").cloned().unwrap_or(Value::Null),
+                            "planned": snapshot.get("planned").cloned().unwrap_or(Value::Null),
+                            "note": snapshot.get("note").cloned().unwrap_or(Value::Null),
+                        }),
+                    )
+                    .await;
+                    last_status_emit = Some(Instant::now());
+                }
+                if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
+                    break snapshot;
+                }
+            }
+            Err(e) => {
+                if matches!(e.status, Some(s) if s < 500) {
+                    break e.to_tool_error();
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(WAIT_POLL_SECS)).await;
+    };
+    ctx.set_status("running").await;
+    result
+}
+
 /// Wait on a backtest inside the driver: no per-call timeout cap (bounded by
 /// the run's wall-clock budget), status messages for the UI, cancel-aware.
 async fn wait_for_backtest_inline(
@@ -477,6 +556,8 @@ pub async fn drive(
                 } else {
                     wait_for_backtest_inline(&mut ctx, &api, &backtest_id, deadline, &cancel).await
                 }
+            } else if call.name == "run_sweep" {
+                run_sweep_inline(&mut ctx, &api, &call.arguments, deadline, &cancel).await
             } else {
                 dispatch_tool(&mcp_ctx, &call.name, &call.arguments, None).await
             };
