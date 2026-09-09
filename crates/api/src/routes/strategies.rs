@@ -209,6 +209,22 @@ pub async fn start_strategy(
         }
     };
 
+    // Live/paper instances run typed parameters (v1.2) on their declared
+    // defaults; the runtime never sees `param()`/`{{}}` references.
+    let def = match domain::strategy_def::params::materialize(
+        &def,
+        &domain::strategy_def::ParamValues::new(),
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": "invalid_parameters", "message": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+
     // Ensure a live data pipeline is running for this instrument before the
     // strategy starts evaluating — it needs fresh bar/trade data to operate.
     state

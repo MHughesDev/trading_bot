@@ -297,6 +297,36 @@ pub fn run_simulation_detailed(
     let mut cancelled = false;
     let mut chunks = engine_bars.into_iter().peekable();
     let mut first = true;
+    // The engine NETS positions: when a position closes and the next fill
+    // re-opens it, the closed one is stored as a serialized *snapshot* under
+    // the same position id and the live `Position` is reused. So
+    // `positions_closed` only ever holds the current closed position;
+    // every earlier round trip lives in `position_snapshots`. The SDK's own
+    // `total_positions` is `cached positions + snapshots` — we harvest the
+    // same union (found when a 16-day 1m run reported one trade against the
+    // SDK's 592 positions). Snapshots share an id, so the key is
+    // (id, opened, closed).
+    let mut closed: HashMap<String, Position> = HashMap::new();
+    let key = |p: &Position| {
+        format!(
+            "{}|{}|{}",
+            p.id,
+            p.ts_opened.as_u64(),
+            p.ts_closed.map_or(0, |t| t.as_u64())
+        )
+    };
+    let harvest = |engine: &BacktestEngine, closed: &mut HashMap<String, Position>| {
+        let cache = engine.kernel().cache.borrow();
+        for p in cache.positions_closed(None, None, None, None, None) {
+            let p: Position = p.cloned();
+            closed.entry(key(&p)).or_insert(p);
+        }
+        for p in cache.position_snapshots(None, None) {
+            if p.ts_closed.is_some() {
+                closed.entry(key(&p)).or_insert(p);
+            }
+        }
+    };
     while chunks.peek().is_some() {
         if control.is_cancelled() {
             cancelled = true;
@@ -304,6 +334,7 @@ pub fn run_simulation_detailed(
         }
         let batch: Vec<Data> = chunks.by_ref().take(cs).map(Data::Bar).collect();
         if !first {
+            harvest(&engine, &mut closed);
             engine.clear_data();
         }
         engine.add_data(batch, None, true, true)?;
@@ -311,20 +342,25 @@ pub fn run_simulation_detailed(
         first = false;
     }
     engine.end();
+    harvest(&engine, &mut closed);
 
     let stats = serde_json::to_value(engine.get_result())?;
 
-    // Pull closed positions from the engine cache and map them to trades.
+    // Map closed positions to trades in close order.
     let trades: Vec<Trade> = {
-        let cache = engine.kernel().cache.borrow();
-        let mut closed: Vec<Position> = cache
-            .positions_closed(None, None, None, None, None)
-            .into_iter()
-            .map(|p| p.cloned())
-            .collect();
-        closed.sort_by_key(|p| p.ts_closed.map_or(0, |t| t.as_u64()));
-        closed.iter().map(position_to_trade).collect()
+        let mut positions: Vec<Position> = closed.into_values().collect();
+        positions.sort_by_key(|p| p.ts_closed.map_or(0, |t| t.as_u64()));
+        positions.iter().map(position_to_trade).collect()
     };
+    if let Some(total) = stats.get("total_positions").and_then(serde_json::Value::as_u64) {
+        if total != trades.len() as u64 {
+            tracing::warn!(
+                sdk_total_positions = total,
+                harvested = trades.len(),
+                "detailed simulation harvested a different position count than the SDK reports"
+            );
+        }
+    }
     let equity = build_equity(inputs.initial_balance, &trades);
 
     Ok(DetailedOutcome {
@@ -762,6 +798,91 @@ mod tests {
             outcome.trades.len() + 1
         };
         assert_eq!(outcome.equity.len(), expected);
+    }
+
+    /// Regression: closed positions must survive chunked streaming. 1,000 bars
+    /// stream as four 250-bar chunks (`chunk_size_for`); a triangle-wave price
+    /// makes the 7/21 EMA cross many times, and every round trip must be
+    /// harvested — not just the last chunk's — so the trade count equals the
+    /// SDK's own `total_positions`.
+    #[test]
+    fn detailed_run_harvests_trades_across_chunks() {
+        let def: StrategyDefinition = serde_json::from_str(
+            r#"{
+                "strategy_id": "ema_round_trip",
+                "definition_version": "1.0",
+                "asset_class": "crypto_spot_cex",
+                "inputs": [
+                    { "lane": "market.bars.1m", "instrument": "$bound_at_init" },
+                    { "lane": "features.technical", "instrument": "$bound_at_init", "features": ["ema_7", "ema_21"] }
+                ],
+                "nodes": [
+                    { "id": "n1", "type": "condition", "expr": "feature('ema_7') > feature('ema_21')" },
+                    { "id": "n2", "type": "signal", "when": "n1", "emit": "long" },
+                    { "id": "n3", "type": "condition", "expr": "feature('ema_7') < feature('ema_21')" },
+                    { "id": "n4", "type": "signal", "when": "n3", "emit": "exit" }
+                ],
+                "actions": [
+                    { "on_signal": "long", "type": "place_order",
+                      "order": { "side": "buy", "size_mode": "fixed", "size": "0.01" } },
+                    { "on_signal": "exit", "type": "place_order",
+                      "order": { "side": "sell", "size_mode": "fixed", "size": "0.01" } }
+                ]
+            }"#,
+        )
+        .expect("valid fixture definition");
+        let features = vec![
+            FeatureSpec {
+                name: "ema_7".into(),
+                kind: FeatureKind::Ema,
+                period: 7,
+            },
+            FeatureSpec {
+                name: "ema_21".into(),
+                kind: FeatureKind::Ema,
+                period: 21,
+            },
+        ];
+        // Triangle wave, period 120 bars, amplitude 20 around 1000.
+        let bars: Vec<LoadedBar> = (0..1_000i64)
+            .map(|i| {
+                let phase = i % 120;
+                let tri = if phase < 60 { phase } else { 120 - phase };
+                let close = dec!(1000) + Decimal::from(tri) / dec!(3);
+                LoadedBar {
+                    ts_ns: i * 60_000_000_000,
+                    open: close,
+                    high: close,
+                    low: close,
+                    close,
+                    volume: dec!(1),
+                    trade_count: 1,
+                }
+            })
+            .collect();
+        assert!(bars.len() > chunk_size_for(bars.len()) * 3, "fixture must span several chunks");
+        let inputs = SimulationInputs {
+            definition: def,
+            instrument_id: "BTC-USDT".into(),
+            venue_id: "binance".into(),
+            asset_class: "crypto_spot_cex".into(),
+            timeframe: Timeframe::Minutes1,
+            quote_currency: "USDT".into(),
+            initial_balance: dec!(100000),
+            precisions: None,
+            sim_start_ns: 0,
+            bars,
+            features,
+        };
+        let control = SimulationControl::new();
+        let outcome = run_simulation_detailed(inputs, &control).expect("detailed run");
+        let sdk_positions = outcome.stats["total_positions"].as_u64().unwrap_or(0);
+        assert!(sdk_positions > 5, "fixture should round-trip many times, got {sdk_positions}");
+        assert_eq!(
+            outcome.trades.len() as u64,
+            sdk_positions,
+            "every closed position across all chunks must be harvested"
+        );
     }
 
     #[test]

@@ -99,6 +99,21 @@ pub async fn create_backtest(
         )
             .into_response();
     }
+    // Typed parameters (v1.2) run on their declared defaults here; sweeps go
+    // through Experiments/Studies where `RunConfig.params` overrides them.
+    let definition = match domain::strategy_def::params::materialize(
+        &definition,
+        &domain::strategy_def::ParamValues::new(),
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": "invalid_parameters", "message": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
 
     let Some(timeframe) = timeframe_from_key(&req.timeframe) else {
         return (

@@ -8,6 +8,13 @@
       "port": 5173,
       "autoPort": false,
       "cwd": "frontend"
+    },
+    {
+      "name": "platform",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["run", "-p", "platform"],
+      "port": 7080,
+      "autoPort": false
     }
   ]
 }
