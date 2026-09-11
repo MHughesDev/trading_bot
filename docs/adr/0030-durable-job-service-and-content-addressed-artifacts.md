@@ -58,5 +58,5 @@ a handle to every large output.
 
 ## References
 
-- COMP-005 (planned)
+- [COMP-005](../specs/COMP-005-job-service-and-artifacts.md)
 - BS-007 [05_JOBS_AND_ARTIFACTS](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/05_JOBS_AND_ARTIFACTS.MD)

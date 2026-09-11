@@ -29,7 +29,7 @@ platform is rebuilt around it, and the human UI comes as a byproduct.
   research doc and a spec doc differ, the spec wins.
 - **Pipeline:**
   1. This folder.
-  2. A formal spec in `docs/Specs/` plus an ADR in `docs/adr/` (Phase 0).
+  2. A formal spec in `docs/specs/` plus an ADR in `docs/adr/` (Phase 0).
   3. A plan set in `docs/plans/plan-sets/set-L…`.
   4. The queue.
 
@@ -151,10 +151,10 @@ platform is rebuilt around it, and the human UI comes as a byproduct.
 
 ## Links
 
-- [FEAT-003 Strategy Research Agent](../../Specs/FEAT-003-strategy-research-agent.md)
-- [Backtest suite core spec](../../Specs/BACKTEST_SUITE_CORE_SPEC.md)
-- [INTG-001 MCP server](../../Specs/INTG-001-mcp-server.md)
-- [DATA-004 strategy definition format](../../Specs/DATA-004-strategy-definition-format.md)
+- [FEAT-003 Strategy Research Agent](../../specs/FEAT-003-strategy-research-agent.md)
+- [Backtest suite core spec](../../specs/BACKTEST_SUITE_CORE_SPEC.md)
+- [INTG-001 MCP server](../../specs/INTG-001-mcp-server.md)
+- [DATA-004 strategy definition format](../../specs/DATA-004-strategy-definition-format.md)
 - [ADR-0022](../../adr/0022-mcp-thin-client-and-internal-agent.md)
 - [ADR-0023](../../adr/0023-llm-proposes-optimiser-chooses-set-j-judges.md)
 - [Set J](../../plans/plan-sets/set-J/MASTER.md)

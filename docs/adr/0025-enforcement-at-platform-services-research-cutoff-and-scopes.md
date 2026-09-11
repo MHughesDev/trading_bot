@@ -67,5 +67,5 @@ the platform honest for every client (UI, MCP, SDK), not just the agent.
 
 - BS-007 [03 §2](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/03_RUNTIME.MD) and
   [06 §3](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/06_DATA.MD)
-- [AGENT-001](../Specs/AGENT-001-agent-runtime.md)
-- [DATA-005](../Specs/DATA-005-data-api-v2.md)
+- [AGENT-001](../specs/AGENT-001-agent-runtime.md)
+- [DATA-005](../specs/DATA-005-data-api-v2.md)

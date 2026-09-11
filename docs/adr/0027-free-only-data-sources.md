@@ -58,5 +58,5 @@ alone unblocks CPCV, walk-forward and regime work.
 
 ## References
 
-- [DATA-005](../Specs/DATA-005-data-api-v2.md)
+- [DATA-005](../specs/DATA-005-data-api-v2.md)
 - BS-007 [06 §6](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/06_DATA.MD)

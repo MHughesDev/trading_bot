@@ -8,22 +8,41 @@ files, like Sets J and K.
 
 ## 1. Phase 0: contracts (design only, plus one spike and one ops task)
 
-**Formal specs to write** (in `docs/Specs/`), derived from the BS-007 docs:
+**Formal specs to write** (in `docs/specs/`), derived from the BS-007 docs:
 
 | Formal spec | From | Notes | Status (2026-09-11) |
 |---|---|---|---|
-| [AGENT-001 Agent runtime and harness](../../Specs/AGENT-001-agent-runtime.md) | 02, 03, 04 | Supersedes the internal-agent part of ADR-0022 and FEAT-003 §harness | Written (Proposed) |
-| [AGENT-002 Agent toolbox (`tbot` SDK/CLI, MCP)](../../Specs/AGENT-002-agent-toolbox.md) | 14 | Supersedes the INTG-001 tool list | Written (Proposed) |
-| [AGENT-003 Knowledge, memory and skills](../../Specs/AGENT-003-knowledge-memory-skills.md) | 12, 13 | — | Written (Proposed) |
-| [AGENT-004 Agent evaluation suite](../../Specs/AGENT-004-agent-evaluation-suite.md) | 16 | — | Written (Proposed) |
-| [COMP-005 Job service and artifact store](../../Specs/COMP-005-job-service-and-artifacts.md) | 05 | — | Written (Proposed) |
-| [COMP-006 Research workspace UI](../../Specs/COMP-006-research-workspace-ui.md) | 15 | Coordinates with the Set K unified workspace | Written (Proposed) |
-| [DATA-005 Data API v2 and sources](../../Specs/DATA-005-data-api-v2.md) | 06 | Includes the `market_bars_v2` fix (§3) | Written (Proposed) |
-| DATA-006 Unified feature engine | 07 | — | To write |
-| FEAT-004 Strategy representation v2 (plus DATA-004 v2 AST) | 08 | — | To write |
-| FEAT-005 Backtest engine integration (FEAT-002 update) | 09 | — | To write |
-| FEAT-006 Model platform v2 (AI_MODELS_SUITE update) | 10 | — | To write |
-| BACKTEST_SUITE_CORE_SPEC v2 | 11 | Extends Set J | To write |
+| [AGENT-001 Agent runtime and harness](../../specs/AGENT-001-agent-runtime.md) | 02, 03, 04 | Supersedes the internal-agent part of ADR-0022 and FEAT-003 §harness | Written (Proposed) |
+| [AGENT-002 Agent toolbox (`tbot` SDK/CLI, MCP)](../../specs/AGENT-002-agent-toolbox.md) | 14 | Supersedes the INTG-001 tool list | Written (Proposed) |
+| [AGENT-003 Knowledge, memory and skills](../../specs/AGENT-003-knowledge-memory-skills.md) | 12, 13 | — | Written (Proposed) |
+| [AGENT-004 Agent evaluation suite](../../specs/AGENT-004-agent-evaluation-suite.md) | 16 | — | Written (Proposed) |
+| [COMP-005 Job service and artifact store](../../specs/COMP-005-job-service-and-artifacts.md) | 05 | — | Written (Proposed) |
+| [COMP-006 Research workspace UI](../../specs/COMP-006-research-workspace-ui.md) | 15 | Coordinates with the Set K unified workspace | Written (Proposed) |
+| [DATA-005 Data API v2 and sources](../../specs/DATA-005-data-api-v2.md) | 06 | Includes the `market_bars_v2` fix (§3) | Written (Proposed) |
+| [DATA-006 Unified feature engine](../../specs/DATA-006-unified-feature-engine.md) | 07 | — | Written (Proposed) |
+| [FEAT-004 Strategy representation v2 (plus DATA-004 v2 AST)](../../specs/FEAT-004-strategy-representation-v2.md) | 08 | — | Written (Proposed) |
+| [FEAT-005 Backtest engine integration (FEAT-002 update)](../../specs/FEAT-005-backtest-engine-integration.md) | 09 | — | Written (Proposed) |
+| [FEAT-006 Model platform v2 (AI_MODELS_SUITE update)](../../specs/FEAT-006-model-platform-v2.md) | 10 | — | Written (Proposed) |
+| [BACKTEST_SUITE_CORE_SPEC v2](../../specs/BACKTEST_SUITE_CORE_SPEC_V2.md) | 11 | Extends Set J | Written (Proposed) |
+
+**All Phase 0 specs are written.** The remaining Phase 0 work is accepting the ADRs, the
+runtime spike, and the backfill ops task. Then the plan sets (L first) can be written.
+
+**Migration numbers reserved** (Postgres):
+
+| Migration | Spec |
+|---|---|
+| 0036 | AGENT-001 |
+| 0037 | COMP-005 |
+| 0038 | DATA-005 |
+| 0039 | AGENT-003 |
+| 0040 | DATA-006 |
+| 0041 | FEAT-004 |
+| 0043 | BACKTEST v2 |
+| 0044 | FEAT-006 |
+
+0042 is unused. The ClickHouse DDL files are `06_market_bars_v2`, `07_backtest_outputs_v2`
+and `08_prediction_series`.
 
 **ADRs** (in `docs/adr/`, all written 2026-09-11, status Proposed):
 

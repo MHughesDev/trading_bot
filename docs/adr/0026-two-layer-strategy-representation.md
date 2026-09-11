@@ -71,6 +71,6 @@ expressiveness. Deployment needs safety, speed and live/backtest parity.
 
 ## References
 
-- [FEAT-004](../Specs/FEAT-004-strategy-representation-v2.md) (planned)
+- [FEAT-004](../specs/FEAT-004-strategy-representation-v2.md)
 - BS-007 [08_STRATEGIES](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/08_STRATEGIES.MD)
 - ADR-0007, ADR-0010

@@ -65,7 +65,11 @@ not as-built until their plan sets ship.
 | [`COMP-005-job-service-and-artifacts.md`](COMP-005-job-service-and-artifacts.md) | Durable jobs, idempotency, queues, counting, artifacts, exploration ledger | 0030 | L |
 | [`COMP-006-research-workspace-ui.md`](COMP-006-research-workspace-ui.md) | Research workspace UI, approvals inbox, rich cards | 0024 | L+ |
 | [`DATA-005-data-api-v2.md`](DATA-005-data-api-v2.md) | Data API v2, PIT/revisions, research cutoff, Desk, `data_qc`, universes, synthetic venue, free sources | 0025, 0027 | L / P |
-| DATA-006, FEAT-004, FEAT-005, FEAT-006, BACKTEST_SUITE_CORE_SPEC v2 | Feature engine, strategy representation v2, backtest integration, model platform v2, research standard | 0026, 0029 | M–Q (to be written) |
+| [`DATA-006-unified-feature-engine.md`](DATA-006-unified-feature-engine.md) | One Rust feature engine, expression language, parity, PyO3 bindings, fail-closed | 0029 | M |
+| [`FEAT-004-strategy-representation-v2.md`](FEAT-004-strategy-representation-v2.md) | Layer 1 position series + truncation test; Strategy Language v2 grammar, AST, bytecode; v1 translator; reconciliation | 0026 | M / O |
+| [`FEAT-005-backtest-engine-integration.md`](FEAT-005-backtest-engine-integration.md) | Fill timing, `StrategyInstance`-driven runs, `RunConfig` honoured, cost models, batch/vector tiers, rich outputs, SDK facade | 0006, 0026, 0030 | M |
+| [`FEAT-006-model-platform-v2.md`](FEAT-006-model-platform-v2.md) | DatasetSpec, families, BYO models, walk-forward prediction series, scoring additions, calibration | 0015–0018, 0029 | N |
+| [`BACKTEST_SUITE_CORE_SPEC_V2.md`](BACKTEST_SUITE_CORE_SPEC_V2.md) | Hypothesis registry, effective N, `post_hoc`, Gate 0/3 v2, dossier, family tests, random arm, forward gate | 0019–0021, 0025 | Q |
 
 ## Naming convention
 

@@ -72,5 +72,5 @@ byte-stable (statistics live in the registry) also protects prompt caching.
 
 ## References
 
-- AGENT-003 (planned)
+- [AGENT-003](../specs/AGENT-003-knowledge-memory-skills.md)
 - BS-007 [13_SKILLS](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/13_SKILLS.MD)

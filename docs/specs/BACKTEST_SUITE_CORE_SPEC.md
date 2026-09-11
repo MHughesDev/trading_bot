@@ -8,6 +8,8 @@
 Everything is language-neutral. Field types use a simple notation (`str`, `int`, `float`, `datetime`, `enum`, `hash`, `ref<X>` = reference to an object of type X, `dist<float>` = an empirical distribution of floats).
 
 > **Implementation plan:** [`docs/plans/plan-sets/set-J/`](../plans/plan-sets/set-J/MASTER.md) — Set J builds this spec on top of the existing `crates/backtest` Run engine.
+>
+> **v2 extensions (proposed):** [`BACKTEST_SUITE_CORE_SPEC_V2.md`](BACKTEST_SUITE_CORE_SPEC_V2.md) adds the hypothesis registry, effective N, specification counting, `post_hoc` detection, Gate 0/3 additions, the vault dossier, and family tests. Everything here stays in force.
 
 ---
 

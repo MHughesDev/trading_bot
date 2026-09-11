@@ -53,5 +53,5 @@ code changes.
 
 ## References
 
-- DATA-006 (planned)
+- [DATA-006](../specs/DATA-006-unified-feature-engine.md)
 - BS-007 [07_FEATURES](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/07_FEATURES.MD)
