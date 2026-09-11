@@ -49,6 +49,24 @@ This folder holds **specifications that describe the repository as implemented**
 | [`../SYSTEM_WALKTHROUGH.MD`](../SYSTEM_WALKTHROUGH.MD) | Step-by-step: live, paper, live execution, backtest (master pipeline) |
 | [`legacy/decision_pipeline/docs/MASTER_SYSTEM_PIPELINE_SPEC.MD`](../../legacy/decision_pipeline/docs/MASTER_SYSTEM_PIPELINE_SPEC.MD) | Authoritative end-to-end system spec |
 
+## Target specs: quant research agent (BS-007, proposed)
+
+These are **target** contracts derived from
+[BS-007](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/00_INDEX.MD). They drive plan sets L–R
+([build order](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/17_BUILD_ORDER.MD)), and are
+not as-built until their plan sets ship.
+
+| File | Scope | ADRs | Plan set |
+|------|-------|------|----------|
+| [`AGENT-001-agent-runtime.md`](AGENT-001-agent-runtime.md) | Agent SDK runtime, per-project container, orchestrator, LLM proxy, scopes, hooks, `final_report`, budgets | 0024, 0025 | L |
+| [`AGENT-002-agent-toolbox.md`](AGENT-002-agent-toolbox.md) | `tbot` SDK/CLI, capability registry, generated MCP surface, output budgets | 0022, 0024, 0025 | L+ |
+| [`AGENT-003-knowledge-memory-skills.md`](AGENT-003-knowledge-memory-skills.md) | Findings, move memory, profiles, local embeddings, skill registry, materialiser, admission | 0028 | L / R |
+| [`AGENT-004-agent-evaluation-suite.md`](AGENT-004-agent-evaluation-suite.md) | Eval suites, auditor CI, scorecard, non-inferiority gate | 0024, 0028 | L+ |
+| [`COMP-005-job-service-and-artifacts.md`](COMP-005-job-service-and-artifacts.md) | Durable jobs, idempotency, queues, counting, artifacts, exploration ledger | 0030 | L |
+| [`COMP-006-research-workspace-ui.md`](COMP-006-research-workspace-ui.md) | Research workspace UI, approvals inbox, rich cards | 0024 | L+ |
+| [`DATA-005-data-api-v2.md`](DATA-005-data-api-v2.md) | Data API v2, PIT/revisions, research cutoff, Desk, `data_qc`, universes, synthetic venue, free sources | 0025, 0027 | L / P |
+| DATA-006, FEAT-004, FEAT-005, FEAT-006, BACKTEST_SUITE_CORE_SPEC v2 | Feature engine, strategy representation v2, backtest integration, model platform v2, research standard | 0026, 0029 | M–Q (to be written) |
+
 ## Naming convention
 
 - Files use **`.MD`** (uppercase), consistent with `docs/` in this repo.
