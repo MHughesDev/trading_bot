@@ -100,6 +100,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # config
 config = "0.14"
+# .env loading for local/dev runs (see cfg::load)
+dotenvy = "0.15"
 toml = "0.8"
 
 # error handling

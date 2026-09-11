@@ -27,6 +27,14 @@ async fn main() -> anyhow::Result<()> {
 
     info!(version = env!("CARGO_PKG_VERSION"), "platform starting");
 
+    // Say plainly whether `.env` was picked up. This was silently skipped
+    // before, which left CRED_KEK unset (disabling LLM credential storage)
+    // even though it was correctly set in the file.
+    match cfg::dotenv_path() {
+        Some(path) => info!(path, ".env loaded"),
+        None => info!("no .env found — using the process environment only"),
+    }
+
     // Connect to Postgres.
     let pg = storage::postgres::connect(&cfg.database.url)
         .await
