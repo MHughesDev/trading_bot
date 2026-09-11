@@ -14,6 +14,9 @@ runs long jobs in its own container. It answers questions about any instrument, 
 researches, backtests and models trading strategies for stocks and crypto honestly. The
 platform is rebuilt around it, and the human UI comes as a byproduct.
 
+> **Picking this up as an agent?** Start with [HANDOFF.MD](HANDOFF.MD). It covers the
+> current state, next steps and gotchas.
+
 ## How to use this folder
 
 - **Spec docs (02–16) are normative.** Each one has these sections:
