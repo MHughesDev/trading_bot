@@ -1,9 +1,16 @@
-# BS-007 / 06 — Quant knowledge core (seed cards for the L1 library)
+# BS-007 / R3 — Quant knowledge core (seed content for the core skills)
 
-> **Refined 2026-09-10 by [11_QUANT_RESEARCH_STANDARD.MD](11_QUANT_RESEARCH_STANDARD.MD):**
-> add its topics T1–T20 as cards; where they conflict (HARQ over HAR, EDGE over
+> **Informative.** This was doc 06 before the 2026-09-11 restructure. It is the **seed
+> content for the core skills** (13 §5, 12 §2 L1). The cards here become `SKILL.md`
+> files, one per topic or group, plus the QC rules in 11 §7.
+>
+> Where they conflict, **11 EVALUATION_STANDARD wins**: HARQ over HAR, EDGE over
 > Roll/Corwin–Schultz, equal-weight combination by default, theme-posterior alongside
-> DSR), 11 wins.
+> DSR.
+>
+> Old refs map as in research/R1's header: 03 → 14, 04 → 03/04/16, 05 → 12, 08 §x →
+> 03/05–11. Part D's "Today" column reflects the 2026-09-10 baseline (01); Sets M–O
+> change it.
 
 Status: draft. These are **seed cards**: the knowledge the agent should be able to
 retrieve, each tied to the tool that computes it (03) and its platform status (01). The

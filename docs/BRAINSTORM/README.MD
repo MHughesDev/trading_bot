@@ -62,7 +62,7 @@ Use **`.MD`** (uppercase extension) to match other docs in this repo.
 | **BS-004** | [`BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD`](BS-004_MULTI_TENANT_AUTH_ACCOUNT_UI.MD) — Multi-tenant auth, Account page, per-user PnL — **promoted** to [`QUEUE_ARCHIVE.MD`](../QUEUE_ARCHIVE.MD) §2.4 **FB-UX-P0**. |
 | **BS-005** | [`BS-005_GENERAL_IMPROVEMENTS_ASSUME_QUEUE_DONE.MD`](BS-005_GENERAL_IMPROVEMENTS_ASSUME_QUEUE_DONE.MD) — General improvements **assuming** current queue epics are done; **no overlap** with tracked **FB-AP** / **FB-UX** / **FB-CONT** rows. |
 | **BS-006** | [`BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD`](BS-006_AUDIT_TO_QUEUE_BRAINSTORM.MD) — Audit report → **queue system** (`QUEUE_STACK`): granularity, IDs, promotion flow *(brainstorm only)*. |
-| **BS-007** | [`BS-007_QUANT_RESEARCH_AGENT/`](BS-007_QUANT_RESEARCH_AGENT/00_OVERVIEW.MD) — Quant research agent: verified ground truth, agent definition, toolbox, harness, knowledge/embeddings, quant knowledge core, roadmap *(multi, draft)*. |
+| **BS-007** | [`BS-007_QUANT_RESEARCH_AGENT/`](BS-007_QUANT_RESEARCH_AGENT/00_INDEX.MD) — Quant research agent: an agent-first re-platforming, split into spec-ready docs (runtime, context/cost, jobs, data, features, strategies, backtest, models, evaluation standard, memory, skills, toolbox, UI, agent evals, build order), plus research appendices *(multi, spec-ready draft)*. |
 
 ## Related
 

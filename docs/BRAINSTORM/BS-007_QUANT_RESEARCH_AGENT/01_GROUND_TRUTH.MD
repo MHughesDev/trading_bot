@@ -7,6 +7,10 @@ routes, and the code behind them) are the truth. Everything else, including the 
 ChatGPT pack (`Quant_Platform_Agent_Context.md`) and older specs, is input to be checked.
 Every claim below cites a path. Re-verify before building on any of it.
 
+**Role in the spec set:** this is the as-built baseline. Spec docs 02–16 cite its gap IDs
+(G-01…G-14) and sections. The "what the agent cannot do" list and the harness description
+(§8) describe *today*. 03_RUNTIME and 14_TOOLBOX replace them.
+
 ---
 
 ## 1. The agent's only window: the MCP tool layer

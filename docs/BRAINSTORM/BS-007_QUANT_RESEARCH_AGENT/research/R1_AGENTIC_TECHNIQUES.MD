@@ -1,4 +1,44 @@
-# BS-007 / 09 — Agentic techniques to build into the agent (research, 2026-09-10)
+# BS-007 / R1 — Agentic techniques (research, 2026-09-10)
+
+> **Informative.** This was doc 09 before the 2026-09-11 restructure. Where it differs
+> from a spec doc, the spec wins. **Old references in this file map to the new docs as
+> follows:**
+>
+> | Old ref | New doc |
+> |---|---|
+> | 03 | 14 TOOLBOX |
+> | 04 | 03 RUNTIME and 04 CONTEXT_AND_COST (§9 → 16 AGENT_EVALS) |
+> | 05 | 12 KNOWLEDGE_MEMORY |
+> | 06 | research/R3 |
+> | 07 | 17 BUILD_ORDER |
+> | 08 §1–2 | 03 RUNTIME |
+> | 08 §2.2 | 05 JOBS |
+> | 08 §3 | 06 DATA |
+> | 08 §4 | 07 FEATURES |
+> | 08 §5 | 08 STRATEGIES |
+> | 08 §6 | 09 BACKTEST |
+> | 08 §7 | 10 MODELS |
+> | 08 §8 | 11 EVALUATION_STANDARD |
+> | 08 §9 | 12 and 13 |
+> | 08 §10 | 17 BUILD_ORDER |
+> | 10 | research/R2 |
+> | 11 | 11 EVALUATION_STANDARD |
+> | 12 | 13 SKILLS |
+>
+> **Adopted into the specs:**
+> - on-disk state (03 §5–6);
+> - code over tools (14 §1);
+> - context engineering (04);
+> - proposal/audit/evaluation/holdout separation (03 §2, 16 §3);
+> - random-search arm (11 §8);
+> - process memory and playbook (12 §4–5);
+> - tree search (10 §4);
+> - quarantined reader (03 §9);
+> - sleep-time curation (03 §9, 12 §8);
+> - harness evolution (16 §8).
+>
+> The all-pairs Elo tournament in §2.3 is replaced by a Swiss-system tournament
+> (04 §8).
 
 Status: research summary + adoption proposals. Each technique lists its source and
 evidence, then **how it lands in this platform** (component names from 08). Evidence
@@ -199,7 +239,7 @@ the hypothesis, the strategy code and the pre-registered rationale, and flags mi
 ("hypothesis says mean reversion; code enters on breakouts"). It's cheap and catches a
 classic LLM failure.
 
-**Agent-created skills** are specified in full in [12_SKILLS.MD](12_SKILLS.MD). That
+**Agent-created skills** are specified in full in [13_SKILLS.MD](../13_SKILLS.MD). That
 covers triggers, platform-side verification, the registry and glossary, materialisation
 for every user, and quant admission tests. The ACE playbook (§3.2) lives in that
 registry as `kind: playbook`.

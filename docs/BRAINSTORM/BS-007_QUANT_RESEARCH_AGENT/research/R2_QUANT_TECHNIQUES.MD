@@ -1,4 +1,10 @@
-# BS-007 / 10 — Quant techniques to give the agent as tools (research, 2026-09-10)
+# BS-007 / R2 — Quant techniques to give the agent as tools (research, 2026-09-10)
+
+> **Informative.** This was doc 10 before the 2026-09-11 restructure. The normative rules
+> derived from it live in **11 EVALUATION_STANDARD** (QC rules, dossier, evaluation
+> tools), **10 MODELS** (families, scoring, calibration), **07 FEATURES** and
+> **14 TOOLBOX**. Old refs map as in research/R1's header: 03 → 14, 06 → R3,
+> 08 §x → 03/05–11, 09 → R1, 11 → 11.
 
 Status: research summary + tool proposals. Complements 06 (the knowledge cards) with
 **what the recent evidence says works**, and turns each technique into a tool or platform
