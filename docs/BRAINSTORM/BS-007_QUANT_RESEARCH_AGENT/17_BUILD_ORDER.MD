@@ -10,22 +10,22 @@ files, like Sets J and K.
 
 **Formal specs to write** (in `docs/Specs/`), derived from the BS-007 docs:
 
-| Formal spec | From | Notes |
-|---|---|---|
-| AGENT-001 Agent runtime and harness | 02, 03, 04 | Supersedes the internal-agent part of ADR-0022 and FEAT-003 §harness |
-| AGENT-002 Agent toolbox (`tbot` SDK/CLI, MCP) | 14 | Supersedes the INTG-001 tool list |
-| AGENT-003 Knowledge, memory and skills | 12, 13 | — |
-| AGENT-004 Agent evaluation suite | 16 | — |
-| COMP-005 Job service and artifact store | 05 | — |
-| COMP-006 Research workspace UI | 15 | Coordinates with the Set K unified workspace |
-| DATA-005 Data API v2 and sources | 06 | — |
-| DATA-006 Unified feature engine | 07 | — |
-| FEAT-004 Strategy representation v2 (plus DATA-004 v2 AST) | 08 | — |
-| FEAT-005 Backtest engine integration (FEAT-002 update) | 09 | — |
-| FEAT-006 Model platform v2 (AI_MODELS_SUITE update) | 10 | — |
-| BACKTEST_SUITE_CORE_SPEC v2 | 11 | Extends Set J |
+| Formal spec | From | Notes | Status (2026-09-11) |
+|---|---|---|---|
+| [AGENT-001 Agent runtime and harness](../../Specs/AGENT-001-agent-runtime.md) | 02, 03, 04 | Supersedes the internal-agent part of ADR-0022 and FEAT-003 §harness | Written (Proposed) |
+| [AGENT-002 Agent toolbox (`tbot` SDK/CLI, MCP)](../../Specs/AGENT-002-agent-toolbox.md) | 14 | Supersedes the INTG-001 tool list | Written (Proposed) |
+| [AGENT-003 Knowledge, memory and skills](../../Specs/AGENT-003-knowledge-memory-skills.md) | 12, 13 | — | Written (Proposed) |
+| [AGENT-004 Agent evaluation suite](../../Specs/AGENT-004-agent-evaluation-suite.md) | 16 | — | Written (Proposed) |
+| [COMP-005 Job service and artifact store](../../Specs/COMP-005-job-service-and-artifacts.md) | 05 | — | Written (Proposed) |
+| [COMP-006 Research workspace UI](../../Specs/COMP-006-research-workspace-ui.md) | 15 | Coordinates with the Set K unified workspace | Written (Proposed) |
+| [DATA-005 Data API v2 and sources](../../Specs/DATA-005-data-api-v2.md) | 06 | Includes the `market_bars_v2` fix (§3) | Written (Proposed) |
+| DATA-006 Unified feature engine | 07 | — | To write |
+| FEAT-004 Strategy representation v2 (plus DATA-004 v2 AST) | 08 | — | To write |
+| FEAT-005 Backtest engine integration (FEAT-002 update) | 09 | — | To write |
+| FEAT-006 Model platform v2 (AI_MODELS_SUITE update) | 10 | — | To write |
+| BACKTEST_SUITE_CORE_SPEC v2 | 11 | Extends Set J | To write |
 
-**ADRs to write** (in `docs/adr/`, next free number 0024):
+**ADRs** (in `docs/adr/`, all written 2026-09-11, status Proposed):
 
 | ADR | Decision |
 |---|---|
