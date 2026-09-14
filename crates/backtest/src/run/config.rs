@@ -151,6 +151,22 @@ pub struct RunConfig {
     /// Which protection(s) were disabled.
     #[serde(default)]
     pub unsafe_flags: UnsafeFlags,
+    /// Present iff this Run executes in a **null world**: the bars are passed
+    /// through the named null generator before the strategy sees them (spec
+    /// §2.1). It is part of the content hash, so a null-world Run can never
+    /// share a `run_id` with the real Run it is the null for, and a stored
+    /// result always says which world produced it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub null_world: Option<NullWorld>,
+}
+
+/// The null this Run's data was generated under.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NullWorld {
+    /// The null object, carrying its own `preserves`/`destroys` hypothesis.
+    pub null: crate::nulls::Null,
+    /// The draw. Members of a permutation-null Study vary exactly this.
+    pub seed: u64,
 }
 
 impl RunConfig {
@@ -172,6 +188,7 @@ impl RunConfig {
             data_snapshot: &'a str,
             unsafe_: bool,
             unsafe_flags: &'a UnsafeFlags,
+            null_world: &'a Option<NullWorld>,
         }
         let view = Hashable {
             strategy_ref: &self.strategy_ref,
@@ -185,6 +202,7 @@ impl RunConfig {
             data_snapshot: &self.data_snapshot,
             unsafe_: self.unsafe_,
             unsafe_flags: &self.unsafe_flags,
+            null_world: &self.null_world,
         };
         let bytes = canonical_json(&view).expect("RunConfig is always JSON-serializable");
         RunId::from_canonical_bytes(&bytes)
@@ -204,6 +222,20 @@ impl RunConfig {
     pub fn rehashed(mut self) -> Self {
         self.run_id = self.compute_id();
         self
+    }
+
+    /// Derive the same Run **in a null world** (spec §2.1).
+    ///
+    /// The result is a different Run with a different `run_id`, because the data
+    /// it sees is different data. That is the whole point: a null-world result
+    /// must never be mistakable for the real one, and a p-value computed against
+    /// a "null distribution" whose members are the real Run under different
+    /// seeds is not a p-value at all.
+    #[must_use]
+    pub fn in_null_world(mut self, null: crate::nulls::Null, seed: u64) -> Self {
+        self.seed = seed;
+        self.null_world = Some(NullWorld { null, seed });
+        self.rehashed()
     }
 }
 
@@ -297,6 +329,10 @@ impl RunConfigBuilder {
             data_snapshot: self.data_snapshot,
             unsafe_,
             unsafe_flags: self.unsafe_flags,
+            // The builder builds real-world Runs. A null world is applied by
+            // `in_null_world`, which is how a null member is derived from the
+            // config it is the null for.
+            null_world: None,
         };
         cfg.run_id = cfg.compute_id();
         cfg

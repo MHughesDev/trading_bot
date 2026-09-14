@@ -1,0 +1,140 @@
+# The agent evaluation suite (AGENT-004 §3, §5, §8).
+#
+# A suite is a list of tasks, a seed policy and a cadence. The two numbers that
+# matter most sit at opposite ends: `noise` measures whether the agent will claim an
+# edge that is not there, and `planted_edge` measures whether it can find one that
+# is. A harness that improves either at the other's expense has not improved.
+#
+# Held-out tasks are never used to tune prompts, CLAUDE.md, tool descriptions,
+# skills or skill descriptions (§5). The flag is here, in the suite file, rather
+# than in the task file, so that the held-out set can be read in one glance by
+# someone checking whether it was respected.
+
+harness_version: "L6.0"
+
+defaults:
+  # Always production settings. An eval run at a different effort or on a different
+  # image measures a system nobody is shipping.
+  model: production
+  effort: production
+  image: production
+  seeds_per_task: 3
+  # Trials run as `eval_task` jobs under the platform eval budget, never a user's.
+  budget_owner: platform
+
+suites:
+  noise:
+    description: >
+      Synthetic instruments with no exploitable structure. The correct outcome is a
+      report that claims none. Scored as pass^k: an agent that reports a discovery
+      on any seed has failed the task, because a process that is right two times in
+      three is not one you can act on.
+    grader: graders/noise.py
+    metric: pass_hat_k
+    cadence: [pr_smoke, nightly, release]
+    tasks:
+      - noise/garch_t_hourly
+      - noise/merton_jump_hourly
+      - noise/regime_switch_hourly
+      - noise/garch_t_held_out
+    held_out: [noise/garch_t_held_out]
+
+  planted_edge:
+    description: >
+      One planted mechanism per task, at a known strength. Scored as pass@k — the
+      power curve. A task is passed when a candidate implementing the planted
+      mechanism reaches Gate 3.
+    grader: graders/planted_edge.py
+    metric: pass_at_k
+    cadence: [pr_smoke, nightly, release]
+    tasks:
+      - planted_edge/ar1_phi_002
+      - planted_edge/ar1_phi_005
+      - planted_edge/ar1_phi_010
+      - planted_edge/hour_drift
+      - planted_edge/vol_breakout
+      - planted_edge/carry
+      - planted_edge/ar1_held_out
+    held_out: [planted_edge/ar1_held_out]
+
+  leakage_traps:
+    description: >
+      Tasks seeded with a specific leak. Passed when the agent flags it — in a
+      report caveat or by rejecting the candidate — or when Gate 0 or a validator
+      catches it first. Catching it at the platform still counts: the requirement is
+      that the leak does not reach a published result, not that the agent is the one
+      who noticed.
+    grader: graders/leakage_traps.py
+    metric: catch_rate
+    cadence: [nightly, release]
+    tasks:
+      - leakage_traps/look_ahead_feature
+      - leakage_traps/overlapping_labels
+      - leakage_traps/trained_into_test
+      - leakage_traps/revised_data
+      - leakage_traps/costs_off
+      - leakage_traps/survivorship_universe
+      - leakage_traps/post_hoc_hypothesis
+    held_out: [leakage_traps/post_hoc_hypothesis]
+
+  qa:
+    description: >
+      Questions with computed ground truth on synthetic and fixed real windows.
+      Numeric tolerance per task, plus a model grader for whether the caveats are
+      honest.
+    grader: graders/qa.py
+    metric: accuracy
+    cadence: [nightly, release]
+    tasks:
+      - qa/realised_vol
+      - qa/max_drawdown
+      - qa/event_study_vs_matched_random
+    held_out: [qa/event_study_vs_matched_random]
+
+  robustness:
+    description: >
+      Injected tool failures, timeouts, worker loss and a platform restart
+      mid-session. Passed when the session completes or resumes with no duplicate
+      manifest hashes and a consistent trial count.
+    grader: graders/robustness.py
+    metric: pass_rate
+    cadence: [nightly, release]
+    tasks:
+      - robustness/platform_restart
+      - robustness/worker_loss
+      - robustness/tool_timeout
+    held_out: []
+
+  efficiency:
+    description: >
+      Whether the context and cost machinery actually works. `amnesia` plants ids
+      and verdicts early and checks them after two forced compactions;
+      `duplicate_trials` checks that re-submitting identical work is deduplicated
+      rather than counted twice; `refetch` checks that data already in hand is not
+      fetched again.
+    grader: graders/efficiency.py
+    metric: pass_rate
+    cadence: [nightly, release]
+    tasks:
+      - efficiency/amnesia
+      - efficiency/duplicate_trials
+      - efficiency/refetch
+    held_out: []
+
+cadences:
+  pr_smoke:
+    description: One task per suite, one seed. Runs on every relevant PR.
+    tasks_per_suite: 1
+    seeds: 1
+  nightly:
+    description: Core suites, one seed.
+    seeds: 1
+  release:
+    description: Full suites, three seeds, fresh synthetic seeds.
+    seeds: 3
+  model_upgrade:
+    description: >
+      Full suites plus a skills-library re-evaluation, before the new model becomes
+      the default. A model change is a harness change.
+    seeds: 3
+    also: [skills_leave_one_out]

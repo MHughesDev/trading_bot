@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { createChart, AreaSeries, type IChartApi, type ISeriesApi } from 'lightweight-charts'
 import { useThemeStore } from '@/store/theme'
-import { chartColors } from '@/lib/chartTheme'
+import { chartPalette } from '@/lib/chartTheme'
 
 interface PnlPoint {
   time: string | number
@@ -33,20 +33,20 @@ export function PnlChart({ data }: Props) {
   useEffect(() => {
     if (!containerRef.current) return
 
-    const colors = chartColors()
+    const colors = chartPalette()
 
     const chart = createChart(containerRef.current, {
       layout: {
         background: { color: 'transparent' },
-        textColor: colors.text,
+        textColor: colors.axis,
       },
       grid: {
         vertLines: { color: colors.grid },
         horzLines: { color: colors.grid },
       },
       crosshair: { mode: 1 },
-      rightPriceScale: { borderColor: colors.border },
-      timeScale: { borderColor: colors.border, timeVisible: true },
+      rightPriceScale: { borderColor: colors.hairline },
+      timeScale: { borderColor: colors.hairline, timeVisible: true },
       handleScroll: true,
       handleScale: true,
     })
@@ -54,9 +54,9 @@ export function PnlChart({ data }: Props) {
     chartRef.current = chart
 
     seriesRef.current = chart.addSeries(AreaSeries, {
-      lineColor: colors.accent,
-      topColor: 'rgba(59,130,246,0.25)',
-      bottomColor: 'rgba(59,130,246,0)',
+      lineColor: colors.equity,
+      topColor: colors.areaFrom,
+      bottomColor: colors.areaTo,
       lineWidth: 2,
     })
 

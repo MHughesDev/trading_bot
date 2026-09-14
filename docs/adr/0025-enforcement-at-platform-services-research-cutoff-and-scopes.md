@@ -1,6 +1,6 @@
 # ADR-0025: Enforce research invariants at platform services — research cutoff, Desk project, scoped tokens, report validation
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-11
 **Deciders:** Mason Hughes (with Claude)
 **Extends:** ADR-0019, ADR-0020, ADR-0021 (Set J invariants)

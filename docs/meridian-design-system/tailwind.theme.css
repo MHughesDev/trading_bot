@@ -1,0 +1,196 @@
+/* =============================================================================
+   Tailwind CSS v4 theme mapping over tokens.css
+   -----------------------------------------------------------------------------
+   Import order matters: tailwind first, then tokens, then this @theme block.
+
+     @import "tailwindcss";
+     @import "./tokens.css";
+     @import "./tailwind.theme.css";
+
+   `@theme inline` is REQUIRED. Without `inline`, Tailwind bakes the token's
+   value into the utility at build time and theme switching silently stops
+   working — the utility would point at paper's hex forever.
+   ============================================================================= */
+
+@theme inline {
+  /* --- surfaces ---------------------------------------------------------- */
+  --color-canvas:            var(--bg-canvas);
+  --color-surface:           var(--bg-surface);
+  --color-surface-raised:    var(--bg-surface-raised);
+  --color-sunken:            var(--bg-sunken);
+  --color-inset:             var(--bg-inset);
+  --color-overlay:           var(--bg-overlay);
+  --color-scrim:             var(--bg-scrim);
+  --color-skeleton:          var(--bg-skeleton);
+
+  --color-accent:            var(--bg-accent);
+  --color-accent-hover:      var(--bg-accent-hover);
+  --color-accent-subtle:     var(--bg-accent-subtle);
+  --color-pos-solid:         var(--bg-pos);
+  --color-pos-subtle:        var(--bg-pos-subtle);
+  --color-neg-solid:         var(--bg-neg);
+  --color-neg-subtle:        var(--bg-neg-subtle);
+  --color-warn-subtle:       var(--bg-warn-subtle);
+  --color-info-subtle:       var(--bg-info-subtle);
+  --color-neutral-subtle:    var(--bg-neutral-subtle);
+
+  /* --- foreground -------------------------------------------------------- */
+  --color-fg:                var(--fg-primary);
+  --color-fg-secondary:      var(--fg-secondary);
+  --color-fg-tertiary:       var(--fg-tertiary);
+  --color-fg-disabled:       var(--fg-disabled);
+  --color-on-accent:         var(--fg-on-accent);
+  --color-on-pos:            var(--fg-on-pos);
+  --color-on-neg:            var(--fg-on-neg);
+  --color-accent-fg:         var(--fg-accent);
+  --color-pos:               var(--fg-pos);
+  --color-neg:               var(--fg-neg);
+  --color-warn:              var(--fg-warn);
+  --color-info:              var(--fg-info);
+
+  /* --- lines ------------------------------------------------------------- */
+  --color-hairline:          var(--line-hairline);
+  --color-line:              var(--line-default);
+  --color-line-strong:       var(--line-strong);
+  --color-line-accent:       var(--line-accent);
+  --color-line-pos:          var(--line-pos);
+  --color-line-neg:          var(--line-neg);
+  --color-focus:             var(--line-focus);
+
+  /* --- chart ------------------------------------------------------------- */
+  --color-chart-1:  var(--chart-1);
+  --color-chart-2:  var(--chart-2);
+  --color-chart-3:  var(--chart-3);
+  --color-chart-4:  var(--chart-4);
+  --color-chart-5:  var(--chart-5);
+  --color-chart-6:  var(--chart-6);
+  --color-chart-7:  var(--chart-7);
+  --color-chart-8:  var(--chart-8);
+  --color-chart-up:   var(--chart-up);
+  --color-chart-down: var(--chart-down);
+  --color-chart-grid: var(--chart-grid);
+
+  /* --- strategy graph ---------------------------------------------------- */
+  --color-node-data:      var(--node-data);
+  --color-node-indicator: var(--node-indicator);
+  --color-node-signal:    var(--node-signal);
+  --color-node-logic:     var(--node-logic);
+  --color-node-ai:        var(--node-ai);
+  --color-node-intent:    var(--node-intent);
+  --color-node-risk:      var(--node-risk);
+  --color-edge:           var(--edge);
+  --color-edge-active:    var(--edge-active);
+
+  /* --- radius ------------------------------------------------------------ */
+  --radius-xs:   var(--r-xs);
+  --radius-sm:   var(--r-sm);
+  --radius-md:   var(--r-md);
+  --radius-lg:   var(--r-lg);
+  --radius-xl:   var(--r-xl);
+  --radius-2xl:  var(--r-2xl);
+  --radius-pill: var(--r-pill);
+
+  /* --- typography -------------------------------------------------------- */
+  --font-display: var(--font-display);
+  --font-sans:    var(--font-ui);
+  --font-mono:    var(--font-mono);
+  --font-numeric: var(--font-numeric);
+
+  --text-2xs:  var(--t-10);
+  --text-xs:   var(--t-11);
+  --text-sm:   var(--t-12);
+  --text-base: var(--t-13);
+  --text-md:   var(--t-14);
+  --text-lg:   var(--t-16);
+  --text-xl:   var(--t-18);
+  --text-2xl:  var(--t-20);
+  --text-3xl:  var(--t-24);
+  --text-4xl:  var(--t-28);
+  --text-5xl:  var(--t-32);
+  --text-6xl:  var(--t-40);
+
+  /* --- spacing ----------------------------------------------------------- */
+  --spacing-1:  var(--s-1);
+  --spacing-2:  var(--s-2);
+  --spacing-3:  var(--s-3);
+  --spacing-4:  var(--s-4);
+  --spacing-5:  var(--s-5);
+  --spacing-6:  var(--s-6);
+  --spacing-7:  var(--s-7);
+  --spacing-8:  var(--s-8);
+  --spacing-10: var(--s-10);
+  --spacing-12: var(--s-12);
+  --spacing-14: var(--s-14);
+  --spacing-16: var(--s-16);
+  --spacing-20: var(--s-20);
+  --spacing-24: var(--s-24);
+  --spacing-32: var(--s-32);
+
+  /* --- control heights (density-aware) ----------------------------------- */
+  --height-ctl-xs: var(--ctl-h-xs);
+  --height-ctl-sm: var(--ctl-h-sm);
+  --height-ctl-md: var(--ctl-h-md);
+  --height-ctl-lg: var(--ctl-h-lg);
+  --height-ctl-xl: var(--ctl-h-xl);
+  --height-row:    var(--row-h);
+  --height-nav:    var(--nav-h);
+  --height-subnav: var(--subnav-h);
+
+  /* --- rails ------------------------------------------------------------- */
+  --width-rail:     var(--rail-w);
+  --width-panel-sm: var(--panel-w-sm);
+  --width-panel-md: var(--panel-w-md);
+  --width-panel-lg: var(--panel-w-lg);
+  --width-content:  var(--content-max);
+
+  /* --- elevation --------------------------------------------------------- */
+  --shadow-e1: var(--shadow-1);
+  --shadow-e2: var(--shadow-2);
+  --shadow-e3: var(--shadow-3);
+  --shadow-e4: var(--shadow-4);
+  --shadow-focus-ring: var(--shadow-focus);
+  --shadow-glow-accent: var(--glow-accent);
+  --shadow-glow-pos:    var(--glow-pos);
+  --shadow-glow-neg:    var(--glow-neg);
+
+  /* --- motion ------------------------------------------------------------ */
+  --animate-duration-1: var(--dur-1);
+  --animate-duration-2: var(--dur-2);
+  --animate-duration-3: var(--dur-3);
+  --animate-duration-4: var(--dur-4);
+  --ease-out-soft:   var(--ease-out);
+  --ease-in-out-soft: var(--ease-in-out);
+  --ease-spring:     var(--ease-spring);
+}
+
+/* =============================================================================
+   Utilities the design system needs and Tailwind does not ship
+   ============================================================================= */
+
+@utility num {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--numeric-feature);
+  letter-spacing: var(--numeric-tracking);
+}
+
+/* Theme-aware micro-label. Consumes all four --label-* tokens; never hand-roll
+   uppercase/tracking on a label. */
+@utility label {
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-tracking);
+  color: var(--fg-tertiary);
+}
+
+@utility focus-ring {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* Variants for theme-scoped overrides. Use sparingly — if you need many of
+   these, the difference probably belongs in a token instead. */
+@custom-variant paper (&:where([data-theme="paper"] *));
+@custom-variant terminal (&:where([data-theme="terminal"] *));
+@custom-variant compact (&:where([data-density="compact"] *));

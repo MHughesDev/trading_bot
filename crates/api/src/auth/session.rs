@@ -17,12 +17,25 @@ use crate::state::AppState;
 pub struct BearerToken {
     pub token: String,
     pub user_id: Uuid,
+    /// The scopes this session carries (AGENT-001 s6, migration 0038).
+    ///
+    /// A web login holds `web:full` and therefore everything; a service session
+    /// holds exactly what it was minted with. Carrying the scopes on the extractor
+    /// is what lets a handler ask "may this caller do X" without a second query,
+    /// and a handler that forgets to ask is the only remaining way past them.
+    pub scopes: Vec<String>,
 }
 
 impl BearerToken {
     #[must_use]
     pub fn user_id(&self) -> Uuid {
         self.user_id
+    }
+
+    /// Whether this token permits `required`.
+    #[must_use]
+    pub fn permits(&self, required: &str) -> bool {
+        super::scopes::permits(&self.scopes, required)
     }
 }
 
@@ -57,8 +70,8 @@ where
 
         let app = AppState::from_ref(state);
 
-        let user_id: Option<Uuid> = sqlx::query_scalar(
-            "SELECT user_id FROM sessions WHERE token = $1 AND expires_at > now()",
+        let row: Option<(Uuid, Vec<String>)> = sqlx::query_as(
+            "SELECT user_id, scopes FROM sessions WHERE token = $1 AND expires_at > now()",
         )
         .bind(&token)
         .fetch_optional(&app.pg)
@@ -66,8 +79,12 @@ where
         .ok()
         .flatten();
 
-        let user_id = user_id.ok_or(Unauthorized)?;
+        let (user_id, scopes) = row.ok_or(Unauthorized)?;
 
-        Ok(BearerToken { token, user_id })
+        Ok(BearerToken {
+            token,
+            user_id,
+            scopes,
+        })
     }
 }

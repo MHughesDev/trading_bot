@@ -21,6 +21,8 @@ domain = { workspace = true }
 features = { workspace = true }
 strategy-runtime = { workspace = true }
 storage = { workspace = true }
+ledger = { workspace = true }
+dataplane = { workspace = true }
 
 anyhow = { workspace = true }
 thiserror = { workspace = true }
@@ -45,6 +47,8 @@ nautilus-model = { workspace = true }
 nautilus-core = { workspace = true }
 
 [dev-dependencies]
+storage = { workspace = true }
+clickhouse = { workspace = true }
 rust_decimal_macros = { workspace = true }
 
 [lints]

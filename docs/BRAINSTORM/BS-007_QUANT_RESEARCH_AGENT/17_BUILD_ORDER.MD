@@ -66,8 +66,22 @@ and `08_prediction_series`.
 
 The spike answers 03 §17 questions 1–3 and verifies the SDK option names used in 03 and 04.
 
-**Ops task, start immediately:** deep history backfill (06 §6, S1). Every later phase
-needs years of bars.
+**Ops task:** deep history backfill (06 §6, S1). Every later phase needs years of bars.
+
+> **UNBLOCKED 2026-09-11.** Set L Phase 0 is complete: `market_bars_v2` exists, the
+> 99,789 existing rows are migrated and verified, writers and readers are moved, and
+> `market_bars` is frozen read-only with a CI guard. **The backfill may now start.**
+> Write bars through `BarStore::insert_collected`, which targets v2 — do not write
+> `market_bars`, and do not `OPTIMIZE` it. The original constraint, for the record:
+>
+> **Ordering constraint added 2026-09-11 — the backfill was blocked on Set L Phase 0.**
+> The `market_bars` cross-timeframe collapse (DATA-005 §3) was confirmed on the live
+> table: 18 of BTC-USD's 22 1h bars were queued for destruction, i.e. every 1h bar
+> overlapping 1m coverage. The rows were rescued to a snapshot, but the schema still
+> destroys bars on merge, and **the backfill writes exactly the bars that collide**.
+> So `market_bars_v2` (DA-16, DA-17) is pulled forward as
+> [Set L Phase 0](../../plans/plan-sets/set-L/phase-0-bar-schema-v2.md), is independent
+> of the rest of Set L, and must complete before the backfill starts.
 
 **Reconcile Set K first.** Parts of Set K shipped with FEAT-003 Phase 1 (the real
 `SimRunExecutor`). Fold the remaining K items into L and M: Postgres/ClickHouse stores,

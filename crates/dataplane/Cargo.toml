@@ -1,0 +1,25 @@
+[package]
+name = "dataplane"
+version = "0.1.0"
+edition = "2021"
+
+# L0/L1 data plane of the ML platform spec (docs/ml-platform-context-pack/spec/SPEC.md
+# §1–§3): instrument identity, the canonical bar contract, point-in-time
+# resolution, asset-class sidecars, alignment, and dataset/feature/label/split
+# specifications. Pure logic; storage adapters live beside the tables they touch.
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+rust_decimal = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+rust_decimal_macros = { workspace = true }
+
+[lints]
+workspace = true

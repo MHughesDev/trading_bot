@@ -19,6 +19,7 @@ import { toast } from '@/hooks/useToast'
 import { SignificanceCard } from './SignificanceCard'
 import { DistributionViewer } from './DistributionViewer'
 import { GateFunnelBoard } from './GateFunnelBoard'
+import { GateStackBoard } from './GateStackBoard'
 import { NullPicker } from './NullPicker'
 import { VaultPanel } from './VaultPanel'
 
@@ -151,6 +152,12 @@ export function ExperimentDetail({ exp }: { exp: ExperimentView }) {
               onAdvance={() => advance.mutate()}
             />
           )}
+          {/* SPEC §12.3's sixteen, beside the five-stage funnel rather than
+              instead of it: the funnel is what runs today, the stack is what
+              judges. Every number arrives with the trial count behind it
+              (§12.2), and a gate with no recorded verdict says so rather than
+              being left out (plan 5.5). */}
+          <GateStackBoard subject={exp.experiment_id} />
         </div>
         <div className="flex flex-col gap-4">
           <SignificanceCard significance={funnel.data?.significance ?? null} />

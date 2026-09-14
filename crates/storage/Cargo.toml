@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 domain = { workspace = true }
+dataplane = { workspace = true }
+async-trait = "0.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }

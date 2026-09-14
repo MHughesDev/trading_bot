@@ -1,0 +1,25 @@
+[package]
+name = "invariants"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Build-blocking invariant tests (docs/ml-platform-context-pack/backlog/ACCEPTANCE-TESTS.md).
+# Static checks run in every `cargo test`; database checks are #[ignore]d and run
+# against live services in CI.
+
+[dependencies]
+
+[dev-dependencies]
+regex = "1"
+ledger = { workspace = true }
+serde_json = { workspace = true }
+mcp-server-lib = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+clickhouse = { workspace = true }
+serde = { workspace = true }
+storage = { workspace = true }
+
+[lints]
+workspace = true

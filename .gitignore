@@ -56,3 +56,6 @@ Thumbs.db
 
 # macOS AppleDouble junk
 ._*
+
+# Local write-once ledger anchor store (PLATFORM_WORM_DIR)
+data/worm/

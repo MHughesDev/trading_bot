@@ -87,7 +87,7 @@ function CrpsSparkline({ series }: { series: QualitySeries[] }) {
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
-      <polyline points={pts} fill="none" stroke="var(--tb-accent)" strokeWidth={1.5} />
+      <polyline points={pts} fill="none" stroke="var(--bg-accent)" strokeWidth={1.5} />
     </svg>
   )
 }
@@ -134,7 +134,7 @@ function QuantileFan({ cf }: { cf: CalibratedForecast }) {
         y={Math.min(toY(q10), toY(q90))}
         width={bw * 4}
         height={Math.abs(toY(q10) - toY(q90))}
-        fill="var(--tb-accent)"
+        fill="var(--bg-accent)"
         opacity={0.12}
       />
       {/* 25-75 band */}
@@ -143,7 +143,7 @@ function QuantileFan({ cf }: { cf: CalibratedForecast }) {
         y={Math.min(toY(q25), toY(q75))}
         width={bw * 2}
         height={Math.abs(toY(q25) - toY(q75))}
-        fill="var(--tb-accent)"
+        fill="var(--bg-accent)"
         opacity={0.3}
       />
       {/* median line */}
@@ -152,7 +152,7 @@ function QuantileFan({ cf }: { cf: CalibratedForecast }) {
         y1={toY(q50)}
         x2={cx + bw * 2}
         y2={toY(q50)}
-        stroke="var(--tb-accent)"
+        stroke="var(--bg-accent)"
         strokeWidth={2}
       />
       {/* zero line */}
@@ -161,18 +161,18 @@ function QuantileFan({ cf }: { cf: CalibratedForecast }) {
         y1={toY(0)}
         x2={W}
         y2={toY(0)}
-        stroke="var(--tb-border)"
+        stroke="var(--line-hairline)"
         strokeWidth={1}
         strokeDasharray="4 3"
       />
       {/* labels */}
-      <text x={cx + bw * 2 + 4} y={toY(q90) + 4} fontSize={9} fill="var(--tb-text-muted)">
+      <text x={cx + bw * 2 + 4} y={toY(q90) + 4} fontSize={9} fill="var(--fg-secondary)">
         q90
       </text>
-      <text x={cx + bw * 2 + 4} y={toY(q50) + 4} fontSize={9} fill="var(--tb-text-muted)">
+      <text x={cx + bw * 2 + 4} y={toY(q50) + 4} fontSize={9} fill="var(--fg-secondary)">
         med
       </text>
-      <text x={cx + bw * 2 + 4} y={toY(q10) + 4} fontSize={9} fill="var(--tb-text-muted)">
+      <text x={cx + bw * 2 + 4} y={toY(q10) + 4} fontSize={9} fill="var(--fg-secondary)">
         q10
       </text>
     </svg>
@@ -206,20 +206,20 @@ function ReliabilityDiagram({ series }: { series: QualitySeries[] }) {
         y1={toY(0.5)}
         x2={140}
         y2={toY(0.9)}
-        stroke="var(--tb-border)"
+        stroke="var(--line-hairline)"
         strokeWidth={1}
         strokeDasharray="4 3"
       />
       {targets.map((t, i) => (
         <g key={t}>
           {/* target marker */}
-          <circle cx={toX(i)} cy={toY(t)} r={3} fill="var(--tb-border)" />
+          <circle cx={toX(i)} cy={toY(t)} r={3} fill="var(--line-hairline)" />
           {/* actual dot */}
           <circle
             cx={toX(i)}
             cy={toY(actuals[i])}
             r={5}
-            fill={Math.abs(actuals[i] - t) < 0.05 ? '#22c55e' : '#f59e0b'}
+            fill={Math.abs(actuals[i] - t) < 0.05 ? 'var(--fg-pos)' : 'var(--fg-warn)'}
           />
           {/* vertical gap line */}
           <line
@@ -227,7 +227,7 @@ function ReliabilityDiagram({ series }: { series: QualitySeries[] }) {
             y1={toY(t)}
             x2={toX(i)}
             y2={toY(actuals[i])}
-            stroke="var(--tb-border)"
+            stroke="var(--line-hairline)"
             strokeWidth={1}
           />
           <text
@@ -235,7 +235,7 @@ function ReliabilityDiagram({ series }: { series: QualitySeries[] }) {
             y={H - 2}
             textAnchor="middle"
             fontSize={9}
-            fill="var(--tb-text-muted)"
+            fill="var(--fg-secondary)"
           >
             {labels[i]}
           </text>
@@ -243,7 +243,7 @@ function ReliabilityDiagram({ series }: { series: QualitySeries[] }) {
             x={toX(i) + 8}
             y={toY(actuals[i]) - 4}
             fontSize={9}
-            fill="var(--tb-text-muted)"
+            fill="var(--fg-secondary)"
           >
             {pct(actuals[i])}
           </text>
@@ -283,7 +283,7 @@ function CoverageVsNominal({ series }: { series: QualitySeries[] }) {
               y={H - 10 - nomH}
               width={barW * 0.8}
               height={nomH}
-              fill="var(--tb-border)"
+              fill="var(--line-hairline)"
               opacity={0.5}
             />
             {/* actual */}
@@ -292,7 +292,7 @@ function CoverageVsNominal({ series }: { series: QualitySeries[] }) {
               y={H - 10 - actH}
               width={barW * 0.6}
               height={actH}
-              fill={good ? '#22c55e' : '#f59e0b'}
+              fill={good ? 'var(--fg-pos)' : 'var(--fg-warn)'}
               opacity={0.8}
             />
             <text
@@ -300,7 +300,7 @@ function CoverageVsNominal({ series }: { series: QualitySeries[] }) {
               y={H - 1}
               textAnchor="middle"
               fontSize={9}
-              fill="var(--tb-text-muted)"
+              fill="var(--fg-secondary)"
             >
               {b.label}
             </text>
@@ -309,7 +309,7 @@ function CoverageVsNominal({ series }: { series: QualitySeries[] }) {
               y={H - 12 - actH}
               textAnchor="middle"
               fontSize={8}
-              fill="var(--tb-text-muted)"
+              fill="var(--fg-secondary)"
             >
               {pct(b.actual)}
             </text>
@@ -340,11 +340,11 @@ export function ForecastChartsTab({ modelId }: { modelId: string }) {
   return (
     <div className="space-y-4">
       {alerts.length > 0 && (
-        <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 flex gap-2">
-          <AlertTriangle className="h-4 w-4 text-yellow-400 shrink-0 mt-0.5" />
+        <div className="rounded-lg border border-line-warn bg-warn-subtle p-3 flex gap-2">
+          <AlertTriangle className="h-4 w-4 text-warn shrink-0 mt-0.5" />
           <div className="space-y-1">
             {alerts.map((a, i) => (
-              <p key={i} className="text-xs text-yellow-300">
+              <p key={i} className="text-xs text-warn">
                 <span className="font-medium">{a.kind}</span>: {a.message}
               </p>
             ))}

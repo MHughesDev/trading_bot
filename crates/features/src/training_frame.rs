@@ -1,39 +1,16 @@
 //! PURE training-frame assembly: OHLCV bars → feature columns + forward-return
 //! label, with warm-up / trailing-label rows dropped.
 //!
-//! This is the materialization compute core (Set I, I-0.5). It mirrors the
-//! *column set* of the trainer sidecar's `apps/model-trainer/app/features.py`
-//! (`fs_core_ohlcv_v3` and friends) so the columns a model trains on match what
-//! the live inference path produces. Crucially, the indicator values come from
-//! the **same pure primitives the live path uses** (`Ema`, `Rsi`, and the
-//! rolling/return helpers below), so train and serve agree by construction
-//! rather than by two independent implementations happening to match.
+//! Every column comes from [`crate::runtime`], the single feature runtime that the
+//! backtest, the warm start and the live serve also use (INV-14). There is no
+//! column computed here and nowhere else.
 //!
 //! Purity contract (same as the rest of the crate): no I/O, no wall-clock, no
-//! side effects. Identical input ⇒ identical output, which is what lets a
-//! reproduce-from-hash run (Set I Phase 3) recompute a dataset deterministically.
-//!
-//! Parity note: pandas seeds `ewm(min_periods=period)` RSI from the first
-//! observation, whereas [`crate::Rsi`] uses Wilder's classic SMA seed. The two
-//! differ by a handful of values at the very start of a series. We deliberately
-//! prefer the Wilder primitive because it is the one the *live* feature path
-//! emits — exact pandas parity is a separate, explicitly-scoped concern in the
-//! Phase 3 reproducibility work, not this materialization.
-
-use crate::{Ema, Rsi};
+//! side effects. Identical input ⇒ identical output.
 
 /// One OHLCV bar as plain `f64`s (statistical, not money — Set I D-4: indicator
 /// math is float, monetary quantities never are).
-#[derive(Clone, Copy, Debug)]
-pub struct OhlcvRow {
-    /// `available_time` in Unix nanoseconds (the universal PIT sort key).
-    pub ts_ns: i64,
-    pub open: f64,
-    pub high: f64,
-    pub low: f64,
-    pub close: f64,
-    pub volume: f64,
-}
+pub use dataplane::feature::FeatureRow as OhlcvRow;
 
 /// A columnar feature + label frame, NaN-free and aligned by row.
 ///
@@ -47,8 +24,31 @@ pub struct TrainingFrame {
     pub ts_ns: Vec<i64>,
     /// One `Vec<f64>` per `feature_names` entry, each `ts_ns.len()` long.
     pub columns: Vec<Vec<f64>>,
+    /// Staleness companion, one `Vec` per `feature_names` entry: how old, in
+    /// minutes, the newest observation behind that value was. Empty on a frame
+    /// built from rows that were never aligned to the master clock.
+    ///
+    /// A value without its age is a forward-fill nobody can see (INV-11), so the
+    /// aligned builder always populates this.
+    pub age_minutes: Vec<Vec<i64>>,
+    /// Quality companion, one `Vec` per `feature_names` entry: the union of the
+    /// quality flags across that feature's declared window.
+    pub quality: Vec<Vec<u32>>,
     /// Forward simple return over the label horizon, one per surviving row.
     pub label: Vec<f64>,
+    /// Average-uniqueness sample weight, one per surviving row (SPEC §3.4).
+    ///
+    /// Labels with overlapping horizons are not independent observations: with a
+    /// 60-bar horizon on 1-minute bars, sixty consecutive labels describe almost
+    /// the same stretch of future, and a model that weights them equally has been
+    /// told the same thing sixty times. The weight is each label's mean of
+    /// `1/concurrency` over its own span.
+    ///
+    /// Empty on a frame built without alignment; `build_aligned_training_frame`
+    /// always populates it, which is what lets the label spec declare
+    /// `sample_weight_method = uniqueness` truthfully rather than `none`
+    /// (ADR-P2-22).
+    pub sample_weight: Vec<f64>,
 }
 
 impl TrainingFrame {
@@ -63,8 +63,8 @@ impl TrainingFrame {
 
 /// Build a [`TrainingFrame`] from one instrument's ascending OHLCV history.
 ///
-/// `features` is the requested column set (names not computable by this crate
-/// are silently skipped, matching `features.py`). `horizon_bars` is the forward
+/// `features` is the requested column set (names no implementation answers to are
+/// skipped). `horizon_bars` is the forward
 /// label window measured in bars (use [`label_horizon_bars`] to convert a token
 /// like `"1h"` at a timeframe like `"5m"`). The label is the simple forward
 /// return `close[i+H] / close[i] - 1`.
@@ -94,10 +94,13 @@ pub fn build_training_frame(
     let n = bars.len();
     let close: Vec<f64> = bars.iter().map(|b| b.close).collect();
 
-    // Compute every requested column as `Vec<Option<f64>>` (None == NaN).
+    // Every requested column from the one runtime (None == absent).
     let raw_columns: Vec<Vec<Option<f64>>> = feature_names
         .iter()
-        .map(|name| compute_column(name, bars, &close))
+        .map(|name| match crate::runtime::feature(name) {
+            Ok(f) => crate::runtime::backfill_column(f.as_ref(), bars),
+            Err(_) => vec![None; n],
+        })
         .collect();
 
     // Forward-return label: None for the trailing `H` rows with no future bar.
@@ -136,8 +139,77 @@ pub fn build_training_frame(
         feature_names,
         ts_ns,
         columns,
+        age_minutes: Vec::new(),
+        quality: Vec::new(),
         label: kept_label,
+        sample_weight: Vec::new(),
     }
+}
+
+/// Clamp a bar horizon into the `u32` the label module works in. A horizon that
+/// does not fit is a configuration error long before it reaches here; saturating
+/// keeps the weight computation total rather than panicking inside a build.
+fn horizon_bars_u32(h: u64) -> u32 {
+    u32::try_from(h).unwrap_or(u32::MAX)
+}
+
+/// Build a training frame on the **UTC master clock** (SPEC 2, INV-11).
+///
+/// `obs` is the sparse bar series with its provenance; it is densified onto the
+/// grid of `step_ns` ticks by the one densifier
+/// ([`crate::align::densify_bars`]), features are computed over the densified
+/// rows, and every feature column is emitted with its `_age_minutes` and
+/// `_quality` companions. A gap -- a venue outage, a holiday, a crypto weekend
+/// -- becomes a run of rows whose age says how stale they are, instead of
+/// silently disappearing and making the bars on either side look adjacent.
+#[must_use]
+pub fn build_aligned_training_frame(
+    obs: &[crate::align::BarObs],
+    features: &[String],
+    horizon_bars: u64,
+    step_ns: i64,
+) -> TrainingFrame {
+    let clock = crate::align::densify_bars(obs, step_ns);
+    let mut frame = build_training_frame(&clock.rows, features, horizon_bars);
+
+    // Map each surviving row back to its grid tick to read off provenance. The
+    // builder drops rows but never reorders them, so the tick is the key.
+    let mut tick_index = std::collections::HashMap::with_capacity(clock.len());
+    for (i, row) in clock.rows.iter().enumerate() {
+        tick_index.insert(row.ts_ns, i);
+    }
+
+    // Average-uniqueness weights, computed over the *densified clock* and then
+    // subset to the rows that survived the NaN drop. Computing them over the
+    // surviving rows alone would understate concurrency: a dropped warm-up row's
+    // label still overlaps the ones that follow it.
+    let intervals = dataplane::label::horizon_intervals(clock.len(), horizon_bars_u32(horizon_bars));
+    let weights = dataplane::label::uniqueness_weights(&intervals, clock.len().max(1));
+    frame.sample_weight = frame
+        .ts_ns
+        .iter()
+        .map(|ts| tick_index.get(ts).and_then(|i| weights.get(*i)).copied().unwrap_or(1.0))
+        .collect();
+
+    frame.age_minutes = Vec::with_capacity(frame.feature_names.len());
+    frame.quality = Vec::with_capacity(frame.feature_names.len());
+    for name in &frame.feature_names {
+        let lookback = crate::runtime::lookback_bars(name).unwrap_or(1);
+        let mut ages = Vec::with_capacity(frame.ts_ns.len());
+        let mut quals = Vec::with_capacity(frame.ts_ns.len());
+        for &ts in &frame.ts_ns {
+            let (age, q) = tick_index
+                .get(&ts)
+                .map_or((0, dataplane::quality::QualityFlags::NONE), |&i| {
+                    clock.provenance(lookback, i)
+                });
+            ages.push(age);
+            quals.push(q.0);
+        }
+        frame.age_minutes.push(ages);
+        frame.quality.push(quals);
+    }
+    frame
 }
 
 // ---------------------------------------------------------------------------
@@ -239,296 +311,8 @@ fn token_to_minutes(token: &str) -> Option<f64> {
     Some(value * mult)
 }
 
-/// Whether `compute_column` can produce a value for this name.
 fn is_known_feature(name: &str) -> bool {
-    crate::feature_sets::is_known(name)
-}
-
-/// Compute a single named column over the series, NaN (`None`) during warm-up.
-#[allow(clippy::too_many_lines)]
-fn compute_column(name: &str, bars: &[OhlcvRow], close: &[f64]) -> Vec<Option<f64>> {
-    let n = bars.len();
-    match name {
-        // ── Passthrough ──────────────────────────────────────────────────
-        "open" => bars.iter().map(|b| finite(b.open)).collect(),
-        "high" => bars.iter().map(|b| finite(b.high)).collect(),
-        "low" => bars.iter().map(|b| finite(b.low)).collect(),
-        "close" => bars.iter().map(|b| finite(b.close)).collect(),
-        "volume" => bars.iter().map(|b| finite(b.volume)).collect(),
-
-        // ── EMA family ───────────────────────────────────────────────────
-        _ if name.starts_with("ema_") => {
-            let period = suffix_usize(name, "ema_").unwrap_or(0);
-            if period == 0 {
-                return vec![None; n];
-            }
-            let mut ema = Ema::new(period);
-            close.iter().map(|&c| finite(ema.update(c))).collect()
-        }
-
-        // ── RSI family ───────────────────────────────────────────────────
-        _ if name.starts_with("rsi_") => {
-            let period = suffix_usize(name, "rsi_").unwrap_or(0);
-            if period < 2 {
-                return vec![None; n];
-            }
-            let mut rsi = Rsi::new(period);
-            close
-                .iter()
-                .map(|&c| rsi.update(c).and_then(finite))
-                .collect()
-        }
-
-        // ── Rolling moments ───────────────────────────────────────────────
-        _ if name.starts_with("rolling_mean_") => {
-            let w = suffix_usize(name, "rolling_mean_").unwrap_or(0);
-            rolling(close, w, rolling_mean)
-        }
-        _ if name.starts_with("rolling_std_") => {
-            let w = suffix_usize(name, "rolling_std_").unwrap_or(0);
-            rolling(close, w, rolling_std)
-        }
-
-        // ── Returns / lags (I-3.2) ────────────────────────────────────────
-        _ if name.starts_with("returns_") => {
-            let k = suffix_usize(name, "returns_").unwrap_or(0);
-            (0..n)
-                .map(|i| {
-                    if k == 0 || i < k || close[i - k] == 0.0 {
-                        None
-                    } else {
-                        finite(close[i] / close[i - k] - 1.0)
-                    }
-                })
-                .collect()
-        }
-        "log_returns_1" => (0..n)
-            .map(|i| {
-                if i == 0 || close[i - 1] <= 0.0 || close[i] <= 0.0 {
-                    None
-                } else {
-                    finite((close[i] / close[i - 1]).ln())
-                }
-            })
-            .collect(),
-
-        // ── Momentum (I-3.2): close[i]/close[i-k] - 1 ───────────────────
-        _ if name.starts_with("momentum_") => {
-            let k = suffix_usize(name, "momentum_").unwrap_or(0);
-            (0..n)
-                .map(|i| {
-                    if k == 0 || i < k || close[i - k] == 0.0 {
-                        None
-                    } else {
-                        finite(close[i] / close[i - k] - 1.0)
-                    }
-                })
-                .collect()
-        }
-
-        // ── Volatility estimators (I-3.2) ─────────────────────────────────
-        // Parkinson: σ² = 1/(4·ln2·N) · Σ (ln(H/L))²
-        _ if name.starts_with("parkinson_vol_") => {
-            let w = suffix_usize(name, "parkinson_vol_").unwrap_or(0);
-            let inv_4ln2 = 1.0 / (4.0 * 2.0_f64.ln());
-            let sq: Vec<Option<f64>> = bars
-                .iter()
-                .map(|b| {
-                    if b.low <= 0.0 || b.high <= 0.0 {
-                        None
-                    } else {
-                        finite((b.high / b.low).ln().powi(2) * inv_4ln2)
-                    }
-                })
-                .collect();
-            // Rolling mean of sq over w bars, then sqrt
-            #[allow(clippy::cast_precision_loss)]
-            rolling_option(&sq, w, |win| {
-                let sum: f64 = win.iter().sum();
-                finite((sum / win.len() as f64).sqrt())
-            })
-        }
-        // Garman–Klass: σ² = 0.5·(ln H/L)² - (2·ln2-1)·(ln C/O)²
-        _ if name.starts_with("garman_klass_vol_") => {
-            let w = suffix_usize(name, "garman_klass_vol_").unwrap_or(0);
-            let c1 = 2.0 * 2.0_f64.ln() - 1.0;
-            let sq: Vec<Option<f64>> = bars
-                .iter()
-                .map(|b| {
-                    if b.low <= 0.0 || b.high <= 0.0 || b.open <= 0.0 || b.close <= 0.0 {
-                        None
-                    } else {
-                        let hl = 0.5 * (b.high / b.low).ln().powi(2);
-                        let co = c1 * (b.close / b.open).ln().powi(2);
-                        finite(hl - co)
-                    }
-                })
-                .collect();
-            #[allow(clippy::cast_precision_loss)]
-            rolling_option(&sq, w, |win| {
-                let sum: f64 = win.iter().map(|v| v.max(0.0)).sum();
-                finite((sum / win.len() as f64).sqrt())
-            })
-        }
-
-        // ── Z-score (I-3.2): (close - mean_w) / std_w ────────────────────
-        _ if name.starts_with("zscore_") => {
-            let w = suffix_usize(name, "zscore_").unwrap_or(0);
-            (0..n)
-                .map(|i| {
-                    if w == 0 || i + 1 < w {
-                        None
-                    } else {
-                        let win = &close[i + 1 - w..=i];
-                        let mean = rolling_mean(win)?;
-                        let std = rolling_std(win)?;
-                        if std == 0.0 {
-                            None
-                        } else {
-                            finite((close[i] - mean) / std)
-                        }
-                    }
-                })
-                .collect()
-        }
-
-        // ── Relative volume (I-3.2): volume / rolling_mean(volume, w) ─────
-        _ if name.starts_with("rel_volume_") => {
-            let w = suffix_usize(name, "rel_volume_").unwrap_or(0);
-            let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect();
-            let mean_vol = rolling(&vol, w, rolling_mean);
-            (0..n)
-                .map(|i| {
-                    let mv = mean_vol[i]?;
-                    if mv <= 0.0 {
-                        None
-                    } else {
-                        finite(vol[i] / mv)
-                    }
-                })
-                .collect()
-        }
-
-        // ── On-balance volume (I-3.2) ─────────────────────────────────────
-        "obv" => {
-            let mut obv = 0.0f64;
-            let mut out = vec![None; n];
-            for i in 0..n {
-                if i > 0 {
-                    let sign = if close[i] > close[i - 1] {
-                        1.0
-                    } else if close[i] < close[i - 1] {
-                        -1.0
-                    } else {
-                        0.0
-                    };
-                    obv += sign * bars[i].volume;
-                }
-                out[i] = finite(obv);
-            }
-            out
-        }
-
-        // ── Calendar / session (I-3.2): sin/cos encodings ─────────────────
-        // ts_ns is Unix nanoseconds; hour = (ts_ns / 1e9 / 3600) % 24
-        "hour_sin" => bars
-            .iter()
-            .map(|b| {
-                let hour = ((b.ts_ns / 1_000_000_000 / 3600) % 24) as f64;
-                finite((hour * std::f64::consts::TAU / 24.0).sin())
-            })
-            .collect(),
-        "hour_cos" => bars
-            .iter()
-            .map(|b| {
-                let hour = ((b.ts_ns / 1_000_000_000 / 3600) % 24) as f64;
-                finite((hour * std::f64::consts::TAU / 24.0).cos())
-            })
-            .collect(),
-        "dow_sin" => bars
-            .iter()
-            .map(|b| {
-                // Unix epoch = Thursday (day 4 of week, 0=Mon in ISO).
-                let days = b.ts_ns / 1_000_000_000 / 86400;
-                let dow = ((days + 3) % 7) as f64; // 0=Mon
-                finite((dow * std::f64::consts::TAU / 7.0).sin())
-            })
-            .collect(),
-        "dow_cos" => bars
-            .iter()
-            .map(|b| {
-                let days = b.ts_ns / 1_000_000_000 / 86400;
-                let dow = ((days + 3) % 7) as f64;
-                finite((dow * std::f64::consts::TAU / 7.0).cos())
-            })
-            .collect(),
-
-        _ => vec![None; n],
-    }
-}
-
-/// Rolling window reducer over a `Vec<Option<f64>>` (None propagates as None in window).
-fn rolling_option<F>(values: &[Option<f64>], window: usize, f: F) -> Vec<Option<f64>>
-where
-    F: Fn(&Vec<f64>) -> Option<f64>,
-{
-    let n = values.len();
-    (0..n)
-        .map(|i| {
-            if window == 0 || i + 1 < window {
-                return None;
-            }
-            let win: Vec<f64> = values[i + 1 - window..=i]
-                .iter()
-                .filter_map(|v| *v)
-                .collect();
-            if win.len() < window {
-                None
-            } else {
-                f(&win)
-            }
-        })
-        .collect()
-}
-
-/// Apply a window reducer over the trailing `window` closes; `None` until `window` samples
-/// exist (pandas `rolling(window)` semantics).
-fn rolling(close: &[f64], window: usize, f: fn(&[f64]) -> Option<f64>) -> Vec<Option<f64>> {
-    let n = close.len();
-    (0..n)
-        .map(|i| {
-            if window == 0 || i + 1 < window {
-                None
-            } else {
-                f(&close[i + 1 - window..=i])
-            }
-        })
-        .collect()
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn rolling_mean(win: &[f64]) -> Option<f64> {
-    let n = win.len();
-    if n == 0 {
-        return None;
-    }
-    finite(win.iter().sum::<f64>() / n as f64)
-}
-
-/// Sample standard deviation (ddof = 1), matching pandas `rolling.std()`.
-#[allow(clippy::cast_precision_loss)]
-fn rolling_std(win: &[f64]) -> Option<f64> {
-    let n = win.len();
-    if n < 2 {
-        return None;
-    }
-    let mean = win.iter().sum::<f64>() / n as f64;
-    let var = win.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n as f64 - 1.0);
-    finite(var.sqrt())
-}
-
-fn suffix_usize(name: &str, prefix: &str) -> Option<usize> {
-    name.strip_prefix(prefix)?.split('_').next()?.parse().ok()
+    crate::runtime::is_known(name)
 }
 
 /// Pass through only finite values; NaN/±∞ become `None` so they are dropped.
@@ -589,7 +373,7 @@ mod tests {
         // 20 strictly increasing closes; rsi_14 is None until enough changes,
         // and the trailing horizon row is dropped too. Every surviving row must
         // be dense (no NaN leaked through).
-        let bars = series(&(0..20).map(|i| 100.0 + f64::from(i)).collect::<Vec<_>>());
+        let bars = series(&(0..100).map(|i| 100.0 + f64::from(i)).collect::<Vec<_>>());
         let feats = vec!["rsi_14".to_string(), "close".to_string()];
         let frame = build_training_frame(&bars, &feats, 1);
         assert!(frame.row_count() > 0, "some rows survive");
@@ -626,5 +410,70 @@ mod tests {
         assert!(frame.is_empty());
         assert_eq!(frame.feature_names, vec!["close".to_string()]);
         assert_eq!(frame.row_count(), 0);
+    }
+
+    // ------------------------------------------------------------------ //
+    // AT-67: sample weights exist and mean something (SPEC §3.4)
+    // ------------------------------------------------------------------ //
+
+    fn obs(minute: i64, close: f64) -> crate::align::BarObs {
+        let ts = minute * 60_000_000_000;
+        crate::align::BarObs {
+            ts_ns: ts,
+            knowledge_ns: ts,
+            open: close,
+            high: close,
+            low: close,
+            close,
+            volume: 1.0,
+            quality: dataplane::quality::QualityFlags::NONE,
+        }
+    }
+
+    /// A label over `h` forward bars spans `h + 1` bars, so in the interior it
+    /// runs concurrently with `h` of its neighbours and its average-uniqueness
+    /// weight is about `1/(h+1)`. That is the whole point: sixty consecutive
+    /// 60-bar labels describe nearly the same stretch of future, and a model told
+    /// to treat them as sixty independent facts will believe it.
+    #[test]
+    fn overlapping_labels_are_downweighted_and_disjoint_ones_are_not() {
+        let bars: Vec<crate::align::BarObs> =
+            (0..600).map(|i| obs(i, 100.0 + (i as f64 * 0.11).sin())).collect();
+        let names = vec!["close".to_string()];
+
+        let short = build_aligned_training_frame(&bars, &names, 1, 60_000_000_000);
+        let long = build_aligned_training_frame(&bars, &names, 60, 60_000_000_000);
+
+        assert_eq!(short.sample_weight.len(), short.row_count());
+        assert_eq!(long.sample_weight.len(), long.row_count());
+        assert!(short.sample_weight.iter().all(|w| *w > 0.0 && *w <= 1.0));
+        assert!(long.sample_weight.iter().all(|w| *w > 0.0 && *w <= 1.0));
+
+        let avg = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        let (a_short, a_long) = (avg(&short.sample_weight), avg(&long.sample_weight));
+        assert!(
+            (a_short - 0.5).abs() < 0.05,
+            "a 1-bar label spans 2 bars, so the mean weight should be ~1/2; got {a_short:.3}"
+        );
+        assert!(
+            (a_long - 1.0 / 61.0).abs() < 0.01,
+            "a 60-bar label spans 61 bars, so the mean weight should be ~1/61; got {a_long:.4}"
+        );
+        assert!(
+            a_long < a_short / 10.0,
+            "overlap must cost weight: {a_long:.4} vs {a_short:.3}"
+        );
+    }
+
+    /// An unaligned frame carries no weights, and that is reported as absence
+    /// rather than as a column of ones — the label spec's declaration depends on
+    /// knowing which it is.
+    #[test]
+    fn an_unaligned_frame_carries_no_weights() {
+        let rows: Vec<OhlcvRow> = (0..200)
+            .map(|i| OhlcvRow { ts_ns: i * 60_000_000_000, close: 100.0 + i as f64, ..OhlcvRow::default() })
+            .collect();
+        let f = build_training_frame(&rows, &["close".to_string()], 1);
+        assert!(f.sample_weight.is_empty());
     }
 }

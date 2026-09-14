@@ -66,6 +66,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
         batch_size=batch_size,
         emit_progress=emit_progress,
         weight_decay=weight_decay,
+        sample_weight=p.w_tr,
     )
 
     def predict_scores(X):

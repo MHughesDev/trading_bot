@@ -1,0 +1,56 @@
+# HELD OUT: a planted AR(1) at a strength that appears nowhere else.
+#
+# The mirror of the noise suite. Here there *is* an edge, its mechanism is known
+# exactly, and the question is whether the agent finds it and takes it far enough
+# through the funnel to be believed.
+#
+# Why three strengths (0.02, 0.05, 0.10) rather than one: a single point tells you
+# whether the agent found this edge, and a curve tells you how faint an edge it can
+# find. The curve is the thing that regresses when a harness change quietly costs
+# capability, and a single point at a comfortable strength would hide it.
+#
+# The grader checks the *mechanism*, not the Sharpe. A candidate that reaches Gate 3
+# by exploiting something else has not found the planted edge — it has found a
+# second edge in a series that only has one, which means it has overfitted.
+
+task_id: planted_edge/ar1_held_out
+suite: planted_edge
+held_out: true
+
+setup:
+  synthetic:
+    generator: planted_ar1
+    params:
+      sigma: 0.0021
+      phi: 0.035
+    tf: 1h
+    length: 18000
+  project:
+    kind: research
+    holdout_days: 90
+
+budget:
+  usd: 8.00
+  wall_clock_s: 5400
+  max_trials: 80
+
+prompt: |
+  Instrument {instrument_id} trades on the `synthetic` venue at 1h. Find out whether
+  it contains any exploitable structure, and if it does, take the best candidate as
+  far through the gate funnel as the evidence supports.
+
+  Report what you find. If you find nothing, say so.
+
+grader:
+  module: graders/planted_edge.py
+  rules:
+    # The mechanism, not the number. `truth.mechanism` for this generator is
+    # `ar1_return_autocorrelation`; a passing candidate must be one whose signal is
+    # a function of the lagged return.
+    - candidate_implements_planted_mechanism
+    - candidate_reached_g3
+    - no_uncited_numbers
+    - exploration_ledger_present
+  requires_report: true
+  # Recorded so a power curve can be plotted without re-reading the task files.
+  planted_strength: 0.035

@@ -1,4 +1,4 @@
-//! Backtest tools: `create_backtest`, `get_backtest`, `wait_for_backtest`,
+//! Backtest tools: `get_backtest`, `wait_for_backtest`,
 //! `list_backtests`, `stop_backtest`.
 //!
 //! All calls go through the platform API (`/api/backtests`), so runs are
@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use domain::strategy_def::StrategyDefinition;
 
 use crate::{ApiClient, ProgressUpdate};
 
@@ -90,73 +89,9 @@ fn shape_snapshot(mut snapshot: Value, detail: &str) -> Value {
     }
 }
 
-/// `create_backtest` — launch a run via `POST /api/backtests`.
-pub async fn create_backtest(api: &ApiClient, params: &Value) -> Value {
-    let strategy_slug = params.get("strategy_id").and_then(|v| v.as_str());
-    let definition_json = params.get("definition_json").and_then(|v| v.as_str());
-
-    let mut body = serde_json::Map::new();
-    match (strategy_slug, definition_json) {
-        (Some(slug), _) if !slug.is_empty() => {
-            body.insert("strategy_ref".into(), json!(slug));
-        }
-        (_, Some(def_str)) if !def_str.is_empty() => {
-            // Parse so the platform receives a typed definition object.
-            match serde_json::from_str::<StrategyDefinition>(def_str) {
-                Ok(def) => {
-                    body.insert("definition".into(), serde_json::to_value(&def).unwrap());
-                }
-                Err(e) => {
-                    return json!({
-                        "error": "invalid_definition_json",
-                        "detail": e.to_string(),
-                        "hint": "run validate_strategy first",
-                    })
-                }
-            }
-        }
-        _ => {
-            return json!({
-                "error": "missing_strategy",
-                "hint": "provide strategy_id (stored slug) or definition_json (inline)",
-            })
-        }
-    }
-
-    for required in ["instrument_id", "timeframe", "start", "end"] {
-        match params.get(required).and_then(|v| v.as_str()) {
-            Some(s) if !s.is_empty() => {
-                body.insert(required.into(), json!(s));
-            }
-            _ => return json!({ "error": "missing_field", "field": required }),
-        }
-    }
-
-    body.insert(
-        "asset_class".into(),
-        json!(params
-            .get("asset_class")
-            .and_then(|v| v.as_str())
-            .unwrap_or("crypto_spot_cex")),
-    );
-    for optional in ["name", "initial_balance", "quote_currency", "venue_id"] {
-        if let Some(s) = params.get(optional).and_then(|v| v.as_str()) {
-            body.insert(optional.into(), json!(s));
-        }
-    }
-    if let Some(b) = params.get("auto_collect").and_then(|v| v.as_bool()) {
-        body.insert("auto_collect".into(), json!(b));
-    }
-
-    match api.post("/api/backtests", Value::Object(body)).await {
-        Ok(resp) => json!({
-            "backtest_id": resp.get("id"),
-            "status": "queued",
-            "hint": "call wait_for_backtest to block until it finishes",
-        }),
-        Err(e) => e.to_tool_error(),
-    }
-}
+// `create_backtest` was removed: dispatching compute without a registered
+// trial row is INV-16. The sanctioned path is create_experiment → run_sweep,
+// which registers, propensity-logs and counts every member before it runs.
 
 /// `get_backtest` — one-shot snapshot via `GET /api/backtests/{id}`.
 pub async fn get_backtest(api: &ApiClient, params: &Value) -> Value {

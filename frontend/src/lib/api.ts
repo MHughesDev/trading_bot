@@ -142,13 +142,46 @@ export const paperApi = {
 
 // ── Portfolio ─────────────────────────────────────────────────────────────────
 
+// Served by the Rust platform since migration 0042; these used to point at a
+// Python service that no longer runs.
 export const portfolioApi = {
-  positions: () => api.get('/portfolio/positions'),
-  pnlSummary: () => api.get('/pnl/summary'),
-  pnlSeries: (bucket_seconds?: number) =>
-    api.get('/pnl/series', { params: { bucket_seconds } }),
+  positions: () => api.get('/api/portfolio/positions'),
+  equityCurve: (params?: { range?: string; mode?: string }) =>
+    api.get('/api/portfolio/equity-curve', { params }),
+  risk: (params?: { mode?: string }) => api.get('/api/risk/summary', { params }),
   transactions: (params?: { start?: string; end?: string; symbol?: string; limit?: number }) =>
-    api.get('/account/transactions', { params }),
+    api.get('/api/account/transactions', { params }),
+}
+
+// ── Execution ─────────────────────────────────────────────────────────────────
+
+export const executionApi = {
+  orders: (params?: { instrument?: string; asset_class?: string; limit?: number }) =>
+    api.get('/api/execution/orders', { params }),
+  fills: (params?: { instrument?: string; asset_class?: string; limit?: number }) =>
+    api.get('/api/execution/fills', { params }),
+  cancel: (orderId: string) => api.post(`/api/orders/${encodeURIComponent(orderId)}/cancel`),
+}
+
+// ── Price alerts ──────────────────────────────────────────────────────────────
+
+export const alertsApi = {
+  list: () => api.get('/api/alerts'),
+  create: (data: {
+    instrumentId: string
+    kind: string
+    value: string
+    note?: string
+    channels?: string[]
+  }) => api.post('/api/alerts', data),
+  remove: (id: string) => api.delete(`/api/alerts/${id}`),
+}
+
+// ── User settings (the copy that follows the user between devices) ────────────
+
+export const settingsApi = {
+  get: () => api.get<Record<string, unknown>>('/api/settings'),
+  put: (payload: Record<string, unknown>) => api.put('/api/settings', payload),
 }
 
 // ── Trade ─────────────────────────────────────────────────────────────────────

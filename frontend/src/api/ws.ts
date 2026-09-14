@@ -34,11 +34,14 @@ interface PendingSub {
 class WsClient {
   private ws: WebSocket | null = null
   private readonly url: string
+  /** The token this client was built for, so a re-init with the same token is a no-op. */
+  readonly token: string
   private reconnectDelay = 1000
   private closed = false
   private pending: PendingSub[] = []
 
   constructor(token: string) {
+    this.token = token
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
     this.url = `${proto}://${window.location.host}/ws/live?token=${encodeURIComponent(token)}`
     this.connect()
@@ -103,6 +106,11 @@ class WsClient {
     }
   }
 
+  /** True when the socket is open right now. */
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN
+  }
+
   destroy() {
     this.closed = true
     this.ws?.close()
@@ -111,7 +119,18 @@ class WsClient {
 
 let _client: WsClient | null = null
 
+/**
+ * Ensure a live client exists for `token`.
+ *
+ * Idempotent on purpose. React runs a child's effects before its parent's, so
+ * panels subscribe before the app shell calls this. Destroying and rebuilding
+ * the socket here would silently drop every subscription made in that window —
+ * which is exactly what made the order book (whose effect deps never change)
+ * permanently empty while the watchlist (whose deps change when its symbol list
+ * loads, causing a re-subscribe) appeared to work.
+ */
 export function initWsClient(token: string) {
+  if (_client && _client.token === token) return
   _client?.destroy()
   _client = new WsClient(token)
 }

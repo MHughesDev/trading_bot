@@ -1,8 +1,19 @@
 # Backtest Suite — Make It Real & Unify — Set K
 
-**Completion: 0% (plan only)**
+**Completion: 50% — SUPERSEDED by Set L (reconciled 2026-09-11)**
 
-**Status:** PLANNED. Set J shipped the honest-evaluation *core* (Run/Study/
+> **Do not execute this set as written.** Re-checked against the code on 2026-09-11:
+>
+> | Phase | State | Disposition |
+> |---|---|---|
+> | **A** — real `SimRunExecutor` | **Shipped** with FEAT-003 Phase 1: `crates/backtest/src/sim_executor.rs`, injected at `crates/api/src/state.rs:174`. A-3's parameter gap is closed by `domain::strategy_def::params::materialize` | Closed |
+> | **B** — Postgres/ClickHouse stores | **Not shipped.** Only `InMemoryRunStore` / `InMemoryStudyStore` / `InMemoryExperimentStore` exist, so the trial counter does not survive a restart — a live INV-1 hole | → [Set L Phase 1](../set-L/MASTER.md) |
+> | **C** — parallel execution | **Not shipped.** No fan-out or bounded scheduler in `suite.rs` | → [Set L Phase 1](../set-L/MASTER.md), where the durable job service (ADR-0030) *is* the scheduler |
+> | **D** — unified workspace | **Shipped.** `/workbench` and `/proving-ground` redirect to `/backtesting` | Closed |
+>
+> The sections below are kept for their design rationale, which Set L Phase 1 inherits.
+
+**Original status:** PLANNED. Set J shipped the honest-evaluation *core* (Run/Study/
 Experiment + Null Library + staged-gate funnel + DSR/PBO + reconciliation) as
 tested pure compute, plus a REST/WS surface and three React surfaces. But the
 suite manager runs a **deterministic synthetic executor over in-memory stores**,

@@ -118,7 +118,10 @@ impl SurfaceSummary {
                 let top = means
                     .iter()
                     .cloned()
-                    .fold((0usize, f64::NEG_INFINITY), |a, b| if b.1 > a.1 { b } else { a });
+                    .fold(
+                        (0usize, f64::NEG_INFINITY),
+                        |a, b| if b.1 > a.1 { b } else { a },
+                    );
                 let lo = means.iter().map(|m| m.1).fold(f64::INFINITY, f64::min);
                 let range = top.1 - lo;
                 let threshold = top.1 - 0.2 * range;
@@ -134,7 +137,10 @@ impl SurfaceSummary {
                     z += 1;
                 }
                 let plateau = if z > a {
-                    Some((bins[means[a].0].label.clone(), bins[means[z].0].label.clone()))
+                    Some((
+                        bins[means[a].0].label.clone(),
+                        bins[means[z].0].label.clone(),
+                    ))
                 } else {
                     None
                 };
@@ -183,13 +189,15 @@ impl SurfaceSummary {
             match &p.plateau {
                 Some((lo, hi)) => line.push_str(&format!(": plateau {lo}–{hi}")),
                 None => {
-                    if let Some(best) = p
-                        .bins
-                        .iter()
-                        .filter(|b| b.n > 0)
-                        .max_by(|a, b| a.mean.partial_cmp(&b.mean).unwrap_or(std::cmp::Ordering::Equal))
-                    {
-                        line.push_str(&format!(": single best bin {} (spike — treat as fragile)", best.label));
+                    if let Some(best) = p.bins.iter().filter(|b| b.n > 0).max_by(|a, b| {
+                        a.mean
+                            .partial_cmp(&b.mean)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    }) {
+                        line.push_str(&format!(
+                            ": single best bin {} (spike — treat as fragile)",
+                            best.label
+                        ));
                     }
                 }
             }

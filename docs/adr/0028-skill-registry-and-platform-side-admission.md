@@ -1,6 +1,6 @@
 # ADR-0028: Skill registry, platform-side admission, and the glossary as a registry view
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-11
 **Deciders:** Mason Hughes (with Claude)
 

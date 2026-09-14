@@ -1,24 +1,45 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="terminal" data-density="compact">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TradingBot</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  </head>
-  <body>
+    <meta name="color-scheme" content="light dark" />
+    <title>Meridian</title>
     <script>
+      /* Resolve theme + density BEFORE first paint (spec §8.3). Fonts are
+         self-hosted and bundled — no third-party font request blocks paint. */
       (function () {
+        var theme = 'terminal';
+        var density = null;
         try {
-          var stored = localStorage.getItem('tb-theme');
-          var theme = stored === 'light' || stored === 'dark' ? stored : 'dark';
-          document.documentElement.classList.toggle('dark', theme === 'dark');
+          var t = localStorage.getItem('meridian-theme');
+          if (t === 'paper' || t === 'terminal') {
+            theme = t;
+          } else {
+            var legacy = localStorage.getItem('tb-theme');
+            if (legacy === 'light') theme = 'paper';
+            else if (legacy === 'dark') theme = 'terminal';
+            else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) theme = 'paper';
+          }
+          var d = localStorage.getItem('meridian-density');
+          if (d === 'comfortable' || d === 'compact') density = d;
         } catch (e) {}
+        if (!density) density = theme === 'paper' ? 'comfortable' : 'compact';
+        var el = document.documentElement;
+        el.setAttribute('data-theme', theme);
+        el.setAttribute('data-density', density);
+        el.classList.toggle('dark', theme === 'terminal');
       })();
     </script>
+    <style>
+      /* Ground the document before the stylesheet arrives so a slow first load
+         never flashes white on the dark theme. */
+      html[data-theme='terminal'] { background: #06090e; }
+      html[data-theme='paper'] { background: #faf9f5; }
+    </style>
+  </head>
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

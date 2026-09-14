@@ -67,7 +67,43 @@ fn build_body(req: &ChatRequest) -> Value {
     if let Some(t) = req.temperature {
         options.insert("temperature".into(), json!(t));
     }
+
+    // `num_ctx` is NOT optional, and omitting it is a silent correctness bug.
+    //
+    // Ollama defaults the context window to the Modelfile's value — commonly 4096,
+    // sometimes 2048 — regardless of what the model advertises. Send a 24k-token
+    // prompt without this and Ollama truncates it from the LEFT: the system charter
+    // and the tool schemas go first, and what arrives looks like the model ignoring
+    // its instructions rather than like a transport that quietly dropped them.
+    //
+    // The harness has already decided this number (`effective_budget_tokens`) and
+    // refuses to assemble a prompt over it, so sending it here makes the two agree
+    // rather than leaving the backend to guess.
+    if let Some(ctx) = req.num_ctx {
+        options.insert("num_ctx".into(), json!(ctx));
+    }
     body.insert("options".into(), Value::Object(options));
+
+    // Keep the weights resident between steps. A ~21 GB model evicted after each
+    // call reloads from NVMe on the next one — measured at ~100 s on the dev box,
+    // which would be paid once per step of a multi-step session.
+    if let Some(keep) = &req.keep_alive {
+        body.insert("keep_alive".into(), json!(keep));
+    }
+
+    // Grammar-constrained decoding (harness guide §3.1). Ollama takes a JSON Schema
+    // in `format` and honours it at sampling time.
+    //
+    // `format` and `tools` DO NOT COMPOSE — measured on 0.33.3, passing both makes
+    // `format` win and `tool_calls` come back null. So when a schema is set we send
+    // it and deliberately omit `tools`: a caller that asked for a grammar gets the
+    // grammar, and silently sending both would produce a response shape neither the
+    // caller nor the parser expects. See docs/LOCAL_TIER_FINDINGS.md §2.
+    if let Some(schema) = &req.schema {
+        body.insert("format".into(), schema.clone());
+        return Value::Object(body);
+    }
+
     if !req.tools.is_empty() {
         let tools: Vec<Value> = req
             .tools
@@ -163,11 +199,18 @@ pub async fn chat(
         .await
         .map_err(|e| LlmError::Network(e.to_string()))?;
 
-    let lower = text.to_lowercase();
-    if lower.contains("does not support tools") {
-        return Err(LlmError::ToolsUnsupported(truncate(&text)));
-    }
+    // Status first, THEN the string sniff.
+    //
+    // The sniff used to run before this check, which meant a successful 200 whose
+    // assistant *content* happened to contain "does not support tools" — an entirely
+    // plausible sentence for a research agent discussing model capabilities — was
+    // reported as a hard ToolsUnsupported error. Only a non-2xx body is Ollama
+    // speaking; a 2xx body is the model speaking, and the two must not be read the
+    // same way.
     if !(200..300).contains(&status) {
+        if text.to_lowercase().contains("does not support tools") {
+            return Err(LlmError::ToolsUnsupported(truncate(&text)));
+        }
         return Err(classify_status(status, &text, None));
     }
 
@@ -208,6 +251,38 @@ pub async fn list_models(
                 .collect()
         })
         .unwrap_or_default())
+}
+
+/// Models the backend currently holds **in memory** (`GET /api/ps`).
+///
+/// Distinct from [`list_models`], which lists what is available to load. The
+/// difference decides a real question: a fit check that compares a model against
+/// FREE device memory will refuse a model that is already resident, because the
+/// memory it occupies reads as used. Asking which models are loaded is what turns
+/// that false refusal back into the correct answer — the weights are on the card, so
+/// they fit on the card.
+///
+/// A backend that does not answer is not an error. An empty list means "cannot say",
+/// and the caller falls back to the ordinary memory check.
+pub async fn resident_models(http: &reqwest::Client, base_url: &str) -> Vec<String> {
+    let Ok(resp) = http.get(format!("{base_url}/api/ps")).send().await else {
+        return Vec::new();
+    };
+    if !resp.status().is_success() {
+        return Vec::new();
+    }
+    let Ok(body) = resp.json::<Value>().await else {
+        return Vec::new();
+    };
+    body.get("models")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("name").and_then(|v| v.as_str()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -263,10 +338,105 @@ mod tests {
             tools: vec![],
             max_tokens: 5,
             temperature: None,
+            schema: None,
+            num_ctx: None,
+            keep_alive: None,
+            tool_choice: None,
         };
         let messages = build_messages(&req);
         assert_eq!(messages[2]["role"], "tool");
         assert_eq!(messages[2]["content"], "out");
         assert!(messages[2].get("tool_call_id").is_none());
+    }
+}
+
+#[cfg(test)]
+mod local_tier_wire_tests {
+    use super::*;
+    use crate::types::{ChatRequest, Message};
+
+    fn req() -> ChatRequest {
+        ChatRequest {
+            model: "qwen3.6-35b-a3b".into(),
+            system: Some("charter".into()),
+            messages: vec![Message::User {
+                content: "go".into(),
+            }],
+            tools: vec![],
+            max_tokens: 512,
+            temperature: Some(0.0),
+            schema: None,
+            num_ctx: None,
+            keep_alive: None,
+            tool_choice: None,
+        }
+    }
+
+    /// The silent-truncation bug, pinned.
+    ///
+    /// Without `num_ctx`, Ollama uses the Modelfile default (often 4096) and cuts a
+    /// longer prompt from the LEFT — taking the system charter and the tool schemas
+    /// first. The symptom is a model that appears to ignore its instructions.
+    #[test]
+    fn the_context_window_is_sent_so_the_backend_cannot_silently_truncate() {
+        let mut r = req();
+        r.num_ctx = Some(24_000);
+        let body = build_body(&r);
+        assert_eq!(
+            body["options"]["num_ctx"], 24_000,
+            "the harness knows the budget; the backend must be told it"
+        );
+    }
+
+    #[test]
+    fn keep_alive_is_sent_so_a_large_model_is_not_reloaded_every_step() {
+        let mut r = req();
+        r.keep_alive = Some("30m".into());
+        assert_eq!(build_body(&r)["keep_alive"], "30m");
+    }
+
+    #[test]
+    fn omitting_them_sends_nothing_rather_than_a_guess() {
+        let body = build_body(&req());
+        assert!(body["options"].get("num_ctx").is_none());
+        assert!(body.get("keep_alive").is_none());
+    }
+
+    /// Measured behaviour, encoded: `format` and `tools` do not compose on Ollama —
+    /// passing both makes `format` win and `tool_calls` come back null. So a request
+    /// carrying a schema sends the schema and omits the tools, rather than sending
+    /// both and getting a response shape the parser does not expect.
+    #[test]
+    fn a_schema_request_omits_tools_because_they_do_not_compose() {
+        let mut r = req();
+        r.tools = vec![crate::types::ToolDef {
+            name: "read_bars".into(),
+            description: "Read bars.".into(),
+            input_schema: serde_json::json!({"type": "object"}),
+        }];
+        r.schema = Some(serde_json::json!({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"]
+        }));
+        let body = build_body(&r);
+        assert!(body.get("format").is_some(), "the grammar is sent");
+        assert!(
+            body.get("tools").is_none(),
+            "sending both would make format win silently and null out tool_calls"
+        );
+    }
+
+    #[test]
+    fn without_a_schema_tools_are_sent_normally() {
+        let mut r = req();
+        r.tools = vec![crate::types::ToolDef {
+            name: "read_bars".into(),
+            description: "Read bars.".into(),
+            input_schema: serde_json::json!({"type": "object"}),
+        }];
+        let body = build_body(&r);
+        assert!(body.get("format").is_none());
+        assert_eq!(body["tools"][0]["function"]["name"], "read_bars");
     }
 }

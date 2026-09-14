@@ -138,23 +138,26 @@ impl ResearchManager {
     }
 
     /// Validate against the Experiment, persist the job, spawn the sweep.
-    pub fn start(self: &Arc<Self>, user_id: Uuid, body: StartSweepBody) -> Result<Uuid, StartError> {
+    pub fn start(
+        self: &Arc<Self>,
+        user_id: Uuid,
+        body: StartSweepBody,
+    ) -> Result<Uuid, StartError> {
         let exp = self
             .suite
             .get_experiment(user_id, body.experiment_id)
             .ok_or(StartError::ExperimentNotFound)?;
-        let objective = body
-            .objective
-            .or(exp.objective)
-            .ok_or_else(|| {
-                StartError::InvalidRequest(
-                    "experiment has no objective — pass `objective` or create the experiment with one"
-                        .into(),
-                )
-            })?;
+        let objective = body.objective.or(exp.objective).ok_or_else(|| {
+            StartError::InvalidRequest(
+                "experiment has no objective — pass `objective` or create the experiment with one"
+                    .into(),
+            )
+        })?;
         objective.validate().map_err(StartError::InvalidRequest)?;
         if body.question.trim().is_empty() {
-            return Err(StartError::InvalidRequest("question must not be empty".into()));
+            return Err(StartError::InvalidRequest(
+                "question must not be empty".into(),
+            ));
         }
         if self.permits.available_permits() == 0 {
             return Err(StartError::Busy);
@@ -217,7 +220,8 @@ impl ResearchManager {
                 job: Arc::clone(&job),
             };
             let req = job.request.clone();
-            let outcome = tokio::task::spawn_blocking(move || run_sweep(&backend, &req, &observer)).await;
+            let outcome =
+                tokio::task::spawn_blocking(move || run_sweep(&backend, &req, &observer)).await;
             let mut s = job.state.write().expect("sweep state lock");
             s.finished_at = Some(Utc::now());
             match outcome {
@@ -341,7 +345,11 @@ impl SweepBackend for Backend {
         serde_json::from_value(json).map_err(|e| format!("invalid stored definition: {e}"))
     }
 
-    fn run_batch(&self, experiment: Uuid, spec: ParamBatchSpec) -> Result<ParamBatchOutcome, String> {
+    fn run_batch(
+        &self,
+        experiment: Uuid,
+        spec: ParamBatchSpec,
+    ) -> Result<ParamBatchOutcome, String> {
         self.suite
             .run_param_batch(self.user_id, experiment, spec)
             .map_err(|e| e.to_string())

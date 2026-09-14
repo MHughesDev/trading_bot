@@ -11,6 +11,7 @@
 // macro recursion limit.
 #![recursion_limit = "256"]
 
+pub mod taxonomy;
 pub mod tools;
 
 use std::collections::HashMap;
@@ -37,9 +38,11 @@ pub fn server_instructions() -> &'static str {
      Workflow: list_instruments (what data exists) → get_bars (inspect the \
      market) → write a definition → validate_strategy → create_strategy \
      (upserts by strategy_id slug; use versioned slugs like my_strat_v2 when \
-     iterating) → create_backtest → wait_for_backtest (call repeatedly for \
-     long runs; each call blocks up to timeout_seconds and returns progress on \
-     timeout) → read results → compare_backtests across variants → iterate.\n\
+     iterating) → create_experiment → run_sweep → wait_for_backtest (call \
+     repeatedly for long runs; each call blocks up to timeout_seconds and \
+     returns progress on timeout) → read results → compare_backtests across \
+     variants → iterate. Every run is registered as a counted trial before it \
+     executes; there is no way to run one off the books.\n\
      \n\
      Backtests run in the background and can take from minutes to over an hour. \
      Expressions use a tiny frozen grammar (feature('ema_7') > feature('ema_21')); \
@@ -183,6 +186,8 @@ pub struct McpContext {
     /// In-memory draft store for the step-by-step strategy builder (scratchpad;
     /// nothing here persists until `finalize_strategy` posts to the platform).
     pub draft_store: Arc<Mutex<HashMap<Uuid, StrategyDraft>>>,
+    /// The trajectory every tool step of this context is logged under (SPEC §14.6).
+    pub trajectory: Arc<Trajectory>,
 }
 
 impl McpContext {
@@ -190,8 +195,83 @@ impl McpContext {
         Self {
             api,
             draft_store: Arc::new(Mutex::new(HashMap::new())),
+            trajectory: Arc::new(Trajectory::new()),
         }
     }
+
+    /// Record one tool step. Every step `dispatch_tool` runs is recorded
+    /// automatically; harness-side tools that never reach dispatch (a driver's
+    /// inline wait, its termination tool) call this themselves.
+    pub async fn record_step(&self, tool_name: &str, arguments: &Value, result: &Value, latency_ms: u128, tokens: Option<(u64, u64)>) {
+        let step_idx = self.trajectory.next_step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let body = json!({
+            "traj_id": self.trajectory.id,
+            "step_idx": step_idx,
+            "campaign_id": *self.trajectory.campaign_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+            "tool_name": tool_name,
+            "tool_schema_hash": tool_schema_hash(tool_name),
+            "tool_semver": TOOL_SEMVER,
+            "arguments": arguments,
+            "result_summary": result,
+            "error": result.get("error"),
+            "latency_ms": i32::try_from(latency_ms).unwrap_or(i32::MAX),
+            "tokens_in": tokens.map(|t| i32::try_from(t.0).unwrap_or(i32::MAX)),
+            "tokens_out": tokens.map(|t| i32::try_from(t.1).unwrap_or(i32::MAX)),
+        });
+        if let Err(e) = self.api.post("/api/agent/trajectory", body).await {
+            self.trajectory.unrecorded.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tracing::warn!(traj_id = %self.trajectory.id, step_idx, tool = tool_name, error = ?e.body, "trajectory step not recorded");
+        }
+    }
+}
+
+/// One agent session's trajectory identity.
+pub struct Trajectory {
+    pub id: Uuid,
+    next_step: std::sync::atomic::AtomicI32,
+    /// Set when the session is working inside a campaign.
+    pub campaign_id: Mutex<Option<Uuid>>,
+    /// Steps whose recording failed; surfaced rather than silently lost.
+    pub unrecorded: std::sync::atomic::AtomicU64,
+}
+
+impl Trajectory {
+    fn new() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            next_step: std::sync::atomic::AtomicI32::new(0),
+            campaign_id: Mutex::new(None),
+            unrecorded: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    pub fn steps_taken(&self) -> i32 {
+        self.next_step.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// Version of the tool surface a trajectory step was taken against.
+pub const TOOL_SEMVER: &str = env!("CARGO_PKG_VERSION");
+
+/// `sha256:` over the canonical JSON of the tool's full stamped descriptor — name,
+/// description, input schema, namespace and risk — so a trajectory records exactly
+/// what the model was offered. Tools with no descriptor (a harness's own
+/// termination tool) hash their name alone.
+pub fn tool_schema_hash(tool_name: &str) -> String {
+    static HASHES: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
+    let map = HASHES.get_or_init(|| {
+        tool_definitions_for(ToolProfile::Mcp)
+            .as_array()
+            .map(|defs| {
+                defs.iter()
+                    .filter_map(|d| Some((d.get("name")?.as_str()?.to_string(), dataplane::content_hash(d).ok()?)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
+    map.get(tool_name)
+        .cloned()
+        .unwrap_or_else(|| dataplane::content_hash(&json!({ "name": tool_name, "descriptor": null })).unwrap_or_default())
 }
 
 /// Whether live automations are permitted via the MCP server.
@@ -218,7 +298,51 @@ pub struct ProgressUpdate {
 ///
 /// A result carrying a top-level `"error"` key should be surfaced to the MCP
 /// client with `isError: true`.
+/// A strategy definition, however the caller chose to send it.
+///
+/// Accepts an OBJECT or a string containing JSON, and that is not politeness — it is
+/// the difference between constrained decoding protecting this argument and not.
+///
+/// Declared as `type: string`, the grammar guarantees the envelope is well-formed
+/// JSON and guarantees nothing whatsoever about the strategy inside it: the sampler
+/// is free to emit any characters between the quotes. A 7B writing a whole strategy
+/// definition into a JSON string produced `JSON parse error: trailing characters at
+/// line 1 column 600` on attempt after attempt, and no amount of harness quality can
+/// fix that, because the harness never sees a malformed argument — it sees a
+/// perfectly valid string whose contents the platform then rejects.
+///
+/// Declared as `type: object`, the same sampler *cannot* emit malformed JSON. The
+/// structure becomes a decoding guarantee instead of a hope. This is the third
+/// instance of the same bug in one session — `backtest_ids` collapsed to a string,
+/// `label_horizon` left unenumerated — and they share a lesson: on a constrained
+/// tier, any argument typed as a free-form string is an argument with no grammar at
+/// all.
+///
+/// Strings are still accepted, because the UI and the human MCP client send them and
+/// they are not decoding under a grammar.
+fn definition_arg(params: &Value) -> String {
+    match params.get("definition_json") {
+        Some(Value::String(s)) => s.clone(),
+        Some(v @ Value::Object(_)) => serde_json::to_string(v).unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// Dispatch a tool call and record the step in the agent trajectory. There is no
+/// unrecorded variant.
 pub async fn dispatch_tool(
+    ctx: &McpContext,
+    tool_name: &str,
+    params: &Value,
+    progress: Option<tokio::sync::mpsc::Sender<ProgressUpdate>>,
+) -> Value {
+    let started = std::time::Instant::now();
+    let result = dispatch_untraced(ctx, tool_name, params, progress).await;
+    ctx.record_step(tool_name, params, &result, started.elapsed().as_millis(), None).await;
+    result
+}
+
+async fn dispatch_untraced(
     ctx: &McpContext,
     tool_name: &str,
     params: &Value,
@@ -237,19 +361,13 @@ pub async fn dispatch_tool(
 
         // ── Authoring ──────────────────────────────────────────────────────────
         "validate_strategy" => {
-            let definition_json = params
-                .get("definition_json")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let result = tools::authoring::validate_strategy(definition_json);
+            let definition_json = definition_arg(params);
+            let result = tools::authoring::validate_strategy(&definition_json);
             serde_json::to_value(result).unwrap_or_else(|_| json!({"error": "serialization_error"}))
         }
         "create_strategy" => {
-            let definition_json = params
-                .get("definition_json")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            tools::authoring::create_strategy(&ctx.api, definition_json).await
+            let definition_json = definition_arg(params);
+            tools::authoring::create_strategy(&ctx.api, &definition_json).await
         }
         "get_strategy" => tools::authoring::get_strategy(&ctx.api, params).await,
         "list_strategies" => tools::authoring::list_strategies(&ctx.api).await,
@@ -273,9 +391,13 @@ pub async fn dispatch_tool(
         "get_trading_status" => tools::portfolio::get_trading_status(&ctx.api).await,
         "get_order" => tools::portfolio::get_order(&ctx.api, params).await,
 
-        // ── Model registry (read-only) ─────────────────────────────────────────
+        // ── Model registry and the training pipeline ───────────────────────────
         "list_models" => tools::models::list_models(&ctx.api).await,
         "get_model" => tools::models::get_model(&ctx.api, params).await,
+        "list_feature_sets" => tools::models::list_feature_sets(&ctx.api).await,
+        "train_model" => tools::models::train_model(&ctx.api, params, progress.clone()).await,
+        "get_training_run" => tools::models::get_training_run(&ctx.api, params).await,
+        "promote_model_version" => tools::models::promote_model_version(&ctx.api, params).await,
 
         // ── Strategy Builder ───────────────────────────────────────────────────
         "new_strategy_draft" => tools::builder::new_strategy_draft(ctx),
@@ -292,7 +414,9 @@ pub async fn dispatch_tool(
         // ── Backtests ──────────────────────────────────────────────────────────
         "list_backtests" => tools::backtests::list_backtests(&ctx.api, params).await,
         "get_backtest" => tools::backtests::get_backtest(&ctx.api, params).await,
-        "create_backtest" => tools::backtests::create_backtest(&ctx.api, params).await,
+        // `create_backtest` is deliberately NOT routed. Dispatching compute
+        // without a registered trial row is INV-16; the sanctioned path is
+        // create_experiment → run_sweep, which registers every member.
         "stop_backtest" => tools::backtests::stop_backtest(&ctx.api, params).await,
         "rerun_backtest" => tools::backtests::rerun_backtest(&ctx.api, params).await,
         "delete_backtest" => tools::backtests::delete_backtest(&ctx.api, params).await,
@@ -308,6 +432,9 @@ pub async fn dispatch_tool(
         "disarm_automation" => tools::automations::disarm_automation(&ctx.api, params).await,
 
         // ── Research (FEAT-003): Experiments, sweeps, gates, diagnostics ───────
+        "backtest_strategy" => {
+            tools::research::backtest_strategy(&ctx.api, params, progress.clone()).await
+        }
         "create_experiment" => tools::research::create_experiment(&ctx.api, params).await,
         "list_experiments" => tools::research::list_experiments(&ctx.api).await,
         "get_experiment" => tools::research::get_experiment(&ctx.api, params).await,
@@ -374,7 +501,12 @@ const INTERNAL_AGENT_TOOLS: &[&str] = &[
     "get_order",
     "list_models",
     "get_model",
+    "list_feature_sets",
+    "train_model",
+    "get_training_run",
+    "promote_model_version",
     // research (FEAT-003)
+    "backtest_strategy",
     "create_experiment",
     "list_experiments",
     "get_experiment",
@@ -398,7 +530,7 @@ pub fn tool_definitions() -> Value {
 
 /// Tool definitions filtered by profile.
 pub fn tool_definitions_for(profile: ToolProfile) -> Value {
-    let all = all_tool_definitions();
+    let all = stamp(all_tool_definitions());
     match profile {
         ToolProfile::Mcp => all,
         ToolProfile::InternalAgent => {
@@ -416,6 +548,34 @@ pub fn tool_definitions_for(profile: ToolProfile) -> Value {
             Value::Array(filtered)
         }
     }
+}
+
+/// Stamps every descriptor with its namespace and risk (ADR-0031).
+///
+/// Applied at render time rather than written into 56 literals, so `taxonomy.rs` is
+/// the single place a tool's classification lives and the tests there can prove the
+/// catalogue and the table agree. A tool with no entry is stamped
+/// `namespace: "unclassified"` and `risk: "destructive"` — the most restrictive
+/// reading, so an unclassified tool fails closed rather than open.
+fn stamp(mut defs: Value) -> Value {
+    if let Some(arr) = defs.as_array_mut() {
+        for t in arr.iter_mut() {
+            let name = t
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let (ns, risk) = taxonomy::classify(&name)
+                .map_or(("unclassified", taxonomy::Risk::Destructive), |(n, r)| {
+                    (n, r)
+                });
+            if let Some(obj) = t.as_object_mut() {
+                obj.insert("namespace".into(), json!(ns));
+                obj.insert("risk".into(), json!(risk.as_str()));
+            }
+        }
+    }
+    defs
 }
 
 fn all_tool_definitions() -> Value {
@@ -505,7 +665,7 @@ fn all_tool_definitions() -> Value {
                 "type": "object",
                 "required": ["definition_json"],
                 "properties": {
-                    "definition_json": { "type": "string", "description": "Strategy definition as a JSON string (format: see get_authoring_guide)" }
+                    "definition_json": { "type": "object", "description": "Strategy definition OBJECT (format: see get_authoring_guide). Send the object itself, not a string containing JSON." }
                 }
             }
         },
@@ -516,7 +676,7 @@ fn all_tool_definitions() -> Value {
                 "type": "object",
                 "required": ["definition_json"],
                 "properties": {
-                    "definition_json": { "type": "string", "description": "Strategy definition as a JSON string" }
+                    "definition_json": { "type": "object", "description": "Strategy definition OBJECT. Send the object itself, not a string containing JSON." }
                 }
             }
         },
@@ -675,35 +835,19 @@ fn all_tool_definitions() -> Value {
             }
         },
         // ── Backtests ────────────────────────────────────────────────────────
-        {
-            "name": "create_backtest",
-            "description": "Launch a backtest of a stored strategy (by slug) or an inline definition against real historical bars. Returns a backtest_id immediately; the run proceeds in the background (minutes to 1h+). Follow with wait_for_backtest.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["instrument_id", "timeframe", "start", "end"],
-                "properties": {
-                    "strategy_id": { "type": "string", "description": "Slug of a stored strategy (from create_strategy). Provide this OR definition_json." },
-                    "definition_json": { "type": "string", "description": "Inline strategy definition JSON string (alternative to strategy_id)" },
-                    "instrument_id": { "type": "string", "description": "e.g. BTC-USD (see list_instruments for coverage)" },
-                    "asset_class": { "type": "string", "description": "Default crypto_spot_cex" },
-                    "timeframe": { "type": "string", "enum": ["1s", "1m", "5m", "15m", "1h", "4h", "1d"], "description": "Bar timeframe. Note: a market.bars.<tf> input lane in the definition overrides this." },
-                    "start": { "type": "string", "description": "RFC3339 UTC start, e.g. 2026-06-01T00:00:00Z" },
-                    "end": { "type": "string", "description": "RFC3339 UTC end" },
-                    "name": { "type": "string", "description": "Optional display name" },
-                    "initial_balance": { "type": "string", "description": "Decimal starting balance (default 100000)" },
-                    "quote_currency": { "type": "string", "description": "Quote currency (default USD)" },
-                    "auto_collect": { "type": "boolean", "description": "Backfill missing history before simulating (default true; can dominate runtime on first touch)" }
-                }
-            }
-        },
+        // There is deliberately no `create_backtest` tool. Compute may not be
+        // dispatched without a registered trial row (INV-16), and a raw backtest
+        // has no Experiment to register against — so the only path that runs
+        // anything is create_experiment → run_sweep, where every member is
+        // registered, propensity-logged and counted before it executes.
         {
             "name": "get_backtest",
-            "description": "One-shot snapshot of a backtest run: status, progress %, error detail, and (when completed) the result document. detail:'summary' (default) truncates long arrays; use detail:'full' for every trade and the full equity curve.",
+            "description": "READ an existing backtest by id — it runs nothing. Use it only for a backtest_id you already have. Status, progress %, error detail, and (when completed) the result document. detail:'summary' (default) truncates long arrays; use detail:'full' for every trade and the full equity curve.",
             "inputSchema": {
                 "type": "object",
                 "required": ["backtest_id"],
                 "properties": {
-                    "backtest_id": { "type": "string", "description": "UUID from create_backtest" },
+                    "backtest_id": { "type": "string", "description": "UUID of an existing run (from run_sweep)" },
                     "detail": { "type": "string", "enum": ["summary", "full"], "description": "Default summary" }
                 }
             }
@@ -715,7 +859,7 @@ fn all_tool_definitions() -> Value {
                 "type": "object",
                 "required": ["backtest_id"],
                 "properties": {
-                    "backtest_id": { "type": "string", "description": "UUID from create_backtest" },
+                    "backtest_id": { "type": "string", "description": "UUID of an existing run (from run_sweep)" },
                     "timeout_seconds": { "type": "integer", "description": "Max seconds this call blocks (default 300, clamp 10-600)" },
                     "poll_seconds": { "type": "integer", "description": "Seconds between status polls (default 5, clamp 2-60)" }
                 }
@@ -826,6 +970,55 @@ fn all_tool_definitions() -> Value {
                 "required": ["model_id"],
                 "properties": {
                     "model_id": { "type": "string" }
+                }
+            }
+        },
+        {
+            "name": "list_feature_sets",
+            "description": "Feature sets a model can be trained on. Use it before train_model when you need to name feature_set_ref.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "train_model",
+            "description": "Train an AI model end to end and wait for it: creates the model if the slug is new, runs training on real stored bars, and returns the trained version with its metrics. Use it when a strategy needs a model that does not exist yet. Deterministic: the same slug, data window and seed reproduce the same run.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["slug", "instrument_id"],
+                "properties": {
+                    "slug": { "type": "string", "description": "Short stable name. Training again with the same slug retrains that model rather than creating a second one." },
+                    "instrument_id": { "type": "string", "description": "Instrument to train on, e.g. BTC-USD. It must have stored bars — check list_instruments." },
+                    "model_kind": { "type": "string", "enum": ["forecaster", "classifier", "regressor"], "description": "Default forecaster." },
+                    "timeframe": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "4h", "1d"], "description": "Bar timeframe. Default 1h." },
+                    "asset_class": { "type": "string", "enum": ["crypto_spot_cex", "us_equity"], "description": "Default crypto_spot_cex." },
+                    "label_horizon": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "4h", "1d"], "description": "How far ahead to predict. A DURATION, not a feature name. Default 1h." },
+                    "lookback_days": { "type": "integer", "description": "How much history to train on. Default 30." },
+                    "seed": { "type": "integer", "description": "Pinned for reproducibility. Default 42." },
+                    "timeout_seconds": { "type": "integer", "description": "How long to wait. Default 900; on timeout the run keeps going and a run_id is returned." }
+                }
+            }
+        },
+        {
+            "name": "get_training_run",
+            "description": "Status and metrics of one training run, by model_id and run_id.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["model_id", "run_id"],
+                "properties": {
+                    "model_id": { "type": "string" },
+                    "run_id": { "type": "string" }
+                }
+            }
+        },
+        {
+            "name": "promote_model_version",
+            "description": "Point an alias (default 'production') at a trained model version, so strategies referencing the model resolve to it.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["model_id", "version"],
+                "properties": {
+                    "model_id": { "type": "string" },
+                    "version": { "type": "string" },
+                    "alias": { "type": "string", "description": "Default production." }
                 }
             }
         },

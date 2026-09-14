@@ -249,7 +249,7 @@ engine, move vocabulary, correlation de-duplication. Sweep and suite state are i
 | G-10 | LSTM sequence length 1; no attention models | "LSTM vs Transformer vs TFT" is not a real choice today |
 | G-11 | Live strategy evaluation not wired | Paper/live forward evidence for agent-built strategies is impossible |
 | G-12 | Harness: no caching, memory, resume, steering or structured final | Long sessions are expensive and fragile |
-| G-13 | Thin history | CPCV, walk-forward and regime work need years of bars |
+| G-13 | Thin history | CPCV, walk-forward and regime work need years of bars. Measured 2026-09-11: 99,789 rows total — BTC-USD 1m 99,717 (2026-05-16 → 2026-09-09), BTC-USD 1h **22**, ETH-USD 1h 48, ETH-USD 1m 2. Primarily a collection gap; the `market_bars` sort-key bug (DATA-005 §3) aggravated it but accounted for only 18 rows. **The schema half is fixed** — `market_bars_v2` cutover completed 2026-09-11 (Set L Phase 0), so the backfill is unblocked. The depth half is still open and is the backfill ops task (DATA-005 §11 S1) |
 | G-14 | Fill-timing semantics unverified | Possible look-ahead in every intraday result |
 
 ## 11. Invariants any design must keep

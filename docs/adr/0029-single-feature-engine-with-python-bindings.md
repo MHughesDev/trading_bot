@@ -1,6 +1,6 @@
 # ADR-0029: One feature engine (Rust) with Python bindings, fail-closed on every path
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-11
 **Deciders:** Mason Hughes (with Claude)
 **Extends:** ADR-0008 (same builders for live and replay)

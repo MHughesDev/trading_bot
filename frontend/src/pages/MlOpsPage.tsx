@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useModels } from '@/hooks/useMlOps'
 import { ModelStatusPill } from '@/components/mlops/ModelStatusPill'
+import { PlatformHealthPanel } from '@/components/mlops/PlatformHealthPanel'
 import type { AiModel, ModelKind, ModelStatus } from '@/api/mlops'
 import { format } from 'date-fns'
 
@@ -64,7 +65,7 @@ const SPRING = { type: 'spring' as const, stiffness: 380, damping: 30 }
 
 function ModelCardSkeleton() {
   return (
-    <div className="rounded-xl border border-border bg-surface p-5 animate-pulse">
+    <div className="panel p-5 animate-pulse">
       <div className="flex items-start gap-3 mb-4">
         <div className="h-9 w-9 rounded-lg bg-surface-2" />
         <div className="flex-1 space-y-2">
@@ -218,23 +219,29 @@ export function MlOpsPage() {
   const models = useMemo(() => data?.models ?? [], [data])
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-6 py-6">
-      {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold text-text">
-            <Brain className="h-6 w-6 text-accent" />
-            ML Ops
-          </h1>
-          <p className="mt-1 text-sm text-text-muted">
-            Manage, train, and deploy machine learning models for your trading strategies.
-          </p>
-        </div>
-        <Button onClick={() => navigate('/mlops/create')}>
-          <Plus className="h-4 w-4" />
-          Create Model
-        </Button>
+    <>
+      <div className="pagehead">
+        <h1 className="h1">Models</h1>
+        <span className="lbl">Train, evaluate and deploy the models your strategies call</span>
+        <div className="spacer" />
+        <button type="button" className="btn sm" onClick={() => navigate('/mlops/leaderboard')}>
+          Leaderboard
+        </button>
+        <button type="button" className="btn sm" onClick={() => navigate('/mlops/graph')}>
+          Lineage
+        </button>
+        <button type="button" className="btn sm primary" onClick={() => navigate('/mlops/create')}>
+          <Plus className="h-3.5 w-3.5" />
+          New model
+        </button>
       </div>
+
+      <div className="page-body">
+      {/* The platform's report on its own judgment, above the models rather than
+          behind a tab (SPEC §16.2, ADR-P5-01). A self-monitoring panel nobody
+          navigates to is a self-monitoring panel nobody reads, and §16.2's whole
+          observation is that this is the layer that gets skipped. */}
+      <PlatformHealthPanel className="mb-4" />
 
       {/* Filter bar */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
@@ -369,6 +376,7 @@ export function MlOpsPage() {
           {data?.total ?? models.length} model{(data?.total ?? models.length) !== 1 ? 's' : ''}
         </p>
       )}
-    </div>
+      </div>
+    </>
   )
 }

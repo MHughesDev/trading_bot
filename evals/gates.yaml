@@ -1,0 +1,121 @@
+# Pre-registered non-inferiority margins (AGENT-004 §7).
+#
+# Pre-registered is the operative word. These numbers are committed before a run,
+# so a change that misses them cannot be rescued by deciding afterwards that the
+# margin was always meant to be a little wider. Changing a margin is its own PR,
+# reviewed on its own, and it invalidates the baseline it was written against.
+#
+# The gate applies to any PR labelled `efficiency`, `cost` or `harness`. Those are
+# the changes that make the system cheaper or faster, which is precisely the
+# category where a small loss of capability is easy to miss and easy to excuse.
+#
+# D-03 in one line: never trade model capability for tokens. Remove waste instead.
+
+applies_to_pr_labels: [efficiency, cost, harness]
+
+baseline:
+  # The scorecard the run is compared against. Published, not re-derived: a baseline
+  # recomputed from today's data would drift with every later run and the gate would
+  # slowly stop meaning anything.
+  source: eval_scorecards
+  label: baseline
+
+margins:
+  fdr_noise:
+    # False discovery rate on the noise suite, as pass^k.
+    direction: lower_is_better
+    absolute_ceiling: gate_nominal_plus_0.02
+    rationale: >
+      The gate's nominal level plus two percentage points. A harness change that
+      raises the rate at which the agent claims edges in pure noise has broken the
+      one property the whole design exists to protect, however much it saved.
+
+  power_planted_edge:
+    direction: higher_is_better
+    margin: 0.05
+    bound: paired_difference_lower_95ci
+    spec_margin: 0.02
+    rationale: >
+      Power may fall by at most five points, measured at the lower bound of a
+      *paired* 95% interval on the difference between the arms (Tango's score
+      interval over common-random-number pairs, AGENT-004 s8).
+
+      AGENT-004 s7 asks for two points. The arithmetic does not support it at any
+      cadence we can afford: with perfect agreement between the arms, deciding a
+      two-point margin needs 189 paired trials per arm, and a release run of
+      ~75 can decide about 4.9 points. At $6-8 a trial, a two-point gate costs
+      $1,100-1,500 per gated pull request.
+
+      Five points is what a release run can actually decide, so the gate is set
+      there and `spec_margin` records the target. The alternatives, if the tighter
+      margin is wanted: run more seeds per task, or move the gated metrics from
+      binary pass/fail to a continuous score, which carries far more information per
+      trial. Both are decisions about money and scope, so they are flagged rather
+      than assumed. See `evals/README.md`.
+
+      What is NOT an option is keeping a 0.02 margin that no run can decide: a gate
+      that always reports UNDERPOWERED is a gate everyone learns to ignore.
+
+  qa_accuracy:
+    direction: higher_is_better
+    margin: 0.05
+    bound: paired_difference_lower_95ci
+    spec_margin: 0.02
+
+  leakage_trap_catch_rate:
+    direction: higher_is_better
+    margin: 0.0
+    rationale: >
+      No margin at all. A leak that reaches a published result is not a two-point
+      regression, it is a wrong answer with a citation attached.
+
+  uncited_number_rate:
+    direction: lower_is_better
+    absolute_ceiling: 0.0
+    rationale: >
+      Zero, always. An uncited number is the failure mode the report contract was
+      written to prevent, and a tolerance for it is a tolerance for the thing.
+
+required_passes:
+  # These tasks must pass outright; there is no margin to be non-inferior within.
+  - efficiency/amnesia
+  - efficiency/duplicate_trials
+
+cost_controls:
+  # Power-preserving, per AGENT-004 §8. Every one of these reduces the number of
+  # trials needed for a given confidence rather than reducing the confidence.
+  paired_common_random_numbers: true
+  sequential_stopping_with_alpha_spending: true
+  batch_api_for_single_turn_grading: true
+  exposure_gated_skill_leave_one_out: true
+  budget_config_key: evals.budget_usd_month
+
+triage:
+  # Every failure is triaged for grader bugs before it is counted, and the label is
+  # stored (§5). An untriaged failure is not yet a data point — but nor is it a
+  # pass, so the gate treats it as a failure until someone looks.
+  untriaged_counts_as: failure
+  labels: [real_failure, grader_bug, infrastructure, ambiguous_task]
+
+# ── Comparing like with like (ADR-0032) ────────────────────────────────────
+#
+# A scorecard now records the profile, tier and hardware it was earned on
+# (migration 0040). The gate compares a run against a baseline from the SAME tier,
+# and refuses otherwise.
+#
+# Without this the local tier quietly breaks the gate rather than passing it: a
+# local_mid run measured against a frontier baseline fails every margin, and the
+# obvious fix — widening the margins — would weaken the gate for frontier too. The
+# tiers are different systems and each needs its own baseline.
+#
+# It also closes the other direction, which is worse because it passes silently: a
+# local_mid run compared against a local_mid baseline earned on DIFFERENT hardware
+# measures the hardware and reports it as a harness change. Promotion from
+# local_mid to local_high is an eval result (guide 6.2), so the evidence has to say
+# what it was earned on.
+comparability:
+  require_same: [tier, profile_id]
+  # Hardware may differ within a tier, but the difference is reported rather than
+  # ignored: a faster box is not a better harness.
+  report_if_different: [hardware]
+  on_mismatch: refuse

@@ -632,9 +632,37 @@ pub async fn feature_vector(
             let store = BarStore::connect(&state.clickhouse_url);
             let to = chrono::Utc::now();
             let from = to - chrono::Duration::days(lookback_days_for(tf_key));
-            match store.load_bars(inst, tf, from, to).await {
+            let resolved = match store.resolve_instrument(inst).await {
+                Ok(r) => r,
+                Err(e) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response();
+                }
+            };
+            let loaded = match resolved {
+                Some(_) => store.load_bars(inst, tf, from, to).await,
+                None => Ok(Vec::new()),
+            };
+            match loaded {
                 Ok(bars) if !bars.is_empty() => {
-                    let feats = crate::features_compute::latest_vector(&bars, &names);
+                    let tenant = token.user_id().to_string();
+                    let ctx = crate::features_compute::ServeContext {
+                        pg: &state.pg,
+                        tenant: &tenant,
+                        instrument_id: resolved.map_or(0, |r| r.0),
+                        venue_id: resolved.map_or(0, |r| r.1),
+                        period_secs: u32::try_from(tf.seconds()).unwrap_or(u32::MAX),
+                        feature_set_id: &fs_ref,
+                    };
+                    let feats = match crate::features_compute::serve_vector(&ctx, &bars, &names).await {
+                        Ok(f) => f,
+                        Err(e) => {
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({ "error": "feature_serve_failed", "message": e.to_string() })),
+                            )
+                                .into_response();
+                        }
+                    };
                     let as_of_ms = bars.last().map_or(0, |b| b.ts_ns / 1_000_000);
                     return Json(json!({
                         "feature_set": fs_ref,
@@ -807,6 +835,9 @@ pub struct DataWindowsRequest {
     pub horizon_token: String,
     /// Bar timeframe key (e.g. `"1m"`) matching the dataset.
     pub timeframe: String,
+    /// Feature set whose declared lookbacks set the embargo (the core set when absent).
+    #[serde(default)]
+    pub feature_set_ref: Option<String>,
 }
 
 /// POST /api/models/data/windows
@@ -824,7 +855,11 @@ pub async fn data_windows(
     let horizon_bars =
         features::label_horizon_bars(&req.horizon_token, &req.timeframe).unwrap_or(60);
 
-    match walk_forward_folds(req.row_count as usize, &req.spec, horizon_bars) {
+    let fs_ref = req.feature_set_ref.clone().unwrap_or_else(|| "fs_core_ohlcv_v3".to_string());
+    let names = features::resolve_feature_set(&fs_ref).map(|s| s.features.clone()).unwrap_or_default();
+    let pipeline = features::walk_forward::embargo_inputs(&names, horizon_bars);
+
+    match walk_forward_folds(req.row_count as usize, &req.spec, &pipeline) {
         Ok(folds) => {
             let windows: Vec<serde_json::Value> = folds
                 .iter()
@@ -840,6 +875,8 @@ pub async fn data_windows(
             Json(serde_json::json!({
                 "row_count": req.row_count,
                 "horizon_bars": horizon_bars,
+                "feature_set_ref": fs_ref,
+                "embargo_bars": features::walk_forward::compute_embargo(&pipeline),
                 "folds": windows,
             }))
             .into_response()

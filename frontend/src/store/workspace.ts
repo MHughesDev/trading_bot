@@ -34,6 +34,10 @@ interface ModeWorkspace {
 interface WorkspaceState {
   byMode: Record<TradingMode, ModeWorkspace>
   setPanels: (mode: TradingMode, updater: (prev: PanelSpec[]) => PanelSpec[]) => void
+  /** Patch one panel in place — width, collapsed, instrument, timeframe. */
+  patchPanel: (mode: TradingMode, id: string, patch: Partial<PanelSpec>) => void
+  /** Replace the whole desk with a named template. */
+  applyTemplate: (mode: TradingMode, panels: PanelSpec[]) => void
   setChartSettings: (mode: TradingMode, key: string, settings: ChartSettings) => void
   removeChartSettings: (mode: TradingMode, key: string) => void
 }
@@ -60,6 +64,20 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             [mode]: { ...s.byMode[mode], panels: updater(s.byMode[mode].panels) },
           },
         })),
+      patchPanel: (mode, id, patch) =>
+        set((s) => ({
+          byMode: {
+            ...s.byMode,
+            [mode]: {
+              ...s.byMode[mode],
+              panels: s.byMode[mode].panels.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+            },
+          },
+        })),
+      applyTemplate: (mode, panels) =>
+        set((s) => ({
+          byMode: { ...s.byMode, [mode]: { panels, chartSettings: {} } },
+        })),
       setChartSettings: (mode, key, settings) =>
         set((s) => ({
           byMode: {
@@ -81,12 +99,27 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     }),
     {
       name: STORAGE_KEY,
-      version: 2,
+      version: 3,
       // Persist data only, not the action functions.
       partialize: (s) => ({ byMode: s.byMode }),
       // v1 was a single flat workspace `{ panels, chartSettings }` (mode-agnostic).
       // Adopt it as the PAPER workspace and seed LIVE fresh.
       migrate: (persisted, version) => {
+        // v2 -> v3 introduced a wider panel vocabulary (book, tape, watchlist,
+        // positions, orders, automations) and per-panel width/collapsed state.
+        // Old desks only ever held chart/terminal/scanner panels; rename the
+        // retired `terminal` kind to `ticket` and keep everything else.
+        if (version === 2 && persisted && typeof persisted === 'object') {
+          const old = persisted as { byMode?: Record<string, ModeWorkspace> }
+          if (old.byMode) {
+            for (const ws of Object.values(old.byMode)) {
+              ws.panels = (ws.panels ?? []).map((p) =>
+                (p.kind as string) === 'terminal' ? { ...p, kind: 'ticket' as const } : p,
+              )
+            }
+            return old as { byMode: Record<TradingMode, ModeWorkspace> }
+          }
+        }
         if (
           version < 2 &&
           persisted &&

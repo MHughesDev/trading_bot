@@ -355,8 +355,16 @@ async fn workflow_b_invalid_draft_catches_errors() {
 
 // ─── Backtests ───────────────────────────────────────────────────────────────
 
+/// The dispatch path itself, not just the catalogue, refuses the bypass.
+///
+/// These two tests used to assert that `create_backtest` launched a run and that
+/// it validated its arguments. Both behaviours were real — and both were the
+/// problem: the tool reached `POST /api/backtests`, which runs a real simulation
+/// through the legacy job tracker with no Experiment, no trial counter and no
+/// ledger row. Removing it from the catalogue is not enough on its own, because a
+/// model that remembers the old name can still name it; dispatch has to refuse.
 #[tokio::test]
-async fn create_backtest_by_slug_returns_id() {
+async fn dispatching_create_backtest_by_name_is_refused() {
     let (ctx, _state) = ctx().await;
     let r = call(
         &ctx,
@@ -370,27 +378,14 @@ async fn create_backtest_by_slug_returns_id() {
         }),
     )
     .await;
-    assert!(r.get("error").is_none(), "{r}");
-    assert!(r.get("backtest_id").and_then(|v| v.as_str()).is_some());
-}
-
-#[tokio::test]
-async fn create_backtest_without_strategy_is_rejected_locally() {
-    let (ctx, _state) = ctx().await;
-    let r = call(
-        &ctx,
-        "create_backtest",
-        json!({
-            "instrument_id": "BTC-USD",
-            "timeframe": "1h",
-            "start": "2026-06-01T00:00:00Z",
-            "end": "2026-09-01T00:00:00Z"
-        }),
-    )
-    .await;
     assert_eq!(
         r.get("error").and_then(|v| v.as_str()),
-        Some("missing_strategy")
+        Some("unknown_tool"),
+        "a remembered tool name must not reach the legacy dispatch path: {r}"
+    );
+    assert!(
+        r.get("backtest_id").is_none(),
+        "nothing may have been dispatched: {r}"
     );
 }
 
@@ -645,4 +640,42 @@ fn internal_agent_profile_is_a_reduced_subset() {
     assert!(!internal_names.contains(&"new_strategy_draft"));
     assert!(!internal_names.contains(&"create_automation"));
     assert!(internal_names.contains(&"wait_for_backtest"));
+}
+
+/// INV-16: no compute is dispatched without a `REGISTERED` trial row, and there
+/// is no bypass at any permission level.
+///
+/// `create_backtest` was that bypass. It called `POST /api/backtests` directly,
+/// which runs a real simulation against real bars through the legacy job tracker
+/// — no Experiment, no trial counter, no propensity, no ledger row of any kind.
+/// An agent could therefore burn compute and read a Sharpe that the platform's
+/// own trial accounting never saw, which is precisely the "a side door exists,
+/// so an audit will find it was used" failure the invariant exists to prevent.
+///
+/// The sanctioned path is create_experiment → run_sweep: every member registers
+/// before it executes, so every look is counted.
+///
+/// If this test starts failing, the tool came back. Do not re-add it to make the
+/// test pass — the invariant is the point, not the assertion.
+#[test]
+fn no_tool_profile_can_dispatch_an_unregistered_backtest() {
+    for profile in [ToolProfile::Mcp, ToolProfile::InternalAgent] {
+        let defs = tool_definitions_for(profile);
+        let names: Vec<&str> = defs
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+            .collect();
+        assert!(
+            !names.contains(&"create_backtest"),
+            "{profile:?} exposes create_backtest — that dispatches compute with no trial row (INV-16)"
+        );
+        // The sanctioned path must still exist, or the tool was removed without
+        // leaving anything that can legitimately run a backtest.
+        assert!(
+            names.contains(&"create_experiment") && names.contains(&"run_sweep"),
+            "{profile:?} must retain the registered path (create_experiment + run_sweep); got {names:?}"
+        );
+    }
 }

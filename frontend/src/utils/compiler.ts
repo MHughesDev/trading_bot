@@ -1,12 +1,15 @@
 import type { Node, Edge } from '@xyflow/react'
 import type { RuleStrategySpec, IndicatorSpec, Condition, ExitRule, SizeRule } from '@/types/spec'
-import type { IndicatorNodeData } from '@/nodes/IndicatorNode'
-import type { ConditionNodeData } from '@/nodes/ConditionNode'
-import type { AIInferenceNodeData } from '@/nodes/AIInferenceNode'
-import type { LogicNodeData } from '@/nodes/LogicNode'
-import type { ActionNodeData } from '@/nodes/ActionNode'
-import type { SizeNodeData } from '@/nodes/SizeNode'
-import type { ExitNodeData } from '@/nodes/ExitNode'
+import type {
+  ActionNodeData,
+  AIInferenceNodeData,
+  ConditionNodeData,
+  ExitNodeData,
+  IndicatorNodeData,
+  LogicNodeData,
+  MarketDataNodeData,
+  SizeNodeData,
+} from '@/nodes'
 
 function byId(nodes: Node[], id: string): Node | undefined {
   return nodes.find(n => n.id === id)
@@ -112,6 +115,48 @@ function collectAiWarnings(conds: Condition[], errors: string[], warnings: strin
     errors.push('Select a model for every AI Inference block.')
   }
   warnings.push('AI Inference blocks require the inference service to be running.')
+}
+
+/* -----------------------------------------------------------------------------
+   Market-data context.
+
+   A `market_data` node declares which series feed the strategy. It does not
+   take part in condition compilation — it configures the definition's `inputs`
+   block. When no symbol is given the input stays `$bound_at_init`, which is how
+   a strategy stays reusable across instruments.
+   -------------------------------------------------------------------------- */
+
+export interface DataInput {
+  lane: string
+  instrument: string
+  features?: string[]
+}
+
+const LANE_FOR: Record<string, string> = {
+  price: 'market.bars.1m',
+  volume: 'market.bars.1m',
+  orderbook: 'market.orderbook.l2',
+  funding: 'market.funding_rate',
+}
+
+export function collectDataInputs(nodes: Node[]): DataInput[] {
+  const out = new Map<string, DataInput>()
+  for (const n of nodes) {
+    if (n.type !== 'market_data') continue
+    const d = n.data as MarketDataNodeData
+    if (d.disabled) continue
+    const lane = LANE_FOR[d.source] ?? 'market.bars.1m'
+    const instrument = d.symbol?.trim() || '$bound_at_init'
+    out.set(`${lane}|${instrument}`, { lane, instrument })
+  }
+  return [...out.values()]
+}
+
+/** The instrument + timeframe the canvas is designed against, for previews. */
+export function dataContext(nodes: Node[]): { symbol: string | null; timeframe: string } {
+  const node = nodes.find((n) => n.type === 'market_data' && !(n.data as MarketDataNodeData).disabled)
+  const d = node?.data as MarketDataNodeData | undefined
+  return { symbol: d?.symbol?.trim() || null, timeframe: d?.timeframe ?? '1h' }
 }
 
 export interface CompileResult {

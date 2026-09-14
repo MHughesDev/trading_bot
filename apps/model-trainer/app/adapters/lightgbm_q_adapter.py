@@ -51,7 +51,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
     model_strings: list[str] = []
     for idx, alpha in enumerate(levels):
         params = {**base_params, "objective": "quantile", "alpha": alpha}
-        dtrain = lgb.Dataset(p.X_tr, label=p.y_tr)
+        dtrain = lgb.Dataset(p.X_tr, label=p.y_tr, weight=p.w_tr)  # weighted by label uniqueness (SPEC 3.4)
         valid_sets = [dtrain]
         valid_names = ["train"]
         if len(p.X_val) > 0:

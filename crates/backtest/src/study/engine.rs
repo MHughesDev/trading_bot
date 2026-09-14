@@ -9,10 +9,25 @@
 
 use chrono::{DateTime, Duration, Utc};
 
+use ledger::{DispatchContext, TrialLedger};
+use crate::run::RunDispatch;
 use crate::rng::DetRng;
 use crate::run::{
     Backtest, MetricInputs, MetricKind, MetricSet, RunConfig, RunExecutor, RunStatus, RunStore,
 };
+
+/// The probability that a given expanded member was dispatched.
+///
+/// A sweep runs every member it expanded, so the propensity is 1 — unless the
+/// budget truncated the expansion, in which case it is the surviving fraction.
+/// Logging 1.0 here is not a placeholder: it is the true dispatch probability
+/// under an exhaustive-enumeration policy (ADR-P0-04).
+fn sweep_propensity(expanded: usize, dispatched: usize) -> f64 {
+    if expanded == 0 {
+        return 1.0;
+    }
+    (dispatched as f64 / expanded as f64).clamp(f64::MIN_POSITIVE, 1.0)
+}
 
 use super::config::{SelectionRule, StudyConfig, StudyConfigError, StudyKind, VarySpec};
 use super::result::{Distribution, StudyResult, StudyVerdict};
@@ -26,27 +41,41 @@ impl StudyEngine {
     /// # Errors
     /// Returns [`StudyConfigError`] if the config is invalid (the Study never
     /// runs, so it never touches the trial counter).
-    pub fn run<S: RunStore, E: RunExecutor>(
+    pub fn run<S: RunStore, E: RunExecutor, L: TrialLedger>(
         study: &StudyConfig,
-        bt: &Backtest<S, E>,
+        bt: &Backtest<S, E, L>,
+        ctx: &DispatchContext,
     ) -> Result<StudyResult, StudyConfigError> {
         study.validate()?;
 
         if study.kind == StudyKind::TradeMonteCarlo {
-            return Ok(trade_monte_carlo(study, bt));
+            return trade_monte_carlo(study, bt, ctx);
         }
 
         // Expand the varying dimension into member configs, honoring the budget.
-        let mut members = expand_members(study);
+        let expanded = expand_members(study);
+        let expanded_total = expanded.len();
+        let mut members = expanded;
         if members.len() > study.budget.max_runs as usize {
             members.truncate(study.budget.max_runs as usize);
         }
+        // A sweep dispatches every expanded member, so each member's probability
+        // of being dispatched under this policy is 1 — unless the budget truncated
+        // the expansion, in which case it is the surviving fraction. See
+        // decisions/ADR-INDEX.md ADR-P0-04.
+        let propensity = sweep_propensity(expanded_total, members.len());
+        let ctx = &ctx.clone().with_policy("grid_exhaustive", 1);
 
         let mut member_ids = Vec::with_capacity(members.len());
         let mut surviving: Vec<(RunConfig, f64)> = Vec::new();
         let mut any_unsafe = false;
         for cfg in members {
-            let result = bt.run(&cfg);
+            let result = match bt.run(&RunDispatch::new(ctx, &cfg, propensity)) {
+                Ok(r) => r,
+                // A registration refusal is not a quiet skip: the study cannot
+                // run a member it was not permitted to log.
+                Err(e) => return Err(StudyConfigError::LedgerRefused(e.to_string())),
+            };
             member_ids.push(result.run_id.clone());
             any_unsafe |= result.unsafe_;
             if result.status == RunStatus::Ok {
@@ -72,6 +101,13 @@ impl StudyEngine {
             any_unsafe,
         ))
     }
+}
+
+/// The member configs a Study expands into, for tests that need to inspect the
+/// expansion rather than its results.
+#[must_use]
+pub fn expand_members_for_test(study: &StudyConfig) -> Vec<RunConfig> {
+    expand_members(study)
 }
 
 /// Expand a Study's `VarySpec` into the member configs to run. Each member is a
@@ -138,9 +174,22 @@ fn expand_members(study: &StudyConfig) -> Vec<RunConfig> {
         }
         VarySpec::Seeds { n } => (0..*n)
             .map(|i| {
-                let mut cfg = base.clone();
-                cfg.seed = base.seed.wrapping_add(u64::from(i)).wrapping_add(1);
-                cfg.rehashed()
+                let seed = base.seed.wrapping_add(u64::from(i)).wrapping_add(1);
+                // A permutation-null member executes in a **null world**: the
+                // bars are passed through the generator before the strategy sees
+                // them. Varying only the seed would re-run the real strategy on
+                // the real data and call the spread a null distribution
+                // (`StudyConfig::validate` refuses the config that would let
+                // that happen).
+                if let (StudyKind::PermutationNull, Some(null)) =
+                    (study.kind, study.null.as_ref())
+                {
+                    base.clone().in_null_world(null.clone(), seed)
+                } else {
+                    let mut cfg = base.clone();
+                    cfg.seed = seed;
+                    cfg.rehashed()
+                }
             })
             .collect(),
         VarySpec::CostLadder { cost_model_refs } => cost_model_refs
@@ -168,11 +217,17 @@ fn expand_members(study: &StudyConfig) -> Vec<RunConfig> {
 /// `trade_monte_carlo`: run the base config once, then block-bootstrap-resample
 /// the executed trade sequence to produce a distribution of path-dependent risk
 /// (max drawdown). Answers "how lucky was this particular ordering?".
-fn trade_monte_carlo<S: RunStore, E: RunExecutor>(
+fn trade_monte_carlo<S: RunStore, E: RunExecutor, L: TrialLedger>(
     study: &StudyConfig,
-    bt: &Backtest<S, E>,
-) -> StudyResult {
-    let base_result = bt.run(&study.base_config);
+    bt: &Backtest<S, E, L>,
+    ctx: &DispatchContext,
+) -> Result<StudyResult, StudyConfigError> {
+    let ctx = ctx.clone().with_policy("monte_carlo_base", 1);
+    // The base run is dispatched with certainty; the resampling that follows is
+    // pure arithmetic over its trades and dispatches no further compute.
+    let base_result = bt
+        .run(&RunDispatch::new(&ctx, &study.base_config, 1.0))
+        .map_err(|e| StudyConfigError::LedgerRefused(e.to_string()))?;
     let member_ids = vec![base_result.run_id.clone()];
 
     let (n, block) = match study.vary {
@@ -215,7 +270,7 @@ fn trade_monte_carlo<S: RunStore, E: RunExecutor>(
         plateau: None,
     };
     // The base run is the only Run; resamples are pure analysis, not Runs.
-    StudyResult::new(
+    Ok(StudyResult::new(
         study.study_id.clone(),
         member_ids,
         dist,
@@ -223,7 +278,7 @@ fn trade_monte_carlo<S: RunStore, E: RunExecutor>(
         1,
         None,
         base_result.unsafe_,
-    )
+    ))
 }
 
 /// Block bootstrap: draw consecutive blocks of length `block` (with wraparound)
@@ -404,8 +459,15 @@ mod tests {
         Backtest, ClosureExecutor, ComputeCost, DataSlice, EvalResolution, InMemoryRunStore,
         ParamMap, RunConfig, RunConfigBuilder, ENGINE_VERSION,
     };
+    use ledger::InMemoryLedger;
     use crate::study::config::{StudyBudget, StudyConfig};
     use chrono::TimeZone;
+
+    /// Tests dispatch through a real ledger — there is no way to reach an
+    /// executor without one (INV-16).
+    fn ctx() -> DispatchContext {
+        DispatchContext::human("tenant-test", "study", 0.1).with_experiment("test-exp")
+    }
     use serde_json::json;
 
     fn base() -> RunConfig {
@@ -454,6 +516,7 @@ mod tests {
             vary: VarySpec::Params { grid },
             metric: MetricKind::TotalReturn,
             null_ref: None,
+            null: None,
             budget: StudyBudget::default(),
             question: "how does perf vary across params?".into(),
             selection_rule: SelectionRule::MedianStableCentroid,
@@ -496,9 +559,9 @@ mod tests {
 
     #[test]
     fn sweep_counts_every_member_and_seals() {
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true));
+        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true), InMemoryLedger::new());
         let grid: Vec<ParamMap> = (0..50).map(|i| param(f64::from(i))).collect();
-        let res = StudyEngine::run(&sweep_cfg(grid), &bt).unwrap();
+        let res = StudyEngine::run(&sweep_cfg(grid), &bt, &ctx()).unwrap();
         assert_eq!(res.members().len(), 50);
         assert_eq!(res.trial_delta, 50);
         assert!(res.sealed);
@@ -506,11 +569,11 @@ mod tests {
 
     #[test]
     fn rerunning_uses_cache_but_still_reports_full_trial_delta() {
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true));
+        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true), InMemoryLedger::new());
         let grid: Vec<ParamMap> = (0..10).map(|i| param(f64::from(i))).collect();
         let cfg = sweep_cfg(grid);
-        let first = StudyEngine::run(&cfg, &bt).unwrap();
-        let again = StudyEngine::run(&cfg, &bt).unwrap();
+        let first = StudyEngine::run(&cfg, &bt, &ctx()).unwrap();
+        let again = StudyEngine::run(&cfg, &bt, &ctx()).unwrap();
         assert_eq!(first.trial_delta, 10);
         assert_eq!(again.trial_delta, 10, "cache hits still count");
     }
@@ -518,7 +581,7 @@ mod tests {
     #[test]
     fn neighborhood_detects_plateau_vs_spike() {
         // Plateau objective → low relative spread → plateau true.
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true));
+        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true), InMemoryLedger::new());
         let study = StudyConfig {
             study_id: "nbhd".into(),
             kind: StudyKind::Neighborhood,
@@ -531,16 +594,17 @@ mod tests {
             },
             metric: MetricKind::TotalReturn,
             null_ref: None,
+            null: None,
             budget: StudyBudget::default(),
             question: "is it a plateau?".into(),
             selection_rule: SelectionRule::None,
         };
-        let plateau_res = StudyEngine::run(&study, &bt).unwrap();
+        let plateau_res = StudyEngine::run(&study, &bt, &ctx()).unwrap();
         assert_eq!(plateau_res.verdict.plateau, Some(true));
 
         // Spike objective → high relative spread → plateau false.
-        let bt2 = Backtest::new(InMemoryRunStore::new(), objective_executor(false));
-        let spike_res = StudyEngine::run(&study, &bt2).unwrap();
+        let bt2 = Backtest::new(InMemoryRunStore::new(), objective_executor(false), InMemoryLedger::new());
+        let spike_res = StudyEngine::run(&study, &bt2, &ctx()).unwrap();
         assert_eq!(spike_res.verdict.plateau, Some(false));
     }
 
@@ -548,9 +612,9 @@ mod tests {
     fn selection_rule_returns_median_not_peak() {
         // Spike objective: peak at fast==12 (level 0.05); rest near zero. The
         // MedianStableCentroid rule must NOT return the peak.
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(false));
+        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(false), InMemoryLedger::new());
         let grid: Vec<ParamMap> = (8..=16).map(|i| param(f64::from(i))).collect();
-        let res = StudyEngine::run(&sweep_cfg(grid), &bt).unwrap();
+        let res = StudyEngine::run(&sweep_cfg(grid), &bt, &ctx()).unwrap();
         let carried = res.carried_forward.expect("a config is carried forward");
         let fast = carried
             .params
@@ -562,7 +626,7 @@ mod tests {
 
     #[test]
     fn permutation_study_requires_null_to_run() {
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true));
+        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true), InMemoryLedger::new());
         let study = StudyConfig {
             study_id: "perm".into(),
             kind: StudyKind::PermutationNull,
@@ -570,19 +634,20 @@ mod tests {
             vary: VarySpec::Seeds { n: 5 },
             metric: MetricKind::TotalReturn,
             null_ref: None,
+            null: None,
             budget: StudyBudget::default(),
             question: "is it real?".into(),
             selection_rule: SelectionRule::None,
         };
         assert_eq!(
-            StudyEngine::run(&study, &bt).err(),
+            StudyEngine::run(&study, &bt, &ctx()).err(),
             Some(StudyConfigError::MissingNull)
         );
     }
 
     #[test]
     fn cpcv_runs_all_combinations() {
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true));
+        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true), InMemoryLedger::new());
         let study = StudyConfig {
             study_id: "cpcv".into(),
             kind: StudyKind::Cpcv,
@@ -593,11 +658,12 @@ mod tests {
             },
             metric: MetricKind::TotalReturn,
             null_ref: None,
+            null: None,
             budget: StudyBudget::default(),
             question: "robust across history?".into(),
             selection_rule: SelectionRule::None,
         };
-        let res = StudyEngine::run(&study, &bt).unwrap();
+        let res = StudyEngine::run(&study, &bt, &ctx()).unwrap();
         assert_eq!(res.members().len(), 15); // C(6,2)
         assert_eq!(res.trial_delta, 15);
     }
@@ -621,7 +687,7 @@ mod tests {
                 ENGINE_VERSION,
             )
         });
-        let bt = Backtest::new(InMemoryRunStore::new(), exec);
+        let bt = Backtest::new(InMemoryRunStore::new(), exec, InMemoryLedger::new());
         let study = StudyConfig {
             study_id: "cost".into(),
             kind: StudyKind::CostSweep,
@@ -635,11 +701,12 @@ mod tests {
             },
             metric: MetricKind::TotalReturn,
             null_ref: None,
+            null: None,
             budget: StudyBudget::default(),
             question: "where does the edge die?".into(),
             selection_rule: SelectionRule::None,
         };
-        let res = StudyEngine::run(&study, &bt).unwrap();
+        let res = StudyEngine::run(&study, &bt, &ctx()).unwrap();
         assert_eq!(res.members().len(), 3);
         assert!(
             res.distribution.worst_5pct < 0.0,
@@ -670,7 +737,7 @@ mod tests {
                 ENGINE_VERSION,
             )
         });
-        let bt = Backtest::new(InMemoryRunStore::new(), exec);
+        let bt = Backtest::new(InMemoryRunStore::new(), exec, InMemoryLedger::new());
         let study = StudyConfig {
             study_id: "tmc".into(),
             kind: StudyKind::TradeMonteCarlo,
@@ -678,11 +745,12 @@ mod tests {
             vary: VarySpec::TradeResamples { n: 500, block: 2 },
             metric: MetricKind::MaxDrawdown,
             null_ref: None,
+            null: None,
             budget: StudyBudget::default(),
             question: "how lucky was the ordering?".into(),
             selection_rule: SelectionRule::None,
         };
-        let res = StudyEngine::run(&study, &bt).unwrap();
+        let res = StudyEngine::run(&study, &bt, &ctx()).unwrap();
         assert_eq!(res.trial_delta, 1, "only the base run is a Run");
         assert_eq!(res.distribution.dist.len(), 500);
         // The worst-case ordering must be at least as bad as the median.

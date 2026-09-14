@@ -69,6 +69,31 @@ export function fromDefinition(def: StrategyDefinition): {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
+  // Market-data nodes reconstruct the definition's `inputs` block so the canvas
+  // shows which series the strategy reads (spec §2.1.8, the `data` family).
+  const SOURCE_FOR: Record<string, 'price' | 'volume' | 'orderbook' | 'funding'> = {
+    'market.bars.1m': 'price',
+    'market.bars.1s': 'price',
+    'market.orderbook.l2': 'orderbook',
+    'market.funding_rate': 'funding',
+  }
+  let dataY = 60
+  for (const inp of def.inputs) {
+    if (inp.lane === 'features.technical') continue
+    nodes.push({
+      id: uid(),
+      type: 'market_data',
+      position: { x: -240, y: dataY },
+      data: {
+        source: SOURCE_FOR[inp.lane] ?? 'price',
+        symbol: inp.instrument === '$bound_at_init' ? '' : inp.instrument,
+        timeframe: inp.lane === 'market.bars.1s' ? '1s' : '1m',
+        field: 'close',
+      },
+    })
+    dataY += 150
+  }
+
   // Collect all feature names referenced by condition expressions + inputs.
   const featureIds = new Set<string>()
   for (const inp of def.inputs) {

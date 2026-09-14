@@ -32,7 +32,11 @@ pub trait SweepBackend: Send + Sync {
     fn definition(&self, strategy_ref: &str) -> Result<StrategyDefinition, String>;
     /// Run one sealed `ParameterSweep` Study and return the sampler-facing
     /// per-member metrics (see `SuiteManager::run_param_batch`).
-    fn run_batch(&self, experiment: Uuid, spec: ParamBatchSpec) -> Result<ParamBatchOutcome, String>;
+    fn run_batch(
+        &self,
+        experiment: Uuid,
+        spec: ParamBatchSpec,
+    ) -> Result<ParamBatchOutcome, String>;
 }
 
 /// Progress sink (the API layer persists these for the UI / agent).
@@ -229,7 +233,11 @@ pub fn run_sweep(
             samples.push((params, score));
         }
         batch_idx += 1;
-        observer.progress(samples.len() as u32, planned, &format!("batch {batch_idx} done"));
+        observer.progress(
+            samples.len() as u32,
+            planned,
+            &format!("batch {batch_idx} done"),
+        );
     }
 
     // ── Neighbourhood cube → the only carry-forward ─────────────────────────
@@ -237,7 +245,8 @@ pub fn run_sweep(
     // look is exploration; what comes back is the sealed Study's rule output.
     let surface = SurfaceSummary::build(&space, &samples);
     let (view, carried_forward) = {
-        let mut finite: Vec<&(ParamMap, f64)> = samples.iter().filter(|(_, s)| s.is_finite()).collect();
+        let mut finite: Vec<&(ParamMap, f64)> =
+            samples.iter().filter(|(_, s)| s.is_finite()).collect();
         if finite.is_empty() {
             (None, None)
         } else {
@@ -321,7 +330,9 @@ pub fn run_sweep(
         n_failed_runs: n_failed,
         racing: RacingInfo {
             enabled: false,
-            reason: "fidelity racing requires a calibration with rho >= 0.8 (P5); full fidelity used".into(),
+            reason:
+                "fidelity racing requires a calibration with rho >= 0.8 (P5); full fidelity used"
+                    .into(),
         },
         violation_counts: violations,
     })
@@ -462,9 +473,14 @@ mod tests {
         );
         let cf = report.carried_forward.expect("carried forward");
         let fast = cf["fast"].as_f64().unwrap();
-        assert!((8.0..=32.0).contains(&fast), "fast={fast} not near optimum 20");
+        assert!(
+            (8.0..=32.0).contains(&fast),
+            "fast={fast} not near optimum 20"
+        );
         // Constraint violations are explained.
-        assert!(report.violation_counts.keys().any(|k| k.contains("trades")) || report.n_feasible == 40);
+        assert!(
+            report.violation_counts.keys().any(|k| k.contains("trades")) || report.n_feasible == 40
+        );
         assert!(report.surface.text.contains("fast"));
     }
 

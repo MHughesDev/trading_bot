@@ -6,31 +6,23 @@
 //
 // Per-model lineage can be reached from the Cockpit; this page shows the
 // full cross-model view.
-import { useCallback, useMemo } from 'react'
-import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  useNodesState,
-  useEdgesState,
-  type Node,
-  type Edge,
-} from '@xyflow/react'
+import { ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState, type Node, type Edge } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useQuery } from '@tanstack/react-query'
-import { useParams, Link } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { modelsApi, type LineageGraph } from '@/api/mlops'
 
-// ── Node styles matching the .tb-node design language ────────────────────────
+/* Lineage node identity uses the fixed categorical Instrument scale in slot
+   order (spec §2.8.3, V7). Slots are assigned once here and never cycled, so a
+   dataset is the same colour on every lineage graph in the product. */
 
 const NODE_COLORS: Record<string, string> = {
-  dataset: 'var(--tb-accent-blue, #3b82f6)',
-  training_run: 'var(--tb-accent-amber, #f59e0b)',
-  model_version: 'var(--tb-accent-green, #22c55e)',
-  deployment: 'var(--tb-accent-purple, #a855f7)',
-  strategy: 'var(--tb-accent-cyan, #06b6d4)',
-  default: 'var(--muted-foreground, #6b7280)',
+  dataset: 'var(--chart-1)',
+  training_run: 'var(--chart-2)',
+  model_version: 'var(--chart-3)',
+  deployment: 'var(--chart-4)',
+  strategy: 'var(--chart-5)',
+  default: 'var(--fg-tertiary)',
 }
 
 function nodeColor(type: string) {
@@ -48,8 +40,8 @@ function buildNodes(raw: LineageGraph['nodes']): Node[] {
           <div
             style={{
               background: nodeColor(n.type),
-              color: '#fff',
-              borderRadius: 4,
+              color: 'var(--fg-on-accent)',
+              borderRadius: 'var(--r-xs)',
               padding: '2px 6px',
               marginBottom: 4,
               fontWeight: 600,
@@ -65,11 +57,11 @@ function buildNodes(raw: LineageGraph['nodes']): Node[] {
       ),
     },
     style: {
-      background: 'var(--card, #1a1d23)',
+      background: 'var(--node-bg)',
       border: `1px solid ${nodeColor(n.type)}`,
-      borderRadius: 8,
+      borderRadius: 'var(--r-md)',
       padding: '8px 12px',
-      color: 'var(--foreground, #f1f5f9)',
+      color: 'var(--fg-primary)',
       minWidth: 140,
     },
   }))
@@ -81,7 +73,7 @@ function buildEdges(raw: LineageGraph['edges']): Edge[] {
     source: e.source,
     target: e.target,
     animated: false,
-    style: { stroke: 'var(--border, #334155)', strokeWidth: 1.5 },
+    style: { stroke: 'var(--edge)', strokeWidth: 1.5 },
   }))
 }
 
@@ -92,8 +84,8 @@ function EmptyState({ title, message }: { title: string; message: string }) {
     <div className="flex flex-col items-center justify-center h-full gap-4">
       <div className="text-6xl">📊</div>
       <div className="text-center">
-        <h3 className="text-lg font-semibold text-foreground">{title}</h3>
-        <p className="text-sm text-muted-foreground max-w-sm mt-1">{message}</p>
+        <h3 className="text-lg font-semibold text-fg">{title}</h3>
+        <p className="text-sm text-fg-tertiary max-w-sm mt-1">{message}</p>
       </div>
     </div>
   )
@@ -119,7 +111,7 @@ function ModelLineagePanel({ modelId }: { modelId: string }) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+      <div className="flex items-center justify-center h-full text-sm text-fg-tertiary">
         Loading lineage…
       </div>
     )
@@ -157,14 +149,14 @@ function ModelLineagePanel({ modelId }: { modelId: string }) {
       panOnDrag
       zoomOnScroll
     >
-      <Background color="var(--border, #1e293b)" gap={24} />
+      <Background color="var(--canvas-dot)" gap={24} />
       <Controls showInteractive={false} />
       <MiniMap
         nodeColor={(n) => {
           const type = typeof n.data?.type === 'string' ? n.data.type : 'default'
           return nodeColor(type)
         }}
-        maskColor="rgba(0,0,0,0.4)"
+        maskColor="var(--bg-scrim)"
       />
     </ReactFlow>
   )
@@ -180,16 +172,16 @@ export function ModelLineagePage() {
   return (
     <div className="flex flex-col h-full min-h-[600px]">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b bg-card/80 backdrop-blur">
+      <div className="flex items-center justify-between px-6 py-4 border-b bg-surface backdrop-blur">
         <div>
           <h1 className="text-lg font-semibold">Lineage Graph</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="text-sm text-fg-tertiary mt-0.5">
             {focusId
               ? `Showing lineage for model ${focusId}`
               : 'Global artifact flow: datasets → runs → versions → deployments → strategies'}
           </p>
         </div>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="flex items-center gap-3 text-xs text-fg-tertiary">
           {/* Legend */}
           {[
             { label: 'Dataset', color: NODE_COLORS.dataset },
@@ -208,7 +200,7 @@ export function ModelLineagePage() {
         </div>
         <Link
           to="/mlops"
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="text-xs text-fg-tertiary hover:text-fg transition-colors"
         >
           ← All models
         </Link>

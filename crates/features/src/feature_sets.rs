@@ -215,20 +215,12 @@ pub fn validate_features(names: &[String]) -> Vec<String> {
 
 /// Whether a feature name can be computed by this crate.
 pub fn is_known(name: &str) -> bool {
-    if KNOWN.contains(name) {
-        return true;
-    }
-    // Pattern-matched families (variable suffix not enumerated statically).
-    name.starts_with("ema_")
-        || name.starts_with("rsi_")
-        || name.starts_with("rolling_mean_")
-        || name.starts_with("rolling_std_")
-        || name.starts_with("returns_")
-        || name.starts_with("momentum_")
-        || name.starts_with("zscore_")
-        || name.starts_with("parkinson_vol_")
-        || name.starts_with("garman_klass_vol_")
-        || name.starts_with("rel_volume_")
+    KNOWN.contains(name) || crate::runtime::is_known(name)
+}
+
+/// The catalogued feature names (the pattern families accept more).
+pub fn known_features() -> Vec<&'static str> {
+    known_features_static()
 }
 
 // ---------------------------------------------------------------------------

@@ -36,7 +36,7 @@ def _train_multi_quantile(p, hp, levels, n_estimators, emit_progress):
         "reg_lambda": float(hp.get("reg_lambda", 1.0)),
         "seed": p.seed,
     }
-    dtrain = xgb.DMatrix(p.X_tr, label=p.y_tr)
+    dtrain = xgb.DMatrix(p.X_tr, label=p.y_tr, weight=p.w_tr)  # weighted by label uniqueness (SPEC 3.4)
     evals = [(dtrain, "train")]
     if len(p.X_val) > 0:
         evals.append((xgb.DMatrix(p.X_val, label=p.y_val), "validation"))
@@ -103,7 +103,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
             "colsample_bytree": float(hp.get("colsample_bytree", 1.0)),
             "seed": p.seed,
         }
-        dtrain = xgb.DMatrix(p.X_tr, label=p.y_tr)
+        dtrain = xgb.DMatrix(p.X_tr, label=p.y_tr, weight=p.w_tr)  # weighted by label uniqueness (SPEC 3.4)
         boosters_raw = []
         for idx, alpha in enumerate(levels):
             params = {**params_base, "objective": "reg:quantileerror", "quantile_alpha": [alpha]}

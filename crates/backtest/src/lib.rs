@@ -39,11 +39,18 @@ pub mod stats;
 pub mod store;
 pub mod study;
 pub mod suite;
+pub mod synthetic;
 pub mod types;
 pub mod warmup;
 
 pub use aggregate::aggregate_bars;
 pub use collect::CollectorPlan;
+/// The Trial Ledger lives in its own crate; re-exported so dispatch sites have one import.
+pub use ledger;
+pub use ledger::{
+    ActorKind, Censoring, DispatchContext, InMemoryLedger, LedgerError, Registration, TrialEvent, TrialLedger,
+    TrialState, TrialTicket,
+};
 pub use manager::BacktestManager;
 pub use store::{BarCoverage, BarStore, CollectedBar};
 pub use suite::SuiteManager;

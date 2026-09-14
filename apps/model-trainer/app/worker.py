@@ -5,7 +5,17 @@ import os
 import numpy as np
 import pandas as pd
 
-from .schemas import TrainRequest, TrainResponse, EvalRequest, EvalResponse
+from .schemas import (
+    TrainRequest,
+    TrainResponse,
+    EvalRequest,
+    EvalResponse,
+    PostHocRequest,
+    PostHocResponse,
+    PostHocStep,
+)
+from . import failures
+from . import posthoc as posthoc_mod
 from .artifact_store import get_store
 from .nats_client import NatsPublisher
 from . import scoring as scoring_mod
@@ -112,10 +122,11 @@ async def run_training(req: TrainRequest) -> TrainResponse:
             "metric": metrics or {},
         })
     except Exception as e:  # noqa: BLE001
-        resp = TrainResponse(status="failed", error=str(e))
+        terminal = failures.classify(e)
+        resp = TrainResponse(status="failed", error=str(e), terminal=terminal)
         await publisher.publish(subject, {
             "run_id": req.run_id, "phase": "failed", "progress": 100.0,
-            "metric": {"error": str(e)},
+            "metric": {"error": str(e), "terminal": terminal},
         })
     finally:
         await publisher.close()
@@ -152,7 +163,7 @@ async def run_evaluation(req: EvalRequest) -> EvalResponse:
         try:
             artifact_bytes = store.get(req.artifact_uri)
         except Exception as e:  # noqa: BLE001
-            return EvalResponse(status="failed", error=f"artifact load failed: {e}")
+            return EvalResponse(status="failed", error=f"artifact load failed: {e}", terminal=failures.DATA_ERROR)
 
         # Load test-window dataset (Parquet from Phase 0 materialization)
         await _emit("loading_dataset", 15.0)
@@ -160,7 +171,7 @@ async def run_evaluation(req: EvalRequest) -> EvalResponse:
             raw = store.get(req.dataset_uri)
             df = pd.read_parquet(io.BytesIO(raw))
         except Exception as e:  # noqa: BLE001
-            return EvalResponse(status="failed", error=f"dataset load failed: {e}")
+            return EvalResponse(status="failed", error=f"dataset load failed: {e}", terminal=failures.DATA_ERROR)
 
         await _emit("running_inference", 30.0)
 
@@ -183,7 +194,11 @@ async def run_evaluation(req: EvalRequest) -> EvalResponse:
         )
 
         if predicted_q is None or realized is None or len(realized) == 0:
-            return EvalResponse(status="failed", error="no predictions or realized values produced")
+            return EvalResponse(
+                status="failed",
+                error="no predictions or realized values produced",
+                terminal=failures.DATA_ERROR,
+            )
 
         await _emit("scoring", 60.0)
 
@@ -241,7 +256,7 @@ async def run_evaluation(req: EvalRequest) -> EvalResponse:
 
     except Exception as e:  # noqa: BLE001
         await _emit("failed", 100.0)
-        return EvalResponse(status="failed", error=str(e))
+        return EvalResponse(status="failed", error=str(e), terminal=failures.classify(e))
     finally:
         await publisher.close()
 
@@ -473,3 +488,41 @@ def _synthetic_frame(n: int = 500):
     })
     df["label"] = rng.normal(0, 0.002, n)
     return df
+
+
+async def run_posthoc(req: PostHocRequest) -> PostHocResponse:
+    """The post-hoc pipeline as a job (SPEC 11.4, checklist 2.11).
+
+    One call, four steps, one order. The response carries every step including
+    the ones that did not apply, so the sequence stays auditable from the
+    artifact alone.
+    """
+    try:
+        report = posthoc_mod.run_posthoc(
+            framework=req.framework,
+            costs=posthoc_mod.CostMatrix(
+                true_positive=req.costs.true_positive,
+                false_positive=req.costs.false_positive,
+                true_negative=req.costs.true_negative,
+                false_negative=req.costs.false_negative,
+            ),
+            oos_predictions=np.asarray(req.oos_predictions, dtype=np.float64),
+            oos_realized=np.asarray(req.oos_realized, dtype=np.float64),
+            cal_scores=np.asarray(req.cal_scores, dtype=np.float64),
+            cal_outcomes=np.asarray(req.cal_outcomes, dtype=np.float64),
+            calibrator=req.calibrator,
+        )
+    except Exception as e:  # noqa: BLE001
+        return PostHocResponse(status="failed", error=str(e), terminal=failures.classify(e))
+
+    return PostHocResponse(
+        status="succeeded",
+        steps=[
+            PostHocStep(step=s.step, applied=s.applied, detail=s.detail, skipped=s.skipped)
+            for s in report.steps
+        ],
+        weights=None if report.weights is None else [float(w) for w in report.weights],
+        calibrator=report.calibrator,
+        calibration_params=report.calibration_params,
+        threshold=report.threshold,
+    )

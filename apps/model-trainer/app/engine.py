@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from . import failures
+
 MAGIC = b"TBNDL001"
 BUNDLE_SCHEMA = "tb-bundle-1"
 
@@ -226,6 +228,40 @@ def pinball_loss(y_true: np.ndarray, q_preds: np.ndarray, levels: list[float]) -
 # --------------------------------------------------------------------------- #
 # Prepared training data
 # --------------------------------------------------------------------------- #
+# Columns a frame carries that are not features.
+#
+# Without this, `select_dtypes(include=["number"])` hands the model every numeric
+# column in the frame — including `ts_ns`, which lets a tree split on "before or
+# after March", and `sample_weight`, which is a function of the label's own
+# overlap structure. Both are leakage by accident: nobody decided to use them, the
+# column list just swept them in.
+RESERVED_COLUMNS = ("label", "target", "sample_weight", "ts_ns", "instrument")
+
+
+def feature_frame(df: pd.DataFrame, label_col: str) -> pd.DataFrame:
+    """The numeric columns that are actually features."""
+    drop = [c for c in RESERVED_COLUMNS if c in df.columns]
+    if label_col not in drop:
+        drop.append(label_col)
+    return df.drop(columns=drop).select_dtypes(include=["number"])
+
+
+def sample_weights(df: pd.DataFrame) -> np.ndarray | None:
+    """Average-uniqueness weights, when the frame carries them (SPEC 3.4).
+
+    Labels with overlapping horizons are not independent observations. Weighting
+    them equally tells the model the same thing many times over and inflates
+    every in-sample statistic computed from them. Returns `None` for a frame with
+    no weight column, which is what an unweighted frame means.
+    """
+    if "sample_weight" not in df.columns:
+        return None
+    w = df["sample_weight"].to_numpy(dtype=np.float64)
+    if not np.all(np.isfinite(w)) or np.all(w <= 0):
+        return None
+    return w
+
+
 @dataclass
 class Prepared:
     objective: str
@@ -243,6 +279,10 @@ class Prepared:
     sigma: float = 1.0
     # quantile grid from definition["output"]["quantile_levels"]; empty for point models.
     quantile_levels: list = field(default_factory=list)
+    # Average-uniqueness sample weights for the training rows, aligned with
+    # `y_tr`. `None` when the frame carried none; an adapter must then fit
+    # unweighted rather than inventing ones.
+    w_tr: np.ndarray | None = None
     extra: dict = field(default_factory=dict)
 
 
@@ -284,11 +324,12 @@ def prepare(
     seed = resolve_seed(definition)
 
     label_col = "label" if "label" in df.columns else df.columns[-1]
-    feat_df = df.drop(columns=[label_col]).select_dtypes(include=["number"])
+    feat_df = feature_frame(df, label_col)
     feature_order = list(feat_df.columns)
 
     X = feat_df.to_numpy(dtype=np.float64)
     y_cont = df[label_col].to_numpy(dtype=np.float64)
+    w_all = sample_weights(df)
 
     n = len(X)
     embargo = int(definition.get("_embargo_bars", 0) or 0)
@@ -319,6 +360,7 @@ def prepare(
         y_te=y_final[te].astype(np.float32),
         sigma=sigma,
         quantile_levels=_extract_quantile_levels(definition),
+        w_tr=(None if w_all is None else w_all[tr].astype(np.float64)),
     )
 
 
@@ -332,11 +374,12 @@ def prepare_with_fold(
     seed = resolve_seed(definition)
 
     label_col = "label" if "label" in df.columns else df.columns[-1]
-    feat_df = df.drop(columns=[label_col]).select_dtypes(include=["number"])
+    feat_df = feature_frame(df, label_col)
     feature_order = list(feat_df.columns)
 
     X = feat_df.to_numpy(dtype=np.float64)
     y_cont = df[label_col].to_numpy(dtype=np.float64)
+    w_all = sample_weights(df)
 
     tr_sl = slice(fold.train_start, fold.train_end)
     va_sl = slice(fold.cal_start, fold.cal_end)
@@ -367,6 +410,7 @@ def prepare_with_fold(
         y_te=y_final[te_sl].astype(np.float32),
         sigma=sigma,
         quantile_levels=_extract_quantile_levels(definition),
+        w_tr=(None if w_all is None else w_all[tr_sl].astype(np.float64)),
     )
 
 
@@ -486,19 +530,34 @@ def train_torch_model(
     batch_size: int,
     emit_progress,
     weight_decay: float = 0.0,
+    sample_weight: np.ndarray | None = None,
 ):
     import torch
     import torch.nn as nn
 
     Xtr = torch.tensor(np.asarray(X_tr, dtype=np.float32))
     ytr = torch.tensor(np.asarray(y_tr, dtype=np.float32)).unsqueeze(1)
+    # Average-uniqueness weights (SPEC 3.4). Applied per element and renormalized
+    # within the batch, so the loss stays on the same scale as an unweighted one
+    # and the learning rate does not silently change meaning when weighting is
+    # turned on.
+    wtr = (
+        torch.tensor(np.asarray(sample_weight, dtype=np.float32)).unsqueeze(1)
+        if sample_weight is not None
+        else None
+    )
     has_val = len(X_val) > 0
     if has_val:
         Xval = torch.tensor(np.asarray(X_val, dtype=np.float32))
         yval = torch.tensor(np.asarray(y_val, dtype=np.float32)).unsqueeze(1)
 
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    loss_fn = nn.BCEWithLogitsLoss() if objective == "classification" else nn.MSELoss()
+    reduction = "none" if wtr is not None else "mean"
+    loss_fn = (
+        nn.BCEWithLogitsLoss(reduction=reduction)
+        if objective == "classification"
+        else nn.MSELoss(reduction=reduction)
+    )
 
     n = len(Xtr)
     bs = max(1, min(int(batch_size), n)) if n else 1
@@ -513,7 +572,19 @@ def train_torch_model(
             idx = perm[i : i + bs]
             opt.zero_grad()
             out = model(Xtr[idx])
-            loss = loss_fn(out, ytr[idx])
+            if wtr is None:
+                loss = loss_fn(out, ytr[idx])
+            else:
+                w = wtr[idx]
+                loss = (loss_fn(out, ytr[idx]) * w).sum() / w.sum().clamp_min(1e-12)
+            # A diverged run is a *different ending* from a run whose dependency
+            # broke, and the ledger records the difference (SPEC 9). Without
+            # this check the loss goes to NaN, every subsequent weight follows,
+            # and the run "succeeds" with a model that predicts nothing.
+            if not torch.isfinite(loss):
+                raise failures.NanDivergence(
+                    f"loss became {loss.item()} at epoch {epoch}, batch starting {i}"
+                )
             loss.backward()
             opt.step()
             running += float(loss.item()) * len(idx)
@@ -522,7 +593,8 @@ def train_torch_model(
         if has_val:
             model.eval()
             with torch.no_grad():
-                val_loss = float(loss_fn(model(Xval), yval).item())
+                raw = loss_fn(model(Xval), yval)
+                val_loss = float(raw.mean().item() if reduction == "none" else raw.item())
 
         pct = ((epoch + 1) / max(epochs, 1)) * 100.0
         emit_progress(

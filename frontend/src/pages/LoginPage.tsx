@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Link, Navigate, useNavigate, useLocation } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { CheckCircle2 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { AuthShell } from '@/components/layout/AuthShell'
+import { Button } from '@/components/primitives/Button'
+import { Input } from '@/components/primitives/Field'
 
 export function LoginPage() {
   const { user, login, loading } = useAuthStore()
@@ -16,78 +17,69 @@ export function LoginPage() {
 
   if (user) return <Navigate to="/dashboard" replace />
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError('')
     try {
       await login(email, password)
       navigate('/dashboard')
     } catch {
-      setError('Invalid email or password.')
+      setError('That email and password do not match an account.')
     }
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-background">
-      <div className="w-full max-w-sm space-y-6 rounded-xl border border-border bg-surface p-8">
-        <div className="text-center space-y-1">
-          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500 text-white font-bold text-lg mb-3">TB</div>
-          <h1 className="text-xl font-semibold text-text">Sign in</h1>
-          <p className="text-sm text-text-muted">TradingBot control plane</p>
-        </div>
-
-        {resetSuccess && (
-          <p className="text-sm text-green-400 text-center rounded-lg bg-green-400/10 px-3 py-2">
-            Password reset! Sign in with your new password.
-          </p>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
-              required
-              autoFocus
-            />
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="password">Password</Label>
-              <Link to="/forgot-password" className="text-xs text-blue-400 hover:underline">
-                Forgot password?
-              </Link>
-            </div>
-            <Input
-              id="password"
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-
-          {error && (
-            <p className="text-sm text-red-400">{error}</p>
-          )}
-
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? 'Signing in…' : 'Sign in'}
-          </Button>
-        </form>
-
-        <p className="text-center text-sm text-text-muted">
+    <AuthShell
+      title="Sign in"
+      subtitle="Multi-asset trading, research and automation."
+      footer={
+        <>
           No account?{' '}
-          <Link to="/signup" className="text-blue-400 hover:underline">
-            Sign up
+          <Link to="/signup" style={{ color: 'var(--fg-link)' }}>
+            Create one
           </Link>
-        </p>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {resetSuccess && (
+        <div className="callout pos" style={{ marginBottom: 'var(--s-4)' }}>
+          <CheckCircle2 size={14} aria-hidden style={{ flex: 'none', marginTop: 1 }} />
+          <span>Password reset. Sign in with your new password.</span>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
+        <Input
+          id="email"
+          label="Email"
+          type="email"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          autoFocus
+          autoComplete="email"
+        />
+        <Input
+          id="password"
+          label="Password"
+          labelAside={
+            <Link to="/forgot-password" style={{ color: 'var(--fg-link)', fontSize: 'var(--t-11)' }}>
+              Forgot password?
+            </Link>
+          }
+          type="password"
+          placeholder="••••••••"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          autoComplete="current-password"
+          error={error || null}
+        />
+        <Button type="submit" variant="primary" block loading={loading}>
+          Sign in
+        </Button>
+      </form>
+    </AuthShell>
   )
 }

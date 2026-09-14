@@ -135,7 +135,7 @@ function VenueCard({ venue }: { venue: VenueConfig }) {
         <span className="font-semibold text-text">{venue.label}</span>
         <div className="flex items-center gap-2">
           {savedAt ? (
-            <span className="flex items-center gap-1 text-xs text-green-400">
+            <span className="flex items-center gap-1 text-xs text-pos">
               <CheckCircle className="h-3.5 w-3.5" />
               Connected
             </span>
@@ -173,13 +173,13 @@ function VenueCard({ venue }: { venue: VenueConfig }) {
           ))}
 
           {verifyStatus === 'error' && (
-            <div className="flex items-start gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs text-red-400">
+            <div className="flex items-start gap-2 rounded-lg bg-neg-subtle border border-line-neg px-3 py-2 text-xs text-neg">
               <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
               {verifyError}
             </div>
           )}
           {verifyStatus === 'success' && (
-            <div className="flex items-center gap-2 rounded-lg bg-green-500/10 border border-green-500/20 px-3 py-2 text-xs text-green-400">
+            <div className="flex items-center gap-2 rounded-lg bg-pos-subtle border border-line-pos px-3 py-2 text-xs text-pos">
               <CheckCircle className="h-3.5 w-3.5 shrink-0" />
               Credentials verified and saved.
             </div>
@@ -191,7 +191,7 @@ function VenueCard({ venue }: { venue: VenueConfig }) {
               onClick={() => saveMutation.mutate()}
               className={cn(
                 'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-                'bg-accent text-white hover:bg-accent/80 disabled:opacity-40',
+                'bg-accent text-on-accent hover:bg-accent/80 disabled:opacity-40',
               )}
             >
               {saveMutation.isPending && verifyStatus === 'verifying' && (
@@ -204,7 +204,7 @@ function VenueCard({ venue }: { venue: VenueConfig }) {
               <button
                 disabled={disconnectMutation.isPending}
                 onClick={() => disconnectMutation.mutate()}
-                className="rounded-lg px-3 py-1.5 text-sm text-text-muted hover:text-red-400 hover:bg-red-400/10 border border-border transition-colors disabled:opacity-40"
+                className="rounded-lg px-3 py-1.5 text-sm text-text-muted hover:text-neg hover:bg-neg-subtle border border-border transition-colors disabled:opacity-40"
               >
                 {disconnectMutation.isPending ? 'Disconnecting…' : 'Disconnect'}
               </button>

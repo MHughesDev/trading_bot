@@ -1,92 +1,63 @@
-//! Proves the versioning contract:
-//! - the same bar stream yields identical FeatureValues across runs
-//! - all values carry a non-zero feature_version
+//! Proves the versioning contract through the single runtime:
+//! - the same bar stream yields bit-identical values across runs
+//! - every feature carries a non-zero version and the hash of its implementation
 
 use chrono::Utc;
-use features::{Ema, FeatureValue, Rsi, EMA_FEATURE_VERSION, RSI_FEATURE_VERSION};
+use features::runtime;
+use features::{FeatureRow, FeatureValue, EMA_FEATURE_VERSION, RSI_FEATURE_VERSION};
 
-fn now() -> chrono::DateTime<Utc> {
-    Utc::now()
-}
-
-// ── EMA ──────────────────────────────────────────────────────────────────────
-
-#[test]
-fn ema_feature_version_is_non_zero() {
-    const { assert!(EMA_FEATURE_VERSION > 0) };
-}
-
-#[test]
-fn ema_value_carries_version() {
-    let mut ema = Ema::new(7);
-    let t = now();
-    let prices = [10.0_f64, 11.0, 10.5, 11.2, 10.8, 11.5, 11.0];
-    let mut last = None;
-    for &p in &prices {
-        last = Some(FeatureValue::new(
-            "ema_7",
-            ema.update(p),
-            EMA_FEATURE_VERSION,
-            t,
-        ));
-    }
-    let fv = last.unwrap();
-    assert_eq!(fv.feature_version, EMA_FEATURE_VERSION);
-    assert_eq!(fv.name, "ema_7");
+fn rows(prices: &[f64]) -> Vec<FeatureRow> {
+    prices
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| FeatureRow { ts_ns: i as i64 * 60_000_000_000, open: c, high: c, low: c, close: c, volume: 1.0 })
+        .collect()
 }
 
 #[test]
-fn ema_same_stream_yields_identical_values() {
-    let prices = [100.0, 102.0, 101.5, 103.0, 102.5, 104.0, 103.5, 105.0];
-    let run = |prices: &[f64]| {
-        let mut ema = Ema::new(5);
-        prices.iter().map(|&p| ema.update(p)).collect::<Vec<_>>()
-    };
-    let a = run(&prices);
-    let b = run(&prices);
-    assert_eq!(a.len(), b.len());
-    for (x, y) in a.iter().zip(b.iter()) {
-        assert!((x - y).abs() < 1e-12, "EMA values differ: {x} vs {y}");
-    }
-}
-
-// ── RSI ──────────────────────────────────────────────────────────────────────
-
-#[test]
-fn rsi_feature_version_is_non_zero() {
-    const { assert!(RSI_FEATURE_VERSION > 0) };
+fn versions_are_non_zero_and_declared_on_the_definition() {
+    const { assert!(EMA_FEATURE_VERSION > 0 && RSI_FEATURE_VERSION > 0) };
+    assert_eq!(runtime::feature("ema_7").unwrap().def().version, EMA_FEATURE_VERSION);
+    assert_eq!(runtime::feature("rsi_14").unwrap().def().version, RSI_FEATURE_VERSION);
 }
 
 #[test]
-fn rsi_value_carries_version() {
-    let mut rsi = Rsi::new(14);
-    let t = now();
-    let prices: Vec<f64> = (0..20).map(|i| 100.0 + i as f64).collect();
-    let mut last = None;
-    for &p in &prices {
-        if let Some(v) = rsi.update(p) {
-            last = Some(FeatureValue::new("rsi_14", v, RSI_FEATURE_VERSION, t));
-        }
-    }
-    let fv = last.unwrap();
+fn value_carries_version() {
+    let prices: Vec<f64> = (0..80).map(|i| 100.0 + f64::from(i) * 0.3).collect();
+    let r = rows(&prices);
+    let f = runtime::feature("rsi_14").unwrap();
+    let v = runtime::value_at(f.as_ref(), &r, r.len() - 1).unwrap();
+    let fv = FeatureValue::new("rsi_14", v, f.def().version, Utc::now());
     assert_eq!(fv.feature_version, RSI_FEATURE_VERSION);
-    assert_eq!(fv.name, "rsi_14");
 }
 
 #[test]
-fn rsi_same_stream_yields_identical_values() {
-    let prices: Vec<f64> = (0..20).map(|i| 100.0 + (i as f64) * 0.7).collect();
-    let run = |prices: &[f64]| {
-        let mut r = Rsi::new(14);
-        prices
-            .iter()
-            .filter_map(|&p| r.update(p))
-            .collect::<Vec<_>>()
-    };
-    let a = run(&prices);
-    let b = run(&prices);
-    assert_eq!(a.len(), b.len());
-    for (x, y) in a.iter().zip(b.iter()) {
-        assert!((x - y).abs() < 1e-12, "RSI values differ: {x} vs {y}");
+fn same_stream_yields_bit_identical_values() {
+    let prices: Vec<f64> = (0..200).map(|i| 100.0 + (f64::from(i) * 0.7).sin()).collect();
+    for name in ["ema_5", "rsi_14", "zscore_20", "obv"] {
+        let f = runtime::feature(name).unwrap();
+        let a = runtime::backfill_column(f.as_ref(), &rows(&prices));
+        let b = runtime::backfill_column(f.as_ref(), &rows(&prices));
+        assert_eq!(
+            a.iter().map(|v| v.map(f64::to_bits)).collect::<Vec<_>>(),
+            b.iter().map(|v| v.map(f64::to_bits)).collect::<Vec<_>>(),
+            "{name}"
+        );
+    }
+}
+
+/// INV-14: the batch column and a live evaluation over a growing window agree bit
+/// for bit at every row.
+#[test]
+fn backfill_and_incremental_serving_agree() {
+    let prices: Vec<f64> = (0..300).map(|i| 50.0 + (f64::from(i) * 0.11).cos() * 3.0).collect();
+    let all = rows(&prices);
+    for name in ["ema_21", "rsi_14", "rolling_std_20", "log_returns_1", "garman_klass_vol_20"] {
+        let f = runtime::feature(name).unwrap();
+        let batch = runtime::backfill_column(f.as_ref(), &all);
+        for i in 0..all.len() {
+            let live = runtime::latest(&[name.to_string()], &all[..=i]).unwrap()[name];
+            assert_eq!(live.map(f64::to_bits), batch[i].map(f64::to_bits), "{name} at {i}");
+        }
     }
 }

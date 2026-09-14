@@ -208,13 +208,13 @@ export function SingleInstrumentFlow({ onArmed }: SingleInstrumentFlowProps) {
       </div>
 
       {mutation.isError && (
-        <p className="text-xs text-red-400">Failed to arm automation.</p>
+        <p className="text-xs text-neg">Failed to arm automation.</p>
       )}
 
       <button
         disabled={!canArm || mutation.isPending}
         onClick={() => mutation.mutate()}
-        className="w-full rounded-lg py-2 text-sm font-semibold bg-accent text-white hover:bg-accent/80 disabled:opacity-40 transition-colors"
+        className="w-full rounded-lg py-2 text-sm font-semibold bg-accent text-on-accent hover:bg-accent/80 disabled:opacity-40 transition-colors"
       >
         {mutation.isPending ? 'Arming…' : 'Arm automation'}
       </button>

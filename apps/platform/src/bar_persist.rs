@@ -2,7 +2,7 @@
 //!
 //! Every initialized asset's pipeline aggregates live ticks into 1-minute OHLCV
 //! bars (see `hot_path::stage_bar_builder`) and sends each completed bar here.
-//! This task is the single writer of live bars to the ClickHouse `market_bars`
+//! This task is the single writer of live bars to the canonical ClickHouse `market_bar`
 //! table, so an initialized asset keeps accumulating minute-level history for as
 //! long as the platform runs — independent of whether any strategy or
 //! automation is subscribed to it.
@@ -32,11 +32,33 @@ pub struct PersistBar {
 pub async fn run_bar_persist(
     clickhouse_url: String,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistBar>,
+    live: api::live_bus::LiveSender,
 ) {
-    info!("bar-persist task starting (live 1m → ClickHouse market_bars)");
+    info!("bar-persist task starting (live 1m → ClickHouse market_bar + live bus)");
     let store = BarStore::connect(&clickhouse_url);
 
     while let Some(item) = rx.recv().await {
+        // Fan the bar out to any open panel first. Persistence is best-effort
+        // and can be slow; a chart waiting on ClickHouse to draw its live tail
+        // would be a chart that lags the market for no reason.
+        api::live_bus::publish(
+            &live,
+            domain::lanes::MARKET_BARS_1M,
+            &item.instrument_id,
+            serde_json::json!({
+                // Unix seconds: what lightweight-charts wants on the x axis.
+                "ts": item.bar.available_time.timestamp(),
+                "open": item.bar.open,
+                "high": item.bar.high,
+                "low": item.bar.low,
+                "close": item.bar.close,
+                "volume": item.bar.volume,
+                "trade_count": item.bar.trade_count,
+                "venue_id": item.venue_id,
+                "source": item.source,
+            }),
+        );
+
         match store
             .insert_collected(
                 &item.instrument_id,

@@ -4,6 +4,7 @@
 //! hooks** (`trial_count_at_eval`, `is_oos_gap`) are `None` at the Run level and
 //! are populated only by Studies (Phase 1) and gates (Phase 4).
 
+use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
@@ -227,49 +228,52 @@ impl MetricSet {
         };
 
         // Trade-derived activity stats.
+        // Money is summed in Decimal; only the unitless ratios derived from those
+        // sums (hit rate, profit factor, expectancy in R) cross into f64.
         let n_trades = input.trades.len() as i64;
-        let (mut wins, mut gains, mut losses, mut notional) = (0i64, 0.0f64, 0.0f64, 0.0f64);
-        let (mut n_losers, mut abs_sum) = (0i64, 0.0f64);
+        let mut wins = 0i64;
+        let (mut gains, mut losses, mut notional) =
+            (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
+        let (mut n_losers, mut abs_sum) = (0i64, Decimal::ZERO);
         for t in input.trades {
-            let pnl = t.pnl.to_f64().unwrap_or(0.0);
-            if pnl > 0.0 {
+            if t.pnl > Decimal::ZERO {
                 wins += 1;
-                gains += pnl;
+                gains += t.pnl;
             } else {
-                losses += -pnl;
-                if pnl < 0.0 {
+                losses -= t.pnl;
+                if t.pnl < Decimal::ZERO {
                     n_losers += 1;
                 }
             }
-            abs_sum += pnl.abs();
-            let entry = t.entry_price.to_f64().unwrap_or(0.0);
-            let qty = t.qty.to_f64().unwrap_or(0.0);
-            notional += (entry * qty).abs();
+            abs_sum += t.pnl.abs();
+            notional += (t.entry_price * t.qty).abs();
         }
+        let (gains_f, losses_f, abs_sum_f) = (
+            gains.to_f64().unwrap_or(0.0),
+            losses.to_f64().unwrap_or(0.0),
+            abs_sum.to_f64().unwrap_or(0.0),
+        );
+        let notional = notional.to_f64().unwrap_or(0.0);
         let hit_rate = if n_trades > 0 {
             wins as f64 / n_trades as f64
         } else {
             0.0
         };
-        let profit_factor = if losses > 0.0 {
-            gains / losses
-        } else if gains > 0.0 {
+        let profit_factor = if losses_f > 0.0 {
+            gains_f / losses_f
+        } else if gains_f > 0.0 {
             f64::INFINITY
         } else {
             0.0
         };
         let expectancy = if n_trades > 0 {
-            let mean_pnl = (gains - losses) / n_trades as f64;
+            let mean_net = (gains_f - losses_f) / n_trades as f64;
             let unit = if n_losers > 0 {
-                losses / n_losers as f64
+                losses_f / n_losers as f64
             } else {
-                abs_sum / n_trades as f64
+                abs_sum_f / n_trades as f64
             };
-            if unit > 0.0 {
-                mean_pnl / unit
-            } else {
-                0.0
-            }
+            if unit > 0.0 { mean_net / unit } else { 0.0 }
         } else {
             0.0
         };

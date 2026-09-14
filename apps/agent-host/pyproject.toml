@@ -1,0 +1,17 @@
+[project]
+name = "agent-host"
+version = "0.1.0"
+description = "Runs the Claude Agent SDK inside a research project's container (AGENT-001)."
+requires-python = ">=3.11"
+dependencies = [
+    "claude-agent-sdk==0.2.152",
+    "httpx>=0.27",
+    "tbot",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

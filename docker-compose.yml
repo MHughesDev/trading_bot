@@ -22,7 +22,12 @@ services:
       retries: 10
 
   postgres:
-    image: postgres:16-alpine
+    # pgvector, not plain postgres (ADR-P3-05). The knowledge plane's kNN is
+    # exact — no ANN index — and at this scale that is ~1 ms and closes the side
+    # channel an approximate index opens: a neighbour list that depends on the
+    # index's internal state is a neighbour list an attacker can probe. The
+    # extension has to exist for migration 0055 to apply at all.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: trading
       POSTGRES_PASSWORD: trading

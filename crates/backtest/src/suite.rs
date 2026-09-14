@@ -25,7 +25,7 @@
 //! exercisable and verifiable.
 
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,7 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::experiment::{Experiment, ExperimentError, ExperimentState, Holdout, VaultAccess};
+use ledger::{ActorKind, DispatchContext, InMemoryLedger, TrialLedger};
 use crate::gates::{
     CorroboratorInputs, Gate, Gate3Outcome, GateError, GateRunner, GateVerdict, IntegrityInputs,
 };
@@ -55,25 +56,63 @@ use crate::study::{
 
 /// Synthetic, deterministic Run executor (the real one is the deferred live leg).
 ///
-/// Produces a smooth, mildly profitable equity curve whose drift is a stable
-/// function of the content-addressed `run_id` — so distinct configs yield
-/// distinct, repeatable metrics and a non-degenerate distribution, while every
-/// strategy clears the cost floor (lets the funnel reach the vault honestly).
+/// It has to model three things the funnel actually asks about, or the gates
+/// have nothing real to judge:
+///
+/// * **Edge lives in the parameters, not in the window.** The drift is keyed on
+///   `(strategy_ref, params)`, so a configuration that is good in one period is
+///   good in the next. Keying it on the whole `run_id` instead would make the
+///   in-sample best config random, and PBO — which asks exactly how often the
+///   in-sample best underperforms out of sample — would sit at 0.5 for a
+///   strategy with a perfect edge.
+/// * **A null world destroys the edge.** A Run whose `null_world` is set earns a
+///   drift centred on zero: that is what it means for the null to destroy the
+///   structure the strategy depends on, and it is what makes a permutation
+///   p-value informative rather than a coin flip.
+/// * **Every config trades the same market.** A shared daily shock keyed by day
+///   makes a sweep look like what it is to platform N_eff — one idea, highly
+///   correlated — instead of a set of independent lines.
 fn synthetic_execute(cfg: &RunConfig) -> RunResult {
-    // FNV-1a over the run_id, mixed with the seed, gives a stable per-config draw.
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in cfg.run_id.as_str().bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    let fnv = |seed: u64, bytes: &[u8]| {
+        let mut h = seed;
+        for b in bytes {
+            h ^= u64::from(*b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h
+    };
+    // The configuration's identity: what it *is*, not where it ran.
+    let mut cfg_h = fnv(0xcbf2_9ce4_8422_2325, cfg.strategy_ref.as_bytes());
+    for (k, v) in &cfg.params {
+        cfg_h = fnv(cfg_h, k.as_bytes());
+        cfg_h = fnv(cfg_h, v.to_string().as_bytes());
     }
-    h ^= cfg.seed.wrapping_mul(0x9e37_79b9_7f4a_7c15);
-    let unit = ((h >> 11) as f64) / ((1u64 << 53) as f64); // [0, 1)
-    let drift = 0.0015 + unit * 0.0020; // daily drift in [0.15%, 0.35%]
+    // The run's identity: window, seed, null world. Only small noise rides on it.
+    let run_h = fnv(0xcbf2_9ce4_8422_2325, cfg.run_id.as_str().as_bytes())
+        ^ cfg.seed.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+
+    let unit = |h: u64| ((h >> 11) as f64) / ((1u64 << 53) as f64); // [0, 1)
+    let drift = if cfg.null_world.is_some() {
+        // The structure the edge rested on is gone: what is left is noise around
+        // zero, which is the whole hypothesis a null states.
+        (unit(cfg_h ^ run_h) - 0.5) * 0.0010
+    } else {
+        0.0015 + unit(cfg_h) * 0.0020 // daily drift in [0.15%, 0.35%]
+    };
+
     let days = 30;
     let mut equity = 100.0_f64;
+    let noise = |key: u64| {
+        let mut z = key.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xd1b5_4a32_d192_ed03;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+    };
     let curve: Vec<f64> = (0..days)
-        .map(|_| {
-            equity *= 1.0 + drift;
+        .map(|d: u64| {
+            let shared = noise(d + 1) * 0.008;
+            let own = noise(run_h ^ (d + 7).wrapping_mul(0x2545_f491_4f6c_dd1d)) * 0.001;
+            equity *= 1.0 + drift + shared + own;
             equity
         })
         .collect();
@@ -90,11 +129,86 @@ fn synthetic_execute(cfg: &RunConfig) -> RunResult {
 /// The engine the manager runs every Study/Run through. The executor is
 /// injected: synthetic by default (tests, offline), the `market_simulator`-backed
 /// [`crate::sim_executor::SimRunExecutor`] in the platform.
-type SuiteEngine = Backtest<InMemoryRunStore, Box<dyn RunExecutor>>;
+type SuiteEngine = Backtest<InMemoryRunStore, Box<dyn RunExecutor>, Arc<dyn TrialLedger>>;
+
+// ── Gate 3's measured inputs ─────────────────────────────────────────────────
+
+/// Null draws per funnel advance. 99 is not a round number chosen for looks: a
+/// permutation p-value can only take values `(k+1)/(B+1)`, so B = 99 gives a
+/// grid of 0.01 — fine enough for a 0.05 decision and no finer than the
+/// simulation budget can honestly support. Fewer draws makes the p-value coarser
+/// than the threshold it is compared against, which is how a "significant"
+/// result becomes an artefact of the draw count.
+const NULL_DRAWS: u32 = 99;
+
+/// Below this, the p-value's granularity is coarser than `GATE3_ALPHA` and the
+/// gate refuses rather than reporting a number it cannot support.
+const MIN_NULL_DRAWS: usize = 19;
+
+/// Gate 3's corrected-p threshold.
+const GATE3_ALPHA: f64 = 0.05;
+
+/// The PBO grid: configurations x periods. Both are deliberately small —
+/// every cell is a real Run and a real look on the trial counter.
+const PBO_CONFIGS: usize = 5;
+const PBO_PERIODS: usize = 8;
+/// CSCV partitions the periods into this many groups.
+const PBO_GROUPS: usize = 4;
+
+/// Daily simple returns from an equity curve.
+fn daily_returns(curve: &[(DateTime<Utc>, f64)]) -> Vec<f64> {
+    curve
+        .windows(2)
+        .filter_map(|w| {
+            let (a, b) = (w[0].1, w[1].1);
+            (a != 0.0).then(|| b / a - 1.0).filter(|r| r.is_finite())
+        })
+        .collect()
+}
+
+fn mean(xs: &[f64]) -> f64 {
+    if xs.is_empty() { 0.0 } else { xs.iter().sum::<f64>() / xs.len() as f64 }
+}
+
+/// Sample variance (ddof = 1).
+fn variance(xs: &[f64]) -> f64 {
+    if xs.len() < 2 {
+        return 0.0;
+    }
+    let m = mean(xs);
+    xs.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (xs.len() as f64 - 1.0)
+}
+
+fn skewness(xs: &[f64]) -> f64 {
+    let sd = variance(xs).sqrt();
+    if xs.len() < 3 || sd <= 0.0 {
+        return 0.0;
+    }
+    let m = mean(xs);
+    xs.iter().map(|x| ((x - m) / sd).powi(3)).sum::<f64>() / xs.len() as f64
+}
+
+/// Non-excess kurtosis: 3.0 is the normal reference the deflated-Sharpe formula
+/// expects, so an empty or degenerate series returns 3.0, not 0.0.
+fn kurtosis(xs: &[f64]) -> f64 {
+    let sd = variance(xs).sqrt();
+    if xs.len() < 4 || sd <= 0.0 {
+        return 3.0;
+    }
+    let m = mean(xs);
+    xs.iter().map(|x| ((x - m) / sd).powi(4)).sum::<f64>() / xs.len() as f64
+}
 
 // ── view models (what the frontend renders) ──────────────────────────────────
 
 /// The always-on-screen header for an Experiment: counter + lifecycle + unsafe.
+//
+// The flags are independent facts about one Experiment that the header renders
+// side by side, not the states of a machine: `unsafe`, "gate 3 passed", "holdout
+// spent" and "suspect overlapping-label leakage" can hold in any combination,
+// and collapsing them into an enum would lose exactly the combinations a reader
+// needs to see together.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExperimentView {
     pub id: Uuid,
@@ -109,6 +223,16 @@ pub struct ExperimentView {
     #[serde(rename = "unsafe")]
     pub unsafe_flag: bool,
     pub gate3_passed: bool,
+    /// `CV_Sharpe − WF_Sharpe`, once both a cross-validated and a walk-forward
+    /// Study have run on this idea. `None` means the comparison has not been
+    /// made, never that it passed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cv_wf_gap: Option<f64>,
+    /// The soft flag from that gap (SPEC §12.5): a cross-validated result more
+    /// than 1.0 above the walk-forward result on the same idea is the signature
+    /// of overlapping-label leakage. Rendered beside every comparison; it blocks
+    /// nothing, which is the point — a human decides.
+    pub suspect_overlapping_label_leakage: bool,
     pub primary_test: String,
     pub holdout_spent: bool,
     pub study_count: usize,
@@ -291,6 +415,14 @@ pub struct CreateExperimentSpec {
     /// (FEAT-003 §6); a different objective is a different Experiment.
     #[serde(default)]
     pub objective: Option<Objective>,
+    /// The smallest improvement that would actually matter, declared **before**
+    /// any trial runs and hash-locked into every trial's pre-registration.
+    ///
+    /// REQUIRED, with no default (SPEC §4.1). There is deliberately no
+    /// `#[serde(default)]` here: a request that omits it fails to deserialize,
+    /// so "how much better is worth caring about" can never be decided after
+    /// seeing the results.
+    pub delta_practical: f64,
 }
 
 /// Run a research Study attached to an Experiment (auto-increments the counter).
@@ -380,6 +512,9 @@ struct Record {
     /// Stored strategy slug the executor resolves (defaults to the family).
     strategy_ref: String,
     objective: Option<Objective>,
+    /// Declared at DEFINE, before any trial ran; hash-locked into every trial's
+    /// pre-registration (SPEC §4.1).
+    delta_practical: f64,
     research_slice: DataSlice,
     studies: Vec<StoredStudy>,
     gate_verdicts: Vec<GateVerdict>,
@@ -408,22 +543,44 @@ impl Default for SuiteManager {
 }
 
 impl SuiteManager {
-    /// A manager over the deterministic synthetic executor (tests / offline).
+    /// A manager over the deterministic synthetic executor and an in-process
+    /// ledger (tests / offline). The ledger is real, not a stub — it chains and
+    /// it refuses unlogged propensities — but it dies with the process, which is
+    /// acceptable only because nothing produced this way is trusted.
     #[must_use]
     pub fn new() -> Self {
         let exec: fn(&RunConfig) -> RunResult = synthetic_execute;
-        Self::with_executor(Box::new(ClosureExecutor(exec)))
+        Self::with_executor(Box::new(ClosureExecutor(exec)), Arc::new(InMemoryLedger::new()))
     }
 
-    /// A manager over an injected executor — the platform passes the real
-    /// `market_simulator`-backed one so every Study runs real backtests.
+    /// A manager over an injected executor and ledger — the platform passes the
+    /// real `market_simulator`-backed executor and the durable Postgres ledger,
+    /// so every Study runs real backtests against a persistent trial record.
     #[must_use]
-    pub fn with_executor(executor: Box<dyn RunExecutor>) -> Self {
+    pub fn with_executor(executor: Box<dyn RunExecutor>, ledger: Arc<dyn TrialLedger>) -> Self {
         let (progress_tx, _) = broadcast::channel(256);
         Self {
             records: RwLock::new(HashMap::new()),
-            bt: Backtest::new(InMemoryRunStore::new(), executor),
+            bt: Backtest::new(InMemoryRunStore::new(), executor, ledger),
             progress_tx,
+        }
+    }
+
+    /// The dispatch provenance for work `user_id` drives on `record`.
+    ///
+    /// `delta_practical` comes from the Experiment, where it was declared before
+    /// any trial ran — never from the caller at dispatch time.
+    fn dispatch_ctx(user_id: Uuid, record: &Record) -> DispatchContext {
+        DispatchContext {
+            tenant_id: user_id.to_string(),
+            campaign_id: None,
+            experiment_id: Some(record.exp.experiment_id.clone()),
+            actor_kind: ActorKind::Human,
+            actor_id: user_id.to_string(),
+            on_behalf_of: None,
+            policy_id: "suite_manual".into(),
+            policy_version: 1,
+            delta_practical: Some(record.delta_practical),
         }
     }
 
@@ -469,6 +626,14 @@ impl SuiteManager {
         if let Some(o) = &spec.objective {
             o.validate().map_err(SuiteError::Invalid)?;
         }
+        // A non-positive or non-finite practical effect size would make every
+        // result "significant enough" — the declaration has to mean something.
+        if !spec.delta_practical.is_finite() || spec.delta_practical <= 0.0 {
+            return Err(SuiteError::Invalid(
+                "delta_practical must be a positive, finite effect size, declared before any trial runs"
+                    .into(),
+            ));
+        }
         let res = Self::eval_resolution(spec.eval_resolution.as_deref());
         let research = DataSlice::new(
             spec.universe_ref.clone(),
@@ -511,6 +676,7 @@ impl SuiteManager {
             strategy_type: spec.strategy_type,
             strategy_ref,
             objective: spec.objective,
+            delta_practical: spec.delta_practical,
             research_slice: research,
             studies: Vec::new(),
             gate_verdicts: Vec::new(),
@@ -557,6 +723,8 @@ impl SuiteManager {
             trial_counter: exp.trial_counter(),
             unsafe_flag: exp.is_unsafe(),
             gate3_passed: exp.gate3_passed(),
+            cv_wf_gap: exp.cv_wf_gap(),
+            suspect_overlapping_label_leakage: exp.suspect_overlapping_label_leakage(),
             primary_test: exp.primary_test().to_string(),
             holdout_spent: exp.holdout.spent,
             study_count: exp.studies.len(),
@@ -604,12 +772,13 @@ impl SuiteManager {
     ) -> Result<StudyView, SuiteError> {
         // Pre-flight under a short read lock: build + validate the config and
         // let the Experiment refuse it (state / holdout) *before* any Run.
-        let study = {
+        let (study, ctx) = {
             let records = self.records.read().expect("suite lock poisoned");
             let r = records
                 .get(&id)
                 .filter(|r| r.user_id == user_id)
                 .ok_or(SuiteError::NotFound)?;
+            let ctx = Self::dispatch_ctx(user_id, r);
             let mut base = Self::base_config(&r.strategy_ref, &r.research_slice);
             if let Some(p) = &spec.base_params {
                 base.params = p.clone();
@@ -622,6 +791,7 @@ impl SuiteManager {
                 vary: spec.vary.clone(),
                 metric: spec.metric,
                 null_ref: spec.null_ref.clone(),
+                null: None,
                 budget: StudyBudget::default(),
                 question: spec.question.clone(),
                 selection_rule: spec.selection_rule.unwrap_or(SelectionRule::None),
@@ -630,13 +800,14 @@ impl SuiteManager {
                 .validate()
                 .map_err(|e| SuiteError::Study(e.to_string()))?;
             r.exp.check_study(&study)?;
-            study
+            (study, ctx)
         };
 
         // Execute with no lock held — real Runs take minutes and other users'
         // reads must not block behind them.
         self.emit(user_id, id, "study_running", 10.0, &spec.question);
-        let result = StudyEngine::run(&study, &self.bt).map_err(|e| SuiteError::Study(e.to_string()))?;
+        let result = StudyEngine::run(&study, &self.bt, &ctx)
+            .map_err(|e| SuiteError::Study(e.to_string()))?;
 
         // Bookkeeping under a short write lock: the counter increments here,
         // through the Experiment's single mutator (J-2.3).
@@ -645,7 +816,7 @@ impl SuiteManager {
             .get_mut(&id)
             .filter(|r| r.user_id == user_id)
             .ok_or(SuiteError::NotFound)?;
-        r.exp.record_study_result(study.study_id.clone(), &result);
+        r.exp.record_study_result(study.study_id.clone(), study.kind, &result);
         let view = Self::study_view(
             spec.kind,
             spec.metric,
@@ -683,7 +854,12 @@ impl SuiteManager {
     /// The parameter set a Study's pre-declared selection rule carried forward
     /// (the rule's output — never an argmax).
     #[must_use]
-    pub fn study_carried_forward(&self, user_id: Uuid, id: Uuid, study_id: &str) -> Option<ParamMap> {
+    pub fn study_carried_forward(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+        study_id: &str,
+    ) -> Option<ParamMap> {
         let records = self.records.read().expect("suite lock poisoned");
         let r = records.get(&id).filter(|r| r.user_id == user_id)?;
         r.studies
@@ -1028,8 +1204,48 @@ impl SuiteManager {
         let syn_res = self.run_evidence(r, user_id, id, &syn)?;
         let nbhd_res = self.run_evidence(r, user_id, id, &nbhd)?;
 
-        // Replay the funnel in order in a single ledger session.
+        // Gate 3's evidence is gathered here, before the gate runner borrows the
+        // Experiment: the observed run, the null distribution and the PBO grid
+        // are all real Runs on the ledger, and the counter must climb for them
+        // exactly as it does for the evidence studies above.
         let null = r.null.clone().expect("null checked above");
+
+        // (a) The observed statistic: the candidate itself, on real data.
+        let (observed_res, observed_trial) = self.run_observed(r, user_id, id, &base)?;
+        let observed_statistic = Self::metric_of(&observed_res, MetricKind::Sharpe);
+
+        // (b) The null distribution: the Experiment's *declared* null, executed.
+        //     Each member is a Run in a null world (`RunConfig::in_null_world`),
+        //     so the spread is what the strategy earns when the structure the
+        //     null destroys is gone — not the same strategy under a new seed.
+        let null_study = Self::null_study("funnel-null", &base, &null, NULL_DRAWS);
+        let null_res = self.run_evidence(r, user_id, id, &null_study)?;
+        let null_distribution = null_res.distribution.dist.clone();
+        if null_distribution.len() < MIN_NULL_DRAWS {
+            return Err(SuiteError::Gate(format!(
+                "the null produced only {} usable draws; a permutation p-value needs at least \
+                 {MIN_NULL_DRAWS} to mean anything",
+                null_distribution.len()
+            )));
+        }
+
+        // (c) The PBO matrix: every neighbourhood configuration over every
+        //     window. PBO asks how often the in-sample best configuration
+        //     underperforms out of sample, which is a question about a grid and
+        //     cannot be answered from one study's marginal distribution.
+        let pbo_perf = self.pbo_matrix(r, user_id, id, &base)?;
+
+        let sharpe_variance_across_trials = variance(
+            &[
+                wf_res.distribution.dist.clone(),
+                cpcv_res.distribution.dist.clone(),
+                syn_res.distribution.dist.clone(),
+                nbhd_res.distribution.dist.clone(),
+            ]
+            .concat(),
+        );
+
+        // Replay the funnel in order in a single ledger session.
         let mut runner = GateRunner::new(&mut r.exp);
         let mut verdicts: Vec<GateVerdict> = Vec::new();
 
@@ -1074,19 +1290,39 @@ impl SuiteManager {
         }
 
         // Gate 3 — significance (one primary p-value + DSR/PBO corroborators).
-        let strong_null: Vec<f64> = (0..999).map(|i| f64::from(i) / 1000.0).collect();
-        let pbo_perf = vec![vec![1.0_f64; 8], vec![0.2; 8], vec![0.3; 8]];
+        //
+        // Every input is measured. The previous implementation applied a real
+        // BHY correction and a real N_eff to a hardcoded null (`0..999 / 1000`),
+        // a hardcoded observed statistic of 6.0 and hardcoded corroborators —
+        // arithmetic that was correct about numbers nobody had computed. Those
+        // constants are gone.
+        let returns = daily_returns(&observed_res.equity_curve);
         let corr = CorroboratorInputs {
-            sharpe: 2.5,
-            n_obs: 252,
-            skew: 0.0,
-            kurtosis: 3.0,
-            sharpe_variance_across_trials: 0.1,
+            sharpe: observed_statistic,
+            n_obs: returns.len(),
+            skew: skewness(&returns),
+            kurtosis: kurtosis(&returns),
+            // Dispersion of the metric across everything this Experiment has
+            // actually looked at — the quantity DSR's haircut is scaled by.
+            sharpe_variance_across_trials,
             pbo_performance: &pbo_perf,
-            pbo_groups: 4,
+            pbo_groups: PBO_GROUPS,
         };
-        let (outcome, _passed3) =
-            runner.gate3(6.0, &strong_null, null.null_id.clone(), &corr, 0.05)?;
+
+        // N_eff comes from the tenant's whole ledger, never from this Experiment's counter.
+        let n_eff = self
+            .bt
+            .ledger()
+            .n_eff(&user_id.to_string())
+            .map_err(|e| SuiteError::Gate(format!("N_eff unavailable: {e}")))?;
+        let (outcome, _passed3) = runner.gate3(
+            observed_statistic,
+            &null_distribution,
+            null.null_id.clone(),
+            &corr,
+            &n_eff,
+            GATE3_ALPHA,
+        )?;
         verdicts.extend(
             runner
                 .ledger()
@@ -1096,6 +1332,35 @@ impl SuiteManager {
                 .cloned(),
         );
         self.emit(user_id, id, "gate_passed", 100.0, "gate 3 significance");
+
+        // The numbers this funnel just computed go on the record, attached to the
+        // run that produced them (ADR-P2-31). §12.3's Gates 5–8 read them from
+        // there, in a different process, later — the alternative is passing them
+        // through the gate job's manifest, which would make every gate statistic
+        // something the submitter chose.
+        //
+        // A failed write is logged, not fatal: the funnel's own verdict stands,
+        // and a gate with no recorded statistic is inconclusive, which is the
+        // safe direction. Failing the funnel because a bookkeeping write missed
+        // would throw away the evidence as well as the record of it.
+        let tenant = user_id.to_string();
+        for (name, value) in [
+            ("cpcv_p05_sharpe", cpcv_res.distribution.worst_5pct),
+            ("walk_forward_sharpe", wf_res.distribution.median),
+            ("pbo", outcome.pbo),
+            ("deflated_sharpe", outcome.deflated_sharpe),
+            ("permutation_p_value", outcome.raw_p_value),
+        ] {
+            if let Err(e) = self.bt.ledger().record_statistic(
+                &tenant,
+                observed_trial,
+                name,
+                value,
+                "funnel_advance",
+            ) {
+                tracing::warn!(experiment = %id, statistic = name, error = %e, "statistic not recorded");
+            }
+        }
 
         r.gate_verdicts = verdicts;
         r.gate3 = Some(outcome);
@@ -1151,6 +1416,7 @@ impl SuiteManager {
             vary,
             metric: MetricKind::TotalReturn,
             null_ref: None,
+            null: None,
             budget: StudyBudget::default(),
             question: format!("{kind:?} evidence for the funnel"),
             selection_rule: SelectionRule::None,
@@ -1159,6 +1425,122 @@ impl SuiteManager {
 
     /// Run one funnel-evidence Study through the Experiment (counter increments)
     /// and record it for the distribution viewer, returning the sealed result.
+    /// Run the candidate itself, once, on real data. Its metric is Gate 3's
+    /// observed statistic — the number the null distribution is a null *for*.
+    fn run_observed(
+        &self,
+        r: &mut Record,
+        user_id: Uuid,
+        id: Uuid,
+        base: &RunConfig,
+    ) -> Result<(RunResult, Uuid), SuiteError> {
+        // Dispatched with certainty: given the funnel policy, the candidate is
+        // the one config this step runs. That is the honest propensity, and it
+        // is a real one — the legacy no-propensity marker is for pre-existing
+        // paths, not for new code that finds declaring one inconvenient.
+        let ctx = Self::dispatch_ctx(user_id, r).with_policy("funnel_observed", 1);
+        // The trial id comes back with the result so the funnel's statistics can
+        // be attached to the run that produced them (ADR-P2-31). Without it they
+        // would have to travel through the gate job's manifest, where the
+        // submitter chooses them.
+        let (res, _, trial_id) = self
+            .bt
+            .run_traced_with_trial(&crate::run::RunDispatch::new(&ctx, base, 1.0))
+            .map_err(|e| SuiteError::Gate(format!("observed run refused: {e}")))?;
+        // A look is a look, whether or not a Study wrapped it (§12.4).
+        r.exp.record_dispatches(1);
+        self.emit(user_id, id, "run_complete", 20.0, "observed run");
+        Ok((res, trial_id))
+    }
+
+    /// The permutation-null Study whose distribution Gate 3 tests against.
+    fn null_study(id: &str, base: &RunConfig, null: &Null, draws: u32) -> StudyConfig {
+        StudyConfig {
+            study_id: id.to_string(),
+            kind: StudyKind::PermutationNull,
+            base_config: base.clone(),
+            vary: VarySpec::Seeds { n: draws },
+            metric: MetricKind::Sharpe,
+            null_ref: Some(null.null_id.as_str().to_string()),
+            null: Some(null.clone()),
+            budget: StudyBudget::default(),
+            question: format!(
+                "what does this strategy earn when {} is destroyed and {} is preserved?",
+                null.destroys.join(", "),
+                null.preserves.join(", ")
+            ),
+            selection_rule: SelectionRule::None,
+        }
+    }
+
+    /// `performance[config][period]`: every neighbourhood configuration over
+    /// every walk-forward window.
+    ///
+    /// PBO asks how often the configuration that looked best in sample
+    /// underperforms out of sample. That is a question about a grid, so the grid
+    /// is what gets run — each cell a real Run, each counted.
+    fn pbo_matrix(
+        &self,
+        r: &mut Record,
+        user_id: Uuid,
+        id: Uuid,
+        base: &RunConfig,
+    ) -> Result<Vec<Vec<f64>>, SuiteError> {
+        let windows = Self::split_windows(&base.data_slice, PBO_PERIODS);
+        let mut matrix = Vec::with_capacity(PBO_CONFIGS);
+        for c in 0..PBO_CONFIGS {
+            let mut cfg = base.clone();
+            // The same neighbourhood the robustness study perturbs, so the PBO
+            // grid and Gate 2's evidence are about the same parameter.
+            let value = 12.0 + (c as f64 - (PBO_CONFIGS as f64 - 1.0) / 2.0);
+            cfg.params.insert(
+                "fast".into(),
+                serde_json::Number::from_f64(value)
+                    .map_or(serde_json::Value::Null, serde_json::Value::Number),
+            );
+            let mut row = Vec::with_capacity(windows.len());
+            for (start, end) in &windows {
+                let mut member = cfg.clone();
+                member.data_slice.start = *start;
+                member.data_slice.end = *end;
+                let member = member.rehashed();
+                // Every cell of a declared grid is dispatched with certainty.
+                let ctx = Self::dispatch_ctx(user_id, r).with_policy("funnel_pbo_grid", 1);
+                let (res, _) = self
+                    .bt
+                    .run_traced(&crate::run::RunDispatch::new(&ctx, &member, 1.0))
+                    .map_err(|e| SuiteError::Gate(format!("pbo cell refused: {e}")))?;
+                r.exp.record_dispatches(1);
+                row.push(Self::metric_of(&res, MetricKind::Sharpe));
+            }
+            matrix.push(row);
+        }
+        self.emit(user_id, id, "study_complete", 90.0, "pbo grid");
+        Ok(matrix)
+    }
+
+    /// `n` contiguous windows covering a slice.
+    fn split_windows(slice: &DataSlice, n: usize) -> Vec<(DateTime<Utc>, DateTime<Utc>)> {
+        let total = (slice.end - slice.start).num_seconds().max(1);
+        let step = total / n as i64;
+        (0..n as i64)
+            .map(|i| {
+                (
+                    slice.start + chrono::Duration::seconds(i * step),
+                    slice.start + chrono::Duration::seconds(((i + 1) * step).min(total)),
+                )
+            })
+            .collect()
+    }
+
+    /// The metric a distribution is taken over, read off one result. Non-finite
+    /// metrics are 0.0: a Run that produced no usable curve contributes nothing,
+    /// rather than poisoning every statistic downstream with a NaN.
+    fn metric_of(res: &RunResult, metric: MetricKind) -> f64 {
+        let v = res.metrics.value(metric);
+        if v.is_finite() { v } else { 0.0 }
+    }
+
     fn run_evidence(
         &self,
         r: &mut Record,
@@ -1172,7 +1554,8 @@ impl SuiteManager {
             study.question.clone(),
             study.selection_rule,
         );
-        let result = r.exp.run_study(study, &self.bt)?;
+        let ctx = Self::dispatch_ctx(user_id, r);
+        let result = r.exp.run_study(study, &self.bt, &ctx)?;
         self.emit(
             user_id,
             id,
@@ -1234,7 +1617,8 @@ impl SuiteManager {
             50.0,
             "one-shot holdout evaluation",
         );
-        let _result = r.exp.run_vault(&candidate, &self.bt, by)?;
+        let ctx = Self::dispatch_ctx(user_id, r);
+        let _result = r.exp.run_vault(&candidate, &self.bt, &ctx, by)?;
         self.emit(user_id, id, "vault_complete", 100.0, "holdout spent");
         Ok(Self::vault_view(&r.exp.holdout, &r.exp))
     }
@@ -1317,6 +1701,7 @@ mod tests {
 
     fn spec(id: &str) -> CreateExperimentSpec {
         CreateExperimentSpec {
+            delta_practical: 0.1,
             experiment_id: id.into(),
             strategy_family: "ema-family".into(),
             strategy_type: "daily_trend".into(),
@@ -1352,6 +1737,119 @@ mod tests {
             null_ref: None,
             base_params: None,
         }
+    }
+
+    // ------------------------------------------------------------------ //
+    // 2.14: Gate 3's inputs are measured, not constants
+    // ------------------------------------------------------------------ //
+
+    /// A permutation-null Study expands into Runs that execute in a **null
+    /// world** — different data, therefore different `run_id`s from the real
+    /// Run. Before this, the members were the same strategy on the same data
+    /// under different seeds, and their spread was called a null distribution.
+    #[test]
+    fn null_study_members_execute_in_a_null_world() {
+        let slice = DataSlice::new(
+            "u",
+            Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap(),
+            EvalResolution::Day1,
+        );
+        let base = SuiteManager::base_config("fam", &slice);
+        let null = crate::nulls::Null::new(
+            crate::nulls::NullKind::BlockPermutation,
+            crate::nulls::NullParams::default(),
+        )
+        .unwrap();
+        let study = SuiteManager::null_study("s", &base, &null, 8);
+        assert!(study.validate().is_ok());
+
+        let members = crate::study::engine::expand_members_for_test(&study);
+        assert_eq!(members.len(), 8);
+        for m in &members {
+            let nw = m.null_world.as_ref().expect("member runs in a null world");
+            assert_eq!(nw.null.null_id, null.null_id);
+            assert_ne!(m.run_id, base.run_id, "a null-world Run is a different Run");
+        }
+        // Each draw is its own Run: the seeds do not collapse onto one id.
+        let ids: std::collections::HashSet<_> = members.iter().map(|m| &m.run_id).collect();
+        assert_eq!(ids.len(), members.len());
+    }
+
+    /// The measured inputs are what they claim: the observed statistic is the
+    /// candidate's own metric, the null distribution has the declared number of
+    /// draws, and the PBO grid is the declared shape.
+    #[test]
+    fn gate3_reports_measured_inputs_not_constants() {
+        let m = SuiteManager::new();
+        let u = Uuid::new_v4();
+        let id = m.create_experiment(u, spec("exp-measured")).unwrap().id;
+        let picker = m.null_picker(u, id).unwrap();
+        m.choose_null(u, id, picker.recommended, None).unwrap();
+
+        let before = m.get_experiment(u, id).unwrap().trial_counter;
+        let funnel = m.advance_funnel(u, id).unwrap();
+        let after = m.get_experiment(u, id).unwrap().trial_counter;
+
+        let g3 = funnel.significance.expect("gate 3 ran");
+        // The old implementation's p came from a hardcoded 999-point null and an
+        // observed statistic of 6.0, which made it 0.001 every single time.
+        assert!(
+            g3.raw_p_value > 0.0 && g3.raw_p_value <= 1.0,
+            "p = {}",
+            g3.raw_p_value
+        );
+        assert!(
+            g3.pbo >= 0.0 && g3.pbo <= 1.0,
+            "PBO came from a real config x period grid: {}",
+            g3.pbo
+        );
+        // The null draws, the observed run and every PBO cell are real looks and
+        // the counter says so.
+        let evidence =
+            i64::from(NULL_DRAWS) + 1 + i64::try_from(PBO_CONFIGS * PBO_PERIODS).unwrap_or(0);
+        assert!(
+            after - before >= evidence,
+            "counter climbed by {} but Gate 3 alone dispatched {evidence} runs",
+            after - before
+        );
+    }
+
+    /// The converse, which is what makes the gate mean anything: a candidate
+    /// whose null earns exactly what it earns is not significant. With
+    /// fabricated inputs this was unreachable — the gate passed on constants.
+    #[test]
+    fn a_candidate_with_no_edge_over_its_null_fails_gate_3() {
+        // An executor in which the null world changes nothing: the strategy's
+        // return does not depend on the structure the null destroys, which is
+        // the definition of having no edge.
+        let m = SuiteManager::with_executor(
+            Box::new(ClosureExecutor(|cfg: &RunConfig| {
+                let mut stripped = cfg.clone();
+                stripped.null_world = None;
+                let mut r = synthetic_execute(&stripped);
+                r.run_id = cfg.run_id.clone();
+                r
+            })),
+            Arc::new(InMemoryLedger::new()),
+        );
+        let u = Uuid::new_v4();
+        let id = m.create_experiment(u, spec("exp-no-edge")).unwrap().id;
+        let picker = m.null_picker(u, id).unwrap();
+        m.choose_null(u, id, picker.recommended, None).unwrap();
+
+        let funnel = m.advance_funnel(u, id).unwrap();
+        let sig = funnel
+            .gates
+            .iter()
+            .find(|g| g.gate == Gate::Significance)
+            .expect("gate 3 recorded");
+        assert_ne!(
+            sig.status,
+            GateStatus::Passed,
+            "a strategy indistinguishable from its own null must not clear significance"
+        );
+        assert!(!m.get_experiment(u, id).unwrap().gate3_passed);
     }
 
     #[test]

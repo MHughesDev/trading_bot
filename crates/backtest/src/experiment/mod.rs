@@ -15,6 +15,8 @@ pub mod store;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use ledger::{DispatchContext, TrialLedger};
+use crate::run::RunDispatch;
 use crate::run::{
     Backtest, DataSlice, RunConfig, RunExecutor, RunId, RunResult, RunStatus, RunStore,
 };
@@ -130,6 +132,19 @@ pub enum ExperimentError {
     UnsafeBarred,
     #[error("invalid study: {0}")]
     Study(StudyConfigError),
+    /// The trial ledger refused to register the dispatch, so nothing ran. The
+    /// vault is NOT sealed in this case — no holdout access occurred.
+    #[error("trial ledger refused the dispatch: {0}")]
+    LedgerRefused(String),
+}
+
+/// What a vault request produced.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultOutcome {
+    pub result: RunResult,
+    /// Set when the lineage's one sealed-holdout evaluation already happened:
+    /// `result` is that evaluation, returned instead of a new one (SPEC §12.7).
+    pub notice: Option<String>,
 }
 
 /// The container for one strategy idea, across its whole life (spec §1.3).
@@ -150,6 +165,12 @@ pub struct Experiment {
     gate3_passed: bool,
     /// True if any Study/Run within was unsafe (INV-1). Never clears.
     unsafe_: bool,
+    /// Median objective of the best cross-validated Study seen so far, and of
+    /// the best walk-forward one. Kept so the gap between them can be reported
+    /// (SPEC §12.5, checklist 1.10) -- a CV result far above the walk-forward
+    /// result on the same idea is the signature of overlapping-label leakage.
+    cv_objective: Option<f64>,
+    wf_objective: Option<f64>,
     pub verdict: Option<String>,
     pub created: DateTime<Utc>,
     pub updated: DateTime<Utc>,
@@ -180,6 +201,8 @@ impl Experiment {
             primary_test: primary_test.into(),
             gate3_passed: false,
             unsafe_: false,
+            cv_objective: None,
+            wf_objective: None,
             verdict: None,
             created: now,
             updated: now,
@@ -240,14 +263,16 @@ impl Experiment {
     ///
     /// # Errors
     /// See [`ExperimentError`].
-    pub fn run_study<S: RunStore, E: RunExecutor>(
+    pub fn run_study<S: RunStore, E: RunExecutor, L: TrialLedger>(
         &mut self,
         study: &StudyConfig,
-        bt: &Backtest<S, E>,
+        bt: &Backtest<S, E, L>,
+        ctx: &DispatchContext,
     ) -> Result<StudyResult, ExperimentError> {
         self.check_study(study)?;
-        let result = StudyEngine::run(study, bt).map_err(ExperimentError::Study)?;
-        self.record_study(study.study_id.clone(), &result);
+        let ctx = ctx.clone().with_experiment(self.experiment_id.clone());
+        let result = StudyEngine::run(study, bt, &ctx).map_err(ExperimentError::Study)?;
+        self.record_study(study.study_id.clone(), study.kind, &result);
         Ok(result)
     }
 
@@ -274,17 +299,66 @@ impl Experiment {
     /// The bookkeeping half of [`Self::run_study`] for a result produced by
     /// `StudyEngine::run` on a config that passed [`Self::check_study`]. Goes
     /// through the single counter mutator; the counter only ever increases.
-    pub fn record_study_result(&mut self, study_id: String, result: &StudyResult) {
-        self.record_study(study_id, result);
+    pub fn record_study_result(&mut self, study_id: String, kind: StudyKind, result: &StudyResult) {
+        self.record_study(study_id, kind, result);
     }
 
-    /// Increment the counter, append the Study reference, and propagate `unsafe`.
+    /// Count Runs dispatched outside a Study — the gate funnel's observed run and
+    /// its PBO grid.
+    ///
+    /// The counter counts **looks**, not Studies (§12.4). A Run dispatched
+    /// directly is still a look at the data, and leaving it out would make
+    /// deflation more lenient — the direction that flatters results. Monotonic,
+    /// like every other path into the counter: there is no decrement and no
+    /// reset.
+    pub fn record_dispatches(&mut self, n: i64) {
+        self.trial_counter += n.max(0);
+        self.updated = Utc::now();
+    }
+
+    /// Increment the counter, append the Study reference, propagate `unsafe`, and
+    /// remember the objective for the CV/WF comparison.
     /// The *only* mutator of the counter; it only ever increases.
-    fn record_study(&mut self, study_id: String, result: &StudyResult) {
+    fn record_study(&mut self, study_id: String, kind: StudyKind, result: &StudyResult) {
         self.trial_counter += result.trial_delta;
         self.studies.push(study_id);
         self.unsafe_ |= result.unsafe_;
+        // The best result of each family, because the flag asks whether *any*
+        // cross-validated view of this idea looks better than the walk-forward
+        // view -- taking the worst CV result would let a single flattering fold
+        // scheme hide behind its siblings.
+        let slot = match kind {
+            StudyKind::Cpcv | StudyKind::NestedCv => Some(&mut self.cv_objective),
+            StudyKind::WalkForward => Some(&mut self.wf_objective),
+            _ => None,
+        };
+        if let Some(slot) = slot {
+            *slot = Some(slot.map_or(result.distribution.median, |m: f64| m.max(result.distribution.median)));
+        }
         self.updated = Utc::now();
+    }
+
+    /// The CV-minus-walk-forward Sharpe gap, once both have been measured
+    /// (SPEC §12.5, checklist 1.10).
+    ///
+    /// A **flag**, never a block: the gap has innocent causes (a regime change
+    /// late in the sample) and guilty ones (labels whose horizons overlap across
+    /// the CV split), and only a human can tell them apart. What is not optional
+    /// is that the Experiment carries the mark into every comparison.
+    #[must_use]
+    pub fn cv_wf_gap(&self) -> Option<f64> {
+        match (self.cv_objective, self.wf_objective) {
+            (Some(cv), Some(wf)) if (cv - wf).is_finite() => Some(cv - wf),
+            _ => None,
+        }
+    }
+
+    /// `true` when the gap exceeds the limit and the Experiment must be shown as
+    /// suspect for overlapping-label leakage.
+    #[must_use]
+    pub fn suspect_overlapping_label_leakage(&self) -> bool {
+        self.cv_wf_gap()
+            .is_some_and(|g| g > features::leakage::CV_WF_GAP_LIMIT)
     }
 
     /// Run the one-shot holdout vault evaluation (Gate 4, spec §2.2 / J-2.6).
@@ -296,12 +370,13 @@ impl Experiment {
     ///
     /// # Errors
     /// See [`ExperimentError`].
-    pub fn run_vault<S: RunStore, E: RunExecutor>(
+    pub fn run_vault<S: RunStore, E: RunExecutor, L: TrialLedger>(
         &mut self,
         candidate: &RunConfig,
-        bt: &Backtest<S, E>,
+        bt: &Backtest<S, E, L>,
+        ctx: &DispatchContext,
         by: impl Into<String>,
-    ) -> Result<RunResult, ExperimentError> {
+    ) -> Result<VaultOutcome, ExperimentError> {
         // Spent is checked first so a second attempt always reports the most
         // specific reason (VaultSpent), even though the post-vault state also
         // forbids the operation.
@@ -321,6 +396,27 @@ impl Experiment {
             return Err(ExperimentError::UnsafeBarred);
         }
 
+        // One sealed-holdout evaluation per strategy lineage, ever — across every
+        // Experiment of the family, enforced by the ledger (SPEC §12.7, AT-33).
+        let lineage = self.strategy_family.clone();
+        let by: String = by.into();
+        let claim = bt
+            .ledger()
+            .claim_sealed_holdout(&ctx.tenant_id, &lineage, &by)
+            .map_err(|e| ExperimentError::LedgerRefused(e.to_string()))?;
+        if let ledger::holdout::HoldoutClaim::Repeat { first_trial, called_at, result } = claim {
+            let first: RunResult = serde_json::from_value(result)
+                .map_err(|e| ExperimentError::LedgerRefused(format!("the recorded holdout result is unreadable: {e}")))?;
+            self.holdout.access_log.push(VaultAccess { when: Utc::now(), run_id: first.run_id.clone(), by });
+            self.holdout.spent = true;
+            self.updated = Utc::now();
+            let notice = format!(
+                "the sealed holdout for lineage '{lineage}' was already evaluated at {called_at} (trial {first_trial}); \
+                 this is that result, not a new evaluation"
+            );
+            return Ok(VaultOutcome { result: first, notice: Some(notice) });
+        }
+
         // The single legitimate holdout access: the candidate config evaluated
         // over the locked tail. This is NOT an `unsafe` holdout unlock — it is
         // the one sanctioned, logged, self-sealing path.
@@ -328,13 +424,22 @@ impl Experiment {
         vault_cfg.data_slice = self.holdout.slice.clone();
         let vault_cfg = vault_cfg.rehashed();
 
-        let result = bt.run(&vault_cfg);
+        // The vault evaluation is the single sanctioned holdout access, dispatched
+        // with certainty under its own policy so it is distinguishable from
+        // research dispatches in the ledger.
+        let ctx = ctx
+            .clone()
+            .with_experiment(self.experiment_id.clone())
+            .with_policy("holdout_vault", 1);
+        let result = bt
+            .run(&RunDispatch::new(&ctx, &vault_cfg, 1.0))
+            .map_err(|e| ExperimentError::LedgerRefused(e.to_string()))?;
 
         // Seal BEFORE returning — a second attempt can never reach execution.
         self.holdout.access_log.push(VaultAccess {
             when: Utc::now(),
             run_id: result.run_id.clone(),
-            by: by.into(),
+            by,
         });
         self.holdout.spent = true;
         self.unsafe_ |= result.unsafe_;
@@ -349,7 +454,17 @@ impl Experiment {
             // can_transition_to(Candidate -> Validated) is legal.
             let _ = self.transition(ExperimentState::Validated);
         }
-        Ok(result)
+
+        // The lineage's one result, recorded against the trial that produced it.
+        let trial = bt
+            .ledger()
+            .prior_trial(&ctx.tenant_id, result.run_id.as_str())
+            .ok_or_else(|| ExperimentError::LedgerRefused("the vault run has no settled trial to record".into()))?;
+        let stored = serde_json::to_value(&result).map_err(|e| ExperimentError::LedgerRefused(e.to_string()))?;
+        bt.ledger()
+            .record_sealed_holdout(&ctx.tenant_id, &lineage, trial, &stored)
+            .map_err(|e| ExperimentError::LedgerRefused(e.to_string()))?;
+        Ok(VaultOutcome { result, notice: None })
     }
 
     /// True if any slice the Study would evaluate intersects the holdout tail.
@@ -388,12 +503,19 @@ pub fn is_permutation_study(kind: StudyKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ledger::{DispatchContext, InMemoryLedger};
+
+    /// Tests dispatch through a real ledger — there is no way to reach an
+    /// executor without one (INV-16).
+    fn ctx() -> DispatchContext {
+        DispatchContext::human("tenant-test", "exp", 0.1).with_experiment("test-exp")
+    }
     use crate::run::executor::{daily_curve, map_sim_result};
     use crate::run::{
         Backtest, ClosureExecutor, ComputeCost, EvalResolution, InMemoryRunStore, MetricKind,
         ParamMap, RunConfig, RunConfigBuilder, UnsafeFlags, ENGINE_VERSION,
     };
-    use crate::study::{SelectionRule, StudyBudget, StudyConfig, StudyKind, VarySpec};
+    use crate::study::{SelectionRule, StudyBudget, StudyConfig, StudyKind, StudyVerdict, VarySpec};
     use chrono::TimeZone;
 
     fn research_slice() -> DataSlice {
@@ -429,6 +551,7 @@ mod tests {
             },
             metric: MetricKind::TotalReturn,
             null_ref: None,
+            null: None,
             budget: StudyBudget::default(),
             question: "how does perf vary?".into(),
             selection_rule: SelectionRule::None,
@@ -464,7 +587,7 @@ mod tests {
     #[test]
     fn running_studies_auto_increments_monotonically() {
         let mut e = experiment();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor());
+        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
         // Each sweep has 10 members → +10 per study.
         let mut s1 = sweep_over(research_slice());
         s1.study_id = "s1".into();
@@ -473,9 +596,9 @@ mod tests {
         s2.vary = VarySpec::Params {
             grid: (0..120).map(|_| ParamMap::new()).collect(),
         };
-        e.run_study(&s1, &bt).unwrap();
+        e.run_study(&s1, &bt, &ctx()).unwrap();
         assert_eq!(e.trial_counter(), 10);
-        e.run_study(&s2, &bt).unwrap();
+        e.run_study(&s2, &bt, &ctx()).unwrap();
         assert_eq!(e.trial_counter(), 130);
         assert_eq!(e.studies.len(), 2);
     }
@@ -483,11 +606,11 @@ mod tests {
     #[test]
     fn research_study_touching_holdout_is_refused() {
         let mut e = experiment();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor());
+        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
         // A sweep whose base slice IS the holdout tail.
         let bad = sweep_over(holdout_slice());
         assert_eq!(
-            e.run_study(&bad, &bt).err(),
+            e.run_study(&bad, &bt, &ctx()).err(),
             Some(ExperimentError::TouchesHoldout)
         );
         assert_eq!(e.trial_counter(), 0, "a refused study never counts");
@@ -496,17 +619,17 @@ mod tests {
     #[test]
     fn vault_requires_gate3_then_runs_once_and_validates() {
         let mut e = experiment();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor());
+        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
         let candidate = base_config(research_slice());
 
         // Before Gate 3: refused.
         assert_eq!(
-            e.run_vault(&candidate, &bt, "alice").err(),
+            e.run_vault(&candidate, &bt, &ctx(), "alice").err(),
             Some(ExperimentError::Gate3NotPassed)
         );
 
         e.mark_gate3_passed();
-        let r = e.run_vault(&candidate, &bt, "alice").unwrap();
+        let r = e.run_vault(&candidate, &bt, &ctx(), "alice").unwrap().result;
         assert_eq!(r.status, RunStatus::Ok);
         assert!(e.holdout.spent);
         assert_eq!(e.holdout.access_log.len(), 1);
@@ -515,18 +638,42 @@ mod tests {
 
         // Second attempt refused — self-sealed.
         assert_eq!(
-            e.run_vault(&candidate, &bt, "bob").err(),
+            e.run_vault(&candidate, &bt, &ctx(), "bob").err(),
             Some(ExperimentError::VaultSpent)
         );
+    }
+
+    /// AT-33: one sealed-holdout evaluation per strategy lineage, ever. A second
+    /// Experiment of the same lineage gets the first result with a notice, runs
+    /// nothing, and the request is logged.
+    #[test]
+    fn a_lineage_evaluates_its_sealed_holdout_once() {
+        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        let candidate = base_config(research_slice());
+        let mut first = experiment();
+        first.mark_gate3_passed();
+        let a = first.run_vault(&candidate, &bt, &ctx(), "alice").unwrap();
+        assert!(a.notice.is_none());
+        let trials_after_first = bt.ledger().trial_count("tenant-test");
+
+        let mut second = experiment();
+        second.experiment_id = "exp-2".into();
+        second.mark_gate3_passed();
+        let b = second.run_vault(&candidate, &bt, &ctx(), "bob").unwrap();
+        assert_eq!(b.result, a.result, "the first result, not a new evaluation");
+        assert!(b.notice.as_deref().is_some_and(|n| n.contains("already evaluated")));
+        assert_eq!(bt.ledger().trial_count("tenant-test"), trials_after_first, "nothing ran");
+        assert!(second.holdout.spent);
+        assert_eq!(bt.ledger().holdout_attempts("tenant-test", &first.strategy_family), 2);
     }
 
     #[test]
     fn vault_runs_over_the_holdout_slice() {
         let mut e = experiment();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor());
+        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
         let candidate = base_config(research_slice());
         e.mark_gate3_passed();
-        let r = e.run_vault(&candidate, &bt, "alice").unwrap();
+        let r = e.run_vault(&candidate, &bt, &ctx(), "alice").unwrap().result;
         // The stored run's config slice must be the holdout, not the research slice.
         let stored = bt.store().get(&r.run_id).unwrap();
         assert_eq!(stored.run_id, r.run_id);
@@ -545,7 +692,7 @@ mod tests {
                 ENGINE_VERSION,
             )
         });
-        let bt = Backtest::new(InMemoryRunStore::new(), unsafe_exec);
+        let bt = Backtest::new(InMemoryRunStore::new(), unsafe_exec, InMemoryLedger::new());
         // A sweep whose base config disabled costs → unsafe runs.
         let mut s = sweep_over(research_slice());
         s.base_config =
@@ -555,12 +702,12 @@ mod tests {
                     ..Default::default()
                 })
                 .build();
-        e.run_study(&s, &bt).unwrap();
+        e.run_study(&s, &bt, &ctx()).unwrap();
         assert!(e.is_unsafe());
         e.mark_gate3_passed();
         let candidate = base_config(research_slice());
         assert_eq!(
-            e.run_vault(&candidate, &bt, "alice").err(),
+            e.run_vault(&candidate, &bt, &ctx(), "alice").err(),
             Some(ExperimentError::UnsafeBarred)
         );
     }
@@ -569,8 +716,8 @@ mod tests {
     fn lifecycle_is_one_directional_through_validation() {
         let mut e = experiment();
         e.mark_gate3_passed();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor());
-        e.run_vault(&base_config(research_slice()), &bt, "a")
+        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        e.run_vault(&base_config(research_slice()), &bt, &ctx(), "a")
             .unwrap();
         assert_eq!(e.state, ExperimentState::Validated);
         // Cannot drop back to candidate.
@@ -587,12 +734,12 @@ mod tests {
     fn validated_state_forbids_research_studies() {
         let mut e = experiment();
         e.mark_gate3_passed();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor());
-        e.run_vault(&base_config(research_slice()), &bt, "a")
+        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        e.run_vault(&base_config(research_slice()), &bt, &ctx(), "a")
             .unwrap();
         let s = sweep_over(research_slice());
         assert_eq!(
-            e.run_study(&s, &bt).err(),
+            e.run_study(&s, &bt, &ctx()).err(),
             Some(ExperimentError::OperationNotAllowed {
                 state: ExperimentState::Validated,
                 op: Operation::ResearchStudy,
@@ -606,8 +753,8 @@ mod tests {
         // it only adds. "Starting over" is a NEW Experiment with its own zeroed
         // counter — a fresh struct — never a reset of this one.
         let mut e = experiment();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor());
-        e.run_study(&sweep_over(research_slice()), &bt).unwrap();
+        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        e.run_study(&sweep_over(research_slice()), &bt, &ctx()).unwrap();
         let after = e.trial_counter();
         assert_eq!(after, 10);
         let fresh = Experiment::new("exp-2", "ema-family", holdout_slice(), "null:block_perm");
@@ -623,5 +770,59 @@ mod tests {
         let e = experiment();
         let back: Experiment = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
         assert_eq!(e, back);
+    }
+
+    // ------------------------------------------------------------------ //
+    // 1.10 — CV − WF Sharpe gap (SPEC §12.5)
+    // ------------------------------------------------------------------ //
+
+    fn result_with_median(median: f64) -> StudyResult {
+        StudyResult::new(
+            "s".into(),
+            Vec::new(),
+            crate::study::Distribution::from_values(MetricKind::Sharpe, vec![median]),
+            StudyVerdict {
+                summary: "fixture".into(),
+                positive_median: median > 0.0,
+                survivable_worst5: false,
+                plateau: None,
+            },
+            1,
+            None,
+            false,
+        )
+    }
+
+    #[test]
+    fn the_cv_wf_gap_is_none_until_both_kinds_have_run() {
+        let mut e = experiment();
+        assert_eq!(e.cv_wf_gap(), None);
+        e.record_study_result("wf".into(), StudyKind::WalkForward, &result_with_median(1.0));
+        assert_eq!(e.cv_wf_gap(), None, "one kind is not a comparison");
+        assert!(!e.suspect_overlapping_label_leakage());
+        e.record_study_result("cv".into(), StudyKind::Cpcv, &result_with_median(1.4));
+        assert_eq!(e.cv_wf_gap(), Some(1.4 - 1.0));
+        assert!(!e.suspect_overlapping_label_leakage(), "0.4 is under the limit");
+    }
+
+    #[test]
+    fn a_cross_validated_result_far_above_walk_forward_is_flagged() {
+        let mut e = experiment();
+        e.record_study_result("wf".into(), StudyKind::WalkForward, &result_with_median(0.4));
+        e.record_study_result("cv".into(), StudyKind::Cpcv, &result_with_median(2.0));
+        assert!(e.suspect_overlapping_label_leakage());
+        // A flag, not a block: nothing about the Experiment's state changed.
+        assert_eq!(e.state, ExperimentState::Candidate);
+    }
+
+    /// The best CV result of several is the one compared, so a flattering fold
+    /// scheme cannot hide behind its siblings.
+    #[test]
+    fn the_gap_uses_the_best_result_of_each_family() {
+        let mut e = experiment();
+        e.record_study_result("wf".into(), StudyKind::WalkForward, &result_with_median(0.4));
+        e.record_study_result("cv1".into(), StudyKind::Cpcv, &result_with_median(0.5));
+        e.record_study_result("cv2".into(), StudyKind::NestedCv, &result_with_median(2.0));
+        assert_eq!(e.cv_wf_gap(), Some(2.0 - 0.4));
     }
 }

@@ -99,9 +99,18 @@ pub struct StudyConfig {
     pub vary: VarySpec,
     /// Which metric the distribution is taken over.
     pub metric: MetricKind,
-    /// REQUIRED iff `kind == PermutationNull`.
+    /// REQUIRED iff `kind == PermutationNull`. The id of [`Self::null`].
     #[serde(default)]
     pub null_ref: Option<String>,
+    /// The resolved null object, REQUIRED iff `kind == PermutationNull`.
+    ///
+    /// The id alone is not enough: members of a permutation-null Study execute
+    /// in a null world, and building one needs the generator's kind and
+    /// parameters, not a reference to them. A Study that carries only the id
+    /// would silently run the *real* strategy on the *real* data under different
+    /// seeds — which looks like a null distribution and is not one.
+    #[serde(default)]
+    pub null: Option<crate::nulls::Null>,
     #[serde(default)]
     pub budget: StudyBudget,
     /// Human-readable; logged before running. Must be non-empty.
@@ -121,12 +130,21 @@ pub enum StudyConfigError {
     EmptyQuestion,
     #[error("permutation_null study requires a null_ref (INV-3)")]
     MissingNull,
+    #[error("permutation_null study requires the resolved null, not just its id: members execute in a null world")]
+    UnresolvedNull,
+    #[error("null_ref {expected} does not name the attached null {actual}")]
+    NullRefMismatch { expected: String, actual: String },
     #[error("null_ref is only meaningful for a permutation_null study")]
     UnexpectedNull,
     #[error("vary spec {vary} does not match study kind {kind:?}")]
     KindVaryMismatch { kind: StudyKind, vary: &'static str },
     #[error("cpcv requires 0 < k_test < n_groups")]
     BadCpcvGroups,
+    /// The trial ledger refused to register a member, so it was never
+    /// dispatched. Surfaced rather than skipped: a study that silently drops
+    /// members it could not log would under-report its own trial count.
+    #[error("trial ledger refused a member run: {0}")]
+    LedgerRefused(String),
 }
 
 impl StudyConfig {
@@ -140,12 +158,21 @@ impl StudyConfig {
         }
         match self.kind {
             StudyKind::PermutationNull => {
-                if self.null_ref.is_none() {
+                let Some(null_ref) = self.null_ref.as_deref() else {
                     return Err(StudyConfigError::MissingNull);
+                };
+                let Some(null) = self.null.as_ref() else {
+                    return Err(StudyConfigError::UnresolvedNull);
+                };
+                if null.null_id.as_str() != null_ref {
+                    return Err(StudyConfigError::NullRefMismatch {
+                        expected: null_ref.to_string(),
+                        actual: null.null_id.as_str().to_string(),
+                    });
                 }
             }
             _ => {
-                if self.null_ref.is_some() {
+                if self.null_ref.is_some() || self.null.is_some() {
                     return Err(StudyConfigError::UnexpectedNull);
                 }
             }
@@ -213,12 +240,24 @@ mod tests {
         RunConfigBuilder::new("s", "v", s, "c", "z", "snap").build()
     }
 
+    fn a_null() -> crate::nulls::Null {
+        crate::nulls::Null::new(
+            crate::nulls::NullKind::BlockPermutation,
+            crate::nulls::NullParams::default(),
+        )
+        .expect("catalog null")
+    }
+
     fn cfg(
         kind: StudyKind,
         vary: VarySpec,
         question: &str,
         null_ref: Option<String>,
     ) -> StudyConfig {
+        // A permutation-null config must carry the resolved null; every other
+        // kind must carry neither.
+        let null = (kind == StudyKind::PermutationNull).then(a_null);
+        let null_ref = null_ref.map(|_| a_null().null_id.as_str().to_string());
         StudyConfig {
             study_id: "study-1".into(),
             kind,
@@ -226,6 +265,7 @@ mod tests {
             vary,
             metric: MetricKind::Sharpe,
             null_ref,
+            null,
             budget: StudyBudget::default(),
             question: question.into(),
             selection_rule: SelectionRule::None,
@@ -294,6 +334,36 @@ mod tests {
         assert!(matches!(
             c.validate(),
             Err(StudyConfigError::KindVaryMismatch { .. })
+        ));
+    }
+
+    /// A permutation-null Study that names a null but does not carry it cannot
+    /// build null-world members, so it is refused rather than run against the
+    /// real data under different seeds.
+    #[test]
+    fn permutation_null_with_only_an_id_is_refused() {
+        let mut c = cfg(
+            StudyKind::PermutationNull,
+            VarySpec::Seeds { n: 100 },
+            "is it real?",
+            Some("null:x".into()),
+        );
+        c.null = None;
+        assert_eq!(c.validate(), Err(StudyConfigError::UnresolvedNull));
+    }
+
+    #[test]
+    fn a_null_ref_that_names_a_different_null_is_refused() {
+        let mut c = cfg(
+            StudyKind::PermutationNull,
+            VarySpec::Seeds { n: 100 },
+            "is it real?",
+            Some("null:x".into()),
+        );
+        c.null_ref = Some("null:something_else".into());
+        assert!(matches!(
+            c.validate(),
+            Err(StudyConfigError::NullRefMismatch { .. })
         ));
     }
 

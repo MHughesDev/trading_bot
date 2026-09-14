@@ -8,6 +8,7 @@ domain = { workspace = true }
 cfg = { workspace = true }
 observability = { workspace = true }
 api = { workspace = true }
+jobs = { workspace = true }
 risk = { workspace = true }
 execution = { workspace = true }
 reconciliation = { workspace = true }
@@ -16,6 +17,9 @@ storage = { workspace = true }
 ui-gateway = { workspace = true }
 demand-manager = { workspace = true }
 backtest = { workspace = true }
+ledger = { workspace = true }
+ed25519-dalek = "2"
+hex = "0.4"
 model-registry = { workspace = true }
 event-bus = { workspace = true }
 collectors = { workspace = true }
@@ -29,6 +33,12 @@ anyhow = { workspace = true }
 axum = { workspace = true }
 async-trait = "0.1"
 sqlx = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+# L2 book feed (book_feed.rs) — its own venue WebSocket, separate from the
+# trade pipelines in collectors.
+tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
+dashmap = { workspace = true }
 mimalloc = { workspace = true }
 reqwest = { workspace = true }

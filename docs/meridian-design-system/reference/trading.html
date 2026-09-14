@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="paper" data-density="comfortable">
+<head>
+<meta charset="utf-8">
+<title>Trading</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  .subbar{height:var(--subnav-h);flex:none;display:flex;align-items:center;gap:var(--s-4);
+    padding:0 var(--s-5);background:var(--bg-surface);border-bottom:1px solid var(--line-hairline)}
+  .inst{display:flex;align-items:center;gap:var(--s-3);padding-right:var(--s-4);border-right:1px solid var(--line-hairline)}
+  .inst .t{font-size:var(--t-18);font-weight:var(--w-semibold);letter-spacing:var(--tr-tight)}
+  [data-theme="terminal"] .inst .t{font-family:var(--font-display)}
+  .lastprice{font-size:var(--t-20);font-weight:var(--w-semibold);font-family:var(--font-numeric);
+    font-variant-numeric:tabular-nums;letter-spacing:var(--numeric-tracking)}
+  .statgrp{display:flex;gap:var(--s-5)}
+  .statgrp .s{display:flex;flex-direction:column;line-height:1.25}
+  .statgrp .s b{font-weight:var(--w-medium);font-size:var(--t-12);font-family:var(--font-numeric);font-variant-numeric:tabular-nums}
+
+  .main{flex:1;display:grid;grid-template-rows:minmax(0,1fr);grid-template-columns:var(--panel-w-sm) minmax(0,1fr) var(--panel-w-md);
+    gap:var(--s-3);padding:var(--s-3);min-height:0}
+  .col{display:grid;grid-template-rows:auto minmax(0,1fr);gap:var(--s-3);min-height:0;overflow:hidden}
+  .col.single{grid-template-rows:minmax(0,1fr)}
+  .col.left{grid-template-rows:minmax(0,1fr) 332px}
+  .center{display:grid;grid-template-rows:minmax(0,1fr) 262px;gap:var(--s-3);min-height:0}
+
+  .wl-row{display:grid;grid-template-columns:1fr auto;gap:var(--s-2);align-items:center;
+    padding:7px var(--s-3);border-radius:var(--r-sm);cursor:pointer}
+  .wl-row.on{background:var(--bg-selected);box-shadow:inset 0 0 0 1px var(--line-accent)}
+  .wl-row .r{text-align:right;font-family:var(--font-numeric);font-variant-numeric:tabular-nums}
+  .wl-grp{padding:var(--s-3) var(--s-3) 5px;display:flex;align-items:center;gap:6px}
+
+  .chartwrap{position:relative;flex:1;min-height:0;background:var(--chart-surface);border-radius:0 0 var(--r-lg) var(--r-lg);overflow:hidden}
+  [data-theme="terminal"] .chartwrap{border-radius:0 0 var(--r-lg) var(--r-lg)}
+  .tif{display:flex;gap:4px}
+
+  .ticket{display:flex;flex-direction:column;gap:10px}
+  .pctrow{display:flex;gap:4px}
+  .pctrow button{flex:1;height:26px;border-radius:var(--r-xs);border:1px solid var(--line-hairline);
+    background:var(--bg-sunken);color:var(--fg-tertiary);font-family:inherit;font-size:var(--t-11);font-weight:var(--w-medium);cursor:pointer}
+  .pctrow button.on{background:var(--bg-accent-subtle);color:var(--fg-accent);border-color:var(--line-accent)}
+  .summary{background:var(--bg-sunken);border-radius:var(--r-sm);padding:var(--s-3);border:1px solid var(--line-hairline)}
+  .tabs{display:flex;gap:var(--s-4);height:36px;align-items:center;padding:0 var(--s-4);border-bottom:1px solid var(--line-hairline)}
+  .tabs a{font-size:var(--t-12);font-weight:var(--w-medium);color:var(--fg-tertiary);text-decoration:none;height:100%;display:flex;align-items:center;border-bottom:2px solid transparent}
+  [data-theme="terminal"] .tabs a{text-transform:uppercase;letter-spacing:.08em;font-size:var(--t-11)}
+  .tabs a.on{color:var(--fg-primary);border-bottom-color:var(--line-accent)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ TOP BAR ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 11.5 6 6l3 3.2L14 3.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="brand-name">Meridian</div>
+    </div>
+    <nav class="nav">
+      <a href="#">Dashboard</a>
+      <a href="#" class="on">Trading</a>
+      <a href="#">Automations</a>
+      <a href="#">Strategy</a>
+      <a href="#">Back&nbsp;Testing</a>
+      <a href="#">Settings</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="topright">
+      <div class="mode-pill"><i class="dot"></i>Paper</div>
+      <div class="equity-readout">
+        <div class="lbl">Equity</div>
+        <div class="num" style="font-size:var(--t-13);font-weight:var(--w-semibold)">$910,432.18</div>
+      </div>
+      <div class="equity-readout">
+        <div class="lbl">Day P&amp;L</div>
+        <div class="num pos" style="font-size:var(--t-13);font-weight:var(--w-semibold)">+$8,214.06</div>
+      </div>
+      <div class="row" style="gap:6px;padding-left:var(--s-3);border-left:1px solid var(--line-hairline)">
+        <i class="dot live"></i><span class="lbl">12 ms</span>
+      </div>
+      <div class="avatar">MH</div>
+    </div>
+  </header>
+
+  <!-- ============ SUB BAR ============ -->
+  <div class="subbar">
+    <div class="inst">
+      <span class="chip">Crypto</span>
+      <span class="t">BTC‑USD</span>
+      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style="color:var(--fg-tertiary)"><path d="M3 4.5 6 8l3-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+    <div class="row" style="gap:var(--s-3)">
+      <div class="lastprice pos">64,318.40</div>
+      <div style="display:flex;flex-direction:column;line-height:1.2">
+        <span class="num pos" style="font-size:var(--t-12);font-weight:var(--w-semibold)">+1,204.10</span>
+        <span class="num pos" style="font-size:var(--t-11)">+1.91%</span>
+      </div>
+    </div>
+    <div class="statgrp">
+      <div class="s"><span class="lbl">Bid</span><b class="pos">64,317.90</b></div>
+      <div class="s"><span class="lbl">Ask</span><b class="neg">64,318.80</b></div>
+      <div class="s"><span class="lbl">24h high</span><b>64,940.00</b></div>
+      <div class="s"><span class="lbl">24h low</span><b>62,880.50</b></div>
+      <div class="s"><span class="lbl">24h vol</span><b>18,402 BTC</b></div>
+      <div class="s"><span class="lbl">Funding</span><b class="pos">+0.0091%</b></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="seg">
+      <button>1m</button><button>5m</button><button>15m</button>
+      <button class="on">1h</button><button>4h</button><button>1D</button>
+    </div>
+    <button class="btn sm">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 12V7m4 5V4m4 8V9m4 3V5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      Indicators
+    </button>
+    <button class="btn sm">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2a4 4 0 0 0-4 4c0 3-1.2 4-1.2 4h10.4S12 9 12 6a4 4 0 0 0-4-4Zm-1.6 11a1.7 1.7 0 0 0 3.2 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Alert
+    </button>
+  </div>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main">
+
+    <!-- LEFT: watchlist -->
+    <div class="col left">
+      <section class="panel" style="min-height:0">
+        <div class="panel-hd">
+          <span class="panel-title">Watchlist</span>
+          <span class="badge neutral">Majors</span>
+          <div class="spacer"></div>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="color:var(--fg-tertiary)"><circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.5"/><path d="m10.4 10.4 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </div>
+        <div class="panel-bd flush" style="padding:0 6px 6px">
+          <div class="wl-grp"><span class="swatch" style="background:var(--chart-1)"></span><span class="lbl">Crypto spot</span></div>
+          <div id="wl-crypto"></div>
+          <div class="wl-grp"><span class="swatch" style="background:var(--chart-5)"></span><span class="lbl">Equities</span></div>
+          <div id="wl-eq"></div>
+          <div class="wl-grp"><span class="swatch" style="background:var(--chart-3)"></span><span class="lbl">FX</span></div>
+          <div id="wl-fx"></div>
+        </div>
+      </section>
+      <section class="panel" style="min-height:0;overflow:hidden">
+        <div class="panel-hd">
+          <span class="panel-title">Order book</span>
+          <div class="spacer"></div>
+          <span class="lbl">Spread <b class="num sec">0.90</b></span>
+        </div>
+        <div class="panel-bd flush book" style="overflow:hidden;padding-top:4px">
+          <div class="r" style="height:20px;color:var(--fg-tertiary)"><span class="lbl">Price</span><span class="lbl">Size</span><span class="lbl">Total</span></div>
+          <div id="asks"></div>
+          <div class="mid">
+            <span class="num pos" style="font-size:var(--t-14);font-weight:var(--w-semibold)">64,318.40</span>
+            <span class="lbl">Mid 64,318.35</span>
+          </div>
+          <div id="bids"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- CENTER: chart + dock -->
+    <div class="center">
+      <section class="panel" style="overflow:hidden">
+        <div class="panel-hd">
+          <span class="panel-title">BTC‑USD · 1H</span>
+          <span class="badge accent">EMA 21 / 55</span>
+          <span class="badge neutral">Volume</span>
+          <div class="spacer"></div>
+          <span class="lbl">O <b class="num sec">63,180.2</b>&nbsp;&nbsp; H <b class="num sec">64,940.0</b>&nbsp;&nbsp; L <b class="num sec">62,880.5</b>&nbsp;&nbsp; C <b class="num pos">64,318.4</b></span>
+        </div>
+        <div class="chartwrap"><svg id="chart" width="100%" height="100%"></svg></div>
+      </section>
+
+      <section class="panel" style="overflow:hidden">
+        <div class="tabs">
+          <a href="#" class="on">Positions <span class="badge neutral" style="margin-left:6px">4</span></a>
+          <a href="#">Open orders <span class="badge neutral" style="margin-left:6px">2</span></a>
+          <a href="#">Fills</a>
+          <a href="#">Automations</a>
+          <div class="spacer"></div>
+          <span class="lbl">Net exposure <b class="num sec">$412,880</b> · Margin used <b class="num sec">18.4%</b></span>
+        </div>
+        <div class="panel-bd flush" style="overflow:auto">
+          <table class="tbl">
+            <thead><tr>
+              <th>Instrument</th><th>Side</th><th>Size</th><th>Entry</th><th>Mark</th>
+              <th>Unrealized</th><th>Return</th><th>Liq. price</th><th>Stop</th><th>Source</th>
+            </tr></thead>
+            <tbody id="positions"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- RIGHT: ticket -->
+    <div class="col single">
+      <section class="panel">
+        <div class="panel-hd">
+          <span class="panel-title">Order ticket</span>
+          <div class="spacer"></div>
+          <span class="badge neutral">BTC‑USD</span>
+        </div>
+        <div class="panel-bd ticket" style="overflow:hidden">
+          <div class="seg bs" style="width:100%">
+            <button class="on buy" style="flex:1">Buy / Long</button>
+            <button style="flex:1">Sell / Short</button>
+          </div>
+          <div class="seg" style="width:100%">
+            <button style="flex:1">Market</button>
+            <button class="on" style="flex:1">Limit</button>
+            <button style="flex:1">Stop</button>
+            <button style="flex:1">Bracket</button>
+          </div>
+
+          <div class="field">
+            <span class="lbl">Limit price</span>
+            <div class="input focus"><span class="val">64,250.00</span><span class="unit">USD</span></div>
+          </div>
+
+          <div class="field">
+            <span class="lbl">Size</span>
+            <div class="input"><span class="val">1.250</span><span class="unit">BTC</span></div>
+            <div class="pctrow">
+              <button>10%</button><button>25%</button><button class="on">50%</button><button>75%</button><button>Max</button>
+            </div>
+          </div>
+
+          <div class="row" style="gap:var(--s-3)">
+            <div class="field" style="flex:1">
+              <span class="lbl">Time in force</span>
+              <div class="input"><span class="val" style="font-size:var(--t-13)">GTC</span></div>
+            </div>
+            <div class="field" style="flex:1">
+              <span class="lbl">Leverage</span>
+              <div class="input"><span class="val" style="font-size:var(--t-13)">3×</span></div>
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="kv"><span class="k">Order value</span><span class="v">$80,312.50</span></div>
+            <div class="kv"><span class="k">Est. fee (maker 0.02%)</span><span class="v">$16.06</span></div>
+            <div class="kv"><span class="k">Margin required</span><span class="v">$26,770.83</span></div>
+            <div class="kv"><span class="k">Est. liquidation</span><span class="v neg">$43,918.20</span></div>
+            <hr class="hr">
+            <div class="kv"><span class="k">Buying power after</span><span class="v">$883,645.29</span></div>
+          </div>
+
+          <div class="summary" style="background:var(--bg-pos-subtle);border-color:var(--line-pos)">
+            <div class="between" style="margin-bottom:6px">
+              <span class="lbl" style="color:var(--fg-pos)">Attached bracket</span>
+              <span class="badge pos">R : R  2.4</span>
+            </div>
+            <div class="kv"><span class="k">Take profit</span><span class="v">68,400.00 &nbsp;<b class="pos">+5.2%</b></span></div>
+            <div class="kv"><span class="k">Stop loss</span><span class="v">62,950.00 &nbsp;<b class="neg">−2.0%</b></span></div>
+            <div class="kv"><span class="k">Risk on this trade</span><span class="v">$1,625.00 · 0.18% of equity</span></div>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn buy block">Buy 1.250 BTC · $80,312.50</button>
+          <div class="row" style="justify-content:center;gap:6px">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="color:var(--fg-warn)"><path d="M8 2.5 14.5 13.5h-13L8 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.6v3.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".8" fill="currentColor"/></svg>
+            <span class="lbl">Paper account — no live funds at risk</span>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- deterministic pseudo-random ---------- */
+let _s = 20260912;
+const rnd = () => ((_s = (_s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+
+/* ---------- watchlist ---------- */
+const wl = {
+  'wl-crypto': [['BTC','Bitcoin','64,318.40','+1.91',1],['ETH','Ethereum','3,142.77','+2.44',0],
+                ['SOL','Solana','168.02','-0.86',0],['AVAX','Avalanche','41.19','+3.02',0]],
+  'wl-eq': [['NVDA','NVIDIA','124.86','+2.18',0],['AAPL','Apple','229.41','-0.42',0],['SPY','S&P 500 ETF','571.13','+0.31',0]],
+  'wl-fx': [['EURUSD','Euro / Dollar','1.1042','-0.12',0],['USDJPY','Dollar / Yen','146.28','+0.34',0]],
+};
+for (const [id, rows] of Object.entries(wl)) {
+  document.getElementById(id).innerHTML = rows.map(([t,n,p,c,on]) => `
+    <div class="wl-row ${on?'on':''}">
+      <div><div class="tick" style="font-weight:var(--w-semibold);font-size:var(--t-13)">${t}</div>
+      <div class="name" style="font-size:var(--t-11);color:var(--fg-tertiary)">${n}</div></div>
+      <div class="r"><div style="font-size:var(--t-12);font-weight:var(--w-medium)">${p}</div>
+      <div style="font-size:var(--t-11)" class="${c.startsWith('-')?'neg':'pos'}">${c}%</div></div>
+    </div>`).join('');
+}
+
+/* ---------- positions ---------- */
+const pos = [
+  ['BTC','Bitcoin perp','Long','1.250','63,400.00','64,318.40','+1,722.50','+2.19','43,918.20','62,950.00','68,400.00','Manual','1'],
+  ['NVDA','NVIDIA','Long','400','118.20','124.86','+2,664.00','+5.63','—','112.00','138.00','EMA Crossover','5'],
+  ['EURUSD','Euro / Dollar','Short','250,000','1.1088','1.1042','+1,150.00','+0.41','1.1402','1.1120','1.0960','Mean Revert','3'],
+  ['SOL','Solana','Long','900','169.48','168.02','-1,314.00','-0.86','121.40','160.00','198.00','AI Forecast','6'],
+];
+document.getElementById('positions').innerHTML = pos.map(p => {
+  const up = !p[6].startsWith('-');
+  return `<tr>
+    <td><div class="sym"><span class="swatch" style="background:var(--chart-${p[12]})"></span>
+      <div><div class="tick">${p[0]}</div><div class="name">${p[1]}</div></div></div></td>
+    <td><span class="badge ${p[2]==='Long'?'pos':'neg'}">${p[2]}</span></td>
+    <td class="n">${p[3]}</td><td class="n">${p[4]}</td><td class="n">${p[5]}</td>
+    <td class="n ${up?'pos':'neg'}" style="font-weight:var(--w-semibold)">${p[6]}</td>
+    <td class="n ${up?'pos':'neg'}">${p[7]}%</td>
+    <td class="n mut">${p[8]}</td><td class="n">${p[9]}</td>
+    <td><span class="badge ${p[11]==='Manual'?'neutral':'accent'}">${p[11]}</span></td>
+  </tr>`;
+}).join('');
+
+/* ---------- order book ---------- */
+function book(el, side, start, step) {
+  let rows = '', tot = 0;
+  for (let i = 0; i < 6; i++) {
+    const px = start + (side === 'ask' ? 1 : -1) * step * (i + 1);
+    const sz = 0.4 + rnd() * 4.6; tot += sz;
+    rows += `<div class="r ${side==='ask'?'ask':'bid'}"><i style="width:${Math.min(96, tot*7.4)}%"></i>
+      <span>${px.toFixed(2)}</span><span>${sz.toFixed(3)}</span><span>${tot.toFixed(2)}</span></div>`;
+  }
+  document.getElementById(el).innerHTML = side === 'ask' ? rows.split('</div>').reverse().join('</div>') : rows;
+}
+// build asks top-down (highest first)
+(function(){
+  let rows = [], tot = 0;
+  for (let i = 5; i >= 0; i--) { const px = 64318.8 + 0.9*(i+1); const sz = 0.4+rnd()*4.6; rows.push([px,sz]); }
+  let t=0; const out = rows.map(([px,sz],i)=>{ t+=sz; return [px,sz,t]; });
+  document.getElementById('asks').innerHTML = out.map(([px,sz,tt])=>
+    `<div class="r ask"><i style="width:${Math.min(94, tt*3.2)}%"></i><span>${px.toFixed(2)}</span><span>${sz.toFixed(3)}</span><span>${tt.toFixed(2)}</span></div>`).reverse().join('');
+})();
+book('bids','bid',64317.9,0.9);
+
+/* ---------- candlestick chart ---------- */
+(function(){
+  const svg = document.getElementById('chart');
+  const W = svg.clientWidth || 900, H = svg.clientHeight || 520;
+  const padR = 74, padL = 10, padT = 14, padB = 26;
+  const volH = Math.round(H * 0.20);
+  const priceH = H - padT - padB - volH - 10;
+
+  const N = 96; let p = 61200; const data = [];
+  for (let i = 0; i < N; i++) {
+    const drift = 34 + Math.sin(i/9)*70;
+    const o = p, c = o + drift*(rnd()*2-0.72), hi = Math.max(o,c)+rnd()*230, lo = Math.min(o,c)-rnd()*230;
+    data.push({o,c,h:hi,l:lo,v:0.3+rnd()}); p = c;
+  }
+  // normalise last close to 64318.4
+  const k = 64318.4 / data[N-1].c;
+  data.forEach(d => { d.o*=k; d.c*=k; d.h*=k; d.l*=k; });
+
+  const lo = Math.min(...data.map(d=>d.l)), hi = Math.max(...data.map(d=>d.h));
+  const pad = (hi-lo)*0.06;
+  const y = v => padT + priceH - ((v-(lo-pad))/((hi+pad)-(lo-pad)))*priceH;
+  const cw = (W - padL - padR) / N;
+  const x = i => padL + i*cw + cw/2;
+
+  const ema = (per) => { const a = 2/(per+1); let e = data[0].c; return data.map(d => (e = d.c*a + e*(1-a))); };
+  const e21 = ema(21), e55 = ema(55);
+
+  let g = '';
+  // grid + y labels
+  const ticks = 6;
+  for (let i = 0; i <= ticks; i++) {
+    const vv = (lo-pad) + ((hi+pad)-(lo-pad))*i/ticks, yy = y(vv);
+    g += `<line x1="${padL}" x2="${W-padR}" y1="${yy}" y2="${yy}" stroke="var(--chart-grid)" stroke-width="1"/>`;
+    g += `<text x="${W-padR+8}" y="${yy+3.5}" fill="var(--chart-axis)" font-size="10.5" font-family="var(--font-numeric)" style="font-variant-numeric:tabular-nums">${vv.toLocaleString('en-US',{maximumFractionDigits:0})}</text>`;
+  }
+  for (let i = 0; i < N; i += 12) {
+    g += `<line x1="${x(i)}" x2="${x(i)}" y1="${padT}" y2="${padT+priceH}" stroke="var(--chart-grid)" stroke-width="1"/>`;
+    g += `<text x="${x(i)}" y="${H-8}" fill="var(--chart-axis)" font-size="10.5" text-anchor="middle" font-family="var(--font-numeric)">${String((6+i)%24).padStart(2,'0')}:00</text>`;
+  }
+
+  // volume
+  g += `<line x1="${padL}" x2="${W-padR}" y1="${padT+priceH+6}" y2="${padT+priceH+6}" stroke="var(--chart-grid-major)" stroke-width="1"/>`;
+  const vmax = Math.max(...data.map(d=>d.v));
+  const vy0 = padT + priceH + 10 + volH;
+  data.forEach((d,i) => {
+    const h = (d.v/vmax)*volH;
+    g += `<rect x="${x(i)-cw*0.32}" y="${vy0-h}" width="${cw*0.64}" height="${h}" rx="1" fill="var(--chart-volume)"/>`;
+  });
+
+  // candles
+  data.forEach((d,i) => {
+    const up = d.c >= d.o;
+    const col = up ? 'var(--chart-up)' : 'var(--chart-down)';
+    g += `<line x1="${x(i)}" x2="${x(i)}" y1="${y(d.h)}" y2="${y(d.l)}" stroke="${col}" stroke-width="1.15"/>`;
+    const yy = y(Math.max(d.o,d.c)), hh = Math.max(1.2, Math.abs(y(d.o)-y(d.c)));
+    g += `<rect x="${x(i)-cw*0.31}" y="${yy}" width="${cw*0.62}" height="${hh}" rx="0.8" fill="${col}"/>`;
+  });
+
+  // EMAs
+  const line = (arr,col,w) => `<path d="${arr.map((v,i)=>`${i?'L':'M'}${x(i)} ${y(v)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linejoin="round" opacity=".9"/>`;
+  g += line(e55, 'var(--chart-ma-slow)', 1.6);
+  g += line(e21, 'var(--chart-ma-fast)', 1.6);
+
+  // last price line + tag
+  const ly = y(64318.4);
+  g += `<line x1="${padL}" x2="${W-padR}" y1="${ly}" y2="${ly}" stroke="var(--chart-last)" stroke-width="1" stroke-dasharray="3 3" opacity=".85"/>`;
+  g += `<rect x="${W-padR+2}" y="${ly-9}" width="66" height="18" rx="3" fill="var(--chart-tag-bg)"/>`;
+  g += `<text x="${W-padR+8}" y="${ly+3.8}" fill="var(--chart-tag-fg)" font-size="10.5" font-weight="600" font-family="var(--font-numeric)">64,318.40</text>`;
+
+  // entry + stop annotations
+  const ey = y(63400), sy = y(62950);
+  g += `<line x1="${padL}" x2="${W-padR}" y1="${ey}" y2="${ey}" stroke="var(--chart-ma-fast)" stroke-width="1" stroke-dasharray="5 4" opacity=".75"/>`;
+  g += `<text x="${padL+8}" y="${ey-6}" fill="var(--chart-ma-fast)" font-size="10" font-weight="600">ENTRY 63,400.00</text>`;
+  g += `<line x1="${padL}" x2="${W-padR}" y1="${sy}" y2="${sy}" stroke="var(--chart-down)" stroke-width="1" stroke-dasharray="5 4" opacity=".7"/>`;
+  g += `<text x="${padL+8}" y="${sy-6}" fill="var(--chart-down-line)" font-size="10" font-weight="600">STOP 62,950.00</text>`;
+
+  svg.innerHTML = g;
+})();
+</script>
+</body>
+</html>

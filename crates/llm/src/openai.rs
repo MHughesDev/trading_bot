@@ -10,7 +10,9 @@
 use serde_json::{json, Map, Value};
 
 use crate::error::{classify_status, truncate, LlmError};
-use crate::types::{ChatRequest, ChatResponse, Message, ModelInfo, StopReason, ToolCall, Usage};
+use crate::types::{
+    ChatRequest, ChatResponse, Message, ModelInfo, StopReason, ToolCall, ToolChoice, Usage,
+};
 
 fn build_messages(req: &ChatRequest) -> Vec<Value> {
     let mut out = Vec::new();
@@ -72,7 +74,20 @@ fn build_messages(req: &ChatRequest) -> Vec<Value> {
     out
 }
 
-fn build_body(req: &ChatRequest, use_completion_tokens: bool) -> Value {
+/// Which OpenAI-compatible server is on the far end.
+///
+/// The wire format is shared; two details are not, and both are load-bearing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Flavor {
+    /// api.openai.com and anything that matches it.
+    OpenAi,
+    /// vLLM's `--api-server`. Wants `max_tokens`, and — the reason it is the
+    /// production local backend — applies `guided_json` to the arguments while the
+    /// model's own tool template still runs.
+    Vllm,
+}
+
+fn build_body(req: &ChatRequest, use_completion_tokens: bool, flavor: Flavor) -> Value {
     let mut body = Map::new();
     body.insert("model".into(), json!(req.model));
     body.insert("messages".into(), Value::Array(build_messages(req)));
@@ -85,6 +100,34 @@ fn build_body(req: &ChatRequest, use_completion_tokens: bool) -> Value {
     if let Some(t) = req.temperature {
         body.insert("temperature".into(), json!(t));
     }
+
+    // Grammar-constrained decoding (harness guide §3.1). The two servers disagree
+    // about the field name, and the disagreement is not symmetric:
+    //
+    // - `response_format: {type: json_schema, …}` is the OpenAI spelling, which vLLM
+    //   also accepts on recent versions. Safe to send to both.
+    // - `guided_json` is vLLM's own, routed to its xgrammar/outlines backend. It goes
+    //   ONLY to vLLM, because api.openai.com rejects unrecognised body parameters
+    //   with a 400 rather than ignoring them — so "send both spellings and let the
+    //   server pick" fails every OpenAI request that asks for a schema.
+    if let Some(schema) = &req.schema {
+        body.insert(
+            "response_format".into(),
+            json!({
+                "type": "json_schema",
+                "json_schema": { "name": "tool_call", "schema": schema, "strict": true }
+            }),
+        );
+        if flavor == Flavor::Vllm {
+            body.insert("guided_json".into(), schema.clone());
+        }
+        // Unlike Ollama, these servers do not make the caller choose: the grammar and
+        // a tool list can both be present, and `tools` is left to the caller rather
+        // than dropped here. The harness's local path deliberately sends the grammar
+        // alone — under the two-step decode the grammar *is* the tool interface, and
+        // a tool list would be a second, weaker statement of the same thing.
+    }
+
     if !req.tools.is_empty() {
         let tools: Vec<Value> = req
             .tools
@@ -101,6 +144,19 @@ fn build_body(req: &ChatRequest, use_completion_tokens: bool) -> Value {
             })
             .collect();
         body.insert("tools".into(), Value::Array(tools));
+        if let Some(choice) = &req.tool_choice {
+            body.insert(
+                "tool_choice".into(),
+                match choice {
+                    ToolChoice::Auto => json!("auto"),
+                    ToolChoice::Required => json!("required"),
+                    ToolChoice::None => json!("none"),
+                    ToolChoice::Tool(name) => {
+                        json!({"type": "function", "function": {"name": name}})
+                    }
+                },
+            );
+        }
     }
     Value::Object(body)
 }
@@ -222,13 +278,17 @@ pub async fn chat(
     base_url: &str,
     api_key: &str,
     req: &ChatRequest,
+    flavor: Flavor,
 ) -> Result<ChatResponse, LlmError> {
-    let mut body = build_body(req, true);
+    // vLLM takes `max_tokens`. Asking it for `max_completion_tokens` first would
+    // spend a round trip to learn something already known.
+    let completion_tokens = flavor == Flavor::OpenAi;
+    let mut body = build_body(req, completion_tokens, flavor);
     let (mut status, mut retry_after, mut text) = post_chat(http, base_url, api_key, &body).await?;
 
     // Older models reject max_completion_tokens; retry once with max_tokens.
     if status == 400 && text.contains("max_completion_tokens") {
-        body = build_body(req, false);
+        body = build_body(req, false, flavor);
         (status, retry_after, text) = post_chat(http, base_url, api_key, &body).await?;
     }
 
@@ -337,12 +397,16 @@ mod tests {
             }],
             max_tokens: 100,
             temperature: Some(0.2),
+            schema: None,
+            num_ctx: None,
+            keep_alive: None,
+            tool_choice: None,
         }
     }
 
     #[test]
     fn wire_shape_matches_openai() {
-        let body = build_body(&req_with_tools(), true);
+        let body = build_body(&req_with_tools(), true, Flavor::OpenAi);
         assert_eq!(body["messages"][0]["role"], "system");
         assert_eq!(body["messages"][1]["role"], "user");
         // Assistant tool call arguments are stringified on the wire.
@@ -351,9 +415,63 @@ mod tests {
         assert_eq!(body["messages"][3]["tool_call_id"], "call_1");
         assert_eq!(body["tools"][0]["type"], "function");
         assert_eq!(body["max_completion_tokens"], 100);
-        assert!(build_body(&req_with_tools(), false)
+        assert!(build_body(&req_with_tools(), false, Flavor::OpenAi)
             .get("max_tokens")
             .is_some());
+    }
+
+    fn req_with_schema() -> ChatRequest {
+        let mut r = req_with_tools();
+        r.schema = Some(serde_json::json!({
+            "type": "object",
+            "properties": {"name": {"type": "string", "enum": ["a", "b"]}},
+            "required": ["name"],
+        }));
+        r
+    }
+
+    /// The production local backend gets vLLM's own spelling, which is the one that
+    /// actually reaches its xgrammar/outlines path.
+    #[test]
+    fn vllm_gets_guided_json_as_well_as_response_format() {
+        let body = build_body(&req_with_schema(), false, Flavor::Vllm);
+        assert_eq!(body["guided_json"]["properties"]["name"]["enum"][0], "a");
+        assert_eq!(body["response_format"]["type"], "json_schema");
+    }
+
+    /// api.openai.com rejects unrecognised body parameters with a 400 rather than
+    /// ignoring them, so "send both spellings and let the server pick" would fail
+    /// every OpenAI request that asks for a schema.
+    #[test]
+    fn openai_never_sees_vllms_private_parameter() {
+        let body = build_body(&req_with_schema(), true, Flavor::OpenAi);
+        assert!(
+            body.get("guided_json").is_none(),
+            "an unknown parameter is a 400 on OpenAI, not a no-op"
+        );
+        assert_eq!(body["response_format"]["type"], "json_schema");
+    }
+
+    /// Unlike Ollama, these servers do not make the caller choose between a grammar
+    /// and a tool list — so the adapter must not silently drop one.
+    #[test]
+    fn a_schema_does_not_suppress_the_tool_list_here() {
+        let body = build_body(&req_with_schema(), false, Flavor::Vllm);
+        assert!(body.get("tools").is_some());
+    }
+
+    #[test]
+    fn forcing_one_tool_is_expressed_on_the_wire() {
+        let mut r = req_with_tools();
+        r.tool_choice = Some(ToolChoice::Tool("lookup".into()));
+        let body = build_body(&r, true, Flavor::OpenAi);
+        assert_eq!(body["tool_choice"]["function"]["name"], "lookup");
+
+        r.tool_choice = Some(ToolChoice::Required);
+        assert_eq!(
+            build_body(&r, true, Flavor::OpenAi)["tool_choice"],
+            "required"
+        );
     }
 
     #[test]

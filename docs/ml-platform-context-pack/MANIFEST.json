@@ -1,0 +1,211 @@
+{
+  "name": "ml-platform-context-pack",
+  "version": "1.4",
+  "date": "2026-09-14",
+  "purpose": "Normative spec + invariants + backlog + DDL + research sources for modifying an existing quant-ML platform's data architecture and MLOps layer.",
+  "entrypoint": "README.md",
+  "agent_instructions": "CLAUDE.md",
+  "authority_order": [
+    "decisions/INVARIANTS.md",
+    "spec/SPEC.md",
+    "reference/*",
+    "agent judgment"
+  ],
+  "normative": [
+    "spec/SPEC.md",
+    "decisions/INVARIANTS.md",
+    "backlog/PHASE-2-5-PLAN.md"
+  ],
+  "evidentiary": [
+    "reference/"
+  ],
+  "build_blocking_tests": [
+    "AT-01",
+    "AT-03",
+    "AT-04",
+    "AT-05",
+    "AT-10",
+    "AT-13",
+    "AT-15",
+    "AT-19",
+    "AT-20",
+    "AT-23",
+    "AT-27",
+    "AT-29",
+    "AT-34",
+    "AT-36",
+    "AT-37",
+    "AT-39",
+    "AT-42",
+    "AT-44",
+    "AT-49",
+    "AT-62",
+    "AT-63",
+    "AT-65",
+    "AT-66"
+  ],
+  "irreversible_decisions": [
+    "Four timestamps at ingest; knowledge_time as a real column",
+    "Unadjusted prices + event-based adjustment factors; surrogate instrument IDs",
+    "One feature code path with consistency logging from day one",
+    "Propensity-logged, hash-chained trial ledger written before results"
+  ],
+  "do_first": "Set Iceberg history.expire.max-snapshot-age-ms >= 90d and min-snapshots-to-keep >= 50. Defaults are 5 days and 1.",
+  "files": [
+    {
+      "path": "CLAUDE.md",
+      "bytes": 6650,
+      "blake2b_16": "388b9350fa176f0e603d6e7c68b475f3"
+    },
+    {
+      "path": "GLOSSARY.md",
+      "bytes": 5395,
+      "blake2b_16": "9a8baaa961500b7805015722fc9c0e39"
+    },
+    {
+      "path": "README.md",
+      "bytes": 5181,
+      "blake2b_16": "9de89dd3c87612dcc3b592fcc9592d51"
+    },
+    {
+      "path": "backlog/ACCEPTANCE-TESTS.md",
+      "bytes": 14540,
+      "blake2b_16": "ac86d70d64d8cac00f2514c27b9abd5e"
+    },
+    {
+      "path": "backlog/IMPLEMENTATION-CHECKLIST.md",
+      "bytes": 28337,
+      "blake2b_16": "b74f79102bd269abfe95908d76a23960"
+    },
+    {
+      "path": "backlog/PHASE-2-5-PLAN.md",
+      "bytes": 34042,
+      "blake2b_16": "306d2cb9effb714160fca4199028cf49"
+    },
+    {
+      "path": "decisions/ADR-INDEX.md",
+      "bytes": 51447,
+      "blake2b_16": "031dc02157dc1a7d3d318dcb045749c7"
+    },
+    {
+      "path": "decisions/CHANGED-FROM-BRIEF.md",
+      "bytes": 10103,
+      "blake2b_16": "274de566b54eaf685cc1a953b1919cbb"
+    },
+    {
+      "path": "decisions/INVARIANTS.md",
+      "bytes": 6784,
+      "blake2b_16": "97ac918ac5a3100c415a46361680b703"
+    },
+    {
+      "path": "decisions/OPEN-QUESTIONS.md",
+      "bytes": 20625,
+      "blake2b_16": "3cdf3fdcfd5f284e64e6819ff038afeb"
+    },
+    {
+      "path": "decisions/PROGRESS.md",
+      "bytes": 17290,
+      "blake2b_16": "11da391cf34e4558236071503477856f"
+    },
+    {
+      "path": "decisions/SOURCE-MAP.md",
+      "bytes": 3130,
+      "blake2b_16": "697731eddf270511b8e6d597c7c8b411"
+    },
+    {
+      "path": "reference/00-research-brief.md",
+      "bytes": 58103,
+      "blake2b_16": "5815044d01a851cb05cc966733859b84"
+    },
+    {
+      "path": "reference/01-mlops-infra.md",
+      "bytes": 90299,
+      "blake2b_16": "b0c098a098b624318bd6eedd6f9ad0fd"
+    },
+    {
+      "path": "reference/02-hpo-search.md",
+      "bytes": 72965,
+      "blake2b_16": "3f1ab6f4d6d217e152ef78183d9c3328"
+    },
+    {
+      "path": "reference/03-financial-ml.md",
+      "bytes": 91010,
+      "blake2b_16": "e176455fbe1d7677252a9f630b7c6e40"
+    },
+    {
+      "path": "reference/04-agentic-ml.md",
+      "bytes": 52284,
+      "blake2b_16": "2f410d27293aed1709c5d9213a17fd5a"
+    },
+    {
+      "path": "reference/05-asset-embeddings.md",
+      "bytes": 97549,
+      "blake2b_16": "42c92a4b8c3d153117b71cc1dd42424f"
+    },
+    {
+      "path": "reference/06-experiment-data.md",
+      "bytes": 64639,
+      "blake2b_16": "d5cbda8d8e28d1d46ad7ff284634d044"
+    },
+    {
+      "path": "reference/07-finetuning-drift.md",
+      "bytes": 98471,
+      "blake2b_16": "f7bd2fa9696dfe72a61788e06cf00b7c"
+    },
+    {
+      "path": "reference/08-market-data-arch.md",
+      "bytes": 102288,
+      "blake2b_16": "9437ae4c7635a0aa9cdc94742310c5f0"
+    },
+    {
+      "path": "schemas/00_README.md",
+      "bytes": 1157,
+      "blake2b_16": "aaec65c321f765dbd20b67ca84348969"
+    },
+    {
+      "path": "schemas/01_identity.sql",
+      "bytes": 1921,
+      "blake2b_16": "78d95049009b91c00a8093f42e477c15"
+    },
+    {
+      "path": "schemas/02_market_data.sql",
+      "bytes": 7306,
+      "blake2b_16": "08a9b053a20f3545d4adce8e31146c78"
+    },
+    {
+      "path": "schemas/03_datasets.sql",
+      "bytes": 4336,
+      "blake2b_16": "1a23fda667ca82f6d277f191316a8fcd"
+    },
+    {
+      "path": "schemas/04_ledger.sql",
+      "bytes": 6220,
+      "blake2b_16": "58f12f99841deff8b1a525eed1ce1e56"
+    },
+    {
+      "path": "schemas/05_knowledge.sql",
+      "bytes": 5153,
+      "blake2b_16": "2eca3acb1bb7c100280c2c668194bfae"
+    },
+    {
+      "path": "schemas/06_tenancy.sql",
+      "bytes": 5453,
+      "blake2b_16": "7395de9e8bec42f4b6b66934d717ded4"
+    },
+    {
+      "path": "spec/SPEC.md",
+      "bytes": 94296,
+      "blake2b_16": "cdb7d110626d872bb51a7de30fe0c554"
+    },
+    {
+      "path": "decisions/HANDOFF.md",
+      "bytes": 10265,
+      "blake2b_16": "dadaf61b8f4392d0fa4d3314f4843524"
+    },
+    {
+      "path": "decisions/CURRENT-STATE.md",
+      "bytes": 24037,
+      "blake2b_16": "94cfd852c10004e217b7264d604432fc"
+    }
+  ]
+}

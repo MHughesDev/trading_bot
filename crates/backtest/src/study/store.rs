@@ -103,6 +103,7 @@ mod tests {
             vary: VarySpec::Params { grid: vec![] },
             metric: MetricKind::Sharpe,
             null_ref: None,
+            null: None,
             budget: StudyBudget::default(),
             question: "logged up front".into(),
             selection_rule: SelectionRule::None,

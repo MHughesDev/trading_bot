@@ -1,0 +1,94 @@
+/* =============================================================================
+   BASE — reset + element defaults only.
+   No colour literals. No component styles. Those live in app.css.
+   ============================================================================= */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html,
+body,
+#root { height: 100%; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--bg-canvas);
+  color: var(--fg-primary);
+  font-family: var(--font-ui);
+  font-size: var(--t-13);
+  line-height: var(--lh-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+/* terminal gets a faint instrument bloom behind everything */
+[data-theme="terminal"] body {
+  background-image:
+    radial-gradient(1200px 600px at 78% -12%, rgba(22, 196, 222, .055), transparent 62%),
+    radial-gradient(900px 500px at 8% 108%, rgba(141, 130, 241, .045), transparent 60%);
+  background-attachment: fixed;
+}
+
+h1, h2, h3, h4, h5, h6, p, figure { margin: 0; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+button { background: none; border: 0; padding: 0; cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+a { color: var(--fg-link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+svg { display: block; }
+img, video, canvas { max-width: 100%; }
+
+table { border-collapse: collapse; }
+
+hr { border: 0; height: 1px; background: var(--line-hairline); margin: 0; }
+
+::selection { background: var(--bg-selected); color: var(--fg-primary); }
+
+/* --- focus: always visible, never removed without a replacement ------------ */
+:focus { outline: none; }
+:focus-visible {
+  outline: var(--focus-w) solid var(--line-focus);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--r-xs);
+}
+
+/* --- scrollbars follow the theme ------------------------------------------- */
+* { scrollbar-width: thin; scrollbar-color: var(--line-default) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-default);
+  border-radius: var(--r-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--line-strong); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* --- theme transition: paint only, and only when the user asks for it ------ */
+html[data-theme-switching] * {
+  transition: background-color var(--dur-2) var(--ease-out),
+              border-color var(--dur-2) var(--ease-out),
+              color var(--dur-2) var(--ease-out) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

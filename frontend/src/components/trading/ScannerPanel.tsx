@@ -1,15 +1,27 @@
-// Scanner panel — instruments split into Triggered / Watching sections.
-// Condition evaluation runs client-side against incoming WS market.bars.1m frames.
+// Scanner panel — a discovery strategy run across a universe, live.
+//
+// Condition evaluation runs client-side against incoming WS market.bars.1m
+// frames: the browser holds a rolling 300-bar close buffer per instrument and
+// re-evaluates the strategy's signal conditions on every tick. That keeps the
+// scanner responsive without a round trip, at the cost of only supporting the
+// comparison grammar the saved v1.0 definition format uses.
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Radar, X } from 'lucide-react'
 import { strategiesApi } from '@/lib/api'
-import { WatchTile, type WatchTileData } from './WatchTile'
-import { cn } from '@/lib/utils'
-import { ChevronDown, ChevronRight } from 'lucide-react'
 import { wsBus, getWsClient } from '@/api/ws'
 import type { WsOutMessage } from '@/lib/types'
 import { calcEMA, calcRSI } from '@/utils/indicators'
+import { DASH, price as fmtPrice, signedPct } from '@/lib/format'
+import { Badge, Swatch } from '@/components/primitives/Badge'
+import { IconButton } from '@/components/primitives/Button'
+import { Select } from '@/components/primitives/Overlay'
+import { Segmented } from '@/components/primitives/Segmented'
+import { EmptyState } from '@/components/primitives/States'
+import { assetClassChartColor, inferAssetClass } from '@/lib/assetClass'
+import { useLiveQuotes } from './Watchlist'
+import { cn } from '@/lib/utils'
 
 // ── Strategy condition evaluator ──────────────────────────────────────────────
 
@@ -105,58 +117,16 @@ function checkTriggered(strat: ParsedStrategy, closes: number[]): boolean {
   return false
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Component ─────────────────────────────────────────────────────────────────
 
-interface ScannerPanelProps {
+export interface ScannerPanelProps {
   initialInstruments?: string[]
   initialStrategyId?: string
   initialTimeframe?: string
 }
 
-interface SectionHeaderProps {
-  label: string
-  count: number
-  open: boolean
-  onToggle: () => void
-  accent?: boolean
-}
-
-function SectionHeader({ label, count, open, onToggle, accent }: SectionHeaderProps) {
-  return (
-    <button
-      onClick={onToggle}
-      className={cn(
-        'w-full flex items-center gap-2 px-3 py-1.5 text-left select-none transition-colors',
-        'border-b border-border hover:bg-surface-2',
-      )}
-    >
-      {open
-        ? <ChevronDown className="h-3 w-3 shrink-0 text-text-dim" />
-        : <ChevronRight className="h-3 w-3 shrink-0 text-text-dim" />
-      }
-      <span
-        className={cn(
-          'text-[10px] font-semibold uppercase tracking-widest',
-          accent ? 'text-emerald-400' : 'text-text-dim',
-        )}
-      >
-        {label}
-      </span>
-      <span
-        className={cn(
-          'ml-auto text-[10px] font-mono tabular-nums rounded-full px-1.5 py-px',
-          accent && count > 0
-            ? 'bg-emerald-500/20 text-emerald-400'
-            : 'bg-surface-2 text-text-dim',
-        )}
-      >
-        {count}
-      </span>
-    </button>
-  )
-}
-
-// ── Main component ────────────────────────────────────────────────────────────
+/** The evaluator consumes 1m bars; coarser timeframes aggregate from them. */
+const AGG_WINDOWS: Record<string, number> = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240 }
 
 export function ScannerPanel({
   initialInstruments = [],
@@ -167,18 +137,14 @@ export function ScannerPanel({
 
   const [selectedStrategyId, setSelectedStrategyId] = useState<string>(initialStrategyId)
   const [timeframe, setTimeframe] = useState<string>(initialTimeframe)
-  const [tiles, setTiles] = useState<WatchTileData[]>(
-    initialInstruments.map((id) => ({ instrumentId: id })),
-  )
+  const [instruments, setInstruments] = useState<string[]>(initialInstruments)
   const [triggeredIds, setTriggeredIds] = useState<Set<string>>(new Set())
-  const [triggeredOpen, setTriggeredOpen] = useState(true)
-  const [watchingOpen, setWatchingOpen] = useState(true)
 
-  // Mutable refs shared between render cycles without causing re-renders
   const barBuffers = useRef<Map<string, number[]>>(new Map())
+  const tickCounters = useRef<Map<string, number>>(new Map())
   const parsedStrategy = useRef<ParsedStrategy | null>(null)
 
-  // ── Discovery strategy list ───────────────────────────────────────────────
+  const quotes = useLiveQuotes(instruments)
 
   const { data: discoveryStrategies = [] } = useQuery({
     queryKey: ['strategies', 'apply-list', 'discovery'],
@@ -190,8 +156,6 @@ export function ScannerPanel({
         ).filter((s) => s.strategy_kind === 'discovery'),
       ),
   })
-
-  // ── Fetch and parse strategy definition ──────────────────────────────────
 
   const { data: strategyDef } = useQuery({
     queryKey: ['strategy-def', selectedStrategyId],
@@ -211,26 +175,21 @@ export function ScannerPanel({
   })
 
   useEffect(() => {
-    if (strategyDef) {
-      parsedStrategy.current = parseDefinition(strategyDef)
-    } else {
-      parsedStrategy.current = null
-    }
+    parsedStrategy.current = strategyDef ? parseDefinition(strategyDef) : null
     barBuffers.current = new Map()
+    tickCounters.current = new Map()
     setTriggeredIds(new Set())
-  }, [strategyDef])
-
-  // ── WS subscription + live evaluation ────────────────────────────────────
+  }, [strategyDef, timeframe])
 
   useEffect(() => {
-    if (tiles.length === 0) return
-
-    const instruments = tiles.map((t) => t.instrumentId)
+    if (instruments.length === 0) return
     const client = getWsClient()
     client?.subscribe(
       evalPanelId,
       instruments.map((inst) => ({ lane: 'market.bars.1m', instrument: inst })),
     )
+
+    const agg = AGG_WINDOWS[timeframe] ?? 1
 
     const unsub = wsBus.on((msg: WsOutMessage) => {
       if (msg.type !== 'frame' || msg.lane !== 'market.bars.1m') return
@@ -238,11 +197,15 @@ export function ScannerPanel({
       if (!instruments.includes(instrument)) return
 
       const payload = msg.payload as Record<string, unknown> | null
-      if (!payload || typeof payload.close !== 'string') return
-      const close = parseFloat(payload.close)
+      const close = payload ? parseFloat(String(payload.close)) : NaN
       if (isNaN(close)) return
 
-      // Maintain rolling 300-bar close buffer per instrument
+      // Downsample the 1m lane to the selected timeframe so the evaluator sees
+      // the same bar cadence the strategy was designed against.
+      const n = (tickCounters.current.get(instrument) ?? 0) + 1
+      tickCounters.current.set(instrument, n)
+      if (agg > 1 && n % agg !== 0) return
+
       const buf = barBuffers.current.get(instrument) ?? []
       const newBuf = buf.length >= 300 ? [...buf.slice(1), close] : [...buf, close]
       barBuffers.current.set(instrument, newBuf)
@@ -255,7 +218,8 @@ export function ScannerPanel({
         const was = prev.has(instrument)
         if (triggered === was) return prev
         const next = new Set(prev)
-        triggered ? next.add(instrument) : next.delete(instrument)
+        if (triggered) next.add(instrument)
+        else next.delete(instrument)
         return next
       })
     })
@@ -264,9 +228,7 @@ export function ScannerPanel({
       unsub()
       client?.unsubscribe(evalPanelId)
     }
-  }, [tiles, evalPanelId])
-
-  // ── Handlers ──────────────────────────────────────────────────────────────
+  }, [instruments, evalPanelId, timeframe])
 
   const handleStrategyChange = useCallback((strategyId: string) => {
     setSelectedStrategyId(strategyId)
@@ -275,108 +237,162 @@ export function ScannerPanel({
   }, [])
 
   const handleRemove = useCallback((instrumentId: string) => {
-    setTiles((prev) => prev.filter((t) => t.instrumentId !== instrumentId))
-    setTriggeredIds((prev) => { const n = new Set(prev); n.delete(instrumentId); return n })
+    setInstruments((prev) => prev.filter((i) => i !== instrumentId))
+    setTriggeredIds((prev) => {
+      const n = new Set(prev)
+      n.delete(instrumentId)
+      return n
+    })
     barBuffers.current.delete(instrumentId)
   }, [])
 
-  const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
+  const triggered = useMemo(() => instruments.filter((i) => triggeredIds.has(i)), [instruments, triggeredIds])
+  const watching = useMemo(() => instruments.filter((i) => !triggeredIds.has(i)), [instruments, triggeredIds])
 
-  const triggered = tiles.filter((t) => triggeredIds.has(t.instrumentId))
-  const watching  = tiles.filter((t) => !triggeredIds.has(t.instrumentId))
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  const strategyOptions = discoveryStrategies.map((s) => ({ value: s.id, label: s.strategy_id, text: s.strategy_id }))
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Controls */}
-      <div className="shrink-0 px-3 py-2 border-b border-border flex flex-col gap-1.5">
-        <div className="relative">
-          <select
-            value={selectedStrategyId}
-            onChange={(e) => handleStrategyChange(e.target.value)}
-            className={cn(
-              'w-full appearance-none rounded-lg px-3 py-1.5 pr-8 text-sm',
-              'bg-surface-2 border border-border text-text',
-              'focus:outline-none focus:ring-1 focus:ring-accent',
-            )}
-          >
-            <option value="">Select discovery strategy…</option>
-            {discoveryStrategies.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.strategy_id}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-dim" />
-        </div>
-        {/* Timeframe pills */}
-        <div className="flex gap-1">
-          {TIMEFRAMES.map((tf) => (
-            <button
-              key={tf}
-              onClick={() => setTimeframe(tf)}
-              className={cn(
-                'flex-1 rounded px-1 py-0.5 text-[10px] font-mono font-medium transition-colors',
-                tf === timeframe
-                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
-                  : 'text-text-dim hover:text-text border border-transparent hover:border-border',
+    <>
+      <div
+        style={{
+          flex: 'none',
+          padding: 'var(--s-3)',
+          borderBottom: '1px solid var(--line-hairline)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--s-2)',
+        }}
+      >
+        <Select
+          ariaLabel="Discovery strategy"
+          small
+          value={selectedStrategyId || null}
+          onChange={handleStrategyChange}
+          placeholder="Choose a discovery strategy…"
+          options={strategyOptions}
+        />
+        <Segmented
+          ariaLabel="Scan timeframe"
+          wide
+          value={timeframe}
+          onChange={setTimeframe}
+          options={Object.keys(AGG_WINDOWS).map((tf) => ({ value: tf, label: tf }))}
+        />
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+        {instruments.length === 0 ? (
+          <EmptyState
+            icon={<Radar size={20} aria-hidden />}
+            message="No universe to scan"
+            detail="Add markets to this scanner and pick a discovery strategy; instruments move to Triggered the moment its conditions hold."
+          />
+        ) : !selectedStrategyId ? (
+          <EmptyState
+            icon={<Radar size={20} aria-hidden />}
+            message="Pick a discovery strategy"
+            detail={`${instruments.length} markets are streaming. Choose a strategy above to start evaluating them.`}
+          />
+        ) : (
+          <>
+            <ScannerSection label="Triggered" count={triggered.length} accent>
+              {triggered.length === 0 ? (
+                <div className="mut" style={{ padding: 'var(--s-3) var(--s-4)', fontSize: 'var(--t-12)' }}>
+                  Nothing has met the conditions yet.
+                </div>
+              ) : (
+                triggered.map((i) => (
+                  <ScannerRow key={i} symbol={i} quote={quotes[i]} triggered onRemove={handleRemove} />
+                ))
               )}
-            >
-              {tf}
-            </button>
-          ))}
-        </div>
-      </div>
+            </ScannerSection>
 
-      {/* Sections */}
-      <div className="flex-1 overflow-y-auto">
-
-        {/* ── Triggered ─────────────────────────────────────────────── */}
-        <SectionHeader
-          label="Triggered"
-          count={triggered.length}
-          open={triggeredOpen}
-          onToggle={() => setTriggeredOpen((v) => !v)}
-          accent
-        />
-        {triggeredOpen && (
-          <div className="p-2 space-y-1.5">
-            {triggered.length === 0 ? (
-              <p className="text-[11px] text-text-dim text-center py-3">
-                {selectedStrategyId
-                  ? 'No signals yet — waiting for strategy to fire'
-                  : 'Select a strategy above'}
-              </p>
-            ) : (
-              triggered.map((tile) => (
-                <WatchTile key={tile.instrumentId} data={tile} onRemove={handleRemove} />
-              ))
-            )}
-          </div>
-        )}
-
-        {/* ── Watching ──────────────────────────────────────────────── */}
-        <SectionHeader
-          label="Watching"
-          count={watching.length}
-          open={watchingOpen}
-          onToggle={() => setWatchingOpen((v) => !v)}
-        />
-        {watchingOpen && (
-          <div className="p-2 space-y-1.5">
-            {watching.length === 0 ? (
-              <p className="text-[11px] text-text-dim text-center py-3">
-                No instruments — add a scanner to watch
-              </p>
-            ) : (
-              watching.map((tile) => (
-                <WatchTile key={tile.instrumentId} data={tile} onRemove={handleRemove} />
-              ))
-            )}
-          </div>
+            <ScannerSection label="Watching" count={watching.length}>
+              {watching.map((i) => (
+                <ScannerRow key={i} symbol={i} quote={quotes[i]} onRemove={handleRemove} />
+              ))}
+            </ScannerSection>
+          </>
         )}
       </div>
+    </>
+  )
+}
+
+function ScannerSection({
+  label,
+  count,
+  accent,
+  children,
+}: {
+  label: string
+  count: number
+  accent?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(true)
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="row"
+        style={{
+          width: '100%',
+          padding: '6px var(--s-3)',
+          borderBottom: '1px solid var(--line-hairline)',
+          background: 'transparent',
+          textAlign: 'left',
+        }}
+      >
+        <span className={cn('lbl', accent && count > 0 && 'pos')}>{label}</span>
+        <span className="spacer" />
+        <Badge tone={accent && count > 0 ? 'pos' : 'neutral'}>{count}</Badge>
+      </button>
+      {open && children}
     </div>
   )
 }
+
+function ScannerRow({
+  symbol,
+  quote,
+  triggered,
+  onRemove,
+}: {
+  symbol: string
+  quote?: { last: number | null; changePct: number | null }
+  triggered?: boolean
+  onRemove: (s: string) => void
+}) {
+  return (
+    <div
+      className="row"
+      style={{
+        padding: '7px var(--s-3)',
+        borderBottom: '1px solid var(--line-hairline)',
+        gap: 'var(--s-2)',
+        background: triggered ? 'var(--bg-pos-subtle)' : undefined,
+      }}
+    >
+      <Swatch color={assetClassChartColor(inferAssetClass(symbol))} />
+      <span style={{ fontSize: 'var(--t-12)', fontWeight: 'var(--w-semibold)' }} className="truncate-1">
+        {symbol}
+      </span>
+      <span className="spacer" />
+      <span className="num" style={{ fontSize: 'var(--t-12)' }}>
+        {quote?.last != null ? fmtPrice(symbol, quote.last) : DASH}
+      </span>
+      <span
+        className={cn('num', quote?.changePct == null ? 'mut' : quote.changePct >= 0 ? 'pos' : 'neg')}
+        style={{ fontSize: 'var(--t-11)', width: 58, textAlign: 'right' }}
+      >
+        {quote?.changePct == null ? DASH : signedPct(quote.changePct)}
+      </span>
+      <IconButton label={`Remove ${symbol}`} bare onClick={() => onRemove(symbol)}>
+        <X size={12} aria-hidden />
+      </IconButton>
+    </div>
+  )
+}
+

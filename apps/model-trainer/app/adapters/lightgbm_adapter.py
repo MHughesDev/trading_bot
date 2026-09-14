@@ -27,7 +27,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
     else:
         params.update(objective="regression", metric=["l2", "l1"])
 
-    dtrain = lgb.Dataset(p.X_tr, label=p.y_tr)
+    dtrain = lgb.Dataset(p.X_tr, label=p.y_tr, weight=p.w_tr)  # weighted by label uniqueness (SPEC 3.4)
     valid_sets = [dtrain]
     valid_names = ["train"]
     has_val = len(p.X_val) > 0

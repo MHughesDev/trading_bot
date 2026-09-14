@@ -56,6 +56,8 @@ pub struct ModelManager {
     sidecar: Arc<crate::sidecar::SidecarClient>,
     /// Dataset materialization manager.
     datasets: Arc<crate::datasets::DatasetManager>,
+    /// Training and evaluation are compute; INV-16 applies to them as to backtests.
+    ledger: Arc<ledger::pg::PgTrialLedger>,
 }
 
 impl ModelManager {
@@ -65,7 +67,9 @@ impl ModelManager {
         datasets: Arc<crate::datasets::DatasetManager>,
     ) -> Arc<Self> {
         let (progress_tx, _) = tokio::sync::broadcast::channel(256);
+        let ledger = Arc::new(ledger::pg::PgTrialLedger::new(pg.clone()));
         Arc::new(Self {
+            ledger,
             pg,
             jobs: RwLock::new(HashMap::new()),
             run_permits: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JOBS)),
@@ -357,15 +361,124 @@ impl ModelManager {
         .execute(&self.pg)
         .await;
 
+        // Resolve the definition and the dataset spec before anything is
+        // dispatched: the trial must name the exact data it will read (INV-12),
+        // and a plan that cannot be built dispatches nothing at all.
+        let definition = self.load_definition(model_id, &hp).await?;
+        let lookback_days = req.data.as_ref().map_or(30, |d| d.lookback_days);
+        let window_end = Utc::now();
+        let window_start = window_end - chrono::Duration::days(i64::from(lookback_days));
+        let artifacts_prefix =
+            std::env::var("ARTIFACT_STORE_PATH").unwrap_or_else(|_| "./artifacts".to_string());
+        let plan = self
+            .datasets
+            .plan(
+                &user_id.to_string(),
+                dataset_request(
+                    &definition,
+                    req.data.as_ref(),
+                    (window_start, window_end),
+                    &artifacts_prefix,
+                )?,
+            )
+            .await?;
+
+        let subject = training_subject(
+            "train",
+            model_id,
+            &hp,
+            &serde_json::to_value(&req.data).unwrap_or_default(),
+            &plan,
+        );
+        let mut ticket = self.register_legacy(user_id, &subject).await?;
+
         self.jobs.write().await.insert(run_id, Arc::clone(&job));
 
         let manager = Arc::clone(self);
         let mid = model_id.to_string();
-        let data = req.data;
         let version_note = req.version_note;
-        tokio::spawn(async move { manager.drive_train(job, mid, data, hp, version_note).await });
+        tokio::spawn(async move {
+            if let Err(e) = manager.ledger.transition_async(&mut ticket, ledger::TrialEvent::to(ledger::TrialState::Running)).await {
+                tracing::warn!(error = %e, "could not mark training trial running");
+            }
+            manager.drive_train(Arc::clone(&job), mid, definition, plan, version_note).await;
+            manager.settle_trial(ticket, &job).await;
+        });
 
         Ok(run_id)
+    }
+
+    /// Load a model definition and apply per-run hyperparameter overrides.
+    /// Object keys are shallow-merged (override wins); a non-object override
+    /// replaces the block wholesale.
+    async fn load_definition(
+        &self,
+        model_id: &str,
+        hyperparam_overrides: &serde_json::Value,
+    ) -> anyhow::Result<domain::model_def::ModelDefinition> {
+        let row: Option<(serde_json::Value,)> =
+            sqlx::query_as("SELECT definition_json FROM ai_models WHERE model_id = $1")
+                .bind(model_id)
+                .fetch_optional(&self.pg)
+                .await?;
+        let (definition_json,) = row.ok_or_else(|| anyhow::anyhow!("model definition not found"))?;
+        let mut definition: domain::model_def::ModelDefinition =
+            serde_json::from_value(definition_json)
+                .map_err(|e| anyhow::anyhow!("definition parse error: {e}"))?;
+
+        if let serde_json::Value::Object(over) = hyperparam_overrides {
+            if !over.is_empty() {
+                let mut merged = definition
+                    .hyperparameters
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+                for (k, v) in over {
+                    merged.insert(k.clone(), v.clone());
+                }
+                definition.hyperparameters = serde_json::Value::Object(merged);
+            }
+        } else if !hyperparam_overrides.is_null() {
+            definition.hyperparameters = hyperparam_overrides.clone();
+        }
+        Ok(definition)
+    }
+
+    /// Register a training/evaluation dispatch before any compute runs.
+    ///
+    /// These entry points predate pre-registration: no declared `delta_practical`,
+    /// no policy to take a propensity from. They register under the legacy marker —
+    /// counted in N_eff, excluded from off-policy estimators — until they are moved
+    /// behind campaigns (OQ-08, ADR-P0-10). A refused registration dispatches nothing.
+    async fn register_legacy(&self, user_id: Uuid, subject: &ledger::TrialSubject) -> anyhow::Result<ledger::TrialTicket> {
+        let ctx = ledger::DispatchContext::legacy(user_id.to_string(), ledger::ActorKind::Human, user_id.to_string());
+        self.ledger
+            .register_async(&ledger::Registration::unlogged(&ctx, subject))
+            .await
+            .map_err(|e| anyhow::anyhow!("trial ledger refused this run: {e}"))
+    }
+
+    /// Settle a training/evaluation trial from the job's final status. Every ending
+    /// writes a terminal event with censoring.
+    async fn settle_trial(&self, ticket: ledger::TrialTicket, job: &Job) {
+        let snap = job.snapshot();
+        let terminal = job.state.read().expect("job state lock poisoned").terminal;
+        let event = match snap.status {
+            RunStatus::Succeeded => ledger::TrialEvent::completed(snap.run_id.to_string(), None),
+            RunStatus::Cancelled => ledger::TrialEvent::failed(ledger::TerminalReason::Cancelled, "cancelled"),
+            RunStatus::Failed | RunStatus::Queued | RunStatus::Running => {
+                let msg = snap.error.clone().unwrap_or_else(|| format!("run ended in {:?}", snap.status));
+                // The reason travels with the failure (ADR-P2-30). A run still
+                // in `Queued`/`Running` when its driver returned never reached a
+                // failing path at all, so `dependency_failure` here is a
+                // statement about the process, not an inference about the work.
+                let reason = terminal.unwrap_or(ledger::TerminalReason::DependencyFailure);
+                ledger::TrialEvent::failed(reason, msg)
+            }
+        };
+        if let Err(e) = self.ledger.settle_async(ticket, event).await {
+            tracing::error!(error = %e, run_id = %snap.run_id, "failed to settle training trial");
+        }
     }
 
     pub async fn list_runs(
@@ -782,11 +895,41 @@ impl ModelManager {
         .execute(&self.pg)
         .await;
 
+        // Same ordering rule as training: the evaluation dataset is resolved and
+        // hashed before the trial is registered (INV-12).
+        let definition = self.load_definition(model_id, &serde_json::Value::Null).await?;
+        let window_end = Utc::now() - chrono::Duration::days(1);
+        let window_start = window_end - chrono::Duration::days(29);
+        let artifacts_prefix =
+            std::env::var("ARTIFACT_STORE_PATH").unwrap_or_else(|_| "./artifacts".to_string());
+        let plan = self
+            .datasets
+            .plan(
+                &user_id.to_string(),
+                dataset_request(&definition, None, (window_start, window_end), &artifacts_prefix)?,
+            )
+            .await?;
+
+        let subject = training_subject(
+            "evaluate",
+            model_id,
+            &serde_json::json!({ "version": version }),
+            &serde_json::Value::Null,
+            &plan,
+        );
+        let mut ticket = self.register_legacy(user_id, &subject).await?;
+
         self.jobs.write().await.insert(eval_id, Arc::clone(&job));
 
         let manager = Arc::clone(self);
         let mid = model_id.to_string();
-        tokio::spawn(async move { manager.drive_eval(job, mid, version).await });
+        tokio::spawn(async move {
+            if let Err(e) = manager.ledger.transition_async(&mut ticket, ledger::TrialEvent::to(ledger::TrialState::Running)).await {
+                tracing::warn!(error = %e, "could not mark evaluation trial running");
+            }
+            manager.drive_eval(Arc::clone(&job), mid, version, plan).await;
+            manager.settle_trial(ticket, &job).await;
+        });
 
         Ok(eval_id)
     }
@@ -1236,8 +1379,8 @@ impl ModelManager {
         self: &Arc<Self>,
         job: Arc<Job>,
         model_id: String,
-        data: Option<crate::types::TrainDataSelection>,
-        hyperparam_overrides: serde_json::Value,
+        definition: domain::model_def::ModelDefinition,
+        plan: crate::datasets::DatasetPlan,
         version_note: Option<String>,
     ) {
         let Ok(_permit) = self.run_permits.clone().acquire_owned().await else {
@@ -1249,110 +1392,18 @@ impl ModelManager {
             return;
         }
 
-        let pg = self.pg.clone();
+        let artifacts_prefix = plan.request().output_prefix.clone();
 
-        // 1. Load model definition
-        let model_row: Option<(serde_json::Value,)> =
-            sqlx::query_as("SELECT definition_json FROM ai_models WHERE model_id = $1")
-                .bind(&model_id)
-                .fetch_optional(&pg)
-                .await
-                .ok()
-                .flatten();
-
-        let Some((definition_json,)) = model_row else {
-            job.fail("model definition not found");
-            self.broadcast_progress(&job.snapshot());
-            self.persist_run(&job).await;
-            return;
-        };
-
-        let mut definition: domain::model_def::ModelDefinition =
-            match serde_json::from_value(definition_json) {
-                Ok(d) => d,
-                Err(e) => {
-                    job.fail(format!("definition parse error: {e}"));
-                    self.broadcast_progress(&job.snapshot());
-                    self.persist_run(&job).await;
-                    return;
-                }
-            };
-
-        // Apply per-run hyperparameter overrides on top of the definition's
-        // baked-in hyperparameters. Object keys are shallow-merged (override
-        // wins); a non-object override replaces the block wholesale.
-        if let serde_json::Value::Object(over) = &hyperparam_overrides {
-            if !over.is_empty() {
-                let base = definition
-                    .hyperparameters
-                    .as_object()
-                    .cloned()
-                    .unwrap_or_default();
-                let mut merged = base;
-                for (k, v) in over {
-                    merged.insert(k.clone(), v.clone());
-                }
-                definition.hyperparameters = serde_json::Value::Object(merged);
-            }
-        } else if !hyperparam_overrides.is_null() {
-            definition.hyperparameters = hyperparam_overrides.clone();
-        }
-
-        // 2. Materialize dataset
+        // 2. Materialize the dataset the plan already identified. The spec was
+        //    hashed and the trial registered before this point; this step only
+        //    produces the bytes that hash names.
         job.set_phase(RunStatus::Running, "materializing");
         self.broadcast_progress(&job.snapshot());
 
-        let artifacts_prefix =
-            std::env::var("ARTIFACT_STORE_PATH").unwrap_or_else(|_| "./artifacts".to_string());
-
-        // Resolve the effective data selection: explicit UI selection wins, then
-        // the model definition, then sensible defaults.
-        let feature_set_ref = data
-            .as_ref()
-            .and_then(|d| d.feature_set_ref.clone())
-            .or_else(|| definition.feature_set_ref.clone())
-            .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string());
-        let instruments = data
-            .as_ref()
-            .filter(|d| !d.instruments.is_empty())
-            .map_or_else(|| vec!["BTC-USD".to_string()], |d| d.instruments.clone());
-        let timeframe = data
-            .as_ref()
-            .map_or_else(|| "1m".to_string(), |d| d.timeframe.clone());
-        let lookback_days = data.as_ref().map_or(30, |d| d.lookback_days);
-        let label_horizon = data
-            .as_ref()
-            .and_then(|d| d.label_horizon.clone())
-            .or_else(|| {
-                definition
-                    .label_spec
-                    .as_ref()
-                    .and_then(|s| s.get("window"))
-                    .and_then(|w| w.as_str().map(str::to_string))
-            })
-            .unwrap_or_else(|| "1h".to_string());
-
-        let window_end = chrono::Utc::now();
-        let window_start = window_end - chrono::Duration::days(i64::from(lookback_days));
-
-        let dataset_req = crate::datasets::DatasetRequest {
-            dataset_id: None,
-            feature_set_ref: feature_set_ref.clone(),
-            instruments: instruments.clone(),
-            timeframe: timeframe.clone(),
-            start: window_start,
-            end: window_end,
-            label_spec: serde_json::json!({
-                "type": "forward_return",
-                "window": label_horizon,
-            }),
-            output_prefix: artifacts_prefix.clone(),
-        };
-
-        let dataset = match self.datasets.materialize(dataset_req).await {
+        let dataset = match self.datasets.materialize(&plan).await {
             Ok(d) => d,
             Err(e) => {
-                job.fail(format!("dataset materialization failed: {e}"));
+                job.fail(ledger::TerminalReason::DataError, format!("dataset materialization failed: {e}"));
                 self.broadcast_progress(&job.snapshot());
                 self.persist_run(&job).await;
                 return;
@@ -1361,7 +1412,7 @@ impl ModelManager {
 
         // 2b. Compute walk-forward folds (I-0.10): Rust owns the fold geometry;
         //     sidecar receives index ranges and never picks its own split (ADR-0017).
-        let horizon_bars = features::label_horizon_bars(&label_horizon, &timeframe).unwrap_or(60);
+        let horizon_bars = plan.horizon_bars;
         let effective_cv = definition.cv.unwrap_or_else(|| {
             // Single expanding fold default: mirrors the pre-Set-I
             // isolated-train path while providing a proper cal role.
@@ -1384,7 +1435,12 @@ impl ModelManager {
         let fold_specs: Option<Vec<crate::sidecar::FoldSpec>> = match features::walk_forward_folds(
             dataset.row_count as usize,
             &effective_cv,
-            horizon_bars,
+            &features::walk_forward::embargo_inputs(
+                &features::resolve_feature_set(definition.feature_set_ref.as_deref().unwrap_or("fs_core_ohlcv_v3"))
+                    .map(|s| s.features.clone())
+                    .unwrap_or_default(),
+                horizon_bars,
+            ),
         ) {
             Ok(folds) => Some(folds.iter().map(crate::sidecar::FoldSpec::from).collect()),
             Err(e) => {
@@ -1457,7 +1513,7 @@ impl ModelManager {
                     "SELECT COALESCE(MAX(version), 0) + 1 FROM model_versions WHERE model_id = $1",
                 )
                 .bind(&model_id)
-                .fetch_one(&pg)
+                .fetch_one(&self.pg)
                 .await
                 .unwrap_or((1,));
                 #[allow(clippy::cast_possible_truncation)]
@@ -1488,7 +1544,7 @@ impl ModelManager {
                 .bind(config_json)
                 .bind(version_note.as_deref())
                 .bind(job.user_id)
-                .execute(&pg)
+                .execute(&self.pg)
                 .await;
 
                 // Write model_artifacts row
@@ -1504,7 +1560,7 @@ impl ModelManager {
                 .bind(&artifact_uri)
                 .bind(size_bytes)
                 .bind(&sha256)
-                .execute(&pg)
+                .execute(&self.pg)
                 .await;
 
                 // Update model status to evaluating
@@ -1512,7 +1568,7 @@ impl ModelManager {
                     "UPDATE ai_models SET status='evaluating', updated_at=now() WHERE model_id=$1",
                 )
                 .bind(&model_id)
-                .execute(&pg)
+                .execute(&self.pg)
                 .await;
 
                 // Merge spec_hash into run metrics for reproduce lookup (I-3.8).
@@ -1531,7 +1587,7 @@ impl ModelManager {
                 let _ = sqlx::query("UPDATE training_runs SET metrics_json = $1 WHERE run_id = $2")
                     .bind(&run_metrics)
                     .bind(job.run_id)
-                    .execute(&pg)
+                    .execute(&self.pg)
                     .await;
 
                 job.progress_pct.store(100, Ordering::Relaxed);
@@ -1548,21 +1604,31 @@ impl ModelManager {
                 let err = r
                     .error
                     .unwrap_or_else(|| "trainer returned failed status".to_string());
-                job.fail(err);
+                // The sidecar classifies its own failure from the exception's
+                // type (`app/failures.py`). A sidecar that does not say settles
+                // as `dependency_failure` — which is the literal truth about a
+                // dependency that raised without naming a reason, not a guess
+                // dressed up as one.
+                let terminal = r
+                    .terminal
+                    .as_deref()
+                    .and_then(ledger::TerminalReason::from_code)
+                    .unwrap_or(ledger::TerminalReason::DependencyFailure);
+                job.fail(terminal, err);
                 let _ = sqlx::query(
                     "UPDATE ai_models SET status='failed', updated_at=now() WHERE model_id=$1",
                 )
                 .bind(&model_id)
-                .execute(&pg)
+                .execute(&self.pg)
                 .await;
             }
             Err(e) => {
-                job.fail(format!("sidecar dispatch error: {e}"));
+                job.fail(ledger::TerminalReason::DependencyFailure, format!("sidecar dispatch error: {e}"));
                 let _ = sqlx::query(
                     "UPDATE ai_models SET status='failed', updated_at=now() WHERE model_id=$1",
                 )
                 .bind(&model_id)
-                .execute(&pg)
+                .execute(&self.pg)
                 .await;
             }
         }
@@ -1572,7 +1638,13 @@ impl ModelManager {
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn drive_eval(self: &Arc<Self>, job: Arc<Job>, model_id: String, version: i32) {
+    async fn drive_eval(
+        self: &Arc<Self>,
+        job: Arc<Job>,
+        model_id: String,
+        version: i32,
+        plan: crate::datasets::DatasetPlan,
+    ) {
         let Ok(_permit) = self.run_permits.clone().acquire_owned().await else {
             return;
         };
@@ -1598,7 +1670,7 @@ impl ModelManager {
         .flatten();
 
         let Some((artifact_uri, artifact_hash, definition_json)) = artifact_row else {
-            job.fail("artifact not found for version");
+            job.fail(ledger::TerminalReason::DataError, "artifact not found for version");
             self.broadcast_progress(&job.snapshot());
             self.persist_eval(&job).await;
             return;
@@ -1608,7 +1680,7 @@ impl ModelManager {
             match serde_json::from_value(definition_json) {
                 Ok(d) => d,
                 Err(e) => {
-                    job.fail(format!("definition parse: {e}"));
+                    job.fail(ledger::TerminalReason::IntegrityRejected, format!("definition parse: {e}"));
                     self.broadcast_progress(&job.snapshot());
                     self.persist_eval(&job).await;
                     return;
@@ -1652,28 +1724,10 @@ impl ModelManager {
         job.progress_pct.store(15, Ordering::Relaxed);
         self.broadcast_progress(&job.snapshot());
 
-        let artifacts_prefix =
-            std::env::var("ARTIFACT_STORE_PATH").unwrap_or_else(|_| "./artifacts".to_string());
-        let dataset_req = crate::datasets::DatasetRequest {
-            dataset_id: None,
-            feature_set_ref: definition
-                .feature_set_ref
-                .clone()
-                .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string()),
-            instruments: vec!["BTC-USD".to_string()],
-            timeframe: "1m".to_string(),
-            start: chrono::Utc::now() - chrono::Duration::days(30),
-            end: chrono::Utc::now() - chrono::Duration::days(1),
-            label_spec: definition
-                .label_spec
-                .clone()
-                .unwrap_or(serde_json::json!({"type":"forward_return","window":"1h"})),
-            output_prefix: artifacts_prefix.clone(),
-        };
-        let dataset = match self.datasets.materialize(dataset_req).await {
+        let dataset = match self.datasets.materialize(&plan).await {
             Ok(d) => d,
             Err(e) => {
-                job.fail(format!("dataset: {e}"));
+                job.fail(ledger::TerminalReason::DataError, format!("dataset: {e}"));
                 self.broadcast_progress(&job.snapshot());
                 self.persist_eval(&job).await;
                 return;
@@ -1681,15 +1735,7 @@ impl ModelManager {
         };
 
         // Build walk-forward fold specs for per-fold breakdown (I-2.7).
-        let label_horizon = definition
-            .label_spec
-            .as_ref()
-            .and_then(|s| s.get("window"))
-            .and_then(|w| w.as_str())
-            .unwrap_or("1h")
-            .to_string();
-        let timeframe = "1m".to_string();
-        let horizon_bars = features::label_horizon_bars(&label_horizon, &timeframe).unwrap_or(60);
+        let horizon_bars = plan.horizon_bars;
         let effective_cv = definition.cv.unwrap_or_else(|| {
             let n = dataset.row_count.max(1) as u64;
             let purge = horizon_bars;
@@ -1708,7 +1754,16 @@ impl ModelManager {
             }
         });
         let fold_specs: Option<Vec<crate::sidecar::FoldSpec>> =
-            features::walk_forward_folds(dataset.row_count as usize, &effective_cv, horizon_bars)
+            features::walk_forward_folds(
+            dataset.row_count as usize,
+            &effective_cv,
+            &features::walk_forward::embargo_inputs(
+                &features::resolve_feature_set(definition.feature_set_ref.as_deref().unwrap_or("fs_core_ohlcv_v3"))
+                    .map(|s| s.features.clone())
+                    .unwrap_or_default(),
+                horizon_bars,
+            ),
+        )
                 .ok()
                 .map(|folds| folds.iter().map(crate::sidecar::FoldSpec::from).collect());
 
@@ -1747,6 +1802,7 @@ impl ModelManager {
                     scorecard: None,
                     report: None,
                     error: Some(e.to_string()),
+                    terminal: Some(ledger::TerminalReason::DependencyFailure.as_str().to_string()),
                 }
             }
         };
@@ -2217,4 +2273,134 @@ impl ModelManager {
             })
             .collect())
     }
+}
+
+/// What the ledger records a training or evaluation dispatch as.
+///
+/// The `dataset_id` is the [`DatasetPlan`]'s content hash (SPEC 3.1, INV-12) --
+/// resolved before dispatch, so the trial names the exact data it will read
+/// rather than a placeholder only knowable afterwards. `non_reproducible` and
+/// `overlapping_labels_unweighted` propagate from the same plan (INV-08, 3.4).
+fn training_subject(
+    kind: &str,
+    model_id: &str,
+    hyperparameters: &serde_json::Value,
+    data: &serde_json::Value,
+    plan: &crate::datasets::DatasetPlan,
+) -> ledger::TrialSubject {
+    let config = serde_json::json!({ "kind": kind, "model_id": model_id, "hyperparameters": hyperparameters, "data": data });
+    let config_hash = dataplane::content_hash(&config).unwrap_or_else(|_| format!("unhashable:{model_id}"));
+    ledger::TrialSubject {
+        config_hash,
+        config,
+        dataset_id: plan.dataset_id.clone(),
+        split_spec_id: Some(plan.split_spec_id().to_string()),
+        code_hash: format!("model:{model_id}"),
+        image_digest: plan.spec.runtime_image_digest.clone(),
+        seed_set: Vec::new(),
+        non_reproducible: plan.non_reproducible(),
+        overlapping_labels_unweighted: plan.overlapping_labels_unweighted(),
+        split_overrides: serde_json::to_value(plan.request().split_spec.overrides())
+            .unwrap_or_else(|_| serde_json::json!([])),
+        planned_steps: None,
+    }
+}
+
+/// The label-construction code this training path actually runs. Bumped when the
+/// labelling changes, so a stored `label_spec` always resolves to the code that
+/// produced its labels.
+const LABEL_CODE_VERSION: u32 = 1;
+
+/// Resolve a model definition and an optional UI selection into a typed dataset
+/// request (SPEC 3.1, 3.4, 3.5).
+///
+/// The label spec is *declared* here rather than inferred downstream:
+/// `LabelSpec` has no serde default for `sample_weight_method`. It declares
+/// `uniqueness` because the frame now carries an average-uniqueness
+/// `sample_weight` column and every trainer adapter consumes it (ADR-P2-22) —
+/// the declaration is a fact about what runs, not a claim about what ought to.
+/// Until that was true it declared `none` and every trial carried
+/// `overlapping_labels_unweighted` (ADR-P1-01).
+///
+/// The split spec is a rule, not a slice, so its embargo is computed from the
+/// pipeline here and the fold geometry expands from it later.
+fn dataset_request(
+    definition: &domain::model_def::ModelDefinition,
+    data: Option<&crate::types::TrainDataSelection>,
+    window: (chrono::DateTime<Utc>, chrono::DateTime<Utc>),
+    artifacts_prefix: &str,
+) -> anyhow::Result<crate::datasets::DatasetRequest> {
+    let feature_set_ref = data
+        .and_then(|d| d.feature_set_ref.clone())
+        .or_else(|| definition.feature_set_ref.clone())
+        .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string());
+    let instruments = data
+        .filter(|d| !d.instruments.is_empty())
+        .map_or_else(|| vec!["BTC-USD".to_string()], |d| d.instruments.clone());
+    let timeframe = data.map_or_else(|| "1m".to_string(), |d| d.timeframe.clone());
+    let label_horizon = data
+        .and_then(|d| d.label_horizon.clone())
+        .or_else(|| {
+            definition
+                .label_spec
+                .as_ref()
+                .and_then(|s| s.get("window"))
+                .and_then(|w| w.as_str().map(str::to_string))
+        })
+        .unwrap_or_else(|| "1h".to_string());
+
+    let horizon_bars = features::label_horizon_bars(&label_horizon, &timeframe)
+        .ok_or_else(|| anyhow::anyhow!("unparseable label window: {label_horizon}"))?;
+    let horizon_bars_u32 = u32::try_from(horizon_bars)
+        .map_err(|_| anyhow::anyhow!("label horizon {label_horizon} does not fit in a u32"))?;
+
+    let label_spec = dataplane::label::LabelSpec {
+        label_spec_id: String::new(),
+        kind: dataplane::label::LabelKind::HorizonReturn,
+        horizon_bars: horizon_bars_u32,
+        pt_sl_multiples: Vec::new(),
+        vol_estimator: None,
+        min_return_threshold: None,
+        sample_weight_method: dataplane::label::SampleWeightMethod::Uniqueness,
+        code_hash: dataplane::content_hash(&("forward_return", LABEL_CODE_VERSION))
+            .unwrap_or_else(|_| "unhashable".into()),
+    }
+    .content_keyed();
+
+    let features = features::resolve_feature_set(&feature_set_ref)
+        .map(|s| s.features.clone())
+        .unwrap_or_default();
+    let embargo = features::walk_forward::embargo_inputs(&features, horizon_bars);
+    let cv = definition.cv.as_ref();
+    let mut split_spec = dataplane::split::SplitSpec::new(
+        String::new(),
+        dataplane::split::SplitKind::WalkForward,
+        cv.map_or(1, |c| c.folds as usize),
+        0,
+        &embargo,
+    );
+    if let Some(c) = cv {
+        split_spec.train_window = match c.mode {
+            domain::model_def::cv::WindowMode::Expanding => dataplane::split::TrainWindow::Expanding,
+            domain::model_def::cv::WindowMode::Rolling => {
+                dataplane::split::TrainWindow::Rolling(c.train_bars as usize)
+            }
+        };
+        split_spec.min_train_bars = c.train_bars as usize;
+    }
+    let split_spec = split_spec.content_keyed();
+
+    Ok(crate::datasets::DatasetRequest {
+        universe_spec_id: format!("explicit:{}", instruments.join(",")),
+        feature_set_ref,
+        instruments,
+        timeframe,
+        start: window.0,
+        end: window.1,
+        label_spec,
+        split_spec,
+        quality_exclusion_mask: crate::datasets::default_exclusion_mask(),
+        adjustment_policy: dataplane::corporate::AdjustmentPolicy::Unadjusted,
+        output_prefix: artifacts_prefix.to_string(),
+    })
 }

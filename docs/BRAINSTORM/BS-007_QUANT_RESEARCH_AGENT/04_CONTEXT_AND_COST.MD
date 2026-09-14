@@ -98,7 +98,8 @@ Built naively, the same sessions cost 3–5× more (R4 §2). The largest steady-
   - open questions;
   - the current plan step;
   - every number with its n, SE and handle.
-- The PostCompact hook re-reads NOTEBOOK §1 (03 §7).
+- NOTEBOOK §1 is re-injected after a compaction, on the next user turn (03 §7; there is
+  no `PostCompact` hook in the SDK — AGENT-001 §23).
 - **Tool-result clearing** is a backstop, not a routine. If used, clear in large batches
   (each clearing rewrites the cache), keep the last 5–8 results, and never clear Set J
   evaluation results that haven't yet been recorded in NOTEBOOK.

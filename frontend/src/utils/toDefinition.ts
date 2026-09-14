@@ -153,6 +153,8 @@ export function scannerToDefinition(
   allOf: Condition[],
   anyOf: Condition[],
   assetClass = 'crypto_spot_cex',
+  /** Declared by the canvas's market-data nodes; defaults to the 1m bar lane. */
+  dataInputs?: StrategyDefinition['inputs'],
 ): ConvertResult {
   const errors: string[] = []
   const warnings: string[] = []
@@ -199,9 +201,10 @@ export function scannerToDefinition(
 
   if (errors.length > 0) return { definition: null, errors, warnings }
 
-  const inputs: StrategyDefinition['inputs'] = [
-    { lane: 'market.bars.1m', instrument: '$bound_at_init' },
-  ]
+  const inputs: StrategyDefinition['inputs'] =
+    dataInputs && dataInputs.length > 0
+      ? [...dataInputs]
+      : [{ lane: 'market.bars.1m', instrument: '$bound_at_init' }]
   if (features.size > 0) {
     inputs.push({ lane: 'features.technical', instrument: '$bound_at_init', features: [...features] })
   }
@@ -229,6 +232,8 @@ export function scannerToDefinition(
 export function ruleSpecToDefinition(
   spec: RuleStrategySpec,
   assetClass = 'crypto_spot_cex',
+  /** Declared by the canvas's market-data nodes; defaults to the 1m bar lane. */
+  dataInputs?: StrategyDefinition['inputs'],
 ): ConvertResult {
   const errors: string[] = []
   const warnings: string[] = []
@@ -301,9 +306,10 @@ export function ruleSpecToDefinition(
     return { definition: null, errors, warnings }
   }
 
-  const inputs: StrategyDefinition['inputs'] = [
-    { lane: 'market.bars.1m', instrument: '$bound_at_init' },
-  ]
+  const inputs: StrategyDefinition['inputs'] =
+    dataInputs && dataInputs.length > 0
+      ? [...dataInputs]
+      : [{ lane: 'market.bars.1m', instrument: '$bound_at_init' }]
   if (features.size > 0) {
     inputs.push({
       lane: 'features.technical',

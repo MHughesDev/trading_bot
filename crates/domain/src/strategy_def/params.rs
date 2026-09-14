@@ -369,7 +369,9 @@ fn substitute(s: &str, values: &ParamValues) -> Result<String, ParamError> {
             let close = inner
                 .find(')')
                 .ok_or_else(|| ParamError::Undeclared(after.chars().take(24).collect()))?;
-            let raw = inner[..close].trim().trim_matches(|c| c == '\'' || c == '"');
+            let raw = inner[..close]
+                .trim()
+                .trim_matches(|c| c == '\'' || c == '"');
             (raw.to_string(), "param(".len() + close + 1)
         } else {
             let inner = &after[2..];

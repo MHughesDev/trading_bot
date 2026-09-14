@@ -95,6 +95,12 @@ pub struct TrainResult {
     pub metrics: Option<serde_json::Value>,
     pub framework_version: Option<String>,
     pub error: Option<String>,
+    /// The SPEC §9 reason the sidecar classified this failure as, from the
+    /// exception's type (`app/failures.py`). `None` on success — and on a
+    /// failure from a sidecar too old to send it, which settles as
+    /// `dependency_failure`: a dependency raised and did not say why.
+    #[serde(default)]
+    pub terminal: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -166,6 +172,9 @@ pub struct EvalResult {
     pub scorecard: Option<serde_json::Value>,
     pub report: Option<serde_json::Value>,
     pub error: Option<String>,
+    /// See [`TrainResult::terminal`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -194,6 +203,81 @@ pub struct SidecarClient {
     train_failures: std::sync::atomic::AtomicU32,
     infer_failures: std::sync::atomic::AtomicU32,
 }
+
+/// What each outcome costs, in the objective's own units (SPEC §11.4).
+///
+/// Every field is required. A cost matrix with a default is a decision nobody
+/// made, and the threshold that comes out of it is indistinguishable from one
+/// that came out of a real one.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct CostMatrix {
+    pub true_positive: f64,
+    pub false_positive: f64,
+    pub true_negative: f64,
+    pub false_negative: f64,
+}
+
+/// The post-hoc stage's request (checklist 2.11, ADR-P2-11).
+///
+/// There is deliberately no field that reorders, skips or disables a step. The
+/// order — soup → greedy ensemble → calibrate → closed-form threshold — is the
+/// guarantee, and a request that could change it would be a request that could
+/// be retried until the order flattered the result.
+#[derive(Debug, Clone, Serialize)]
+pub struct PostHocRequest {
+    pub posthoc_id: String,
+    pub framework: String,
+    pub costs: CostMatrix,
+    /// `(n_models, n_rows)` out-of-sample predictions from the stored folds.
+    pub oos_predictions: Vec<Vec<f64>>,
+    pub oos_realized: Vec<f64>,
+    /// Scores and outcomes on the dedicated `cal` role — never the train
+    /// window, where the model is optimistic, and never the test window, which
+    /// is the estimate this exists to protect.
+    pub cal_scores: Vec<f64>,
+    pub cal_outcomes: Vec<f64>,
+    pub calibrator: String,
+}
+
+/// One step of the pipeline, including the ones that did not apply.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PostHocStep {
+    pub step: String,
+    pub applied: bool,
+    #[serde(default)]
+    pub detail: serde_json::Value,
+    #[serde(default)]
+    pub skipped: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PostHocResult {
+    pub status: String,
+    #[serde(default)]
+    pub steps: Vec<PostHocStep>,
+    #[serde(default)]
+    pub weights: Option<Vec<f64>>,
+    #[serde(default)]
+    pub calibrator: Option<String>,
+    #[serde(default)]
+    pub calibration_params: Vec<f64>,
+    #[serde(default)]
+    pub threshold: Option<f64>,
+    #[serde(default)]
+    pub error: Option<String>,
+    /// See [`TrainResult::terminal`].
+    #[serde(default)]
+    pub terminal: Option<String>,
+}
+
+impl PostHocResult {
+    /// The step names in the order the sidecar ran them.
+    #[must_use]
+    pub fn order(&self) -> Vec<&str> {
+        self.steps.iter().map(|s| s.step.as_str()).collect()
+    }
+}
+
 
 impl SidecarClient {
     pub fn from_env() -> Self {
@@ -264,6 +348,44 @@ impl SidecarClient {
         }
         self.infer_failures.store(0, Ordering::Relaxed);
         Ok(resp.json::<PredictResponse>().await?)
+    }
+
+    /// Run the post-hoc pipeline (SPEC §11.4, checklist 2.11).
+    ///
+    /// # Errors
+    /// The sidecar being unreachable, returning a non-success status, or a
+    /// response that does not deserialise.
+    pub async fn dispatch_posthoc(&self, req: PostHocRequest) -> anyhow::Result<PostHocResult> {
+        use std::sync::atomic::Ordering;
+        if self.train_failures.load(Ordering::Relaxed) >= 5 {
+            anyhow::bail!("trainer sidecar circuit-breaker open");
+        }
+        let resp = self
+            .http
+            .post(format!("{}/posthoc", self.trainer_url))
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| {
+                self.train_failures.fetch_add(1, Ordering::Relaxed);
+                anyhow::anyhow!("trainer posthoc unreachable: {e}")
+            })?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            self.train_failures.fetch_add(1, Ordering::Relaxed);
+            anyhow::bail!("trainer posthoc returned {status}: {body}");
+        }
+        self.train_failures.store(0, Ordering::Relaxed);
+        let result: PostHocResult = resp.json().await?;
+        // The order is not a thing the caller asked for, so it is a thing the
+        // caller checks: a sidecar that ran the steps in a different order is
+        // not running this pipeline.
+        let order = result.order();
+        if result.status == "succeeded" && order != ["soup", "ensemble", "calibrate", "threshold"] {
+            anyhow::bail!("post-hoc steps came back in the order {order:?}; SPEC §11.4 fixes it");
+        }
+        Ok(result)
     }
 
     pub async fn dispatch_evaluate(&self, req: EvalDispatchRequest) -> anyhow::Result<EvalResult> {

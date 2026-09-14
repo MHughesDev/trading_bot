@@ -1,0 +1,109 @@
+/* =============================================================================
+   COMPATIBILITY LAYER
+
+   Classes used by the pre-Meridian UI kit in `src/components/ui/*`, mapped onto
+   the token layer so every untouched call site is correct in both themes while
+   it is migrated to `src/components/primitives/*`.
+
+   This file is temporary scaffolding. When the last `@/components/ui/*` import
+   is gone, delete it.
+   ============================================================================= */
+
+.ui-input {
+  display: flex;
+  width: 100%;
+  height: var(--ctl-h-md);
+  align-items: center;
+  gap: var(--s-2);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-default);
+  background: var(--bg-surface);
+  padding: 0 var(--s-3);
+  font-size: var(--t-13);
+  color: var(--fg-primary);
+  outline: none;
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+[data-theme="terminal"] .ui-input { background: var(--bg-inset); }
+.ui-input::placeholder { color: var(--fg-disabled); }
+.ui-input:focus,
+.ui-input:focus-visible,
+.ui-input[data-state="open"] { border-color: var(--line-focus); box-shadow: var(--shadow-focus); }
+.ui-input:disabled { opacity: .5; cursor: not-allowed; }
+.ui-input[type="number"] {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-select-trigger { justify-content: space-between; cursor: pointer; text-align: left; }
+.ui-select-item { padding-left: 28px; position: relative; }
+.ui-select-label { padding: 6px 8px 4px 28px; }
+
+/* Radix animation utilities the old kit referenced. Motion tokens, not magic. */
+[data-state="open"].popover,
+[data-state="open"].modal { animation-duration: var(--dur-3); }
+
+/* A `Card` is a Panel; its header/body/footer classes come from app.css. The
+   old kit passes extra Tailwind spacing utilities alongside, which is harmless
+   because the component layer sets the authoritative padding. */
+.panel > .panel-hd { flex-direction: row; }
+
+/* Tailwind's `sr-only` is used for captions and live regions throughout. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0;
+}
+
+/* Utility aliases so migrated markup can lean on flex without a utility class. */
+.flex-1 { flex: 1; min-width: 0; min-height: 0; }
+
+/* --- accessibility preference overrides (store/prefs.ts) -------------------- */
+html[data-reduce-motion] *,
+html[data-reduce-motion] *::before,
+html[data-reduce-motion] *::after {
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
+}
+html[data-thick-focus] { --focus-w: 3px; --focus-offset: 3px; }
+html[data-underline-links] a { text-decoration: underline; }
+
+/* --- native form controls -------------------------------------------------- */
+/* Screens still using a bare <select>, <input> or <textarea> inherit the system
+   rather than the browser default, so no corner of the product looks unmigrated
+   while it waits its turn. Components that opt into `.input` / `.ui-input`
+   override this with their own rules. */
+select:not([class*="ui-"]):not(.tb-select) {
+  height: var(--ctl-h-sm);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-default);
+  background: var(--bg-surface);
+  color: var(--fg-primary);
+  padding: 0 var(--s-3);
+  font-size: var(--t-12);
+  outline: none;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 12px center, right 7px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 26px;
+}
+[data-theme="terminal"] select:not([class*="ui-"]):not(.tb-select) { background-color: var(--bg-inset); }
+select:not([class*="ui-"]):focus-visible { border-color: var(--line-focus); box-shadow: var(--shadow-focus); }
+select option { background: var(--bg-overlay); color: var(--fg-primary); }
+
+input[type="text"]:not([class*="ui-"]):not(.tb-input),
+input[type="search"]:not([class*="ui-"]),
+input[type="email"]:not([class*="ui-"]),
+input[type="password"]:not([class*="ui-"]),
+input[type="number"]:not([class*="ui-"]):not(.tb-input),
+input[type="date"]:not([class*="ui-"]) {
+  color: var(--fg-primary);
+}
+input[type="checkbox"] { accent-color: var(--bg-accent); width: 14px; height: 14px; }
+input[type="range"] { accent-color: var(--bg-accent); }
+
+/* Radix/legacy scrims that still ask for a black wash resolve to the token. */
+.bg-scrim { background: var(--bg-scrim) !important; }

@@ -2,19 +2,11 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "frontend",
+      "name": "meridian-frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--host"],
+      "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
       "port": 5173,
-      "autoPort": false,
-      "cwd": "frontend"
-    },
-    {
-      "name": "platform",
-      "runtimeExecutable": "cargo",
-      "runtimeArgs": ["run", "-p", "platform"],
-      "port": 7080,
-      "autoPort": false
+      "autoPort": true
     }
   ]
 }

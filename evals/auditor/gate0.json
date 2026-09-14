@@ -1,0 +1,77 @@
+[
+  {
+    "id": "lookahead_higher_tf_open",
+    "check": "gate0",
+    "why": "Acting on a 1h signal before the constituent bar closed leaks the entire bar. It is the single most likely real leak in a 1m-constructed stack, because a naive resample stamps the bar at its open and every downstream join then looks correct.",
+    "violating": {
+      "signals": [
+        { "acted_at_ns": 1700000000000000000, "bar_close_ns": 1700003600000000000 }
+      ],
+      "gross_return": 0.02,
+      "cost_floor": 0.001
+    },
+    "clean": {
+      "signals": [
+        { "acted_at_ns": 1700003600000000000, "bar_close_ns": 1700003600000000000 }
+      ],
+      "gross_return": 0.02,
+      "cost_floor": 0.001
+    },
+    "expect": ["lookahead.higher_tf_open"]
+  },
+  {
+    "id": "acting_exactly_at_the_close_is_legal",
+    "check": "gate0",
+    "why": "The boundary case, as its own fixture. If acting at the close were rejected, every honest close-stamped strategy would fail Gate 0 and the check would be turned off within a week.",
+    "violating": {
+      "signals": [
+        { "acted_at_ns": 1699999999999999999, "bar_close_ns": 1700000000000000000 }
+      ],
+      "gross_return": 0.02,
+      "cost_floor": 0.001
+    },
+    "clean": {
+      "signals": [
+        { "acted_at_ns": 1700000000000000000, "bar_close_ns": 1700000000000000000 },
+        { "acted_at_ns": 1700000060000000000, "bar_close_ns": 1700000000000000000 }
+      ],
+      "gross_return": 0.02,
+      "cost_floor": 0.001
+    },
+    "expect": ["lookahead.higher_tf_open"]
+  },
+  {
+    "id": "unpurged_overlapping_labels",
+    "check": "gate0",
+    "why": "A label spanning 10 bars forward with a 2-bar purge means the last 8 training rows were labelled using data the test fold also contains. The model has seen the answer, the OOS score is inflated, and nothing in the equity curve looks wrong.",
+    "violating": {
+      "gross_return": 0.02,
+      "cost_floor": 0.001,
+      "label_horizon_bars": 10,
+      "feature_window_end_bar": 0,
+      "purge_bars": 2
+    },
+    "clean": {
+      "gross_return": 0.02,
+      "cost_floor": 0.001,
+      "label_horizon_bars": 10,
+      "feature_window_end_bar": 0,
+      "purge_bars": 12
+    },
+    "expect": ["lookahead.label_overlap"]
+  },
+  {
+    "id": "costs_below_the_floor",
+    "check": "gate0",
+    "why": "An edge that does not clear the minimum realistic cost is not an edge. This is the arithmetic form of the mistake; the lint fixture covers the code form (costs switched off outright).",
+    "violating": {
+      "gross_return": 0.0004,
+      "cost_floor": 0.0008
+    },
+    "clean": {
+      "gross_return": 0.0032,
+      "cost_floor": 0.0008
+    },
+    "expect": ["cost.below_floor"]
+  }
+]

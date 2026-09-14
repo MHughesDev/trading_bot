@@ -8,6 +8,8 @@ domain = { workspace = true }
 storage = { workspace = true }
 features = { workspace = true }
 backtest = { workspace = true }
+ledger = { workspace = true }
+dataplane = { workspace = true }
 
 anyhow = { workspace = true }
 tokio = { workspace = true }

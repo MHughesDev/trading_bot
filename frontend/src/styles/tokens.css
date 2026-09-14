@@ -1,0 +1,508 @@
+/* =============================================================================
+   TRADING PLATFORM — DESIGN TOKENS
+   Themes:  "paper"    (light)  — soft, warm, entropic
+            "terminal" (dark)   — cold, precise, futuristic
+   -----------------------------------------------------------------------------
+   CONTRACT FOR IMPLEMENTERS
+   1. This file is the ONLY place a raw color value may appear in the codebase.
+      Any hex, rgb(), hsl() or oklch() literal outside this file is a bug.
+   2. Components consume SEMANTIC tokens (--bg-*, --fg-*, --line-*, --chart-*).
+      Components must NEVER consume primitives (--p-*) directly.
+   3. Theme is selected by `data-theme="paper" | "terminal"` on <html>.
+      `:root` with no attribute = paper. `prefers-color-scheme: dark` with no
+      explicit attribute = terminal.
+   4. Density is selected by `data-density="comfortable" | "compact"` on any
+      container. Paper defaults to comfortable, terminal to compact.
+   ============================================================================= */
+
+/* =============================================================================
+   LAYER 1 — PRIMITIVES (never referenced by components)
+   ============================================================================= */
+:root {
+  /* --- Paper ramp: IVORY (warm neutral, hue ~60, very low chroma) --------- */
+  --p-ivory-50:  #FDFCFA;
+  --p-ivory-100: #FAF9F5;
+  --p-ivory-150: #F7F5EF;
+  --p-ivory-200: #F4F2EB;
+  --p-ivory-300: #EEEBE1;
+  --p-ivory-350: #E8E4D8;
+  --p-ivory-400: #E1DDD0;
+  --p-ivory-500: #CFC9B8;
+  --p-ivory-600: #AEA89A;
+  --p-ivory-700: #6E695E;
+  --p-ivory-800: #57534A;
+  --p-ivory-900: #2B2925;
+  --p-ivory-950: #171613;
+
+  /* --- Paper ramp: CLAY (brand) ------------------------------------------ */
+  --p-clay-50:  #FBF3EF;
+  --p-clay-100: #F7EAE3;
+  --p-clay-200: #EFD2C4;
+  --p-clay-300: #E3AE92;
+  --p-clay-400: #D4794F;
+  --p-clay-500: #B85B39;
+  --p-clay-600: #A64E2F;
+  --p-clay-700: #843D25;
+  --p-clay-800: #5E2C1B;
+
+  /* --- Paper ramp: KELP (positive) --------------------------------------- */
+  --p-kelp-50:  #F1F6F2;
+  --p-kelp-100: #E2EEE6;
+  --p-kelp-200: #C2DCCB;
+  --p-kelp-400: #4E9A6E;
+  --p-kelp-500: #2D7751;
+  --p-kelp-600: #246241;
+  --p-kelp-700: #1A4931;
+
+  /* --- Paper ramp: EMBER (negative) -------------------------------------- */
+  --p-ember-50:  #FBF0EE;
+  --p-ember-100: #F8E7E4;
+  --p-ember-200: #EFCAC4;
+  --p-ember-400: #C0574C;
+  --p-ember-500: #B0382E;
+  --p-ember-600: #8F2B23;
+  --p-ember-700: #6B1F19;
+
+  /* --- Paper ramp: BRASS (warning) / HARBOR (info) ------------------------ */
+  --p-brass-100: #F9EFDA;
+  --p-brass-500: #A9761F;
+  --p-brass-600: #886314;
+  --p-harbor-100: #E6EEF6;
+  --p-harbor-500: #3A83C2;
+  --p-harbor-600: #2F6B9E;
+
+  /* --- Terminal ramp: STEEL (cool neutral, blue-black) -------------------- */
+  --p-steel-950: #06090E;
+  --p-steel-925: #080D13;
+  --p-steel-900: #0B1017;
+  --p-steel-875: #0E151E;
+  --p-steel-850: #111925;
+  --p-steel-800: #16202C;
+  --p-steel-750: #1E2A38;
+  --p-steel-700: #2C3B4D;
+  --p-steel-600: #3C4E63;
+  --p-steel-500: #47566A;
+  --p-steel-400: #758497;
+  --p-steel-300: #93A4B8;
+  --p-steel-200: #C3CFDD;
+  --p-steel-100: #E4EBF3;
+  --p-steel-50:  #F5F8FC;
+
+  /* --- Terminal ramp: FLUX (brand cyan) ----------------------------------- */
+  --p-flux-200: #B4F2FB;
+  --p-flux-300: #7DE7F7;
+  --p-flux-400: #3FD9F0;
+  --p-flux-500: #16C4DE;
+  --p-flux-600: #0E9DB4;
+  --p-flux-700: #0A7387;
+  --p-flux-900: #04303A;
+
+  /* --- Terminal ramp: MINT / ROSE / SOLAR / ION ---------------------------- */
+  --p-mint-300:  #7BF3C9;
+  --p-mint-400:  #2BE3A2;
+  --p-mint-500:  #12C286;
+  --p-mint-900:  #052B1F;
+  --p-rose-300:  #FF93A6;
+  --p-rose-400:  #FF5470;
+  --p-rose-350:  #FF7087;
+  --p-rose-500:  #E63455;
+  --p-rose-900:  #330A14;
+  --p-solar-400: #FFB13D;
+  --p-solar-500: #E08A12;
+  --p-solar-900: #331F05;
+  --p-ion-400:   #8D82F1;   /* AI / model / automation */
+  --p-ion-500:   #6B5EE0;
+  --p-ion-900:   #1A1440;
+
+  /* --- Instrument scale, PAPER (validated categorical, 8 slots) ------------
+     ΔE adjacent: 12.5 (deutan) · normal-vision floor 20.1 · all ≥3:1 on white */
+  --p-inst-l-1: #3A83C2;  /* sky      */
+  --p-inst-l-2: #8F5E00;  /* bronze   */
+  --p-inst-l-3: #008F95;  /* cactus   */
+  --p-inst-l-4: #863864;  /* mulberry */
+  --p-inst-l-5: #6C862C;  /* olive    */
+  --p-inst-l-6: #664D99;  /* heather  */
+  --p-inst-l-7: #B46239;  /* ember    */
+  --p-inst-l-8: #46549E;  /* indigo   */
+
+  /* --- Instrument scale, TERMINAL (validated categorical, 8 slots) ---------
+     ΔE adjacent: 9.3 (deutan) · normal-vision floor 15.2 · all ≥3:1 on #0B1017 */
+  --p-inst-d-1: #009FA7;  /* teal        */
+  --p-inst-d-2: #A08200;  /* brass       */
+  --p-inst-d-3: #00B074;  /* jade        */
+  --p-inst-d-4: #C55CA6;  /* orchid      */
+  --p-inst-d-5: #8D82F1;  /* periwinkle  */
+  --p-inst-d-6: #E36D3B;  /* ember       */
+  --p-inst-d-7: #1190E4;  /* azure       */
+  --p-inst-d-8: #689A18;  /* lime        */
+}
+
+/* =============================================================================
+   LAYER 2 — MODE-INVARIANT TOKENS
+   Spacing, sizing, motion and the type SCALE never change between themes.
+   Only the type FACES and the radii change (declared in layer 3).
+   ============================================================================= */
+:root {
+  /* --- Space (4px base) --------------------------------------------------- */
+  --s-0: 0;      --s-px: 1px;  --s-1: 4px;   --s-2: 8px;   --s-3: 12px;
+  --s-4: 16px;   --s-5: 20px;  --s-6: 24px;  --s-7: 28px;  --s-8: 32px;
+  --s-10: 40px;  --s-12: 48px; --s-14: 56px; --s-16: 64px; --s-20: 80px;
+  --s-24: 96px;  --s-32: 128px;
+
+  /* --- Type scale (px, fixed — do not use rem-scaling for data density) --- */
+  --t-10: 10px; --t-11: 11px; --t-12: 12px; --t-13: 13px; --t-14: 14px;
+  --t-16: 16px; --t-18: 18px; --t-20: 20px; --t-24: 24px; --t-28: 28px;
+  --t-32: 32px; --t-40: 40px; --t-48: 48px; --t-60: 60px;
+
+  --lh-tight: 1.1; --lh-snug: 1.25; --lh-normal: 1.45; --lh-relaxed: 1.6;
+  --tr-tighter: -0.03em; --tr-tight: -0.015em; --tr-normal: 0;
+  --tr-wide: 0.02em; --tr-wider: 0.06em; --tr-widest: 0.1em;
+
+  --w-regular: 400; --w-medium: 500; --w-semibold: 600; --w-bold: 700;
+
+  /* --- Control sizing (comfortable is the base) --------------------------- */
+  --ctl-h-xs: 24px; --ctl-h-sm: 30px; --ctl-h-md: 36px;
+  --ctl-h-lg: 44px; --ctl-h-xl: 52px;
+  --row-h: 40px;            /* table row */
+  --row-pad-x: var(--s-4);
+  --panel-pad: var(--s-5);
+  --tile-gap: var(--s-4);
+  --icon-sm: 14px; --icon-md: 16px; --icon-lg: 20px; --icon-xl: 24px;
+
+  /* --- Layout rails -------------------------------------------------------- */
+  --nav-h: 56px;
+  --subnav-h: 44px;
+  --rail-w: 60px;           /* icon rail  */
+  --panel-w-sm: 280px;      /* watchlist  */
+  --panel-w-md: 340px;      /* order ticket */
+  --panel-w-lg: 400px;      /* inspector  */
+  --content-max: 1680px;
+
+  /* --- Motion -------------------------------------------------------------- */
+  --dur-0: 0ms; --dur-1: 80ms; --dur-2: 140ms; --dur-3: 220ms;
+  --dur-4: 320ms; --dur-5: 480ms;
+  --ease-out: cubic-bezier(.22,.61,.36,1);
+  --ease-in-out: cubic-bezier(.65,.05,.36,1);
+  --ease-spring: cubic-bezier(.34,1.56,.64,1);
+  --ease-linear: linear;
+
+  /* --- Z index ------------------------------------------------------------- */
+  --z-base: 0; --z-sticky: 100; --z-nav: 200; --z-dropdown: 300;
+  --z-tooltip: 400; --z-modal: 500; --z-toast: 600; --z-devtool: 700;
+
+  /* --- Focus --------------------------------------------------------------- */
+  --focus-w: 2px;
+  --focus-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-1:0ms; --dur-2:0ms; --dur-3:0ms; --dur-4:0ms; --dur-5:0ms; }
+}
+
+/* --- Density modifier ------------------------------------------------------ */
+[data-density="compact"] {
+  --ctl-h-xs: 20px; --ctl-h-sm: 26px; --ctl-h-md: 30px;
+  --ctl-h-lg: 36px; --ctl-h-xl: 44px;
+  --row-h: 28px;
+  --row-pad-x: var(--s-3);
+  --panel-pad: var(--s-4);
+  --tile-gap: var(--s-3);
+  --nav-h: 48px;
+  --subnav-h: 36px;
+}
+
+/* =============================================================================
+   LAYER 3 — SEMANTIC TOKENS · THEME "PAPER" (light)
+   ============================================================================= */
+:root,
+[data-theme="paper"] {
+  color-scheme: light;
+
+  /* --- Type faces ---------------------------------------------------------- */
+  --font-display: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-numeric: "Inter", system-ui, sans-serif;
+  --numeric-feature: "tnum" 1, "cv01" 1, "ss01" 1;
+  --numeric-tracking: var(--tr-tight);
+  /* Micro-labels: paper uses sentence case, NOT uppercase. */
+  --label-transform: none;
+  --label-tracking: var(--tr-normal);
+  --label-weight: var(--w-medium);
+  --label-size: var(--t-12);
+
+  /* --- Radius (soft) ------------------------------------------------------- */
+  --r-xs: 6px; --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 22px;
+  --r-2xl: 28px; --r-pill: 999px; --r-circle: 50%;
+
+  /* --- Surfaces ------------------------------------------------------------ */
+  --bg-canvas:          var(--p-ivory-100);
+  --bg-surface:         #FFFFFF;
+  --bg-surface-raised:  #FFFFFF;
+  --bg-sunken:          var(--p-ivory-200);
+  --bg-inset:           var(--p-ivory-300);
+  --bg-hover:           rgba(23,22,19,.045);
+  --bg-active:          rgba(23,22,19,.075);
+  --bg-selected:        var(--p-clay-50);
+  --bg-overlay:         #FFFFFF;
+  --bg-scrim:           rgba(30,26,20,.32);
+  --bg-accent:          var(--p-clay-500);
+  --bg-accent-hover:    var(--p-clay-600);
+  --bg-accent-active:   var(--p-clay-700);
+  --bg-accent-subtle:   var(--p-clay-100);
+  --bg-pos:             var(--p-kelp-500);
+  --bg-pos-hover:       var(--p-kelp-600);
+  --bg-pos-subtle:      var(--p-kelp-100);
+  --bg-neg:             var(--p-ember-500);
+  --bg-neg-hover:       var(--p-ember-600);
+  --bg-neg-subtle:      var(--p-ember-100);
+  --bg-warn-subtle:     var(--p-brass-100);
+  --bg-info-subtle:     var(--p-harbor-100);
+  --bg-neutral-subtle:  var(--p-ivory-200);
+  --bg-skeleton:        var(--p-ivory-300);
+
+  /* --- Foreground ---------------------------------------------------------- */
+  --fg-primary:    var(--p-ivory-950);
+  --fg-secondary:  var(--p-ivory-800);
+  --fg-tertiary:   var(--p-ivory-700);
+  --fg-disabled:   var(--p-ivory-600);
+  --fg-on-accent:  #FFFFFF;
+  --fg-on-pos:     #FFFFFF;
+  --fg-on-neg:     #FFFFFF;
+  --fg-accent:     var(--p-clay-600);
+  --fg-pos:        var(--p-kelp-500);
+  --fg-neg:        var(--p-ember-500);
+  --fg-warn:       var(--p-brass-600);
+  --fg-info:       var(--p-harbor-600);
+  --fg-link:       var(--p-clay-600);
+
+  /* --- Lines --------------------------------------------------------------- */
+  --line-hairline: var(--p-ivory-300);
+  --line-default:  var(--p-ivory-400);
+  --line-strong:   var(--p-ivory-500);
+  --line-accent:   var(--p-clay-500);
+  --line-pos:      var(--p-kelp-400);
+  --line-neg:      var(--p-ember-400);
+  --line-focus:    var(--p-clay-500);
+
+  /* --- Elevation (warm, soft, directional) --------------------------------- */
+  --shadow-0: none;
+  --shadow-1: 0 1px 2px rgba(72,60,42,.05);
+  --shadow-2: 0 2px 4px rgba(72,60,42,.06), 0 1px 2px rgba(72,60,42,.04);
+  --shadow-3: 0 8px 24px -6px rgba(72,60,42,.12), 0 2px 6px rgba(72,60,42,.06);
+  --shadow-4: 0 20px 48px -12px rgba(72,60,42,.18), 0 4px 12px rgba(72,60,42,.07);
+  --shadow-focus: 0 0 0 var(--focus-w) var(--p-clay-200);
+  --glow-accent: none;
+  --glow-pos: none;
+  --glow-neg: none;
+  --ring-inset: none;
+
+  /* --- Charting ------------------------------------------------------------ */
+  --chart-surface:    #FFFFFF;
+  --chart-grid:       var(--p-ivory-300);
+  --chart-grid-major: var(--p-ivory-400);
+  --chart-axis:       var(--p-ivory-700);
+  --chart-crosshair:  var(--p-ivory-600);
+  --chart-up:         var(--p-kelp-400);
+  --chart-up-line:    var(--p-kelp-600);
+  --chart-down:       var(--p-ember-400);
+  --chart-down-line:  var(--p-ember-600);
+  --chart-volume:     rgba(124,118,106,.28);
+  --chart-last:       var(--p-ivory-950);
+  --chart-tag-bg:     var(--p-kelp-600);
+  --chart-tag-fg:     #FFFFFF;
+  --chart-ma-fast:    var(--p-inst-l-1);
+  --chart-ma-slow:    var(--p-inst-l-6);
+  --chart-equity:     var(--p-inst-l-1);
+  --chart-area-from:  rgba(58,131,194,.20);
+  --chart-area-to:    rgba(58,131,194,.00);
+
+  --chart-1: var(--p-inst-l-1); --chart-2: var(--p-inst-l-2);
+  --chart-3: var(--p-inst-l-3); --chart-4: var(--p-inst-l-4);
+  --chart-5: var(--p-inst-l-5); --chart-6: var(--p-inst-l-6);
+  --chart-7: var(--p-inst-l-7); --chart-8: var(--p-inst-l-8);
+
+  /* sequential (magnitude) — one hue, light→dark */
+  --chart-seq-1: #E3EDF6; --chart-seq-2: #B9D2E8; --chart-seq-3: #7FAED6;
+  --chart-seq-4: #3A83C2; --chart-seq-5: #1E5384;
+  /* diverging (polarity) — ember ← neutral → kelp */
+  --chart-div-n2: #B0382E; --chart-div-n1: #DA9287; --chart-div-0: #E8E4D8;
+  --chart-div-p1: #7FB897; --chart-div-p2: #2D7751;
+
+  /* --- Strategy graph ------------------------------------------------------ */
+  --canvas-bg:        var(--p-ivory-150);
+  --canvas-dot:       var(--p-ivory-400);
+  --canvas-dot-major: var(--p-ivory-500);
+  --node-bg:          #FFFFFF;
+  --node-line:        var(--p-ivory-400);
+  --node-shadow:      var(--shadow-2);
+  --edge:             var(--p-ivory-500);
+  --edge-active:      var(--p-clay-500);
+  --edge-invalid:     var(--p-ember-400);
+  --port:             var(--p-ivory-100);
+  --port-line:        var(--p-ivory-500);
+
+  --node-data:      var(--p-inst-l-8);  /* feeds        */
+  --node-indicator: var(--p-inst-l-1);  /* EMA/SMA/RSI  */
+  --node-signal:    var(--p-inst-l-2);  /* comparators  */
+  --node-logic:     var(--p-ivory-700); /* AND/OR/NOT   */
+  --node-intent:    var(--p-kelp-500);  /* buy/sell/size*/
+  --node-risk:      var(--p-ember-500); /* stop/target  */
+  --node-ai:        var(--p-inst-l-6);  /* model        */
+
+  /* --- Instrument identity chips (neutral by default) ---------------------- */
+  --chip-bg: var(--p-ivory-200);
+  --chip-fg: var(--p-ivory-800);
+  --chip-line: var(--p-ivory-400);
+}
+
+/* =============================================================================
+   LAYER 3 — SEMANTIC TOKENS · THEME "TERMINAL" (dark)
+   ============================================================================= */
+[data-theme="terminal"] {
+  color-scheme: dark;
+
+  /* --- Type faces ---------------------------------------------------------- */
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-numeric: "JetBrains Mono", ui-monospace, monospace;
+  --numeric-feature: "tnum" 1, "zero" 1;
+  --numeric-tracking: var(--tr-normal);
+  /* Micro-labels: terminal uses uppercase tracked-out HUD labels. */
+  --label-transform: uppercase;
+  --label-tracking: var(--tr-widest);
+  --label-weight: var(--w-medium);
+  --label-size: var(--t-10);
+
+  /* --- Radius (crisp) ------------------------------------------------------ */
+  --r-xs: 2px; --r-sm: 3px; --r-md: 5px; --r-lg: 8px; --r-xl: 12px;
+  --r-2xl: 16px; --r-pill: 999px; --r-circle: 50%;
+
+  /* --- Surfaces ------------------------------------------------------------ */
+  --bg-canvas:          var(--p-steel-950);
+  --bg-surface:         var(--p-steel-900);
+  --bg-surface-raised:  var(--p-steel-850);
+  --bg-sunken:          var(--p-steel-925);
+  --bg-inset:           var(--p-steel-875);
+  --bg-hover:           rgba(147,196,255,.055);
+  --bg-active:          rgba(147,196,255,.10);
+  --bg-selected:        rgba(22,196,222,.13);
+  --bg-overlay:         var(--p-steel-850);
+  --bg-scrim:           rgba(2,5,9,.72);
+  --bg-accent:          var(--p-flux-500);
+  --bg-accent-hover:    var(--p-flux-400);
+  --bg-accent-active:   var(--p-flux-600);
+  --bg-accent-subtle:   rgba(22,196,222,.13);
+  --bg-pos:             var(--p-mint-500);
+  --bg-pos-hover:       var(--p-mint-400);
+  --bg-pos-subtle:      rgba(43,227,162,.13);
+  --bg-neg:             var(--p-rose-400);
+  --bg-neg-hover:       var(--p-rose-350);
+  --bg-neg-subtle:      rgba(255,84,112,.14);
+  --bg-warn-subtle:     rgba(255,177,61,.14);
+  --bg-info-subtle:     rgba(17,144,228,.14);
+  --bg-neutral-subtle:  var(--p-steel-800);
+  --bg-skeleton:        var(--p-steel-800);
+
+  /* --- Foreground ---------------------------------------------------------- */
+  --fg-primary:    var(--p-steel-100);
+  --fg-secondary:  var(--p-steel-300);
+  --fg-tertiary:   var(--p-steel-400);
+  --fg-disabled:   var(--p-steel-500);
+  --fg-on-accent:  #04161C;
+  --fg-on-pos:     #032118;
+  --fg-on-neg:     #2B0008;
+  --fg-accent:     var(--p-flux-400);
+  --fg-pos:        var(--p-mint-400);
+  --fg-neg:        var(--p-rose-400);
+  --fg-warn:       var(--p-solar-400);
+  --fg-info:       #58B6FF;
+  --fg-link:       var(--p-flux-400);
+
+  /* --- Lines --------------------------------------------------------------- */
+  --line-hairline: var(--p-steel-800);
+  --line-default:  var(--p-steel-750);
+  --line-strong:   var(--p-steel-700);
+  --line-accent:   rgba(22,196,222,.55);
+  --line-pos:      rgba(43,227,162,.45);
+  --line-neg:      rgba(255,84,112,.45);
+  --line-focus:    var(--p-flux-400);
+
+  /* --- Elevation (luminance + glow, not drop shadow) ----------------------- */
+  --shadow-0: none;
+  --shadow-1: inset 0 1px 0 rgba(255,255,255,.035);
+  --shadow-2: inset 0 1px 0 rgba(255,255,255,.045), 0 1px 0 rgba(0,0,0,.5);
+  --shadow-3: 0 12px 32px -10px rgba(0,0,0,.78), inset 0 1px 0 rgba(255,255,255,.05);
+  --shadow-4: 0 28px 64px -16px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.06);
+  --shadow-focus: 0 0 0 var(--focus-w) rgba(22,196,222,.45);
+  --glow-accent: 0 0 20px -4px rgba(22,196,222,.55);
+  --glow-pos:    0 0 20px -4px rgba(43,227,162,.50);
+  --glow-neg:    0 0 20px -4px rgba(255,84,112,.50);
+  --ring-inset:  inset 0 0 0 1px rgba(255,255,255,.04);
+
+  /* --- Charting ------------------------------------------------------------ */
+  --chart-surface:    var(--p-steel-925);
+  --chart-grid:       rgba(140,175,215,.075);
+  --chart-grid-major: rgba(140,175,215,.14);
+  --chart-axis:       var(--p-steel-400);
+  --chart-crosshair:  var(--p-flux-400);
+  --chart-up:         var(--p-mint-400);
+  --chart-up-line:    var(--p-mint-300);
+  --chart-down:       var(--p-rose-400);
+  --chart-down-line:  var(--p-rose-300);
+  --chart-volume:     rgba(99,116,138,.35);
+  --chart-last:       var(--p-flux-400);
+  --chart-tag-bg:     var(--p-mint-400);
+  --chart-tag-fg:     #032118;
+  --chart-ma-fast:    var(--p-inst-d-1);
+  --chart-ma-slow:    var(--p-inst-d-5);
+  --chart-equity:     var(--p-inst-d-7);
+  --chart-area-from:  rgba(17,144,228,.28);
+  --chart-area-to:    rgba(17,144,228,.00);
+
+  --chart-1: var(--p-inst-d-1); --chart-2: var(--p-inst-d-2);
+  --chart-3: var(--p-inst-d-3); --chart-4: var(--p-inst-d-4);
+  --chart-5: var(--p-inst-d-5); --chart-6: var(--p-inst-d-6);
+  --chart-7: var(--p-inst-d-7); --chart-8: var(--p-inst-d-8);
+
+  --chart-seq-1: #08243A; --chart-seq-2: #0E4570; --chart-seq-3: #1169A9;
+  --chart-seq-4: #1190E4; --chart-seq-5: #7CC4FF;
+  --chart-div-n2: #FF5470; --chart-div-n1: #A33B54; --chart-div-0: #2C3B4D;
+  --chart-div-p1: #1C8A67; --chart-div-p2: #2BE3A2;
+
+  /* --- Strategy graph ------------------------------------------------------ */
+  --canvas-bg:        var(--p-steel-950);
+  --canvas-dot:       rgba(120,160,205,.10);
+  --canvas-dot-major: rgba(120,160,205,.20);
+  --node-bg:          var(--p-steel-850);
+  --node-line:        var(--p-steel-700);
+  --node-shadow:      var(--shadow-3);
+  --edge:             var(--p-steel-600);
+  --edge-active:      var(--p-flux-400);
+  --edge-invalid:     var(--p-rose-400);
+  --port:             var(--p-steel-900);
+  --port-line:        var(--p-steel-600);
+
+  --node-data:      var(--p-inst-d-7);
+  --node-indicator: var(--p-inst-d-1);
+  --node-signal:    var(--p-inst-d-2);
+  --node-logic:     var(--p-steel-400);
+  --node-intent:    var(--p-mint-400);
+  --node-risk:      var(--p-rose-400);
+  --node-ai:        var(--p-ion-400);
+
+  /* --- Instrument identity chips ------------------------------------------- */
+  --chip-bg: var(--p-steel-800);
+  --chip-fg: var(--p-steel-200);
+  --chip-line: var(--p-steel-700);
+}
+
+/* System preference fallback when no explicit theme is set ------------------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="paper"]):not([data-theme="terminal"]) {
+    /* Mirror of [data-theme="terminal"] — keep in sync, or set data-theme
+       server-side and delete this block. */
+    color-scheme: dark;
+  }
+}
