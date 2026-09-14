@@ -1,0 +1,98 @@
+# The research agent's production profile (ADR-0031, harness guide §1.2).
+#
+# This is the permissive case of the same schema every other profile uses, not a
+# separate code path. Everything here is enforced by harness code; a value nothing
+# reads is a bug, and `tests/conformance.rs` fails when one appears.
+
+model_id: "claude-opus-5"
+provider: "anthropic-agent-sdk"
+tier: "frontier"
+
+# A5 background/autonomous: research sessions run for hours with no human attached.
+# That is why the policy engine treats this agent as unattended by default and gives
+# it NARROWER standing permissions than an interactive one — absence of a user
+# watching means less authority, never more (guide §14.3).
+archetype: "background"
+
+context:
+  advertised_tokens: 200000
+  # Well below the window on purpose. Reasoning quality degrades long before a
+  # context is full, and D-11 says the way to spend less is to waste less, not to
+  # cut capability — so this is a waste ceiling, not a capability cut.
+  effective_budget_tokens: 120000
+  reserve_for_output: 16000
+  # A tool result larger than this is written to the scratchpad and enters context
+  # as a summary plus a handle. 32 KiB is roughly a long file or a few hundred bar
+  # rows: enough to reason over, small enough that one greedy call cannot take the
+  # step's whole budget.
+  max_tool_result_bytes: 32768
+
+tools:
+  # The catalogue is 56 tools. This is what may be in front of the model at once.
+  # The gap between the two numbers is what dynamic routing closes.
+  max_exposed_per_step: 24
+  schema_style: "rich"
+  routing: "dynamic"
+  parallel_calls: true
+
+output:
+  # The Agent SDK does not expose grammar-constrained decoding, and the guide makes
+  # it a local-tier requirement rather than a universal one. The adapter reports
+  # `false` honestly, which is what makes `verify` refuse a local profile here
+  # instead of running one unprotected.
+  constrained_decoding: false
+  native_tool_template: true
+  temperature_tool_calls: 0.0
+  # Appendix A: 2 for frontier. Kept at 3 so every tier shares one retry budget —
+  # a ladder that behaves differently per tier is one more thing to reason about,
+  # and the third attempt costs one turn.
+  max_retries_per_call: 3
+
+orchestration:
+  mode: "freeform"
+  # DEVIATION from Appendix A (frontier default: 30). Stated per the guide's
+  # operating procedure step 6.
+  #
+  # Appendix A's 30 is calibrated for a task that answers a question. A task here is
+  # a multi-hour research session: read data, build features, sweep, study, advance
+  # gates, write a report. It makes hundreds of tool calls legitimately, and a
+  # 30-step ceiling would truncate honest work mid-funnel.
+  #
+  # The real guards are the ones that bound cost rather than count: max_usd_per_task,
+  # max_wall_clock_s, and the trial counter, which raises the significance bar as the
+  # search widens. max_steps is the backstop against a loop, not the budget.
+  #
+  # No eval justifies 400 specifically; it is a domain judgement, and the eval suite
+  # records steps per task so it can be tightened on evidence.
+  max_steps: 400
+  few_shot_examples: 0
+  reflection: true
+  # Depth 1 (guide §13.3). A sub-agent that can spawn sub-agents is a cost and
+  # reliability bomb, and no eval has argued for more.
+  max_subagent_depth: 1
+  code_execution: "full"
+
+# The trifecta audit (guide §14.1), recorded rather than believed.
+trifecta:
+  # Research data, the project's own artifacts, the exploration ledger.
+  private_data: true
+  # Reddit and web-collector text, plus any third-party tool description.
+  untrusted_content: true
+  # CUT. The container's network is `internal: true`: it resolves the platform and
+  # nothing else. Verified by test — `gaierror` on api.anthropic.com from inside.
+  outbound_channel: false
+  mitigation: >
+    The outbound leg is cut at the container network, not by policy: the agent's
+    network reaches the platform API and nothing else, so there is no channel to
+    exfiltrate over even if injected content persuaded it to try. Publishing happens
+    only by writing to outputs/ and calling deliver, which a human approves.
+
+budgets:
+  max_usd_per_task: 25.0
+  max_wall_clock_s: 14400
+  max_tokens_per_task: 40000000
+
+notes: >
+  Frontier tier per D-01. The harness-side discipline here is not a concession to
+  local models: tool overload and context rot degrade frontier models too, just
+  later (guide §0.4).

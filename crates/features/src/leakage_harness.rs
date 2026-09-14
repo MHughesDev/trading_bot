@@ -227,7 +227,7 @@ mod tests {
             purge_bars: 5,
             embargo_bars: 5,
         };
-        let folds = walk_forward_folds(10_000, &spec, 5).unwrap();
+        let folds = walk_forward_folds(10_000, &spec, &crate::walk_forward::horizon_only(5)).unwrap();
         for fold in &folds {
             assert!(
                 fold.test.start >= fold.cal.end,
@@ -256,7 +256,7 @@ mod tests {
         }
 
         // A spec with insufficient history must fail — never silently truncate.
-        let err = walk_forward_folds(10, &spec, 5).unwrap_err();
+        let err = walk_forward_folds(10, &spec, &crate::walk_forward::horizon_only(5)).unwrap_err();
         assert!(
             matches!(err, FoldError::InsufficientHistory { .. }),
             "expected InsufficientHistory, got {err:?}"

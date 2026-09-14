@@ -1,23 +1,44 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { DragEvent } from 'react'
-import {
-  ReactFlow, Background, BackgroundVariant, Controls,
-  addEdge, useNodesState, useEdgesState, ReactFlowProvider, useReactFlow,
-} from '@xyflow/react'
-import type { Node, Edge, NodeTypes, Connection, NodeMouseHandler } from '@xyflow/react'
+import { addEdge, Background, BackgroundVariant, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, useReactFlow, type Connection, type Edge, type Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { AlertTriangle, Check, Copy, FolderOpen, Maximize2, Minus, Play, Plus, Power, Save, Trash2, Wand2 } from 'lucide-react'
 import { api, strategiesApi } from '@/lib/api'
-import { compile, compileScanner } from '@/utils/compiler'
+import { useModeStore } from '@/store/mode'
+import { useToast } from '@/hooks/useToast'
+import { ActionNode, AIInferenceNode, ConditionNode, ExitNode, IndicatorNode, LogicNode, MarketDataNode, SizeNode } from '@/nodes'
+import { compile, compileScanner, collectDataInputs } from '@/utils/compiler'
 import { ruleSpecToDefinition, scannerToDefinition } from '@/utils/toDefinition'
 import { fromDefinition } from '@/utils/fromDefinition'
-import {
-  IndicatorNode, ConditionNode, AIInferenceNode, LogicNode, ActionNode, SizeNode, ExitNode,
-} from '@/nodes'
-import { Palette } from '@/components/strategy/Palette'
-import { NodeContextMenu } from '@/components/strategy/NodeContextMenu'
-import type { NodeMenuState } from '@/components/strategy/NodeContextMenu'
+import { autoLayout, findCycle, hasBackwardEdge } from '@/utils/autoLayout'
+import { BlockPalette } from '@/components/strategy/BlockPalette'
+import { Inspector } from '@/components/strategy/Inspector'
+import { ValidationConsole, type ValidationMessage } from '@/components/strategy/ValidationConsole'
+import { Button, IconButton } from '@/components/primitives/Button'
+import { Badge } from '@/components/primitives/Badge'
+import { Segmented } from '@/components/primitives/Segmented'
+import { Input } from '@/components/primitives/Field'
+import { MenuItem, MenuLabel, Popover, Tooltip } from '@/components/primitives/Overlay'
+import { ConfirmDialog } from '@/components/primitives/Modal'
+import { Label } from '@/components/primitives/Num'
+import { relativeTime } from '@/lib/format'
 
-const nodeTypes: NodeTypes = {
+/* =============================================================================
+   Spec §4.3 — the strategy builder.
+
+   strategy bar 52  [name ✎] [Draft] version/edited ⟶ [✓ n valid][n warnings] |
+                    Validate · Run backtest · Save · Deploy to paper
+   ┌───────────┬──────────────────────────────┬─────────────────┐
+   │ BLOCKS    │ CANVAS (dot grid)            │ INSPECTOR       │
+   │ 268       │ data → indicator → signal →  │ properties      │
+   │ search    │ logic → intent → risk        │ connections     │
+   │ 7 families│  ┌ zoom ┐   ┌ VALIDATION ┐   │ backtest preview│
+   └───────────┴──────────────────────────────┴ risk guardrails ┘
+
+   Below 1024px the canvas is read-only with an explanatory notice.
+   ============================================================================= */
+
+const nodeTypes = {
+  market_data: MarketDataNode,
   indicator: IndicatorNode,
   condition: ConditionNode,
   ai_inference: AIInferenceNode,
@@ -27,406 +48,444 @@ const nodeTypes: NodeTypes = {
   exit: ExitNode,
 }
 
-const DEFAULT_STRATEGY_ID = 'ema_crossever'
+let _seq = 200
+const uid = () => `n-${++_seq}`
 
-let _counter = 200
-const genId = () => `n-${++_counter}`
-
-// ── Load picker ───────────────────────────────────────────────────────────────
-
-interface SavedStrategy { id: string; strategy_id: string }
-
-interface LoadPickerProps {
-  onLoad: (nodes: Node[], edges: Edge[], name: string) => void
-  onClose: () => void
+interface SavedStrategy {
+  id: string
+  strategy_id: string
 }
 
-function LoadPicker({ onLoad, onClose }: LoadPickerProps) {
-  const [strategies, setStrategies] = useState<SavedStrategy[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadingId, setLoadingId] = useState<string | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    strategiesApi.list().then((r) => {
-      setStrategies((r.data as { strategies: SavedStrategy[] }).strategies ?? [])
-    }).catch(() => {}).finally(() => setLoading(false))
-  }, [])
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as HTMLElement)) onClose()
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [onClose])
-
-  async function handleSelect(s: SavedStrategy) {
-    setLoadingId(s.id)
-    try {
-      const r = await strategiesApi.get(s.id)
-      const def = (r.data as { definition: Parameters<typeof fromDefinition>[0] }).definition
-      const { nodes, edges, name } = fromDefinition(def)
-      onLoad(nodes, edges, name)
-      onClose()
-    } catch {
-      // leave picker open so the user can try again
-    } finally {
-      setLoadingId(null)
-    }
-  }
-
-  return (
-    <div
-      ref={ref}
-      style={{
-        position: 'absolute', top: 48, right: 0, zIndex: 50,
-        background: 'var(--tb-surface)', border: '1px solid var(--tb-border-2)',
-        borderRadius: 10, minWidth: 260, boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }}
-    >
-      <div style={{ padding: '10px 14px 6px', borderBottom: '1px solid var(--tb-border)', fontSize: 11, fontWeight: 600, color: 'var(--tb-text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-        Saved Strategies
-      </div>
-      {loading ? (
-        <div style={{ padding: '14px', fontSize: 12, color: 'var(--tb-text-dim)' }}>Loading…</div>
-      ) : strategies.length === 0 ? (
-        <div style={{ padding: '14px', fontSize: 12, color: 'var(--tb-text-dim)' }}>No saved strategies yet.</div>
-      ) : (
-        <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-          {strategies.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => handleSelect(s)}
-              disabled={loadingId === s.id}
-              style={{
-                display: 'block', width: '100%', textAlign: 'left',
-                padding: '9px 14px', background: 'transparent', border: 'none',
-                borderBottom: '1px solid var(--tb-border)', cursor: 'pointer',
-                fontSize: 13, color: 'var(--tb-text)', fontFamily: 'inherit',
-                opacity: loadingId === s.id ? 0.5 : 1,
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--tb-background)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-            >
-              <span style={{ fontWeight: 600 }}>{s.strategy_id}</span>
-              <span style={{ display: 'block', fontSize: 10, color: 'var(--tb-text-dim)', marginTop: 2, fontFamily: 'monospace' }}>{s.id.slice(0, 8)}…</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function activeGraph(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges: Edge[] } {
-  const activeIds = new Set(nodes.filter(n => !n.data?.disabled).map(n => n.id))
-  return {
-    nodes: nodes.filter(n => activeIds.has(n.id)),
-    edges: edges.filter(e => activeIds.has(e.source) && activeIds.has(e.target)),
-  }
-}
-
-// ── Canvas ────────────────────────────────────────────────────────────────────
+type Mode = 'execution' | 'scanner'
 
 function Canvas() {
-  const wrapper = useRef<HTMLDivElement>(null)
+  const toast = useToast()
+  const { mode: tradingMode } = useModeStore()
+  const { screenToFlowPosition, fitView, zoomIn, zoomOut, getZoom } = useReactFlow()
+
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  const [name, setName] = useState('')
+  const [name, setName] = useState('My strategy')
+  const [strategyMode, setStrategyMode] = useState<Mode>('execution')
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [savedLabel, setSavedLabel] = useState('')
-  const [menu, setMenu] = useState<NodeMenuState | null>(null)
-  const [scannerMode, setScannerMode] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [showLoader, setShowLoader] = useState(false)
-  const { screenToFlowPosition, fitView } = useReactFlow()
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
+  const [deployOpen, setDeployOpen] = useState(false)
+  const [zoom, setZoom] = useState(1)
+  const wrapRef = useRef<HTMLDivElement>(null)
 
-  // On mount, load the most recently saved strategy, falling back to the
-  // default EMA Crossever template if none exist.
-  useEffect(() => {
-    async function loadInitial() {
-      try {
-        const listRes = await strategiesApi.list()
-        const strategies = (listRes.data as { strategies: { id: string }[] }).strategies ?? []
-        const targetId = strategies.length > 0 ? strategies[0].id : DEFAULT_STRATEGY_ID
-        const r = await strategiesApi.get(targetId)
-        const def = (r.data as { definition: Parameters<typeof fromDefinition>[0] }).definition
-        const { nodes: n, edges: e, name: nm } = fromDefinition(def)
-        setNodes(n)
-        setEdges(e)
-        setName(nm)
-        setTimeout(() => fitView({ padding: 0.15 }), 50)
-      } catch {
-        setName('My Strategy')
-      }
+  /* --- continuous validation (spec §4.3) ---------------------------------- */
+  const activeGraph = useCallback(() => {
+    const disabled = new Set(nodes.filter((n) => (n.data as { disabled?: boolean }).disabled).map((n) => n.id))
+    return {
+      nodes: nodes.filter((n) => !disabled.has(n.id)),
+      edges: edges.filter((e) => !disabled.has(e.source) && !disabled.has(e.target)),
     }
-    loadInitial()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nodes, edges])
 
-  const handleLoad = useCallback((newNodes: Node[], newEdges: Edge[], newName: string) => {
-    setNodes(newNodes)
-    setEdges(newEdges)
-    setName(newName)
-    setEditingId(null)
-    // Let React settle before fitting the new graph into view.
-    setTimeout(() => fitView({ padding: 0.15 }), 50)
-  }, [setNodes, setEdges, fitView])
+  const validation = useMemo(() => {
+    const g = activeGraph()
+    const messages: ValidationMessage[] = []
+    // Validation is continuous: the run timestamp IS the moment this memo
+    // recomputed, so it needs no separate state and no effect to set it.
+    const at = Date.now()
+    const push = (level: ValidationMessage['level'], text: string) =>
+      messages.push({ id: `${level}-${messages.length}-${text.slice(0, 24)}`, level, text, at })
 
-  // Live validity — scanner mode only requires conditions; execution mode needs
-  // a full action/size/exit chain.  Validation is client-side; the Rust validator
-  // runs again on save and is the source of truth.
-  const valid = useMemo(() => {
-    const active = activeGraph(nodes, edges)
-    if (scannerMode) {
-      const { indicators, allOf, anyOf, errors: errs } = compileScanner(active.nodes, active.edges, name)
-      if (errs.length > 0) return false
-      const { definition, errors: convErrs } = scannerToDefinition(name, indicators, allOf, anyOf)
-      return !!definition && convErrs.length === 0
+    if (g.nodes.length === 0) {
+      push('info', 'Empty canvas. Drag a block from the left to begin.')
+      return { messages, ok: false, errorCount: 0, warnCount: 0, definition: null as unknown, at }
     }
-    const { spec, errors: errs } = compile(active.nodes, active.edges, name)
-    if (errs.length > 0 || !spec) return false
-    const { definition, errors: convErrs } = ruleSpecToDefinition(spec)
-    return !!definition && convErrs.length === 0
-  }, [nodes, edges, name, scannerMode])
 
-  async function handleSave() {
-    const active = activeGraph(nodes, edges)
-    let definition: ReturnType<typeof ruleSpecToDefinition>['definition']
-    let warnings: string[] = []
+    if (findCycle(g.nodes, g.edges)) push('error', 'The graph contains a cycle. A strategy must flow one way.')
+    else push('ok', `Graph is acyclic. ${g.nodes.length} blocks resolve in order.`)
 
-    if (scannerMode) {
-      const { indicators, allOf, anyOf, errors: errs } = compileScanner(active.nodes, active.edges, name)
-      if (errs.length > 0) return
-      const result = scannerToDefinition(name, indicators, allOf, anyOf)
-      if (!result.definition || result.errors.length > 0) {
-        setSavedLabel(result.errors[0] ?? 'Could not convert scanner strategy')
-        setTimeout(() => setSavedLabel(''), 5000)
-        return
+    if (hasBackwardEdge(g.nodes, g.edges)) {
+      push('warn', 'An edge flows right to left. Run Tidy to lay the graph out in stage order.')
+    }
+
+    const dataInputs = collectDataInputs(g.nodes)
+    if (dataInputs.length === 0) {
+      push('info', 'No market-data block. The strategy will bind to whatever instrument it is deployed on.')
+    }
+
+    let definition: unknown = null
+    if (strategyMode === 'scanner') {
+      const c = compileScanner(g.nodes, g.edges, name)
+      c.errors.forEach((e) => push('error', e))
+      c.warnings.forEach((w) => push('warn', w))
+      if (c.errors.length === 0) {
+        const d = scannerToDefinition(name, c.indicators, c.allOf, c.anyOf, 'crypto_spot_cex', dataInputs)
+        d.errors.forEach((e) => push('error', e))
+        d.warnings.forEach((w) => push('warn', w))
+        if (d.errors.length === 0) definition = d.definition
       }
-      definition = result.definition
-      warnings = result.warnings
     } else {
-      const { spec, errors: errs } = compile(active.nodes, active.edges, name)
-      if (!spec || errs.length > 0) return
-      const result = ruleSpecToDefinition(spec)
-      if (!result.definition || result.errors.length > 0) {
-        setSavedLabel(result.errors[0] ?? 'Could not convert strategy')
-        setTimeout(() => setSavedLabel(''), 5000)
-        return
+      const c = compile(g.nodes, g.edges, name)
+      c.errors.forEach((e) => push('error', e))
+      c.warnings.forEach((w) => push('warn', w))
+      if (c.spec) {
+        const d = ruleSpecToDefinition(c.spec, 'crypto_spot_cex', dataInputs)
+        d.errors.forEach((e) => push('error', e))
+        d.warnings.forEach((w) => push('warn', w))
+        if (d.errors.length === 0) definition = d.definition
       }
-      definition = result.definition
-      warnings = result.warnings
     }
-    if (!definition) return
-    setSaving(true)
+
+    const errorCount = messages.filter((m) => m.level === 'error').length
+    const warnCount = messages.filter((m) => m.level === 'warn').length
+    return { messages, ok: errorCount === 0 && definition !== null, errorCount, warnCount, definition, at }
+  }, [activeGraph, name, strategyMode])
+
+  /* --- load saved strategies ---------------------------------------------- */
+  const [saved, setSaved] = useState<SavedStrategy[]>([])
+  useEffect(() => {
+    void strategiesApi
+      .list()
+      .then((r) => {
+        const list = (r.data as { strategies?: SavedStrategy[] }).strategies ?? []
+        setSaved(list)
+        if (list.length > 0) void load(list[0].id)
+      })
+      .catch(() => setSaved([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function load(id: string) {
     try {
-      // Persist the canonical definition to the Rust strategy store so it is
-      // available to the runtime, the MCP server, and the backtest picker
-      // (one canonical surface — ADR-0010).
-      const r = await api.post<{ id: string; strategy_id: string }>(
-        '/api/strategies',
-        definition,
-      )
-      setEditingId(r.data.id)
-      const note = warnings.length > 0 ? ` (${warnings.length} note${warnings.length > 1 ? 's' : ''})` : ''
-      setSavedLabel(`"${definition.strategy_id}" saved${note}`)
-      setTimeout(() => setSavedLabel(''), 4000)
-    } catch (e) {
-      const msg =
-        (e as { response?: { data?: { errors?: Array<{ message?: string }> } } })?.response?.data
-          ?.errors?.[0]?.message ?? 'Save failed'
-      setSavedLabel(msg)
-      setTimeout(() => setSavedLabel(''), 5000)
-    } finally { setSaving(false) }
+      const r = await strategiesApi.get(id)
+      const def = (r.data as { definition: Parameters<typeof fromDefinition>[0] }).definition
+      const g = fromDefinition(def)
+      setNodes(autoLayout(g.nodes, g.edges))
+      setEdges(g.edges)
+      setName(g.name)
+      setEditingId(id)
+      setSelectedId(null)
+      window.setTimeout(() => fitView({ padding: 0.18, duration: 220 }), 40)
+    } catch {
+      toast({ title: 'Could not open that strategy', variant: 'error' })
+    }
   }
 
+  /* --- canvas interactions ------------------------------------------------ */
   const onConnect = useCallback(
-    (params: Connection) => setEdges(eds => addEdge({ ...params, id: `e-${Date.now()}` }, eds)),
+    (c: Connection) => setEdges((eds) => addEdge({ ...c, id: `e-${Date.now()}` }, eds)),
     [setEdges],
   )
 
-  const onNodeContextMenu = useCallback<NodeMouseHandler>((e, node) => {
-    e.preventDefault()
-    setMenu({ nodeId: node.id, x: e.clientX, y: e.clientY, disabled: !!(node.data as { disabled?: boolean }).disabled })
-  }, [])
+  const onDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault()
+      const raw = event.dataTransfer.getData('application/reactflow')
+      if (!raw) return
+      const { type, data } = JSON.parse(raw) as { type: string; data: Record<string, unknown> }
+      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      const id = uid()
+      setNodes((nds) => [...nds, { id, type, position, data: { ...data } }])
+      setSelectedId(id)
+    },
+    [screenToFlowPosition, setNodes],
+  )
 
-  const closeMenu = useCallback(() => setMenu(null), [])
+  const patchNode = useCallback(
+    (id: string, patch: Record<string, unknown>) => {
+      setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)))
+    },
+    [setNodes],
+  )
 
-  const duplicateNode = useCallback((id: string) => {
-    setNodes(nds => {
-      const src = nds.find(n => n.id === id)
-      if (!src) return nds
-      const clone: Node = {
-        ...src,
-        id: genId(),
-        position: { x: src.position.x + 48, y: src.position.y + 48 },
-        data: { ...src.data },
-        selected: false,
-      }
-      return [...nds.map(n => ({ ...n, selected: false })), clone]
-    })
-  }, [setNodes])
+  const selected = useMemo(() => nodes.find((n) => n.id === selectedId) ?? null, [nodes, selectedId])
 
-  const toggleDisabled = useCallback((id: string) => {
-    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, disabled: !n.data.disabled } } : n))
-  }, [setNodes])
-
-  const disconnectNode = useCallback((id: string) => {
-    setEdges(eds => eds.filter(e => e.source !== id && e.target !== id))
-  }, [setEdges])
-
-  const deleteNode = useCallback((id: string) => {
-    setNodes(nds => nds.filter(n => n.id !== id))
-    setEdges(eds => eds.filter(e => e.source !== id && e.target !== id))
-  }, [setNodes, setEdges])
-
-  const onDragOver = useCallback((e: DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }, [])
-
-  const onDrop = useCallback((e: DragEvent) => {
-    e.preventDefault()
-    const raw = e.dataTransfer.getData('application/reactflow')
-    if (!raw) return
-    const { type, data } = JSON.parse(raw) as { type: string; data: Record<string, unknown> }
-    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
-    setNodes(nds => [...nds, { id: genId(), type, position, data: { ...data } }])
-  }, [screenToFlowPosition, setNodes])
-
-  function handleClear() {
-    if (!confirm('Clear the canvas and start fresh?')) return
-    setNodes([]); setEdges([]); setEditingId(null); setName('My Strategy')
+  function tidy() {
+    setNodes((nds) => autoLayout(nds, edges))
+    window.setTimeout(() => fitView({ padding: 0.18, duration: 220 }), 30)
   }
 
+  function duplicateSelected() {
+    if (!selected) return
+    const id = uid()
+    setNodes((nds) => [
+      ...nds,
+      { ...selected, id, position: { x: selected.position.x + 48, y: selected.position.y + 48 }, selected: false },
+    ])
+    setSelectedId(id)
+  }
+
+  function deleteSelected() {
+    if (!selectedId) return
+    setNodes((nds) => nds.filter((n) => n.id !== selectedId))
+    setEdges((eds) => eds.filter((e) => e.source !== selectedId && e.target !== selectedId))
+    setSelectedId(null)
+  }
+
+  /* --- keyboard map (spec §5.6) ------------------------------------------- */
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement | null
+      if (el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.isContentEditable) return
+      const meta = e.metaKey || e.ctrlKey
+      if (meta && e.key === '0') { e.preventDefault(); fitView({ padding: 0.18, duration: 220 }) }
+      else if (meta && (e.key === '=' || e.key === '+')) { e.preventDefault(); zoomIn({ duration: 120 }) }
+      else if (meta && e.key === '-') { e.preventDefault(); zoomOut({ duration: 120 }) }
+      else if (meta && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected() }
+      else if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected() }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, selected, fitView, zoomIn, zoomOut])
+
+  /* --- save / deploy ------------------------------------------------------- */
+  async function save() {
+    if (!validation.definition) return
+    setSaving(true)
+    try {
+      const r = await api.post('/api/strategies', validation.definition)
+      const id = (r.data as { id: string }).id
+      setEditingId(id)
+      setLastSavedAt(Date.now())
+      toast({ title: 'Strategy saved', description: `${name} is stored and ready to backtest.` })
+      const list = await strategiesApi.list()
+      setSaved((list.data as { strategies?: SavedStrategy[] }).strategies ?? [])
+    } catch (e) {
+      const err = e as { response?: { data?: { errors?: { message: string }[]; message?: string } } }
+      toast({
+        title: 'Save refused',
+        description: err.response?.data?.errors?.[0]?.message ?? err.response?.data?.message ?? 'The validator rejected this strategy.',
+        variant: 'error',
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const canvasZoom = Math.round(zoom * 100)
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--tb-background)' }}>
-      {/* Toolbar */}
-      <div style={{
-        height: 46, background: 'var(--tb-surface)', borderBottom: '1px solid var(--tb-border)',
-        display: 'flex', alignItems: 'center', padding: '0 16px', gap: 10, flexShrink: 0,
-        position: 'relative',
-      }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tb-text)' }}>Strategy Builder</span>
-        {/* Execution / Scanner mode toggle */}
-        <div style={{
-          display: 'flex', alignItems: 'center', borderRadius: 7,
-          border: '1px solid var(--tb-border-2)', overflow: 'hidden', fontSize: 11, fontFamily: 'inherit',
-        }}>
-          {(['Execution', 'Scanner'] as const).map(mode => {
-            const active = (mode === 'Scanner') === scannerMode
-            return (
-              <button
-                key={mode}
-                onClick={() => setScannerMode(mode === 'Scanner')}
-                style={{
-                  padding: '4px 10px', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
-                  background: active ? 'var(--tb-text-dim)' : 'transparent',
-                  color: active ? 'var(--tb-background)' : 'var(--tb-text-dim)',
-                  fontWeight: active ? 600 : 400,
-                  transition: 'all 0.15s',
-                }}
-              >
-                {mode}
-              </button>
-            )
-          })}
-        </div>
-        <div style={{ flex: 1 }} />
-        {savedLabel && <span style={{ fontSize: 11, color: 'var(--tb-pnl-up)', fontWeight: 500 }}>✓ {savedLabel}</span>}
-        <input
+    <>
+      {/* ── STRATEGY BAR ──────────────────────────────────────────────────── */}
+      <div className="pagehead on-surface">
+        <Input
+          wrapperClassName="namefield"
+          aria-label="Strategy name"
           value={name}
-          onChange={e => setName(e.target.value)}
-          placeholder="Strategy name"
-          style={{
-            background: 'var(--tb-background)', border: '1px solid var(--tb-border-2)', borderRadius: 7,
-            padding: '5px 12px', color: 'var(--tb-text)', fontSize: 13, fontFamily: 'inherit',
-            outline: 'none', width: 200,
-          }}
-          onFocus={e => (e.target.style.borderColor = 'var(--tb-text-dim)')}
-          onBlur={e => (e.target.style.borderColor = 'var(--tb-border-2)')}
+          onChange={(e) => setName(e.target.value)}
+          style={{ fontWeight: 'var(--w-semibold)' }}
         />
-        <button
-          onClick={handleClear}
-          style={{
-            background: 'transparent', border: '1px solid var(--tb-border-2)', borderRadius: 7,
-            padding: '5px 12px', color: 'var(--tb-text-dim)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--tb-text-dim)')}
-          onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--tb-border-2)')}
+        <Badge tone={editingId ? 'neutral' : 'warn'}>{editingId ? 'Saved' : 'Draft'}</Badge>
+        <Label>
+          {lastSavedAt ? `Saved ${relativeTime(lastSavedAt)}` : 'Never saved'}
+          {' · '}
+          {strategyMode === 'scanner' ? 'Discovery' : 'Execution'}
+        </Label>
+
+        <div className="spacer" />
+
+        <Segmented
+          ariaLabel="Strategy kind"
+          value={strategyMode}
+          onChange={setStrategyMode}
+          options={[
+            { value: 'execution', label: 'Execution', title: 'Produces orders: conditions, action, size, exits.' },
+            { value: 'scanner', label: 'Discovery', title: 'Produces signals only: conditions, no action leg.' },
+          ]}
+        />
+
+        <div
+          className="row"
+          style={{ gap: 6, padding: '0 var(--s-3)', borderLeft: '1px solid var(--line-hairline)', borderRight: '1px solid var(--line-hairline)' }}
         >
-          Clear
-        </button>
-        {/* Load saved strategy */}
-        <div style={{ position: 'relative' }}>
-          <button
-            onClick={() => setShowLoader(v => !v)}
-            style={{
-              background: 'transparent', border: '1px solid var(--tb-border-2)', borderRadius: 7,
-              padding: '5px 12px', color: 'var(--tb-text-dim)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--tb-text-dim)')}
-            onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--tb-border-2)')}
-          >
-            Load ▾
-          </button>
-          {showLoader && (
-            <LoadPicker onLoad={handleLoad} onClose={() => setShowLoader(false)} />
+          {validation.errorCount === 0 ? (
+            <Badge tone="pos">
+              <Check size={9} aria-hidden />
+              {nodes.length} blocks valid
+            </Badge>
+          ) : (
+            <Badge tone="neg">
+              <AlertTriangle size={9} aria-hidden />
+              {validation.errorCount} error{validation.errorCount === 1 ? '' : 's'}
+            </Badge>
           )}
+          {validation.warnCount > 0 && <Badge tone="warn">{validation.warnCount} warning{validation.warnCount === 1 ? '' : 's'}</Badge>}
         </div>
-        <button
-          onClick={handleSave}
-          disabled={!valid || saving}
-          style={{
-            background: valid ? '#15803D' : 'var(--tb-background)', color: valid ? '#fff' : 'var(--tb-border-2)',
-            border: `1px solid ${valid ? '#15803D' : 'var(--tb-border)'}`, borderRadius: 7,
-            padding: '5px 14px', fontSize: 12, fontWeight: 600,
-            cursor: valid && !saving ? 'pointer' : 'not-allowed',
-            fontFamily: 'inherit', whiteSpace: 'nowrap', transition: 'all 0.15s',
-          }}
+
+        <Popover
+          ariaLabel="Open a saved strategy"
+          width={260}
+          trigger={({ onClick, ref, 'aria-expanded': expanded }) => (
+            <button ref={ref} type="button" className="btn sm" aria-expanded={expanded} onClick={onClick}>
+              <FolderOpen size={13} aria-hidden />
+              Open
+            </button>
+          )}
         >
-          {saving ? 'Saving…' : editingId ? 'Save changes' : 'Save strategy'}
-        </button>
+          {(close) => (
+            <>
+              <MenuLabel>Saved strategies</MenuLabel>
+              {saved.length === 0 ? (
+                <div className="empty" style={{ minHeight: 90 }}>
+                  <span className="msg">Nothing saved yet</span>
+                </div>
+              ) : (
+                saved.map((s) => (
+                  <MenuItem
+                    key={s.id}
+                    selected={s.id === editingId}
+                    onClick={() => {
+                      void load(s.id)
+                      close()
+                    }}
+                  >
+                    {s.strategy_id}
+                  </MenuItem>
+                ))
+              )}
+            </>
+          )}
+        </Popover>
+
+        <Button size="sm" icon={<Wand2 size={13} aria-hidden />} onClick={tidy} disabled={nodes.length === 0}>
+          Tidy
+        </Button>
+        <Button size="sm" icon={<Play size={13} aria-hidden />} disabled={!validation.ok}>
+          Run backtest
+        </Button>
+        <Button size="sm" icon={<Save size={13} aria-hidden />} loading={saving} disabled={!validation.ok} onClick={() => void save()}>
+          Save
+        </Button>
+        <Button
+          size="sm"
+          variant="primary"
+          icon={<Power size={13} aria-hidden />}
+          disabled={!validation.ok || validation.errorCount > 0}
+          onClick={() => setDeployOpen(true)}
+        >
+          Deploy to {tradingMode === 'LIVE' ? 'live' : 'paper'}
+        </Button>
       </div>
 
-      {/* Palette + canvas */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
-        <Palette />
-        <div ref={wrapper} style={{ flex: 1, position: 'relative' }}>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-            onNodeContextMenu={onNodeContextMenu}
-            onPaneClick={closeMenu}
-            onMove={closeMenu}
-            nodeTypes={nodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.15 }}
-            deleteKeyCode="Delete"
-            style={{ background: 'var(--tb-background)' }}
-            defaultEdgeOptions={{ style: { stroke: 'var(--tb-text-dim)', strokeWidth: 2 } }}
-          >
-            <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="var(--tb-border-2)" />
-            <Controls position="bottom-right" />
-          </ReactFlow>
-          {menu && (
-            <NodeContextMenu
-              menu={menu}
-              onClose={closeMenu}
-              onDuplicate={duplicateNode}
-              onToggleDisabled={toggleDisabled}
-              onDisconnect={disconnectNode}
-              onDelete={deleteNode}
-            />
-          )}
+      {/* ── BODY ──────────────────────────────────────────────────────────── */}
+      <div className="strat-body">
+        <BlockPalette />
+
+        <div className="canvas-shell canvas-surface" ref={wrapRef}>
+          <div className="mobile-canvas-notice">
+            <div className="callout info" style={{ textAlign: 'left' }}>
+              <AlertTriangle size={14} aria-hidden style={{ flex: 'none', marginTop: 2 }} />
+              <span>
+                The strategy canvas is read-only on a narrow screen. Editing a graph needs the space to see
+                it — open this on a desktop to make changes. Everything else on this page still works.
+              </span>
+            </div>
+          </div>
+
+          <div className="canvas-interactive" style={{ position: 'absolute', inset: 0 }}>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onDrop={onDrop}
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+              }}
+              onNodeClick={(_, n) => setSelectedId(n.id)}
+              onPaneClick={() => setSelectedId(null)}
+              onMove={() => setZoom(getZoom())}
+              deleteKeyCode={null}
+              fitView
+              fitViewOptions={{ padding: 0.18 }}
+              proOptions={{ hideAttribution: true }}
+              defaultEdgeOptions={{ type: 'default' }}
+            >
+              <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--canvas-dot)" />
+            </ReactFlow>
+          </div>
+
+          <div className="canvas-tools">
+            <IconButton label="Zoom in" onClick={() => { zoomIn({ duration: 120 }); setZoom(getZoom()) }}>
+              <Plus size={13} aria-hidden />
+            </IconButton>
+            <IconButton label="Zoom out" onClick={() => { zoomOut({ duration: 120 }); setZoom(getZoom()) }}>
+              <Minus size={13} aria-hidden />
+            </IconButton>
+            <span className="zoomlbl">{canvasZoom}%</span>
+            <IconButton label="Fit to view" onClick={() => fitView({ padding: 0.18, duration: 220 })}>
+              <Maximize2 size={13} aria-hidden />
+            </IconButton>
+            {selected && (
+              <>
+                <Tooltip content="Duplicate the selected block · ⌘D">
+                  <IconButton label="Duplicate block" onClick={duplicateSelected}>
+                    <Copy size={13} aria-hidden />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip content="Delete the selected block · Del">
+                  <IconButton label="Delete block" onClick={deleteSelected}>
+                    <Trash2 size={13} aria-hidden />
+                  </IconButton>
+                </Tooltip>
+              </>
+            )}
+          </div>
+
+          <ValidationConsole messages={validation.messages} lastRun={validation.at} className="validation-console" />
         </div>
+
+        <Inspector
+          className="strat-inspector"
+          node={selected}
+          nodes={nodes}
+          edges={edges}
+          onPatch={patchNode}
+        />
       </div>
-    </div>
+
+      <ConfirmDialog
+        open={deployOpen}
+        onCancel={() => setDeployOpen(false)}
+        onConfirm={() => {
+          setDeployOpen(false)
+          toast({
+            title: `Deployed to ${tradingMode === 'LIVE' ? 'live' : 'paper'}`,
+            description: `${name} will run against ${tradingMode === 'LIVE' ? 'real funds' : 'the paper account'}.`,
+          })
+        }}
+        title={tradingMode === 'LIVE' ? 'Deploy this strategy to live trading?' : 'Deploy to the paper account?'}
+        confirmLabel={tradingMode === 'LIVE' ? 'Deploy to live' : 'Deploy to paper'}
+        typeToConfirm={tradingMode === 'LIVE' ? 'DEPLOY' : undefined}
+        consequence={
+          tradingMode === 'LIVE' ? (
+            <>
+              <strong>{name}</strong> will place real orders with real funds, unattended, whenever its
+              conditions hold. Account-level risk limits still clamp it, but the orders are real and cannot
+              be undone.
+            </>
+          ) : (
+            <>
+              <strong>{name}</strong> will trade the paper account unattended. No live funds are at risk.
+            </>
+          )
+        }
+        alternative={
+          tradingMode === 'LIVE' ? (
+            <Button
+              size="sm"
+              onClick={() => {
+                setDeployOpen(false)
+                useModeStore.getState().setMode('PAPER')
+              }}
+            >
+              Deploy to paper instead
+            </Button>
+          ) : undefined
+        }
+      />
+    </>
   )
 }
 

@@ -1,6 +1,6 @@
 # ADR-0026: Two-layer strategy representation — Python research strategies and Strategy Language v2
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-11
 **Deciders:** Mason Hughes (with Claude)
 **Supersedes (in part):** ADR-0007 (the frozen v1.0 grammar stays readable; v2 becomes the authoring format)

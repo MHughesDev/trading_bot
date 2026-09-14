@@ -24,8 +24,8 @@ export function ModeBadge({ className }: { className?: string }) {
         className={cn(
           'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide transition-colors border',
           isPaper
-            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
-            : 'bg-green-500/10 text-green-400 border-green-500/30 hover:bg-green-500/20',
+            ? 'bg-warn-subtle text-warn border-line-warn hover:bg-warn-subtle'
+            : 'bg-pos-subtle text-pos border-line-pos hover:bg-pos-subtle',
         )}
         title={
           pinned
@@ -36,7 +36,7 @@ export function ModeBadge({ className }: { className?: string }) {
         <span
           className={cn(
             'h-1.5 w-1.5 rounded-full shrink-0',
-            isPaper ? 'bg-amber-400' : 'bg-green-400',
+            isPaper ? 'bg-warn-subtle' : 'bg-pos-fill',
           )}
         />
         {mode}

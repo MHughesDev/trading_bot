@@ -18,6 +18,8 @@ members = [
     "crates/venue-router",
     "crates/ui-gateway",
     "crates/backtest",
+    "crates/harness",
+    "crates/jobs",
     "crates/model-registry",
     "crates/api",
     "crates/mcp-server",
@@ -25,6 +27,9 @@ members = [
     "crates/research",
     "crates/graph",
     "crates/semantic",
+    "crates/dataplane",
+    "crates/ledger",
+    "crates/invariants",
     "apps/platform",
     "apps/collector-crypto",
     "apps/collector-equity",
@@ -48,6 +53,7 @@ mimalloc = { version = "0.1", default-features = false }
 # async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
+harness = { path = "crates/harness" }
 
 # web API / middleware
 axum = { version = "0.8", features = ["ws", "macros"] }
@@ -124,6 +130,7 @@ demand-manager = { path = "crates/demand-manager" }
 venue-router = { path = "crates/venue-router" }
 ui-gateway = { path = "crates/ui-gateway" }
 backtest = { path = "crates/backtest" }
+jobs = { path = "crates/jobs" }
 model-registry = { path = "crates/model-registry" }
 api = { path = "crates/api" }
 mcp-server-lib = { path = "crates/mcp-server" }
@@ -131,6 +138,8 @@ llm = { path = "crates/llm" }
 research = { path = "crates/research" }
 graph = { path = "crates/graph" }
 semantic = { path = "crates/semantic" }
+dataplane = { path = "crates/dataplane" }
+ledger = { path = "crates/ledger" }
 
 # ── market_simulator SDK (external, pinned git dependency) ───────────────────
 # The backtesting engine lives in its own repository and is consumed only

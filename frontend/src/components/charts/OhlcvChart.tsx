@@ -4,7 +4,7 @@ import {
   type IChartApi, type ISeriesApi, type CandlestickData, type Time,
 } from 'lightweight-charts'
 import { useThemeStore } from '@/store/theme'
-import { chartColors } from '@/lib/chartTheme'
+import { chartPalette } from '@/lib/chartTheme'
 import type { PriceLineAnnotation } from './Annotations'
 
 export interface Bar {
@@ -46,30 +46,30 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
   useEffect(() => {
     if (!containerRef.current) return
 
-    const colors = chartColors()
+    const colors = chartPalette()
 
     const chart = createChart(containerRef.current, {
       layout: {
         background: { color: 'transparent' },
-        textColor: colors.text,
+        textColor: colors.axis,
       },
       grid: {
         vertLines: { color: colors.grid },
         horzLines: { color: colors.grid },
       },
       crosshair: { mode: 1 },
-      rightPriceScale: { borderColor: colors.border },
-      timeScale: { borderColor: colors.border, timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: colors.hairline },
+      timeScale: { borderColor: colors.hairline, timeVisible: true, secondsVisible: false },
     })
     chartRef.current = chart
 
     const candle = chart.addSeries(CandlestickSeries, {
-      upColor: colors.pnlUp,
-      downColor: colors.pnlDown,
-      borderUpColor: colors.pnlUp,
-      borderDownColor: colors.pnlDown,
-      wickUpColor: colors.pnlUp,
-      wickDownColor: colors.pnlDown,
+      upColor: colors.up,
+      downColor: colors.down,
+      borderUpColor: colors.up,
+      borderDownColor: colors.down,
+      wickUpColor: colors.up,
+      wickDownColor: colors.down,
     })
     candleRef.current = candle
 
@@ -137,11 +137,11 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
     }
 
     if (markers.length > 0) {
-      const colors = chartColors()
+      const colors = chartPalette()
       const seriesMarkers = markers.map((m) => ({
         time: toTime(m.ts),
         position: m.side === 'buy' ? ('belowBar' as const) : ('aboveBar' as const),
-        color: m.side === 'buy' ? colors.pnlUp : colors.pnlDown,
+        color: m.side === 'buy' ? colors.up : colors.down,
         shape: m.side === 'buy' ? ('arrowUp' as const) : ('arrowDown' as const),
         text: `${m.side.toUpperCase()}${m.qty ? ` ${m.qty}` : ''}`,
       }))

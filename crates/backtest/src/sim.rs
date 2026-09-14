@@ -59,7 +59,7 @@ fn money(s: &str) -> anyhow::Result<Money> {
     Money::from_str(s).map_err(|e| anyhow::anyhow!("invalid money '{s}': {e}"))
 }
 
-use crate::requirements::{FeatureKind, FeatureSpec};
+use crate::requirements::FeatureSpec;
 use crate::store::LoadedBar;
 
 /// Everything needed to run one simulation.
@@ -89,10 +89,6 @@ pub struct SimulationReport {
     pub result: serde_json::Value,
 }
 
-enum IndicatorState {
-    Ema(features::Ema),
-    Rsi(features::Rsi),
-}
 
 /// Formats a `Decimal` with exactly `precision` fractional digits.
 fn dec_str(d: Decimal, precision: u32) -> String {
@@ -304,13 +300,16 @@ pub fn run_simulation_detailed(
     // every earlier round trip lives in `position_snapshots`. The SDK's own
     // `total_positions` is `cached positions + snapshots` — we harvest the
     // same union (found when a 16-day 1m run reported one trade against the
-    // SDK's 592 positions). Snapshots share an id, so the key is
-    // (id, opened, closed).
+    // SDK's 592 positions). A snapshot is stored under a RENAMED id,
+    // `{position_id}-{uuid4}` (nautilus `Cache::snapshot_position`), so a round
+    // trip harvested as a closed position before a chunk boundary and later
+    // re-snapshotted on re-open must key on the base id — keying on the raw id
+    // counted it twice. The key is (base id, opened, closed).
     let mut closed: HashMap<String, Position> = HashMap::new();
     let key = |p: &Position| {
         format!(
             "{}|{}|{}",
-            p.id,
+            base_position_id(p.id.as_str()),
             p.ts_opened.as_u64(),
             p.ts_closed.map_or(0, |t| t.as_u64())
         )
@@ -352,7 +351,10 @@ pub fn run_simulation_detailed(
         positions.sort_by_key(|p| p.ts_closed.map_or(0, |t| t.as_u64()));
         positions.iter().map(position_to_trade).collect()
     };
-    if let Some(total) = stats.get("total_positions").and_then(serde_json::Value::as_u64) {
+    if let Some(total) = stats
+        .get("total_positions")
+        .and_then(serde_json::Value::as_u64)
+    {
         if total != trades.len() as u64 {
             tracing::warn!(
                 sdk_total_positions = total,
@@ -369,6 +371,21 @@ pub fn run_simulation_detailed(
         trades,
         stats,
     })
+}
+
+/// The id a position snapshot was taken from: nautilus stores snapshots as
+/// `{position_id}-{uuid4}`, so a trailing hyphenated UUID is stripped.
+fn base_position_id(id: &str) -> &str {
+    const UUID_LEN: usize = 36;
+    if id.len() <= UUID_LEN || !id.is_char_boundary(id.len() - UUID_LEN - 1) {
+        return id;
+    }
+    let (head, tail) = id.split_at(id.len() - UUID_LEN);
+    let is_uuid = tail.char_indices().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() });
+    match head.strip_suffix('-') {
+        Some(base) if is_uuid => base,
+        _ => id,
+    }
 }
 
 /// A simulation outcome carrying the per-trade and equity detail the suite needs.
@@ -545,17 +562,15 @@ fn build_handler(
         })
         .collect::<anyhow::Result<_>>()?;
 
-    let mut indicators: Vec<(String, IndicatorState)> = inputs
+    // Every indicator is the single runtime's windowed implementation (INV-14),
+    // evaluated over the trailing rows at each bar.
+    let indicators: Vec<(String, std::sync::Arc<dyn features::Feature>)> = inputs
         .features
         .iter()
-        .map(|f| {
-            let state = match f.kind {
-                FeatureKind::Ema => IndicatorState::Ema(features::Ema::new(f.period)),
-                FeatureKind::Rsi => IndicatorState::Rsi(features::Rsi::new(f.period)),
-            };
-            (f.name.clone(), state)
-        })
-        .collect();
+        .map(|f| Ok((f.name.clone(), features::runtime::feature(&f.name)?)))
+        .collect::<Result<_, features::FeatureError>>()?;
+    let keep = indicators.iter().map(|(_, f)| f.def().lookback_bars as usize).max().unwrap_or(1).max(1);
+    let mut rows: Vec<features::FeatureRow> = Vec::with_capacity(keep * 2);
 
     let mut feature_values: HashMap<String, f64> = HashMap::new();
     let mut bar_map: HashMap<Timeframe, BarPayload> = HashMap::new();
@@ -566,14 +581,26 @@ fn build_handler(
 
         // Indicators consume the close (same convention as the live feature
         // pipeline).  All indicators are recomputed from bars each session.
-        let close_input = close_value.to_f64().unwrap_or(0.0);
-        for (name, state) in &mut indicators {
-            let value = match state {
-                IndicatorState::Ema(ema) => Some(ema.update(close_input)),
-                IndicatorState::Rsi(rsi) => rsi.update(close_input),
-            };
-            if let Some(v) = value {
-                feature_values.insert(name.clone(), v);
+        if rows.len() >= keep * 2 {
+            rows.drain(..rows.len() + 1 - keep);
+        }
+        rows.push(features::FeatureRow {
+            ts_ns: i64::try_from(bar.ts_event.as_u64()).unwrap_or(i64::MAX),
+            open: bar.open.as_decimal().to_f64().unwrap_or(0.0),
+            high: bar.high.as_decimal().to_f64().unwrap_or(0.0),
+            low: bar.low.as_decimal().to_f64().unwrap_or(0.0),
+            close: close_value.to_f64().unwrap_or(0.0),
+            volume: bar.volume.as_decimal().to_f64().unwrap_or(0.0),
+        });
+        let decision = rows.len() - 1;
+        for (name, feature) in &indicators {
+            match features::runtime::value_at(feature.as_ref(), &rows, decision) {
+                Some(v) => {
+                    feature_values.insert(name.clone(), v);
+                }
+                None => {
+                    feature_values.remove(name);
+                }
             }
         }
 
@@ -617,6 +644,7 @@ fn build_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::requirements::FeatureKind;
     use rust_decimal_macros::dec;
 
     #[test]
@@ -624,6 +652,14 @@ mod tests {
         assert_eq!(dec_str(dec!(1.5), 4), "1.5000");
         assert_eq!(dec_str(dec!(1.23456), 4), "1.2346");
         assert_eq!(dec_str(dec!(100), 2), "100.00");
+    }
+
+    #[test]
+    fn base_position_id_strips_only_a_snapshot_uuid_suffix() {
+        assert_eq!(base_position_id("BTC-USDT.BINANCE-EMA-001-3f2b8c1e-9a4d-4e2b-8c7f-1a2b3c4d5e6f"), "BTC-USDT.BINANCE-EMA-001");
+        assert_eq!(base_position_id("BTC-USDT.BINANCE-EMA-001"), "BTC-USDT.BINANCE-EMA-001");
+        assert_eq!(base_position_id("P-zzzzzzzz-9a4d-4e2b-8c7f-1a2b3c4d5e6f"), "P-zzzzzzzz-9a4d-4e2b-8c7f-1a2b3c4d5e6f");
+        assert_eq!(base_position_id("3f2b8c1e-9a4d-4e2b-8c7f-1a2b3c4d5e6f"), "3f2b8c1e-9a4d-4e2b-8c7f-1a2b3c4d5e6f");
     }
 
     #[test]
@@ -707,8 +743,8 @@ mod tests {
                 period: 21,
             },
         ];
-        // 60 one-minute bars with a strictly rising close (100.00 → 159.00).
-        let bars: Vec<LoadedBar> = (0..60)
+        // 200 one-minute bars with a strictly rising close (100.00 → 299.00).
+        let bars: Vec<LoadedBar> = (0..200)
             .map(|i| {
                 let close = dec!(100) + Decimal::from(i);
                 LoadedBar {
@@ -719,6 +755,7 @@ mod tests {
                     close,
                     volume: dec!(1),
                     trade_count: 1,
+                    ..Default::default()
                 }
             })
             .collect();
@@ -758,7 +795,7 @@ mod tests {
                 period: 21,
             },
         ];
-        let bars: Vec<LoadedBar> = (0..60)
+        let bars: Vec<LoadedBar> = (0..200)
             .map(|i| {
                 let close = dec!(100) + Decimal::from(i);
                 LoadedBar {
@@ -769,6 +806,7 @@ mod tests {
                     close,
                     volume: dec!(1),
                     trade_count: 1,
+                    ..Default::default()
                 }
             })
             .collect();
@@ -857,10 +895,14 @@ mod tests {
                     close,
                     volume: dec!(1),
                     trade_count: 1,
+                    ..Default::default()
                 }
             })
             .collect();
-        assert!(bars.len() > chunk_size_for(bars.len()) * 3, "fixture must span several chunks");
+        assert!(
+            bars.len() > chunk_size_for(bars.len()) * 3,
+            "fixture must span several chunks"
+        );
         let inputs = SimulationInputs {
             definition: def,
             instrument_id: "BTC-USDT".into(),
@@ -877,7 +919,10 @@ mod tests {
         let control = SimulationControl::new();
         let outcome = run_simulation_detailed(inputs, &control).expect("detailed run");
         let sdk_positions = outcome.stats["total_positions"].as_u64().unwrap_or(0);
-        assert!(sdk_positions > 5, "fixture should round-trip many times, got {sdk_positions}");
+        assert!(
+            sdk_positions > 5,
+            "fixture should round-trip many times, got {sdk_positions}"
+        );
         assert_eq!(
             outcome.trades.len() as u64,
             sdk_positions,

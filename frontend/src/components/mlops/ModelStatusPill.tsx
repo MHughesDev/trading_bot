@@ -7,43 +7,21 @@ interface ModelStatusPillProps {
   className?: string
 }
 
+/* A model's lifecycle state wears the same badge tones as every other state in
+   the product: a training run is an in-progress thing (accent), an evaluation
+   is a caution (warn), an active model is positive, a failure is negative. The
+   glow is a `terminal`-only affordance and resolves to `none` in `paper`. */
 const STATUS_CONFIG: Record<
   ModelStatus,
-  { label: string; className: string; pulse?: boolean; glow?: string }
+  { label: string; tone: string; pulse?: boolean; glow?: string }
 > = {
-  draft: {
-    label: 'Draft',
-    className: 'bg-[color:var(--tb-surface-2)] text-[color:var(--tb-text-muted)] border border-[color:var(--tb-border)]',
-  },
-  training: {
-    label: 'Training',
-    className: 'bg-blue-500/15 text-blue-400 border border-blue-500/30',
-    pulse: true,
-    glow: '0 0 8px rgba(59,130,246,0.4)',
-  },
-  evaluating: {
-    label: 'Evaluating',
-    className: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',
-    pulse: true,
-    glow: '0 0 8px rgba(245,158,11,0.4)',
-  },
-  candidate: {
-    label: 'Candidate',
-    className: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
-  },
-  active: {
-    label: 'Active',
-    className: 'bg-[color:var(--tb-pnl-up)]/15 text-[color:var(--tb-pnl-up)] border border-[color:var(--tb-pnl-up)]/30',
-    glow: '0 0 10px color-mix(in srgb, var(--tb-pnl-up) 40%, transparent)',
-  },
-  archived: {
-    label: 'Archived',
-    className: 'bg-[color:var(--tb-surface-2)] text-[color:var(--tb-text-dim)] border border-[color:var(--tb-border)] opacity-60',
-  },
-  failed: {
-    label: 'Failed',
-    className: 'bg-[color:var(--tb-pnl-down)]/10 text-[color:var(--tb-pnl-down)]/70 border border-[color:var(--tb-pnl-down)]/20 opacity-80',
-  },
+  draft: { label: 'Draft', tone: 'neutral' },
+  training: { label: 'Training', tone: 'accent', pulse: true, glow: 'var(--glow-accent)' },
+  evaluating: { label: 'Evaluating', tone: 'warn', pulse: true },
+  candidate: { label: 'Candidate', tone: 'info' },
+  active: { label: 'Active', tone: 'pos', glow: 'var(--glow-pos)' },
+  archived: { label: 'Archived', tone: 'neutral' },
+  failed: { label: 'Failed', tone: 'neg' },
 }
 
 export function ModelStatusPill({ status, className }: ModelStatusPillProps) {
@@ -52,21 +30,10 @@ export function ModelStatusPill({ status, className }: ModelStatusPillProps) {
 
   const pill = (
     <span
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium font-mono',
-        cfg.className,
-        className,
-      )}
+      className={cn('badge', cfg.tone, className)}
       style={cfg.glow ? { boxShadow: cfg.glow } : undefined}
     >
-      {cfg.pulse && (
-        <span
-          className={cn(
-            'h-1.5 w-1.5 rounded-full',
-            status === 'training' ? 'bg-blue-400' : 'bg-amber-400',
-          )}
-        />
-      )}
+      {cfg.pulse && <i className="dot" aria-hidden />}
       {cfg.label}
     </span>
   )

@@ -24,11 +24,10 @@ and Set J INV-1/2/3
 - AGENT-003 (skills materialisation);
 - AGENT-004 (eval suite).
 
-> **Verify in the Phase 0 spike:** every Claude Agent SDK identifier in this spec
-> (`ClaudeSDKClient`, `ClaudeAgentOptions`, hook names, in-process MCP tools, base-URL
-> and auth-token env vars, cache TTL options, sub-agent caps, session resume) must be
-> checked against the SDK version we pin. They are marked *(verify)*. Where the SDK
-> differs, this spec adapts the mechanism and keeps the requirement.
+> **SDK identifiers verified 2026-09-11** against `claude-agent-sdk==0.2.152` (the pinned
+> version). The findings, including the two mechanisms that had to change, are in
+> [§23](#23-phase-0-spike-findings-sdk-0.2.152). Identifiers in this spec now match that
+> version. Re-run §23's introspection when the pin moves.
 
 ---
 
@@ -134,7 +133,7 @@ CREATE TABLE agent_sessions (
   state          TEXT NOT NULL,   -- §11 state machine
   is_initializer BOOLEAN NOT NULL DEFAULT false,
   project_version INT NOT NULL,
-  sdk_session_ref TEXT,           -- SDK resume handle (verify)
+  sdk_session_ref TEXT,           -- SDK session id, passed back as ClaudeAgentOptions.resume
   container_id   TEXT,
   report_id      TEXT,            -- rep_… once validated
   abort_reason   TEXT,
@@ -204,12 +203,12 @@ after retirement (§20).
 
 | Item | Specification |
 |---|---|
-| Image | `tbot-agent:<semver>` from `infra/agent-image/Dockerfile`: `python:3.11-slim` + Node runtime if the SDK requires it *(verify)* + `claude-agent-sdk` (pinned) + `tbot` + `tbot_features` wheel + polars, numpy, scipy, statsmodels, arch, scikit-learn, lightgbm, xgboost, torch (CPU), duckdb, plotly, pyarrow. No compilers beyond what the wheels need |
+| Image | `tbot-agent:<semver>` from `infra/agent-image/Dockerfile`: `python:3.11-slim` + `claude-agent-sdk==0.2.152` (pinned; **no Node runtime needed** — the wheel bundles a self-contained CLI binary in `claude_agent_sdk/_bundled/`, ~210 MB, so budget for image size) + `tbot` + `tbot_features` wheel + polars, numpy, scipy, statsmodels, arch, scikit-learn, lightgbm, xgboost, torch (CPU — the local GPU of D-17 belongs to the training-job worker, not to the agent container; the agent trains by submitting a job), duckdb, plotly, pyarrow. No compilers beyond what the wheels need |
 | User | Non-root UID 10001. `--cap-drop ALL`, `--security-opt no-new-privileges`, `--read-only` root filesystem |
 | Writable | `/workspace` (named volume `tbot-ws-<project_id>`), `/tmp` (tmpfs, size-limited), `/home/agent/.cache` (tmpfs) |
 | Limits | Per tier: CPUs, memory, PIDs, `/tmp` size. Defaults: standard = 4 CPU, 8 GiB, 512 PIDs |
 | Network | Attached only to `tbot-agent-net`, a Docker network created with `internal: true` (no default route). Reachable: the platform's API and proxy endpoint (the platform container is dual-homed on this network) and a `devpi` PyPI mirror on the same network. Nothing else resolves or routes |
-| Environment | `TBOT_API_URL`, `TBOT_TOKEN` (session token), `TBOT_PROJECT_ID`, `TBOT_SESSION_ID`, `ANTHROPIC_BASE_URL=<platform>/llm`, `ANTHROPIC_AUTH_TOKEN=<session token>` *(verify variable names)*. No provider key |
+| Environment | `TBOT_API_URL`, `TBOT_TOKEN` (session token), `TBOT_PROJECT_ID`, `TBOT_SESSION_ID`, `ANTHROPIC_BASE_URL=<platform>/llm`, `ANTHROPIC_AUTH_TOKEN=<session token>` (**verified**: both are honoured by the bundled CLI, and are passed through `ClaudeAgentOptions.env`; `ANTHROPIC_CUSTOM_HEADERS` is available for the role header, and `CLAUDE_CODE_OAUTH_TOKEN` is the subscription-path equivalent of D-16 — but the container still sends only the session token, and the proxy swaps in the real credential). No provider key |
 | Lifecycle | Created on first session; stopped after `idle_stop_after` (default 15 min) without an active session; the volume persists; removed on project archive (volume snapshot kept) |
 | Snapshots | On session stop: `git commit` of the workspace (by `agent-host`), plus a volume snapshot where the backend supports it |
 
@@ -222,7 +221,9 @@ after retirement (§20).
 2. Build the SDK client (§8.2) and run the session. Stream every SDK message to the
    bridge as an `agent_event`.
 3. Receive steering messages and inject them as user turns at the next boundary, through
-   the SDK's streaming input *(verify)*.
+   the SDK's streaming input (**verified**: `ClaudeSDKClient.query()` accepts an async
+   iterable of message dicts, so a steering turn is appended without restarting the
+   session; `ClaudeSDKClient.interrupt()` cancels the current turn).
 4. Implement the in-process tool `ask_user(question, options, default, timeout_s)`. It
    posts an `approval_requests` row through the orchestrator, blocks, and returns the
    answer, or the default at timeout.
@@ -233,15 +234,17 @@ after retirement (§20).
 
 | Option | Value |
 |---|---|
-| System prompt | A stable core: identity, behaviour contract (BS-007 02 §4), protocol summary, workspace map pointer. No dynamic values. Dynamic context (bootstrap output, time) enters as the first user message (e.g. `excludeDynamicSections` *(verify)*) |
+| System prompt | A stable core: identity, behaviour contract (BS-007 02 §4), protocol summary, workspace map pointer. No dynamic values. Dynamic context (bootstrap output, time) enters as the first user message. **Verified:** `system_prompt` takes a `SystemPromptPreset` `{"type": "preset", "preset": "claude_code", "append": …, "exclude_dynamic_sections": True}` (snake_case in the Python SDK), or a `SystemPromptFile` `{"type": "file", "path": …}`, or a plain string |
 | `cwd` | `/workspace` |
-| Settings source | Project settings from the read-only `/workspace/.claude/settings.json` (hooks) *(verify loader)* |
+| Settings source | `setting_sources=['project']` loads `/workspace/.claude/settings.json` (hooks), which is mounted read-only. **Verified:** `ClaudeAgentOptions.setting_sources: list['user'|'project'|'local'] | None` — leave `user` and `local` out so nothing on the host leaks in |
 | Tools | SDK built-ins (Read, Write, Edit, Bash, Grep, Glob, Task/sub-agents, Skill) + in-process MCP server exposing `ask_user` only. Web fetch/search disabled |
 | Model / effort | `research_projects.model` / `.effort` (≥ high) |
-| Cache TTL | 1 h for the main loop; per-role for sub-agents *(verify option names)* |
+| Cache TTL | **Not settable from the SDK.** The CLI places its own `cache_control` breakpoints and picks `ttl: "5m"` or `"1h"` itself under the `extended-cache-ttl` beta; the only env toggle is `DISABLE_PROMPT_CACHING`. **Consequence:** if a 1 h TTL is required for long research sessions, the *proxy* must rewrite `cache_control.ttl` on the outbound request (RT-22), not the harness |
 | Compaction | Server-side, same model; instructions from CLAUDE.md (§10.2) |
-| Sub-agents | From read-only `/workspace/.claude/agents/*.md` (§13); depth 1; concurrency cap *(verify env/option)* |
-| Budget | `max_budget_usd` per session as belt-and-braces *(verify)*. The proxy is authoritative (§9) |
+| Sub-agents | From read-only `/workspace/.claude/agents/*.md` (§13), or programmatically via `ClaudeAgentOptions.agents: dict[str, AgentDefinition]`. **Verified:** `AgentDefinition` carries `description`, `prompt`, `tools`, `disallowedTools`, `model`, `skills`, `memory`, `mcpServers`, `initialPrompt`, `maxTurns`, `background`, `effort`, `permissionMode` — so the per-role tool restriction and turn cap of §13 are expressible. The total sub-agent cap is `ClaudeAgentOptions.task_budget = {"total": N}` (`TaskBudget`) |
+| Skills | **Verified:** `ClaudeAgentOptions.skills: list[str] \| "all"` selects the admitted skill set directly, so the materialiser (AGENT-003) writes files and names them here rather than relying on discovery alone |
+| Budget | `max_budget_usd: float` per session (**verified**, a real `ClaudeAgentOptions` field) as belt-and-braces. The proxy is authoritative (§9) |
+| Sandbox (defence in depth) | **Verified:** `ClaudeAgentOptions.sandbox: SandboxSettings` gives an in-harness sandbox with `network.allowedDomains` / `deniedDomains` / `allowLocalBinding`, `excludedCommands` and `autoAllowBashIfSandboxed`. This is a **second** layer inside the container of §7, not a replacement: the container's `internal: true` network stays the enforcement boundary |
 
 ## 9. LLM proxy (`crates/llm-proxy`, route prefix `/llm`)
 
@@ -258,8 +261,12 @@ after retirement (§20).
   Compute cost from a versioned price table (`config/llm_prices.toml`). Insert
   `llm_usage`. Update `agent_sessions.spend_usd`.
 - **Telemetry fields:** as in the `llm_usage` table (§5). The `role` is taken from a
-  header set by `agent-host` per sub-agent (`X-Tbot-Role`) *(verify header
-  propagation through the SDK; otherwise infer from SDK events)*.
+  header set by `agent-host` per sub-agent (`X-Tbot-Role`). **Verified mechanism:**
+  `ANTHROPIC_CUSTOM_HEADERS` in `ClaudeAgentOptions.env` is honoured by the CLI, but it
+  is process-wide, so it cannot vary per sub-agent within one session. Sub-agent
+  attribution therefore comes from SDK events (`SubagentStartHookInput.agent_type`,
+  `agent_id`, and `forward_subagent_text`), with `X-Tbot-Role` carrying only the
+  session-level role. The spike must confirm the event-to-request correlation.
 - **Streaming:** pass through server-sent chunks unchanged, and account on stream end.
 - **Headers:** forward cache-diagnosis and beta headers the SDK sets. Strip client auth.
 - **Failure:** upstream errors pass through with their status. Proxy errors use the
@@ -303,7 +310,8 @@ No timestamps or per-session values.
 ### 10.3 `NOTEBOOK.md`
 
 `## 1. Current state` (≤ 2,000 tokens: goal, plan step, active hypotheses, candidates,
-blockers) is followed by free sections. The PostCompact hook re-injects §1. A PreToolUse
+blockers) is followed by free sections. The PreCompact + UserPromptSubmit pair re-injects
+§1 (§12). A PreToolUse
 check warns when §1 exceeds its budget.
 
 ### 10.4 `RESEARCH_PLAN.json` (JSON Schema in `apps/agent-host/schemas/research_plan.json`)
@@ -350,7 +358,8 @@ any → failed (unrecoverable; abort_reason set)
   workspace is committed.
 - **suspended/resuming:** on platform boot, every session in
   `running | waiting_input | starting` goes to `suspended`, then `resuming`. The
-  orchestrator restarts `agent-host` with the SDK resume handle *(verify)* or, if resume
+  orchestrator restarts `agent-host` with `ClaudeAgentOptions.resume=<sdk_session_ref>`
+  (**verified**; `resume_drops_turn` discards a half-finished turn) or, if resume
   is unavailable, a new session that re-bootstraps from disk and registries. Pending jobs
   continue in COMP-005.
 - **The initializer session** (the first in a project): the system core instructs it to
@@ -366,7 +375,8 @@ any → failed (unrecoverable; abort_reason set)
 | PreToolUse | Bash | Deny commands matching the policy list (`docker`, `sudo`, secret paths, raw `curl`/`wget` to hosts other than `$TBOT_API_URL`); deny `tbot` subcommands outside the token scopes (fast feedback; the platform re-checks) | Deny |
 | PreToolUse | Read | Duplicate-read guard: same path and hash as a read since the last compaction → return a short pointer ("unchanged since turn N; use offset/limit for a slice") | Allow |
 | PostToolUse | * | Output guard: tool output > 8,000 tokens → write to `/tmp/out/<id>.txt` and replace it with a ≤ 300-token summary plus the path. Emit a usage event | Pass through |
-| PostCompact *(verify availability; else SessionStart-on-compact)* | * | Re-inject NOTEBOOK §1 | — |
+| PreCompact | * | **There is no `PostCompact` hook in SDK 0.2.152** (§23). Instead: on `PreCompact` (which carries `trigger: "manual" \| "auto"` and `custom_instructions`), `agent-host` sets `custom_instructions` to preserve NOTEBOOK §1 verbatim and records that a compaction happened | — |
+| UserPromptSubmit | * | If a compaction was recorded since the last user turn, prepend the current NOTEBOOK §1 (≤ 2k tokens) to the turn. This is the actual re-injection mechanism, and it is deterministic rather than dependent on what the summariser kept | Pass through |
 | Stop | * | Require: (a) `reports/final_report.json` submitted and validated (`rep_…` stored on the session), or an explicit abort record; (b) a finding per hypothesis moved to rejected/supported this session (`tbot memory` check); (c) a clean git commit; (d) at most one skill-proposal nudge (AGENT-003 triggers). If unmet, block the stop with a message listing what's missing, at most 3 times; then allow the stop and record `abort_reason='stop_gate_unmet'` | Allow + record |
 
 The hook implementation lives in `apps/agent-host/hooks/` (Python callbacks or scripts).
@@ -406,6 +416,16 @@ data (`artifact` plus summary).
 
 ## 15. `final_report`
 
+> **Amended by ADR-0032.** `final_report` and the internal agent's `finish_task` are
+> **one termination contract with two transports**, not two contracts. Both are typed
+> calls the harness validates; both require evidence and refuse a conclusion without
+> it; neither can be triggered by prose. The difference is only where the payload
+> lands: `final_report` is a stored artifact for a containerised research session
+> (rich enough to carry claims, candidates and a rejection ledger), `finish_task` is
+> an in-band tool call for a single agent run. The `FINAL:` free-text contract this
+> spec was written alongside is **removed** — a model that can end a task by writing
+> the right words can end it by accident.
+
 **Submission:** `POST /api/reports` (CLI `tbot report submit <file>`), scope
 `research:reports`.
 
@@ -443,7 +463,7 @@ Flagged claims then get an LLM citation check (proxy, role `citation`). **Respon
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/agent/sessions/{id}/steer` `{text}` | Queue a steering message; delivered at the next turn boundary |
-| `POST /api/agent/sessions/{id}/interrupt` | Interrupt the current turn (SDK interrupt *(verify)*) |
+| `POST /api/agent/sessions/{id}/interrupt` | Interrupt the current turn (`ClaudeSDKClient.interrupt()`, **verified**) |
 | `POST /api/agent/sessions/{id}/stop` | Graceful stop through the Stop gate |
 | `GET /api/approvals?state=pending` | Approvals inbox (all kinds) |
 | `POST /api/approvals/{id}/answer` `{option|value}` | Answer; unblocks `ask_user` or applies an approved action |
@@ -540,14 +560,66 @@ Telemetry is in §9. Every change to these rules must pass AGENT-004 non-inferio
 | A9 | Critic sub-agent context contains no transcript; reader sub-agent has no tools | RT-13 |
 | A10 | Scope CI: every route annotated; agent token denied on `/api/orders`, automations and alias routes | RT-05 |
 
-## 23. Open items for the Phase 0 spike
+## 23. Phase 0 spike findings (SDK 0.2.152)
 
-1. Confirm SDK identifiers and behaviours marked *(verify)*: base URL and auth token,
-   resume, streaming input for steering, PostCompact availability, TTL options,
-   sub-agent caps, role header propagation.
-2. Measure the container cold start and `agent-host` start time. Target a session start
+**Method (2026-09-11).** `claude-agent-sdk` was installed into a throwaway venv and
+introspected: `dataclasses.fields(ClaudeAgentOptions)`, the `hooks` event `Literal`, the
+`TypedDict` annotations of the option payloads, `dir(ClaudeSDKClient)`, and a string scan
+of the bundled CLI binary for environment-variable names. Version pinned by this spec:
+**`claude-agent-sdk==0.2.152`**. Repeat this when the pin moves.
+
+### 23.1 Verified as designed
+
+| Item this spec assumed | Verified identifier |
+|---|---|
+| Session resume | `ClaudeAgentOptions.resume: str \| None`, plus `session_id`, `fork_session`, `resume_session_at`, `resume_drops_turn`, and a pluggable `session_store: SessionStore` (`InMemorySessionStore`, `fork_session()`, `list_sessions()`, `get_session_messages()`) |
+| Base URL and auth token through the proxy | The bundled CLI honours `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_CUSTOM_HEADERS` and `CLAUDE_CODE_OAUTH_TOKEN`; all are passed through `ClaudeAgentOptions.env` |
+| Streaming input for steering | `ClaudeSDKClient.query()` takes a string or an async iterable of message dicts |
+| Interrupting a turn | `ClaudeSDKClient.interrupt()` |
+| Per-session dollar cap | `ClaudeAgentOptions.max_budget_usd: float \| None` |
+| Sub-agent caps and per-role restriction | `ClaudeAgentOptions.agents: dict[str, AgentDefinition]` with `tools`, `disallowedTools`, `model`, `skills`, `maxTurns`, `background`, `effort`, `permissionMode`; total cap via `task_budget: TaskBudget = {"total": int}` |
+| Static system prompt with no dynamic sections | `SystemPromptPreset = {"type": "preset", "preset": "claude_code", "append": str, "exclude_dynamic_sections": bool}` — note **snake_case**, not the `excludeDynamicSections` this spec first wrote |
+| Effort pinning | `ClaudeAgentOptions.effort: 'low'\|'medium'\|'high'\|'xhigh'\|'max'` |
+
+### 23.2 Two mechanisms that had to change
+
+1. **There is no `PostCompact` hook.** The hook events in 0.2.152 are `PreToolUse`,
+   `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Stop`, `SubagentStop`,
+   `PreCompact`, `Notification`, `SubagentStart`, `PermissionRequest`.
+   NOTEBOOK §1 re-injection therefore uses **`PreCompact` + `UserPromptSubmit`** (§12):
+   `PreCompact` supplies `custom_instructions` to the summariser and records that a
+   compaction happened; the next `UserPromptSubmit` prepends NOTEBOOK §1. This is
+   deterministic, where a post-compaction hook would have depended on the summariser.
+2. **Cache TTL is not an SDK option.** The CLI places its own `cache_control`
+   breakpoints and selects `ttl: "5m"` or `"1h"` under the `extended-cache-ttl` beta.
+   The only environment toggle is `DISABLE_PROMPT_CACHING`. Forcing a 1 h TTL is
+   therefore a **proxy** responsibility (**RT-22**), not a harness setting.
+
+### 23.3 Capabilities found that this spec should use
+
+| Finding | Consequence |
+|---|---|
+| `ClaudeAgentOptions.skills: list[str] \| "all"` | The materialiser (AGENT-003) can name the admitted skill set explicitly instead of relying on directory discovery |
+| `ClaudeAgentOptions.sandbox: SandboxSettings` with `network.allowedDomains` / `deniedDomains` / `allowLocalBinding`, `excludedCommands`, `autoAllowBashIfSandboxed` | A second containment layer **inside** the container (§8.2). The container's `internal: true` network stays the boundary that enforcement relies on |
+| `ClaudeSDKClient.get_context_usage()` → `ContextUsageResponse`, `ContextUsageCategory` | Direct context telemetry for BS-007 04 budgets, without estimating from events |
+| `include_partial_messages`, `include_hook_events`, `forward_subagent_text` | The event bridge (§8.1) can stream partial output, hook firings and sub-agent text to the UI |
+| `enable_file_checkpointing`, `ClaudeSDKClient.rewind_files()` | A cheaper workspace-rollback path than a git revert for failed experiments |
+| `betas = ['context-1m-2025-08-07']` | A 1M-token context is available behind a beta flag; evaluate against cost in BS-007 04 |
+| `ClaudeSDKClient.set_model()`, `set_permission_mode()`, `stop_task()` | Note: `set_model` **must not** be called — R3 pins the model for the session |
+| The wheel bundles a self-contained CLI (`claude_agent_sdk/_bundled/`, ~210 MB) | No Node runtime in the image (§7); budget for image size |
+| `ThinkingConfigAdaptive` / `ThinkingConfigEnabled(budget_tokens)`, `max_thinking_tokens` | Explicit thinking-budget control for long research turns |
+
+### 23.4 Still open after this pass
+
+1. **End-to-end runtime spike, not yet run:** container + minimal LLM proxy +
+   `tbot data bars` with the cutoff + `tbot jobs submit/wait` + a validated
+   `final_report` + the pure-noise eval task. The introspection above verifies
+   identifiers; it does not verify behaviour under the proxy.
+2. Measure container cold start and `agent-host` start time. Target a session start
    under 10 s.
-3. Choose the container backend beyond the dev box (Docker Desktop now; Podman or
+3. Confirm the proxy can rewrite `cache_control.ttl` without breaking the CLI's own
+   cache accounting (RT-22).
+4. Choose the container backend beyond the dev box (Docker Desktop now; Podman or
    Kubernetes later).
 
 ## 24. Traceability

@@ -1,112 +1,130 @@
-//! Compute a model's feature vector from recent ClickHouse bars.
+//! Serve a model's feature vector from recent bars (SPEC §3.3, INV-14).
 //!
-//! Mirrors the trainer's `features.py` so the Test Lab feeds a model the same
-//! columns it was trained on — and the same ones the live inference path
-//! produces (this uses the shared `features` crate primitives).
+//! Values come from the single feature runtime — the same windowed implementations
+//! the dataset materializer and the backtest use — and every serve is written to
+//! `dataplane.feature_serving_log` before the vector is returned. A serve whose log
+//! row cannot be written is a failed serve, not an unlogged one.
+
+use std::sync::Arc;
 
 use backtest::store::LoadedBar;
-use features::{Ema, Rsi};
-use rust_decimal::prelude::ToPrimitive;
 use serde_json::{json, Map, Value};
+use sqlx::PgPool;
 
-fn dec(d: rust_decimal::Decimal) -> f64 {
-    d.to_f64().unwrap_or(0.0)
+/// Who and what a serve is for.
+pub struct ServeContext<'a> {
+    pub pg: &'a PgPool,
+    pub tenant: &'a str,
+    /// Surrogate instrument id of the bars.
+    pub instrument_id: i64,
+    /// Venue the bars were read from.
+    pub venue_id: i32,
+    /// Bar period of the rows read.
+    pub period_secs: u32,
+    pub feature_set_id: &'a str,
 }
 
-/// Compute the latest-bar value for each requested feature name.
+/// The latest value of each named feature over `bars` (ascending). Features whose
+/// declared window is not yet complete, or whose value is not finite, are `null` —
+/// never a fabricated zero. Everything served is logged first.
 ///
-/// Unknown feature names resolve to 0.0 (the inference side fills missing
-/// features with 0 anyway, so this stays consistent).
-pub fn latest_vector(bars: &[LoadedBar], names: &[String]) -> Map<String, Value> {
-    let closes: Vec<f64> = bars.iter().map(|b| dec(b.close)).collect();
-    let mut out = Map::new();
+/// The bars are densified onto the UTC master clock by the one densifier
+/// (`features::align`) before anything is computed, and every value is returned
+/// with its `_age_minutes` and `_quality` companions (SPEC §2, INV-11) — the
+/// same contract, and the same code, the dataset builder uses.
+///
+/// # Errors
+/// An unknown feature name, or a failure writing the serving log.
+pub async fn serve_vector(ctx: &ServeContext<'_>, bars: &[LoadedBar], names: &[String]) -> anyhow::Result<Map<String, Value>> {
+    let step_ns = i64::from(ctx.period_secs) * 1_000_000_000;
+    let clock = features::densify_bars(&bars.iter().map(backtest::warmup::bar_obs).collect::<Vec<_>>(), step_ns);
+    let rows = clock.rows.clone();
+    let mut out: Map<String, Value> = Map::new();
+    for n in names {
+        let [value, age, quality] = features::align::companion_columns(n);
+        out.insert(value, Value::Null);
+        out.insert(age, Value::Null);
+        out.insert(quality, Value::Null);
+    }
+    let Some(last) = bars.last() else { return Ok(out) };
+    if rows.is_empty() {
+        return Ok(out);
+    }
+    let decision = rows.len() - 1;
+
+    let mut available: Vec<Arc<dyn features::Feature>> = Vec::new();
     for name in names {
-        out.insert(name.clone(), json!(compute_one(name, bars, &closes)));
-    }
-    out
-}
-
-fn compute_one(name: &str, bars: &[LoadedBar], closes: &[f64]) -> f64 {
-    let n = closes.len();
-    if n == 0 {
-        return 0.0;
-    }
-    let last = n - 1;
-    let last_bar = &bars[last];
-
-    match name {
-        "open" => dec(last_bar.open),
-        "high" => dec(last_bar.high),
-        "low" => dec(last_bar.low),
-        "close" => dec(last_bar.close),
-        "volume" => dec(last_bar.volume),
-        "log_returns_1" => {
-            if n >= 2 && closes[last - 1] > 0.0 {
-                (closes[last] / closes[last - 1]).ln()
-            } else {
-                0.0
-            }
+        let f = features::runtime::feature(name)?;
+        // The companions describe the inputs, so they are reported whether or not
+        // the value itself is available: "no value yet, from data 40 minutes old"
+        // is a different fact from "no value yet".
+        let (age, q) = clock.provenance_for(f.as_ref(), decision);
+        let [_, age_col, quality_col] = features::align::companion_columns(name);
+        out.insert(age_col, json!(age));
+        out.insert(quality_col, json!(q.0));
+        if features::runtime::value_at(f.as_ref(), &rows, decision).is_some() {
+            available.push(f);
         }
-        _ if name.starts_with("ema_") => match parse_period(name) {
-            Some(p) => {
-                let mut e = Ema::new(p.max(1));
-                let mut v = closes[0];
-                for &c in closes {
-                    v = e.update(c);
-                }
-                v
-            }
-            None => 0.0,
-        },
-        _ if name.starts_with("rsi_") => match parse_period(name) {
-            Some(p) if p >= 2 => {
-                let mut r = Rsi::new(p);
-                let mut latest = 0.0;
-                for &c in closes {
-                    if let Some(v) = r.update(c) {
-                        latest = v;
-                    }
-                }
-                latest
-            }
-            _ => 0.0,
-        },
-        _ if name.starts_with("rolling_mean_") => match parse_period(name) {
-            Some(p) => window_mean(closes, p),
-            None => 0.0,
-        },
-        _ if name.starts_with("rolling_std_") => match parse_period(name) {
-            Some(p) => window_std(closes, p),
-            None => 0.0,
-        },
-        _ if name.starts_with("returns_") => match parse_period(name) {
-            Some(p) if n > p && closes[last - p] != 0.0 => closes[last] / closes[last - p] - 1.0,
-            _ => 0.0,
-        },
-        _ => 0.0,
     }
-}
-
-/// Parse the trailing integer of a feature name like `ema_7` or `rolling_mean_14`.
-fn parse_period(name: &str) -> Option<usize> {
-    name.rsplit('_').next().and_then(|s| s.parse().ok())
-}
-
-fn window_mean(closes: &[f64], period: usize) -> f64 {
-    if period == 0 || closes.len() < period {
-        return 0.0;
+    if available.is_empty() {
+        return Ok(out);
     }
-    let w = &closes[closes.len() - period..];
-    w.iter().sum::<f64>() / period as f64
-}
 
-/// Sample standard deviation (ddof=1), matching pandas `.rolling(period).std()`.
-fn window_std(closes: &[f64], period: usize) -> f64 {
-    if period < 2 || closes.len() < period {
-        return 0.0;
+    let log = Arc::new(features::MemoryServeLog::default());
+    let runtime = features::FeatureRuntime::new(ctx.feature_set_id, available, log.clone())?;
+    let event_time = chrono::DateTime::from_timestamp_nanos(last.open_ns);
+    // The serve can only know what every row it read was knowable by.
+    let knowledge_time = chrono::DateTime::from_timestamp_nanos(bars.iter().map(|b| b.knowledge_ns).max().unwrap_or(last.knowledge_ns));
+    let values = runtime.serve_live(ctx.tenant, ctx.instrument_id, &rows, event_time, knowledge_time)?;
+
+    let records = std::mem::take(&mut *log.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    let mut tx = ledger::pg::tenant_tx(ctx.pg, ctx.tenant).await?;
+    // Every served feature is registered (§3.2): its definition row exists before
+    // any value it produced is logged.
+    for def in runtime.defs() {
+        sqlx::query(
+            "INSERT INTO dataplane.feature_def
+                 (feature_id, version, code_hash, lookback_bars, knowledge_lag_ms, output_dtype, asset_classes, deflators, info_class)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             ON CONFLICT (feature_id, version, code_hash) DO NOTHING",
+        )
+        .bind(&def.feature_id)
+        .bind(i32::try_from(def.version).unwrap_or(i32::MAX))
+        .bind(&def.code_hash)
+        .bind(i32::try_from(def.lookback_bars).unwrap_or(i32::MAX))
+        .bind(i64::try_from(def.knowledge_lag_ms).unwrap_or(i64::MAX))
+        .bind(&def.output_dtype)
+        .bind(&def.asset_classes)
+        .bind(&def.deflators)
+        .bind(serde_json::to_value(def.info_class)?.as_str().unwrap_or("market_public"))
+        .execute(&mut *tx)
+        .await?;
     }
-    let w = &closes[closes.len() - period..];
-    let mean = w.iter().sum::<f64>() / period as f64;
-    let var = w.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (period as f64 - 1.0);
-    var.sqrt()
+    for r in &records {
+        sqlx::query(
+            "INSERT INTO dataplane.feature_serving_log
+                 (serve_id, tenant_id, instrument_id, venue_id, period_secs, event_time, knowledge_time, feature_set_id,
+                  code_hashes, feature_values, served_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+        )
+        .bind(r.serve_id)
+        .bind(&r.tenant)
+        .bind(r.instrument_id)
+        .bind(ctx.venue_id)
+        .bind(i32::try_from(ctx.period_secs).unwrap_or(i32::MAX))
+        .bind(r.event_time)
+        .bind(r.knowledge_time)
+        .bind(&r.feature_set_id)
+        .bind(json!(r.code_hashes))
+        .bind(json!(r.values))
+        .bind(r.served_at)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+
+    for (k, v) in values {
+        out.insert(k, json!(v));
+    }
+    Ok(out)
 }

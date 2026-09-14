@@ -3,6 +3,7 @@
 pub mod artifacts;
 pub mod automation;
 pub mod clickhouse;
+pub mod identity;
 pub mod ledger;
 pub mod parquet;
 pub mod pnl;

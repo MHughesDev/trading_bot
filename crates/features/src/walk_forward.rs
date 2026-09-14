@@ -23,6 +23,8 @@ use std::ops::Range;
 
 use domain::model_def::cv::{WalkForwardSpec, WindowMode};
 
+pub use dataplane::split::{compute_embargo, EmbargoInputs};
+
 /// One walk-forward fold: half-open index ranges into the dataset.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fold {
@@ -56,13 +58,16 @@ impl std::fmt::Display for FoldError {
 impl std::error::Error for FoldError {}
 
 /// Compute walk-forward folds over an index of `index_len` rows (sorted by
-/// `available_time`). `horizon_bars` is the label look-ahead in base-timeframe
-/// bars; it sets the minimum purge.
+/// `available_time`). The pipeline facts set the minimum purge (the label horizon)
+/// and the minimum embargo, computed per SPEC §12.2 from the horizon, the longest
+/// declared feature lookback and knowledge lag, and settlement. A spec may raise
+/// either; it can never lower them (INV-15).
 pub fn walk_forward_folds(
     index_len: usize,
     spec: &WalkForwardSpec,
-    horizon_bars: u64,
+    pipeline: &EmbargoInputs,
 ) -> Result<Vec<Fold>, FoldError> {
+    let horizon_bars = u64::from(pipeline.horizon_bars);
     if spec.folds == 0 {
         return Err(FoldError::InvalidSpec("folds must be ≥ 1".into()));
     }
@@ -75,7 +80,7 @@ pub fn walk_forward_folds(
     let train_bars = spec.train_bars as usize;
     let cal_bars = spec.cal_bars as usize;
     let test_bars = spec.test_bars as usize;
-    let embargo = spec.embargo_bars as usize;
+    let embargo = (spec.embargo_bars as usize).max(compute_embargo(pipeline) as usize);
     // Enforce purge ≥ horizon so label windows never cross a role boundary.
     let purge = (spec.purge_bars as usize).max(horizon_bars as usize);
 
@@ -122,6 +127,39 @@ pub fn walk_forward_folds(
     Ok(folds)
 }
 
+/// The embargo inputs of a pipeline: its label horizon plus the longest declared
+/// lookback and knowledge lag among its features, read from the single feature
+/// runtime. Names no implementation answers to produce no column, so they
+/// contribute nothing. Settlement lag is zero: the training path serves spot
+/// instruments that settle as they trade (ADR-P0-25).
+#[must_use]
+pub fn embargo_inputs(features: &[String], horizon_bars: u64) -> EmbargoInputs {
+    let (mut max_lookback, mut max_lag) = (0_u32, 0_u64);
+    for name in features {
+        if let Ok(f) = crate::runtime::feature(name) {
+            max_lookback = max_lookback.max(f.def().lookback_bars);
+            max_lag = max_lag.max(f.def().knowledge_lag_ms);
+        }
+    }
+    EmbargoInputs {
+        horizon_bars: u32::try_from(horizon_bars).unwrap_or(u32::MAX),
+        max_lookback_bars: max_lookback,
+        max_knowledge_lag_ms: max_lag,
+        settlement_lag_bars: 0,
+    }
+}
+
+/// Test-only: a pipeline with no feature lookback or lag.
+#[cfg(test)]
+pub(crate) fn horizon_only(horizon_bars: u64) -> EmbargoInputs {
+    EmbargoInputs {
+        horizon_bars: u32::try_from(horizon_bars).unwrap_or(u32::MAX),
+        max_lookback_bars: 0,
+        max_knowledge_lag_ms: 0,
+        settlement_lag_bars: 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,7 +181,7 @@ mod tests {
         let mut s = spec(WindowMode::Expanding, 5);
         s.folds = 0;
         assert!(matches!(
-            walk_forward_folds(10_000, &s, 5),
+            walk_forward_folds(10_000, &s, &horizon_only(5)),
             Err(FoldError::InvalidSpec(_))
         ));
     }
@@ -152,7 +190,7 @@ mod tests {
     fn errors_when_history_too_short() {
         let s = spec(WindowMode::Rolling, 5);
         assert!(matches!(
-            walk_forward_folds(50, &s, 5),
+            walk_forward_folds(50, &s, &horizon_only(5)),
             Err(FoldError::InsufficientHistory { .. })
         ));
     }
@@ -160,7 +198,7 @@ mod tests {
     #[test]
     fn produces_requested_fold_count() {
         let s = spec(WindowMode::Expanding, 5);
-        let folds = walk_forward_folds(10_000, &s, 5).unwrap();
+        let folds = walk_forward_folds(10_000, &s, &horizon_only(5)).unwrap();
         assert_eq!(folds.len(), 5);
         assert_eq!(folds[0].index, 0);
         assert_eq!(folds[4].index, 4);
@@ -169,7 +207,7 @@ mod tests {
     #[test]
     fn expanding_train_starts_at_zero_and_grows() {
         let s = spec(WindowMode::Expanding, 5);
-        let folds = walk_forward_folds(10_000, &s, 5).unwrap();
+        let folds = walk_forward_folds(10_000, &s, &horizon_only(5)).unwrap();
         for fold in &folds {
             assert_eq!(fold.train.start, 0, "expanding train always starts at 0");
         }
@@ -182,7 +220,7 @@ mod tests {
     #[test]
     fn rolling_train_is_fixed_length_and_slides() {
         let s = spec(WindowMode::Rolling, 5);
-        let folds = walk_forward_folds(10_000, &s, 5).unwrap();
+        let folds = walk_forward_folds(10_000, &s, &horizon_only(5)).unwrap();
         for fold in &folds {
             assert_eq!(fold.train.len(), 100, "rolling train is fixed length");
         }
@@ -217,7 +255,7 @@ mod tests {
                             purge_bars: pu,
                             embargo_bars: em.max(horizon),
                         };
-                        let generated = walk_forward_folds(1_000_000, &s, horizon).unwrap();
+                        let generated = walk_forward_folds(1_000_000, &s, &horizon_only(horizon)).unwrap();
                         assert_eq!(generated.len() as u32, folds);
 
                         for fold in &generated {

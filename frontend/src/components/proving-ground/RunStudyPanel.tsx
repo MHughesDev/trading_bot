@@ -168,13 +168,13 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm">
-          <FlaskConical className="h-4 w-4 text-blue-400" />
+          <FlaskConical className="h-4 w-4 text-fg-accent" />
           New Backtest
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {/* The ledger contract, stated up front. */}
-        <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
+        <div className="flex items-start gap-2 rounded-md border border-line-warn bg-warn-subtle p-2 text-xs text-warn">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
             Every run permanently increments your search count and raises the bar your

@@ -57,7 +57,7 @@ function CircularProgress({ value }: { value: number }) {
           cy={64}
           r={r}
           fill="none"
-          stroke="var(--tb-border)"
+          stroke="var(--line-hairline)"
           strokeWidth={8}
         />
         <circle
@@ -65,7 +65,7 @@ function CircularProgress({ value }: { value: number }) {
           cy={64}
           r={r}
           fill="none"
-          stroke="var(--tb-accent)"
+          stroke="var(--bg-accent)"
           strokeWidth={8}
           strokeDasharray={circumference}
           strokeDashoffset={offset}
@@ -432,7 +432,7 @@ export function ModelTrainTab({ modelId }: Props) {
                     className={cn(
                       'h-1.5 w-1.5 rounded-full shrink-0',
                       run.status === 'running'
-                        ? 'bg-blue-400'
+                        ? 'bg-accent'
                         : run.status === 'succeeded'
                           ? 'bg-pnl-up'
                           : run.status === 'failed'

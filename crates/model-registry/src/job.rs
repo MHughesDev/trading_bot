@@ -10,6 +10,11 @@ pub(crate) struct JobState {
     pub status: RunStatus,
     pub phase: String,
     pub error: Option<String>,
+    /// How the ledger should record this run's failure (SPEC §9, ADR-P2-30).
+    /// Set by whoever failed the job, because that is the only place the answer
+    /// is known; settlement used to recover it by matching substrings of
+    /// `error`, which made every unfamiliar wording `dependency_failure`.
+    pub terminal: Option<ledger::TerminalReason>,
     pub metrics: Option<serde_json::Value>,
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
@@ -45,6 +50,7 @@ impl Job {
                 status: RunStatus::Queued,
                 phase: "queued".to_string(),
                 error: None,
+                terminal: None,
                 metrics: None,
                 started_at: None,
                 finished_at: None,
@@ -84,12 +90,16 @@ impl Job {
         }
     }
 
-    // Phase 2 will call this from the sidecar error path.
-    #[allow(dead_code)]
-    pub fn fail(&self, error: impl Into<String>) {
+    /// Fails the run with the reason the ledger will record.
+    ///
+    /// `terminal` is an argument rather than something derived from `error`
+    /// afterwards: `data_error` and `nan_divergence` carry different censoring
+    /// (INV-17) and no reading of the message decides between them reliably.
+    pub fn fail(&self, terminal: ledger::TerminalReason, error: impl Into<String>) {
         let mut state = self.state.write().expect("job state lock poisoned");
         state.status = RunStatus::Failed;
         state.error = Some(error.into());
+        state.terminal = Some(terminal);
         state.finished_at = Some(Utc::now());
     }
 }

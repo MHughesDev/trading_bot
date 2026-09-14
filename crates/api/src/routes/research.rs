@@ -93,7 +93,9 @@ pub async fn get_diagnostics(
         Some(b) => Json(b).into_response(),
         None => (
             StatusCode::NOT_FOUND,
-            Json(json!({ "error": "not_found", "message": "run not found in any of your studies" })),
+            Json(
+                json!({ "error": "not_found", "message": "run not found in any of your studies" }),
+            ),
         )
             .into_response(),
     }

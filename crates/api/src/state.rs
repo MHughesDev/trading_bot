@@ -38,6 +38,10 @@ pub struct AppState {
     /// data on the dashboard (balances, positions, P&L per asset class).
     pub paper_engine: Arc<PaperTradingEngine>,
     pub gateway: Arc<SubscriptionRegistry>,
+    /// Live frame bus. Producers publish here; every `/ws/live` socket forwards
+    /// the frames matching its own subscriptions. Without this the streaming
+    /// surfaces (quotes, chart tail, order book, tape) have no data source.
+    pub live: crate::live_bus::LiveSender,
     /// In-memory strategy definition store (keyed by Uuid).
     pub strategy_store: Arc<Mutex<HashMap<Uuid, StrategyDefinition>>>,
     /// Active strategy instance manager.
@@ -73,6 +77,87 @@ pub struct AppState {
     pub agent: Arc<crate::agent::AgentManager>,
     /// Research orchestrator (FEAT-003): sweeps over the suite, diagnostics.
     pub research: Arc<crate::research::ResearchManager>,
+    /// Durable job service (COMP-005, Set L Phase 1).
+    ///
+    /// Optional so that unit tests and tools can build an `AppState` without a
+    /// database; the routes answer `503 jobs_unavailable` when it is absent rather
+    /// than pretending to accept work they cannot durably record.
+    pub jobs: Option<Arc<jobs::JobStore>>,
+    /// Content-addressed artifact registry (COMP-005 §8).
+    pub artifacts: Option<Arc<jobs::ArtifactRegistry>>,
+    /// Capability profiles (ADR-0031, harness guide §1.2).
+    ///
+    /// Loaded at startup, never hardcoded. Every constraint in the active profile is
+    /// enforced by harness code — the tool exposure budget, the context cap, the
+    /// permission policy and the per-task budgets all read from here rather than from
+    /// constants scattered through the request path.
+    pub profiles: Arc<harness::ProfileSet>,
+    /// The profile id a research session runs under unless its project pins another.
+    pub default_profile: String,
+}
+
+/// Loads the capability profiles (ADR-0031). Read from disk at startup, never
+/// hardcoded.
+///
+/// A missing or invalid directory leaves the set empty, and `AppState::profile` then
+/// returns `None` — callers fall back to their own conservative behaviour and the
+/// warning says why. Panicking here would take the whole platform down over the
+/// agent's configuration, which is the wrong blast radius for a feature most of the
+/// platform does not use.
+///
+/// Shared with the agent manager rather than loaded twice: two loaders would be two
+/// answers to "which profile is this model?", and the disagreement would show up as
+/// a run executing on a tier the UI says it is not.
+#[must_use]
+pub fn load_profiles() -> Arc<harness::ProfileSet> {
+    let dir = std::env::var("TBOT_PROFILES_DIR").unwrap_or_else(|_| "config/profiles".to_string());
+    let profiles = match harness::ProfileSet::load_dir(std::path::Path::new(&dir)) {
+        Ok(set) => {
+            tracing::info!(
+                dir = %dir,
+                profiles = set.len(),
+                ids = ?set.ids(),
+                "capability profiles loaded"
+            );
+            set
+        }
+        Err(e) => {
+            tracing::warn!(
+                dir = %dir,
+                error = %e,
+                "no capability profiles loaded; agent sessions will refuse to start rather than run unprofiled"
+            );
+            harness::ProfileSet::default()
+        }
+    };
+    // The fallback for an unknown model id is named explicitly, never derived from
+    // whichever profile happens to be lowest-tier: adding a dev-box profile must not
+    // repoint the platform default as a side effect.
+    let profiles = match std::env::var("TBOT_FALLBACK_PROFILE") {
+        Ok(id) if !id.trim().is_empty() => profiles.with_default(id),
+        _ => profiles,
+    };
+    Arc::new(profiles)
+}
+
+impl AppState {
+    /// The active capability profile.
+    ///
+    /// An unknown model resolves to the most conservative tier with a warning rather
+    /// than to frontier settings (guide §1.2) — so a typo in a project's pinned model
+    /// produces a cautious session, not an unprofiled one.
+    #[must_use]
+    pub fn profile(&self, model_id: Option<&str>) -> Option<&harness::Profile> {
+        // `accepting_substitution` rather than a silent unwrap: this is a read path
+        // (the proxy's budget check, the tool exposure budget), where running under
+        // the conservative default is better than running unbudgeted. An EXECUTION
+        // path must call `resolve_for_execution` directly and decide for itself
+        // whether a substitution is acceptable — that is the distinction
+        // `Resolution` exists to force.
+        self.profiles
+            .resolve_for_execution(model_id.unwrap_or(&self.default_profile))
+            .accepting_substitution()
+    }
 }
 
 impl AppState {
@@ -150,6 +235,10 @@ impl AppState {
         clickhouse_url: String,
         stream_tx: Option<tokio::sync::mpsc::UnboundedSender<StreamRequest>>,
         agent: Arc<crate::agent::AgentManager>,
+        // Shared live frame bus. `None` builds a private one, which is what
+        // tests and tools want; the platform passes its own so the producers it
+        // spawns reach the same sockets.
+        live: Option<crate::live_bus::LiveSender>,
     ) -> Self {
         let demand = Arc::new(DemandRegistry::new(Arc::new(NoopPipelineFactory)));
         let quality_monitor = QualityMonitor::new(
@@ -176,11 +265,28 @@ impl AppState {
                     pg.clone(),
                     clickhouse_url.clone(),
                 );
-                Arc::new(SuiteManager::with_executor(Box::new(executor)))
+                // The durable, hash-chained trial ledger. Inside a runtime this
+                // is the Postgres one: every dispatch writes a REGISTERED row
+                // before any compute runs, and that row survives a restart.
+                let ledger = Arc::new(backtest::ledger::pg::PgTrialLedger::new(pg.clone()));
+                Arc::new(SuiteManager::with_executor(Box::new(executor), ledger))
             }
             Err(_) => Arc::new(SuiteManager::new()),
         };
         let research = crate::research::ResearchManager::new(pg.clone(), Arc::clone(&suite), 2);
+
+        // The job service counts trials against Set J's experiment counter inside
+        // the submission transaction (INV-1, JB-03).
+        let job_store = Arc::new(jobs::JobStore::new(
+            pg.clone(),
+            Arc::new(jobs::store::PgTrialCounter),
+        ));
+        let artifact_registry = Arc::new(jobs::ArtifactRegistry::new(
+            pg.clone(),
+            Arc::from(storage::artifacts::from_env()),
+        ));
+
+        let profiles = load_profiles();
         Self {
             pg,
             risk_gate,
@@ -188,6 +294,7 @@ impl AppState {
             execution,
             paper_engine,
             gateway,
+            live: live.unwrap_or_else(crate::live_bus::channel),
             strategy_store: Arc::new(Mutex::new(HashMap::new())),
             instance_manager: Arc::new(Mutex::new(InstanceManager::new(demand))),
             clock: Arc::new(WallClock),
@@ -203,6 +310,11 @@ impl AppState {
             cred_crypto,
             agent,
             research,
+            jobs: Some(job_store),
+            artifacts: Some(artifact_registry),
+            profiles,
+            default_profile: std::env::var("TBOT_DEFAULT_PROFILE")
+                .unwrap_or_else(|_| "claude-opus-5".to_string()),
         }
     }
 }

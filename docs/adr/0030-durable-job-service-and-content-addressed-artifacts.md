@@ -1,6 +1,6 @@
 # ADR-0030: One durable job service and a content-addressed artifact store
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-11
 **Deciders:** Mason Hughes (with Claude)
 

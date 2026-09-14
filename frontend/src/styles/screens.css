@@ -1,0 +1,204 @@
+/* =============================================================================
+   SCREEN LAYOUTS
+   One grid per screen. Identical in both themes — only paint differs.
+   Semantic tokens only; no colour literal may appear here.
+   ============================================================================= */
+
+/* --- Dashboard (spec §4.1) -------------------------------------------------- */
+.dash-body {
+  flex: 1; min-height: 0; display: grid; gap: var(--s-3);
+  padding: 0 var(--s-5) var(--s-5);
+  grid-template-columns: minmax(0, 1fr) 400px;
+  grid-template-rows: auto 312px minmax(280px, 1fr) auto;
+  overflow: auto;
+}
+.dash-hero   { grid-column: 1 / -1; grid-row: 1; }
+.dash-curve  { grid-column: 1; grid-row: 2; }
+.dash-alloc  { grid-column: 2; grid-row: 2; }
+.dash-detail { grid-column: 1; grid-row: 3 / 5; }
+.dash-autos  { grid-column: 2; grid-row: 3; min-height: 220px; }
+.dash-risk   { grid-column: 2; grid-row: 4; }
+
+@media (max-width: 1279px) {
+  .dash-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
+  .dash-hero, .dash-curve, .dash-alloc, .dash-detail, .dash-autos, .dash-risk {
+    grid-column: 1; grid-row: auto;
+  }
+  .dash-curve { min-height: 312px; }
+  .dash-detail { min-height: 360px; }
+  .hero { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .hero > div:nth-child(4) { border-left: 0; }
+}
+@media (max-width: 767px) {
+  .hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hero > div:nth-child(odd) { border-left: 0; }
+}
+
+/* --- Trading terminal (spec §4.2) ------------------------------------------- */
+.term-main {
+  flex: 1; display: grid; min-height: 0; gap: var(--s-3); padding: var(--s-3);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: var(--panel-w-sm) minmax(0, 1fr) var(--panel-w-md);
+}
+.term-left { display: grid; grid-template-rows: minmax(0, 1fr) 332px; gap: var(--s-3); min-height: 0; }
+.term-center { display: grid; grid-template-rows: minmax(0, 1fr) 262px; gap: var(--s-3); min-height: 0; }
+.term-center.no-dock { grid-template-rows: minmax(0, 1fr); }
+
+.chartwrap {
+  position: relative; flex: 1; min-height: 0; background: var(--chart-surface);
+  border-radius: 0 0 var(--r-lg) var(--r-lg); overflow: hidden;
+}
+.chart-grid { display: grid; gap: 1px; background: var(--line-hairline); flex: 1; min-height: 0; }
+.chart-grid.m1  { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.chart-grid.m2  { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+.chart-grid.m4  { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.chart-grid.m31 { grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr 1fr; }
+.chart-grid.m31 > :first-child { grid-row: 1 / 4; }
+/* `height: 100%` matters outside the grid: in a workspace panel the pane is
+   a lone block child of a flex column, and a block with auto height collapses
+   to zero, which is what left the desk's chart panel blank. */
+.chart-pane { background: var(--chart-surface); position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+.chart-pane.focused { box-shadow: inset 0 0 0 1px var(--line-accent); }
+.chart-pane-hd {
+  position: absolute; top: 0; left: 0; right: 0; height: 26px; display: flex; align-items: center;
+  gap: var(--s-2); padding: 0 var(--s-3); z-index: 2; background: var(--bg-surface);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+@media (max-width: 1439px) {
+  .term-main { grid-template-columns: 240px minmax(0, 1fr) var(--panel-w-md); }
+}
+@media (max-width: 1279px) {
+  .term-main { grid-template-columns: 220px minmax(0, 1fr); }
+  .term-left { grid-template-rows: minmax(0, 1fr); }
+  .term-ticket-rail { display: none; }
+}
+@media (max-width: 1023px) {
+  .term-main { grid-template-columns: minmax(0, 1fr); }
+  .term-left { display: none; }
+}
+
+/* --- Strategy builder (spec §4.3) ------------------------------------------- */
+.strat-body {
+  flex: 1; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: 268px minmax(0, 1fr) var(--panel-w-md);
+  gap: var(--s-3); padding: var(--s-3) var(--s-5) var(--s-5);
+}
+.canvas-shell {
+  position: relative; overflow: hidden; border-radius: var(--r-lg);
+  border: 1px solid var(--line-hairline); min-width: 0; min-height: 0;
+}
+.canvas-tools { position: absolute; left: var(--s-4); bottom: var(--s-4); display: flex; gap: 6px; z-index: 5; }
+.canvas-tools .iconbtn { box-shadow: var(--shadow-2); }
+.validation-console {
+  position: absolute; right: var(--s-4); bottom: var(--s-4); width: 404px; z-index: 5; max-height: 260px;
+}
+.mobile-canvas-notice {
+  display: none; padding: var(--s-6); text-align: center;
+}
+@media (max-width: 1279px) {
+  .strat-body { grid-template-columns: 232px minmax(0, 1fr) 300px; }
+  .validation-console { width: 320px; }
+}
+@media (max-width: 1023px) {
+  .strat-body { grid-template-columns: minmax(0, 1fr); }
+  .strat-palette, .strat-inspector, .validation-console { display: none; }
+  .mobile-canvas-notice { display: block; }
+  .canvas-interactive { pointer-events: none; opacity: .55; }
+}
+
+/* --- Two-column reading layout (Settings, Account) -------------------------- */
+.read-body {
+  flex: 1; min-height: 0; display: grid; grid-template-columns: 240px minmax(0, 1fr);
+  gap: var(--s-6); padding: 0 var(--s-5) var(--s-8); overflow: auto;
+}
+.read-col { max-width: 760px; display: flex; flex-direction: column; gap: var(--s-3); width: 100%; }
+.read-nav { position: sticky; top: 0; align-self: start; display: flex; flex-direction: column; gap: 2px; }
+.read-nav button {
+  display: flex; align-items: center; gap: var(--s-2); height: var(--ctl-h-sm);
+  padding: 0 var(--s-3); border-radius: var(--r-sm); font-size: var(--t-13);
+  color: var(--fg-secondary); text-align: left; background: transparent; width: 100%;
+}
+.read-nav button:hover { background: var(--bg-hover); color: var(--fg-primary); }
+.read-nav button.on { background: var(--bg-selected); color: var(--fg-primary); font-weight: var(--w-medium); }
+@media (max-width: 1023px) {
+  .read-body { grid-template-columns: minmax(0, 1fr); }
+  .read-nav { position: static; flex-direction: row; overflow-x: auto; }
+}
+
+/* --- Generic page body used by list/detail screens -------------------------- */
+.page-body {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--s-3);
+  padding: 0 var(--s-5) var(--s-5); overflow: auto;
+}
+.page-body.grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) 400px; align-items: start; }
+.page-body.grid-rail { display: grid; grid-template-columns: 340px minmax(0, 1fr); align-items: start; }
+.page-body.fill { overflow: hidden; }
+@media (max-width: 1279px) {
+  .page-body.grid-2, .page-body.grid-rail { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* --- Trading workspace (the panel dashboard) -------------------------------- */
+.ws-scroll {
+  flex: 1; display: flex; min-height: 0; overflow-x: auto; overflow-y: hidden;
+  padding: var(--s-3); gap: var(--s-3); align-items: stretch;
+}
+.ws-panel { display: flex; flex-direction: column; min-height: 0; position: relative; flex: none; }
+.ws-panel.dragging { opacity: .4; }
+.ws-panel.dropzone::before {
+  content: ""; position: absolute; left: -7px; top: 0; bottom: 0;
+  width: 2px; background: var(--bg-accent); border-radius: 1px; z-index: 3;
+}
+.ws-grip { cursor: grab; color: var(--fg-tertiary); display: flex; align-items: center; }
+.ws-grip:active { cursor: grabbing; }
+.ws-resize { position: absolute; top: 0; right: -6px; bottom: 0; width: 10px; cursor: col-resize; z-index: 4; }
+.ws-resize::after { content: ""; position: absolute; inset: 0 4px; border-radius: 1px; }
+.ws-resize:hover::after, .ws-resize.on::after { background: var(--line-accent); }
+.ws-add { flex: none; width: 184px; display: flex; flex-direction: column; gap: var(--s-2); }
+.ws-add-btn {
+  display: flex; align-items: center; justify-content: flex-start; gap: var(--s-2);
+  height: var(--ctl-h-md); padding: 0 var(--s-3);
+  border: 1px dashed var(--line-default); border-radius: var(--r-md); color: var(--fg-tertiary);
+  font-size: var(--t-12); background: transparent; width: 100%;
+}
+.ws-add-btn:hover { border-color: var(--line-accent); color: var(--fg-accent); background: var(--bg-hover); }
+.ws-collapsed {
+  writing-mode: vertical-rl; text-orientation: mixed; padding: var(--s-3) 0;
+  font-size: var(--t-11); color: var(--fg-tertiary); letter-spacing: var(--tr-wide); white-space: nowrap;
+}
+
+/* --- Drawer ----------------------------------------------------------------- */
+@keyframes drawer-in { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 520px; max-width: 100vw;
+  background: var(--bg-surface); border-left: 1px solid var(--line-hairline);
+  box-shadow: var(--shadow-4); z-index: var(--z-modal); display: flex; flex-direction: column;
+  animation: drawer-in var(--dur-3) var(--ease-out);
+}
+.drawer.wide { width: 680px; }
+
+/* --- Auth screens ----------------------------------------------------------- */
+.auth-shell {
+  min-height: 100vh; display: grid; place-items: center; padding: var(--s-6);
+  background: var(--bg-canvas);
+}
+.auth-card { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: var(--s-4); }
+
+/* --- Time and sales tape ---------------------------------------------------- */
+.tape { font-family: var(--font-numeric); font-variant-numeric: tabular-nums; font-size: var(--t-11); }
+.tape .r {
+  display: grid; grid-template-columns: 1fr 1fr 64px; height: 18px; align-items: center;
+  padding: 0 var(--s-3);
+}
+.tape .r span { text-align: right; }
+.tape .r span:first-child { text-align: left; }
+.tape .r.buy span:first-child { color: var(--fg-pos); }
+.tape .r.sell span:first-child { color: var(--fg-neg); }
+
+/* --- Heat cell (monthly returns) -------------------------------------------- */
+.heat { display: grid; grid-template-columns: 52px repeat(12, minmax(0, 1fr)); gap: 2px; }
+.heat .cell {
+  height: 24px; border-radius: var(--r-xs); display: grid; place-items: center;
+  font-size: var(--t-10); font-family: var(--font-numeric); font-variant-numeric: tabular-nums;
+}
+.heat .rowlbl { display: grid; place-items: start center; font-size: var(--t-11); color: var(--fg-tertiary); }

@@ -28,7 +28,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
     else:
         params.update(objective="reg:squarederror", eval_metric="rmse")
 
-    dtrain = xgb.DMatrix(p.X_tr, label=p.y_tr)
+    dtrain = xgb.DMatrix(p.X_tr, label=p.y_tr, weight=p.w_tr)  # weighted by label uniqueness (SPEC 3.4)
     evals = [(dtrain, "train")]
     dval = None
     if len(p.X_val):

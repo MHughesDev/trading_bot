@@ -95,7 +95,11 @@ pub async fn get_experiment(api: &ApiClient, params: &Value) -> Value {
     let Some(id) = str_field(params, "experiment_id") else {
         return missing("experiment_id");
     };
-    get(api, &format!("/api/backtest/experiments/{}", urlencode(&id))).await
+    get(
+        api,
+        &format!("/api/backtest/experiments/{}", urlencode(&id)),
+    )
+    .await
 }
 
 // ── studies ───────────────────────────────────────────────────────────────────
@@ -121,14 +125,20 @@ pub async fn list_studies(api: &ApiClient, params: &Value) -> Value {
     let Some(id) = str_field(params, "experiment_id") else {
         return missing("experiment_id");
     };
-    get(api, &format!("/api/backtest/experiments/{}/studies", urlencode(&id))).await
+    get(
+        api,
+        &format!("/api/backtest/experiments/{}/studies", urlencode(&id)),
+    )
+    .await
 }
 
 /// `get_carried_forward` — the parameter set a Study's pre-declared selection
 /// rule carried forward (never an argmax).
 pub async fn get_carried_forward(api: &ApiClient, params: &Value) -> Value {
-    let (Some(id), Some(study)) = (str_field(params, "experiment_id"), str_field(params, "study_id"))
-    else {
+    let (Some(id), Some(study)) = (
+        str_field(params, "experiment_id"),
+        str_field(params, "study_id"),
+    ) else {
         return missing("experiment_id/study_id");
     };
     get(
@@ -148,7 +158,11 @@ pub async fn get_funnel(api: &ApiClient, params: &Value) -> Value {
     let Some(id) = str_field(params, "experiment_id") else {
         return missing("experiment_id");
     };
-    get(api, &format!("/api/backtest/experiments/{}/funnel", urlencode(&id))).await
+    get(
+        api,
+        &format!("/api/backtest/experiments/{}/funnel", urlencode(&id)),
+    )
+    .await
 }
 
 /// `advance_gate` — run the next gate (0 integrity → 1 single path → 2
@@ -159,7 +173,10 @@ pub async fn advance_gate(api: &ApiClient, params: &Value) -> Value {
     };
     post(
         api,
-        &format!("/api/backtest/experiments/{}/funnel/advance", urlencode(&id)),
+        &format!(
+            "/api/backtest/experiments/{}/funnel/advance",
+            urlencode(&id)
+        ),
         json!({}),
     )
     .await
@@ -169,7 +186,11 @@ pub async fn get_null_picker(api: &ApiClient, params: &Value) -> Value {
     let Some(id) = str_field(params, "experiment_id") else {
         return missing("experiment_id");
     };
-    get(api, &format!("/api/backtest/experiments/{}/nulls", urlencode(&id))).await
+    get(
+        api,
+        &format!("/api/backtest/experiments/{}/nulls", urlencode(&id)),
+    )
+    .await
 }
 
 pub async fn choose_null(api: &ApiClient, params: &Value) -> Value {
@@ -207,7 +228,12 @@ pub async fn cancel_sweep(api: &ApiClient, params: &Value) -> Value {
     let Some(id) = str_field(params, "sweep_id") else {
         return missing("sweep_id");
     };
-    post(api, &format!("/api/research/sweeps/{}/cancel", urlencode(&id)), json!({})).await
+    post(
+        api,
+        &format!("/api/research/sweeps/{}/cancel", urlencode(&id)),
+        json!({}),
+    )
+    .await
 }
 
 fn is_terminal(snapshot: &Value) -> bool {
@@ -240,7 +266,11 @@ pub async fn run_sweep(api: &ApiClient, params: &Value) -> Value {
         .min(MAX_WAIT_SECS);
     let deadline = Instant::now() + Duration::from_secs(timeout);
     loop {
-        let snap = get(api, &format!("/api/research/sweeps/{}", urlencode(&sweep_id))).await;
+        let snap = get(
+            api,
+            &format!("/api/research/sweeps/{}", urlencode(&sweep_id)),
+        )
+        .await;
         if snap.get("error").is_some() || is_terminal(&snap) {
             return snap;
         }
@@ -267,7 +297,11 @@ pub async fn get_diagnostics(api: &ApiClient, params: &Value) -> Value {
     let Some(run_id) = str_field(params, "run_id") else {
         return missing("run_id");
     };
-    get(api, &format!("/api/research/diagnostics/{}", urlencode(&run_id))).await
+    get(
+        api,
+        &format!("/api/research/diagnostics/{}", urlencode(&run_id)),
+    )
+    .await
 }
 
 /// Tool definitions for this module (appended to the server's list).
@@ -275,6 +309,20 @@ pub async fn get_diagnostics(api: &ApiClient, params: &Value) -> Value {
 pub fn definitions() -> Vec<Value> {
     let exp_id = json!({ "type": "string", "description": "Experiment uuid (the `id` field from create_experiment / list_experiments)" });
     vec![
+        json!({
+            "name": "backtest_strategy",
+            "description": "BACKTEST a stored strategy and return the results. One call: creates the Experiment with a locked holdout, runs the sweep (these are real backtests), and returns the report. Use this whenever the task is to backtest, evaluate, or measure the edge of a strategy you have created. get_backtest does NOT do this — it only reads a backtest that already exists.",
+            "inputSchema": { "type": "object",
+                "required": ["strategy_id"],
+                "properties": {
+                    "strategy_id": { "type": "string", "description": "The slug you passed to create_strategy." },
+                    "instrument_id": { "type": "string", "description": "Default BTC-USD." },
+                    "timeframe": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "4h", "1d"], "description": "Default 1h." },
+                    "question": { "type": "string", "description": "What you are asking of this sweep, in one line." },
+                    "timeout_seconds": { "type": "integer", "description": "Default 600." }
+                }
+            }
+        }),
         json!({
             "name": "create_experiment",
             "description": "Create a candidate Experiment: the unit of honest research. Locks a holdout tail you cannot read until the vault; declares an immutable objective; every Study you run on it increments an irreversible trial counter that deflates significance. Research window must not overlap the holdout. Returns the experiment (use its `id` everywhere else).",
@@ -387,4 +435,157 @@ pub fn definitions() -> Vec<Value> {
             "inputSchema": { "type": "object", "required": ["experiment_id", "kind"], "properties": { "experiment_id": exp_id, "kind": { "type": "string" }, "override_reason": { "type": "string", "description": "Required when not choosing the recommended null" } } }
         }),
     ]
+}
+
+// ── The backtest pipeline ───────────────────────────────────────────────────
+
+/// `backtest_strategy` — experiment, sweep, report. One call.
+///
+/// The honest path to a backtest on this platform is an Experiment with a locked
+/// holdout and an immutable objective, swept by `run_sweep`. That is the right design
+/// and it asks the caller for ten fields, two of which are non-overlapping date
+/// windows. Measured on the degraded tier: given the step "run a backtest on the
+/// strategy", the model reached for `get_backtest` — the one exposed tool with the
+/// word in its name — and passed it the id of the TRAINING run, because that was the
+/// only uuid it had seen. It did that on every retry until the step budget went.
+///
+/// It was not confused about backtesting. It was unable to assemble a ten-field
+/// request with two date ranges, and nothing in the catalogue offered a smaller move.
+/// So this is the same pipeline answer that made `train_model` work: derive the
+/// windows, supply a defensible default objective, run the sweep, return the report.
+///
+/// Defaults are conservative and stated in the reply, so a caller that wanted
+/// something else can see exactly what it got instead of discovering it later.
+pub async fn backtest_strategy(
+    api: &ApiClient,
+    params: &Value,
+    progress: Option<tokio::sync::mpsc::Sender<crate::ProgressUpdate>>,
+) -> Value {
+    let strategy_id = params
+        .get("strategy_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if strategy_id.is_empty() {
+        return json!({
+            "error": "missing_field",
+            "field": "strategy_id",
+            "fix": "the slug you passed to create_strategy"
+        });
+    }
+    let instrument = params
+        .get("instrument_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("BTC-USD");
+    let timeframe = params
+        .get("timeframe")
+        .and_then(|v| v.as_str())
+        .unwrap_or("1h");
+
+    // Windows derived from now, with the holdout as a tail that does not overlap the
+    // research period. Explicit dates stay available for a caller that has them.
+    let now = chrono::Utc::now();
+    let day = chrono::Duration::days(1);
+    let holdout_end = now;
+    let holdout_start = now - day * 30;
+    let research_end = holdout_start;
+    let research_start = now - day * 210;
+    let iso = |t: chrono::DateTime<chrono::Utc>| t.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    let experiment_id = format!("{strategy_id}_exp");
+    let objective = params.get("objective").cloned().unwrap_or_else(|| {
+        json!({
+            "primary": "sortino",
+            "constraints": [{ "kind": "min_trades", "value": 20 }],
+            "aggregate": "median"
+        })
+    });
+
+    // ── 1. Experiment (idempotent on the slug) ──────────────────────────────
+    let create = json!({
+        "experiment_id": experiment_id,
+        "strategy_family": strategy_id,
+        "strategy_type": "single",
+        "strategy_ref": strategy_id,
+        "universe_ref": format!("{instrument}:{timeframe}"),
+        "research_start": iso(research_start),
+        "research_end": iso(research_end),
+        "holdout_start": iso(holdout_start),
+        "holdout_end": iso(holdout_end),
+        "objective": objective,
+    });
+    let created = create_experiment(api, &create).await;
+    // An existing experiment with this slug is not an error — it is a retry.
+    let exp_uuid = created
+        .get("id")
+        .or_else(|| created.get("experiment").and_then(|e| e.get("id")))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    let exp_uuid = match exp_uuid {
+        Some(u) => u,
+        None => {
+            // Fall back to finding it, so a second call after a partial failure works.
+            let listed = list_experiments(api).await;
+            let found = listed
+                .get("experiments")
+                .and_then(Value::as_array)
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|e| {
+                            e.get("experiment_id").and_then(Value::as_str) == Some(&experiment_id)
+                        })
+                        .and_then(|e| e.get("id").and_then(Value::as_str))
+                        .map(str::to_string)
+                });
+            match found {
+                Some(u) => u,
+                None => {
+                    return json!({
+                        "error": "experiment_failed",
+                        "detail": "could not create or find the experiment for this strategy",
+                        "response": created
+                    })
+                }
+            }
+        }
+    };
+
+    // ── 2. Sweep — these are real backtests ─────────────────────────────────
+    if let Some(tx) = &progress {
+        let _ = tx
+            .send(crate::ProgressUpdate {
+                progress: 20.0,
+                message: format!("running backtests for {strategy_id}"),
+            })
+            .await;
+    }
+    let sweep = json!({
+        "experiment_id": exp_uuid,
+        "question": params
+            .get("question")
+            .and_then(|v| v.as_str())
+            .unwrap_or("does this strategy have an edge on the research window"),
+        "timeout_seconds": params
+            .get("timeout_seconds")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(600)
+            .clamp(60, 3600),
+    });
+    let report = run_sweep(api, &sweep).await;
+
+    json!({
+        // `is_none()` would be wrong here for the same reason it was wrong in the
+        // bridge: a report carrying `"error": null` is a report with no error.
+        "ok": report.get("error").is_none_or(serde_json::Value::is_null),
+        "strategy_id": strategy_id,
+        "experiment_id": exp_uuid,
+        // Stated, not silent: these were derived, and a caller that wanted a
+        // different window should be able to see that it did not get one.
+        "windows": {
+            "research": [iso(research_start), iso(research_end)],
+            "holdout_locked": [iso(holdout_start), iso(holdout_end)],
+        },
+        "objective": objective,
+        "report": report,
+    })
 }

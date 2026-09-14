@@ -267,6 +267,7 @@ mod tests {
             close: Decimal::from(close),
             volume: Decimal::from(1),
             trade_count: 1,
+            ..Default::default()
         }
     }
 

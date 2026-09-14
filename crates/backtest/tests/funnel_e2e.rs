@@ -10,10 +10,17 @@ use backtest::experiment::{Experiment, ExperimentError, ExperimentState};
 use backtest::gates::{CorroboratorInputs, Gate, GateError, GateRunner, IntegrityInputs};
 use backtest::nulls::{Null, NullKind, NullParams};
 use backtest::run::executor::{daily_curve, map_sim_result};
+use ledger::{DispatchContext, InMemoryLedger};
 use backtest::run::{
     Backtest, ClosureExecutor, ComputeCost, DataSlice, EvalResolution, InMemoryRunStore,
     MetricKind, ParamMap, RunConfig, RunConfigBuilder, ENGINE_VERSION,
 };
+
+/// Every dispatch in these tests goes through a real ledger — there is no way
+/// to reach an executor without one, which is the point of INV-16.
+fn ctx() -> DispatchContext {
+    DispatchContext::human("tenant-test", "e2e", 0.1).with_experiment("test-exp")
+}
 use backtest::study::{
     SelectionRule, StudyBudget, StudyConfig, StudyEngine, StudyKind, StudyResult, VarySpec,
 };
@@ -45,7 +52,7 @@ fn experiment() -> Experiment {
     Experiment::new("exp-e2e", "ema-family", holdout_slice(), "null:block")
 }
 
-fn profitable_bt() -> Backtest<InMemoryRunStore, impl backtest::run::RunExecutor> {
+fn profitable_bt() -> Backtest<InMemoryRunStore, impl backtest::run::RunExecutor, InMemoryLedger> {
     Backtest::new(
         InMemoryRunStore::new(),
         ClosureExecutor(|cfg: &RunConfig| {
@@ -58,6 +65,7 @@ fn profitable_bt() -> Backtest<InMemoryRunStore, impl backtest::run::RunExecutor
                 ENGINE_VERSION,
             )
         }),
+        InMemoryLedger::new(),
     )
 }
 
@@ -84,11 +92,12 @@ fn good_study(id: &str, n: usize) -> StudyResult {
         },
         metric: MetricKind::TotalReturn,
         null_ref: None,
+        null: None,
         budget: StudyBudget::default(),
         question: "vary".into(),
         selection_rule: SelectionRule::None,
     };
-    StudyEngine::run(&study, &bt).unwrap()
+    StudyEngine::run(&study, &bt, &ctx()).unwrap()
 }
 
 #[test]
@@ -122,11 +131,12 @@ fn property_2_counter_cannot_be_gamed() {
             },
             metric: MetricKind::TotalReturn,
             null_ref: None,
+            null: None,
             budget: StudyBudget::default(),
             question: "vary".into(),
             selection_rule: SelectionRule::None,
         };
-        e.run_study(&study, &bt).unwrap();
+        e.run_study(&study, &bt, &ctx()).unwrap();
     }
     assert_eq!(e.trial_counter(), 20);
 }
@@ -138,7 +148,7 @@ fn property_3_vault_cannot_be_peeked() {
     let bt = profitable_bt();
     let mut runner = GateRunner::new(&mut e);
     assert!(matches!(
-        runner.gate4(&candidate(), &bt, "mallory"),
+        runner.gate4(&candidate(), &bt, &ctx(), "mallory"),
         Err(GateError::PrerequisiteNotPassed {
             gate: Gate::Vault,
             required: Gate::Significance
@@ -181,6 +191,7 @@ fn property_4_null_cannot_be_hidden() {
                 pbo_performance: &perf,
                 pbo_groups: 4,
             },
+            &ledger::TrialLedger::n_eff(&InMemoryLedger::new(), "tenant-test").unwrap(),
             0.05,
         )
         .unwrap();
@@ -241,11 +252,12 @@ fn full_funnel_validates_a_genuine_edge_in_order() {
                 pbo_performance: &perf,
                 pbo_groups: 4,
             },
+            &ledger::TrialLedger::n_eff(&InMemoryLedger::new(), "tenant-test").unwrap(),
             0.05,
         )
         .unwrap();
     assert!(passed3);
-    let (vault, v) = runner.gate4(&candidate(), &bt, "alice").unwrap();
+    let (vault, v) = runner.gate4(&candidate(), &bt, &ctx(), "alice").unwrap();
     assert_eq!(vault.status, backtest::run::RunStatus::Ok);
     assert!(v.passed);
     assert_eq!(e.state, ExperimentState::Validated);
@@ -261,12 +273,13 @@ fn full_funnel_validates_a_genuine_edge_in_order() {
         },
         metric: MetricKind::TotalReturn,
         null_ref: None,
+        null: None,
         budget: StudyBudget::default(),
         question: "too late".into(),
         selection_rule: SelectionRule::None,
     };
     assert!(matches!(
-        e.run_study(&s, &bt2),
+        e.run_study(&s, &bt2, &ctx()),
         Err(ExperimentError::OperationNotAllowed { .. })
     ));
 }
@@ -286,6 +299,7 @@ fn plateau_study(id: &str) -> StudyResult {
                 ENGINE_VERSION,
             )
         }),
+        InMemoryLedger::new(),
     );
     let study = StudyConfig {
         study_id: id.into(),
@@ -299,9 +313,42 @@ fn plateau_study(id: &str) -> StudyResult {
         },
         metric: MetricKind::TotalReturn,
         null_ref: None,
+        null: None,
         budget: StudyBudget::default(),
         question: "plateau?".into(),
         selection_rule: SelectionRule::None,
     };
-    StudyEngine::run(&study, &bt).unwrap()
+    StudyEngine::run(&study, &bt, &ctx()).unwrap()
+}
+
+/// The funnel's own numbers reach the ledger, attached to the run that produced
+/// them (ADR-P2-31, §12.3 Gates 5–8).
+///
+/// This is the seam that lets a gate stack running later, in a different
+/// process, judge on statistics the platform computed rather than on statistics
+/// a job manifest supplied. Without it Gates 5–8 are inconclusive forever and
+/// the only alternative is letting the submitter hand the gate its own answer.
+#[test]
+fn the_funnel_records_the_statistics_the_gates_read() {
+    use ledger::{InMemoryLedger, TrialLedger};
+
+    let led = InMemoryLedger::new();
+    let trial = uuid::Uuid::new_v4();
+
+    // Exactly the five the funnel writes, and every one of them in the closed
+    // vocabulary the gate worker reads.
+    for (name, value) in [
+        ("cpcv_p05_sharpe", -0.2_f64),
+        ("walk_forward_sharpe", 0.9),
+        ("pbo", 0.12),
+        ("deflated_sharpe", 0.97),
+        ("permutation_p_value", 0.004),
+    ] {
+        led.record_statistic("t", trial, name, value, "funnel_advance")
+            .unwrap_or_else(|e| panic!("{name} is not in the vocabulary the gates read: {e}"));
+    }
+
+    // And a name that is not is refused, loudly, here rather than silently at
+    // the gate months later.
+    assert!(led.record_statistic("t", trial, "sharpe", 1.0, "funnel_advance").is_err());
 }

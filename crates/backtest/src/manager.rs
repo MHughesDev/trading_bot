@@ -18,7 +18,12 @@ use uuid::Uuid;
 
 use nautilus_backtest::sdk::SimulationControl;
 
+use domain::payloads::bar::Timeframe;
+
 use crate::collect::{collect_ranges, CollectorPlan};
+use ledger::pg::PgTrialLedger;
+use ledger::{ActorKind, DispatchContext, Registration, TerminalReason, TrialEvent, TrialState, TrialTicket};
+use crate::run::{DataSlice, EvalResolution, RunConfig, RunConfigBuilder};
 use crate::gaps::{self, ScheduleKind};
 use crate::requirements::derive_requirements;
 use crate::sim::{run_simulation, InstrumentPrecisions, SimulationInputs};
@@ -28,6 +33,11 @@ use crate::types::{BacktestSnapshot, BacktestStatus, DataCoverage, ResolvedSpec,
 struct JobState {
     status: BacktestStatus,
     error: Option<String>,
+    /// How the ledger should record this job's failure (ADR-P2-30). Set on the
+    /// failing path, alongside the message, so settlement reads a decision
+    /// rather than re-deriving one from prose. Not persisted: the only reader is
+    /// `settle_trial`, which runs in the same process immediately after.
+    terminal: Option<TerminalReason>,
     failed_phase: Option<String>,
     coverage: Option<DataCoverage>,
     result: Option<serde_json::Value>,
@@ -58,6 +68,7 @@ impl Job {
             state: StdRwLock::new(JobState {
                 status: BacktestStatus::Queued,
                 error: None,
+                terminal: None,
                 failed_phase: None,
                 coverage: None,
                 result: None,
@@ -137,12 +148,32 @@ impl Job {
         }
     }
 
-    fn fail(&self, phase: BacktestStatus, error: String) {
+    fn fail(&self, failure: PhaseFailure) {
         let mut state = self.state.write().expect("job state lock poisoned");
         state.status = BacktestStatus::Failed;
-        state.failed_phase = Some(phase.as_str().to_string());
-        state.error = Some(error);
+        state.failed_phase = Some(failure.phase.as_str().to_string());
+        state.error = Some(failure.detail);
+        state.terminal = Some(failure.reason);
         state.finished_at = Some(Utc::now());
+    }
+}
+
+/// A phase failure that already knows how the trial ended.
+///
+/// The reason is chosen where the failure happens, by the code that knows what
+/// it was doing — a ClickHouse read that came back empty is a `data_error`, a
+/// strategy whose requirements do not resolve is a refusal. Settlement used to
+/// recover this by matching substrings of the message, which made every
+/// unrecognised wording `dependency_failure` (ADR-P2-30).
+struct PhaseFailure {
+    phase: BacktestStatus,
+    reason: TerminalReason,
+    detail: String,
+}
+
+impl PhaseFailure {
+    fn new(phase: BacktestStatus, reason: TerminalReason, detail: impl Into<String>) -> Self {
+        Self { phase, reason, detail: detail.into() }
     }
 }
 
@@ -151,6 +182,21 @@ impl Job {
 /// extra jobs sit in `Queued` until a permit frees up, so N concurrent
 /// creates can't spawn N simultaneous full simulations and exhaust the box.
 const MAX_CONCURRENT_RUNS: usize = 3;
+
+/// The eval resolution a stored bar timeframe corresponds to — the inverse of
+/// `sim_executor::timeframe_for`. Timeframes with no matching resolution fall
+/// back to the 1m foundation rather than failing: this only feeds the ledger's
+/// `config_hash`, and refusing to register would be a far worse outcome than a
+/// slightly coarse label.
+fn eval_resolution_for(tf: Timeframe) -> EvalResolution {
+    match tf {
+        Timeframe::Minutes5 => EvalResolution::Min5,
+        Timeframe::Minutes15 => EvalResolution::Min15,
+        Timeframe::Hours1 => EvalResolution::Hour1,
+        Timeframe::Daily => EvalResolution::Day1,
+        Timeframe::Seconds1 | Timeframe::Minutes1 | Timeframe::Hours4 => EvalResolution::Min1,
+    }
+}
 
 /// Owns all backtest jobs for the platform process.
 pub struct BacktestManager {
@@ -161,6 +207,9 @@ pub struct BacktestManager {
     hydrated: AtomicBool,
     /// Caps the number of jobs running their heavy phases concurrently.
     run_permits: Arc<tokio::sync::Semaphore>,
+    /// The trial ledger. This path dispatches real compute, so INV-16 applies to
+    /// it exactly as it does to the Experiment path — see [`Self::create`].
+    ledger: Arc<PgTrialLedger>,
 }
 
 impl BacktestManager {
@@ -172,6 +221,7 @@ impl BacktestManager {
             .timeout(std::time::Duration::from_secs(60))
             .build()
             .unwrap_or_default();
+        let ledger = Arc::new(PgTrialLedger::new(pg.clone()));
         Arc::new(Self {
             jobs: RwLock::new(HashMap::new()),
             ch_url: clickhouse_url.into(),
@@ -179,7 +229,33 @@ impl BacktestManager {
             http,
             hydrated: AtomicBool::new(false),
             run_permits: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
+            ledger,
         })
+    }
+
+    /// The `RunConfig` this job's spec corresponds to.
+    ///
+    /// Built so the legacy path's `config_hash` is computed the same way the
+    /// Experiment path computes it — two dispatches of the same strategy over
+    /// the same window collide on the same hash regardless of which door they
+    /// came through, which is what makes trial accounting comparable across
+    /// them.
+    fn run_config_for(spec: &ResolvedSpec) -> RunConfig {
+        let slice = DataSlice::new(
+            spec.instrument_id.clone(),
+            spec.start,
+            spec.end,
+            eval_resolution_for(spec.timeframe),
+        );
+        RunConfigBuilder::new(
+            spec.definition.strategy_id.clone(),
+            spec.definition.definition_version.clone(),
+            slice,
+            "cost:floor",
+            "sizing:default",
+            "snapshot:latest",
+        )
+        .build()
     }
 
     /// Creates a job owned by `user_id` and starts driving it immediately.
@@ -214,6 +290,24 @@ impl BacktestManager {
             );
         }
 
+        // INV-16: write the ledger row BEFORE anything is dispatched. This path
+        // predates pre-registration — the caller never declared a
+        // `delta_practical` and there is no policy to take a propensity from —
+        // so it registers under the legacy marker (CLAUDE.md §6): propensity and
+        // effect size NULL, excluded from every off-policy estimator by
+        // construction, but **counted**, because a look through this door is
+        // still a look. See decisions/OPEN-QUESTIONS.md OQ-08.
+        //
+        // A refused registration means no compute runs. That is the point.
+        let cfg = Self::run_config_for(&spec);
+        let ctx = DispatchContext::legacy(user_id.to_string(), ActorKind::Human, user_id.to_string());
+        let subject = crate::run::trial_subject(&cfg);
+        let mut ticket = self
+            .ledger
+            .register_async(&Registration::unlogged(&ctx, &subject))
+            .await
+            .map_err(|e| anyhow::anyhow!("trial ledger refused this run: {e}"))?;
+
         let id = Uuid::new_v4();
         let job = Job::new(id, user_id, spec, Utc::now());
         self.jobs.write().await.insert(id, Arc::clone(&job));
@@ -221,10 +315,47 @@ impl BacktestManager {
 
         let manager = Arc::clone(self);
         tokio::spawn(async move {
+            // Advance to `running` before the work starts, so a trial left behind
+            // by a process crash is distinguishable from one that never began.
+            if let Err(e) = manager.ledger.transition_async(&mut ticket, TrialEvent::to(TrialState::Running)).await {
+                tracing::warn!(error = %e, "could not mark trial running");
+            }
             manager.drive(Arc::clone(&job)).await;
             manager.persist(&job).await;
+            manager.settle_trial(ticket, &job, &cfg).await;
         });
         Ok(id)
+    }
+
+    /// Settle this job's trial once it reaches a terminal state.
+    ///
+    /// Every terminal path sets `censoring` (INV-17): a cancelled job is
+    /// right-censored, a crashed one is censored `failed`. Neither is a missing
+    /// row and neither is a zero.
+    async fn settle_trial(&self, ticket: TrialTicket, job: &Job, cfg: &RunConfig) {
+        let (status, error, terminal) = {
+            let state = job.state.read().expect("job state lock poisoned");
+            (state.status, state.error.clone(), state.terminal)
+        };
+        let event = match status {
+            BacktestStatus::Completed => TrialEvent::completed(cfg.run_id.as_str(), None),
+            BacktestStatus::Cancelled => TrialEvent::failed(TerminalReason::Cancelled, "cancelled by the user before completion"),
+            // Anything else terminating here did not finish: a failure, never a
+            // silently recorded completion. A job that failed through `fail`
+            // carries its reason; one that ended in a non-terminal state never
+            // reached a failing path at all, and `dependency_failure` is then a
+            // statement about the process, not a guess about the work.
+            _ => TrialEvent::failed(
+                terminal.unwrap_or(TerminalReason::DependencyFailure),
+                error.unwrap_or_else(|| format!("job ended in state {status:?}")),
+            ),
+        };
+        if let Err(e) = self.ledger.settle_async(ticket, event).await {
+            // The row exists and is chained; only its terminal state is missing.
+            // Loud, because a trial stuck in `running` skews nothing but reads
+            // as an in-flight job forever.
+            tracing::error!(error = %e, "failed to settle trial in the ledger");
+        }
     }
 
     /// This user's jobs, newest first.
@@ -321,24 +452,33 @@ impl BacktestManager {
             job.set_status(BacktestStatus::Cancelled);
             return;
         }
-        if let Err((phase, error)) = self.drive_inner(&job).await {
-            tracing::warn!(id = %job.id, phase = phase.as_str(), %error, "backtest failed");
-            job.fail(phase, error);
+        if let Err(failure) = self.drive_inner(&job).await {
+            tracing::warn!(
+                id = %job.id,
+                phase = failure.phase.as_str(),
+                reason = failure.reason.as_str(),
+                error = %failure.detail,
+                "backtest failed"
+            );
+            job.fail(failure);
         }
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn drive_inner(self: &Arc<Self>, job: &Arc<Job>) -> Result<(), (BacktestStatus, String)> {
+    async fn drive_inner(self: &Arc<Self>, job: &Arc<Job>) -> Result<(), PhaseFailure> {
         let spec = &job.spec;
-        let fail =
-            |phase: BacktestStatus| move |e: anyhow::Error| (phase, humanize_error(&e.to_string()));
+        let fail = |phase: BacktestStatus, reason: TerminalReason| {
+            move |e: anyhow::Error| PhaseFailure::new(phase, reason, humanize_error(&e.to_string()))
+        };
 
         // ── Phase 1: check stored data against the strategy's requirements ──
         job.set_status(BacktestStatus::CheckingData);
         self.persist(job).await;
 
         let requirements = derive_requirements(&spec.definition, spec.timeframe)
-            .map_err(|e| (BacktestStatus::CheckingData, e.to_string()))?;
+            .map_err(|e| {
+                PhaseFailure::new(BacktestStatus::CheckingData, TerminalReason::IntegrityRejected, e.to_string())
+            })?;
         let timeframe = requirements.timeframe;
         let schedule = ScheduleKind::for_asset_class(&spec.asset_class);
         let warmup_secs = requirements.warmup_bars * timeframe.seconds();
@@ -349,7 +489,7 @@ impl BacktestManager {
         let counts = store
             .daily_counts(&spec.instrument_id, timeframe, data_from, spec.end)
             .await
-            .map_err(fail(BacktestStatus::CheckingData))?;
+            .map_err(fail(BacktestStatus::CheckingData, TerminalReason::DataError))?;
         let mut coverage = gaps::analyze(data_from, spec.end, &counts, timeframe, schedule);
 
         job.state.write().expect("job state lock poisoned").coverage = Some(coverage.clone());
@@ -363,8 +503,10 @@ impl BacktestManager {
             );
             self.persist(job).await;
 
+            // No collector for this asset class is a refusal of the request, not a
+            // fault in the data that exists.
             let plan = CollectorPlan::for_asset_class(&spec.asset_class, &spec.instrument_id)
-                .map_err(fail(BacktestStatus::CollectingData))?;
+                .map_err(fail(BacktestStatus::CollectingData, TerminalReason::IntegrityRejected))?;
             let collected = collect_ranges(
                 &self.http,
                 &store,
@@ -377,13 +519,13 @@ impl BacktestManager {
                 &job.cancel,
             )
             .await
-            .map_err(fail(BacktestStatus::CollectingData))?;
+            .map_err(fail(BacktestStatus::CollectingData, TerminalReason::DataError))?;
 
             // Re-check coverage after the backfill.
             let counts = store
                 .daily_counts(&spec.instrument_id, timeframe, data_from, spec.end)
                 .await
-                .map_err(fail(BacktestStatus::CollectingData))?;
+                .map_err(fail(BacktestStatus::CollectingData, TerminalReason::DataError))?;
             coverage = gaps::analyze(data_from, spec.end, &counts, timeframe, schedule);
             coverage.collected_bars = collected;
             job.state.write().expect("job state lock poisoned").coverage = Some(coverage.clone());
@@ -394,8 +536,9 @@ impl BacktestManager {
             return Ok(());
         }
         if coverage.present_bars == 0 {
-            return Err((
+            return Err(PhaseFailure::new(
                 BacktestStatus::CheckingData,
+                TerminalReason::DataError,
                 format!(
                     "no historical {} bars available for {} in the requested window{}",
                     timeframe.key(),
@@ -415,11 +558,12 @@ impl BacktestManager {
         let bars = store
             .load_bars(&spec.instrument_id, timeframe, data_from, spec.end)
             .await
-            .map_err(fail(BacktestStatus::LoadingData))?;
+            .map_err(fail(BacktestStatus::LoadingData, TerminalReason::DataError))?;
         if bars.is_empty() {
-            return Err((
+            return Err(PhaseFailure::new(
                 BacktestStatus::LoadingData,
-                "bar load returned no rows despite coverage — check ClickHouse".to_string(),
+                TerminalReason::DataError,
+                "bar load returned no rows despite coverage — check ClickHouse",
             ));
         }
 
@@ -430,7 +574,13 @@ impl BacktestManager {
         let initial_balance: Decimal = spec
             .initial_balance
             .parse()
-            .map_err(|e| (BacktestStatus::Simulating, format!("invalid balance: {e}")))?;
+            .map_err(|e| {
+                PhaseFailure::new(
+                    BacktestStatus::Simulating,
+                    TerminalReason::IntegrityRejected,
+                    format!("invalid balance: {e}"),
+                )
+            })?;
         let precisions = self.instrument_precisions(&spec.instrument_id).await;
         let inputs = SimulationInputs {
             definition: spec.definition.clone(),
@@ -449,12 +599,13 @@ impl BacktestManager {
         let report = tokio::task::spawn_blocking(move || run_simulation(inputs, &control))
             .await
             .map_err(|e| {
-                (
+                PhaseFailure::new(
                     BacktestStatus::Simulating,
+                    TerminalReason::DependencyFailure,
                     format!("simulation panicked: {e}"),
                 )
             })?
-            .map_err(fail(BacktestStatus::Simulating))?;
+            .map_err(fail(BacktestStatus::Simulating, TerminalReason::DependencyFailure))?;
 
         if report.cancelled || job.cancel.load(Ordering::Relaxed) {
             job.set_status(BacktestStatus::Cancelled);
@@ -593,9 +744,13 @@ impl BacktestManager {
             };
             let mut status = BacktestStatus::from_str_loose(&row.status);
             let mut error = row.error;
+            // A job still running when the process died is a preemption nobody
+            // recovered, not a failure of the work (INV-17: right-censored).
+            let mut terminal = None;
             if !status.is_terminal() {
                 status = BacktestStatus::Failed;
                 error = Some("interrupted by platform restart".to_string());
+                terminal = Some(TerminalReason::PreemptedAbandoned);
             }
             let job = Job::new(
                 row.id,
@@ -619,6 +774,7 @@ impl BacktestManager {
                 let mut state = job.state.write().expect("job state lock poisoned");
                 state.status = status;
                 state.error = error;
+                state.terminal = terminal;
                 state.failed_phase = row.failed_phase;
                 state.coverage = row.coverage.and_then(|c| serde_json::from_value(c).ok());
                 state.result = row.result;

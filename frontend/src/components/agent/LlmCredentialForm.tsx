@@ -66,7 +66,7 @@ function ProviderCard({
         <span className="font-semibold text-text">{label}</span>
         <div className="flex items-center gap-2">
           {configured ? (
-            <span className="flex items-center gap-1 text-xs text-green-400">
+            <span className="flex items-center gap-1 text-xs text-pos">
               <CheckCircle className="h-3.5 w-3.5" />
               {keyLast4 ? `Connected ····${keyLast4}` : 'Connected'}
             </span>
@@ -98,7 +98,7 @@ function ProviderCard({
           )}
           <div>
             <label className="block text-xs text-text-dim mb-1">
-              {provider === 'ollama' ? 'Ollama host' : 'Base URL (optional)'}
+              {provider === 'ollama' ? 'Ollama host' : provider === 'vllm' ? 'vLLM host' : 'Base URL (optional)'}
             </label>
             <input
               type="text"
@@ -106,7 +106,11 @@ function ProviderCard({
               onChange={(e) => setUrl(e.target.value)}
               placeholder={
                 baseUrl ??
-                (provider === 'ollama' ? 'http://localhost:11434' : 'Provider default')
+                (provider === 'ollama'
+                  ? 'http://localhost:11434'
+                  : provider === 'vllm'
+                    ? 'http://localhost:8000'
+                    : 'Provider default')
               }
               autoComplete="off"
               className="w-full rounded-lg px-3 py-1.5 text-sm bg-surface border border-border text-text placeholder:text-text-dim focus:outline-none focus:ring-1 focus:ring-accent"
@@ -114,7 +118,7 @@ function ProviderCard({
           </div>
 
           {error && (
-            <div className="flex items-start gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs text-red-400">
+            <div className="flex items-start gap-2 rounded-lg bg-neg-subtle border border-line-neg px-3 py-2 text-xs text-neg">
               <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
               {error}
             </div>
@@ -126,7 +130,7 @@ function ProviderCard({
               onClick={() => saveMutation.mutate()}
               className={cn(
                 'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-                'bg-accent text-white hover:bg-accent/80 disabled:opacity-40',
+                'bg-accent text-on-accent hover:bg-accent/80 disabled:opacity-40',
               )}
             >
               {saveMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -136,7 +140,7 @@ function ProviderCard({
               <button
                 disabled={deleteMutation.isPending}
                 onClick={() => deleteMutation.mutate()}
-                className="rounded-lg px-3 py-1.5 text-sm text-text-muted hover:text-red-400 hover:bg-red-400/10 border border-border transition-colors disabled:opacity-40"
+                className="rounded-lg px-3 py-1.5 text-sm text-text-muted hover:text-neg hover:bg-neg-subtle border border-border transition-colors disabled:opacity-40"
               >
                 {deleteMutation.isPending ? 'Removing…' : 'Remove'}
               </button>
@@ -157,7 +161,7 @@ export function LlmCredentialForm() {
   return (
     <div className="space-y-3">
       {data && !data.encryption_available && (
-        <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-400">
+        <div className="rounded-lg bg-warn-subtle border border-line-warn px-3 py-2 text-xs text-warn">
           Credential encryption is not configured on the platform (CRED_KEK unset) —
           keys cannot be stored until the operator sets it.
         </div>

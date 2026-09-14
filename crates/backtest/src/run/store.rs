@@ -100,7 +100,7 @@ mod tests {
         let cfg = RunConfigBuilder::new("s", "v", s, "c", "z", "snap")
             .seed(seed)
             .build();
-        let mut r = RunResult::failed(&cfg, "x", "engine@test");
+        let mut r = RunResult::failed(&cfg, ledger::TerminalReason::DependencyFailure, "x", "engine@test");
         r.status = status;
         r
     }
@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(store.put(r.clone()), PutOutcome::Stored);
         // A second put of the same id is a no-op, even with a mutated body.
         let mut mutated = r.clone();
-        mutated.status = RunStatus::Failed;
+        mutated.status = RunStatus::Failed(ledger::TerminalReason::DependencyFailure);
         assert_eq!(store.put(mutated), PutOutcome::AlreadyPresent);
         assert_eq!(store.len(), 1);
         // The original (Ok) survived; the mutation did not take.
@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn failed_and_rejected_runs_are_stored() {
         let store = InMemoryRunStore::new();
-        store.put(result(1, RunStatus::Failed));
+        store.put(result(1, RunStatus::Failed(ledger::TerminalReason::DependencyFailure)));
         store.put(result(2, RunStatus::RejectedIntegrity));
         assert_eq!(store.len(), 2);
     }

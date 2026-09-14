@@ -708,7 +708,10 @@ mod tests {
     #[test]
     fn coinbase_granularity_covers_all_but_seconds() {
         assert!(coinbase_granularity(Timeframe::Seconds1).is_err());
-        assert_eq!(coinbase_granularity(Timeframe::Minutes15).unwrap(), (900, 1));
+        assert_eq!(
+            coinbase_granularity(Timeframe::Minutes15).unwrap(),
+            (900, 1)
+        );
         // 4h is assembled from 1h candles.
         assert_eq!(coinbase_granularity(Timeframe::Hours4).unwrap(), (3600, 4));
     }

@@ -5,9 +5,15 @@
 //! run-scoped service token — the identical code path (`mcp-server-lib`) the
 //! external MCP front door uses, so tool behavior cannot drift between the two.
 
+pub mod audit;
+pub mod bridge;
+pub mod conversations;
 pub mod driver;
+pub mod hardware_probe;
+pub mod local_driver;
 pub mod manager;
 pub mod prompt;
 pub mod routes;
+pub mod workspace_tools;
 
-pub use manager::{AgentManager, StartError, StartRunRequest};
+pub use manager::{AgentManager, StartError};

@@ -4,18 +4,34 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+use ledger::TerminalReason;
+
 use super::config::RunConfig;
 use super::id::RunId;
 use super::metrics::MetricSet;
 
 /// Terminal status of a Run. `RejectedIntegrity` is set by Gate 0 (Phase 4);
 /// `Failed` is any execution error — both are stored and counted, never lost.
+///
+/// `Failed` carries the [`TerminalReason`] the ledger will record, because a
+/// failure whose reason has to be reconstructed later is a failure whose reason
+/// is guessed: the settlement path used to substring-match the message and call
+/// everything it did not recognise `dependency_failure` (ADR-P2-30). Making the
+/// reason part of the status means a Run cannot fail without saying how.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
     Ok,
-    Failed,
+    Failed(TerminalReason),
     RejectedIntegrity,
+}
+
+impl RunStatus {
+    /// Whether this status means the Run produced usable metrics.
+    #[must_use]
+    pub fn is_ok(self) -> bool {
+        matches!(self, Self::Ok)
+    }
 }
 
 /// Long or short.
@@ -91,17 +107,21 @@ pub struct RunResult {
 }
 
 impl RunResult {
-    /// Build a `Failed` result for `cfg` with a reason flag — used so an
-    /// erroring execution is still a recorded, counted Run (never dropped).
+    /// Build a `Failed` result for `cfg` — used so an erroring execution is still
+    /// a recorded, counted Run (never dropped).
+    ///
+    /// `terminal` is what §9 records and therefore which censoring INV-17
+    /// applies; `detail` is for a human reading the flag.
     #[must_use]
     pub fn failed(
         cfg: &RunConfig,
+        terminal: TerminalReason,
         reason: impl Into<String>,
         produced_by: impl Into<String>,
     ) -> Self {
         Self {
             run_id: cfg.run_id.clone(),
-            status: RunStatus::Failed,
+            status: RunStatus::Failed(terminal),
             equity_curve: Vec::new(),
             net_exposure: Vec::new(),
             trades: Vec::new(),
@@ -196,8 +216,8 @@ mod tests {
     #[test]
     fn failed_carries_unsafe_and_a_reason() {
         let c = cfg();
-        let r = RunResult::failed(&c, "boom", "engine@test");
-        assert_eq!(r.status, RunStatus::Failed);
+        let r = RunResult::failed(&c, TerminalReason::NanDivergence, "boom", "engine@test");
+        assert_eq!(r.status, RunStatus::Failed(TerminalReason::NanDivergence));
         assert_eq!(r.run_id, c.run_id);
         assert_eq!(r.integrity_flags.len(), 1);
     }

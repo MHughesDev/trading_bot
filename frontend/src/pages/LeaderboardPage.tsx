@@ -50,10 +50,10 @@ type SortKey = 'rank' | 'score' | 'crps' | 'coverage_90' | 'sharpe'
 function ScoreBadge({ score }: { score: number }) {
   const color =
     score >= 80
-      ? 'bg-green-500/15 text-green-400 border-green-500/30'
+      ? 'bg-pos-subtle text-pos border-line-pos'
       : score >= 60
-        ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
-        : 'bg-red-500/15 text-red-400 border-red-500/30'
+        ? 'bg-warn-subtle text-warn border-line-warn'
+        : 'bg-neg-subtle text-neg border-line-neg'
 
   return (
     <span className={cn('inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono font-medium', color)}>
@@ -63,9 +63,9 @@ function ScoreBadge({ score }: { score: number }) {
 }
 
 function RankMedal({ rank }: { rank: number }) {
-  if (rank === 1) return <span className="text-yellow-400 font-bold text-sm">🥇</span>
-  if (rank === 2) return <span className="text-zinc-300 font-bold text-sm">🥈</span>
-  if (rank === 3) return <span className="text-amber-600 font-bold text-sm">🥉</span>
+  if (rank === 1) return <span className="text-warn font-bold text-sm">🥇</span>
+  if (rank === 2) return <span className="text-fg-secondary font-bold text-sm">🥈</span>
+  if (rank === 3) return <span className="text-warn font-bold text-sm">🥉</span>
   return <span className="text-xs text-text-muted font-mono w-5 text-right">{rank}</span>
 }
 

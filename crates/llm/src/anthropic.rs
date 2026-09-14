@@ -10,7 +10,9 @@
 use serde_json::{json, Map, Value};
 
 use crate::error::{classify_status, truncate, LlmError};
-use crate::types::{ChatRequest, ChatResponse, Message, ModelInfo, StopReason, ToolCall, Usage};
+use crate::types::{
+    ChatRequest, ChatResponse, Message, ModelInfo, StopReason, ToolCall, ToolChoice, Usage,
+};
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
@@ -104,6 +106,18 @@ fn build_body(req: &ChatRequest) -> Value {
             })
             .collect();
         body.insert("tools".into(), Value::Array(tools));
+        if let Some(choice) = &req.tool_choice {
+            body.insert(
+                "tool_choice".into(),
+                match choice {
+                    ToolChoice::Auto => json!({"type": "auto"}),
+                    // Anthropic spells "you must call something" as `any`.
+                    ToolChoice::Required => json!({"type": "any"}),
+                    ToolChoice::None => json!({"type": "none"}),
+                    ToolChoice::Tool(name) => json!({"type": "tool", "name": name}),
+                },
+            );
+        }
     }
     Value::Object(body)
 }
@@ -294,6 +308,10 @@ mod tests {
             tools: vec![],
             max_tokens: 10,
             temperature: None,
+            schema: None,
+            num_ctx: None,
+            keep_alive: None,
+            tool_choice: None,
         };
         let messages = build_messages(&req);
         assert_eq!(messages.len(), 3); // user, assistant, merged tool-result user

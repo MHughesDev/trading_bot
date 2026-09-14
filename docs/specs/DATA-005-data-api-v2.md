@@ -44,12 +44,99 @@ data. The API:
 `clickhouse/02_bars.sql` defines `market_bars` as
 `ReplacingMergeTree(revision) ORDER BY (instrument_id, available_time)`.
 
-1. **Cross-timeframe collapse risk:** `timeframe` isn't in the sorting key. Rows for
-   different timeframes of the same instrument with the same `available_time` (for
-   example the 1m and 1h bars closing at 10:00) are treated as duplicates and collapsed
-   on merge. **Verify with a ClickHouse query before Set L.** If confirmed, this is a
-   data-loss bug independent of this spec, and may explain the thin 1h history observed
-   on 2026-09-08 (BS-007 G-13).
+1. **Cross-timeframe collapse — CONFIRMED on the live table, 2026-09-11.** `timeframe`
+   isn't in the sorting key, so rows for different timeframes of the same instrument
+   sharing an `available_time` are treated as duplicates and collapsed on merge.
+   Measured on `trading.market_bars` (read-only queries; nothing was optimised or
+   dropped):
+
+   | Measurement | Value |
+   |---|---|
+   | Rows, raw | 99,789 |
+   | Rows, `FINAL` (what a full merge would leave) | 99,531 |
+   | Duplicate keys that are exact duplicates (benign) | 240 |
+   | Duplicate keys that are **cross-timeframe collisions** | **18** |
+   | BTC-USD 1h bars at risk | **18 of 22 (81.8%)** |
+   | BTC-USD 1h bars not at risk | 4 — exactly those before 1m coverage begins (2026-05-16 00:48) |
+
+   Every 1h bar that overlaps 1m coverage collides. The colliding rows are genuinely
+   different data, not duplicates — for `BTC-USD 2026-05-31 06:00`:
+
+   | timeframe | open | high | low | close | volume |
+   |---|---|---|---|---|---|
+   | 1h | 74054.00 | 74100.72 | 73939.99 | 73947.01 | 75.0697 |
+   | 1m | 73961.99 | 73961.99 | 73947.01 | 73947.01 | 1.4108 |
+
+   Only `close` coincides, because an hour's close equals its last minute's close.
+   Both rows carry `revision = 0`, so `ReplacingMergeTree(revision)` has no tiebreak
+   and the winner is arbitrary. In practice `FINAL` keeps the **1m** row for all 18,
+   i.e. the coarse bar is the one destroyed.
+
+   **The loss was pending, not yet realised.** ReplacingMergeTree only collapses rows
+   within a single part, and the colliding rows sat in two different parts of partition
+   `202605` (`202605_1_402_15` and `202605_403_407_1`). They die when those parts merge.
+
+   **Rescued 2026-09-11, before any merge.** A verified snapshot was taken, so the 18
+   rows can no longer be lost:
+   - `trading.market_bars_rescue_20260911` — a plain `MergeTree` (no replacing) ordered
+     by `(instrument_id, timeframe, venue_id, source, available_time, revision,
+     ingested_time)`, holding all 99,789 rows. `OPTIMIZE … FINAL` on it leaves the count
+     and all 18 collisions unchanged, which is the proof that the new sorting key fixes
+     the bug.
+   - Off-database copies in `../trading_bot_backups/` (outside the repo):
+     `market_bars_20260911.native` (authoritative, restores byte-identical),
+     a Parquet copy, and a CSV of just the 36 colliding rows. See the README there.
+   - Equality was checked with an order-independent `sipHash64` over all 18 columns:
+     source, rescue table and restored-from-file all match.
+
+   **RESOLVED — cutover completed 2026-09-11** (Set L Phase 0,
+   [phase-0-bar-schema-v2.md](../plans/plan-sets/set-L/phase-0-bar-schema-v2.md)):
+
+   | Step | Outcome |
+   |---|---|
+   | `market_bars_v2` created (`clickhouse/06_market_bars_v2.sql`) | append-only `MergeTree`, `ORDER BY (instrument_id, timeframe, event_time, revision, ingested_time)` |
+   | Data migrated from the verified snapshot | 99,789 rows across 7 `(timeframe, month)` chunks |
+   | Verified | 0 rows of the source absent from v2, by row-level anti-join on a `sipHash64` fingerprint of all 18 shared columns |
+   | `OPTIMIZE TABLE market_bars_v2 FINAL` on the live data | 99,789 rows, **all 18 collisions intact** |
+   | Writers | moved to v2; `market_bars` receives nothing further |
+   | Readers | all five moved to v2, resolving revisions with one shared `argMax(x, (revision, ingested_time))` |
+   | `market_bars` | frozen read-only, **not dropped**; retirement scheduled for the end of Set L |
+
+   Read-only is enforced by `cargo xtask check-bars-v1-frozen` in CI rather than a
+   database grant: the ClickHouse user lives in `users_xml`, so `REVOKE INSERT` fails
+   with `ACCESS_STORAGE_READONLY`, and a grant would not survive a container rebuild.
+
+   **Still avoid `OPTIMIZE` on `market_bars`.** It is frozen, not fixed — a merge
+   would still collapse the 18 rows it holds. The snapshot and v2 both carry the data,
+   so the loss would be recoverable, but there is no reason to incur it.
+
+   **Worse than "on merge" (measured during the cutover).** If both timeframes arrive
+   in the **same insert batch**, ReplacingMergeTree collapses them as the part is
+   written — the coarse bar is gone immediately, no merge involved. Only when the bars
+   arrive in *different* batches is the loss deferred. The 18 rows survived on the live
+   table only because of that accident of batching.
+
+   The regression is executed, not described: `crates/backtest/tests/bars_collision_regression.rs`
+   runs one property — *two bars, same instrument, same close, different timeframes,
+   both survive a full merge and stay distinguishable* — against both schemas, and
+   asserts that **v1 fails it** and v2 passes. If v1 ever starts passing, the test
+   breaks and this section needs revisiting.
+
+   **Worse than "on merge" (measured 2026-09-11 during Set L L-0.1).** If both
+   timeframes arrive in the **same insert batch**, ReplacingMergeTree collapses them as
+   the part is written — the coarse bar is gone immediately, with no merge involved.
+   Only when the bars arrive in *different* batches is the loss deferred to a merge.
+   The 18 rows that survive on the live table do so only because of that accident of
+   batching. Consequence for the backfill (DA-17): a job that writes several timeframes
+   for one instrument in a single batch destroys the coarse bars instantly and silently.
+   The v2 cutover is therefore a hard prerequisite of the backfill, not a preference.
+
+   This does *not* explain the thin 1h history of BS-007 G-13 on its own: only 18 rows
+   are at risk, while the 1h series is missing hundreds of hours (a gap from
+   2026-05-16 00:00 to 2026-05-31 06:00 with no 1h bars at all, inside continuous 1m
+   coverage). Destroyed rows leave no trace, so earlier merges may have eaten more, but
+   the table cannot prove it. Treat G-13 as primarily a **collection** gap, with this
+   bug as an aggravating factor.
 2. **Revisions are overwritten:** "latest revision wins after merge" destroys the
    revision history that `as_of` queries need.
 
@@ -60,11 +147,35 @@ CREATE TABLE market_bars_v2 (
   -- same columns as market_bars, plus:
   bar_open_time   DateTime64(9,'UTC'),
   event_time      DateTime64(9,'UTC'),        -- bar close (window_close)
-  snapshot_id     UInt64 MATERIALIZED toUnixTimestamp64Nano(ingested_time)
-) ENGINE = MergeTree                            -- append-only; no replacing
-ORDER BY (instrument_id, timeframe, event_time, revision, ingested_time)
+  snapshot_id     UInt64 MATERIALIZED toUInt64(toUnixTimestamp64Nano(ingested_time))
+) ENGINE = ReplacingMergeTree(ingested_time)
+ORDER BY (instrument_id, timeframe, venue_id, source, event_time, revision)
 PARTITION BY (timeframe, toYYYYMM(event_time));
 ```
+
+> **Engine corrected 2026-09-11, hours after the cutover.** This spec first said
+> plain `MergeTree`, "append-only; no replacing", reasoning that a table which never
+> collapses cannot lose a row to a sorting-key mistake. That is true, and it is why
+> the key above names every dimension that distinguishes two bars. But it traded one
+> failure for another: **re-collecting a bar is routine** — gap fill re-reads ranges
+> on every boot — and an append-only table keeps every repeat forever. Measured on
+> the live table the same day: **1,688 rows were exact re-collections**, same
+> `event_id`, same revision, differing only in `ingested_time`. Reads stayed correct
+> (they resolve with `argMax`), but the table grew without bound and `count()`
+> stopped meaning "bars".
+>
+> v1's bug was never the engine — it was an **incomplete key**. v1 collapsed rows
+> that differed in `timeframe` because `timeframe` was not in its key. Here rows
+> merge only when instrument, timeframe, venue, source, close time **and** revision
+> all match, i.e. only for a genuine repeat of the same observation, most recent
+> ingest winning. Revision history is preserved because `revision` is in the key.
+>
+> Two consequences for anything comparing the tables:
+> - Identity is the **sorting key**, not full row content. Fingerprinting
+>   `ingested_time` makes a merged-away repeat look like a missing row; the backfill
+>   did that and re-copied 1,680 rows on every boot until it was fixed.
+> - `count()` on v2 is now meaningful: after the rebuild, rows equal distinct
+>   observations (102,113 on 2026-09-11).
 
 - **Latest-as-of reads** pick, per `(instrument_id, timeframe, event_time)`, the row
   with the greatest `(revision, ingested_time)` among rows with

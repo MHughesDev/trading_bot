@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="paper" data-density="comfortable">
+<head>
+<meta charset="utf-8">
+<title>Dashboard</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  .pagehead{height:52px;flex:none;display:flex;align-items:center;gap:var(--s-4);
+    padding:0 var(--s-5);background:var(--bg-canvas)}
+  .h1{font-family:var(--font-display);font-size:var(--t-20);font-weight:var(--w-semibold);letter-spacing:var(--tr-tight)}
+  [data-theme="terminal"] .h1{font-size:var(--t-16);text-transform:uppercase;letter-spacing:.12em}
+
+  .body{flex:1;min-height:0;display:grid;gap:var(--s-3);padding:0 var(--s-5) var(--s-5);
+    grid-template-columns:minmax(0,1fr) 400px;grid-template-rows:auto 312px minmax(0,1fr)}
+
+  .hero{grid-column:1/-1;display:grid;grid-template-columns:300px repeat(5,minmax(0,1fr));
+    align-items:center}
+  .hero > div{padding:var(--s-4) var(--s-5);border-left:1px solid var(--line-hairline);height:100%;display:flex;flex-direction:column;justify-content:center}
+  .hero > div:first-child{border-left:0}
+  .hero .big{font-size:var(--t-32);font-weight:var(--w-semibold);font-family:var(--font-numeric);
+    font-variant-numeric:tabular-nums;letter-spacing:var(--tr-tighter);line-height:1.05}
+  [data-theme="paper"] .hero .big{font-family:var(--font-display);letter-spacing:var(--tr-tight)}
+
+  .legend{display:flex;flex-direction:column}
+  .legend .r{display:grid;grid-template-columns:10px 1fr auto auto;gap:var(--s-3);align-items:center;
+    height:26px;font-size:var(--t-12)}
+  .legend .r .pct{font-family:var(--font-numeric);font-variant-numeric:tabular-nums;font-weight:var(--w-semibold);width:52px;text-align:right}
+  .legend .r .amt{font-family:var(--font-numeric);font-variant-numeric:tabular-nums;color:var(--fg-tertiary);width:88px;text-align:right}
+
+  .stack{display:grid;grid-template-rows:minmax(0,1fr) auto;gap:var(--s-3);min-height:0}
+  .tabs{display:flex;gap:var(--s-4);height:36px;align-items:center;padding:0 var(--s-4);border-bottom:1px solid var(--line-hairline);flex:none}
+  .tabs a{font-size:var(--t-12);font-weight:var(--w-medium);color:var(--fg-tertiary);text-decoration:none;height:100%;display:flex;align-items:center;border-bottom:2px solid transparent}
+  [data-theme="terminal"] .tabs a{text-transform:uppercase;letter-spacing:.08em;font-size:var(--t-11)}
+  .tabs a.on{color:var(--fg-primary);border-bottom-color:var(--line-accent)}
+  .auto-row{display:grid;grid-template-columns:1fr auto;gap:var(--s-3);align-items:center;
+    padding:9px var(--s-4);border-bottom:1px solid var(--line-hairline)}
+  .auto-row:last-child{border-bottom:0}
+  .alloc-cell{display:flex;align-items:center;gap:var(--s-2);justify-content:flex-end}
+  .alloc-cell .minibar{width:56px;flex:none}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 11.5 6 6l3 3.2L14 3.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="brand-name">Meridian</div>
+    </div>
+    <nav class="nav">
+      <a href="#" class="on">Dashboard</a><a href="#">Trading</a><a href="#">Automations</a>
+      <a href="#">Strategy</a><a href="#">Back&nbsp;Testing</a><a href="#">Settings</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="topright">
+      <div class="mode-pill"><i class="dot"></i>Paper</div>
+      <div class="equity-readout"><div class="lbl">Equity</div><div class="num" style="font-size:var(--t-13);font-weight:var(--w-semibold)">$910,432.18</div></div>
+      <div class="equity-readout"><div class="lbl">Day P&amp;L</div><div class="num pos" style="font-size:var(--t-13);font-weight:var(--w-semibold)">+$8,214.06</div></div>
+      <div class="row" style="gap:6px;padding-left:var(--s-3);border-left:1px solid var(--line-hairline)"><i class="dot live"></i><span class="lbl">12 ms</span></div>
+      <div class="avatar">MH</div>
+    </div>
+  </header>
+
+  <div class="pagehead">
+    <div class="h1">Portfolio</div>
+    <span class="badge neutral">All accounts</span>
+    <div class="spacer"></div>
+    <div class="seg"><button>1D</button><button>1W</button><button class="on">1M</button><button>3M</button><button>YTD</button><button>All</button></div>
+    <button class="btn sm">Export</button>
+    <button class="btn sm primary">New order</button>
+  </div>
+
+  <div class="body">
+
+    <!-- HERO -->
+    <section class="panel hero">
+      <div>
+        <span class="k lbl">Account equity</span>
+        <div class="big">$910,432.18</div>
+        <div class="row" style="gap:var(--s-2);margin-top:4px">
+          <span class="badge pos">▲ +2.30% all time</span>
+          <svg id="spark" width="86" height="22"></svg>
+        </div>
+      </div>
+      <div class="stat"><span class="k">Day P&amp;L</span><span class="v pos">+$8,214.06</span><span class="mut num" style="font-size:var(--t-11)">+0.91%</span></div>
+      <div class="stat"><span class="k">Unrealized</span><span class="v pos">+$4,222.50</span><span class="mut num" style="font-size:var(--t-11)">4 open positions</span></div>
+      <div class="stat"><span class="k">Realized (MTD)</span><span class="v pos">+$16,209.68</span><span class="mut num" style="font-size:var(--t-11)">982 trades</span></div>
+      <div class="stat"><span class="k">Win rate</span><span class="v">54.2%</span><span class="mut num" style="font-size:var(--t-11)">profit factor 1.68</span></div>
+      <div class="stat"><span class="k">Buying power</span><span class="v">$330,120.00</span><span class="mut num" style="font-size:var(--t-11)">margin used 18.4%</span></div>
+    </section>
+
+    <!-- EQUITY CURVE -->
+    <section class="panel">
+      <div class="panel-hd">
+        <span class="panel-title">Equity curve</span>
+        <span class="badge neutral">30 days</span>
+        <div class="spacer"></div>
+        <span class="lbl">Max drawdown <b class="num neg">−4.18%</b>&nbsp;&nbsp;·&nbsp;&nbsp;Sharpe <b class="num sec">1.94</b>&nbsp;&nbsp;·&nbsp;&nbsp;Best day <b class="num pos">+$14,880</b></span>
+      </div>
+      <div class="panel-bd flush" style="position:relative"><svg id="equity" width="100%" height="100%"></svg></div>
+    </section>
+
+    <!-- ALLOCATION -->
+    <section class="panel">
+      <div class="panel-hd"><span class="panel-title">Allocation by asset class</span>
+        <div class="spacer"></div><span class="lbl">8 classes</span></div>
+      <div class="panel-bd" style="padding:var(--s-4)">
+        <div class="allocbar" id="allocbar" style="margin-bottom:var(--s-4)"></div>
+        <div class="legend" id="legend"></div>
+      </div>
+    </section>
+
+    <!-- PORTFOLIO DETAIL (tabbed) -->
+    <section class="panel" style="overflow:hidden">
+      <div class="tabs">
+        <a href="#" class="on">By asset class</a>
+        <a href="#">Open positions <span class="badge neutral" style="margin-left:6px">4</span></a>
+        <a href="#">Recent fills</a>
+        <a href="#">Orders</a>
+        <div class="spacer"></div>
+        <div class="seg"><button class="on">Equity</button><button>Cash</button><button>Risk</button></div>
+      </div>
+      <div class="panel-bd flush" style="overflow:auto">
+        <table class="tbl">
+          <thead><tr>
+            <th>Asset class</th><th>Equity</th><th>Cash</th><th>Day P&amp;L</th><th>Total P&amp;L</th>
+            <th>Win rate</th><th>Trades</th><th>Open</th><th>Allocation</th>
+          </tr></thead>
+          <tbody id="classes"></tbody>
+          <tfoot><tr>
+            <td style="font-weight:var(--w-semibold)">Total</td>
+            <td class="n" style="font-weight:var(--w-semibold)">$910,432.18</td>
+            <td class="n">$330,120.00</td>
+            <td class="n pos" style="font-weight:var(--w-semibold)">+$8,214.06</td>
+            <td class="n pos" style="font-weight:var(--w-semibold)">+$20,432.18</td>
+            <td class="n">54.2%</td>
+            <td class="n">982</td>
+            <td class="n">4</td>
+            <td class="n">100.0%</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </section>
+
+
+    <!-- AUTOMATIONS + RISK -->
+    <div class="stack">
+    <section class="panel" style="overflow:hidden">
+        <div class="panel-hd"><span class="panel-title">Active automations</span>
+        <div class="spacer"></div><a href="#" style="color:var(--fg-link);font-size:var(--t-12);text-decoration:none">Manage</a></div>
+      <div class="panel-bd flush" id="autos" style="overflow:auto"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-hd"><span class="panel-title">Risk &amp; exposure</span>
+          <div class="spacer"></div><span class="badge pos">Within limits</span></div>
+        <div class="panel-bd">
+          <div class="kv"><span class="k">Gross exposure</span><span class="v">$584,120.00</span></div>
+          <div class="kv"><span class="k">Net exposure</span><span class="v">$412,880.00 &nbsp;<span class="mut">45.4% of equity</span></span></div>
+          <div class="kv"><span class="k">1-day VaR (95%)</span><span class="v neg">−$18,240.00</span></div>
+          <hr class="hr">
+          <div class="between" style="margin-bottom:6px"><span class="lbl">Margin utilisation</span><span class="num sec" style="font-size:var(--t-12)">18.4% of 60% limit</span></div>
+          <div class="minibar" style="height:8px"><i style="width:30.6%;background:var(--fg-pos)"></i></div>
+        </div>
+      </section>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let _s = 7714; const rnd = () => ((_s = (_s*1103515245+12345) & 0x7fffffff)/0x7fffffff);
+
+const CLASSES = [
+  ['Crypto Spot','212,480.22','84,120.00','+3,102.44','+12,480.22','58%','142','2',23.34,1],
+  ['Equities',   '188,940.10','61,300.00','+2,884.00','+8,940.10', '61%','96', '1',20.75,2],
+  ['ETF',        '121,006.44','40,200.00','+318.60',  '+1,006.44', '54%','38', '0',13.29,3],
+  ['FX',         '104,220.85','52,000.00','+1,150.00','+4,220.85', '49%','210','1',11.45,4],
+  ['Perpetuals', '98,410.60', '22,400.00','+1,722.50','−1,589.40', '44%','318','1',10.81,5],
+  ['Options',    '84,660.00', '38,800.00','−602.10',  '−5,340.00', '39%','64', '0', 9.30,6],
+  ['DEX / AMM',  '62,714.00', '21,900.00','+402.18',  '+2,714.00', '52%','88', '0', 6.89,7],
+  ['Prediction', '37,999.97', '9,400.00', '−763.56',  '−2,000.03', '47%','26', '0', 4.17,8],
+];
+const sgn = v => v.startsWith('−') ? 'neg' : 'pos';
+
+document.getElementById('classes').innerHTML = CLASSES.map(c => `
+  <tr>
+    <td><div class="sym"><span class="swatch" style="background:var(--chart-${c[9]})"></span>
+      <span class="tick" style="font-size:var(--t-12)">${c[0]}</span></div></td>
+    <td class="n">$${c[1]}</td><td class="n mut">$${c[2]}</td>
+    <td class="n ${sgn(c[3])}">${c[3]}</td>
+    <td class="n ${sgn(c[4])}" style="font-weight:var(--w-semibold)">${c[4]}</td>
+    <td class="n">${c[5]}</td><td class="n mut">${c[6]}</td><td class="n">${c[7]}</td>
+    <td><div class="alloc-cell"><div class="minibar"><i style="width:${c[8]/23.34*100}%;background:var(--chart-${c[9]})"></i></div>
+      <span class="n" style="width:44px;text-align:right">${c[8].toFixed(2)}%</span></div></td>
+  </tr>`).join('');
+
+document.getElementById('allocbar').innerHTML = CLASSES.map(c =>
+  `<i style="width:${c[8]}%;background:var(--chart-${c[9]})"></i>`).join('');
+
+document.getElementById('legend').innerHTML = CLASSES.map(c => `
+  <div class="r">
+    <span class="swatch" style="background:var(--chart-${c[9]});width:10px;height:10px"></span>
+    <span>${c[0]}</span>
+    <span class="pct">${c[8].toFixed(2)}%</span>
+    <span class="amt">$${c[1].split('.')[0]}</span>
+  </div>`).join('');
+
+const AUTOS = [
+  ['EMA Crossover','Equities · 12 symbols','Running','+$2,884.00','61% win · 96 trades','pos'],
+  ['Mean Revert FX','FX · 6 pairs','Running','+$1,150.00','49% win · 210 trades','pos'],
+  ['AI Forecast — BTC','Perpetuals · BTC-USD','Running','−$412.00','44% win · 318 trades','neg'],
+  ['Vol Harvest','Options · SPY / QQQ','Paused','−$602.10','39% win · 64 trades','neg'],
+];
+document.getElementById('autos').innerHTML = AUTOS.map(a => `
+  <div class="auto-row">
+    <div>
+      <div class="row" style="gap:var(--s-2)">
+        <span style="font-weight:var(--w-semibold);font-size:var(--t-13)">${a[0]}</span>
+        <span class="badge ${a[2]==='Running'?'accent':'warn'}">${a[2]}</span>
+      </div>
+      <div class="mut" style="font-size:var(--t-11);margin-top:1px">${a[1]} &nbsp;·&nbsp; ${a[4]}</div>
+    </div>
+    <div class="num ${a[5]}" style="font-weight:var(--w-semibold);font-size:var(--t-13)">${a[3]}</div>
+  </div>`).join('');
+
+/* ---- sparkline ---- */
+(function(){
+  const el=document.getElementById('spark'), W=86,H=22,N=40; let v=100,pts=[];
+  for(let i=0;i<N;i++){v+=rnd()*4-1.55;pts.push(v)}
+  const lo=Math.min(...pts),hi=Math.max(...pts);
+  const d=pts.map((p,i)=>`${i?'L':'M'}${i/(N-1)*W} ${H-2-((p-lo)/(hi-lo))*(H-4)}`).join(' ');
+  el.innerHTML=`<path d="${d}" fill="none" stroke="var(--fg-pos)" stroke-width="1.5" stroke-linejoin="round"/>`;
+})();
+
+/* ---- equity area chart ---- */
+(function(){
+  const svg=document.getElementById('equity');
+  const W=svg.clientWidth||1000,H=svg.clientHeight||260;
+  const padL=8,padR=68,padT=16,padB=26;
+  const N=120; let v=890000; const pts=[];
+  for(let i=0;i<N;i++){ v += (rnd()*2-0.86)*3600 + 190; pts.push(v); }
+  const k=910432.18/pts[N-1]; for(let i=0;i<N;i++) pts[i]*=k;
+  const lo=Math.min(...pts)-6000, hi=Math.max(...pts)+6000;
+  const x=i=>padL+i/(N-1)*(W-padL-padR);
+  const y=p=>padT+(H-padT-padB)-((p-lo)/(hi-lo))*(H-padT-padB);
+  let g=`<defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="var(--chart-area-from)"/><stop offset="100%" stop-color="var(--chart-area-to)"/></linearGradient></defs>`;
+  for(let i=0;i<=4;i++){
+    const vv=lo+(hi-lo)*i/4, yy=y(vv);
+    g+=`<line x1="${padL}" x2="${W-padR}" y1="${yy}" y2="${yy}" stroke="var(--chart-grid)" stroke-width="1"/>`;
+    g+=`<text x="${W-padR+8}" y="${yy+3.5}" fill="var(--chart-axis)" font-size="10.5" font-family="var(--font-numeric)">$${Math.round(vv/1000)}k</text>`;
+  }
+  const line=pts.map((p,i)=>`${i?'L':'M'}${x(i)} ${y(p)}`).join(' ');
+  g+=`<path d="${line} L${x(N-1)} ${H-padB} L${x(0)} ${H-padB} Z" fill="url(#ag)"/>`;
+  g+=`<path d="${line}" fill="none" stroke="var(--chart-equity)" stroke-width="2" stroke-linejoin="round"/>`;
+  // deposit marker
+  const mi=Math.round(N*0.42);
+  g+=`<line x1="${x(mi)}" x2="${x(mi)}" y1="${padT}" y2="${H-padB}" stroke="var(--chart-grid-major)" stroke-width="1" stroke-dasharray="3 3"/>`;
+  g+=`<circle cx="${x(mi)}" cy="${y(pts[mi])}" r="4" fill="var(--bg-surface)" stroke="var(--chart-equity)" stroke-width="2"/>`;
+  g+=`<text x="${x(mi)+8}" y="${padT+12}" fill="var(--fg-tertiary)" font-size="10.5">Deposit · $50,000</text>`;
+  // end dot + tag
+  g+=`<circle cx="${x(N-1)}" cy="${y(pts[N-1])}" r="4.5" fill="var(--chart-equity)"/>`;
+  const labels=['Aug 13','Aug 20','Aug 27','Sep 3','Sep 10'];
+  labels.forEach((L,i)=>{const xx=padL+i/(labels.length-1)*(W-padL-padR);
+    g+=`<text x="${xx}" y="${H-8}" fill="var(--chart-axis)" font-size="10.5" text-anchor="${i===0?'start':i===labels.length-1?'end':'middle'}">${L}</text>`;});
+  svg.innerHTML=g;
+})();
+</script>
+</body>
+</html>

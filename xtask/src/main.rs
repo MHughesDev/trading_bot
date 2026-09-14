@@ -3,6 +3,7 @@
 //! Commands:
 //!   check-money-f64       — scan workspace for f64 usage on price/size (CI enforced)
 //!   lint-no-json-hotpath  — verify serde_json absent from market-lane hot paths (CI enforced)
+//!   check-bars-v1-frozen  — verify nothing writes the retired market_bars table (CI enforced)
 
 use std::process::Command;
 
@@ -11,12 +12,15 @@ fn main() {
     match task.as_deref() {
         Some("check-money-f64") => check_money_f64(),
         Some("lint-no-json-hotpath") => lint_no_json_hotpath(),
+        Some("check-bars-v1-frozen") => check_bars_v1_frozen(),
         Some(t) => {
             eprintln!("Unknown xtask: {t}");
             std::process::exit(1);
         }
         None => {
-            println!("Usage: cargo xtask <check-money-f64|lint-no-json-hotpath>");
+            println!(
+                "Usage: cargo xtask <check-money-f64|lint-no-json-hotpath|check-bars-v1-frozen>"
+            );
         }
     }
 }
@@ -302,4 +306,87 @@ fn lint_no_json_hotpath() {
         }
         std::process::exit(1);
     }
+}
+
+/// Verify that nothing writes the retired `market_bars` table (Set L, L-0.7).
+///
+/// `market_bars` is `ReplacingMergeTree(revision) ORDER BY (instrument_id,
+/// available_time)` with `timeframe` missing from the sorting key, so two bars of
+/// different timeframes closing at the same instant destroy one another on merge —
+/// and, when they arrive in the same insert batch, immediately (DATA-005 §3).
+/// Writers moved to `market_bars_v2` on 2026-09-11 and the table is frozen.
+///
+/// This is a source guard rather than a database permission because the ClickHouse
+/// user is defined in `users_xml`, which is read-only to SQL: `REVOKE INSERT` fails
+/// with ACCESS_STORAGE_READONLY, and a grant would not survive a container rebuild
+/// anyway. A CI check does survive, and it fails at the moment someone reintroduces
+/// the write rather than months later when a merge eats the bars.
+///
+/// Reads of `market_bars` are still permitted — the table is kept as a fallback
+/// until it is retired at the end of Set L. Only inserts are forbidden.
+fn check_bars_v1_frozen() {
+    let output = Command::new("git")
+        .args(["ls-files", "--", "*.rs"])
+        .output()
+        .expect("git ls-files failed");
+
+    if !output.status.success() {
+        eprintln!("git ls-files failed");
+        std::process::exit(2);
+    }
+
+    let file_list = String::from_utf8(output.stdout).expect("invalid utf8 from git ls-files");
+    let mut violations: Vec<String> = vec![];
+
+    for file in file_list.lines() {
+        if file.contains("target/") {
+            continue;
+        }
+        // Tests may still write v1 deliberately — `bars_v2_writer.rs` seeds it in
+        // order to prove it destroys a bar, which is the premise of the whole fix.
+        if file.contains("/tests/") {
+            continue;
+        }
+        // The guard describes the forbidden pattern, so it necessarily contains it.
+        if file.ends_with("xtask/src/main.rs") {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(file) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for (idx, line) in content.lines().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*') {
+                continue;
+            }
+            // An insert targeting v1: `.insert("market_bars")`, or SQL that writes it.
+            let writes_v1 = line.contains("insert(\"market_bars\")")
+                || line.contains("INSERT INTO market_bars ")
+                || line.contains("INSERT INTO market_bars(")
+                || line.trim_end().ends_with("INSERT INTO market_bars");
+            if writes_v1 {
+                violations.push(format!("{}:{}: {}", file, idx + 1, line.trim()));
+            }
+        }
+    }
+
+    if violations.is_empty() {
+        println!("check-bars-v1-frozen: OK — nothing writes the retired market_bars table");
+        return;
+    }
+
+    eprintln!(
+        "check-bars-v1-frozen: FAILED — {} write(s) to the retired market_bars table:",
+        violations.len()
+    );
+    for v in &violations {
+        eprintln!("  {v}");
+    }
+    eprintln!();
+    eprintln!("market_bars collapses bars of different timeframes that close at the same");
+    eprintln!("instant (DATA-005 §3). Write market_bars_v2 instead.");
+    std::process::exit(1);
 }

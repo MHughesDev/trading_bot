@@ -5,7 +5,7 @@ import {
   type IChartApi, type ISeriesApi, type Time,
 } from 'lightweight-charts'
 import { useThemeStore } from '@/store/theme'
-import { chartColors } from '@/lib/chartTheme'
+import { chartPalette, type ChartPalette } from '@/lib/chartTheme'
 import type { PriceLineAnnotation } from './Annotations'
 import { calcEMA, calcSMA, calcBB, calcRSI, calcMACD } from '@/utils/indicators'
 
@@ -47,15 +47,21 @@ type AnySeries = ISeriesApi<'Line' | 'Candlestick' | 'Histogram'>
 
 function makeChart(
   el: HTMLDivElement,
-  colors: ReturnType<typeof chartColors>,
+  palette: ChartPalette,
   extra?: object,
 ): IChartApi {
+  // Spec §2.8: every chart colour is a --chart-* token. Horizontal gridlines
+  // only by default (V5); the crosshair wears --chart-crosshair.
   return createChart(el, {
-    layout: { background: { color: 'transparent' }, textColor: colors.text },
-    grid:   { vertLines: { color: colors.grid }, horzLines: { color: colors.grid } },
-    crosshair: { mode: 1 },
-    rightPriceScale: { borderColor: colors.border },
-    timeScale: { borderColor: colors.border, timeVisible: true, secondsVisible: false },
+    layout: { background: { color: 'transparent' }, textColor: palette.axis, attributionLogo: false },
+    grid: { vertLines: { visible: false }, horzLines: { color: palette.grid } },
+    crosshair: {
+      mode: 1,
+      vertLine: { color: palette.crosshair, width: 1, style: 2, labelBackgroundColor: palette.tagBg },
+      horzLine: { color: palette.crosshair, width: 1, style: 2, labelBackgroundColor: palette.tagBg },
+    },
+    rightPriceScale: { borderColor: palette.hairline },
+    timeScale: { borderColor: palette.hairline, timeVisible: true, secondsVisible: false },
     ...extra,
   })
 }
@@ -106,19 +112,19 @@ export function MultiPaneChart({
   // ── chart lifecycle (recreate on theme change) ────────────────────────────
   useEffect(() => {
     if (!mainRef.current) return
-    const colors = chartColors()
+    const colors = chartPalette()
 
     const mc = makeChart(mainRef.current, colors)
     mainChart.current = mc
     const cs = mc.addSeries(CandlestickSeries, {
-      upColor: colors.pnlUp, downColor: colors.pnlDown,
-      borderUpColor: colors.pnlUp, borderDownColor: colors.pnlDown,
-      wickUpColor:   colors.pnlUp, wickDownColor:   colors.pnlDown,
+      upColor: colors.up, downColor: colors.down,
+      borderUpColor: colors.upLine, borderDownColor: colors.downLine,
+      wickUpColor: colors.up, wickDownColor: colors.down,
     })
     candleSeries.current = cs
 
     const subOpts = {
-      timeScale: { visible: false, borderColor: colors.border },
+      timeScale: { visible: false, borderColor: colors.hairline },
       leftPriceScale: { visible: false },
       handleScroll: false,
       handleScale:  false,
@@ -163,7 +169,7 @@ export function MultiPaneChart({
   // ── data + indicators ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!candleSeries.current || !mainChart.current || bars.length === 0) return
-    const colors = chartColors()
+    const colors = chartPalette()
 
     const sorted = [...bars].sort((a, b) => {
       const ta = typeof a.ts === 'number' ? a.ts : new Date(a.ts).getTime()
@@ -201,7 +207,7 @@ export function MultiPaneChart({
       createSeriesMarkers(candleSeries.current, markers.map((m) => ({
         time: toTime(m.ts),
         position: m.side === 'buy' ? ('belowBar' as const) : ('aboveBar' as const),
-        color: m.side === 'buy' ? colors.pnlUp : colors.pnlDown,
+        color: m.side === 'buy' ? colors.up : colors.down,
         shape: m.side === 'buy' ? ('arrowUp' as const) : ('arrowDown' as const),
         text:  `${m.side.toUpperCase()}${m.qty ? ` ${m.qty}` : ''}`,
       })))
@@ -235,7 +241,7 @@ export function MultiPaneChart({
     for (const inst of indicators.filter((i) => ['ema', 'sma', 'bb'].includes(i.kind))) {
       if (overlayMap.current.has(inst.uid)) continue  // already added — just let data update handle it
 
-      const color = inst.color ?? '#94a3b8'
+      const color = inst.color ?? colors.series[0]
 
       if (inst.kind === 'bb') {
         const { upper, middle, lower } = calcBB(closes, inst.period ?? 20, inst.stddev ?? 2)
@@ -286,7 +292,7 @@ export function MultiPaneChart({
       const volInsts = indicators.filter((i) => i.kind === 'volume')
       if (volInsts.length > 0) {
         const vs = volChart.current.addSeries(HistogramSeries, {
-          color: colors.pnlUp,
+          color: colors.up,
           priceFormat: { type: 'volume' },
           lastValueVisible: false,
           priceLineVisible: false,
@@ -294,7 +300,7 @@ export function MultiPaneChart({
         vs.setData(sorted.map((b) => ({
           time:  toTime(b.ts),
           value: b.volume ?? 0,
-          color: b.close >= b.open ? `${colors.pnlUp}99` : `${colors.pnlDown}99`,
+          color: b.close >= b.open ? colors.volume : colors.volume,
         })))
         volSeriesRef.current = vs
       }
@@ -307,7 +313,7 @@ export function MultiPaneChart({
       })
       rsiSeriesRef.current = []
       const rsiInsts = indicators.filter((i) => i.kind === 'rsi')
-      const rsiColors = ['#a78bfa', '#34d399', '#f59e0b', '#f87171']
+      const rsiColors = [colors.series[3], colors.series[2], colors.series[1], colors.series[5]]
       for (const [idx, inst] of rsiInsts.entries()) {
         const rsiVals = calcRSI(closes, inst.period ?? 14)
         const color = rsiColors[idx % rsiColors.length]
@@ -316,8 +322,8 @@ export function MultiPaneChart({
         })
         rs.setData(validPoints(rsiVals))
         if (idx === 0) {
-          rs.createPriceLine({ price: 70, color: '#ef444466', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '' })
-          rs.createPriceLine({ price: 30, color: '#22c55e66', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '' })
+          rs.createPriceLine({ price: 70, color: colors.down, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '' })
+          rs.createPriceLine({ price: 30, color: colors.up, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '' })
         }
         rsiSeriesRef.current.push(rs as AnySeries)
       }
@@ -338,20 +344,20 @@ export function MultiPaneChart({
           macdInst.signal ?? 9,
         )
         const hist = macdChart.current.addSeries(HistogramSeries, {
-          color: '#3b82f6', lastValueVisible: false, priceLineVisible: false,
+          color: colors.maFast, lastValueVisible: false, priceLineVisible: false,
         })
         hist.setData(
           histogram.map((v, i) => isNaN(v) ? null : {
             time: times[i], value: v,
-            color: v >= 0 ? '#22c55e99' : '#ef444499',
+            color: v >= 0 ? colors.up : colors.down,
           }).filter(Boolean) as { time: Time; value: number; color: string }[],
         )
         const ml = macdChart.current.addSeries(LineSeries, {
-          color: '#3b82f6', lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
+          color: colors.maFast, lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
         })
         ml.setData(validPoints(macdLine))
         const sl = macdChart.current.addSeries(LineSeries, {
-          color: '#f59e0b', lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
+          color: colors.maSlow, lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
         })
         sl.setData(validPoints(signalLine))
         macdSeriesRef.current = [hist as AnySeries, ml as AnySeries, sl as AnySeries]
@@ -410,7 +416,7 @@ export function MultiPaneChart({
         style={{
           width: '100%', overflow: 'hidden',
           height: hasVol ? SUB_H.volume : 0,
-          borderTop: hasVol ? '1px solid var(--tb-border)' : 'none',
+          borderTop: hasVol ? '1px solid var(--line-hairline)' : 'none',
         }}
       />
       <div
@@ -418,7 +424,7 @@ export function MultiPaneChart({
         style={{
           width: '100%', overflow: 'hidden',
           height: hasRsi ? SUB_H.rsi : 0,
-          borderTop: hasRsi ? '1px solid var(--tb-border)' : 'none',
+          borderTop: hasRsi ? '1px solid var(--line-hairline)' : 'none',
         }}
       />
       <div
@@ -426,7 +432,7 @@ export function MultiPaneChart({
         style={{
           width: '100%', overflow: 'hidden',
           height: hasMacd ? SUB_H.macd : 0,
-          borderTop: hasMacd ? '1px solid var(--tb-border)' : 'none',
+          borderTop: hasMacd ? '1px solid var(--line-hairline)' : 'none',
         }}
       />
     </div>

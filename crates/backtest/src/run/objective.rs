@@ -197,7 +197,9 @@ mod tests {
             aggregate: Aggregate::Median,
         };
         assert!(bad.validate().is_err());
-        assert!(Objective::default_for(MetricKind::Calmar).validate().is_ok());
+        assert!(Objective::default_for(MetricKind::Calmar)
+            .validate()
+            .is_ok());
     }
 
     #[test]

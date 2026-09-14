@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel
 
 
@@ -49,6 +49,10 @@ class TrainResponse(BaseModel):
     metrics: Optional[dict] = None
     framework_version: Optional[str] = None
     error: Optional[str] = None
+    # The SPEC 9 TerminalReason for a failure, chosen from the exception's type
+    # by `failures.classify`. `None` on success. The caller does not parse
+    # `error` to work this out; see app/failures.py.
+    terminal: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -78,5 +82,57 @@ class EvalResponse(BaseModel):
     scorecard: Optional[dict] = None
     report: Optional[dict] = None
     error: Optional[str] = None
+    # See TrainResponse.terminal.
+    terminal: Optional[str] = None
 
 
+
+
+# ---------------------------------------------------------------------------
+# Post-hoc schemas (SPEC 11.4, checklist 2.11)
+# ---------------------------------------------------------------------------
+
+class CostMatrixSpec(BaseModel):
+    """What each outcome costs. No defaults: an assumed cost matrix produces a
+    threshold that looks exactly like a decided one."""
+
+    true_positive: float
+    false_positive: float
+    true_negative: float
+    false_negative: float
+
+
+class PostHocRequest(BaseModel):
+    posthoc_id: str
+    framework: str
+    costs: CostMatrixSpec
+    # (n_models, n_rows) out-of-sample predictions from the stored folds, and the
+    # realized values they are scored against.
+    oos_predictions: List[List[float]]
+    oos_realized: List[float]
+    # Scores and outcomes on the dedicated `cal` role of each fold -- never the
+    # train window, where the model is optimistic, and never the test window,
+    # which is the estimate this is protecting.
+    cal_scores: List[float]
+    cal_outcomes: List[float]
+    calibrator: str = "platt"
+    # There is deliberately no field here that reorders, skips or disables a
+    # step. The order is the guarantee (SPEC 11.4).
+
+
+class PostHocStep(BaseModel):
+    step: str
+    applied: bool
+    detail: dict = {}
+    skipped: Optional[str] = None
+
+
+class PostHocResponse(BaseModel):
+    status: str  # "succeeded" | "failed"
+    steps: List[PostHocStep] = []
+    weights: Optional[List[float]] = None
+    calibrator: Optional[str] = None
+    calibration_params: List[float] = []
+    threshold: Optional[float] = None
+    error: Optional[str] = None
+    terminal: Optional[str] = None

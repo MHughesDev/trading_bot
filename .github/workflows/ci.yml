@@ -44,6 +44,80 @@ jobs:
       - name: Run unit tests
         run: cargo test --workspace --lib
 
+  platform-invariants:
+    name: Platform invariants (static, build-blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # docs/ml-platform-context-pack/INVARIANTS.md: every ⛔ test that can be decided
+      # from the source tree. A failure here is never waived by editing the allowlist
+      # without an ADR.
+      - name: Static invariants
+        run: cargo test -p invariants --test static_invariants
+      - name: Ledger, data-plane and evaluation unit tests
+        run: cargo test -p ledger -p dataplane
+
+  platform-invariants-live:
+    name: Platform invariants (live Postgres + ClickHouse)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # pgvector, not plain postgres: migration 0055 needs the extension
+        # (ADR-P3-05).
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: trading
+          POSTGRES_PASSWORD: trading
+          POSTGRES_DB: trading
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U trading" --health-interval 5s --health-timeout 5s --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.3
+        env:
+          CLICKHOUSE_USER: trading
+          CLICKHOUSE_PASSWORD: trading
+          CLICKHOUSE_DB: trading
+        ports: ["8123:8123"]
+    env:
+      DATABASE_URL: postgres://trading:trading@localhost:5432/trading
+      PLATFORM_DB_APP_PASSWORD: ci-app-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Ledger chain, state machine, tenancy, campaigns
+        run: cargo test -p ledger -- --ignored --test-threads=1
+      - name: Schema invariants
+        run: cargo test -p invariants --test db_invariants -- --ignored --test-threads=1
+      # AT-29: a gate threshold cannot be edited in place, a superseding version
+      # can be created, and a comparison spanning two profiles is non-comparable.
+      - name: Gate profiles are immutable and versioned
+        run: cargo test -p backtest --test pg_gate_profile -- --ignored --test-threads=1
+      # 0.21 / INV-14: a live serve is logged, and the nightly job recomputes it
+      # from the bars through the real point-in-time reader. The unit tests cover
+      # the diff logic; only this covers the path between the two.
+      - name: Feature consistency diff, end to end
+        env:
+          CONSISTENCY_E2E_CLICKHOUSE_URL: http://trading:trading@localhost:8123
+        run: cargo test -p api --test pg_feature_consistency -- --ignored --test-threads=1
+
+  leakage-suite:
+    name: Leakage suite (SPEC 12.5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # "Three tests, all in CI" (SPEC 12.5). The causal access guard over the
+      # shipped feature set, the random-label test against the production fold
+      # geometry, the two frame screens, and the synthetic leak injections that
+      # prove each detector catches something. No database, no model, no network.
+      - name: Run the leakage suite
+        run: cargo test -p features --lib leakage
+
   check-money:
     name: Money safety (no f64 on price/size)
     runs-on: ubuntu-latest
@@ -53,6 +127,78 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run f64 check
         run: cargo xtask check-money-f64
+
+  check-bars-v1-frozen:
+    name: Bars schema (nothing writes the retired market_bars)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run market_bars write check
+        run: cargo xtask check-bars-v1-frozen
+
+  auditor-suite:
+    name: Auditor suite (AGENT-004 AE-02)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Fixture pairs run straight against Gate 0, the leakage lint, the data-grade
+      # gate, the revision-pinning check, the prediction-overlap rule, the
+      # truncation marker and the final_report validator. No agent, no model, no
+      # credential, no network. Target: 100% of violations caught, 0 false
+      # rejections on the clean twins.
+      - name: Run the auditor fixtures
+        run: cargo test -p api --test auditor_suite
+
+  eval-graders:
+    name: Eval graders and the non-inferiority gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test deps
+        run: pip install pytest pyyaml
+      # The graders are the instrument. An instrument nobody checks is a number
+      # generator, so the graders, the pass@k/pass^k arithmetic and the paired
+      # non-inferiority gate are tested on every PR. No model or credential needed.
+      - name: Run grader tests
+        run: python -m pytest evals/tests -q
+      - name: Dry-run the harness end to end
+        run: python evals/runner/run.py --suite noise --seeds 1 --dry-run > /dev/null
+      # The post-hoc pipeline decides a threshold from a cost matrix and nothing
+      # else (SPEC 11.4, AT-35). A tuned threshold would be an uncounted
+      # evaluation trial, so the arithmetic and the absence of a search are both
+      # checked on every PR.
+      - name: Install post-hoc deps
+        run: pip install numpy
+      - name: Run the post-hoc pipeline tests
+        run: python -m pytest apps/model-trainer/tests -q
+
+  harness-conformance:
+    name: Harness conformance and failure injection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Conformance reads the SHIPPED capability profiles, so a profile edit that
+      # drifts from Appendix A, drops an enforcement point, or quietly widens the
+      # trifecta fails here rather than in production.
+      - name: Conformance to the harness guide
+        run: cargo test -p harness --test conformance
+      # "An agent is production-ready only when it degrades correctly, not just when
+      # it succeeds" (guide v3 s6.2). Includes the prompt-injection payloads that
+      # assert the policy engine blocks the resulting action.
+      - name: Failure injection
+        run: cargo test -p harness --test failure_injection
+      # A new tool cannot reach a model without a namespace and a risk.
+      - name: Tool taxonomy is complete
+        run: cargo test -p mcp-server-lib --lib taxonomy
 
   builders-purity:
     name: builders/features purity (no I/O deps)

@@ -1,0 +1,97 @@
+# The local tier's reference model (D-18, ADR-0032).
+#
+# THIS IS THE TARGET, NOT AN ASPIRATION. It is unreachable on the current dev box
+# (GTX 1080 Ti, 11 GB, Pascal) and that is expected and acceptable. The deployment
+# target is a single RTX 3090 (24 GB, Ampere), then two over NVLink (48 GB pooled).
+#
+# Multi-step-reliable tool calling is a BASELINE ASSUMPTION here, not a capability to
+# defensively work around. The degradation in this profile relative to `frontier` is
+# the harness guide's ladder (Part 7) — smaller exposure budget, flat schemas,
+# planner-executor — not an accommodation for weak tool calling.
+
+model_id: "qwen3.6-35b-a3b"
+provider: "ollama"
+tier: "local_mid"
+
+# A3 knowledge-worker, not A5. Appendix A lists local_mid as eligible for A1-A3;
+# promotion to A5 (long-running, unattended) is an eval result, not a config edit
+# (guide §9, §6.2).
+archetype: "knowledge_worker"
+
+# What this model needs to run, at the quantisation actually deployed.
+# ~21 GB resident at Q4. With the resolver's 20% headroom that is ~25 GB, which does
+# NOT fit one 24 GB card — so a single 3090 needs a smaller quant, and two pooled
+# cards hold it comfortably. The resolver says which, out loud, rather than OOMing
+# four hours into a session.
+requires:
+  resident_bytes: 22548578304   # 21 GiB
+  requires_target_architecture: true
+
+tool_calling: "multi_step"
+
+# Where work goes if this tier cannot take it. Escalation beats refusal when a
+# frontier profile is configured and idle.
+escalate_to: "claude-opus-5"
+
+context:
+  advertised_tokens: 131072
+  # Appendix A's local_mid band is 16-24K. Held at the top of it: a research step
+  # carries a subtask, its tools and compressed state, and the compaction machinery
+  # is what keeps this honest rather than a larger number would.
+  effective_budget_tokens: 24000
+  reserve_for_output: 3000
+  max_tool_result_bytes: 8192
+
+tools:
+  # ~6 simultaneous schemas is a cliff, not a soft limit. The catalogue is 56 tools
+  # and routing is what closes the gap.
+  max_exposed_per_step: 6
+  schema_style: "flat"
+  routing: "dynamic"
+  parallel_calls: false
+
+output:
+  # Non-negotiable for a local tier (guide §3.1), and measured to work: Ollama's
+  # `format` parameter with a JSON-schema envelope produced conformant tool calls at
+  # temperature 0 on the first attempt. See docs/LOCAL_TIER_FINDINGS.md §1.
+  constrained_decoding: true
+  native_tool_template: true
+  temperature_tool_calls: 0.0
+  max_retries_per_call: 3
+
+orchestration:
+  mode: "planner_executor"
+  # Appendix A: 15 for local_mid. Held there; the eval suite on the target hardware
+  # is what would justify more.
+  max_steps: 15
+  few_shot_examples: 2
+  reflection: false
+  max_subagent_depth: 1
+  # Templated, not full. A 35B-A3B MoE writes decent short scripts; multi-step
+  # programmatic tool calling is a frontier capability until an eval says otherwise.
+  code_execution: "templated"
+
+trifecta:
+  private_data: true
+  untrusted_content: true
+  outbound_channel: false
+  mitigation: >
+    Identical to the frontier profile, and deliberately so: containment does not vary
+    with model tier. The sandbox network is internal-only, so the outbound leg is cut
+    structurally rather than by policy. A smaller model is more likely to be talked
+    into trying something, not less.
+
+budgets:
+  # Local inference trades latency for cost. Surfaced honestly rather than hidden
+  # (guide §15.3); the UI shows expected duration.
+  max_usd_per_task: 2.0
+  max_wall_clock_s: 28800
+  max_tokens_per_task: 40000000
+
+notes: >
+  Reference model for the local tier. Decode is two constrained calls per step -
+  select the tool against an enum of exactly the tools routed for this step, then
+  fill its argument schema - because a single-call anyOf envelope was measured
+  producing valid JSON naming the WRONG tool (docs/LOCAL_TIER_FINDINGS.md §4).
+  The exposure budget is therefore the decoding grammar: an unrouted tool is
+  unnameable rather than merely rejected.

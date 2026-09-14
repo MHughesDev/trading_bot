@@ -81,13 +81,13 @@ function ScorecardRing({
     <div className="flex flex-col items-center gap-2">
       <div className="relative">
         <svg width={72} height={72} className="-rotate-90">
-          <circle cx={36} cy={36} r={r} fill="none" stroke="var(--tb-border)" strokeWidth={5} />
+          <circle cx={36} cy={36} r={r} fill="none" stroke="var(--line-hairline)" strokeWidth={5} />
           <circle
             cx={36}
             cy={36}
             r={r}
             fill="none"
-            stroke="var(--tb-accent)"
+            stroke="var(--bg-accent)"
             strokeWidth={5}
             strokeDasharray={circumference}
             strokeDashoffset={offset}

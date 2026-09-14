@@ -1,0 +1,135 @@
+/* =============================================================================
+   TAILWIND v4 @theme MAPPING OVER tokens.css
+   `inline` is required: utilities must resolve to the *variable*, not its value
+   at build time, or theme switching stops working.
+   ============================================================================= */
+
+@theme inline {
+  /* --- surfaces ----------------------------------------------------------- */
+  --color-canvas:          var(--bg-canvas);
+  --color-surface:         var(--bg-surface);
+  --color-raised:          var(--bg-surface-raised);
+  --color-sunken:          var(--bg-sunken);
+  --color-inset:           var(--bg-inset);
+  --color-overlay:         var(--bg-overlay);
+  --color-scrim:           var(--bg-scrim);
+  --color-hover:           var(--bg-hover);
+  --color-active:          var(--bg-active);
+  --color-selected:        var(--bg-selected);
+  --color-skeleton:        var(--bg-skeleton);
+
+  /* --- accent / direction / state fills ------------------------------------ */
+  --color-accent:          var(--bg-accent);
+  --color-accent-hover:    var(--bg-accent-hover);
+  --color-accent-subtle:   var(--bg-accent-subtle);
+  --color-pos-fill:        var(--bg-pos);
+  --color-pos-subtle:      var(--bg-pos-subtle);
+  --color-neg-fill:        var(--bg-neg);
+  --color-neg-subtle:      var(--bg-neg-subtle);
+  --color-warn-subtle:     var(--bg-warn-subtle);
+  --color-info-subtle:     var(--bg-info-subtle);
+  --color-neutral-subtle:  var(--bg-neutral-subtle);
+
+  /* --- foreground ---------------------------------------------------------- */
+  --color-fg:              var(--fg-primary);
+  --color-fg-secondary:    var(--fg-secondary);
+  --color-fg-tertiary:     var(--fg-tertiary);
+  --color-fg-disabled:     var(--fg-disabled);
+  --color-fg-accent:       var(--fg-accent);
+  --color-pos:             var(--fg-pos);
+  --color-neg:             var(--fg-neg);
+  --color-warn:            var(--fg-warn);
+  --color-info:            var(--fg-info);
+  --color-on-accent:       var(--fg-on-accent);
+  --color-on-pos:          var(--fg-on-pos);
+  --color-on-neg:          var(--fg-on-neg);
+
+  /* --- lines --------------------------------------------------------------- */
+  --color-hairline:        var(--line-hairline);
+  --color-line:            var(--line-default);
+  --color-line-strong:     var(--line-strong);
+  --color-line-accent:     var(--line-accent);
+  --color-line-pos:        var(--line-pos);
+  --color-line-neg:        var(--line-neg);
+  --color-focus:           var(--line-focus);
+  /* Derived hairlines for tinted callouts. Not literals — a mix over a token. */
+  --color-line-warn:       color-mix(in srgb, var(--fg-warn) 32%, transparent);
+  --color-line-info:       color-mix(in srgb, var(--fg-info) 32%, transparent);
+  --color-line-accent-soft: color-mix(in srgb, var(--fg-accent) 32%, transparent);
+
+  /* --- chart series (fixed slot order — never cycled) ---------------------- */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
+
+  /* --- node families -------------------------------------------------------- */
+  --color-node-data:      var(--node-data);
+  --color-node-indicator: var(--node-indicator);
+  --color-node-signal:    var(--node-signal);
+  --color-node-logic:     var(--node-logic);
+  --color-node-ai:        var(--node-ai);
+  --color-node-intent:    var(--node-intent);
+  --color-node-risk:      var(--node-risk);
+
+  /* =========================================================================
+     BACK-COMPAT ALIASES
+     The pre-Meridian app themed itself through these names. They now resolve to
+     Meridian semantics so untouched screens are correct in both themes while
+     they are migrated. Do not introduce new usages.
+     ========================================================================= */
+  --color-background:      var(--bg-canvas);
+  --color-surface-2:       var(--bg-sunken);
+  --color-border:          var(--line-hairline);
+  --color-border-2:        var(--line-default);
+  --color-text:            var(--fg-primary);
+  --color-text-muted:      var(--fg-secondary);
+  --color-text-dim:        var(--fg-tertiary);
+  --color-pnl-up:          var(--fg-pos);
+  --color-pnl-down:        var(--fg-neg);
+  --color-warning:         var(--fg-warn);
+
+  /* --- radii --------------------------------------------------------------- */
+  --radius-xs:   var(--r-xs);
+  --radius-sm:   var(--r-sm);
+  --radius-md:   var(--r-md);
+  --radius-lg:   var(--r-lg);
+  --radius-xl:   var(--r-xl);
+  --radius-2xl:  var(--r-2xl);
+  --radius-pill: var(--r-pill);
+
+  /* --- type ---------------------------------------------------------------- */
+  --font-ui:      var(--font-ui);
+  --font-sans:    var(--font-ui);
+  --font-display: var(--font-display);
+  --font-mono:    var(--font-mono);
+  --font-numeric: var(--font-numeric);
+
+  --text-10: var(--t-10);
+  --text-11: var(--t-11);
+  --text-12: var(--t-12);
+  --text-13: var(--t-13);
+  --text-14: var(--t-14);
+  --text-16: var(--t-16);
+  --text-18: var(--t-18);
+  --text-20: var(--t-20);
+  --text-24: var(--t-24);
+  --text-28: var(--t-28);
+  --text-32: var(--t-32);
+  --text-40: var(--t-40);
+
+  /* --- elevation ----------------------------------------------------------- */
+  --shadow-e1: var(--shadow-1);
+  --shadow-e2: var(--shadow-2);
+  --shadow-e3: var(--shadow-3);
+  --shadow-e4: var(--shadow-4);
+
+  /* --- motion -------------------------------------------------------------- */
+  --ease-out-soft: var(--ease-out);
+  --ease-in-out-soft: var(--ease-in-out);
+  --ease-spring: var(--ease-spring);
+}

@@ -5,6 +5,7 @@ edition = "2021"
 description = "Strategy research: typed search spaces, samplers, surfaces and the sweep loop over the honest-evaluation core (FEAT-003)"
 
 [dependencies]
+ledger = { workspace = true }
 backtest = { workspace = true }
 domain = { workspace = true }
 serde = { workspace = true }

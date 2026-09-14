@@ -4,18 +4,27 @@
 //! The same code runs identically live and in replay.
 //!
 //! Float math is acceptable for indicator values — feature values are *versioned*
-//! and recorded at their `available_time`, so replay sees the exact values live
-//! produced rather than recomputing them.
+//! and recorded at their `available_time`. Every feature is a windowed
+//! implementation resolved through [`runtime`]: one implementation per feature,
+//! evaluated by one function, for backfill and live alike (INV-13, INV-14).
 
+pub mod align;
+pub mod consistency;
 pub mod ema;
 pub mod feature_sets;
+pub mod leakage;
 pub mod leakage_harness;
 pub mod rsi;
+pub mod runtime;
 pub mod training_frame;
 pub mod walk_forward;
-pub mod window;
 
 use chrono::{DateTime, Utc};
+pub use dataplane::feature::{
+    p99_relative_diff, ConsistencyDiff, Diagnosis, Feature, FeatureDef, FeatureError, FeatureRow, FeatureRuntime, MemoryServeLog, ServeLog,
+    ServeRecord,
+};
+pub use align::{densify_bars, densify_to_master_clock, BarObs, MasterClockFrame};
 pub use ema::{Ema, EMA_FEATURE_VERSION};
 pub use feature_sets::{
     is_known as is_known_feature, list_feature_sets, resolve as resolve_feature_set,
@@ -23,11 +32,10 @@ pub use feature_sets::{
 };
 pub use rsi::{Rsi, RSI_FEATURE_VERSION};
 pub use training_frame::{
-    align_higher_tf, build_training_frame, devol, fit_sigma, label_horizon_bars, HigherTfBar,
+    align_higher_tf, build_aligned_training_frame, build_training_frame, devol, fit_sigma, label_horizon_bars, HigherTfBar,
     OhlcvRow, TrainingFrame,
 };
 pub use walk_forward::{walk_forward_folds, Fold, FoldError};
-pub use window::Window;
 
 /// A computed indicator value carrying its algorithm version and availability time.
 ///

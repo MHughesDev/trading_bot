@@ -153,7 +153,7 @@ A new crate, `crates/agent-orchestrator`, mounted in `apps/platform`:
 | **Start** | Materialise skills; SessionStart hook runs `bootstrap.sh` and injects its output; the agent reads NOTEBOOK §1 |
 | **Work** | The protocol loop (§8). Slow work goes to jobs (05). Findings go to memory as they occur |
 | **Checkpoint** | The agent or a hook emits checkpoint events (02 §5). Optional pause for input |
-| **Compaction** | Server-side compaction with project instructions (04 §5). The PostCompact hook re-reads NOTEBOOK §1 |
+| **Compaction** | Server-side compaction with project instructions (04 §5). NOTEBOOK §1 is re-injected on the next user turn (there is no `PostCompact` hook; AGENT-001 §12, §23) |
 | **Stop** | Stop hook: requires a validated `final_report` id, findings for every tested hypothesis, and a clean commit; at most one skill-proposal nudge (13 §3) |
 | **Resume** | Any later session starts at **Start**; pending jobs are picked up from the job service |
 
@@ -166,7 +166,8 @@ A new crate, `crates/agent-orchestrator`, mounted in `apps/platform`:
 | PreToolUse (Bash) | Deny known secret paths, raw network tools against non-allowlisted hosts, and `docker`/`sudo`; deny `tbot` subcommands outside the token scope (early feedback only; the platform re-checks) |
 | PreToolUse (Read) | Duplicate-read guard: if the file hash is unchanged since the last read in this context, return a pointer instead (04 §6). Cleared on compaction |
 | PostToolUse | Output guard: results over 8k tokens are spilled to `/tmp/out/<id>.txt` and replaced by a summary and path (04 §6). Log tool usage to the event bridge |
-| PostCompact | Re-inject NOTEBOOK §1 |
+| PreCompact | Set compaction `custom_instructions` to preserve NOTEBOOK §1; record the compaction |
+| UserPromptSubmit | Re-inject NOTEBOOK §1 if a compaction was recorded since the last turn |
 | Stop | `final_report` gate plus findings gate plus a skill nudge (at most 1 per session) |
 
 ## 8. Research protocol as a state machine
@@ -315,6 +316,8 @@ fields (research/R4 §7.15).
 | RT-19 | The model and effort MUST be pinned per project version and MUST NOT change inside a session (04 §7) | MUST |
 | RT-20 | The current driver MUST receive the interim elision and usage fix until it is retired (§14) | SHOULD |
 | RT-21 | The orchestrator SHOULD support cloning a project (workspace plus memory scope, new cutoff) | SHOULD |
+| RT-22 | The LLM proxy MUST be able to rewrite outbound `cache_control.ttl` (5m ↔ 1h, `extended-cache-ttl` beta) per project. The Agent SDK exposes no cache-TTL option (AGENT-001 §23), so the proxy is the only place this can be set **(E)** | MUST |
+| RT-23 | The proxy MUST support both credential kinds of D-16 — Anthropic API key (primary) and Claude subscription (fallback) — selecting per project and pinning the kind for the life of a session **(E)** | MUST |
 
 ## 16. Acceptance criteria
 

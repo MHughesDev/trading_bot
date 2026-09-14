@@ -86,6 +86,10 @@ struct BucketAcc {
     close: rust_decimal::Decimal,
     volume: rust_decimal::Decimal,
     trade_count: u64,
+    /// A rolled-up bar is knowable only once its last constituent is.
+    knowledge_ns: i64,
+    quality_flags: dataplane::quality::QualityFlags,
+    first_open_ns: i64,
 }
 
 impl BucketAcc {
@@ -98,6 +102,9 @@ impl BucketAcc {
             close: bar.close,
             volume: bar.volume,
             trade_count: bar.trade_count,
+            knowledge_ns: bar.knowledge_ns,
+            quality_flags: bar.quality_flags,
+            first_open_ns: bar.open_ns,
         }
     }
 
@@ -111,6 +118,8 @@ impl BucketAcc {
         self.close = bar.close;
         self.volume += bar.volume;
         self.trade_count += bar.trade_count;
+        self.knowledge_ns = self.knowledge_ns.max(bar.knowledge_ns);
+        self.quality_flags |= bar.quality_flags;
     }
 
     fn finish(self) -> LoadedBar {
@@ -122,6 +131,9 @@ impl BucketAcc {
             close: self.close,
             volume: self.volume,
             trade_count: self.trade_count,
+            open_ns: self.first_open_ns,
+            knowledge_ns: self.knowledge_ns,
+            quality_flags: self.quality_flags,
         }
     }
 }
@@ -140,6 +152,7 @@ mod tests {
             close: dec!(1) * rust_decimal::Decimal::from(close),
             volume: dec!(1) * rust_decimal::Decimal::from(vol),
             trade_count: 1,
+            ..Default::default()
         }
     }
 

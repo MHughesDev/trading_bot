@@ -101,27 +101,19 @@ pub fn derive_requirements(
     })
 }
 
-/// EMA warm-up multiplier — bars of lead-in per period of the longest EMA.
-///
-/// An EMA with period *p* has smoothing factor α = 2/(p+1); after *n* bars the
-/// weight still carried by the seed value is (1−α)ⁿ.  At n = 5p that weight is
-/// (1 − 2/(p+1))^{5p} ≈ e^{−10} ≈ 4.5·10⁻⁵ for any non-trivial period — i.e.
-/// the indicator has effectively forgotten its initialization.  Five periods is
-/// therefore a principled (not arbitrary) convergence bound, not merely a round
-/// number.  RSI, by contrast, is exact after `period + 1` bars (its first
-/// average needs `period` deltas), so it gets no multiplier.
-const EMA_WARMUP_PERIODS: u64 = 5;
 
 /// Floor on warm-up whenever any indicator is in play, so very short-period
 /// strategies still get a stable lead-in before the first tradable bar.
 const MIN_WARMUP_BARS: u64 = 30;
 
-/// Bars of warm-up lead-in an indicator needs before its output is trustworthy.
+/// Bars of warm-up lead-in an indicator needs: its declared lookback in the single
+/// feature runtime, which is also the first bar at which it has a value at all.
 fn warmup_bars_for(kind: FeatureKind, period: u64) -> u64 {
-    match kind {
-        FeatureKind::Ema => period * EMA_WARMUP_PERIODS,
-        FeatureKind::Rsi => period + 1,
-    }
+    let name = match kind {
+        FeatureKind::Ema => format!("ema_{period}"),
+        FeatureKind::Rsi => format!("rsi_{period}"),
+    };
+    features::runtime::lookback_bars(&name).map_or(0, u64::from)
 }
 
 /// Extracts the names inside `feature('...')` calls from an expression.
@@ -216,7 +208,7 @@ mod tests {
         let req = derive_requirements(&d, Timeframe::Minutes1).unwrap();
         assert_eq!(req.features.len(), 1);
         assert_eq!(req.features[0].kind, FeatureKind::Rsi);
-        assert_eq!(req.warmup_bars, 30); // floor
+        assert_eq!(req.warmup_bars, 71); // rsi_14 declares 5 × 14 + 1 bars
     }
 
     #[test]

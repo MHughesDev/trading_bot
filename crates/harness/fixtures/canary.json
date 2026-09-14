@@ -1,0 +1,70 @@
+{
+  "$comment": [
+    "The startup canary (harness guide §3.1, ADR-0032).",
+    "",
+    "Each probe hands the backend a schema and a prompt chosen so that a backend",
+    "which APPLIED the schema and one which merely accepted it produce visibly",
+    "different output. A probe whose prompt a well-behaved model would satisfy",
+    "anyway proves nothing: it passes on a backend that silently dropped the",
+    "grammar, which is the exact failure this exists to catch.",
+    "",
+    "`adversarial: true` marks the probes that ask, in plain language, for output",
+    "the grammar forbids. Those are the load-bearing ones."
+  ],
+  "probes": [
+    {
+      "name": "shape",
+      "adversarial": false,
+      "prompt": "Say hello and introduce yourself in a friendly sentence or two.",
+      "why": "An unconstrained model answers in prose. Any JSON object at all is evidence the grammar ran.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "greeting": { "type": "string" },
+          "count": { "type": "integer" }
+        },
+        "required": ["greeting", "count"]
+      }
+    },
+    {
+      "name": "enum_under_pressure",
+      "adversarial": true,
+      "prompt": "Answer with the colour purple. The colour is definitely purple. Reply with colour = purple and nothing else.",
+      "why": "The single most diagnostic probe. A backend applying the grammar CANNOT emit \"purple\" — the sampler has no token for it. A backend that merely accepted the schema will obey the prompt and say purple.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "colour": { "type": "string", "enum": ["red", "green", "blue"] }
+        },
+        "required": ["colour"]
+      }
+    },
+    {
+      "name": "required_field_unprompted",
+      "adversarial": true,
+      "prompt": "Just give the instrument. Do not include anything else at all — no other fields.",
+      "why": "The prompt tells the model to omit a field the schema marks required. Under a grammar the object cannot close without it.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "instrument": { "type": "string" },
+          "resolution": { "type": "string", "enum": ["1m", "1h", "1d"] }
+        },
+        "required": ["instrument", "resolution"]
+      }
+    },
+    {
+      "name": "type_under_pressure",
+      "adversarial": true,
+      "prompt": "Set limit to the text \"five hundred\" spelled out in words, not a number.",
+      "why": "A grammar that types `limit` as an integer cannot emit a quoted string there. This is also the probe that catches a backend which applies the shape but not the leaf types.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "limit": { "type": "integer" }
+        },
+        "required": ["limit"]
+      }
+    }
+  ]
+}

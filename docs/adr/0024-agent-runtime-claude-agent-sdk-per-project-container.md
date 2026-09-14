@@ -1,6 +1,6 @@
 # ADR-0024: Agent runtime — Claude Agent SDK in a per-project container, behind an LLM proxy
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-11
 **Deciders:** Mason Hughes (with Claude)
 **Supersedes (in part):** ADR-0022 §internal agent loop (the MCP thin-client decision stands)
@@ -31,10 +31,22 @@ Agent SDK as the harness (D-07).
 3. **LLM proxy.** The container holds no long-lived secret. The SDK's model calls go
    to a platform **LLM proxy** (`/llm/*`). The proxy:
    - authenticates the session token;
-   - injects the provider key from the encrypted credential store (migration
-     0034);
+   - injects the provider credential from the encrypted credential store
+     (migration 0034);
    - enforces dollar budgets;
    - records per-request usage telemetry.
+
+   **Credential path (decided 2026-09-11).** The proxy supports two credential
+   kinds and selects per project: an **Anthropic API key is primary**, and a
+   **Claude subscription credential is the fallback** when a project is
+   configured for it or the key path is unavailable. The container never sees
+   either. Consequences:
+   - budgets and dollar telemetry are exact on the key path and best-effort on
+     the subscription path (the proxy records tokens and applies list-price
+     estimates);
+   - cache TTL defaults are chosen per credential kind;
+   - a project pins its credential kind for the life of a session, so usage
+     accounting within a session is homogeneous.
 4. **Session orchestrator.** A new crate, `crates/agent-orchestrator`, manages the
    lifecycle of projects, sessions and containers. It also runs skill
    materialisation, the event bridge (SSE to the UI), steering, `ask_user`,

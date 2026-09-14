@@ -5,6 +5,8 @@
 //! Probability of Backtest Overfitting). These should agree; disagreement is a
 //! flag to investigate, not a result to shop between (spec §2.2 Gate 3).
 
+pub mod bootstrap;
+pub mod compare;
 pub mod diagnostics;
 
 use crate::study::combinations;
@@ -22,18 +24,6 @@ pub fn permutation_p_value(observed: f64, null_distribution: &[f64]) -> f64 {
     }
     let at_least_as_extreme = null_distribution.iter().filter(|&&x| x >= observed).count();
     (1 + at_least_as_extreme) as f64 / (1 + n) as f64
-}
-
-/// Selection-bias correction (Šidák): inflate a single-test p-value for the
-/// number of trials that produced the result (INV-3). A Sharpe found after 3
-/// trials and after 3,000 trials yield radically different corrected p-values.
-#[must_use]
-pub fn selection_bias_correction(p_value: f64, trials: i64) -> f64 {
-    let t = trials.max(1) as f64;
-    let p = p_value.clamp(0.0, 1.0);
-    // 1 - (1 - p)^T : probability that at least one of T independent trials
-    // would beat this under the null.
-    (1.0 - (1.0 - p).powf(t)).clamp(0.0, 1.0)
 }
 
 /// Standard normal CDF Φ via `erf` (Abramowitz & Stegun 7.1.26).
@@ -226,9 +216,109 @@ pub fn probability_of_backtest_overfitting(performance: &[Vec<f64>], n_groups: u
     logits.iter().filter(|&&l| l < 0.0).count() as f64 / logits.len() as f64
 }
 
+/// Benjamini–Hochberg–Yekutieli adjusted p-values: false-discovery-rate control
+/// valid under arbitrary dependence between tests (§12.4 — BHY, not Bonferroni).
+/// Returned in input order.
+#[must_use]
+pub fn bhy_adjusted(p_values: &[f64]) -> Vec<f64> {
+    let m = p_values.len();
+    if m == 0 {
+        return Vec::new();
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let c_m: f64 = (1..=m).map(|i| 1.0 / i as f64).sum();
+    let mut order: Vec<usize> = (0..m).collect();
+    order.sort_by(|&a, &b| p_values[a].total_cmp(&p_values[b]));
+    let mut adjusted = vec![1.0; m];
+    let mut running = 1.0_f64;
+    for (rank0, &idx) in order.iter().enumerate().rev() {
+        #[allow(clippy::cast_precision_loss)]
+        let raw = p_values[idx].clamp(0.0, 1.0) * m as f64 * c_m / (rank0 + 1) as f64;
+        running = running.min(raw);
+        adjusted[idx] = running.min(1.0);
+    }
+    adjusted
+}
+
+/// Benjamini–Hochberg adjusted p-values: false-discovery-rate control under
+/// independence or positive dependence. Returned in input order.
+///
+/// This is §11.5's screening instrument. It differs from [`bhy_adjusted`] by the
+/// harmonic factor `c(m) = Σ 1/i`, which is the price of validity under
+/// *arbitrary* dependence — appropriate for the Gate 3 corroborators, where the
+/// dependence between a p-value, a DSR and a PBO is not characterised, and
+/// needlessly conservative for a screen over paired comparisons that share their
+/// replicate grid by construction.
+#[must_use]
+pub fn bh_adjusted(p_values: &[f64]) -> Vec<f64> {
+    let m = p_values.len();
+    if m == 0 {
+        return Vec::new();
+    }
+    let mut order: Vec<usize> = (0..m).collect();
+    order.sort_by(|&a, &b| p_values[a].total_cmp(&p_values[b]));
+    let mut adjusted = vec![1.0; m];
+    let mut running = 1.0_f64;
+    for (rank0, &idx) in order.iter().enumerate().rev() {
+        #[allow(clippy::cast_precision_loss)]
+        let raw = p_values[idx].clamp(0.0, 1.0) * m as f64 / (rank0 + 1) as f64;
+        running = running.min(raw);
+        adjusted[idx] = running.min(1.0);
+    }
+    adjusted
+}
+
+/// BHY-adjusted p-value of `p` as one member of a family of at least `m_total`
+/// tests, of which `others` are observed. Unobserved members enter at p = 1 — they
+/// cannot make `p` look better, only the family larger.
+#[must_use]
+pub fn bhy_adjusted_within(p: f64, others: &[f64], m_total: usize) -> f64 {
+    let mut family = Vec::with_capacity(m_total.max(others.len() + 1));
+    family.push(p);
+    family.extend_from_slice(others);
+    while family.len() < m_total {
+        family.push(1.0);
+    }
+    bhy_adjusted(&family)[0]
+}
+
+/// Sharpe to size with (§12.4): `min(DSR-implied SR, 0.5 × backtest SR)`, where the
+/// DSR-implied SR is the observed Sharpe less the expected maximum Sharpe of
+/// `n_eff` null trials. The haircut is non-linear by construction.
+#[must_use]
+pub fn sr_expected(backtest_sr: f64, n_eff: f64, sharpe_variance_across_trials: f64) -> f64 {
+    #[allow(clippy::cast_possible_truncation)]
+    let trials = n_eff.ceil().max(1.0) as i64;
+    let sr0 = sharpe_variance_across_trials.max(0.0).sqrt() * if trials <= 1 { 0.0 } else { expected_max_standard_gaussian(trials) };
+    (backtest_sr - sr0).min(0.5 * backtest_sr)
+}
+
 #[cfg(test)]
 #[allow(clippy::float_cmp, clippy::needless_range_loop)]
 mod tests {
+    #[test]
+    fn bhy_is_monotone_bounded_and_stricter_than_bh() {
+        let p = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205];
+        let adj = bhy_adjusted(&p);
+        assert!(adj.iter().all(|a| (0.0..=1.0).contains(a)));
+        for w in adj.windows(2) {
+            assert!(w[0] <= w[1] + 1e-15, "adjusted p must preserve order: {adj:?}");
+        }
+        // BH alone would give 0.001·8/1 = 0.008; BHY multiplies by c(8) ≈ 2.718.
+        assert!((adj[0] - 0.008 * (1..=8).map(|i| 1.0 / f64::from(i)).sum::<f64>()).abs() < 1e-12);
+        assert!(bhy_adjusted_within(0.001, &[], 1000) > bhy_adjusted_within(0.001, &[], 10));
+    }
+
+    #[test]
+    fn sizing_haircut_is_non_linear() {
+        // Many effective trials: a weak Sharpe loses more than half, a strong one does not.
+        let weak = sr_expected(0.3, 500.0, 0.01);
+        assert!(weak < 0.15, "SR 0.3 must lose > 50%: {weak}");
+        let strong = sr_expected(2.0, 500.0, 0.01);
+        assert!((strong - 1.0).abs() < 1e-12, "SR 2.0 is capped at half: {strong}");
+        assert_eq!(sr_expected(1.0, 1.0, 0.01), 0.5);
+    }
+
     use super::*;
 
     #[test]
@@ -245,17 +335,14 @@ mod tests {
     }
 
     #[test]
-    fn selection_bias_inflates_p_with_trials() {
-        let raw = 0.01;
-        let p3 = selection_bias_correction(raw, 3);
-        let p3000 = selection_bias_correction(raw, 3000);
+    fn selection_bias_inflates_p_with_effective_trials() {
+        let raw = 0.001;
+        let p3 = bhy_adjusted_within(raw, &[], 3);
+        let p3000 = bhy_adjusted_within(raw, &[], 3000);
         assert!(p3 > raw);
         assert!(p3000 > p3);
-        assert!(
-            p3000 > 0.99,
-            "3000 trials make a raw p=0.01 nearly certain under H0"
-        );
-        assert!(p3 < 0.05, "3 trials keep it borderline-significant");
+        assert!((p3000 - 1.0).abs() < 1e-12, "3000 effective trials make a raw p=0.001 meaningless");
+        assert!(p3 < 0.01, "3 effective trials keep it significant");
     }
 
     #[test]

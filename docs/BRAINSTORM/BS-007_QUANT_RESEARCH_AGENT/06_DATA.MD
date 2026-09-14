@@ -193,6 +193,8 @@ Used by the eval suite (16), `skill_verify` (13) and `SyntheticPaths` studies.
 | DA-12 | A forward-stored option chain snapshot job (IV and Greeks computed) SHOULD run on the existing Tradier collector | SHOULD |
 | DA-13 | The `synthetic` venue MUST support the §8 generators with seeds recorded | MUST |
 | DA-14 | No paid data source MAY be added without revisiting D-09 | MUST |
+| DA-16 | Bars MUST be stored append-only in `market_bars_v2`, with `timeframe` in the sorting key and no engine that collapses rows. Revisions MUST be retained, not overwritten, so `as_of` reads can pick a revision **(E)** | MUST |
+| DA-17 | The v2 cutover MUST be verified row-for-row: every row of `market_bars` present in v2, checked by an order-independent checksum over all columns. Writers MUST move to v2 before any bar backfill runs, and `market_bars` MUST become read-only at cutover **(E)** | MUST |
 | DA-15 | Each user MUST have a Desk project (cutoff = now, exploratory only, no G3 or vault); live and post-cutoff reads MUST be refused in research projects (§3.1) | MUST |
 
 ## 10. Acceptance criteria

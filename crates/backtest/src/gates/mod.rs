@@ -10,15 +10,23 @@
 //! GATE 0 integrity → GATE 1 single-path → GATE 2 robustness → GATE 3 significance → GATE 4 vault
 //! ```
 
+pub mod evaluators;
+pub mod stack;
+pub mod profile;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+pub use evaluators::{GateOutcome, LengthInputs, PerturbationInputs, VolRegime};
+pub use profile::{AssetClassGates, Comparability, CrisisWindow, GateProfile, Thresholds, PAPER_V1, STRICT_V1};
+
 use crate::experiment::{Experiment, ExperimentError};
+use ledger::{DispatchContext, TrialLedger};
 use crate::nulls::{NullId, SignificanceResult};
 use crate::run::{Backtest, RunConfig, RunExecutor, RunResult, RunStatus, RunStore};
 use crate::stats::{
     deflated_sharpe_ratio, permutation_p_value, probability_of_backtest_overfitting,
-    selection_bias_correction,
+    bhy_adjusted_within,
 };
 use crate::study::StudyResult;
 
@@ -55,16 +63,28 @@ pub struct GateVerdict {
     pub summary: String,
     /// Study/run ids that constitute the evidence for this verdict.
     pub evidence: Vec<String>,
+    /// The threshold set this verdict was judged under (SPEC §12.3, INV-23).
+    /// Without it, "passed" is not a claim anyone can check later: profiles are
+    /// versioned precisely so a pass under one bar is not read as a pass under
+    /// another.
+    pub profile_id: String,
     pub at: DateTime<Utc>,
 }
 
 impl GateVerdict {
-    fn new(gate: Gate, passed: bool, summary: impl Into<String>, evidence: Vec<String>) -> Self {
+    fn new(
+        gate: Gate,
+        passed: bool,
+        summary: impl Into<String>,
+        evidence: Vec<String>,
+        profile_id: &str,
+    ) -> Self {
         Self {
             gate,
             passed,
             summary: summary.into(),
             evidence,
+            profile_id: profile_id.to_string(),
             at: Utc::now(),
         }
     }
@@ -106,6 +126,20 @@ impl GateLedger {
     #[must_use]
     pub fn verdicts(&self) -> &[GateVerdict] {
         &self.verdicts
+    }
+
+    /// The profile every recorded verdict was judged under, if they agree.
+    /// `None` on an empty ledger; a ledger whose verdicts span profiles reports
+    /// the first, and [`Self::comparable_with`] is how that is detected.
+    #[must_use]
+    pub fn profile_id(&self) -> Option<&str> {
+        self.verdicts.first().map(|v| v.profile_id.as_str())
+    }
+
+    /// Whether this ledger's verdicts may be put beside another's (§12.3).
+    #[must_use]
+    pub fn comparable_with(&self, other: &Self) -> Option<Comparability> {
+        Some(Comparability::of(self.profile_id()?, other.profile_id()?))
     }
 }
 
@@ -193,6 +227,8 @@ pub fn integrity_scan(inputs: &IntegrityInputs<'_>) -> Vec<crate::run::Flag> {
 pub struct GateRunner<'e> {
     experiment: &'e mut Experiment,
     ledger: GateLedger,
+    /// The versioned threshold set this run is judged under (INV-23).
+    profile: GateProfile,
 }
 
 /// The full Gate 3 outcome: one primary p-value + two corroborators.
@@ -224,12 +260,26 @@ pub struct CorroboratorInputs<'a> {
 }
 
 impl<'e> GateRunner<'e> {
+    /// Run the funnel under the platform's shipped profile.
     #[must_use]
     pub fn new(experiment: &'e mut Experiment) -> Self {
+        Self::with_profile(experiment, GateProfile::strict_v1())
+    }
+
+    /// Run the funnel under an explicit profile. Every verdict it records names
+    /// this profile, so a comparison spanning two of them can be flagged.
+    #[must_use]
+    pub fn with_profile(experiment: &'e mut Experiment, profile: GateProfile) -> Self {
         Self {
             experiment,
             ledger: GateLedger::new(),
+            profile,
         }
+    }
+
+    #[must_use]
+    pub fn profile(&self) -> &GateProfile {
+        &self.profile
     }
 
     #[must_use]
@@ -261,7 +311,7 @@ impl<'e> GateRunner<'e> {
             format!("{} integrity violation(s): {}", flags.len(), flags[0].code)
         };
         self.ledger
-            .record(GateVerdict::new(Gate::Integrity, passed, summary, vec![]));
+            .record(GateVerdict::new(Gate::Integrity, passed, summary, vec![], self.profile.profile_id()));
         if !passed {
             return Err(GateError::IntegrityHardStop);
         }
@@ -287,6 +337,7 @@ impl<'e> GateRunner<'e> {
             passed,
             summary,
             vec![walk_forward.study_id.clone()],
+            self.profile.profile_id(),
         ));
         Ok(self.ledger.verdicts.last().unwrap())
     }
@@ -324,6 +375,7 @@ impl<'e> GateRunner<'e> {
                 synthetic.study_id.clone(),
                 neighborhood.study_id.clone(),
             ],
+            self.profile.profile_id(),
         ));
         Ok(self.ledger.verdicts.last().unwrap())
     }
@@ -339,13 +391,19 @@ impl<'e> GateRunner<'e> {
         null_distribution: &[f64],
         null_id: NullId,
         corroborators: &CorroboratorInputs<'_>,
+        n_eff: &ledger::neff::NEff,
         alpha: f64,
     ) -> Result<(Gate3Outcome, bool), GateError> {
         self.enter(Gate::Significance)?;
 
-        let trials = self.experiment.trial_counter();
+        // N_eff is platform-computed over the tenant's whole ledger (§12.4, INV-22) and
+        // can only be minted by a ledger; the Experiment's own look counter is not a
+        // substitute. The primary p is BHY-adjusted within a family of N_eff tests,
+        // unobserved members entering at p = 1.
+        #[allow(clippy::cast_possible_truncation)]
+        let trials = n_eff.value().ceil() as i64;
         let raw_p = permutation_p_value(observed_statistic, null_distribution);
-        let corrected_p = selection_bias_correction(raw_p, trials);
+        let corrected_p = bhy_adjusted_within(raw_p, &[], usize::try_from(trials).unwrap_or(usize::MAX));
         let significance = SignificanceResult::new(corrected_p, null_id, trials);
 
         let dsr = deflated_sharpe_ratio(
@@ -362,9 +420,13 @@ impl<'e> GateRunner<'e> {
         );
 
         let primary_significant = corrected_p <= alpha;
-        // Corroborators "agree" with a significant primary when DSR is high and
-        // PBO is low (and vice-versa for a non-significant primary).
-        let corroborators_significant = dsr >= 0.95 && pbo <= 0.5;
+        // Corroborators "agree" with a significant primary when DSR clears the
+        // profile's bar and PBO is under it (and vice-versa for a
+        // non-significant primary). The numbers come from the profile, not from
+        // this function: a threshold that lives in code is a threshold nobody
+        // can version.
+        let t = *self.profile.thresholds();
+        let corroborators_significant = dsr >= t.dsr_gte && pbo < t.pbo_lt;
         let corroborators_agree = primary_significant == corroborators_significant;
 
         // The gate passes only when the primary is significant AND the
@@ -386,6 +448,7 @@ impl<'e> GateRunner<'e> {
             passed,
             summary,
             vec![significance.null_ref().to_string()],
+            self.profile.profile_id(),
         ));
         if passed {
             self.experiment.mark_gate3_passed();
@@ -404,17 +467,19 @@ impl<'e> GateRunner<'e> {
     /// GATE 4 — the vault. Reachable only after a passing Gate 3. Runs the
     /// candidate config once against the locked holdout; on a successful
     /// evaluation the Experiment becomes `validated`.
-    pub fn gate4<S: RunStore, E: RunExecutor>(
+    pub fn gate4<S: RunStore, E: RunExecutor, L: TrialLedger>(
         &mut self,
         candidate: &RunConfig,
-        bt: &Backtest<S, E>,
+        bt: &Backtest<S, E, L>,
+        ctx: &DispatchContext,
         by: impl Into<String>,
     ) -> Result<(RunResult, &GateVerdict), GateError> {
         self.enter(Gate::Vault)?;
         let result = self
             .experiment
-            .run_vault(candidate, bt, by)
-            .map_err(GateError::Experiment)?;
+            .run_vault(candidate, bt, ctx, by)
+            .map_err(GateError::Experiment)?
+            .result;
         let passed = result.status == RunStatus::Ok;
         let summary = format!(
             "vault: single holdout evaluation → {:?} ({})",
@@ -430,6 +495,7 @@ impl<'e> GateRunner<'e> {
             passed,
             summary,
             vec![result.run_id.to_string()],
+            self.profile.profile_id(),
         ));
         Ok((result, self.ledger.verdicts.last().unwrap()))
     }
@@ -438,6 +504,13 @@ impl<'e> GateRunner<'e> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ledger::{DispatchContext, InMemoryLedger};
+
+    /// Tests dispatch through a real ledger — there is no way to reach an
+    /// executor without one (INV-16).
+    fn ctx() -> DispatchContext {
+        DispatchContext::human("tenant-test", "gates", 0.1).with_experiment("test-exp")
+    }
     use crate::run::executor::{daily_curve, map_sim_result};
     use crate::run::{
         Backtest, ClosureExecutor, ComputeCost, DataSlice, EvalResolution, InMemoryRunStore,
@@ -567,6 +640,7 @@ mod tests {
                     ENGINE_VERSION,
                 )
             }),
+            InMemoryLedger::new(),
         );
         let candidate = RunConfigBuilder::new(
             "s",
@@ -586,7 +660,7 @@ mod tests {
         let mut runner = GateRunner::new(&mut e);
         // Vault before Gate 3 is refused.
         assert!(matches!(
-            runner.gate4(&candidate, &bt, "a"),
+            runner.gate4(&candidate, &bt, &ctx(), "a"),
             Err(GateError::PrerequisiteNotPassed {
                 gate: Gate::Vault,
                 required: Gate::Significance
@@ -632,6 +706,7 @@ mod tests {
                     pbo_performance: &perf,
                     pbo_groups: 4,
                 },
+                &ledger::TrialLedger::n_eff(&InMemoryLedger::new(), "tenant-test").unwrap(),
                 0.05,
             )
             .unwrap();
@@ -642,7 +717,7 @@ mod tests {
         );
         assert!(runner.ledger().passed(Gate::Significance));
 
-        let (vault_result, v) = runner.gate4(&candidate, &bt, "alice").unwrap();
+        let (vault_result, v) = runner.gate4(&candidate, &bt, &ctx(), "alice").unwrap();
         assert_eq!(vault_result.status, RunStatus::Ok);
         assert!(v.passed);
         assert_eq!(e.state, crate::experiment::ExperimentState::Validated);
@@ -689,6 +764,7 @@ mod tests {
                     pbo_performance: &perf,
                     pbo_groups: 2,
                 },
+                &ledger::TrialLedger::n_eff(&InMemoryLedger::new(), "tenant-test").unwrap(),
                 0.05,
             )
             .unwrap();

@@ -12,8 +12,8 @@ interface Props {
 
 const ALIAS_COLORS: Record<string, string> = {
   production: 'bg-pnl-up/15 text-pnl-up border-pnl-up/30',
-  candidate: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
-  staging: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  candidate: 'bg-info-subtle text-info border-line-info',
+  staging: 'bg-accent-subtle text-fg-accent border-line-accent',
   fallback: 'bg-surface-2 text-text-muted border-border',
 }
 
@@ -48,7 +48,7 @@ function CreateDeploymentModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-scrim backdrop-blur-sm" onClick={onClose} />
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}

@@ -1,0 +1,164 @@
+# The degraded tier, PROMOTED ON EVIDENCE (D-18, ADR-0032).
+#
+# This is what the dev box resolves to: a GTX 1080 Ti, 11 GB, Pascal. It still is
+# not the deployment target and it still must not shape the design for anyone else.
+#
+# What changed on 2026-09-12 is not the hardware and not the design's opinion of it.
+# It is that the tier's `single_shot` declaration was never measured — it was
+# inherited from "this card cannot run the reference model", which is a statement
+# about MEMORY AND TENSOR CORES and was being used as a proxy for TOOL-CALLING
+# RELIABILITY. Those are different properties. What carries a chain here is the
+# two-step decode, the exposure budget being the decoding grammar, and a
+# harness-owned plan — none of which depend on the card.
+#
+# So the claim was measured instead of assumed. `cargo test -p llm --test
+# local_multistep_eval -- --ignored --nocapture` drives the real client against a
+# real Ollama through an 11-check chain with near-miss distractors, a six-tool
+# exposure cap, an injected tool error to recover from, a destructive tool in reach
+# throughout, and two state-carry checks whose values exist only in earlier results.
+# Result on this box: 10/10 fully clean, ~7 s per run warm.
+#
+# Measured here: ~50 tok/s decode, ~170 s cold model load, correct two-step
+# constrained tool selection, canary 4/4 including all three adversarial probes
+# (docs/LOCAL_TIER_FINDINGS.md).
+
+# DEVIATION FROM APPENDIX A — two settings, one cause, stated per guide procedure
+# step 6 (an eval beats the table; an unexplained gap is drift).
+#
+#   max_steps               30     vs the table's exact(1)
+#   effective_budget_tokens 16000  vs the table's 2000-8000
+#
+# Both numbers in the table are downstream of the assumption this profile stopped
+# making. `max_steps: 1` is not an independent judgement about degraded hosts — it
+# is what `single_shot` means written as a step budget, and the eval below is
+# precisely the evidence that the premise does not hold for this model. Leaving it
+# at 1 while declaring `multi_step` would be a profile that contradicts itself.
+#
+# 16000 follows from 12: `drive.rs` sends `effective_budget_tokens` as Ollama's
+# `num_ctx`, and a 12-step chain has to hold a plan, a transcript and several tool
+# results at once. At 8000 the context manager would compact away the earlier
+# results that the state-carry checks exist to prove are carried — the promotion
+# would be real and useless at the same time. 16000 is what the eval ran at, so it
+# is the only figure the attestation actually covers.
+
+model_id: "qwen2.5:7b-instruct"
+provider: "ollama"
+tier: "degraded"
+
+# A1. The archetype is unchanged: a promotion in tool calling is not a promotion in
+# blast radius, and the admission check still enforces this rather than trusting it.
+archetype: "chat_assistant"
+
+requires:
+  resident_bytes: 5033164800    # ~4.7 GiB at Q4_K_M
+  # Pascal-era hardware is fine for THIS model; that is why it runs here at all.
+  requires_target_architecture: false
+
+# Promoted, with the receipt attached. `validate` refuses this claim without
+# evidence for THIS model at ten-for-ten, and `effective_tool_calling` re-checks
+# `device` against the running machine at startup — so copying this file to a
+# different box silently loses the promotion rather than silently keeping it.
+tool_calling: "multi_step"
+multi_step_evidence:
+  eval: "local_multistep_eval"
+  model: "qwen2.5:7b-instruct"
+  device: "NVIDIA GeForce GTX 1080 Ti"
+  trials: 10
+  clean: 10
+  recorded: "2026-09-12"
+  detail: >
+    11 checks per trial over a 6-step chain at the shipped six-tool exposure cap:
+    correct first selection against three near-miss distractors, recovery from an injected tool error by re-reading the
+    message and halving the limit, realised-vs-implied discrimination, two
+    state-carry checks (the instrument from step 1's result, the 0.0417 volatility
+    from step 3's), no call to the destructive tool in reach the whole time, and a
+    final answer carrying the computed figure.
+
+# Escalation is KEPT. The promotion covers chains of this shape at this length; it
+# is not a claim that a 7B is a frontier model, and work that outgrows the tier
+# should still have somewhere to go.
+escalate_to: "claude-opus-5"
+
+context:
+  advertised_tokens: 32768
+  # This IS the Ollama context window (`drive.rs` sends it as `num_ctx`), so it is
+  # also the number the eval has to have run at to mean anything — it ran at 16384.
+  # Raised from 6000, which was sized for single-lookup work: a chain has to hold a
+  # plan, a transcript and several tool results at once, and 6000 would have made
+  # the promotion useless by compacting away the thing being carried.
+  #
+  # Costs about 0.9 GB of KV cache on top of the 4.7 GB of weights, which is inside
+  # the resolver's 20% headroom and inside this box's measured free VRAM.
+  effective_budget_tokens: 16000
+  # Raised from 1000. At 1000 a long finish_task was truncated mid-string and the
+  # loop read it as a grammar violation and fenced a healthy session
+  # (LOCAL_TIER_FINDINGS §8, bug 1).
+  reserve_for_output: 2000
+  max_tool_result_bytes: 6144
+
+tools:
+  # Six: three core (search_tools, record_finding, finish_task) plus THREE work slots.
+  #
+  # Four was not enough, and the failure was subtle. Core counts against this budget,
+  # so four left exactly one work slot — and one slot means the router's first pick is
+  # the only pick. Observed: on the step "design a trading strategy", the router
+  # correctly pinned create_strategy, the single work slot went to train_model left
+  # over from the previous step, and the model — asked to design a strategy with no
+  # way to create one — invented a strategy id and was fenced for citing it.
+  #
+  # It read as the model hallucinating. It was the model being cornered. Three work
+  # slots give the router room to be wrong about one of them.
+  #
+  # Re-measured at this cap: the eval runs its selection enum at exactly this size.
+  max_exposed_per_step: 6
+  schema_style: "flat"
+  routing: "dynamic"
+  parallel_calls: false
+
+output:
+  constrained_decoding: true
+  native_tool_template: true
+  temperature_tool_calls: 0.0
+  max_retries_per_call: 3
+
+orchestration:
+  mode: "planner_executor"
+  # Was 1, because a "single-shot" tier that allowed a second step would have been a
+  # multi-step tier with extra words. The tier is now multi-step on evidence.
+  #
+  # Raised 12 -> 30 once the no-progress breaker landed. Those two numbers were
+  # doing one job between them and doing it badly: with no way to tell working from
+  # spinning, `max_steps` was the ONLY thing standing between a confused session and
+  # an unbounded one, so it had to be small — which also capped the useful work at
+  # twelve steps. The breaker now stops a run that has stopped learning after three
+  # barren steps, so the ceiling no longer has to double as a stall detector and can
+  # be sized for the long tasks this tier is actually asked to do: design a strategy,
+  # run an experiment, read the diagnostics, report. At ~3-9 s a step that is a few
+  # minutes, inside the hour of `max_wall_clock_s`.
+  max_steps: 30
+  few_shot_examples: 2
+  reflection: false
+  max_subagent_depth: 1
+  code_execution: "denied"
+
+trifecta:
+  private_data: true
+  untrusted_content: true
+  outbound_channel: false
+  mitigation: >
+    Unchanged from every other profile. Containment is not a function of model tier.
+
+budgets:
+  max_usd_per_task: 0.5
+  max_wall_clock_s: 3600
+  max_tokens_per_task: 2000000
+
+notes: >
+  DEGRADED TIER, PROMOTED ON EVIDENCE - still the dev box, still not the target.
+  The tier name remains accurate: this machine cannot run the reference model, and
+  nothing here is a Pascal workaround, an FP32 fallback, or an 11 GB-tuned constant
+  in the core path. The accommodation IS this file. What the promotion says is
+  narrower than the tier name suggests: chains of the shape the eval measured hold
+  together here 10 times out of 10. Re-run the eval after changing the model, the
+  quantisation, the exposure cap or the context budget - each of those is a variable
+  the measurement held fixed.

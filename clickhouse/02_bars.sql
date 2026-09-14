@@ -1,4 +1,20 @@
--- ClickHouse: OHLCV bar events (primary analytics table).
+-- ClickHouse: OHLCV bar events.
+--
+-- *** RETIRED AND FROZEN READ-ONLY: 2026-09-11 (Set L, L-0.7). ***
+--
+-- Superseded by `market_bars_v2` (06_market_bars_v2.sql). This table's
+-- ReplacingMergeTree(revision) sorts on (instrument_id, available_time) WITHOUT
+-- `timeframe`, so two bars of different timeframes that close at the same instant
+-- are treated as duplicates: one is destroyed on merge, and destroyed immediately
+-- when both arrive in the same insert batch. Measured on the live table on
+-- 2026-09-11: 18 of BTC-USD's 22 1h bars were queued for destruction — every 1h bar
+-- overlapping 1m coverage (DATA-005 §3).
+--
+-- Nothing writes this table any more; `cargo xtask check-bars-v1-frozen` enforces
+-- that in CI. It is kept readable as a fallback and is scheduled for removal at the
+-- end of Set L. Do NOT run OPTIMIZE on it.
+--
+-- Original description follows.
 -- ReplacingMergeTree ordered on (instrument_id, available_time) for range scans.
 -- All OHLCV columns are Decimal128 — never Float64.
 

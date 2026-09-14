@@ -1,6 +1,6 @@
 # ADR-0027: Free-only data sources for agent research
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-11
 **Deciders:** Mason Hughes
 

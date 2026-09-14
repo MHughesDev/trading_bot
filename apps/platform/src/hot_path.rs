@@ -54,6 +54,9 @@ pub fn spawn_pipeline(
     paper_engine: Arc<PaperTradingEngine>,
     // Completed 1-minute bars are sent here for continuous ClickHouse persistence.
     bar_sink: BarSink,
+    // Live frame bus: every tick becomes a `market.trades` frame so the tape and
+    // the watchlist update between minute boundaries.
+    live: api::live_bus::LiveSender,
 ) -> PipelineHandle {
     // Shared-data contract: this pipeline is the mark source for BOTH halves
     // (paper fills + live decisioning).  Registering the instrument's asset
@@ -70,6 +73,7 @@ pub fn spawn_pipeline(
         world_prod,
         paper_engine,
         bar_sink,
+        live,
     ));
     let t3 = tokio::spawn(stage_strategy_eval(
         instrument_id.clone(),
@@ -218,6 +222,7 @@ async fn stage_bar_builder(
     mut world_prod: rtrb::Producer<WorldEvent>,
     paper_engine: Arc<PaperTradingEngine>,
     bar_sink: BarSink,
+    live: api::live_bus::LiveSender,
 ) {
     use domain::money::Size;
     use domain::payloads::bar::{BarPayload, Timeframe};
@@ -247,6 +252,27 @@ async fn stage_bar_builder(
                 };
                 let price = trade.price;
                 paper_engine.on_mark(&instrument_id, price);
+
+                // The tape. Published per tick so time & sales is genuinely live
+                // rather than a minute behind the market.
+                api::live_bus::publish(
+                    &live,
+                    domain::lanes::MARKET_TRADES,
+                    &instrument_id,
+                    serde_json::json!({
+                        "ts": tick.timestamp_ns / 1_000_000,
+                        "price": price.inner().to_string(),
+                        "size": trade.size.inner().to_string(),
+                        // An unknown aggressor is reported as such rather than
+                        // guessed — the tape colours by side and a wrong colour
+                        // is a wrong statement about who lifted the offer.
+                        "side": match trade.side {
+                            domain::payloads::trade::TradeSide::Buy => "buy",
+                            domain::payloads::trade::TradeSide::Sell => "sell",
+                            _ => "unknown",
+                        },
+                    }),
+                );
 
                 // Aggregate into the 1-minute bar; persist a completed minute.
                 let ts_secs = tick.timestamp_ns / 1_000_000_000;

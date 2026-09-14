@@ -1,0 +1,31 @@
+# Research stack for the agent sandbox (AGENT-001 §7).
+#
+# Torch is the CPU build: the local GPU (D-17) belongs to the training-job worker,
+# not to this container. The agent trains by submitting a `train` job, which is also
+# what makes training runs countable as trials (INV-1).
+
+# Analysis
+polars==1.17.1
+numpy==2.2.1
+scipy==1.15.0
+pandas==2.2.3
+pyarrow==18.1.0
+duckdb==1.1.3
+
+# Statistics and time series
+statsmodels==0.14.4
+arch==7.2.0
+
+# Models
+scikit-learn==1.6.0
+lightgbm==4.5.0
+xgboost==2.1.3
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1
+
+# Plots (spec artifacts, not interactive display)
+plotly==5.24.1
+
+# Platform client
+httpx==0.28.1
+pydantic==2.10.4

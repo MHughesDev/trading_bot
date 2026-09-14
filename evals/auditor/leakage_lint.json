@@ -1,0 +1,74 @@
+[
+  {
+    "id": "bfill_fills_a_gap_from_the_future",
+    "check": "leakage_lint",
+    "why": "Back-filling copies a later observation into an earlier row. Every model downstream then trains on a value that did not exist at decision time, and the effect is strongest exactly where data was missing - which is usually a stressed market.",
+    "violating": {
+      "code": "import pandas as pd\n\ndef build(df):\n    df['mid'] = df[['bid', 'ask']].mean(axis=1)\n    df['mid'] = df['mid'].fillna(method='bfill')\n    return df\n"
+    },
+    "clean": {
+      "code": "import pandas as pd\n\ndef build(df):\n    df['mid'] = df[['bid', 'ask']].mean(axis=1)\n    df['mid'] = df['mid'].ffill()\n    return df\n"
+    },
+    "expect": ["leak.bfill"]
+  },
+  {
+    "id": "centred_rolling_window",
+    "check": "leakage_lint",
+    "why": "A centred 20-bar mean at time t averages ten bars after t. The feature looks like a smoother and behaves like an oracle; a strategy built on it is profitable in backtest and flat in production, with no obvious difference between the two runs.",
+    "violating": {
+      "code": "def smooth(df):\n    df['sma'] = df['close'].rolling(20, center=True).mean()\n    return df\n"
+    },
+    "clean": {
+      "code": "def smooth(df):\n    df['sma'] = df['close'].rolling(20).mean()\n    return df\n"
+    },
+    "expect": ["leak.centred_window"]
+  },
+  {
+    "id": "negative_shift_as_a_feature",
+    "check": "leakage_lint",
+    "why": "shift(-1) is the label, not a feature. Written as a feature it is a perfect predictor, and the resulting Sharpe is so obviously wrong that the usual reaction is to look for a bug somewhere else.",
+    "violating": {
+      "code": "def build(df):\n    df['next_ret'] = df['close'].pct_change().shift(-1)\n    df['signal'] = (df['next_ret'] > 0).astype(int)\n    return df\n"
+    },
+    "clean": {
+      "code": "def build(df):\n    df['prev_ret'] = df['close'].pct_change().shift(1)\n    df['signal'] = (df['prev_ret'] > 0).astype(int)\n    return df\n"
+    },
+    "expect": ["leak.negative_shift"]
+  },
+  {
+    "id": "costs_switched_off_in_code",
+    "check": "leakage_lint",
+    "why": "The code form of a cost-model failure. Gate 0 catches an edge that does not clear the floor; this catches the run that never applied a floor at all, which shows up as a large positive edge rather than a small one.",
+    "violating": {
+      "code": "result = run_backtest(cfg, costs=None)\nprint(result.sharpe)\n"
+    },
+    "clean": {
+      "code": "result = run_backtest(cfg, costs=pessimistic_cost_model())\nprint(result.sharpe)\n"
+    },
+    "expect": ["cost.disabled"]
+  },
+  {
+    "id": "a_scaler_fitted_on_the_whole_sample",
+    "check": "leakage_lint",
+    "why": "Fitting a scaler before the split leaks the test fold's mean and variance into training. It is a small effect on a large sample and a decisive one on the short windows a research agent will actually use.",
+    "violating": {
+      "code": "scaler = StandardScaler()\nX = scaler.fit_transform(df)\ntrain, test = split(X)\n"
+    },
+    "clean": {
+      "code": "train, test = split(df)\nscaler = StandardScaler()\ntrain_x = scaler.fit_transform(train)\ntest_x = scaler.transform(test)\n"
+    },
+    "expect": ["leak.full_sample_fit"]
+  },
+  {
+    "id": "documenting_a_leak_is_not_committing_one",
+    "check": "leakage_lint",
+    "why": "The lint reads code, and code has comments. If naming a rule in a comment tripped it, the only way to document a leak would be to commit one - and the agent would learn to stop explaining itself. This fixture inverts the usual shape: the clean twin is the one full of rule names.",
+    "violating": {
+      "code": "df = df.bfill()\n"
+    },
+    "clean": {
+      "code": "# Do not use .bfill() here: center=True and shift(-1) are equally wrong.\n# The rule is that every window is trailing.\ndf = df.ffill()\ndf['sma'] = df['close'].rolling(20).mean()\n"
+    },
+    "expect": ["leak.bfill"]
+  }
+]

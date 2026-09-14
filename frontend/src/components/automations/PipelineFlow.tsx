@@ -156,7 +156,7 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
               <span className="flex-1 text-sm text-text truncate">{stage.label}</span>
               <button
                 onClick={() => removeStage(stage.stage_id)}
-                className="rounded p-0.5 text-text-dim hover:text-red-400 transition-colors"
+                className="rounded p-0.5 text-text-dim hover:text-neg transition-colors"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -221,7 +221,7 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
       </div>
 
       {mutation.isError && (
-        <p className="text-xs text-red-400">Failed to arm automation.</p>
+        <p className="text-xs text-neg">Failed to arm automation.</p>
       )}
 
       <button
@@ -229,7 +229,7 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
         onClick={() => mutation.mutate()}
         className={cn(
           'w-full rounded-lg py-2 text-sm font-semibold transition-colors',
-          'bg-accent text-white hover:bg-accent/80 disabled:opacity-40',
+          'bg-accent text-on-accent hover:bg-accent/80 disabled:opacity-40',
         )}
       >
         {mutation.isPending ? 'Arming…' : 'Arm pipeline'}

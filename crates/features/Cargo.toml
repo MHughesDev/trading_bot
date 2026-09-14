@@ -9,3 +9,4 @@ domain = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 once_cell = "1"
+dataplane = { workspace = true }

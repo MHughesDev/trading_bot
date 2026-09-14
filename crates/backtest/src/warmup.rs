@@ -27,7 +27,7 @@ use domain::payloads::bar::Timeframe;
 use rust_decimal::prelude::ToPrimitive;
 
 use crate::aggregate::aggregate_bars;
-use crate::requirements::{DataRequirements, FeatureKind};
+use crate::requirements::DataRequirements;
 use crate::store::{BarStore, LoadedBar};
 use crate::types::TimeframeExt;
 
@@ -106,39 +106,45 @@ pub async fn load_warm_state(
 /// Drives all indicators in `requirements` over `bars` (ascending) and
 /// returns the last emitted value for each feature name.
 pub fn run_indicators(bars: &[LoadedBar], requirements: &DataRequirements) -> HashMap<String, f64> {
-    enum IndicatorState {
-        Ema(features::Ema),
-        Rsi(features::Rsi),
+    let rows: Vec<features::FeatureRow> = bars.iter().map(feature_row).collect();
+    let names: Vec<String> = requirements.features.iter().map(|f| f.name.clone()).collect();
+    features::runtime::latest(&names, &rows)
+        .map(|m| m.into_iter().filter_map(|(k, v)| Some((k, v?))).collect())
+        .unwrap_or_default()
+}
+
+/// A stored bar as the feature runtime reads it.
+#[must_use]
+pub fn feature_row(b: &LoadedBar) -> features::FeatureRow {
+    features::FeatureRow {
+        ts_ns: b.ts_ns,
+        open: b.open.to_f64().unwrap_or(0.0),
+        high: b.high.to_f64().unwrap_or(0.0),
+        low: b.low.to_f64().unwrap_or(0.0),
+        close: b.close.to_f64().unwrap_or(0.0),
+        volume: b.volume.to_f64().unwrap_or(0.0),
     }
+}
 
-    let mut indicators: Vec<(String, IndicatorState)> = requirements
-        .features
-        .iter()
-        .map(|f| {
-            let state = match f.kind {
-                FeatureKind::Ema => IndicatorState::Ema(features::Ema::new(f.period)),
-                FeatureKind::Rsi => IndicatorState::Rsi(features::Rsi::new(f.period)),
-            };
-            (f.name.clone(), state)
-        })
-        .collect();
-
-    let mut values: HashMap<String, f64> = HashMap::new();
-
-    for bar in bars {
-        let close = bar.close.to_f64().unwrap_or(0.0);
-        for (name, state) in &mut indicators {
-            let value = match state {
-                IndicatorState::Ema(ema) => Some(ema.update(close)),
-                IndicatorState::Rsi(rsi) => rsi.update(close),
-            };
-            if let Some(v) = value {
-                values.insert(name.clone(), v);
-            }
-        }
+/// Convert a point-in-time bar to the aligner's observation, carrying the
+/// provenance the master clock needs: when the bar became knowable, and how good
+/// it was (SPEC §2, INV-11).
+///
+/// One conversion, used by the dataset builder, the live serve and the nightly
+/// consistency diff alike -- a diff between a serve and a recomputation must
+/// compare code, not two different readings of the same bars.
+#[must_use]
+pub fn bar_obs(b: &LoadedBar) -> features::BarObs {
+    features::BarObs {
+        ts_ns: b.ts_ns,
+        knowledge_ns: b.knowledge_ns,
+        open: b.open.to_f64().unwrap_or(f64::NAN),
+        high: b.high.to_f64().unwrap_or(f64::NAN),
+        low: b.low.to_f64().unwrap_or(f64::NAN),
+        close: b.close.to_f64().unwrap_or(f64::NAN),
+        volume: b.volume.to_f64().unwrap_or(f64::NAN),
+        quality: b.quality_flags,
     }
-
-    values
 }
 
 #[cfg(test)]
@@ -159,6 +165,7 @@ mod tests {
                 close: rust_decimal::Decimal::from(100 + i as i64),
                 volume: dec!(1),
                 trade_count: 1,
+                ..Default::default()
             })
             .collect()
     }
@@ -176,11 +183,10 @@ mod tests {
     }
 
     #[test]
-    fn ema_value_is_present_after_one_bar() {
-        let bars = rising_bars(1);
+    fn ema_value_is_absent_until_its_window_exists() {
         let req = ema_requirements(7);
-        let values = run_indicators(&bars, &req);
-        assert!(values.contains_key("ema_7"), "EMA seeds on first bar");
+        assert!(!run_indicators(&rising_bars(34), &req).contains_key("ema_7"));
+        assert!(run_indicators(&rising_bars(35), &req).contains_key("ema_7"));
     }
 
     #[test]
@@ -194,13 +200,9 @@ mod tests {
             }],
             warmup_bars: 30,
         };
-        // 3 bars → not enough (needs period + 1 = 4)
-        let short = rising_bars(3);
-        assert!(!run_indicators(&short, &req).contains_key("rsi_3"));
-
-        // 4 bars → first RSI value available
-        let enough = rising_bars(4);
-        assert!(run_indicators(&enough, &req).contains_key("rsi_3"));
+        // The declared window is 5 × 3 + 1 = 16 bars.
+        assert!(!run_indicators(&rising_bars(15), &req).contains_key("rsi_3"));
+        assert!(run_indicators(&rising_bars(16), &req).contains_key("rsi_3"));
     }
 
     #[test]

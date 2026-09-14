@@ -10,7 +10,7 @@ const ToastViewport = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ToastPrimitive.Viewport
     ref={ref}
-    className={cn('fixed bottom-4 right-4 z-[100] flex max-h-screen w-full max-w-[380px] flex-col gap-2', className)}
+    className={cn('toastwrap', className)}
     {...props}
   />
 ))
@@ -23,11 +23,11 @@ const Toast = React.forwardRef<
   <ToastPrimitive.Root
     ref={ref}
     className={cn(
-      'flex w-full items-center justify-between gap-4 rounded-lg border p-4 shadow-lg transition-all',
+      'toast',
       'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-80',
-      variant === 'default' && 'border-border-2 bg-surface text-text',
-      variant === 'success' && 'border-emerald-700 bg-emerald-900/40 text-emerald-300',
-      variant === 'error' && 'border-red-700 bg-red-900/40 text-red-300',
+      variant === 'default' && 'info',
+      variant === 'success' && 'pos',
+      variant === 'error' && 'neg',
       className
     )}
     {...props}

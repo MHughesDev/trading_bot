@@ -42,7 +42,13 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
     models: list = []
     for idx, alpha in enumerate(levels):
         m = GradientBoostingRegressor(loss="quantile", alpha=alpha, **base_kwargs)
-        m.fit(p.X_tr, p.y_tr)
+        if p.w_tr is not None:
+            try:
+                m.fit(p.X_tr, p.y_tr, sample_weight=p.w_tr)  # SPEC 3.4
+            except TypeError:
+                m.fit(p.X_tr, p.y_tr)
+        else:
+            m.fit(p.X_tr, p.y_tr)
         models.append(m)
         pct = ((idx + 1) / len(levels)) * 90.0
         emit_progress("fitting", pct, {"quantile_idx": idx})

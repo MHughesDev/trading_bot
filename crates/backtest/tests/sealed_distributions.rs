@@ -19,6 +19,12 @@ use backtest::study::{SelectionRule, StudyBudget, StudyConfig, StudyEngine, Stud
 use chrono::{TimeZone, Utc};
 use serde_json::json;
 
+use ledger::{DispatchContext, InMemoryLedger};
+
+fn ctx() -> DispatchContext {
+    DispatchContext::human("tenant-test", "sealed", 0.1).with_experiment("test-exp")
+}
+
 fn base() -> RunConfig {
     let s = DataSlice::new(
         "u",
@@ -62,6 +68,7 @@ fn sweep(grid: Vec<ParamMap>, rule: SelectionRule) -> StudyConfig {
         vary: VarySpec::Params { grid },
         metric: MetricKind::TotalReturn,
         null_ref: None,
+        null: None,
         budget: StudyBudget::default(),
         question: "vary across params".into(),
         selection_rule: rule,
@@ -76,9 +83,9 @@ fn param(fast: f64) -> ParamMap {
 
 #[test]
 fn members_are_insertion_ordered_not_metric_ranked() {
-    let bt = Backtest::new(InMemoryRunStore::new(), spike_executor());
+    let bt = Backtest::new(InMemoryRunStore::new(), spike_executor(), InMemoryLedger::new());
     let grid: Vec<ParamMap> = (8..=16).map(|i| param(f64::from(i))).collect();
-    let res = StudyEngine::run(&sweep(grid, SelectionRule::None), &bt).unwrap();
+    let res = StudyEngine::run(&sweep(grid, SelectionRule::None), &bt, &ctx()).unwrap();
 
     // `members()` returns provenance in insertion order. We assert it is NOT
     // sorted by performance: the peak (fast==12, 5th of 9) is in the middle, so
@@ -92,13 +99,14 @@ fn members_are_insertion_ordered_not_metric_ranked() {
 
 #[test]
 fn carry_forward_is_the_declared_rule_not_the_peak() {
-    let bt = Backtest::new(InMemoryRunStore::new(), spike_executor());
+    let bt = Backtest::new(InMemoryRunStore::new(), spike_executor(), InMemoryLedger::new());
     let grid: Vec<ParamMap> = (8..=16).map(|i| param(f64::from(i))).collect();
 
     // MedianStableCentroid must return a near-median member, NOT the peak (12).
     let res = StudyEngine::run(
         &sweep(grid.clone(), SelectionRule::MedianStableCentroid),
         &bt,
+        &ctx(),
     )
     .unwrap();
     let carried = res.carried_forward.expect("a config is carried forward");
@@ -110,7 +118,7 @@ fn carry_forward_is_the_declared_rule_not_the_peak() {
     assert_ne!(fast, 12.0, "the centroid rule must never carry the peak");
 
     // `None` carries nothing — there is no implicit best-member promotion.
-    let none = StudyEngine::run(&sweep(grid, SelectionRule::None), &bt).unwrap();
+    let none = StudyEngine::run(&sweep(grid, SelectionRule::None), &bt, &ctx()).unwrap();
     assert!(none.carried_forward.is_none());
 }
 
@@ -120,9 +128,9 @@ fn the_only_single_config_out_is_the_selection_rule() {
     // config is `carried_forward` (the declared rule). If you find yourself
     // wanting `res.members()[k]` "the best one", that is the p-hacking surface
     // ADR-002 seals. The distribution — median, IQR, worst-5% — is what you read.
-    let bt = Backtest::new(InMemoryRunStore::new(), spike_executor());
+    let bt = Backtest::new(InMemoryRunStore::new(), spike_executor(), InMemoryLedger::new());
     let grid: Vec<ParamMap> = (8..=16).map(|i| param(f64::from(i))).collect();
-    let res = StudyEngine::run(&sweep(grid, SelectionRule::WorstCaseRobust), &bt).unwrap();
+    let res = StudyEngine::run(&sweep(grid, SelectionRule::WorstCaseRobust), &bt, &ctx()).unwrap();
     // Worst-case rule lands on a conservative (low-return) member, never the peak.
     let carried = res.carried_forward.unwrap();
     let fast = carried

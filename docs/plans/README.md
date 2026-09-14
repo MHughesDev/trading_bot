@@ -17,6 +17,14 @@ top of the existing `crates/backtest` Run engine — the Run/Study/Experiment ob
 model (content-addressed runs, sealed distributions, a monotonic trial counter, a
 one-shot holdout vault), the Null Library, and the staged-gate funnel (0→4) — derived
 from [`specs/BACKTEST_SUITE_CORE_SPEC.md`](../specs/BACKTEST_SUITE_CORE_SPEC.md).
+Set L (`plan-sets/set-L/`) builds the **quant research agent's foundation** — the
+Claude Agent SDK runtime in a per-project container, the LLM proxy, a durable job
+service and artifact store, Data API v2 with the research cutoff, the `tbot` read
+surface, the workspace UI v1 and the eval-suite skeleton — derived from
+[`specs/AGENT-001-agent-runtime.md`](../specs/AGENT-001-agent-runtime.md) and its
+siblings. Its **Phase 0 is independent and urgent**: it replaces the `market_bars`
+table, whose sorting key silently destroys bars, and it must land before any bar
+backfill. Set L also absorbs the two unshipped legs of Set K.
 
 ---
 

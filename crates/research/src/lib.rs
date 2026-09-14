@@ -18,6 +18,7 @@
 //! [`SweepBackend`] trait the API layer implements.
 
 pub mod calibration;
+pub mod search;
 pub mod sampler;
 pub mod space;
 pub mod surface;

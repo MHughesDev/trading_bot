@@ -1,0 +1,214 @@
+[
+  {
+    "id": "grade_d_data_backing_an_experiment",
+    "check": "data_grade",
+    "why": "Grade D means under half the expected bars are present. A backtest over that data is a backtest over whichever hours happened to be collected, which is a survivorship filter nobody chose and nobody can see in the equity curve.",
+    "violating": {
+      "grade": "D"
+    },
+    "clean": {
+      "grade": "B"
+    },
+    "expect": [
+      "data_grade_d_refused"
+    ]
+  },
+  {
+    "id": "grade_d_with_a_waiver_is_still_refused",
+    "check": "data_grade",
+    "why": "The waiver system's limit, as its own fixture. A waiver that can wave through anything is a rubber stamp, and the one grade it must never cover is the one that is not a judgement call.",
+    "violating": {
+      "grade": "D",
+      "waiver": {
+        "granted_for": "D",
+        "approved_by": "mason",
+        "reason": "I would like this to work"
+      }
+    },
+    "clean": {
+      "grade": "C",
+      "waiver": {
+        "granted_for": "C",
+        "approved_by": "mason",
+        "reason": "the gap is a documented venue outage, not a collection failure"
+      }
+    },
+    "expect": [
+      "data_grade_d_refused"
+    ]
+  },
+  {
+    "id": "grade_c_without_a_waiver",
+    "check": "data_grade",
+    "why": "Grade C is the interesting one: usable, with a recorded human decision. Without the decision it is just a result on bad data, and with it it is a result on bad data that somebody owns.",
+    "violating": {
+      "grade": "C"
+    },
+    "clean": {
+      "grade": "C",
+      "waiver": {
+        "granted_for": "C",
+        "approved_by": "mason",
+        "reason": "the gap is a documented venue outage, not a collection failure"
+      }
+    },
+    "expect": [
+      "data_grade_c_needs_waiver"
+    ]
+  },
+  {
+    "id": "an_ungraded_instrument_is_not_assumed_good",
+    "check": "data_grade",
+    "why": "The default matters more than the thresholds. If missing QC meant 'proceed', every instrument the pipeline has not reached yet would silently be grade A.",
+    "violating": {
+      "grade": ""
+    },
+    "clean": {
+      "grade": "A"
+    },
+    "expect": [
+      "data_grade_unknown"
+    ]
+  },
+  {
+    "id": "a_confirmatory_run_reading_unpinned_data",
+    "check": "revision_pinning",
+    "why": "Bars get revised. A confirmatory run that read 'whatever the table says now' cannot be reproduced, and the specific danger is directional: a later revision usually improves the past, so re-reading unpinned silently upgrades a result nobody re-ran.",
+    "violating": {
+      "confirmatory": true,
+      "manifest": {
+        "instrument_id": "BTC-USD",
+        "window_end": "2026-06-01T00:00:00Z"
+      }
+    },
+    "clean": {
+      "confirmatory": true,
+      "manifest": {
+        "instrument_id": "BTC-USD",
+        "window_end": "2026-06-01T00:00:00Z",
+        "data_snapshot_id": "snap_7f21",
+        "as_of": "2026-06-02T00:00:00Z"
+      }
+    },
+    "expect": [
+      "data_not_pinned"
+    ]
+  },
+  {
+    "id": "reading_corrections_from_after_the_window",
+    "check": "revision_pinning",
+    "why": "Not a future bar - a future *edit* to a past bar. Reading at an as-of before the window closed means part of the window was unreadable at that instant; reading at one long after means the run used corrections it could not have had.",
+    "violating": {
+      "confirmatory": true,
+      "manifest": {
+        "data_snapshot_id": "snap_7f21",
+        "as_of": "2026-01-01T00:00:00Z",
+        "window_end": "2026-06-01T00:00:00Z"
+      }
+    },
+    "clean": {
+      "confirmatory": true,
+      "manifest": {
+        "data_snapshot_id": "snap_7f21",
+        "as_of": "2026-06-01T00:00:00Z",
+        "window_end": "2026-06-01T00:00:00Z"
+      }
+    },
+    "expect": [
+      "data_as_of_before_window_end"
+    ]
+  },
+  {
+    "id": "exploration_does_not_have_to_pin",
+    "check": "revision_pinning",
+    "why": "The clean twin for the rule above. Demanding a pinned snapshot for every exploratory glance would make the honest path the expensive one, and the agent would stop exploring rather than stop being sloppy.",
+    "violating": {
+      "confirmatory": true,
+      "manifest": {
+        "instrument_id": "BTC-USD"
+      }
+    },
+    "clean": {
+      "confirmatory": false,
+      "manifest": {
+        "instrument_id": "BTC-USD"
+      }
+    },
+    "expect": [
+      "data_not_pinned"
+    ]
+  },
+  {
+    "id": "prediction_series_overlapping_its_training_window",
+    "check": "prediction_overlap",
+    "why": "A model retrained on more data and then scored over a window that now includes some of its own training rows. The score is part in-sample, and because the overlap is usually a few weeks at the boundary, it looks like a mild improvement rather than a bug.",
+    "violating": {
+      "train": {
+        "start": "2024-01-01T00:00:00Z",
+        "end": "2025-03-01T00:00:00Z"
+      },
+      "predict": {
+        "start": "2025-01-01T00:00:00Z",
+        "end": "2025-06-01T00:00:00Z"
+      }
+    },
+    "clean": {
+      "train": {
+        "start": "2024-01-01T00:00:00Z",
+        "end": "2025-01-01T00:00:00Z"
+      },
+      "predict": {
+        "start": "2025-01-01T00:00:00Z",
+        "end": "2025-06-01T00:00:00Z"
+      }
+    },
+    "expect": [
+      "lookahead.prediction_train_overlap"
+    ]
+  },
+  {
+    "id": "a_skill_with_a_tuned_constant",
+    "check": "skill_lint",
+    "why": "A skill is a procedure. One containing `if sharpe > 1.37` has stopped being a procedure and become a result - fitted somewhere, by someone, on data nobody is citing (ADR-0028). It then applies that number to every future project silently.",
+    "violating": {
+      "code": "def should_promote(metrics):\n    if metrics['sharpe'] > 1.37:\n        return 'promote'\n    return 'hold'\n"
+    },
+    "clean": {
+      "code": "def should_promote(metrics, sharpe_threshold):\n    if metrics['sharpe'] > sharpe_threshold:\n        return 'promote'\n    return 'hold'\n"
+    },
+    "expect": [
+      "skill.tuned_constant"
+    ]
+  },
+  {
+    "id": "ordinary_skill_arithmetic_is_not_a_tuned_constant",
+    "check": "skill_lint",
+    "why": "The false-rejection half. Annualising by 252, converting to percent, an epsilon guard - a lint that rejected those would make honest skills unwritable, and the agent would stop registering skills rather than stop tuning them.",
+    "violating": {
+      "code": "annual = daily * 15.87\n"
+    },
+    "clean": {
+      "code": "import math\n\ndef annualise(daily_sharpe):\n    return daily_sharpe * math.sqrt(252)\n\ndef to_pct(x):\n    return x * 100\n\nEPS = 1e-9\n"
+    },
+    "expect": [
+      "skill.tuned_constant"
+    ]
+  },
+  {
+    "id": "an_oversized_tool_result_is_marked_not_silently_cut",
+    "check": "truncation",
+    "why": "A model that is told the result was cut asks for a summary; a model that is not, reasons over half a table and reports a number as though it saw all of it. This pair reads the other way round: the oversized payload must be detectable as truncated, and the small one must pass through untouched.",
+    "violating": {
+      "payload_bytes": 40000
+    },
+    "clean": {
+      "payload": {
+        "rows": 3,
+        "note": "small enough to pass through whole"
+      }
+    },
+    "expect": [
+      "transcript.truncated"
+    ]
+  }
+]

@@ -46,7 +46,7 @@ platform is rebuilt around it, and the human UI comes as a byproduct.
 
 | ID | Decision | Date | Consequence |
 |---|---|---|---|
-| D-01 | **Frontier models first** (Claude Opus class) | 2026-09-10 | Harness and tool granularity are tuned for frontier models. Local models aren't a constraint on the agent. `crates/llm` stays for `LlmInference` strategy nodes |
+| D-01 | ~~Frontier models first; local models aren't a constraint~~ **SUPERSEDED by D-18** | 2026-09-10, superseded 2026-09-11 | The frontier path is unchanged and remains the default. What changed is that local models became a *target* rather than a non-constraint |
 | D-02 | **The agent runs in its own sandboxed container**, one per research project, like a coding agent | 2026-09-10 | Data reaches the agent as files; analysis is code; enforcement moves to the platform (03 §2) |
 | D-03 | **Local embeddings** | 2026-09-10 | Research notes and text never leave the machine. `apps/embedder` switches from OpenAI (12) |
 | D-04 | **One agent, optimised for long-running work.** No modes; asking a question is just a short session | 2026-09-10 | One harness, one tool surface, one UI (02, 03, 15) |
@@ -59,6 +59,11 @@ platform is rebuilt around it, and the human UI comes as a byproduct.
 | D-11 | **Never trade away model capability for tokens.** Remove waste instead | 2026-09-10 | 04_CONTEXT_AND_COST |
 | D-12 | **Research authority only.** No orders, no automations, no live arming. Deployment and promotion are human-approved proposals | standing | 02 §6, 03 §12 |
 | D-13 | **Exploration is logged, not counted as trials.** Every Data API read and sandbox job inside a project goes to an exploration ledger, reported with each verdict | 2026-09-11 (was the recommended option) | 11 §3 |
+| D-14 | **ADRs 0024–0030 are Accepted** | 2026-09-11 | The Phase 0 contracts are binding on plan sets L…R |
+| D-15 | **Desk project as specified:** one per user, cutoff = now, exploratory Experiments only, no G3 gate and no vault | 2026-09-11 | 06 §3.1, DATA-005 §4, ADR-0025 |
+| D-16 | **Billing: Anthropic API key primary, Claude subscription fallback.** The proxy selects per project and pins the kind for a session | 2026-09-11 | ADR-0024 §3; exact budgets on the key path, estimated on the subscription path; cache TTL defaults per kind |
+| D-17 | **A local GPU is available** for training jobs | 2026-09-11 | Sequence models are in scope for Set N (10); the job service gets a GPU worker class (05) |
+| D-18 | **Wire a local model tier.** One harness, two executors behind the Model Adapter: the Claude Agent SDK for `frontier`, a constrained-decoding local loop for `local_*`. Supersedes D-01's "local models aren't a constraint" | 2026-09-11 | ADR-0032. **Design target is a single RTX 3090 (24 GB), then 2x3090/48 GB pooled via NVLink, with a 128 GB unified-memory host as a stretch — NOT the current 1080 Ti dev box.** Reference model `qwen3.6-35b-a3b` Q4 (~21 GB); multi-step-reliable tool calling is a baseline assumption. Pascal/11 GB accommodations live behind the capability resolver as a `degraded` tier that refuses tool-heavy work. D-07's SDK harness is unchanged for frontier |
 
 ## Document map
 
@@ -128,19 +133,14 @@ platform is rebuilt around it, and the human UI comes as a byproduct.
 
 ## Cross-cutting open questions
 
-1. **Billing path** for the agent's model calls: an API key through the platform's LLM
-   proxy (assumed in 03 §4), or a subscription? This sets cache TTL defaults and budgets.
-2. **GPU availability** for training jobs: local GPU, CPU-only, or burst to a cloud
-   worker? This affects 10's sequence-model scope.
-3. **Multi-tenancy:** will outside users ever share global skills and memory? This
+**Answered 2026-09-11:** billing (→ D-16), GPU (→ D-17), Desk project (→ D-15).
+Still open:
+
+1. **Multi-tenancy:** will outside users ever share global skills and memory? This
    affects 13 §6 and 12 privacy scope.
-4. **Monthly eval budget** for agent evals, skill A/B testing and re-evaluation on model
+2. **Monthly eval budget** for agent evals, skill A/B testing and re-evaluation on model
    upgrades (16 §7).
-5. **Desk project** (06 §3.1): confirm the design that separates live questions (Desk,
-   cutoff = now, exploratory only) from research projects (fixed cutoff, vault). It was
-   introduced during the cleanup to resolve a conflict between J1 live questions and
-   holdout integrity.
-6. **Paper deployment proposals:** may the agent create a pending paper-deployment request
+3. **Paper deployment proposals:** may the agent create a pending paper-deployment request
    for human approval, once live evaluation (G-11) is wired? The assumed answer is yes,
    proposal only.
 

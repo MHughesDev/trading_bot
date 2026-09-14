@@ -23,6 +23,7 @@ use crate::hot_path::{self, BarSink, PipelineHandle, RawTick};
 /// currently running (keyed by `instrument_id`).
 pub struct PipelineManager {
     tee_tx: tokio::sync::mpsc::UnboundedSender<RawTick>,
+    live: api::live_bus::LiveSender,
     bar_persist_tx: tokio::sync::mpsc::UnboundedSender<PersistBar>,
     execution_engine: Arc<execution::ExecutionEngine>,
     risk_gate: Arc<risk::RiskGate>,
@@ -33,6 +34,7 @@ pub struct PipelineManager {
 
 impl PipelineManager {
     pub fn new(
+        live: api::live_bus::LiveSender,
         tee_tx: tokio::sync::mpsc::UnboundedSender<RawTick>,
         bar_persist_tx: tokio::sync::mpsc::UnboundedSender<PersistBar>,
         execution_engine: Arc<execution::ExecutionEngine>,
@@ -42,6 +44,7 @@ impl PipelineManager {
     ) -> Self {
         Self {
             tee_tx,
+            live,
             bar_persist_tx,
             execution_engine,
             risk_gate,
@@ -87,6 +90,7 @@ impl PipelineManager {
             Arc::clone(&self.risk_gate),
             Arc::clone(&self.paper_engine),
             sink,
+            self.live.clone(),
         );
 
         info!(

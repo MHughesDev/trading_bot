@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use chrono::{DateTime, Datelike, Utc};
+use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
@@ -25,12 +26,15 @@ pub struct TradeStats {
     pub wins: usize,
     pub losses: usize,
     pub win_rate: f64,
-    pub avg_win: f64,
-    pub avg_loss: f64,
+    /// Mean P&L of the winning trades, in quote currency.
+    pub avg_win: Decimal,
+    /// Mean loss magnitude of the losing trades (≥ 0), in quote currency.
+    pub avg_loss: Decimal,
+    /// R-multiple, unitless.
     pub expectancy: f64,
     pub profit_factor: f64,
-    pub pnl_total: f64,
-    pub costs_total: f64,
+    pub pnl_total: Decimal,
+    pub costs_total: Decimal,
     pub hold_secs_p50: i64,
     pub mae_p50: f64,
     pub mfe_p50: f64,
@@ -62,7 +66,7 @@ pub struct WorstTrade {
     pub entry_time: DateTime<Utc>,
     pub exit_time: DateTime<Utc>,
     pub side: Side,
-    pub pnl: f64,
+    pub pnl: Decimal,
     pub holding_period_secs: i64,
     pub mae: f64,
 }
@@ -123,21 +127,26 @@ fn trade_stats(trades: &[Trade], metrics: &MetricSet) -> TradeStats {
     if trades.is_empty() {
         return TradeStats::default();
     }
-    let (mut wins, mut losses, mut gain, mut loss, mut pnl_total, mut costs) =
-        (0usize, 0usize, 0.0, 0.0, 0.0, 0.0);
+    let (mut wins, mut losses) = (0usize, 0usize);
+    let (mut gain, mut loss, mut pnl_total, mut costs) = (
+        Decimal::ZERO,
+        Decimal::ZERO,
+        Decimal::ZERO,
+        Decimal::ZERO,
+    );
     let (mut streak, mut longest) = (0usize, 0usize);
     for t in trades {
-        let p = f(t.pnl);
+        let p = t.pnl;
         pnl_total += p;
-        costs += f(t.costs_paid);
-        if p > 0.0 {
+        costs += t.costs_paid;
+        if p > Decimal::ZERO {
             wins += 1;
             gain += p;
             streak = 0;
         } else {
-            if p < 0.0 {
+            if p < Decimal::ZERO {
                 losses += 1;
-                loss += -p;
+                loss -= p;
             }
             streak += 1;
             longest = longest.max(streak);
@@ -151,11 +160,15 @@ fn trade_stats(trades: &[Trade], metrics: &MetricSet) -> TradeStats {
         wins,
         losses,
         win_rate: wins as f64 / trades.len() as f64,
-        avg_win: if wins > 0 { gain / wins as f64 } else { 0.0 },
-        avg_loss: if losses > 0 {
-            loss / losses as f64
+        avg_win: if wins > 0 {
+            gain / Decimal::from(wins)
         } else {
-            0.0
+            Decimal::ZERO
+        },
+        avg_loss: if losses > 0 {
+            loss / Decimal::from(losses)
+        } else {
+            Decimal::ZERO
         },
         expectancy: metrics.expectancy,
         profit_factor: metrics.profit_factor,
@@ -240,7 +253,10 @@ fn longest_drawdown(equity: &[(DateTime<Utc>, f64)]) -> Option<DrawdownEpisode> 
                     depth,
                     duration_secs: (ts - start).num_seconds(),
                 };
-                if best.as_ref().is_none_or(|b| ep.duration_secs > b.duration_secs) {
+                if best
+                    .as_ref()
+                    .is_none_or(|b| ep.duration_secs > b.duration_secs)
+                {
                     best = Some(ep);
                 }
             }
@@ -267,7 +283,10 @@ fn longest_drawdown(equity: &[(DateTime<Utc>, f64)]) -> Option<DrawdownEpisode> 
             depth,
             duration_secs: (end - start).num_seconds(),
         };
-        if best.as_ref().is_none_or(|b| ep.duration_secs > b.duration_secs) {
+        if best
+            .as_ref()
+            .is_none_or(|b| ep.duration_secs > b.duration_secs)
+        {
             best = Some(ep);
         }
     }
@@ -381,7 +400,11 @@ fn render_text(b: &DiagnosticBundle) -> String {
     }
     if !b.by_month.is_empty() {
         let mut worst: Vec<&MonthSlice> = b.by_month.iter().collect();
-        worst.sort_by(|a, c| a.ret.partial_cmp(&c.ret).unwrap_or(std::cmp::Ordering::Equal));
+        worst.sort_by(|a, c| {
+            a.ret
+                .partial_cmp(&c.ret)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let losing = b.by_month.iter().filter(|x| x.ret < 0.0).count();
         let _ = writeln!(
             s,
@@ -459,7 +482,7 @@ impl DiagnosticBundle {
                 entry_time: t.entry_time,
                 exit_time: t.exit_time,
                 side: t.side,
-                pnl: f(t.pnl),
+                pnl: t.pnl,
                 holding_period_secs: t.holding_period_secs,
                 mae: t.mae,
             })
@@ -492,7 +515,12 @@ mod tests {
 
     fn fixture() -> RunResult {
         let t0 = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
-        let slice = DataSlice::new("BTC-USD", t0, t0 + Duration::days(120), EvalResolution::Day1);
+        let slice = DataSlice::new(
+            "BTC-USD",
+            t0,
+            t0 + Duration::days(120),
+            EvalResolution::Day1,
+        );
         let cfg = RunConfigBuilder::new("s", "v", slice, "c", "z", "snap").build();
         // Equity: up, then a 3-week drawdown, then recovery and new highs.
         let mut equity = Vec::new();
@@ -536,7 +564,7 @@ mod tests {
         assert!(dd.depth < -0.05, "depth {}", dd.depth);
         assert!(dd.recovered.is_some());
         assert!(dd.duration_secs > 20 * 86_400);
-        assert_eq!(b.worst_trades[0].pnl, -3.0);
+        assert_eq!(b.worst_trades[0].pnl, dec!(-3.0));
         assert_eq!(b.trades.longest_losing_streak, 3);
         assert_eq!(b.by_month.len(), 4);
         assert!(b.by_month.iter().any(|m| m.ret < 0.0));
@@ -550,8 +578,16 @@ mod tests {
         let t0 = r.equity_curve[0].0;
         let regimes = vec![
             (t0, t0 + Duration::days(30), "trend".to_string()),
-            (t0 + Duration::days(30), t0 + Duration::days(51), "chop".to_string()),
-            (t0 + Duration::days(51), t0 + Duration::days(120), "trend".to_string()),
+            (
+                t0 + Duration::days(30),
+                t0 + Duration::days(51),
+                "chop".to_string(),
+            ),
+            (
+                t0 + Duration::days(51),
+                t0 + Duration::days(120),
+                "trend".to_string(),
+            ),
         ];
         let b = DiagnosticBundle::from_result(&r, &regimes);
         assert_eq!(b.by_regime.len(), 2);
@@ -566,9 +602,9 @@ mod tests {
         let t0 = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let slice = DataSlice::new("X", t0, t0 + Duration::days(1), EvalResolution::Day1);
         let cfg = RunConfigBuilder::new("s", "v", slice, "c", "z", "snap").build();
-        let r = RunResult::failed(&cfg, "nope", "test");
+        let r = RunResult::failed(&cfg, ledger::TerminalReason::DataError, "nope", "test");
         let b = DiagnosticBundle::from_result(&r, &[]);
-        assert_eq!(b.status, RunStatus::Failed);
+        assert_eq!(b.status, RunStatus::Failed(ledger::TerminalReason::DataError));
         assert!(b.longest_drawdown.is_none());
         assert!(b.by_month.is_empty());
     }

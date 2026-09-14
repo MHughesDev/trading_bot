@@ -1,0 +1,153 @@
+CONTRAST + PALETTE VERIFICATION REPORT
+Generated: 2026-09-12 19:10 UTC
+Source of truth: tokens.css
+
+==============================================================
+1. WCAG CONTRAST — every semantic foreground/background pair
+==============================================================
+┌─────────┬────────────┬─────────────────────────────┬───────┬──────┬─────────┬────────────────┐
+│ (index) │ theme      │ pair                        │ ratio │ need │ verdict │ kind           │
+├─────────┼────────────┼─────────────────────────────┼───────┼──────┼─────────┼────────────────┤
+│ 0       │ 'paper'    │ 'fg-primary / canvas'       │ 17.18 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 1       │ 'paper'    │ 'fg-secondary / canvas'     │ 7.27  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 2       │ 'paper'    │ 'fg-tertiary / canvas'      │ 5.18  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 3       │ 'paper'    │ 'fg-accent / canvas'        │ 5.31  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 4       │ 'paper'    │ 'fg-pos / canvas'           │ 5.15  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 5       │ 'paper'    │ 'fg-neg / canvas'           │ 5.78  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 6       │ 'paper'    │ 'fg-warn / canvas'          │ 5.19  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 7       │ 'paper'    │ 'fg-info / canvas'          │ 5.36  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 8       │ 'paper'    │ 'fg-primary / surface'      │ 18.09 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 9       │ 'paper'    │ 'fg-secondary / surface'    │ 7.66  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 10      │ 'paper'    │ 'fg-tertiary / surface'     │ 5.46  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 11      │ 'paper'    │ 'fg-accent / surface'       │ 5.6   │ 4.5  │ 'PASS'  │ 'text'         │
+│ 12      │ 'paper'    │ 'fg-pos / surface'          │ 5.43  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 13      │ 'paper'    │ 'fg-neg / surface'          │ 6.08  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 14      │ 'paper'    │ 'fg-warn / surface'         │ 5.47  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 15      │ 'paper'    │ 'fg-info / surface'         │ 5.65  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 16      │ 'paper'    │ 'fg-primary / sunken'       │ 16.15 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 17      │ 'paper'    │ 'fg-secondary / sunken'     │ 6.84  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 18      │ 'paper'    │ 'fg-tertiary / sunken'      │ 4.88  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 19      │ 'paper'    │ 'fg-accent / sunken'        │ 5     │ 4.5  │ 'PASS'  │ 'text'         │
+│ 20      │ 'paper'    │ 'fg-pos / sunken'           │ 4.85  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 21      │ 'paper'    │ 'fg-neg / sunken'           │ 5.43  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 22      │ 'paper'    │ 'fg-warn / sunken'          │ 4.88  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 23      │ 'paper'    │ 'fg-info / sunken'          │ 5.04  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 24      │ 'paper'    │ 'fg-primary / inset'        │ 15.17 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 25      │ 'paper'    │ 'fg-secondary / inset'      │ 6.42  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 26      │ 'paper'    │ 'fg-tertiary / inset'       │ 4.58  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 27      │ 'paper'    │ 'fg-accent / inset'         │ 4.69  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 28      │ 'paper'    │ 'fg-pos / inset'            │ 4.55  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 29      │ 'paper'    │ 'fg-neg / inset'            │ 5.1   │ 4.5  │ 'PASS'  │ 'text'         │
+│ 30      │ 'paper'    │ 'fg-warn / inset'           │ 4.58  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 31      │ 'paper'    │ 'fg-info / inset'           │ 4.74  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 32      │ 'paper'    │ 'on-accent / accent-bg'     │ 4.57  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 33      │ 'paper'    │ 'on-pos / pos-bg'           │ 5.43  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 34      │ 'paper'    │ 'on-neg / neg-bg'           │ 6.08  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 35      │ 'paper'    │ 'fg-accent / accent-subtle' │ 4.75  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 36      │ 'paper'    │ 'fg-pos / pos-subtle'       │ 4.55  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 37      │ 'paper'    │ 'fg-neg / neg-subtle'       │ 5.08  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 38      │ 'paper'    │ 'fg-warn / warn-subtle'     │ 4.79  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 39      │ 'paper'    │ 'fg-info / info-subtle'     │ 4.82  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 40      │ 'paper'    │ 'line-default / surface'    │ 1.36  │ 1.3  │ 'PASS'  │ 'nontext-soft' │
+│ 41      │ 'paper'    │ 'line-strong / surface'     │ 1.65  │ 1.5  │ 'PASS'  │ 'nontext-soft' │
+│ 42      │ 'paper'    │ 'fg-disabled / surface'     │ 2.37  │ 2.2  │ 'PASS'  │ 'disabled'     │
+│ 43      │ 'terminal' │ 'fg-primary / canvas'       │ 16.59 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 44      │ 'terminal' │ 'fg-secondary / canvas'     │ 7.83  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 45      │ 'terminal' │ 'fg-tertiary / canvas'      │ 5.23  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 46      │ 'terminal' │ 'fg-accent / canvas'        │ 11.77 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 47      │ 'terminal' │ 'fg-pos / canvas'           │ 11.98 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 48      │ 'terminal' │ 'fg-neg / canvas'           │ 6.41  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 49      │ 'terminal' │ 'fg-warn / canvas'          │ 11.02 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 50      │ 'terminal' │ 'fg-info / canvas'          │ 9.07  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 51      │ 'terminal' │ 'fg-primary / surface'      │ 15.88 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 52      │ 'terminal' │ 'fg-secondary / surface'    │ 7.49  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 53      │ 'terminal' │ 'fg-tertiary / surface'     │ 5     │ 4.5  │ 'PASS'  │ 'text'         │
+│ 54      │ 'terminal' │ 'fg-accent / surface'       │ 11.26 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 55      │ 'terminal' │ 'fg-pos / surface'          │ 11.46 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 56      │ 'terminal' │ 'fg-neg / surface'          │ 6.14  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 57      │ 'terminal' │ 'fg-warn / surface'         │ 10.55 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 58      │ 'terminal' │ 'fg-info / surface'         │ 8.68  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 59      │ 'terminal' │ 'fg-primary / raised'       │ 14.69 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 60      │ 'terminal' │ 'fg-secondary / raised'     │ 6.93  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 61      │ 'terminal' │ 'fg-tertiary / raised'      │ 4.63  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 62      │ 'terminal' │ 'fg-accent / raised'        │ 10.42 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 63      │ 'terminal' │ 'fg-pos / raised'           │ 10.6  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 64      │ 'terminal' │ 'fg-neg / raised'           │ 5.68  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 65      │ 'terminal' │ 'fg-warn / raised'          │ 9.76  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 66      │ 'terminal' │ 'fg-info / raised'          │ 8.03  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 67      │ 'terminal' │ 'fg-primary / sunken'       │ 16.22 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 68      │ 'terminal' │ 'fg-secondary / sunken'     │ 7.65  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 69      │ 'terminal' │ 'fg-tertiary / sunken'      │ 5.11  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 70      │ 'terminal' │ 'fg-accent / sunken'        │ 11.51 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 71      │ 'terminal' │ 'fg-pos / sunken'           │ 11.71 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 72      │ 'terminal' │ 'fg-neg / sunken'           │ 6.27  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 73      │ 'terminal' │ 'fg-warn / sunken'          │ 10.78 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 74      │ 'terminal' │ 'fg-info / sunken'          │ 8.86  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 75      │ 'terminal' │ 'fg-primary / inset'        │ 15.27 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 76      │ 'terminal' │ 'fg-secondary / inset'      │ 7.2   │ 4.5  │ 'PASS'  │ 'text'         │
+│ 77      │ 'terminal' │ 'fg-tertiary / inset'       │ 4.81  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 78      │ 'terminal' │ 'fg-accent / inset'         │ 10.83 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 79      │ 'terminal' │ 'fg-pos / inset'            │ 11.02 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 80      │ 'terminal' │ 'fg-neg / inset'            │ 5.9   │ 4.5  │ 'PASS'  │ 'text'         │
+│ 81      │ 'terminal' │ 'fg-warn / inset'           │ 10.14 │ 4.5  │ 'PASS'  │ 'text'         │
+│ 82      │ 'terminal' │ 'fg-info / inset'           │ 8.34  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 83      │ 'terminal' │ 'on-accent / accent-bg'     │ 8.78  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 84      │ 'terminal' │ 'on-pos / pos-bg'           │ 7.36  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 85      │ 'terminal' │ 'on-neg / neg-bg'           │ 6.11  │ 4.5  │ 'PASS'  │ 'text'         │
+│ 86      │ 'terminal' │ 'line-default / surface'    │ 1.31  │ 1.3  │ 'PASS'  │ 'nontext-soft' │
+│ 87      │ 'terminal' │ 'line-strong / surface'     │ 1.67  │ 1.5  │ 'PASS'  │ 'nontext-soft' │
+│ 88      │ 'terminal' │ 'fg-disabled / surface'     │ 2.55  │ 2.2  │ 'PASS'  │ 'disabled'     │
+└─────────┴────────────┴─────────────────────────────┴───────┴──────┴─────────┴────────────────┘
+
+89 pairs checked · 0 FAIL
+
+==============================================================
+2. CATEGORICAL CHART PALETTE — theme 'paper', surface #FFFFFF
+==============================================================
+
+Palette (light, surface #FFFFFF, categorical): 8 slots
+  [PASS] Lightness band         all 8 inside L 0.43–0.77
+  [PASS] Chroma floor           all 8 >= 0.1
+  [PASS] CVD separation         worst adjacent #863864↔#008F95 ΔE 12.5 (deutan) · tritan 11.4
+  [PASS] Normal-vision floor    worst adjacent #008F95↔#8F5E00 ΔE 20.1 (normal)
+  [PASS] Contrast vs surface    all 8 >= 3:1
+
+  → ALL CHECKS PASS  (CVD in the 6–8 floor band is legal ONLY with secondary encoding: direct labels, gaps, or texture)
+  scope: categorical palettes only. For a lone status/text color check WCAG text contrast; for a sequential ramp, lightness monotonicity.
+
+
+==============================================================
+3. CATEGORICAL CHART PALETTE — theme 'terminal', surface #0B1017
+==============================================================
+
+Palette (dark, surface #0B1017, categorical): 8 slots
+  [PASS] Lightness band         all 8 inside L 0.48–0.67
+  [PASS] Chroma floor           all 8 >= 0.1
+  [PASS] CVD separation         worst adjacent #C55CA6↔#00B074 ΔE 9.3 (deutan) · tritan 8.1
+  [PASS] Normal-vision floor    worst adjacent #8D82F1↔#C55CA6 ΔE 15.2 (normal)
+  [PASS] Contrast vs surface    all 8 >= 3:1
+
+  → ALL CHECKS PASS  (CVD in the 6–8 floor band is legal ONLY with secondary encoding: direct labels, gaps, or texture)
+  scope: categorical palettes only. For a lone status/text color check WCAG text contrast; for a sequential ramp, lightness monotonicity.
+
+
+==============================================================
+4. TOKEN PARITY — every semantic token exists in BOTH themes
+==============================================================
+  semantic tokens in 'paper'   : 129
+  semantic tokens in 'terminal': 129
+  defined in paper only        : none
+  defined in terminal only     : none
+  RESULT: PASS — full parity
+
+==============================================================
+5. MOCKUP AUDIT — no colour literal outside tokens.css
+==============================================================
+  mock/app.css               colour literals: 0
+  mock/dashboard.html        colour literals: 0
+  mock/strategy.html         colour literals: 0
+  mock/trading.html          colour literals: 0
+  RESULT: PASS — 0 literals
+
+  The three reference screens were rendered entirely from tokens.css.
+  This is the same audit the CI rule in spec §8.6 performs on src/.

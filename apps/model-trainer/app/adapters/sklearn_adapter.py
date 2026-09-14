@@ -49,7 +49,17 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
             model = estimator_cls()
 
     emit_progress("fitting", 40.0, {"estimator": estimator_cls.__name__})
-    model.fit(p.X_tr, p.y_tr)
+    # Overlapping labels are not independent observations (SPEC 3.4). Not every
+    # scikit-learn estimator accepts weights; the ones that do not are fitted
+    # unweighted rather than silently dropping the rows, and the frame's declared
+    # weighting still describes what the platform computed.
+    if p.w_tr is not None:
+        try:
+            model.fit(p.X_tr, p.y_tr, sample_weight=p.w_tr)
+        except TypeError:
+            model.fit(p.X_tr, p.y_tr)
+    else:
+        model.fit(p.X_tr, p.y_tr)
     emit_progress("evaluating", 80.0, {"estimator": estimator_cls.__name__})
 
     def predict_scores(X):

@@ -158,7 +158,8 @@ impl TpeSampler {
 impl Sampler for TpeSampler {
     fn propose(&mut self, space: &SearchSpace, n: usize) -> Vec<Vec<f64>> {
         let d = space.n_dims();
-        let finite: Vec<&(Vec<f64>, f64)> = self.obs.iter().filter(|(_, s)| s.is_finite()).collect();
+        let finite: Vec<&(Vec<f64>, f64)> =
+            self.obs.iter().filter(|(_, s)| s.is_finite()).collect();
         if finite.len() < self.n_startup {
             return (0..n)
                 .map(|_| (0..d).map(|_| self.rng.next_f64()).collect())
@@ -173,7 +174,12 @@ impl Sampler for TpeSampler {
         let bad: Vec<&Vec<f64>> = sorted[n_good..]
             .iter()
             .map(|(x, _)| x)
-            .chain(self.obs.iter().filter(|(_, s)| !s.is_finite()).map(|(x, _)| x))
+            .chain(
+                self.obs
+                    .iter()
+                    .filter(|(_, s)| !s.is_finite())
+                    .map(|(x, _)| x),
+            )
             .collect();
         let bw_good: Vec<f64> = (0..d).map(|i| Self::bandwidth(&good, i)).collect();
         let bw_bad: Vec<f64> = (0..d).map(|i| Self::bandwidth(&bad, i)).collect();
@@ -306,6 +312,8 @@ mod tests {
         }
         let next = t.propose(&sp, 3);
         assert_eq!(next.len(), 3);
-        assert!(next.iter().all(|x| x.iter().all(|v| (0.0..=1.0).contains(v))));
+        assert!(next
+            .iter()
+            .all(|x| x.iter().all(|v| (0.0..=1.0).contains(v))));
     }
 }

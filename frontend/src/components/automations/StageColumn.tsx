@@ -23,7 +23,7 @@ export function StageColumn({ stage, isFinal }: StageColumnProps) {
       className={cn(
         'flex flex-col gap-3 shrink-0 w-44 rounded-xl border px-4 py-4',
         isFinal
-          ? 'border-green-500/30 bg-green-500/5'
+          ? 'border-line-pos bg-pos-subtle'
           : 'border-border bg-surface-2',
       )}
     >
@@ -50,11 +50,11 @@ export function StageColumn({ stage, isFinal }: StageColumnProps) {
 
       {/* Enter/exit deltas */}
       <div className="flex items-center gap-3 text-xs font-mono">
-        <span className="flex items-center gap-0.5 text-green-400">
+        <span className="flex items-center gap-0.5 text-pos">
           <ArrowUpRight className="h-3 w-3" />
           {stage.entered_count}
         </span>
-        <span className="flex items-center gap-0.5 text-red-400">
+        <span className="flex items-center gap-0.5 text-neg">
           <ArrowDownRight className="h-3 w-3" />
           {stage.exited_count}
         </span>

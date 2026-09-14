@@ -1,0 +1,201 @@
+[
+  {
+    "id": "uncited_number_in_a_claim",
+    "check": "final_report",
+    "why": "A number in prose with nothing to resolve it against is how an unchecked figure enters a report. Nobody lies here; a figure gets recomputed during the write-up, drifts, and is never reconciled with the run that produced it.",
+    "violating": {
+      "schema": "final_report.v1",
+      "session_id": "ses_1",
+      "project_id": "prj_1",
+      "answer": "No edge was found.",
+      "outcome": "inconclusive",
+      "claims": [
+        {
+          "text": "The strategy returned 3.2% out of sample.",
+          "class": "result",
+          "evidence": ["exp_abc"]
+        }
+      ]
+    },
+    "clean": {
+      "schema": "final_report.v1",
+      "session_id": "ses_1",
+      "project_id": "prj_1",
+      "answer": "No edge was found.",
+      "outcome": "inconclusive",
+      "claims": [
+        {
+          "text": "The strategy returned 3.2% out of sample.",
+          "class": "result",
+          "value": 0.032,
+          "unit": "return",
+          "evidence": ["exp_abc"]
+        }
+      ]
+    },
+    "expect": ["uncited_number_in_text"]
+  },
+  {
+    "id": "a_number_with_no_evidence_at_all",
+    "check": "final_report",
+    "why": "The sharpest form: a claim carrying a value and citing nothing. This is the assertion the whole report contract exists to refuse.",
+    "violating": {
+      "schema": "final_report.v1",
+      "session_id": "ses_1",
+      "project_id": "prj_1",
+      "answer": "An edge was found.",
+      "outcome": "inconclusive",
+      "claims": [
+        {
+          "text": "Sharpe of 1.8 after costs.",
+          "class": "result",
+          "value": 1.8,
+          "evidence": []
+        }
+      ]
+    },
+    "clean": {
+      "schema": "final_report.v1",
+      "session_id": "ses_1",
+      "project_id": "prj_1",
+      "answer": "An edge was found.",
+      "outcome": "inconclusive",
+      "claims": [
+        {
+          "text": "Sharpe of 1.8 after costs.",
+          "class": "result",
+          "value": 1.8,
+          "evidence": ["exp_9f2"]
+        }
+      ]
+    },
+    "expect": ["unsupported_value"]
+  },
+  {
+    "id": "a_significant_candidate_with_no_trial_count",
+    "check": "final_report",
+    "why": "A significance claim with no denominator (INV-3). Without the trial count nobody can tell whether one hypothesis was tested or four hundred, and the p-value means nothing either way.",
+    "violating": {
+      "schema": "final_report.v1",
+      "session_id": "ses_1",
+      "project_id": "prj_1",
+      "answer": "One candidate survived.",
+      "outcome": "answered",
+      "exploration_ledger_ref": "art_led_1",
+      "candidates": [
+        {
+          "strategy_ref": "str_1",
+          "experiment_id": "exp_1",
+          "gate_reached": "G3",
+          "dossier_ref": "art_dossier_1",
+          "trials": 0
+        }
+      ]
+    },
+    "clean": {
+      "schema": "final_report.v1",
+      "session_id": "ses_1",
+      "project_id": "prj_1",
+      "answer": "One candidate survived.",
+      "outcome": "answered",
+      "exploration_ledger_ref": "art_led_1",
+      "candidates": [
+        {
+          "strategy_ref": "str_1",
+          "experiment_id": "exp_1",
+          "gate_reached": "G3",
+          "dossier_ref": "art_dossier_1",
+          "trials": 47
+        }
+      ]
+    },
+    "expect": ["missing_trials"]
+  },
+  {
+    "id": "past_gate_3_with_no_dossier",
+    "check": "final_report",
+    "why": "The dossier is what lets a reader check a claim instead of trusting it. A candidate past the significance gate without one is asking to be believed.",
+    "violating": {
+      "schema": "final_report.v1",
+      "session_id": "ses_1",
+      "project_id": "prj_1",
+      "answer": "One candidate survived.",
+      "outcome": "answered",
+      "exploration_ledger_ref": "art_led_1",
+      "candidates": [
+        {
+          "strategy_ref": "str_1",
+          "experiment_id": "exp_1",
+          "gate_reached": "G4",
+          "trials": 47
+        }
+      ]
+    },
+    "clean": {
+      "schema": "final_report.v1",
+      "session_id": "ses_1",
+      "project_id": "prj_1",
+      "answer": "One candidate survived.",
+      "outcome": "answered",
+      "exploration_ledger_ref": "art_led_1",
+      "candidates": [
+        {
+          "strategy_ref": "str_1",
+          "experiment_id": "exp_1",
+          "gate_reached": "G4",
+          "dossier_ref": "art_dossier_1",
+          "trials": 47
+        }
+      ]
+    },
+    "expect": ["dossier_required"]
+  },
+  {
+    "id": "an_answer_with_no_exploration_ledger",
+    "check": "final_report",
+    "why": "The ledger is the report's denominator (D-13). An answered report without it hides how much searching preceded the verdict, which is the difference between a finding and the best of two hundred guesses.",
+    "violating": {
+      "schema": "final_report.v1",
+      "session_id": "ses_1",
+      "project_id": "prj_1",
+      "answer": "No exploitable structure was found.",
+      "outcome": "answered"
+    },
+    "clean": {
+      "schema": "final_report.v1",
+      "session_id": "ses_1",
+      "project_id": "prj_1",
+      "answer": "No exploitable structure was found.",
+      "outcome": "answered",
+      "exploration_ledger_ref": "art_led_1"
+    },
+    "expect": ["missing_exploration_ledger"]
+  },
+  {
+    "id": "the_honest_null_report_is_filable",
+    "check": "final_report",
+    "why": "The most important clean twin in the suite. The correct answer to a pure-noise task is a report claiming nothing, and if that report is harder to file than a discovery the validator has inverted the incentive it exists to protect. The violating side here is the same report with a number nobody can check.",
+    "violating": {
+      "schema": "final_report.v1",
+      "session_id": "ses_noise",
+      "project_id": "prj_noise",
+      "answer": "No edge. Best candidate reached a Sharpe of 0.9 but did not pass Gate 1.",
+      "outcome": "answered",
+      "exploration_ledger_ref": "art_led_noise",
+      "caveats": ["The instrument may contain structure this search did not reach."]
+    },
+    "clean": {
+      "schema": "final_report.v1",
+      "session_id": "ses_noise",
+      "project_id": "prj_noise",
+      "answer": "No edge was found. Every candidate failed at Gate 1 under the pessimistic cost model.",
+      "outcome": "answered",
+      "exploration_ledger_ref": "art_led_noise",
+      "caveats": [
+        "The instrument may contain structure this search did not reach.",
+        "Absence of evidence over this window is not evidence of absence over any other."
+      ]
+    },
+    "expect": ["uncited_number_in_answer"]
+  }
+]

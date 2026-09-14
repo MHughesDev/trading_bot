@@ -45,7 +45,7 @@ export function bracketToLines(
     lines.push({
       id: `${orderId}-tp`,
       price: tpPrice,
-      color: 'var(--tb-pnl-up, #22c55e)',
+      color: 'var(--chart-up)',
       lineStyle: 'dashed',
       label: 'TP',
     })
@@ -54,7 +54,7 @@ export function bracketToLines(
     lines.push({
       id: `${orderId}-sl`,
       price: slPrice,
-      color: 'var(--tb-pnl-down, #ef4444)',
+      color: 'var(--chart-down)',
       lineStyle: 'dashed',
       label: 'SL',
     })

@@ -13,18 +13,29 @@ use rust_decimal::Decimal;
 use super::config::RunConfig;
 use super::metrics::{MetricInputs, MetricSet};
 use super::result::{ComputeCost, RunResult, RunStatus};
+use ledger::TrialTicket;
 
 /// Translates one `RunConfig` into a `RunResult`. An erroring execution must
 /// return a `Failed` `RunResult` (never an `Err` that drops the run).
+///
+/// # Why `ticket`
+///
+/// The [`TrialTicket`] argument is how INV-16 ("no compute is dispatched without
+/// a `REGISTERED` trial row... there is no bypass at any permission level") is
+/// enforced by the compiler rather than by review. A `TrialTicket` can only be
+/// produced by [`TrialLedger::register`](crate::ledger::TrialLedger::register),
+/// which writes the ledger row before it returns — so there is no way to reach
+/// an executor without one, including from tests. The executor itself does not
+/// need the ticket's contents; it needs to be *unreachable without one*.
 pub trait RunExecutor: Send + Sync {
-    fn execute(&self, cfg: &RunConfig) -> RunResult;
+    fn execute(&self, cfg: &RunConfig, ticket: &TrialTicket) -> RunResult;
 }
 
 /// Boxed executors are executors, so an orchestrator can be generic over the
 /// synthetic and the simulator-backed implementations at runtime.
 impl RunExecutor for Box<dyn RunExecutor> {
-    fn execute(&self, cfg: &RunConfig) -> RunResult {
-        (**self).execute(cfg)
+    fn execute(&self, cfg: &RunConfig, ticket: &TrialTicket) -> RunResult {
+        (**self).execute(cfg, ticket)
     }
 }
 
@@ -38,7 +49,7 @@ impl<F> RunExecutor for ClosureExecutor<F>
 where
     F: Fn(&RunConfig) -> RunResult + Send + Sync,
 {
-    fn execute(&self, cfg: &RunConfig) -> RunResult {
+    fn execute(&self, cfg: &RunConfig, _ticket: &TrialTicket) -> RunResult {
         (self.0)(cfg)
     }
 }
@@ -235,9 +246,18 @@ mod tests {
 
     #[test]
     fn closure_executor_failing_config_yields_failed() {
-        let exec = ClosureExecutor(|cfg: &RunConfig| RunResult::failed(cfg, "boom", "engine@test"));
-        let r = exec.execute(&cfg());
-        assert_eq!(r.status, RunStatus::Failed);
+        use ledger::{DispatchContext, InMemoryLedger, Registration, TrialLedger};
+        use crate::run::trial_subject;
+        let exec = ClosureExecutor(|cfg: &RunConfig| RunResult::failed(cfg, ledger::TerminalReason::DependencyFailure, "boom", "engine@test"));
+        // Even here, the only way to obtain a ticket is to register a trial —
+        // there is no test-only constructor for one (INV-16).
+        let ledger = InMemoryLedger::new();
+        let ctx = DispatchContext::human("tenant-test", "exec", 0.1).with_experiment("exp");
+        let c = cfg();
+        let subject = trial_subject(&c);
+        let ticket = ledger.register(&Registration::new(&ctx, &subject, 1.0)).unwrap();
+        let r = exec.execute(&c, &ticket);
+        assert_eq!(r.status, RunStatus::Failed(ledger::TerminalReason::DependencyFailure));
     }
 
     #[test]

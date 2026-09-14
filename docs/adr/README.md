@@ -31,13 +31,16 @@ ADR that replaces it.
 | [ADR-0021](0021-staged-gate-funnel-and-honesty-mechanics.md) | Staged-Gate Funnel, Trial Counter & Holdout Vault | Accepted | 2026-06-17 |
 | [ADR-0022](0022-mcp-thin-client-and-internal-agent.md) | MCP Thin Client and Internal Agent | Accepted (internal-agent loop superseded in part by ADR-0024) | 2026-09-06 |
 | [ADR-0023](0023-llm-proposes-optimiser-chooses-set-j-judges.md) | The LLM Proposes Structure, an Optimiser Chooses Parameters, Set J Judges | Accepted | 2026-09-08 |
-| [ADR-0024](0024-agent-runtime-claude-agent-sdk-per-project-container.md) | Agent Runtime — Claude Agent SDK in a Per-Project Container, behind an LLM Proxy | Proposed | 2026-09-11 |
-| [ADR-0025](0025-enforcement-at-platform-services-research-cutoff-and-scopes.md) | Enforce Research Invariants at Platform Services (Cutoff, Desk, Scopes, Report Validation) | Proposed | 2026-09-11 |
-| [ADR-0026](0026-two-layer-strategy-representation.md) | Two-Layer Strategy Representation (Python Research + Strategy Language v2) | Proposed | 2026-09-11 |
-| [ADR-0027](0027-free-only-data-sources.md) | Free-Only Data Sources for Agent Research | Proposed | 2026-09-11 |
-| [ADR-0028](0028-skill-registry-and-platform-side-admission.md) | Skill Registry, Platform-Side Admission, Glossary as a Registry View | Proposed | 2026-09-11 |
-| [ADR-0029](0029-single-feature-engine-with-python-bindings.md) | One Feature Engine (Rust) with Python Bindings, Fail-Closed | Proposed | 2026-09-11 |
-| [ADR-0030](0030-durable-job-service-and-content-addressed-artifacts.md) | One Durable Job Service and a Content-Addressed Artifact Store | Proposed | 2026-09-11 |
+| [ADR-0024](0024-agent-runtime-claude-agent-sdk-per-project-container.md) | Agent Runtime — Claude Agent SDK in a Per-Project Container, behind an LLM Proxy | Accepted | 2026-09-11 |
+| [ADR-0025](0025-enforcement-at-platform-services-research-cutoff-and-scopes.md) | Enforce Research Invariants at Platform Services (Cutoff, Desk, Scopes, Report Validation) | Accepted | 2026-09-11 |
+| [ADR-0026](0026-two-layer-strategy-representation.md) | Two-Layer Strategy Representation (Python Research + Strategy Language v2) | Accepted | 2026-09-11 |
+| [ADR-0027](0027-free-only-data-sources.md) | Free-Only Data Sources for Agent Research | Accepted | 2026-09-11 |
+| [ADR-0028](0028-skill-registry-and-platform-side-admission.md) | Skill Registry, Platform-Side Admission, Glossary as a Registry View | Accepted | 2026-09-11 |
+| [ADR-0029](0029-single-feature-engine-with-python-bindings.md) | One Feature Engine (Rust) with Python Bindings, Fail-Closed | Accepted | 2026-09-11 |
+| [ADR-0030](0030-durable-job-service-and-content-addressed-artifacts.md) | One Durable Job Service and a Content-Addressed Artifact Store | Accepted | 2026-09-11 |
+| [ADR-0031](0031-harness-conformance-capability-profiles.md) | Harness Conformance — Capability Profiles, Tool Budgets and Containment | Accepted | 2026-09-11 |
+| [ADR-0032](0032-local-tier-governor-loop.md) | The Local Tier — Target Hardware, the GOVERNOR Loop, and the Fence | Accepted | 2026-09-11 |
+| [ADR-0033](0033-agent-as-a-conversation.md) | The Agent Is a Conversation, Not a Form | Accepted | 2026-09-12 |
 
 ## Decision Relationships
 
@@ -59,6 +62,8 @@ The following ADRs have explicit dependencies or cross-references:
 - **ADR-0024** (agent runtime) supersedes the internal-agent loop of **ADR-0022**; the MCP thin-client principle stands and becomes one of several thin surfaces over `/api/*`.
 - **ADR-0025** (platform-side enforcement) extends **ADR-0019/0020/0021** to a sandboxed agent: the holdout is enforced by the Data API cutoff, trials are counted at job submission (**ADR-0030**), authority by token scope.
 - **ADR-0026** (two-layer strategies) supersedes **ADR-0007** as the authoring format; v1 stays readable through a translator. It depends on **ADR-0029** (one feature engine) for its expression language.
+- **ADR-0033** (conversation) replaces the run form with a chat, removes the wall clock and iteration cap, and gives every conversation its own folder. It amends **ADR-0032**.
+- **ADR-0032** (local tier) implements the Part 3 surface **ADR-0031** deliberately left unimplemented, and supersedes **D-01** as **D-18**.
 - **ADR-0028** (skill registry) depends on **ADR-0030** (skill_verify jobs, artifacts) and **ADR-0025** (`skills.admit` never granted to agents).
 - **ADR-0027** (free-only data) scopes the sources behind the Data API of **ADR-0025**.
 
