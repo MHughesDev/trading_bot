@@ -51,17 +51,36 @@ pub struct CensusBar {
     /// `true` when `knowledge_time` was derived from a declared vendor lag rather
     /// than observed at ingest — the `BACKFILLED_KNOWLEDGE_TIME` flag.
     pub knowledge_derived: bool,
+    /// `true` when this row's `knowledge_time` is *earlier* than the instant its
+    /// source could have published it (`close + declared_vendor_lag`) **and** it
+    /// carries no `BACKFILLED_KNOWLEDGE_TIME` flag admitting it.
+    ///
+    /// That combination is not a hole, it is a fiction: everything downstream —
+    /// embargo arithmetic, PIT filtering, a dataset's `max_knowledge_lag_ms` —
+    /// reads it as an observed fact. It is the shape of the bug that put 158,259
+    /// rows into `market_bars_v2` stamped as if they had been watched live, and the
+    /// reason this is a counted alarm rather than a number on a page.
+    ///
+    /// See [`crate::bar::is_unflagged_sentinel_violation`], which is the predicate.
+    pub unflagged_sentinel: bool,
 }
 
 impl CensusBar {
     #[must_use]
     pub const fn observed(open_ns: i64) -> Self {
-        Self { open_ns, knowledge_derived: false }
+        Self { open_ns, knowledge_derived: false, unflagged_sentinel: false }
     }
 
     #[must_use]
     pub const fn derived(open_ns: i64) -> Self {
-        Self { open_ns, knowledge_derived: true }
+        Self { open_ns, knowledge_derived: true, unflagged_sentinel: false }
+    }
+
+    /// A row whose knowledge time is too early for its source and which does not
+    /// admit it. Counted as observed — which is precisely the problem.
+    #[must_use]
+    pub const fn unflagged_sentinel(open_ns: i64) -> Self {
+        Self { open_ns, knowledge_derived: false, unflagged_sentinel: true }
     }
 }
 
@@ -131,6 +150,15 @@ pub struct CoverageCensus {
     /// Bars whose `knowledge_time` was observed at ingest. Gate 15 takes forward
     /// evidence from these and only these (D-P3).
     pub observed_knowledge_bars: u64,
+    /// Bars counted above as *observed* whose knowledge time is nonetheless earlier
+    /// than their source could have published, with no flag admitting it.
+    ///
+    /// A subset of `observed_knowledge_bars`, and the one number in this struct that
+    /// is an **alarm rather than a measurement**: any value above zero means the
+    /// series' observed count is overstated by that much, and that whatever wrote
+    /// those rows is still writing them. Zero is the only acceptable reading; see
+    /// [`CoverageCensus::provenance_alarm`].
+    pub unflagged_sentinel_bars: u64,
 
     /// Whether the continuous span clears `strict_v1` Gate 9's five-year floor.
     pub strict_v1: FloorVerdict,
@@ -138,11 +166,81 @@ pub struct CoverageCensus {
     pub paper_v1: FloorVerdict,
 }
 
+/// A series whose knowledge provenance is not what it claims.
+///
+/// Returned rather than logged so a caller has to do something with it. The census
+/// job raises it; the silence alarm's siblings in P-0.6 carry it to an operator.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProvenanceAlarm {
+    pub instrument: String,
+    pub venue: String,
+    pub timeframe: String,
+    /// Rows claiming an observed knowledge time their source could not have
+    /// supported, carrying no flag.
+    pub unflagged_sentinel_bars: u64,
+    /// What the series reports as observed, including the overstatement.
+    pub observed_knowledge_bars: u64,
+}
+
+impl ProvenanceAlarm {
+    /// Observed rows that survive the alarm — the series' true stock of
+    /// Gate-15-admissible history (D-P3).
+    #[must_use]
+    pub const fn defensibly_observed_bars(&self) -> u64 {
+        self.observed_knowledge_bars.saturating_sub(self.unflagged_sentinel_bars)
+    }
+}
+
+impl std::fmt::Display for ProvenanceAlarm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}@{} {}: {} of {} rows claim an observed knowledge_time earlier than their source could \
+             have published, with no BACKFILLED_KNOWLEDGE_TIME flag. Only {} are defensibly observed \
+             and admissible as Gate 15 forward evidence (INV-01, ADR-P2-24, Set P D-P3)",
+            self.instrument,
+            self.venue,
+            self.timeframe,
+            self.unflagged_sentinel_bars,
+            self.observed_knowledge_bars,
+            self.defensibly_observed_bars(),
+        )
+    }
+}
+
 impl CoverageCensus {
     /// Longest continuous coverage in whole days — the headline number.
     #[must_use]
     pub const fn continuous_days(&self) -> i64 {
         self.longest_continuous_secs / 86_400
+    }
+
+    /// Rows this series may honestly offer Gate 15 as forward evidence: observed,
+    /// minus the observed rows that cannot defend the claim.
+    ///
+    /// On `market_bars_v2` as measured on 2026-09-15 this is zero for every series,
+    /// and that is the correct answer — the platform's entire history was stamped at
+    /// the bar close.
+    #[must_use]
+    pub const fn defensibly_observed_bars(&self) -> u64 {
+        self.observed_knowledge_bars.saturating_sub(self.unflagged_sentinel_bars)
+    }
+
+    /// `Some` when any row claims observed knowledge it cannot support.
+    ///
+    /// A census that merely *reported* the derived/observed split would have shown
+    /// 158,259 observed rows and looked healthy. The split is only meaningful next
+    /// to the count of rows whose claim does not survive inspection, so this is the
+    /// reading callers are expected to act on.
+    #[must_use]
+    pub fn provenance_alarm(&self) -> Option<ProvenanceAlarm> {
+        (self.unflagged_sentinel_bars > 0).then(|| ProvenanceAlarm {
+            instrument: self.instrument.clone(),
+            venue: self.venue.clone(),
+            timeframe: self.timeframe.clone(),
+            unflagged_sentinel_bars: self.unflagged_sentinel_bars,
+            observed_knowledge_bars: self.observed_knowledge_bars,
+        })
     }
 }
 
@@ -174,21 +272,35 @@ pub fn census(
     sorted.sort_unstable();
     let mut opens: Vec<i64> = Vec::with_capacity(sorted.len());
     let mut derived: Vec<bool> = Vec::with_capacity(sorted.len());
+    let mut unflagged: Vec<bool> = Vec::with_capacity(sorted.len());
     for b in sorted {
         if opens.last() == Some(&b.open_ns) {
             // Any derived copy taints the bar.
             if let Some(last) = derived.last_mut() {
                 *last = *last || b.knowledge_derived;
             }
+            // And any copy that claims more than it can support taints it too: a
+            // bar is no more defensible than its least defensible revision.
+            if let Some(last) = unflagged.last_mut() {
+                *last = *last || b.unflagged_sentinel;
+            }
             continue;
         }
         opens.push(b.open_ns);
         derived.push(b.knowledge_derived);
+        unflagged.push(b.unflagged_sentinel);
     }
 
     let present_bars = opens.len() as u64;
     let derived_knowledge_bars = derived.iter().filter(|d| **d).count() as u64;
     let observed_knowledge_bars = present_bars - derived_knowledge_bars;
+    // A flagged row is an honest hole and is already counted as derived, so the
+    // alarm counts only rows still presented as observed.
+    let unflagged_sentinel_bars = unflagged
+        .iter()
+        .zip(derived.iter())
+        .filter(|(u, d)| **u && !**d)
+        .count() as u64;
 
     let (first_bar_ns, last_bar_ns) = match (opens.first(), opens.last()) {
         (Some(f), Some(l)) => (Some(*f), Some(*l)),
@@ -234,6 +346,7 @@ pub fn census(
         longest_continuous_secs,
         derived_knowledge_bars,
         observed_knowledge_bars,
+        unflagged_sentinel_bars,
         strict_v1,
         paper_v1,
     }
@@ -422,6 +535,73 @@ mod tests {
         let c = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
         assert_eq!(c.longest_gap_periods, 7);
         assert_eq!(c.missing_bars, 9);
+    }
+
+    /// A series stamped exactly as `market_bars_v2` stamped every one of its rows:
+    /// nothing flagged, so the derived/observed split reports it as wholly observed
+    /// — and the alarm says the observed count is worth nothing.
+    ///
+    /// This is the difference between a census that reports a number and one that
+    /// reports a number nobody can be fooled by.
+    #[test]
+    fn a_wholly_unflagged_sentinel_series_reports_zero_defensibly_observed() {
+        let bars: Vec<CensusBar> = (0..500).map(|i| CensusBar::unflagged_sentinel(i * MIN)).collect();
+        let c = census("BTC-USD", "coinbase", "1m", 60, &bars, &crypto(), at(0));
+        assert_eq!(c.derived_knowledge_bars, 0, "nothing was flagged — that is the bug, not the fix");
+        assert_eq!(c.observed_knowledge_bars, 500, "the naive split calls all 500 observed");
+        assert_eq!(c.unflagged_sentinel_bars, 500);
+        assert_eq!(c.defensibly_observed_bars(), 0, "and none of them may reach Gate 15");
+        let alarm = c.provenance_alarm().expect("500 unsupportable claims must alarm");
+        assert_eq!(alarm.defensibly_observed_bars(), 0);
+        assert!(alarm.to_string().contains("BACKFILLED_KNOWLEDGE_TIME"));
+    }
+
+    /// The alarm is silent on an honest store: flagged holes are not violations, and
+    /// genuinely observed rows are not either.
+    #[test]
+    fn an_honest_series_raises_no_provenance_alarm() {
+        let mut bars: Vec<CensusBar> = (0..10).map(|i| CensusBar::observed(i * MIN)).collect();
+        bars.extend((10..20).map(|i| CensusBar::derived(i * MIN)));
+        let c = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
+        assert_eq!(c.unflagged_sentinel_bars, 0);
+        assert_eq!(c.defensibly_observed_bars(), 10);
+        assert!(c.provenance_alarm().is_none());
+    }
+
+    /// Adversarial: a bar collected twice, once honestly and once with an
+    /// unsupportable stamp, must not have the bad copy hidden by the good one. A bar
+    /// is no more defensible than its least defensible revision.
+    #[test]
+    fn one_unsupportable_revision_taints_the_bar() {
+        let bars = vec![
+            CensusBar::observed(0),
+            CensusBar::observed(MIN),
+            CensusBar::unflagged_sentinel(MIN),
+        ];
+        let c = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
+        assert_eq!(c.present_bars, 2);
+        assert_eq!(c.unflagged_sentinel_bars, 1);
+        assert_eq!(c.defensibly_observed_bars(), 1);
+        assert!(c.provenance_alarm().is_some());
+    }
+
+    /// A flagged row is an honest hole, already counted as derived, so it must not
+    /// also be counted as an alarm — otherwise the fix for the bug would look like
+    /// the bug.
+    #[test]
+    fn a_flagged_row_is_never_counted_twice() {
+        let bars = vec![
+            CensusBar::derived(0),
+            CensusBar { open_ns: 0, knowledge_derived: true, unflagged_sentinel: true },
+        ];
+        let c = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
+        assert_eq!(c.derived_knowledge_bars, 1);
+        assert_eq!(c.unflagged_sentinel_bars, 0);
+        assert_eq!(
+            c.derived_knowledge_bars + c.observed_knowledge_bars,
+            c.present_bars,
+            "the split still partitions the series"
+        );
     }
 
     #[test]
