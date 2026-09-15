@@ -43,6 +43,7 @@
 //! bar short and fires every `max_holding_bars` one bar late.
 
 use chrono::{DateTime, Utc};
+use domain::payloads::bar::Timeframe;
 use domain::strategy_def::exits::{
     first_triggered, ExitPolicy, ExitRule, PositionSide, PositionState,
 };
@@ -283,6 +284,128 @@ impl ExitTracker {
         if let Some(open) = self.open.as_mut() {
             open.bars_held += 1;
         }
+    }
+}
+
+/// Folds a feed of any granularity into the bars the strategy declared.
+///
+/// The backtest feed delivers one event per bar, so its bars need no
+/// assembling. The live feed does not: the hot path publishes one
+/// `WorldEvent::Bar` per trade tick, each carrying that tick's price as all
+/// four of O/H/L/C. Left alone, an [`ExitTracker`] driven from it would count
+/// trades where the strategy declared minutes.
+///
+/// This is where the two feeds become the same sequence of bars, so that
+/// `max_holding_bars` means the same thing in both (SC-3, ADR-P6-14). It is
+/// deliberately part of the shared module rather than the live caller's: a
+/// second place that decides where a bar ends is a second place the two paths
+/// can disagree.
+#[derive(Clone, Debug)]
+pub struct BarAggregator {
+    bucket_secs: i64,
+    open: Option<Running>,
+}
+
+#[derive(Clone, Debug)]
+struct Running {
+    bucket: i64,
+    ts: DateTime<Utc>,
+    high: Decimal,
+    low: Decimal,
+    close: Decimal,
+}
+
+/// One folded observation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Observed {
+    /// The declared bar as it stands *now*: the extremes reached inside it so
+    /// far, and the latest price as its close.
+    pub bar: Bar,
+    /// Whether this observation opened a new declared bar, meaning the
+    /// previous one is complete. The caller advances the holding count here
+    /// and nowhere else.
+    pub opened_new_bar: bool,
+}
+
+impl BarAggregator {
+    /// An aggregator for `timeframe`.
+    #[must_use]
+    pub fn new(timeframe: Timeframe) -> Self {
+        Self {
+            bucket_secs: bar_seconds(timeframe),
+            open: None,
+        }
+    }
+
+    /// Whether a bar is currently in progress.
+    #[must_use]
+    pub const fn is_open(&self) -> bool {
+        self.open.is_some()
+    }
+
+    /// Fold one event into the bar in progress, or start a new one.
+    ///
+    /// Bucketing is by `ts` floored to the timeframe, which is correct whether
+    /// the feed stamps a bar with its open or its close: both are stable
+    /// within a bar and at least one bar apart between bars.
+    pub fn observe(
+        &mut self,
+        ts: DateTime<Utc>,
+        high: Decimal,
+        low: Decimal,
+        close: Decimal,
+    ) -> Observed {
+        let bucket = ts.timestamp().div_euclid(self.bucket_secs);
+        let opened_new_bar = match self.open.as_mut() {
+            Some(run) if run.bucket == bucket => {
+                run.ts = ts;
+                run.high = run.high.max(high);
+                run.low = run.low.min(low);
+                run.close = close;
+                false
+            }
+            _ => {
+                self.open = Some(Running { bucket, ts, high, low, close });
+                // The very first bar of a position opens no *previous* bar, and
+                // `ExitTracker::bar_closed` is a no-op while flat in any case.
+                true
+            }
+        };
+        let run = self.open.as_ref().expect("just set");
+        Observed {
+            bar: Bar { ts: run.ts, high: run.high, low: run.low, close: run.close },
+            opened_new_bar,
+        }
+    }
+
+    /// Restart the bar in progress from `price`, discarding the extremes it
+    /// reached before now, without opening a new declared bar.
+    ///
+    /// Called when a position opens part-way through a bar. The prices that
+    /// bar traded at before the fill are prices the position was never exposed
+    /// to, and letting them stop it out is the defect ADR-P6-11 named: it
+    /// would hand every strategy a stop measured against a market it was not
+    /// in. The bar itself is unchanged — this is the position's clock, not the
+    /// market's.
+    pub fn restart_at(&mut self, price: Decimal) {
+        if let Some(run) = self.open.as_mut() {
+            run.high = price;
+            run.low = price;
+            run.close = price;
+        }
+    }
+}
+
+/// Seconds in one bar of `timeframe`.
+const fn bar_seconds(timeframe: Timeframe) -> i64 {
+    match timeframe {
+        Timeframe::Seconds1 => 1,
+        Timeframe::Minutes1 => 60,
+        Timeframe::Minutes5 => 300,
+        Timeframe::Minutes15 => 900,
+        Timeframe::Hours1 => 3_600,
+        Timeframe::Hours4 => 14_400,
+        Timeframe::Daily => 86_400,
     }
 }
 
@@ -655,6 +778,75 @@ mod tests {
             .unwrap();
         assert_eq!(fired.rule, "stop_loss");
         assert_eq!(fired.price, dec!(98));
+    }
+
+    // ── the aggregator: one bar sequence from either feed ────────────────────
+
+    /// Sixty ticks inside a minute are one minute.
+    #[test]
+    fn ticks_inside_one_minute_are_one_declared_bar() {
+        let mut agg = BarAggregator::new(Timeframe::Minutes1);
+        // Minute-aligned on purpose: this test is about what happens *inside*
+        // one bar, and the boundary is what the next assertion measures.
+        let base = DateTime::from_timestamp(1_699_999_980, 0).unwrap();
+        let mut opened = 0;
+        for s in 0..60 {
+            let o = agg.observe(base + chrono::Duration::seconds(s), dec!(100), dec!(100), dec!(100));
+            if o.opened_new_bar {
+                opened += 1;
+            }
+        }
+        assert_eq!(opened, 1, "one minute is one bar, not sixty");
+
+        let o = agg.observe(base + chrono::Duration::seconds(60), dec!(100), dec!(100), dec!(100));
+        assert!(o.opened_new_bar, "the next minute is the next bar");
+    }
+
+    /// The running bar carries the extremes the position was exposed to, not
+    /// only the latest tick. A stop must see the low the minute traded to.
+    #[test]
+    fn the_running_bar_keeps_the_extremes_reached_inside_it() {
+        let mut agg = BarAggregator::new(Timeframe::Minutes1);
+        let base = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        agg.observe(base, dec!(100), dec!(100), dec!(100));
+        agg.observe(base + chrono::Duration::seconds(10), dec!(95), dec!(95), dec!(95));
+        let o = agg.observe(base + chrono::Duration::seconds(20), dec!(103), dec!(103), dec!(103));
+        assert_eq!(o.bar.high, dec!(103));
+        assert_eq!(o.bar.low, dec!(95));
+        assert_eq!(o.bar.close, dec!(103));
+    }
+
+    /// A one-event-per-bar feed produces exactly one declared bar per event,
+    /// whether the stamp is the bar's open or its close.
+    #[test]
+    fn a_bar_per_event_feed_opens_one_declared_bar_per_event() {
+        for offset in [0, 60] {
+            let mut agg = BarAggregator::new(Timeframe::Minutes1);
+            let base = DateTime::from_timestamp(1_700_000_000 + offset, 0).unwrap();
+            for n in 0..5 {
+                let o = agg.observe(
+                    base + chrono::Duration::seconds(60 * n),
+                    dec!(101),
+                    dec!(99),
+                    dec!(100),
+                );
+                assert!(o.opened_new_bar, "event {n} at offset {offset}");
+            }
+        }
+    }
+
+    /// The prices a bar traded at before the position existed must not be able
+    /// to stop it out.
+    #[test]
+    fn restarting_discards_the_extremes_from_before_the_fill() {
+        let mut agg = BarAggregator::new(Timeframe::Minutes1);
+        let base = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        agg.observe(base, dec!(90), dec!(90), dec!(90));
+        agg.restart_at(dec!(100));
+        let o = agg.observe(base + chrono::Duration::seconds(5), dec!(101), dec!(101), dec!(101));
+        assert!(!o.opened_new_bar, "still the same minute");
+        assert_eq!(o.bar.low, dec!(100), "the 90 happened before the position");
+        assert_eq!(o.bar.high, dec!(101));
     }
 
     /// A bar that elapses while flat is not a bar held. Otherwise a position
