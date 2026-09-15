@@ -1,11 +1,15 @@
 //! The single risk gate — every order passes through here with no bypass.
 
+pub mod context;
 pub mod gate;
 pub mod kill_switch;
 pub mod limits;
 pub mod overrides;
+pub mod rate;
 pub mod trust_gate;
 
-pub use gate::{ApprovedOrder, GateContext, RiskGate};
+pub use context::RiskContextProvider;
+pub use gate::{ApprovedOrder, GateContext, InstrumentLimits, Measured, RateSource, RiskGate};
 pub use kill_switch::KillSwitch;
 pub use limits::GlobalRiskLimits;
+pub use rate::{RateCounts, RateKey, RateTracker};

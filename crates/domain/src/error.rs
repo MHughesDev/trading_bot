@@ -114,4 +114,33 @@ pub enum RiskRejection {
 
     #[error("order rejected: {instrument_id} is halted")]
     InstrumentHalted { instrument_id: String },
+
+    // ── Fail-closed rejections: an input the gate needs was not measurable ────
+    //
+    // These exist because the alternative — substituting a permissive default
+    // for an input we do not have — makes a limit that cannot fire report a
+    // pass.  A limit that cannot fire must refuse, never default (SC-2, FM-2).
+    /// No usable mark for the instrument, so exposure and price sanity cannot
+    /// be judged.  Emitted instead of silently skipping those checks.
+    #[error("order rejected: no current mark for {instrument_id} — risk context incomplete")]
+    MarketDataUnavailable { instrument_id: String },
+
+    /// Instrument metadata (tick size, lot size, session, halt policy) is not
+    /// known, so lot/tick validity cannot be judged.
+    #[error(
+        "order rejected: no instrument metadata for {instrument_id} — lot/tick validity unknown"
+    )]
+    InstrumentMetadataUnavailable { instrument_id: String },
+
+    /// Account state (equity, realized loss today) could not be read, so the
+    /// daily-loss limit cannot fire.
+    #[error("order rejected: account state unavailable ({detail}) — daily-loss limit cannot be evaluated")]
+    AccountStateUnavailable { detail: String },
+
+    /// The gate itself is not in a state where it can answer — a poisoned
+    /// lock, or no risk-context provider installed in this process.  The gate
+    /// is the one component that must always be able to say no; when it cannot
+    /// reason, the answer is no.
+    #[error("order rejected: risk gate unavailable ({detail})")]
+    GateUnavailable { detail: String },
 }
