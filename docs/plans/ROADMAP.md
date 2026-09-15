@@ -396,7 +396,7 @@ Everything else is delegated. These are not.
 
 | Gate | Question | Blocks | Status |
 |---|---|---|---|
-| **H-1** | The dirty working tree — **and it is now one precise ask, not a 50-file audit.** Track 1's triage: `Cargo.toml`'s entire diff is **two workspace-member lines**, for `crates/webfetch` and `crates/skills`, and **the 13 untracked catalogue tools cannot compile without them**. Commit those two lines and the untracked tool files, and the blockage clears. Separately: **escalated 2026-09-15 from a convenience to a blocker.** It is not just "which files are yours" — `ExitTracker`, `FeeBook` and the falsification ledger are **uncommitted in your checkout**, so every agent worktree cut from `62e0165` lacks the very code its task depends on. Tracks are working around it by mirroring your uncommitted tree into their own branches, which means the same "user's work" commit is being duplicated across branches and will have to be deduplicated at integration | **every track, actively, now** | **open — the highest-value thing you can do** |
+| ~~H-1~~ | The dirty working tree | — | **CLOSED 2026-09-15, commit `37faade`.** 161 files, +27,518. The two `Cargo.toml` workspace-member lines, the 13 untracked catalogue tools, `ExitTracker`, `FeeBook`, the falsification ledger, `webfetch`, `skills`, migrations 0058–0060, `.gitattributes` — and the plan corpus itself (`ROADMAP`, `EXECUTION-BOARD`, plan-sets P/S/T, AGENT-005…014, ADR-0034–0037), which was also untracked. **Every worktree can now rebase onto a baseline that contains what its task depends on**, and the mirrored "user's work" commits on ~25 branches should be dropped rather than deduplicated at integration |
 | **H-2** | A model provider credential in the encrypted store | the **only two** acceptance criteria in all of Set S an agent cannot close (AGENT-005 §10.2's cache-hit measurement, AGENT-009's `decode` suite); every live agent session | **open — track 22 is building everything either side of it** |
 | **H-3** | Monthly research budget ceiling (the platform default is $25/day per continuous session) | continuous research at scale | default set, revisit at Stage 2 |
 | **H-7** | **Alpaca paper credentials.** Track 5 built the whole forward-evidence pipeline and cannot start it: T-0.4 is blocked on a paper fill (track 16) **and** on credentials in `.env`, which an agent must not enter. This is the second of the two locks on the Gate 15 clock | **DONE-3, the only calendar-bound condition** | **open — minutes of your time** |
@@ -404,8 +404,8 @@ Everything else is delegated. These are not.
 | ~~H-5~~ | Whether Set C and Set F are retired or re-derived | — | **closed 2026-09-15 without needing you.** The audit answered both from evidence: Set F is 9/11 shipped with 2 deliberately reversed; Set C is 54/68 shipped with 2 open items worth doing |
 | **H-6** | Whether equities/futures onboarding is coming, which turns several vacuous invariants live (INV-03, INV-07, INV-08, corporate actions) | Set P scope beyond crypto | open |
 
-**H-1 and H-2 are the only two that block work starting this week.** Both are minutes of
-human action, not engineering.
+**H-2 and H-7 are now the only gates blocking work.** Both are a credential in a file —
+minutes of human action, not engineering. H-1 is closed.
 
 ---
 
@@ -470,8 +470,9 @@ Distinct from per-set risks, which live in each MASTER.
 
 In order, starting now:
 
-1. **Answer H-1** (the dirty tree) and **H-2** (the credential). Nothing else is blocked on
-   anything you have to decide.
+1. ~~Answer H-1~~ **— done, `37faade`.** Answer **H-2** (a model-provider credential) and
+   **H-7** (Alpaca paper credentials). Those two are all that is left that you have to
+   decide, and H-7 is the only one on a calendar.
 2. **Run Set P Phase 0** — measure coverage, publish it, switch on the forward collectors.
    Days, not weeks. This is the irreversible one.
 3. **Run Set T Phase 0** — wire reconciliation, deploy one hand-authored strategy to paper.
@@ -486,6 +487,7 @@ In order, starting now:
 
 | Date | Note |
 |---|---|
+| 2026-09-15 | **H-1 closed — `37faade`, 161 files, +27,518.** The gate this roadmap called "the highest-value thing you can do" is shut. What made it urgent was not the code: it was that **the plans themselves were untracked too**, so twenty-five worktrees cut from `62e0165` lacked both the mechanisms their tasks depend on and the documents describing the tasks. Every track is now unblocked by a rebase. The mirrored "user's work" commits some tracks made should be **dropped, not deduplicated** — the real commit supersedes them. Two things found while closing it: a **stale `ledger` rlib** made `cargo build -p api` fail with four unresolved-import errors against modules that were declared and present (touch `crates/ledger/src/lib.rs` if it recurs — it is not a real breakage), and **`docs/specs/README.MD` and `README.md` are both indexed** while Windows can hold only one on disk, so that path shows permanently dirty in every worktree. The content is safe under `README.md`; the `.MD` entry is stale. Left alone under §2.6 rather than chased mid-programme, because removing an index entry touches a shared file across twenty-six branches. |
 | 2026-09-15 | **G-2 closed, and it was wrong in the same direction as G-1.** I had recorded the skills lifecycle as having no build spec; AGENT-003 already assigns R-a and R-b work by section with a requirements map and plan-set-labelled acceptance. What it needed was an amendment, not a rewrite. **Every one of the eight upstream gaps has now been examined and three of them — G-1, G-2, G-6 — turned out to be pessimistic records of things that already existed.** That is a pattern worth stating: an unverified claim in these plans skews toward "not built" as readily as toward "built", and both directions cost. |
 | 2026-09-15 | **Track 1 landed and Stage 1 is genuinely open.** The three contracts five phases waited on exist. H-1 is now a precise ask rather than an audit: `Cargo.toml`'s whole diff is two workspace-member lines, and the 13 untracked catalogue tools cannot compile without them. Its most instructive find is one to remember when reading any green suite here: **`static_invariants.rs:632` asserted the defect** — it checked an action string no tool answers to, so it certified promotion as gated for precisely as long as promotion was ungated. A test can be the thing hiding the hole. |
 | 2026-09-15 | **Track 5 landed.** The forward-evidence pipeline exists end to end and has never seen a fill. Gate 15 now leads its verdict with "n observations over d days", the observed-knowledge filter lives in exactly one function, and a planted backfilled row inside the window does not enter the count. The divergence halt sits **ahead of the idempotency cache**, so a redelivered intent approved before a divergence cannot ride the cached-approval fast path. `Numeraire` is a closed enum with **no conversion API** — only `assert_comparable`, which refuses — so USDT cannot be summed as USD by any route. Two honest omissions reported rather than glossed: T-0.3's UI surface was left unbuilt rather than half-built, and the SQL writers are untested because there are no fills to write. **New human gate H-7: Alpaca paper credentials.** Also: it corrected a build instruction I had given every agent — see the board. |

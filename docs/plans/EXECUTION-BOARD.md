@@ -50,6 +50,9 @@ Eighteen tracks dispatched (two landed), 2026-09-15. Each is one agent, one bran
 | **25** | Set S Phase 6 — the Research Desk (Chat/Research + Continuous toggle) | [set-S/phase-6](plan-sets/set-S/phase-6-research-desk.md) | `claude/set-s-phase-6-desk` | 0125 if needed | **DONE-1 — a question typed into the desk** |
 | **26** | Set S Phase 1 remainder — the context budget (S-1.2, 1.5–1.9, 1.11, 1.12) | [set-S/phase-1](plan-sets/set-S/phase-1-contracts.md); AGENT-005 Part I | `claude/set-s-phase-1-context-budget` | 0126 if needed | **Phase 9** — Part II may only ship by beating Part I |
 
+**H-1 closed 2026-09-15 (`37faade`) — every paused and running track should rebase onto
+`main` before doing anything else. See §2.5a.**
+
 **State as of the 2026-09-15 rate-limit incident.** Two tracks landed (6, 11). Five are
 **resumed and running**: 16, 3, 1, 15, 5. Eleven are **paused with their worktrees intact** and
 are resumed with `SendMessage`, never re-dispatched — re-dispatching discards their work:
@@ -225,20 +228,29 @@ any of this work:
 
 **Do not fix any of these into your PR.** Do check that you have not added to them.
 
-### 2.5a The worktree baseline does not contain the work you depend on
+### 2.5a The worktree baseline — **resolved 2026-09-15**
 
-Every agent worktree is cut from `62e0165`. **`ExitTracker`, `FeeBook` and the falsification
-ledger are uncommitted in the user's shared checkout**, so a track whose task depends on them
-starts from a tree that does not have them. This is roadmap gate **H-1** biting in practice
-rather than in theory.
+**Rebase onto `main`.** H-1 is closed at commit `37faade` (161 files, +27,518), and the
+baseline every worktree was cut from is no longer the right one.
 
-Until the user commits: mirror the shared checkout into your branch as **one commit clearly
-labelled as the user's work**, never mixed with your own, and **state in your report exactly
-what you mirrored** so integration can deduplicate. Never mirror `Cargo.lock`, `Cargo.toml`,
-`apps/platform/src/main.rs` or `crates/config/*`.
+`main` now contains `ExitTracker`, `FeeBook`, the falsification ledger, `webfetch`,
+`skills`, the evidence tools, migrations 0058–0060, `.gitattributes`, the two `Cargo.toml`
+workspace-member lines, the 13 catalogue tool files — **and this board, the roadmap and
+every plan-set file**, which were untracked as well.
 
-`.gitattributes` may also be absent from the baseline. It pins `migrations/*.sql` to LF and its
-absence is a recorded startup blocker. Recreate it if it is missing.
+**If you mirrored the user's tree into your branch, drop that commit rather than keeping
+it.** The real commit supersedes it, and two copies of the same 27,000 lines will conflict
+with each other at integration in a way that is much harder to read than a clean rebase.
+Say in your report that you dropped it, so integration knows not to look for it.
+
+Two warts to expect, neither of them yours to fix:
+
+- **A stale `ledger` rlib** can make `cargo build -p api` fail with unresolved imports for
+  modules that are declared and present. `touch crates/ledger/src/lib.rs` and rebuild. It is
+  not a real breakage and it cost fifteen minutes to diagnose once already.
+- **`docs/specs/README.MD` shows permanently dirty.** Both case variants are indexed and
+  Windows holds one file. The content is committed under `README.md`; the `.MD` entry is
+  stale. Do not `git add` it and do not try to remove it — §2.6 applies.
 
 ---
 
@@ -441,6 +453,7 @@ pass — fix the file, or if the check itself is wrong, say so in your report.
 
 | Date | Change |
 |---|---|
+| 2026-09-15 | **H-1 closed, `37faade`.** The baseline moved. Every track rebases onto `main`; anyone who mirrored the user's tree drops that commit rather than keeping it. §2.5a rewritten from a workaround into an instruction. The plan corpus was untracked too — tracks had neither the code nor the plans in their baseline. |
 | 2026-09-15 | **Found an unclaimed block on the critical path.** Track 1 completed 5 of Phase 1's 20 tasks and its handoff named what came next, but nothing owned it: fourteen tasks, including the whole context-budget and reasoning-protocol halves. Track 26 dispatched for the first; S-1.14–S-1.20 recorded in §7 as the next dispatch. The lesson for the queue: **a landed track's partials are not automatically someone's work** — a phase is only finished when its file says so, and §7 now carries the residue explicitly rather than trusting that a successor picks it up. |
 | 2026-09-15 | Tracks 10 and 12 resumed — both sit directly on unmet completion conditions. Track 10 closes **DONE-5** (the external MCP door is the last INV-16 exemption; the human and agent doors are already shut). Track 12 plus track 14 take the gate funnel from eleven judging on real numbers to sixteen, which is **Stage 2's exit**. Thirteen live. |
 | 2026-09-15 | Track 1 fully verified: **all six suites cold-green in a private target dir** (27, 208, 30, 24, 116, 27), retracting its own earlier caveat so nothing rests on a shared-cache result. Its refined disk measurement — 4.5 GB with full graphs, 217.8 GB free — is now in §2.3 in place of the 2.4 GB figure. Track 25 (Phase 6, the desk) dispatched, completing the Set S fan-out. |
