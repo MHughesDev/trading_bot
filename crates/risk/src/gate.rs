@@ -347,6 +347,19 @@ impl RiskGate {
         Ok(lock_or_refuse(&self.rate, "rate")?.counts(key))
     }
 
+    /// Poison the gate's own state, to prove the refusal is real.
+    ///
+    /// A poisoned `Mutex` is what a panic inside the gate leaves behind.  There
+    /// is no way to produce one from outside the module, so the adversarial
+    /// test that the gate *fails closed* rather than panicking needs this.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn poison_for_test(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = self.seen_keys.lock().expect("seen_keys lock");
+            panic!("deliberately poisoning the gate's decision cache");
+        }));
+    }
+
     fn run_checks(
         &self,
         intent: &OrderIntent,
@@ -618,6 +631,26 @@ mod tests {
             );
         }
         assert_eq!(gate.rate_counts(&key).unwrap().last_second, 1);
+    }
+
+    #[test]
+    fn a_poisoned_gate_refuses_instead_of_panicking() {
+        // The gate is the one component that must always be able to say no.
+        // Before this, both `check` call sites did `.expect("seen_keys lock")`,
+        // so any earlier panic while holding that lock turned every subsequent
+        // order approval into a panic — taking down the chokepoint itself.
+        let gate = gate();
+        gate.poison_for_test();
+
+        let err = gate.check(simple_intent("BTC-USD"), &simple_ctx()).unwrap_err();
+        assert!(
+            matches!(err, RiskRejection::GateUnavailable { .. }),
+            "a poisoned gate must refuse, not panic and not approve: {err}"
+        );
+
+        // And it stays refused — a poisoned lock does not heal.
+        let err2 = gate.check(simple_intent("BTC-USD"), &simple_ctx()).unwrap_err();
+        assert!(matches!(err2, RiskRejection::GateUnavailable { .. }));
     }
 
     #[test]

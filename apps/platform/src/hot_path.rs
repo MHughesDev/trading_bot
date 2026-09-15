@@ -1097,6 +1097,61 @@ mod tests {
         );
     }
 
+    /// A venue rejection is recorded **as a rejection**, and reusing its key is
+    /// refused with the reason.
+    ///
+    /// If a refused order were left at `accepted` it would be indistinguishable
+    /// from an order whose ack went missing — and those need opposite responses
+    /// (one is safe to retry with a new key, the other must be reconciled
+    /// before anything is retried at all; COMP-002 §3.4 and §3.6).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_venue_rejection_is_recorded_and_the_key_is_not_reusable() {
+        let instrument = "BROKE-BTC-USD";
+        ready_instrument(instrument, "50000");
+
+        // Far beyond the paper account's cash.  The gate is bypassed on purpose:
+        // this exercises the execution engine's handling of a venue refusal, not
+        // the gate's position limit (which would catch this first in production,
+        // and does — see `the_rate_limit_fires_when_breached` for the gate path).
+        let intent = OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("100000").unwrap(),
+            None,
+            None,
+        );
+        let key = intent.idempotency_key;
+        let err = engine()
+            .submit(risk::ApprovedOrder::new_for_test(intent.clone()))
+            .await
+            .expect_err("the venue must refuse an order it cannot fund");
+        assert!(
+            err.to_string().contains("broker"),
+            "expected a broker refusal, got {err}"
+        );
+
+        let recorded = journal_order(key).await.expect("the attempt is recorded");
+        assert_eq!(
+            recorded.state,
+            OrderState::Rejected,
+            "a refused order must not be left looking like a missing ack"
+        );
+
+        let again = engine()
+            .submit(risk::ApprovedOrder::new_for_test(intent))
+            .await
+            .expect_err("the key is spent");
+        assert!(
+            again.to_string().contains("new idempotency key"),
+            "the refusal must say how to retry, got {again}"
+        );
+        assert!(
+            journal_fills(key).await.is_empty(),
+            "a rejected order has no fills"
+        );
+    }
+
     // ── The fill stream track 5 consumes ─────────────────────────────────────
 
     /// A registered [`execution::fills::FillObserver`] receives every genuinely

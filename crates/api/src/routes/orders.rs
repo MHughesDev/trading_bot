@@ -32,6 +32,37 @@ pub struct PlaceOrderRequest {
     pub execution_mode: Option<String>,
 }
 
+
+/// Parse the inbound `side` string.
+///
+/// Exactly two spellings are accepted.  The sibling of this function inside
+/// `execution` used to read `if s == "buy" { Buy } else { Sell }`, so anything
+/// unexpected became a **sell** — a position-reducing or short-opening order
+/// built from an input the platform could not read.  There is no safe default
+/// for a direction: a wrong side is not a smaller trade, it is the opposite
+/// trade.
+#[must_use]
+pub fn parse_side(s: &str) -> Option<Side> {
+    match s {
+        "buy" => Some(Side::Buy),
+        "sell" => Some(Side::Sell),
+        _ => None,
+    }
+}
+
+/// Parse the inbound `order_type` string.  No default: a market order fills
+/// immediately at whatever the book offers, which is the last thing an
+/// unreadable input should become.
+#[must_use]
+pub fn parse_order_type(s: &str) -> Option<OrderType> {
+    match s {
+        "market" => Some(OrderType::Market),
+        "limit" => Some(OrderType::Limit),
+        "stop_limit" => Some(OrderType::StopLimit),
+        _ => None,
+    }
+}
+
 /// POST /api/orders — submit a manual order through the risk gate.
 pub async fn place_order(
     _token: BearerToken,
@@ -51,31 +82,29 @@ pub async fn place_order(
             .into_response();
     }
 
-    // Parse side.
-    let side = match req.side.as_str() {
-        "buy" => Side::Buy,
-        "sell" => Side::Sell,
-        _ => {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(json!({ "error": "side must be 'buy' or 'sell'" })),
-            )
-                .into_response();
-        }
+    // Parse side.  An unrecognised side is a refusal, never a default.
+    let Some(side) = parse_side(&req.side) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "side must be 'buy' or 'sell'",
+                "received": req.side,
+            })),
+        )
+            .into_response();
     };
 
-    // Parse order type.
-    let order_type = match req.order_type.as_str() {
-        "market" => OrderType::Market,
-        "limit" => OrderType::Limit,
-        "stop_limit" => OrderType::StopLimit,
-        _ => {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(json!({ "error": "order_type must be 'market', 'limit', or 'stop_limit'" })),
-            )
-                .into_response();
-        }
+    // Parse order type.  An unrecognised type must never fall through to
+    // `market`, the one type that executes immediately at any price.
+    let Some(order_type) = parse_order_type(&req.order_type) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "order_type must be 'market', 'limit', or 'stop_limit'",
+                "received": req.order_type,
+            })),
+        )
+            .into_response();
     };
 
     // Parse size.
@@ -323,5 +352,66 @@ fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
             StatusCode::SERVICE_UNAVAILABLE,
             "the risk gate cannot evaluate orders right now",
         ),
+    }
+}
+\n
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unparseable_side_produces_no_order() {
+        // Every one of these used to become a SELL in `execution::side_from_str`.
+        for bad in [
+            "", " ", "BUY", "Buy", "b", "sel", "sell ", "long", "short", "0", "null",
+        ] {
+            assert!(
+                parse_side(bad).is_none(),
+                "side '{bad}' must be refused, not read as a sell"
+            );
+        }
+        assert_eq!(parse_side("buy"), Some(Side::Buy));
+        assert_eq!(parse_side("sell"), Some(Side::Sell));
+    }
+
+    #[test]
+    fn an_unparseable_order_type_produces_no_order() {
+        for bad in ["", "MARKET", "mkt", "stop", "stoplimit", "trailing"] {
+            assert!(
+                parse_order_type(bad).is_none(),
+                "order_type '{bad}' must be refused, not read as a market order"
+            );
+        }
+        assert_eq!(parse_order_type("market"), Some(OrderType::Market));
+        assert_eq!(parse_order_type("limit"), Some(OrderType::Limit));
+        assert_eq!(parse_order_type("stop_limit"), Some(OrderType::StopLimit));
+    }
+
+    /// Every fail-closed refusal maps to a status that says "not evaluated",
+    /// never to a success and never to a client error blaming the order.
+    #[test]
+    fn unmeasurable_inputs_map_to_service_unavailable() {
+        for r in [
+            RiskRejection::MarketDataUnavailable {
+                instrument_id: "BTC-USD".into(),
+            },
+            RiskRejection::InstrumentMetadataUnavailable {
+                instrument_id: "BTC-USD".into(),
+            },
+            RiskRejection::AccountStateUnavailable {
+                detail: "x".into(),
+            },
+            RiskRejection::GateUnavailable {
+                detail: "x".into(),
+            },
+        ] {
+            let (status, _) = risk_rejection_response(&r);
+            assert_eq!(
+                status,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{r} must read as 'the gate could not evaluate this'"
+            );
+        }
     }
 }

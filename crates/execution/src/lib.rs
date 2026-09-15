@@ -135,14 +135,26 @@ impl ExecutionEngine {
                     fill,
                 });
             }
-            // Recorded but never acked: an ack desync.  COMP-002 §3.6 —
-            // query, never blindly retry.  We have no broker id to query
-            // with, so the safe answer is to refuse and let reconciliation
-            // resolve it rather than risk a double-fill.
-            return Err(ExecutionError::Database(format!(
-                "order {idempotency_key} was recorded but has no broker ack — \
-                 refusing to resubmit blindly (COMP-002 §3.6 ack desync)"
-            )));
+            // Recorded, but no broker id.  Two different situations, and
+            // conflating them would either hide a rejection or invite a
+            // double-fill.
+            return Err(match recorded.state {
+                // The venue refused it.  COMP-002 §3.4: a failed order is
+                // retry-eligible **with a new idempotency key** — reusing the
+                // key would collide with this row for ever.
+                OrderState::Rejected => ExecutionError::Database(format!(
+                    "order {idempotency_key} was rejected by the venue; \
+                     retry with a new idempotency key (COMP-002 §3.4)"
+                )),
+                // Recorded and never acked: an ack desync.  COMP-002 §3.6 —
+                // query, never blindly retry.  There is no broker id to query
+                // with, so the safe answer is to refuse and let reconciliation
+                // resolve it rather than risk a double-fill.
+                _ => ExecutionError::Database(format!(
+                    "order {idempotency_key} was recorded but has no broker ack — \
+                     refusing to resubmit blindly (COMP-002 §3.6 ack desync)"
+                )),
+            });
         }
 
         // 2. Record before submitting.
@@ -151,8 +163,22 @@ impl ExecutionEngine {
             .await
             .map_err(|e| ExecutionError::Database(e.to_string()))?;
 
-        // 3. Submit.
-        let broker_order_id = self.broker.submit(&order).await?;
+        // 3. Submit.  A venue refusal is recorded as a refusal: leaving the row
+        //    at `accepted` would make a rejected order indistinguishable from
+        //    an order whose ack went missing, and those need opposite responses.
+        let broker_order_id = match self.broker.submit(&order).await {
+            Ok(id) => id,
+            Err(e) => {
+                if let Err(je) = journal.set_state(idempotency_key, OrderState::Rejected).await {
+                    tracing::error!(
+                        %idempotency_key, error = %je,
+                        "could not record a venue rejection — the order row is left at 'accepted' \
+                         and will read as an ack desync"
+                    );
+                }
+                return Err(e.into());
+            }
+        };
         journal
             .set_broker_order(idempotency_key, &broker_order_id, OrderState::Submitted)
             .await
