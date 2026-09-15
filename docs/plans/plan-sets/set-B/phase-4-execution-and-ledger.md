@@ -7,9 +7,9 @@ Derived From: C-017, C-056, C-058, C-059, C-068, C-073, C-086, C-087, C-088, C-0
 
 # Phase 4 — Execution & Ledger
 
-> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../architecture.md),
+> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../../architecture.md),
 > the specs (especially
-> [`../../specs/COMP-002-execution-and-risk-gate.md`](../../specs/COMP-002-execution-and-risk-gate.md)),
+> [`../../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)),
 > and the existing codebase. Phase 1 built the paper-simulator trait + skeletons, ledger tables +
 > writer skeleton, `AccountSource` trait, and P&L lot schema — this phase completes them. Phase 2
 > built the venue collectors + health checks. Read `crates/execution` (broker trait, order_state,

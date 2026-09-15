@@ -7,15 +7,15 @@ Note: Canonical executable plans live in docs/plans/. This copy is the traceable
 
 # Phase B — Bootstrap (workspace, infra, CI, Python quarantine)
 
-> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../architecture.md),
-> and the specs in [`../specs/`](../specs/). This phase produces no business logic — it produces the
+> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../../../architecture.md),
+> and the specs in [`../specs/`](../../../specs/). This phase produces no business logic — it produces the
 > empty, correct skeleton that every later phase fills in, plus the local infra and CI that keep the
 > work honest.
 
 ## Phase goal
 
 After this phase, the repository root is a compiling Cargo **workspace** matching the top-level
-layout in [`../architecture.md`](../architecture.md): every crate and app exists as an empty-but-
+layout in [`../architecture.md`](../../../architecture.md): every crate and app exists as an empty-but-
 compiling stub, local infrastructure (NATS JetStream, Postgres, ClickHouse, Redis) starts with one
 command, CI runs fmt+clippy+test on every push, and the entire old Python tree is moved to
 `legacy_python/` so it remains a behavior reference without polluting the new structure.
@@ -67,7 +67,7 @@ command, CI runs fmt+clippy+test on every push, and the entire old Python tree i
 
 ### P B-T03 — Stub every library crate
 - **Goal:** Create each crate under `crates/` as an empty compiling library with the module files
-  enumerated in [`../architecture.md`](../architecture.md) present as empty stubs
+  enumerated in [`../architecture.md`](../../../architecture.md) present as empty stubs
   (`//! TODO(<phase>)` doc-comment + minimal valid Rust).
 - **Files:** one `Cargo.toml` + `src/lib.rs` (+ the listed submodule files declared with `mod`/`pub
   mod` but empty) for each of: `domain config observability event-bus storage builders features

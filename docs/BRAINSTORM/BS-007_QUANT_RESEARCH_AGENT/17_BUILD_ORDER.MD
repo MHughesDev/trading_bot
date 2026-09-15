@@ -88,6 +88,13 @@ The spike answers 03 §17 questions 1–3 and verifies the SDK option names used
 parallel execution, and the unified workspace.
 
 ## 2. Phases and plan sets
+> **SUPERSEDED 2026-09-15 — §2 and §3 only.** The reserved set letters and their dependency
+> graph below predate Set S, which is cut around the agent rather than around subsystems and
+> absorbs parts of M, O, Q, R-a and R-b. The current programme sequencing, the residual scope of
+> each reserved letter, and the two new sets (P data reach, T forward evidence) live in
+> [`docs/plans/ROADMAP.md`](../../plans/ROADMAP.md) §4 and §5. **§1, §4, §5 and §6 of this file
+> still stand.** The tables below are kept as the record of what was reserved and why.
+
 
 | Phase | Plan set | Scope (requirement IDs) | Exit criteria |
 |---|---|---|---|

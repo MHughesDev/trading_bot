@@ -41,6 +41,10 @@ ADR that replaces it.
 | [ADR-0031](0031-harness-conformance-capability-profiles.md) | Harness Conformance — Capability Profiles, Tool Budgets and Containment | Accepted | 2026-09-11 |
 | [ADR-0032](0032-local-tier-governor-loop.md) | The Local Tier — Target Hardware, the GOVERNOR Loop, and the Fence | Accepted | 2026-09-11 |
 | [ADR-0033](0033-agent-as-a-conversation.md) | The Agent Is a Conversation, Not a Form | Accepted | 2026-09-12 |
+| [ADR-0034](0034-context-assembly-one-budget-routed-exposure.md) | Context Assembly — One Budget, Routed Exposure, Cache-Stable Layers | Proposed | 2026-09-14 |
+| [ADR-0035](0035-one-runtime-loop-container-as-sandbox.md) | One Runtime Loop for Every Tier; the Container Becomes the Code Sandbox | Proposed | 2026-09-14 |
+| [ADR-0036](0036-context-as-retrieval.md) | Context Assembly Is Retrieval Over a Run Store, Not Accumulation in a Buffer | Proposed | 2026-09-14 |
+| [ADR-0037](0037-two-modes-continuous-toggle.md) | Two Agent Modes — Chat and Research — with a Continuous Toggle on Research; "Endless" Is the Toggle's `replenish` Setting | Proposed | 2026-09-15 |
 
 ## Decision Relationships
 

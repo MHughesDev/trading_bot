@@ -3,6 +3,7 @@
 //! All three front doors (JSON API, visual builder, MCP server) call `validate()`
 //! before persisting or applying a definition. No door has a privileged bypass.
 
+pub mod exits;
 pub mod expressions;
 pub mod risk;
 pub mod schema;
@@ -49,6 +50,8 @@ impl ValidatedDefinition {
 ///    checked on the definition **materialized with its defaults** so the
 ///    grammar itself never has to know about parameters.
 /// 4. Risk — tighten-only invariant against `GlobalRiskLimits::default()`.
+/// 5. Exits (v1.3) — the `exits` block is present, non-empty when it claims to
+///    be, and its rules are in range. See [`exits`] for why silence is refused.
 ///
 /// All errors from all passes are collected before returning, so an agent
 /// can see and fix all problems in one round trip.
@@ -84,6 +87,7 @@ pub fn validate(def: &StrategyDefinition) -> Result<ValidatedDefinition, Vec<Val
     }
 
     errors.extend(risk::validate_risk_overrides(&def.risk_overrides));
+    errors.extend(exits::validate_exits(def));
 
     if errors.is_empty() {
         Ok(ValidatedDefinition { inner: def.clone() })

@@ -432,6 +432,197 @@ an explicit absent state rather than as a number.
 
 ---
 
+## The external review, checked and acted on · 2026-09-14
+
+Two documents arrived from agents with **no access to this repository** — a
+literature review and a design memo. Both reason from a description of the
+platform about a year stale, so six of their ten ranked changes name things that
+are already merged. `decisions/EXTERNAL-REVIEW-2026-09.md` separates what is
+already enforced from what they got wrong about this repo from what is a real
+hole, with a file named for every row.
+
+Four of their recommendations were already enforced and are recorded as such
+rather than rebuilt. The rest of this section is the eight that were not.
+
+### The largest hole was one the pack never looked at
+
+`ActionKind` had exactly one variant, `PlaceOrder`, and the expression grammar is
+stateless — every expression is a comparison over the current bar. Between them
+that made **every path-dependent exit inexpressible**: a stop needs the entry
+price, a time exit needs bars-since-entry, a trailing stop needs the running
+extreme. So every strategy the platform could author was entry-only and the risk
+layer's position limits were silently the exit logic, in a domain where position
+management drives more P&L variance than entry timing.
+
+No ADR covered it because the context pack governs the MLOps layer and this lives
+in the strategy language. The fix keeps the grammar frozen (ADR-P6-01): exits are
+a typed `ExitPolicy` on the definition, evaluated by the runtime against position
+state, REQUIRED at `definition_version` 1.3. `RiskLayerOnly` is a *variant*, not
+an absence — a strategy that delegates its exits and one that forgot to have any
+looked identical from outside, and did until now.
+
+### The half where backtests lie
+
+Exits evaluated against the close understate stop hits; exits evaluated against
+both extremes freely overstate wins, because OHLCV cannot say which came first
+and a bar that breached both the stop and the target resolves to whichever the
+simulator picks. Over a long backtest that single choice is worth more than most
+edges.
+
+`IntrabarPolicy::WorstFirst` is the default and there is **no optimistic
+variant** (ADR-P6-09). A static test fails the build if one appears. A stop fills
+at its own level clamped into the bar's traded range, so a gap fills at the gap
+and a resting order fills where it rested.
+
+### The oracle test
+
+A perfect-foresight strategy that trades every bar **must lose money** at one
+minute: it earns `E|Δp| = σ√(2/π) ≈ 5.6 bp` at σ=7bp and pays a ≈20 bp round
+trip. If it turns a profit the cost model is not charging what it claims, and
+every backtest that used it is suspect.
+
+`oracle_is_unprofitable_at_one_minute` now fails the build on that, and
+`the_oracle_becomes_profitable_once_the_move_outgrows_the_round_trip` keeps it
+from passing vacuously. It is a simulator-validation test and a horizon-
+feasibility measurement in one call, and it costs an afternoon.
+
+### A fee is a schedule, not a rate
+
+The platform carried `fee_rate: dec!(0.0025)` — one number per asset class, no
+maker/taker split — while Gate 3 asked how wrong the cost model can be before an
+edge dies. It was asking the right question of a model that could not express the
+axis that matters.
+
+`FeeSchedule` carries maker, taker, half-spread, venue, tier and `effective_from`
+(ADR-P6-02), and `FeeBook::resolve` falls back to the **most expensive** schedule
+it holds rather than the cheapest, because the direction of a cost error always
+flatters the candidate.
+
+The **tradeable frontier** follows from it: `E|Δp(h)|` measured against the round
+trip gives a horizon below which no signal of any quality is profitable. That is
+a **pre-trial admission check**, not a seventeenth gate (ADR-P6-03) — the stack
+is sixteen and does not change size, and refusing before a trial costs nothing
+where refusing at Gate 3 costs a trial. An unmeasured frontier refuses rather
+than admitting: unmeasured is not infinite.
+
+### The agent's job, inverted
+
+"Find alpha" produces a usable learning signal about twice a year on a ninety-day
+lag. "Prove this is noise" produces one every few minutes and is usually right.
+Twenty-four noisy labels a year is not a small dataset; it is not a dataset.
+
+So `report_kill` and `report_evaluator_defect` are now the agent's primary output
+surface, and **a verified evaluator defect outranks a promotion** — encoded in
+`Score`'s variant order, in `mlops.falsification_score()`, and asserted by a
+static test against both (ADR-P6-06). Without that ordering an agent that
+discovers the simulator lets it buy the intrabar low exploits it silently,
+because reporting it would destroy its best result.
+
+The degenerate policy — kill everything — is blocked by what a kill *is*:
+`Kill` and `EvaluatorDefect` have no public constructor, and the only route is a
+`Reproduction` that refuses `expected == observed`, an empty step list, or no
+artifact. "Sharpe is only 0.4" reduces to the first of those and cannot be
+written down. There is no `Underperforms` class and a test asserts that no class
+name contains a performance word. Unverified and refuted both score **zero**, not
+a discount; refuted reports are kept, because a pattern of them is the signal
+that a reporter is guessing. `agent_role` holds INSERT and **not** UPDATE: a
+reporter that can verify itself scores whatever it likes.
+
+### Three defects found by reading the code against the review
+
+- **The authoring store was the last mutable thing in the evidence path.**
+  `ON CONFLICT (strategy_id) DO UPDATE` meant the definition a live instance was
+  running was reconstructable from nothing, and two runs sharing a
+  `strategy_version` were only comparable if nobody had saved in between — a
+  condition nothing checked and nothing recorded. `strategy_id` is now a pointer
+  to a content-addressed, hash-chained, append-only `strategy_revision`
+  (ADR-P6-04), and `strategy_instances.revision_hash` binds a live position to an
+  exact document. The canonicaliser sorts object keys and **never** arrays,
+  because `exits.rules` and `actions` are order-dependent; a static test enforces
+  that.
+
+- **USDT was treated as USD.** `matches!(currency, "USD" | "USDC" | "USDT")`
+  summed three different assets, one of them an unsecured claim on a private
+  issuer, with no record. During the March 2023 USDC depeg those pairs moved ~10%
+  on nothing, which a backtest reads as alpha. `Numeraire` separates them and
+  `Converted` has no accessor that yields the amount without the peg assumptions
+  that produced it (ADR-P6-07). Parity is still permitted — for a five-second
+  dashboard it is almost always right — but "we assumed parity" and "these were
+  dollars" are no longer the same sentence.
+
+- **Capacity was measured per run, never per definition.** Gate 4 is correct
+  about one run and a definition binds to many instances, each of whose backtests
+  assumed it traded alone. Fifty instances are one position at fifty times the
+  size with correlation 1.0. `Exposure::across` takes the whole instance set — a
+  function accepting one instance is one somebody calls in a loop and sums wrong
+  — and an unmeasured ceiling refuses (ADR-P6-08).
+
+### The procedure null now has a shape
+
+The synthetic venue's seven generators already existed; nothing had ever run the
+loop against them. `Roc::measure` requires **both** arms and refuses to be built
+from one (ADR-P6-10): a procedure that promotes nothing has a perfect
+false-discovery floor and no value, and reporting that floor alone would be the
+most misleading number the module could produce.
+`FalseDiscoveryFloor::upper_95` is Clopper–Pearson, so `0/20` bounds at 15%
+rather than reading as zero, and `monte_carlo_p` carries the `+1` correction
+because an unexceeded statistic reporting `p = 0` claims more than B draws can
+support.
+
+### What was verified
+
+- `cargo test --workspace` — exit 0.
+- **Migrations 0001–0059 apply cleanly to a fresh database** (`initialised to 59`)
+  **and to the developer database** (`applied 57 -> 59`), once the line-ending
+  checksum drift below was repaired.
+- **21 new live-Postgres tests pass** against a real database: `pg_falsification`
+  (12) and `pg_strategy_revision` (9), including the RLS check run as
+  `platform_app` rather than as the owner — the owner bypasses row-level
+  security, so an isolation test run as the owner passes whatever the policy says.
+- 11 new static invariants, each naming the ADR it pins.
+
+### What is not done, and is said so
+
+- **The exit policy is evaluated but not yet driven by the backtest simulator.**
+  `ExitTracker` is the one implementation and the live runtime and the simulator
+  are meant to share it; `crates/backtest/src/sim.rs` still runs through the
+  Nautilus bar engine and does not call it. Until it does, a definition's exits
+  affect live behaviour and not backtest results, which is the more dangerous
+  direction of the two and is why it is stated here rather than in a comment.
+### One more defect, found by trying to apply the migrations
+
+Applying 0058 to the developer database failed with *"migration 36 was
+previously applied but has been modified"* — on a file `git status` reports as
+unmodified. **The platform applies migrations on boot, so this was a startup
+blocker, not a nuisance.**
+
+The cause: sqlx checksums a migration's *bytes*, `core.autocrlf` is on, and the
+repository had no `.gitattributes`. So a Windows checkout produces CRLF and a
+Linux one produces LF, the same commit yields two different checksums, and a
+database migrated on one machine cannot be migrated on the other. Fifty of
+fifty-nine migrations were CRLF on disk; the database held a mixture, recorded
+by whichever checkout applied each one.
+
+Two halves to the fix, because either alone is incomplete:
+
+- `.gitattributes` pins `migrations/*.sql` to LF, making the checksum a property
+  of the commit rather than of whoever ran it. Scoped to migrations — a
+  repo-wide renormalisation would be a thousand-file whitespace diff, and nothing
+  else has its bytes hashed across machines.
+- `cargo run -p storage --example normalize_checksums` repairs a database
+  migrated under the old behaviour. For each mismatch it recomputes the file's
+  hash under LF and under CRLF; **if neither matches the recorded value it
+  refuses the row and exits non-zero**, because at that point the checksum is
+  doing exactly the job it exists for and overwriting it would erase the only
+  evidence that a migration was edited after it ran. `--dry-run` shows the plan.
+
+On the developer database: 23 rows already matched, **34 were line-ending
+mismatches, 0 were refused**, and the migration runner then applied 57 → 59.
+- The four `storage` live suites listed below still fail, still for the same
+  reasons, and are still not this pack's call.
+
+---
+
 ## The migrations were applied and the live tests were run · 2026-09-14
 
 Everything above was written against a database nobody had run it on. That is no

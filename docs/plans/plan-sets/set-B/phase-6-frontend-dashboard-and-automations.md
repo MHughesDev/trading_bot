@@ -7,8 +7,8 @@ Derived From: C-015, C-053, C-079, C-080, C-081, C-084, C-093, C-095, C-098
 
 # Phase 6 — Frontend Dashboard & Automations
 
-> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../architecture.md),
-> the spec [`../../specs/COMP-003-ui-streaming-gateway.md`](../../specs/COMP-003-ui-streaming-gateway.md),
+> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../../architecture.md),
+> the spec [`../../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md),
 > and the existing `frontend/` SPA. Phase 5 built the five-section routing, glass-pill nav, Paper/Live
 > mode store, and the section shells (`DashboardPage`, `AutomationsPage`, `SettingsPage`). Phase 4
 > built the USD rollup endpoint (`GET /api/dashboard/rollup`) and per-venue `AccountSource`. Phase 3

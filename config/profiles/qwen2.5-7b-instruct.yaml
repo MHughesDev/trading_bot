@@ -144,9 +144,13 @@ orchestration:
 trifecta:
   private_data: true
   untrusted_content: true
-  outbound_channel: false
+  outbound_channel: true
   mitigation: >
-    Unchanged from every other profile. Containment is not a function of model tier.
+    Unchanged from every other profile — see claude-opus-5.yaml for the full audit.
+    The outbound leg went live on 2026-09-14 (ADR-P7-01) and is narrowed by
+    `webfetch::egress`, not by model tier: containment is a property of the
+    platform, and a smaller model is if anything more likely to be talked into
+    something by a page it read.
 
 budgets:
   max_usd_per_task: 0.5

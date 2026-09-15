@@ -19,10 +19,12 @@
 //! for the tighten-only invariant.
 
 pub mod actions;
+pub mod exits;
 pub mod inference_output;
 pub mod inputs;
 pub mod nodes;
 pub mod params;
+pub mod revision;
 pub mod risk_overrides;
 
 pub use inference_output::InferenceOutput;
@@ -34,6 +36,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::trust::TrustTier;
 use actions::Action;
+use exits::ExitPolicy;
 use inputs::InputDeclaration;
 use nodes::Node;
 use risk_overrides::RiskOverrides;
@@ -48,6 +51,13 @@ pub const DEFINITION_VERSION_V1_1: &str = "1.1";
 /// and `{{x}}` references — see [`params`]). Additive: a v1.0 document is a
 /// valid v1.2 document.
 pub const DEFINITION_VERSION_V1_2: &str = "1.2";
+/// Format version for v1.3 additions (the typed `exits` block — see [`exits`]).
+///
+/// Additive in the parser and **not** additive in meaning: a document below 1.3
+/// has no exit policy at all, which is why [`StrategyDefinition::exit_policy`]
+/// reports the absence rather than inventing [`ExitPolicy::RiskLayerOnly`] on
+/// its behalf. The two look identical at runtime and are different claims.
+pub const DEFINITION_VERSION_V1_3: &str = "1.3";
 
 /// A complete strategy definition — the artifact all three front doors produce.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -76,6 +86,41 @@ pub struct StrategyDefinition {
     /// A sample violating one is rejected before a Run exists.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub constraints: Vec<String>,
+    /// What closes a position (v1.3). REQUIRED at version 1.3 and above; the
+    /// validator refuses a 1.3 document without one, and refuses a `Rules`
+    /// policy with an empty rule list.
+    ///
+    /// `None` here means "this document predates 1.3", which is a different
+    /// statement from [`ExitPolicy::RiskLayerOnly`] and must never be collapsed
+    /// into it: one is a strategy that delegates its exits, the other is a
+    /// strategy from before the question was asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exits: Option<ExitPolicy>,
+}
+
+impl StrategyDefinition {
+    /// The declared exit policy, or `None` for a pre-1.3 document.
+    #[must_use]
+    pub fn exit_policy(&self) -> Option<&ExitPolicy> {
+        self.exits.as_ref()
+    }
+
+    /// The holding period this definition *declares*, in bars.
+    ///
+    /// Only an [`exits::ExitRule::MaxHoldingBars`] produces one. Everything else
+    /// — a stop, a target, a trailing stop, a reversal signal — bounds price or
+    /// events, not time, and a strategy whose holding period is emergent cannot
+    /// be checked against the tradeable frontier before it runs. That is not a
+    /// reason to guess: it returns `None` and the caller decides.
+    #[must_use]
+    pub fn declared_holding_bars(&self) -> Option<u32> {
+        self.exits
+            .as_ref()?
+            .rules()
+            .iter()
+            .filter_map(exits::ExitRule::holding_bound)
+            .min()
+    }
 }
 
 fn default_min_trust_tier() -> TrustTier {

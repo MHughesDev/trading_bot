@@ -1,3 +1,6 @@
+pub mod evidence;
+pub mod web_and_skills;
+pub mod falsification;
 pub mod agent_sessions;
 pub mod asset_lifecycle;
 pub mod assets;
@@ -83,6 +86,28 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/projects/{project_id}", get(data::get_project))
         .route("/api/data/bars", get(data::get_bars))
+        // Falsification: the agent's primary output surface. Filing a report is
+        // a write that nothing can edit afterwards; verifying one is a separate
+        // action the agent's token does not carry.
+        .route("/api/falsification", get(falsification::list_reports))
+        .route("/api/falsification/kills", post(falsification::report_kill))
+        .route("/api/falsification/defects", post(falsification::report_defect))
+        // Feasibility: neither of these spends a trial, which is the point of
+        // asking them before a search rather than after it disappoints.
+        .route("/api/research/tradeable-frontier", post(falsification::tradeable_frontier))
+        .route("/api/research/oracle-test", post(falsification::oracle_test))
+        // Web access (ADR-P7-01). The only two routes in the platform that
+        // reach the internet; everything they return is untrusted.
+        .route("/api/web/search", post(web_and_skills::search))
+        .route("/api/web/fetch", post(web_and_skills::fetch))
+        // The Python skill library (ADR-P7-03).
+        .route("/api/skills", get(web_and_skills::list_skills).post(web_and_skills::create_skill))
+        .route("/api/skills/run", post(web_and_skills::run_skill))
+        // Evidence for the falsification tools (ADR-P7-05). None of these
+        // returns a verdict; each answers one defect class with a number.
+        .route("/api/evidence/trades", post(evidence::trades))
+        .route("/api/evidence/data-quality", post(evidence::data_quality))
+        .route("/api/evidence/similar-trials", post(evidence::similar_trials))
         .route("/api/data/catalog", get(data::get_catalog))
         .route("/api/data/live/{instrument}", get(data::get_live))
         .route(

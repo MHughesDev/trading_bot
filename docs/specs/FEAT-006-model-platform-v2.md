@@ -1,6 +1,38 @@
 # FEAT-006: Model Platform v2 — Datasets, Families, Bring-Your-Own Models, Prediction Series
 
 **Status:** Proposed (Phase 0 contract; not implemented)
+**Derivation Status: STALE as of 2026-09-15** — see the amendment note below before planning Set N.
+
+> ## Amendment note — 2026-09-15 (roadmap gap G-4)
+>
+> Written 2026-09-11, before the ML platform pack's Phases 0–5. Set N absorbs **Set H Phases
+> 4–5** (the inference gateway, alias resolution, the `model_forecast` evaluator, and the
+> Studio frontend — 17 tasks), and those were written against the **pre-`mlops` registry**.
+> Re-derive against this list before planning either.
+>
+> 1. **Datasets, splits and labels are specified objects now**, with content hashing and a
+>    *computed* embargo (`EmbargoInputs`, INV-12/INV-15). A training run declares them; it does
+>    not describe its data in prose.
+> 2. **`max_gpu_hours` is a REQUIRED manifest field** for `Trainer`-class jobs, with no default,
+>    enforced by refusal at submission and a hard kill in the worker (ADR-P2-05).
+> 3. **Sample weighting is declared `uniqueness`**, not `none` — the frame contract emits
+>    `sample_weight` and every trainer adapter consumes it (ADR-P2-22).
+> 4. **Resume is not bit-identical for any framework** until AT-61 demonstrates it
+>    (`BIT_IDENTICAL_FRAMEWORKS` is empty; **track 6 is running that test now**). Until a name
+>    enters that list, a resumed run restarts under the same trial.
+> 5. **`promote_model_version` was ungated** — the agent could promote. Under AGENT-013's rings
+>    it is a ring-1 write, reachable only through a `Proposal` a human decides. Set H's
+>    promotion tasks must be re-derived against that, not left as a direct call.
+> 6. **A prediction series carries `knowledge_time`** like every other fact (INV-01), and a
+>    model used inside a backtest must be pinned in the reproducibility receipt
+>    (AGENT-013 §7) — dataset hash, feature registry version, engine version, model version.
+> 7. **The `InstrumentProfile` writer and the outcome tensor** are being wired by track 8;
+>    Set N must consume them rather than build a parallel path.
+>
+> **What did not change:** ADR-0015/0016 (model format and the distributional contract),
+> ADR-0017 (walk-forward CV and leakage), ADR-0018 (ensembles and conformal), and the
+> AI_MODELS_SUITE handoff contract. Set I shipped the forecasting core against those and it
+> stands.
 **Version:** 0.1
 **ADR(s):** ADR-0015/0016 (model format and distributional contract, kept and extended),
 ADR-0017 (walk-forward CV and leakage), ADR-0018 (ensembles and conformal), ADR-0029,

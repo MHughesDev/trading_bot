@@ -78,14 +78,30 @@ trifecta:
   private_data: true
   # Reddit and web-collector text, plus any third-party tool description.
   untrusted_content: true
-  # CUT. The container's network is `internal: true`: it resolves the platform and
-  # nothing else. Verified by test — `gaierror` on api.anthropic.com from inside.
-  outbound_channel: false
+  # LIVE since 2026-09-14 (ADR-P7-01). Was cut; `web_search` and `fetch_url`
+  # restored it deliberately, because a research agent that cannot read a fee
+  # schedule or check whether its discovery is a 2011 paper is worth much less.
+  outbound_channel: true
   mitigation: >
-    The outbound leg is cut at the container network, not by policy: the agent's
-    network reaches the platform API and nothing else, so there is no channel to
-    exfiltrate over even if injected content persuaded it to try. Publishing happens
-    only by writing to outputs/ and calling deliver, which a human approves.
+    All three legs are live. The outbound one is narrowed rather than cut, and the
+    narrowing is mechanism rather than care: every destination is decided by
+    `webfetch::egress::check`, a pure deny-by-default function over a parsed URL
+    and its resolved addresses. Private, loopback, link-local and unique-local
+    ranges are refused in both address families, IPv4-mapped included, so cloud
+    instance metadata is unreachable; the allow verdict carries the checked
+    addresses and the client is pinned to them, closing the DNS-rebinding window;
+    redirects are re-checked hop by hop; credentials in a URL are refused rather
+    than stripped; and only two tools in the whole catalogue are classified
+    Outbound, asserted by name in `the_only_outbound_tools_are_the_two_web_tools`.
+    Python skills have no network at all, so they cannot be used to go around any
+    of this.
+    What this does NOT defend is the agent being persuaded by a page it fetched.
+    Fetched content is a distinct type (`webfetch::Untrusted`) with no Display and
+    one deliberately long accessor, and it reaches a prompt only inside a fence
+    that states it is data; that makes the boundary legible at every call site and
+    cannot make a model that ignores the distinction ignore it less. The residual
+    risk is accepted knowingly, and publishing still happens only by writing to
+    outputs/ and calling deliver, which a human approves.
 
 budgets:
   max_usd_per_task: 25.0

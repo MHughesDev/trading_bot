@@ -74,12 +74,16 @@ orchestration:
 trifecta:
   private_data: true
   untrusted_content: true
-  outbound_channel: false
+  outbound_channel: true
+  # LIVE since 2026-09-14 (ADR-P7-01).
   mitigation: >
     Identical to the frontier profile, and deliberately so: containment does not vary
-    with model tier. The sandbox network is internal-only, so the outbound leg is cut
-    structurally rather than by policy. A smaller model is more likely to be talked
-    into trying something, not less.
+    with model tier. The outbound leg is narrowed by `webfetch::egress` — a
+    deny-by-default check over a parsed URL and its resolved addresses, with the
+    connection pinned to the addresses that were checked — and by the catalogue
+    holding exactly two Outbound tools. A smaller model is more likely to be talked
+    into trying something by a page it read, not less, which is precisely why the
+    bound is mechanism rather than tier.
 
 budgets:
   # Local inference trades latency for cost. Surfaced honestly rather than hidden

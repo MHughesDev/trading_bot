@@ -7,10 +7,10 @@ Note: Canonical executable plans live in docs/plans/. This copy is the traceable
 
 # Phase 5 — Authoring front doors (JSON API + visual builder + MCP server)
 
-> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../architecture.md),
+> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../../../architecture.md),
 > and the specs — especially
-> [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md) and
-> [`../specs/INTG-001-mcp-server.md`](../specs/INTG-001-mcp-server.md).
+> [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md) and
+> [`../specs/INTG-001-mcp-server.md`](../../../specs/INTG-001-mcp-server.md).
 
 ## Phase goal
 
@@ -48,8 +48,8 @@ privileged path. A definition authored by any door round-trips through the other
 - **Goal:** The single validator all three doors target.
 - **Files:** `crates/strategy-validator/src/{lib,schema,expressions,risk}.rs`,
   `crates/strategy-validator/tests/rejects_loosening.rs`.
-- **Context:** Per [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md)
-  and [`../specs/INTG-001-mcp-server.md`](../specs/INTG-001-mcp-server.md): `validate(def) ->
+- **Context:** Per [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md)
+  and [`../specs/INTG-001-mcp-server.md`](../../../specs/INTG-001-mcp-server.md): `validate(def) ->
   Result<ValidatedDefinition, Vec<ValidationError>>`. `schema.rs` checks structure against the frozen
   `1.0` format; `expressions.rs` parses/validates the `condition.expr` grammar frozen in Phase 0;
   `risk.rs` enforces **tighten-only** `risk_overrides` against the global gate (reusing the rule from
@@ -62,7 +62,7 @@ privileged path. A definition authored by any door round-trips through the other
 - **Goal:** Create/validate/apply/stop strategies over REST against the frozen format.
 - **Files:** `crates/api/src/routes/strategies.rs` (extend), persistence via
   `crates/storage/src/postgres/strategies.rs`.
-- **Context:** Per [`../specs/COMP-003-ui-streaming-gateway.md`](../specs/COMP-003-ui-streaming-gateway.md)
+- **Context:** Per [`../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md)
   REST list: `POST /api/strategies` (create from JSON → **validate** → persist),
   `POST /api/strategies/{id}/start` (apply over `asset_universe` via the runtime),
   `POST /api/strategies/{id}/stop`, `GET /api/strategies/{id}/config`. All creation/apply goes
@@ -76,8 +76,8 @@ privileged path. A definition authored by any door round-trips through the other
 - **Files:** `frontend/src/builder/{BuilderCanvas.tsx,serialize.ts}`,
   `frontend/src/builder/nodes/` (node components per node type), plus a `StrategyPanel` entry to open
   it.
-- **Context:** Per [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md)
-  §front doors and [`../specs/INTG-001-mcp-server.md`](../specs/INTG-001-mcp-server.md)
+- **Context:** Per [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md)
+  §front doors and [`../specs/INTG-001-mcp-server.md`](../../../specs/INTG-001-mcp-server.md)
   §relationship: the editor's node graph **serializes to the strategy-definition JSON** and
   deserializes it back (`serialize.ts` round-trips, preserving node ids and optional positions).
   Node types map 1:1 to the frozen format's node types — the builder must not introduce node types
@@ -92,7 +92,7 @@ privileged path. A definition authored by any door round-trips through the other
 - **Files:** `crates/mcp-server/src/lib.rs`,
   `crates/mcp-server/src/tools/{mod,discovery,authoring,lifecycle,backtest}.rs`,
   `apps/mcp-server/src/main.rs`.
-- **Context:** Per [`../specs/INTG-001-mcp-server.md`](../specs/INTG-001-mcp-server.md): implement
+- **Context:** Per [`../specs/INTG-001-mcp-server.md`](../../../specs/INTG-001-mcp-server.md): implement
   the tool set — `list_lanes`, `list_instruments` (discovery); `validate_strategy`,
   `create_strategy` (authoring, via `strategy-validator`); `apply_strategy` (initialize strategy on
   a specific instrument), `stop_strategy`, `list_strategies` (lifecycle, via the runtime);

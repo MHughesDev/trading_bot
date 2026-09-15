@@ -13,7 +13,10 @@
 pub mod anchor;
 pub mod audit;
 pub mod campaign;
+pub mod capacity;
 pub mod capital;
+pub mod falsification;
+pub mod falsification_store;
 pub mod gates;
 pub mod holdout;
 pub mod internal;

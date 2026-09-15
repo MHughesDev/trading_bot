@@ -81,10 +81,10 @@ duplicates or conflicts with the now-consolidated docs.
   into the appropriate `docs/` subdirectory (e.g. architecture overview →
   `docs/architecture/system_walkthrough.md` which already exists).
 - Add explicit links:
-  - `[Full documentation](docs/README.md)`
-  - `[Architecture decisions](docs/adr/README.md)`
-  - `[Implementation plans](docs/plans/README.md)`
-  - `[Contributor guide](docs/NEWCOMERS.md)`
+  - `[Full documentation](../../../README.md)`
+  - `[Architecture decisions](../../../adr/README.md)`
+  - `[Implementation plans](../../../plans/README.md)`
+  - `[Contributor guide](../../../NEWCOMERS.md)`
 
 **Files:**
 - `README.md`

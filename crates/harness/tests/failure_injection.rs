@@ -122,10 +122,46 @@ fn an_injected_exfiltration_attempt_has_no_channel_to_use() {
             approval_envelope: None,
         },
     );
-    // Denied outright, not merely escalated: this platform cut the outbound leg, so
-    // there is nothing to approve.
-    assert_eq!(ruling.decision, Decision::Deny);
-    assert_eq!(ruling.code, "policy.outbound_cut");
+    // **Changed on 2026-09-14 (ADR-P7-01).** This used to be `Deny` /
+    // `policy.outbound_cut`, because the platform had no outbound channel and
+    // there was nothing to approve. `web_search` and `fetch_url` gave it one.
+    //
+    // The defence did not disappear, it moved down a rung: an outbound action
+    // whose immediate predecessor was untrusted content is the textbook
+    // exfiltration path, and it now reaches a human instead of being refused by
+    // the absence of a network. `Ask` and not `Allow` is the whole point — if
+    // this ever reads `Allow`, a page the agent fetched can talk it into sending
+    // something, with nothing in between.
+    assert_eq!(
+        ruling.decision,
+        Decision::Ask,
+        "an outbound action right after untrusted content must reach a human"
+    );
+    assert_eq!(ruling.code, "policy.untrusted_escalation");
+}
+
+/// The other half: with no untrusted content in the lineage, an outbound call is
+/// ordinary work and is not escalated. A rule that asked every time would be
+/// turned off within a week.
+#[test]
+fn an_outbound_call_on_clean_provenance_is_not_escalated() {
+    let p = profile();
+    let ruling = decide(
+        &p,
+        &ActionContext {
+            tool: "web_search".into(),
+            risk: Risk::Outbound,
+            prior_provenance: Provenance::ToolInternal,
+            user_present: true,
+            session_allowlisted: false,
+            approval_envelope: None,
+        },
+    );
+    assert_ne!(
+        ruling.decision,
+        Decision::Deny,
+        "the outbound leg is live; a clean-provenance search is ordinary work"
+    );
 }
 
 /// A session allowlist is the obvious hole in an escalation rule: get the operator

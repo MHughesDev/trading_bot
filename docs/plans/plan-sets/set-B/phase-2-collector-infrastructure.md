@@ -6,10 +6,10 @@ Derived From: C-017, C-060, C-065, C-077, C-091, C-099, C-101, C-102, C-103, C-1
 
 # Phase 2 — Collector Infrastructure
 
-> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../architecture.md),
+> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../../architecture.md),
 > the specs (especially
-> [`../../specs/COMP-001-data-quality-and-ingestion.md`](../../specs/COMP-001-data-quality-and-ingestion.md)
-> §3/§7 and [`../../specs/DATA-002-instrument-metadata.md`](../../specs/DATA-002-instrument-metadata.md)),
+> [`../../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
+> §3/§7 and [`../../specs/DATA-002-instrument-metadata.md`](../../../specs/DATA-002-instrument-metadata.md)),
 > and the existing codebase. Existing collectors (`crates/collectors`: Kraken crypto, Alpaca equity
 > data) and the NATS JetStream wrappers in `crates/event-bus` are your templates — read them first.
 > Phase 1 must be complete: `DataType`, `SupportedVenue`, the 8-class `AssetClass` exist.

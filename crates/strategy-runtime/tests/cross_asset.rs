@@ -34,6 +34,7 @@ use strategy_runtime::{StrategyInstance, WorldEvent};
 /// gate on asset_class — that is validated at definition upload, not at runtime.
 fn ema_cross_def(asset_class: &str) -> StrategyDefinition {
     StrategyDefinition {
+        exits: None,
         strategy_id: "ema_cross_cross_asset".into(),
         definition_version: "1.0".into(),
         asset_class: asset_class.into(),

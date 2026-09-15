@@ -20,4 +20,5 @@ rust_decimal = { workspace = true }
 smallvec = { workspace = true }
 
 [dev-dependencies]
+rust_decimal_macros = "1"
 reconciliation = { workspace = true }

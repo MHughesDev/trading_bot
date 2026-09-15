@@ -7,13 +7,13 @@ Note: Canonical executable plans live in docs/plans/. This copy is the traceable
 
 # Phase 6 — Second asset class proves the abstraction (equities)
 
-> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../architecture.md),
+> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../../../architecture.md),
 > and the specs — especially
-> [`../specs/DATA-002-instrument-metadata.md`](../specs/DATA-002-instrument-metadata.md)
+> [`../specs/DATA-002-instrument-metadata.md`](../../../specs/DATA-002-instrument-metadata.md)
 > (instrument metadata),
-> [`../specs/COMP-002-execution-and-risk-gate.md`](../specs/COMP-002-execution-and-risk-gate.md)
+> [`../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)
 > (stocks vs crypto), and
-> [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
+> [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
 > §8 (trust tiers).
 
 ## Phase goal
@@ -29,7 +29,7 @@ unchanged, the "new asset = a collector + a payload type + metadata rows" promis
 - Phases 1–4 complete (spine, money safety, UI optional, strategies/backtest). The crypto collector
   and paper execution already exist and define the patterns to mirror — **and to deliberately
   diverge from** so the abstraction is tested, not papered over (per
-  [`../../research/OPEN_QUESTIONS.md`](../../research/OPEN_QUESTIONS.md) Q2).
+  [`../../research/OPEN_QUESTIONS.md`](../../../open-questions.md) Q2).
 - **Decision gate Q2 (equity half — resolved):** Use **Alpaca** for both equity market data and
   equity paper execution (all assets/domains). Alpaca provides a WS data feed for equities
   (`crates/collectors/src/equity/alpaca_data.rs`) and a paper account for order execution
@@ -60,9 +60,9 @@ unchanged, the "new asset = a collector + a payload type + metadata rows" promis
 - **Goal:** Seed equity instruments with correct sessions/auctions/halt policy/precision/trust tier.
 - **Files:** equity rows via `crates/storage/src/postgres/instruments.rs`; if needed, extend
   `TradingSchedule`/`HaltPolicy` in `crates/domain/src/instrument.rs` **without** breaking crypto.
-- **Context:** Per [`../specs/DATA-002-instrument-metadata.md`](../specs/DATA-002-instrument-metadata.md)
+- **Context:** Per [`../specs/DATA-002-instrument-metadata.md`](../../../specs/DATA-002-instrument-metadata.md)
   §instrument metadata and
-  [`../specs/COMP-002-execution-and-risk-gate.md`](../specs/COMP-002-execution-and-risk-gate.md)
+  [`../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)
   §stocks vs crypto: equities have session+auction `trading_hours`, can halt (`halt_behavior`), quote
   precision 2dp, lot size rules, `trust_tier = Regulated`. Crypto stays 24/7. Any `TradingSchedule`
   extension must remain expressive enough for both (24/7 and session) without a core code branch.
@@ -75,7 +75,7 @@ unchanged, the "new asset = a collector + a payload type + metadata rows" promis
   structured differently from the Kraken crypto collector, publishing the **same** `domain` payloads
   on the **same** lanes.
 - **Files:** `crates/collectors/src/equity/{mod,alpaca_data}.rs`, `apps/collector-equity/src/main.rs`.
-- **Context:** Per [`../../research/OPEN_QUESTIONS.md`](../../research/OPEN_QUESTIONS.md) Q2: build the second collector
+- **Context:** Per [`../../research/OPEN_QUESTIONS.md`](../../../open-questions.md) Q2: build the second collector
   deliberately differently (Alpaca uses REST+WS with different auth/snapshot model vs Kraken's WS v2)
   so the lane/metadata abstraction is *proven*. It normalizes Alpaca's equity feed shapes into the
   same `TradePayload`/`QuotePayload`/`OrderBookPayload`/`BarPayload` on the same `market.*` lanes,
@@ -94,7 +94,7 @@ unchanged, the "new asset = a collector + a payload type + metadata rows" promis
   built in Phase 2) with equity instruments, and confirm sessions/halts are correctly enforced.
 - **Files:** `crates/execution/src/alpaca.rs` (extend for equity session/auction semantics if
   needed); instrument metadata rows from P6-T01; keep `Broker` trait unchanged.
-- **Context:** Per [`../specs/COMP-002-execution-and-risk-gate.md`](../specs/COMP-002-execution-and-risk-gate.md)
+- **Context:** Per [`../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)
   §stocks vs crypto: session/auction order acceptance, halt rejection, and settlement/shorting
   constraints live in the **adapter and metadata** (not core). The Alpaca paper adapter handles both
   crypto and equity orders — this task proves it for equity. Coinbase live equity trading is

@@ -12,6 +12,8 @@ rust_decimal = { workspace = true }
 thiserror = { workspace = true }
 rkyv = { workspace = true }
 xxhash-rust = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 rust_decimal_macros = "1"
