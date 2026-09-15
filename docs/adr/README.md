@@ -41,6 +41,7 @@ ADR that replaces it.
 | [ADR-0031](0031-harness-conformance-capability-profiles.md) | Harness Conformance — Capability Profiles, Tool Budgets and Containment | Accepted | 2026-09-11 |
 | [ADR-0032](0032-local-tier-governor-loop.md) | The Local Tier — Target Hardware, the GOVERNOR Loop, and the Fence | Accepted | 2026-09-11 |
 | [ADR-0033](0033-agent-as-a-conversation.md) | The Agent Is a Conversation, Not a Form | Accepted | 2026-09-12 |
+| [ADR-0038](0038-one-live-evaluation-path.md) | One Live Evaluation Path — Automations Declare, the Hot Path Evaluates | Accepted | 2026-09-15 |
 
 ## Decision Relationships
 

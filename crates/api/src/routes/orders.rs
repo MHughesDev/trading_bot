@@ -7,16 +7,11 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
-use chrono::Utc;
 use domain::{
-    instrument::{HaltPolicy, TradingSchedule},
     money::{Price, Size},
     order::{OrderIntent, OrderType, Side},
     RiskRejection,
 };
-use reconciliation::freshness::is_within_trading_hours;
-use risk::GateContext;
-use rust_decimal::Decimal;
 
 use crate::{auth::BearerToken, state::AppState};
 
@@ -126,99 +121,31 @@ pub async fn place_order(
         intent.idempotency_key = key;
     }
 
-    // Resolve the instrument's asset class from the paper engine's registry.
-    // An unregistered instrument has no in-process pipeline feeding it marks, so
-    // it cannot be paper-traded — reject with a clear message rather than a mark
-    // error deeper in the engine.
-    let Some(asset_class) = state.paper_engine.asset_class_of(&req.instrument_id) else {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({
-                "error": "instrument not initialized for trading",
-                "detail": format!(
-                    "no live pipeline is feeding marks for '{}'; initialize the asset first",
-                    req.instrument_id
-                ),
-            })),
-        )
-            .into_response();
-    };
-
-    // A mark is required: the paper engine fills against the latest observed
-    // price and rejects stale/absent marks.  Surface a precise error if the
-    // feed has not produced one yet (e.g. just after startup).
-    let Some(market_price) = state.paper_engine.mark(&req.instrument_id) else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "error": "market data not ready",
-                "detail": format!(
-                    "no mark price for '{}' yet — wait for the live feed to tick",
-                    req.instrument_id
-                ),
-            })),
-        )
-            .into_response();
-    };
-
-    // Current net position for this instrument, so the risk gate's
-    // position-limit check sees real exposure rather than a zero default.
-    let current_position = state
-        .paper_engine
-        .positions(asset_class)
-        .into_iter()
-        .find(|p| p.instrument_id == req.instrument_id)
-        .map(|p| p.quantity)
-        .unwrap_or(Decimal::ZERO);
-
-    // Resolve session / halt state from instrument metadata (P6-T03).
-    // For crypto (24/7, non-haltable) the defaults remain; for equities the
-    // NYSE session window and haltable policy are applied — matching the spec
-    // invariant "session/halt checks live in metadata, not in core code."
-    let (is_in_session, halt_policy) = {
-        let row: Option<(serde_json::Value, String)> = sqlx::query_as(
-            "SELECT trading_hours_json, halt_policy FROM instruments WHERE instrument_id = $1",
-        )
-        .bind(&req.instrument_id)
-        .fetch_optional(&state.pg)
-        .await
-        .ok()
-        .flatten();
-
-        match row {
-            Some((hours_json, hp_str)) => {
-                let schedule: TradingSchedule = serde_json::from_value(hours_json)
-                    .unwrap_or_else(|_| TradingSchedule::always_open());
-                let in_session = is_within_trading_hours(Utc::now(), &schedule);
-                let hp = if hp_str == "haltable" {
-                    HaltPolicy::Haltable
-                } else {
-                    HaltPolicy::NonHaltable
-                };
-                (in_session, hp)
-            }
-            // Instrument not in metadata table — default to 24/7 non-haltable (crypto behaviour).
-            None => (true, HaltPolicy::NonHaltable),
+    // The risk context.  One provider serves this door and the hot path's
+    // stage 4, so the two cannot drift: the position, the mark, the venue's
+    // published tick and lot, today's loss and the order-rate counts are all
+    // measured from live state, and anything that cannot be measured refuses
+    // here instead of defaulting.
+    //
+    // What this replaced, and why it mattered:
+    //
+    //     GateContext::for_manual_order(pos, mark, ZERO, ZERO, ZERO, true, 0, 0)
+    //
+    // A zero tick and lot disable the tick and lot checks.  A zero daily loss
+    // cannot breach a daily-loss limit.  `0, 0` order counts cannot breach a
+    // rate limit.  Three of the ten checks in COMP-002 3.2 reported a pass they
+    // had never evaluated, and nothing downstream could tell the difference.
+    let ctx = match risk::context::context_for(&intent) {
+        Ok(ctx) => ctx,
+        Err(rejection) => {
+            let (status, message) = risk_rejection_response(&rejection);
+            return (
+                status,
+                Json(json!({ "error": message, "detail": rejection.to_string() })),
+            )
+                .into_response();
         }
     };
-
-    // Manual-order risk context.  tick_size and lot_size are 0 — which disables
-    // those two checks (a nonzero lot would wrongly reject fractional crypto like
-    // 0.01 BTC).  Daily-loss is 0 until P&L wiring lands.
-    let mut ctx = GateContext::for_manual_order(
-        current_position,
-        Some(market_price),
-        Decimal::ZERO,
-        Decimal::ZERO,
-        Decimal::ZERO,
-        true,
-        0,
-        0,
-    );
-    ctx.is_in_session = is_in_session;
-    ctx.halt_policy = halt_policy;
-    // is_halted defaults to false — we do not yet subscribe to exchange halt events,
-    // so the gate catches session violations but not intra-session halts at this phase.
 
     match state.risk_gate.check(intent, &ctx) {
         Ok(approved) => {
@@ -248,38 +175,85 @@ pub async fn place_order(
     }
 }
 
-/// GET /api/orders/:id — look up an order by idempotency key.
+/// GET /api/orders/:id — look up an order by idempotency key, with its fills.
+///
+/// This endpoint could not succeed before migration 0121 and
+/// `execution::journal`: nothing in the repository wrote to `orders`, so every
+/// lookup was a 404.  The fills are returned alongside because "did it fill,
+/// and at what?" is the question the endpoint is asked, and because
+/// reconciliation and Gate 15 read exactly these rows.
 pub async fn get_order(
     _token: BearerToken,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
 ) -> impl IntoResponse {
-    let row: Option<(String, Option<String>, String, String, String)> = sqlx::query_as(
-        "SELECT instrument_id, broker_order_id, side, order_type, state \
+    #[allow(clippy::type_complexity)]
+    let row: Option<(
+        String,
+        Option<String>,
+        String,
+        String,
+        String,
+        rust_decimal::Decimal,
+        Option<String>,
+        String,
+    )> = sqlx::query_as(
+        "SELECT instrument_id, broker_order_id, side, order_type, state, size, \
+                strategy_id, execution_mode \
          FROM orders WHERE idempotency_key = $1",
     )
     .bind(id)
     .fetch_optional(&state.pg)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
     .ok()
     .flatten();
 
-    match row {
-        Some((instrument_id, broker_order_id, side, order_type, order_state)) => (
-            StatusCode::OK,
-            Json(json!({
-                "idempotency_key": id,
-                "instrument_id": instrument_id,
-                "broker_order_id": broker_order_id,
-                "side": side,
-                "order_type": order_type,
-                "state": order_state,
-            })),
+    let Some((
+        instrument_id,
+        broker_order_id,
+        side,
+        order_type,
+        order_state,
+        size,
+        strategy_id,
+        execution_mode,
+    )) = row
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let fills: Vec<(String, rust_decimal::Decimal, rust_decimal::Decimal, rust_decimal::Decimal, chrono::DateTime<chrono::Utc>)> =
+        sqlx::query_as(
+            "SELECT broker_order_id, filled_size, fill_price, commission, filled_at \
+             FROM fills WHERE idempotency_key = $1 ORDER BY filled_at ASC",
         )
-            .into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
-    }
+        .bind(id)
+        .fetch_all(&state.pg)
+        .await
+        .unwrap_or_default();
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "idempotency_key": id,
+            "instrument_id": instrument_id,
+            "broker_order_id": broker_order_id,
+            "side": side,
+            "order_type": order_type,
+            "state": order_state,
+            "size": size.to_string(),
+            "strategy_id": strategy_id,
+            "execution_mode": execution_mode,
+            "fills": fills.iter().map(|(boid, qty, price, commission, at)| json!({
+                "broker_order_id": boid,
+                "filled_size": qty.to_string(),
+                "fill_price": price.to_string(),
+                "commission": commission.to_string(),
+                "filled_at": at,
+            })).collect::<Vec<_>>(),
+        })),
+    )
+        .into_response()
 }
 
 fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
@@ -327,6 +301,27 @@ fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
         RiskRejection::InvalidTickSize { .. } => (
             StatusCode::UNPROCESSABLE_ENTITY,
             "limit price is not on a valid tick",
+        ),
+
+        // The fail-closed refusals.  Each one is the gate saying "I could not
+        // evaluate this", which is a 503-class answer — the request was not
+        // wrong, the platform was not ready to judge it.  Returning 200 here,
+        // or skipping the check, is the defect these variants exist to prevent.
+        RiskRejection::MarketDataUnavailable { .. } => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no current mark for this instrument — wait for the live feed to tick",
+        ),
+        RiskRejection::InstrumentMetadataUnavailable { .. } => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the venue's tick and lot for this instrument are not known — initialize the asset",
+        ),
+        RiskRejection::AccountStateUnavailable { .. } => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "account state could not be read — the daily-loss limit cannot be evaluated",
+        ),
+        RiskRejection::GateUnavailable { .. } => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the risk gate cannot evaluate orders right now",
         ),
     }
 }

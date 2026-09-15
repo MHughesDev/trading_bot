@@ -95,7 +95,10 @@ mod tests {
             None,
         );
         // This test runs in a process where no provider is installed.
-        let err = context_for(&intent).unwrap_err();
+        let err = match context_for(&intent) {
+            Ok(_) => panic!("a context was produced with no provider installed"),
+            Err(e) => e,
+        };
         assert!(
             matches!(err, RiskRejection::GateUnavailable { .. }),
             "a missing provider must refuse, not produce a permissive context"

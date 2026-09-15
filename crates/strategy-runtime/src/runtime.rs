@@ -9,7 +9,6 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use demand_manager::DemandRegistry;
 use domain::lanes::Lane;
-use domain::order::OrderIntent;
 use domain::strategy_def::StrategyDefinition;
 use domain::InstrumentId;
 use thiserror::Error;

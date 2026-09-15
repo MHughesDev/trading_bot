@@ -116,6 +116,14 @@ pub struct PaperAccount {
     cash: Decimal,
     positions: HashMap<String, PaperPosition>,
     realized_pnl: Decimal,
+    /// Realized P&L **and fees** bucketed by UTC calendar day.
+    ///
+    /// The risk gate's daily-loss limit needs today's number, not the
+    /// account's lifetime number; without this the limit was fed
+    /// `Decimal::ZERO` and could never fire.  In-memory like the rest of the
+    /// paper account, so a platform restart starts a fresh day's tally — a
+    /// limitation of the paper engine, not of the gate.
+    realized_by_day: HashMap<chrono::NaiveDate, Decimal>,
     fees_paid: Decimal,
     closed_trades: u64,
     winning_trades: u64,
@@ -140,6 +148,7 @@ impl PaperAccount {
             cash: starting_cash,
             positions: HashMap::new(),
             realized_pnl: Decimal::ZERO,
+            realized_by_day: HashMap::new(),
             fees_paid: Decimal::ZERO,
             closed_trades: 0,
             winning_trades: 0,
@@ -161,6 +170,23 @@ impl PaperAccount {
 
     pub fn realized_pnl(&self) -> Decimal {
         self.realized_pnl
+    }
+
+    /// Realized P&L net of fees for one UTC calendar day.  Negative is a loss.
+    pub fn realized_pnl_on(&self, day: chrono::NaiveDate) -> Decimal {
+        self.realized_by_day
+            .get(&day)
+            .copied()
+            .unwrap_or(Decimal::ZERO)
+    }
+
+    /// Record realized P&L against both the lifetime figure and today's bucket.
+    fn add_realized(&mut self, amount: Decimal) {
+        self.realized_pnl += amount;
+        *self
+            .realized_by_day
+            .entry(Utc::now().date_naive())
+            .or_insert(Decimal::ZERO) += amount;
     }
 
     pub fn position(&self, instrument_id: &str) -> Option<&PaperPosition> {
@@ -238,7 +264,7 @@ impl PaperAccount {
                 }
                 let entry = self.positions[&fill.instrument_id].average_entry_price;
                 let realized = (price - entry) * qty * mult;
-                self.realized_pnl += realized;
+                self.add_realized(realized);
                 self.record_close(realized);
                 self.cash += notional - fill.fee;
                 self.reduce_long(&fill.instrument_id, qty);
@@ -319,7 +345,7 @@ impl PaperAccount {
 
         // Commit.
         self.cash += realized;
-        self.realized_pnl += realized;
+        self.add_realized(realized);
         if !same_direction {
             self.record_close(realized);
         }
@@ -360,7 +386,7 @@ impl PaperAccount {
             AccountKind::Margin => realized,
         };
         self.cash += cash_delta;
-        self.realized_pnl += realized;
+        self.add_realized(realized);
         self.record_close(realized);
         self.ledger.record(
             PaperLedgerKind::Settlement,
@@ -501,6 +527,7 @@ impl PaperAccount {
             self.cash -= fee;
         }
         self.fees_paid += fee;
+        self.add_realized(-fee);
         self.ledger.record(
             PaperLedgerKind::Fee,
             Some(instrument_id.to_owned()),

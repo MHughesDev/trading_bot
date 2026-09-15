@@ -94,6 +94,10 @@ pub struct AppState {
     pub profiles: Arc<harness::ProfileSet>,
     /// The profile id a research session runs under unless its project pins another.
     pub default_profile: String,
+    /// Instrument trading rules (tick, lot, session, halt policy, venue trust),
+    /// cached from `instruments`.  The risk gate refuses any order on an
+    /// instrument absent from here rather than judging it against a guess.
+    pub instrument_meta: Arc<crate::instrument_meta::InstrumentMetaCache>,
 }
 
 /// Loads the capability profiles (ADR-0031). Read from disk at startup, never
@@ -287,6 +291,73 @@ impl AppState {
         ));
 
         let profiles = load_profiles();
+
+        // ── The two process-wide installs that make an order possible ────────
+        //
+        // Both are `OnceLock`s in their own crates rather than values threaded
+        // from `main`, because the in-process pipelines and the REST handlers
+        // must see the *same* ones and `apps/platform/src/main.rs` is not this
+        // track's to change.  First install wins, so a second `AppState` (a
+        // test) cannot repoint what a running pipeline is already using.
+        let instrument_meta = Arc::new(crate::instrument_meta::InstrumentMetaCache::new());
+
+        // The order journal: `execution::ExecutionEngine::submit` refuses to
+        // submit anything at all without one, because an order that cannot be
+        // recorded cannot be reconciled (FM-4, SC-7).
+        execution::journal::install(Arc::new(execution::journal::PgOrderJournal::new(pg.clone())));
+
+        // The risk-context provider: the single source of a measured
+        // `GateContext` for both order doors (SC-2).
+        risk::context::install(Arc::new(crate::risk_context::PaperRiskContextProvider::new(
+            Arc::clone(&paper_engine),
+            Arc::clone(&instrument_meta),
+        )));
+
+        // Keep the metadata snapshot fresh.  Inside a runtime only; outside one
+        // (unit tests, tools) the cache stays empty and every order is refused
+        // with `InstrumentMetadataUnavailable`, which is the correct answer for
+        // a process that cannot read the instrument table.
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let pool = pg.clone();
+            let cache = Arc::clone(&instrument_meta);
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(tokio::time::Duration::from_secs(60));
+                loop {
+                    tick.tick().await;
+                    match cache.reload(&pool).await {
+                        Ok(n) => tracing::debug!(instruments = n, "instrument metadata reloaded"),
+                        Err(e) => tracing::warn!(
+                            error = %e,
+                            "instrument metadata reload failed — the gate will refuse orders on                              instruments it has not yet loaded"
+                        ),
+                    }
+                }
+            });
+        }
+
+        // Resume armed automations (ADR-0038).  `armed` is durable state: an
+        // automation the operator armed before a restart must evaluate after
+        // one, or the platform silently stops trading and still shows "armed"
+        // in the UI.  `storage::automation::armed_automations` existed for
+        // exactly this and had no caller until now.
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let pool = pg.clone();
+            let tx = stream_tx.clone();
+            tokio::spawn(async move {
+                match crate::routes::automations::resume_armed(&pool, tx.as_ref()).await {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(automations = n, "armed automations resumed")
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::error!(
+                        error = %e,
+                        "could not resume armed automations — they remain armed in the database \
+                         and are NOT evaluating; disarm and re-arm to recover"
+                    ),
+                }
+            });
+        }
+
         Self {
             pg,
             risk_gate,
@@ -315,6 +386,7 @@ impl AppState {
             profiles,
             default_profile: std::env::var("TBOT_DEFAULT_PROFILE")
                 .unwrap_or_else(|_| "claude-opus-5".to_string()),
+            instrument_meta,
         }
     }
 }

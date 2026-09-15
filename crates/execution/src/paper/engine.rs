@@ -715,6 +715,31 @@ impl PaperTradingEngine {
             .snapshot(&|id| self.mark(id).map(Price::inner))
     }
 
+    /// Today's loss on one account, in quote currency, positive = loss.
+    ///
+    /// Realized P&L for the current UTC day (net of fees) plus the unrealized
+    /// P&L of everything still open — which is what COMP-002 §3.2 check 7
+    /// means by "cumulative realized + unrealized loss for today".  This is the
+    /// number the risk gate's daily-loss limit reads; before it existed both
+    /// order doors passed `Decimal::ZERO`, so the limit could not fire.
+    ///
+    /// In-memory, like the whole paper account: a platform restart starts the
+    /// day's tally again.
+    pub fn daily_loss_usd(&self, asset_class: AssetClass) -> Decimal {
+        let realized_today = self
+            .account(asset_class)
+            .lock()
+            .expect("paper account lock")
+            .realized_pnl_on(Utc::now().date_naive());
+        let unrealized: Decimal = self
+            .snapshot(asset_class)
+            .positions
+            .iter()
+            .map(|p| p.unrealized_pnl)
+            .sum();
+        -(realized_today + unrealized)
+    }
+
     /// Snapshots for every asset class, in policy-table order.
     pub fn snapshots(&self) -> Vec<PaperAccountSnapshot> {
         ALL_ASSET_CLASSES
