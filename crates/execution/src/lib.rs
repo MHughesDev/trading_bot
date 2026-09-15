@@ -8,6 +8,7 @@ pub mod broker;
 pub mod coinbase;
 pub mod events;
 pub mod fills;
+pub mod journal;
 pub mod order_state;
 pub mod paper;
 pub mod positions;
@@ -47,6 +48,13 @@ pub enum ExecutionError {
 pub struct SubmitResult {
     pub broker_order_id: String,
     pub audit: Vec<AuditEntry>,
+    /// `true` when this key was already recorded in the journal and the broker
+    /// was **not** called again.  A redelivery, a reconnect, or a resubmit
+    /// after a restart all land here (SC-7).
+    pub duplicate: bool,
+    /// The fill captured during this submission, if the venue filled it
+    /// immediately (paper market orders do).  `None` for a resting order.
+    pub fill: Option<journal::PersistedFill>,
 }
 
 /// Result of syncing a single order against the broker.
@@ -77,16 +85,80 @@ impl ExecutionEngine {
         }
     }
 
-    /// Submit an `ApprovedOrder` to the broker and return the broker order ID.
+    /// Submit an `ApprovedOrder` to the broker, recording it durably first.
     ///
-    /// Idempotency is enforced by the broker (via `client_order_id` = idempotency key).
-    /// A resubmit for an already-known key is a no-op at the broker level.
+    /// Order of operations matters and is not negotiable:
+    ///
+    /// 1. **Ask the journal whether this key was already submitted.** If it
+    ///    was, return the recorded broker order id without touching the broker.
+    ///    This is what makes a redelivery, a reconnect and a *restart* safe;
+    ///    the in-memory caches above cannot do it because a restart wipes them.
+    /// 2. **Record the order before submitting it.** If the process dies
+    ///    between the record and the ack, the order exists in the journal with
+    ///    no broker id, which reconciliation can see and query.  Recording
+    ///    afterwards would lose orders in exactly the window that matters.
+    /// 3. Submit, then attach the broker id.
+    /// 4. Query the order back and record any fill.
+    ///
+    /// An order that cannot be recorded is not submitted: a trade the platform
+    /// cannot reconcile is worse than a trade it did not make (FM-4).
     pub async fn submit(&self, order: ApprovedOrder) -> Result<SubmitResult, ExecutionError> {
         let idempotency_key = order.intent.idempotency_key;
+        let journal = journal::require().map_err(|e| ExecutionError::Database(e.to_string()))?;
 
+        // 1. Durable idempotency check.
+        if let Some(recorded) = journal
+            .find_order(idempotency_key)
+            .await
+            .map_err(|e| ExecutionError::Database(e.to_string()))?
+        {
+            if let Some(broker_order_id) = recorded.broker_order_id {
+                info!(
+                    %idempotency_key,
+                    %broker_order_id,
+                    "order already submitted — returning the recorded broker id without resubmitting"
+                );
+                let fill = journal
+                    .fills_for(idempotency_key)
+                    .await
+                    .map_err(|e| ExecutionError::Database(e.to_string()))?
+                    .into_iter()
+                    .next_back();
+                return Ok(SubmitResult {
+                    broker_order_id,
+                    audit: vec![AuditEntry::broker_query(
+                        idempotency_key,
+                        "duplicate-submit".to_owned(),
+                        "idempotent-replay".to_owned(),
+                    )],
+                    duplicate: true,
+                    fill,
+                });
+            }
+            // Recorded but never acked: an ack desync.  COMP-002 §3.6 —
+            // query, never blindly retry.  We have no broker id to query
+            // with, so the safe answer is to refuse and let reconciliation
+            // resolve it rather than risk a double-fill.
+            return Err(ExecutionError::Database(format!(
+                "order {idempotency_key} was recorded but has no broker ack — \
+                 refusing to resubmit blindly (COMP-002 §3.6 ack desync)"
+            )));
+        }
+
+        // 2. Record before submitting.
+        journal
+            .record_order(&order.intent, OrderState::Accepted)
+            .await
+            .map_err(|e| ExecutionError::Database(e.to_string()))?;
+
+        // 3. Submit.
         let broker_order_id = self.broker.submit(&order).await?;
+        journal
+            .set_broker_order(idempotency_key, &broker_order_id, OrderState::Submitted)
+            .await
+            .map_err(|e| ExecutionError::Database(e.to_string()))?;
 
-        let audit = vec![
+        let mut audit = vec![
             AuditEntry::state_transition(
                 idempotency_key,
                 Some(OrderState::Accepted),
@@ -96,16 +168,126 @@ impl ExecutionEngine {
             AuditEntry::broker_submit(idempotency_key, broker_order_id.clone()),
         ];
 
-        info!(
-            %idempotency_key,
-            %broker_order_id,
-            "order submitted"
-        );
+        info!(%idempotency_key, %broker_order_id, "order submitted");
+
+        // 4. Capture the fill.  Paper market orders fill on submit, so without
+        //    this step the platform would have an order and never a fill —
+        //    which is the state Gate 15 cannot start a clock against.
+        let fill = self
+            .capture_fill(
+                &*journal,
+                idempotency_key,
+                &broker_order_id,
+                &order.intent,
+                &mut audit,
+            )
+            .await?;
 
         Ok(SubmitResult {
             broker_order_id,
             audit,
+            duplicate: false,
+            fill,
         })
+    }
+
+    /// Query the order back from the venue and persist whatever filled.
+    async fn capture_fill(
+        &self,
+        journal: &dyn journal::OrderJournal,
+        idempotency_key: Uuid,
+        broker_order_id: &str,
+        intent: &OrderIntent,
+        audit: &mut Vec<AuditEntry>,
+    ) -> Result<Option<journal::PersistedFill>, ExecutionError> {
+        let status = match self.broker.query_order(broker_order_id).await {
+            Ok(s) => s,
+            Err(e) => {
+                // The order is submitted and recorded; the fill will be picked
+                // up by the reconciliation sweep.  Not an error for the caller.
+                tracing::warn!(
+                    %idempotency_key, %broker_order_id, error = %e,
+                    "could not read the order back after submit — leaving the fill to reconciliation"
+                );
+                return Ok(None);
+            }
+        };
+
+        if status.filled_qty <= Decimal::ZERO {
+            return Ok(None);
+        }
+        let Some(avg_price) = status.avg_fill_price else {
+            tracing::warn!(
+                %idempotency_key, %broker_order_id,
+                "venue reports a filled quantity with no fill price — not recording a fill"
+            );
+            return Ok(None);
+        };
+
+        let fill = journal::PersistedFill {
+            idempotency_key,
+            broker_order_id: broker_order_id.to_owned(),
+            instrument_id: intent.instrument_id.clone(),
+            side: intent.side,
+            filled_size: status.filled_qty,
+            fill_price: avg_price,
+            commission: Decimal::ZERO,
+            filled_at: Utc::now(),
+        };
+
+        // In-memory dedup first (cheap), database second (durable).
+        let in_memory = self
+            .fill_processor
+            .lock()
+            .map(|mut fp| {
+                fp.apply(&FillEvent {
+                    idempotency_key,
+                    broker_order_id: broker_order_id.to_owned(),
+                    filled_qty: fill.filled_size,
+                    fill_price: fill.fill_price,
+                    commission: fill.commission,
+                    filled_at: fill.filled_at,
+                })
+            })
+            .unwrap_or(FillResult::Applied);
+
+        let outcome = journal
+            .record_fill(&fill)
+            .await
+            .map_err(|e| ExecutionError::Database(e.to_string()))?;
+
+        let new_state = if status.filled_qty >= status.submitted_qty {
+            OrderState::Filled
+        } else {
+            OrderState::PartiallyFilled
+        };
+        journal
+            .set_state(idempotency_key, new_state)
+            .await
+            .map_err(|e| ExecutionError::Database(e.to_string()))?;
+
+        if outcome == journal::WriteOutcome::Inserted {
+            audit.push(AuditEntry::StateTransition {
+                idempotency_key,
+                from: Some(OrderState::Submitted),
+                to: new_state,
+                reason: None,
+                at: Utc::now(),
+            });
+            info!(
+                %idempotency_key, %broker_order_id,
+                filled = %fill.filled_size, price = %fill.fill_price.inner(),
+                "fill recorded"
+            );
+        } else {
+            tracing::debug!(
+                %idempotency_key,
+                in_memory = ?in_memory,
+                "fill was already recorded — durable idempotency held"
+            );
+        }
+
+        Ok(Some(fill))
     }
 
     /// Cancel an open order by broker order ID.
@@ -209,22 +391,26 @@ pub fn order_record_from_intent(
     }
 }
 
-/// Determine the `Side` from an `OrderRecord` by looking up the original intent.
-/// In tests this is constructed directly; in production it comes from the DB.
-pub fn side_from_str(s: &str) -> Side {
-    if s == "buy" {
-        Side::Buy
-    } else {
-        Side::Sell
-    }
+/// Parse a persisted `Side`.  `None` for anything unrecognised.
+///
+/// This used to read `if s == "buy" { Buy } else { Sell }`, so a malformed,
+/// truncated or unexpected value silently became a **sell** — a
+/// position-reducing or short-opening order built from an input the platform
+/// could not read.  When an input cannot be trusted, refuse.
+///
+/// [`journal::parse_side`] is the same check with a reason attached; prefer it
+/// where an error can be surfaced.
+#[must_use]
+pub fn side_from_str(s: &str) -> Option<Side> {
+    journal::parse_side(s).ok()
 }
 
-pub fn order_type_from_str(s: &str) -> OrderType {
-    match s {
-        "limit" => OrderType::Limit,
-        "stop_limit" => OrderType::StopLimit,
-        _ => OrderType::Market,
-    }
+/// Parse a persisted `OrderType`.  `None` for anything unrecognised — an
+/// unknown type must never fall through to `Market`, which is the one type
+/// that executes immediately at any price.
+#[must_use]
+pub fn order_type_from_str(s: &str) -> Option<OrderType> {
+    journal::parse_order_type(s).ok()
 }
 
 pub fn decimal_or_zero(s: &str) -> Decimal {

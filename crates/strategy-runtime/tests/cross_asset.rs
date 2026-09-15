@@ -140,12 +140,12 @@ fn same_strategy_fires_same_signals_on_crypto_and_equity() {
 
     let mut crypto_intents = vec![];
     for event in &events {
-        crypto_intents.extend(crypto_instance.process_event(event));
+        crypto_intents.extend(crypto_instance.process_event(event).intents);
     }
 
     let mut equity_intents = vec![];
     for event in &equity_events {
-        equity_intents.extend(equity_instance.process_event(event));
+        equity_intents.extend(equity_instance.process_event(event).intents);
     }
 
     // Both emit the same signal (long) → same intent shape (Buy, fixed 0.01).

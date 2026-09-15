@@ -36,10 +36,18 @@ pub enum FillResult {
     Duplicate,
 }
 
-/// In-memory dedup key for a fill.  In production the DB `fills` table's
-/// UNIQUE constraint on `(idempotency_key, broker_order_id, fill_price, filled_qty)`
-/// provides the durable idempotency guarantee; this struct provides the
-/// in-memory fast path used in unit tests and by the `ExecutionEngine`.
+/// In-memory dedup key for a fill.
+///
+/// This is a **latency** cache and nothing more.  An earlier version of this
+/// comment claimed the `fills` UNIQUE constraint provided "the durable
+/// idempotency guarantee"; at the time neither the constraint nor any
+/// `INSERT INTO fills` existed, so the only thing standing between a
+/// redelivered fill and a double-applied position was the bounded `VecDeque`
+/// below — which a restart wipes, and a restart is exactly the reconnect SC-7
+/// is about.  The durable guarantee is now real and lives in
+/// [`crate::journal`]: `fills_idempotent` (migration 0121) plus
+/// `ON CONFLICT DO NOTHING`.  Both run on every fill; this one first because
+/// it is cheap, the database second because it is true.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FillDedupKey {
     pub idempotency_key: Uuid,
@@ -62,8 +70,9 @@ impl FillDedupKey {
 
 /// Stateful fill processor that tracks seen fills in memory.
 ///
-/// In production this is backed by the `fills` Postgres table, but the
-/// idempotency logic is encapsulated here so it can be unit-tested without I/O.
+/// Not a durability mechanism — see [`FillDedupKey`].  The authoritative
+/// answer to "have we already applied this fill?" is the `fills` table's
+/// unique constraint, checked in [`crate::journal::OrderJournal::record_fill`].
 ///
 /// Uses a bounded FIFO cache so memory usage is capped regardless of session
 /// length or fill volume (H-4).

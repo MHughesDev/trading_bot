@@ -62,6 +62,9 @@ pub fn spawn_pipeline(
     // (paper fills + live decisioning).  Registering the instrument's asset
     // class lets the paper half route orders to the right internal account.
     paper_engine.register_instrument(&instrument_id, asset_class);
+    // Stage 3 reads the paper account for equity-relative sizing; stage 2 owns
+    // the mark board.  One engine, two readers.
+    let paper_engine_for_sizing = Arc::clone(&paper_engine);
     let (raw_prod, raw_cons) = rtrb::RingBuffer::<RawTick>::new(4096);
     let (world_prod, world_cons) = rtrb::RingBuffer::<WorldEvent>::new(1024);
     let (intent_prod, intent_cons) = rtrb::RingBuffer::<OrderIntent>::new(256);
@@ -77,8 +80,10 @@ pub fn spawn_pipeline(
     ));
     let t3 = tokio::spawn(stage_strategy_eval(
         instrument_id.clone(),
+        asset_class,
         world_cons,
         intent_prod,
+        Arc::clone(&paper_engine_for_sizing),
     ));
     let t4 = tokio::spawn(stage_risk_exec(
         instrument_id,
@@ -317,26 +322,89 @@ async fn stage_bar_builder(
 
 /// Stage 3: consume `WorldEvent`, run strategy evaluation, push `OrderIntent`.
 ///
-/// The strategy instance is a placeholder — real loading is wired through the
-/// demand-manager / API layer.  The stage is structurally complete: it reads
-/// `ring_world` and never awaits any network call.
+/// This stage held `let mut strategy: Option<StrategyInstance> = None;` — a
+/// started strategy returned `200` and then produced no intents, for ever,
+/// with nothing in the logs to say so.  It now owns the instances for this
+/// instrument and re-syncs them from [`strategy_runtime::live`] whenever the
+/// registry's generation moves.
+///
+/// Per `WorldEvent` this costs one relaxed atomic load and no allocation:
+/// the instances are owned here (they hold mutable per-instrument state, so
+/// they cannot be shared), and the registry is read only on a generation
+/// change, which is a cold path (Set E locked decision 12).
 async fn stage_strategy_eval(
     instrument_id: String,
+    asset_class: AssetClass,
     mut world_cons: rtrb::Consumer<WorldEvent>,
     mut intent_prod: rtrb::Producer<OrderIntent>,
+    paper_engine: Arc<PaperTradingEngine>,
 ) {
+    use strategy_runtime::live::{LiveKey, LiveStrategySpec};
     use strategy_runtime::runtime::StrategyInstance;
+    use strategy_runtime::SizingContext;
 
     info!(instrument_id, "hot-path stage 3 (strategy-eval) starting");
 
-    // No strategy loaded by default; placeholder for demand-manager integration.
-    let mut strategy: Option<StrategyInstance> = None;
+    let registry = strategy_runtime::live::global();
+    // (key, instance, needs_sizing) — owned here, rebuilt only on a change.
+    let mut instances: Vec<(LiveKey, StrategyInstance)> = Vec::new();
+    // `u64::MAX` forces a first sync even when the registry is still at 0, so
+    // a strategy armed before this pipeline started is picked up immediately.
+    let mut synced_generation: u64 = u64::MAX;
 
     loop {
+        // One `Acquire` load per iteration.  No lock, no allocation.
+        let generation = registry.generation();
+        if generation != synced_generation {
+            let declared: Vec<Arc<LiveStrategySpec>> = registry.snapshot_for(&instrument_id);
+            resync_instances(&instrument_id, &mut instances, &declared);
+            synced_generation = generation;
+        }
+
         match world_cons.pop() {
             Ok(event) => {
-                if let Some(ref mut instance) = strategy {
-                    for intent in instance.process_event(&event) {
+                if instances.is_empty() {
+                    continue;
+                }
+                for (key, instance) in instances.iter_mut() {
+                    // Equity-relative sizing needs account state.  Read it only
+                    // for definitions that declare such a size mode, so the
+                    // common fixed-size strategy costs no account lock here.
+                    if instance.needs_sizing_context() {
+                        // The lot comes from instrument metadata, not from a
+                        // guess: quantizing to an assumed lot is how a size the
+                        // venue will reject gets submitted.  No metadata means
+                        // no sizing context, which the sizer reports as a
+                        // refused order naming what was missing.
+                        let sizing = match (
+                            paper_engine.mark(&instrument_id),
+                            risk::context::instrument_limits(&instrument_id),
+                        ) {
+                            (Some(mark), risk::Measured::Yes(limits)) => Some(SizingContext::new(
+                                paper_engine.snapshot(asset_class).equity,
+                                mark,
+                                limits.lot_size,
+                            )),
+                            _ => None,
+                        };
+                        instance.set_sizing_context(sizing);
+                    }
+
+                    let outcome = instance.process_event(&event);
+
+                    // A size that could not be computed is a refusal, not a
+                    // non-event.  It is logged with the strategy that asked.
+                    for (signal, error) in &outcome.errors {
+                        warn!(
+                            instrument_id,
+                            strategy_id = %key.strategy_id,
+                            signal,
+                            error = %error,
+                            "strategy signal produced no order — sizing failed"
+                        );
+                    }
+
+                    for intent in outcome.intents {
                         if intent_prod.push(intent).is_err() {
                             warn!(instrument_id, "ring_intent full — intent dropped");
                         }
@@ -348,7 +416,65 @@ async fn stage_strategy_eval(
     }
 }
 
+/// Bring the owned instance set in line with what the registry declares.
+///
+/// Instances whose key is still declared are **kept**, warm state and all:
+/// starting a second strategy on an instrument must not reset the first one's
+/// indicator history.
+fn resync_instances(
+    instrument_id: &str,
+    instances: &mut Vec<(
+        strategy_runtime::live::LiveKey,
+        strategy_runtime::runtime::StrategyInstance,
+    )>,
+    declared: &[Arc<strategy_runtime::live::LiveStrategySpec>],
+) {
+    use strategy_runtime::runtime::StrategyInstance;
+
+    let wanted: Vec<strategy_runtime::live::LiveKey> =
+        declared.iter().map(|s| s.key()).collect();
+
+    let before = instances.len();
+    instances.retain(|(key, _)| wanted.contains(key));
+    let removed = before - instances.len();
+
+    let mut added = 0;
+    for spec in declared {
+        let key = spec.key();
+        if instances.iter().any(|(k, _)| *k == key) {
+            continue;
+        }
+        instances.push((
+            key,
+            StrategyInstance::new(
+                spec.user_id.clone(),
+                spec.instrument_id.clone(),
+                spec.definition.clone(),
+                chrono::Utc::now(),
+            ),
+        ));
+        added += 1;
+    }
+
+    if added > 0 || removed > 0 {
+        info!(
+            instrument_id,
+            added,
+            removed,
+            live = instances.len(),
+            "hot-path stage 3 re-synced its strategy set"
+        );
+    }
+}
+
 /// Stage 4: consume `OrderIntent`, apply risk gate, submit to execution engine.
+///
+/// The context used to be eight hardcoded constants — a zero position, no
+/// mark, a tick and lot of `1`, a zero daily loss, `0, 0` order counts — with
+/// a comment blaming latency.  Three limits could not fire against it, so
+/// wiring stage 3 on top would have turned the single chokepoint into a rubber
+/// stamp (FM-2).  It now asks the one process-wide provider, and a context
+/// that cannot be built is a refusal, not a permissive default.
 async fn stage_risk_exec(
     instrument_id: String,
     mut intent_cons: rtrb::Consumer<OrderIntent>,
@@ -359,18 +485,20 @@ async fn stage_risk_exec(
     loop {
         match intent_cons.pop() {
             Ok(intent) => {
-                // Build a minimal GateContext from hot-path defaults.
-                // Full position/price state wiring is addressed by set-C issue #5.
-                let ctx = risk::GateContext::for_manual_order(
-                    Decimal::ZERO,
-                    None,
-                    Decimal::ONE,
-                    Decimal::ONE,
-                    Decimal::ZERO,
-                    true,
-                    0,
-                    0,
-                );
+                let ctx = match risk::context::context_for(&intent) {
+                    Ok(ctx) => ctx,
+                    Err(e) => {
+                        // Failing closed: no order beats an order through an
+                        // unverified gate, and the reason is visible.
+                        warn!(
+                            instrument_id,
+                            strategy_id = ?intent.strategy_id,
+                            error = %e,
+                            "no risk context — intent refused before the gate"
+                        );
+                        continue;
+                    }
+                };
                 match risk_gate.check(intent, &ctx) {
                     Ok(approved) => {
                         if let Err(e) = execution_engine.submit(approved).await {

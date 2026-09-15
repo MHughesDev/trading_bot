@@ -17,7 +17,7 @@ use std::sync::{Arc, OnceLock};
 
 use domain::{order::OrderIntent, RiskRejection};
 
-use crate::gate::GateContext;
+use crate::gate::{GateContext, InstrumentLimits, Measured};
 
 /// Supplies the measured risk context for an order about to be gated.
 ///
@@ -28,6 +28,14 @@ use crate::gate::GateContext;
 pub trait RiskContextProvider: Send + Sync {
     /// Build the context for `intent`, or explain why it cannot be built.
     fn context_for(&self, intent: &OrderIntent) -> Result<GateContext, RiskRejection>;
+
+    /// Tick and lot increments for `instrument_id`, if known.
+    ///
+    /// The sizer needs the lot to quantize an equity-relative size *before* the
+    /// order is built, which is earlier than [`Self::context_for`].  Not
+    /// knowing it is `Unavailable`; there is no "assume no lot" answer, because
+    /// assuming one is how a size that the venue will reject gets submitted.
+    fn instrument_limits(&self, instrument_id: &str) -> Measured<InstrumentLimits>;
 }
 
 static PROVIDER: OnceLock<Arc<dyn RiskContextProvider>> = OnceLock::new();
@@ -43,6 +51,17 @@ pub fn install(provider: Arc<dyn RiskContextProvider>) -> bool {
 #[must_use]
 pub fn provider() -> Option<Arc<dyn RiskContextProvider>> {
     PROVIDER.get().cloned()
+}
+
+/// Tick/lot increments for `instrument_id`, `Unavailable` when no provider is
+/// installed.  The sizer treats that as "cannot size", which surfaces as a
+/// refused order naming the missing metadata.
+#[must_use]
+pub fn instrument_limits(instrument_id: &str) -> Measured<InstrumentLimits> {
+    match provider() {
+        Some(p) => p.instrument_limits(instrument_id),
+        None => Measured::Unavailable,
+    }
 }
 
 /// Build the context for `intent`, refusing when no provider is installed.
