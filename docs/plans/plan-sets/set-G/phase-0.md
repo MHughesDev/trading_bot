@@ -1,6 +1,6 @@
 # Phase 0 — Content Audit
 
-**Completion: 0% (0 / 1 tasks)**
+**Completion: 100% (1 / 1) — DONE in commit 5febac2 (audited 2026-09-15; see [MASTER](MASTER.md))**
 
 **Goal:** Catalogue every file in `docs/archive/` before anything is deleted.
 Phase 3 (archive prune) is blocked on this audit. The output is a checklist

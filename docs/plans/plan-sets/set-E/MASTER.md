@@ -1,9 +1,139 @@
 # Production-Readiness — Stub, Placeholder & Tech-Debt Master Plan — Set E
 
-**Completion: 17% (5 / 30 primary tasks; 1 deferred-by-design — see Progress Log)**
+**Completion: 20% (6 / 30 fully done · 7 partial · 17 open; 1 deferred-by-design)
+— re-verified against the code 2026-09-15**
 
 > Future-scope items (TigerGraph, Milvus) live in [future-scope.md](future-scope.md)
 > and are **not** counted in the primary total.
+
+---
+
+## ⚠️ Re-audit, 2026-09-15 — read this before planning any Set E work
+
+The 2026-06-13 sweep is three months and a whole ML platform old. All 30 items
+were re-verified against the current code by the plan-hygiene track. **The
+headline number barely moved — 5/30 → 6/30 — and that is the finding.** Phases
+3, 4 and 5.1–5.4 are untouched since the sweep; Phase 1 moved from 0% to roughly
+half-built *by substance* while **no Phase 1 task fully meets its acceptance
+criteria**, which is exactly the failure mode this plan set exists to name.
+
+The old count was stale in both directions: 5.5 (MCP tests) landed as a side
+effect of other work and was never ticked, and 1.3 was substantially built
+without being claimed.
+
+| Verdict | Count |
+|---|---|
+| **DONE** | **6** — 0.1, 0.2, 0.3, 0.4, 0.5, 5.5 |
+| **PARTIAL** | **7** — 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.3 |
+| **OPEN** | **17** — 1.6, 1.7, 2.2, 3.1–3.6, 4.1–4.4, 5.1–5.4 |
+| OBSOLETE / UNKNOWN | 0 / 0 |
+
+### The answer Stage 3 needs: what blocks unattended paper trading
+
+ROADMAP Stage 3 folds Set E in because these items *"become load-bearing the
+moment something runs unattended against a broker."* **Ten of them do.** Ordered
+by how much damage a week of unattended running would do, each with the failure
+mode:
+
+| # | Task | Failure mode if a paper fleet runs a week unwatched |
+|---|---|---|
+| **1** | **5.4** hot-path stage 3 | `POST /api/strategies/{id}/start` returns 200 and registers the instance, but **nothing ever calls `dispatch`** (`hot_path.rs:333` is `Option::None`; `InstanceManager::dispatch` has no caller outside tests). Zero intents forever, no error. **Total silent outage of the product's core function.** |
+| **2** | **5.1** metrics | `crates/observability/src/metrics.rs:1-17` are empty-body stubs; no `metrics`/`prometheus` dependency, no `/metrics` route, **zero call sites**. Nothing to scrape, nothing to alert on. **This is the item that turns every other row here from "a bug" into "an un-diagnosable incident."** |
+| **3** | **2.3** residual | `routes/orders.rs:208-217` passes order counters `0, 0` and `daily_loss_usd = Decimal::ZERO`, so `RateLimitExceeded`, `RateLimitPerSecondExceeded` and `DailyLossLimitExceeded` **can never fire**. A looping strategy or a retrying client submits unbounded orders with no brake. |
+| **4** | **4.4** exit nodes | `toDefinition.ts:292-294` drops exit rules on save with a **warning only**. A strategy the operator designed with a stop-loss is persisted without it and runs unprotected all week. |
+| **5** | **4.2** `PercentOfBalance` | `intents.rs:31` returns `None` at runtime, while the builder happily saves percent-of-equity sizing. Every signal produces **no order and no error** — indistinguishable from "no signals fired". |
+| **6** | **1.3** `/ws/live` | `ws/live.rs:33-38` takes `?token=` and uses **the raw string as the user id** if non-empty — no session lookup, no expiry. The surviving M-17 hole: anyone reaching the port reads another tenant's frames. |
+| **7** | **1.4** automations | `routes/automations.rs:27` still `const DEV_USER: Uuid = Uuid::nil()`, and `storage/automation.rs:87,114,124` `list`/`set_armed`/`delete` carry **no `user_id` predicate**. Any authenticated caller can arm or **disarm** anyone's automation. |
+| **8** | **2.2** live P&L | `dashboard.rs:54-65` still returns the hard-coded all-zero rollup for `AccountMode::Live`. The operator's only P&L surface reports \$0 instead of erroring — **a losing week looks like a flat week.** |
+| **9** | **1.5** `dev-local` | `frontend/src/lib/api.ts:16` and `AppLayout.tsx:50` still fall back to `Bearer dev-local`. It is the credential that makes row 6 reachable from an unauthenticated browser tab. Also diverges from locked decision 1: bearer token in `localStorage`, no cookie, no CSRF. |
+| **10** | **1.1** sessions | `migrations/0013_auth.sql` stores `sessions.token` as **cleartext `TEXT PRIMARY KEY`**, not the specified SHA-256 `token_hash BYTEA`; no `last_seen_at`, no sliding expiry, no sweep. A DB dump or a logged row is a full-authority bearer credential, including `POST /api/trading/resume`. |
+
+**Explicitly NOT blocking** — 1.2, 1.6, 1.7, 2.1, 3.1–3.6, 4.1, 4.3, 5.2, 5.3.
+These are ordinary debt. The reasoning matters: **1.7's bind guard fails
+*closed*** (loopback-only is safer than the flip it asks for, so leaving it is
+correct); the Tradier/Tradovate/Coinbase/0x adapters all fail loudly or are
+simply unreachable (**only `PaperBroker` is ever constructed** —
+`apps/platform/src/main.rs:151`); compaction and `OrderBookBuilder` are inert
+no-ops with no consumer.
+
+### Ten things wrong in the code that no Set E item covers
+
+Found during this audit. **None was fixed here.** Several are more dangerous
+than items already in the plan, and the first four are, jointly, the reason
+"unattended" is not currently a safe word for this platform.
+
+1. **Nothing ever writes an order or a fill to the database.** A repo-wide grep
+   for `INSERT INTO orders` / `INSERT INTO fills` returns **zero hits**. The
+   `orders` and `fills` tables from `migrations/0003` are permanently empty, so
+   `GET /api/orders/{id}` (`routes/orders.rs:255-262`, selecting on
+   `idempotency_key`) **can never succeed**.
+2. **Order idempotency does not survive a restart.** `ExecutionEngine`'s dedup is
+   an in-memory bounded `VecDeque` of 50,000 keys behind a `Mutex`
+   (`execution/src/lib.rs:69`, `fills.rs:17`). Its own doc comment at
+   `fills.rs:38-41` claims *"the DB `fills` table's UNIQUE constraint provides
+   the durable idempotency guarantee"* — **and nothing writes that table**, per
+   item 1. The durable guarantee does not exist; a restart mid-week re-applies
+   any redelivered fill.
+3. **The order audit trail is built and then thrown away.**
+   `ExecutionEngine::submit` (`execution/src/lib.rs:85-109`) constructs
+   `AuditEntry::state_transition` and `AuditEntry::broker_submit` and returns
+   them in `SubmitResult.audit`; `routes/orders.rs:222-236` **ignores the field**,
+   and no migration creates an order-audit table. There is no durable record
+   that any order was ever placed.
+4. **The kill switch does not persist when tripped.**
+   `risk/src/kill_switch.rs:26-36` flips only an `AtomicBool`;
+   `POST /api/trading/kill` (`routes/trading.rs:19-28`) never writes
+   `global_risk_config.trading_enabled`, which boot *does* read
+   (`main.rs:483-499`). **A kill switch tripped on Monday is silently reset by
+   any restart.** The doc comment says persistence is "the caller's
+   responsibility" — no caller does it. This directly undercuts ROADMAP Stage
+   3's exit criterion *"a kill-switch drill stops order flow within one
+   cadence"*.
+5. **The paper engine is entirely in-memory and non-durable.**
+   `PaperTradingEngine` holds accounts, positions, cash and marks behind
+   `Mutex`es with `snapshot()` and no save/load (`execution/src/paper/engine.rs`).
+   A restart silently resets positions, cash and realized P&L to seed state.
+   Nothing in Set E covers paper-state durability, and Stage 3 is *made of*
+   paper state.
+6. **Armed automations are dead code.** `storage::automation::armed_automations`
+   (`storage/src/automation.rs:98`) **has no caller**; the only boot-time touch is
+   `disarm_all_automations` (`main.rs:282`). `POST /api/automations/{id}/arm`
+   returns success and starts a data pipeline, and then **nothing ever evaluates
+   the spec**. This is a *second* silent path, distinct from the hot path that
+   item 5.4 covers.
+7. **No graceful shutdown.** `main.rs:470-478` is `axum::serve(listener,
+   router).await` with no `with_graceful_shutdown` and no ctrl-c/SIGTERM handler
+   anywhere. In-flight submits and the tee / bar-persist tasks are killed
+   mid-flight.
+8. **Mutex-poisoning panics on the order and fill paths.** `execution/src/lib.rs:159`
+   `.expect("fill_processor lock")`, `risk/src/gate.rs:196,224`
+   `.expect("seen_keys lock")` (**on every order approval**),
+   `paper/engine.rs:556,567,586,606,696,784,792,963`, and
+   `routes/strategies.rs:238,284`. One panic under any of those locks poisons it
+   permanently: every subsequent order then panics the handler task rather than
+   returning an error, **and the process keeps running looking healthy**.
+9. **Inbound order side fails open to `Sell`.** `execution/src/alpaca.rs:99-105`
+   and `execution/src/lib.rs:214-220`:
+   `if s == "buy" { Side::Buy } else { Side::Sell }`. Outbound mapping is correct,
+   but on the inbound path any unrecognised, empty, truncated or differently-cased
+   value silently becomes a **short**. In a system that reconstructs positions and
+   P&L from broker records, a parse glitch turning a long into a short is the
+   wrong direction to fail.
+10. **`zerox.rs:79-141` `submit` fabricates a broker order id without
+    broadcasting anything** — it returns `Ok(format!("0x:{}", quote.to))`, the 0x
+    *contract address*, identical for every order, so it is not even a unique key.
+    Task 0.2 fixed `query_order` and left `submit` claiming success for an order
+    that was never sent. Harmless only because `ZeroXBroker` is never constructed.
+    Also `GET /api/dashboard/rollup` (`routes/dashboard.rs:35-38`) is **the only
+    handler in `routes/` with no `BearerToken`** — read-only, but it is the P&L
+    surface.
+
+**Recommendation for Stage 3 planning:** the ten blocking items above plus
+untracked findings 1–8 are the real Stage-3 prerequisite list, and it is
+**eighteen items, not ten**. Findings 1–5 in particular (no order/fill
+persistence, no durable idempotency, no order audit trail, a non-persisting kill
+switch, a non-durable paper engine) are not "tech debt" — they are the absence of
+the substrate Stage 3's exit criteria are written against.
 
 ## Overview
 
@@ -59,12 +189,12 @@ Two findings the log under-rated are promoted here to **safety/correctness**:
 
 | Phase | File | Label | Tasks | Completion | Goal |
 |-------|------|-------|-------|------------|------|
-| 0 | [phase-0.md](phase-0.md) | Correctness & safety quick wins | 5 | 100% | fix the live-trading hazards that are cheap to fix now |
-| 1 | [phase-1.md](phase-1.md) | Authentication & multi-user | 7 | 0% | real session auth; unlock network binding |
-| 2 | [phase-2.md](phase-2.md) | Live P&L, manual orders & shared data | 3 | 0% | real $ rollup + paper manual orders via real risk context |
-| 3 | [phase-3.md](phase-3.md) | Execution venue adapters | 6 | 0% | Tradier/Tradovate account sources; real DEX quotes + on-chain; Coinbase live |
-| 4 | [phase-4.md](phase-4.md) | Strategy surface & sizing | 4 | 0% | SMA/ATR, %-of-balance sizing, scanner, v1.5 format |
-| 5 | [phase-5.md](phase-5.md) | Data pipeline & observability | 5 | 0% | metrics, compaction, order book, hot-path strategies |
+| 0 | [phase-0.md](phase-0.md) | Correctness & safety quick wins | 5 | **100% (5/5)** | fix the live-trading hazards that are cheap to fix now |
+| 1 | [phase-1.md](phase-1.md) | Authentication & multi-user | 7 | **0% fully — 5 PARTIAL** | real session auth; unlock network binding. **4 of 7 block unattended paper** |
+| 2 | [phase-2.md](phase-2.md) | Live P&L, manual orders & shared data | 3 | **0% fully — 2 PARTIAL** | real $ rollup + paper manual orders. **2 of 3 block unattended paper** |
+| 3 | [phase-3.md](phase-3.md) | Execution venue adapters | 6 | **0%** | untouched. **None blocks unattended PAPER** — only `PaperBroker` is constructed |
+| 4 | [phase-4.md](phase-4.md) | Strategy surface & sizing | 4 | **0%** | untouched. **4.2 and 4.4 block unattended paper** — both fail silently |
+| 5 | [phase-5.md](phase-5.md) | Data pipeline & observability | 5 | **20% (1/5)** | 5.5 shipped, never ticked. **5.1 and 5.4 are the worst blockers in the set** |
 | FS | [future-scope.md](future-scope.md) | Future scope (not counted) | — | — | TigerGraph / Milvus — keep code, gate infra |
 
 **Recommended sequencing:** 0 → 1 → 2 makes the platform safe-to-run and
@@ -149,3 +279,4 @@ Update this table and the per-phase completion headers as tasks land.
 | 2026-06-13 | — | plan | Set E created from the repo-wide stub/stale sweep + 5-cluster deep research; consolidates COMPLACENCY_LOG v2 (21 items) + 8 new findings. **Deferred-by-design:** 4.5 (RiskUnit — blocked on exit nodes), plus the future-scope appendix (TigerGraph, Milvus). |
 | 2026-06-13 | — | decisions | All 12 design decisions locked. **3.4 (0x full on-chain submit/poll) and 3.5 (Coinbase live) promoted from deferred into scope** per decisions 7 & 8 — both real-money paths, gated by a key-handling security review. Decision 12 set to a real `PipelineFactory` in the demand-manager (arc-swap internally). |
 | 2026-06-13 | 0 | all 5 tasks | **Phase 0 complete.** 0.1: freshness.rs now converts UTC→venue local time via `chrono-tz` before comparing to session windows; 6 new timezone-correct tests. 0.2: zerox.rs `query_order` returns `Unknown` (not `Filled`); token scaling uses per-symbol decimal map (USDC/USDT=6). 0.3: `list_lanes`/`list_instruments` use `domain::lanes::ALL_LANES` and `domain::instrument::ALL_ASSET_CLASSES`; `list_instruments` now queries the live Postgres `instruments` table (async MCP server, `DATABASE_URL`-driven). 0.4: `json_msg` returns `Option<Message>`; serialize failures are logged and frame is dropped. 0.5: TigerGraph/Milvus/etcd/minio behind `profiles: ["vector-graph"]`; embedder `MILVUS_HTTP_PORT` default corrected to 19530. |
+| 2026-09-15 | all | audit | **Re-verified all 30 items against the code** (plan-hygiene track, ROADMAP Stage 3). True count **6 / 30** (was 5): 6 DONE, 7 PARTIAL, 17 OPEN, 0 obsolete. 5.5 had shipped and was never ticked; 1.3 was built without being claimed. Phases 3, 4 and 5.1–5.4 untouched since the sweep. **Ten items marked as blocking unattended paper trading**, plus ten untracked code defects recorded in the audit header — five of which (no order/fill persistence, no durable idempotency, no order audit trail, a kill switch that does not survive restart, a non-durable paper engine) are prerequisites Stage 3's exit criteria assume already exist. |

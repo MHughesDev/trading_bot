@@ -1,6 +1,56 @@
 # AI Agent MCP Platform — Full Read/Write Strategy, Backtest & Automation — Set F
 
-**Completion: 0% (0 / 11 primary tasks)**
+**Completion: 9 / 11 shipped, 2 deliberately reversed — CLOSED, SUPERSEDED by
+ADR-0022 + AGENT-006 (audited 2026-09-15)**
+
+> **Do not execute this set as written.** The `0 / 11` above was a bookkeeping
+> failure, not a build failure: Set F was **built during the ADR-0022 work in
+> September 2026 and never ticked off**. `INTG-001` has said
+> `Status: Implemented · Version: 2.0 (Set F)` since that work landed, which is
+> the clearest single piece of evidence that this MASTER was stale rather than
+> the code being absent.
+>
+> Re-checked against the code on 2026-09-15:
+>
+> | # | Task | State | Evidence / disposition |
+> |---|---|---|---|
+> | 1 | **F-0.1** stdio → Streamable HTTP (MCP 2025-03-26) | **Shipped** | `apps/mcp-server/src/main.rs:1` module doc declares Streamable HTTP; `POST /mcp` at `:57`, SSE upgrade at `:117-166`, keep-alive/`notifications/progress` streaming at `:173-236`. Exceeds the task: ADR-0022 §3 added keep-alives the plan never asked for. |
+> | 2 | **F-1.1** `StrategyDraft` store in `McpContext` | **Shipped** | `crates/mcp-server/src/lib.rs:188` `draft_store: Arc<Mutex<HashMap<Uuid, StrategyDraft>>>`; `new_strategy_draft` / `discard_draft` in `taxonomy.rs`. ADR-0022 §1 kept the draft builder process-local *by name* — this is the one part of `McpContext` the ADR preserved. |
+> | 3 | **F-1.2** 7 step-by-step builder tools | **Shipped, exceeded** | `builder` namespace holds **10** tools (`taxonomy.rs:64-74`): the 7 planned plus `new_strategy_draft`, `discard_draft`, `get_draft_summary`. |
+> | 4 | **F-1.3** `finalize_strategy` (assemble → validate → persist) | **Shipped** | `taxonomy.rs:74`; end-to-end test `workflow_a_draft_to_finalize_persists_via_api` (`crates/mcp-server/tests/integration.rs:261`) and the negative case `workflow_b_invalid_draft_catches_errors` (`:303`). |
+> | 5 | **F-2.1** Add `BacktestManager` to `McpContext` | **Reversed — do not build** | ADR-0022 §1 names this exact design as the defect it was written to remove: a second `BacktestManager` over the shared `backtest_jobs` table whose hydrate pass marks non-terminal rows failed. `McpContext` (`lib.rs:183-191`) now holds only `ApiClient`, `draft_store`, `trajectory`. |
+> | 6 | **F-2.2** `list_backtests` + `get_backtest` | **Shipped, exceeded** | `taxonomy.rs:76-87` — plus `stop_backtest`, `rerun_backtest`, `delete_backtest`, `compare_backtests`, `wait_for_backtest`. Tests at `integration.rs:393, 414, 465`. |
+> | 7 | **F-2.3** `create_backtest` write tool | **Reversed — do not build** | Deleted under INV-16: it dispatched compute with no ledger trial row. The refusal is now an enforced invariant, not an absence — `taxonomy.rs:78-80` records why, and two tests prove it stays gone: `dispatching_create_backtest_by_name_is_refused` (`integration.rs:367`) and `no_tool_profile_can_dispatch_an_unregistered_backtest` (`:661`). The legitimate successor is `backtest_strategy`, which registers the trial first. AGENT-006 P5 restates this as a catalogue principle. |
+> | 8 | **F-3.1** Automation storage wired into `McpContext` | **Shipped differently** | Storage is **not** in `McpContext`; automations route over HTTP to `/api/automations` (`tools/automations.rs:14, 73, 99`), which is ADR-0022 §1's thin-client rule. The task's *outcome* — the agent can reach automations — holds; its *mechanism* is correctly dead. |
+> | 9 | **F-3.2** `list_automations` | **Shipped** | `taxonomy.rs:93`. |
+> | 10 | **F-3.3** `create_automation`, `arm_automation`, `disarm_automation` | **Shipped, with the live gate** | `taxonomy.rs:94-99`. `MCP_ALLOW_LIVE_AUTOMATIONS` defaults off exactly as decision 6 locked it (`lib.rs:279-281`, `tools/automations.rs:45`), proven by `live_automations_default_off` (`integration.rs:586`) and `automations_route_through_api_and_live_is_gated` (`:496`). `arm_automation` was additionally classified `Risk::Destructive` — stricter than the plan. |
+> | 11 | **F-4.1 / F-4.2** `tool_definitions()`, INTG-001, integration tests | **Shipped; forward ownership moves to AGENT-006** | `INTG-001` header reads `Status: Implemented · Version: 2.0 (Set F)`. 681-line `integration.rs` with 17 tests, plus 7 taxonomy tests. **But** the hand-maintained four-array registration this task institutionalised is precisely what AGENT-006 §0 and §2.3 identify as a defect source and replace with `ToolSpec`. Further work on tool declaration belongs to AGENT-006, not here. |
+>
+> **Disposition: closed.** Nine tasks shipped (two of them exceeded), two were
+> deliberately reversed by decisions that outrank this plan. Nothing in Set F is
+> still owed. Roadmap gap **G-5** is resolved: there is nothing to re-derive,
+> because the only live question — *how a tool is declared and how the catalogue
+> grows* — already has an owner in
+> [`AGENT-006`](../../../specs/AGENT-006-tool-catalog.md). Human gate **H-5**'s
+> Set F half needs no decision.
+>
+> **Two things this audit found that are not Set F's to fix, recorded so they are
+> not lost:**
+>
+> 1. `taxonomy.rs:90` records that *the agent's service token does not carry
+>    `automations.arm`*, so the automation tools are unreachable from a research
+>    session regardless of policy. They exist for the human MCP client only. That
+>    is a deliberate and good choice, but it means **F-3.x shipped a surface the
+>    internal agent cannot use** — worth knowing before anyone plans work on top
+>    of it.
+> 2. `INTG-001` §2 still says the server "binds to loopback only until Set E
+>    Phase 1 (cookie-session auth) lands", carrying a Set-E dependency that Set
+>    E's own audit must confirm. The bind guard is a **Set E** item, not an MCP
+>    one.
+>
+> The sections below are kept for the decision record in §"Locked Decisions",
+> which documents why the shipped surface looks the way it does. Read them as
+> history.
 
 ## Overview
 
@@ -54,11 +104,11 @@ new crate is added.
 
 | Phase | File | Label | Tasks | Completion | Goal |
 |-------|------|-------|-------|------------|------|
-| 0 | [phase-0.md](phase-0.md) | HTTP Transport | 1 | 0% | Replace stdio with Streamable HTTP (MCP 2025-03-26) via Axum |
-| 1 | [phase-1.md](phase-1.md) | Strategy Builder | 3 | 0% | Draft store + 7 builder tools + finalize |
-| 2 | [phase-2.md](phase-2.md) | Backtest Tools | 3 | 0% | BacktestManager in context + trigger/poll/read |
-| 3 | [phase-3.md](phase-3.md) | Automation Tools | 3 | 0% | Assign, arm, disarm automations |
-| 4 | [phase-4.md](phase-4.md) | Spec & Tests | 2 | 0% | Update INTG-001; integration tests for full agent workflow |
+| 0 | [phase-0.md](phase-0.md) | HTTP Transport | 1 | **100%** | Shipped — Streamable HTTP + SSE keep-alives |
+| 1 | [phase-1.md](phase-1.md) | Strategy Builder | 3 | **100%** | Shipped — 10 builder tools (7 planned), draft store, finalize |
+| 2 | [phase-2.md](phase-2.md) | Backtest Tools | 3 | **33% + 2 reversed** | Read tools shipped; F-2.1 and F-2.3 reversed by ADR-0022 / INV-16 |
+| 3 | [phase-3.md](phase-3.md) | Automation Tools | 3 | **100%** | Shipped over HTTP, live mode gated off |
+| 4 | [phase-4.md](phase-4.md) | Spec & Tests | 2 | **100%** | INTG-001 v2.0 Implemented; 17 integration + 7 taxonomy tests |
 
 ---
 
@@ -109,3 +159,4 @@ Update this table and the per-phase completion headers as tasks land.
 | Date | Phase | Task | Note |
 |------|-------|------|------|
 | 2026-06-13 | — | plan | Set F created; all 7 decisions locked. 11 tasks across 5 phases. |
+| 2026-09-15 | all | audit | **Set closed.** Audited against the code by the plan-hygiene track (ROADMAP §9 G-5). 9 of 11 tasks were found already shipped and never ticked; F-2.1 and F-2.3 are deliberately reversed by ADR-0022 §1 and INV-16 and must not be built. Forward ownership of tool declaration passes to AGENT-006. See the superseded header for per-task evidence. |

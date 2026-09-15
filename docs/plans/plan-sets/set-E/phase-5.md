@@ -1,6 +1,6 @@
 # Phase 5 — Data Pipeline & Observability
 
-**Completion: 0% (0 / 5 tasks complete)**
+**Completion: 20% (1 / 5) — 5.5 shipped and was never ticked. **5.1 and 5.4 are the two worst unattended-paper blockers in the whole set** (re-audited 2026-09-15; see [MASTER](MASTER.md))**
 
 **Goal:** Wire production visibility, complete the deferred data-pipeline
 mechanics, and close the hot path so the ring pipeline actually runs strategies.
@@ -15,7 +15,7 @@ mechanics, and close the hot path so the ring pipeline actually runs strategies.
 
 ## Tasks
 
-### ☐ 5.1 Metrics registry + `/metrics` exporter + call sites — M
+### ☐ 5.1 [OPEN — empty stubs, no dep, no route, zero call sites] — ⚠ **BLOCKS UNATTENDED PAPER** Metrics registry + `/metrics` exporter + call sites — M
 **Addresses #14, #15 (CL metrics, correctness).** `metrics.rs`/`correctness.rs`
 are no-op structs with **no call sites anywhere**; no `prometheus`/`metrics` dep;
 no `/metrics` endpoint.
@@ -62,7 +62,7 @@ no `/metrics` endpoint.
 - **Verify:** snapshot→deltas reconstructs a known book; a sequence gap forces
   resync rather than silent corruption.
 
-### ☐ 5.4 Hot-path stage-3 strategy integration — L — **largest**
+### ☐ 5.4 [OPEN — `hot_path.rs:333` is still `Option::None`; the pipeline emits zero intents] — ⚠ **BLOCKS UNATTENDED PAPER** Hot-path stage-3 strategy integration — L — **largest**
 **Addresses #26 (NF).** `stage_strategy_eval` declares
 `let mut strategy: Option<StrategyInstance> = None;` (`hot_path.rs:153`) — it
 pops `WorldEvent`s and produces **no intents**. The machinery is complete
@@ -84,7 +84,7 @@ handle; demand-manager uses `NoopPipelineFactory`.
   (set-C #3/#24); the stage-2 one-bar-per-tick shim limits fidelity until that
   lands.
 
-### ☐ 5.5 MCP server tests — S–M
+### ☑ 5.5 [DONE — 681-line `crates/mcp-server/tests/integration.rs`, 17 tests, run by CI] MCP server tests — S–M
 **Addresses #21 (CL mcp tests).** 5 source files, 0 tests. After 0.3 makes
 discovery query real registries, add tests for tool discovery, lane queries, and
 instrument enumeration against seeded platform state.

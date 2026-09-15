@@ -1,6 +1,6 @@
 # Phase 4 — Strategy Surface & Sizing
 
-**Completion: 0% (0 / 4 tasks complete; 1 deferred-by-design — 4.5)**
+**Completion: 0 / 4 — untouched since the sweep; 1 deferred-by-design (4.5). **4.2 and 4.4 BLOCK unattended paper** — both fail silently, not loudly (re-audited 2026-09-15; see [MASTER](MASTER.md))**
 
 **Goal:** Close the gaps between what the strategy builder lets users express and
 what the engine executes, **without ever breaking live/replay parity**
@@ -32,7 +32,7 @@ change — implement in the shared crate and both live + replay gain them.
 - **Verify:** indicator unit tests; a backtest using `sma_*`/`atr_*` runs;
   builder no longer warns.
 
-### ☐ 4.2 `PercentOfBalance` sizing — M/L — **live + replay together**
+### ☐ 4.2 [OPEN — `intents.rs:31` returns `None`: no order AND no error] — ⚠ **BLOCKS UNATTENDED PAPER** `PercentOfBalance` sizing — M/L — **live + replay together**
 **Addresses #22 (NF, PoB).** Parse-only in the shared
 `intents::build_intent_from_action` (returns `None`,
 `strategy-runtime/src/intents.rs:35`); backtest hard-errors on non-Fixed
@@ -74,7 +74,7 @@ pipeline's `initial_universe` is unsourced outside tests.
 - **Verify:** a discovery strategy surfaces a real instrument set end-to-end;
   the universe feed has a test.
 
-### ☐ 4.4 Strategy-definition v1.5: exit nodes + AND/OR — L — **format bump**
+### ☐ 4.4 [OPEN — exit rules dropped on save with a warning only] — ⚠ **BLOCKS UNATTENDED PAPER** Strategy-definition v1.5: exit nodes + AND/OR — L — **format bump**
 **Addresses #24 (NF).** v1.0 grammar has no boolean operators and no exit nodes
 (`nodes.rs`, ADR-0007); the builder hard-errors on AND/mixed conditions and
 drops exit rules (`toDefinition.ts:130-165`). Both require grammar/vocabulary

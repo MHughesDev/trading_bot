@@ -1,6 +1,6 @@
 # Phase 4 — Index & Navigation Updates
 
-**Completion: 0% (0 / 4 tasks)**
+**Completion: 75% (3 / 4) — G-4.2/4.3/4.4 DONE; G-4.1 (`FOLDER_MAP.md`) OPEN (audited 2026-09-15)**
 
 **Goal:** After all file moves and prunes are complete, update the navigation
 layer so readers can find everything from the top-level entry points: root

@@ -1,6 +1,6 @@
 # Phase 3 — Execution Venue Adapters
 
-**Completion: 0% (0 / 6 tasks complete)**
+**Completion: 0 / 6 — untouched since the 2026-06-13 sweep. None blocks unattended PAPER trading: only `PaperBroker` is ever constructed (`apps/platform/src/main.rs:151`) and every stub fails loudly (re-audited 2026-09-15)**
 
 **Goal:** Complete the account-source adapters, real DEX quoting **and on-chain
 execution**, and the **live Coinbase broker**, following the existing complete

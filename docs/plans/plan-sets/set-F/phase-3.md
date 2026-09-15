@@ -1,6 +1,6 @@
 # Phase 3 — Automation Tools
 
-**Completion: 0% (0 / 3 tasks)**
+**Completion: 100% (3 / 3 tasks) — SHIPPED (audited 2026-09-15; see [MASTER](MASTER.md))**
 
 **Goal:** Let an AI agent create an automation that ties a strategy to an
 instrument, then arm or disarm it. Uses the existing automation storage layer
@@ -27,7 +27,7 @@ lands — same as the REST API.
 
 ## Tasks
 
-### ☐ F-3.1 Wire automation storage into McpContext — S
+### ☑ F-3.1 [SHIPPED DIFFERENTLY — over HTTP, not in McpContext] Wire automation storage into McpContext — S
 
 **What:** `McpContext` already has `pg: Option<PgPool>`. No new field is
 needed — automation functions take `&PgPool` directly. This task just adds
@@ -54,7 +54,7 @@ Expose this helper from `crates/mcp-server/src/lib.rs`.
 
 ---
 
-### ☐ F-3.2 `list_automations` read tool — S
+### ☑ F-3.2 [SHIPPED] `list_automations` read tool — S
 
 **What:** Lists all automations for the current user.
 
@@ -96,7 +96,7 @@ Expose this helper from `crates/mcp-server/src/lib.rs`.
 
 ---
 
-### ☐ F-3.3 `create_automation`, `arm_automation`, `disarm_automation` write tools — M
+### ☑ F-3.3 [SHIPPED] `create_automation`, `arm_automation`, `disarm_automation` write tools — M
 
 **What:** Three write tools covering the full automation write surface for
 `SingleInstrument` automations (Pipeline automations are a Phase 4 / Set E
