@@ -20,7 +20,7 @@ use thiserror::Error;
 
 use crate::bytecode;
 use crate::clock::StrategyClock;
-use crate::exits::{BarAggregator, ExitTracker, NetEffect, NetPosition};
+use crate::exits::{BarAggregator, ExitTracker, NetEffect, NetPosition, Triggered};
 use crate::ids::NodeId;
 use crate::intents::build_intents_for_signals;
 use crate::interpreter::evaluate_condition;
@@ -67,6 +67,15 @@ struct LiveExits {
     /// The netted position, assumed from this instance's own emitted intents
     /// and corrected by [`WorldEvent::PositionUpdate`].
     position: Option<NetPosition>,
+    /// The last exit this instance fired, kept so that the rule and the level
+    /// it rested at stay observable after the flattening order has gone.
+    ///
+    /// Live has no `conservative_exit_fill`: the simulator needs it because it
+    /// cannot rest an order and must reconcile the level with the close it
+    /// actually got, whereas a live fill is simply what happened. Keeping the
+    /// level is what makes the gap between the two measurable rather than
+    /// assumed (ADR-P6-15).
+    last_exit: Option<Triggered>,
 }
 
 /// A single runtime binding of a strategy definition to one instrument for one user.
@@ -416,6 +425,7 @@ impl StrategyInstance {
                 bars: BarAggregator::new(*timeframe),
                 timeframe: *timeframe,
                 position: None,
+                last_exit: None,
             });
         }
 
@@ -453,6 +463,7 @@ impl StrategyInstance {
 
         exits.position = None;
         exits.tracker.closed();
+        exits.last_exit = Some(triggered.clone());
         tracing::info!(
             instrument_id = %instrument_id,
             strategy_id = %strategy_id,
@@ -544,6 +555,17 @@ impl StrategyInstance {
     #[must_use]
     pub fn exit_bars_held(&self) -> Option<u32> {
         self.exits.as_ref().and_then(|e| e.tracker.bars_held())
+    }
+
+    /// The last declared exit this instance fired: which rule, the level it
+    /// rested at, and how many bars the position was held.
+    ///
+    /// The level is what the policy said, not what the venue paid. The gap
+    /// between the two is live slippage, and it is only measurable because
+    /// this is kept (ADR-P6-15).
+    #[must_use]
+    pub fn last_declared_exit(&self) -> Option<&Triggered> {
+        self.exits.as_ref().and_then(|e| e.last_exit.as_ref())
     }
 
     /// Collect resolved size fractions from `Sizing` nodes that produced an
