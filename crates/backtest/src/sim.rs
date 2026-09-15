@@ -239,22 +239,23 @@ impl SimPosition {
                 *pos = Some(open);
                 NetEffect::Reopened { side, entry: open.entry }
             }
-            Some(mut open) => {
-                if qty < open.qty {
+            Some(mut open) => match qty.cmp(&open.qty) {
+                std::cmp::Ordering::Less => {
                     open.qty -= qty;
                     *pos = Some(open);
                     NetEffect::Unchanged
-                } else if qty == open.qty {
+                }
+                std::cmp::Ordering::Equal => {
                     *pos = None;
                     NetEffect::Flat
-                } else {
-                    // A reversal is an exit and a new entry, and the new
-                    // position's stop is measured from the new entry.
-                    let rest = qty - open.qty;
-                    *pos = Some(Self { side, qty: rest, entry: fill });
+                }
+                // A reversal is an exit and a new entry, and the new position's
+                // stop is measured from the new entry.
+                std::cmp::Ordering::Greater => {
+                    *pos = Some(Self { side, qty: qty - open.qty, entry: fill });
                     NetEffect::Reopened { side, entry: fill }
                 }
-            }
+            },
         }
     }
 }
