@@ -216,8 +216,10 @@ Static analysis: no type, endpoint or component matches `critical_difference` / 
 **AT-63 ⛔ · The platform seed is unreadable.**
 Assert `agent_role` has no SELECT grant on `campaign.platform_seed` and that no API response type carries it. Attempt a read as the agent role; assert permission denied. *(§12.7, ADR-P2-18)*
 
-**AT-64 · Denials are provable.**
-For each of the four approval-gated actions, assert an `audit_event` with `record_phase = 'pre'` is written before the policy check; deny the action; assert the `pre` record exists and no `post` record does. *(§15, ADR-P2-21)*
+**AT-64 ⛔ · Denials are provable, through every door.**
+For each of the four approval-gated actions, assert an `audit_event` with `record_phase = 'pre'` is written before the policy check; deny the action; assert the `pre` record exists and the `post` record carries `denied`. Then assert the coverage is **structural rather than enumerated**: every `dispatch_tool` caller writes the pair, the external MCP process included; the envelope type is sealed to `AuditSink::open` so a dispatch path that skips the audit fails to compile; and — adversarially — a dispatch the platform refuses to record does not happen at all, touching no platform endpoint, rather than being logged and run. *(§15, ADR-P2-21, ADR-P2-34)*
+
+*Verified by:* `at64_no_dispatch_path_can_skip_the_audit_trail` (`crates/invariants/tests/static_invariants.rs`); `at64_the_external_front_door_writes_pre_and_post_around_every_dispatch`, `at64_a_dispatch_the_platform_will_not_record_is_refused_not_logged`, `at64_even_a_tool_answered_from_memory_is_refused_without_a_record`, `at64_a_failing_tool_still_closes_its_record`, `at64_an_unknown_tool_is_still_recorded` (`crates/mcp-server/tests/integration.rs`); `every_gated_action_is_classified_into_exactly_one_envelope` (`crates/ledger/src/audit.rs`); `the_principal_is_derived_by_the_platform_not_declared_by_the_caller` (`crates/api/src/agent/audit.rs`).
 
 **AT-65 ⛔ · `paper_v1` cannot authorise capital.**
 Assert a `paper_v1` pass cannot raise `allowed_fraction` above 0, and that a comparison between a `paper_v1` and a `strict_v1` verdict is flagged non-comparable. *(§12.3, ADR-P2-14)*

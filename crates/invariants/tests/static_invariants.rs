@@ -461,67 +461,162 @@ fn at63_no_api_type_carries_the_platform_seed() {
     );
 }
 
-/// AT-64 · Denials are provable: the `pre` record is written before the policy
-/// check (SPEC §15, ADR-P2-21).
+/// AT-64 · Denials are provable, through **every** door: the `pre` record is
+/// written before the policy check, and a dispatch the platform will not record
+/// does not happen (SPEC §15, ADR-P2-21, ADR-P2-34).
 ///
 /// The property is an *ordering*, and ordering is the kind of thing a refactor
 /// reverses without anyone noticing, so it is pinned in the source rather than
-/// left to a convention. `bridge::execute` is the single function every internal
-/// agent tool call passes through; this asserts the `pre` write appears before
-/// the dispatch in it, that the `post` write appears after, and that nothing
-/// else in the tree dispatches around it.
+/// left to a convention.
+///
+/// # What changed, and why this test no longer lists callers
+///
+/// It used to enumerate every `dispatch_tool` caller and assert the list, with
+/// `apps/mcp-server/src/main.rs` on it as a **named exemption**: the external
+/// front door is a separate process and wrote no trail. A list is the weakest
+/// possible form of this check — it goes stale by being edited, and the edit
+/// that adds a new door looks exactly like the edit that keeps the list current.
+///
+/// The exemption is closed and the list is gone. Coverage is now structural:
+/// `dispatch_tool`'s first argument is an `&McpContext`, an `McpContext` cannot
+/// be built without an `AuditSink`, and `dispatch_under` — the variant for a
+/// caller that opened its own record — takes an `AuditEnvelope` that only
+/// `AuditSink::open` can mint. A new dispatch path that forgets to audit does
+/// not fail this test; it fails to compile. What this test defends is the
+/// *mechanism* those guarantees rest on, because every one of them is one
+/// plausible-looking edit away from being lost.
 #[test]
-fn at64_the_audit_pre_record_precedes_the_dispatch() {
-    let src = fs::read_to_string(root().join("crates/api/src/agent/bridge.rs"))
-        .expect("the bridge exists");
-    let start = src.find("pub async fn execute(").expect("the dispatch chokepoint exists");
-    let body = &src[start..];
-    let end = body.find("\nfn compact(").unwrap_or(body.len());
-    let body = strip_comments(&body[..end]);
+fn at64_no_dispatch_path_can_skip_the_audit_trail() {
+    let lib = fs::read_to_string(root().join("crates/mcp-server/src/lib.rs"))
+        .expect("the dispatch chokepoint exists");
+    let src = strip_comments(&lib);
 
-    let pre = body.find(".pre(").expect("execute must write the audit pre-record");
-    let dispatch = body.find("dispatch_tool(").expect("execute must dispatch");
-    let post = body.find(".post(").expect("execute must write the audit post-record");
+    // ── 1. The order, inside the one function every door goes through ────────
+    let start = src.find("pub async fn dispatch_tool(").expect("dispatch_tool exists");
+    let body = &src[start..];
+    let end = body.find("pub async fn dispatch_under(").unwrap_or(body.len());
+    let body = &body[..end];
+
+    let open = body.find(".open(").expect("dispatch_tool must open an audit record");
+    let dispatch = body.find("dispatch_under(").expect("dispatch_tool must dispatch");
+    let close = body.find(".close(").expect("dispatch_tool must close the record");
     assert!(
-        pre < dispatch,
-        "the audit pre-record must be written BEFORE the dispatch: a denial that is not \
+        open < dispatch,
+        "the audit pre-record must be opened BEFORE the dispatch: a denial that is not \
          recorded first leaves no evidence the control did anything"
     );
-    assert!(post > dispatch, "the post-record must follow the dispatch");
+    assert!(close > dispatch, "the post-record must follow the dispatch");
 
-    // The SDK driver dispatches directly rather than through the bridge, so it
-    // opens its own record — in the same order.
-    let driver = fs::read_to_string(root().join("crates/api/src/agent/driver.rs")).unwrap();
-    let driver = strip_comments(&driver);
-    let d_pre = driver.find("audit_trail.pre(").expect("the SDK driver writes a pre-record");
-    let d_dispatch = driver.find("dispatch_tool(&mcp_ctx").expect("the SDK driver dispatches");
-    let d_post = driver.find("audit_trail.post(").expect("the SDK driver writes a post-record");
-    assert!(d_pre < d_dispatch && d_post > d_dispatch, "the SDK driver's audit order is reversed");
+    // ── 2. And a record the platform would not open means no dispatch ────────
+    //
+    // This is the half that makes it a property rather than a claim. `Err` must
+    // return, not warn: a logged miss is a look nobody counted.
+    let refusal = body.find("audit_unavailable").expect(
+        "dispatch_tool must refuse when the platform opens no record; \
+         `audit_unavailable` is the refusal's name",
+    );
+    assert!(
+        refusal < dispatch,
+        "the refusal must be decided before the dispatch, not reported after it"
+    );
 
-    // Nothing else routes around them. The external MCP front door is a separate
-    // process holding a service token and is **not** audited by this trail — a
-    // gap, reported in decisions/PROGRESS.md rather than hidden by widening this
-    // list quietly.
-    let mut callers: Vec<String> = Vec::new();
+    // ── 3. The envelope is sealed, so `dispatch_under` cannot be forged ──────
+    //
+    // `AuditEnvelope(` appearing outside `AuditSink::open` would be a second
+    // constructor, and a second constructor is a way to dispatch with no record.
+    let constructions: Vec<usize> = src.match_indices("AuditEnvelope(").map(|(i, _)| i).collect();
+    let sink_open = src.find("pub async fn open(").expect("AuditSink::open exists");
+    let sink_open_end = src[sink_open..]
+        .find("pub async fn close(")
+        .map_or(src.len(), |o| sink_open + o);
+    for at in constructions {
+        assert!(
+            at > sink_open && at < sink_open_end,
+            "an AuditEnvelope is minted outside AuditSink::open at byte {at}; the seal is \
+             what makes holding one proof that a pre-record exists"
+        );
+    }
+    assert!(
+        src.contains("_envelope: &AuditEnvelope"),
+        "dispatch_under must take the envelope as a proof obligation, or a caller that \
+         never opened a record can reach the dispatch"
+    );
+
+    // ── 4. No context exists without a sink ──────────────────────────────────
+    //
+    // A public `audit` field would let any crate build an `McpContext` with a
+    // struct literal and skip `new`, which is the one place the sink is attached.
+    assert!(
+        src.contains("    audit: AuditSink,"),
+        "McpContext::audit must stay private: a public field is a struct literal away \
+         from a context with no audit trail"
+    );
+    assert!(
+        src.contains("audit: AuditSink::through_platform("),
+        "McpContext::new must build the sink"
+    );
+    // And there is no second way to build one — no disabled, no-op or defaulted
+    // sink for tests, which is how this kind of seal is usually undone.
+    for hatch in ["AuditSink::none", "AuditSink::noop", "AuditSink::disabled", "impl Default for AuditSink"] {
+        assert!(!src.contains(hatch), "{hatch} is an escape hatch from the audit trail");
+    }
+
+    // ── 5. The record is written by the platform, not by the caller ──────────
+    //
+    // ADR-0022 made the MCP server a thin client precisely so enforcement lives
+    // platform-side (ADR-0025). If the sink ever grew a database handle, the
+    // external process would be writing its own trail again — and an audit a
+    // client writes is an audit a client can decline to write.
+    let sink = {
+        let at = src.find("impl AuditSink {").expect("the sink exists");
+        &src[at..src[at..].find("\n// ── Context").map_or(src.len(), |o| at + o)]
+    };
+    assert!(
+        sink.contains("self.api.post(\"/api/agent/audit\""),
+        "AuditSink::open must ask the platform to write the record"
+    );
+    for local_write in ["PgPool", "sqlx", "record_audit_pre"] {
+        assert!(
+            !sink.contains(local_write),
+            "the sink writes the record itself ({local_write}); it must ask the platform, \
+             which is the component a caller cannot route around"
+        );
+    }
+
+    // ── 6. Callers that open their own envelope close it, in order ───────────
+    //
+    // `dispatch_under` exists for drivers whose record has to span more than the
+    // dispatch — the SDK driver opens it before its policy gate decides, so the
+    // four §15 actions it refuses are recorded as asked-for and denied, and its
+    // two inline paths (`run_sweep`, `wait_for_backtest`) are recorded at all.
     for (path, file) in rust_files() {
-        if path.starts_with("crates/invariants/") {
+        if path.starts_with("crates/invariants/") || path == "crates/mcp-server/src/lib.rs" {
             continue;
         }
-        if strip_comments(&file).contains("dispatch_tool(") {
-            callers.push(path);
-        }
+        let clean = strip_comments(&file);
+        let Some(at) = clean.find("dispatch_under(") else { continue };
+        let opened = clean.find(".open(").unwrap_or(usize::MAX);
+        let closed = clean.rfind(".close(").unwrap_or(0);
+        assert!(
+            opened < at,
+            "{path} dispatches under an envelope it never opened"
+        );
+        assert!(
+            closed > at,
+            "{path} opens an audit record and never closes it; a `pre` with no `post` \
+             reads as a call that is still in flight"
+        );
     }
-    callers.sort();
-    assert_eq!(
-        callers,
-        vec![
-            "apps/mcp-server/src/main.rs".to_string(),
-            "crates/api/src/agent/bridge.rs".to_string(),
-            "crates/api/src/agent/driver.rs".to_string(),
-            "crates/mcp-server/src/lib.rs".to_string(),
-            "crates/mcp-server/tests/integration.rs".to_string(),
-        ],
-        "a new dispatch path appeared; audit it or record why it is exempt"
+
+    // ── 7. The platform endpoint the sink depends on is actually routed ──────
+    //
+    // The seal above guarantees a caller *asks*. This guarantees someone answers:
+    // without the route, every dispatch in the system refuses, which is safe but
+    // is not the behaviour anybody wants to discover in production.
+    let routes = fs::read_to_string(root().join("crates/api/src/routes/mod.rs")).unwrap();
+    assert!(
+        routes.contains("\"/api/agent/audit\"") && routes.contains("\"/api/agent/audit/{audit_id}\""),
+        "the audit trail's two halves must be routed on the platform"
     );
 }
 

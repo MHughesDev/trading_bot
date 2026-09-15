@@ -142,9 +142,18 @@ API type, and `has_column_privilege` asked of the database itself.
 
 The audit trail's `pre` record is written **before** the dispatch, by the API
 layer rather than the harness. The property is an ordering, which is the kind of
-thing a refactor reverses silently, so AT-64 pins it in the source for both
-dispatch paths and enumerates every `dispatch_tool` caller — a new unaudited path
-fails the build rather than appearing quietly.
+thing a refactor reverses silently, so AT-64 pins it in the source.
+
+Since 2026-09-15 it covers **every** door, the external MCP process included, and
+it no longer does so by listing them. `mcp_server_lib::AuditSink` asks the
+platform to open the record over `POST /api/agent/audit` before the tool runs and
+closes it after; the platform derives the principal from the `sessions` row the
+bearer token resolves to, classifies the envelope from the action name and
+computes the verdict from the result, so the caller asserts none of it. An
+`AuditEnvelope` is sealed to `AuditSink::open`, `dispatch_under` takes one by
+reference, and `McpContext`'s sink field is private — so a dispatch path that
+forgets to audit fails to compile rather than failing a test. A dispatch the
+platform will not record is **refused**, not logged (ADR-P2-34).
 
 ### 2.14 Gate 16 / AT-65 — capital is a type
 
@@ -739,10 +748,13 @@ AT-62 is live and scans Rust, TypeScript, Python, SQL and JSON across `crates`,
   true statement about a dependency that raised without saying why, but it is not
   the same as knowing, and it is the one place in the chain where a reason is a
   residue rather than a decision.
-- **The external MCP front door writes no audit trail.** `apps/mcp-server` is a
-  separate process holding a service token; the `pre`/`post` records cover the
-  two internal agent dispatch paths only. AT-64 enumerates every caller, so this
-  is a named exemption rather than an oversight, but it is an exemption.
+- **The GOVERNOR loop's approval pause writes no audit record.** `local_driver`'s
+  `Effect::AskHuman` path holds a §15 action across a human answer without a
+  `pre`/`post` pair of its own, so a *pending* or *approved* approval is visible
+  in `agent_messages` and not in `audit_event`. It is narrower than it sounds —
+  the dispatch that follows an approval is recorded like any other, so an
+  approved action is on the trail; what is missing is the asking. Found closing
+  AT-64, not fixed by it.
 - **The trainer sidecar's post-hoc stage has no caller.** `/posthoc` is
   reachable and `dispatch_posthoc` is typed, but the COMPARE phase's worker —
   the thing that would run it — does not exist (2.1's gap).

@@ -6,6 +6,20 @@
 //! keeps process-local state (a scratchpad that persists nothing).
 //!
 //! No privileged path; no order-placement tool.
+//!
+//! # Every dispatch is on the record
+//!
+//! [`dispatch_tool`] is the one function all three front doors go through — the
+//! external MCP process, the SDK driver and the GOVERNOR loop — and it cannot
+//! run a tool without the platform having opened an audit record for it first
+//! (SPEC §15, ADR-P2-21, ADR-P2-34, AT-64). The record is opened *by the
+//! platform*, not written here: this crate asks, and is told the id. An audit a
+//! client writes is an audit a client can decline to write.
+//!
+//! The seal is [`AuditEnvelope`], which only [`AuditSink::open`] can mint, and
+//! [`McpContext`]'s private `audit` field, which means a context — and therefore
+//! a dispatch — cannot exist without one. A new dispatch path that forgets to
+//! audit does not fail a test; it fails to compile.
 
 // The tool-definitions json! literal is large enough to exceed the default
 // macro recursion limit.
