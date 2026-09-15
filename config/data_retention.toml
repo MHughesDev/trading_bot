@@ -1,0 +1,97 @@
+# Disk budgets and downsampling for the forward-only series (Set P, P-0.6).
+#
+# These series cannot be re-collected. Under a free-only data policy (ADR-0027)
+# there is no vendor holding last year's open interest, so a row freed to save disk
+# is a row that is gone for good — `docs/artifact.md` FM-11.
+#
+# Accordingly there is no `delete` policy and no way to write one: `policy` accepts
+# `none` or `downsample`, both here and in `dataplane.forward_series`'s CHECK
+# constraint (migration 0098), and `dataplane::retention::RetentionAction` has no
+# delete variant. Over budget with no downsampling rule, the platform escalates to
+# a human rather than freeing space by itself.
+#
+# Downsampling begins at 80 % of budget, not 100 %: acting at the limit means
+# acting after writes have already started failing.
+#
+# This file answers DATA-005 §14 open question 2 **for the series Phase 0 switches
+# on, and only those**. Retention for raw L2 events remains deferred (Q-8).
+
+[defaults]
+# Fire the silence alarm when the newest row is older than this many cadences.
+# Three is two missed observations plus the one in flight: late enough not to page
+# on a single slow poll, early enough that a dead collector is caught the same day
+# on an hourly series.
+alarm_after_cadences = 3
+# Share of budget at which downsampling begins.
+budget_high_water_pct = 80
+
+# ── Kraken Futures funding rates ──────────────────────────────────────────────
+# Verified reachable 2026-09-15: 279 perpetuals on the public ticker, and about a
+# rolling year of hourly settlements on historical-funding-rates.
+#
+# Size: ~280 instruments x 24 rows/day x ~120 bytes ~= 1 MB/day, ~370 MB/year.
+# The 2 GiB budget is roughly five years. It will not bind before the retention
+# question is revisited, which is why the policy is `none` rather than a
+# downsampling rule nobody has tested.
+[series."kraken_futures.funding"]
+store_table = "funding_rates"
+venue = "kraken_futures"
+cadence_secs = 3600
+disk_budget_bytes = 2147483648   # 2 GiB
+policy = "none"
+backfill_available = true
+backfill_earliest = "2025-09-10T08:00:00Z"
+notes = "Hourly perpetual funding. Backfillable to roughly a year, and the window ROLLS: every month of delay is a month that falls off the far end permanently."
+
+# ── Kraken Futures open interest ──────────────────────────────────────────────
+# The purest FM-11 case on the board. The venue publishes the CURRENT open interest
+# on its ticker and offers no history endpoint at all, so every hour not sampled is
+# lost with no recourse. `backfill_available = false` is a statement of fact, not a
+# configuration choice.
+[series."kraken_futures.open_interest"]
+store_table = "open_interest"
+venue = "kraken_futures"
+cadence_secs = 3600
+disk_budget_bytes = 2147483648   # 2 GiB
+policy = "none"
+backfill_available = false
+notes = "No history endpoint exists. An hour not sampled is permanently gone."
+
+# ── Option chain snapshots ────────────────────────────────────────────────────
+# Registered but NOT collecting. The crypto source (P-0.4) is BLOCKED:UPSTREAM on
+# Deribit's terms — see P-0.4-BLOCKED-crypto-option-chains.md — and the equity
+# source (P-0.5) needs a Tradier credential. The budget and downsampling rule are
+# set now anyway, because Set P §8 requires them to exist BEFORE the first snapshot
+# rather than after the disk fills.
+#
+# Chains are the one series here big enough to need a rule. A two-underlying crypto
+# chain is ~4,000 live contracts; hourly at ~200 bytes is ~19 MB/day, ~7 GB/year,
+# and an equity chain is larger still. Beyond 90 days the hourly resolution is
+# worth less than the disk, so those rows coarsen to daily — a ~24x reduction that
+# keeps the series continuous and loses only intraday shape on old expiries.
+#
+# Contracts outside ADR-P2-26's `universe_id = 1` gate are already stored at daily
+# cadence from the start (`snapshot_cadence = 'daily'`), never dropped.
+[series."crypto.option_chains"]
+store_table = "option_chain_snapshots"
+venue = "unassigned"             # pending the P-0.4 terms decision
+cadence_secs = 3600
+disk_budget_bytes = 21474836480  # 20 GiB
+policy = "downsample"
+downsample_after_days = 90
+downsample_to_secs = 86400       # hourly -> daily
+enabled = false
+backfill_available = false
+notes = "BLOCKED:UPSTREAM on Deribit ToS 2.4 and 4.6. Budget set in advance per Set P §8; enable once a permitted venue is chosen."
+
+[series."equity.option_chains"]
+store_table = "option_chain_snapshots"
+venue = "tradier"
+cadence_secs = 3600
+disk_budget_bytes = 21474836480  # 20 GiB
+policy = "downsample"
+downsample_after_days = 90
+downsample_to_secs = 86400
+enabled = false
+backfill_available = false
+notes = "BLOCKED:HUMAN on a Tradier credential. Delayed source: 900 s declared lag, so rows are observed but observed late."
