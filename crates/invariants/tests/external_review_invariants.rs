@@ -168,6 +168,106 @@ fn the_default_intrabar_policy_is_the_pessimistic_one() {
     );
 }
 
+// ── ADR-P6-11: one exit implementation, and the simulator drives it ──────────
+
+/// The exit rules are evaluated in exactly one place.
+///
+/// SC-3 and INV-14: the same code runs live and in replay. An exit path is the
+/// easiest place in the platform to end up with two of them, because the
+/// simulator has a bar loop of its own and re-deriving "is the stop breached"
+/// inside it is four lines. Two implementations that agree today diverge on the
+/// first edge case, and the divergence shows up as a live position that did not
+/// behave like its backtest — which is the failure this platform exists to make
+/// impossible.
+///
+/// `triggers` and `first_triggered` are the whole of the decision, and they
+/// live in `domain::strategy_def::exits`. This fails the build if a second
+/// definition of either appears anywhere.
+#[test]
+fn the_exit_rules_are_evaluated_in_exactly_one_place() {
+    let definitions: Vec<String> = rust_code()
+        .into_iter()
+        .filter(|(_, body)| {
+            body.contains("pub fn triggers(") || body.contains("pub fn first_triggered(")
+        })
+        .map(|(path, _)| path)
+        .collect();
+
+    assert_eq!(
+        definitions.len(),
+        1,
+        "the exit rules must be evaluated in one place and are evaluated in {}: {definitions:?}. \
+         Extend `domain::strategy_def::exits`, never add a second evaluator. ADR-P6-11, INV-14.",
+        definitions.len()
+    );
+    assert!(
+        definitions[0].ends_with("domain/src/strategy_def/exits.rs"),
+        "the one evaluator moved to {}; the invariant is that there is one, and this test has to \
+         know where it is",
+        definitions[0]
+    );
+}
+
+/// The position state machine that drives those rules is also singular, and the
+/// backtest simulator drives *it* rather than rolling its own.
+///
+/// The second half is the one that was false until ADR-P6-11: `ExitTracker`
+/// existed, was tested, and nothing called it, so a declared exit changed live
+/// behaviour and not backtest results — the more dangerous direction of the
+/// two, because it makes evidence about a strategy nobody declared.
+#[test]
+fn the_backtest_simulator_drives_the_shared_exit_tracker() {
+    let src = rust_code();
+
+    let trackers: Vec<&String> = src
+        .iter()
+        .filter(|(_, body)| body.contains("pub struct ExitTracker"))
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(
+        trackers.len(),
+        1,
+        "one ExitTracker, found {trackers:?}. ADR-P6-11."
+    );
+
+    let (path, sim) = src
+        .iter()
+        .find(|(p, _)| p.ends_with("backtest/src/sim.rs"))
+        .expect("the backtest simulator must exist");
+    assert!(
+        sim.contains("ExitTracker::new"),
+        "{path}: the simulator does not construct the shared ExitTracker. A definition's exits \
+         would then affect live behaviour and not backtest results, which is how a backtest \
+         comes to describe a strategy nobody declared. ADR-P6-11."
+    );
+    assert!(
+        sim.contains("tracker.on_bar("),
+        "{path}: the simulator holds an ExitTracker but never advances it. ADR-P6-11."
+    );
+}
+
+/// The simulator must not select an intrabar policy at all.
+///
+/// `WorstFirst` is the default and the only one usable for evidence;
+/// `CloseOnly` understates every stop hit. A `with_intrabar` call in the
+/// backtest crate is a per-run switch between them, and a per-run switch
+/// between a pessimistic and an optimistic cost assumption is a knob an agent
+/// scored on backtests will find.
+#[test]
+fn the_simulator_never_chooses_its_own_intrabar_policy() {
+    for (path, body) in rust_code() {
+        if !path.contains("backtest/src/") {
+            continue;
+        }
+        assert!(
+            !body.contains("with_intrabar("),
+            "{path}: the simulator selects an intrabar policy. It must take the pessimistic \
+             default: CloseOnly understates every stop the bar traded through, and a backtest \
+             under one policy is not comparable with live fills under another. ADR-P6-09."
+        );
+    }
+}
+
 // ── ADR-P6-07: dollars and dollar tokens are different things ────────────────
 
 /// The literal that started it: three assets, one of them an unsecured claim on
