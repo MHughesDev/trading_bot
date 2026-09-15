@@ -133,3 +133,58 @@ pub(crate) fn urlencode(s: &str) -> String {
     }
     out
 }
+
+/// Declarations for the three tools this module serves (AGENT-006 §2.3).
+///
+/// `get_bars` is `data`; the two registry lookups are `discovery`. The split is
+/// the routing boundary, not the module boundary — a plan step that asks "what
+/// exists" and one that asks "what did it do" want different slices.
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::ToolSpec;
+    use crate::taxonomy::Risk;
+    vec![
+        ToolSpec::new(
+            "list_asset_classes",
+            "discovery",
+            Risk::Read,
+            "List the asset classes the platform supports (crypto_spot_cex is the v1 focus).",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "get_instrument",
+            "discovery",
+            Risk::Read,
+            "Fetch one instrument's registry row (venue, asset class, active flag).",
+            json!({
+                "type": "object",
+                "required": ["instrument_id"],
+                "properties": {
+                    "instrument_id": { "type": "string", "description": "e.g. BTC-USD" }
+                }
+            }),
+        )
+        .internal()
+        .evidence(&["instrument_id"]),
+        ToolSpec::new(
+            "get_bars",
+            "data",
+            Risk::Read,
+            "Fetch real OHLCV bars for an instrument over a time range, with full-window summary \
+             stats. Responses are capped: you get the summary plus the most recent max_bars bars.",
+            json!({
+                "type": "object",
+                "required": ["instrument_id", "start", "end"],
+                "properties": {
+                    "instrument_id": { "type": "string", "description": "e.g. BTC-USD" },
+                    "start": { "type": "string", "description": "RFC3339 UTC start" },
+                    "end": { "type": "string", "description": "RFC3339 UTC end" },
+                    "interval_seconds": { "type": "integer", "description": "Bar size in seconds (default 3600; 60=1m, 86400=1d). Aggregated from stored 1m bars." },
+                    "max_bars": { "type": "integer", "description": "Max bars returned (default 300, cap 2000); earlier bars are summarized, not returned" }
+                }
+            }),
+        )
+        .internal()
+        .notes("get_bars"),
+    ]
+}

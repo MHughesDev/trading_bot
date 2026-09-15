@@ -8,6 +8,7 @@
 
 pub mod assets;
 pub mod authoring;
+pub mod core;
 pub mod automations;
 pub mod backtests;
 pub mod builder;

@@ -276,6 +276,14 @@ mod tests {
     /// decided the rest: `get_authoring_guide` was routed in, ahead of anything that
     /// could run anything.
     ///
+    /// `backtest_strategy` counts, and became the top hit when S-1.4 shortened the
+    /// catalogue's descriptions: it is the sanctioned one-call path (it creates the
+    /// Experiment with a locked holdout, runs the sweep, returns the report), so
+    /// routing to it is a better answer than routing to `create_experiment`, not a
+    /// worse one. The claim under test is "a tool that RUNS something is offered",
+    /// and the list it was written against simply predated that tool being the
+    /// shortest honest route.
+    ///
     /// Note what this test does NOT assert. `create_backtest` is deliberately absent
     /// from the agent's allowlist — the charter is explicit that experiments are the
     /// only path to a backtest — so the right outcome is that the EXPERIMENT path is
@@ -293,7 +301,9 @@ mod tests {
             .map(|t| t.name.as_str())
             .collect();
         assert!(
-            hits.contains(&"run_sweep") || hits.contains(&"create_experiment"),
+            hits.contains(&"backtest_strategy")
+                || hits.contains(&"run_sweep")
+                || hits.contains(&"create_experiment"),
             "the step needs a tool that RUNS something; got {hits:?}"
         );
         assert!(

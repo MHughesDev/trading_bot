@@ -338,17 +338,29 @@ Not in this spec: sandboxing `run_python` against intent (ADR-0024's container i
 
 ## 10. Acceptance (the whole spec passes when all hold)
 
-1. `prompt::charter().len() ≤ 3,200` and is byte-stable. No test or prompt names a tool the internal profile does not expose.
-2. A hosted 30-iteration run with `claude-opus-5` shows, from `Usage`: `cache_read_input_tokens ≥ 0.8 × prompt_tokens()` averaged over iterations 3–30, and uncached `input_tokens` per iteration ≤ 1.3 × the new tokens appended that iteration.
-3. Hosted L0 never exceeds `max_exposed_per_step`; its order is a prefix of the previous iteration's order except on a logged eviction; `search_tools` finds and appends a tool the initial routing missed in one round-trip (test with a goal that never mentions "skill" and a search for "run python").
-4. On `qwen2.5-7b`, for a step with six flat schemas: `est(system) + est(schemas) + est(body) ≤ 14,000` and `body_budget ≥ 3,500` (the 25% floor), asserted in a `local_driver` test using `config/profiles/qwen2.5-7b-instruct.yaml`.
-5. After 20 `record_finding` calls there is exactly one `findings` block.
-6. No message in any driver's transcript ever reads `[elided — was N bytes]` without a `work/…` handle when a workspace exists.
-7. Every tool definition ≤ 1,200 B rich / ≤ 400 B flat.
-8. `tests/conformance.rs` has a reader for `exposure_scope`, `search_reserve_slots`, and `few_shot_examples`.
-9. `agent_runs.prompt_tokens` and `est_prompt_tokens` are populated on every run; `agent_token_calibration` has a row for every model that has completed ≥ 10 runs.
-10. The 12 doc conflicts listed in ADR-0034 §3 are resolved by that ADR's amendments; `HARNESS_CONFORMANCE.md` item 10 cites this spec.
+> **Form note (Set S task S-0.4, 2026-09-15).** Converted from a plain numbered
+> list to the repository's acceptance form so `docs/procedures/execute-plan.md`
+> step 3c can close the chain requirement -> criterion -> evidence. No criterion
+> was added, removed, reworded or softened; each kept its position, so item *n* of
+> the old list is `AC-n`. An unticked box with `Verified by: [--]` means nothing
+> has been proved, which is the honest default.
+>
+> The plan's S-0.4 gives the target form as `6.1.A [ ] ... - Verified by: [--]`.
+> The form actually used across the tracked specs (DATA-003, COMP-001..004,
+> FEAT-001, SYS-001) is `- [ ] AC-n: ... - Verified by: [--]`, and that is what
+> execute-plan step 3c ticks. This uses the tracked form; the plan's example is
+> stale.
 
+- [ ] AC-1: `prompt::charter().len() ≤ 3,200` and is byte-stable. No test or prompt names a tool the internal profile does not expose. - Verified by: [--]
+- [ ] AC-2: A hosted 30-iteration run with `claude-opus-5` shows, from `Usage`: `cache_read_input_tokens ≥ 0.8 × prompt_tokens()` averaged over iterations 3–30, and uncached `input_tokens` per iteration ≤ 1.3 × the new tokens appended that iteration. - Verified by: [--]
+- [ ] AC-3: Hosted L0 never exceeds `max_exposed_per_step`; its order is a prefix of the previous iteration's order except on a logged eviction; `search_tools` finds and appends a tool the initial routing missed in one round-trip (test with a goal that never mentions "skill" and a search for "run python"). - Verified by: [--]
+- [ ] AC-4: On `qwen2.5-7b`, for a step with six flat schemas: `est(system) + est(schemas) + est(body) ≤ 14,000` and `body_budget ≥ 3,500` (the 25% floor), asserted in a `local_driver` test using `config/profiles/qwen2.5-7b-instruct.yaml`. - Verified by: [--]
+- [ ] AC-5: After 20 `record_finding` calls there is exactly one `findings` block. - Verified by: [--]
+- [ ] AC-6: No message in any driver's transcript ever reads `[elided — was N bytes]` without a `work/…` handle when a workspace exists. - Verified by: [--]
+- [x] AC-7: Every tool definition ≤ 1,200 B rich / ≤ 400 B flat. - Verified by: `mcp-server-lib::catalogue_tests::no_tool_descriptor_exceeds_the_rich_budget` and `every_first_sentence_fits_the_flat_budget`. Meeting it moved ~7.4 KB of prose from thirteen descriptions into the authoring guide's new `## Tool notes`.
+- [ ] AC-8: `tests/conformance.rs` has a reader for `exposure_scope`, `search_reserve_slots`, and `few_shot_examples`. - Verified by: [--]
+- [ ] AC-9: `agent_runs.prompt_tokens` and `est_prompt_tokens` are populated on every run; `agent_token_calibration` has a row for every model that has completed ≥ 10 runs. - Verified by: [--]
+- [ ] AC-10: The 12 doc conflicts listed in ADR-0034 §3 are resolved by that ADR's amendments; `HARNESS_CONFORMANCE.md` item 10 cites this spec. - Verified by: [--]
 ## 11. Non-goals
 
 - Unifying the hosted multi-turn driver and the sans-IO `Loop` into one execution loop (ADR-0033-scale; this spec makes them share the assembler, not the loop).

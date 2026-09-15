@@ -147,6 +147,17 @@ pub struct CompactionReport {
     /// duplicating it here would double the cost of the record that exists to explain
     /// a budget problem.
     pub removed: Vec<Removed>,
+    /// What was claimed by something outside `blocks` — the exposed tool schemas,
+    /// above all (AGENT-005 §4.1).
+    ///
+    /// Recorded because "the prompt was compacted" and "the prompt was compacted
+    /// because the schemas took two thirds of the window" are different findings, and
+    /// only the second says what to change.
+    pub reserved_tokens: u32,
+    /// What the body was actually budgeted against, after the reservation and the
+    /// [`MIN_BODY_SHARE`] floor. When this equals `window * MIN_BODY_SHARE` the floor
+    /// bound and the caller is over-reserved.
+    pub body_budget_tokens: u32,
 }
 
 /// One block that did not survive compaction intact.
@@ -236,14 +247,56 @@ pub fn truncate_middle(s: &str, max_bytes: usize) -> String {
 /// any other model output.
 #[must_use]
 pub fn assemble(profile: &Profile, blocks: Vec<Block>) -> Assembled {
-    let input_budget = profile.input_budget_tokens();
+    assemble_reserving(profile, blocks, 0)
+}
+
+/// The share of the window the body keeps however much is reserved (AGENT-005 §4.1).
+///
+/// A reservation is a claim on the window made by something that is not the body —
+/// the tool schemas, most often. Without a floor, a profile whose schemas happen to
+/// be large hands the body a budget near zero and every block is compacted away, so
+/// the model reads a full description of its tools and nothing about its task. That
+/// is the wrong thing to keep: a model with no working state cannot use the tools it
+/// can see.
+///
+/// When the floor binds, the caller is over-reserved and the *reservation* is what
+/// has to shrink — routing exposes fewer schemas. That is a decision for the caller,
+/// which is why this returns a body budget rather than failing.
+pub const MIN_BODY_SHARE: f32 = 0.25;
+
+/// Assemble with part of the window already spoken for.
+///
+/// `reserved_tokens` is everything that will leave the body on the way to the model
+/// but is not in `blocks` — the exposed tool schemas above all (AGENT-005 §4.2).
+/// Budgeting the body against the whole window while the schemas are charged to the
+/// same window is how a prompt that fits by arithmetic arrives over budget in fact.
+///
+/// The body budget is `max(window - reserved, window * MIN_BODY_SHARE)`.
+#[must_use]
+pub fn assemble_reserving(
+    profile: &Profile,
+    blocks: Vec<Block>,
+    reserved_tokens: u32,
+) -> Assembled {
+    let window = profile.input_budget_tokens();
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let floor = (window as f32 * MIN_BODY_SHARE) as u32;
+    let input_budget = window.saturating_sub(reserved_tokens).max(floor);
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         clippy::cast_precision_loss
     )]
     let trigger = (input_budget as f32 * COMPACTION_TRIGGER) as u32;
-    let mut report = CompactionReport::default();
+    let mut report = CompactionReport {
+        reserved_tokens,
+        body_budget_tokens: input_budget,
+        ..CompactionReport::default()
+    };
 
     // Render first: an untrusted block costs its wrapper, and budgeting the
     // unwrapped text would put us over after wrapping.
@@ -442,6 +495,97 @@ mod tests {
         p.context.effective_budget_tokens = 1_000;
         p.context.reserve_for_output = 200;
         p
+    }
+
+    /// A profile whose window is exactly 10,000 tokens, for the reservation
+    /// arithmetic AGENT-005 §4.1 states in round numbers.
+    fn window_of(tokens: u32) -> Profile {
+        let mut p = frontier_fixture();
+        p.context.effective_budget_tokens = tokens;
+        p.context.reserve_for_output = 0;
+        p
+    }
+
+    /// AGENT-005 §4.1, the worked example: with 10,000 tokens and 4,000 reserved,
+    /// 6,500 tokens of blocks compact where at 9,500 reserved-free they would not.
+    ///
+    /// This is the whole point of the reservation. Nothing about the blocks changed
+    /// between the two calls; what changed is that the schemas are now charged to
+    /// the same window, which they always were in fact and were not in arithmetic.
+    #[test]
+    fn a_reservation_moves_the_compaction_point() {
+        let p = window_of(10_000);
+        // ~6,500 tokens at the estimator's 4 bytes per token, in one unreferenced
+        // block so nothing can be dropped — only truncated.
+        let body = "x".repeat(6_500 * 4);
+
+        let relaxed = assemble(&p, vec![block(Section::WorkingState, &body, 9, false)]);
+        assert_eq!(relaxed.compaction.reserved_tokens, 0);
+        assert_eq!(relaxed.compaction.body_budget_tokens, 10_000);
+        assert_eq!(
+            relaxed.compaction.truncated, 0,
+            "6,500 tokens against a 10,000-token window is under the trigger"
+        );
+
+        let reserved = assemble_reserving(
+            &p,
+            vec![block(Section::WorkingState, &body, 9, false)],
+            4_000,
+        );
+        assert_eq!(reserved.compaction.reserved_tokens, 4_000);
+        assert_eq!(reserved.compaction.body_budget_tokens, 6_000);
+        assert!(
+            reserved.compaction.truncated > 0,
+            "the same blocks must compact once 4,000 tokens are spoken for"
+        );
+        assert!(reserved.tokens <= 6_000, "{} tokens", reserved.tokens);
+    }
+
+    /// Adversarial: a reservation that would take the whole window does not.
+    ///
+    /// Without the floor, a profile whose schemas happen to be large hands the body
+    /// a budget near zero, every block compacts away, and the model reads a full
+    /// description of its tools and nothing about its task. The floor is what makes
+    /// over-reserving a visible caller error instead of a silently empty prompt.
+    #[test]
+    fn the_body_keeps_its_floor_when_a_reservation_would_take_everything() {
+        let p = window_of(10_000);
+        let body = "y".repeat(40_000);
+
+        for reserved in [9_000, 10_000, 25_000, u32::MAX] {
+            let out = assemble_reserving(
+                &p,
+                vec![block(Section::WorkingState, &body, 9, false)],
+                reserved,
+            );
+            assert_eq!(
+                out.compaction.body_budget_tokens, 2_500,
+                "reserving {reserved} must still leave the body 25% of 10,000"
+            );
+            assert!(out.tokens > 0, "reserving {reserved} emptied the prompt");
+            assert!(
+                out.tokens <= 2_500,
+                "reserving {reserved} gave {} tokens",
+                out.tokens
+            );
+        }
+    }
+
+    /// And `assemble` is exactly `assemble_reserving(_, _, 0)`, so the existing
+    /// callers cannot have changed behaviour.
+    #[test]
+    fn assemble_is_assemble_reserving_with_nothing_reserved() {
+        let p = small_profile();
+        let blocks = || {
+            vec![
+                block(Section::WorkingState, &"z".repeat(9_000), 3, true),
+                block(Section::Charter, "charter", 9, false),
+            ]
+        };
+        let a = assemble(&p, blocks());
+        let b = assemble_reserving(&p, blocks(), 0);
+        assert_eq!(a.sections, b.sections);
+        assert_eq!(a.tokens, b.tokens);
     }
 
     #[test]

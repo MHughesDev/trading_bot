@@ -4,7 +4,7 @@
 //!
 //! Until now this platform cut one leg of the lethal trifecta: the agent had
 //! private data (the ledger, positions, strategy definitions) and no outbound
-//! network, so there was nothing to exfiltrate *to*. `the_catalogue_has_no_outbound_tools`
+//! network, so there was nothing to exfiltrate *to*. `the_only_outbound_tools_are_the_two_web_tools`
 //! asserted that by name.
 //!
 //! Adding web access restores that leg deliberately. Private data, untrusted

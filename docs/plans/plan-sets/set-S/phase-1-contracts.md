@@ -1,6 +1,36 @@
 # Phase 1 — Contracts
 
-**Completion: 0% (0 / 20 tasks)**
+**Completion: 25% (5 / 20 done, 2 partial). Track A landed, plus S-1.10; the rest of tracks B and C not started.**
+
+> Status 2026-09-15, track 1. The three contracts the other Set S phases wait on now exist:
+> `ToolSpec`/`ToolResult` (`crates/mcp-server/src/spec.rs`), the generated taxonomy and
+> profile lists, and `WorkingState` (`crates/harness/src/state.rs`). Track A (S-1.1 … S-1.4)
+> is done. Track B (the context contract, S-1.5 … S-1.12) is **not started**. Track C has
+> S-1.13's type but none of its wiring, and S-1.14 … S-1.20 are not started.
+>
+> S-1.10 is done as well, out of track order: phase 1 says track C rebases onto it and track B
+> has not started, so leaving the one shared file in tracks B and C unwritten would have blocked
+> C for no reason.
+>
+> Three things a following track must know before touching this phase:
+>
+> 1. **The catalogue here is 60 tools, not 73.** The thirteen `falsification` and
+>    `web`/`skills` tools are untracked and cannot be committed without adding
+>    `crates/webfetch` and `crates/skills` to `Cargo.toml` — a do-not-commit file
+>    (EXECUTION-BOARD §2.4, gate H-1). Each needs a `ToolSpec` when it lands; the shape
+>    does not change. Checked directly: neither file contains `f64` or `f32`, so the
+>    money-f64 exemption they have been living under has cost nothing.
+> 2. **`spends_trial` and `max_calls_per_run` are declared, not enforced** (ADR-S1-03).
+>    Declaring them was necessary so six phases do not each have to revisit their
+>    declarations later; the dispatch wrapper that writes the ledger row before the tool
+>    runs is AGENT-006 §2.5 and belongs to a later phase.
+> 3. **Do not share `CARGO_TARGET_DIR` across worktrees.** EXECUTION-BOARD §2.3 says to; it is
+>    wrong, and two tracks found it independently. Artifacts collide between worktrees, so a
+>    suite can run against another worktree's code — observed here as a `static_invariants`
+>    binary with 23 tests built from a source with 27, and a link against an `mcp-server-lib`
+>    with no `spec` module. Everything reported green in this phase was re-run from cold in a
+>    private target directory. The `jobs = 2` pin is separately real and still must not be
+>    raised. Details in phase 0's S-0.1 triage.
 
 **Requirement IDs:** TC-01…TC-10 (track A), CA-01…CA-09 (track B), RP-01…RP-07 (track C).
 **Specs:** [AGENT-006 §2.3–2.4, §3](../../../specs/AGENT-006-tool-catalog.md),
@@ -21,7 +51,21 @@ B lands `assemble_reserving` first (S-1.10), C rebases onto it.
 ## Track A — the tool contract
 
 ### S-1.1 `ToolSpec`: one declaration per tool — M
-`NOT STARTED`
+`DONE` 2026-09-15 — `crates/mcp-server/src/spec.rs`; all 60 tracked tools declare one in
+`tools/<module>::specs()`.
+
+Verified by `mcp-server-lib::spec::tests::every_catalogue_tool_has_exactly_one_spec` and,
+adversarially, `a_tool_declared_twice_is_rejected_naming_both_sites` (feeds two declarations of
+`get_bars` from different namespaces and asserts the panic names both catalogue indices).
+`version` and `status` are present from the outset; `a_deprecated_tool_still_resolves_but_is_exposed_to_nobody`
+proves the tombstone — `spec::find` answers for it so an old ticket resolves, `spec::exposed`
+does not.
+
+**Partial, and named as such:** a ticket does not yet record the tool version. That is a
+`crates/ledger` change to the `TrialTicket` path, which this track did not touch because the
+envelope work already put it in `ledger::audit` and two tracks editing one crate is what
+EXECUTION-BOARD §2.2 asks us not to do. The field exists and is stable; stamping it is a
+one-line read of `spec::find(tool).version`.
 
 The type in AGENT-006 §2.3, in a new `crates/mcp-server/src/spec.rs`. Then migrate the
 catalogue file by file to `tools/<ns>.rs::specs() -> Vec<ToolSpec>`, keeping the existing
@@ -42,7 +86,29 @@ deprecated tool still resolves for an old ticket and appears in no profile's exp
 **Traces:** AGENT-006 §2.3, §2.7; §10.1.
 
 ### S-1.2 `ToolResult`: answers, not data — M
-`NOT STARTED`
+`PARTIAL` 2026-09-15 — the type, the renderer and the gates exist; no typed tool returns one
+yet.
+
+`ToolResult {summary, ids, n, se, detail, handle}` with `render_within(max_bytes, handle_hint)`.
+Two decisions worth carrying forward:
+
+- The cap is the **effective** one, `min(profile cap, remaining body)` at the moment the result
+  arrives — S-1.18's first defect, fixed here rather than later, because the signature would
+  otherwise have had to change. Verified by
+  `a_result_over_the_smallest_cap_always_carries_a_handle` (6,144 B, the smallest profile):
+  `detail` is dropped whole and replaced by a handle, never truncated in place.
+- A cap too small even for the summary still returns the summary, truncated on a char
+  boundary. `a_cap_smaller_than_the_summary_truncates_rather_than_returning_nothing`. A tool
+  that answers with nothing is indistinguishable from one that failed, and the model retries it.
+
+Summary templates: `render_summary` over declared `detail_fields`, with
+`a_template_naming_an_undeclared_field_is_rejected` (adversarial) and the build-time gate
+`a_summary_template_only_names_declared_fields`. `a_numeric_field_without_a_value_renders_n_unknown`
+covers the "(n unknown)" rule.
+
+**Missing:** migrating the 60 typed handlers to return `ToolResult`. They still return ad-hoc
+`Value`. The ≤ 400-token summary bound therefore has nothing to measure on the reference
+dataset yet.
 
 `{summary, ids, n, se, detail, handle}` with `render(profile)` applying the profile's
 `max_tool_result_bytes` and setting `handle` on overflow. Migrate typed tools to return it.
@@ -59,7 +125,20 @@ field the schema does not define **fails the build**; a result over the smallest
 **Traces:** AGENT-006 §2.4, P3; §10.9.
 
 ### S-1.3 Generate the four arrays from the specs — M
-`NOT STARTED`
+`DONE` 2026-09-15 — `tool_definitions_for`, the taxonomy and the internal-agent profile all
+render from `spec::catalog()`; `stamp()` and both hand-written arrays are deleted.
+
+Verified by `cargo test -p mcp-server-lib --lib taxonomy` (the CI job): `every_tool_is_classified`,
+`the_taxonomy_has_no_entries_for_tools_that_do_not_exist` and `no_tool_is_classified_twice` now
+run against generated rows. `every_namespace_is_canonical` is new and asserts §2.1's
+twenty-two — a tool declaring `strategies` instead of `strategy` would otherwise create a
+namespace of one that no plan step routes to.
+
+The envelope lists are **reconciled, not generated**: `ledger` cannot depend on `mcp-server`
+without inverting the dependency. `invariants::every_tool_envelope_matches_the_ledger` asserts
+agreement in both directions and pins the gated catalogue set to exactly
+`{arm_automation, promote_model_version}`, so widening it is a decision rather than a diff.
+S-0.2's envelope test still passes.
 
 `TAXONOMY`, `INTERNAL_AGENT_TOOLS`, the four envelope lists and the guide's tool-notes
 index all derive from `ToolSpec`. Delete the hand-written arrays. Keep the three taxonomy
@@ -73,7 +152,26 @@ passes with the lists generated rather than typed.
 **Traces:** AGENT-006 §2.3 P2, §2.6; §10.1, §10.2.
 
 ### S-1.4 The mechanical gates: description budget, namespace cap, dispatch coverage — M
-`NOT STARTED`
+`DONE` 2026-09-15 — five gates, all in `cargo test -p mcp-server-lib --lib`.
+
+`no_tool_descriptor_exceeds_the_rich_budget` (≤ 1,200 B),
+`every_first_sentence_fits_the_flat_budget` (≤ 400 B),
+`no_namespace_holds_more_than_sixteen_tools`,
+`every_dispatch_arm_has_a_spec_and_every_spec_has_an_arm`,
+`every_notes_section_resolves_to_a_heading`.
+
+Meeting the budget moved ~7.4 KB of prose out of thirteen descriptions into a new
+`## Tool notes` section of `crates/mcp-server/docs/authoring_guide.md`, verbatim. The
+over-budget set on the tracked catalogue was `create_experiment` (1,405 B after the first
+pass), `train_model` (1,376) and `run_sweep` (1,290) — and most of those bytes were *parameter*
+descriptions, not the tool description. AGENT-005 §5.4 measures the whole rendered descriptor,
+so trimming only the description would not have met it; that is worth knowing before the
+thirteen blocked tools are re-measured.
+
+**Partial:** `get_authoring_guide(section, tool?)` is **not** implemented — the guide is still
+served whole, so a 7B fetching one ≤ 4 KB section cannot yet. The sections and headings the
+parameter would select over now exist, which is the part that had to come first. The flat bound
+is asserted on the first sentence rather than on `registry::render(_, Flat)`.
 
 Three tests that cannot be argued past, plus the rewrite they force: the ten over-budget
 descriptions (measured: `create_skill` 2,123 B … `fetch_url` 1,212 B, and `run_skill`'s
@@ -156,7 +254,24 @@ cached and 10 fresh reports 1,000 total.
 **Traces:** AGENT-005 §6.1, §7; §10.2.
 
 ### S-1.10 `assemble_reserving` — the budget counts what leaves the body — M
-`NOT STARTED`
+`DONE` 2026-09-15 — `crates/harness/src/context.rs`. Landed by track 1 out of track order,
+because phase 1 says track C rebases onto it and track B has not started.
+
+Verified by `a_reservation_moves_the_compaction_point` — the spec's worked example run as
+written: the same 6,500 tokens of blocks pass through untouched against a 10,000-token window
+and compact once 4,000 are reserved. `the_body_keeps_its_floor_when_a_reservation_would_take_everything`
+is the adversarial one: reserving 9,000, 10,000, 25,000 and `u32::MAX` all leave the body
+exactly 2,500 tokens and a non-empty prompt. Without the floor, a profile whose schemas happen
+to be large hands the body a budget near zero and the model reads a full description of its
+tools and nothing about its task — which is the wrong thing to keep.
+`assemble_is_assemble_reserving_with_nothing_reserved` pins the delegation, so no existing
+caller changed behaviour.
+
+`CompactionReport` gained **two** fields, not one: `reserved_tokens` and
+`body_budget_tokens`. The second is what makes an over-reservation diagnosable — when it equals
+`window × MIN_BODY_SHARE` the floor bound and the caller should expose fewer schemas. "The
+prompt was compacted" and "the prompt was compacted because the schemas took two thirds of the
+window" are different findings and only the second says what to change.
 
 `assemble_reserving(profile, blocks, reserved_tokens)` with `MIN_BODY_SHARE = 0.25`;
 `assemble` delegates with 0. `reserved_tokens` joins `CompactionReport`.
@@ -197,7 +312,26 @@ it lists 20 lines; `the_section_budget_shares_do_not_exceed_the_whole` still pas
 ## Track C — the reasoning contract
 
 ### S-1.13 `WorkingState`: the model reads state instead of rebuilding it — L
-`NOT STARTED`
+`PARTIAL` 2026-09-15 — the type is landed; `Loop` does not own one.
+
+`crates/harness/src/state.rs` carries every field AGENT-008 §2 names, including AGENT-013's
+lifecycle fields, with two renderers: a ≤ 400-token flat card bounded by construction and a
+rich card adding plan, hypothesis and open questions. `anchor()` is derived from the state.
+
+Verified by `the_card_stops_growing_once_it_is_populated` (adversarial: 200 updates move the
+card by under 40 bytes — a fixed-size view over an unbounded history, which is exactly what the
+nine append sites are not), `a_flat_card_is_bounded_however_long_the_goal_is`,
+`an_id_no_tool_returned_cannot_be_cited`, `an_unset_state_authorises_nothing` (the defaults are
+the narrowest reading: `Ring::Research`, `Stage::Explore`, `GoalKind::Lookup`, no trials), and
+`re_asking_a_decided_question_is_corrected`.
+
+**Missing, and it is the larger half:** `Loop` does not own a `WorkingState`, the nine
+`Section::WorkingState` pushes in `drive.rs` are untouched, and nothing renders this type into a
+prompt. Until that lands, AGENT-008 AC-1 is proved of the type and not of the system, which is
+why its box is unticked.
+
+Note for whoever wires it: `state::Decision` is deliberately not re-exported at the crate root
+because `policy::Decision` already owns that name and means a policy ruling (ADR-S1-04).
 
 The struct in AGENT-008 §2 in a new `crates/harness/src/state.rs`, owned by `Loop`,
 replacing the nine ad-hoc `WorkingState` block pushes in `drive.rs` (`:926, :963, :1476,

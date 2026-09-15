@@ -74,3 +74,30 @@ pub async fn list_instruments(api: &ApiClient) -> Value {
 
     json!({ "instruments": instruments })
 }
+
+/// Declarations for the two tools this module serves (AGENT-006 §2.3).
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::ToolSpec;
+    use crate::taxonomy::Risk;
+    vec![
+        ToolSpec::new(
+            "list_lanes",
+            "discovery",
+            Risk::Read,
+            "Return the data lanes strategies can subscribe to (e.g. market.bars.1m, \
+             features.technical).",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "list_instruments",
+            "discovery",
+            Risk::Read,
+            "List instruments that have stored bar history, with per-timeframe coverage (bar \
+             count, first/last timestamp). Backtest inside the covered window, or rely on \
+             auto_collect to backfill.",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .internal(),
+    ]
+}

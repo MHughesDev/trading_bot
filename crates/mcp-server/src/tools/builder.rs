@@ -420,3 +420,160 @@ pub async fn finalize_strategy(ctx: &McpContext, params: &Value) -> Value {
         .remove(&draft_id);
     json!({ "strategy_id": strategy_id, "valid": true })
 }
+
+/// Declarations for the ten `builder` tools (AGENT-006 §2.3).
+///
+/// None of them is `internal()`. The in-app agent writes whole definition JSON,
+/// so the step-by-step builder is redundant there and its ten schemas are ten
+/// schemas of prompt the agent pays for and never uses — AGENT-005 §3.1 names
+/// the charter's draft-builder instruction as a live defect for exactly this
+/// reason: it told the agent about tools its profile does not expose.
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::ToolSpec;
+    use crate::taxonomy::Risk;
+    let draft_only = |name: &'static str, risk, description| {
+        ToolSpec::new(
+            name,
+            "builder",
+            risk,
+            description,
+            json!({
+                "type": "object",
+                "required": ["draft_id"],
+                "properties": { "draft_id": { "type": "string" } }
+            }),
+        )
+    };
+    vec![
+        ToolSpec::new(
+            "new_strategy_draft",
+            "builder",
+            Risk::Write,
+            "Create an empty strategy draft and return a draft_id. Drafts live only in this \
+             server's memory until finalize_strategy.",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .evidence(&["draft_id"]),
+        // Discarding loses unsaved authoring work with no platform-side copy.
+        draft_only(
+            "discard_draft",
+            Risk::Destructive,
+            "Discard a strategy draft by draft_id. The draft is gone; there is no server-side \
+             copy.",
+        ),
+        ToolSpec::new(
+            "set_strategy_meta",
+            "builder",
+            Risk::Write,
+            "Set top-level strategy fields on a draft (strategy_id slug, asset_class, \
+             min_trust_tier).",
+            json!({
+                "type": "object",
+                "required": ["draft_id", "strategy_id", "asset_class"],
+                "properties": {
+                    "draft_id": { "type": "string" },
+                    "strategy_id": { "type": "string", "description": "Human-readable slug, e.g. ema_cross_v1" },
+                    "asset_class": { "type": "string", "description": "e.g. crypto_spot_cex" },
+                    "min_trust_tier": { "type": "string", "description": "Optional trust tier override" }
+                }
+            }),
+        ),
+        ToolSpec::new(
+            "add_strategy_input",
+            "builder",
+            Risk::Write,
+            "Append an input lane subscription to the draft.",
+            json!({
+                "type": "object",
+                "required": ["draft_id", "lane"],
+                "properties": {
+                    "draft_id": { "type": "string" },
+                    "lane": { "type": "string", "description": "Lane name, e.g. market.bars.1m" },
+                    "instrument": { "type": "string", "description": "Instrument ID or $bound_at_init (default)" },
+                    "features": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Feature names for features.technical lanes (backtests support ema_N and rsi_N)"
+                    }
+                }
+            }),
+        ),
+        ToolSpec::new(
+            "add_condition_node",
+            "builder",
+            Risk::Write,
+            "Append a Condition node to the draft.",
+            json!({
+                "type": "object",
+                "required": ["draft_id", "node_id", "expr"],
+                "properties": {
+                    "draft_id": { "type": "string" },
+                    "node_id": { "type": "string", "description": "Unique node ID within this strategy" },
+                    "expr": { "type": "string", "description": "Predicate expression, e.g. feature('ema_7') > feature('ema_21')" }
+                }
+            }),
+        ),
+        ToolSpec::new(
+            "add_signal_node",
+            "builder",
+            Risk::Write,
+            "Append a Signal node that emits on the rising edge of a condition.",
+            json!({
+                "type": "object",
+                "required": ["draft_id", "node_id", "when", "emit"],
+                "properties": {
+                    "draft_id": { "type": "string" },
+                    "node_id": { "type": "string" },
+                    "when": { "type": "string", "description": "ID of the condition node to watch" },
+                    "emit": { "type": "string", "description": "Named signal to emit, e.g. long" }
+                }
+            }),
+        ),
+        ToolSpec::new(
+            "add_strategy_action",
+            "builder",
+            Risk::Write,
+            "Append a PlaceOrder action triggered by a named signal.",
+            json!({
+                "type": "object",
+                "required": ["draft_id", "on_signal", "side", "size_mode", "size"],
+                "properties": {
+                    "draft_id": { "type": "string" },
+                    "on_signal": { "type": "string", "description": "Signal name that triggers this action" },
+                    "side": { "type": "string", "enum": ["buy", "sell"] },
+                    "size_mode": { "type": "string", "enum": ["fixed", "percent_of_balance", "risk_unit"] },
+                    "size": { "type": "string", "description": "Decimal string quantity (e.g. \"0.02\" = 2% for percent_of_balance)" }
+                }
+            }),
+        ),
+        ToolSpec::new(
+            "set_risk_overrides",
+            "builder",
+            Risk::Write,
+            "Set per-strategy risk overrides on the draft. Tighten-only: loosening a platform \
+             limit fails validation.",
+            json!({
+                "type": "object",
+                "required": ["draft_id"],
+                "properties": {
+                    "draft_id": { "type": "string" },
+                    "max_position": { "type": "string", "description": "Decimal max position size" },
+                    "max_order_rate_per_minute": { "type": "integer" },
+                    "max_order_rate_per_second": { "type": "integer" }
+                }
+            }),
+        ),
+        draft_only(
+            "get_draft_summary",
+            Risk::Read,
+            "Return the current draft definition as JSON without mutating it.",
+        ),
+        draft_only(
+            "finalize_strategy",
+            Risk::Write,
+            "Validate the draft and persist it to the strategy library; returns the strategy_id \
+             slug or structured validation errors.",
+        )
+        .evidence(&["strategy_id"]),
+    ]
+}

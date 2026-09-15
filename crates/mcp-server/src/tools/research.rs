@@ -304,15 +304,41 @@ pub async fn get_diagnostics(api: &ApiClient, params: &Value) -> Value {
     .await
 }
 
-/// Tool definitions for this module (appended to the server's list).
-#[must_use]
-pub fn definitions() -> Vec<Value> {
+/// Declarations for the fifteen tools this module serves (AGENT-006 §2.3).
+///
+/// Six of these descriptions used to carry a paragraph of how-to-think-about-it
+/// prose — `run_sweep` alone was 1,862 bytes, and the whole catalogue is sent on
+/// every call. AGENT-005 §5.4 caps a rendered descriptor at 1,200 bytes, so the
+/// prose moved verbatim into the authoring guide's `## Tool notes` and is fetched
+/// with `get_authoring_guide(section: "tool_notes", tool: "run_sweep")` by the
+/// runs that need it. Nothing was deleted; it moved out of the layer every call
+/// pays for and into the one a step pays for once.
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::{ToolSpec, TrialKind};
+    use crate::taxonomy::Risk;
     let exp_id = json!({ "type": "string", "description": "Experiment uuid (the `id` field from create_experiment / list_experiments)" });
+    let by_exp = |name: &'static str, risk, description, exp: Value| {
+        ToolSpec::new(
+            name,
+            "research",
+            risk,
+            description,
+            json!({ "type": "object", "required": ["experiment_id"], "properties": { "experiment_id": exp } }),
+        )
+        .internal()
+    };
     vec![
-        json!({
-            "name": "backtest_strategy",
-            "description": "BACKTEST a stored strategy and return the results. One call: creates the Experiment with a locked holdout, runs the sweep (these are real backtests), and returns the report. Use this whenever the task is to backtest, evaluate, or measure the edge of a strategy you have created. get_backtest does NOT do this — it only reads a backtest that already exists.",
-            "inputSchema": { "type": "object",
+        // `backtest_strategy` is namespace `backtest`, not `research`: a step
+        // that wants "backtest this" routes to the namespace with the word in
+        // it, and the whole point of this tool is that the honest path was too
+        // many fields for a 7B to assemble.
+        ToolSpec::new(
+            "backtest_strategy",
+            "backtest",
+            Risk::Write,
+            "BACKTEST a stored strategy and return the results. One call: creates the Experiment \
+             with a locked holdout, runs the sweep (real backtests), returns the report.",
+            json!({ "type": "object",
                 "required": ["strategy_id"],
                 "properties": {
                     "strategy_id": { "type": "string", "description": "The slug you passed to create_strategy." },
@@ -321,119 +347,191 @@ pub fn definitions() -> Vec<Value> {
                     "question": { "type": "string", "description": "What you are asking of this sweep, in one line." },
                     "timeout_seconds": { "type": "integer", "description": "Default 600." }
                 }
-            }
-        }),
-        json!({
-            "name": "create_experiment",
-            "description": "Create a candidate Experiment: the unit of honest research. Locks a holdout tail you cannot read until the vault; declares an immutable objective; every Study you run on it increments an irreversible trial counter that deflates significance. Research window must not overlap the holdout. Returns the experiment (use its `id` everywhere else).",
-            "inputSchema": { "type": "object",
+            }),
+        )
+        .internal()
+        .spends_trial(TrialKind::Search)
+        .evidence(&["experiment_id"])
+        .max_calls_per_run(10)
+        .notes("backtest_strategy"),
+        ToolSpec::new(
+            "create_experiment",
+            "research",
+            Risk::Write,
+            "Create a candidate Experiment: the unit of honest research. Locks a holdout, \
+             declares an immutable objective, starts an irreversible trial counter.",
+            json!({ "type": "object",
                 "required": ["experiment_id", "strategy_family", "strategy_type", "strategy_ref", "universe_ref", "research_start", "research_end", "holdout_start", "holdout_end", "objective"],
                 "properties": {
-                    "experiment_id": { "type": "string", "description": "Your slug for this investigation, e.g. ema_cross_btc_1h" },
-                    "strategy_family": { "type": "string", "description": "The idea being investigated (version-agnostic), e.g. ema_cross" },
-                    "strategy_type": { "type": "string", "enum": ["daily_trend", "intraday_momentum", "mean_reversion", "cross_sectional", "event_driven"], "description": "Seeds the recommended significance null" },
-                    "strategy_ref": { "type": "string", "description": "Stored strategy slug (from create_strategy) every Run executes. Must declare a `parameters` block to be sweepable." },
-                    "universe_ref": { "type": "string", "description": "Instrument id, e.g. BTC-USD" },
-                    "research_start": { "type": "string", "description": "RFC3339" },
-                    "research_end": { "type": "string", "description": "RFC3339 — research slice end (exclusive)" },
-                    "holdout_start": { "type": "string", "description": "RFC3339 — must be >= research_end" },
-                    "holdout_end": { "type": "string", "description": "RFC3339" },
-                    "eval_resolution": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "1d"], "description": "Bar timeframe Runs execute on (default 1d). Start on 1h." },
-                    "objective": { "type": "object", "description": "{primary: sortino|calmar|profit_factor|expectancy|detrended_sharpe|sharpe, constraints: [{kind: min_trades, value: 50}, {kind: max_drawdown_lte, value: 0.15}, ...], aggregate: median|worst5_pct}. Win rate is never a primary." }
+                    "experiment_id": { "type": "string", "description": "Your slug, e.g. ema_cross_btc_1h" },
+                    "strategy_family": { "type": "string", "description": "The idea, version-free" },
+                    "strategy_type": { "type": "string", "enum": ["daily_trend", "intraday_momentum", "mean_reversion", "cross_sectional", "event_driven"] },
+                    "strategy_ref": { "type": "string", "description": "Stored slug every Run executes" },
+                    "universe_ref": { "type": "string", "description": "Instrument id" },
+                    "research_start": { "type": "string" },
+                    "research_end": { "type": "string", "description": "Exclusive" },
+                    "holdout_start": { "type": "string", "description": ">= research_end" },
+                    "holdout_end": { "type": "string" },
+                    "eval_resolution": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "1d"] },
+                    "objective": { "type": "object", "description": "See tool notes" }
                 }
-            }
-        }),
-        json!({
-            "name": "list_experiments",
-            "description": "Your Experiments, newest first, each with its trial counter, state and gate3 status.",
-            "inputSchema": { "type": "object", "properties": {} }
-        }),
-        json!({
-            "name": "get_experiment",
-            "description": "One Experiment header: state, trial counter, objective, strategy_ref, research window. Never holdout metrics.",
-            "inputSchema": { "type": "object", "required": ["experiment_id"], "properties": { "experiment_id": exp_id } }
-        }),
-        json!({
-            "name": "run_sweep",
-            "description": "THE inner loop. Tune the strategy's declared `parameters` against the Experiment's objective: a sampler (TPE by default) proposes batches, each batch is a sealed ParameterSweep Study (counted trials), then a neighbourhood Study around the promising region yields the ONLY carry-forward — its median-stable-centroid member, never the best sample. Returns a report with: `carried_forward` (params to build on), `surface.text` (per-parameter plateau/cliff/sensitivity — read this; plateaus are robust, spikes are fragile), `distribution` (sealed), `violation_counts` (why samples were rejected, e.g. too few trades), `study_ids`. Blocks up to timeout_seconds; on `timed_out` call again with the returned sweep_id. Runs are real backtests: 40 runs on 1h bars takes minutes.",
-            "inputSchema": { "type": "object", "required": ["experiment_id", "question"],
+            }),
+        )
+        .internal()
+        .evidence(&["experiment_id"])
+        .notes("create_experiment"),
+        ToolSpec::new(
+            "list_experiments",
+            "research",
+            Risk::Read,
+            "Your Experiments, newest first, each with its trial counter, state and gate3 status.",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .internal(),
+        by_exp(
+            "get_experiment",
+            Risk::Read,
+            "One Experiment header: state, trial counter, objective, strategy_ref, research \
+             window. Never holdout metrics.",
+            exp_id.clone(),
+        )
+        .evidence(&["experiment_id"]),
+        ToolSpec::new(
+            "run_sweep",
+            "research",
+            Risk::Write,
+            "THE inner loop: tune the strategy's declared parameters against the Experiment's \
+             objective. Returns carried_forward, the sensitivity surface, the sealed \
+             distribution and study_ids. Real backtests: minutes, and counted trials.",
+            json!({ "type": "object", "required": ["experiment_id", "question"],
                 "properties": {
-                    "experiment_id": exp_id,
-                    "sweep_id": { "type": "string", "description": "Resume waiting on an existing sweep instead of starting one" },
-                    "question": { "type": "string", "description": "What this sweep answers — logged before running" },
-                    "narrowing": { "type": "object", "description": "Optional per-parameter tightening: {fast: {min: 8, max: 30}, exit: {choices: ['trail']}}. Can only narrow the declaration." },
+                    "experiment_id": exp_id.clone(),
+                    "sweep_id": { "type": "string", "description": "Resume an existing sweep" },
+                    "question": { "type": "string", "description": "What this sweep answers; logged first" },
+                    "narrowing": { "type": "object", "description": "Per-parameter tightening only" },
                     "sampler": { "type": "string", "enum": ["tpe", "random"], "description": "Default tpe" },
-                    "max_runs": { "type": "integer", "description": "Sampled Runs (default 40; the neighbourhood cube is extra)" },
-                    "batch_size": { "type": "integer", "description": "Runs per sealed batch Study (default 8)" },
+                    "max_runs": { "type": "integer", "description": "Sampled Runs (default 40)" },
+                    "batch_size": { "type": "integer", "description": "Runs per batch (default 8)" },
                     "seed": { "type": "integer" },
-                    "base_params": { "type": "object", "description": "Values held fixed for parameters you are not sweeping (e.g. a prior carried_forward)" },
-                    "objective": { "type": "object", "description": "Override only if the Experiment has none" },
+                    "base_params": { "type": "object", "description": "Values held fixed" },
+                    "objective": { "type": "object", "description": "Only if the Experiment has none" },
                     "timeout_seconds": { "type": "integer", "description": "<= 600" }
                 }
-            }
-        }),
-        json!({
-            "name": "get_sweep",
-            "description": "Status/progress of a sweep and, when completed, its report.",
-            "inputSchema": { "type": "object", "required": ["sweep_id"], "properties": { "sweep_id": { "type": "string" } } }
-        }),
-        json!({
-            "name": "cancel_sweep",
-            "description": "Request cancellation of a running sweep (honoured between batches).",
-            "inputSchema": { "type": "object", "required": ["sweep_id"], "properties": { "sweep_id": { "type": "string" } } }
-        }),
-        json!({
-            "name": "run_study",
-            "description": "Run one honest-evaluation Study on the Experiment (counted trials). Kinds: parameter_sweep, neighborhood, walk_forward, cpcv, nested_cv, permutation_null, synthetic_paths, cost_sweep, trade_monte_carlo, regime_conditional. Returns the SEALED distribution (median, IQR, worst-5%, spread) and verdict; member ids are provenance only. Use `selection_rule: median_stable_centroid` to carry a config forward (then get_carried_forward). Prefer run_sweep for parameter tuning.",
-            "inputSchema": { "type": "object", "required": ["experiment_id", "study_id", "kind", "vary", "metric", "question"],
+            }),
+        )
+        .internal()
+        .spends_trial(TrialKind::Search)
+        .evidence(&["sweep_id"])
+        .max_calls_per_run(10)
+        .notes("run_sweep"),
+        ToolSpec::new(
+            "get_sweep",
+            "research",
+            Risk::Read,
+            "Status and progress of a sweep and, when completed, its report.",
+            json!({ "type": "object", "required": ["sweep_id"], "properties": { "sweep_id": { "type": "string" } } }),
+        )
+        .internal()
+        .evidence(&["sweep_id"]),
+        ToolSpec::new(
+            "cancel_sweep",
+            "research",
+            Risk::Write,
+            "Request cancellation of a running sweep (honoured between batches).",
+            json!({ "type": "object", "required": ["sweep_id"], "properties": { "sweep_id": { "type": "string" } } }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "run_study",
+            "research",
+            Risk::Write,
+            "Run one honest-evaluation Study on the Experiment (counted trials). Returns the \
+             sealed distribution and verdict. Prefer run_sweep for parameter tuning.",
+            json!({ "type": "object", "required": ["experiment_id", "study_id", "kind", "vary", "metric", "question"],
                 "properties": {
-                    "experiment_id": exp_id,
+                    "experiment_id": exp_id.clone(),
                     "study_id": { "type": "string" },
-                    "kind": { "type": "string" },
-                    "vary": { "type": "object", "description": "Tagged by `vary`: {vary:'params', grid:[{fast:12},{fast:20}]} | {vary:'neighborhood', param:'fast', center:20, step:2, k:3} | {vary:'data_windows', windows:[[start,end],...]} | {vary:'cpcv_groups', n_groups:6, k_test:2} | {vary:'seeds', n:200} | {vary:'cost_ladder', cost_model_refs:[...]} | {vary:'trade_resamples', n:500, block:5} | {vary:'regimes', windows:[[start,end,label],...]}" },
+                    "kind": { "type": "string", "description": "See tool notes for the ten kinds" },
+                    "vary": { "type": "object", "description": "Tagged by `vary`; see tool notes" },
                     "metric": { "type": "string", "enum": ["cagr", "total_return", "sharpe", "sortino", "calmar", "detrended_sharpe", "max_drawdown", "profit_factor", "expectancy"] },
                     "question": { "type": "string" },
                     "selection_rule": { "type": "string", "enum": ["none", "median_stable_centroid", "worst_case_robust"] },
                     "null_ref": { "type": "string", "description": "Required for permutation_null" },
-                    "base_params": { "type": "object", "description": "Centre the base config on these params (e.g. a carried_forward set)" }
+                    "base_params": { "type": "object", "description": "Centre the base config on these params" }
                 }
-            }
-        }),
-        json!({
-            "name": "list_studies",
-            "description": "Every Study on an Experiment with its sealed distribution and verdict.",
-            "inputSchema": { "type": "object", "required": ["experiment_id"], "properties": { "experiment_id": exp_id } }
-        }),
-        json!({
-            "name": "get_carried_forward",
-            "description": "The parameter set a Study's pre-declared selection rule carried forward (the stable centroid / worst-case member — never the best). 404 if the Study declared no rule.",
-            "inputSchema": { "type": "object", "required": ["experiment_id", "study_id"], "properties": { "experiment_id": exp_id, "study_id": { "type": "string" } } }
-        }),
-        json!({
-            "name": "get_diagnostics",
-            "description": "Diagnostic bundle for a Run you reached through one of your Studies (member ids from list_studies / a sweep's study): trade P&L shape, win/loss averages, expectancy, longest losing streak, hold time, MAE/MFE, by-month slices, the ten worst trades, the longest drawdown episode, exposure and cost drag, plus a compact `text`. This is what tells you WHAT to change — read it before proposing a structural edit.",
-            "inputSchema": { "type": "object", "required": ["run_id"], "properties": { "run_id": { "type": "string" } } }
-        }),
-        json!({
-            "name": "get_funnel",
-            "description": "The staged-gate ledger for an Experiment: which of Integrity → SinglePath → Robustness → Significance → Vault have passed, with each verdict's null and trial count.",
-            "inputSchema": { "type": "object", "required": ["experiment_id"], "properties": { "experiment_id": exp_id } }
-        }),
-        json!({
-            "name": "advance_gate",
-            "description": "Run the next gate. Gate 2 runs CPCV + synthetic paths (worst-5% must survive); Gate 3 runs the chosen permutation null with selection-bias correction from the live trial counter and requires deflated Sharpe >= 0.95 and PBO <= 0.5. Blocks for minutes. Choose a null (choose_null) before Gate 3.",
-            "inputSchema": { "type": "object", "required": ["experiment_id"], "properties": { "experiment_id": exp_id } }
-        }),
-        json!({
-            "name": "get_null_picker",
-            "description": "The recommended significance null for this Experiment's strategy type, the full catalog with what each null preserves/destroys, and the logged choice if made.",
-            "inputSchema": { "type": "object", "required": ["experiment_id"], "properties": { "experiment_id": exp_id } }
-        }),
-        json!({
-            "name": "choose_null",
-            "description": "Declare the primary significance null (logged; immutable). Kinds: signal_return_decouple, block_permutation, stationary_bootstrap, bar_permutation, synthetic_garch, regime_block, random_entry_matched.",
-            "inputSchema": { "type": "object", "required": ["experiment_id", "kind"], "properties": { "experiment_id": exp_id, "kind": { "type": "string" }, "override_reason": { "type": "string", "description": "Required when not choosing the recommended null" } } }
-        }),
+            }),
+        )
+        .internal()
+        .spends_trial(TrialKind::Search)
+        .evidence(&["study_id"])
+        .max_calls_per_run(10)
+        .notes("run_study"),
+        by_exp(
+            "list_studies",
+            Risk::Read,
+            "Every Study on an Experiment with its sealed distribution and verdict.",
+            exp_id.clone(),
+        ),
+        ToolSpec::new(
+            "get_carried_forward",
+            "research",
+            Risk::Read,
+            "The parameter set a Study's pre-declared selection rule carried forward: the stable \
+             centroid or worst-case member, never the best. 404 if it declared no rule.",
+            json!({ "type": "object", "required": ["experiment_id", "study_id"], "properties": { "experiment_id": exp_id.clone(), "study_id": { "type": "string" } } }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "get_diagnostics",
+            "research",
+            Risk::Read,
+            "Diagnostic bundle for one Run: trade P&L shape, expectancy, streaks, MAE/MFE, \
+             monthly slices, worst trades, drawdown episode, exposure and cost drag. Read it \
+             before proposing a structural edit.",
+            json!({ "type": "object", "required": ["run_id"], "properties": { "run_id": { "type": "string" } } }),
+        )
+        .internal()
+        .evidence(&["run_id"])
+        .notes("get_diagnostics"),
+        by_exp(
+            "get_funnel",
+            Risk::Read,
+            "The staged-gate ledger for an Experiment: which of Integrity, SinglePath, \
+             Robustness, Significance and Vault have passed, with each verdict's null and trial \
+             count.",
+            exp_id.clone(),
+        ),
+        // Advancing a gate is a verdict about evidence. It is recorded, ordered
+        // and cannot be walked back without the ledger showing it (D-8).
+        by_exp(
+            "advance_gate",
+            Risk::Write,
+            "Run the next gate. Gate 2 runs CPCV plus synthetic paths; Gate 3 runs the chosen \
+             permutation null with selection-bias correction. Blocks for minutes.",
+            exp_id.clone(),
+        )
+        .spends_trial(TrialKind::Falsification)
+        .max_calls_per_run(5)
+        .notes("advance_gate"),
+        by_exp(
+            "get_null_picker",
+            Risk::Read,
+            "The recommended significance null for this Experiment's strategy type, the full \
+             catalog with what each null preserves and destroys, and the logged choice if made.",
+            exp_id.clone(),
+        ),
+        // Choosing a null seals a distribution (INV-2). The choice is final by
+        // design, which is what makes it destructive rather than a write.
+        ToolSpec::new(
+            "choose_null",
+            "research",
+            Risk::Destructive,
+            "Declare the primary significance null. Logged and immutable: there is no second \
+             choice.",
+            json!({ "type": "object", "required": ["experiment_id", "kind"], "properties": { "experiment_id": exp_id, "kind": { "type": "string", "description": "See tool notes for the seven kinds" }, "override_reason": { "type": "string", "description": "Required when not choosing the recommended null" } } }),
+        )
+        .internal()
+        .notes("choose_null"),
     ]
 }
 

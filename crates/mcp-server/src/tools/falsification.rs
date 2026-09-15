@@ -262,84 +262,69 @@ pub async fn find_similar_trials(api: &ApiClient, params: &Value) -> Value {
     .await
 }
 
-/// Tool definitions.
+/// One declaration per tool (AGENT-006 §2.3; Set S tasks S-1.1, S-1.4).
+///
+/// Filing a report is a `Write`: it appends a row nothing can edit afterwards.
+/// It is emphatically **not** `Destructive` — an agent that hesitates to report a
+/// defect because the tool is flagged dangerous is an agent that exploits the
+/// defect instead, which is the failure the whole mechanism exists to prevent.
+///
+/// The two reports declare `TrialKind::Falsification` because
+/// `audit.selection_bias_verdict` folds an attack on a strategy into N_eff
+/// differently from a search for one. `check_tradeable_frontier` and
+/// `run_oracle_test` only measure and spend nothing; that is the point of asking
+/// them *before* a search rather than after it disappoints.
 #[must_use]
-pub fn definitions() -> Vec<Value> {
-    let reproduction = json!({
-        "artifact_ref": {
-            "type": "string",
-            "description": "The run, backtest or migration to replay (e.g. a run_id)."
-        },
-        "seed": {
-            "type": "integer",
-            "description": "The seed. A replay that cannot be pinned to a seed is an anecdote."
-        },
-        "expected": {
-            "type": "string",
-            "description": "What you predicted would happen, in your own words."
-        },
-        "observed": {
-            "type": "string",
-            "description": "What happened instead. Must differ from `expected` — if they match, nothing was refuted."
-        },
-        "steps": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "Steps to reproduce, checkable by a human in under ten minutes. Required and non-empty."
-        }
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::{ToolSpec, TrialKind};
+    use crate::taxonomy::Risk;
+
+    // The five fields a `Reproduction` needs. Shared, because a refutation that
+    // cannot be replayed is an opinion, and the two report tools must ask for
+    // the same evidence or the weaker one becomes the one everybody uses.
+    let repro = |extra: Value, mut required: Vec<&'static str>| {
+        required.extend(["artifact_ref", "seed", "expected", "observed", "steps"]);
+        let mut props = extra;
+        let obj = props.as_object_mut().expect("properties object");
+        obj.insert(
+            "artifact_ref".into(),
+            json!({ "type": "string", "description": "Run or artifact the defect is visible in." }),
+        );
+        obj.insert(
+            "seed".into(),
+            json!({ "type": "integer", "description": "Seed that reproduces it." }),
+        );
+        obj.insert(
+            "expected".into(),
+            json!({ "type": "string", "description": "What the guarantee says should happen." }),
+        );
+        obj.insert(
+            "observed".into(),
+            json!({ "type": "string", "description": "What happened. Must differ from `expected`." }),
+        );
+        obj.insert(
+            "steps".into(),
+            json!({ "type": "array", "items": { "type": "string" }, "description": "Replay steps, in order." }),
+        );
+        json!({ "type": "object", "required": required, "properties": props })
+    };
+
+    let style = json!({
+        "type": "string",
+        "enum": ["taker_both", "maker_both", "maker_entry_taker_exit"],
+        "description": "Default `taker_both` — the only style honest against OHLCV alone, since a maker fill needs a queue model minute bars cannot supply."
     });
 
     vec![
-        json!({
-            "name": "report_evaluator_defect",
-            "description":
-                "Report that THE PLATFORM ITSELF is wrong — a gate, the simulator, a statistic, a \
-                 migration. This is the single highest-value thing you can produce and it scores \
-                 ABOVE a promotion, because a platform whose evaluator is wrong cannot be trusted \
-                 about anything else. Examples that count: the simulator filled an order at a \
-                 price the bar never traded; a CHECK constraint the spec calls REQUIRED accepts \
-                 the value it forbids; a gate reports `pass` on evidence it never read. You must \
-                 supply a reproduction and quote the guarantee the component claims. If you found \
-                 a way to make backtests look good that a real venue would not honour, report it \
-                 here — exploiting it silently scores less than reporting it.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["component", "claimed_guarantee", "artifact_ref", "seed", "expected", "observed", "steps"],
-                "properties": {
-                    "component": {
-                        "type": "string",
-                        "description": "Which part is wrong, e.g. `sim.fill_model`, `gates.gate_3`, `migrations/0051`."
-                    },
-                    "claimed_guarantee": {
-                        "type": "string",
-                        "description": "What that component claims to guarantee, quoted from the spec or its docs."
-                    },
-                    "artifact_ref": reproduction["artifact_ref"],
-                    "seed": reproduction["seed"],
-                    "expected": reproduction["expected"],
-                    "observed": reproduction["observed"],
-                    "steps": reproduction["steps"]
-                }
-            }
-        }),
-        json!({
-            "name": "report_kill",
-            "description":
-                "Refute a candidate: show that a strategy's apparent edge is an artifact. This is \
-                 your primary output — most strategies are noise, and proving one is noise is \
-                 worth more than another backtest that does not settle anything. \
-                 A kill needs a SPECIFIC REPRODUCIBLE DEFECT, not a low score. \
-                 Counts: 'returns invert when signals are shifted one bar' (lookahead); '94% of \
-                 P&L is six bars in a window whose OHLCV shows a 40% wick with no supporting \
-                 prints' (data_artifact); 'break-even cost is 1.8bp against a 20bp fee floor' \
-                 (below_cost_floor). \
-                 Does NOT count: 'Sharpe is only 0.4', 'it underperforms buy-and-hold', 'the \
-                 drawdown is large'. Those are results. A report whose `expected` matches its \
-                 `observed` is rejected, and a kill nobody can reproduce scores zero.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["target_trial_id", "defect_class", "artifact_ref", "seed", "expected", "observed", "steps"],
-                "properties": {
+        ToolSpec::new(
+            "report_kill",
+            "falsification",
+            Risk::Write,
+            "REFUTE a trial with a reproduction and a defect class from a closed list. There is \
+             no class for underperformance on purpose: a disappointing result is a result, not \
+             a defect.",
+            repro(
+                json!({
                     "target_trial_id": { "type": "string", "description": "The trial being refuted." },
                     "defect_class": {
                         "type": "string",
@@ -348,58 +333,67 @@ pub fn definitions() -> Vec<Value> {
                             "below_tradeable_frontier", "fill_model_exploit",
                             "duplicate_of_existing", "invalid_metric"
                         ],
-                        "description": "The defect, from a closed list. There is no class for 'underperforms' on purpose."
-                    },
-                    "artifact_ref": reproduction["artifact_ref"],
-                    "seed": reproduction["seed"],
-                    "expected": reproduction["expected"],
-                    "observed": reproduction["observed"],
-                    "steps": reproduction["steps"]
-                }
-            }
-        }),
-        json!({
-            "name": "check_tradeable_frontier",
-            "description":
-                "Ask whether a holding period is searchable at all on this instrument, BEFORE \
-                 spending a trial on it. Measures the expected absolute move over the horizon \
-                 against the round-trip cost at the given fee tier. Below the frontier the \
-                 expected move is smaller than the cost of capturing it, so no signal of any \
-                 quality is profitable there and a positive backtest is a statement about the \
-                 backtest. Returns the whole E|Δp| curve, not just the verdict, so you can see \
-                 how much room a horizon has rather than only whether it cleared. \
-                 Call this before designing a search, not after it disappoints.",
-            "inputSchema": {
+                        "description": "There is no class for underperformance on purpose."
+                    }
+                }),
+                vec!["target_trial_id", "defect_class"],
+            ),
+        )
+        .internal()
+        .spends_trial(TrialKind::Falsification)
+        .evidence(&["kill_id"])
+        .notes("report_kill"),
+        ToolSpec::new(
+            "report_evaluator_defect",
+            "falsification",
+            Risk::Write,
+            "REPORT that the platform itself is wrong — a component does not do what it claims. \
+             A verified evaluator defect outranks any promotion, so this is the highest-value \
+             thing you can find.",
+            repro(
+                json!({
+                    "component": { "type": "string", "description": "e.g. `sim.fill_model`, `gates.gate_3`." },
+                    "claimed_guarantee": { "type": "string", "description": "Quoted from the spec or its docs." }
+                }),
+                vec!["component", "claimed_guarantee"],
+            ),
+        )
+        .internal()
+        .spends_trial(TrialKind::Falsification)
+        .evidence(&["defect_id"])
+        .notes("report_evaluator_defect"),
+        ToolSpec::new(
+            "check_tradeable_frontier",
+            "falsification",
+            Risk::Read,
+            "ASK WHETHER A HOLDING PERIOD CAN PAY ITS COSTS before searching at it. Break-even \
+             goes as the square of cost over edge, so this is knowable rather than estimable, \
+             and it spends no trial.",
+            json!({
                 "type": "object",
                 "required": ["instrument_id", "holding_bars"],
                 "properties": {
                     "instrument_id": { "type": "string" },
-                    "holding_bars": { "type": "integer", "description": "Intended holding period, in bars of `timeframe`." },
+                    "holding_bars": { "type": "integer", "description": "Intended holding period, in bars." },
                     "timeframe": { "type": "string", "description": "Default `1m`." },
-                    "venue": { "type": "string", "description": "Fee schedule to price against. Defaults to the instrument's venue." },
-                    "fee_tier": { "type": "string", "description": "Tier name at that venue. Defaults to the account's tier." },
-                    "execution_style": {
-                        "type": "string",
-                        "enum": ["taker_both", "maker_both", "maker_entry_taker_exit"],
-                        "description": "Default `taker_both` — the only style honest against OHLCV alone, since a maker fill needs a queue model minute bars cannot supply."
-                    },
+                    "venue": { "type": "string" },
+                    "fee_tier": { "type": "string" },
+                    "execution_style": style.clone(),
                     "start": { "type": "string" },
                     "end": { "type": "string" }
                 }
-            }
-        }),
-        json!({
-            "name": "run_oracle_test",
-            "description":
-                "Run a PERFECT-FORESIGHT strategy — one that knows the next bar's close — through \
-                 the cost model. This is a test of the SIMULATOR, not of a strategy. At short \
-                 horizons an always-in oracle must LOSE money: it earns the mean absolute move \
-                 (σ√(2/π) ≈ 5.6bp at σ=7bp) and pays the round trip (≈20bp). If it turns a \
-                 profit, the cost model is not charging what it claims and every backtest that \
-                 passed through it is suspect — report that with report_evaluator_defect. \
-                 Also returns how often a selective oracle could trade profitably, which is the \
-                 ceiling on how often ANY strategy can at this horizon.",
-            "inputSchema": {
+            }),
+        )
+        .internal()
+        .notes("check_tradeable_frontier"),
+        ToolSpec::new(
+            "run_oracle_test",
+            "falsification",
+            Risk::Read,
+            "MEASURE WHETHER THE EVALUATOR CAN SEE AN EDGE AT ALL, by running a strategy with \
+             perfect foresight. If the oracle does not profit, nothing will, and a negative \
+             result about your strategy meant nothing.",
+            json!({
                 "type": "object",
                 "required": ["instrument_id"],
                 "properties": {
@@ -407,56 +401,72 @@ pub fn definitions() -> Vec<Value> {
                     "timeframe": { "type": "string", "description": "Default `1m`." },
                     "venue": { "type": "string" },
                     "fee_tier": { "type": "string" },
-                    "execution_style": {
-                        "type": "string",
-                        "enum": ["taker_both", "maker_both", "maker_entry_taker_exit"]
-                    },
+                    "execution_style": style,
                     "start": { "type": "string" },
                     "end": { "type": "string" }
                 }
-            }
-        }),
-        json!({
-            "name": "get_trade_list",
-            "description":
-                "Every fill from a backtest, WITH its P&L concentration already measured.                  This is how you gather evidence for a `data_artifact` kill: it reports what                  fraction of the gross gain sits in the top few trades, and what the net becomes                  without them. A strategy whose edge disappears when you remove its best six                  bars did not have an edge — it had those six bars.                  Concentration alone is not a kill. It tells you WHICH bars to look at;                  probe_data_quality tells you whether those bars are real. You need both.",
-            "inputSchema": {
+            }),
+        )
+        .internal()
+        .notes("run_oracle_test"),
+        ToolSpec::new(
+            "get_trade_list",
+            "falsification",
+            Risk::Read,
+            "ISOLATE THE TRADES A RESULT RESTS ON. Returns the top-N contributors and what the \
+             result becomes without them; a Sharpe that lives in six bars is a defect class, \
+             not a strategy.",
+            json!({
                 "type": "object",
                 "required": ["run_id"],
                 "properties": {
                     "run_id": { "type": "string" },
-                    "top_n": { "type": "integer", "description": "How many top trades to isolate. Default 6." }
+                    "top_n": { "type": "integer", "description": "Default 6." }
                 }
-            }
-        }),
-        json!({
-            "name": "probe_data_quality",
-            "description":
-                "Scan the underlying bars for defects that make a backtest lie: impossible bars                  (a close outside its own range), long wicks on ZERO VOLUME (a price nothing                  traded at, which the simulator will happily fill against), stale republished                  bars, and spikes that fully revert next bar. Returns timestamps you can quote                  in a reproduction.                  An empty result is NOT a clean bill of health — it means none of those four                  things was found, and a plausible-looking wrong price passes all four.",
-            "inputSchema": {
+            }),
+        )
+        .internal()
+        .evidence(&["run_id"])
+        .notes("get_trade_list"),
+        ToolSpec::new(
+            "probe_data_quality",
+            "falsification",
+            Risk::Read,
+            "ASK WHETHER THE BARS THEMSELVES ARE THE DEFECT over a window — gaps, repeats, \
+             frozen prices, impossible moves. Narrow it to the window `get_trade_list` pointed \
+             you at.",
+            json!({
                 "type": "object",
                 "required": ["instrument_id"],
                 "properties": {
                     "instrument_id": { "type": "string" },
                     "timeframe": { "type": "string", "description": "Default `1m`." },
                     "start": { "type": "string" },
-                    "end": { "type": "string", "description": "Narrow this to the window get_trade_list pointed you at." }
+                    "end": { "type": "string" }
                 }
-            }
-        }),
-        json!({
-            "name": "find_similar_trials",
-            "description":
-                "Search the trial ledger before proposing something. An exact `config_hash`                  match means THIS CONFIGURATION HAS ALREADY BEEN EVALUATED: re-running it                  produces no new market evidence, still spends trial budget, and inflates the                  effective trial count that every selection-adjusted statistic depends on.                  `experiment_id` finds neighbours — what has already been tried in this line of                  work. Use it to avoid rediscovering your own last session.",
-            "inputSchema": {
+            }),
+        )
+        .internal()
+        .notes("probe_data_quality"),
+        ToolSpec::new(
+            "find_similar_trials",
+            "falsification",
+            Risk::Read,
+            "FIND WHETHER THIS HAS BEEN TRIED. An exact config repeat means the earlier result \
+             already answers you; a cluster of neighbours means the family's N_eff is larger \
+             than its trial count suggests.",
+            json!({
                 "type": "object",
                 "properties": {
                     "config_hash": { "type": "string", "description": "Find exact repeats." },
                     "experiment_id": { "type": "string", "description": "Find neighbours." },
-                    "limit": { "type": "integer", "description": "1–200, default 20." }
+                    "limit": { "type": "integer", "description": "1-200, default 20." }
                 }
-            }
-        }),
+            }),
+        )
+        .internal()
+        .evidence(&["trial_id"])
+        .notes("find_similar_trials"),
     ]
 }
 
@@ -530,64 +540,106 @@ mod tests {
         }
     }
 
-    // ── the definitions ──────────────────────────────────────────────────────
+    // ── the declarations, and the prose that moved out of them ───────────────
+    //
+    // These seven descriptions used to carry 6.4 KB of guidance between them,
+    // and the catalogue is sent on every model call. S-1.4 moved that guidance
+    // to `## Tool notes` in the authoring guide, which a model fetches once.
+    //
+    // The tests moved with it. Each one below asserts the same claim it always
+    // did — it just asserts it where the words now live. The point was never
+    // that a particular string sat in a particular field; it was that the agent
+    // is told the thing. A test that checked only the short description would
+    // pass while the substance quietly rotted out of the guide.
+
+    fn notes(tool: &str) -> String {
+        let guide = crate::authoring_guide();
+        let start = guide
+            .find(&format!("### {tool}\n"))
+            .unwrap_or_else(|| panic!("`### {tool}` must exist in the authoring guide"));
+        let rest = &guide[start + tool.len() + 5..];
+        let end = rest.find("\n### ").unwrap_or(rest.len());
+        // The guide is hard-wrapped; these assertions are about content, so a
+        // claim must not become invisible because it straddled a line break.
+        rest[..end].split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn described(tool: &str) -> &'static str {
+        specs()
+            .into_iter()
+            .find(|s| s.name == tool)
+            .unwrap_or_else(|| panic!("{tool} must be declared"))
+            .description
+    }
 
     #[test]
-    fn every_tool_is_defined_with_a_schema() {
-        let defs = definitions();
-        assert_eq!(defs.len(), 7, "four falsification tools plus three evidence tools");
-        for d in &defs {
-            assert!(d["name"].is_string());
-            assert!(d["description"].as_str().unwrap().len() > 120, "{}", d["name"]);
-            assert_eq!(d["inputSchema"]["type"], "object");
+    fn every_tool_is_declared_with_a_schema() {
+        let specs = specs();
+        assert_eq!(specs.len(), 7, "four falsification tools plus three evidence tools");
+        for s in &specs {
+            assert!(!s.description.is_empty(), "{}", s.name);
+            assert_eq!(s.input_schema["type"], "object");
             // Not every tool has a required field — `find_similar_trials` takes
             // either of two selectors and neither alone is mandatory. What every
             // tool must have is properties, or the model has nothing to fill in.
             assert!(
-                !d["inputSchema"]["properties"].as_object().unwrap().is_empty(),
+                !s.input_schema["properties"].as_object().unwrap().is_empty(),
                 "{} has no properties",
-                d["name"]
+                s.name
+            );
+            // Every one of these moved prose out, so every one must point at it.
+            assert_eq!(
+                s.notes_section,
+                Some(s.name),
+                "{} moved prose to the guide and must name the section",
+                s.name
             );
         }
     }
 
-    /// The ordering has to reach the model, not just the database. A tool
-    /// description that does not say "scores above a promotion" leaves the agent
-    /// to infer that reporting a bug costs it.
+    /// The ordering has to reach the model, not just the database. A tool that
+    /// does not say "scores above a promotion" leaves the agent to infer that
+    /// reporting a bug costs it.
     #[test]
     fn the_defect_tool_tells_the_model_it_outranks_a_promotion() {
-        let defs = definitions();
-        let d = defs.iter().find(|d| d["name"] == "report_evaluator_defect").unwrap();
-        let desc = d["description"].as_str().unwrap();
-        assert!(desc.contains("ABOVE a promotion"), "{desc}");
-        assert!(desc.contains("exploiting it silently scores less"), "{desc}");
+        let n = notes("report_evaluator_defect");
+        assert!(n.contains("ABOVE a promotion"), "{n}");
+        assert!(n.contains("exploiting it silently scores less"), "{n}");
+        // The short form must carry the ranking too: it is the half a flat-tier
+        // model sees without fetching anything.
+        assert!(described("report_evaluator_defect").contains("outranks any promotion"));
     }
 
     /// The kill tool must spell out what does not count, or the model will file
     /// low Sharpes until the constructor stops it.
     #[test]
     fn the_kill_tool_says_what_does_not_count() {
-        let defs = definitions();
-        let d = defs.iter().find(|d| d["name"] == "report_kill").unwrap();
-        let desc = d["description"].as_str().unwrap();
-        assert!(desc.contains("Does NOT count"), "{desc}");
-        assert!(desc.contains("Sharpe is only 0.4"), "{desc}");
+        let n = notes("report_kill");
+        assert!(n.contains("Does NOT count"), "{n}");
+        assert!(n.contains("Sharpe is only 0.4"), "{n}");
+        assert!(described("report_kill").contains("no class for underperformance"));
     }
 
     /// There is no `underperforms` class, and there must never be one.
     #[test]
     fn the_defect_class_enum_contains_no_performance_threshold() {
-        let defs = definitions();
-        let d = defs.iter().find(|d| d["name"] == "report_kill").unwrap();
-        let classes = d["inputSchema"]["properties"]["defect_class"]["enum"]
+        let s = specs();
+        let d = s.iter().find(|s| s.name == "report_kill").unwrap();
+        let classes = d.input_schema["properties"]["defect_class"]["enum"]
             .as_array()
-            .unwrap();
+            .expect("the closed list is in the schema, not only in the guide");
         assert_eq!(classes.len(), 7);
         for c in classes {
             let s = c.as_str().unwrap();
             for banned in ["underperform", "sharpe", "return", "loss", "worse"] {
                 assert!(!s.contains(banned), "{s} names a threshold, not a defect");
             }
+            // And the guide must name every class the schema accepts, or the
+            // model is offered a value with nowhere to read what it means.
+            assert!(
+                notes("report_kill").contains(s),
+                "`{s}` is accepted by the schema and absent from the guide"
+            );
         }
     }
 
@@ -596,25 +648,15 @@ mod tests {
     /// at the next step rather than reading as a verdict on its own.
     #[test]
     fn the_evidence_tools_say_what_they_do_not_prove() {
-        let defs = definitions();
-        let d = |n: &str| {
-            defs.iter()
-                .find(|d| d["name"] == n)
-                .unwrap_or_else(|| panic!("{n} must be defined"))["description"]
-                .as_str()
-                .unwrap()
-                .to_string()
-        };
-
-        let trades = d("get_trade_list");
+        let trades = notes("get_trade_list");
         assert!(trades.contains("Concentration alone is not a kill"), "{trades}");
         assert!(trades.contains("probe_data_quality"), "it must point at the next step: {trades}");
 
-        let quality = d("probe_data_quality");
+        let quality = notes("probe_data_quality");
         assert!(quality.contains("NOT a clean bill of health"), "{quality}");
         assert!(quality.contains("ZERO VOLUME"), "{quality}");
 
-        let similar = d("find_similar_trials");
+        let similar = notes("find_similar_trials");
         assert!(similar.contains("ALREADY BEEN EVALUATED"), "{similar}");
         assert!(
             similar.contains("effective trial count"),
@@ -624,10 +666,12 @@ mod tests {
 
     #[test]
     fn the_frontier_tool_defaults_to_the_only_honest_execution_style() {
-        let defs = definitions();
-        let d = defs.iter().find(|d| d["name"] == "check_tradeable_frontier").unwrap();
-        let style = &d["inputSchema"]["properties"]["execution_style"];
+        let s = specs();
+        let d = s.iter().find(|s| s.name == "check_tradeable_frontier").unwrap();
+        let style = &d.input_schema["properties"]["execution_style"];
         assert_eq!(style["enum"][0], "taker_both");
+        // The *reason* stays in the schema rather than the guide: it is read at
+        // the moment the field is filled in, which is the moment it matters.
         assert!(style["description"].as_str().unwrap().contains("queue model"));
     }
 
@@ -635,11 +679,10 @@ mod tests {
     /// strategy tool would get it used as one.
     #[test]
     fn the_oracle_tool_says_it_tests_the_simulator_and_what_failure_means() {
-        let defs = definitions();
-        let d = defs.iter().find(|d| d["name"] == "run_oracle_test").unwrap();
-        let desc = d["description"].as_str().unwrap();
-        assert!(desc.contains("test of the SIMULATOR"), "{desc}");
-        assert!(desc.contains("must LOSE money"), "{desc}");
-        assert!(desc.contains("report_evaluator_defect"), "route failure onward: {desc}");
+        let n = notes("run_oracle_test");
+        assert!(n.contains("test of the SIMULATOR"), "{n}");
+        assert!(n.contains("must LOSE money"), "{n}");
+        assert!(n.contains("report_evaluator_defect"), "route failure onward: {n}");
+        assert!(described("run_oracle_test").contains("EVALUATOR CAN SEE AN EDGE"));
     }
 }

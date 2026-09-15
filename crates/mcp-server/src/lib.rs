@@ -11,6 +11,7 @@
 // macro recursion limit.
 #![recursion_limit = "256"]
 
+pub mod spec;
 pub mod taxonomy;
 pub mod tools;
 
@@ -449,6 +450,8 @@ async fn dispatch_untraced(
         "advance_gate" => tools::research::advance_gate(&ctx.api, params).await,
         "get_null_picker" => tools::research::get_null_picker(&ctx.api, params).await,
         "choose_null" => tools::research::choose_null(&ctx.api, params).await,
+
+        // ── Falsification (EXTERNAL-REVIEW-2026-09 §4) and its evidence tools ──
         "report_kill" => tools::falsification::report_kill(&ctx.api, params).await,
         "report_evaluator_defect" => {
             tools::falsification::report_evaluator_defect(&ctx.api, params).await
@@ -460,6 +463,8 @@ async fn dispatch_untraced(
         "get_trade_list" => tools::falsification::get_trade_list(&ctx.api, params).await,
         "probe_data_quality" => tools::falsification::probe_data_quality(&ctx.api, params).await,
         "find_similar_trials" => tools::falsification::find_similar_trials(&ctx.api, params).await,
+
+        // ── Web access (ADR-P7-01) and the skill library (ADR-P7-03) ──────────
         "web_search" => tools::research_tools::web_search(&ctx.api, params).await,
         "fetch_url" => tools::research_tools::fetch_url(&ctx.api, params).await,
         "create_skill" => tools::research_tools::create_skill(&ctx.api, params).await,
@@ -485,73 +490,21 @@ pub enum ToolProfile {
     InternalAgent,
 }
 
-/// Tool names included in the internal-agent profile.
+/// The tools the internal-agent profile exposes, sorted.
 ///
-/// Everything except the step-by-step draft builder (redundant — the agent
-/// writes full definition JSON) and automations (no standing trading config
-/// from the in-app agent). Raw backtest *creation* is also excluded
-/// (FEAT-003 §11): the agent may only cause Runs through Experiments and
-/// Studies, so every result it sees is sealed and counted.
-const INTERNAL_AGENT_TOOLS: &[&str] = &[
-    "get_authoring_guide",
-    "list_lanes",
-    "list_instruments",
-    "list_asset_classes",
-    "get_instrument",
-    "get_bars",
-    "list_initialized_assets",
-    "init_asset",
-    "get_asset_init_job",
-    "validate_strategy",
-    "create_strategy",
-    "get_strategy",
-    "list_strategies",
-    "list_compatible_strategies",
-    "get_backtest",
-    "wait_for_backtest",
-    "list_backtests",
-    "compare_backtests",
-    "get_dashboard_rollup",
-    "get_paper_activity",
-    "get_trading_status",
-    "get_order",
-    "list_models",
-    "get_model",
-    "list_feature_sets",
-    "train_model",
-    "get_training_run",
-    "promote_model_version",
-    // web access and the skill library (ADR-P7-01 … P7-04)
-    "web_search",
-    "fetch_url",
-    "create_skill",
-    "list_skills",
-    "run_skill",
-    // falsification (EXTERNAL-REVIEW-2026-09 §4) — the agent's primary output
-    "report_evaluator_defect",
-    "report_kill",
-    "check_tradeable_frontier",
-    "run_oracle_test",
-    "get_trade_list",
-    "probe_data_quality",
-    "find_similar_trials",
-    // research (FEAT-003)
-    "backtest_strategy",
-    "create_experiment",
-    "list_experiments",
-    "get_experiment",
-    "run_sweep",
-    "get_sweep",
-    "cancel_sweep",
-    "run_study",
-    "list_studies",
-    "get_carried_forward",
-    "get_diagnostics",
-    "get_funnel",
-    "advance_gate",
-    "get_null_picker",
-    "choose_null",
-];
+/// Derived from `ToolSpec.profiles` (AGENT-006 §2.3 P2). It was a hand-written
+/// array of 43 names until Set S task S-1.3, which is one more place a tool could
+/// be missing from — and the direction of the miss was silent: a tool absent here
+/// was simply invisible to the in-app agent, with nothing failing.
+///
+/// A deprecated tool is absent whatever its `profiles` still says (§2.7).
+#[must_use]
+pub fn internal_agent_tools() -> Vec<&'static str> {
+    let mut names: Vec<&str> =
+        spec::exposed(ToolProfile::InternalAgent).iter().map(|s| s.name).collect();
+    names.sort_unstable();
+    names
+}
 
 /// The complete list of tools exposed by this MCP server (MCP profile).
 pub fn tool_definitions() -> Value {
@@ -559,550 +512,188 @@ pub fn tool_definitions() -> Value {
 }
 
 /// Tool definitions filtered by profile.
-pub fn tool_definitions_for(profile: ToolProfile) -> Value {
-    let all = stamp(all_tool_definitions());
-    match profile {
-        ToolProfile::Mcp => all,
-        ToolProfile::InternalAgent => {
-            let filtered: Vec<Value> = all
-                .as_array()
-                .expect("tool definitions are an array")
-                .iter()
-                .filter(|t| {
-                    t.get("name")
-                        .and_then(|n| n.as_str())
-                        .is_some_and(|n| INTERNAL_AGENT_TOOLS.contains(&n))
-                })
-                .cloned()
-                .collect();
-            Value::Array(filtered)
-        }
-    }
-}
-
-/// Stamps every descriptor with its namespace and risk (ADR-0031).
 ///
-/// Applied at render time rather than written into 56 literals, so `taxonomy.rs` is
-/// the single place a tool's classification lives and the tests there can prove the
-/// catalogue and the table agree. A tool with no entry is stamped
-/// `namespace: "unclassified"` and `risk: "destructive"` — the most restrictive
-/// reading, so an unclassified tool fails closed rather than open.
-fn stamp(mut defs: Value) -> Value {
-    if let Some(arr) = defs.as_array_mut() {
-        for t in arr.iter_mut() {
-            let name = t
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let (ns, risk) = taxonomy::classify(&name)
-                .map_or(("unclassified", taxonomy::Risk::Destructive), |(n, r)| {
-                    (n, r)
-                });
-            if let Some(obj) = t.as_object_mut() {
-                obj.insert("namespace".into(), json!(ns));
-                obj.insert("risk".into(), json!(risk.as_str()));
-            }
-        }
-    }
-    defs
+/// Rendered from [`spec::catalog`], which is the only place a tool's name,
+/// description, schema, namespace and risk are written down. There is no second
+/// copy to disagree with, which is what retired `stamp()` — it existed to graft
+/// the taxonomy's namespace and risk onto a JSON literal that did not carry them.
+pub fn tool_definitions_for(profile: ToolProfile) -> Value {
+    Value::Array(spec::exposed(profile).iter().map(|s| s.descriptor()).collect())
 }
 
-fn all_tool_definitions() -> Value {
-    let mut all = json!([
-        // ── Protocol ─────────────────────────────────────────────────────────
-        {
-            "name": "get_authoring_guide",
-            "description": "Return the full strategy-authoring protocol: definition JSON format, expression grammar, supported features, backtest workflow, and result interpretation. Call this once before authoring anything.",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        // ── Discovery ────────────────────────────────────────────────────────
-        {
-            "name": "list_lanes",
-            "description": "Return the data lanes strategies can subscribe to (e.g. market.bars.1m, features.technical)",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "list_instruments",
-            "description": "List instruments that have stored bar history, with per-timeframe coverage (bar count, first/last timestamp). Backtest inside the covered window, or rely on auto_collect to backfill.",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "list_asset_classes",
-            "description": "List the asset classes the platform supports (crypto_spot_cex is the v1 focus)",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "get_instrument",
-            "description": "Fetch one instrument's registry row (venue, asset class, active flag)",
-            "inputSchema": {
-                "type": "object",
-                "required": ["instrument_id"],
-                "properties": {
-                    "instrument_id": { "type": "string", "description": "e.g. BTC-USD" }
-                }
+#[cfg(test)]
+mod catalogue_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    /// Every dispatch arm has a spec and every spec has a dispatch arm
+    /// (AGENT-006 §2.3, §10.4; Set S task S-1.4).
+    ///
+    /// Dispatch is a `match` on the name and stays one — generating it is an
+    /// explicit non-goal (§11). What must not happen is a spec whose tool cannot
+    /// be called, or an arm no profile can reach: the first is a tool the model
+    /// is told about and cannot use, the second is a code path no test covers.
+    ///
+    /// Read from the source text rather than exercised, because exercising it
+    /// needs a live `ApiClient` for all sixty.
+    #[test]
+    fn every_dispatch_arm_has_a_spec_and_every_spec_has_an_arm() {
+        const SRC: &str = include_str!("lib.rs");
+        let body = SRC
+            .split_once("async fn dispatch_untraced")
+            .expect("dispatch_untraced exists")
+            .1
+            .split_once("unknown =>")
+            .expect("the catch-all arm exists")
+            .0;
+
+        let mut arms: BTreeSet<&str> = BTreeSet::new();
+        for line in body.lines() {
+            let t = line.trim_start();
+            if !t.starts_with('"') {
+                continue;
             }
-        },
-        {
-            "name": "get_bars",
-            "description": "Fetch real OHLCV bars for an instrument over a time range, with full-window summary stats (return %, high/low). Use this to inspect market behavior before designing a strategy or to sanity-check a backtest window. Responses are capped: you get summary + the most recent max_bars bars; widen interval_seconds for long ranges.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["instrument_id", "start", "end"],
-                "properties": {
-                    "instrument_id": { "type": "string", "description": "e.g. BTC-USD" },
-                    "start": { "type": "string", "description": "RFC3339 UTC start" },
-                    "end": { "type": "string", "description": "RFC3339 UTC end" },
-                    "interval_seconds": { "type": "integer", "description": "Bar size in seconds (default 3600; 60=1m, 86400=1d). Aggregated from stored 1m bars." },
-                    "max_bars": { "type": "integer", "description": "Max bars returned (default 300, cap 2000); earlier bars are summarized, not returned" }
-                }
-            }
-        },
-        {
-            "name": "list_initialized_assets",
-            "description": "List symbols that have been initialized on the platform (seeded history + live 1-minute aggregation)",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "init_asset",
-            "description": "Onboard a symbol: starts a background job that backfills historical bars and starts live 1-minute aggregation. Data collection only — never trades. Returns a job_id; poll get_asset_init_job until status is terminal, then the symbol is backtestable.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["symbol"],
-                "properties": {
-                    "symbol": { "type": "string", "description": "e.g. SOL-USD" },
-                    "lookback_days": { "type": "integer", "description": "Days of history to backfill (default 90, max 3650)" },
-                    "asset_class": { "type": "string", "description": "Default resolved from the registry, else crypto heuristic" }
-                }
-            }
-        },
-        {
-            "name": "get_asset_init_job",
-            "description": "Status of an init_asset seeding job (status, bars_collected, error)",
-            "inputSchema": {
-                "type": "object",
-                "required": ["job_id"],
-                "properties": {
-                    "job_id": { "type": "string", "description": "UUID from init_asset" }
-                }
-            }
-        },
-        // ── Authoring ────────────────────────────────────────────────────────
-        {
-            "name": "validate_strategy",
-            "description": "Validate a strategy definition JSON without persisting it; returns structured errors (path + message) you can fix and retry. Free and instant — validate early and often.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["definition_json"],
-                "properties": {
-                    "definition_json": { "type": "object", "description": "Strategy definition OBJECT (format: see get_authoring_guide). Send the object itself, not a string containing JSON." }
-                }
-            }
-        },
-        {
-            "name": "create_strategy",
-            "description": "Validate and persist a strategy definition to the platform's strategy library. Upserts by strategy_id slug — reusing a slug overwrites that strategy, so mint versioned slugs (my_strat_v2) when iterating.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["definition_json"],
-                "properties": {
-                    "definition_json": { "type": "object", "description": "Strategy definition OBJECT. Send the object itself, not a string containing JSON." }
-                }
-            }
-        },
-        {
-            "name": "get_strategy",
-            "description": "Fetch a stored strategy definition by its strategy_id slug",
-            "inputSchema": {
-                "type": "object",
-                "required": ["strategy_id"],
-                "properties": {
-                    "strategy_id": { "type": "string", "description": "Slug returned by create_strategy / list_strategies" }
-                }
-            }
-        },
-        {
-            "name": "list_strategies",
-            "description": "List all stored strategy slugs in the platform library",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "list_compatible_strategies",
-            "description": "List stored strategies whose data requirements the given instrument/asset-class can satisfy (incompatible ones are omitted, with each strategy's kind, trigger, and required lanes)",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "instrument_id": { "type": "string", "description": "Optional instrument filter" },
-                    "asset_class": { "type": "string", "description": "Default crypto_spot_cex" }
-                }
-            }
-        },
-        // ── Strategy Builder (optional step-by-step alternative) ─────────────
-        {
-            "name": "new_strategy_draft",
-            "description": "Create a new empty strategy draft; returns a draft_id for subsequent builder calls. Alternative to writing full definition JSON — drafts live only in this server's memory until finalize_strategy.",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "discard_draft",
-            "description": "Discard a strategy draft by draft_id",
-            "inputSchema": {
-                "type": "object",
-                "required": ["draft_id"],
-                "properties": {
-                    "draft_id": { "type": "string", "description": "UUID of the draft to discard" }
-                }
-            }
-        },
-        {
-            "name": "set_strategy_meta",
-            "description": "Set top-level strategy fields on a draft (strategy_id slug, asset_class, min_trust_tier)",
-            "inputSchema": {
-                "type": "object",
-                "required": ["draft_id", "strategy_id", "asset_class"],
-                "properties": {
-                    "draft_id": { "type": "string" },
-                    "strategy_id": { "type": "string", "description": "Human-readable slug, e.g. ema_cross_v1" },
-                    "asset_class": { "type": "string", "description": "e.g. crypto_spot_cex (platform v1 focus is crypto)" },
-                    "min_trust_tier": { "type": "string", "description": "Optional trust tier override" }
-                }
-            }
-        },
-        {
-            "name": "add_strategy_input",
-            "description": "Append an input lane subscription to the draft",
-            "inputSchema": {
-                "type": "object",
-                "required": ["draft_id", "lane"],
-                "properties": {
-                    "draft_id": { "type": "string" },
-                    "lane": { "type": "string", "description": "Lane name, e.g. market.bars.1m" },
-                    "instrument": { "type": "string", "description": "Instrument ID or $bound_at_init (default)" },
-                    "features": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Feature names for features.technical lanes (backtests support ema_N and rsi_N)"
-                    }
-                }
-            }
-        },
-        {
-            "name": "add_condition_node",
-            "description": "Append a Condition node to the draft",
-            "inputSchema": {
-                "type": "object",
-                "required": ["draft_id", "node_id", "expr"],
-                "properties": {
-                    "draft_id": { "type": "string" },
-                    "node_id": { "type": "string", "description": "Unique node ID within this strategy" },
-                    "expr": { "type": "string", "description": "Predicate expression, e.g. feature('ema_7') > feature('ema_21')" }
-                }
-            }
-        },
-        {
-            "name": "add_signal_node",
-            "description": "Append a Signal node that emits on the rising edge of a condition",
-            "inputSchema": {
-                "type": "object",
-                "required": ["draft_id", "node_id", "when", "emit"],
-                "properties": {
-                    "draft_id": { "type": "string" },
-                    "node_id": { "type": "string" },
-                    "when": { "type": "string", "description": "ID of the condition node to watch" },
-                    "emit": { "type": "string", "description": "Named signal to emit, e.g. long" }
-                }
-            }
-        },
-        {
-            "name": "add_strategy_action",
-            "description": "Append a PlaceOrder action triggered by a named signal",
-            "inputSchema": {
-                "type": "object",
-                "required": ["draft_id", "on_signal", "side", "size_mode", "size"],
-                "properties": {
-                    "draft_id": { "type": "string" },
-                    "on_signal": { "type": "string", "description": "Signal name that triggers this action" },
-                    "side": { "type": "string", "enum": ["buy", "sell"] },
-                    "size_mode": { "type": "string", "enum": ["fixed", "percent_of_balance", "risk_unit"] },
-                    "size": { "type": "string", "description": "Decimal string quantity (e.g. \"0.02\" = 2% for percent_of_balance)" }
-                }
-            }
-        },
-        {
-            "name": "set_risk_overrides",
-            "description": "Set per-strategy risk overrides on the draft (tighten-only — loosening platform limits fails validation)",
-            "inputSchema": {
-                "type": "object",
-                "required": ["draft_id"],
-                "properties": {
-                    "draft_id": { "type": "string" },
-                    "max_position": { "type": "string", "description": "Decimal max position size" },
-                    "max_order_rate_per_minute": { "type": "integer" },
-                    "max_order_rate_per_second": { "type": "integer" }
-                }
-            }
-        },
-        {
-            "name": "get_draft_summary",
-            "description": "Return the current draft definition as JSON without mutating it",
-            "inputSchema": {
-                "type": "object",
-                "required": ["draft_id"],
-                "properties": {
-                    "draft_id": { "type": "string" }
-                }
-            }
-        },
-        {
-            "name": "finalize_strategy",
-            "description": "Validate the draft and persist it to the platform strategy library; returns the strategy_id slug on success or structured validation errors",
-            "inputSchema": {
-                "type": "object",
-                "required": ["draft_id"],
-                "properties": {
-                    "draft_id": { "type": "string" }
-                }
-            }
-        },
-        // ── Backtests ────────────────────────────────────────────────────────
-        // There is deliberately no `create_backtest` tool. Compute may not be
-        // dispatched without a registered trial row (INV-16), and a raw backtest
-        // has no Experiment to register against — so the only path that runs
-        // anything is create_experiment → run_sweep, where every member is
-        // registered, propensity-logged and counted before it executes.
-        {
-            "name": "get_backtest",
-            "description": "READ an existing backtest by id — it runs nothing. Use it only for a backtest_id you already have. Status, progress %, error detail, and (when completed) the result document. detail:'summary' (default) truncates long arrays; use detail:'full' for every trade and the full equity curve.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["backtest_id"],
-                "properties": {
-                    "backtest_id": { "type": "string", "description": "UUID of an existing run (from run_sweep)" },
-                    "detail": { "type": "string", "enum": ["summary", "full"], "description": "Default summary" }
-                }
-            }
-        },
-        {
-            "name": "wait_for_backtest",
-            "description": "Block server-side until the backtest reaches a terminal state (completed/failed/cancelled) or timeout_seconds elapses. On timeout it returns {timed_out:true, status, progress} — simply call it again; chain calls to wait out hour-long runs without burning turns on manual polling.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["backtest_id"],
-                "properties": {
-                    "backtest_id": { "type": "string", "description": "UUID of an existing run (from run_sweep)" },
-                    "timeout_seconds": { "type": "integer", "description": "Max seconds this call blocks (default 300, clamp 10-600)" },
-                    "poll_seconds": { "type": "integer", "description": "Seconds between status polls (default 5, clamp 2-60)" }
-                }
-            }
-        },
-        {
-            "name": "list_backtests",
-            "description": "List recent backtest runs (newest first) with status, progress and identifying fields",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "limit": { "type": "integer", "description": "Max runs to return (default 20, max 100)" }
-                }
-            }
-        },
-        {
-            "name": "stop_backtest",
-            "description": "Cancel a running backtest",
-            "inputSchema": {
-                "type": "object",
-                "required": ["backtest_id"],
-                "properties": {
-                    "backtest_id": { "type": "string", "description": "UUID of the run to cancel" }
-                }
-            }
-        },
-        {
-            "name": "rerun_backtest",
-            "description": "Start a fresh run with the same spec as an existing backtest; returns the new backtest_id",
-            "inputSchema": {
-                "type": "object",
-                "required": ["backtest_id"],
-                "properties": {
-                    "backtest_id": { "type": "string", "description": "UUID of the run to copy" }
-                }
-            }
-        },
-        {
-            "name": "delete_backtest",
-            "description": "Delete a finished backtest run (terminal states only) — housekeeping for failed experiments",
-            "inputSchema": {
-                "type": "object",
-                "required": ["backtest_id"],
-                "properties": {
-                    "backtest_id": { "type": "string", "description": "UUID of the run to delete" }
-                }
-            }
-        },
-        {
-            "name": "compare_backtests",
-            "description": "Side-by-side comparison of 2-5 backtest runs: identifying fields plus headline result metrics (summary, returns, order counts). Use after iterating to pick the best variant on evidence.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["backtest_ids"],
-                "properties": {
-                    "backtest_ids": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "2-5 backtest UUIDs"
-                    }
-                }
-            }
-        },
-        // ── Portfolio observability (read-only) ──────────────────────────────
-        {
-            "name": "get_dashboard_rollup",
-            "description": "Account overview: balances, open positions, and P&L per asset class (read-only)",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "get_paper_activity",
-            "description": "Paper-trading engine activity for one instrument: positions, fills, P&L (read-only)",
-            "inputSchema": {
-                "type": "object",
-                "required": ["instrument_id"],
-                "properties": {
-                    "instrument_id": { "type": "string" }
-                }
-            }
-        },
-        {
-            "name": "get_trading_status",
-            "description": "Platform trading status: whether the kill switch is tripped (read-only)",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "get_order",
-            "description": "Look up one order's status by id (read-only — there is no order-placement tool)",
-            "inputSchema": {
-                "type": "object",
-                "required": ["order_id"],
-                "properties": {
-                    "order_id": { "type": "string", "description": "Order UUID" }
-                }
-            }
-        },
-        // ── Model registry (read-only) ───────────────────────────────────────
-        {
-            "name": "list_models",
-            "description": "List registered AI models (kind, status). Definition v1.1 strategies can bind model outputs into feature slots via Inference nodes.",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "get_model",
-            "description": "One registered model's detail by id (read-only)",
-            "inputSchema": {
-                "type": "object",
-                "required": ["model_id"],
-                "properties": {
-                    "model_id": { "type": "string" }
-                }
-            }
-        },
-        {
-            "name": "list_feature_sets",
-            "description": "Feature sets a model can be trained on. Use it before train_model when you need to name feature_set_ref.",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "train_model",
-            "description": "Train an AI model end to end and wait for it: creates the model if the slug is new, runs training on real stored bars, and returns the trained version with its metrics. Use it when a strategy needs a model that does not exist yet. Deterministic: the same slug, data window and seed reproduce the same run.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["slug", "instrument_id"],
-                "properties": {
-                    "slug": { "type": "string", "description": "Short stable name. Training again with the same slug retrains that model rather than creating a second one." },
-                    "instrument_id": { "type": "string", "description": "Instrument to train on, e.g. BTC-USD. It must have stored bars — check list_instruments." },
-                    "model_kind": { "type": "string", "enum": ["forecaster", "classifier", "regressor"], "description": "Default forecaster." },
-                    "timeframe": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "4h", "1d"], "description": "Bar timeframe. Default 1h." },
-                    "asset_class": { "type": "string", "enum": ["crypto_spot_cex", "us_equity"], "description": "Default crypto_spot_cex." },
-                    "label_horizon": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "4h", "1d"], "description": "How far ahead to predict. A DURATION, not a feature name. Default 1h." },
-                    "lookback_days": { "type": "integer", "description": "How much history to train on. Default 30." },
-                    "seed": { "type": "integer", "description": "Pinned for reproducibility. Default 42." },
-                    "timeout_seconds": { "type": "integer", "description": "How long to wait. Default 900; on timeout the run keeps going and a run_id is returned." }
-                }
-            }
-        },
-        {
-            "name": "get_training_run",
-            "description": "Status and metrics of one training run, by model_id and run_id.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["model_id", "run_id"],
-                "properties": {
-                    "model_id": { "type": "string" },
-                    "run_id": { "type": "string" }
-                }
-            }
-        },
-        {
-            "name": "promote_model_version",
-            "description": "Point an alias (default 'production') at a trained model version, so strategies referencing the model resolve to it.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["model_id", "version"],
-                "properties": {
-                    "model_id": { "type": "string" },
-                    "version": { "type": "string" },
-                    "alias": { "type": "string", "description": "Default production." }
-                }
-            }
-        },
-        // ── Automations ──────────────────────────────────────────────────────
-        {
-            "name": "list_automations",
-            "description": "List all automation plans (strategy↔instrument bindings that run when armed)",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "create_automation",
-            "description": "Create a SingleInstrument automation that ties a stored strategy to an instrument. Live mode is blocked unless the operator sets MCP_ALLOW_LIVE_AUTOMATIONS.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["execution_strategy_id", "instrument_id", "asset_class", "account_mode"],
-                "properties": {
-                    "execution_strategy_id": { "type": "string", "description": "strategy_id slug of the stored strategy" },
-                    "instrument_id": { "type": "string" },
-                    "asset_class": { "type": "string", "description": "e.g. crypto_spot_cex" },
-                    "account_mode": { "type": "string", "enum": ["paper", "live"] },
-                    "armed": { "type": "boolean", "description": "Start armed (default false)" },
-                    "time_window_start": { "type": "string", "description": "HH:MM trading window open (omit for 24/7)" },
-                    "time_window_end": { "type": "string", "description": "HH:MM trading window close (omit for 24/7)" },
-                    "time_window_tz": { "type": "string", "description": "IANA timezone (default UTC)" }
-                }
-            }
-        },
-        {
-            "name": "arm_automation",
-            "description": "Arm an automation by ID",
-            "inputSchema": {
-                "type": "object",
-                "required": ["automation_id"],
-                "properties": {
-                    "automation_id": { "type": "string" }
-                }
-            }
-        },
-        {
-            "name": "disarm_automation",
-            "description": "Disarm an automation by ID",
-            "inputSchema": {
-                "type": "object",
-                "required": ["automation_id"],
-                "properties": {
-                    "automation_id": { "type": "string" }
-                }
+            let Some(rest) = t.strip_prefix('"') else { continue };
+            let Some((name, after)) = rest.split_once('"') else { continue };
+            if after.trim_start().starts_with("=>") {
+                arms.insert(name);
             }
         }
-    ]);
-    if let Some(arr) = all.as_array_mut() {
-        arr.extend(tools::research::definitions());
-        arr.extend(tools::falsification::definitions());
-        arr.extend(tools::research_tools::definitions());
+        assert!(arms.len() > 50, "the arm scan found only {}; it has drifted", arms.len());
+
+        let declared: BTreeSet<&str> = spec::names().into_iter().collect();
+        let no_spec: Vec<&&str> = arms.difference(&declared).collect();
+        assert!(
+            no_spec.is_empty(),
+            "dispatch arms with no ToolSpec — callable but invisible to routing, \
+             exposure and gating: {no_spec:?}"
+        );
+        let no_arm: Vec<&&str> = declared.difference(&arms).collect();
+        assert!(
+            no_arm.is_empty(),
+            "specs with no dispatch arm — the model is told about them and they \
+             return unknown_tool: {no_arm:?}"
+        );
     }
-    all
+
+    /// AGENT-005 §5.4: a rendered descriptor is ≤ 1,200 bytes.
+    ///
+    /// The whole catalogue is sent on every hosted call, so a description is the
+    /// one piece of prose in this system whose cost is multiplied by every turn
+    /// of every run. The rule is: ≤ 2 sentences saying *when* to use it. The
+    /// "how to think about this" paragraphs live in the guide's `## Tool notes`
+    /// and are fetched by the steps that need them.
+    #[test]
+    fn no_tool_descriptor_exceeds_the_rich_budget() {
+        let mut over: Vec<(String, usize)> = Vec::new();
+        for s in spec::catalog() {
+            let bytes = serde_json::to_string(&json!({
+                "name": s.name,
+                "description": s.description,
+                "inputSchema": s.input_schema,
+            }))
+            .expect("descriptor serialises")
+            .len();
+            if bytes > 1_200 {
+                over.push((s.name.to_string(), bytes));
+            }
+        }
+        over.sort_by_key(|(_, b)| std::cmp::Reverse(*b));
+        assert!(
+            over.is_empty(),
+            "over the 1,200-byte rich budget (AGENT-005 §5.4) — move the prose to \
+             `## Tool notes` in the authoring guide and keep when-to-use: {over:?}"
+        );
+    }
+
+    /// The flat budget: the first sentence alone must carry the tool, because a
+    /// flat-tier render is all a 7B sees.
+    #[test]
+    fn every_first_sentence_fits_the_flat_budget() {
+        let mut over: Vec<(String, usize)> = Vec::new();
+        for s in spec::catalog() {
+            let first = s.description.split_once(". ").map_or(s.description, |(a, _)| a);
+            if first.len() > 400 {
+                over.push((s.name.to_string(), first.len()));
+            }
+        }
+        assert!(over.is_empty(), "first sentence over 400 B (AGENT-005 §5.4): {over:?}");
+    }
+
+    /// The routing unit stays routable (AGENT-006 §2.1, §10.4;
+    /// `api/src/agent/bridge.rs` `no_namespace_is_too_large_to_expose_on_a_local_step`).
+    ///
+    /// A namespace larger than a local step's exposure budget truncates
+    /// deterministically, so some tool in it becomes permanently invisible —
+    /// reachable only through `search_tools`, which the model has to think to
+    /// use.
+    #[test]
+    fn no_namespace_holds_more_than_sixteen_tools() {
+        let mut counts: std::collections::BTreeMap<&str, usize> = Default::default();
+        for s in spec::catalog() {
+            *counts.entry(s.namespace).or_default() += 1;
+        }
+        let over: Vec<(&&str, &usize)> = counts.iter().filter(|(_, n)| **n > 16).collect();
+        assert!(over.is_empty(), "namespaces over the 16-tool routing cap: {over:?}");
+    }
+
+    /// Every `notes_section` resolves to a heading in the guide (§10.3).
+    ///
+    /// A pointer into documentation that does not exist is worse than no
+    /// pointer: the model spends a call on `get_authoring_guide` and gets
+    /// nothing, then has no reason to trust the next pointer either.
+    #[test]
+    fn every_notes_section_resolves_to_a_heading() {
+        let guide = authoring_guide();
+        let missing: Vec<&str> = spec::catalog()
+            .iter()
+            .filter_map(|s| s.notes_section)
+            .filter(|section| !guide.contains(&format!("### {section}")))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "notes_section values with no `### <name>` heading in \
+             docs/authoring_guide.md: {missing:?}"
+        );
+    }
+
+    /// §2.5, the static half: a write in a namespace that can run the simulator
+    /// either declares a trial kind or is on this list with a reason.
+    ///
+    /// **This asserts the declaration, not the enforcement.** Wrapping dispatch
+    /// so the ledger row is written before the tool runs is AGENT-006 §2.5 and is
+    /// not implemented here; until it is, `spends_trial` says what *should*
+    /// register a trial, and `run_sweep`/`run_study` register theirs through the
+    /// platform's own Experiment path as they always did.
+    #[test]
+    fn a_write_that_can_run_the_simulator_declares_a_trial() {
+        use spec::TrialKind;
+        // Each entry is a write in one of the three namespaces that does not run
+        // anything: it records a verdict or cancels work already counted.
+        const RECORDS_ONLY: &[(&str, &str)] = &[
+            ("create_experiment", "creates the container; the trials are the Studies"),
+            ("cancel_sweep", "stops work already registered"),
+            ("stop_backtest", "cancels a run whose trial was registered when it started"),
+        ];
+        let mut problems = Vec::new();
+        for s in spec::catalog() {
+            let risky = matches!(s.namespace, "research" | "falsification" | "backtest");
+            let writes = matches!(s.risk, taxonomy::Risk::Write);
+            if !(risky && writes) {
+                continue;
+            }
+            let exempt = RECORDS_ONLY.iter().any(|(n, _)| *n == s.name);
+            if s.spends_trial == TrialKind::None && !exempt {
+                problems.push(format!(
+                    "`{}` is a write in `{}` and declares no trial — if it cannot run \
+                     the simulator, add it to RECORDS_ONLY with the reason",
+                    s.name, s.namespace
+                ));
+            }
+            if s.spends_trial != TrialKind::None && exempt {
+                problems.push(format!("`{}` declares a trial and is also exempt", s.name));
+            }
+        }
+        assert!(problems.is_empty(), "{problems:#?}");
+    }
 }

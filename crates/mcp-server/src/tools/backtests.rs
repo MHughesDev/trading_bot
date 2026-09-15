@@ -335,3 +335,129 @@ pub async fn compare_backtests(api: &ApiClient, params: &Value) -> Value {
     }
     json!({ "comparison": rows })
 }
+
+/// Declarations for the seven read/manage `backtest` tools (AGENT-006 §2.3).
+///
+/// There is deliberately no `create_backtest`. Compute may not be dispatched
+/// without a registered trial row (INV-16), and a raw backtest has no Experiment
+/// to register against — so the only path that runs anything is
+/// `create_experiment` → `run_sweep`, where every member is registered,
+/// propensity-logged and counted before it executes. `backtest_strategy` is
+/// declared in `research.rs` with the rest of that path.
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::{ToolSpec, TrialKind};
+    use crate::taxonomy::Risk;
+    let by_id = |name: &'static str, risk, description, what: &'static str| {
+        ToolSpec::new(
+            name,
+            "backtest",
+            risk,
+            description,
+            json!({
+                "type": "object",
+                "required": ["backtest_id"],
+                "properties": {
+                    "backtest_id": { "type": "string", "description": what }
+                }
+            }),
+        )
+    };
+    vec![
+        ToolSpec::new(
+            "get_backtest",
+            "backtest",
+            Risk::Read,
+            "READ an existing backtest by id — it runs nothing. Status, progress, error detail \
+             and, when completed, the result document.",
+            json!({
+                "type": "object",
+                "required": ["backtest_id"],
+                "properties": {
+                    "backtest_id": { "type": "string", "description": "UUID of an existing run (from run_sweep)" },
+                    "detail": { "type": "string", "enum": ["summary", "full"], "description": "Default summary" }
+                }
+            }),
+        )
+        .internal()
+        .evidence(&["backtest_id"])
+        .notes("get_backtest"),
+        ToolSpec::new(
+            "wait_for_backtest",
+            "backtest",
+            Risk::Read,
+            "Block server-side until a backtest reaches a terminal state or timeout_seconds \
+             elapses. On timeout it returns {timed_out:true, status, progress}; call it again.",
+            json!({
+                "type": "object",
+                "required": ["backtest_id"],
+                "properties": {
+                    "backtest_id": { "type": "string", "description": "UUID of an existing run (from run_sweep)" },
+                    "timeout_seconds": { "type": "integer", "description": "Max seconds this call blocks (default 300, clamp 10-600)" },
+                    "poll_seconds": { "type": "integer", "description": "Seconds between status polls (default 5, clamp 2-60)" }
+                }
+            }),
+        )
+        .internal()
+        .notes("wait_for_backtest"),
+        ToolSpec::new(
+            "list_backtests",
+            "backtest",
+            Risk::Read,
+            "List recent backtest runs (newest first) with status, progress and identifying \
+             fields.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "description": "Max runs to return (default 20, max 100)" }
+                }
+            }),
+        )
+        .internal(),
+        by_id(
+            "stop_backtest",
+            Risk::Write,
+            "Cancel a running backtest.",
+            "UUID of the run to cancel",
+        ),
+        // Re-running dispatches the simulator again. The trial that pays for it
+        // is the one the original run registered; see the note in `spec.rs`
+        // about declaration versus dispatch-time enforcement (§2.5).
+        by_id(
+            "rerun_backtest",
+            Risk::Write,
+            "Start a fresh run with the same spec as an existing backtest; returns the new \
+             backtest_id.",
+            "UUID of the run to copy",
+        )
+        .spends_trial(TrialKind::Search)
+        .evidence(&["backtest_id"]),
+        // The evidence behind a result disappears. If a report cited it, the
+        // citation now points at nothing.
+        by_id(
+            "delete_backtest",
+            Risk::Destructive,
+            "Delete a finished backtest run (terminal states only). Anything that cited it now \
+             cites nothing.",
+            "UUID of the run to delete",
+        ),
+        ToolSpec::new(
+            "compare_backtests",
+            "backtest",
+            Risk::Read,
+            "Side-by-side comparison of 2-5 backtest runs: identifying fields plus headline \
+             result metrics.",
+            json!({
+                "type": "object",
+                "required": ["backtest_ids"],
+                "properties": {
+                    "backtest_ids": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "2-5 backtest UUIDs"
+                    }
+                }
+            }),
+        )
+        .internal(),
+    ]
+}

@@ -10,7 +10,7 @@
 //!
 //! Before this crate the platform had private data (the ledger, positions,
 //! strategy definitions) and **no outbound network**, so there was nothing to
-//! exfiltrate to. `the_catalogue_has_no_outbound_tools` asserted that by name.
+//! exfiltrate to. `the_only_outbound_tools_are_the_two_web_tools` asserted that by name.
 //!
 //! A research agent that cannot read a fee schedule or check whether its
 //! "discovery" is a 2011 paper is worth much less, so the leg is restored — and
