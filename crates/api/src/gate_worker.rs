@@ -42,6 +42,14 @@ use uuid::Uuid;
 /// Gate 11 would count different regimes over the same period.
 pub const VOL_WINDOW: usize = 21;
 
+/// The shortest overlap Gate 10's attribution regression is estimable on.
+///
+/// `newey_west_fit`'s own floor is 30 observations and `3 x (factors + 1)`;
+/// below it the regression is not identified and it returns `None`. Stating the
+/// floor here means the refusal names the overlap that was too short rather than
+/// the regression that could not be run.
+pub const MIN_ATTRIBUTION_PERIODS: usize = 30;
+
 /// The checks the leakage suite runs. Gate 2 refuses a run that is missing any
 /// of them, so this list is the contract between the suite and the gate.
 pub const LEAKAGE_CHECKS: &[&str] = &[
@@ -264,6 +272,58 @@ fn profile_for(id: &str) -> Result<GateProfile, JobError> {
     }
 }
 
+/// Attach the per-asset-class half of the profile — Gate 10's declared factor
+/// battery and Gate 11's crisis windows — from
+/// `mlops.gate_profile_asset_class` (migration 0050, ADR-P2-15/16).
+///
+/// The code-side constructors leave `asset_classes` empty, so before this
+/// existed **Gate 10 was inconclusive for every candidate under every profile**,
+/// reporting "profile strict_v1 declares no factor battery for asset class
+/// `crypto`" — while the rows declaring exactly that battery had been in the
+/// database since 0050. The factor series were the visible half of the gap; this
+/// was the other half.
+///
+/// This reads the immutable table; it does not construct thresholds. A profile
+/// whose per-asset-class rows are missing stays empty, and Gate 10 reports the
+/// asset class as undeclared, which is then true.
+async fn load_asset_classes(
+    pg: &PgPool,
+    tenant_id: &str,
+    mut profile: GateProfile,
+) -> Result<GateProfile, JobError> {
+    let rows: Vec<(String, Vec<String>, Value)> = sqlx::query_as(
+        "SELECT asset_class, factor_battery, crisis_windows
+         FROM mlops.gate_profile_asset_class WHERE profile_id = $1",
+    )
+    .bind(profile.profile_id())
+    .fetch_all(pg)
+    .await
+    .map_err(|e| JobError::infrastructure(format!("reading the profile's asset classes: {e}")))?;
+    let _ = tenant_id;
+    for (asset_class, factor_battery, crisis) in rows {
+        // A malformed crisis-window blob is refused rather than silently read as
+        // an empty list: "no crisis windows declared" and "the declaration did
+        // not parse" are different facts, and only one of them is about the
+        // world.
+        let crisis_windows: Vec<backtest::gates::CrisisWindow> = serde_json::from_value(crisis)
+            .map_err(|e| {
+                JobError::logic(
+                    ledger::TerminalReason::IntegrityRejected,
+                    "malformed_gate_profile",
+                    format!("{asset_class}'s crisis windows do not parse: {e}"),
+                )
+            })?;
+        profile = profile.with_asset_class(
+            asset_class,
+            backtest::gates::AssetClassGates {
+                factor_battery,
+                crisis_windows,
+            },
+        );
+    }
+    Ok(profile)
+}
+
 #[async_trait::async_trait]
 impl Worker for GateAdvanceWorker {
     fn kind(&self) -> JobKind {
@@ -288,6 +348,12 @@ impl Worker for GateAdvanceWorker {
                     "gate_advance counts as a trial and cannot run without one (INV-16)",
                 )
             })?;
+
+        // Gate 10's declared battery and Gate 11's crisis windows live in the
+        // immutable per-asset-class table, not in the code-side constructor.
+        // Without this the profile arrives with none and Gate 10 reports the
+        // asset class as undeclared, whatever evidence exists.
+        let profile = load_asset_classes(&self.pg, &tenant, profile).await?;
 
         ctx.progress(Progress {
             pct: Some(0.1),
@@ -418,14 +484,109 @@ impl Worker for GateAdvanceWorker {
                 })
             });
 
-        let cost_ladder: Vec<backtest::gates::evaluators::CostRung> =
-            match stat("breakeven_cost_multiple") {
-                Some(b) if b > 1.0 => vec![
-                    backtest::gates::evaluators::CostRung { multiple: 1.0, net_metric: 1.0 },
-                    backtest::gates::evaluators::CostRung { multiple: b, net_metric: 0.0 },
-                ],
-                _ => Vec::new(),
+        // The shaped evidence gates 3, 4, 10 and 12 read (migration 0119). Like
+        // the scalars, it is read from the ledger and never taken from the
+        // manifest.
+        let shaped = led
+            .gate_evidence_async(&tenant, req.trial_id)
+            .await
+            .map_err(infra("the gate evidence"))?;
+        let shaped = shaped.unwrap_or_default();
+
+        // Gate 3's ladder is a shape, not a scalar. The stored rungs are used
+        // when the cost sweep recorded them; the recorded breakeven multiple is
+        // the fallback, turned back into the two rungs that bracket it — alive
+        // at 1×, dead at the recorded multiple — which is exactly what
+        // `breakeven_multiple` would interpolate from.
+        //
+        // The fallback is deliberately narrow. `b > 1.0` only: a breakeven at or
+        // below 1× means the edge does not survive its *own* cost model, and
+        // reconstructing "alive at 1×" for it would assert the opposite of what
+        // was measured. Such a candidate reaches Gate 3 through the stored rungs
+        // or not at all, and without them the gate says it cannot judge — which
+        // is worse for nobody, because a candidate that dies at 1× fails Gate 1
+        // on its median long before this.
+        let cost_ladder = cost_ladder(&shaped, stat("breakeven_cost_multiple"));
+
+        // Gate 4. Assembled only when both halves are present; a half-filled
+        // `CapacityInputs` with zeros in it is the exact shape of a gate given an
+        // input instead of evidence.
+        let (mut adv, mut vol, mut peak, mut sharpe_by_aum) = (
+            std::collections::BTreeMap::new(),
+            std::collections::BTreeMap::new(),
+            std::collections::BTreeMap::new(),
+            Vec::new(),
+        );
+        let capacity = shaped.capacity_base.and_then(|base| {
+            backtest::capacity::capacity_inputs(
+                &shaped.instrument_pnl,
+                base,
+                &shaped.capacity_curve,
+                &mut adv,
+                &mut vol,
+                &mut peak,
+                &mut sharpe_by_aum,
+            )
+        });
+
+        // Gate 12. The concentration half refuses to cross a numeraire; when it
+        // does, the pairs are empty and the numeraire is `None`, and the gate
+        // reports that rather than summing two units together.
+        let (numeraire, per_instrument_pnl) =
+            match ledger::evidence::per_instrument_pnl(&shaped.instrument_pnl) {
+                Ok((unit, pairs)) => (Some(unit), pairs),
+                Err(why) => {
+                    if !shaped.instrument_pnl.is_empty() {
+                        tracing::info!(trial = %req.trial_id, reason = %why, "gate 12 concentration");
+                    }
+                    (None, Vec::new())
+                }
             };
+        let neighbourhood: Vec<(f64, f64)> = shaped
+            .neighbourhood
+            .iter()
+            .map(|p| (p.param_value, p.metric))
+            .collect();
+        let perturbation = shaped
+            .neighbourhood
+            .iter()
+            .find(|p| p.is_center)
+            .map(|c| backtest::gates::PerturbationInputs {
+                center: c.metric,
+                neighbourhood: &neighbourhood,
+                per_instrument_pnl: &per_instrument_pnl,
+                numeraire: numeraire.as_deref(),
+            });
+
+        // Gate 10. The stored factor series, aligned period-for-period to the
+        // strategy's **own stored net return series** — the same series N_eff and
+        // Gates 13/14 read, not a series the manifest supplied.
+        //
+        // `MIN_ATTRIBUTION_PERIODS` is `newey_west_fit`'s own floor. Passing it a
+        // shorter overlap would make it return `None` anyway; refusing here means
+        // the reason names the overlap rather than the regression.
+        let aligned = backtest::factors::align_to_strategy(
+            &timestamps,
+            &returns,
+            &shaped.factors,
+            MIN_ATTRIBUTION_PERIODS,
+        );
+        let factors = aligned.as_ref().map(|(net, battery)| backtest::gates::evaluators::FactorInputs {
+            strategy_net: net,
+            factors: battery,
+            // Which factor is "the market" is a property of the declared
+            // battery, not of this worker. The profile names it first; falling
+            // back to the crypto market factor only when the profile declared
+            // nothing, in which case Gate 10 is already inconclusive.
+            market_factor: profile
+                .asset_class(&req.asset_class)
+                .and_then(|d| d.factor_battery.first().cloned())
+                .unwrap_or_else(|| backtest::factors::CRYPTO_MARKET.to_string()),
+            // Neutrality is a claim a strategy makes, and nothing in this
+            // platform records one yet. An unmade claim is not checked — which
+            // is the spec's rule, not a leniency (§12.3 Gate 10).
+            neutral_claim: false,
+        });
 
         ctx.progress(Progress {
             pct: Some(0.5),
@@ -448,7 +609,7 @@ impl Worker for GateAdvanceWorker {
             // what `breakeven_multiple` would interpolate from, and nothing is
             // claimed that the cost sweep did not measure.
             cost_ladder: &cost_ladder,
-            capacity: None,
+            capacity: capacity.as_ref(),
             cpcv_p05_sharpe: stat("cpcv_p05_sharpe"),
             walk_forward_sharpe: stat("walk_forward_sharpe"),
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -456,7 +617,7 @@ impl Worker for GateAdvanceWorker {
             pbo: stat("pbo"),
             dsr: stat("deflated_sharpe"),
             length,
-            factors: None,
+            factors: factors.as_ref(),
             // Gate 11 reads the platform's filtered labels when a market scope
             // is configured for what this strategy trades. When one is not, it
             // is handed the strategy's own series as the market and the
@@ -468,7 +629,7 @@ impl Worker for GateAdvanceWorker {
             market_returns: &strategy_series,
             strategy_returns: &strategy_series,
             regime_labels: market_labels.labels.as_deref(),
-            perturbation: None,
+            perturbation: perturbation.as_ref(),
             return_series: &returns,
             family: &family,
             candidate_index,
@@ -521,6 +682,42 @@ impl Worker for GateAdvanceWorker {
             }),
             ..Default::default()
         })
+    }
+}
+
+/// Gate 3's ladder, from the stored rungs when the cost sweep recorded them and
+/// from the recorded breakeven multiple when it did not.
+///
+/// The fallback reconstructs the two rungs that bracket zero — alive at 1x, dead
+/// at the recorded multiple — which is exactly what `breakeven_multiple` would
+/// interpolate from, so nothing is claimed that the sweep did not measure.
+///
+/// It is deliberately narrow in two ways.
+///
+/// * **`b > 1.0` only.** A breakeven at or below 1x means the edge does not
+///   survive its own cost model. Reconstructing "alive at 1x" for such a
+///   candidate would assert the opposite of what was measured, and a gate fed an
+///   input that contradicts its evidence is worse than a gate that says it
+///   cannot judge.
+/// * **Stored rungs win.** They are the measurement; the scalar is its summary.
+fn cost_ladder(
+    shaped: &ledger::evidence::TrialEvidence,
+    recorded_breakeven: Option<f64>,
+) -> Vec<backtest::gates::evaluators::CostRung> {
+    let rung = |multiple: f64, net_metric: f64| backtest::gates::evaluators::CostRung {
+        multiple,
+        net_metric,
+    };
+    if shaped.cost_ladder.len() >= 2 {
+        return shaped
+            .cost_ladder
+            .iter()
+            .map(|r| rung(r.multiple, r.net_metric))
+            .collect();
+    }
+    match recorded_breakeven {
+        Some(b) if b > 1.0 && b.is_finite() => vec![rung(1.0, 1.0), rung(b, 0.0)],
+        _ => Vec::new(),
     }
 }
 
@@ -640,6 +837,52 @@ mod tests {
         // The profile defaults to the strict one when unnamed. Defaulting
         // *toward* the stricter profile is the only safe direction.
         assert_eq!(ok.profile_id, "strict_v1");
+    }
+
+    /// A cost ladder recorded by the sweep is the measurement; the scalar is
+    /// only its summary, so the rungs win.
+    #[test]
+    fn stored_cost_rungs_beat_the_reconstructed_pair() {
+        let mut shaped = ledger::evidence::TrialEvidence::produced_by("funnel");
+        shaped.cost_ladder = vec![
+            ledger::evidence::CostRung { multiple: 1.0, net_metric: 0.20 },
+            ledger::evidence::CostRung { multiple: 4.0, net_metric: -0.05 },
+        ];
+        let ladder = cost_ladder(&shaped, Some(9.0));
+        assert_eq!(ladder.len(), 2);
+        assert!((ladder[1].multiple - 4.0).abs() < f64::EPSILON, "not the scalar's 9x");
+    }
+
+    /// The adversarial case for the fallback. A breakeven at or below 1x says
+    /// the edge does not survive its own cost model; reconstructing "alive at
+    /// 1x, dead at 0.8x" would hand Gate 3 a ladder that contradicts the
+    /// measurement it came from. No ladder is built, and Gate 3 says it cannot
+    /// judge.
+    #[test]
+    fn a_breakeven_at_or_below_one_is_not_reconstructed_into_a_ladder() {
+        let shaped = ledger::evidence::TrialEvidence::produced_by("funnel");
+        for b in [0.0, 0.5, 1.0, f64::NAN] {
+            assert!(
+                cost_ladder(&shaped, Some(b)).is_empty(),
+                "a breakeven of {b} must not become a ladder"
+            );
+        }
+        assert!(cost_ladder(&shaped, None).is_empty());
+        assert_eq!(cost_ladder(&shaped, Some(3.5)).len(), 2);
+    }
+
+    /// Nothing recorded means no ladder at all, which makes Gate 3
+    /// inconclusive. The failure mode this forbids is a default ladder that
+    /// reads as "the edge survives every rung tried".
+    #[test]
+    fn no_cost_evidence_produces_no_ladder_rather_than_a_default_one() {
+        let shaped = ledger::evidence::TrialEvidence::default();
+        assert!(cost_ladder(&shaped, None).is_empty());
+        let verdict = backtest::gates::evaluators::gate_3_cost_sensitivity(
+            &GateProfile::strict_v1(),
+            &cost_ladder(&shaped, None),
+        );
+        assert!(verdict.inconclusive && !verdict.passed, "{}", verdict.detail);
     }
 
     #[test]

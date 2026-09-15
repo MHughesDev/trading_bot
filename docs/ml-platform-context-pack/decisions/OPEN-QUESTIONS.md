@@ -1607,4 +1607,26 @@ requirement table *"declare[s] all four and enforces one — `selection_bias_ver
 Gate 2"*. If `leakage_audit` is now runnable, ADR-S8-02's invariant should have made
 that two, and the note is stale.
 
+### OQ-14 · Gate 10's crypto battery makes `ccarry` mandatory, but §12.3's own amendment says "carry-**when-available**". Under free-only data it is never available, so Gate 10 can never compute.
+**Raised:** 2026-09-15, building the gate's evidence source (track 14).
+**Context.** Appendix C, C-5(b) reads: "Gate 10's factor battery is declared **per asset class** on the profile (crypto: market, size, momentum, **carry-when-available**; equity: FF5+MOM+STR+BAB+QMJ)." Migration 0050 stores the crypto battery as `ARRAY['cmkt','csmb','cmom','ccarry']` — four names, no optionality — and `gate_10_factor_attribution` requires the supplied battery to equal the declared one **exactly**, which is right: attribution against a different battery answers a different question.
+
+Crypto carry *is* the perpetual funding rate. Funding is forward-collect-only under ADR-0027 (there is no free vendor to buy history from), and the collectors were switched on 2026-09-15. So for every candidate whose window predates that date, `ccarry` cannot be constructed, the supplied battery is `{cmkt, csmb, cmom}`, the sets differ, and Gate 10 returns `inconclusive` — correctly, given the code, and possibly not what C-5 intended.
+
+**The two readings, and what each costs.**
+- **A. The stored battery is right and the phrase is loose.** Gate 10 stays dark for crypto until funding history accumulates, which is a calendar, not a task. Cost: one of sixteen gates cannot render for years, and Stage 2's exit ("no `NotComputable`") is unreachable for crypto.
+- **B. "when-available" is normative** and the battery has an optional tail: a declared-optional factor that cannot be constructed is *omitted*, the regression runs on the three that can be, and the verdict records which factor was absent and why. Cost: a battery that varies between candidates, so two Gate 10 verdicts are not strictly comparable unless the absent list is read alongside them — which is a real loss, and the reason the exact-match rule exists.
+
+**Not implemented, either way.** CLAUDE.md §2: where the spec looks wrong, write the question and implement neither version. What *is* built is the producer (`backtest::factors`), which constructs all four when funding exists and refuses **by name** (`FactorGap::CarryUnavailable`) when it does not — so whichever reading wins, the evidence is there and only the gate's tolerance changes. Choosing B would mean a new profile version if the stored battery gains an optionality marker, since profiles are immutable (INV-23).
+**Status:** open.
+
+### OQ-15 · `RunConfig.cost_model_ref` is read by nothing. A `CostSweep` study varies a string no executor consults.
+**Raised:** 2026-09-15, building Gate 3's evidence source (track 14).
+**Context.** `StudyKind::CostSweep` + `VarySpec::CostLadder { cost_model_refs }` expands into member configs that differ only in `cost_model_ref` (`study::engine`, ~line 195). Nothing downstream reads that field: neither `SimRunExecutor`, nor `sim::run_simulation_detailed`, nor the synthetic executor. Every rung therefore returns the *same* metric, and the resulting ladder is flat.
+
+**Why that is worse than useless.** A flat, positive ladder whose top rung clears the bar makes `gate_3_cost_sensitivity` return **passed**, with the detail "the edge survives every rung tried". So running a `CostSweep` today produces a Gate 3 pass that measures nothing — which is precisely the failure the gate exists to prevent, and which the zero-commission defect (ADR-P6-12) would have walked straight through.
+
+**What was built instead, and why it is not the answer to this question.** Gate 3's ladder is now computed *analytically* from the run's own recorded trade costs (`capacity::cost_ladder`): net at multiple `m` is `(gross − m·costs) / starting_equity`, which is exact for a fixed trade path and reproducible from the stored trade list. It refuses outright when costs are zero. That gives Gate 3 real evidence without depending on a field nothing reads.
+
+**The question that remains.** Should `cost_model_ref` be (a) honoured by the executors — a real cost-model registry, so a `CostSweep` re-simulates and captures cost-aware strategy behaviour the analytic ladder cannot; (b) removed from `VarySpec`, since `StudyKind::CostSweep` currently cannot do what its name says; or (c) left as-is with the analytic ladder as the supported path and the study kind documented as not-yet-wired? Only (a) captures a strategy that *reads* its cost model and trades differently under a worse one — which no strategy in the frozen v1.0 grammar does today.
 **Status:** open.
