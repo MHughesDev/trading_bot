@@ -753,6 +753,18 @@ mod tests {
         assert_eq!(fills[0].instrument_id, instrument);
         assert_eq!(fills[0].side, Side::Buy);
         assert!(fills[0].fill_price.inner() > Decimal::ZERO);
+
+        // The fee the paper venue charged is recorded, not zeroed.  A cost that
+        // reads as zero when it was merely unknown makes a forward fill stream
+        // look cheaper than the backtest that justified deploying it, which is
+        // the one comparison Gate 15 exists to make.
+        let commission = fills[0]
+            .commission
+            .expect("the paper venue charges a fee and therefore knows it");
+        assert!(
+            commission > Decimal::ZERO,
+            "a crypto-spot taker fill carries a taker fee, got {commission}"
+        );
     }
 
     /// Helper: run a future to completion on the current thread from inside a

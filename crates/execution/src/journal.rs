@@ -68,7 +68,11 @@ pub struct PersistedFill {
     pub side: Side,
     pub filled_size: Decimal,
     pub fill_price: Price,
-    pub commission: Decimal,
+    /// Commission and venue fees, or `None` when the venue did not report
+    /// them.  Stored as `NULL`, never as `0`: an unknown fee recorded as zero
+    /// makes the fill look cheaper than it was, which is the one direction a
+    /// cost error must never go.
+    pub commission: Option<Decimal>,
     pub filled_at: DateTime<Utc>,
 }
 
@@ -298,7 +302,16 @@ impl OrderJournal for PgOrderJournal {
     }
 
     async fn fills_for(&self, key: Uuid) -> Result<Vec<PersistedFill>, JournalError> {
-        let rows: Vec<(String, String, String, Decimal, Decimal, Decimal, DateTime<Utc>)> =
+        #[allow(clippy::type_complexity)]
+        let rows: Vec<(
+            String,
+            String,
+            String,
+            Decimal,
+            Decimal,
+            Option<Decimal>,
+            DateTime<Utc>,
+        )> =
             sqlx::query_as(
                 "SELECT broker_order_id, instrument_id, side, filled_size, fill_price, \
                         commission, filled_at \

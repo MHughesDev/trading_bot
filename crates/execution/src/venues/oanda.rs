@@ -204,6 +204,9 @@ impl Broker for OandaBroker {
             submitted_qty,
             filled_qty,
             avg_fill_price,
+            // This adapter does not report fees on an order query;
+            // `None`, never zero -- see BrokerOrderStatus::commission.
+            commission: None,
             state: broker_state,
         })
     }

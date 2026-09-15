@@ -220,6 +220,9 @@ impl Broker for AlpacaBroker {
             submitted_qty,
             filled_qty,
             avg_fill_price,
+            // This adapter does not report fees on an order query;
+            // `None`, never zero -- see BrokerOrderStatus::commission.
+            commission: None,
             state: parse_broker_state(&parsed.status),
         })
     }
@@ -258,6 +261,9 @@ impl Broker for AlpacaBroker {
                     submitted_qty,
                     filled_qty,
                     avg_fill_price,
+                    // This adapter does not report fees on an order query;
+                    // `None`, never zero -- see BrokerOrderStatus::commission.
+                    commission: None,
                     state: parse_broker_state(&o.status),
                 }
             })

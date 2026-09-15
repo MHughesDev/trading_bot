@@ -224,6 +224,8 @@ pub struct PaperOrderRecord {
     pub intent: OrderIntent,
     pub filled_qty: Decimal,
     pub avg_fill_price: Option<Price>,
+    /// Cumulative simulated fees charged on this order.
+    pub fees_paid: Decimal,
     pub state: BrokerOrderState,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -238,6 +240,7 @@ impl PaperOrderRecord {
             intent,
             filled_qty: Decimal::ZERO,
             avg_fill_price: None,
+            fees_paid: Decimal::ZERO,
             state: BrokerOrderState::New,
             created_at: now,
             updated_at: now,
@@ -250,6 +253,7 @@ impl PaperOrderRecord {
             .avg_fill_price
             .map_or(Decimal::ZERO, |p| p.inner() * self.filled_qty);
         self.filled_qty += fill.filled_qty;
+        self.fees_paid += fill.fee;
         if self.filled_qty > Decimal::ZERO {
             let vwap =
                 (prev_notional + fill.fill_price.inner() * fill.filled_qty) / self.filled_qty;
@@ -279,6 +283,8 @@ impl PaperOrderRecord {
             submitted_qty: self.intent.size.inner(),
             filled_qty: self.filled_qty,
             avg_fill_price: self.avg_fill_price,
+            // The paper engine charges the fee itself, so it always knows it.
+            commission: Some(self.fees_paid),
             state: self.state.clone(),
         }
     }

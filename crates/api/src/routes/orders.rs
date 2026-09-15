@@ -251,7 +251,14 @@ pub async fn get_order(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let fills: Vec<(String, rust_decimal::Decimal, rust_decimal::Decimal, rust_decimal::Decimal, chrono::DateTime<chrono::Utc>)> =
+    #[allow(clippy::type_complexity)]
+    let fills: Vec<(
+        String,
+        rust_decimal::Decimal,
+        rust_decimal::Decimal,
+        Option<rust_decimal::Decimal>,
+        chrono::DateTime<chrono::Utc>,
+    )> =
         sqlx::query_as(
             "SELECT broker_order_id, filled_size, fill_price, commission, filled_at \
              FROM fills WHERE idempotency_key = $1 ORDER BY filled_at ASC",
@@ -277,7 +284,8 @@ pub async fn get_order(
                 "broker_order_id": boid,
                 "filled_size": qty.to_string(),
                 "fill_price": price.to_string(),
-                "commission": commission.to_string(),
+                // `null`, not "0", when the venue did not report a fee.
+                "commission": commission.map(|c| c.to_string()),
                 "filled_at": at,
             })).collect::<Vec<_>>(),
         })),

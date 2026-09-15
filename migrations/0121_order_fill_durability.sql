@@ -37,6 +37,13 @@ ALTER TABLE fills
     ADD CONSTRAINT fills_idempotent
     UNIQUE (idempotency_key, broker_order_id, fill_price, filled_size);
 
+-- A commission of NULL means the venue did not report one.  Recording an
+-- unknown fee as 0 makes every fill on that path look cheaper than it was, and
+-- makes a forward fill stream look cheaper than the backtest that justified
+-- deploying it -- the one comparison Gate 15 exists to make.
+ALTER TABLE fills ALTER COLUMN commission DROP NOT NULL;
+ALTER TABLE fills ALTER COLUMN commission DROP DEFAULT;
+
 -- Reading an instrument's recent fills is the reconciliation sweep's hot query.
 CREATE INDEX IF NOT EXISTS fills_instrument_time ON fills(instrument_id, filled_at DESC);
 CREATE INDEX IF NOT EXISTS orders_instrument_state ON orders(instrument_id, state);

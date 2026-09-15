@@ -257,17 +257,29 @@ impl ExecutionEngine {
             side: intent.side,
             filled_size: status.filled_qty,
             fill_price: avg_price,
-            commission: Decimal::ZERO,
+            commission: status.commission,
             filled_at: Utc::now(),
         };
+        if fill.commission.is_none() {
+            tracing::warn!(
+                %idempotency_key, %broker_order_id,
+                "venue did not report a commission for this fill \u2014 stored as NULL, not as \
+                 zero. P&L from this fill is gross of fees until the adapter reports them."
+            );
+        }
 
         // The event shape every consumer of the fill stream receives.
+        //
+        // `FillEvent::commission` is a plain `Decimal` and cannot express
+        // "unknown", so an unreported fee appears here as zero.  The
+        // authoritative test is `fills.commission IS NULL` in the journal; the
+        // warning above fires whenever the two differ.
         let event = FillEvent {
             idempotency_key,
             broker_order_id: broker_order_id.to_owned(),
             filled_qty: fill.filled_size,
             fill_price: fill.fill_price,
-            commission: fill.commission,
+            commission: fill.commission.unwrap_or(Decimal::ZERO),
             filled_at: fill.filled_at,
         };
 

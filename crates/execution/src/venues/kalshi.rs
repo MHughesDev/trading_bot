@@ -187,6 +187,9 @@ impl Broker for KalshiBroker {
             submitted_qty: Decimal::from(o.count),
             filled_qty: Decimal::from(o.filled_count),
             avg_fill_price,
+            // This adapter does not report fees on an order query;
+            // `None`, never zero -- see BrokerOrderStatus::commission.
+            commission: None,
             state: parse_state(&o.status),
         })
     }
@@ -233,6 +236,9 @@ impl Broker for KalshiBroker {
                     submitted_qty: Decimal::from(count),
                     filled_qty: Decimal::from(filled),
                     avg_fill_price: price,
+                    // This adapter does not report fees on an order query;
+                    // `None`, never zero -- see BrokerOrderStatus::commission.
+                    commission: None,
                     state: BrokerOrderState::New,
                 })
             })

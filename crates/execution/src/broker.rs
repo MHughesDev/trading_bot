@@ -42,6 +42,15 @@ pub struct BrokerOrderStatus {
     pub filled_qty: Decimal,
     /// Volume-weighted average fill price (None if unfilled).
     pub avg_fill_price: Option<Price>,
+    /// Cumulative commission and venue fees on this order, in quote currency.
+    ///
+    /// `None` means **this adapter does not report it**, which is not the same
+    /// as zero.  A fee recorded as zero when it was merely unknown makes every
+    /// P&L on that path optimistic, and makes a forward fill stream look
+    /// cheaper than the backtest that justified deploying it -- which is the
+    /// one comparison Gate 15 exists to make.  The journal stores `NULL` for
+    /// the unknown case so the two stay distinguishable.
+    pub commission: Option<Decimal>,
     pub state: BrokerOrderState,
 }
 

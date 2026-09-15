@@ -202,6 +202,9 @@ impl Broker for TradierBroker {
             submitted_qty: o.quantity,
             filled_qty: o.exec_quantity,
             avg_fill_price: o.avg_fill_price.map(Price::from_decimal),
+            // This adapter does not report fees on an order query;
+            // `None`, never zero -- see BrokerOrderStatus::commission.
+            commission: None,
             state: broker_state,
         })
     }
