@@ -3,6 +3,7 @@
 //! Each venue implementation lives in its own sub-module and is deliberately
 //! different to prove that the `Collector` abstraction is venue-agnostic.
 
+pub mod backfill;
 pub mod crypto;
 pub mod dex;
 pub mod equity;

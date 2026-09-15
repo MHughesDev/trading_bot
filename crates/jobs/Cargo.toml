@@ -23,6 +23,8 @@ async-trait = "0.1"
 
 [dev-dependencies]
 ledger = { workspace = true }
+dataplane = { workspace = true }
+chrono = { workspace = true }
 storage = { workspace = true }
 tokio = { workspace = true }
 async-trait = "0.1"

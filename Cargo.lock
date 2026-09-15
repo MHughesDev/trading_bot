@@ -575,6 +575,7 @@ name = "backtest"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "clickhouse",
  "dataplane",
@@ -1099,15 +1100,18 @@ dependencies = [
  "async-trait",
  "chrono",
  "dashmap",
+ "dataplane",
  "domain",
  "event-bus",
  "futures-util",
+ "hex",
  "reqwest",
  "rkyv 0.8.16",
  "rtrb",
  "rust_decimal",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.24.0",
@@ -1486,6 +1490,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 name = "dataplane"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "hex",
  "rust_decimal",

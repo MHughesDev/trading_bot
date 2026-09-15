@@ -690,6 +690,20 @@ impl BarStore {
                 }
                 cb.revision_seq = max_rev + 1;
                 cb.quality_flags |= QualityFlags::VENDOR_REVISED;
+                // A revision's knowledge time is when the platform learned the
+                // NEW value, which for a backfilled source is receipt, not the
+                // original bar's `close + vendor_lag` sentinel. Leaving the
+                // sentinel would give both versions of the cell the same
+                // knowledge time, and then no `as_of` read could return the
+                // pre-revision value: the revision history would be retained in
+                // storage (DA-16) while being unreachable in time, which is the
+                // shape of a PIT hole rather than a PIT store. The row keeps
+                // BACKFILLED_KNOWLEDGE_TIME — its provenance is still a
+                // backfill — so P-1.6's distinguishability is unaffected
+                // (Set P P-1.5; ADR-P1-01).
+                if cb.knowledge_time < cb.ingest_time {
+                    cb.knowledge_time = cb.ingest_time;
+                }
                 let e = restated_dates.entry(cb.event_time.date_naive()).or_insert((0, 0));
                 e.0 += 1;
                 e.1 = e.1.max(nanos(cb.knowledge_time));

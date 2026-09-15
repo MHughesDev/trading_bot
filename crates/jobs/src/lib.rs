@@ -16,6 +16,7 @@
 //!    renew; if it dies, the job returns to the queue rather than vanishing.
 
 pub mod checkpoint;
+pub mod kinds;
 pub mod models;
 pub mod artifacts;
 pub mod manifest;
