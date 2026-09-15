@@ -5,6 +5,8 @@ pub mod auth;
 pub mod credentials;
 pub mod data_admission;
 pub mod feature_consistency;
+pub mod instrument_meta;
+pub mod risk_context;
 pub mod leakage_audit;
 pub mod campaign_driver;
 pub mod gate_worker;

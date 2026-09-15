@@ -224,6 +224,8 @@ pub struct PaperOrderRecord {
     pub intent: OrderIntent,
     pub filled_qty: Decimal,
     pub avg_fill_price: Option<Price>,
+    /// Cumulative simulated fees charged on this order.
+    pub fees_paid: Decimal,
     pub state: BrokerOrderState,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -238,6 +240,7 @@ impl PaperOrderRecord {
             intent,
             filled_qty: Decimal::ZERO,
             avg_fill_price: None,
+            fees_paid: Decimal::ZERO,
             state: BrokerOrderState::New,
             created_at: now,
             updated_at: now,
@@ -250,6 +253,7 @@ impl PaperOrderRecord {
             .avg_fill_price
             .map_or(Decimal::ZERO, |p| p.inner() * self.filled_qty);
         self.filled_qty += fill.filled_qty;
+        self.fees_paid += fill.fee;
         if self.filled_qty > Decimal::ZERO {
             let vwap =
                 (prev_notional + fill.fill_price.inner() * fill.filled_qty) / self.filled_qty;
@@ -279,6 +283,8 @@ impl PaperOrderRecord {
             submitted_qty: self.intent.size.inner(),
             filled_qty: self.filled_qty,
             avg_fill_price: self.avg_fill_price,
+            // The paper engine charges the fee itself, so it always knows it.
+            commission: Some(self.fees_paid),
             state: self.state.clone(),
         }
     }
@@ -289,6 +295,9 @@ impl PaperOrderRecord {
 #[derive(Clone, Debug, Serialize)]
 pub struct PaperOrderView {
     pub order_id: String,
+    /// The intent's idempotency key -- joins this order to its `orders` row and
+    /// its `fills` rows in the journal.
+    pub idempotency_key: Uuid,
     pub instrument_id: String,
     pub asset_class: String,
     pub side: String,
@@ -324,6 +333,7 @@ impl PaperOrderView {
         };
         Self {
             order_id: r.order_id.clone(),
+            idempotency_key: r.intent.idempotency_key,
             instrument_id: r.intent.instrument_id.clone(),
             asset_class: r.asset_class.as_str().to_owned(),
             side: side.to_owned(),
@@ -713,6 +723,31 @@ impl PaperTradingEngine {
             .lock()
             .expect("paper account lock")
             .snapshot(&|id| self.mark(id).map(Price::inner))
+    }
+
+    /// Today's loss on one account, in quote currency, positive = loss.
+    ///
+    /// Realized P&L for the current UTC day (net of fees) plus the unrealized
+    /// P&L of everything still open — which is what COMP-002 §3.2 check 7
+    /// means by "cumulative realized + unrealized loss for today".  This is the
+    /// number the risk gate's daily-loss limit reads; before it existed both
+    /// order doors passed `Decimal::ZERO`, so the limit could not fire.
+    ///
+    /// In-memory, like the whole paper account: a platform restart starts the
+    /// day's tally again.
+    pub fn daily_loss_usd(&self, asset_class: AssetClass) -> Decimal {
+        let realized_today = self
+            .account(asset_class)
+            .lock()
+            .expect("paper account lock")
+            .realized_pnl_on(Utc::now().date_naive());
+        let unrealized: Decimal = self
+            .snapshot(asset_class)
+            .positions
+            .iter()
+            .map(|p| p.unrealized_pnl)
+            .sum();
+        -(realized_today + unrealized)
     }
 
     /// Snapshots for every asset class, in policy-table order.

@@ -35,16 +35,20 @@ fn shared_gate() -> RiskGate {
 fn crypto_ctx() -> GateContext {
     GateContext {
         current_position: Decimal::ZERO,
-        market_price: None,
-        tick_size: Decimal::from_str("0.01").unwrap(),
-        lot_size: Decimal::from_str("0.00001").unwrap(),
-        daily_loss_usd: Decimal::ZERO,
+        market_price: risk::Measured::Yes(domain::money::Price::from_str("100").unwrap()),
+        instrument_limits: risk::Measured::Yes(risk::InstrumentLimits {
+            tick_size: Decimal::from_str("0.01").unwrap(),
+            lot_size: Decimal::from_str("0.00001").unwrap(),
+        }),
+        daily_loss_usd: risk::Measured::Yes(Decimal::ZERO),
         event_trust_tier: TrustTier::CentralizedExchange,
         strategy_min_trust_tier: TrustTier::CentralizedExchange,
         risk_overrides: Default::default(),
         instrument_active: true,
-        recent_orders_last_second: 0,
-        recent_orders_last_minute: 0,
+        rate: risk::RateSource::Explicit(risk::RateCounts {
+            last_second: 0,
+            last_minute: 0,
+        }),
         is_in_session: true,
         is_halted: false,
         halt_policy: HaltPolicy::NonHaltable,
@@ -56,16 +60,20 @@ fn crypto_ctx() -> GateContext {
 fn equity_ctx(is_in_session: bool) -> GateContext {
     GateContext {
         current_position: Decimal::ZERO,
-        market_price: None,
-        tick_size: Decimal::from_str("0.01").unwrap(),
-        lot_size: Decimal::ONE,
-        daily_loss_usd: Decimal::ZERO,
+        market_price: risk::Measured::Yes(domain::money::Price::from_str("100").unwrap()),
+        instrument_limits: risk::Measured::Yes(risk::InstrumentLimits {
+            tick_size: Decimal::from_str("0.01").unwrap(),
+            lot_size: Decimal::ONE,
+        }),
+        daily_loss_usd: risk::Measured::Yes(Decimal::ZERO),
         event_trust_tier: TrustTier::Regulated,
         strategy_min_trust_tier: TrustTier::Regulated,
         risk_overrides: Default::default(),
         instrument_active: true,
-        recent_orders_last_second: 0,
-        recent_orders_last_minute: 0,
+        rate: risk::RateSource::Explicit(risk::RateCounts {
+            last_second: 0,
+            last_minute: 0,
+        }),
         is_in_session,
         is_halted: false,
         halt_policy: HaltPolicy::Haltable,

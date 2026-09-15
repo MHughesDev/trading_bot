@@ -1,6 +1,6 @@
 # Phase 5 — Data Pipeline & Observability
 
-**Completion: 20% (1 / 5) — 5.5 shipped and was never ticked. **5.1 and 5.4 are the two worst unattended-paper blockers in the whole set** (re-audited 2026-09-15; see [MASTER](MASTER.md))**
+**Completion: 20% (1 / 5 tasks complete — 5.4 landed 2026-09-15, track 16)**
 
 **Goal:** Wire production visibility, complete the deferred data-pipeline
 mechanics, and close the hot path so the ring pipeline actually runs strategies.
@@ -62,7 +62,7 @@ no `/metrics` endpoint.
 - **Verify:** snapshot→deltas reconstructs a known book; a sequence gap forces
   resync rather than silent corruption.
 
-### ☐ 5.4 [OPEN — `hot_path.rs:333` is still `Option::None`; the pipeline emits zero intents] — ⚠ **BLOCKS UNATTENDED PAPER** Hot-path stage-3 strategy integration — L — **largest**
+### ☑ 5.4 Hot-path stage-3 strategy integration — L — **largest** — **DONE 2026-09-15**
 **Addresses #26 (NF).** `stage_strategy_eval` declares
 `let mut strategy: Option<StrategyInstance> = None;` (`hot_path.rs:153`) — it
 pops `WorldEvent`s and produces **no intents**. The machinery is complete
@@ -80,6 +80,20 @@ handle; demand-manager uses `NoopPipelineFactory`.
   `crates/api/src/state.rs`, `crates/strategy-runtime/src/runtime.rs`.
 - **Verify:** an end-to-end paper run where a loaded strategy emits an intent
   through the ring pipeline and reaches the gate; no per-event lock (bench/assert).
+- **Verified by:** `hot_path::tests::a_hand_authored_strategy_reaches_a_persisted_fill`
+  (intent → real gate → paper fill → journal) and
+  `hot_path::tests::resync_keeps_warm_instances_and_adds_new_ones`.
+- **Landed as:** a generation-counter registry (`strategy_runtime::live`) rather
+  than `arc-swap` — same lock-free property (one relaxed atomic load per
+  `WorldEvent`, the registry read only when the generation moved), no new
+  dependency, and instances are owned by stage 3 because they carry mutable
+  per-instrument state and cannot be shared. Declared deviation from locked
+  decision 12 as written. The demand-manager keeps `NoopPipelineFactory`: the
+  pipeline lifecycle is already owned by `PipelineManager` + `StreamRequest`,
+  and a second factory would be a second lifecycle owner. See **ADR-0038**.
+- **Stage 4’s dummy `GateContext` is also gone** (it was in scope here and is
+  the reason this task could not land alone): it now asks
+  `risk::context::context_for`, the one provider both order doors use.
 - **Note:** meaningful signals also depend on the proper OHLCV aggregator
   (set-C #3/#24); the stage-2 one-bar-per-tick shim limits fidelity until that
   lands.

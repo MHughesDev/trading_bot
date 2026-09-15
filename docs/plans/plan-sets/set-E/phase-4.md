@@ -1,6 +1,6 @@
 # Phase 4 — Strategy Surface & Sizing
 
-**Completion: 0 / 4 — untouched since the sweep; 1 deferred-by-design (4.5). **4.2 and 4.4 BLOCK unattended paper** — both fail silently, not loudly (re-audited 2026-09-15; see [MASTER](MASTER.md))**
+**Completion: 0% (0 / 4 tasks complete; 4.2 and 4.4 partially landed 2026-09-15, track 16 — neither meets its Definition of Done; 1 deferred-by-design — 4.5)**
 
 **Goal:** Close the gaps between what the strategy builder lets users express and
 what the engine executes, **without ever breaking live/replay parity**
@@ -55,6 +55,21 @@ across live/replay.
   `crates/backtest/src/sim.rs`, `frontend/src/utils/toDefinition.ts`.
 - **Verify:** a PoB strategy produces identical order sizes live and in a
   matching replay fixture (parity test); lot quantization is deterministic.
+- **Verified by (live):** `strategy_runtime::intents::tests::percent_of_balance_sizes_against_equity_and_mark`,
+  `..._quantizes_down_to_the_lot`, `..._without_context_errors_loudly`,
+  `..._that_rounds_to_zero_errors`, and
+  `hot_path::tests::percent_of_balance_sizes_a_real_order` end to end.
+- **PARTIAL — the replay call site is not wired.** The sizer is in the one
+  shared crate (`strategy-runtime::intents::build_intents_for_signals`, which
+  now takes a `SizingContext`), so live and replay *can* be byte-identical.
+  `crates/backtest/src/sim.rs` still hard-errors on non-`Fixed` and belongs to
+  **track 15**; the parity test cannot be written until that call site adopts
+  the shared sizer. Until then PoB executes live and not in replay, which is
+  an ADR-0008 gap that must be closed before any PoB strategy is evaluated.
+- Also changed: the sizer returns `Result<Option<_>>`. `Ok(None)` is a
+  deliberate abstention and `Err` is a failure; they used to be the same
+  `None`, which is why PoB produced no order **and no error**. `RiskUnit`
+  now errors with its reason instead of returning nothing.
 
 ### ☐ 4.3 Scanner surface endpoint + universe feed — M/L
 **Addresses #25 (NF).** `ScannerPanel.handleStrategyChange` only sets state; it
@@ -93,6 +108,17 @@ existing v1.5 universe-node precedent.
   `frontend/src/utils/toDefinition.ts`.
 - **Verify:** existing v1.0 strategies still validate/run unchanged; a v1.5
   strategy with AND/OR + a stop-loss runs identically live and in replay.
+- **PARTIAL (track 16).** The format bump is **not** done. What changed is the
+  failure mode: a spec declaring exit rules is now **rejected on save**
+  (`toDefinition.ts`) instead of saved with a warning and the exits silently
+  dropped. A strategy that runs without the stop loss its author declared,
+  while the builder still shows the stop, is worse than one that will not
+  save — the operator sizes the position believing in a control that does
+  not exist. AND/OR mixing was already an error and stays one.
+- The executable half is still open and is coupled to **track 15**
+  (`ExitTracker` in the simulator): declaring exits without the simulator
+  honouring them would make every backtest of an exit-declaring strategy
+  wrong in the optimistic direction.
 
 ---
 

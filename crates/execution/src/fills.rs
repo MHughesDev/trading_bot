@@ -28,7 +28,7 @@ pub struct FillEvent {
 }
 
 /// Outcome of applying a fill to the processor.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FillResult {
     /// Fill was new and applied successfully.
     Applied,
@@ -36,10 +36,76 @@ pub enum FillResult {
     Duplicate,
 }
 
-/// In-memory dedup key for a fill.  In production the DB `fills` table's
-/// UNIQUE constraint on `(idempotency_key, broker_order_id, fill_price, filled_qty)`
-/// provides the durable idempotency guarantee; this struct provides the
-/// in-memory fast path used in unit tests and by the `ExecutionEngine`.
+// ── The fill stream ──────────────────────────────────────────────────────────
+
+/// Something that wants to hear about every fill the platform takes.
+///
+/// This is the seam reconciliation, the forward-observation collector and
+/// Gate 15's evidence path attach to.  It fires **once per genuinely new
+/// fill** — a redelivery, a resubmit, or a restart replaying the same broker
+/// fill does not fire it again, because an observer that counts a fill twice
+/// reports a forward observation that never happened.
+///
+/// Observers are notified synchronously and must not block: do the work on
+/// your own task.
+pub trait FillObserver: Send + Sync {
+    fn on_fill(&self, fill: &FillEvent);
+}
+
+static OBSERVERS: std::sync::RwLock<Vec<std::sync::Arc<dyn FillObserver>>> =
+    std::sync::RwLock::new(Vec::new());
+
+/// Subscribe to the fill stream.  Idempotent per observer instance is *not*
+/// enforced — register once, at startup.
+pub fn register_observer(observer: std::sync::Arc<dyn FillObserver>) {
+    match OBSERVERS.write() {
+        Ok(mut w) => w.push(observer),
+        Err(_) => tracing::error!(
+            "fill observer registry poisoned — this observer will not receive fills"
+        ),
+    }
+}
+
+/// Number of registered observers, for diagnostics and tests.
+#[must_use]
+pub fn observer_count() -> usize {
+    OBSERVERS.read().map(|r| r.len()).unwrap_or(0)
+}
+
+/// Publish a fill to every observer.
+///
+/// Called by [`crate::ExecutionEngine`] only when the fill was both new to the
+/// in-memory processor (`FillResult::Applied`) **and** newly inserted into the
+/// `fills` table.  Those two together are the definition of "this fill happened
+/// and we had not seen it before"; either alone is not.
+pub fn publish(fill: &FillEvent) {
+    let observers = match OBSERVERS.read() {
+        Ok(r) => r.clone(),
+        Err(_) => {
+            tracing::error!(
+                idempotency_key = %fill.idempotency_key,
+                "fill observer registry poisoned — a fill was not published"
+            );
+            return;
+        }
+    };
+    for observer in &observers {
+        observer.on_fill(fill);
+    }
+}
+
+/// In-memory dedup key for a fill.
+///
+/// This is a **latency** cache and nothing more.  An earlier version of this
+/// comment claimed the `fills` UNIQUE constraint provided "the durable
+/// idempotency guarantee"; at the time neither the constraint nor any
+/// `INSERT INTO fills` existed, so the only thing standing between a
+/// redelivered fill and a double-applied position was the bounded `VecDeque`
+/// below — which a restart wipes, and a restart is exactly the reconnect SC-7
+/// is about.  The durable guarantee is now real and lives in
+/// [`crate::journal`]: `fills_idempotent` (migration 0121) plus
+/// `ON CONFLICT DO NOTHING`.  Both run on every fill; this one first because
+/// it is cheap, the database second because it is true.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FillDedupKey {
     pub idempotency_key: Uuid,
@@ -62,8 +128,9 @@ impl FillDedupKey {
 
 /// Stateful fill processor that tracks seen fills in memory.
 ///
-/// In production this is backed by the `fills` Postgres table, but the
-/// idempotency logic is encapsulated here so it can be unit-tested without I/O.
+/// Not a durability mechanism — see [`FillDedupKey`].  The authoritative
+/// answer to "have we already applied this fill?" is the `fills` table's
+/// unique constraint, checked in [`crate::journal::OrderJournal::record_fill`].
 ///
 /// Uses a bounded FIFO cache so memory usage is capped regardless of session
 /// length or fill volume (H-4).

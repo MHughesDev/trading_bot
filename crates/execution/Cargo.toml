@@ -21,6 +21,12 @@ uuid = { workspace = true }
 sqlx = { workspace = true }
 async-trait = "0.1"
 
+[features]
+# Exposes the non-durable in-memory order journal.  Tests only: installing it
+# in a trading process would reinstate the in-memory idempotency that
+# migration 0121 replaced.
+test-helpers = []
+
 [dev-dependencies]
 tokio = { workspace = true }
 rust_decimal_macros = { workspace = true }

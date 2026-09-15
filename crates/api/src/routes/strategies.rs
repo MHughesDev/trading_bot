@@ -333,11 +333,43 @@ pub async fn start_strategy(
         .ensure_pipeline_for_instrument(&req.instrument_id)
         .await;
 
+    // Declare it live.  This is the registration the in-process pipeline's
+    // stage 3 actually reads (ADR-0038).  Until this line existed, starting a
+    // strategy inserted it into `instance_manager` — which nothing on the hot
+    // path ever consulted — and returned `201`, so the call reported success
+    // and the strategy evaluated nothing, for ever, silently.
+    let live = strategy_runtime::live::global();
+    let spec = strategy_runtime::live::LiveStrategySpec {
+        user_id: req.user_id.clone(),
+        instrument_id: req.instrument_id.clone(),
+        definition: def.clone(),
+        source: strategy_runtime::live::LiveSource::Strategy {
+            strategy_id: strategy_id.clone(),
+        },
+    };
+    if let Err(e) = live.register(spec) {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "already_running", "detail": e.to_string() })),
+        )
+            .into_response();
+    }
+
+    // The instance manager still owns lane demand (one pipeline per lane, no
+    // matter how many strategies want it).  A failure here must not leave a
+    // strategy declared live with no data behind it, so it unwinds.
     let clock: Arc<dyn strategy_runtime::StrategyClock> = state.clock.clone();
-    let mut manager = state
-        .instance_manager
-        .lock()
-        .expect("instance_manager lock poisoned");
+    let mut manager = match state.instance_manager.lock() {
+        Ok(m) => m,
+        Err(_) => {
+            live.deregister_all_for(&req.user_id, &req.instrument_id);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": "instance manager unavailable" })),
+            )
+                .into_response();
+        }
+    };
 
     match manager.initialize(&req.user_id, &req.instrument_id, def, &clock) {
         Ok(()) => (
@@ -346,22 +378,26 @@ pub async fn start_strategy(
                 "strategy_id": strategy_id,
                 "user_id": req.user_id,
                 "instrument_id": req.instrument_id,
-                "status": "running"
+                "status": "running",
+                "live_generation": live.generation(),
             })),
         )
             .into_response(),
         Err(strategy_runtime::RuntimeError::AlreadyRunning {
             user_id,
             instrument_id,
-        }) => (
-            StatusCode::CONFLICT,
-            Json(json!({
-                "error": "already_running",
-                "user_id": user_id,
-                "instrument_id": instrument_id
-            })),
-        )
-            .into_response(),
+        }) => {
+            live.deregister_all_for(&user_id, &instrument_id);
+            (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": "already_running",
+                    "user_id": user_id,
+                    "instrument_id": instrument_id
+                })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -380,15 +416,28 @@ pub async fn stop_strategy(
     Path(_id): Path<Uuid>,
     Json(req): Json<StopRequest>,
 ) -> impl IntoResponse {
-    let mut manager = state
-        .instance_manager
-        .lock()
-        .expect("instance_manager lock poisoned");
-    manager.stop(&req.user_id, &req.instrument_id);
+    // Stop evaluating first, then release lane demand.  In that order a stop
+    // cannot leave a window where the strategy is still live but its data feed
+    // has been torn down.
+    let removed = strategy_runtime::live::global()
+        .deregister_all_for(&req.user_id, &req.instrument_id);
+
+    if let Ok(mut manager) = state.instance_manager.lock() {
+        manager.stop(&req.user_id, &req.instrument_id);
+    } else {
+        tracing::error!(
+            user_id = %req.user_id,
+            instrument_id = %req.instrument_id,
+            "instance manager lock poisoned during stop — the strategy is deregistered \
+             from live evaluation but its lane demand was not released"
+        );
+    }
+
     Json(json!({
         "user_id": req.user_id,
         "instrument_id": req.instrument_id,
-        "status": "stopped"
+        "status": "stopped",
+        "deregistered": removed,
     }))
 }
 

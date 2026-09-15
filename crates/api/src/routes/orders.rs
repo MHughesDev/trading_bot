@@ -7,16 +7,11 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
-use chrono::Utc;
 use domain::{
-    instrument::{HaltPolicy, TradingSchedule},
     money::{Price, Size},
     order::{OrderIntent, OrderType, Side},
     RiskRejection,
 };
-use reconciliation::freshness::is_within_trading_hours;
-use risk::GateContext;
-use rust_decimal::Decimal;
 
 use crate::{auth::BearerToken, state::AppState};
 
@@ -35,6 +30,37 @@ pub struct PlaceOrderRequest {
     /// rejected until per-user broker adapters are connected.
     #[serde(default)]
     pub execution_mode: Option<String>,
+}
+
+
+/// Parse the inbound `side` string.
+///
+/// Exactly two spellings are accepted.  The sibling of this function inside
+/// `execution` used to read `if s == "buy" { Buy } else { Sell }`, so anything
+/// unexpected became a **sell** — a position-reducing or short-opening order
+/// built from an input the platform could not read.  There is no safe default
+/// for a direction: a wrong side is not a smaller trade, it is the opposite
+/// trade.
+#[must_use]
+pub fn parse_side(s: &str) -> Option<Side> {
+    match s {
+        "buy" => Some(Side::Buy),
+        "sell" => Some(Side::Sell),
+        _ => None,
+    }
+}
+
+/// Parse the inbound `order_type` string.  No default: a market order fills
+/// immediately at whatever the book offers, which is the last thing an
+/// unreadable input should become.
+#[must_use]
+pub fn parse_order_type(s: &str) -> Option<OrderType> {
+    match s {
+        "market" => Some(OrderType::Market),
+        "limit" => Some(OrderType::Limit),
+        "stop_limit" => Some(OrderType::StopLimit),
+        _ => None,
+    }
 }
 
 /// POST /api/orders — submit a manual order through the risk gate.
@@ -56,31 +82,29 @@ pub async fn place_order(
             .into_response();
     }
 
-    // Parse side.
-    let side = match req.side.as_str() {
-        "buy" => Side::Buy,
-        "sell" => Side::Sell,
-        _ => {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(json!({ "error": "side must be 'buy' or 'sell'" })),
-            )
-                .into_response();
-        }
+    // Parse side.  An unrecognised side is a refusal, never a default.
+    let Some(side) = parse_side(&req.side) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "side must be 'buy' or 'sell'",
+                "received": req.side,
+            })),
+        )
+            .into_response();
     };
 
-    // Parse order type.
-    let order_type = match req.order_type.as_str() {
-        "market" => OrderType::Market,
-        "limit" => OrderType::Limit,
-        "stop_limit" => OrderType::StopLimit,
-        _ => {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(json!({ "error": "order_type must be 'market', 'limit', or 'stop_limit'" })),
-            )
-                .into_response();
-        }
+    // Parse order type.  An unrecognised type must never fall through to
+    // `market`, the one type that executes immediately at any price.
+    let Some(order_type) = parse_order_type(&req.order_type) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "order_type must be 'market', 'limit', or 'stop_limit'",
+                "received": req.order_type,
+            })),
+        )
+            .into_response();
     };
 
     // Parse size.
@@ -126,99 +150,31 @@ pub async fn place_order(
         intent.idempotency_key = key;
     }
 
-    // Resolve the instrument's asset class from the paper engine's registry.
-    // An unregistered instrument has no in-process pipeline feeding it marks, so
-    // it cannot be paper-traded — reject with a clear message rather than a mark
-    // error deeper in the engine.
-    let Some(asset_class) = state.paper_engine.asset_class_of(&req.instrument_id) else {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({
-                "error": "instrument not initialized for trading",
-                "detail": format!(
-                    "no live pipeline is feeding marks for '{}'; initialize the asset first",
-                    req.instrument_id
-                ),
-            })),
-        )
-            .into_response();
-    };
-
-    // A mark is required: the paper engine fills against the latest observed
-    // price and rejects stale/absent marks.  Surface a precise error if the
-    // feed has not produced one yet (e.g. just after startup).
-    let Some(market_price) = state.paper_engine.mark(&req.instrument_id) else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "error": "market data not ready",
-                "detail": format!(
-                    "no mark price for '{}' yet — wait for the live feed to tick",
-                    req.instrument_id
-                ),
-            })),
-        )
-            .into_response();
-    };
-
-    // Current net position for this instrument, so the risk gate's
-    // position-limit check sees real exposure rather than a zero default.
-    let current_position = state
-        .paper_engine
-        .positions(asset_class)
-        .into_iter()
-        .find(|p| p.instrument_id == req.instrument_id)
-        .map(|p| p.quantity)
-        .unwrap_or(Decimal::ZERO);
-
-    // Resolve session / halt state from instrument metadata (P6-T03).
-    // For crypto (24/7, non-haltable) the defaults remain; for equities the
-    // NYSE session window and haltable policy are applied — matching the spec
-    // invariant "session/halt checks live in metadata, not in core code."
-    let (is_in_session, halt_policy) = {
-        let row: Option<(serde_json::Value, String)> = sqlx::query_as(
-            "SELECT trading_hours_json, halt_policy FROM instruments WHERE instrument_id = $1",
-        )
-        .bind(&req.instrument_id)
-        .fetch_optional(&state.pg)
-        .await
-        .ok()
-        .flatten();
-
-        match row {
-            Some((hours_json, hp_str)) => {
-                let schedule: TradingSchedule = serde_json::from_value(hours_json)
-                    .unwrap_or_else(|_| TradingSchedule::always_open());
-                let in_session = is_within_trading_hours(Utc::now(), &schedule);
-                let hp = if hp_str == "haltable" {
-                    HaltPolicy::Haltable
-                } else {
-                    HaltPolicy::NonHaltable
-                };
-                (in_session, hp)
-            }
-            // Instrument not in metadata table — default to 24/7 non-haltable (crypto behaviour).
-            None => (true, HaltPolicy::NonHaltable),
+    // The risk context.  One provider serves this door and the hot path's
+    // stage 4, so the two cannot drift: the position, the mark, the venue's
+    // published tick and lot, today's loss and the order-rate counts are all
+    // measured from live state, and anything that cannot be measured refuses
+    // here instead of defaulting.
+    //
+    // What this replaced, and why it mattered:
+    //
+    //     GateContext::for_manual_order(pos, mark, ZERO, ZERO, ZERO, true, 0, 0)
+    //
+    // A zero tick and lot disable the tick and lot checks.  A zero daily loss
+    // cannot breach a daily-loss limit.  `0, 0` order counts cannot breach a
+    // rate limit.  Three of the ten checks in COMP-002 3.2 reported a pass they
+    // had never evaluated, and nothing downstream could tell the difference.
+    let ctx = match risk::context::context_for(&intent) {
+        Ok(ctx) => ctx,
+        Err(rejection) => {
+            let (status, message) = risk_rejection_response(&rejection);
+            return (
+                status,
+                Json(json!({ "error": message, "detail": rejection.to_string() })),
+            )
+                .into_response();
         }
     };
-
-    // Manual-order risk context.  tick_size and lot_size are 0 — which disables
-    // those two checks (a nonzero lot would wrongly reject fractional crypto like
-    // 0.01 BTC).  Daily-loss is 0 until P&L wiring lands.
-    let mut ctx = GateContext::for_manual_order(
-        current_position,
-        Some(market_price),
-        Decimal::ZERO,
-        Decimal::ZERO,
-        Decimal::ZERO,
-        true,
-        0,
-        0,
-    );
-    ctx.is_in_session = is_in_session;
-    ctx.halt_policy = halt_policy;
-    // is_halted defaults to false — we do not yet subscribe to exchange halt events,
-    // so the gate catches session violations but not intra-session halts at this phase.
 
     match state.risk_gate.check(intent, &ctx) {
         Ok(approved) => {
@@ -248,38 +204,93 @@ pub async fn place_order(
     }
 }
 
-/// GET /api/orders/:id — look up an order by idempotency key.
+/// GET /api/orders/:id — look up an order by idempotency key, with its fills.
+///
+/// This endpoint could not succeed before migration 0121 and
+/// `execution::journal`: nothing in the repository wrote to `orders`, so every
+/// lookup was a 404.  The fills are returned alongside because "did it fill,
+/// and at what?" is the question the endpoint is asked, and because
+/// reconciliation and Gate 15 read exactly these rows.
 pub async fn get_order(
     _token: BearerToken,
     State(state): State<AppState>,
     Path(id): Path<uuid::Uuid>,
 ) -> impl IntoResponse {
-    let row: Option<(String, Option<String>, String, String, String)> = sqlx::query_as(
-        "SELECT instrument_id, broker_order_id, side, order_type, state \
+    #[allow(clippy::type_complexity)]
+    let row: Option<(
+        String,
+        Option<String>,
+        String,
+        String,
+        String,
+        rust_decimal::Decimal,
+        Option<String>,
+        String,
+    )> = sqlx::query_as(
+        "SELECT instrument_id, broker_order_id, side, order_type, state, size, \
+                strategy_id, execution_mode \
          FROM orders WHERE idempotency_key = $1",
     )
     .bind(id)
     .fetch_optional(&state.pg)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
     .ok()
     .flatten();
 
-    match row {
-        Some((instrument_id, broker_order_id, side, order_type, order_state)) => (
-            StatusCode::OK,
-            Json(json!({
-                "idempotency_key": id,
-                "instrument_id": instrument_id,
-                "broker_order_id": broker_order_id,
-                "side": side,
-                "order_type": order_type,
-                "state": order_state,
-            })),
+    let Some((
+        instrument_id,
+        broker_order_id,
+        side,
+        order_type,
+        order_state,
+        size,
+        strategy_id,
+        execution_mode,
+    )) = row
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    #[allow(clippy::type_complexity)]
+    let fills: Vec<(
+        String,
+        rust_decimal::Decimal,
+        rust_decimal::Decimal,
+        Option<rust_decimal::Decimal>,
+        chrono::DateTime<chrono::Utc>,
+    )> =
+        sqlx::query_as(
+            "SELECT broker_order_id, filled_size, fill_price, commission, filled_at \
+             FROM fills WHERE idempotency_key = $1 ORDER BY filled_at ASC",
         )
-            .into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
-    }
+        .bind(id)
+        .fetch_all(&state.pg)
+        .await
+        .unwrap_or_default();
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "idempotency_key": id,
+            "instrument_id": instrument_id,
+            "broker_order_id": broker_order_id,
+            "side": side,
+            "order_type": order_type,
+            "state": order_state,
+            "size": size.to_string(),
+            "strategy_id": strategy_id,
+            "execution_mode": execution_mode,
+            "fills": fills.iter().map(|(boid, qty, price, commission, at)| json!({
+                "broker_order_id": boid,
+                "filled_size": qty.to_string(),
+                "fill_price": price.to_string(),
+                // `null`, not "0", when the venue did not report a fee.
+                "commission": commission.map(|c| c.to_string()),
+                "filled_at": at,
+            })).collect::<Vec<_>>(),
+        })),
+    )
+        .into_response()
 }
 
 fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
@@ -328,5 +339,86 @@ fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
             StatusCode::UNPROCESSABLE_ENTITY,
             "limit price is not on a valid tick",
         ),
+
+        // The fail-closed refusals.  Each one is the gate saying "I could not
+        // evaluate this", which is a 503-class answer — the request was not
+        // wrong, the platform was not ready to judge it.  Returning 200 here,
+        // or skipping the check, is the defect these variants exist to prevent.
+        RiskRejection::MarketDataUnavailable { .. } => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no current mark for this instrument — wait for the live feed to tick",
+        ),
+        RiskRejection::InstrumentMetadataUnavailable { .. } => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the venue's tick and lot for this instrument are not known — initialize the asset",
+        ),
+        RiskRejection::AccountStateUnavailable { .. } => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "account state could not be read — the daily-loss limit cannot be evaluated",
+        ),
+        RiskRejection::GateUnavailable { .. } => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the risk gate cannot evaluate orders right now",
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unparseable_side_produces_no_order() {
+        // Every one of these used to become a SELL in `execution::side_from_str`.
+        for bad in [
+            "", " ", "BUY", "Buy", "b", "sel", "sell ", "long", "short", "0", "null",
+        ] {
+            assert!(
+                parse_side(bad).is_none(),
+                "side '{bad}' must be refused, not read as a sell"
+            );
+        }
+        assert_eq!(parse_side("buy"), Some(Side::Buy));
+        assert_eq!(parse_side("sell"), Some(Side::Sell));
+    }
+
+    #[test]
+    fn an_unparseable_order_type_produces_no_order() {
+        for bad in ["", "MARKET", "mkt", "stop", "stoplimit", "trailing"] {
+            assert!(
+                parse_order_type(bad).is_none(),
+                "order_type '{bad}' must be refused, not read as a market order"
+            );
+        }
+        assert_eq!(parse_order_type("market"), Some(OrderType::Market));
+        assert_eq!(parse_order_type("limit"), Some(OrderType::Limit));
+        assert_eq!(parse_order_type("stop_limit"), Some(OrderType::StopLimit));
+    }
+
+    /// Every fail-closed refusal maps to a status that says "not evaluated",
+    /// never to a success and never to a client error blaming the order.
+    #[test]
+    fn unmeasurable_inputs_map_to_service_unavailable() {
+        for r in [
+            RiskRejection::MarketDataUnavailable {
+                instrument_id: "BTC-USD".into(),
+            },
+            RiskRejection::InstrumentMetadataUnavailable {
+                instrument_id: "BTC-USD".into(),
+            },
+            RiskRejection::AccountStateUnavailable {
+                detail: "x".into(),
+            },
+            RiskRejection::GateUnavailable {
+                detail: "x".into(),
+            },
+        ] {
+            let (status, _) = risk_rejection_response(&r);
+            assert_eq!(
+                status,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{r} must read as 'the gate could not evaluate this'"
+            );
+        }
     }
 }

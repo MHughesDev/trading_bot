@@ -42,3 +42,9 @@ futures-util = "0.3"
 dashmap = { workspace = true }
 mimalloc = { workspace = true }
 reqwest = { workspace = true }
+
+[dev-dependencies]
+# The end-to-end fill test installs the non-durable in-memory order journal and
+# builds ApprovedOrders directly where it needs to drive one stage in isolation.
+execution = { workspace = true, features = ["test-helpers"] }
+risk = { workspace = true, features = ["test-helpers"] }

@@ -168,6 +168,9 @@ impl Broker for ZeroXBroker {
             submitted_qty: qty,
             filled_qty: Decimal::ZERO,
             avg_fill_price: None,
+            // This adapter does not report fees on an order query;
+            // `None`, never zero -- see BrokerOrderStatus::commission.
+            commission: None,
             state: BrokerOrderState::Unknown(
                 "on-chain receipt poll not yet implemented (task 3.4)".to_owned(),
             ),

@@ -433,6 +433,47 @@ catches is the one that is hardest to read at merge time.
   three are **byte-identical to `37faade`**: they mirrored it, none modified it.
   On rebase their copy becomes a no-op and `70cfc1f`'s two changes stand.
 
+### 8.2c The merge hazard nobody listed: a silent deletion, 2026-09-15
+
+Wave 1 nearly shipped one, and it is the reason §8.3's checklist is necessary
+but not sufficient.
+
+Track 1 replaces the hand-written `TAXONOMY` with `taxonomy()` generated from
+`spec::catalog()`. Its branch predates `37faade`, so `catalog()` enumerates the
+tool modules that existed when it was cut. Taking track 1's file — which §8.2
+correctly tells you to do — took the catalogue from **72 tools to 60**, dropping
+falsification, the three evidence tools, both web tools and the whole skill
+library.
+
+**Every test stayed green.** The taxonomy tests reconcile the catalogue against
+the dispatch arms and the envelope lists; the merge removed the tools from all
+of those at once, so nothing was left to disagree. `cargo test -p mcp-server-lib`
+passed, `static_invariants` passed, `verify_plans.py` passed. A conflict stops
+you; this does not.
+
+**So: after any merge that makes a hand-written list generated, count the
+generated output against the list it replaced.** For the catalogue that is one
+example binary over `spec::catalog()`. The general form: a reconciliation test
+proves two sides agree, never that either side is complete, and a merge is
+exactly the event that can shrink both at once.
+
+### 8.2d Three branches do not compile, and reported LANDED anyway
+
+Found while merging, not before:
+
+- **Track 16** (`execution-path-to-a-fill`): `crates/execution/src/lib.rs` had a
+  literal `\u2014` in a Rust string (Rust wants `\u{2014}`), `orders.rs` had a
+  bare `\n` on its own line, `SubmitResult` had no `Debug` while its own new
+  hot-path tests call `expect_err`, and a test closure in
+  `strategy-runtime/src/runtime.rs` captured a counter mutably and then read it
+  five times. The first two look like file-writing artifacts; the last two are
+  code that was written and never built.
+
+These are cheap to fix and were fixed in the merge. The point is the process
+one: **a track's own report that it landed is not evidence that its branch
+builds.** Before the remaining waves, run `cargo build --workspace -j 2` on each
+branch — or accept that the merge is where you will find out.
+
 ### 8.3 Verify after every merge, not at the end
 
 A merge is done when all of these pass — failing any one means stop, not continue:
@@ -485,6 +526,7 @@ pass — fix the file, or if the check itself is wrong, say so in your report.
 
 | Date | Change |
 |---|---|
+| 2026-09-15 | **Integration started on branch `integration`, waves 0–3 landed.** The waves are being done off `main` so `main` stays green until the whole stack verifies. Two findings change the plan rather than just the code. First, the merge hazard in §8.2c: taking track 1's generated catalogue **silently deleted the thirteen tools H-1 landed**, 72 → 60, with every test still green, because the rows left both sides of every reconciliation at once. Restoring them as `ToolSpec` declarations also did **S-1.4**'s work for the twelve over-budget descriptions — 6.4 KB of prose moved to the authoring guide, and the seven tests guarding that prose moved with it. Second, §8.2d: **track 16's branch does not compile** — two file-writing artifacts and two genuine compile errors in code it reported as landed. Both were fixed in the merge. Also settled by measurement rather than by picking a side: the plan-hygiene audit and track 16 made contradictory claims about set-E 2.3 and 5.4; the code says track 16 is right (`risk_context.rs` computes `daily_loss_usd` and passes `RateSource::Tracked`; `hot_path.rs` stage 3 pushes `OrderIntent`s), so its claims were taken and the audit's objections are descriptions of the state it changed. `verify_plans.py` learns `PARTIAL`. |
 | 2026-09-15 | **Set P Phase 2 landed on `main` (`70cfc1f`), and the migration namespace was audited clean.** The battery found a real defect on its first run against live data: `BTC-USD/coinbase/1m` contains **2026-08-13 twice** — 2,879 rows for 1,440 distinct minutes. Nothing had caught it because duplicates are not gaps, not bad prices and not stale, so every other check passes over them. Blast radius **A 0 · B 3 · C 1 · D 5** of nine series, so P-2.3's enforcement was deliberately **not built** — the phase sequences publication before enforcement, and that is now satisfied more strongly than asked. Also found and fixed: **`pg_strategy_revision` was not idempotent** — it used a constant hash, so it passed once against a database and failed forever after. Every live suite has now been run twice in a row; the rest are clean. |
 | 2026-09-15 | **H-1 closed, `37faade`.** The baseline moved. Every track rebases onto `main`; anyone who mirrored the user's tree drops that commit rather than keeping it. §2.5a rewritten from a workaround into an instruction. The plan corpus was untracked too — tracks had neither the code nor the plans in their baseline. |
 | 2026-09-15 | **Found an unclaimed block on the critical path.** Track 1 completed 5 of Phase 1's 20 tasks and its handoff named what came next, but nothing owned it: fourteen tasks, including the whole context-budget and reasoning-protocol halves. Track 26 dispatched for the first; S-1.14–S-1.20 recorded in §7 as the next dispatch. The lesson for the queue: **a landed track's partials are not automatically someone's work** — a phase is only finished when its file says so, and §7 now carries the residue explicitly rather than trusting that a successor picks it up. |

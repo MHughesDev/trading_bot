@@ -105,7 +105,9 @@ fn run_once(events: Vec<WorldEvent>) -> Vec<domain::order::OrderIntent> {
     let mut instance = StrategyInstance::new("user1", "BTC-USDT", ema_cross_def(), clock.now());
     let mut all_intents = Vec::new();
     for event in &events {
-        all_intents.extend(instance.process_event(event));
+        let outcome = instance.process_event(event);
+        assert!(outcome.errors.is_empty(), "replay must not hit a sizing error");
+        all_intents.extend(outcome.intents);
     }
     all_intents
 }
@@ -164,5 +166,9 @@ fn condition_false_emits_no_intents() {
         available_time: t,
     });
 
-    assert!(intents.is_empty(), "no intents when condition is false");
+    assert!(
+        intents.intents.is_empty(),
+        "no intents when condition is false"
+    );
+    assert!(intents.errors.is_empty(), "and no sizing errors either");
 }

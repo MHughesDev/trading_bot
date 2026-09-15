@@ -142,45 +142,265 @@ pub async fn disarm_automation(
     set_armed(state, token, id, false).await
 }
 
+/// Arming and disarming.
+///
+/// **Arming is registration in the one live registry, not a second evaluator**
+/// (ADR-0038).  `armed_automations` — the query that was meant to resume armed
+/// plans at startup — had no caller anywhere in the repository, so arming set a
+/// boolean, returned success, and nothing ever evaluated the spec.  The fix is
+/// not to write the missing evaluator: a second evaluation path is how the
+/// platform came to have two doors that both reported success and both did
+/// nothing.  Arming now declares the automation's execution strategy into
+/// [`strategy_runtime::live`], which is what the in-process pipeline reads.
+///
+/// `pipeline` automations (multi-stage discovery over a universe) are a
+/// genuinely different shape and have no executable path yet — the universe
+/// feed is Set E 4.3.  Arming one is **refused** with a reason rather than
+/// accepted and ignored.
 async fn set_armed(
     State(state): State<AppState>,
     _token: BearerToken,
     Path(id): Path<Uuid>,
     armed: bool,
 ) -> axum::response::Response {
-    // Before arming, load the automation's spec and start a live data pipeline
-    // for every instrument it references so data is ready when the first
-    // evaluation fires.
-    if armed {
-        if let Ok(Some(row)) = automation::get_automation(&state.pg, id).await {
-            let spec = &row.spec;
-            let asset_class = spec
-                .get("asset_class")
-                .and_then(|v| v.as_str())
-                .unwrap_or("crypto_spot_cex");
-            let instruments: Vec<&str> = match row.kind.as_str() {
-                "single_instrument" => spec
-                    .get("instrument_id")
-                    .and_then(|v| v.as_str())
-                    .map(|s| vec![s])
-                    .unwrap_or_default(),
-                "pipeline" => spec
-                    .get("universe")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-                    .unwrap_or_default(),
-                _ => vec![],
-            };
-            for instrument_id in instruments {
-                state.ensure_pipeline(instrument_id, asset_class);
+    if !armed {
+        let removed = strategy_runtime::live::global().deregister_automation(&id.to_string());
+        return match automation::set_automation_armed(&state.pg, id, false).await {
+            Ok(true) => {
+                Json(json!({ "id": id, "armed": false, "deregistered": removed })).into_response()
             }
+            Ok(false) => not_found(id),
+            Err(e) => db_error(e),
+        };
+    }
+
+    let Ok(Some(row)) = automation::get_automation(&state.pg, id).await else {
+        return not_found(id);
+    };
+
+    if row.kind.as_str() != "single_instrument" {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({
+                "error": "pipeline automations are not executable yet",
+                "detail": "a multi-stage discovery pipeline needs the shared universe feed \
+                           (Set E 4.3).  Refusing to arm rather than reporting success and \
+                           evaluating nothing.",
+            })),
+        )
+            .into_response();
+    }
+
+    let spec = &row.spec;
+    let asset_class = spec
+        .get("asset_class")
+        .and_then(|v| v.as_str())
+        .unwrap_or("crypto_spot_cex");
+    let Some(instrument_id) = spec.get("instrument_id").and_then(|v| v.as_str()) else {
+        return bad_request("spec is missing instrument_id");
+    };
+    let Some(execution_strategy_id) = spec.get("execution_strategy_id").and_then(|v| v.as_str())
+    else {
+        return bad_request("spec is missing execution_strategy_id");
+    };
+
+    // Load the execution strategy's definition.  An automation that names a
+    // strategy the platform does not have must not arm.
+    let def_row: Option<(serde_json::Value,)> = sqlx::query_as(
+        "SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1",
+    )
+    .bind(execution_strategy_id)
+    .fetch_optional(&state.pg)
+    .await
+    .ok()
+    .flatten();
+
+    let Some((def_json,)) = def_row else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "execution strategy not found",
+                "strategy_id": execution_strategy_id,
+            })),
+        )
+            .into_response();
+    };
+
+    let definition: domain::strategy_def::StrategyDefinition =
+        match serde_json::from_value(def_json) {
+            Ok(d) => d,
+            Err(e) => {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(json!({ "error": "invalid strategy definition", "detail": e.to_string() })),
+                )
+                    .into_response()
+            }
+        };
+    let definition = match domain::strategy_def::params::materialize(
+        &definition,
+        &domain::strategy_def::ParamValues::new(),
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": "invalid_parameters", "detail": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+
+    // Data first, then evaluation: the pipeline that supplies marks and bars
+    // must exist before anything is declared live against it.
+    state.ensure_pipeline(instrument_id, asset_class);
+
+    let live = strategy_runtime::live::global();
+    if let Err(e) = live.register(strategy_runtime::live::LiveStrategySpec {
+        user_id: row.user_id.to_string(),
+        instrument_id: instrument_id.to_owned(),
+        definition,
+        source: strategy_runtime::live::LiveSource::Automation {
+            automation_id: id.to_string(),
+        },
+    }) {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "already_running", "detail": e.to_string() })),
+        )
+            .into_response();
+    }
+
+    match automation::set_automation_armed(&state.pg, id, true).await {
+        Ok(true) => Json(json!({
+            "id": id,
+            "armed": true,
+            "instrument_id": instrument_id,
+            "execution_strategy_id": execution_strategy_id,
+            "live_generation": live.generation(),
+        }))
+        .into_response(),
+        Ok(false) => {
+            live.deregister_automation(&id.to_string());
+            not_found(id)
+        }
+        Err(e) => {
+            live.deregister_automation(&id.to_string());
+            db_error(e)
         }
     }
-    match automation::set_automation_armed(&state.pg, id, armed).await {
-        Ok(true) => Json(json!({ "id": id, "armed": armed })).into_response(),
-        Ok(false) => not_found(id),
-        Err(e) => db_error(e),
+}
+
+/// Re-declare every armed `single_instrument` automation into the live
+/// registry, and start the data pipeline each one needs.
+///
+/// Called once at startup.  `armed` is durable, so an automation armed before a
+/// restart must evaluate after one; before ADR-0038 the resume query existed
+/// and had no caller, which meant a restart silently stopped every automation
+/// while the UI went on showing them as armed.
+///
+/// Returns how many were resumed.  A `pipeline` automation is skipped with a
+/// warning — it has no executable path (Set E 4.3) and arming one is refused,
+/// but rows predating that refusal may still be armed in the database.
+pub async fn resume_armed(
+    pg: &sqlx::PgPool,
+    stream_tx: Option<&tokio::sync::mpsc::UnboundedSender<crate::state::StreamRequest>>,
+) -> Result<usize, sqlx::Error> {
+    let rows = automation::armed_automations(pg).await?;
+    let live = strategy_runtime::live::global();
+    let mut resumed = 0;
+
+    for row in rows {
+        if row.kind.as_str() != "single_instrument" {
+            tracing::warn!(
+                automation_id = %row.id,
+                kind = %row.kind,
+                "armed automation of a kind that has no executable path — not resumed"
+            );
+            continue;
+        }
+        let Some(instrument_id) = row.spec.get("instrument_id").and_then(|v| v.as_str()) else {
+            tracing::warn!(automation_id = %row.id, "armed automation has no instrument_id");
+            continue;
+        };
+        let Some(strategy_id) = row
+            .spec
+            .get("execution_strategy_id")
+            .and_then(|v| v.as_str())
+        else {
+            tracing::warn!(
+                automation_id = %row.id,
+                "armed automation has no execution_strategy_id"
+            );
+            continue;
+        };
+        let asset_class = row
+            .spec
+            .get("asset_class")
+            .and_then(|v| v.as_str())
+            .unwrap_or("crypto_spot_cex");
+
+        let def_row: Option<(serde_json::Value,)> = sqlx::query_as(
+            "SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1",
+        )
+        .bind(strategy_id)
+        .fetch_optional(pg)
+        .await?;
+
+        let Some((def_json,)) = def_row else {
+            tracing::error!(
+                automation_id = %row.id,
+                strategy_id,
+                "armed automation names a strategy that no longer exists — not resumed"
+            );
+            continue;
+        };
+        let definition: domain::strategy_def::StrategyDefinition =
+            match serde_json::from_value(def_json)
+                .map_err(|e| e.to_string())
+                .and_then(|d: domain::strategy_def::StrategyDefinition| {
+                    domain::strategy_def::params::materialize(
+                        &d,
+                        &domain::strategy_def::ParamValues::new(),
+                    )
+                    .map_err(|e| e.to_string())
+                }) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::error!(
+                        automation_id = %row.id,
+                        strategy_id,
+                        error = %e,
+                        "armed automation's strategy no longer materializes — not resumed"
+                    );
+                    continue;
+                }
+            };
+
+        if let Some(tx) = stream_tx {
+            let _ = tx.send(crate::state::StreamRequest {
+                instrument_id: instrument_id.to_owned(),
+                asset_class: asset_class.to_owned(),
+            });
+        }
+
+        match live.register(strategy_runtime::live::LiveStrategySpec {
+            user_id: row.user_id.to_string(),
+            instrument_id: instrument_id.to_owned(),
+            definition,
+            source: strategy_runtime::live::LiveSource::Automation {
+                automation_id: row.id.to_string(),
+            },
+        }) {
+            Ok(()) => resumed += 1,
+            Err(e) => tracing::warn!(
+                automation_id = %row.id,
+                error = %e,
+                "armed automation was already live — not resumed twice"
+            ),
+        }
     }
+    Ok(resumed)
 }
 
 /// DELETE /api/automations/:id
