@@ -32,10 +32,19 @@ ALTER TABLE orders
 -- The durable idempotency guarantee that `execution::fills` used to *claim*.
 -- A redelivered fill inserts zero rows; the duplicate is detected by the
 -- database, so it survives a restart, a reconnect and a JetStream redelivery.
+--
+-- The key is the CUMULATIVE filled quantity, not this fill's size.  Keying on
+-- (price, size) -- what the in-memory dedup does -- collapses two legitimate
+-- partial fills of the same size at the same price into one, which silently
+-- halves a position.  Cumulative quantity is monotonic per order, so two
+-- partials are distinct while a redelivery of the same broker state is not.
+ALTER TABLE fills
+    ADD COLUMN IF NOT EXISTS cumulative_filled NUMERIC(30, 10) NOT NULL DEFAULT 0;
+ALTER TABLE fills ALTER COLUMN cumulative_filled DROP DEFAULT;
 ALTER TABLE fills DROP CONSTRAINT IF EXISTS fills_idempotent;
 ALTER TABLE fills
     ADD CONSTRAINT fills_idempotent
-    UNIQUE (idempotency_key, broker_order_id, fill_price, filled_size);
+    UNIQUE (idempotency_key, broker_order_id, cumulative_filled);
 
 -- A commission of NULL means the venue did not report one.  Recording an
 -- unknown fee as 0 makes every fill on that path look cheaper than it was, and

@@ -66,7 +66,16 @@ pub struct PersistedFill {
     pub broker_order_id: String,
     pub instrument_id: String,
     pub side: Side,
+    /// Quantity filled by **this** fill (the delta), which is what P&L uses.
     pub filled_size: Decimal,
+    /// Cumulative quantity filled on the order **after** this fill.
+    ///
+    /// This is the field that makes a fill unique.  Keying on the delta alone
+    /// (what the in-memory dedup does) collapses two legitimate partial fills
+    /// of the same size at the same price into one — which would silently
+    /// halve a position.  Cumulative quantity is monotonic, so two partials are
+    /// distinct while a redelivery of the same sync is not.
+    pub cumulative_filled: Decimal,
     pub fill_price: Price,
     /// Commission and venue fees, or `None` when the venue did not report
     /// them.  Stored as `NULL`, never as `0`: an unknown fee recorded as zero
@@ -279,8 +288,8 @@ impl OrderJournal for PgOrderJournal {
         let result = sqlx::query(
             "INSERT INTO fills \
                (idempotency_key, broker_order_id, instrument_id, side, filled_size, \
-                fill_price, commission, filled_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+                cumulative_filled, fill_price, commission, filled_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
              ON CONFLICT ON CONSTRAINT fills_idempotent DO NOTHING",
         )
         .bind(fill.idempotency_key)
@@ -288,6 +297,7 @@ impl OrderJournal for PgOrderJournal {
         .bind(&fill.instrument_id)
         .bind(side_str(fill.side))
         .bind(fill.filled_size)
+        .bind(fill.cumulative_filled)
         .bind(fill.fill_price.inner())
         .bind(fill.commission)
         .bind(fill.filled_at)
@@ -309,12 +319,13 @@ impl OrderJournal for PgOrderJournal {
             String,
             Decimal,
             Decimal,
+            Decimal,
             Option<Decimal>,
             DateTime<Utc>,
         )> =
             sqlx::query_as(
-                "SELECT broker_order_id, instrument_id, side, filled_size, fill_price, \
-                        commission, filled_at \
+                "SELECT broker_order_id, instrument_id, side, filled_size, cumulative_filled, \
+                        fill_price, commission, filled_at \
                  FROM fills WHERE idempotency_key = $1 ORDER BY filled_at ASC",
             )
             .bind(key)
@@ -323,13 +334,23 @@ impl OrderJournal for PgOrderJournal {
             .map_err(db)?;
         rows.into_iter()
             .map(
-                |(broker_order_id, instrument_id, side, filled_size, fill_price, commission, at)| {
+                |(
+                    broker_order_id,
+                    instrument_id,
+                    side,
+                    filled_size,
+                    cumulative_filled,
+                    fill_price,
+                    commission,
+                    at,
+                )| {
                     Ok(PersistedFill {
                         idempotency_key: key,
                         broker_order_id,
                         instrument_id,
                         side: parse_side(&side)?,
                         filled_size,
+                        cumulative_filled,
                         fill_price: Price::from_decimal(fill_price),
                         commission,
                         filled_at: at,
@@ -400,13 +421,13 @@ pub mod memory {
         }
     }
 
+    /// Mirrors the `fills_idempotent` constraint exactly, cumulative quantity
+    /// included — a test journal that deduped differently from the database
+    /// would prove the wrong thing.
     fn dedup_key(f: &PersistedFill) -> String {
         format!(
-            "{}|{}|{}|{}",
-            f.idempotency_key,
-            f.broker_order_id,
-            f.fill_price.inner(),
-            f.filled_size
+            "{}|{}|{}",
+            f.idempotency_key, f.broker_order_id, f.cumulative_filled
         )
     }
 

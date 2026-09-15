@@ -255,7 +255,10 @@ impl ExecutionEngine {
             broker_order_id: broker_order_id.to_owned(),
             instrument_id: intent.instrument_id.clone(),
             side: intent.side,
+            // At submit time nothing was filled before, so the delta and
+            // the cumulative are the same number.
             filled_size: status.filled_qty,
+            cumulative_filled: status.filled_qty,
             fill_price: avg_price,
             commission: status.commission,
             filled_at: Utc::now(),
@@ -350,6 +353,9 @@ impl ExecutionEngine {
         idempotency_key: Uuid,
         broker_order_id: &str,
         prior_filled_qty: Decimal,
+        // The side is read from the broker's own view of the order rather than
+        // from the caller: a caller that passes the wrong one would write a
+        // fill in the wrong direction.
         _side: Side,
     ) -> Result<SyncResult, ExecutionError> {
         let status = self.broker.query_order(broker_order_id).await?;
@@ -369,25 +375,55 @@ impl ExecutionEngine {
             BrokerOrderState::Unknown(_) => OrderState::Submitted,
         };
 
-        // Detect new fill delta.
+        let journal = journal::require().map_err(|e| ExecutionError::Database(e.to_string()))?;
+        journal
+            .set_state(idempotency_key, new_state)
+            .await
+            .map_err(|e| ExecutionError::Database(e.to_string()))?;
+
+        // Detect new fill delta.  This is the path a *resting* order's later
+        // fill takes: a limit order that fills minutes after submission is seen
+        // here, not at submit.  Before this it was applied to the in-memory
+        // processor and then dropped -- never written to `fills`, never
+        // published -- so a limit order could fill and leave no trace at all.
         let delta = status.filled_qty - prior_filled_qty;
         let fill_and_result = if delta > Decimal::ZERO {
             if let Some(avg_price) = status.avg_fill_price {
-                let fill = FillEvent {
+                let filled_at = Utc::now();
+                let event = FillEvent {
                     idempotency_key,
                     broker_order_id: broker_order_id.to_owned(),
                     filled_qty: delta,
                     fill_price: avg_price,
-                    commission: Decimal::ZERO,
-                    filled_at: Utc::now(),
+                    commission: status.commission.unwrap_or(Decimal::ZERO),
+                    filled_at,
                 };
                 let result = self
                     .fill_processor
                     .lock()
-                    .expect("fill_processor lock")
-                    .apply(&fill);
+                    .map(|mut fp| fp.apply(&event))
+                    .unwrap_or(FillResult::Applied);
 
-                if result == FillResult::Applied {
+                let persisted = journal::PersistedFill {
+                    idempotency_key,
+                    broker_order_id: broker_order_id.to_owned(),
+                    instrument_id: status.instrument_id.clone(),
+                    side: status.side,
+                    filled_size: delta,
+                    // Monotonic per order, so two equal partials at the same
+                    // price stay distinct while a re-sync of the same broker
+                    // state does not.
+                    cumulative_filled: status.filled_qty,
+                    fill_price: avg_price,
+                    commission: status.commission,
+                    filled_at,
+                };
+                let outcome = journal
+                    .record_fill(&persisted)
+                    .await
+                    .map_err(|e| ExecutionError::Database(e.to_string()))?;
+
+                if outcome == journal::WriteOutcome::Inserted && result == FillResult::Applied {
                     audit.push(AuditEntry::StateTransition {
                         idempotency_key,
                         from: Some(OrderState::Submitted),
@@ -395,9 +431,15 @@ impl ExecutionEngine {
                         reason: None,
                         at: Utc::now(),
                     });
+                    info!(
+                        %idempotency_key, %broker_order_id,
+                        filled = %delta, price = %avg_price.inner(),
+                        "fill recorded from a broker sync"
+                    );
+                    fills::publish(&event);
                 }
 
-                Some((fill, result))
+                Some((event, result))
             } else {
                 None
             }
