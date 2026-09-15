@@ -396,6 +396,80 @@ impl BarAggregator {
     }
 }
 
+/// The netted position an exit policy is tracking, and nothing else.
+///
+/// This decides *how much* to flatten, never *whether* to — every "should this
+/// position close" question belongs to [`ExitTracker`] and is asked there
+/// (INV-14). It is here rather than in either caller because both the live
+/// runtime and the simulator have to answer the same three questions the same
+/// way: what an averaging-in fill does to the entry reference, what a partial
+/// close does to it, and what a reversal does.
+///
+/// `crates/backtest/src/sim.rs` still carries a private twin of this
+/// (`SimPosition`), written first and byte-for-byte equivalent. Unifying them
+/// was out of this track's file scope; it is a deletion, not a change.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NetPosition {
+    pub side: PositionSide,
+    pub qty: Decimal,
+    pub entry: Decimal,
+}
+
+/// What a fill did to the netted position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NetEffect {
+    /// Untouched, or reduced without changing the entry reference.
+    Unchanged,
+    /// Opened, averaged into, or reversed — the entry reference moved.
+    Reopened { side: PositionSide, entry: Decimal },
+    /// Back to flat.
+    Flat,
+}
+
+impl NetPosition {
+    /// Apply one fill of `qty` at `fill` on `side` to `pos`.
+    pub fn apply(
+        pos: &mut Option<Self>,
+        side: PositionSide,
+        qty: Decimal,
+        fill: Decimal,
+    ) -> NetEffect {
+        if qty <= Decimal::ZERO {
+            return NetEffect::Unchanged;
+        }
+        match *pos {
+            None => {
+                *pos = Some(Self { side, qty, entry: fill });
+                NetEffect::Reopened { side, entry: fill }
+            }
+            Some(mut open) if open.side == side => {
+                let total = open.qty + qty;
+                open.entry = (open.entry * open.qty + fill * qty) / total;
+                open.qty = total;
+                *pos = Some(open);
+                NetEffect::Reopened { side, entry: open.entry }
+            }
+            Some(mut open) => match qty.cmp(&open.qty) {
+                std::cmp::Ordering::Less => {
+                    open.qty -= qty;
+                    *pos = Some(open);
+                    NetEffect::Unchanged
+                }
+                std::cmp::Ordering::Equal => {
+                    *pos = None;
+                    NetEffect::Flat
+                }
+                // A reversal is an exit and a new entry, and the new position's
+                // stop is measured from the new entry.
+                std::cmp::Ordering::Greater => {
+                    *pos = Some(Self { side, qty: qty - open.qty, entry: fill });
+                    NetEffect::Reopened { side, entry: fill }
+                }
+            },
+        }
+    }
+}
+
 /// Seconds in one bar of `timeframe`.
 const fn bar_seconds(timeframe: Timeframe) -> i64 {
     match timeframe {
