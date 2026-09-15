@@ -574,6 +574,10 @@ pub struct Loop {
     /// The durable spine of a long task: it is re-rendered into context at high
     /// priority every step, so it outlives the raw results it was distilled from.
     findings: Vec<String>,
+    /// The claims alone, without the confidence label or the evidence. What the
+    /// duplicate check compares against, kept separately so a change to how a
+    /// finding is *rendered* cannot silently disable it.
+    finding_claims: Vec<String>,
     /// Opaque identifiers that appeared in a tool result this session.
     ///
     /// The corpus `finish_task` citations are checked against. Kept as its own set
@@ -582,6 +586,12 @@ pub struct Loop {
     /// refused because the harness forgot is exactly the kind of unfixable failure
     /// that fences a healthy session.
     seen_ids: BTreeSet<String>,
+    /// The result text each seen id arrived in.
+    ///
+    /// The corpus [`crate::memory::verify_finding`] checks a claim's *numbers*
+    /// against (AGENT-007 §3.1 step 2). `seen_ids` proves the id is real; this is
+    /// what proves the number is.
+    results_by_id: BTreeMap<String, String>,
     /// Idempotent calls already made this session, keyed by name + arguments.
     ///
     /// `ToolDef::idempotent` was set on every tool in the catalogue and read by
@@ -655,7 +665,9 @@ impl Loop {
             barren_steps: 0,
             step_learned_something: false,
             findings: Vec::new(),
+            finding_claims: Vec::new(),
             seen_ids: BTreeSet::new(),
+            results_by_id: BTreeMap::new(),
             idempotent_calls: BTreeMap::new(),
             held: None,
             running: None,
@@ -1698,24 +1710,30 @@ impl Loop {
             );
             return;
         }
-        let invented: Vec<&str> = opaque_ids(&evidence)
-            .into_iter()
-            .filter(|id| !self.seen_ids.contains(*id))
-            .collect();
-        if !invented.is_empty() {
-            self.reject_and_retry(
-                Rejection::semantic_owned(
-                    "drive.finding_evidence_unattributable",
-                    format!(
-                        "`evidence` cites {} — no tool in this session returned that. Cite \
-                         something you actually read, or do the work first.",
-                        invented.join(", ")
-                    ),
-                ),
-                fx,
-            );
-            return;
-        }
+        // AGENT-007 §3.1, both halves (Set S task S-4.2).
+        //
+        // The id check was already here. What was missing is the second half:
+        // a claim asserting a number that appears in none of the results it cites
+        // was stored exactly like one whose every number was measured. The
+        // verifier does not refuse those — refusing "the two Sharpes differ by
+        // 0.31" would teach the model to stop doing arithmetic — it records them
+        // as `suggestive` / `derived`, so nothing downstream can render the
+        // model's own arithmetic as an established fact.
+        let verdict = crate::memory::verify_finding(
+            &finding,
+            &evidence,
+            &self.seen_ids,
+            &self.results_by_id,
+        );
+        let (confidence, why) = match verdict {
+            crate::memory::FindingVerdict::Refused { code, correction } => {
+                self.reject_and_retry(Rejection::semantic_owned(code, correction), fx);
+                return;
+            }
+            crate::memory::FindingVerdict::Accepted {
+                confidence, why, ..
+            } => (confidence, why),
+        };
 
         // Recording something already established is not progress, and allowing it
         // turns the ledger into a free skip button: `record_finding` advances the plan
@@ -1723,9 +1741,15 @@ impl Loop {
         // old fact and move on. Observed doing precisely that — three consecutive
         // steps recording "BTC-USD has 1m bars available", walking the cursor through
         // "design a strategy" and "run a backtest" without touching either.
+        // Matched against the CLAIMS, not the rendered lines. The rendered line
+        // now opens with the confidence label, and a `starts_with` over that
+        // matches nothing — which turned the duplicate check off silently and was
+        // caught only by `re_recording_a_known_finding_is_refused`. A dedup key
+        // built from a display string is a dedup key one formatting change from
+        // being a no-op.
         let key = finding.to_ascii_lowercase();
         if self
-            .findings
+            .finding_claims
             .iter()
             .any(|f| f.to_ascii_lowercase().starts_with(&key))
         {
@@ -1744,7 +1768,16 @@ impl Loop {
         }
 
         self.step_learned_something = true;
-        self.findings.push(format!("{finding} [{evidence}]"));
+        self.finding_claims.push(finding.clone());
+        // The confidence travels **with** the finding, in the text the model
+        // re-reads every step. A findings block headed "ESTABLISHED SO FAR" that
+        // silently contains suggestive claims is how a downgrade gets undone by
+        // the next turn's prose, and AGENT-009's honesty suite asserts the label
+        // survives.
+        self.findings.push(format!(
+            "[{}] {finding} [{evidence}]",
+            confidence.as_str()
+        ));
         // Priority 250: above raw tool results, below the charter and the goal. A
         // finding is the compressed form of a result, so when the budget forces a
         // choice the compression is what should survive.
@@ -1753,7 +1786,8 @@ impl Loop {
             tagged: Tagged::system(
                 "findings",
                 format!(
-                    "ESTABLISHED SO FAR ({}):\n{}",
+                    "WHAT THIS SESSION HAS RECORDED ({}) — `established` means every number \
+                     is in a cited result; `suggestive` means it is not:\n{}",
                     self.findings.len(),
                     self.findings
                         .iter()
@@ -1768,7 +1802,7 @@ impl Loop {
         });
         fx.push(Effect::Note(Note::CoreTool {
             name: RECORD_FINDING.to_string(),
-            detail: finding,
+            detail: format!("{finding} — stored {}: {why}", confidence.as_str()),
         }));
         self.plan_cursor = (self.plan_cursor + 1).min(self.plan.len());
         self.begin_step(fx);
@@ -1957,6 +1991,22 @@ impl Loop {
         // look like handles are kept, and the output is already capped.
         self.seen_ids
             .extend(opaque_ids(&capped).into_iter().map(str::to_string));
+
+        // And which result each id arrived in (AGENT-007 §3.1 step 2).
+        //
+        // `seen_ids` alone answers "was this id real"; it cannot answer "does the
+        // result behind this id actually carry the number being claimed". Without
+        // the second question a finding citing a genuine experiment can assert any
+        // Sharpe at all and be stored `established` — and a real citation is
+        // precisely what makes a wrong number credible.
+        //
+        // Capped text, stored once per id rather than per result, so a long output
+        // with six ids costs six references to one string, not six copies.
+        for id in opaque_ids(&capped) {
+            self.results_by_id
+                .entry(id.to_string())
+                .or_insert_with(|| capped.to_string());
+        }
 
         // Record idempotent reads so an identical repeat is answered from here.
         // Stored capped, because the capped form is what the session actually holds

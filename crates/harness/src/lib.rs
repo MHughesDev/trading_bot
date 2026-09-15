@@ -35,6 +35,7 @@ pub mod appendix_a;
 pub mod canary;
 pub mod context;
 pub mod drive;
+pub mod eval;
 pub mod hardware;
 pub mod memory;
 pub mod policy;

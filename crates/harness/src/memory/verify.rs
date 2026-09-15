@@ -179,16 +179,21 @@ pub fn verify_finding(
     seen_ids: &BTreeSet<String>,
     results_by_id: &BTreeMap<String, String>,
 ) -> FindingVerdict {
+    // The `drive.` prefix on these codes is deliberate and is not a layering
+    // mistake. A rejection code is a wire contract: `tests/conformance.rs`
+    // asserts on it, and anything counting rejections by code would silently
+    // start reading zero if it moved. The check moved crates; the contract did
+    // not.
     if claim.trim().is_empty() {
         return FindingVerdict::Refused {
-            code: "memory.finding_empty",
+            code: "drive.finding_empty",
             correction: "record_finding needs a non-empty `finding`: say what you now know."
                 .to_string(),
         };
     }
     if evidence.trim().is_empty() {
         return FindingVerdict::Refused {
-            code: "memory.finding_evidence_missing",
+            code: "drive.finding_evidence_missing",
             correction: "`evidence` is required: name what you actually read this session — a \
                          tool you called, or an id it returned."
                 .to_string(),
@@ -204,7 +209,7 @@ pub fn verify_finding(
     if !invented.is_empty() {
         let names: Vec<&str> = invented.iter().map(|s| s.as_str()).collect();
         return FindingVerdict::Refused {
-            code: "memory.finding_evidence_unattributable",
+            code: "drive.finding_evidence_unattributable",
             correction: format!(
                 "`evidence` cites {} — no tool in this session returned that. Cite something \
                  you actually read, or do the work first.",
@@ -292,7 +297,7 @@ mod tests {
         );
         match v {
             FindingVerdict::Refused { code, correction } => {
-                assert_eq!(code, "memory.finding_evidence_unattributable");
+                assert_eq!(code, "drive.finding_evidence_unattributable");
                 assert!(correction.contains("exp_9f3c1201"), "{correction}");
             }
             other => panic!("a fabricated id must be refused, got {other:?}"),
@@ -419,14 +424,14 @@ mod tests {
         assert!(matches!(
             verify_finding("  ", "exp_11112222", &seen(&[]), &results(&[])),
             FindingVerdict::Refused {
-                code: "memory.finding_empty",
+                code: "drive.finding_empty",
                 ..
             }
         ));
         assert!(matches!(
             verify_finding("something", "", &seen(&[]), &results(&[])),
             FindingVerdict::Refused {
-                code: "memory.finding_evidence_missing",
+                code: "drive.finding_evidence_missing",
                 ..
             }
         ));

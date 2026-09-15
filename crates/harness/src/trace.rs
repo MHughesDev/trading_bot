@@ -85,6 +85,33 @@ pub enum Event {
         tool_grant: Vec<String>,
         budget_usd: f64,
     },
+    /// A tool the **harness** answered itself: `search_tools`, `record_finding`,
+    /// `finish_task` (AGENT-009 §2; closes ADR-P0-18).
+    ///
+    /// These never became [`Event::ToolCall`]s, because they are not dispatched —
+    /// `gate()` short-circuits them before the policy runs, on the grounds that a
+    /// ruling on either would be a ruling on the harness talking to itself. That
+    /// reasoning is right and the consequence was not: a trajectory missing
+    /// `record_finding` cannot replay a run whose whole content was findings, and
+    /// the `honesty` suite's cases are *made* of these three calls.
+    CoreTool {
+        name: String,
+        args: serde_json::Value,
+        /// What the harness answered — the correction text on a rejection, the
+        /// search hits on a `search_tools`, the finding on a `record_finding`.
+        reply: String,
+        /// Whether the harness accepted it. A refused `record_finding` is the
+        /// most informative row in an honesty trajectory.
+        accepted: bool,
+    },
+    /// The working state at the end of a step (AGENT-008 §2, AGENT-009 §2).
+    ///
+    /// Recorded as a hash rather than a document: the state is rewritten every
+    /// step and storing it whole would make a trace an order of magnitude larger
+    /// than the run. The hash is what a replay needs — it proves the rebuilt
+    /// state is the same state, and it is the only way to tell "the effects
+    /// matched" from "the effects matched and the loop is in the same place".
+    StateSnapshot { step: u32, working_state_hash: String },
 }
 
 /// One entry in the task's trace.
@@ -136,7 +163,10 @@ impl Span {
     /// tool calls, so nothing can be rebuilt from it.
     #[must_use]
     pub fn is_replayable_step(&self) -> bool {
-        matches!(self.event, Event::ModelCall { .. } | Event::ToolCall { .. })
+        matches!(
+            self.event,
+            Event::ModelCall { .. } | Event::ToolCall { .. } | Event::CoreTool { .. }
+        )
     }
 }
 
@@ -154,9 +184,46 @@ pub fn is_replayable(spans: &[Span]) -> bool {
         return false;
     }
     spans.iter().all(|s| match &s.event {
-        Event::ToolCall { args, .. } => !args.is_null(),
+        // A tool call logged without its arguments looks complete in a dashboard
+        // and reproduces nothing. The same is true of a harness-owned tool: a
+        // `record_finding` row with no `args` cannot tell a replay what claim was
+        // proposed, which is the entire content of an honesty case.
+        Event::ToolCall { args, .. } | Event::CoreTool { args, .. } => !args.is_null(),
         _ => true,
     })
+}
+
+/// Why a trajectory is not replayable, in words.
+///
+/// `is_replayable` answers yes or no, which is what a gate needs and not what a
+/// person debugging a nightly sample needs. AGENT-009 §8.1 asserts the predicate
+/// on real runs; when it fails, this says which of the two rules broke.
+#[must_use]
+pub fn unreplayable_reason(spans: &[Span]) -> Option<String> {
+    if !spans
+        .iter()
+        .any(|s| matches!(s.event, Event::ModelCall { .. }))
+    {
+        return Some(
+            "no model call in the trace: a replay is made of the successful steps, and a trace \
+             of only failures has none"
+                .to_string(),
+        );
+    }
+    for s in spans {
+        match &s.event {
+            Event::ToolCall { name, args, .. } | Event::CoreTool { name, args, .. }
+                if args.is_null() =>
+            {
+                return Some(format!(
+                    "span {} logged `{name}` without its arguments; a tool name is not a tool call",
+                    s.span_id
+                ));
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Every span for one task, in order, across all agents.
@@ -275,6 +342,75 @@ mod tests {
         let json = serde_json::to_value(&s).unwrap();
         assert_eq!(json["event"]["risk"], "destructive");
         assert_eq!(json["event"]["decision"], "ask");
+    }
+
+    /// ADR-P0-18, closed. `record_finding` is not dispatched, so it never
+    /// became a `ToolCall` — and a trajectory missing it cannot replay a run
+    /// whose whole content was findings.
+    #[test]
+    fn a_harness_owned_tool_is_in_the_record_and_counts_for_replay() {
+        let s = Span::new(
+            "t1",
+            "s1",
+            "orchestrator",
+            3,
+            Event::CoreTool {
+                name: "record_finding".into(),
+                args: json!({"finding": "no edge", "evidence": "exp_11112222"}),
+                reply: "recorded as suggestive".into(),
+                accepted: true,
+            },
+        );
+        assert!(s.is_replayable_step());
+        let spans = vec![model_span("t1", "orchestrator", 1), s];
+        assert!(is_replayable(&spans));
+        assert!(unreplayable_reason(&spans).is_none());
+    }
+
+    #[test]
+    fn a_core_tool_without_arguments_breaks_replay_and_says_which_one() {
+        let spans = vec![
+            model_span("t1", "orchestrator", 1),
+            Span::new(
+                "t1",
+                "s9",
+                "orchestrator",
+                3,
+                Event::CoreTool {
+                    name: "finish_task".into(),
+                    args: serde_json::Value::Null,
+                    reply: String::new(),
+                    accepted: false,
+                },
+            ),
+        ];
+        assert!(!is_replayable(&spans));
+        let why = unreplayable_reason(&spans).expect("a reason");
+        assert!(why.contains("finish_task"), "{why}");
+        assert!(why.contains("s9"), "{why}");
+    }
+
+    /// The state hash is what separates "the effects matched" from "the effects
+    /// matched and the loop is in the same place".
+    #[test]
+    fn a_state_snapshot_records_the_step_and_the_hash() {
+        let s = Span::new(
+            "t1",
+            "s1",
+            "orchestrator",
+            4,
+            Event::StateSnapshot {
+                step: 4,
+                working_state_hash: "ws:9f3c".into(),
+            },
+        );
+        let j = serde_json::to_value(&s).unwrap();
+        assert_eq!(j["event"]["kind"], "state_snapshot");
+        assert_eq!(j["event"]["working_state_hash"], "ws:9f3c");
+        assert!(
+            !s.is_replayable_step(),
+            "a snapshot is a check on a replay, not a step of one"
+        );
     }
 
     #[test]
