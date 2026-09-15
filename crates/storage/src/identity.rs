@@ -74,6 +74,18 @@ struct VenueDimRow {
     quality_tier: u8,
 }
 
+/// Replicated `dataplane.source`, so a ClickHouse-side audit can compute a row's
+/// earliest knowable instant (`close + declared_vendor_lag`) without a Postgres
+/// round trip per row. `kind` travels with it but decides nothing: provenance is
+/// per row, from the receipt (`dataplane::bar::classify_receipt`).
+#[derive(Row, Serialize)]
+struct SourceDimRow {
+    source_id: i32,
+    name: String,
+    kind: String,
+    declared_vendor_lag_ms: i64,
+}
+
 fn ns(t: DateTime<Utc>) -> i64 {
     t.timestamp_nanos_opt().unwrap_or(0)
 }
@@ -107,6 +119,17 @@ impl PgIdentityService {
         let mut ins = ch.insert("venue_dim").map_err(|e| IdentityError::Ch(e.to_string()))?;
         for (venue_id, name, tier) in venues {
             ins.write(&VenueDimRow { venue_id, name, quality_tier: u8::try_from(tier).unwrap_or(3) }).await.map_err(|e| IdentityError::Ch(e.to_string()))?;
+        }
+        ins.end().await.map_err(|e| IdentityError::Ch(e.to_string()))?;
+        let sources: Vec<(i32, String, String, i64)> =
+            sqlx::query_as("SELECT source_id, name, kind, declared_vendor_lag_ms FROM dataplane.source")
+                .fetch_all(&self.pg)
+                .await?;
+        let mut ins = ch.insert("source_dim").map_err(|e| IdentityError::Ch(e.to_string()))?;
+        for (source_id, name, kind, declared_vendor_lag_ms) in sources {
+            ins.write(&SourceDimRow { source_id, name, kind, declared_vendor_lag_ms })
+                .await
+                .map_err(|e| IdentityError::Ch(e.to_string()))?;
         }
         ins.end().await.map_err(|e| IdentityError::Ch(e.to_string()))?;
         let n = symbols.len();
