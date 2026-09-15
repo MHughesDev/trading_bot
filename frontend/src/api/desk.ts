@@ -504,12 +504,18 @@ async function optional<T>(p: Promise<{ data: T }>): Promise<T | null> {
   }
 }
 
+/**
+ * The wire shape `/api/trading/status` actually answers with today. COMP-007
+ * (Set S phase 7) adds scope, who tripped it and why; until then the desk shows
+ * the two fields that exist rather than inventing the other three.
+ */
 export interface KillSwitchState {
-  tripped: boolean
-  scope: string | null
-  tripped_by: string | null
-  reason: string | null
-  at: string | null
+  trading_enabled: boolean
+  kill_switch_active: boolean
+  scope?: string | null
+  tripped_by?: string | null
+  reason?: string | null
+  at?: string | null
 }
 
 export const deskApi = {
