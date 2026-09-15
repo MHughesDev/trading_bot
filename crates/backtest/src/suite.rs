@@ -1471,6 +1471,14 @@ impl SuiteManager {
         // and a gate with no recorded statistic is inconclusive, which is the
         // safe direction. Failing the funnel because a bookkeeping write missed
         // would throw away the evidence as well as the record of it.
+        // The *shaped* evidence gates 3, 4 and 12 read — a cost ladder, an AUM
+        // ladder, the neighbourhood in parameter order, the per-instrument
+        // cross-section. Gathered here for the same reason as the scalars above:
+        // this is where the runs that produced it are, and a gate that took it
+        // from a manifest would be judging numbers the submitter chose.
+        //
+        // Every piece is skipped rather than substituted when it cannot be
+        // measured. `gather_gate_evidence` says which, and why, in the log.
         let tenant = user_id.to_string();
         // The objective metrics go on the record beside the gate statistics
         // (migration 0130, S-10.4). Until they did, a run's *falsifier* named
@@ -1522,13 +1530,37 @@ impl SuiteManager {
                 tracing::warn!(experiment = %id, statistic = name, error = %e, "statistic not recorded");
             }
         }
+
+        // Gate evidence is gathered after the objective metrics are on
+        // the record, not before: gates 3, 4, 10 and 12 judge on evidence
+        // rows, and a gate that ran before the statistics it is judging
+        // would read an absence as a verdict.
+        let breakeven = self.gather_gate_evidence(
+            r,
+            user_id,
+            id,
+            &tenant,
+            observed_trial,
+            &observed_res,
+            &base,
+            &nbhd,
+            &nbhd_res,
+        );
+
         for (name, value) in [
             ("cpcv_p05_sharpe", cpcv_res.distribution.worst_5pct),
             ("walk_forward_sharpe", wf_res.distribution.median),
             ("pbo", outcome.pbo),
             ("deflated_sharpe", outcome.deflated_sharpe),
             ("permutation_p_value", outcome.raw_p_value),
-        ] {
+        ]
+        .into_iter()
+        // Gate 3's headline number, recorded only when a cost ladder was
+        // actually built. An absent breakeven is not a zero and not a one: it
+        // is the honest statement that the run paid no costs, and Gate 3 then
+        // reports that it cannot judge.
+        .chain(breakeven.map(|b| ("breakeven_cost_multiple", b)))
+        {
             if let Err(e) = self.bt.ledger().record_statistic(
                 &tenant,
                 observed_trial,
@@ -1629,6 +1661,228 @@ impl SuiteManager {
         r.exp.record_dispatches(1);
         self.emit(user_id, id, "run_complete", 20.0, "observed run");
         Ok((res, trial_id))
+    }
+
+    /// Gather and record the shaped evidence gates 3, 4 and 12 read, returning
+    /// the breakeven cost multiple when one could be measured.
+    ///
+    /// ## What it will not do
+    ///
+    /// Every part is **omitted** rather than defaulted when it cannot be
+    /// measured, and the omission is logged with its reason. That is the whole
+    /// discipline of this function, and the three places it bites:
+    ///
+    /// * **A run that paid no costs gets no cost ladder.** A flat ladder reads
+    ///   to Gate 3 as "the edge survives every rung tried" and *passes* — a pass
+    ///   earned by the cost model's absence rather than by the strategy. This is
+    ///   not hypothetical: every fill the simulator produced before ADR-P6-12
+    ///   was charged zero commission, and Gate 3 is the gate that would have
+    ///   caught it had it been judging on anything.
+    /// * **No ADV, no capacity sweep.** The sweep is not merely skipped at the
+    ///   gate — it is never *dispatched*, because each of its rungs is a counted
+    ///   trial and spending seven looks to produce evidence that cannot be
+    ///   completed is worse than spending none.
+    /// * **A mixed-engine ladder is refused.** Rungs charged under two cost
+    ///   models measure the difference between the models, not the size.
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    fn gather_gate_evidence(
+        &self,
+        r: &mut Record,
+        user_id: Uuid,
+        id: Uuid,
+        tenant: &str,
+        observed_trial: Uuid,
+        observed_res: &RunResult,
+        base: &RunConfig,
+        nbhd: &StudyConfig,
+        nbhd_res: &StudyResult,
+    ) -> Option<f64> {
+        use crate::capacity::{self, Exposure};
+
+        let mut evidence = ledger::evidence::TrialEvidence::produced_by(format!(
+            "funnel_advance@{}",
+            observed_res.produced_by
+        ));
+
+        // ── Gate 12's shape: the neighbourhood in parameter order ────────────
+        //
+        // Paired back to the parameter values that produced them. A metric
+        // distribution has thrown the parameter away, and "no cliff" is a
+        // statement about consecutive points in parameter order.
+        if let VarySpec::Neighborhood { param, center, .. } = &nbhd.vary {
+            let members = crate::study::members_of(nbhd);
+            for (cfg, run_id) in members.iter().zip(nbhd_res.members()) {
+                let Some(value) = cfg.params.get(param).and_then(serde_json::Value::as_f64) else {
+                    continue;
+                };
+                let Some(res) = self.bt.store().get(run_id) else {
+                    continue;
+                };
+                if res.status != RunStatus::Ok {
+                    continue;
+                }
+                evidence.neighbourhood.push(ledger::evidence::NeighbourhoodPoint {
+                    param: param.clone(),
+                    param_value: value,
+                    metric: Self::metric_of(&res, nbhd.metric),
+                    is_center: (value - center).abs() < f64::EPSILON,
+                });
+            }
+        }
+
+        // ── the exposure everything below is derived from ────────────────────
+        let exposure = match Exposure::from_run(observed_res) {
+            Ok(e) => e,
+            Err(why) => {
+                tracing::info!(
+                    experiment = %id,
+                    reason = %why,
+                    "gates 3, 4 and 12's concentration check have no evidence from this run"
+                );
+                self.record_evidence(tenant, observed_trial, id, &evidence);
+                return None;
+            }
+        };
+
+        // ── Gates 4 and 12: the per-instrument cross-section ─────────────────
+        evidence.instrument_pnl = exposure.instrument_rows();
+
+        // ── Gate 3: the cost ladder ──────────────────────────────────────────
+        let breakeven = match (
+            capacity::cost_ladder(&exposure, capacity::COST_MULTIPLES),
+            capacity::breakeven_cost_multiple(&exposure),
+        ) {
+            (Ok(ladder), Ok(b)) => {
+                evidence.cost_ladder = ladder;
+                Some(b)
+            }
+            (Err(why), _) | (_, Err(why)) => {
+                tracing::info!(
+                    experiment = %id,
+                    reason = %why,
+                    "gate 3 has no cost ladder: it will report that it cannot judge, which is the \
+                     honest answer and not a pass"
+                );
+                None
+            }
+        };
+
+        // ── Gate 4: the AUM ladder, dispatched only when it can be completed ──
+        let base_aum = exposure.starting_equity;
+        let years = (base.data_slice.end - base.data_slice.start).num_seconds() as f64
+            / (86_400.0 * 365.25);
+        match capacity::impact_drag(&exposure, base_aum, base_aum) {
+            Err(why) => {
+                tracing::info!(
+                    experiment = %id,
+                    reason = %why,
+                    "gate 4's capacity sweep was not dispatched: its rungs are counted trials and \
+                     the evidence could not be completed"
+                );
+            }
+            Ok(_) => match self.run_aum_ladder(r, user_id, id, base, base_aum) {
+                Err(e) => tracing::warn!(experiment = %id, error = %e, "capacity sweep refused"),
+                Ok(rungs) => {
+                    let engines: Vec<&str> = std::iter::once(observed_res.produced_by.as_str())
+                        .chain(rungs.iter().map(|(_, _, _, v)| v.as_str()))
+                        .collect();
+                    match capacity::one_engine(engines) {
+                        Err(why) => tracing::warn!(
+                            experiment = %id,
+                            reason = %why,
+                            "capacity ladder discarded"
+                        ),
+                        Ok(_) => {
+                            let points: Vec<(f64, Uuid, Vec<f64>)> = rungs
+                                .into_iter()
+                                .map(|(aum, trial, returns, _)| (aum, trial, returns))
+                                .collect();
+                            match capacity::Ladder::from_runs(
+                                &exposure, base_aum, true, years, &points,
+                            ) {
+                                Ok(ladder) => {
+                                    evidence.capacity_base = Some(ladder.base);
+                                    evidence.capacity_curve = ladder.points;
+                                }
+                                Err(why) => tracing::warn!(
+                                    experiment = %id,
+                                    reason = %why,
+                                    "capacity ladder not measurable"
+                                ),
+                            }
+                        }
+                    }
+                }
+            },
+        }
+
+        self.record_evidence(tenant, observed_trial, id, &evidence);
+        breakeven
+    }
+
+    /// Write a bundle, logging rather than failing on a bookkeeping error.
+    ///
+    /// The funnel's own verdict stands either way, and a gate with no recorded
+    /// evidence is inconclusive — the safe direction. Failing the funnel because
+    /// a write missed would throw away the evidence as well as the record of it.
+    fn record_evidence(
+        &self,
+        tenant: &str,
+        trial_id: Uuid,
+        experiment: Uuid,
+        evidence: &ledger::evidence::TrialEvidence,
+    ) {
+        if evidence.is_empty() {
+            return;
+        }
+        if let Err(e) = self
+            .bt
+            .ledger()
+            .record_gate_evidence(tenant, trial_id, evidence)
+        {
+            tracing::warn!(experiment = %experiment, error = %e, "gate evidence not recorded");
+        }
+    }
+
+    /// Dispatch the AUM ladder: one **counted** Run per rung.
+    ///
+    /// Each rung carries its AUM in the config's params, so each is a distinct
+    /// content hash, a distinct registration and a distinct trial. INV-16 has no
+    /// exception for runs taken to satisfy a gate, and a capacity sweep that
+    /// dodged the ledger would be exactly the kind of uncounted look this
+    /// platform exists to make impossible.
+    ///
+    /// Returns `(aum, trial id, that run's return series, engine version)`.
+    fn run_aum_ladder(
+        &self,
+        r: &mut Record,
+        user_id: Uuid,
+        id: Uuid,
+        base: &RunConfig,
+        base_aum: f64,
+    ) -> Result<Vec<(f64, Uuid, Vec<f64>, String)>, SuiteError> {
+        let mut out = Vec::with_capacity(crate::capacity::AUM_MULTIPLES.len());
+        for multiple in crate::capacity::AUM_MULTIPLES {
+            let aum = base_aum * multiple;
+            let mut cfg = base.clone();
+            cfg.params.insert(
+                "aum_usd".into(),
+                serde_json::Number::from_f64(aum)
+                    .map_or(serde_json::Value::Null, serde_json::Value::Number),
+            );
+            let cfg = cfg.rehashed();
+            // A declared ladder dispatches every rung, so each rung's
+            // probability of being dispatched under this policy is 1.
+            let ctx = Self::dispatch_ctx(user_id, r).with_policy("funnel_capacity_ladder", 1);
+            let (res, _, trial) = self
+                .bt
+                .run_traced_with_trial(&crate::run::RunDispatch::new(&ctx, &cfg, 1.0))
+                .map_err(|e| SuiteError::Gate(format!("capacity rung refused: {e}")))?;
+            r.exp.record_dispatches(1);
+            out.push((aum, trial, daily_returns(&res.equity_curve), res.produced_by));
+        }
+        self.emit(user_id, id, "study_complete", 95.0, "capacity ladder");
+        Ok(out)
     }
 
     /// The permutation-null Study whose distribution Gate 3 tests against.

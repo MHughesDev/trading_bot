@@ -87,6 +87,39 @@ pub enum Missing {
     NoVolatility(String),
     #[error("no instrument traded on more than zero days")]
     NoTradingDays,
+    #[error(
+        "the rungs were produced by more than one engine ({0}); a ladder that mixes engine \
+         versions is a ladder whose rungs were charged differently, and the difference between \
+         them is the engine rather than the size"
+    )]
+    MixedEngineVersions(String),
+}
+
+/// The one engine version behind a set of runs, or a refusal naming them all.
+///
+/// This exists because of a real defect, and the defect is the argument for it.
+/// Every fill the simulator produced before ADR-P6-12 was charged **zero**
+/// commission: the SDK's instrument constructors left maker/taker unset and the
+/// default fee model read that as zero, so the engine computed a gross number
+/// and labelled it net. A cost ladder built across that boundary would have
+/// rungs charged on two different cost models, and the "sensitivity" would be
+/// measuring the fix.
+///
+/// Two protections, and the first is stronger than this one: a run that paid no
+/// costs yields [`Missing::NoCostsCharged`] and no ladder at all, which is
+/// exactly the signature of a pre-fix run. This is the second — for statistics
+/// aggregated over several runs, where one of them could be post-fix.
+///
+/// # Errors
+/// [`Missing::MixedEngineVersions`] listing what was mixed.
+pub fn one_engine<'a>(versions: impl IntoIterator<Item = &'a str>) -> Result<String, Missing> {
+    let distinct: std::collections::BTreeSet<&str> = versions.into_iter().collect();
+    match distinct.len() {
+        1 => Ok((*distinct.iter().next().expect("one")).to_string()),
+        _ => Err(Missing::MixedEngineVersions(
+            distinct.into_iter().collect::<Vec<_>>().join(", "),
+        )),
+    }
 }
 
 /// The unit an instrument's P&L is denominated in.
@@ -636,6 +669,19 @@ mod tests {
         let small = impact_drag(&e, 100_000.0, 100_000.0).expect("adv measured");
         let large = impact_drag(&e, 100_000.0, 10_000_000.0).expect("adv measured");
         assert!(large > small * 5.0, "square-root impact: {small} → {large}");
+    }
+
+    /// Before ADR-P6-12 the simulator charged zero commission on every fill and
+    /// called the result net. A statistic aggregated across that boundary is
+    /// measuring the fix, not the strategy.
+    #[test]
+    fn a_statistic_is_refused_across_an_engine_boundary() {
+        assert_eq!(one_engine(["sim@1+exits", "sim@1+exits"]).as_deref(), Ok("sim@1+exits"));
+        assert!(matches!(
+            one_engine(["sim@1", "sim@1+exits"]),
+            Err(Missing::MixedEngineVersions(_))
+        ));
+        assert!(matches!(one_engine([]), Err(Missing::MixedEngineVersions(_))));
     }
 
     #[test]

@@ -591,9 +591,18 @@ pub struct PerturbationInputs<'a> {
     /// `(parameter value, metric)` across the neighbourhood sweep, in parameter
     /// order. The neighbourhood Study already produces this.
     pub neighbourhood: &'a [(f64, f64)],
-    /// `(instrument, absolute P&L)` — from the per-instrument Parquet artifact
-    /// (plan 5.2), never from a metric series.
+    /// `(instrument, absolute P&L)` — from the per-instrument artifact
+    /// (plan 5.2, `mlops.trial_instrument_pnl`), never from a metric series.
     pub per_instrument_pnl: &'a [(String, f64)],
+    /// The single unit every one of those figures is denominated in.
+    ///
+    /// `None` when the cross-section spans more than one, and the gate then
+    /// refuses the concentration check rather than computing a share over two
+    /// units. A USDT P&L summed into a USD one produces a denominator that means
+    /// nothing, and the resulting percentage looks exactly like a real one —
+    /// which is why this is a `None` the gate must handle rather than a detail
+    /// the caller is trusted to have got right.
+    pub numeraire: Option<&'a str>,
 }
 
 /// Gate 12 — flat optima generalize; spikes do not (§12.3).
@@ -612,6 +621,18 @@ pub fn gate_12_perturbation(profile: &GateProfile, i: &PerturbationInputs<'_>) -
             12,
             NAME,
             "a neighbourhood needs at least three points to have a shape",
+        );
+    }
+
+    // Concentration is a share, and a share needs one denominator. A
+    // cross-section spanning two numeraires has no single total, and computing
+    // one anyway yields a percentage that reads exactly like a real one.
+    if i.per_instrument_pnl.len() > 1 && i.numeraire.is_none() {
+        return GateOutcome::inconclusive(
+            12,
+            NAME,
+            "the per-instrument P&L spans more than one numeraire, so there is no single total to \
+             take a share of; converting would need a point-in-time FX series nobody stored",
         );
     }
 
@@ -1916,6 +1937,7 @@ mod tests {
                 center: 2.0,
                 neighbourhood: &nbhd,
                 per_instrument_pnl: &[("BTC-USD".into(), 1.0)],
+                numeraire: Some("USD"),
             },
         );
         assert!(!out.passed, "{}", out.detail);
@@ -1936,6 +1958,7 @@ mod tests {
                 center: 2.0,
                 neighbourhood: &nbhd,
                 per_instrument_pnl: &[("BTC-USD".into(), 5.0), ("ETH-USD".into(), 5.0)],
+                numeraire: Some("USD"),
             },
         );
         assert!(out.passed, "{}", out.detail);
@@ -1948,6 +1971,7 @@ mod tests {
                 center: 2.0,
                 neighbourhood: &nbhd,
                 per_instrument_pnl: &[("BTC-USD".into(), 9.5), ("ETH-USD".into(), 0.5)],
+                numeraire: Some("USD"),
             },
         );
         assert!(!lopsided.passed, "{}", lopsided.detail);
@@ -1970,6 +1994,7 @@ mod tests {
                     ("DOT-USD".into(), 2.0),
                     ("AVAX-USD".into(), 2.0),
                 ],
+                numeraire: Some("USD"),
             },
         );
         assert!(out.passed, "{}", out.detail);
@@ -1990,6 +2015,7 @@ mod tests {
                     ("ETH-USD".into(), 0.5),
                     ("SOL-USD".into(), 0.5),
                 ],
+                numeraire: Some("USD"),
             },
         );
         assert!(!out.passed, "{}", out.detail);
@@ -2008,10 +2034,246 @@ mod tests {
                 center: 2.0,
                 neighbourhood: &nbhd,
                 per_instrument_pnl: &[("BTC-USD".into(), 10.0)],
+                numeraire: Some("USD"),
             },
         );
         assert!(out.passed);
         assert!(out.detail.contains("does not apply"));
+    }
+
+    /// The adversarial case for Gate 12's second half: a cross-section whose
+    /// rows are denominated in two different units. Ten thousand USDT and ten
+    /// thousand USD are not twenty thousand of anything, and a concentration
+    /// share computed over that total is a real-looking percentage of a
+    /// meaningless denominator.
+    #[test]
+    fn gate_12_refuses_a_cross_section_that_spans_two_numeraires() {
+        let p = GateProfile::strict_v1();
+        let nbhd = [(8.0, 1.8), (9.0, 1.9), (10.0, 2.0), (11.0, 1.95), (12.0, 1.85)];
+        let out = gate_12_perturbation(
+            &p,
+            &PerturbationInputs {
+                center: 2.0,
+                neighbourhood: &nbhd,
+                per_instrument_pnl: &[("BTC-USD".into(), 5.0), ("BTC-USDT".into(), 5.0)],
+                numeraire: None,
+            },
+        );
+        assert!(out.inconclusive && !out.passed, "{}", out.detail);
+        assert!(out.detail.contains("numeraire"), "{}", out.detail);
+    }
+
+    // ── Gate 3, adversarially ────────────────────────────────────────────────
+
+    /// The shape of the defect ADR-P6-12 fixed, expressed as a gate test.
+    ///
+    /// Every fill the simulator produced before that fix was charged zero
+    /// commission, so a cost sweep over such a run returns the same metric at
+    /// every rung. Gate 3 reads a flat, positive ladder whose top rung clears
+    /// the bar as **"the edge survives every rung tried"** and passes it — a
+    /// pass earned by the cost model's absence.
+    ///
+    /// The gate cannot tell the difference, and it is not asked to: the
+    /// producer (`capacity::cost_ladder`) refuses to build a ladder from a run
+    /// that paid nothing, so this input never reaches the gate. This test
+    /// pins the behaviour that makes that refusal load-bearing — if someone
+    /// later "helpfully" supplies a flat ladder, the pass it produces is
+    /// documented here as the thing that must not happen.
+    #[test]
+    fn a_flat_cost_ladder_would_pass_gate_3_which_is_why_it_is_never_built() {
+        let p = GateProfile::strict_v1();
+        let flat: Vec<CostRung> = [1.0, 2.0, 3.0, 4.0]
+            .into_iter()
+            .map(|multiple| CostRung { multiple, net_metric: 0.10 })
+            .collect();
+        let out = gate_3_cost_sensitivity(&p, &flat);
+        assert!(
+            out.passed,
+            "documented, not endorsed: a flat ladder passes, which is why the producer refuses \
+             to build one — {}",
+            out.detail
+        );
+
+        // And the refusal itself, at the producer, on the same run shape.
+        let exposure = zero_cost_exposure();
+        assert_eq!(
+            crate::capacity::cost_ladder(&exposure, crate::capacity::COST_MULTIPLES),
+            Err(crate::capacity::Missing::NoCostsCharged)
+        );
+    }
+
+    /// A single cost assumption is not a sensitivity, and one rung cannot say
+    /// where anything crosses zero.
+    #[test]
+    fn gate_3_refuses_a_one_rung_ladder() {
+        let out = gate_3_cost_sensitivity(
+            &GateProfile::strict_v1(),
+            &[CostRung { multiple: 1.0, net_metric: 0.1 }],
+        );
+        assert!(out.inconclusive && !out.passed, "{}", out.detail);
+    }
+
+    /// An edge that dies below the modelled cost model must **fail**, not go
+    /// inconclusive: that is a result about the candidate, not a hole in the
+    /// evidence, and the two mean different things to everyone downstream.
+    #[test]
+    fn gate_3_fails_an_edge_that_dies_under_its_own_cost_model() {
+        let ladder = [
+            CostRung { multiple: 0.5, net_metric: 0.02 },
+            CostRung { multiple: 1.0, net_metric: -0.01 },
+            CostRung { multiple: 2.0, net_metric: -0.06 },
+        ];
+        let out = gate_3_cost_sensitivity(&GateProfile::strict_v1(), &ladder);
+        assert!(!out.passed && !out.inconclusive, "{}", out.detail);
+        assert!(out.statistic.unwrap() < 3.0, "{}", out.detail);
+    }
+
+    /// A run with trades and no costs at all — the pre-ADR-P6-12 signature.
+    fn zero_cost_exposure() -> crate::capacity::Exposure {
+        use rust_decimal_macros::dec;
+        let t0 = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let result = crate::run::RunResult {
+            run_id: crate::run::RunId::from_canonical_bytes(b"zero-cost"),
+            status: crate::run::RunStatus::Ok,
+            equity_curve: vec![(t0, 100_000.0), (t0 + chrono::Duration::days(1), 100_500.0)],
+            net_exposure: vec![],
+            trades: vec![crate::run::Trade {
+                symbol: "BTC-USD".into(),
+                side: crate::run::Side::Long,
+                entry_time: t0,
+                exit_time: t0 + chrono::Duration::hours(4),
+                entry_price: dec!(100),
+                exit_price: dec!(105),
+                qty: dec!(100),
+                mae: -0.01,
+                mfe: 0.05,
+                holding_period_secs: 14_400,
+                costs_paid: dec!(0),
+                pnl: dec!(500),
+            }],
+            metrics: crate::run::MetricSet::empty(),
+            integrity_flags: vec![],
+            instrument_stats: vec![],
+            compute_cost: crate::run::ComputeCost::default(),
+            produced_at: t0,
+            produced_by: "sim@pre-exits".into(),
+            unsafe_: false,
+        };
+        crate::capacity::Exposure::from_run(&result).expect("has trades")
+    }
+
+    // ── Gate 4, adversarially ────────────────────────────────────────────────
+
+    /// A one-point "curve" cannot say where net Sharpe halves, and Gate 4 must
+    /// not read "we never saw it halve" as "capacity is large".
+    #[test]
+    fn gate_4_refuses_a_curve_that_never_halves() {
+        let mut adv = BTreeMap::new();
+        adv.insert("BTC-USD".to_string(), 50_000_000.0);
+        let mut vol = BTreeMap::new();
+        vol.insert("BTC-USD".to_string(), 0.03);
+        let mut peak = BTreeMap::new();
+        peak.insert("BTC-USD".to_string(), 100_000.0);
+        let flat = [(1e6, 1.5), (1e7, 1.49), (1e8, 1.48)];
+        let out = gate_4_capacity(
+            &GateProfile::strict_v1(),
+            &CapacityInputs {
+                adv_usd: &adv,
+                daily_vol: &vol,
+                peak_daily_notional: &peak,
+                sharpe_by_aum: &flat,
+                base_aum_usd: 1e6,
+                single_venue: true,
+            },
+        );
+        assert!(out.inconclusive && !out.passed, "{}", out.detail);
+        assert!(out.detail.contains("beyond the measured range"), "{}", out.detail);
+    }
+
+    /// An instrument that was traded but has no measured ADV makes the gate
+    /// inconclusive by name, rather than being silently dropped from the
+    /// participation check it would have failed.
+    #[test]
+    fn gate_4_names_the_instrument_whose_adv_is_missing() {
+        let vol: BTreeMap<String, f64> = BTreeMap::new();
+        let mut peak = BTreeMap::new();
+        peak.insert("SOL-USD".to_string(), 100_000.0);
+        let curve = [(1e6, 2.0), (1e7, 0.5)];
+        let out = gate_4_capacity(
+            &GateProfile::strict_v1(),
+            &CapacityInputs {
+                adv_usd: &{
+                    let mut m = BTreeMap::new();
+                    m.insert("BTC-USD".to_string(), 1e8);
+                    m
+                },
+                daily_vol: &vol,
+                peak_daily_notional: &peak,
+                sharpe_by_aum: &curve,
+                base_aum_usd: 1e6,
+                single_venue: true,
+            },
+        );
+        assert!(out.inconclusive && !out.passed, "{}", out.detail);
+        assert!(out.detail.contains("SOL-USD"), "{}", out.detail);
+    }
+
+    // ── Gate 10, adversarially ───────────────────────────────────────────────
+
+    /// A profile that declares no battery for the asset class cannot attribute
+    /// anything, and must say so rather than regressing against whatever
+    /// arrived.
+    #[test]
+    fn gate_10_refuses_an_undeclared_asset_class() {
+        let factors: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+        let out = gate_10_factor_attribution(
+            &GateProfile::strict_v1(),
+            "crypto",
+            &FactorInputs {
+                strategy_net: &[],
+                factors: &factors,
+                market_factor: "cmkt".into(),
+                neutral_claim: false,
+            },
+        );
+        assert!(out.inconclusive && !out.passed, "{}", out.detail);
+        assert!(out.detail.contains("declares no factor battery"), "{}", out.detail);
+    }
+
+    /// The placeholder that would otherwise sail through: a battery whose names
+    /// match the declaration exactly, but whose series are constants. A constant
+    /// regressor is collinear with the intercept, the design is rank-deficient,
+    /// and `newey_west_fit` returns `None` — so the gate reports it cannot
+    /// estimate rather than reporting an alpha of whatever the mean happened to
+    /// be.
+    #[test]
+    fn gate_10_refuses_a_battery_of_constants() {
+        let profile = GateProfile::strict_v1().with_asset_class(
+            "crypto",
+            crate::gates::AssetClassGates {
+                factor_battery: vec!["cmkt".into(), "csmb".into()],
+                crisis_windows: vec![],
+            },
+        );
+        let mut factors = BTreeMap::new();
+        factors.insert("cmkt".to_string(), vec![0.0; 200]);
+        factors.insert("csmb".to_string(), vec![0.0; 200]);
+        let strategy: Vec<f64> = (0..200).map(|i| if i % 2 == 0 { 0.01 } else { -0.002 }).collect();
+        let out = gate_10_factor_attribution(
+            &profile,
+            "crypto",
+            &FactorInputs {
+                strategy_net: &strategy,
+                factors: &factors,
+                market_factor: "cmkt".into(),
+                neutral_claim: false,
+            },
+        );
+        assert!(
+            out.inconclusive && !out.passed,
+            "a battery of constants must not produce an alpha: {}",
+            out.detail
+        );
     }
 
     // ── 13 / 14 wrappers, and the record ─────────────────────────────────────
