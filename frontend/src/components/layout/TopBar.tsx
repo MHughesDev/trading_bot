@@ -24,13 +24,13 @@ export const NAV_SECTIONS = [
   { path: '/automations', label: 'Automations', icon: Zap },
   { path: '/backtesting', label: 'Back Testing', icon: FlaskConical },
   { path: '/mlops', label: 'Models', icon: Brain },
-  { path: '/agent', label: 'Agent', icon: Bot },
+  { path: '/desk', label: 'Desk', icon: Bot },
 ] as const
 
 export const SECONDARY_SECTIONS = [
   { path: '/markets', label: 'Markets', icon: Layers },
-  { path: '/research', label: 'Research workspace', icon: Microscope },
-  { path: '/approvals', label: 'Approvals', icon: Inbox },
+  { path: '/desk/memory', label: 'Research memory', icon: Microscope },
+  { path: '/desk/approvals', label: 'Approvals', icon: Inbox },
   { path: '/transactions', label: 'Transactions', icon: Receipt },
   { path: '/settings', label: 'Settings', icon: SettingsIcon },
 ] as const

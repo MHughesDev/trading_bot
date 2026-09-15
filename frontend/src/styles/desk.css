@@ -12,14 +12,23 @@
 /* --- shell ----------------------------------------------------------------- */
 .desk {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) 360px;
+  grid-template-columns: 232px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--bg-canvas);
 }
 .desk > .desk-rail { border-right: 1px solid var(--line-hairline); min-height: 0; overflow: auto; }
 .desk > .desk-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.desk > .desk-side { border-left: 1px solid var(--line-hairline); min-height: 0; display: flex; flex-direction: column; }
+/* Three columns at wide width: rail | centre | panel. The panel is a child of
+   the main column rather than of the grid so a route without one (the memory
+   browser, the catalogue) simply does not render it. */
+.desk-body { flex: 1 1 auto; min-height: 0; display: flex; }
+.desk-center { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.desk-side {
+  width: 360px; flex: none; border-left: 1px solid var(--line-hairline);
+  min-height: 0; display: flex; flex-direction: column; background: var(--bg-canvas);
+}
+.desk-rail-toggle { display: none; }
 
 .desk-rail-hd, .desk-side-hd {
   display: flex; align-items: center; gap: var(--s-2); justify-content: space-between;
@@ -161,19 +170,23 @@
 /* --- responsive (§1 layout rules) --------------------------------------------- */
 @media (max-width: 1200px) {
   .desk { grid-template-columns: 200px minmax(0, 1fr); }
-  .desk > .desk-side {
+  /* The right panel becomes a drawer rather than a squeezed third column. */
+  .desk-side {
     position: fixed; right: 0; top: var(--nav-h); bottom: 0; width: min(380px, 92vw);
     background: var(--bg-surface-raised); z-index: 30; box-shadow: var(--shadow-3);
   }
-  .desk > .desk-side[hidden] { display: none; }
 }
 @media (max-width: 768px) {
+  /* The rail becomes a sheet, the conversation is full-bleed and the controls
+     row docks to the bottom (§1). */
   .desk { grid-template-columns: minmax(0, 1fr); }
   .desk > .desk-rail {
     position: fixed; left: 0; top: var(--nav-h); bottom: 0; width: min(280px, 88vw);
     background: var(--bg-surface-raised); z-index: 31;
   }
   .desk > .desk-rail[hidden] { display: none; }
+  .desk-rail-toggle { display: inline-flex; position: absolute; left: var(--s-2); top: var(--s-2); z-index: 32; }
   .desk-dock { position: sticky; bottom: 0; }
+  .desk-hd { padding-left: var(--s-10, 40px); }
   .charter-form { grid-template-columns: minmax(0, 1fr); }
 }

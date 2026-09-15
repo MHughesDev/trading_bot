@@ -13,9 +13,10 @@ import { getStoredToken } from '@/lib/api'
 import { registerInstruments } from '@/lib/format'
 import { fetchInstruments } from '@/api/portfolio'
 import { toSpecAssetClass } from '@/lib/assetClass'
+import { KillSwitchBanner } from '@/components/desk/KillSwitchBanner'
 
 /* Routes that own their own scroll and must fill the viewport exactly. */
-const FULL_HEIGHT_ROUTES = ['/trading', '/terminal', '/dashboard', '/agent', '/strategy', '/research']
+const FULL_HEIGHT_ROUTES = ['/trading', '/terminal', '/dashboard', '/desk', '/strategy']
 
 /** `g` then a letter jumps between sections (spec §5.6). */
 const GOTO: Record<string, string> = {
@@ -25,8 +26,8 @@ const GOTO: Record<string, string> = {
   a: '/automations',
   b: '/backtesting',
   m: '/mlops',
-  g: '/agent',
-  r: '/research',
+  g: '/desk',
+  r: '/desk/memory',
 }
 
 export function AppLayout() {
@@ -124,6 +125,9 @@ export function AppLayout() {
       </a>
       <TopBar onOpenPalette={() => setPalette(true)} />
       <DisconnectedBanner state={connection.state} />
+      {/* Global and undismissable while tripped (AGENT-012 §19.6). Here rather
+          than in each page so "every route" is structural. */}
+      <KillSwitchBanner />
       <main
         id="main"
         className={fullHeight ? 'flex-1 overflow-hidden' : 'flex-1 overflow-y-auto'}

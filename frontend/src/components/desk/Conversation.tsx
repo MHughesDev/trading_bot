@@ -238,6 +238,8 @@ export function Conversation({
         </Button>
       </div>
 
+      <div className="desk-body">
+        <div className="desk-center">
       <div className="desk-scroll">
         <CardStream
           conversationId={conversationId}
@@ -290,6 +292,8 @@ export function Conversation({
         />
       </div>
 
+        </div>
+
       <aside className="desk-side" hidden={!sideOpen}>
         <RightPanel tab={tab} onTab={setTab} continuous={continuous}>
           {tab === 'state' && (
@@ -325,6 +329,7 @@ export function Conversation({
           {tab === 'charter' && <CharterTab charter={null} amendments={[]} />}
         </RightPanel>
       </aside>
+      </div>
     </>
   )
 }
