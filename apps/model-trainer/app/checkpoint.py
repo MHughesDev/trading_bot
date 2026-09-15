@@ -159,6 +159,9 @@ def _knob_is_engaged(name: str, value: Any) -> bool:
         return str(value).lower() != "bagging"
     if name == "extra_trees":
         return bool(value)
+    # `bagging_fraction < 1` with `bagging_freq = 0` is inert in LightGBM, and is
+    # reported engaged anyway. Erring this way costs a resume; erring the other
+    # way costs a trial record that says a run was reproduced when it was not.
     try:
         return float(value) < 1.0
     except (TypeError, ValueError):

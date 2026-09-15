@@ -823,7 +823,14 @@ cannot pass.
 
 ### What the result licenses
 
-ADR-P6-11. `BIT_IDENTICAL_FRAMEWORKS` holds only frameworks that reproduced under
+ADR-P6-11, and the reason the split is not pedantic is in `app/hpo.py`: the GBDT
+search spaces sample `subsample` and `colsample_bytree` on [0.5, 1.0] and
+`feature_fraction`/`bagging_fraction` on [0.4, 1.0]/[0.5, 1.0], so a sweep draws
+a sampling fraction below 1.0 with probability 1. An unconditional `xgboost` in
+the set would have been true of the adapters' defaults and false of essentially
+every HPO trial the platform runs.
+
+`BIT_IDENTICAL_FRAMEWORKS` therefore holds only frameworks that reproduced under
 **every** configuration the platform can produce, so it holds `torch` alone;
 `SAMPLING_SENSITIVE_FRAMEWORKS` records xgboost's and lightgbm's condition with
 the knobs that break it. `resume_support` will not answer `bit_identical` for a
