@@ -119,6 +119,23 @@ impl ForwardRecorder {
             .on_model_reject();
     }
 
+    /// Whether this recorder's deployment names a paper venue.
+    ///
+    /// Always true by construction — [`crate::forward::PaperVenue`] has no live
+    /// variant — and exposed so the entry-point test in
+    /// `tests/paper_only_entry_points.rs` can assert it at the boundary rather
+    /// than only at the type.
+    #[must_use]
+    pub fn spec_is_paper(&self) -> bool {
+        self.state
+            .lock()
+            .expect("recorder lock")
+            .builder
+            .spec()
+            .venue
+            .is_paper()
+    }
+
     /// The internal signed position, for reconciliation against the broker.
     #[must_use]
     pub fn position(&self) -> Decimal {
