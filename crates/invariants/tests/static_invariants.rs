@@ -296,9 +296,11 @@ fn every_tool_dispatch_is_trajectory_logged() {
         }
         total += n;
     }
-    assert_eq!(total, 2, "one definition and one call, from dispatch_tool");
+    assert_eq!(total, 2, "one definition and one call, from dispatch_under");
+    // The slice spans both public entry points: `dispatch_tool`, which opens the
+    // audit envelope, and `dispatch_under`, which does the recording for both.
     let wrapper = &lib[lib.find("pub async fn dispatch_tool(").unwrap()..lib.find("async fn dispatch_untraced(").unwrap()];
-    assert!(wrapper.contains("record_step"), "dispatch_tool must record the step");
+    assert!(wrapper.contains("record_step"), "the dispatch path must record the step");
 }
 
 /// AT-62 ⛔ · No critical-difference renderer exists (SPEC §11.5, ADR-P2-13).
