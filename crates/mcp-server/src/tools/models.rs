@@ -357,3 +357,108 @@ pub async fn list_feature_sets(api: &ApiClient) -> Value {
         Err(e) => e.to_tool_error(),
     }
 }
+
+/// Declarations for the seven `model` tools (AGENT-006 §2.3).
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::{Envelope, ToolSpec};
+    use crate::taxonomy::Risk;
+    vec![
+        ToolSpec::new(
+            "list_models",
+            "model",
+            Risk::Read,
+            "List registered AI models (kind, status). Definition v1.1 strategies bind model \
+             outputs into feature slots via Inference nodes.",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "get_model",
+            "model",
+            Risk::Read,
+            "One registered model's detail by id.",
+            json!({
+                "type": "object",
+                "required": ["model_id"],
+                "properties": { "model_id": { "type": "string" } }
+            }),
+        )
+        .internal()
+        .evidence(&["model_id"]),
+        ToolSpec::new(
+            "list_feature_sets",
+            "model",
+            Risk::Read,
+            "Feature sets a model can be trained on. Call it before train_model when you need to \
+             name feature_set_ref.",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .internal(),
+        // Training spends real compute and writes a new version. Nothing is
+        // destroyed and a bad version can simply not be promoted, so: write.
+        ToolSpec::new(
+            "train_model",
+            "model",
+            Risk::Write,
+            "Train a model end to end and wait for it: creates the model if the slug is new, \
+             trains on real stored bars, and returns the version with its metrics.",
+            json!({
+                "type": "object",
+                "required": ["slug", "instrument_id"],
+                "properties": {
+                    "slug": { "type": "string", "description": "Short stable name; reusing it retrains that model" },
+                    "instrument_id": { "type": "string", "description": "Must have stored bars" },
+                    "model_kind": { "type": "string", "enum": ["forecaster", "classifier", "regressor"] },
+                    "timeframe": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "4h", "1d"], "description": "Default 1h" },
+                    "asset_class": { "type": "string", "enum": ["crypto_spot_cex", "us_equity"] },
+                    "label_horizon": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "4h", "1d"], "description": "A DURATION, not a feature" },
+                    "lookback_days": { "type": "integer", "description": "Default 30" },
+                    "seed": { "type": "integer", "description": "Default 42" },
+                    "timeout_seconds": { "type": "integer", "description": "Default 900; a run_id is returned on timeout" }
+                }
+            }),
+        )
+        .internal()
+        .evidence(&["model_id", "run_id"])
+        .max_calls_per_run(3)
+        .notes("train_model"),
+        ToolSpec::new(
+            "get_training_run",
+            "model",
+            Risk::Read,
+            "Status and metrics of one training run, by model_id and run_id.",
+            json!({
+                "type": "object",
+                "required": ["model_id", "run_id"],
+                "properties": {
+                    "model_id": { "type": "string" },
+                    "run_id": { "type": "string" }
+                }
+            }),
+        )
+        .internal(),
+        // Promotion changes which version live strategies resolve to. It is
+        // reversible by promoting another version, so `Risk::Write` — but it is
+        // the one model action AGENT-001 §15 says needs a human, which is the
+        // `Envelope`, not the risk. The two answer different questions, and
+        // conflating them is how S-0.2's defect stayed invisible.
+        ToolSpec::new(
+            "promote_model_version",
+            "model",
+            Risk::Write,
+            "Point an alias (default 'production') at a trained model version, so strategies \
+             referencing the model resolve to it.",
+            json!({
+                "type": "object",
+                "required": ["model_id", "version"],
+                "properties": {
+                    "model_id": { "type": "string" },
+                    "version": { "type": "string" },
+                    "alias": { "type": "string", "description": "Default production." }
+                }
+            }),
+        )
+        .internal()
+        .envelope(Envelope::Promotion),
+    ]
+}

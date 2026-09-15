@@ -66,3 +66,57 @@ pub async fn get_asset_init_job(api: &ApiClient, params: &Value) -> Value {
         Err(e) => e.to_tool_error(),
     }
 }
+
+/// Declarations for the three tools this module serves (AGENT-006 §2.3).
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::ToolSpec;
+    use crate::taxonomy::Risk;
+    vec![
+        ToolSpec::new(
+            "list_initialized_assets",
+            "discovery",
+            Risk::Read,
+            "List symbols that have been initialized on the platform (seeded history plus live \
+             1-minute aggregation).",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .internal(),
+        // Onboarding starts live collection and a backfill: it spends real
+        // resources and changes what the platform is doing, so it is a write.
+        ToolSpec::new(
+            "init_asset",
+            "data",
+            Risk::Write,
+            "Onboard a symbol: starts a background job that backfills historical bars and starts \
+             live 1-minute aggregation. Returns a job_id; poll get_asset_init_job until the \
+             status is terminal.",
+            json!({
+                "type": "object",
+                "required": ["symbol"],
+                "properties": {
+                    "symbol": { "type": "string", "description": "e.g. SOL-USD" },
+                    "lookback_days": { "type": "integer", "description": "Days of history to backfill (default 90, max 3650)" },
+                    "asset_class": { "type": "string", "description": "Default resolved from the registry, else crypto heuristic" }
+                }
+            }),
+        )
+        .internal()
+        .evidence(&["job_id"])
+        .max_calls_per_run(5)
+        .notes("init_asset"),
+        ToolSpec::new(
+            "get_asset_init_job",
+            "data",
+            Risk::Read,
+            "Status of an init_asset seeding job (status, bars_collected, error).",
+            json!({
+                "type": "object",
+                "required": ["job_id"],
+                "properties": {
+                    "job_id": { "type": "string", "description": "UUID from init_asset" }
+                }
+            }),
+        )
+        .internal(),
+    ]
+}

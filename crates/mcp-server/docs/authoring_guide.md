@@ -207,3 +207,164 @@ definition with a block runs on its defaults when no overrides are supplied.
 Declare honest ranges: the sweep can only *narrow* them, never widen. You never
 pick a value yourself — `run_sweep` samples the space, and what comes back is
 the neighbourhood Study's stable centroid, not the best sample.
+
+
+## Tool notes
+
+Everything below used to live in a tool's `description`. The whole catalogue is
+sent on every model call, so a paragraph in a description is a paragraph paid for
+on every turn of every run — 10.7 KB of it, measured (AGENT-005 §5.4). None of it
+was wrong; it was in the layer that charges for prose by the turn instead of the
+layer that charges for it once.
+
+Fetch a single note with
+`get_authoring_guide(section: "tool_notes", tool: "run_sweep")`.
+
+### get_bars
+
+Use it to inspect market behaviour before designing a strategy, or to sanity-check
+a backtest window. Responses are capped: you get the full-window summary (return
+%, high/low) plus the most recent `max_bars` bars, and earlier bars are summarised
+rather than returned. Widen `interval_seconds` for long ranges — a year at 60 s is
+half a million bars nobody reads.
+
+### init_asset
+
+Data collection only. It never trades. It starts a background job that backfills
+historical bars *and* starts live 1-minute aggregation, so the symbol keeps
+current after the backfill finishes. Poll `get_asset_init_job` until the status is
+terminal; only then is the symbol backtestable.
+
+### create_strategy
+
+Upserts by `strategy_id` slug, so reusing a slug **overwrites** that strategy.
+Mint versioned slugs (`my_strat_v2`) when iterating, or you will lose the variant
+you were comparing against — and any Experiment pointing at the slug will silently
+start running the new definition.
+
+### get_backtest
+
+It reads; it runs nothing. Use it only for a `backtest_id` you already have.
+`detail: "summary"` (the default) truncates long arrays; `detail: "full"` returns
+every trade and the whole equity curve.
+
+If the task is to *run* a backtest, this is not the tool — use
+`backtest_strategy`. Passing `get_backtest` the id of a training run is the single
+most common wrong turn on the local tier, because it is the one tool with the word
+in its name.
+
+### wait_for_backtest
+
+Blocks server-side until the run reaches a terminal state or `timeout_seconds`
+elapses. On timeout it returns `{timed_out: true, status, progress}` — call it
+again. Chaining calls waits out hour-long runs without spending turns on manual
+polling, which is the difference between a run that finishes and a run that hits
+its step budget watching.
+
+### train_model
+
+Creates the model if the slug is new, trains on real stored bars, and returns the
+trained version with its metrics. Deterministic: the same slug, data window and
+seed reproduce the same run. Training again with the same slug *retrains that
+model* rather than creating a second one.
+
+The REST surface underneath is granular — create, train, poll, list versions,
+evaluate, promote — and right to be. This tool is one call because a model a
+strategy needs is a precondition, not a research question.
+
+### backtest_strategy
+
+One call: creates the Experiment with a locked holdout, runs the sweep (these are
+real backtests), returns the report. Use it whenever the task is to backtest,
+evaluate, or measure the edge of a strategy you have created.
+
+The windows and the objective are **derived** when you do not supply them —
+210 days of research, a 30-day holdout tail that does not overlap it, and a
+Sortino objective with a `min_trades: 20` constraint — and the reply states what
+it used. The honest path (`create_experiment` → `run_sweep`) asks for ten fields,
+two of them non-overlapping date ranges; measured on the degraded tier, that was
+more than the model could assemble, and it reached for `get_backtest` instead on
+every retry until the step budget went.
+
+### create_experiment
+
+The unit of honest research. It locks a holdout tail you cannot read until the
+vault, declares an immutable objective, and starts a trial counter that every
+Study increments irreversibly — which is what deflates significance later. The
+research window must not overlap the holdout. Returns the experiment; use its `id`
+everywhere else.
+
+`objective` is
+`{primary: sortino|calmar|profit_factor|expectancy|detrended_sharpe|sharpe,
+constraints: [{kind: min_trades, value: 50}, {kind: max_drawdown_lte, value: 0.15}, ...],
+aggregate: median|worst5_pct}`. **Win rate is never a primary.**
+
+### run_sweep
+
+THE inner loop. A sampler (TPE by default) proposes batches; each batch is a
+sealed `ParameterSweep` Study with counted trials; then a neighbourhood Study
+around the promising region yields the only carry-forward — its
+median-stable-centroid member, **never the best sample**.
+
+The report carries `carried_forward` (params to build on), `surface.text`
+(per-parameter plateau / cliff / sensitivity — read this; plateaus are robust,
+spikes are fragile), `distribution` (sealed), `violation_counts` (why samples were
+rejected, e.g. too few trades) and `study_ids`.
+
+It blocks up to `timeout_seconds`; on `timed_out`, call again with the returned
+`sweep_id`. These are real backtests: 40 runs on 1h bars takes minutes.
+
+`narrowing` tightens per parameter — `{fast: {min: 8, max: 30}, exit: {choices: ['trail']}}`
+— and can only narrow what the strategy declared, never widen it.
+
+### run_study
+
+One honest-evaluation Study on the Experiment, with counted trials. Kinds:
+`parameter_sweep`, `neighborhood`, `walk_forward`, `cpcv`, `nested_cv`,
+`permutation_null`, `synthetic_paths`, `cost_sweep`, `trade_monte_carlo`,
+`regime_conditional`. Prefer `run_sweep` for parameter tuning.
+
+Returns the **sealed** distribution (median, IQR, worst-5%, spread) and the
+verdict; member ids are provenance only. Use
+`selection_rule: median_stable_centroid` to carry a config forward, then read it
+with `get_carried_forward`.
+
+`vary` is tagged by its `vary` field:
+`{vary:'params', grid:[{fast:12},{fast:20}]}` ·
+`{vary:'neighborhood', param:'fast', center:20, step:2, k:3}` ·
+`{vary:'data_windows', windows:[[start,end],...]}` ·
+`{vary:'cpcv_groups', n_groups:6, k_test:2}` ·
+`{vary:'seeds', n:200}` ·
+`{vary:'cost_ladder', cost_model_refs:[...]}` ·
+`{vary:'trade_resamples', n:500, block:5}` ·
+`{vary:'regimes', windows:[[start,end,label],...]}`.
+
+### get_diagnostics
+
+For a Run you reached through one of your Studies (member ids come from
+`list_studies` or a sweep's study). Returns trade P&L shape, win/loss averages,
+expectancy, longest losing streak, hold time, MAE/MFE, by-month slices, the ten
+worst trades, the longest drawdown episode, exposure and cost drag, plus a compact
+`text`.
+
+This is what tells you *what* to change. Read it before proposing a structural
+edit — a sweep tells you a parameter is wrong, this tells you the idea is.
+
+### advance_gate
+
+Runs the next gate, and blocks for minutes. Gate 2 runs CPCV plus synthetic paths
+and the worst-5% must survive. Gate 3 runs the chosen permutation null with
+selection-bias correction taken from the live trial counter, and requires deflated
+Sharpe ≥ 0.95 and PBO ≤ 0.5. Choose a null (`choose_null`) before Gate 3.
+
+### choose_null
+
+Declares the primary significance null. Logged and immutable — there is no second
+choice, which is the point: picking the null after seeing which one flatters the
+result is the oldest way to fake significance.
+
+Kinds: `signal_return_decouple`, `block_permutation`, `stationary_bootstrap`,
+`bar_permutation`, `synthetic_garch`, `regime_block`, `random_entry_matched`.
+`get_null_picker` says which is recommended for this strategy type and what each
+one preserves and destroys; departing from the recommendation requires
+`override_reason`.

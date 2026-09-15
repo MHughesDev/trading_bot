@@ -103,3 +103,63 @@ async fn toggle_armed(api: &ApiClient, params: &Value, armed: bool) -> Value {
         Err(e) => e.to_tool_error(),
     }
 }
+
+/// Declarations for the four `automation` tools (AGENT-006 §2.3).
+///
+/// None is `internal()`: no standing trading configuration from the in-app
+/// agent. They are still declared, because the same catalogue serves the human
+/// MCP client, and a tool that is not declared is a tool nothing classifies.
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::{Envelope, ToolSpec};
+    use crate::taxonomy::Risk;
+    let by_id = |name: &'static str, risk, description| {
+        ToolSpec::new(
+            name,
+            "automation",
+            risk,
+            description,
+            json!({
+                "type": "object",
+                "required": ["automation_id"],
+                "properties": { "automation_id": { "type": "string" } }
+            }),
+        )
+    };
+    vec![
+        ToolSpec::new(
+            "list_automations",
+            "automation",
+            Risk::Read,
+            "List all automation plans (strategy-to-instrument bindings that run when armed).",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        ToolSpec::new(
+            "create_automation",
+            "automation",
+            Risk::Write,
+            "Create a SingleInstrument automation tying a stored strategy to an instrument. Live \
+             mode is blocked unless the operator sets MCP_ALLOW_LIVE_AUTOMATIONS.",
+            json!({
+                "type": "object",
+                "required": ["execution_strategy_id", "instrument_id", "asset_class", "account_mode"],
+                "properties": {
+                    "execution_strategy_id": { "type": "string", "description": "strategy_id slug of the stored strategy" },
+                    "instrument_id": { "type": "string" },
+                    "asset_class": { "type": "string", "description": "e.g. crypto_spot_cex" },
+                    "account_mode": { "type": "string", "enum": ["paper", "live"] },
+                    "armed": { "type": "boolean", "description": "Start armed (default false)" },
+                    "time_window_start": { "type": "string", "description": "HH:MM trading window open (omit for 24/7)" },
+                    "time_window_end": { "type": "string", "description": "HH:MM trading window close (omit for 24/7)" },
+                    "time_window_tz": { "type": "string", "description": "IANA timezone (default UTC)" }
+                }
+            }),
+        )
+        .evidence(&["automation_id"]),
+        // Arming changes what the platform will do with money, with no further
+        // human step. That is the definition of destructive here, and it is why
+        // it is also the one catalogue tool under an approval envelope.
+        by_id("arm_automation", Risk::Destructive, "Arm an automation by ID.")
+            .envelope(Envelope::Spend),
+        by_id("disarm_automation", Risk::Write, "Disarm an automation by ID."),
+    ]
+}

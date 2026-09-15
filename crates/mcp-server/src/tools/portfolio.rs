@@ -57,3 +57,58 @@ pub async fn get_order(api: &ApiClient, params: &Value) -> Value {
         Err(e) => e.to_tool_error(),
     }
 }
+
+/// Declarations for the four read-only `portfolio` tools (AGENT-006 §2.3).
+///
+/// Every one is `Risk::Read`. There is no order-placement tool anywhere in this
+/// catalogue, and `place_order` is gated in `ledger::audit` as a platform action
+/// precisely so that stays true by decision rather than by omission.
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::ToolSpec;
+    use crate::taxonomy::Risk;
+    vec![
+        ToolSpec::new(
+            "get_dashboard_rollup",
+            "portfolio",
+            Risk::Read,
+            "Account overview: balances, open positions and P&L per asset class.",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "get_paper_activity",
+            "portfolio",
+            Risk::Read,
+            "Paper-trading engine activity for one instrument: positions, fills, P&L.",
+            json!({
+                "type": "object",
+                "required": ["instrument_id"],
+                "properties": { "instrument_id": { "type": "string" } }
+            }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "get_trading_status",
+            "portfolio",
+            Risk::Read,
+            "Platform trading status: whether the kill switch is tripped.",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "get_order",
+            "portfolio",
+            Risk::Read,
+            "Look up one order's status by id.",
+            json!({
+                "type": "object",
+                "required": ["order_id"],
+                "properties": {
+                    "order_id": { "type": "string", "description": "Order UUID" }
+                }
+            }),
+        )
+        .internal()
+        .evidence(&["order_id"]),
+    ]
+}

@@ -135,3 +135,76 @@ pub async fn list_compatible_strategies(api: &ApiClient, params: &Value) -> Valu
         Err(e) => e.to_tool_error(),
     }
 }
+
+/// Declarations for the five `strategy` tools (AGENT-006 §2.3).
+pub fn specs() -> Vec<crate::spec::ToolSpec> {
+    use crate::spec::ToolSpec;
+    use crate::taxonomy::Risk;
+    let definition = json!({
+        "type": "object",
+        "required": ["definition_json"],
+        "properties": {
+            "definition_json": { "type": "object", "description": "Strategy definition OBJECT (format: get_authoring_guide). Send the object, not a string containing JSON." }
+        }
+    });
+    vec![
+        ToolSpec::new(
+            "validate_strategy",
+            "strategy",
+            Risk::Read,
+            "Validate a strategy definition without persisting it; returns structured errors \
+             (path plus message) you can fix and retry. Free and instant.",
+            definition.clone(),
+        )
+        .internal(),
+        ToolSpec::new(
+            "create_strategy",
+            "strategy",
+            Risk::Write,
+            "Validate and persist a strategy definition to the platform's library. Upserts by \
+             strategy_id slug, so mint versioned slugs (my_strat_v2) when iterating.",
+            definition,
+        )
+        .internal()
+        .evidence(&["strategy_id"])
+        .notes("create_strategy"),
+        ToolSpec::new(
+            "get_strategy",
+            "strategy",
+            Risk::Read,
+            "Fetch a stored strategy definition by its strategy_id slug.",
+            json!({
+                "type": "object",
+                "required": ["strategy_id"],
+                "properties": {
+                    "strategy_id": { "type": "string", "description": "Slug returned by create_strategy / list_strategies" }
+                }
+            }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "list_strategies",
+            "strategy",
+            Risk::Read,
+            "List all stored strategy slugs in the platform library.",
+            json!({ "type": "object", "properties": {} }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "list_compatible_strategies",
+            "strategy",
+            Risk::Read,
+            "List stored strategies whose data requirements the given instrument or asset class \
+             can satisfy; incompatible ones are omitted, with each strategy's kind, trigger and \
+             required lanes.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "instrument_id": { "type": "string", "description": "Optional instrument filter" },
+                    "asset_class": { "type": "string", "description": "Default crypto_spot_cex" }
+                }
+            }),
+        )
+        .internal(),
+    ]
+}

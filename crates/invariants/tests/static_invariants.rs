@@ -910,6 +910,58 @@ fn the_envelope_name_check_rejects_a_name_no_tool_answers_to() {
     assert!(problems.is_empty(), "{problems:?}");
 }
 
+/// The other direction of AGENT-006 §2.6: every tool that *declares* an envelope
+/// is in the list `Envelope::for_action` matches on, and every list entry that
+/// names a tool has that tool declaring the same envelope.
+///
+/// `every_envelope_entry_is_a_real_action` above stops a gated name from naming
+/// nothing. This stops the mirror failure: a tool that says it needs approval and
+/// is in no list, which is ungated with a comment claiming otherwise. Set S task
+/// S-1.1 — it needs `ToolSpec.envelope`, which did not exist when S-0.2 landed.
+#[test]
+fn every_tool_envelope_matches_the_ledger() {
+    use ledger::audit::Envelope as Led;
+    use mcp_server_lib::spec::Envelope as Dec;
+
+    let mut problems = Vec::new();
+    for spec in mcp_server_lib::spec::catalog() {
+        let ledger_says = Led::for_action(spec.name);
+        let agree = matches!(
+            (spec.envelope, ledger_says),
+            (Dec::None, Led::None)
+                | (Dec::Spend, Led::Spend)
+                | (Dec::Promotion, Led::Promotion)
+                | (Dec::SealedHoldout, Led::SealedHoldout)
+                | (Dec::Tier3Memory, Led::Tier3Memory)
+        );
+        if !agree {
+            problems.push(format!(
+                "`{}` declares envelope `{}` but ledger::audit gates it as {ledger_says:?} — \
+                 one of the two is a lie about whether a human sees this call",
+                spec.name,
+                spec.envelope.as_str()
+            ));
+        }
+    }
+    assert!(problems.is_empty(), "{problems:#?}");
+
+    // And the declaration is not vacuous: at least one tool is actually gated.
+    // Without this the test passes on a catalogue where nothing declares an
+    // envelope and nothing is listed, which is exactly the state it exists to
+    // make impossible to reach quietly.
+    let mut gated: Vec<&str> = mcp_server_lib::spec::catalog()
+        .iter()
+        .filter(|s| s.envelope.requires_approval())
+        .map(|s| s.name)
+        .collect();
+    gated.sort_unstable();
+    assert_eq!(
+        gated,
+        vec!["arm_automation", "promote_model_version"],
+        "the gated catalogue tools changed; that is a decision, not a diff"
+    );
+}
+
 /// Adversarial: the old spelling gates nothing, and the new one gates promotion.
 ///
 /// Asserting the fix works is half a test. This asserts the broken spelling is
