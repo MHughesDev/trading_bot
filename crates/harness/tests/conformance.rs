@@ -178,10 +178,19 @@ fn every_profile_field_is_enforced_somewhere() {
             approval_envelope: None,
         },
     );
-    assert_eq!(
+    // Was `Deny`, when the profile declared the outbound leg cut. Now the leg is
+    // live, so the policy engine no longer denies the whole Outbound *class*.
+    //
+    // That is a real loss of defence in depth and it is worth naming: the bound
+    // on what can reach the network moved from the profile to the catalogue,
+    // which `taxonomy::the_only_outbound_tools_are_the_two_web_tools` pins by
+    // name. A `send_email` added to the catalogue tomorrow would no longer be
+    // stopped here — it would be stopped by that test failing, in CI, before it
+    // shipped.
+    assert_ne!(
         ruling.decision,
         Decision::Deny,
-        "trifecta.outbound_channel=false must deny outbound tools"
+        "with trifecta.outbound_channel=true the policy engine defers to the catalogue"
     );
 
     // archetype → the policy engine's unattended rule.
@@ -242,18 +251,27 @@ fn the_degradation_ladder_is_visible_as_profile_deltas() {
 
 /// Containment does not vary with model tier. A smaller model is more likely to be
 /// talked into trying something, not less.
+///
+/// **This test changed on 2026-09-14 (ADR-P7-01).** It used to assert that no
+/// profile held all three trifecta legs, because the outbound one was cut at the
+/// container network. `web_search` and `fetch_url` restored that leg
+/// deliberately, so the assertion moved rather than disappeared: every profile
+/// must now declare the leg *live* and record a mitigation that names the
+/// mechanism holding it. A profile that quietly went back to claiming the leg is
+/// cut would be the platform lying about itself in the one file whose job is to
+/// record what is true.
 #[test]
 fn the_trifecta_decision_is_the_same_at_every_tier() {
     let set = load();
     for id in set.ids() {
+        assert!(
+            set.get(id).unwrap().trifecta.outbound_channel,
+            "{id} claims the outbound leg is cut. It is not: the catalogue has two Outbound              tools. Declare it live and record how it is narrowed."
+        );
         let p = set.get(id).unwrap();
         assert!(
-            !p.trifecta.is_complete(),
-            "{id} holds all three trifecta legs"
-        );
-        assert!(
-            !p.trifecta.outbound_channel,
-            "{id} has an outbound channel; this platform cuts that leg"
+            p.trifecta.mitigation.contains("egress"),
+            "{id}'s mitigation must name the mechanism that narrows the outbound leg, not              merely assert that one exists"
         );
         assert!(
             !p.trifecta.mitigation.trim().is_empty(),

@@ -2,22 +2,65 @@
 //!
 //! The platform side owns: the strategy definition (interpreted with the same
 //! pure `strategy-runtime` evaluator that runs live), the indicator
-//! computation (same pure `features` crate), and the bar data.  The simulator
-//! side owns only execution: per-asset-class venue simulation, order
+//! computation (same pure `features` crate), the **declared exit policy**
+//! (driven through the one shared [`ExitTracker`]), and the bar data.  The
+//! simulator side owns only execution: per-asset-class venue simulation, order
 //! matching, fills, fees, and result statistics.
+//!
+//! # Declared exits (ADR-P6-01, ADR-P6-09, ADR-P6-11)
+//!
+//! A definition at `definition_version` 1.3 carries a typed
+//! [`domain::strategy_def::exits::ExitPolicy`].  Until ADR-P6-11 this module
+//! ignored it, so every backtest of an exit-declaring strategy evaluated a
+//! different strategy from the one declared.  It now drives
+//! [`strategy_runtime::exits::ExitTracker`] — the *same* implementation the
+//! live runtime is meant to use, never a second copy (INV-14, SC-3).
+//!
+//! Three things have to be right or the fix is worse than the bug, and each has
+//! a test:
+//!
+//! 1. **When the exit is evaluated.** An entry submitted from this handler
+//!    fills at the close of the bar that emitted it (the venue processes the
+//!    bar's O/H/L/C ticks *before* the handler runs, so the resting market
+//!    order takes the last traded price).  The entry bar's high and low
+//!    therefore happened before the position existed, and passing that bar to
+//!    the tracker would let a position be stopped out by a price it was never
+//!    exposed to.  Exits are evaluated from the **next** bar on, through
+//!    [`ExitTracker::opened_at_bar_close`].
+//!
+//! 2. **Which exit is deemed to have fired.** [`ExitTracker`]'s default
+//!    `IntrabarPolicy::WorstFirst` probes the adverse extreme first, so a bar
+//!    that breached both the stop and the target resolves to the stop.  This
+//!    module never selects another policy.
+//!
+//! 3. **What the exit is deemed to have paid.** Two prices describe one exit
+//!    and they disagree: the tracker's resting **level** (clamped into the
+//!    bar's traded range), and what the venue's market order actually paid
+//!    (the bar's close).  The platform cannot rest an order at the venue — the
+//!    SDK's order surface is market-only — so it may not claim the level when
+//!    the close is worse, and it must not claim the close when the close is
+//!    better.  [`conservative_exit_fill`] takes the **worse of the two**, and
+//!    the difference is carried on the trade rather than quietly discarded.
+//!
+//! Costs come from [`FeeBook`] for entries and exits alike: the simulated
+//! instrument is built with the resolved schedule's maker/taker rates, so one
+//! book prices both legs and there is no second cost path to drift.
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use domain::order::Side;
 use domain::payloads::bar::{BarPayload, Timeframe};
 use domain::strategy_def::actions::{ActionKind, SizeMode};
+use domain::strategy_def::exits::{ExitPolicy, PositionSide as ExitSide};
 use domain::strategy_def::StrategyDefinition;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use strategy_runtime::exits::{Bar as ExitBar, ExitTracker};
 
-use crate::run::result::{Side as TradeSide, Trade};
+use crate::costs::{ExecutionStyle, FeeBook, FeeSchedule};
+use crate::run::result::{Flag, Side as TradeSide, Trade};
 use chrono::{DateTime, Utc};
 use nautilus_backtest::config::BacktestEngineConfig;
 use nautilus_backtest::engine::BacktestEngine;
@@ -31,8 +74,8 @@ use nautilus_model::data::{Bar, BarSpecification, BarType, Data};
 use nautilus_model::enums::{
     AggregationSource, BarAggregation, OrderSide, PositionSide, PriceType,
 };
-use nautilus_model::identifiers::Venue;
-use nautilus_model::instruments::Instrument;
+use nautilus_model::identifiers::{InstrumentId, Symbol, Venue};
+use nautilus_model::instruments::{CurrencyPair, Equity, Instrument, InstrumentAny};
 use nautilus_model::position::Position;
 use nautilus_model::types::{Money, Price, Quantity};
 
@@ -89,6 +132,168 @@ pub struct SimulationReport {
     pub result: serde_json::Value,
 }
 
+/// One declared exit that fired during a run.
+///
+/// Both prices are kept. A run that reports only the charged one cannot be
+/// audited afterwards for whether the conservative rule was applied, and "the
+/// simulator quietly filled me at a better price than my stop" is precisely the
+/// class of defect `report_evaluator_defect` exists for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExitFill {
+    /// The bar the exit fired on. Matches the closing fill's timestamp.
+    pub ts: DateTime<Utc>,
+    /// Which rule fired, by its stable kind string.
+    pub rule: String,
+    /// Side the position was on.
+    pub side: ExitSide,
+    /// Where the shared [`ExitTracker`] says a resting order would have filled,
+    /// clamped into the bar's traded range.
+    pub level: Decimal,
+    /// What the venue's market order actually paid — the bar's close.
+    pub venue_fill: Decimal,
+    /// `worst_of(level, venue_fill)`. Never the better of the two.
+    pub charged: Decimal,
+    /// Bars the position was held, counting the first bar after the entry fill
+    /// as one.
+    pub bars_held: u32,
+    /// The quantity flattened. Taken from the handler's own netting rather than
+    /// from the engine's closed `Position`, whose `quantity` is zero once it
+    /// closes — see [`position_to_trade`].
+    pub qty: Decimal,
+}
+
+impl ExitFill {
+    /// How much worse than the venue's own fill this exit was charged, per
+    /// unit, as a non-negative number. Zero when the venue's fill was already
+    /// the conservative one.
+    #[must_use]
+    pub fn adverse_adjustment(&self) -> Decimal {
+        (self.venue_fill - self.charged).abs()
+    }
+}
+
+/// Exits observed by the bar handler, read back after the engine has run.
+type ExitLog = Arc<Mutex<Vec<ExitFill>>>;
+
+/// The price an exit is charged at when the tracker and the venue disagree.
+///
+/// They disagree on most bars, and in a predictable direction. The tracker
+/// prices a stop where the resting order rested; the venue prices a market
+/// order at the bar's close, which for a stop is *at least as good* — a bar
+/// that traded down through 98 and closed at 104 would book a 4% gain on an
+/// order that, in the world the strategy declared, was a 2% loss.
+///
+/// Neither price can simply be taken. The platform submits a market order, so
+/// it has no claim on the level when the close was worse; and it cannot rest an
+/// order at the venue, so it has no claim on the close when the close was
+/// better. The worse of the two is the only assumption that is defensible in
+/// both directions, and the only one an agent cannot farm.
+#[must_use]
+pub fn conservative_exit_fill(side: ExitSide, level: Decimal, venue_fill: Decimal) -> Decimal {
+    match side {
+        // Closing a long is a sale: the lower price is the worse one.
+        ExitSide::Long => level.min(venue_fill),
+        // Closing a short is a purchase: the higher price is the worse one.
+        ExitSide::Short => level.max(venue_fill),
+    }
+}
+
+/// The handler's model of the position the engine holds.
+///
+/// Netting, and nothing else: this decides *how much* to flatten, never
+/// *whether* to. Every "should this position close" question belongs to
+/// [`ExitTracker`] and is asked there (INV-14).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SimPosition {
+    side: ExitSide,
+    qty: Decimal,
+    entry: Decimal,
+}
+
+/// What a fill did to the netted position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum NetEffect {
+    /// Untouched, or reduced without changing the entry reference.
+    Unchanged,
+    /// Opened, averaged into, or reversed — the entry reference moved.
+    Reopened { side: ExitSide, entry: Decimal },
+    /// Back to flat.
+    Flat,
+}
+
+impl SimPosition {
+    /// Apply one fill of `qty` at `fill` on `side` to `pos`.
+    fn apply(pos: &mut Option<Self>, side: ExitSide, qty: Decimal, fill: Decimal) -> NetEffect {
+        if qty <= Decimal::ZERO {
+            return NetEffect::Unchanged;
+        }
+        match *pos {
+            None => {
+                *pos = Some(Self { side, qty, entry: fill });
+                NetEffect::Reopened { side, entry: fill }
+            }
+            Some(mut open) if open.side == side => {
+                let total = open.qty + qty;
+                open.entry = (open.entry * open.qty + fill * qty) / total;
+                open.qty = total;
+                *pos = Some(open);
+                NetEffect::Reopened { side, entry: open.entry }
+            }
+            Some(mut open) => match qty.cmp(&open.qty) {
+                std::cmp::Ordering::Less => {
+                    open.qty -= qty;
+                    *pos = Some(open);
+                    NetEffect::Unchanged
+                }
+                std::cmp::Ordering::Equal => {
+                    *pos = None;
+                    NetEffect::Flat
+                }
+                // A reversal is an exit and a new entry, and the new position's
+                // stop is measured from the new entry.
+                std::cmp::Ordering::Greater => {
+                    *pos = Some(Self { side, qty: qty - open.qty, entry: fill });
+                    NetEffect::Reopened { side, entry: fill }
+                }
+            },
+        }
+    }
+}
+
+/// The order side that flattens a position.
+const fn flattening_side(side: ExitSide) -> OrderSide {
+    match side {
+        ExitSide::Long => OrderSide::Sell,
+        ExitSide::Short => OrderSide::Buy,
+    }
+}
+
+/// The fee schedule a run is priced against.
+///
+/// [`FeeBook::resolve`] never returns "free": an unrecognised venue falls back
+/// to the most expensive schedule in the book and says so in its tier name.
+/// That direction is deliberate — a strategy priced too cheaply gets promoted,
+/// and one priced too dearly gets rejected and re-examined.
+fn schedule_for(venue_id: &str) -> FeeSchedule {
+    FeeBook::platform_default().resolve(Some(&venue_id.to_lowercase()), None)
+}
+
+/// Per-fill charge as a fraction of notional.
+///
+/// The half-spread rides on the taker leg because the simulated L1 book is
+/// built from trade ticks and therefore has no spread of its own; leaving it
+/// out would price every crossing fill at the mid. `round_trip_bps` elsewhere
+/// in `costs` makes the same choice, so a run and the tradeable-frontier check
+/// that admitted it charge the same number.
+fn fill_rate(schedule: &FeeSchedule, taker: bool) -> Decimal {
+    let bps = if taker {
+        schedule.taker_bps + schedule.half_spread_bps
+    } else {
+        schedule.maker_bps
+    };
+    dec_from(bps) / Decimal::from(10_000)
+}
+
 
 /// Formats a `Decimal` with exactly `precision` fractional digits.
 fn dec_str(d: Decimal, precision: u32) -> String {
@@ -112,10 +317,19 @@ fn timeframe_spec(tf: Timeframe) -> BarSpecification {
     BarSpecification::new(step, aggregation, PriceType::Last)
 }
 
+/// Everything `build_setup` hands back: the engine spec, the bars, the handler,
+/// the log the handler writes its exits into, and the schedule both legs of
+/// every trade were priced against.
+struct Setup {
+    spec: BarSimulationSpec,
+    bars: Vec<Bar>,
+    handler: BarHandler,
+    exits: ExitLog,
+    schedule: FeeSchedule,
+}
+
 /// Builds the venue/instrument/strategy/bars setup shared by both run paths.
-fn build_setup(
-    inputs: &SimulationInputs,
-) -> anyhow::Result<(BarSimulationSpec, Vec<Bar>, BarHandler)> {
+fn build_setup(inputs: &SimulationInputs) -> anyhow::Result<Setup> {
     anyhow::ensure!(!inputs.bars.is_empty(), "no bars to simulate");
 
     let order_specs = order_specs(&inputs.definition)?;
@@ -149,18 +363,20 @@ fn build_setup(
     let venue = Venue::from(inputs.venue_id.to_uppercase().as_str());
     let preset = VenuePreset::from_asset_class(&inputs.asset_class);
     let price_increment = price(&increment_str(price_precision))?;
+    let schedule = schedule_for(&inputs.venue_id);
     let instrument = if preset == VenuePreset::Equity {
-        sdk::equity_instrument(
+        equity_instrument_priced(
             venue,
             &inputs.instrument_id,
             &inputs.quote_currency,
             price_precision,
             price_increment,
+            &schedule,
         )
     } else {
         let (base, quote) = split_pair(&inputs.instrument_id, &inputs.quote_currency);
         let size_increment = quantity(&increment_str(size_precision))?;
-        sdk::spot_pair_instrument(
+        spot_pair_instrument_priced(
             venue,
             &inputs.instrument_id,
             &base,
@@ -169,6 +385,7 @@ fn build_setup(
             size_precision,
             price_increment,
             size_increment,
+            &schedule,
         )
     };
 
@@ -197,8 +414,89 @@ fn build_setup(
         chunk_size: chunk_size_for(engine_bars.len()),
     };
 
-    let handler = build_handler(inputs, order_specs, size_precision)?;
-    Ok((spec, engine_bars, handler))
+    let exits: ExitLog = Arc::new(Mutex::new(Vec::new()));
+    let handler = build_handler(inputs, order_specs, size_precision, Arc::clone(&exits))?;
+    Ok(Setup { spec, bars: engine_bars, handler, exits, schedule })
+}
+
+/// A spot pair that charges the resolved schedule.
+///
+/// The SDK's own constructor leaves maker and taker unset, which the engine's
+/// default fee model reads as **zero commission on every fill**. A simulator
+/// that charges nothing reports a gross number and labels it net, and that is
+/// the same failure as ignoring an exit: the component whose job is to say what
+/// a strategy would have done says something else.
+#[allow(clippy::too_many_arguments)]
+fn spot_pair_instrument_priced(
+    venue: Venue,
+    symbol: &str,
+    base: &str,
+    quote: &str,
+    price_precision: u8,
+    size_precision: u8,
+    price_increment: Price,
+    size_increment: Quantity,
+    schedule: &FeeSchedule,
+) -> InstrumentAny {
+    let raw_symbol = Symbol::from(symbol);
+    InstrumentAny::CurrencyPair(CurrencyPair::new(
+        InstrumentId::new(raw_symbol, venue),
+        raw_symbol,
+        sdk::currency_or_register(base, size_precision),
+        sdk::currency_or_register(quote, price_precision),
+        price_precision,
+        size_precision,
+        price_increment,
+        size_increment,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(fill_rate(schedule, false)),
+        Some(fill_rate(schedule, true)),
+        None,
+        UnixNanos::default(),
+        UnixNanos::default(),
+    ))
+}
+
+/// A cash equity that charges the resolved schedule. See
+/// [`spot_pair_instrument_priced`] for why the SDK's constructor is not used.
+fn equity_instrument_priced(
+    venue: Venue,
+    symbol: &str,
+    quote: &str,
+    price_precision: u8,
+    price_increment: Price,
+    schedule: &FeeSchedule,
+) -> InstrumentAny {
+    let raw_symbol = Symbol::from(symbol);
+    InstrumentAny::Equity(Equity::new(
+        InstrumentId::new(raw_symbol, venue),
+        raw_symbol,
+        None,
+        sdk::currency_or_register(quote, price_precision),
+        price_precision,
+        price_increment,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(fill_rate(schedule, false)),
+        Some(fill_rate(schedule, true)),
+        None,
+        UnixNanos::default(),
+        UnixNanos::default(),
+    ))
 }
 
 /// Runs the simulation and returns the engine's aggregate statistics document.
@@ -208,7 +506,7 @@ pub fn run_simulation(
     inputs: SimulationInputs,
     control: &Arc<SimulationControl>,
 ) -> anyhow::Result<SimulationReport> {
-    let (spec, engine_bars, handler) = build_setup(&inputs)?;
+    let Setup { spec, bars: engine_bars, handler, .. } = build_setup(&inputs)?;
     let BarSimulationSpec {
         venue,
         preset,
@@ -266,7 +564,7 @@ pub fn run_simulation_detailed(
     inputs: SimulationInputs,
     control: &Arc<SimulationControl>,
 ) -> anyhow::Result<DetailedOutcome> {
-    let (spec, engine_bars, handler) = build_setup(&inputs)?;
+    let Setup { spec, bars: engine_bars, handler, exits, schedule } = build_setup(&inputs)?;
     let BarSimulationSpec {
         venue,
         preset,
@@ -346,11 +644,17 @@ pub fn run_simulation_detailed(
     let stats = serde_json::to_value(engine.get_result())?;
 
     // Map closed positions to trades in close order.
-    let trades: Vec<Trade> = {
+    let mut trades: Vec<Trade> = {
         let mut positions: Vec<Position> = closed.into_values().collect();
         positions.sort_by_key(|p| p.ts_closed.map_or(0, |t| t.as_u64()));
         positions.iter().map(position_to_trade).collect()
     };
+
+    // Re-price the exits the declared policy caused. The engine filled them at
+    // the bar's close, which for a stop is at least as good as the level the
+    // order rested at; `conservative_exit_fill` refuses the better of the two.
+    let exit_fills = exits.lock().map_or_else(|e| e.into_inner().clone(), |g| g.clone());
+    apply_exit_fills(&mut trades, &exit_fills);
     if let Some(total) = stats
         .get("total_positions")
         .and_then(serde_json::Value::as_u64)
@@ -370,7 +674,45 @@ pub fn run_simulation_detailed(
         equity,
         trades,
         stats,
+        exit_fills,
+        fee_schedule: schedule,
     })
+}
+
+/// Re-price every trade a declared exit closed.
+///
+/// One exit closes one position, matched on the closing timestamp: the exit
+/// order is submitted from the handler for bar *t* and the venue fills it
+/// within that same bar's settlement, so the position's `ts_closed` is the
+/// bar's timestamp. An exit with no matching trade is logged rather than
+/// dropped silently — it means the flattening order did not fill, and a run
+/// whose exits did not actually happen must not look like one whose did.
+///
+/// The adjustment can only ever move P&L **down**: `conservative_exit_fill`
+/// returns the worse of the two prices, so the difference against the venue's
+/// own fill is a cost or nothing.
+fn apply_exit_fills(trades: &mut [Trade], fills: &[ExitFill]) {
+    for fill in fills {
+        let Some(trade) = trades.iter_mut().find(|t| t.exit_time == fill.ts) else {
+            tracing::warn!(
+                ts = %fill.ts,
+                rule = %fill.rule,
+                "a declared exit fired but no closed position matched it; the flattening order                  did not fill"
+            );
+            continue;
+        };
+        let sign = match trade.side {
+            TradeSide::Long => Decimal::ONE,
+            TradeSide::Short => -Decimal::ONE,
+        };
+        // The handler's quantity, not the trade's: a closed engine `Position`
+        // reports `quantity` zero, and an adjustment multiplied by that is an
+        // adjustment that silently does not happen.
+        let delta = (fill.charged - trade.exit_price) * fill.qty * sign;
+        debug_assert!(delta <= Decimal::ZERO, "the conservative fill never improves a trade");
+        trade.pnl += delta;
+        trade.exit_price = fill.charged;
+    }
 }
 
 /// The id a position snapshot was taken from: nautilus stores snapshots as
@@ -396,11 +738,70 @@ pub struct DetailedOutcome {
     pub equity: Vec<(DateTime<Utc>, f64)>,
     pub trades: Vec<Trade>,
     /// The engine's aggregate statistics document (Sharpe etc.), for cross-check.
+    ///
+    /// Produced by the venue before the conservative exit re-pricing below, so
+    /// on a run with declared exits it is an **upper bound** on the platform's
+    /// own trade P&L rather than a second opinion about it.
     pub stats: serde_json::Value,
+    /// Every declared exit that fired, with both prices that described it.
+    pub exit_fills: Vec<ExitFill>,
+    /// The schedule both legs of every fill were charged at.
+    pub fee_schedule: FeeSchedule,
+}
+
+impl DetailedOutcome {
+    /// The execution assumptions this run was computed under, as flags for the
+    /// `RunResult`.
+    ///
+    /// Stated on every run rather than only on the ones where they bit. An
+    /// assumption that is recorded only when it changes the answer is one
+    /// nobody can check on the runs where it did not.
+    #[must_use]
+    pub fn execution_assumptions(&self) -> Vec<Flag> {
+        let s = &self.fee_schedule;
+        let mut flags = vec![Flag {
+            code: "exec.fee_schedule".into(),
+            detail: format!(
+                "{}/{}: taker {} bp + half-spread {} bp charged on every fill, entry and exit \
+                 alike; round trip {} bp",
+                s.venue,
+                s.tier,
+                s.taker_bps,
+                s.half_spread_bps,
+                s.round_trip_bps(ExecutionStyle::TakerBoth),
+            ),
+        }];
+        if self.exit_fills.is_empty() {
+            return flags;
+        }
+        let adverse: Decimal = self
+            .exit_fills
+            .iter()
+            .map(ExitFill::adverse_adjustment)
+            .sum();
+        flags.push(Flag {
+            code: "exec.intrabar_resolution".into(),
+            detail: format!(
+                "worst_first: a bar that breached both the stop and the target is deemed to have \
+                 hit the stop, and an exit is charged the worse of its resting level and the \
+                 venue's market fill. {} declared exits fired; {adverse} of adverse price \
+                 adjustment was applied against the venue's own fills.",
+                self.exit_fills.len(),
+            ),
+        });
+        flags
+    }
 }
 
 /// Maps a closed engine `Position` to the suite's `Trade`. Money/price values go
 /// through `Decimal` via keyword-free helpers so the money-f64 scanner stays green.
+///
+/// The size comes from `peak_qty`, not `quantity`. A closed nautilus `Position`
+/// sets `quantity` to zero — it is the *open* size — so reading it gave every
+/// trade this executor ever produced a size of zero. Nothing downstream had
+/// noticed, because the P&L is carried separately and no metric divided by it;
+/// it was found by an exit adjustment that multiplied by it and silently did
+/// nothing. `peak_qty` is the size the round trip actually reached.
 fn position_to_trade(p: &Position) -> Trade {
     let side = match p.side {
         PositionSide::Short => TradeSide::Short,
@@ -418,7 +819,11 @@ fn position_to_trade(p: &Position) -> Trade {
         exit_time,
         entry_price: dec_from(p.avg_px_open),
         exit_price: dec_from(p.avg_px_close.unwrap_or(p.avg_px_open)),
-        qty: p.quantity.as_decimal(),
+        qty: if p.peak_qty.is_zero() {
+            p.quantity.as_decimal()
+        } else {
+            p.peak_qty.as_decimal()
+        },
         mae: 0.0,
         mfe: 0.0,
         holding_period_secs,
@@ -542,10 +947,22 @@ fn build_handler(
     inputs: &SimulationInputs,
     order_specs: Vec<(String, Side, Decimal)>,
     size_precision: u8,
+    exit_log: ExitLog,
 ) -> anyhow::Result<BarHandler> {
     let nodes = inputs.definition.nodes.clone();
     let timeframe = inputs.timeframe;
     let sim_start_ns = inputs.sim_start_ns;
+    let size_scale = u32::from(size_precision);
+
+    // The declared exit policy, driven through the one shared tracker. `None`
+    // for a pre-1.3 definition and for `RiskLayerOnly`: both mean this module
+    // closes nothing on its own, and they are different claims that happen to
+    // produce the same behaviour here.
+    let mut exits: Option<ExitTracker> = match inputs.definition.exit_policy() {
+        Some(policy) if policy.is_self_closing() => Some(ExitTracker::new(policy.clone())),
+        Some(ExitPolicy::Rules { .. } | ExitPolicy::RiskLayerOnly) | None => None,
+    };
+    let mut position: Option<SimPosition> = None;
 
     // Pre-quantize each order's size to a nautilus `Quantity` once, up front, so
     // a malformed size is an error here rather than a panic inside the per-bar
@@ -620,9 +1037,73 @@ fn build_handler(
         bar_map.insert(Timeframe::Minutes1, payload);
 
         let fired = strategy_runtime::evaluate_signals(&nodes, &feature_values, &bar_map);
+        let emitted: Vec<String> = fired.clone();
         let fired: HashSet<String> = fired.into_iter().collect();
 
         let mut commands = Vec::new();
+
+        // ── exits first, and never against the bar that opened the position ──
+        //
+        // Entries fill at the close of the bar that emitted them, so this bar's
+        // high and low are prices the position opened *below* was not in the
+        // market for. Evaluating exits before this bar's entries is what keeps
+        // that true: the tracker only ever sees bars strictly after the entry.
+        if let Some(tracker) = exits.as_mut() {
+            let ts = ns_to_dt(bar.ts_event);
+            let probe = ExitBar {
+                ts,
+                high: bar.high.as_decimal(),
+                low: bar.low.as_decimal(),
+                close: close_value,
+            };
+            if let Some(triggered) = tracker.on_bar(&probe, &emitted) {
+                // The tracker reports; the caller fills. A position that cannot
+                // be quantized into an order has not closed, and the tracker
+                // must not be told that it has.
+                if let Some(open) = position {
+                    match quantity(&dec_str(open.qty, size_scale)) {
+                        Ok(qty) => {
+                            commands.push(SimOrderCommand::Market {
+                                side: flattening_side(open.side),
+                                quantity: qty,
+                            });
+                            let charged = conservative_exit_fill(
+                                open.side,
+                                triggered.price,
+                                close_value,
+                            );
+                            let fill = ExitFill {
+                                ts,
+                                rule: triggered.rule.clone(),
+                                side: open.side,
+                                level: triggered.price,
+                                venue_fill: close_value,
+                                charged,
+                                bars_held: triggered.bars_held,
+                                qty: open.qty,
+                            };
+                            if let Ok(mut log) = exit_log.lock() {
+                                log.push(fill);
+                            }
+                            position = None;
+                            tracker.closed();
+                        }
+                        Err(e) => tracing::error!(
+                            rule = %triggered.rule,
+                            error = %e,
+                            "declared exit fired but the flattening order could not be built;                              the position stays open"
+                        ),
+                    }
+                } else {
+                    // The tracker thinks it holds something this handler does
+                    // not. Re-synchronise rather than emit an order for a
+                    // position that is not there.
+                    tracker.closed();
+                }
+            }
+        }
+
+        // ── then this bar's entries, on their rising edge ────────────────────
         let in_window = i64::try_from(bar.ts_event.as_u64()).unwrap_or(i64::MAX) >= sim_start_ns;
         if in_window {
             for signal in fired.difference(&active_signals) {
@@ -632,6 +1113,27 @@ fn build_handler(
                             side: *side,
                             quantity: *qty,
                         });
+                        if exits.is_some() {
+                            let filled = match side {
+                                OrderSide::Sell => ExitSide::Short,
+                                _ => ExitSide::Long,
+                            };
+                            let effect = SimPosition::apply(
+                                &mut position,
+                                filled,
+                                qty.as_decimal(),
+                                close_value,
+                            );
+                            if let Some(tracker) = exits.as_mut() {
+                                match effect {
+                                    NetEffect::Reopened { side, entry } => {
+                                        tracker.opened_at_bar_close(side, entry);
+                                    }
+                                    NetEffect::Flat => tracker.closed(),
+                                    NetEffect::Unchanged => {}
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -14,6 +14,7 @@ use strategy_runtime::manifest::compile_manifest;
 
 fn ohlcv_only_def(id: &str) -> StrategyDefinition {
     StrategyDefinition {
+        exits: None,
         strategy_id: id.into(),
         definition_version: "1.0".into(),
         asset_class: "crypto_spot_cex".into(),
@@ -38,6 +39,7 @@ fn ohlcv_only_def(id: &str) -> StrategyDefinition {
 
 fn funding_rate_def() -> StrategyDefinition {
     StrategyDefinition {
+        exits: None,
         strategy_id: "funding_rate_strat".into(),
         definition_version: "1.0".into(),
         asset_class: "perpetual_swap".into(),

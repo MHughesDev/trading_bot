@@ -18,6 +18,7 @@ use strategy_validator::validate;
 
 fn canonical() -> StrategyDefinition {
     StrategyDefinition {
+        exits: None,
         strategy_id: "ema_cross_v1".into(),
         definition_version: "1.0".into(),
         asset_class: "crypto_spot_cex".into(),

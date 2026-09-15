@@ -7,8 +7,8 @@ Derived From: C-012, C-013, C-026, C-060, C-094, C-096, C-112, C-118, C-119, C-1
 
 # Phase 5 — Frontend Trading Workspace
 
-> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../architecture.md),
-> the spec [`../../specs/COMP-003-ui-streaming-gateway.md`](../../specs/COMP-003-ui-streaming-gateway.md),
+> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../../architecture.md),
+> the spec [`../../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md),
 > and the existing `frontend/` SPA. The frontend is React + Vite with `src/pages/`, `src/panels/`
 > (`ChartPanel`, `PositionsPanel`, `TradePanel`, and an existing `OrderBookPanel` to be **removed**),
 > `src/components/`, `src/hooks/`, `src/store/` (Zustand: `auth`, `theme`, `watchlist`),

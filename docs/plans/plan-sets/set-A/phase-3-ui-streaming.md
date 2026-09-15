@@ -7,10 +7,10 @@ Note: Canonical executable plans live in docs/plans/. This copy is the traceable
 
 # Phase 3 — See it (UI streaming gateway + React panels + demand manager)
 
-> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../architecture.md),
+> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../../../architecture.md),
 > and the specs — especially
-> [`../specs/COMP-003-ui-streaming-gateway.md`](../specs/COMP-003-ui-streaming-gateway.md) and the
-> Demand Manager section of [`../specs/SYS-001-system-overview.md`](../specs/SYS-001-system-overview.md).
+> [`../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md) and the
+> Demand Manager section of [`../specs/SYS-001-system-overview.md`](../../../specs/SYS-001-system-overview.md).
 
 ## Phase goal
 
@@ -46,7 +46,7 @@ strategies) are subscribed.
 - **Goal:** Aggregate demand for `(lane, instrument)` across consumers and start/keepalive/downshift/
   stop the underlying pipelines.
 - **Files:** `crates/demand-manager/src/{lib,registry,lifecycle}.rs`.
-- **Context:** Per [`../specs/SYS-001-system-overview.md`](../specs/SYS-001-system-overview.md)
+- **Context:** Per [`../specs/SYS-001-system-overview.md`](../../../specs/SYS-001-system-overview.md)
   §Demand Manager: consumers (UI panels now, strategies in Phase 4) **declare demand**; the manager
   keeps a pipeline active if ≥1 consumer needs its lane, else stops/pauses/downshifts it. This
   prevents every panel/strategy from spinning up duplicate streams.
@@ -57,7 +57,7 @@ strategies) are subscribed.
 ### P3-T02 — UI gateway core (subscriptions + authz + shaping)
 - **Goal:** The gateway that manages panel subscriptions and shapes/authorizes payloads.
 - **Files:** `crates/ui-gateway/src/{lib,subscriptions,shaping}.rs`.
-- **Context:** Per [`../specs/COMP-003-ui-streaming-gateway.md`](../specs/COMP-003-ui-streaming-gateway.md):
+- **Context:** Per [`../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md):
   register/remove subscriptions, lane+instrument filtering, **per-subscription authorization** (a
   panel may only subscribe to private lanes scoped to its authenticated user), and UI-safe payload
   shaping (public vs private enforcement). On subscribe, decrement/increment Demand Manager demand.
@@ -68,7 +68,7 @@ strategies) are subscribed.
 ### P3-T03 — UI gateway throttling + snapshots + transport
 - **Goal:** The lossy-by-design machinery and the WS transport.
 - **Files:** `crates/ui-gateway/src/{throttle,snapshot,transport}.rs`.
-- **Context:** Per [`../specs/COMP-003-ui-streaming-gateway.md`](../specs/COMP-003-ui-streaming-gateway.md):
+- **Context:** Per [`../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md):
   per-panel rate limits; order-book path = raw L2 deltas → state builder (reuse `builders::orderbook`)
   → throttled top-N snapshot every 50–150 ms → WS; **snapshot-on-connect** + reconnect recovery;
   heartbeat/ping-pong; batching; compression; backpressure detection. The gateway intentionally drops
@@ -84,7 +84,7 @@ strategies) are subscribed.
   wiring in `apps/platform/src/main.rs`.
 - **Context:** `GET /ws/live` upgrades and bridges the socket to ui-gateway subscriptions;
   `POST /api/ui/subscriptions` registers panel subscriptions (per
-  [`../specs/COMP-003-ui-streaming-gateway.md`](../specs/COMP-003-ui-streaming-gateway.md) REST list).
+  [`../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md) REST list).
 - **Acceptance:** a WS client subscribes to `market.bars.1m` for an instrument and receives live
   bars; closing the socket removes the subscription and decrements demand.
 - **Depends on:** P3-T03.
@@ -103,7 +103,7 @@ strategies) are subscribed.
 - **Goal:** The chart, order-book, trade, and positions panels.
 - **Files:** `frontend/src/panels/{ChartPanel,OrderBookPanel,TradePanel,PositionsPanel}.tsx`,
   shared bits in `frontend/src/components/`.
-- **Context:** Per [`../specs/COMP-003-ui-streaming-gateway.md`](../specs/COMP-003-ui-streaming-gateway.md)
+- **Context:** Per [`../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md)
   example panels: `ChartPanel` subscribes to `market.bars.1m` + `features.technical` (features land
   in Phase 4 — render gracefully without them now); `OrderBookPanel` subscribes to
   `ui.orderbook.snapshot` (depth N, max_fps 20); `TradePanel` submits manual orders via

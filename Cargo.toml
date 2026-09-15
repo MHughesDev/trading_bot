@@ -30,6 +30,8 @@ members = [
     "crates/dataplane",
     "crates/ledger",
     "crates/invariants",
+    "crates/webfetch",
+    "crates/skills",
     "apps/platform",
     "apps/collector-crypto",
     "apps/collector-equity",
@@ -94,6 +96,8 @@ smallvec = { version = "1", features = ["union"] }
 
 # external connectivity
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+webfetch = { path = "crates/webfetch" }
+skills = { path = "crates/skills" }
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "http2", "gzip", "brotli"] }
 
 # columnar analytics / archive storage

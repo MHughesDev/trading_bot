@@ -7,8 +7,8 @@ Note: Canonical executable plans live in docs/plans/. This copy is the traceable
 
 # Phase 7 — Cutover (parity, decommission Python, **finalize docs**, release)
 
-> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../architecture.md),
-> [`./rust-rewrite-master-plan.md`](./rust-rewrite-master-plan.md) §6 (definition of done), the
+> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../../../architecture.md),
+> [`./rust-rewrite-master-plan.md`](../../reference/rust-rewrite-master-plan.md) §6 (definition of done), the
 > live `docs/` workspace (stood up in Phase A), and `[deleted - see Phase 7]/` — which is still
 > present at root as the permanent reference anchor and is the **last thing deleted**, as the final
 > act of this phase.
@@ -58,7 +58,7 @@ repository matches `docs/architecture.md` exactly with no orphan files.
 
 ### P7-T02 — Full adversarial test sweep
 - **Goal:** Confirm every "decided mechanism" test from the spec is green (per
-  [`../../research/OPEN_QUESTIONS.md`](../../research/OPEN_QUESTIONS.md) standing reminder).
+  [`../../research/OPEN_QUESTIONS.md`](../../../open-questions.md) standing reminder).
 - **Files:** none new — run the suite; record results in `docs/parity-matrix.md`.
 - **Context:** Re-run: quarantine→replay, bar revision on late data, idempotent fills, ack-timeout
   query, no-lookahead replay, live/replay equivalence, reconciliation halt, freshness-respects-hours,
@@ -76,14 +76,14 @@ repository matches `docs/architecture.md` exactly with no orphan files.
   (CI, docs, scripts, `justfile`) references `legacy_python/` or the old Python entrypoints before
   deleting.
 - **Acceptance:** `legacy_python/` is gone; no file references it; `just test` and CI remain green;
-  the repo tree matches [`../architecture.md`](../architecture.md) (no orphans, nothing missing).
+  the repo tree matches [`../architecture.md`](../../../architecture.md) (no orphans, nothing missing).
 - **Depends on:** P7-T02.
 
 ### P7-T04 — Structure conformance check
 - **Goal:** Verify the repository matches the end-state file structure exactly.
 - **Files:** optionally a small `xtask` subcommand (`cargo xtask check-structure`) that diffs the tree
   against the enumerated structure; otherwise a manual checklist.
-- **Context:** Walk [`../architecture.md`](../architecture.md): every enumerated crate/app/file
+- **Context:** Walk [`../architecture.md`](../../../architecture.md): every enumerated crate/app/file
   exists and every existing file is accounted for. Flag orphans and gaps.
 - **Acceptance:** zero orphans, zero missing enumerated files (or documented, justified deviations
   with `architecture.md` updated to match reality).
@@ -110,10 +110,10 @@ repository matches `docs/architecture.md` exactly with no orphan files.
   - **API specs** — update the REST/WS `SYS`/`COMP` specs to match the shipped contract exactly.
   - **Root `README.md`** — quickstart reflects the Rust-only repo with the `docs/` workspace.
 - **Context:** Phase A scaffolded the workspace with design intent; this task makes it reflect
-  actuality. Follow [`../procedures/add-spec.md`](../procedures/add-spec.md) (the spec lifecycle
-  steps) and [`../procedures/verify-traceability.md`](../procedures/verify-traceability.md) (the
+  actuality. Follow [`../procedures/add-spec.md`](../../../procedures/add-spec.md) (the spec lifecycle
+  steps) and [`../procedures/verify-traceability.md`](../../../procedures/verify-traceability.md) (the
   closing check). Operational procedures follow the authoring template in
-  [`../procedures/README.md`](../procedures/README.md).
+  [`../procedures/README.md`](../../../procedures/README.md).
 - **Acceptance:** every spec in `docs/specs/` is `Implemented` with all `Verified by:` fields
   filled and all checkboxes ticked; `architecture.md` matches the real repo with no `[not yet
   decided]` remaining; all open questions are either resolved or documented with a concrete
@@ -162,6 +162,6 @@ repository matches `docs/architecture.md` exactly with no orphan files.
   - `docs/procedures/operate-the-stack.md` and `docs/procedures/add-a-venue.md` exist and match reality;
   - `verify-traceability` all 10 steps pass (including step 9 — evidence on implemented specs).
 - [ ] Tagged, reproducible release builds and runs the full stack.
-- [ ] [`./rust-rewrite-master-plan.md`](./rust-rewrite-master-plan.md) §6 definition of done is satisfied.
+- [ ] [`./rust-rewrite-master-plan.md`](../../reference/rust-rewrite-master-plan.md) §6 definition of done is satisfied.
 - [ ] **`[deleted - see Phase 7]/` deleted from the repo root (P7-T07). This is the last checkbox.
       When it is ticked, the refactor is done.**

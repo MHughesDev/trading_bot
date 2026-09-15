@@ -25,7 +25,7 @@ use crate::{auth::BearerToken, state::AppState};
 /// POST /api/strategies — validate then persist a strategy definition.
 pub async fn create_strategy(
     State(state): State<AppState>,
-    _token: BearerToken,
+    token: BearerToken,
     Json(def): Json<StrategyDefinition>,
 ) -> impl IntoResponse {
     match validate(&def) {
@@ -53,20 +53,118 @@ pub async fn create_strategy(
                 }
             };
 
-            // Persist to Postgres (upsert so re-saving a strategy updates it).
-            if let Err(e) = sqlx::query(
-                "INSERT INTO strategy_definitions (strategy_id, asset_class, definition_json) \
-                 VALUES ($1, $2, $3) \
-                 ON CONFLICT (strategy_id) DO UPDATE SET \
-                   definition_json = EXCLUDED.definition_json, \
-                   updated_at = now()",
+            // ── append the revision, then move the pointer (ADR-P6-04) ──
+            //
+            // This used to be `ON CONFLICT (strategy_id) DO UPDATE`, which made
+            // the authoring store the last mutable thing in the evidence path:
+            // a re-save meant the definition a live instance was running could
+            // not be reconstructed from any record, and two runs sharing a
+            // `strategy_version` were only comparable if nobody had saved in
+            // between.
+            //
+            // Now `strategy_id` is a pointer. The revision is content-addressed
+            // and append-only, so re-saving an unchanged document is a no-op
+            // rather than a new row, and re-saving a changed one *adds* rather
+            // than replaces.
+            //
+            // Both writes are one transaction: a revision with nothing pointing
+            // at it is harmless, but a pointer to a revision that was rolled
+            // back is a dangling head.
+            let revision = match domain::strategy_def::revision::RevisionHash::of(&inner) {
+                Ok(h) => h,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "canonicalisation_failed", "message": e.to_string() })),
+                    )
+                        .into_response()
+                }
+            };
+            let canonical = domain::strategy_def::revision::canonical_json(&def_json);
+
+            let mut tx = match state.pg.begin().await {
+                Ok(t) => t,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": e.to_string() })),
+                    )
+                        .into_response()
+                }
+            };
+
+            // The parent is whatever this strategy currently points at. A first
+            // save has none; a later one records what it was edited from, which
+            // is what makes the revision history a chain rather than a pile.
+            let parent: Option<String> = sqlx::query_scalar(
+                "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
             )
             .bind(&inner.strategy_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .ok()
+            .flatten();
+
+            // Re-saving the identical document is not a new revision. The
+            // content hash is the identity, so ON CONFLICT DO NOTHING is the
+            // correct no-op here and the only place a `DO NOTHING` belongs in
+            // this path.
+            if let Err(e) = sqlx::query(
+                "INSERT INTO strategy_revision (
+                     revision_hash, strategy_id, parent_hash, definition_version, asset_class,
+                     definition_json, definition_bytes, actor_kind, actor_id,
+                     seq, prev_hash, row_hash
+                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,'\\x'::bytea,'\\x'::bytea)
+                 ON CONFLICT (revision_hash) DO NOTHING",
+            )
+            .bind(revision.as_str())
+            .bind(&inner.strategy_id)
+            .bind(parent.filter(|p| p != revision.as_str()))
+            .bind(&inner.definition_version)
             .bind(&inner.asset_class)
             .bind(&def_json)
-            .execute(&state.pg)
+            .bind(canonical.as_bytes())
+            .bind("human")
+            .bind(token.user_id().to_string())
+            .execute(&mut *tx)
             .await
             {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "revision_insert_failed", "message": e.to_string() })),
+                )
+                    .into_response();
+            }
+
+            // The pointer. `definition_json` here is a cache of the head
+            // revision, and 0058's trigger refuses a head belonging to another
+            // strategy, so the two cannot drift into naming different documents.
+            if let Err(e) = sqlx::query(
+                "INSERT INTO strategy_definitions \
+                   (strategy_id, definition_version, asset_class, definition_json, head_revision) \
+                 VALUES ($1, $2, $3, $4, $5) \
+                 ON CONFLICT (strategy_id) DO UPDATE SET \
+                   definition_version = EXCLUDED.definition_version, \
+                   definition_json = EXCLUDED.definition_json, \
+                   head_revision   = EXCLUDED.head_revision, \
+                   updated_at      = now()",
+            )
+            .bind(&inner.strategy_id)
+            .bind(&inner.definition_version)
+            .bind(&inner.asset_class)
+            .bind(&def_json)
+            .bind(revision.as_str())
+            .execute(&mut *tx)
+            .await
+            {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": e.to_string() })),
+                )
+                    .into_response();
+            }
+
+            if let Err(e) = tx.commit().await {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({ "error": e.to_string() })),
@@ -87,7 +185,11 @@ pub async fn create_strategy(
 
             (
                 StatusCode::CREATED,
-                Json(json!({ "id": inner.strategy_id, "strategy_id": inner.strategy_id })),
+                Json(json!({
+                    "id": inner.strategy_id,
+                    "strategy_id": inner.strategy_id,
+                    "revision_hash": revision.as_str(),
+                })),
             )
                 .into_response()
         }

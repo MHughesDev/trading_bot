@@ -25,7 +25,7 @@ Formal plans for the Python → Rust trading platform refactor. Each plan file i
 
 | Plan | Type | Status | Derived From |
 |------|------|--------|--------------|
-| [rust-rewrite-master-plan.md](./rust-rewrite-master-plan.md) | Formal | Current | SYS-001, all ADRs |
+| [rust-rewrite-master-plan.md](../../reference/rust-rewrite-master-plan.md) | Formal | Current | SYS-001, all ADRs |
 | [phase-A-documentation.md](./phase-A-documentation.md) | Formal | Current | All specs/ADRs |
 | [phase-B-bootstrap.md](./phase-B-bootstrap.md) | Formal | Pending | SYS-001, ADR-0001 |
 | [phase-0-foundations.md](./phase-0-foundations.md) | Formal | Pending | DATA-001, DATA-002, DATA-003, DATA-004, ADR-0002, ADR-0007 |

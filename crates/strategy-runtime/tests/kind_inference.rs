@@ -12,6 +12,7 @@ use strategy_runtime::kind::{infer_kind, StrategyKind};
 
 fn base_def() -> StrategyDefinition {
     StrategyDefinition {
+        exits: None,
         strategy_id: "test".into(),
         definition_version: "1.0".into(),
         asset_class: "crypto_spot_cex".into(),

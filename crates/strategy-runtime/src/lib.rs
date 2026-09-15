@@ -4,6 +4,7 @@
 //! and in replay; determinism is enforced by `world.now()` returning
 //! `available_time` rather than the OS clock.
 
+pub mod exits;
 pub mod automation;
 pub mod bytecode;
 pub mod clock;

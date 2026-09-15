@@ -79,6 +79,7 @@ fn pipeline_surfaces_top_5_by_feature() {
 #[test]
 fn pipeline_manifest_reflects_data_source_lane() {
     let def = StrategyDefinition {
+        exits: None,
         strategy_id: "pipeline_top5".into(),
         definition_version: "1.0".into(),
         asset_class: "crypto_spot_cex".into(),

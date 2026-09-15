@@ -50,10 +50,35 @@ Phase 0 and 1: done. Phase 2: every item done except 2.1, 2.14 and 2.16, which a
 4. **Phase 3's writers** — the `InstrumentProfile` job that calls `fingerprint.compute` and writes `knowledge.asset_embedding`, and a timer for `TensorProjection::rebuild`. Both modules exist and are tested; neither is scheduled.
 5. **Keep the live suites in CI.** They pass today against a real database; the four listed in §3 do not, and they were already failing.
 
+## 5a. The external review sprint (2026-09-14)
+
+`decisions/EXTERNAL-REVIEW-2026-09.md` is the gap analysis; `PROGRESS.md` records
+what was built from it. Ten ADRs, P6-01 to P6-10. The short version:
+
+- Exits are typed fields on the definition at `definition_version` 1.3, and the
+  grammar stays frozen. `ExitTracker` drives them, and **the backtest simulator
+  now calls it** (ADR-P6-11, migration 0120) — this was the sprint's one loose
+  end and it is closed. Wiring it found two more defects in the same component:
+  the simulated instrument carried no maker/taker rate, so every fill was
+  charged zero commission (ADR-P6-12), and every `Trade` carried a size of zero,
+  because a closed nautilus `Position` reports `quantity` as the *open* size.
+  Runs computed before the fix are separated by engine version and filed as a
+  verified evaluator defect (ADR-P6-13); they are not deleted or re-scored.
+- `FeeSchedule`/`FeeBook` replace the flat per-asset-class rate; the tradeable
+  frontier is a pre-trial admission check, not a gate.
+- The oracle test is in the adversarial suite and fails the build if a
+  perfect-foresight always-in strategy is profitable at one minute.
+- `strategy_id` is a pointer; evidence binds to `strategy_revision`.
+- `report_kill` / `report_evaluator_defect` are the agent's primary output, and a
+  verified defect outranks a promotion in the type *and* in the database.
+- `Numeraire` stops USDT being summed as USD; `capacity::Exposure` aggregates
+  across every instance of a revision; `procedure_null::Roc` needs both arms.
+
+Migrations 0058 and 0059. 21 new live tests, 11 new static invariants.
+
 ## 5b. Database state
 
-The developer database **is at migration 57** and the Postgres container **is**
-`pgvector/pgvector:pg16`. Applying 0043–57 to it found two bugs that a fresh
+The developer database **is at migration 59** and the Postgres container **is** `pgvector/pgvector:pg16`. Applying 0043–57 to it found two bugs that a fresh
 database could not have shown (see `PROGRESS.md`), and the old alpine volume had
 its indexes rebuilt with `REINDEX DATABASE` because musl and glibc sort text
 differently and alpine records no collation version to compare against. A dump
@@ -68,6 +93,20 @@ DATABASE_URL=postgres://trading:trading@localhost:5432/trading \
 
 It refuses to run without `DATABASE_URL`, prints the before and after version,
 and is idempotent.
+
+If it reports *"migration N was previously applied but has been modified"* on a
+file git says is unmodified, the cause is line endings: sqlx hashes bytes, and
+before `.gitattributes` pinned `migrations/*.sql` to LF the same commit produced
+different checksums on Windows and Linux. Repair it with
+
+```
+DATABASE_URL=... cargo run -p storage --example normalize_checksums -- --dry-run
+DATABASE_URL=... cargo run -p storage --example normalize_checksums
+```
+
+It re-records only rows whose difference is provably line endings, and exits
+non-zero on any row where the content actually changed rather than papering over
+it.
 
 ## 6. Environment and how to verify
 

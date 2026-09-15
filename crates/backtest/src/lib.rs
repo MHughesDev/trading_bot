@@ -24,11 +24,14 @@
 
 pub mod aggregate;
 pub mod collect;
+pub mod costs;
 pub mod experiment;
+pub mod forensics;
 pub mod gaps;
 pub mod gates;
 pub mod manager;
 pub mod nulls;
+pub mod procedure_null;
 pub mod reconcile;
 pub mod requirements;
 pub mod rng;

@@ -229,6 +229,8 @@ mod tests {
             equity: daily_curve(&[100.0, 101.0, 102.0]),
             trades: vec![sample_trade(dec!(2))],
             stats: serde_json::Value::Null,
+            exit_fills: Vec::new(),
+            fee_schedule: crate::costs::FeeBook::platform_default().resolve(None, None),
         };
         let r = map_detailed_result(
             &c,

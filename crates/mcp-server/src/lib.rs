@@ -450,6 +450,22 @@ async fn dispatch_untraced(
         "advance_gate" => tools::research::advance_gate(&ctx.api, params).await,
         "get_null_picker" => tools::research::get_null_picker(&ctx.api, params).await,
         "choose_null" => tools::research::choose_null(&ctx.api, params).await,
+        "report_kill" => tools::falsification::report_kill(&ctx.api, params).await,
+        "report_evaluator_defect" => {
+            tools::falsification::report_evaluator_defect(&ctx.api, params).await
+        }
+        "check_tradeable_frontier" => {
+            tools::falsification::check_tradeable_frontier(&ctx.api, params).await
+        }
+        "run_oracle_test" => tools::falsification::run_oracle_test(&ctx.api, params).await,
+        "get_trade_list" => tools::falsification::get_trade_list(&ctx.api, params).await,
+        "probe_data_quality" => tools::falsification::probe_data_quality(&ctx.api, params).await,
+        "find_similar_trials" => tools::falsification::find_similar_trials(&ctx.api, params).await,
+        "web_search" => tools::research_tools::web_search(&ctx.api, params).await,
+        "fetch_url" => tools::research_tools::fetch_url(&ctx.api, params).await,
+        "create_skill" => tools::research_tools::create_skill(&ctx.api, params).await,
+        "list_skills" => tools::research_tools::list_skills(&ctx.api, params).await,
+        "run_skill" => tools::research_tools::run_skill(&ctx.api, params).await,
 
         unknown => {
             json!({ "error": "unknown_tool", "tool": unknown })

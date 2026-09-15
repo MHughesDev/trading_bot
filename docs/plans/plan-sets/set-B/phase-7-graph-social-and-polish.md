@@ -6,8 +6,8 @@ Derived From: C-043, C-065, C-101, C-102, C-103, C-106, C-110
 
 # Phase 7 — Graph, Social & Polish
 
-> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../architecture.md),
-> the specs under [`../../specs/`](../../specs/), and the existing codebase. Phase 2 stood up the
+> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../../architecture.md),
+> the specs under [`../../specs/`](../../../specs/), and the existing codebase. Phase 2 stood up the
 > TigerGraph + Milvus containers and client crate skeletons (`crates/graph`, `crates/semantic`) and
 > the Reddit collector. This phase populates and uses them, adds the web scraper satellite, and
 > finalizes docs. Read `crates/graph`, `crates/semantic`, the registries from Phase 1, and
