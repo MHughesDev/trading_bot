@@ -182,24 +182,65 @@ impl RegimeScopeStore {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    /// The scope that covers a strategy, if one is configured.
+    /// The scope that covers a strategy.
     ///
-    /// `None` is a real answer and the caller must treat it as one: an
-    /// unconfigured market has no regimes, and a gate that invents them from
-    /// the strategy's own returns has to say so (ADR-P2-29).
+    /// Every outcome but [`ScopeResolution::Scope`] is a real answer the caller
+    /// must carry: an unconfigured market has no regimes, and a gate that
+    /// invents them from the strategy's own returns has to say so (ADR-P2-29).
     ///
     /// # Errors
     /// Backend failures.
-    pub async fn covering(
+    pub async fn resolve(
         &self,
         asset_class: &str,
         symbol: Option<&str>,
-    ) -> Result<Option<RegimeScope>, sqlx::Error> {
-        Ok(self
-            .enabled()
-            .await?
-            .into_iter()
-            .find(|s| s.covers(asset_class, symbol)))
+    ) -> Result<ScopeResolution, sqlx::Error> {
+        Ok(resolve_from(&self.enabled().await?, asset_class, symbol))
+    }
+}
+
+/// What asking for a strategy's market scope can answer.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScopeResolution {
+    Scope(Box<RegimeScope>),
+    /// Several scopes claim this asset class and nothing said which market the
+    /// strategy trades. Choosing one would be exactly the guess ADR-P3-07
+    /// refused to bake in as a default.
+    Ambiguous(Vec<String>),
+    /// No scope is configured for this market.
+    Unconfigured,
+}
+
+/// The resolution rule, without a database.
+///
+/// With a symbol, a scope has to claim that symbol. Without one, a single
+/// configured scope for the asset class is unambiguous — there is only one
+/// market it could mean — and two or more are not, so the answer is
+/// [`ScopeResolution::Ambiguous`] rather than the first row.
+#[must_use]
+pub fn resolve_from(
+    scopes: &[RegimeScope],
+    asset_class: &str,
+    symbol: Option<&str>,
+) -> ScopeResolution {
+    if symbol.is_some() {
+        return scopes
+            .iter()
+            .find(|s| s.covers(asset_class, symbol))
+            .map_or(ScopeResolution::Unconfigured, |s| {
+                ScopeResolution::Scope(Box::new(s.clone()))
+            });
+    }
+    let in_class: Vec<&RegimeScope> = scopes
+        .iter()
+        .filter(|s| s.asset_class.eq_ignore_ascii_case(asset_class))
+        .collect();
+    match in_class.len() {
+        0 => ScopeResolution::Unconfigured,
+        1 => ScopeResolution::Scope(Box::new(in_class[0].clone())),
+        _ => ScopeResolution::Ambiguous(
+            in_class.iter().map(|s| s.market_scope.clone()).collect(),
+        ),
     }
 }
 
@@ -297,7 +338,7 @@ impl RegimeStore {
                    -- was computed from is backfilled onto rows written before
                    -- 0117 added the column, and only when it is still absent.
                    SET series_log_return = coalesce(
-                         regime_causal.regime_state.series_log_return,
+                         regime_state.series_log_return,
                          EXCLUDED.series_log_return)",
             )
             .bind(market_scope)
@@ -590,6 +631,37 @@ mod tests {
         assert!(all.covers("crypto", Some("SOL-USD")));
         assert!(all.covers("crypto", None));
         assert!(!all.covers("equity", Some("SPY")));
+    }
+
+    /// Two scopes for one asset class and no symbol is ambiguous, and ambiguity
+    /// is reported rather than resolved by row order.
+    #[test]
+    fn two_markets_and_no_symbol_is_not_a_choice_to_make_quietly() {
+        let one = scope(&["BTC-USD"]);
+        let mut two = scope(&["ETH-USD"]);
+        two.market_scope = "crypto_eth_usd".into();
+        two.series_symbol = "ETH-USD".into();
+        let both = vec![one.clone(), two.clone()];
+
+        assert_eq!(
+            resolve_from(&both, "crypto", Some("ETH-USD")),
+            ScopeResolution::Scope(Box::new(two))
+        );
+        match resolve_from(&both, "crypto", None) {
+            ScopeResolution::Ambiguous(names) => assert_eq!(names.len(), 2),
+            other => panic!("two scopes, no symbol, and it picked one: {other:?}"),
+        }
+        // One scope for the class is unambiguous: there is only one market it
+        // could mean.
+        assert_eq!(
+            resolve_from(&[one], "crypto", None),
+            ScopeResolution::Scope(Box::new(scope(&["BTC-USD"])))
+        );
+        assert_eq!(resolve_from(&both, "equity", None), ScopeResolution::Unconfigured);
+        assert_eq!(
+            resolve_from(&both, "crypto", Some("SOL-USD")),
+            ScopeResolution::Unconfigured
+        );
     }
 
     /// The alignment is causal in both bounds. A label whose knowledge time is

@@ -76,6 +76,14 @@ pub struct StackEvidence<'a> {
     // Gate 11 — regime coverage. Market first, strategy second (ADR-P2-29).
     pub market_returns: &'a [(chrono::DateTime<chrono::Utc>, f64)],
     pub strategy_returns: &'a [(chrono::DateTime<chrono::Utc>, f64)],
+    /// The platform's own filtered labels, one per strategy observation, when a
+    /// market scope is configured (SPEC §5.4, ADR-P3-08).
+    ///
+    /// When this is `Some`, Gate 11 counts these and does not derive its own.
+    /// Two regime models — one in the gate and one in `regime_causal` — would be
+    /// free to disagree about the same day, and the gate's would be the one
+    /// nobody could audit.
+    pub regime_labels: Option<&'a [VolRegime]>,
     // Gate 12 — perturbation.
     pub perturbation: Option<&'a PerturbationInputs<'a>>,
     // Gates 13 / 14 — the stored return series and the candidate family.
@@ -257,13 +265,24 @@ pub fn evaluate_stack(
     });
 
     // 11 — regime coverage. The market series labels the regimes; the strategy's
-    // attributes the P&L (ADR-P2-29).
-    outcomes.push(gate_11_regime_coverage(
-        profile,
-        evidence.asset_class,
-        evidence.market_returns,
-        evidence.strategy_returns,
-    ));
+    // attributes the P&L (ADR-P2-29). When the platform's own filtered labels
+    // are supplied they are used as given, so the gate and `regime_causal` count
+    // the same regimes over the same days (ADR-P3-08).
+    outcomes.push(match evidence.regime_labels {
+        Some(labels) => crate::gates::evaluators::gate_11_with_labels(
+            profile,
+            evidence.asset_class,
+            labels,
+            evidence.strategy_returns,
+            false,
+        ),
+        None => gate_11_regime_coverage(
+            profile,
+            evidence.asset_class,
+            evidence.market_returns,
+            evidence.strategy_returns,
+        ),
+    });
 
     // 12 — perturbation and concentration.
     outcomes.push(match evidence.perturbation {
@@ -438,6 +457,7 @@ mod tests {
             factors: None,
             market_returns: &[],
             strategy_returns: &[],
+            regime_labels: None,
             perturbation: None,
             return_series: &[],
             family: &[],

@@ -78,6 +78,14 @@ pub const MIN_OBS_PER_REGIME: usize = 20;
 /// Distinct labels needed before there is a comparison to make.
 pub const MIN_REGIMES: usize = 2;
 
+/// How far before a series' first observation the label history is read.
+///
+/// The label in force on day one was written at an earlier bar's close, so a
+/// history starting at the first observation leaves the start of every series
+/// unlabelled. Sixty days is comfortably more than the labeller's 21-day window
+/// and costs one bounded read.
+const LABEL_LOOKBEHIND_DAYS: i64 = 60;
+
 /// One strategy's out-of-sample series, already aligned to its causal labels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LabelledSeries {
@@ -496,7 +504,17 @@ impl SeparationJob {
         let store = RegimeStore::new(self.pg.clone());
         let (from, to) = span(series);
         let history = store
-            .history(&scope.market_scope, model_version, from, to)
+            .history(
+                &scope.market_scope,
+                model_version,
+                // Back far enough to catch the label already in force when the
+                // first observation lands. A daily label is stamped at an
+                // earlier bar's close, and reading from the first observation
+                // would leave the start of every series unlabelled — which the
+                // callers correctly refuse to work around.
+                from - chrono::Duration::days(LABEL_LOOKBEHIND_DAYS),
+                to,
+            )
             .await?;
 
         let mut labelled = Vec::new();
@@ -578,13 +596,22 @@ impl SeparationJob {
         &self,
         tenant_id: &str,
     ) -> Result<Vec<(String, Vec<(DateTime<Utc>, f64)>)>, sqlx::Error> {
+        // Through the tenant transaction, not the bare pool. The table has
+        // FORCE ROW LEVEL SECURITY and its policy reads `app.tenant_id`, so a
+        // plain read returns **zero rows rather than an error** — which would
+        // make "the ledger has no series" indistinguishable from "this job
+        // forgot to say who it is".
+        let mut tx = ledger::pg::tenant_tx(&self.pg, tenant_id)
+            .await
+            .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
         let rows: Vec<(uuid::Uuid, Vec<DateTime<Utc>>, Vec<f64>)> = sqlx::query_as(
             "SELECT trial_id, ts, returns FROM mlops.trial_return_series
               WHERE tenant_id = $1 ORDER BY recorded_at",
         )
         .bind(tenant_id)
-        .fetch_all(&self.pg)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(rows
             .into_iter()
             .map(|(id, ts, returns)| {
@@ -878,16 +905,24 @@ mod tests {
         assert!((periods_per_year(&[]) - 252.0).abs() < f64::EPSILON);
     }
 
-    /// The pre-registered alpha is a constant with no setter. If this test has
-    /// to be edited to make a run pass, that edit is the finding.
+    /// The pre-registered alpha is a constant, and no function here takes one.
+    /// If this test has to be edited to make a run pass, that edit is the
+    /// finding — a separation test tuned until the regime model looks good is a
+    /// curve-fitted backtest in the one place the platform is supposed to be
+    /// immune to it.
     #[test]
     fn alpha_is_pre_registered() {
         assert!((ALPHA - 0.05).abs() < f64::EPSILON);
         let src = include_str!("regime_separation.rs");
         let production = &src[..src.find("#[cfg(test)]").expect("a test module")];
-        assert!(
-            !production.contains("fn set_alpha") && !production.contains("alpha:  f64,"),
-            "alpha must not become a parameter a caller can raise after seeing the answer"
-        );
+        // Every function signature in the module, checked for a way in.
+        for sig in production.split("fn ").skip(1) {
+            let params = sig.split(')').next().unwrap_or_default();
+            assert!(
+                !params.contains("alpha"),
+                "alpha must not be a parameter a caller can raise after seeing the answer: fn {}",
+                sig.lines().next().unwrap_or_default()
+            );
+        }
     }
 }

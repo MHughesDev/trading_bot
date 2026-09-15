@@ -316,13 +316,59 @@ pub struct RegimeCoverage {
 /// Four checks, and the third is the one that catches the most self-deception:
 /// many "robust" strategies turn out to have made all their money in one
 /// three-month window.
+///
+/// This entry point labels the market series itself. A caller that already holds
+/// the platform's filtered labels — anything reading `regime_causal` once a
+/// scope is configured — should use [`gate_11_with_labels`] instead, so the gate
+/// and the rest of the platform are counting the same regimes.
 #[must_use]
-#[allow(clippy::too_many_lines)]
 pub fn gate_11_regime_coverage(
     profile: &GateProfile,
     asset_class: &str,
     market: &[(DateTime<Utc>, f64)],
     strategy: &[(DateTime<Utc>, f64)],
+) -> GateOutcome {
+    let labelled_from_strategy = market.is_empty();
+    let source = if labelled_from_strategy { strategy } else { market };
+    if source.len() != strategy.len() {
+        return GateOutcome::inconclusive(
+            11,
+            "regime_coverage",
+            format!(
+                "the market series has {} days and the strategy {}; regimes can only be attributed \
+                 across aligned series",
+                source.len(),
+                strategy.len()
+            ),
+        );
+    }
+    let labels = vol_tercile_regimes(source, 21);
+    gate_11_with_labels(profile, asset_class, &labels, strategy, labelled_from_strategy)
+}
+
+/// Gate 11 over labels somebody else produced.
+///
+/// The labelling and the attribution are two steps, and once `regime_scopes` is
+/// configured the first one has already happened: `regime_causal.regime_state`
+/// holds the filtered label the platform could have known on each day, computed
+/// by the labeller from the scope's series. Re-deriving terciles here from a
+/// market series reconstructed for the occasion would be a second regime model
+/// — one that could disagree with the one every other reader sees.
+///
+/// `labelled_from_strategy` is the caller's admission, not an inference: it says
+/// whether these labels came from a market series or from the strategy's own
+/// returns, and the verdict repeats it (ADR-P2-29).
+///
+/// # Panics
+/// Never; the length mismatch is returned as an inconclusive verdict.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn gate_11_with_labels(
+    profile: &GateProfile,
+    asset_class: &str,
+    labels: &[VolRegime],
+    strategy: &[(DateTime<Utc>, f64)],
+    labelled_from_strategy: bool,
 ) -> GateOutcome {
     const NAME: &str = "regime_coverage";
     let t = profile.thresholds();
@@ -345,23 +391,20 @@ pub fn gate_11_regime_coverage(
             format!("{} out-of-sample days is too few to label regimes", strategy.len()),
         );
     }
-    let labelled_from_strategy = market.is_empty();
-    let source = if labelled_from_strategy { strategy } else { market };
-    if source.len() != strategy.len() {
+    if labels.len() != strategy.len() {
         return GateOutcome::inconclusive(
             11,
             NAME,
             format!(
-                "the market series has {} days and the strategy {}; regimes can only be attributed \
-                 across aligned series",
-                source.len(),
+                "{} regime labels against {} strategy observations; regimes can only be \
+                 attributed across aligned series",
+                labels.len(),
                 strategy.len()
             ),
         );
     }
 
-    let labels = vol_tercile_regimes(source, 21);
-    let coverage = measure_coverage(strategy, &labels, &ac.crisis_windows, labelled_from_strategy);
+    let coverage = measure_coverage(strategy, labels, &ac.crisis_windows, labelled_from_strategy);
 
     if coverage.pnl_share.is_empty() {
         return GateOutcome::inconclusive(
@@ -1671,6 +1714,45 @@ mod tests {
         // The high-vol middle is labelled high; the quiet start is not.
         assert_eq!(labels[150], VolRegime::High);
         assert_ne!(labels[20], VolRegime::High);
+    }
+
+    /// The platform's own filtered labels are used as given, not re-derived.
+    ///
+    /// Once a scope is configured, `regime_causal.regime_state` already holds
+    /// the label the platform could have known on each day. If the gate
+    /// recomputed terciles from a series reconstructed for the occasion it would
+    /// be a second regime model, free to disagree with the one every other
+    /// reader sees — so the fixture hands it labels that no tercile of the
+    /// strategy's own returns could produce, and checks they are the ones
+    /// counted.
+    #[test]
+    fn gate_11_counts_the_labels_it_is_given() {
+        let p = profile_with_crises();
+        let r = daily(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(), 400, |i| {
+            if (180..220).contains(&i) { 0.05 } else { 0.00001 }
+        });
+        // Every day in one regime: the platform's labeller says the whole sample
+        // was one kind of market, whatever the strategy's own returns did.
+        let one = vec![VolRegime::Mid; r.len()];
+        let out = gate_11_with_labels(&p, "crypto", &one, &r, false);
+        assert!(!out.passed, "{}", out.detail);
+        assert!(
+            out.detail.contains("1 distinct volatility regimes"),
+            "the supplied labels must be the ones counted: {}",
+            out.detail
+        );
+        assert!(
+            !out.detail.contains("labelled from the strategy"),
+            "these labels came from the market and the verdict must not say otherwise: {}",
+            out.detail
+        );
+
+        // And a label vector that does not line up with the series is
+        // inconclusive rather than truncated to fit.
+        let short = vec![VolRegime::Mid; r.len() - 1];
+        let out = gate_11_with_labels(&p, "crypto", &short, &r, false);
+        assert!(!out.passed);
+        assert!(out.detail.contains("regime labels against"), "{}", out.detail);
     }
 
     /// The check that catches the most self-deception: all the money made in one
