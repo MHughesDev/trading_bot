@@ -40,6 +40,7 @@ pub mod policy;
 pub mod profile;
 pub mod provenance;
 pub mod registry;
+pub mod state;
 pub mod trace;
 pub mod validation;
 pub mod workspace;
@@ -49,4 +50,9 @@ pub use policy::{decide, ActionContext, Decision, Ruling};
 pub use profile::{Archetype, Profile, ProfileSet, Tier};
 pub use provenance::{Provenance, Tagged};
 pub use registry::{Risk, ToolDef, ToolRegistry};
+// `state::Decision` is deliberately NOT re-exported: `policy::Decision` already
+// owns that name at the crate root and means something else (a policy ruling, not
+// a choice the run recorded). AGENT-008 §2 names the field `decided:
+// Vec<Decision>`; it is reached as `state::Decision`.
+pub use state::{Detail, GoalKind, Mode, PlannedStep, Ring, Stage, StepKind, StepStatus, WorkingState, Workflow};
 pub use workspace::{Area, Delivery, Workspace};
