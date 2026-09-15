@@ -184,7 +184,41 @@ impl ExitTracker {
     /// The tracker does **not** close itself on a trigger: the caller owns the
     /// position and may not be able to fill. Call [`ExitTracker::closed`] when
     /// the fill is done.
+    ///
+    /// This is the whole-bar form, for a caller whose feed delivers one event
+    /// per bar — the backtest simulator. A caller whose feed is finer than a
+    /// bar drives the same evaluation through
+    /// [`ExitTracker::on_bar_update`] and marks the bar boundary with
+    /// [`ExitTracker::bar_closed`]; `on_bar` is exactly those two in order, so
+    /// there is one evaluation and one holding-bar count for both.
     pub fn on_bar(&mut self, bar: &Bar, signals: &[String]) -> Option<Triggered> {
+        let fired = self.on_bar_update(bar, signals);
+        self.bar_closed();
+        fired
+    }
+
+    /// Evaluate the policy against the bar **so far**, without advancing the
+    /// holding-bar count.
+    ///
+    /// A live feed is finer-grained than the bar the strategy declared: the
+    /// hot path publishes one event per trade, so a one-minute strategy sees
+    /// many events inside one minute. Waiting for the minute to close before
+    /// asking whether the stop was breached would leave a position exposed for
+    /// up to a bar past its own stop — the exact bound the declaration exists
+    /// to impose. Waiting is therefore not an option, and counting each tick as
+    /// a bar is not either: `max_holding_bars: 5` would mean five minutes in
+    /// replay and five trades live.
+    ///
+    /// Splitting the two lets the caller do the right thing on both axes:
+    /// evaluate prices as often as the feed allows, and advance the holding
+    /// count once per declared bar. The evaluation is the same code either
+    /// way, including the intrabar policy.
+    ///
+    /// `bar` is the *running* bar — the extremes reached inside the current
+    /// bar up to now, and the latest price as its close. Calling this twice on
+    /// the same bar is safe: the favourable extreme only ratchets, and a rule
+    /// that fired on the first call fires on the second.
+    pub fn on_bar_update(&mut self, bar: &Bar, signals: &[String]) -> Option<Triggered> {
         let open = self.open.as_mut()?;
 
         open.favourable_extreme = match open.side {
@@ -231,15 +265,24 @@ impl ExitTracker {
             }
         }
 
-        let result = fired.map(|(rule, probe)| Triggered {
+        fired.map(|(rule, probe)| Triggered {
             rule: rule.kind().to_string(),
             price: fill_level(rule, open, probe, bar),
             ts: bar.ts,
             bars_held: open.bars_held,
-        });
+        })
+    }
 
-        open.bars_held += 1;
-        result
+    /// Mark the end of one declared bar.
+    ///
+    /// The holding-bar count — and therefore [`ExitRule::MaxHoldingBars`] —
+    /// advances here and nowhere else, so it counts bars of the timeframe the
+    /// strategy declared whatever granularity the feed arrives at. A no-op
+    /// when flat: bars that elapse with no position are not held.
+    pub fn bar_closed(&mut self) {
+        if let Some(open) = self.open.as_mut() {
+            open.bars_held += 1;
+        }
     }
 }
 
@@ -537,5 +580,92 @@ mod tests {
     #[test]
     fn worst_first_is_the_default() {
         assert_eq!(IntrabarPolicy::default(), IntrabarPolicy::WorstFirst);
+    }
+
+    // ── the split form, for a feed finer than a bar (ADR-P6-14) ──────────────
+
+    /// `on_bar` must remain exactly `on_bar_update` followed by `bar_closed`,
+    /// or the simulator and the live runtime are counting different things.
+    #[test]
+    fn the_whole_bar_form_is_the_split_form_in_order() {
+        let bars = [
+            bar(1, dec!(101), dec!(99), dec!(100)),
+            bar(2, dec!(103), dec!(97), dec!(99)),
+            bar(3, dec!(104), dec!(96), dec!(98)),
+        ];
+        let rules = || {
+            policy(vec![
+                ExitRule::MaxHoldingBars { bars: 3 },
+                ExitRule::StopLoss { fraction: dec!(0.05) },
+            ])
+        };
+
+        let mut whole = ExitTracker::new(rules());
+        let mut split = ExitTracker::new(rules());
+        whole.opened(PositionSide::Long, dec!(100));
+        split.opened(PositionSide::Long, dec!(100));
+
+        for b in &bars {
+            let a = whole.on_bar(b, &[]);
+            let c = split.on_bar_update(b, &[]);
+            split.bar_closed();
+            assert_eq!(a, c, "the two forms disagreed on {}", b.ts);
+            assert_eq!(whole.bars_held(), split.bars_held());
+        }
+    }
+
+    /// Many updates inside one bar are one bar of holding. Counting each
+    /// update would make `max_holding_bars: 2` mean two trades live and two
+    /// minutes in replay.
+    #[test]
+    fn updates_within_one_bar_do_not_advance_the_holding_count() {
+        let mut t = ExitTracker::new(policy(vec![ExitRule::MaxHoldingBars { bars: 2 }]));
+        t.opened(PositionSide::Long, dec!(100));
+
+        // Twenty ticks inside bar one; none of them is a second bar.
+        for _ in 0..20 {
+            assert!(t.on_bar_update(&bar(1, dec!(100), dec!(100), dec!(100)), &[]).is_none());
+        }
+        assert_eq!(t.bars_held(), Some(0));
+        t.bar_closed();
+
+        for _ in 0..20 {
+            assert!(t.on_bar_update(&bar(2, dec!(100), dec!(100), dec!(100)), &[]).is_none());
+        }
+        t.bar_closed();
+
+        let fired = t
+            .on_bar_update(&bar(3, dec!(100), dec!(100), dec!(100)), &[])
+            .expect("two bars held");
+        assert_eq!(fired.rule, "max_holding_bars");
+        assert_eq!(fired.bars_held, 2);
+    }
+
+    /// The running-bar form still resolves a bar that breached both adversely.
+    /// The intrabar policy is not something the split form gets to skip.
+    #[test]
+    fn a_running_bar_that_breached_both_still_resolves_to_the_stop() {
+        let mut t = ExitTracker::new(policy(vec![
+            ExitRule::TakeProfit { fraction: dec!(0.05) },
+            ExitRule::StopLoss { fraction: dec!(0.02) },
+        ]));
+        t.opened(PositionSide::Long, dec!(100));
+        let fired = t
+            .on_bar_update(&bar(1, dec!(106), dec!(97), dec!(104)), &[])
+            .unwrap();
+        assert_eq!(fired.rule, "stop_loss");
+        assert_eq!(fired.price, dec!(98));
+    }
+
+    /// A bar that elapses while flat is not a bar held. Otherwise a position
+    /// opened after a long quiet stretch inherits somebody else's clock.
+    #[test]
+    fn bars_that_close_while_flat_are_not_counted() {
+        let mut t = ExitTracker::new(policy(vec![ExitRule::MaxHoldingBars { bars: 1 }]));
+        for _ in 0..5 {
+            t.bar_closed();
+        }
+        t.opened(PositionSide::Long, dec!(100));
+        assert_eq!(t.bars_held(), Some(0));
     }
 }
