@@ -61,6 +61,10 @@ use crate::policy::{self, ActionContext, Decision, Ruling};
 use crate::profile::{Mode, Profile, SchemaStyle};
 use crate::provenance::{self, Provenance, Tagged};
 use crate::registry::{self, Risk, ToolRegistry, FINISH_TASK, RECORD_FINDING, SEARCH_TOOLS};
+use crate::state::{
+    BudgetView, Correction, Detail, FindingRef, GoalKind, Mode as RunMode, PlannedStep, StepKind,
+    StepStatus, WorkingState,
+};
 use crate::validation::{self, Rejection, RetryBudget, Rung, ToolCall};
 
 // ── What the loop is driving ────────────────────────────────────────────────
@@ -497,7 +501,34 @@ pub struct Loop {
     /// visible here.
     path: Vec<State>,
 
-    blocks: Vec<Block>,
+    /// The one working state the loop owns (AGENT-008 §2, S-1.13).
+    ///
+    /// **Rewritten, never appended to.** Before this field existed, "what has
+    /// happened so far" was nine separate `Section::WorkingState` pushes — a
+    /// transcript the model re-derived every step and which grew with the run.
+    /// Every one of those nine sites now either rewrites a field here or records
+    /// an *observation* (below), and the difference between the two is the whole
+    /// mechanism: state is a fixed-size view over an unbounded history.
+    working: WorkingState,
+    /// The namespace the planner named for each step of `working.plan`, in the same
+    /// order and never mutated after the plan is accepted.
+    ///
+    /// It lives here rather than on [`PlannedStep`] because AGENT-008's step type
+    /// names a catalogue entry (`StepKind::Tool`), not a namespace, while the plan
+    /// grammar this loop sends asks for a namespace as the router's *fallback*. Two
+    /// vectors written once at the same moment is the cheapest honest way to hold
+    /// both; see the report note on AGENT-008 §3.2.
+    plan_namespaces: Vec<String>,
+    /// The raw observations: what tools actually returned, in order.
+    ///
+    /// This is the transcript, and it is deliberately NOT the working state. It is
+    /// low priority, carries scratchpad references, and is what compaction drops
+    /// first (AGENT-005 §4.3) — precisely because the state card above it survives
+    /// on its own.
+    observations: Vec<Block>,
+    /// A standing instruction the harness has decided on — "your budget is spent,
+    /// report now". Rewritten, so a run that hits two of these reads one.
+    directive: Option<String>,
     /// Namespaces added by `search_tools`, kept across steps so a recovered routing
     /// miss stays recovered.
     discovered: BTreeSet<String>,
@@ -517,9 +548,6 @@ pub struct Loop {
     exposed: BTreeSet<String>,
     exposed_schemas: Vec<Value>,
     step_namespaces: Vec<String>,
-
-    plan: Vec<PlanStep>,
-    plan_cursor: usize,
 
     pending: Option<Pending>,
     retries: RetryBudget,
@@ -569,19 +597,6 @@ pub struct Loop {
     /// identically over and over, and counting that as progress would make the
     /// counter blind to the thing it exists to catch.
     step_learned_something: bool,
-    /// What the session has established, in order.
-    ///
-    /// The durable spine of a long task: it is re-rendered into context at high
-    /// priority every step, so it outlives the raw results it was distilled from.
-    findings: Vec<String>,
-    /// Opaque identifiers that appeared in a tool result this session.
-    ///
-    /// The corpus `finish_task` citations are checked against. Kept as its own set
-    /// rather than scanned out of `blocks` because blocks are compacted — an id read
-    /// at step 1 and cited at step 12 must still count as seen, and a citation being
-    /// refused because the harness forgot is exactly the kind of unfixable failure
-    /// that fences a healthy session.
-    seen_ids: BTreeSet<String>,
     /// Idempotent calls already made this session, keyed by name + arguments.
     ///
     /// `ToolDef::idempotent` was set on every tool in the catalogue and read by
@@ -616,20 +631,21 @@ impl Loop {
     #[must_use]
     pub fn new(profile: Profile, registry: ToolRegistry, task: Task) -> Self {
         let retries = RetryBudget::new(profile.output.max_retries_per_call);
-        let blocks = vec![
-            Block {
-                section: Section::Charter,
-                tagged: Tagged::system("charter", task.charter.clone()),
-                priority: 255,
-                reference: None,
-            },
-            Block {
-                section: Section::Subtask,
-                tagged: Tagged::system("goal", task.goal.clone()),
-                priority: 255,
-                reference: None,
-            },
-        ];
+        // The state is built from what the loop actually knows at construction, not
+        // left at its defaults: a card that says `lookup` on a multi-step research
+        // task is a card telling the model something false. `demand` is the only
+        // signal available here, so it is the one that decides — the lifecycle
+        // phase (AGENT-013) sets `mode`, `workflow`, `ring` and `stage` properly.
+        let mut working = WorkingState::new(task.goal.clone());
+        (working.kind, working.mode) = match task.demand {
+            TaskDemand::SingleLookup => (GoalKind::Lookup, RunMode::Chat),
+            TaskDemand::MultiStep => (GoalKind::Research, RunMode::Research),
+        };
+        working.budget = BudgetView {
+            steps_remaining: profile.orchestration.max_steps,
+            steps_total: profile.orchestration.max_steps,
+            ..BudgetView::default()
+        };
         Self {
             profile,
             registry,
@@ -637,15 +653,16 @@ impl Loop {
             state: State::Admitting,
             step: 0,
             path: vec![State::Admitting],
-            blocks,
+            working,
+            plan_namespaces: Vec::new(),
+            observations: Vec::new(),
+            directive: None,
             discovered: BTreeSet::new(),
             discovered_tools: Vec::new(),
             evidence_candidates: Vec::new(),
             exposed: BTreeSet::new(),
             exposed_schemas: Vec::new(),
             step_namespaces: Vec::new(),
-            plan: Vec::new(),
-            plan_cursor: 0,
             pending: None,
             retries,
             chosen: None,
@@ -654,8 +671,6 @@ impl Loop {
             tools_attempted: 0,
             barren_steps: 0,
             step_learned_something: false,
-            findings: Vec::new(),
-            seen_ids: BTreeSet::new(),
             idempotent_calls: BTreeMap::new(),
             held: None,
             running: None,
@@ -713,6 +728,141 @@ impl Loop {
     #[must_use]
     pub fn exposed(&self) -> &BTreeSet<String> {
         &self.exposed
+    }
+
+    /// The working state, as the model reads it (AGENT-008 §2).
+    ///
+    /// Exposed so a driver can persist a `state_snapshot` at each step boundary and
+    /// so an escalation can carry it — not so anything outside can mutate it. There
+    /// is exactly one of these per run and the loop owns it.
+    #[must_use]
+    pub fn working(&self) -> &WorkingState {
+        &self.working
+    }
+
+    /// How much of the state this tier reads.
+    ///
+    /// Flat below `local_high`: the card is the first thing a small model attends
+    /// to, and a plan plus a hypothesis plus open questions is most of a 7B's
+    /// attention budget spent on orientation rather than on the step.
+    fn detail(&self) -> Detail {
+        if self.profile.tier.is_local() && self.profile.output.constrained_decoding {
+            Detail::Flat
+        } else {
+            Detail::Rich
+        }
+    }
+
+    /// Everything that goes to the assembler, rebuilt from state on every render.
+    ///
+    /// Rebuilt rather than accumulated: that is the property the nine append sites
+    /// did not have. The state card is one block however long the run is, and the
+    /// only thing that grows is `observations`, which is what compaction is for.
+    fn body(&self) -> Vec<Block> {
+        let mut blocks = Vec::with_capacity(self.observations.len() + 4);
+        blocks.push(Block {
+            section: Section::Charter,
+            tagged: Tagged::system("charter", self.task.charter.clone()),
+            priority: 255,
+            reference: None,
+        });
+        blocks.push(Block {
+            section: Section::Subtask,
+            tagged: Tagged::system("state", self.working.card(self.detail())),
+            priority: 255,
+            reference: None,
+        });
+        if let Some(d) = &self.directive {
+            blocks.push(Block {
+                section: Section::Subtask,
+                tagged: Tagged::system("harness", d.clone()),
+                priority: 250,
+                reference: None,
+            });
+        }
+        if !self.working.findings.is_empty() {
+            blocks.push(Block {
+                section: Section::WorkingState,
+                tagged: Tagged::system(
+                    "findings",
+                    format!(
+                        "ESTABLISHED SO FAR ({}):\n{}",
+                        self.working.findings.len(),
+                        self.working
+                            .findings
+                            .iter()
+                            .enumerate()
+                            .map(|(i, f)| format!("{}. {}", i + 1, f.headline))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    ),
+                ),
+                priority: 250,
+                reference: None,
+            });
+        }
+        blocks.extend(self.observations.iter().cloned());
+        blocks
+    }
+
+    /// Record something a tool actually returned.
+    ///
+    /// The counterpart to rewriting state: an observation is evidence, it is kept in
+    /// order, and it is droppable. Anything the harness merely *decided* belongs in
+    /// [`Self::working`] instead, where it replaces the previous decision rather
+    /// than sitting beside it.
+    fn observe(&mut self, tagged: Tagged, priority: u8, reference: Option<String>) {
+        self.observations.push(Block {
+            section: Section::WorkingState,
+            tagged,
+            priority,
+            reference,
+        });
+    }
+
+    /// The tokens that will leave the body on the way to the model but are not in
+    /// the blocks (AGENT-005 §4.2) — the exposed tool schemas, or the menu that
+    /// stands in for them under the two-step decode.
+    fn reserved_tokens(&self) -> u32 {
+        if self.profile.output.constrained_decoding {
+            // The menu: one line per candidate, plus the fixed instruction text.
+            self.exposed
+                .iter()
+                .map(|n| {
+                    context::estimate_tokens(n)
+                        + self.registry.get(n).map_or(0, |t| {
+                            context::estimate_tokens(t.description.lines().next().unwrap_or(""))
+                        })
+                })
+                .sum::<u32>()
+                + 64
+        } else {
+            self.exposed_schemas
+                .iter()
+                .map(|s| context::estimate_tokens(&s.to_string()))
+                .sum()
+        }
+    }
+
+    /// Mark the step the run is on as finished and move to the next.
+    ///
+    /// There is no cursor: the plan carries its own status, so "where am I" has one
+    /// answer rather than two that can disagree.
+    fn advance_plan(&mut self) {
+        if let Some((i, _)) = self.working.active_step() {
+            self.working.plan[i].status = StepStatus::Done;
+        }
+        if let Some((i, _)) = self.working.active_step() {
+            self.working.plan[i].status = StepStatus::Active;
+        }
+    }
+
+    /// Re-state what is left to spend. Rewritten every step, like everything else
+    /// on the card.
+    fn refresh_budget(&mut self) {
+        let max = self.profile.orchestration.max_steps;
+        self.working.budget.steps_total = max;
+        self.working.budget.steps_remaining = max.saturating_sub(self.step.saturating_sub(1));
     }
 
     /// The one entry point.
@@ -893,14 +1043,39 @@ impl Loop {
             return;
         }
 
-        self.plan = steps
+        let steps: Vec<PlanStep> = steps
             .into_iter()
             .take(self.profile.orchestration.max_steps as usize)
             .collect();
-        self.plan_cursor = 0;
-        fx.push(Effect::Note(Note::Planned {
-            steps: self.plan.clone(),
-        }));
+        // Into the working state, where the plan carries its own status and the card
+        // renders it. `plan_namespaces` keeps the router's fallback beside it.
+        self.plan_namespaces = steps.iter().map(|s| s.namespace.clone()).collect();
+        self.working.plan = steps
+            .iter()
+            .enumerate()
+            .map(|(i, s)| PlannedStep {
+                goal: s.goal.clone(),
+                // The planner names an outcome and a namespace, not a tool, so the
+                // step's kind is the best catalogue match for the outcome — the same
+                // lookup the router does. A step nothing matches is `search_tools`,
+                // which AGENT-008 §3.2 names as the honest answer to "no namespace
+                // to route to".
+                kind: self.registry.search(&s.goal, 1).first().map_or_else(
+                    || StepKind::Tool {
+                        name: SEARCH_TOOLS.to_string(),
+                    },
+                    |t| StepKind::Tool {
+                        name: t.name.clone(),
+                    },
+                ),
+                status: if i == 0 {
+                    StepStatus::Active
+                } else {
+                    StepStatus::Pending
+                },
+            })
+            .collect();
+        fx.push(Effect::Note(Note::Planned { steps }));
         self.begin_step(fx);
     }
 
@@ -923,18 +1098,10 @@ impl Loop {
         // conclusion, which is the state an exhausted budget produces.
         if self.barren_steps >= MAX_BARREN_STEPS && !self.wrapping_up {
             self.wrapping_up = true;
-            self.blocks.push(Block {
-                section: Section::WorkingState,
-                tagged: Tagged::system(
-                    "harness",
-                    format!(
-                        "The last {} steps learned nothing new. Stop and report. Call                          finish_task with what you established, citing the calls that                          showed it. If the goal was not reached, say so plainly and say                          what you would need — do not report a result you cannot                          attribute.",
-                        self.barren_steps
-                    ),
-                ),
-                priority: 250,
-                reference: None,
-            });
+            self.directive = Some(format!(
+                "The last {} steps learned nothing new. Stop and report. Call                  finish_task with what you established, citing the calls that showed                  it. If the goal was not reached, say so plainly and say what you                  would need — do not report a result you cannot attribute.",
+                self.barren_steps
+            ));
             fx.push(Effect::Note(Note::Degraded(Degradation::NoProgress {
                 barren_steps: self.barren_steps,
             })));
@@ -960,23 +1127,15 @@ impl Loop {
             // hand. Spending the last step on the work and none on saying what it was
             // is not a budget, it is a bug.
             self.wrapping_up = true;
-            self.blocks.push(Block {
-                section: Section::WorkingState,
-                tagged: Tagged::system(
-                    "harness",
-                    format!(
-                        "Your step budget ({}) is spent. This is your last turn: call                          finish_task and report what you found, citing ONLY what you                          actually ran this session ({}). If you did not reach an answer,                          say so plainly and say why — do not report a result you cannot                          attribute to one of those calls.",
-                        self.profile.orchestration.max_steps,
-                        if self.evidence_candidates.is_empty() {
-                            "no tool returned a result this session".to_string()
-                        } else {
-                            self.evidence_candidates.join(", ")
-                        }
-                    ),
-                ),
-                priority: 250,
-                reference: None,
-            });
+            self.directive = Some(format!(
+                "Your step budget ({}) is spent. This is your last turn: call                  finish_task and report what you found, citing ONLY what you actually                  ran this session ({}). If you did not reach an answer, say so plainly                  and say why — do not report a result you cannot attribute to one of                  those calls.",
+                self.profile.orchestration.max_steps,
+                if self.evidence_candidates.is_empty() {
+                    "no tool returned a result this session".to_string()
+                } else {
+                    self.evidence_candidates.join(", ")
+                }
+            ));
             fx.push(Effect::Note(Note::Degraded(Degradation::StepsExhausted {
                 max: self.profile.orchestration.max_steps,
             })));
@@ -984,6 +1143,11 @@ impl Loop {
         self.retries = RetryBudget::new(self.profile.output.max_retries_per_call);
         self.chosen = None;
         self.searches_this_step = 0;
+        // A correction is rendered ONCE (AGENT-008 §2, `Correction`). Carried across
+        // a step boundary it reads as a standing instruction, and the model starts
+        // answering the correction instead of the goal.
+        self.working.last_error = None;
+        self.refresh_budget();
 
         // The injection arrives in step N's result and fires in step N+1's call.
         self.prior_provenance = self.pending_provenance;
@@ -1012,7 +1176,15 @@ impl Loop {
             }
         }
 
-        if let Some(step) = self.plan.get(self.plan_cursor).cloned() {
+        let active = self
+            .working
+            .active_step()
+            .map(|(i, s)| (i, s.goal.clone()))
+            .map(|(i, goal)| PlanStep {
+                goal,
+                namespace: self.plan_namespaces.get(i).cloned().unwrap_or_default(),
+            });
+        if let Some(step) = active {
             // Route from the step's goal **deterministically** (§2.2 step 2a), and
             // treat the namespace the planner named as a fallback rather than an
             // answer.
@@ -1089,7 +1261,7 @@ impl Loop {
             exposed: self.exposed.iter().cloned().collect(),
             budget: self.profile.tools.max_exposed_per_step,
             pinned: pinned.clone(),
-            plan_step: self.plan.get(self.plan_cursor).map(|p| p.goal.clone()),
+            plan_step: self.working.active_step().map(|(_, s)| s.goal.clone()),
         }));
 
         self.render(fx);
@@ -1122,7 +1294,13 @@ impl Loop {
     /// `Compacting` state can be entered — and it is entered only when compaction
     /// actually dropped something.
     fn working_prompt(&mut self, fx: &mut Vec<Effect>) -> String {
-        let assembled = context::assemble(&self.profile, self.blocks.clone());
+        // `assemble_reserving`, not `assemble`: the tool schemas (or the menu that
+        // stands in for them) leave the body on the way to the model and are charged
+        // to the same window, so budgeting the body against the whole window is how
+        // a prompt that fits by arithmetic arrives over budget in fact
+        // (AGENT-005 §4.2).
+        let assembled =
+            context::assemble_reserving(&self.profile, self.body(), self.reserved_tokens());
         let c = &assembled.compaction;
         if c.dropped > 0 || c.truncated > 0 || c.deduped > 0 {
             self.enter(State::Compacting, fx);
@@ -1150,30 +1328,13 @@ impl Loop {
     /// original task, which never changes; the plan position, so "how far in am I" is
     /// not something to infer from the transcript; and the current step, which is the
     /// only one of the three the model is being asked to act on.
+    ///
+    /// Derived from the working state rather than built beside it. It **was** built
+    /// beside it, from a second cursor, and the two could disagree — the anchor said
+    /// "plan step 3 of 5" while the state block described a different step. Two
+    /// renderings of one fact is one rendering too many (`state::WorkingState::anchor`).
     fn anchor(&self) -> String {
-        let step_goal = self
-            .plan
-            .get(self.plan_cursor)
-            .map(|s| s.goal.clone())
-            .unwrap_or_else(|| self.task.goal.clone());
-        let position = if self.plan.is_empty() {
-            String::new()
-        } else {
-            format!(
-                " (plan step {} of {})",
-                (self.plan_cursor + 1).min(self.plan.len()),
-                self.plan.len()
-            )
-        };
-        let established = if self.findings.is_empty() {
-            String::new()
-        } else {
-            format!("\nEstablished so far: {} finding(s).", self.findings.len())
-        };
-        format!(
-            "THE TASK YOU WERE GIVEN: {}\nTHIS STEP{}: {}{}",
-            self.task.goal, position, step_goal, established
-        )
+        self.working.anchor()
     }
 
     fn select_prompt(&mut self, candidates: &[String], fx: &mut Vec<Effect>) -> String {
@@ -1473,11 +1634,15 @@ impl Loop {
             return;
         };
 
-        self.blocks.push(Block {
-            section: Section::WorkingState,
-            tagged: Tagged::system("harness", correction),
-            priority: 200,
-            reference: None,
+        // Into the state's ONE correction slot, not appended beside the last one.
+        // Three rejections used to leave three standing corrections in context, and
+        // a model reading three contradictory fixes answers the corrections rather
+        // than the goal.
+        self.working.last_error = Some(Correction {
+            code: rej.code.to_string(),
+            message: rej.message.clone(),
+            fix: correction,
+            step: self.step,
         });
         // Re-ask the same question. The correction is now in working state, so the
         // rebuilt prompt carries it.
@@ -1531,7 +1696,12 @@ impl Loop {
         // that was not already in it.
         if idempotent {
             let key = repeat_key(&call.name, &call.arguments);
-            if let Some(previous) = self.idempotent_calls.get(&key).filter(|r| r.is_spent()) {
+            if let Some(previous) = self
+                .idempotent_calls
+                .get(&key)
+                .filter(|r| r.is_spent())
+                .cloned()
+            {
                 let advice = if previous.failed {
                     "It failed the same way before and will again with these arguments.                      Change them, choose a different tool, or call finish_task with what you have."
                 } else {
@@ -1541,12 +1711,21 @@ impl Loop {
                     "You already called {} with these arguments this session. The result,                      unchanged, was: {}. {advice}",
                     call.name, previous.payload
                 );
-                self.blocks.push(Block {
-                    section: Section::WorkingState,
-                    tagged: Tagged::tool(&call.name, &message),
-                    priority: 215,
-                    reference: None,
-                });
+                // An observation: it carries the result the session already holds,
+                // which is data the model needs to read. What the harness *decided*
+                // — that this call is settled — goes on the card instead, where
+                // asking again is answered by "decided at step N".
+                self.observe(Tagged::tool(&call.name, &message), 215, None);
+                self.working.decide(
+                    format!("call {} with these arguments", call.name),
+                    if previous.failed {
+                        "no — it already failed with them".to_string()
+                    } else {
+                        "no — the session already holds the answer".to_string()
+                    },
+                    "an idempotent read cannot have changed since this session read it",
+                    self.step,
+                );
                 self.begin_step(fx);
                 return;
             }
@@ -1621,23 +1800,19 @@ impl Loop {
             return;
         };
         if !granted {
-            self.blocks.push(Block {
-                section: Section::WorkingState,
-                tagged: Tagged::system(
-                    "harness",
-                    format!(
-                        "A human refused {}{}. Do something else.",
-                        call.name,
-                        if note.is_empty() {
-                            String::new()
-                        } else {
-                            format!(": {note}")
-                        }
-                    ),
-                ),
-                priority: 220,
-                reference: None,
-            });
+            // A refusal is a DECISION this run has made, not a message to re-read.
+            // On the card it answers "should I call X" for the rest of the run; as
+            // an appended note it was one more thing to re-derive every step.
+            self.working.decide(
+                format!("call {}", call.name),
+                "no — a human refused it",
+                if note.is_empty() {
+                    "no reason given".to_string()
+                } else {
+                    note.to_string()
+                },
+                self.step,
+            );
             self.begin_step(fx);
             return;
         }
@@ -1700,7 +1875,7 @@ impl Loop {
         }
         let invented: Vec<&str> = opaque_ids(&evidence)
             .into_iter()
-            .filter(|id| !self.seen_ids.contains(*id))
+            .filter(|id| !self.working.can_cite(id))
             .collect();
         if !invented.is_empty() {
             self.reject_and_retry(
@@ -1725,9 +1900,10 @@ impl Loop {
         // "design a strategy" and "run a backtest" without touching either.
         let key = finding.to_ascii_lowercase();
         if self
+            .working
             .findings
             .iter()
-            .any(|f| f.to_ascii_lowercase().starts_with(&key))
+            .any(|f| f.headline.to_ascii_lowercase().starts_with(&key))
         {
             self.reject_and_retry(
                 Rejection::semantic_owned(
@@ -1744,33 +1920,24 @@ impl Loop {
         }
 
         self.step_learned_something = true;
-        self.findings.push(format!("{finding} [{evidence}]"));
-        // Priority 250: above raw tool results, below the charter and the goal. A
-        // finding is the compressed form of a result, so when the budget forces a
-        // choice the compression is what should survive.
-        self.blocks.push(Block {
-            section: Section::WorkingState,
-            tagged: Tagged::system(
-                "findings",
-                format!(
-                    "ESTABLISHED SO FAR ({}):\n{}",
-                    self.findings.len(),
-                    self.findings
-                        .iter()
-                        .enumerate()
-                        .map(|(i, f)| format!("{}. {f}", i + 1))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                ),
-            ),
-            priority: 250,
-            reference: None,
+        // Into the state. The block that renders these is rebuilt from here on every
+        // assembly at priority 250 — above raw tool results, below the charter — so
+        // the compressed form outlives the results it was distilled from without the
+        // list being pushed again for every finding.
+        self.working.findings.push(FindingRef {
+            id: format!("finding-{}", self.working.findings.len() + 1),
+            headline: if evidence.is_empty() {
+                finding.clone()
+            } else {
+                format!("{finding} [{evidence}]")
+            },
+            step: self.step,
         });
         fx.push(Effect::Note(Note::CoreTool {
             name: RECORD_FINDING.to_string(),
             detail: finding,
         }));
-        self.plan_cursor = (self.plan_cursor + 1).min(self.plan.len());
+        self.advance_plan();
         self.begin_step(fx);
     }
 
@@ -1815,12 +1982,7 @@ impl Loop {
             name: SEARCH_TOOLS.to_string(),
             detail: detail.clone(),
         }));
-        self.blocks.push(Block {
-            section: Section::WorkingState,
-            tagged: Tagged::system("search_tools", detail),
-            priority: 200,
-            reference: None,
-        });
+        self.observe(Tagged::system("search_tools", detail), 200, None);
         // Deliberately not a new step: a routing miss costs one turn, not one step of
         // the task's budget. The step budget is for work, not for the harness's own
         // recovery from a bad route.
@@ -1909,7 +2071,7 @@ impl Loop {
         // exist.
         let invented: Vec<&str> = opaque_ids(&evidence)
             .into_iter()
-            .filter(|id| !self.seen_ids.contains(*id))
+            .filter(|id| !self.working.can_cite(id))
             .collect();
         if !invented.is_empty() {
             let ran = if self.evidence_candidates.is_empty() {
@@ -1953,10 +2115,14 @@ impl Loop {
         self.tools_attempted += 1;
         self.step_learned_something = true;
 
-        // Everything the session has actually seen an id for. Cheap: only tokens that
-        // look like handles are kept, and the output is already capped.
-        self.seen_ids
-            .extend(opaque_ids(&capped).into_iter().map(str::to_string));
+        // Everything the session has actually seen an id for, recorded in the state
+        // with the tool and the step that produced it. Cheap: only tokens that look
+        // like handles are kept, and the output is already capped. It lives in the
+        // state rather than in the blocks because blocks are compacted — an id read
+        // at step 1 and cited at step 12 must still count as seen.
+        for id in opaque_ids(&capped) {
+            self.working.record_evidence(id, &name, self.step);
+        }
 
         // Record idempotent reads so an identical repeat is answered from here.
         // Stored capped, because the capped form is what the session actually holds
@@ -1983,20 +2149,16 @@ impl Loop {
             Provenance::ExternalUntrusted => Tagged::untrusted(source, capped),
             _ => Tagged::tool(source, capped),
         };
-        self.blocks.push(Block {
-            section: Section::WorkingState,
-            tagged,
-            // Raw tool results are the first thing compaction drops: their summaries
-            // and their scratchpad handles outlive them.
-            priority: 100,
-            reference: truncated.then(|| format!("work/{name}-step{}.txt", self.step)),
-        });
+        // Raw tool results are the first thing compaction drops: their summaries
+        // and their scratchpad handles outlive them.
+        let reference = truncated.then(|| format!("work/{name}-step{}.txt", self.step));
+        self.observe(tagged, 100, reference);
 
         if !self.evidence_candidates.contains(&name) {
             self.evidence_candidates.push(name);
         }
 
-        self.plan_cursor = (self.plan_cursor + 1).min(self.plan.len());
+        self.advance_plan();
         self.begin_step(fx);
     }
 
@@ -2030,12 +2192,11 @@ impl Loop {
                 entry.failed = true;
             }
         }
-        self.blocks.push(Block {
-            section: Section::WorkingState,
-            tagged: Tagged::system("harness", format!("{name} failed: {detail}")),
-            priority: 200,
-            reference: None,
-        });
+        self.observe(
+            Tagged::system("harness", format!("{name} failed: {detail}")),
+            200,
+            None,
+        );
         self.begin_step(fx);
     }
 
