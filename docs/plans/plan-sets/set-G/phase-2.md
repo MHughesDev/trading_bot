@@ -1,6 +1,6 @@
 # Phase 2 — Plans Migration
 
-**Completion: 0% (0 / 2 tasks)**
+**Completion: 50% (1 / 2) — G-2.1 DONE (landed at `docs/plans/plan-sets/`); G-2.2 OPEN, 8 stale references (audited 2026-09-15)**
 
 **Goal:** Move the `plans/` folder from the repo root into `docs/plans/` so
 that all documentation lives under a single `docs/` tree. Update every

@@ -1,6 +1,6 @@
 # Phase 2 — Live P&L, Manual Orders & Shared Data Layer
 
-**Completion: 0% (0 / 3 tasks complete)**
+**Completion: 0 / 3 fully done — 2.3 is substantially built (re-audited 2026-09-15; see [MASTER](MASTER.md))**
 
 **Goal:** Build the shared position/mark/P&L data layer once, then use it to
 turn on the live dashboard rollup and paper-mode manual orders.
@@ -15,7 +15,7 @@ turn on the live dashboard rollup and paper-mode manual orders.
 
 ## Tasks
 
-### ☐ 2.1 Shared trading-data layer in `AppState` — S–M — **prerequisite**
+### ◑ 2.1 [PARTIAL — no Redis handle, marks come from the paper engine] Shared trading-data layer in `AppState` — S–M — **prerequisite**
 The compute is done and tested (`api/src/rollup/compute_rollup`,
 `risk/src/gate.rs`); only the data plumbing is missing.
 - Add a **Redis handle** to `AppState` (`state.rs` has none today), constructed
@@ -29,7 +29,7 @@ The compute is done and tested (`api/src/rollup/compute_rollup`,
 - **Files:** `crates/api/src/state.rs`, platform startup wiring.
 - **Verify:** `AppState` exposes Redis + registry; a smoke test reads a mark.
 
-### ☐ 2.2 Live dashboard P&L rollup — M
+### ☐ 2.2 [OPEN — still the hard-coded all-zero response] — ⚠ **BLOCKS UNATTENDED PAPER** Live dashboard P&L rollup — M
 **Addresses #13 (CL dashboard.rs).** `AccountMode::Live` returns an all-zero
 `RollupResponse` (`dashboard.rs:58-65`). P&L is computed from the **ledger**
 (`pnl_lots`/`pnl_closes`, migration 0008), not the broker — so it's achievable
@@ -45,7 +45,7 @@ broker dependency).
 - **Verify:** seeded lots/closes + marks produce a correct non-zero rollup;
   missing-mark instruments are surfaced, not silently zeroed.
 
-### ☐ 2.3 Paper-mode manual order placement — M
+### ◑ 2.3 [PARTIAL — real risk gate wired, but rate + daily-loss counters are hardcoded 0] — ⚠ **BLOCKS UNATTENDED PAPER** Paper-mode manual order placement — M
 **Addresses #12 (CL orders.rs).** The handler builds a valid `OrderIntent` then
 unconditionally returns **503** (`orders.rs:104-118`) because position/mark were
 unwired — a deliberate fail-closed guard against zero-position over-leverage.

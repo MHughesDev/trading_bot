@@ -1,6 +1,6 @@
 # Phase 1 — Strategy Builder Tools
 
-**Completion: 0% (0 / 3 tasks)**
+**Completion: 100% (3 / 3 tasks) — SHIPPED (audited 2026-09-15; see [MASTER](MASTER.md))**
 
 **Goal:** Give an AI agent the ability to construct a `StrategyDefinition`
 incrementally via discrete MCP tool calls, then validate and persist it in one
@@ -26,7 +26,7 @@ cleanup; drafts that are finalized are also removed from the store.
 
 ## Tasks
 
-### ☐ F-1.1 Add StrategyDraft store to McpContext + draft lifecycle tools — S
+### ☑ F-1.1 [SHIPPED] Add StrategyDraft store to McpContext + draft lifecycle tools — S
 
 **What:** Introduce a `StrategyDraft` type and add a `draft_store` field to
 `McpContext`. Add two draft management tools: `new_strategy_draft` and
@@ -69,7 +69,7 @@ Add to both `new()` and `new_without_db()` constructors.
 
 ---
 
-### ☐ F-1.2 Implement 7 step-by-step builder tools — M
+### ☑ F-1.2 [SHIPPED — 10 builder tools, not 7] Implement 7 step-by-step builder tools — M
 
 **What:** Add tools that mutate an existing draft. All require a `draft_id`
 param; all return the current draft summary on success, or an error if
@@ -118,7 +118,7 @@ param; all return the current draft summary on success, or an error if
 
 ---
 
-### ☐ F-1.3 `finalize_strategy` — assemble draft → validate → persist — S
+### ☑ F-1.3 [SHIPPED] `finalize_strategy` — assemble draft → validate → persist — S
 
 **What:** The terminal builder tool. Assembles the draft into a
 `StrategyDefinition`, runs it through `strategy_validator::validate`, and on

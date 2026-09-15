@@ -1,6 +1,6 @@
 # Phase 3 — Archive Prune
 
-**Completion: 0% (0 / 1 tasks)**
+**Completion: ~90% — the 22 duplicates were deleted; sub-step 4 (update `docs/archive/README.md`) is OPEN, 24 dead links (audited 2026-09-15)**
 
 **Prerequisite:** Phase 0 (G-0.1) must be complete. The audit table must exist
 before any file is deleted.

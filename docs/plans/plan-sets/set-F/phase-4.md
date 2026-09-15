@@ -1,6 +1,6 @@
 # Phase 4 — Spec Compliance & Integration Tests
 
-**Completion: 0% (0 / 2 tasks)**
+**Completion: 100% (2 / 2 tasks) — SHIPPED (audited 2026-09-15; forward ownership → AGENT-006)**
 
 **Goal:** Document the complete tool surface in the canonical MCP spec, update
 `tool_definitions()` for all new tools, and add integration tests that validate
@@ -10,7 +10,7 @@ the full end-to-end agent workflow.
 
 ## Tasks
 
-### ☐ F-4.1 Update `tool_definitions()` + INTG-001 spec — S
+### ☑ F-4.1 [SHIPPED — INTG-001 v2.0 Implemented] Update `tool_definitions()` + INTG-001 spec — S
 
 **What:** Every tool added in Phases 0–3 must appear in `tool_definitions()`
 with a complete `inputSchema` (JSON Schema). The canonical MCP spec file
@@ -65,7 +65,7 @@ Automation tools (Phase 3):
 
 ---
 
-### ☐ F-4.2 Integration tests for the full agent workflow — M
+### ☑ F-4.2 [SHIPPED — 17 tests in crates/mcp-server/tests/integration.rs] Integration tests for the full agent workflow — M
 
 **What:** Tests that validate the three end-to-end agent workflows the MCP
 server is designed to enable:

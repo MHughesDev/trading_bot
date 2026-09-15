@@ -1,6 +1,6 @@
 # Phase 1 — Root File Migration
 
-**Completion: 0% (0 / 5 tasks)**
+**Completion: 100% (5 / 5) — DONE in commit 5febac2; one stale cross-ref left in `docs/governance/COMPLACENCY_LOG.md:9` (audited 2026-09-15)**
 
 **Goal:** Move the 6 documentation `.md` files at the repo root into
 appropriate subdirectories under `docs/`. `README.md` stays at root.

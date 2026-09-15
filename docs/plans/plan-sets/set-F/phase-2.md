@@ -1,6 +1,6 @@
 # Phase 2 — Backtest Tools
 
-**Completion: 0% (0 / 3 tasks)**
+**Completion: 1 / 3 shipped, 2 REVERSED — do not build (audited 2026-09-15; see [MASTER](MASTER.md))**
 
 **Goal:** Let an AI agent trigger a backtest against any persisted or
 freshly-built strategy, poll its status, and read the full results — all via
@@ -25,7 +25,7 @@ optional at MCP startup; if missing, backtest tools return a clear
 
 ## Tasks
 
-### ☐ F-2.1 Add BacktestManager to McpContext — S
+### ✗ F-2.1 [REVERSED by ADR-0022 §1 — DO NOT BUILD] Add BacktestManager to McpContext — S
 
 **What:** Extend `McpContext` with an optional `Arc<BacktestManager>`:
 
@@ -57,7 +57,7 @@ In `McpContext::new()`:
 
 ---
 
-### ☐ F-2.2 `list_backtests` + `get_backtest` read tools — S
+### ☑ F-2.2 [SHIPPED] `list_backtests` + `get_backtest` read tools — S
 
 **What:** Two read-only tools that surface backtest state.
 
@@ -104,7 +104,7 @@ In `McpContext::new()`:
 
 ---
 
-### ☐ F-2.3 `create_backtest` write tool — M
+### ✗ F-2.3 [REVERSED by INV-16 — DO NOT BUILD; use `backtest_strategy`] `create_backtest` write tool — M
 
 **What:** Triggers a new backtest run. An agent can reference either a
 persisted strategy (by `store_id`) or a freshly-finalized draft (same

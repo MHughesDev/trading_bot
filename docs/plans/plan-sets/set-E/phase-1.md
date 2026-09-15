@@ -1,6 +1,6 @@
 # Phase 1 — Authentication & Multi-User
 
-**Completion: 0% (0 / 7 tasks complete)**
+**Completion: 0 / 7 fully done — but 5 of 7 are PARTIAL, not untouched (re-audited 2026-09-15; see [MASTER](MASTER.md))**
 
 **Goal:** Replace the M-17 placeholder auth with real session authentication,
 scope every resource to its owner, and only then unlock network binding.
@@ -23,7 +23,7 @@ scope every resource to its owner, and only then unlock network binding.
 
 ## Tasks
 
-### ☐ 1.1 User + session store (migration + repository) — M
+### ◑ 1.1 [PARTIAL] — ⚠ **BLOCKS UNATTENDED PAPER** User + session store (migration + repository) — M
 **Addresses #4 (CL users.rs).** `storage/postgres/users.rs` has only `count()`;
 the `users` table (`migrations/0001`) has **no password column**.
 - Migration `0013_user_auth.sql`: `ALTER TABLE users ADD COLUMN password_hash
@@ -38,7 +38,7 @@ the `users` table (`migrations/0001`) has **no password column**.
 - **Verify:** round-trip tests for user create/verify (Argon2id) and session
   create/lookup/expire; never log hashes.
 
-### ☐ 1.2 `/auth/*` route module — M — **keystone**
+### ◑ 1.2 [PARTIAL — `/auth/touch` + `/auth/venue-credentials` missing, frontend 404s] `/auth/*` route module — M — **keystone**
 **Addresses #3 (NF).** Build the backend the frontend already calls.
 - `register`, `login` (mint a session, set cookie), `me`, `logout` (revoke),
   `touch` (sliding expiry); wire the existing `credentials/crypto.rs`
@@ -50,7 +50,7 @@ the `users` table (`migrations/0001`) has **no password column**.
 - **Verify:** integration test of register → login → me → logout against a test
   Postgres; constant-time failure on bad credentials.
 
-### ☐ 1.3 Real session-validating extractor — M
+### ◑ 1.3 [PARTIAL — REST validates, `/ws/live` does NOT] — ⚠ **BLOCKS UNATTENDED PAPER** Real session-validating extractor — M
 **Addresses #1 (CL session.rs CRITICAL).** `BearerToken` accepts any non-empty
 token and derives a `UUIDv5` identity (`session.rs:28-30,42-62`).
 - Replace with a `CurrentUser(Uuid)` extractor that reads the session token
@@ -62,7 +62,7 @@ token and derives a `UUIDv5` identity (`session.rs:28-30,42-62`).
 - **Files:** `crates/api/src/auth/session.rs`, every route's extractor bound.
 - **Verify:** invalid/expired/missing → 401; valid → correct `user_id`.
 
-### ☐ 1.4 Scope automations + unify `streams.rs` identity — S–M
+### ◑ 1.4 [PARTIAL — streams done, automations still `Uuid::nil()`] — ⚠ **BLOCKS UNATTENDED PAPER** Scope automations + unify `streams.rs` identity — S–M
 **Addresses #5 (CL auth + NF).** `automations.rs` ignores the token and writes
 `DEV_USER = Uuid::nil()` (`:27,:102`); storage queries (`storage/automation.rs`)
 have **no user filter** — any token can list/arm/disarm/delete every user's
@@ -78,7 +78,7 @@ backtests use `token.user_id()`.
   `crates/storage/src/automation.rs`, `crates/api/src/routes/streams.rs:48`.
 - **Verify:** cross-user list/arm/delete returns 404; create stamps the caller.
 
-### ☐ 1.5 Drop the frontend `dev-local` interceptor — S
+### ◑ 1.5 [PARTIAL — 4 fallback sites remain] — ⚠ **BLOCKS UNATTENDED PAPER** Drop the frontend `dev-local` interceptor — S
 **Addresses #6 (NF).** The SPA injects `Authorization: Bearer dev-local` on
 every request (`api.ts:11-16`). With real cookie sessions (`withCredentials`
 already set) this is no longer needed.
@@ -90,7 +90,7 @@ already set) this is no longer needed.
 - **Verify:** authenticated requests succeed via cookie alone; 401 redirects to
   `/login` (interceptor at `api.ts:18-31` already does this).
 
-### ☐ 1.6 Delete legacy nil-user data — S
+### ☐ 1.6 [OPEN — moot while 1.4 still writes nil rows] Delete legacy nil-user data — S
 **Locked decision 3: delete.** Existing automations/backtests under
 `Uuid::nil()` and the old UUIDv5-of-token identity orphan once real `user_id`s
 land. The cutover **deletes** them — but **armed live automations under nil move
@@ -103,7 +103,7 @@ real money**, so they must be **disarmed first** as a safety step, then removed.
 - **Verify:** post-migration there are zero nil-user automations/backtests and no
   automation was left armed mid-migration.
 
-### ☐ 1.7 Flip the loopback bind guard — S — **security gate, LAST**
+### ☐ 1.7 [OPEN — fails CLOSED; leaving it is correct for now] Flip the loopback bind guard — S — **security gate, LAST**
 **Addresses #2 (CL main.rs guardrail).** `main.rs:169-180` refuses to bind
 non-loopback while auth is placeholder.
 - Do **not** just delete it. Flip the predicate from "is loopback" to "is auth

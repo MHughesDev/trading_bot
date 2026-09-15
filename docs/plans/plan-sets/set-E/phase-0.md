@@ -1,6 +1,6 @@
 # Phase 0 — Correctness & Safety Quick Wins
 
-**Completion: 100% (5 / 5 tasks complete)**
+**Completion: 100% (5 / 5) — all five re-verified in code 2026-09-15**
 
 **Goal:** Fix the cheap-to-fix hazards that affect live-trading correctness or
 safety *now*, independent of the larger features. Every task here is small,

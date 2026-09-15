@@ -1,6 +1,6 @@
 # Phase 0 — HTTP Transport
 
-**Completion: 0% (0 / 1 tasks)**
+**Completion: 100% (1 / 1 tasks) — SHIPPED (audited 2026-09-15; see [MASTER](MASTER.md))**
 
 **Goal:** Replace the stdio JSON-RPC transport with Streamable HTTP (MCP spec
 2025-03-26) so any MCP-compliant client can reach the server over the network.
@@ -10,7 +10,7 @@ This is the prerequisite for all Phase 1–4 work.
 
 ## Tasks
 
-### ☐ F-0.1 Replace stdio with Streamable HTTP (MCP 2025-03-26) — M — **transport**
+### ☑ F-0.1 [SHIPPED] Replace stdio with Streamable HTTP (MCP 2025-03-26) — M — **transport**
 
 **Why.** The current server reads from stdin and writes to stdout
 (`apps/mcp-server/src/main.rs`). This works for local CLI usage (e.g. Claude
