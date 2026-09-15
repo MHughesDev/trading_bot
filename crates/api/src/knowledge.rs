@@ -96,6 +96,156 @@ pub struct RegimeObservation {
     /// When the platform could first have known this. For the rule tier that is
     /// the close of the bar the tercile was computed through — never earlier.
     pub knowledge_time: DateTime<Utc>,
+    /// The scope series' log return for this bar — the observable the label was
+    /// computed from. `None` for rows written before 0117.
+    pub series_log_return: Option<f64>,
+}
+
+/// One configured market scope (SPEC §5.4, ADR-P3-07, ADR-P3-08).
+///
+/// A scope is a *market*, and `series_symbol` is how that market is measured.
+/// Keeping the two apart is the whole reason this is a table rather than a list
+/// of symbols: "the crypto market" and "BTC-USD" are not the same statement,
+/// and the second is the evidence for the first.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct RegimeScope {
+    pub market_scope: String,
+    pub asset_class: String,
+    pub series_symbol: String,
+    /// `None` defers to the bar reader's best-quality-venue rule.
+    pub series_venue: Option<String>,
+    /// The stored timeframe read, and the bucket returns are taken over.
+    pub series_base_period_secs: i32,
+    pub series_period_secs: i32,
+    /// Symbols this scope may label. Empty means every instrument of the asset
+    /// class — a claim, and one the seeded configuration deliberately does not
+    /// make while the traded universe is small.
+    pub applies_to: Vec<String>,
+    pub rationale: String,
+}
+
+impl RegimeScope {
+    /// Whether this scope is the market for a strategy trading `symbol` in
+    /// `asset_class`.
+    ///
+    /// The asset class must match — a crypto volatility regime says nothing
+    /// about an equity strategy, and labelling one with the other is precisely
+    /// the authoritative-looking wrong answer ADR-P3-07 refused to default to.
+    #[must_use]
+    pub fn covers(&self, asset_class: &str, symbol: Option<&str>) -> bool {
+        if !self.asset_class.eq_ignore_ascii_case(asset_class) {
+            return false;
+        }
+        if self.applies_to.is_empty() {
+            return true;
+        }
+        match symbol {
+            // An explicit instrument list is a decision about those
+            // instruments. Without a symbol there is nothing to check it
+            // against, so the scope does not claim the strategy.
+            Some(s) => self.applies_to.iter().any(|a| a.eq_ignore_ascii_case(s)),
+            None => false,
+        }
+    }
+}
+
+/// Reads `regime_causal.regime_scope`.
+///
+/// There is no write path here on purpose. Configuring a scope chooses the
+/// market a result is measured against, which is a decision an operator makes
+/// and an agent must not (SPEC §12.7); the grant says so and this module does
+/// not offer the call.
+pub struct RegimeScopeStore {
+    pg: PgPool,
+}
+
+impl RegimeScopeStore {
+    #[must_use]
+    pub fn new(pg: PgPool) -> Self {
+        Self { pg }
+    }
+
+    /// Every enabled scope, in name order.
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn enabled(&self) -> Result<Vec<RegimeScope>, sqlx::Error> {
+        let rows: Vec<ScopeRow> = sqlx::query_as(
+            "SELECT market_scope, asset_class, series_symbol, series_venue,
+                    series_base_period_secs, series_period_secs, applies_to, rationale
+               FROM regime_causal.regime_scope
+              WHERE enabled
+              ORDER BY market_scope",
+        )
+        .fetch_all(&self.pg)
+        .await?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    /// The scope that covers a strategy, if one is configured.
+    ///
+    /// `None` is a real answer and the caller must treat it as one: an
+    /// unconfigured market has no regimes, and a gate that invents them from
+    /// the strategy's own returns has to say so (ADR-P2-29).
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn covering(
+        &self,
+        asset_class: &str,
+        symbol: Option<&str>,
+    ) -> Result<Option<RegimeScope>, sqlx::Error> {
+        Ok(self
+            .enabled()
+            .await?
+            .into_iter()
+            .find(|s| s.covers(asset_class, symbol)))
+    }
+}
+
+/// `regime_causal.regime_scope` as it comes back.
+type ScopeRow = (String, String, String, Option<String>, i32, i32, Vec<String>, String);
+
+impl From<ScopeRow> for RegimeScope {
+    fn from(r: ScopeRow) -> Self {
+        Self {
+            market_scope: r.0,
+            asset_class: r.1,
+            series_symbol: r.2,
+            series_venue: r.3,
+            series_base_period_secs: r.4,
+            series_period_secs: r.5,
+            applies_to: r.6,
+            rationale: r.7,
+        }
+    }
+}
+
+/// The causal label in force at each of `times`, given a scope's history.
+///
+/// Two bounds and both are the same idea as [`RegimeStore::filtered_at`]: a row
+/// is an answer about `t` only if its event time *and* its knowledge time are at
+/// or before `t`. `None` where no row qualifies — an unlabelled observation is
+/// dropped by the caller rather than assigned the nearest label, because
+/// "nearest" in this direction means the next one, which is the future.
+///
+/// `history` must be sorted by `event_time` ascending; [`RegimeStore::history`]
+/// returns it that way.
+#[must_use]
+pub fn labels_as_of(
+    history: &[RegimeObservation],
+    times: &[DateTime<Utc>],
+) -> Vec<Option<RegimeLabel>> {
+    times
+        .iter()
+        .map(|t| {
+            history
+                .iter()
+                .rev()
+                .find(|o| o.event_time <= *t && o.knowledge_time <= *t)
+                .map(|o| o.label)
+        })
+        .collect()
 }
 
 /// Reads and writes `regime_causal.regime_state`.
@@ -135,14 +285,20 @@ impl RegimeStore {
     ) -> Result<usize, sqlx::Error> {
         let labels = backtest::gates::evaluators::vol_tercile_regimes(returns, window);
         let mut written = 0;
-        for ((event_time, _), regime) in returns.iter().zip(labels.iter()) {
+        for ((event_time, series_return), regime) in returns.iter().zip(labels.iter()) {
             let label = RegimeLabel::from_tercile(*regime);
             sqlx::query(
                 "INSERT INTO regime_causal.regime_state
                      (market_scope, event_time, model_version, p_filtered, regime_vec,
-                      knowledge_time, label)
-                 VALUES ($1, $2, $3, $4, $5::real[]::vector, $6, $7)
-                 ON CONFLICT (market_scope, event_time, model_version) DO NOTHING",
+                      knowledge_time, label, series_log_return)
+                 VALUES ($1, $2, $3, $4, $5::real[]::vector, $6, $7, $8)
+                 ON CONFLICT (market_scope, event_time, model_version) DO UPDATE
+                   -- The label is keyed and does not change; the observable it
+                   -- was computed from is backfilled onto rows written before
+                   -- 0117 added the column, and only when it is still absent.
+                   SET series_log_return = coalesce(
+                         regime_causal.regime_state.series_log_return,
+                         EXCLUDED.series_log_return)",
             )
             .bind(market_scope)
             .bind(event_time)
@@ -151,11 +307,56 @@ impl RegimeStore {
             .bind(regime_vec(label))
             .bind(event_time)
             .bind(label.as_str())
+            .bind(series_return)
             .execute(&self.pg)
             .await?;
             written += 1;
         }
         Ok(written)
+    }
+
+    /// Every filtered state for a scope in `[from, to]`, oldest first.
+    ///
+    /// The whole history in one read rather than a query per timestamp: the
+    /// callers that need this are aligning a strategy's series to the market's,
+    /// and N round trips to answer one alignment question is how an analysis job
+    /// becomes a load problem.
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn history(
+        &self,
+        market_scope: &str,
+        model_version: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<RegimeObservation>, sqlx::Error> {
+        let rows: Vec<HistoryRow> = sqlx::query_as(
+            "SELECT event_time, label, p_filtered, knowledge_time, series_log_return
+               FROM regime_causal.regime_state
+              WHERE market_scope = $1 AND model_version = $2
+                AND event_time >= $3 AND event_time <= $4
+              ORDER BY event_time",
+        )
+        .bind(market_scope)
+        .bind(model_version)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pg)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|(event_time, label, p_filtered, knowledge_time, series_log_return)| {
+                RegimeLabel::from_code(&label).map(|label| RegimeObservation {
+                    event_time,
+                    label,
+                    p_filtered,
+                    knowledge_time,
+                    series_log_return,
+                })
+            })
+            .collect())
     }
 
     /// The most recent filtered state at or before `as_of`.
@@ -173,7 +374,7 @@ impl RegimeStore {
         model_version: &str,
     ) -> Result<Option<RegimeObservation>, sqlx::Error> {
         let row: Option<RegimeRow> = sqlx::query_as(
-            "SELECT event_time, label, p_filtered, knowledge_time
+            "SELECT event_time, label, p_filtered, knowledge_time, series_log_return
              FROM regime_causal.regime_state
              WHERE market_scope = $1 AND model_version = $2
                AND event_time <= $3
@@ -189,19 +390,24 @@ impl RegimeStore {
         .fetch_optional(&self.pg)
         .await?;
 
-        Ok(row.and_then(|(event_time, label, p_filtered, knowledge_time)| {
+        Ok(row.and_then(|(event_time, label, p_filtered, knowledge_time, series_log_return)| {
             RegimeLabel::from_code(&label).map(|label| RegimeObservation {
                 event_time,
                 label,
                 p_filtered,
                 knowledge_time,
+                series_log_return,
             })
         }))
     }
 }
 
-/// `(event_time, label, p_filtered, knowledge_time)` as the row comes back.
-type RegimeRow = (DateTime<Utc>, String, Vec<f32>, DateTime<Utc>);
+/// `(event_time, label, p_filtered, knowledge_time, series_log_return)` as the
+/// row comes back.
+type RegimeRow = (DateTime<Utc>, String, Vec<f32>, DateTime<Utc>, Option<f64>);
+
+/// The same shape, for [`RegimeStore::history`].
+type HistoryRow = RegimeRow;
 
 /// A 16-dimensional regime coordinate.
 ///
@@ -309,6 +515,7 @@ impl EmbeddingStore {
 mod tests {
     use super::*;
     use backtest::gates::evaluators::VolRegime;
+    use chrono::TimeZone;
 
     #[test]
     fn the_labels_are_exactly_the_database_check() {
@@ -349,6 +556,74 @@ mod tests {
             assert_eq!(v.len(), 16, "the column is vector(16)");
             assert_eq!(v.iter().filter(|x| **x != 0.0).count(), 1);
         }
+    }
+
+    fn scope(applies_to: &[&str]) -> RegimeScope {
+        RegimeScope {
+            market_scope: "crypto_btc_usd".into(),
+            asset_class: "crypto".into(),
+            series_symbol: "BTC-USD".into(),
+            series_venue: None,
+            series_base_period_secs: 60,
+            series_period_secs: 86_400,
+            applies_to: applies_to.iter().map(ToString::to_string).collect(),
+            rationale: "the configured reason".into(),
+        }
+    }
+
+    /// A crypto volatility regime is not a statement about an equity strategy.
+    /// This is ADR-P3-07's whole point expressed as a predicate: the scope has
+    /// to refuse a market it does not measure, or configuring one becomes the
+    /// default it was refused.
+    #[test]
+    fn a_scope_does_not_claim_a_market_it_does_not_measure() {
+        let s = scope(&["BTC-USD", "ETH-USD"]);
+        assert!(s.covers("crypto", Some("BTC-USD")));
+        assert!(s.covers("crypto", Some("eth-usd")), "symbol match is case-insensitive");
+        assert!(!s.covers("equity", Some("SPY")), "a crypto scope labelling an equity");
+        assert!(!s.covers("crypto", Some("SOL-USD")), "an instrument nobody decided about");
+        assert!(!s.covers("crypto", None), "an explicit list cannot be checked without a symbol");
+
+        // An empty list is the wider claim, and it is only honest when the
+        // operator wrote it down that way.
+        let all = scope(&[]);
+        assert!(all.covers("crypto", Some("SOL-USD")));
+        assert!(all.covers("crypto", None));
+        assert!(!all.covers("equity", Some("SPY")));
+    }
+
+    /// The alignment is causal in both bounds. A label whose knowledge time is
+    /// after the observation is the future, however old its event time looks.
+    #[test]
+    fn a_label_that_was_not_knowable_yet_is_not_the_answer() {
+        let t = |d: u32| chrono::Utc.with_ymd_and_hms(2026, 1, d, 0, 0, 0).unwrap();
+        let obs = |d: u32, k: u32, label: RegimeLabel| RegimeObservation {
+            event_time: t(d),
+            label,
+            p_filtered: label.one_hot(),
+            knowledge_time: t(k),
+            series_log_return: Some(0.0),
+        };
+        let history = vec![
+            obs(1, 1, RegimeLabel::LowVol),
+            // Event time on the 2nd, but not knowable until the 9th: a
+            // restatement, a late backfill, a labeller that ran a week later.
+            obs(2, 9, RegimeLabel::HighVol),
+            obs(3, 3, RegimeLabel::MidVol),
+        ];
+        let got = labels_as_of(&history, &[t(1), t(2), t(3), t(10)]);
+        assert_eq!(
+            got,
+            vec![
+                Some(RegimeLabel::LowVol),
+                // NOT HighVol: on the 2nd the platform had not seen that row.
+                Some(RegimeLabel::LowVol),
+                Some(RegimeLabel::MidVol),
+                Some(RegimeLabel::MidVol),
+            ]
+        );
+        // Before any row exists there is no label, and no label is not a label.
+        assert_eq!(labels_as_of(&history, &[t(1) - chrono::Duration::days(1)]), vec![None]);
     }
 
     /// There is no function in this module that reads the smoothed path. If one
