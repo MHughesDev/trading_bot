@@ -1005,6 +1005,60 @@ impl PgTrialLedger {
         Ok(crate::audit::PreAudit::seal(id))
     }
 
+    /// Read back an open `pre` record, so the `post` half can be written by a
+    /// caller that holds only its id.
+    ///
+    /// The external front door and the internal drivers open and close their
+    /// audit record over two separate HTTP calls, and the second one carries the
+    /// id and the result — nothing else. Reconstructing the action, the envelope
+    /// and the principal *from the stored row* is what stops a caller restating
+    /// them: a client that asked about `open_vault` cannot close the record as
+    /// though it had asked about `list_lanes`.
+    ///
+    /// Returns `None` when no `pre` row with that id exists for this tenant.
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn read_audit_pre_async(
+        &self,
+        tenant_id: &str,
+        audit_id: Uuid,
+    ) -> Result<Option<(crate::audit::AuditRequest, crate::audit::PreAudit)>, LedgerError> {
+        let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
+        let row: Option<(String, String, String, String, Option<String>, serde_json::Value)> =
+            sqlx::query_as(
+                "SELECT action, envelope, actor_kind, actor_id, on_behalf_of, request
+                   FROM mlops.audit_event
+                  WHERE audit_id = $1 AND tenant_id = $2 AND record_phase = 'pre'",
+            )
+            .bind(audit_id)
+            .bind(tenant_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(be)?;
+        tx.commit().await.map_err(be)?;
+        let Some((action, envelope, actor_kind, actor_id, on_behalf_of, request)) = row else {
+            return Ok(None);
+        };
+        let envelope = crate::audit::Envelope::from_code(&envelope).ok_or_else(|| {
+            LedgerError::Invalid(format!("audit row {audit_id} carries an unknown envelope"))
+        })?;
+        Ok(Some((
+            crate::audit::AuditRequest {
+                action,
+                envelope,
+                principal: crate::audit::Principal {
+                    tenant_id: tenant_id.to_string(),
+                    actor_kind,
+                    actor_id,
+                    on_behalf_of,
+                },
+                request,
+            },
+            crate::audit::PreAudit::seal(audit_id),
+        )))
+    }
+
     /// Write the `post` half: what the platform did about the request.
     ///
     /// # Errors

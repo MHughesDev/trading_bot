@@ -589,3 +589,96 @@ pub async fn record_trajectory_step(
         Err(e) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": "invalid_step", "message": e.to_string() }))).into_response(),
     }
 }
+
+// ── The audit trail's front door (SPEC §15, ADR-P2-21, ADR-P2-34, AT-64) ──────
+
+#[derive(Debug, Deserialize)]
+pub struct OpenAuditBody {
+    pub action: String,
+    #[serde(default)]
+    pub arguments: Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CloseAuditBody {
+    /// What the dispatch returned. The **platform** classifies it; the caller
+    /// does not get to say whether it was denied.
+    #[serde(default)]
+    pub result: Value,
+}
+
+/// POST /api/agent/audit — open the `pre` half of an audit record.
+///
+/// This is the endpoint that closes the external front door's exemption. The
+/// MCP server is a separate process (ADR-0022) and it writes no rows; it asks
+/// *here*, before it dispatches anything, and a call this endpoint does not
+/// answer is a call `mcp_server_lib::dispatch_tool` refuses to make. So the
+/// record is written by the component the caller cannot route around
+/// (ADR-0025), and the caller's only power over it is to give up the dispatch.
+///
+/// Nothing about the principal comes from the body. The tenant, the actor kind
+/// and the actor id are derived from the `sessions` row the bearer token
+/// resolves to, and the approval envelope is derived from the action's name by
+/// `ledger::audit::Envelope::for_action` — the same list the policy engine is
+/// handed, so a caller cannot declare its own action ungated.
+pub async fn open_audit_record(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(body): Json<OpenAuditBody>,
+) -> Response {
+    let trail =
+        super::audit::AuditTrail::for_session(state.pg.clone(), &token.token, token.user_id())
+            .await;
+    match trail.pre(&body.action, &body.arguments).await {
+        Some((_, pre)) => (
+            StatusCode::CREATED,
+            Json(json!({ "audit_id": pre.id(), "action": body.action })),
+        )
+            .into_response(),
+        // 503, not 500: the honest reading is "this platform cannot account for
+        // a call right now", and the caller's contract is to refuse rather than
+        // proceed.
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "error": "audit_unavailable",
+                "detail": "the audit trail could not record this request, so it must not be dispatched"
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /api/agent/audit/{audit_id} — close it with what the platform decided.
+///
+/// The action, envelope and principal are read back from the stored `pre` row
+/// rather than taken from this request, so the closing call carries no claim at
+/// all beyond the id and the result. The verdict is computed here by
+/// `verdict_of`, which reads the platform's own refusal shape — a `denied` the
+/// caller cannot downgrade to a `failed`.
+pub async fn close_audit_record(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(audit_id): Path<Uuid>,
+    Json(body): Json<CloseAuditBody>,
+) -> Response {
+    let trail =
+        super::audit::AuditTrail::for_session(state.pg.clone(), &token.token, token.user_id())
+            .await;
+    let Some(opened) = trail.reopen(audit_id).await else {
+        // Tenant-scoped: another tenant's audit id is indistinguishable from one
+        // that does not exist.
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no_such_audit_record" })),
+        )
+            .into_response();
+    };
+    let verdict = super::audit::verdict_of(&body.result);
+    trail.post(Some(opened), verdict).await;
+    (
+        StatusCode::CREATED,
+        Json(json!({ "recorded": true, "verdict": verdict.as_str() })),
+    )
+        .into_response()
+}
