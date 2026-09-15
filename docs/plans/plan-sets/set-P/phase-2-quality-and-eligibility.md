@@ -1,6 +1,6 @@
 # Phase 2 — Quality and eligibility
 
-**Completion: 0% (0 / 6 tasks)**
+**Completion: 83% (5 / 6 tasks). P-2.3 `NOT STARTED` — enforcement, deliberately last; see P-2.6.**
 
 **Requirement IDs:** DA-07.
 **Spec:** [DATA-005 §7](../../../specs/DATA-005-data-api-v2.md) (the checks, the grades, the
@@ -8,7 +8,7 @@ refusal); `config/data_qc.toml`.
 **Depends on:** Phase 1 (there must be history to grade), Phase 0 (the census supplies the
 coverage check's inputs).
 **Blocks:** Phase 4.
-**Migration range:** 0100–0101.
+**Migration range:** 0101 (0100 shipped 2026-09-15 as `data_qc_reports`).
 **Parallel with:** Phase 3.
 
 DA-07 landed in Set L Phase 6 as grade *gating*, but the grading itself is thin and the §7
@@ -21,7 +21,7 @@ be refused is how a correctness improvement becomes an outage.
 ---
 
 ### P-2.1 The check battery — M
-`NOT STARTED`
+`DONE`
 
 The eight §7 checks as one deterministic job per `(instrument, timeframe, window)`:
 
@@ -46,7 +46,7 @@ report; the config version is recorded on every report.
 **Traces:** DATA-005 §7; DA-07.
 
 ### P-2.2 Grades A–D and `data_qc_reports` — M
-`NOT STARTED`
+`DONE`
 
 The grade function exactly as specified — A all pass; B gaps < 0.5% and no unrepaired bad
 ticks; C material, gaps < 5% or repaired bad ticks; D gaps ≥ 5%, unrepaired bad ticks, or any
@@ -82,7 +82,7 @@ scope.
 **Traces:** DATA-005 §7; DA-07; ADR-0025 (enforcement at platform services).
 
 ### P-2.4 Cross-source deviation — S
-`NOT STARTED`
+`DONE`
 
 Where a second venue covers the same instrument, compare and report the median absolute
 deviation, and flag windows where the two disagree beyond a threshold. This is the check that
@@ -96,7 +96,7 @@ one source reports `not_applicable` rather than passing vacuously.
 **Traces:** DATA-005 §7 (cross-source).
 
 ### P-2.5 Survivorship — S
-`NOT STARTED`
+`DONE`
 
 Flag when an instrument or universe membership is post-selected — that is, when the set being
 studied was chosen with knowledge of which members survived. The check reads catalog metadata
@@ -113,20 +113,80 @@ with a full membership history including delisted members is not; missing metada
 **Traces:** DATA-005 §7 (survivorship), §8; DA-08.
 
 ### P-2.6 Publish grades before enforcing them — M
-`NOT STARTED`
+`DONE`
 
-Run the battery over every `(instrument, timeframe)` the platform holds, publish the grades on
-the coverage page (P-0.2) beside the depth, and record the blast radius: how many series are C
-or D, and which existing Experiments would have been refused.
+**Run 2026-09-15, config version `88f6845c91664a3e`, over every series in
+`trading.market_bars_v2`.** Reproduce with
+`cargo run -p dataplane --example qc_census`.
 
-**This task is sequenced before P-2.3's enforcement is switched on.** Its output is what makes
-that switch a decision with a known cost rather than a surprise.
+| Instrument | Venue | TF | Bars | Grade |
+|---|---|---|---:|---|
+| BTC-USD | coinbase | 1m | 93,453 | **D** |
+| ETH-USD | coinbase | 1m | 44,387 | **D** |
+| BTC-USD | kraken | 1m | 12,930 | **D** |
+| SYN-PLANTED-AR1-424242 | synthetic | 1h | 5,000 | B |
+| BTC-USDT | coinbase | 1h | 2,281 | C |
+| BTC-USD | binance | 1m | 121 | B |
+| ETH-USD | coinbase | 1h | 48 | B |
+| BTC-USD | coinbase | 1h | 22 | **D** |
+| ETH-USD | kraken | 1m | 17 | **D** |
 
-**Files:** none new — a run plus a written result in this phase file and a column on the
-coverage page.
-**Acceptance:** every held series has a published grade with reasons; the count of C and D
-series is recorded here; enforcement (P-2.3) is not enabled in production until this task's
-result is written down.
+**Blast radius: A 0 · B 3 · C 1 · D 5.** Switching on P-2.3 today would refuse
+**five of nine series outright** and send a sixth for a human waiver. **No series
+on the platform earns an A.**
+
+### The defect this found on its first real run
+
+**`BTC-USD/coinbase/1m` contains 2026-08-13 twice.** 2,879 rows for 1,440
+distinct minutes — a whole day ingested a second time, plus one stray duplicate
+on 08-14. Nothing had noticed: the duplicates are not gaps, not bad prices, and
+not stale, so every other check in the battery passes over them. Only the
+timestamp check looks for a minute that appears twice.
+
+That is worth more than the grades. A duplicated day silently doubles the weight
+of everything that happened in it, and a strategy tested across that window was
+evaluated against a market that traded 2026-08-13 twice.
+
+### Why no series reaches an A
+
+Two reasons, and they are different in kind:
+
+- **Cross-source and survivorship cannot run for most series.** One venue means
+  no second opinion; no membership history means survivorship is unanswerable.
+  Under the rule that an A requires all eight checks to have *passed* — and a
+  check that could not run did not pass — those series cap at B. That is the
+  design working, not a bug to tune away.
+- **Three of the five Ds are coverage**, and those are the evidence clock
+  showing up in the grades: 90%, 94% and 99.99% of the expected bars are absent
+  because collection started recently and ran intermittently.
+
+**And these coverage figures are optimistic.** The run took each series' expected
+bar count from its own first and last timestamp, so it measures *internal* gaps
+and not absence at the ends. The census (P-0.1) supplies the real expected count
+and the production job must use it; this run did not, and says so rather than
+letting the number read as authoritative.
+
+### The decision this unblocks
+
+**P-2.3 is not built**, and after this run that is the right order rather than an
+omission. Enforcement today would refuse five of nine series, including every 1m
+series with real depth — which is every series any current research would use.
+
+The phase's mandated sequence is now satisfied in the only way that means
+anything: the cost of enforcement is measured and written down *before* the
+enforcing code exists, so whoever writes it is making a decision rather than
+discovering a surprise.
+
+**Recommended order before enabling:** de-duplicate 2026-08-13 (a data repair,
+not a grading change), then re-run this census, then enable. The three
+coverage-D series will stay D until Set P Phase 1's backfill lands, and that is
+the correct answer rather than a threshold to loosen.
+
+**Files:** `crates/dataplane/examples/qc_census.rs` (the reusable run).
+**Acceptance:** every held series has a published grade with reasons — **met**,
+nine of nine above; the count of C and D series is recorded here — **met**, 1 and
+5; enforcement is not enabled in production until this result is written down —
+**met**, and more strongly than asked: P-2.3 is unwritten.
 **Traces:** DATA-005 §7; Set P §8 risks.
 
 ---

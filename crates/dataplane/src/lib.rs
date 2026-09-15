@@ -14,6 +14,7 @@ pub mod hash;
 pub mod identity;
 pub mod label;
 pub mod options;
+pub mod qc;
 pub mod quality;
 pub mod restatement;
 pub mod split;

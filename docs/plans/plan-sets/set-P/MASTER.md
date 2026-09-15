@@ -11,6 +11,8 @@
 ADR-P2-24 (the `knowledge_time` sentinel), `docs/artifact.md` FM-11.
 **Requirement IDs:** DA-07, DA-08, DA-10, DA-11, DA-12, DA-14 · sources S1–S8.
 **Migration range:** 0097–0104.
+
+**Migrations shipped:** 0100 — `data_qc_reports` (P-2.2), 2026-09-15.
 **Scope class:** End-state architecture. Phases are build-ordering, not feature-gating.
 
 ---
@@ -89,7 +91,7 @@ whether `paper_v1` (ADR-P2-14) carries the programme for years.
 |---|---|---|---|---|---|
 | 0 | [Measure, and start the irreversible clock](phase-0-measure-and-collect.md) | 6 | S5, S6, S8, DA-12 | 0097–0098 | NOT STARTED |
 | 1 | [Deep backfill](phase-1-deep-backfill.md) | 7 | S1, DA-11 | 0099 | NOT STARTED |
-| 2 | [Quality and eligibility](phase-2-quality-and-eligibility.md) | 6 | DA-07 | 0100–0101 | NOT STARTED |
+| 2 | [Quality and eligibility](phase-2-quality-and-eligibility.md) | 6 | DA-07 | 0101 | 5 / 6 — P-2.3 (enforcement) deliberately last |
 | 3 | [Alternative data](phase-3-alternative-data.md) | 6 | S2, S3, S4, S7, DA-11 | 0102–0103 | NOT STARTED |
 | 4 | [Derived access and the source fence](phase-4-derived-access.md) | 5 | DA-08, DA-10, DA-14 | 0104 | NOT STARTED |
 

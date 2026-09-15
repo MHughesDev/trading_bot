@@ -43,12 +43,33 @@ def parse_ranges(text):
     for line in re.findall(r"\*\*Migration range:\*\*\s*(.+)", text):
         if re.search(r"\bnone\b", line, re.I):
             continue
+        # A parenthetical is commentary, not a claim. Without this, a note
+        # like "0101 (0100 shipped 2026-09-15)" re-claims the number it says
+        # is already shipped -- and claims 2026 as a migration besides.
+        line = line.split("(", 1)[0]
         for lo, hi in re.findall(r"(\d{4})\s*[-–—]\s*(\d{4})", line):
             claimed.update(range(int(lo), int(hi) + 1))
         # bare numbers not already covered by a range
         for n in re.findall(r"(?<![\d–—-])(\d{4})(?![\d–—-])", line):
             claimed.add(int(n))
     return claimed
+
+
+def parse_shipped(text):
+    """Migration numbers a set records as already shipped.
+
+    Declared as `**Migrations shipped:** 0100, 0101` in a MASTER. These are
+    subtracted from the set's claim before the on-disk check, so a set that has
+    started shipping does not trip rule 5 against its own work.
+    """
+    shipped = set()
+    for line in re.findall(r"\*\*Migrations shipped:\*\*\s*(.+)", text):
+        line = line.split("(", 1)[0]
+        for lo, hi in re.findall(r"(\d{4})\s*[-\u2013\u2014]\s*(\d{4})", line):
+            shipped.update(range(int(lo), int(hi) + 1))
+        for n in re.findall(r"(?<![\d\u2013\u2014-])(\d{4})(?![\d\u2013\u2014-])", line):
+            shipped.add(int(n))
+    return shipped
 
 
 def check_links(path, text, base):
@@ -64,6 +85,7 @@ def rel(p):
 
 # ---------------------------------------------------------------- per set
 set_ranges = {}
+set_shipped = {}
 total_tasks = 0
 
 for setdir in sorted(glob.glob(os.path.join(SETS, "set-*"))):
@@ -74,6 +96,7 @@ for setdir in sorted(glob.glob(os.path.join(SETS, "set-*"))):
         continue
 
     set_total = 0
+    shipped = set()
     seen_ids = {}
     claimed = set()
 
@@ -122,6 +145,7 @@ for setdir in sorted(glob.glob(os.path.join(SETS, "set-*"))):
             if int(m.group(1)) != set_total:
                 problem("%s/MASTER.md: says %s tasks, phase files hold %d"
                         % (setname, m.group(1), set_total))
+        shipped |= parse_shipped(mtext)
         rows = re.findall(r"^\| (?:\*\*)?\d+(?:\*\*)? \| \[[^\]]+\]\([^)]+\) \| (\d+) \|",
                           mtext, re.M)
         if rows and set_total and sum(int(r) for r in rows) != set_total:
@@ -130,6 +154,7 @@ for setdir in sorted(glob.glob(os.path.join(SETS, "set-*"))):
 
     if claimed:
         set_ranges[setname] = claimed
+        set_shipped[setname] = shipped
     total_tasks += set_total
     if set_total:
         print("%-10s %3d tasks across %d phase files%s"
@@ -152,7 +177,9 @@ for f in glob.glob(os.path.join(MIGRATIONS, "*.sql")):
         on_disk.add(int(m.group(1)))
 
 for name, claimed in sorted(set_ranges.items()):
-    clash = claimed & on_disk
+    # A number the set itself records as shipped is its own work, not a
+    # collision with somebody else's.
+    clash = claimed & on_disk - set_shipped.get(name, set())
     if clash:
         problem("%s claims migrations already on disk: %s"
                 % (name, ", ".join("%04d" % n for n in sorted(clash))))

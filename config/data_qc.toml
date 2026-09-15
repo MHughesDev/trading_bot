@@ -1,0 +1,57 @@
+# Data-quality thresholds (DATA-005 §7; Set P Phase 2, task P-2.1).
+#
+# Every threshold the check battery uses lives here and nowhere else. A constant
+# inlined in a check is a threshold nobody can version, and a grade is only
+# reproducible if you can say what it was computed against.
+#
+# Changing any value here changes `QcConfig::version()`, which is stamped on
+# every report. Two reports with the same version were graded by the same rules;
+# two with different versions were not, whatever their letters say. Reformatting
+# this file does NOT change the version — the hash is over the parsed values, so
+# tidying the comments will not invalidate every historical grade.
+#
+# An unknown key is a hard error rather than being ignored. A misspelled
+# threshold that is silently dropped reverts to its default while the report
+# still claims the version that was asked for, which is the worst of both.
+
+[coverage]
+# DATA-005 §7's grade boundaries. B keeps gaps under 0.5%; D begins at 5%.
+b_max_missing = 0.005
+d_min_missing = 0.05
+
+[bad_ticks]
+# "abs(log return) > 8·sigma_rolling reversing >= 80% on the next bar."
+#
+# Eight sigma is deliberately far out. A lower bar catches real moves in a
+# fat-tailed series, and a bad-tick check that flags genuine volatility gets
+# turned off within a week.
+sigma_multiple = 8.0
+reversal_fraction = 0.8
+sigma_window = 50
+
+[stale.runs]
+# Consecutive identical closes on ZERO volume before a run is flagged, per
+# timeframe. Both conditions together: a flat close on real volume is a quiet
+# market, and only a flat close on no volume is a feed republishing itself.
+#
+# Shorter timeframes tolerate longer runs because thirty flat minutes is
+# ordinary overnight and four flat hours is not.
+"1m" = 30
+"5m" = 12
+"15m" = 8
+"1h" = 4
+"1d" = 3
+default = 10
+
+[volume]
+max_zero_share = 0.10
+# "spikes > 20x rolling median" (DATA-005 §7).
+spike_multiple = 20.0
+median_window = 50
+
+[cross_source]
+# Median absolute deviation between two venues, in basis points, above which
+# they are deemed to disagree. Fifty bp is wide on purpose: two venues genuinely
+# differ by a few bp on a liquid pair, and this check exists to catch a backfill
+# serving wrong history, not to measure microstructure.
+max_mad_bps = 50.0
