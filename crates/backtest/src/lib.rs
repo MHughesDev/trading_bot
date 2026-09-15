@@ -23,6 +23,7 @@
 //! (paged 1000-bar requests) straight into `ClickHouse`, then re-checks.
 
 pub mod aggregate;
+pub mod census;
 pub mod collect;
 pub mod experiment;
 pub mod gaps;

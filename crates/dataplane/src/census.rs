@@ -1,0 +1,569 @@
+//! The coverage census (Set P, P-0.1; DATA-005 §7 "Coverage", §12).
+//!
+//! *How much history does the platform actually have?* Until this module existed the
+//! answer was an anecdote — "BTC-USD holds 22 one-hour bars", observed once on
+//! 2026-09-08 — and the whole programme's sequencing rested on it. The census turns
+//! that into a number, per `(instrument, timeframe, venue)`, recomputed nightly and
+//! kept as a time series rather than a snapshot that overwrites its own history.
+//!
+//! Pure logic, by the crate's rule: it is handed the bar *open* times a
+//! point-in-time read returned and the instrument's calendar, and it computes.
+//! It never names a bar table and never writes one — reading bars is
+//! `BarStore`'s job and only `BarStore`'s (INV-01, AT-01).
+//!
+//! Two properties this module is built around:
+//!
+//! * **Determinism.** Two runs over an unchanged database produce byte-identical
+//!   output except `as_of`. There is no clock read, no float, and no iteration over
+//!   a hash map anywhere in here.
+//! * **Honest knowledge provenance.** `derived_knowledge_bars` counts rows whose
+//!   `knowledge_time` was *inferred* (the `BACKFILLED_KNOWLEDGE_TIME` sentinel)
+//!   rather than observed at ingest. A census that reported only "how many bars"
+//!   would flatter a series whose entire history is a backfill stamped as if it had
+//!   been watched live — which is precisely the bug that shipped in
+//!   `market_bars_v2` (ADR-P2-24, `clickhouse/07_canonical_market.sql`).
+
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::calendar::Calendar;
+
+/// Gate 9 of `strict_v1` wants five calendar years of history.
+///
+/// Expressed in days so a shortfall can be stated in days, which is the unit a
+/// human plans in. Five years including the leap days a five-year window always
+/// contains at least one of.
+pub const STRICT_V1_FLOOR_DAYS: i64 = 1826;
+
+/// `paper_v1` (ADR-P2-14) is the profile that carries the programme while depth
+/// accrues. Its floor is one calendar year.
+pub const PAPER_V1_FLOOR_DAYS: i64 = 365;
+
+/// One bar, as the census needs it: when the bar opened, and whether the platform
+/// genuinely observed when it learned of it.
+///
+/// Deliberately not [`crate::bar::CanonicalBar`] — the census reads millions of
+/// rows and needs two fields of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CensusBar {
+    /// Bar OPEN, Unix nanoseconds (the stored `event_time`; INV-06).
+    pub open_ns: i64,
+    /// `true` when `knowledge_time` was derived from a declared vendor lag rather
+    /// than observed at ingest — the `BACKFILLED_KNOWLEDGE_TIME` flag.
+    pub knowledge_derived: bool,
+}
+
+impl CensusBar {
+    #[must_use]
+    pub const fn observed(open_ns: i64) -> Self {
+        Self { open_ns, knowledge_derived: false }
+    }
+
+    #[must_use]
+    pub const fn derived(open_ns: i64) -> Self {
+        Self { open_ns, knowledge_derived: true }
+    }
+}
+
+/// What a series' depth permits, stated in the vocabulary of the gate funnel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FloorVerdict {
+    /// The continuous span already clears the floor.
+    Satisfied,
+    /// It does not, and this many more days of collection at the observed cadence
+    /// would clear it.
+    Short { shortfall_days: i64, days_at_current_rate: i64 },
+    /// The series has no bars at all, so no rate can be observed and no date named.
+    NoData,
+}
+
+impl FloorVerdict {
+    #[must_use]
+    pub const fn is_satisfied(self) -> bool {
+        matches!(self, Self::Satisfied)
+    }
+}
+
+/// The census for one `(instrument, timeframe, venue)` at one `as_of`.
+///
+/// Counts are `u64` and times are Unix nanoseconds so the row round-trips through
+/// ClickHouse and Postgres without a float anywhere near it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CoverageCensus {
+    pub instrument: String,
+    pub venue: String,
+    pub timeframe: String,
+    pub period_secs: u32,
+    /// When the census was taken. The only field that differs between two runs over
+    /// an unchanged database.
+    pub as_of: DateTime<Utc>,
+
+    /// First bar OPEN, Unix ns. `None` for an empty series.
+    pub first_bar_ns: Option<i64>,
+    /// Last bar OPEN, Unix ns. `None` for an empty series.
+    pub last_bar_ns: Option<i64>,
+
+    /// Bars the calendar says should exist between `first_bar` and `last_bar`
+    /// inclusive. For a 24/7 calendar this is the arithmetic span; for a session
+    /// calendar, only the periods inside a session count.
+    pub expected_bars: u64,
+    /// Distinct bar opens actually present.
+    pub present_bars: u64,
+    /// `expected_bars - present_bars`, floored at zero.
+    pub missing_bars: u64,
+    /// Missing share in basis points — an integer, so the census hashes stably.
+    /// 10_000 bps = 100%.
+    pub missing_bps: u32,
+
+    /// The longest run of consecutive *expected* bars with none present, counted in
+    /// periods. A perfectly dense series reports 0.
+    pub longest_gap_periods: u64,
+    /// The longest stretch with no gap longer than one period, in bars. This is the
+    /// number that decides whether a walk-forward study is possible at all — total
+    /// bar count over a swiss-cheese span does not.
+    pub longest_continuous_bars: u64,
+    /// The same stretch in whole seconds.
+    pub longest_continuous_secs: i64,
+
+    /// Bars whose `knowledge_time` was derived, not observed.
+    pub derived_knowledge_bars: u64,
+    /// Bars whose `knowledge_time` was observed at ingest. Gate 15 takes forward
+    /// evidence from these and only these (D-P3).
+    pub observed_knowledge_bars: u64,
+
+    /// Whether the continuous span clears `strict_v1` Gate 9's five-year floor.
+    pub strict_v1: FloorVerdict,
+    /// Whether it clears `paper_v1`'s one-year floor.
+    pub paper_v1: FloorVerdict,
+}
+
+impl CoverageCensus {
+    /// Longest continuous coverage in whole days — the headline number.
+    #[must_use]
+    pub const fn continuous_days(&self) -> i64 {
+        self.longest_continuous_secs / 86_400
+    }
+}
+
+/// Compute the census for one series.
+///
+/// `bars` need not be sorted or deduplicated; this function sorts a copy and
+/// collapses repeats, so a caller that read two revisions of the same bar gets one
+/// bar. A bar is counted as derived if *any* copy of it was derived: a series is no
+/// more trustworthy than the least honest stamp in it.
+///
+/// `calendar` decides `expected_bars`. For crypto that is
+/// [`Calendar::Continuous`]; for an equity series it is the venue's session
+/// calendar, so a weekend is not reported as a 48-hour hole.
+#[must_use]
+pub fn census(
+    instrument: &str,
+    venue: &str,
+    timeframe: &str,
+    period_secs: u32,
+    bars: &[CensusBar],
+    calendar: &Calendar,
+    as_of: DateTime<Utc>,
+) -> CoverageCensus {
+    let period_ns = i64::from(period_secs.max(1)) * 1_000_000_000;
+
+    // Sort and collapse duplicates. `CensusBar` orders on `open_ns` first, so a
+    // dedup by open time is a linear pass.
+    let mut sorted: Vec<CensusBar> = bars.to_vec();
+    sorted.sort_unstable();
+    let mut opens: Vec<i64> = Vec::with_capacity(sorted.len());
+    let mut derived: Vec<bool> = Vec::with_capacity(sorted.len());
+    for b in sorted {
+        if opens.last() == Some(&b.open_ns) {
+            // Any derived copy taints the bar.
+            if let Some(last) = derived.last_mut() {
+                *last = *last || b.knowledge_derived;
+            }
+            continue;
+        }
+        opens.push(b.open_ns);
+        derived.push(b.knowledge_derived);
+    }
+
+    let present_bars = opens.len() as u64;
+    let derived_knowledge_bars = derived.iter().filter(|d| **d).count() as u64;
+    let observed_knowledge_bars = present_bars - derived_knowledge_bars;
+
+    let (first_bar_ns, last_bar_ns) = match (opens.first(), opens.last()) {
+        (Some(f), Some(l)) => (Some(*f), Some(*l)),
+        _ => (None, None),
+    };
+
+    let expected_bars = match (first_bar_ns, last_bar_ns) {
+        (Some(f), Some(l)) => expected_between(f, l, period_ns, calendar),
+        _ => 0,
+    };
+    let missing_bars = expected_bars.saturating_sub(present_bars);
+    let missing_bps = if expected_bars == 0 {
+        0
+    } else {
+        // Integer arithmetic on purpose: a float here would make two runs of the
+        // census differ in the last digit on different hardware.
+        u32::try_from(missing_bars.saturating_mul(10_000) / expected_bars).unwrap_or(10_000)
+    };
+
+    let (longest_gap_periods, longest_continuous_bars) = runs(&opens, period_ns, calendar);
+    let longest_continuous_secs = longest_continuous_bars.saturating_mul(u64::from(period_secs.max(1)));
+    let longest_continuous_secs = i64::try_from(longest_continuous_secs).unwrap_or(i64::MAX);
+
+    let continuous_days = longest_continuous_secs / 86_400;
+    let rate = observed_daily_rate(first_bar_ns, last_bar_ns, period_secs, present_bars);
+    let strict_v1 = verdict(continuous_days, STRICT_V1_FLOOR_DAYS, present_bars, rate);
+    let paper_v1 = verdict(continuous_days, PAPER_V1_FLOOR_DAYS, present_bars, rate);
+
+    CoverageCensus {
+        instrument: instrument.to_string(),
+        venue: venue.to_string(),
+        timeframe: timeframe.to_string(),
+        period_secs,
+        as_of,
+        first_bar_ns,
+        last_bar_ns,
+        expected_bars,
+        present_bars,
+        missing_bars,
+        missing_bps,
+        longest_gap_periods,
+        longest_continuous_bars,
+        longest_continuous_secs,
+        derived_knowledge_bars,
+        observed_knowledge_bars,
+        strict_v1,
+        paper_v1,
+    }
+}
+
+/// Bars the calendar expects in `[first, last]` inclusive.
+fn expected_between(first_ns: i64, last_ns: i64, period_ns: i64, calendar: &Calendar) -> u64 {
+    match calendar {
+        Calendar::Continuous { .. } => {
+            let span = last_ns.saturating_sub(first_ns);
+            (span / period_ns).unsigned_abs().saturating_add(1)
+        }
+        Calendar::Sessions { .. } => {
+            let mut n: u64 = 0;
+            let mut t = first_ns;
+            while t <= last_ns {
+                if calendar.is_open(DateTime::from_timestamp_nanos(t)) {
+                    n += 1;
+                }
+                t = match t.checked_add(period_ns) {
+                    Some(next) => next,
+                    None => break,
+                };
+            }
+            n
+        }
+    }
+}
+
+/// `(longest gap in periods, longest continuous run in bars)`.
+///
+/// A "gap" counts only periods the calendar says should have had a bar, so an
+/// overnight session break is not a gap. The run is broken by any gap of one
+/// expected period or more.
+fn runs(opens: &[i64], period_ns: i64, calendar: &Calendar) -> (u64, u64) {
+    if opens.is_empty() {
+        return (0, 0);
+    }
+    let mut longest_gap: u64 = 0;
+    let mut longest_run: u64 = 1;
+    let mut run: u64 = 1;
+    for w in opens.windows(2) {
+        let (prev, cur) = (w[0], w[1]);
+        let missing = expected_strictly_between(prev, cur, period_ns, calendar);
+        if missing == 0 {
+            run += 1;
+            longest_run = longest_run.max(run);
+        } else {
+            longest_gap = longest_gap.max(missing);
+            run = 1;
+        }
+    }
+    (longest_gap, longest_run)
+}
+
+/// Expected bar slots strictly between two present bars.
+fn expected_strictly_between(prev: i64, cur: i64, period_ns: i64, calendar: &Calendar) -> u64 {
+    match calendar {
+        Calendar::Continuous { .. } => {
+            let periods = (cur.saturating_sub(prev) / period_ns).unsigned_abs();
+            periods.saturating_sub(1)
+        }
+        Calendar::Sessions { .. } => {
+            let mut n: u64 = 0;
+            let mut t = match prev.checked_add(period_ns) {
+                Some(t) => t,
+                None => return 0,
+            };
+            while t < cur {
+                if calendar.is_open(DateTime::from_timestamp_nanos(t)) {
+                    n += 1;
+                }
+                t = match t.checked_add(period_ns) {
+                    Some(next) => next,
+                    None => break,
+                };
+            }
+            n
+        }
+    }
+}
+
+/// Coverage-days accrued per calendar day over the series' observed span.
+///
+/// `1.0` is a collector that never misses a bar; `0.5` is one that misses half of
+/// them and therefore needs twice as long to reach a floor. Returns `None` when
+/// there is no span to measure a rate over, in which case the projection falls back
+/// to the shortfall itself.
+///
+/// Deliberately measured on *present* bars against wall-clock span, so a series
+/// full of holes projects the slower date it has earned rather than the optimistic
+/// one its start and end dates imply. The rate is a projection, not a stored fact,
+/// which is why a float is acceptable here and nowhere else in this module — it
+/// never reaches a persisted count.
+fn observed_daily_rate(first_ns: Option<i64>, last_ns: Option<i64>, period_secs: u32, present: u64) -> Option<f64> {
+    let (f, l) = (first_ns?, last_ns?);
+    let span_secs = (l - f) / 1_000_000_000;
+    if span_secs <= 0 || present == 0 {
+        return None;
+    }
+    let covered_secs = (present as f64) * f64::from(period_secs.max(1));
+    Some((covered_secs / span_secs as f64).clamp(f64::MIN_POSITIVE, 1.0))
+}
+
+fn verdict(continuous_days: i64, floor_days: i64, present: u64, rate: Option<f64>) -> FloorVerdict {
+    if present == 0 {
+        return FloorVerdict::NoData;
+    }
+    if continuous_days >= floor_days {
+        return FloorVerdict::Satisfied;
+    }
+    let shortfall_days = floor_days - continuous_days;
+    // At the observed rate: a collector accruing one coverage-day per calendar day
+    // needs exactly `shortfall_days` more days. A slower one needs proportionally
+    // more. `rate` is never zero here (it is `None` instead).
+    let days_at_current_rate = match rate {
+        Some(r) if r > 0.0 => ((shortfall_days as f64) / r).ceil() as i64,
+        _ => shortfall_days,
+    };
+    FloorVerdict::Short { shortfall_days, days_at_current_rate }
+}
+
+/// How old the most recent row is, for the forward-series silence alarm (P-0.6).
+#[must_use]
+pub fn staleness(last_bar_ns: Option<i64>, period_secs: u32, as_of: DateTime<Utc>) -> Option<Duration> {
+    let last = last_bar_ns?;
+    let close = last + i64::from(period_secs) * 1_000_000_000;
+    Some(as_of - DateTime::<Utc>::from_timestamp_nanos(close))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::calendar::CalendarVersion;
+    use chrono::{NaiveDate, NaiveTime, TimeZone};
+
+    const MIN: i64 = 60 * 1_000_000_000;
+
+    fn crypto() -> Calendar {
+        Calendar::Continuous { version: CalendarVersion::crypto_24_7() }
+    }
+
+    fn at(n: i64) -> DateTime<Utc> {
+        Utc.timestamp_nanos(n)
+    }
+
+    fn dense(n: i64) -> Vec<CensusBar> {
+        (0..n).map(|i| CensusBar::observed(i * MIN)).collect()
+    }
+
+    #[test]
+    fn dense_series_has_no_gap() {
+        let c = census("BTC-USD", "coinbase", "1m", 60, &dense(100), &crypto(), at(0));
+        assert_eq!(c.present_bars, 100);
+        assert_eq!(c.expected_bars, 100);
+        assert_eq!(c.missing_bars, 0);
+        assert_eq!(c.missing_bps, 0);
+        assert_eq!(c.longest_gap_periods, 0);
+        assert_eq!(c.longest_continuous_bars, 100);
+    }
+
+    /// The planted-gap acceptance: a known 3-bar hole reports exactly that hole and
+    /// exactly its length.
+    #[test]
+    fn planted_three_bar_gap_is_reported_exactly() {
+        let mut bars = dense(50);
+        // Remove bars 20, 21, 22 — a hole of exactly three periods.
+        bars.retain(|b| !(20..23).contains(&(b.open_ns / MIN)));
+        let c = census("BTC-USD", "coinbase", "1m", 60, &bars, &crypto(), at(0));
+        assert_eq!(c.present_bars, 47);
+        assert_eq!(c.expected_bars, 50);
+        assert_eq!(c.missing_bars, 3);
+        assert_eq!(c.longest_gap_periods, 3, "a 3-bar hole is a 3-period gap");
+        // The longer of the two sides: bars 23..49 is 27 bars.
+        assert_eq!(c.longest_continuous_bars, 27);
+        assert_eq!(c.missing_bps, 600);
+    }
+
+    #[test]
+    fn two_gaps_report_the_longer() {
+        let mut bars = dense(100);
+        bars.retain(|b| {
+            let i = b.open_ns / MIN;
+            !(10..12).contains(&i) && !(40..47).contains(&i)
+        });
+        let c = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
+        assert_eq!(c.longest_gap_periods, 7);
+        assert_eq!(c.missing_bars, 9);
+    }
+
+    #[test]
+    fn empty_series_is_no_data_not_satisfied() {
+        let c = census("X", "v", "1m", 60, &[], &crypto(), at(0));
+        assert_eq!(c.present_bars, 0);
+        assert_eq!(c.expected_bars, 0);
+        assert_eq!(c.missing_bps, 0);
+        assert_eq!(c.strict_v1, FloorVerdict::NoData);
+        assert_eq!(c.paper_v1, FloorVerdict::NoData);
+        assert!(!c.strict_v1.is_satisfied());
+    }
+
+    /// Adversarial: knowledge provenance may not be laundered. A backfilled bar and
+    /// an observed bar of the same open time must remain distinguishable, and the
+    /// backfilled one must win — the census is not allowed to flatter a series.
+    #[test]
+    fn derived_knowledge_is_never_laundered_into_observed() {
+        let bars = vec![
+            CensusBar::observed(0),
+            CensusBar::derived(MIN),
+            // The same bar, collected twice: once honestly, once as a backfill.
+            CensusBar::observed(2 * MIN),
+            CensusBar::derived(2 * MIN),
+        ];
+        let c = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
+        assert_eq!(c.present_bars, 3, "the duplicate collapses to one bar");
+        assert_eq!(c.derived_knowledge_bars, 2, "the tainted duplicate counts as derived");
+        assert_eq!(c.observed_knowledge_bars, 1);
+        assert_eq!(
+            c.derived_knowledge_bars + c.observed_knowledge_bars,
+            c.present_bars,
+            "every bar is on exactly one side of the provenance line"
+        );
+    }
+
+    /// Adversarial: a series that is entirely backfilled must not report a single
+    /// observed bar. This is the `market_bars_v2` bug stated as a test — 158k rows
+    /// stamped `available_time = event_time` looked observed-live and were not.
+    #[test]
+    fn a_wholly_backfilled_series_reports_zero_observed() {
+        let bars: Vec<CensusBar> = (0..500).map(|i| CensusBar::derived(i * MIN)).collect();
+        let c = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
+        assert_eq!(c.observed_knowledge_bars, 0);
+        assert_eq!(c.derived_knowledge_bars, 500);
+    }
+
+    #[test]
+    fn unsorted_input_gives_the_same_answer() {
+        let mut bars = dense(200);
+        bars.retain(|b| b.open_ns / MIN != 77);
+        let sorted = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
+        let mut shuffled = bars.clone();
+        // A fixed, seedless permutation: reverse, then rotate. Deterministic.
+        shuffled.reverse();
+        shuffled.rotate_left(53);
+        let out = census("X", "v", "1m", 60, &shuffled, &crypto(), at(0));
+        assert_eq!(sorted, out);
+    }
+
+    /// Re-running on an unchanged database is identical except `as_of`.
+    #[test]
+    fn rerun_is_identical_except_as_of() {
+        let bars = dense(300);
+        let a = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
+        let b = census("X", "v", "1m", 60, &bars, &crypto(), at(999 * MIN));
+        assert_ne!(a.as_of, b.as_of);
+        let a2 = CoverageCensus { as_of: b.as_of, ..a.clone() };
+        assert_eq!(a2, b, "only as_of may differ between two runs");
+    }
+
+    #[test]
+    fn session_calendar_does_not_call_a_weekend_a_gap() {
+        let nyse = Calendar::Sessions {
+            version: CalendarVersion::new("XNYS", "2026.1"),
+            open_utc: NaiveTime::from_hms_opt(14, 30, 0).unwrap(),
+            close_utc: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
+            holidays: vec![NaiveDate::from_ymd_opt(2026, 1, 19).unwrap()],
+        };
+        // Hourly bars, Friday 15:00 UTC then Monday 15:00 UTC. Continuous would call
+        // that a 71-period hole; the session calendar calls it none.
+        let fri = Utc.with_ymd_and_hms(2026, 1, 16, 15, 0, 0).unwrap().timestamp_nanos_opt().unwrap();
+        let mon = Utc.with_ymd_and_hms(2026, 1, 20, 15, 0, 0).unwrap().timestamp_nanos_opt().unwrap();
+        let hour = 3600 * 1_000_000_000;
+        let bars = vec![CensusBar::observed(fri), CensusBar::observed(mon)];
+        let c = census("SPY", "alpaca", "1h", 3600, &bars, &nyse, at(0));
+        let continuous = census("SPY", "alpaca", "1h", 3600, &bars, &crypto(), at(0));
+        assert!(
+            c.longest_gap_periods < continuous.longest_gap_periods,
+            "a session calendar must not count closed hours as missing bars"
+        );
+        assert_eq!(continuous.longest_gap_periods, ((mon - fri) / hour - 1).unsigned_abs());
+        // 2026-01-19 is a holiday, so only the 2026-01-16 and 2026-01-20 sessions
+        // contribute; the closed hours between them are not expected bars.
+        assert!(c.longest_gap_periods <= 12);
+    }
+
+    #[test]
+    fn floors_are_judged_on_continuous_span_not_total_bars() {
+        // Two years of hourly bars, but every 100th bar missing: plenty of bars,
+        // no continuous span. strict_v1 must not be satisfied.
+        let hour = 3600 * 1_000_000_000;
+        let bars: Vec<CensusBar> =
+            (0..24 * 365 * 2).filter(|i| i % 100 != 0).map(|i| CensusBar::observed(i * hour)).collect();
+        let c = census("X", "v", "1h", 3600, &bars, &crypto(), at(0));
+        assert!(c.present_bars > 17_000);
+        assert!(!c.strict_v1.is_satisfied());
+        assert!(!c.paper_v1.is_satisfied(), "a 99-bar run is not a year of history");
+        assert!(matches!(c.strict_v1, FloorVerdict::Short { .. }));
+    }
+
+    #[test]
+    fn five_years_continuous_satisfies_strict_v1() {
+        let hour = 3600 * 1_000_000_000;
+        let bars: Vec<CensusBar> = (0..24 * 1830).map(|i| CensusBar::observed(i * hour)).collect();
+        let c = census("X", "v", "1h", 3600, &bars, &crypto(), at(0));
+        assert!(c.continuous_days() >= STRICT_V1_FLOOR_DAYS);
+        assert_eq!(c.strict_v1, FloorVerdict::Satisfied);
+        assert_eq!(c.paper_v1, FloorVerdict::Satisfied);
+    }
+
+    #[test]
+    fn shortfall_is_stated_in_days() {
+        let hour = 3600 * 1_000_000_000;
+        // 30 days of hourly bars.
+        let bars: Vec<CensusBar> = (0..24 * 30).map(|i| CensusBar::observed(i * hour)).collect();
+        let c = census("BTC-USD", "coinbase", "1h", 3600, &bars, &crypto(), at(0));
+        match c.paper_v1 {
+            FloorVerdict::Short { shortfall_days, .. } => {
+                assert_eq!(shortfall_days, PAPER_V1_FLOOR_DAYS - c.continuous_days());
+            }
+            other => panic!("expected a shortfall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn staleness_measures_from_the_bar_close() {
+        let last = 1_000 * MIN;
+        let s = staleness(Some(last), 60, at(last + 5 * MIN)).unwrap();
+        // The bar closes one period after it opens, so five minutes after the open
+        // is four minutes after the close.
+        assert_eq!(s.num_minutes(), 4);
+        assert!(staleness(None, 60, at(0)).is_none());
+    }
+}

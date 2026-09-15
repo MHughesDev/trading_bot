@@ -4,6 +4,7 @@
 //! different to prove that the `Collector` abstraction is venue-agnostic.
 
 pub mod crypto;
+pub mod derivs;
 pub mod dex;
 pub mod equity;
 pub mod futures;
@@ -12,6 +13,7 @@ pub mod gap;
 pub mod normalizer;
 pub mod options;
 pub mod prediction;
+pub mod ratelimit;
 pub mod reconnect;
 pub mod social;
 pub mod web;

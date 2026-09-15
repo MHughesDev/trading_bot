@@ -2,6 +2,7 @@
 pub mod backfill;
 pub mod canonical;
 pub mod features;
+pub mod forward;
 pub mod migrate;
 pub mod model_traces;
 pub mod trades;

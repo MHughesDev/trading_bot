@@ -4,6 +4,7 @@ pub mod align;
 pub mod asof;
 pub mod bar;
 pub mod calendar;
+pub mod census;
 pub mod corporate;
 pub mod crypto;
 pub mod dataset;
@@ -16,6 +17,7 @@ pub mod label;
 pub mod options;
 pub mod quality;
 pub mod restatement;
+pub mod source;
 pub mod split;
 
 pub use hash::content_hash;
