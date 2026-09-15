@@ -110,6 +110,18 @@ pub fn expand_members_for_test(study: &StudyConfig) -> Vec<RunConfig> {
     expand_members(study)
 }
 
+/// The member configs a Study expands into, **in the order its member run ids
+/// come back in**.
+///
+/// The funnel needs this to pair a neighbourhood Study's results with the
+/// parameter values that produced them: Gate 12 asks whether there is a cliff,
+/// which is a statement about consecutive points in *parameter* order, and a
+/// distribution of metrics has thrown the parameter away.
+#[must_use]
+pub fn members_of(study: &StudyConfig) -> Vec<RunConfig> {
+    expand_members(study)
+}
+
 /// Expand a Study's `VarySpec` into the member configs to run. Each member is a
 /// *new* Run with its own content-addressed id (`rehashed`).
 fn expand_members(study: &StudyConfig) -> Vec<RunConfig> {
