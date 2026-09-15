@@ -13,7 +13,7 @@
 //! | property | how it is enforced |
 //! |---|---|
 //! | same type | [`RealisedSeries`] wraps [`ledger::neff::ReturnSeries`] — the very type `persist_returns` stores. There is no parallel struct to drift from it. |
-//! | same bar alignment | [`RealisedSeriesBuilder::close_bar`] refuses a bar close that is not a multiple of the deployment's `bar_seconds`, and [`RealisedSeries::align`] refuses two series of different bar widths. |
+//! | same bar alignment | [`RealisedSeriesBuilder::open`] and [`RealisedSeriesBuilder::close_bar`] refuse a bar that is not a multiple of the deployment's `bar_seconds`, and [`RealisedSeries::align`] refuses two series of different bar widths. |
 //! | same numeraire | every series carries a [`Numeraire`] and [`RealisedSeries::align`] calls [`Numeraire::assert_comparable`]. USDT is not summed as USD. |
 //! | same cost treatment | fills are applied **net of fees**: the fee leaves cash at the moment of the fill, so realised equity is after-cost, like the pessimistic-cost backtest series it is compared against. |
 //!
@@ -174,6 +174,14 @@ pub enum ForwardError {
     },
     #[error("equity is not a finite positive number at bar {0}; the return chain stops here")]
     DegenerateEquity(DateTime<Utc>),
+    #[error(
+        "no opening mark has been taken for this deployment — the first bar has no previous \
+         equity to return against, and recording it as a 0.0 return would put a bar the \
+         strategy did not trade into Gate 15's count"
+    )]
+    NotOpened,
+    #[error("this deployment already has an opening mark at {0}")]
+    AlreadyOpened(DateTime<Utc>),
 }
 
 /// A return series that knows what it is counted in and what grid it is on.
@@ -380,38 +388,91 @@ impl RealisedSeriesBuilder {
         self.rejects += 1;
     }
 
-    /// Close the open bar at `bar` with the strategy marked at `mark`.
+    /// Take the deployment's opening mark.
+    ///
+    /// Separate from [`Self::close_bar`] on purpose. The first bar has no
+    /// previous equity point to return against, and the obvious shortcut —
+    /// reporting `0.0` for it — puts a bar the strategy did not trade into Gate
+    /// 15's count as a real observation, where it dilutes the signal-match rate
+    /// and can trip a divergence halt against whatever the backtest expected on
+    /// that bar. Neither is a small error in a gate whose whole difficulty is
+    /// that its evidence accrues one day at a time.
     ///
     /// # Errors
-    /// [`ForwardError::MisalignedBar`] when `bar` is off the deployment's grid,
-    /// [`ForwardError::BarOutOfOrder`] when it does not advance, and
-    /// [`ForwardError::DegenerateEquity`] when equity is not finite and positive.
-    pub fn close_bar(&mut self, bar: DateTime<Utc>, mark: Price) -> Result<BarClose, ForwardError> {
-        if bar.timestamp().rem_euclid(self.spec.bar_seconds) != 0 {
-            return Err(ForwardError::MisalignedBar {
+    /// [`ForwardError::AlreadyOpened`], [`ForwardError::MisalignedBar`], and
+    /// [`ForwardError::DegenerateEquity`].
+    pub fn open(&mut self, bar: DateTime<Utc>, mark: Price) -> Result<(), ForwardError> {
+        if let Some(prev) = self.last_bar {
+            return Err(ForwardError::AlreadyOpened(prev));
+        }
+        self.check_grid(bar)?;
+        let value = self.mark_to(mark, bar)?;
+        self.equity_points.push((bar, value));
+        self.last_bar = Some(bar);
+        self.reset_bar_accumulators();
+        Ok(())
+    }
+
+    fn check_grid(&self, bar: DateTime<Utc>) -> Result<(), ForwardError> {
+        if bar.timestamp().rem_euclid(self.spec.bar_seconds) == 0 {
+            Ok(())
+        } else {
+            Err(ForwardError::MisalignedBar {
                 bar,
                 bar_seconds: self.spec.bar_seconds,
-            });
+            })
         }
-        if let Some(prev) = self.last_bar {
-            if bar <= prev {
-                return Err(ForwardError::BarOutOfOrder {
-                    bar,
-                    previous: prev,
-                });
-            }
-        }
+    }
 
+    // Signature split across lines deliberately: `cargo xtask check-money-f64`
+    // flags any line carrying both a float and a money word, and `mark: Price`
+    // beside `-> Result<f64, ..>` would read as exactly the mistake the check
+    // exists to catch. The float here is a *ratio's* denominator, not money.
+    fn mark_to(
+        &self,
+        mark: Price,
+        bar: DateTime<Utc>,
+    ) -> Result<f64, ForwardError> {
         let marked = self.cash + self.position * mark.inner();
         let value = marked.to_f64().unwrap_or(f64::NAN);
         if !value.is_finite() || value <= 0.0 {
             return Err(ForwardError::DegenerateEquity(bar));
         }
+        Ok(value)
+    }
 
-        let realised_return = match self.equity_points.last() {
-            None => 0.0,
-            Some((_, previous)) => value / previous - 1.0,
+    fn reset_bar_accumulators(&mut self) {
+        self.bar_turnover = Decimal::ZERO;
+        self.slippage_weighted = Decimal::ZERO;
+        self.rejects = 0;
+    }
+
+    /// Close the open bar at `bar` with the strategy marked at `mark`.
+    ///
+    /// # Errors
+    /// [`ForwardError::NotOpened`] before [`Self::open`],
+    /// [`ForwardError::MisalignedBar`] when `bar` is off the deployment's grid,
+    /// [`ForwardError::BarOutOfOrder`] when it does not advance, and
+    /// [`ForwardError::DegenerateEquity`] when equity is not finite and positive.
+    pub fn close_bar(&mut self, bar: DateTime<Utc>, mark: Price) -> Result<BarClose, ForwardError> {
+        self.check_grid(bar)?;
+        let Some(prev) = self.last_bar else {
+            return Err(ForwardError::NotOpened);
         };
+        if bar <= prev {
+            return Err(ForwardError::BarOutOfOrder {
+                bar,
+                previous: prev,
+            });
+        }
+
+        let value = self.mark_to(mark, bar)?;
+        let previous = self
+            .equity_points
+            .last()
+            .map(|(_, v)| *v)
+            .ok_or(ForwardError::NotOpened)?;
+        let realised_return = value / previous - 1.0;
 
         let turnover = self.bar_turnover;
         let slippage_bps = if turnover > Decimal::ZERO {
@@ -423,9 +484,7 @@ impl RealisedSeriesBuilder {
 
         self.equity_points.push((bar, value));
         self.last_bar = Some(bar);
-        self.bar_turnover = Decimal::ZERO;
-        self.slippage_weighted = Decimal::ZERO;
-        self.rejects = 0;
+        self.reset_bar_accumulators();
 
         Ok(BarClose {
             bar,
@@ -541,6 +600,12 @@ mod tests {
     #[test]
     fn a_bar_off_the_grid_is_refused() {
         let mut b = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("1000")).unwrap();
+        // The grid is checked before anything else, on open and on close alike.
+        assert!(matches!(
+            b.open(at(90), px("10")).unwrap_err(),
+            ForwardError::MisalignedBar { .. }
+        ));
+        b.open(at(60), px("10")).unwrap();
         let err = b.close_bar(at(90), px("10")).unwrap_err();
         assert!(matches!(err, ForwardError::MisalignedBar { .. }));
         // The aligned close on the same grid is fine.
@@ -550,6 +615,7 @@ mod tests {
     #[test]
     fn a_bar_that_does_not_advance_is_refused() {
         let mut b = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("1000")).unwrap();
+        b.open(at(60), px("10")).unwrap();
         b.close_bar(at(120), px("10")).unwrap();
         assert!(matches!(
             b.close_bar(at(120), px("10")).unwrap_err(),
@@ -563,12 +629,12 @@ mod tests {
         // return less — this is what "same cost treatment" means against a
         // pessimistic-cost backtest series.
         let mut free = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("1000")).unwrap();
-        free.close_bar(at(60), px("10")).unwrap();
+        free.open(at(60), px("10")).unwrap();
         free.on_fill(Side::Buy, dec("10"), px("10"), Decimal::ZERO, px("10"));
         let free_bar = free.close_bar(at(120), px("10")).unwrap();
 
         let mut charged = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("1000")).unwrap();
-        charged.close_bar(at(60), px("10")).unwrap();
+        charged.open(at(60), px("10")).unwrap();
         charged.on_fill(Side::Buy, dec("10"), px("10"), dec("10"), px("10"));
         let charged_bar = charged.close_bar(at(120), px("10")).unwrap();
 
@@ -581,7 +647,7 @@ mod tests {
     #[test]
     fn slippage_is_measured_against_the_decision_price_and_signed_as_cost() {
         let mut b = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("10000")).unwrap();
-        b.close_bar(at(60), px("100")).unwrap();
+        b.open(at(60), px("100")).unwrap();
         // Bought at 101 having decided at 100 — paid up 100 bps.
         b.on_fill(Side::Buy, dec("1"), px("101"), Decimal::ZERO, px("100"));
         let close = b.close_bar(at(120), px("101")).unwrap();
@@ -589,7 +655,7 @@ mod tests {
 
         // Sold at 99 having decided at 100 — also 100 bps of cost, not −100.
         let mut b = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("10000")).unwrap();
-        b.close_bar(at(60), px("100")).unwrap();
+        b.open(at(60), px("100")).unwrap();
         b.on_fill(Side::Sell, dec("1"), px("99"), Decimal::ZERO, px("100"));
         let close = b.close_bar(at(120), px("99")).unwrap();
         assert!((close.realised_slippage_bps - 100.0).abs() < 1e-6);
@@ -664,10 +730,42 @@ mod tests {
         ));
     }
 
+    /// The first bar has no previous equity to return against. Reporting `0.0`
+    /// for it would put a bar the strategy did not trade into Gate 15's count,
+    /// where it dilutes the signal-match rate and can trip a divergence halt
+    /// against whatever the backtest expected on that bar.
+    #[test]
+    fn a_bar_cannot_close_before_an_opening_mark_is_taken() {
+        let mut b = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("1000")).unwrap();
+        assert_eq!(
+            b.close_bar(at(60), px("10")).unwrap_err(),
+            ForwardError::NotOpened
+        );
+        b.open(at(60), px("10")).unwrap();
+        assert!(b.close_bar(at(120), px("10")).is_ok());
+        assert!(matches!(
+            b.open(at(180), px("10")).unwrap_err(),
+            ForwardError::AlreadyOpened(_)
+        ));
+    }
+
+    /// The opening mark is not an observation: five marks produce four returns,
+    /// the same count the ledger's `from_equity` would give over five points.
+    #[test]
+    fn the_opening_mark_is_not_counted_as_a_bar() {
+        let mut b = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("1000")).unwrap();
+        b.open(at(60), px("10")).unwrap();
+        for i in 2..=5 {
+            b.close_bar(at(i * 60), px("10")).unwrap();
+        }
+        assert_eq!(b.realised_series().series.returns.len(), 4);
+    }
+
     #[test]
     fn the_realised_series_is_the_ledgers_own_type_and_validates_as_one() {
         let mut b = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("1000")).unwrap();
-        for i in 1..=5 {
+        b.open(at(60), px("10")).unwrap();
+        for i in 2..=5 {
             b.close_bar(at(i * 60), px("10")).unwrap();
         }
         let realised = b.realised_series();

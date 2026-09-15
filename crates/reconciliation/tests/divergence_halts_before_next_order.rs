@@ -179,25 +179,9 @@ async fn a_planted_return_divergence_stops_the_next_order_at_the_gate() {
     try_submit(&rig).await.expect("the first order is fine");
     assert_eq!(rig.broker.submit_call_count(), 1);
 
-    // Two bars. The first establishes the equity base; the second moves the
-    // mark 5% against a backtest that expected nothing, which is five times the
-    // declared per-bar threshold.
-    recorder
-        .close_bar(
-            at(BAR),
-            px("100"),
-            ExpectedBar {
-                expected_return: 0.0,
-                expected_turnover: Decimal::ZERO,
-                modelled_slippage_bps: 0.0,
-                signal_matched: true,
-            },
-            ObservationSource::Observed,
-        )
-        .unwrap();
-
-    // Put the book to work so the mark moves equity.
-    recorder.on_submit(&intent(), px("100"));
+    // The opening mark is not an observation — it is the base the first return
+    // is measured against.
+    recorder.open(at(BAR), px("100")).unwrap();
 
     let (observation, verdict) = recorder
         .close_bar(
@@ -282,9 +266,10 @@ async fn the_halt_is_scoped_to_the_diverging_strategy() {
     // A return divergence halts only this strategy — no kill switch, because a
     // strategy whose realised returns stopped matching its backtest says
     // nothing about anyone else's book.
+    recorder.open(at(BAR), px("100")).unwrap();
     recorder
         .close_bar(
-            at(BAR),
+            at(2 * BAR),
             px("100"),
             ExpectedBar {
                 expected_return: 0.0,

@@ -73,18 +73,20 @@ CREATE TABLE IF NOT EXISTS mlops.paper_deployment (
   kill_criteria     TEXT NOT NULL CHECK (length(trim(kill_criteria)) > 0),
 
   deployed_by       TEXT NOT NULL CHECK (length(deployed_by) > 0),
-  deployed_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  -- When the deployment stopped producing forward evidence. Set by writing a
-  -- successor row; NULL means running.
-  retired_at        TIMESTAMPTZ
+  deployed_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_paper_deployment_strategy
   ON mlops.paper_deployment (tenant_id, strategy_id, deployed_at DESC);
 
+-- UPDATE is refused along with DELETE. A `retired_at` column that could be set
+-- would be an UPDATE grant on this table, and the same grant would let somebody
+-- widen `max_abs_return_divergence` after a halt fired — which is the one edit
+-- that must leave a trace, because §12.6's whole point is that the stopping rule
+-- predates the result. Retirement goes in its own table below.
 DROP TRIGGER IF EXISTS trg_paper_deployment_immutable ON mlops.paper_deployment;
 CREATE TRIGGER trg_paper_deployment_immutable
-  BEFORE DELETE ON mlops.paper_deployment
+  BEFORE UPDATE OR DELETE ON mlops.paper_deployment
   FOR EACH ROW EXECUTE FUNCTION mlops.refuse_mutation();
 
 ALTER TABLE mlops.paper_deployment ENABLE ROW LEVEL SECURITY;
@@ -94,8 +96,35 @@ CREATE POLICY tenant_isolation ON mlops.paper_deployment
   USING (tenant_id = current_setting('app.tenant_id', true))
   WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
-GRANT SELECT, INSERT, UPDATE ON mlops.paper_deployment TO app_role;
+GRANT SELECT, INSERT ON mlops.paper_deployment TO app_role;
 GRANT SELECT ON mlops.paper_deployment TO agent_role, internal_ml_role, backtest_role;
+
+-- A deployment that has stopped producing forward evidence. Its own table so
+-- the deployment row stays immutable; a deployment with no row here is running.
+CREATE TABLE IF NOT EXISTS mlops.paper_deployment_retirement (
+  deployment_id UUID PRIMARY KEY REFERENCES mlops.paper_deployment(deployment_id),
+  tenant_id     TEXT NOT NULL,
+  retired_by    TEXT NOT NULL CHECK (length(trim(retired_by)) > 0),
+  reason        TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+  retired_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DROP TRIGGER IF EXISTS trg_paper_deployment_retirement_immutable
+  ON mlops.paper_deployment_retirement;
+CREATE TRIGGER trg_paper_deployment_retirement_immutable
+  BEFORE UPDATE OR DELETE ON mlops.paper_deployment_retirement
+  FOR EACH ROW EXECUTE FUNCTION mlops.refuse_mutation();
+
+ALTER TABLE mlops.paper_deployment_retirement ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mlops.paper_deployment_retirement FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON mlops.paper_deployment_retirement;
+CREATE POLICY tenant_isolation ON mlops.paper_deployment_retirement
+  USING (tenant_id = current_setting('app.tenant_id', true))
+  WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+GRANT SELECT, INSERT ON mlops.paper_deployment_retirement TO app_role;
+GRANT SELECT ON mlops.paper_deployment_retirement
+  TO agent_role, internal_ml_role, backtest_role;
 
 -- ── The observations ────────────────────────────────────────────────────────
 

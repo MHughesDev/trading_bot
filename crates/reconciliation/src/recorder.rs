@@ -110,6 +110,24 @@ impl ForwardRecorder {
         );
     }
 
+    /// Take the deployment's opening mark. Must precede the first
+    /// [`Self::close_bar`].
+    ///
+    /// # Errors
+    /// [`ForwardError::AlreadyOpened`], [`ForwardError::MisalignedBar`], or
+    /// [`ForwardError::DegenerateEquity`].
+    pub fn open(
+        &self,
+        bar: chrono::DateTime<chrono::Utc>,
+        mark: Price,
+    ) -> Result<(), ForwardError> {
+        self.state
+            .lock()
+            .expect("recorder lock")
+            .builder
+            .open(bar, mark)
+    }
+
     /// Note a broker reject attributable to the model's own output (§12.6).
     pub fn on_model_reject(&self) {
         self.state

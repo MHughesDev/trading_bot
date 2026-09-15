@@ -116,10 +116,10 @@ async fn a_fill_reaches_the_forward_record_within_one_bar() {
     let kill_switch = Arc::new(KillSwitch::new(false));
     let gate = RiskGate::new(GlobalRiskLimits::default(), kill_switch);
 
-    // Bar 1 closes flat and establishes the equity base.
-    recorder
-        .close_bar(at(BAR), px("100"), flat(), ObservationSource::Observed)
-        .unwrap();
+    // The opening mark establishes the equity base. It is deliberately not an
+    // observation: a bar the strategy did not trade must not enter Gate 15's
+    // count.
+    recorder.open(at(BAR), px("100")).unwrap();
 
     // The strategy decides at 100 and submits.
     let intent = buy_intent();
@@ -220,7 +220,8 @@ async fn the_realised_series_compares_element_wise_with_a_stored_backtest_series
     let recorder =
         ForwardRecorder::new(spec(Numeraire::Usd), dec("10000"), Arc::clone(&halts)).unwrap();
 
-    for i in 1..=5 {
+    recorder.open(at(BAR), px("100")).unwrap();
+    for i in 2..=5 {
         recorder
             .close_bar(
                 at(i * BAR),
@@ -262,7 +263,8 @@ async fn a_usdt_deployment_is_not_summed_as_usd() {
     let halts = Arc::new(StrategyHaltRegistry::new());
     let recorder =
         ForwardRecorder::new(spec(Numeraire::Usdt), dec("10000"), Arc::clone(&halts)).unwrap();
-    for i in 1..=3 {
+    recorder.open(at(BAR), px("100")).unwrap();
+    for i in 2..=3 {
         recorder
             .close_bar(
                 at(i * BAR),
@@ -296,6 +298,7 @@ async fn observations_become_gate_15_evidence_and_backfill_does_not() {
         ForwardRecorder::new(spec(Numeraire::Usd), dec("10000"), Arc::clone(&halts)).unwrap();
 
     let mut rows = Vec::new();
+    recorder.open(at(0), px("100")).unwrap();
     for i in 1..=6 {
         let (o, _) = recorder
             .close_bar(
