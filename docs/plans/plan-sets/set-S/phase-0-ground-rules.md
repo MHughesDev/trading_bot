@@ -147,15 +147,26 @@ real and `jobs = 2` must stay — but the cascade that contradicts the source in
 the shared cache. The board's instruction to share the 237 GB cache is what produces it.
 
 The fix is a per-worktree `CARGO_TARGET_DIR`, and **it is much cheaper than the shared
-directory's size suggests.** Measured here: after cold-building `mcp-server-lib`, `harness` and
-their dependency graphs, this worktree's own `target/` is **1.5 GB**, and free space went from
-230.7 GB to 228.8 GB. A per-worktree directory holds only what that track builds; the shared
-237 GB is the accumulation of everything every build has ever produced, including profiles and
-crates no current track touches. Eighteen private directories at this size are ~30 GB, not
-4 TB. The disk argument for sharing does not survive the measurement.
+directory's size suggests.** Measured here, end to end: cold-building `mcp-server-lib`,
+`harness`, `ledger` and `invariants` with their full dependency graphs — sqlx, clickhouse,
+storage, ed25519-dalek, all of it — left this worktree's own `target/` at **4.5 GB**, and free
+space went from 230.7 GB to 217.8 GB (the extra is cargo's shared registry and git checkouts,
+paid once for the machine, not once per worktree). A private directory holds only what that
+track builds; the shared 237 GB is the accumulation of everything every build has ever
+produced. Eighteen private directories at this size are **~80 GB, not 4 TB**. The disk argument
+for sharing does not survive the measurement.
 
 Every suite this track reports green was re-run from cold in the private directory after the
-shared one was abandoned.
+shared one was abandoned:
+
+| Suite | Cold result |
+|---|---|
+| `cargo test -p mcp-server-lib --lib` | 27 passed, 0 failed |
+| `cargo test -p harness --lib` | 208 passed, 0 failed |
+| `cargo test -p harness --test conformance` | 30 passed, 0 failed |
+| `cargo test -p harness --test failure_injection` | 24 passed, 0 failed |
+| `cargo test -p ledger --lib` | 116 passed, 0 failed |
+| `cargo test -p invariants --test static_invariants` | 27 passed, 0 failed |
 
 **Recommendation, not done.** `cargo xtask lint-no-json-hotpath` enforces a rule a prior phase
 established, is **not wired into CI**, and fails on one pre-existing line in
