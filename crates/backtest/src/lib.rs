@@ -23,8 +23,10 @@
 //! (paged 1000-bar requests) straight into `ClickHouse`, then re-checks.
 
 pub mod aggregate;
+pub mod capacity;
 pub mod collect;
 pub mod experiment;
+pub mod factors;
 pub mod gaps;
 pub mod gates;
 pub mod manager;

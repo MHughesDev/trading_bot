@@ -24,7 +24,7 @@ pub use executor::{ClosureExecutor, RunExecutor};
 pub use id::RunId;
 pub use metrics::{MetricInputs, MetricKind, MetricSet};
 pub use objective::{Aggregate, Constraint, Objective};
-pub use result::{ComputeCost, Flag, RunResult, RunStatus, Side, Trade};
+pub use result::{ComputeCost, Flag, InstrumentStat, RunResult, RunStatus, Side, Trade};
 pub use store::{InMemoryRunStore, PutOutcome, RunStore};
 
 use ledger::{
