@@ -97,7 +97,16 @@ impl Envelope {
 pub const SPEND_ACTIONS: &[&str] = &["arm_automation", "place_order", "start_campaign", "submit_job"];
 
 /// Actions that move a strategy toward capital.
-pub const PROMOTION_ACTIONS: &[&str] = &["promote_model", "promote_strategy", "raise_capital_fraction"];
+///
+/// `promote_model_version` is spelled exactly as the catalogue spells it
+/// (`mcp-server::taxonomy`). It read `promote_model` until 2026-09-15, which meant
+/// [`Envelope::for_action`] returned [`Envelope::None`] for the only promotion tool
+/// that exists and both drivers dispatched it ungated
+/// (`api/src/agent/driver.rs:684`, `harness/src/drive.rs:1564`). The class of
+/// defect — a gated name that no tool answers to — is now closed by
+/// `mcp-server-lib`'s `every_envelope_entry_is_a_real_action`, not by care.
+pub const PROMOTION_ACTIONS: &[&str] =
+    &["promote_model_version", "promote_strategy", "raise_capital_fraction"];
 
 /// The one-shot holdout (§12.7).
 pub const SEALED_HOLDOUT_ACTIONS: &[&str] = &["evaluate_sealed_holdout", "open_vault"];

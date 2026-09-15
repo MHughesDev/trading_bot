@@ -628,8 +628,12 @@ fn spec_15_tool_surface_conformance() {
 
     // Promotion is gated rather than keyed: a second request cannot double-promote
     // because it pauses for a human either way (§15's approval envelopes).
+    // The name here is the *tool* name, which is what both drivers pass to
+    // `for_action`. It said `promote_model` until 2026-09-15 and so asserted a
+    // property of a string no tool answers to; the catalogue's tool has always
+    // been `promote_model_version` (Set S task S-0.2).
     assert!(
-        ledger::audit::Envelope::for_action("promote_model").requires_approval(),
+        ledger::audit::Envelope::for_action("promote_model_version").requires_approval(),
         "promotion must fall under an approval envelope"
     );
 
@@ -791,4 +795,134 @@ fn no_check_requires_a_non_empty_array_with_array_length() {
         "`array_length(x, 1)` in a CHECK is NULL for an empty array, and a NULL CHECK passes — \
          use `cardinality(x)`, which is 0: {hits:?}"
     );
+}
+
+// ── AT-64b · Approval envelopes name actions that exist ──────────────────────
+//
+// `Envelope::for_action` matches on a *name*, and both drivers hand it the tool
+// name they are about to dispatch (`api/src/agent/driver.rs:684`,
+// `harness/src/drive.rs:1564`). A gated name that no tool answers to therefore
+// gates nothing, silently, in the safe-looking direction: the list still reads as
+// though promotion is covered.
+//
+// That was live until 2026-09-15. `PROMOTION_ACTIONS` said `promote_model`; the
+// catalogue's tool has always been `promote_model_version`, so the one action
+// AGENT-001 §15 says needs a human ran without one on both drivers.
+//
+// Set S task S-0.2 — AGENT-006 §2.6.
+
+/// Gated actions that are deliberately **not** catalogue tools.
+///
+/// The envelope lists gate *platform actions*, and most of them are reached
+/// through a route or a job rather than through an MCP tool. Each one is named
+/// here with the reason, so that adding a gated action is a choice between
+/// naming a real tool and writing down why there isn't one — and so that a typo
+/// in a tool name cannot hide among them.
+const NON_TOOL_GATED_ACTIONS: &[(&str, &str)] = &[
+    ("place_order", "execution route /api/orders; no MCP tool places orders"),
+    ("start_campaign", "campaign dispatcher; Set S phase 10 may add a tool"),
+    ("submit_job", "job service admission, crates/jobs"),
+    ("promote_strategy", "capital path; no tool exists yet (Set T)"),
+    ("raise_capital_fraction", "ramp mechanics; Set T phase 3"),
+    ("evaluate_sealed_holdout", "holdout path, crates/ledger; Set S phase 3 tool pending"),
+    ("open_vault", "holdout path, crates/ledger; Set S phase 3 tool pending"),
+    ("write_insight", "tier-3 memory writer; Set S phase 4"),
+    ("record_insight", "tier-3 memory writer; Set S phase 4"),
+    ("update_playbook", "tier-3 memory writer; Set S phase 4"),
+];
+
+/// The check itself, over supplied inputs, so the adversarial test below can run
+/// it against a deliberately broken catalogue and assert it *rejects*.
+///
+/// A test that only asserts the real lists are fine proves the lists are fine
+/// today; it does not prove the check would catch tomorrow's typo.
+fn envelope_name_problems(
+    gated: &[&str],
+    catalogue: &BTreeSet<String>,
+    non_tools: &[(&str, &str)],
+) -> Vec<String> {
+    let allowed: BTreeSet<&str> = non_tools.iter().map(|(n, _)| *n).collect();
+    let mut problems = Vec::new();
+    for action in gated {
+        let is_tool = catalogue.contains(*action);
+        let is_allowed = allowed.contains(action);
+        if !is_tool && !is_allowed {
+            problems.push(format!(
+                "gated action `{action}` is neither a catalogue tool nor listed in \
+                 NON_TOOL_GATED_ACTIONS — it gates nothing"
+            ));
+        }
+        if is_tool && is_allowed {
+            problems.push(format!(
+                "`{action}` is now a catalogue tool and must be removed from \
+                 NON_TOOL_GATED_ACTIONS, which claims no tool has that name"
+            ));
+        }
+    }
+    problems
+}
+
+fn catalogue_names() -> BTreeSet<String> {
+    let defs = mcp_server_lib::tool_definitions();
+    let names: BTreeSet<String> = defs
+        .as_array()
+        .expect("tool definitions are an array")
+        .iter()
+        .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_owned))
+        .collect();
+    assert!(!names.is_empty(), "the catalogue is empty; the check would pass vacuously");
+    names
+}
+
+#[test]
+fn every_envelope_entry_is_a_real_action() {
+    let gated = ledger::audit::gated_actions();
+    let problems = envelope_name_problems(&gated, &catalogue_names(), NON_TOOL_GATED_ACTIONS);
+    assert!(problems.is_empty(), "{problems:#?}");
+}
+
+/// Adversarial: the check rejects the two ways the list can drift.
+///
+/// Without this, `every_envelope_entry_is_a_real_action` could be a function that
+/// returns an empty vector and nobody would know.
+#[test]
+fn the_envelope_name_check_rejects_a_name_no_tool_answers_to() {
+    let catalogue: BTreeSet<String> =
+        ["promote_model_version", "arm_automation"].into_iter().map(str::to_owned).collect();
+
+    // 1. The exact defect that was live: a plausible-looking name, misspelled.
+    let problems = envelope_name_problems(&["promote_model"], &catalogue, &[]);
+    assert_eq!(problems.len(), 1, "a name no tool answers to must be rejected: {problems:?}");
+    assert!(problems[0].contains("promote_model"));
+
+    // 2. A stale exemption: the tool now exists, so the "not a tool" claim is a lie.
+    let problems =
+        envelope_name_problems(&["arm_automation"], &catalogue, &[("arm_automation", "stale")]);
+    assert_eq!(problems.len(), 1, "a stale exemption must be rejected: {problems:?}");
+    assert!(problems[0].contains("must be removed"));
+
+    // 3. And it passes what it should: a real tool, and a declared non-tool.
+    let problems = envelope_name_problems(
+        &["promote_model_version", "place_order"],
+        &catalogue,
+        &[("place_order", "execution route")],
+    );
+    assert!(problems.is_empty(), "{problems:?}");
+}
+
+/// Adversarial: the old spelling gates nothing, and the new one gates promotion.
+///
+/// Asserting the fix works is half a test. This asserts the broken spelling is
+/// *not* quietly still accepted by some fallback.
+#[test]
+fn the_old_promotion_spelling_matches_no_envelope() {
+    use ledger::audit::Envelope;
+    assert_eq!(
+        Envelope::for_action("promote_model"),
+        Envelope::None,
+        "`promote_model` must match nothing: it is not a tool, and keeping it would \
+         restore the illusion the real tool is gated"
+    );
+    assert_eq!(Envelope::for_action("promote_model_version"), Envelope::Promotion);
+    assert!(Envelope::for_action("promote_model_version").requires_approval());
 }
