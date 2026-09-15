@@ -235,20 +235,21 @@ impl ExecutionEngine {
             filled_at: Utc::now(),
         };
 
+        // The event shape every consumer of the fill stream receives.
+        let event = FillEvent {
+            idempotency_key,
+            broker_order_id: broker_order_id.to_owned(),
+            filled_qty: fill.filled_size,
+            fill_price: fill.fill_price,
+            commission: fill.commission,
+            filled_at: fill.filled_at,
+        };
+
         // In-memory dedup first (cheap), database second (durable).
         let in_memory = self
             .fill_processor
             .lock()
-            .map(|mut fp| {
-                fp.apply(&FillEvent {
-                    idempotency_key,
-                    broker_order_id: broker_order_id.to_owned(),
-                    filled_qty: fill.filled_size,
-                    fill_price: fill.fill_price,
-                    commission: fill.commission,
-                    filled_at: fill.filled_at,
-                })
-            })
+            .map(|mut fp| fp.apply(&event))
             .unwrap_or(FillResult::Applied);
 
         let outcome = journal
@@ -266,7 +267,7 @@ impl ExecutionEngine {
             .await
             .map_err(|e| ExecutionError::Database(e.to_string()))?;
 
-        if outcome == journal::WriteOutcome::Inserted {
+        if outcome == journal::WriteOutcome::Inserted && in_memory == FillResult::Applied {
             audit.push(AuditEntry::StateTransition {
                 idempotency_key,
                 from: Some(OrderState::Submitted),
@@ -277,8 +278,15 @@ impl ExecutionEngine {
             info!(
                 %idempotency_key, %broker_order_id,
                 filled = %fill.filled_size, price = %fill.fill_price.inner(),
+                observers = fills::observer_count(),
                 "fill recorded"
             );
+
+            // The fill stream.  Published only for a fill that is new to both
+            // the in-memory processor and the database — a redelivery or a
+            // post-restart resubmit must not look like a second forward
+            // observation to reconciliation or to Gate 15.
+            fills::publish(&event);
         } else {
             tracing::debug!(
                 %idempotency_key,

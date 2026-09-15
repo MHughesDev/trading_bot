@@ -522,7 +522,7 @@ mod tests {
     use super::*;
 
     use std::str::FromStr;
-    use std::sync::OnceLock;
+    use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
 
     use api::instrument_meta::{InstrumentMeta, InstrumentMetaCache};
@@ -1094,6 +1094,73 @@ mod tests {
                 && fraction < Decimal::from_str("0.002").unwrap(),
             "0.1% of equity expected; sized {} of equity ({notional} of {equity})",
             fraction
+        );
+    }
+
+    // ── The fill stream track 5 consumes ─────────────────────────────────────
+
+    /// A registered [`execution::fills::FillObserver`] receives every genuinely
+    /// new fill exactly once, and is **not** fired again by a resubmit of the
+    /// same order.  Reconciliation, the forward-observation collector and
+    /// Gate 15's evidence path all hang off this seam, and a fill counted twice
+    /// is a forward observation that never happened.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_fill_stream_fires_once_per_new_fill() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        #[derive(Default)]
+        struct Counter {
+            seen: AtomicUsize,
+            last_key: Mutex<Option<journal::Uuid>>,
+        }
+        impl execution::fills::FillObserver for Counter {
+            fn on_fill(&self, fill: &execution::fills::FillEvent) {
+                self.seen.fetch_add(1, Ordering::SeqCst);
+                *self.last_key.lock().unwrap() = Some(fill.idempotency_key);
+            }
+        }
+
+        let counter = Arc::new(Counter::default());
+        execution::fills::register_observer(Arc::clone(&counter) as Arc<_>);
+        let before = counter.seen.load(Ordering::SeqCst);
+
+        let instrument = "STREAM-BTC-USD";
+        ready_instrument(instrument, "50000");
+
+        let intent = OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("0.01").unwrap(),
+            None,
+            None,
+        );
+        let key = intent.idempotency_key;
+        let gate = gate_with(GlobalRiskLimits::default());
+
+        let ctx = risk::context::context_for(&intent).expect("a measured context");
+        engine()
+            .submit(gate.check(intent.clone(), &ctx).expect("approved"))
+            .await
+            .expect("submitted");
+
+        let after_first = counter.seen.load(Ordering::SeqCst);
+        assert_eq!(after_first, before + 1, "one fill, one notification");
+        assert_eq!(*counter.last_key.lock().unwrap(), Some(key));
+
+        // Resubmit the same order with a fresh engine and gate — the restart
+        // case.  The journal recognises it, so no second notification.
+        let gate2 = gate_with(GlobalRiskLimits::default());
+        let ctx2 = risk::context::context_for(&intent).expect("a measured context");
+        engine()
+            .submit(gate2.check(intent, &ctx2).expect("approved"))
+            .await
+            .expect("resubmitted");
+
+        assert_eq!(
+            counter.seen.load(Ordering::SeqCst),
+            after_first,
+            "a redelivered order must not publish a second fill"
         );
     }
 

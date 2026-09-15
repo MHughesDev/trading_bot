@@ -19,7 +19,8 @@ fn gate_with_ks(ks: Arc<KillSwitch>) -> RiskGate {
 fn ctx() -> GateContext {
     GateContext::for_manual_order(
         Decimal::ZERO,
-        None,
+        // A measured mark: the gate refuses an order it cannot price.
+        Some(domain::money::Price::from_str("50000").unwrap()),
         Decimal::from_str("0.01").unwrap(),
         Decimal::from_str("0.001").unwrap(),
         Decimal::ZERO,

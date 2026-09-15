@@ -28,12 +28,70 @@ pub struct FillEvent {
 }
 
 /// Outcome of applying a fill to the processor.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FillResult {
     /// Fill was new and applied successfully.
     Applied,
     /// Fill was already seen; skipped as a no-op.
     Duplicate,
+}
+
+// ── The fill stream ──────────────────────────────────────────────────────────
+
+/// Something that wants to hear about every fill the platform takes.
+///
+/// This is the seam reconciliation, the forward-observation collector and
+/// Gate 15's evidence path attach to.  It fires **once per genuinely new
+/// fill** — a redelivery, a resubmit, or a restart replaying the same broker
+/// fill does not fire it again, because an observer that counts a fill twice
+/// reports a forward observation that never happened.
+///
+/// Observers are notified synchronously and must not block: do the work on
+/// your own task.
+pub trait FillObserver: Send + Sync {
+    fn on_fill(&self, fill: &FillEvent);
+}
+
+static OBSERVERS: std::sync::RwLock<Vec<std::sync::Arc<dyn FillObserver>>> =
+    std::sync::RwLock::new(Vec::new());
+
+/// Subscribe to the fill stream.  Idempotent per observer instance is *not*
+/// enforced — register once, at startup.
+pub fn register_observer(observer: std::sync::Arc<dyn FillObserver>) {
+    match OBSERVERS.write() {
+        Ok(mut w) => w.push(observer),
+        Err(_) => tracing::error!(
+            "fill observer registry poisoned — this observer will not receive fills"
+        ),
+    }
+}
+
+/// Number of registered observers, for diagnostics and tests.
+#[must_use]
+pub fn observer_count() -> usize {
+    OBSERVERS.read().map(|r| r.len()).unwrap_or(0)
+}
+
+/// Publish a fill to every observer.
+///
+/// Called by [`crate::ExecutionEngine`] only when the fill was both new to the
+/// in-memory processor (`FillResult::Applied`) **and** newly inserted into the
+/// `fills` table.  Those two together are the definition of "this fill happened
+/// and we had not seen it before"; either alone is not.
+pub fn publish(fill: &FillEvent) {
+    let observers = match OBSERVERS.read() {
+        Ok(r) => r.clone(),
+        Err(_) => {
+            tracing::error!(
+                idempotency_key = %fill.idempotency_key,
+                "fill observer registry poisoned — a fill was not published"
+            );
+            return;
+        }
+    };
+    for observer in &observers {
+        observer.on_fill(fill);
+    }
 }
 
 /// In-memory dedup key for a fill.

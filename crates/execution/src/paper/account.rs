@@ -183,6 +183,16 @@ impl PaperAccount {
     /// Record realized P&L against both the lifetime figure and today's bucket.
     fn add_realized(&mut self, amount: Decimal) {
         self.realized_pnl += amount;
+        self.add_to_today(amount);
+    }
+
+    /// Record a cash effect against today's bucket **only**.
+    ///
+    /// Fees go here rather than through `add_realized`: `realized_pnl` is the
+    /// account's gross trading P&L and `fees_paid` is tracked separately, but
+    /// the risk gate's daily-loss limit is about money actually lost today,
+    /// which includes what the venue charged.
+    fn add_to_today(&mut self, amount: Decimal) {
         *self
             .realized_by_day
             .entry(Utc::now().date_naive())
@@ -527,7 +537,7 @@ impl PaperAccount {
             self.cash -= fee;
         }
         self.fees_paid += fee;
-        self.add_realized(-fee);
+        self.add_to_today(-fee);
         self.ledger.record(
             PaperLedgerKind::Fee,
             Some(instrument_id.to_owned()),
