@@ -219,6 +219,36 @@ pub async fn ensure_instrument_metadata(
     Ok(true)
 }
 
+/// Fill in trading rules for every initialised asset that has none.
+///
+/// Assets initialised before the rules were recorded have a row in
+/// `asset_lifecycle` and none in `instruments`, so the gate refuses every order
+/// on them.  That refusal is correct — it will not guess a tick or a lot — but
+/// it is not a state to leave the platform in, so this runs at startup and on
+/// every metadata refresh until each one is resolved.
+///
+/// Returns how many rows were written.
+pub async fn backfill_missing(pg: &PgPool) -> Result<usize, sqlx::Error> {
+    let missing: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT a.symbol, a.asset_class, a.venue_id \
+         FROM asset_lifecycle a \
+         LEFT JOIN instruments i ON i.instrument_id = a.symbol \
+         WHERE i.instrument_id IS NULL",
+    )
+    .fetch_all(pg)
+    .await?;
+
+    let mut written = 0;
+    for (symbol, asset_class, venue_id) in missing {
+        match ensure_instrument_metadata(pg, &symbol, &asset_class, &venue_id).await {
+            Ok(true) => written += 1,
+            Ok(false) => {}
+            Err(e) => warn!(symbol, error = %e, "instrument metadata backfill failed"),
+        }
+    }
+    Ok(written)
+}
+
 fn nyse_schedule() -> TradingSchedule {
     TradingSchedule {
         timezone: "America/New_York".into(),

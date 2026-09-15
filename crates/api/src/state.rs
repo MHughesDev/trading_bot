@@ -324,6 +324,16 @@ impl AppState {
                 let mut tick = tokio::time::interval(tokio::time::Duration::from_secs(60));
                 loop {
                     tick.tick().await;
+                    // Assets initialised before the venue's trading rules were
+                    // recorded have no `instruments` row, so the gate refuses
+                    // every order on them.  Resolve those first.
+                    match crate::instrument_meta::backfill_missing(&pool).await {
+                        Ok(n) if n > 0 => {
+                            tracing::info!(instruments = n, "instrument trading rules backfilled")
+                        }
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!(error = %e, "instrument metadata backfill failed"),
+                    }
                     match cache.reload(&pool).await {
                         Ok(n) => tracing::debug!(instruments = n, "instrument metadata reloaded"),
                         Err(e) => tracing::warn!(
