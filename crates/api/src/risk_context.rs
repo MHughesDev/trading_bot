@@ -117,7 +117,7 @@ impl RiskContextProvider for PaperRiskContextProvider {
             Some(m) => (
                 m.active,
                 is_within_trading_hours(chrono::Utc::now(), &m.trading_hours),
-                m.halt_policy,
+                m.halt_policy.clone(),
                 m.trust_tier,
             ),
             // No metadata: the values below are never reached, because
@@ -128,7 +128,7 @@ impl RiskContextProvider for PaperRiskContextProvider {
                 false,
                 false,
                 domain::instrument::HaltPolicy::Haltable,
-                TrustTier::Social,
+                TrustTier::SocialDerived,
             ),
         };
 
@@ -138,7 +138,7 @@ impl RiskContextProvider for PaperRiskContextProvider {
             .strategy_id
             .as_deref()
             .and_then(|sid| live_strategy_min_tier(instrument_id, sid))
-            .unwrap_or(TrustTier::Social);
+            .unwrap_or(TrustTier::SocialDerived);
 
         // Per-strategy risk overrides are tighten-only and come from the same
         // running definition.

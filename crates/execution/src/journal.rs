@@ -24,7 +24,9 @@ use std::sync::{Arc, OnceLock};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use uuid::Uuid;
+// Re-exported: every key in this module's public API is one of these, so a
+// caller can name the type without depending on `uuid` directly.
+pub use uuid::Uuid;
 
 use domain::{
     money::Price,

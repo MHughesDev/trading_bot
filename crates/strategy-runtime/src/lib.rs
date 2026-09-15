@@ -25,5 +25,8 @@ pub use intents::{SizedIntents, SizingContext, SizingError};
 pub use live::{LiveKey, LiveRegistryError, LiveSource, LiveStrategyRegistry, LiveStrategySpec};
 pub use interpreter::{evaluate_condition, evaluate_signals, EvalError};
 pub use registry::FeatureRegistry;
+// Re-exported so a caller can build a `WorldEvent::Feature` without
+// depending on `features` directly.
+pub use features::FeatureValue;
 pub use runtime::{InstanceManager, RuntimeError, StrategyInstance};
 pub use world::{StrategyResult, WorldContext, WorldEvent, WorldState};

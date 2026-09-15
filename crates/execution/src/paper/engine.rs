@@ -289,6 +289,9 @@ impl PaperOrderRecord {
 #[derive(Clone, Debug, Serialize)]
 pub struct PaperOrderView {
     pub order_id: String,
+    /// The intent's idempotency key -- joins this order to its `orders` row and
+    /// its `fills` rows in the journal.
+    pub idempotency_key: Uuid,
     pub instrument_id: String,
     pub asset_class: String,
     pub side: String,
@@ -324,6 +327,7 @@ impl PaperOrderView {
         };
         Self {
             order_id: r.order_id.clone(),
+            idempotency_key: r.intent.idempotency_key,
             instrument_id: r.intent.instrument_id.clone(),
             asset_class: r.asset_class.as_str().to_owned(),
             side: side.to_owned(),

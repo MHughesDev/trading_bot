@@ -150,6 +150,28 @@ pub async fn init_asset(
                 .execute(&pg)
                 .await;
 
+                // Record the venue's published tick and lot before anything can
+                // trade this instrument.  The risk gate refuses orders on an
+                // instrument it has no increments for (it will not guess one),
+                // so an asset initialised without this row is tradable only
+                // once the row exists.  A failure here is logged, not fatal:
+                // the bars are still collected, and the refusal downstream
+                // names the missing metadata.
+                match crate::instrument_meta::ensure_instrument_metadata(&pg, &sym, &ac, &vid).await
+                {
+                    Ok(true) => {}
+                    Ok(false) => tracing::warn!(
+                        symbol = %sym,
+                        "asset initialised without instrument trading rules — orders on it \
+                         will be refused until the venue's tick and lot are recorded"
+                    ),
+                    Err(e) => tracing::error!(
+                        symbol = %sym,
+                        error = %e,
+                        "could not record instrument trading rules"
+                    ),
+                }
+
                 // Start continuous live 1-minute aggregation for this asset now,
                 // so it keeps accumulating minute bars without a restart.
                 if let Some(tx) = &stream_tx {

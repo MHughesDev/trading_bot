@@ -514,3 +514,672 @@ async fn stage_risk_exec(
         }
     }
 }
+
+// ── The execution path to a fill ─────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::str::FromStr;
+    use std::sync::OnceLock;
+    use std::time::Duration;
+
+    use api::instrument_meta::{InstrumentMeta, InstrumentMetaCache};
+    use api::risk_context::PaperRiskContextProvider;
+    use domain::instrument::{HaltPolicy, TradingSchedule};
+    use domain::money::{Price, Size};
+    use domain::order::{OrderIntent, OrderState, OrderType, Side};
+    use domain::payloads::bar::{BarPayload, Timeframe};
+    use domain::strategy_def::StrategyDefinition;
+    use domain::{RiskRejection, TrustTier};
+    use execution::journal::{self, memory::MemoryOrderJournal};
+    use risk::{GlobalRiskLimits, KillSwitch, RateKey, RiskGate};
+    use strategy_runtime::live::{LiveSource, LiveStrategySpec};
+    use strategy_runtime::world::WorldEvent;
+
+    /// The process-wide pieces.  `risk::context::install` and
+    /// `execution::journal::install` are `OnceLock`s — first install wins — so
+    /// every test in this binary shares one provider, one journal and one paper
+    /// engine, and uses its own instrument to stay independent.
+    struct Env {
+        paper: Arc<PaperTradingEngine>,
+        meta: Arc<InstrumentMetaCache>,
+    }
+
+    static ENV: OnceLock<Env> = OnceLock::new();
+
+    fn env() -> &'static Env {
+        ENV.get_or_init(|| {
+            let paper = Arc::new(PaperTradingEngine::new());
+            let meta = Arc::new(InstrumentMetaCache::new());
+
+            assert!(
+                risk::context::install(Arc::new(PaperRiskContextProvider::new(
+                    Arc::clone(&paper),
+                    Arc::clone(&meta),
+                ))),
+                "risk context provider must install"
+            );
+            assert!(
+                journal::install(Arc::new(MemoryOrderJournal::new())),
+                "order journal must install"
+            );
+
+            Env { paper, meta }
+        })
+    }
+
+    /// Register an instrument the way a live pipeline and asset-init would: an
+    /// asset class, a mark, and the venue's published increments.
+    fn ready_instrument(instrument_id: &str, mark: &str) {
+        let e = env();
+        e.paper
+            .register_instrument(instrument_id, AssetClass::CryptoSpotCex);
+        e.paper
+            .on_mark(instrument_id, Price::from_str(mark).unwrap());
+        e.meta.put(InstrumentMeta {
+            instrument_id: instrument_id.to_owned(),
+            // Kraken's published increments for a USD spot pair.
+            tick_size: Decimal::from_str("0.1").unwrap(),
+            lot_size: Decimal::from_str("0.00000001").unwrap(),
+            trading_hours: TradingSchedule::always_open(),
+            halt_policy: HaltPolicy::NonHaltable,
+            trust_tier: TrustTier::CentralizedExchange,
+            active: true,
+        });
+    }
+
+    fn gate_with(limits: GlobalRiskLimits) -> Arc<RiskGate> {
+        Arc::new(RiskGate::new(limits, Arc::new(KillSwitch::new(false))))
+    }
+
+    fn engine() -> Arc<execution::ExecutionEngine> {
+        Arc::new(execution::ExecutionEngine::new(Arc::new(
+            env().paper.multi_asset_broker(),
+        )))
+    }
+
+    /// A hand-authored EMA-cross strategy — the kind a person builds in the UI
+    /// and the kind ROADMAP §6 assumes can be deployed to paper "in a day".
+    fn ema_cross(strategy_id: &str, size_mode: &str, size: &str) -> StrategyDefinition {
+        serde_json::from_value(serde_json::json!({
+            "strategy_id": strategy_id,
+            "definition_version": "1.0",
+            "asset_class": "crypto_spot_cex",
+            "min_trust_tier": "centralized_exchange",
+            "inputs": [
+                { "lane": "features.technical", "instrument": "$bound_at_init",
+                  "features": ["ema_7", "ema_21"] }
+            ],
+            "nodes": [
+                { "id": "c1", "type": "condition",
+                  "expr": "feature('ema_7') > feature('ema_21')" },
+                { "id": "s1", "type": "signal", "when": "c1", "emit": "long" }
+            ],
+            "actions": [
+                { "on_signal": "long", "type": "place_order",
+                  "order": { "side": "buy", "size_mode": size_mode, "size": size } }
+            ]
+        }))
+        .expect("hand-authored definition must parse")
+    }
+
+    fn feature(instrument_id: &str, name: &str, value: f64) -> WorldEvent {
+        WorldEvent::Feature {
+            instrument_id: instrument_id.to_owned(),
+            feature_value: strategy_runtime::FeatureValue::new(name, value, 1, chrono::Utc::now()),
+        }
+    }
+
+    fn bar(instrument_id: &str, price: &str) -> WorldEvent {
+        let p = Price::from_str(price).unwrap();
+        WorldEvent::Bar {
+            instrument_id: instrument_id.to_owned(),
+            timeframe: Timeframe::Minutes1,
+            bar: BarPayload::new(
+                Timeframe::Minutes1,
+                p,
+                p,
+                p,
+                p,
+                Size::from_str("1").unwrap(),
+                1,
+            ),
+            available_time: chrono::Utc::now(),
+        }
+    }
+
+    /// Wait for `f` to return `Some`, or fail.  The stages are infinite loops,
+    /// so the test observes their effect rather than awaiting their completion.
+    async fn eventually<T, F: FnMut() -> Option<T>>(what: &str, mut f: F) -> T {
+        for _ in 0..400 {
+            if let Some(v) = f() {
+                return v;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("timed out waiting for {what}");
+    }
+
+    async fn journal_order(key: journal::Uuid) -> Option<journal::RecordedOrder> {
+        journal::require().unwrap().find_order(key).await.unwrap()
+    }
+
+    async fn journal_fills(key: journal::Uuid) -> Vec<journal::PersistedFill> {
+        journal::require().unwrap().fills_for(key).await.unwrap()
+    }
+
+    // ── The definition of done ───────────────────────────────────────────────
+
+    /// A hand-authored strategy, declared live through the same registry
+    /// `POST /api/strategies/:id/start` writes to, produces an intent from the
+    /// real stage 3, clears the real risk gate against a **measured** context,
+    /// becomes a paper order, fills, and both the order and the fill are in the
+    /// journal.
+    ///
+    /// Every one of those steps was missing or fabricated before track 16:
+    /// stage 3 was `Option::None`, the gate's context was eight constants, and
+    /// no code anywhere wrote an order or a fill.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_hand_authored_strategy_reaches_a_persisted_fill() {
+        let instrument = "E2E-BTC-USD";
+        ready_instrument(instrument, "50000");
+
+        strategy_runtime::live::global()
+            .register(LiveStrategySpec {
+                user_id: "operator".into(),
+                instrument_id: instrument.into(),
+                definition: ema_cross("e2e_ema_cross", "fixed", "0.01"),
+                source: LiveSource::Strategy {
+                    strategy_id: "e2e_ema_cross".into(),
+                },
+            })
+            .expect("declare the strategy live");
+
+        let (mut world_prod, world_cons) = rtrb::RingBuffer::<WorldEvent>::new(64);
+        let (intent_prod, intent_cons) = rtrb::RingBuffer::<OrderIntent>::new(64);
+
+        let _t3 = tokio::spawn(stage_strategy_eval(
+            instrument.to_string(),
+            AssetClass::CryptoSpotCex,
+            world_cons,
+            intent_prod,
+            Arc::clone(&env().paper),
+        ));
+        let _t4 = tokio::spawn(stage_risk_exec(
+            instrument.to_string(),
+            intent_cons,
+            engine(),
+            gate_with(GlobalRiskLimits::default()),
+        ));
+
+        // ema_7 > ema_21 — the cross fires.
+        world_prod.push(feature(instrument, "ema_7", 11.0)).unwrap();
+        world_prod.push(feature(instrument, "ema_21", 10.0)).unwrap();
+        world_prod.push(bar(instrument, "50000")).unwrap();
+
+        // The observable result: a filled paper order on this instrument.
+        let order = eventually("a paper order", || {
+            env()
+                .paper
+                .orders_for_instrument(instrument)
+                .into_iter()
+                .next()
+        })
+        .await;
+
+        assert_eq!(order.side, "buy");
+        assert_eq!(
+            order.filled_qty,
+            Decimal::from_str("0.01").unwrap(),
+            "a market order on a marked instrument must fill in full"
+        );
+
+        // And the durable half: the order and the fill are both recorded.
+        let key = order.idempotency_key;
+        let recorded = eventually("the order in the journal", || {
+            futures_block(journal_order(key))
+        })
+        .await;
+        assert_eq!(recorded.state, OrderState::Filled);
+        assert!(
+            recorded.broker_order_id.is_some(),
+            "a submitted order must carry its broker id"
+        );
+
+        let fills = journal_fills(key).await;
+        assert_eq!(fills.len(), 1, "exactly one fill recorded");
+        assert_eq!(fills[0].instrument_id, instrument);
+        assert_eq!(fills[0].side, Side::Buy);
+        assert!(fills[0].fill_price.inner() > Decimal::ZERO);
+    }
+
+    /// Helper: run a future to completion on the current thread from inside a
+    /// synchronous closure.  Only used by `eventually`, which polls.
+    fn futures_block<T, F: std::future::Future<Output = Option<T>>>(f: F) -> Option<T> {
+        tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(f))
+    }
+
+    // ── SC-7: idempotent across a restart ────────────────────────────────────
+
+    /// Resubmitting an order after every in-memory cache is gone must not
+    /// double-fill.  This is the restart case SC-7 is about: the old
+    /// implementation's only defence was a `VecDeque` inside `ExecutionEngine`,
+    /// which a restart wipes.  Here both the engine and the gate are rebuilt —
+    /// only the journal survives, which is exactly what survives a restart.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_resubmit_after_a_restart_does_not_double_fill() {
+        let instrument = "IDEM-BTC-USD";
+        ready_instrument(instrument, "50000");
+
+        let intent = OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("0.01").unwrap(),
+            None,
+            None,
+        );
+        let key = intent.idempotency_key;
+
+        // First submission, through a real gate and a real context.
+        let gate = gate_with(GlobalRiskLimits::default());
+        let ctx = risk::context::context_for(&intent).expect("a measured context");
+        let approved = gate.check(intent.clone(), &ctx).expect("gate approves");
+        let first = engine().submit(approved).await.expect("submitted");
+        assert!(!first.duplicate);
+        assert!(first.fill.is_some(), "a paper market order fills on submit");
+
+        // "Restart": new engine (fresh FillProcessor), new gate (fresh decision
+        // cache).  The journal is the only thing that persists.
+        let gate2 = gate_with(GlobalRiskLimits::default());
+        let ctx2 = risk::context::context_for(&intent).expect("a measured context");
+        let approved2 = gate2.check(intent, &ctx2).expect("gate approves");
+        let second = engine().submit(approved2).await.expect("resubmitted");
+
+        assert!(
+            second.duplicate,
+            "the journal must recognise the key across a restart"
+        );
+        assert_eq!(
+            second.broker_order_id, first.broker_order_id,
+            "a redelivery returns the original broker order id"
+        );
+        assert_eq!(
+            journal_fills(key).await.len(),
+            1,
+            "a redelivery must not record a second fill"
+        );
+    }
+
+    // ── Part 2: the limits actually fire ─────────────────────────────────────
+
+    /// The per-second order-rate limit fires against counts the **gate** keeps.
+    /// Both order doors used to pass `0, 0`, so this limit could not fire.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_rate_limit_fires_when_breached() {
+        let instrument = "RATE-BTC-USD";
+        ready_instrument(instrument, "50000");
+
+        let limit = 3u32;
+        let gate = gate_with(GlobalRiskLimits {
+            max_orders_per_second: limit,
+            ..Default::default()
+        });
+
+        let mut approvals = 0;
+        let mut rejection = None;
+        for _ in 0..(limit + 2) {
+            let intent = OrderIntent::new(
+                instrument,
+                Side::Buy,
+                OrderType::Market,
+                Size::from_str("0.001").unwrap(),
+                None,
+                None,
+            );
+            let ctx = risk::context::context_for(&intent).expect("a measured context");
+            match gate.check(intent, &ctx) {
+                Ok(_) => approvals += 1,
+                Err(e) => {
+                    rejection = Some(e);
+                    break;
+                }
+            }
+        }
+
+        assert_eq!(approvals, limit as usize, "the gate stops at the burst");
+        assert!(
+            matches!(
+                rejection,
+                Some(RiskRejection::RateLimitPerSecondExceeded { .. })
+            ),
+            "expected the per-second limit to fire, got {rejection:?}"
+        );
+        // And the count is the gate's own, not the caller's.
+        assert_eq!(
+            gate.rate_counts(&RateKey::manual(instrument))
+                .unwrap()
+                .last_second,
+            limit
+        );
+    }
+
+    /// The daily-loss limit fires on a **realized** loss the paper account
+    /// actually took.  Both doors used to pass `Decimal::ZERO`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_daily_loss_limit_fires_on_a_real_loss() {
+        let instrument = "LOSS-BTC-USD";
+        ready_instrument(instrument, "50000");
+        let e = env();
+
+        // Buy, then sell after the mark falls: a realized loss on the account.
+        let open = risk::ApprovedOrder::new_for_test(OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("0.05").unwrap(),
+            None,
+            None,
+        ));
+        engine().submit(open).await.expect("opening fill");
+
+        e.paper
+            .on_mark(instrument, Price::from_str("40000").unwrap());
+
+        let close = risk::ApprovedOrder::new_for_test(OrderIntent::new(
+            instrument,
+            Side::Sell,
+            OrderType::Market,
+            Size::from_str("0.05").unwrap(),
+            None,
+            None,
+        ));
+        engine().submit(close).await.expect("closing fill");
+
+        let loss = e.paper.daily_loss_usd(AssetClass::CryptoSpotCex);
+        assert!(
+            loss > Decimal::ZERO,
+            "the round trip must have realized a loss, got {loss}"
+        );
+
+        // A limit below the loss the account took must refuse the next order.
+        let gate = gate_with(GlobalRiskLimits {
+            max_daily_loss_usd: loss - Decimal::ONE,
+            ..Default::default()
+        });
+        let intent = OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("0.001").unwrap(),
+            None,
+            None,
+        );
+        let ctx = risk::context::context_for(&intent).expect("a measured context");
+        let err = gate.check(intent, &ctx).unwrap_err();
+        assert!(
+            matches!(err, RiskRejection::DailyLossLimitExceeded { .. }),
+            "expected the daily-loss limit to fire, got {err}"
+        );
+    }
+
+    /// An instrument whose venue increments are unknown is refused, not judged
+    /// against a zero tick and lot (which disable both checks).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_instrument_without_venue_increments_is_refused() {
+        let instrument = "NOMETA-BTC-USD";
+        // Registered and marked, but deliberately no `instruments` metadata.
+        env()
+            .paper
+            .register_instrument(instrument, AssetClass::CryptoSpotCex);
+        env()
+            .paper
+            .on_mark(instrument, Price::from_str("50000").unwrap());
+
+        let intent = OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("0.01").unwrap(),
+            None,
+            None,
+        );
+        let ctx = risk::context::context_for(&intent).expect("context builds");
+        let err = gate_with(GlobalRiskLimits::default())
+            .check(intent, &ctx)
+            .unwrap_err();
+        assert!(
+            matches!(err, RiskRejection::InstrumentMetadataUnavailable { .. }),
+            "expected a refusal naming the missing metadata, got {err}"
+        );
+    }
+
+    /// An instrument with no mark is refused rather than having its exposure
+    /// and price-sanity checks quietly skipped.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_instrument_without_a_mark_is_refused() {
+        let instrument = "NOMARK-BTC-USD";
+        env()
+            .paper
+            .register_instrument(instrument, AssetClass::CryptoSpotCex);
+        env().meta.put(InstrumentMeta {
+            instrument_id: instrument.to_owned(),
+            tick_size: Decimal::from_str("0.1").unwrap(),
+            lot_size: Decimal::from_str("0.00000001").unwrap(),
+            trading_hours: TradingSchedule::always_open(),
+            halt_policy: HaltPolicy::NonHaltable,
+            trust_tier: TrustTier::CentralizedExchange,
+            active: true,
+        });
+
+        let intent = OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("0.01").unwrap(),
+            None,
+            None,
+        );
+        let ctx = risk::context::context_for(&intent).expect("context builds");
+        let err = gate_with(GlobalRiskLimits::default())
+            .check(intent, &ctx)
+            .unwrap_err();
+        assert!(
+            matches!(err, RiskRejection::MarketDataUnavailable { .. }),
+            "expected a refusal naming the missing mark, got {err}"
+        );
+    }
+
+    /// A rejected order reaches no venue and leaves no record: stage 4 must not
+    /// submit what the gate refused.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_gate_rejection_never_reaches_the_venue() {
+        let instrument = "REJECT-BTC-USD";
+        ready_instrument(instrument, "50000");
+
+        let ks = Arc::new(KillSwitch::new(false));
+        let gate = Arc::new(RiskGate::new(GlobalRiskLimits::default(), Arc::clone(&ks)));
+        ks.trip();
+
+        let intent = OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("0.01").unwrap(),
+            None,
+            None,
+        );
+        let key = intent.idempotency_key;
+
+        let (mut intent_prod, intent_cons) = rtrb::RingBuffer::<OrderIntent>::new(8);
+        let _t4 = tokio::spawn(stage_risk_exec(
+            instrument.to_string(),
+            intent_cons,
+            engine(),
+            gate,
+        ));
+        intent_prod.push(intent).unwrap();
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            journal_order(key).await.is_none(),
+            "a gate rejection must leave no order record"
+        );
+        assert!(
+            env().paper.orders_for_instrument(instrument).is_empty(),
+            "a gate rejection must never reach the venue"
+        );
+    }
+
+    // ── Part 1: percent-of-balance sizes, or says why it cannot ──────────────
+
+    /// `percent_of_balance` used to return `None` — no order and no error.
+    /// It now sizes against the account's equity and the instrument's mark.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn percent_of_balance_sizes_a_real_order() {
+        let instrument = "POB-BTC-USD";
+        ready_instrument(instrument, "50000");
+
+        strategy_runtime::live::global()
+            .register(LiveStrategySpec {
+                user_id: "operator".into(),
+                instrument_id: instrument.into(),
+                definition: ema_cross("pob_ema_cross", "percent_of_balance", "0.001"),
+                source: LiveSource::Strategy {
+                    strategy_id: "pob_ema_cross".into(),
+                },
+            })
+            .expect("declare the strategy live");
+
+        let (mut world_prod, world_cons) = rtrb::RingBuffer::<WorldEvent>::new(64);
+        let (intent_prod, mut intent_cons) = rtrb::RingBuffer::<OrderIntent>::new(64);
+
+        let _t3 = tokio::spawn(stage_strategy_eval(
+            instrument.to_string(),
+            AssetClass::CryptoSpotCex,
+            world_cons,
+            intent_prod,
+            Arc::clone(&env().paper),
+        ));
+
+        world_prod.push(feature(instrument, "ema_7", 11.0)).unwrap();
+        world_prod.push(feature(instrument, "ema_21", 10.0)).unwrap();
+
+        let intent = eventually("a percent-of-balance intent", || intent_cons.pop().ok()).await;
+        assert!(
+            intent.size.inner() > Decimal::ZERO,
+            "percent-of-balance must produce a positive size, not silence"
+        );
+        // The size is a fraction of equity at the instrument's mark, quantized
+        // down to the venue's lot.  The exact arithmetic is pinned by
+        // `strategy_runtime::intents::tests`; asserted here is the behaviour
+        // that was missing — a real quantity derived from real account state.
+        //
+        // The account is shared with the other tests in this binary, so the
+        // notional is checked as a band around the declared 0.1%, not against
+        // an equity figure read at a different instant.
+        let lot = Decimal::from_str("0.00000001").unwrap();
+        assert_eq!(
+            intent.size.inner() % lot,
+            Decimal::ZERO,
+            "the size must land on the venue's lot"
+        );
+        let notional = intent.size.inner() * Decimal::from_str("50000").unwrap();
+        let equity = env().paper.snapshot(AssetClass::CryptoSpotCex).equity;
+        let fraction = notional / equity;
+        assert!(
+            fraction > Decimal::from_str("0.0005").unwrap()
+                && fraction < Decimal::from_str("0.002").unwrap(),
+            "0.1% of equity expected; sized {} of equity ({notional} of {equity})",
+            fraction
+        );
+    }
+
+    // ── Stage 3's re-sync ────────────────────────────────────────────────────
+
+    #[test]
+    fn resync_keeps_warm_instances_and_adds_new_ones() {
+        let instrument = "RESYNC-BTC-USD";
+        let mut instances: Vec<(
+            strategy_runtime::live::LiveKey,
+            strategy_runtime::runtime::StrategyInstance,
+        )> = Vec::new();
+
+        let a = Arc::new(LiveStrategySpec {
+            user_id: "u".into(),
+            instrument_id: instrument.into(),
+            definition: ema_cross("resync_a", "fixed", "0.01"),
+            source: LiveSource::Strategy {
+                strategy_id: "resync_a".into(),
+            },
+        });
+        let b = Arc::new(LiveStrategySpec {
+            user_id: "u".into(),
+            instrument_id: instrument.into(),
+            definition: ema_cross("resync_b", "fixed", "0.01"),
+            source: LiveSource::Strategy {
+                strategy_id: "resync_b".into(),
+            },
+        });
+
+        resync_instances(instrument, &mut instances, &[Arc::clone(&a)]);
+        assert_eq!(instances.len(), 1);
+
+        // Warm the first instance up so a re-sync that keeps it is observable.
+        instances[0].1.process_event(&feature(instrument, "ema_7", 11.0));
+        let warm = std::ptr::addr_of!(instances[0].1) as usize;
+
+        resync_instances(instrument, &mut instances, &[a, b]);
+        assert_eq!(instances.len(), 2, "the second strategy is added");
+        let still_warm = instances
+            .iter()
+            .position(|(k, _)| k.strategy_id == "resync_a")
+            .expect("the first strategy is still there");
+        assert_eq!(
+            std::ptr::addr_of!(instances[still_warm].1) as usize,
+            warm,
+            "adding a strategy must not rebuild the one already running"
+        );
+
+        resync_instances(instrument, &mut instances, &[]);
+        assert!(instances.is_empty(), "stopping removes every instance");
+    }
+
+    // ── Paper only ───────────────────────────────────────────────────────────
+
+    /// No live-venue path exists from here.  The engine this process submits
+    /// through is the in-house paper engine, and the journal records every
+    /// order as `paper` — which migration 0121 also enforces with a CHECK.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn execution_is_paper_only() {
+        assert_eq!(journal::PAPER_MODE, "paper");
+
+        let instrument = "PAPER-BTC-USD";
+        ready_instrument(instrument, "50000");
+
+        let intent = OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("0.01").unwrap(),
+            None,
+            None,
+        );
+        let ctx = risk::context::context_for(&intent).expect("a measured context");
+        let approved = gate_with(GlobalRiskLimits::default())
+            .check(intent, &ctx)
+            .expect("approved");
+        let result = engine().submit(approved).await.expect("submitted");
+
+        // The fill came from the in-house engine: the order id it minted is the
+        // one the journal holds, and the same order is visible on the paper
+        // account.  Nothing left this process.
+        assert!(env()
+            .paper
+            .orders_for_instrument(instrument)
+            .iter()
+            .any(|o| o.order_id == result.broker_order_id));
+    }
+}

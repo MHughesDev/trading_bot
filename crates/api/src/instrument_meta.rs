@@ -15,7 +15,7 @@
 //! missing metadata rather than waving them through.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 use rust_decimal::Decimal;
 use sqlx::PgPool;
@@ -122,13 +122,13 @@ fn parse_trust_tier(s: &str) -> TrustTier {
     match s {
         "regulated" => TrustTier::Regulated,
         "centralized_exchange" => TrustTier::CentralizedExchange,
-        "onchain" | "on_chain" => TrustTier::OnChain,
-        "aggregator" => TrustTier::Aggregator,
-        "social" => TrustTier::Social,
+        "onchain_confirmed" => TrustTier::OnchainConfirmed,
+        "onchain_tentative" => TrustTier::OnchainTentative,
+        "social_derived" => TrustTier::SocialDerived,
         // An unrecognised tier is treated as the **lowest** trust, not the
         // highest: a strategy declaring a minimum tier must not clear it on the
         // strength of a value we could not read.
-        _ => TrustTier::Social,
+        _ => TrustTier::SocialDerived,
     }
 }
 
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn an_unreadable_trust_tier_is_the_lowest_not_the_highest() {
         // A tier we cannot parse must not let a strategy's min_trust_tier pass.
-        assert_eq!(parse_trust_tier("something_new"), TrustTier::Social);
+        assert_eq!(parse_trust_tier("something_new"), TrustTier::SocialDerived);
         assert_eq!(parse_trust_tier("regulated"), TrustTier::Regulated);
     }
 
