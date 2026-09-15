@@ -6,7 +6,9 @@ pub mod freshness;
 pub mod positions;
 pub mod sequence;
 
-pub use divergence::{check_position_divergence, ReconcileOutcome};
+pub use divergence::{
+    check_position_divergence, check_position_divergence_at_venue, ReconcileOutcome,
+};
 pub use freshness::{check_freshness, FreshnessOutcome};
 pub use positions::{reconcile_all, reconcile_one, reconcile_with_broker, InternalPosition};
 pub use sequence::SequenceTracker;
