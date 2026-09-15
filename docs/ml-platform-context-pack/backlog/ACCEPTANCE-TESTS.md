@@ -208,7 +208,9 @@ Kill the campaign driver mid-`EXPERIMENT`; restart. Assert the fold over `campai
 Assert every `JobError.code` maps to exactly one `TerminalReason` and that an unmapped code fails the build; assert `asha_stopped` settles `right_asha`, never `failed`. *(§9, ADR-P2-06)*
 
 **AT-61 · Checkpoint resume is bit-identical.**
-Per framework: train `n` steps; resume from the checkpoint at `n−2`; assert bit-identical weights and metrics against the uninterrupted run. A checkpoint manifest missing any contract field is refused by the artifact registry. *(§9, ADR-P2-07)*
+Per framework: train `n` steps; resume from the checkpoint at `n−2`; assert bit-identical weights and metrics against the uninterrupted run. A checkpoint manifest missing any contract field is refused by the artifact registry. *(§9, ADR-P2-07, ADR-P6-11)*
+**Verified by:** `apps/model-trainer/tests/test_resume_eval.py` — `test_at61_resume_reproduces_the_uninterrupted_run` and the eight tests beside it; the measurement itself is `apps/model-trainer/app/resume_eval.py`, run in CI by the `resume-bit-identity` job. The manifest half stays `apps/model-trainer/tests/test_checkpoint.py` and `crates/jobs/src/checkpoint.rs`.
+**Measured 2026-09-15:** torch bit-identical across `mlp`, `lstm` and an `mlp` with dropout → the only name in `BIT_IDENTICAL_FRAMEWORKS`. xgboost and lightgbm bit-identical **only with row and column sampling off** — their sampling RNG is not in the saved booster, and both were shown deterministic run-to-run first, so the resume is the cause — recorded in `SAMPLING_SENSITIVE_FRAMEWORKS`, which `resume_support` consults before it will say `bit_identical` for either. sklearn and garch have **no checkpoint boundary**: both adapters fit in a single call, so there is no step `n−2`. The test fails if this list and the measurement ever disagree in either direction, and fails rather than skips when a claimed framework cannot be imported.
 
 **AT-62 ⛔ · No critical-difference renderer exists.**
 Static analysis: no type, endpoint or component matches `critical_difference` / `cd_diagram`. *(§11.5, ADR-P2-13)*
