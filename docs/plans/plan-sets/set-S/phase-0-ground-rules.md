@@ -146,12 +146,16 @@ colliding artifact hashes, so worktrees overwrite each other's `.rmeta`.
 real and `jobs = 2` must stay — but the cascade that contradicts the source in front of you is
 the shared cache. The board's instruction to share the 237 GB cache is what produces it.
 
-The fix is a per-worktree `CARGO_TARGET_DIR`. Cost, measured here: this worktree's own target
-directory after building `mcp-server-lib`, `harness`, `invariants` and `ledger` from cold. Free
-space on this box was 230 GB when the switch was made, which is enough for a handful of tracks
-and *not* for eighteen — so the real decision is how many worktrees exist at once, and that is
-the user's to make. Every suite this track reports green was re-run from cold in a private
-target directory after the shared one was abandoned.
+The fix is a per-worktree `CARGO_TARGET_DIR`, and **it is much cheaper than the shared
+directory's size suggests.** Measured here: after cold-building `mcp-server-lib`, `harness` and
+their dependency graphs, this worktree's own `target/` is **1.5 GB**, and free space went from
+230.7 GB to 228.8 GB. A per-worktree directory holds only what that track builds; the shared
+237 GB is the accumulation of everything every build has ever produced, including profiles and
+crates no current track touches. Eighteen private directories at this size are ~30 GB, not
+4 TB. The disk argument for sharing does not survive the measurement.
+
+Every suite this track reports green was re-run from cold in the private directory after the
+shared one was abandoned.
 
 **Recommendation, not done.** `cargo xtask lint-no-json-hotpath` enforces a rule a prior phase
 established, is **not wired into CI**, and fails on one pre-existing line in
