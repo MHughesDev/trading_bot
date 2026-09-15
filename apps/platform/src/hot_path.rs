@@ -1033,6 +1033,63 @@ mod tests {
         );
     }
 
+    /// Both order doors get their context from the same provider, so a limit
+    /// that binds a manual order binds a strategy order identically (SC-2,
+    /// COMP-002 §3.1 "both paths converge on the same check").
+    ///
+    /// The one thing that differs is deliberate: the order-rate **scope**.  A
+    /// strategy counts against its own budget, so it cannot get a second
+    /// allowance by also placing orders by hand, and a human cannot be locked
+    /// out by a chatty strategy.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn both_order_doors_share_one_risk_context() {
+        let instrument = "DOORS-BTC-USD";
+        ready_instrument(instrument, "50000");
+
+        let manual = OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("0.01").unwrap(),
+            None,
+            None, // no strategy — the REST door
+        );
+        let automated = OrderIntent::new(
+            instrument,
+            Side::Buy,
+            OrderType::Market,
+            Size::from_str("0.01").unwrap(),
+            None,
+            Some("some_strategy".to_owned()), // the hot path
+        );
+
+        let a = risk::context::context_for(&manual).expect("manual context");
+        let b = risk::context::context_for(&automated).expect("strategy context");
+
+        assert_eq!(a.current_position, b.current_position);
+        assert_eq!(a.instrument_active, b.instrument_active);
+        assert_eq!(a.is_in_session, b.is_in_session);
+        assert!(a.market_price.is_available() && b.market_price.is_available());
+        assert_eq!(a.instrument_limits, b.instrument_limits);
+        // Both doors read today's loss from the same account.  The *value* is
+        // not compared: it is per asset class, so a concurrent test's fill can
+        // move it between these two calls — what matters is that neither door
+        // is handed a default.
+        assert!(
+            a.daily_loss_usd.is_available() && b.daily_loss_usd.is_available(),
+            "neither door may be given an unmeasured daily loss"
+        );
+
+        // Different rate scopes, by design.
+        let (risk::RateSource::Tracked(ka), risk::RateSource::Tracked(kb)) = (&a.rate, &b.rate)
+        else {
+            panic!("both doors must use gate-tracked rate counts, never supplied ones");
+        };
+        assert_ne!(ka.as_str(), kb.as_str());
+        assert!(ka.as_str().starts_with("manual:"));
+        assert!(kb.as_str().starts_with("strategy:some_strategy:"));
+    }
+
     // ── Part 1: percent-of-balance sizes, or says why it cannot ──────────────
 
     /// `percent_of_balance` used to return `None` — no order and no error.
