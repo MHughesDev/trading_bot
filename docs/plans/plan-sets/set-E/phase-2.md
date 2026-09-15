@@ -1,6 +1,6 @@
 # Phase 2 — Live P&L, Manual Orders & Shared Data Layer
 
-**Completion: 0% (0 / 3 tasks complete)**
+**Completion: 33% (1 / 3 tasks complete — 2.3 landed 2026-09-15, track 16)**
 
 **Goal:** Build the shared position/mark/P&L data layer once, then use it to
 turn on the live dashboard rollup and paper-mode manual orders.
@@ -45,7 +45,7 @@ broker dependency).
 - **Verify:** seeded lots/closes + marks produce a correct non-zero rollup;
   missing-mark instruments are surfaced, not silently zeroed.
 
-### ☐ 2.3 Paper-mode manual order placement — M
+### ☑ 2.3 Paper-mode manual order placement — M — **DONE 2026-09-15**
 **Addresses #12 (CL orders.rs).** The handler builds a valid `OrderIntent` then
 unconditionally returns **503** (`orders.rs:104-118`) because position/mark were
 unwired — a deliberate fail-closed guard against zero-position over-leverage.
@@ -65,6 +65,18 @@ unwired — a deliberate fail-closed guard against zero-position over-leverage.
 - **Verify:** a paper order within limits fills; one breaching position/rate
   limits is rejected with the mapped status; the zero-position bypass cannot
   recur.
+- **Verified by:** `hot_path::tests::the_rate_limit_fires_when_breached`,
+  `..::the_daily_loss_limit_fires_on_a_real_loss`,
+  `..::an_instrument_without_venue_increments_is_refused`,
+  `..::an_instrument_without_a_mark_is_refused`. The zero-position bypass
+  cannot recur because `GateContext` no longer has a field that can be
+  defaulted: every input is `Measured<T>` and `Unavailable` rejects.
+- Rate counters are not “wired” by the caller — the **gate owns them**
+  (`risk::rate`), keyed by a caller-chosen scope. A call site can choose the
+  scope; it can no longer choose the count.
+- 2.1’s data layer landed in the shape this task needed: `AppState` carries
+  an instrument-metadata cache rather than a Redis handle, because the mark
+  source for paper is the in-process paper engine’s mark board, not Redis.
 
 ---
 

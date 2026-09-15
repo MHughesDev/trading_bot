@@ -9,7 +9,16 @@
 // AI inference is a first-class node (`model_forecast`, canonical v1.1): the
 // block runs data through a model and gates a signal on
 // the resolved forecast. A definition that uses one is emitted at version 1.1;
-// otherwise 1.0. Exits still have no representation and are reported as warnings.
+// otherwise 1.0.
+//
+// Exits still have no representation in the canonical format, so a spec that
+// declares them is REJECTED rather than saved without them: dropping a declared
+// stop loss produces a strategy that runs unprotected while the builder still
+// shows the stop (Set E 4.4 is the v1.5 bump that makes them executable).
+//
+// percent-of-balance sizing IS executable now (Set E 4.2): the shared sizer in
+// crates/strategy-runtime computes qty = fraction * equity / mark, quantized
+// down to the venue lot, on the live path.
 
 import type { Condition, IndicatorSpec, RuleStrategySpec } from '@/types/spec'
 
@@ -288,19 +297,24 @@ export function ruleSpecToDefinition(
     nodes.push({ id: `s${idx + 1}`, type: 'signal', when: condId, emit })
   })
 
+  // Exit rules have no representation in the canonical format yet (the v1.5
+  // exit-node bump is Set E 4.4).  This used to be a *warning*: the strategy
+  // saved, the exits were dropped, and what ran had no stop loss while the
+  // builder still showed one.  A risk control that silently does not exist is
+  // worse than no risk control, because the operator sized their position
+  // believing in it.  So it is an error: the strategy does not save until the
+  // exits can be honoured.
   if (spec.exits.length > 0) {
-    warnings.push(
-      'Exit rules (stop loss / take profit / trailing stop) are not represented in the saved v1.0 format and will not be backtested.',
+    errors.push(
+      'Exit rules (stop loss / take profit / trailing stop) cannot be saved yet: ' +
+        'the canonical strategy format has no exit nodes, so they would be dropped ' +
+        'and the strategy would run without them. Remove the exit rules to save, ' +
+        'or wait for the v1.5 format.',
     )
   }
 
   const sizeMode =
     spec.size.type === 'percent_of_equity' ? 'percent_of_balance' : 'fixed'
-  if (sizeMode === 'percent_of_balance') {
-    warnings.push(
-      'Percent-of-equity sizing is accepted but currently parse-only in the backtest engine (which simulates fixed sizes).',
-    )
-  }
 
   if (errors.length > 0) {
     return { definition: null, errors, warnings }
