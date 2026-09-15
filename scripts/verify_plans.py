@@ -85,7 +85,12 @@ for setdir in sorted(glob.glob(os.path.join(SETS, "set-*"))):
         if not ids:
             continue  # a phase file with no task headers in this convention
 
-        hdr = re.search(r"\*\*Completion: \d+% \((\d+) / (\d+) tasks\)\*\*", text)
+        # The closing `**` need not follow `tasks)` immediately: a phase file is
+        # allowed to carry a status note in the same bold run, e.g.
+        # "**Completion: 75% (3 / 4 tasks). T-0.4 `BLOCKED:UPSTREAM`.**". Forcing
+        # that note out of the header to satisfy a regex would be the tool
+        # dictating the document.
+        hdr = re.search(r"\*\*Completion: \d+% \((\d+) / (\d+) tasks\)", text)
         declared = int(hdr.group(2)) if hdr else -1
         acc = len(re.findall(r"^\*\*Acceptance:\*\*", text, re.M))
         tra = len(re.findall(r"^\*\*Traces:\*\*", text, re.M))

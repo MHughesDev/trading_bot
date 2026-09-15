@@ -388,18 +388,22 @@ Merge in these waves. Within a wave, order does not matter.
 - **`crates/backtest/src/gates/`** — tracks 5 (Gate 15) and 14 (gates 3, 4, 10, 12). Disjoint
   gates, same directory.
 - **`crates/jobs`** — tracks 8 and 18. **`crates/collectors/src/lib.rs`** — tracks 3, 4, 9.
-- **`docs/plans/plan-sets/set-T/phase-0-reconciliation.md`** — track 5 wrote its copy inside its
-  worktree because the shared checkout went read-only mid-session. If an untracked copy still
-  sits in the shared checkout, `git merge` refuses to overwrite it: **remove or commit the shared
-  copy first and take track 5's**, which carries the status labels, the `Verified by:` names, the
-  T-0.4 block and the track-16 fill contract.
+- ~~**`docs/plans/plan-sets/set-T/phase-0-reconciliation.md`**~~ — **resolved 2026-09-15.** The
+  H-1 commit swept in the shared checkout's **stale** copy (101 lines, zero `Verified by:`) over
+  track 5's real one (290 lines, three). Track 5's has been taken into `main`. Two further
+  sweeps of the same kind were found and corrected at the same time: `set-C/MASTER.md` (track
+  11's audit, 402 lines over 264) and `set-P/P-0.4-BLOCKED-crypto-option-chains.md`, which the
+  H-1 commit missed entirely. **The general lesson for integration: a bulk commit of an
+  untracked tree takes the shared checkout's copy of every file, and for plan files the
+  worktree's copy is usually the newer one.** Check line counts against the landed branches
+  before assuming `main` is current.
 - **`ADR-INDEX.md` ids have already collided.** Track 6 took `ADR-P6-11`; track 15 reports
   `ADR-P6-11`, `P6-12` and `P6-13`. Renumber at integration — the *content* is what matters and
   no decision is lost. Expect more of these; it was the accepted cost of not serialising.
 - **Mirrored "user's work" commits.** Tracks 15 and 19 mirrored the user's uncommitted checkout
-  into their branches to get code their tasks depended on (gate H-1). **These are duplicates of
-  each other and of whatever the user eventually commits.** Deduplicate deliberately: take the
-  user's own commit as authoritative and drop the mirrors.
+  into their branches to get code their tasks depended on (gate H-1). **The authoritative commit
+  now exists: `37faade`.** Drop the mirrors rather than deduplicating them — rebasing onto `main`
+  makes them empty, and a mirror kept alongside the real commit conflicts with it line for line.
 
 ### 8.3 Verify after every merge, not at the end
 
