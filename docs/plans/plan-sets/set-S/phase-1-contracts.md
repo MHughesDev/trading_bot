@@ -1,6 +1,6 @@
 # Phase 1 — Contracts
 
-**Completion: 25% (5 / 20 done, 2 partial). Track A landed, plus S-1.10; the rest of tracks B and C not started.**
+**Completion: 25% (5 / 20 tasks), plus 2 partial. Track A landed, plus S-1.10; the rest of tracks B and C not started.**
 
 > Status 2026-09-15, track 1. The three contracts the other Set S phases wait on now exist:
 > `ToolSpec`/`ToolResult` (`crates/mcp-server/src/spec.rs`), the generated taxonomy and

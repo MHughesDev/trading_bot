@@ -583,12 +583,65 @@ support.
 
 ### What is not done, and is said so
 
-- **The exit policy is evaluated but not yet driven by the backtest simulator.**
-  `ExitTracker` is the one implementation and the live runtime and the simulator
-  are meant to share it; `crates/backtest/src/sim.rs` still runs through the
-  Nautilus bar engine and does not call it. Until it does, a definition's exits
-  affect live behaviour and not backtest results, which is the more dangerous
-  direction of the two and is why it is stated here rather than in a comment.
+- ~~**The exit policy is evaluated but not yet driven by the backtest
+  simulator.**~~ **Closed 2026-09-15 (ADR-P6-11).** `crates/backtest/src/sim.rs`
+  now constructs the shared `ExitTracker`, opens it through the new
+  `ExitTracker::opened_at_bar_close`, evaluates it before each bar's entries and
+  flattens through the engine when it fires. See below.
+
+### The simulator honours the declared exits (2026-09-15)
+
+The loose end above is closed, and closing it turned up two more defects in the
+same component. All three are one defect report, filed verified and discharged
+by migration `0120`: a mechanism nobody files into when it plainly applies is
+decoration, and `mlops.falsification_score()` already says an evaluator defect
+outranks a promotion.
+
+**Three things had to be right.** *When:* an entry submitted from the bar
+handler fills at that bar's close, because the venue processes the bar's O/H/L/C
+ticks before the handler runs. The entry bar's extremes are therefore prices the
+position was never exposed to, so the tracker never sees the entry bar
+(`the_entry_bar_cannot_stop_out_a_position_opened_at_its_close`), and the entry
+is recorded through `opened_at_bar_close` — the open-fill convention would fire
+every `max_holding_bars` one bar late. *Which:* `WorstFirst`, never overridden;
+a static test fails the build on a `with_intrabar` call anywhere in
+`backtest/src/`. *What it paid:* two prices describe one exit and they disagree,
+and the SDK's order surface is market-only, so the platform cannot rest a stop
+at the venue. It has no claim on the level when the close was worse and must not
+claim the close when the close was better — on a bar that traded through 98
+and closed at 104 that is a 4% gain booked on an order that lost 2%.
+`conservative_exit_fill` takes the worse of the two, and both assumptions are
+recorded as `integrity_flags` on every run rather than only on the runs where
+they bit.
+
+**Zero commission.** The SDK's instrument constructors leave maker and taker
+unset and the engine's default fee model reads that as zero, so every run this
+executor has ever produced reported a gross number and labelled it net. The
+instrument now carries `FeeBook::resolve`'s rates, which prices entries and
+exits through one book rather than adding the second cost path INV-14 forbids
+(ADR-P6-12).
+
+**Every trade had a size of zero.** A closed nautilus `Position` reports
+`quantity` as the *open* size. Nothing downstream had noticed because no metric
+divided by it; it surfaced when the exit adjustment multiplied by it and
+silently did nothing, which
+`a_bar_that_breached_both_books_the_stop_and_never_the_target` caught as a +2.76
+profit on a bar that must book a loss. `peak_qty` is the round trip's size.
+
+**What was verified:** `cargo test -p backtest --test declared_exits` (11, every
+expectation hand-computed from the bar data and stated in its assertion
+message), `-p backtest --lib`, `-p strategy-runtime --lib` (including three new
+tests pinning the close-fill entry convention) and `-p invariants --test
+external_review_invariants` (14, three of them new). The oracle test
+`oracle_is_unprofitable_at_one_minute` still passes — it is pure arithmetic in
+`costs.rs` and does not run the simulator, so it guards the cost algebra rather
+than the fill path, which is worth knowing before relying on it to catch a
+lookahead regression.
+
+**What is not done, and is said so:** migration `0120` has not been applied —
+no Postgres was reachable from this worktree — so the number of affected stored
+runs is unmeasured. The migration counts them and `RAISE NOTICE`s the figure
+when it runs.
 ### One more defect, found by trying to apply the migrations
 
 Applying 0058 to the developer database failed with *"migration 36 was

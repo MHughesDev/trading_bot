@@ -117,7 +117,13 @@ for setdir in sorted(glob.glob(os.path.join(SETS, "set-*"))):
         declared = int(hdr.group(2)) if hdr else -1
         acc = len(re.findall(r"^\*\*Acceptance:\*\*", text, re.M))
         tra = len(re.findall(r"^\*\*Traces:\*\*", text, re.M))
-        sta = len(re.findall(r"^`(?:NOT STARTED|IN PROGRESS|DONE|BLOCKED[^`]*)`", text, re.M))
+        # `PARTIAL` is a real state and the vocabulary has to hold it. A task
+        # whose type exists but whose call site does not is neither done nor
+        # not-started, and the two honest alternatives are both worse: label it
+        # DONE and the plan lies, label it NOT STARTED and the work already
+        # landed gets redone. ADR-S1-06 is the same rule one level down.
+        sta = len(re.findall(
+            r"^`(?:NOT STARTED|IN PROGRESS|PARTIAL|DONE|BLOCKED[^`]*)`", text, re.M))
 
         counts = {"tasks": len(ids), "header": declared, "acceptance": acc,
                   "traces": tra, "status": sta}

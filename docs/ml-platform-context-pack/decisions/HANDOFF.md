@@ -74,8 +74,14 @@ Phase 0 and 1: done. Phase 2: every item done except 2.1, 2.14 and 2.16, which a
 what was built from it. Ten ADRs, P6-01 to P6-10. The short version:
 
 - Exits are typed fields on the definition at `definition_version` 1.3, and the
-  grammar stays frozen. `ExitTracker` drives them; **the backtest simulator does
-  not call it yet**, which is the one loose end in this sprint.
+  grammar stays frozen. `ExitTracker` drives them, and **the backtest simulator
+  now calls it** (ADR-P6-11, migration 0120) — this was the sprint's one loose
+  end and it is closed. Wiring it found two more defects in the same component:
+  the simulated instrument carried no maker/taker rate, so every fill was
+  charged zero commission (ADR-P6-12), and every `Trade` carried a size of zero,
+  because a closed nautilus `Position` reports `quantity` as the *open* size.
+  Runs computed before the fix are separated by engine version and filed as a
+  verified evaluator defect (ADR-P6-13); they are not deleted or re-scored.
 - `FeeSchedule`/`FeeBook` replace the flat per-asset-class rate; the tradeable
   frontier is a pre-trial admission check, not a gate.
 - The oracle test is in the adversarial suite and fails the build if a

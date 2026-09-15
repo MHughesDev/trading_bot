@@ -43,7 +43,18 @@ use crate::types::TimeframeExt;
 use nautilus_backtest::sdk::SimulationControl;
 
 /// `produced_by` tag on every result this executor emits.
-pub const EXECUTOR_TAG: &str = "SimRunExecutor@market_simulator";
+///
+/// The `+exits` suffix is the engine version boundary for ADR-P6-11. Every run
+/// stored under the bare [`DEFECTIVE_EXITS_TAG`] was computed by an engine that
+/// ignored the declared exit policy and charged no commission, and migration
+/// `0120` records that as a verified evaluator defect. The tag is the only
+/// thing that separates the two populations in `backtest_runs`, which is why it
+/// changes here rather than being left alone.
+pub const EXECUTOR_TAG: &str = "SimRunExecutor@market_simulator+exits";
+
+/// The engine version that ignored declared exits. Runs carrying it are
+/// evidence about a strategy nobody declared.
+pub const DEFECTIVE_EXITS_TAG: &str = "SimRunExecutor@market_simulator";
 
 /// The real executor. Cheap to clone-by-reference; hold it in an `Arc`/`Box`.
 pub struct SimRunExecutor {
@@ -315,7 +326,16 @@ impl RunExecutor for SimRunExecutor {
             Ok(o) if o.cancelled => {
                 RunResult::failed(cfg, TerminalReason::Cancelled, "simulation cancelled", EXECUTOR_TAG)
             }
-            Ok(o) => map_detailed_result(cfg, o, cost, EXECUTOR_TAG),
+            Ok(o) => {
+                // The assumptions ride on the result rather than on a log line:
+                // a run whose exits were resolved pessimistically and one whose
+                // strategy simply never breached a level look identical in the
+                // numbers, and only the record tells them apart.
+                let assumptions = o.execution_assumptions();
+                let mut result = map_detailed_result(cfg, o, cost, EXECUTOR_TAG);
+                result.integrity_flags.extend(assumptions);
+                result
+            }
             Err(f) => {
                 let detail = format!("{:#}", f.error);
                 tracing::warn!(run_id = cfg.run_id.as_str(), error = %detail, reason = f.reason.as_str(), "run failed");

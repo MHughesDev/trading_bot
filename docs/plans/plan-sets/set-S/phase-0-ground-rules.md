@@ -1,6 +1,6 @@
 # Phase 0 — Ground rules
 
-**Completion: 1 done, 2 partial, 2 blocked on gate H-1, 1 not started.**
+**Completion: 17% (1 / 6 tasks). 2 partial, 2 `BLOCKED:HUMAN` on gate H-1, 1 not started.**
 
 **Requirement IDs:** GR-01…GR-06.
 **Spec:** none directly — this phase makes the other eight executable.

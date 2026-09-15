@@ -33,6 +33,14 @@
 //! it **is** eligible for a stop: a position that gaps through its stop on the
 //! entry bar really did. Treating the entry bar as protected is a subtle way of
 //! giving every strategy one free bar of adverse movement.
+//!
+//! That is the convention for a fill at the **start** of a bar. A fill at a
+//! bar's **close** is a different clock and needs
+//! [`ExitTracker::opened_at_bar_close`]: the entry bar's high and low happened
+//! before the position existed, so the entry bar is not a bar it was exposed
+//! for, and the first bar after it is holding bar one. Calling
+//! [`ExitTracker::opened`] for a close fill reports every holding period one
+//! bar short and fires every `max_holding_bars` one bar late.
 
 use chrono::{DateTime, Utc};
 use domain::strategy_def::exits::{
@@ -139,6 +147,26 @@ impl ExitTracker {
             favourable_extreme: entry_price,
             bars_held: 0,
         });
+    }
+
+    /// Record an opening fill that happened at the **close** of a bar, with
+    /// that bar already consumed.
+    ///
+    /// The backtest simulator submits market orders from a bar handler that
+    /// runs after the venue has processed the bar, so an entry fills at that
+    /// bar's close. The entry bar's extremes are then prices the position was
+    /// not in the market for, and the caller must not pass that bar to
+    /// [`ExitTracker::on_bar`]. The first bar it *does* pass is holding bar
+    /// one, which is what this sets up: [`ExitRule::MaxHoldingBars`] with
+    /// `bars: 1` fires on the bar after the entry, not two bars after it.
+    ///
+    /// Everything else is [`ExitTracker::opened`]: a stop can still fire on the
+    /// very first bar the position is exposed for.
+    pub fn opened_at_bar_close(&mut self, side: PositionSide, entry_price: Decimal) {
+        self.opened(side, entry_price);
+        if let Some(open) = self.open.as_mut() {
+            open.bars_held = 1;
+        }
     }
 
     /// Record that the position closed for any reason — including one this
@@ -411,6 +439,49 @@ mod tests {
         t.opened(PositionSide::Long, dec!(100));
         let fired = t.on_bar(&bar(1, dec!(100), dec!(90), dec!(95)), &[]).unwrap();
         assert_eq!(fired.bars_held, 0);
+    }
+
+    /// A fill at the close of bar *t* means bar *t+1* is the first bar held.
+    /// Counting it as bar zero fires every time exit one bar late, which reads
+    /// as a strategy that holds longer than it declared.
+    #[test]
+    fn a_close_fill_counts_the_next_bar_as_the_first_bar_held() {
+        let mut t = ExitTracker::new(policy(vec![ExitRule::MaxHoldingBars { bars: 1 }]));
+        t.opened_at_bar_close(PositionSide::Long, dec!(100));
+        let flat = |n| bar(n, dec!(100), dec!(100), dec!(100));
+
+        let fired = t.on_bar(&flat(1), &[]).expect("one bar held is one bar held");
+        assert_eq!(fired.rule, "max_holding_bars");
+        assert_eq!(fired.bars_held, 1);
+    }
+
+    /// The close-fill convention must not buy the position a protected bar:
+    /// the first bar it is exposed for can stop it out.
+    #[test]
+    fn a_close_fill_is_still_stoppable_on_its_first_exposed_bar() {
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { fraction: dec!(0.02) }]));
+        t.opened_at_bar_close(PositionSide::Long, dec!(100));
+        let fired = t.on_bar(&bar(1, dec!(100), dec!(90), dec!(95)), &[]).unwrap();
+        assert_eq!(fired.rule, "stop_loss");
+        assert_eq!(fired.price, dec!(98));
+    }
+
+    /// The two conventions differ by exactly one bar, and by nothing else.
+    #[test]
+    fn the_two_entry_conventions_differ_by_one_bar_of_holding() {
+        let flat = |n| bar(n, dec!(100), dec!(100), dec!(100));
+        let rules = || policy(vec![ExitRule::MaxHoldingBars { bars: 2 }]);
+
+        let mut open_fill = ExitTracker::new(rules());
+        open_fill.opened(PositionSide::Long, dec!(100));
+        let mut close_fill = ExitTracker::new(rules());
+        close_fill.opened_at_bar_close(PositionSide::Long, dec!(100));
+
+        assert!(open_fill.on_bar(&flat(1), &[]).is_none());
+        assert!(close_fill.on_bar(&flat(1), &[]).is_none());
+        assert!(open_fill.on_bar(&flat(2), &[]).is_none(), "bars_held 1");
+        assert!(close_fill.on_bar(&flat(2), &[]).is_some(), "two bars held");
+        assert!(open_fill.on_bar(&flat(3), &[]).is_some());
     }
 
     // ── signals and lifecycle ────────────────────────────────────────────────
