@@ -9,9 +9,28 @@ default:
 # ── Development ────────────────────────────────────────────────────────────────
 
 # Start infra and run the platform
+#
+# The platform's order gate fails closed on the monitor's lease (COMP-007 §4),
+# so `just monitor` has to be running in another terminal or every order is
+# refused with `monitor_unavailable`. That is the design, not a bug: if the
+# monitor dies, the platform stops.
 dev:
     docker compose up -d
     cargo run -p platform
+
+# Run the live monitor (COMP-007). A separate process, on purpose — a monitor
+# inside the platform dies with it and has therefore checked nothing.
+monitor:
+    DATABASE_URL=postgres://trading:trading@localhost:5432/trading cargo run -p monitor --bin tbot-monitor
+
+# Rehearse the kill switch end to end (COMP-007 §4.2, §8.1-§8.3).
+#
+# Nobody will trip a global halt on a live book to see whether it works, so
+# without this the most important path in the platform is the one path never
+# exercised. A drill whose propagation exceeds one cadence fails the deploy.
+drill:
+    MONITOR_TEST_DATABASE_URL=postgres://trading:trading@localhost:5432/trading \
+      cargo test -j 2 -p monitor --test fail_closed_drill -- --test-threads=1
 
 # Run the MCP server (requires PLATFORM_API_TOKEN — see docs/mcp/README.md)
 run-mcp:

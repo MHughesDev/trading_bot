@@ -23,7 +23,8 @@ RUN cargo build --release \
     -p collector-equity \
     -p collector-web \
     -p embedder \
-    -p mcp-server
+    -p mcp-server \
+    -p monitor
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim AS runtime
@@ -42,6 +43,10 @@ COPY --from=builder /build/target/release/collector-equity /usr/local/bin/collec
 COPY --from=builder /build/target/release/collector-web /usr/local/bin/collector-web
 COPY --from=builder /build/target/release/embedder /usr/local/bin/embedder
 COPY --from=builder /build/target/release/mcp-server /usr/local/bin/mcp-server
+# COMP-007: the live monitor. A separate binary in the same image, run as a
+# separate container — the isolation that matters is the process and its
+# database connection, not the filesystem it was copied from.
+COPY --from=builder /build/target/release/tbot-monitor /usr/local/bin/tbot-monitor
 
 # Copy config
 COPY config/ /app/config/

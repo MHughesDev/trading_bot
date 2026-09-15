@@ -207,6 +207,33 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── COMP-007: the live monitor and kill switch ─────────────────────────────
+  #
+  # Its own container, on purpose. A monitor inside the API process dies with it
+  # and has therefore checked nothing; here, `docker compose stop tbot-monitor`
+  # is a real drill — within one cadence the platform's lease lapses and the
+  # order gate refuses everything with `monitor_unavailable`.
+  #
+  # It depends only on Postgres. Not on the platform: the whole point is that it
+  # keeps running and keeps recording when the thing it watches is wedged.
+  # Deliberately **not** behind a profile. The order gate fails closed on this
+  # service's lease, so an opt-in monitor would mean the default stack cannot
+  # place an order and the first thing anybody learned would be how to switch the
+  # safety off.
+  tbot-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["tbot-monitor"]
+    environment:
+      DATABASE_URL: postgres://trading:trading@postgres:5432/trading
+      MONITOR_CADENCE_MS: "60000"
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   nats_data:
   pg_data:
