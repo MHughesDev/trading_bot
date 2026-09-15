@@ -178,8 +178,8 @@ strictly ordered.
 5. **Track progress** by task IDs (`P1-T01`, `P2-T03`, …) in a PR/issue checklist.
 
 **Reference paths each phase cites:**
-- Architecture / structural contract: [`../../architecture.md`](../../architecture.md).
-- Specs: [`../../specs/`](../../specs/) (e.g. `../../specs/DATA-004-strategy-definition-format.md`).
+- Architecture / structural contract: [`../../architecture.md`](../../../architecture.md).
+- Specs: [`../../specs/`](../../../specs/) (e.g. `../../specs/DATA-004-strategy-definition-format.md`).
 - ADRs: [`../../adr/`](../../adr/).
 - The set-A plans ([`../plans-set-A/`](../plans-set-A/)) are the **format reference** and document the
   already-built foundation; set-B is the delta to the full end-state.

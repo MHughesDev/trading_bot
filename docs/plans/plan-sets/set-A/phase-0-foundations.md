@@ -7,11 +7,11 @@ Note: Canonical executable plans live in docs/plans/. This copy is the traceable
 
 # Phase 0 — Foundations (the irreversible core)
 
-> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../architecture.md),
-> and the specs in [`../specs/`](../specs/) — especially
-> [`../specs/DATA-001-event-envelope-and-payloads.md`](../specs/DATA-001-event-envelope-and-payloads.md),
-> [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md),
-> and [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md).
+> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../../../architecture.md),
+> and the specs in [`../specs/`](../../../specs/) — especially
+> [`../specs/DATA-001-event-envelope-and-payloads.md`](../../../specs/DATA-001-event-envelope-and-payloads.md),
+> [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md),
+> and [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md).
 >
 > **Why this phase is special:** The types built here are *tattoos*. Everything stored depends on them
 > forever. Get them right; stay loose on transport. Nothing in later phases starts until this exists.
@@ -31,7 +31,7 @@ and documented.
 - **Decision gate Q3** (strategy-format 1.0 freeze) is *produced* in this phase (P0-T08). The
   expression language, node types, `$each` fan-out semantics, and tighten-only override rule must be
   pinned here. If unanswered, make the decisions per the sketch in
-  [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md) and document them.
+  [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md) and document them.
 
 ## Invariants this phase must respect
 
@@ -53,7 +53,7 @@ and documented.
   Provide `from_str`, arithmetic via `Decimal`, serde as string/decimal. **Do not** implement
   `From<f64>` or `TryFrom<f64>`. Provide a `quantize(precision)` that quantizes to an instrument's
   precision (used at normalization) — never truncating real money away (see
-  [`../specs/DATA-001-event-envelope-and-payloads.md`](../specs/DATA-001-event-envelope-and-payloads.md)
+  [`../specs/DATA-001-event-envelope-and-payloads.md`](../../../specs/DATA-001-event-envelope-and-payloads.md)
   §money types).
 - **Acceptance:** `money_no_float.rs` proves (compile-fail doc-test or trait-absence test) that
   `Price::from(0.1f64)` does not compile; arithmetic + quantize behave; serde round-trips.
@@ -63,7 +63,7 @@ and documented.
 - **Goal:** `TrustTier` as a first-class ordered enum.
 - **Files:** `crates/domain/src/trust.rs`.
 - **Context:** Variants `Regulated`, `CentralizedExchange`, `OnchainConfirmed`, `OnchainTentative`,
-  `SocialDerived` (per [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
+  `SocialDerived` (per [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
   §8). Provide ordering so a strategy's `min_trust_tier` can be compared against an event's tier.
   serde.
 - **Acceptance:** ordering test (`Regulated >= CentralizedExchange`, etc. per chosen semantics);
@@ -74,7 +74,7 @@ and documented.
 - **Goal:** The four timestamps and `available_time` semantics.
 - **Files:** `crates/domain/src/timestamp.rs`.
 - **Context:** `event_time` (Option), `observed_time`, `ingested_time`, `available_time` — all
-  `DateTime<Utc>` (see [`../specs/DATA-003-timestamps-and-identity.md`](../specs/DATA-003-timestamps-and-identity.md)
+  `DateTime<Utc>` (see [`../specs/DATA-003-timestamps-and-identity.md`](../../../specs/DATA-003-timestamps-and-identity.md)
   §timestamp model). Provide a helper to compute
   `available_time = max(window_close, observed) + watermark + processing_delay`.
   Document that `available_time` is the replay sort key.
@@ -84,7 +84,7 @@ and documented.
 ### P0-T04 — Payload types
 - **Goal:** The v1 versioned payloads.
 - **Files:** `crates/domain/src/payloads/{mod,trade,quote,orderbook,bar}.rs`.
-- **Context:** Exactly the structs in [`../specs/DATA-001-event-envelope-and-payloads.md`](../specs/DATA-001-event-envelope-and-payloads.md)
+- **Context:** Exactly the structs in [`../specs/DATA-001-event-envelope-and-payloads.md`](../../../specs/DATA-001-event-envelope-and-payloads.md)
   §v1 payloads: `TradePayload`, `QuotePayload`, `OrderBookPayload` (`BookUpdateKind`, levels,
   `sequence`, `is_tentative`), `BarPayload` (`Timeframe`, OHLCV as `Price`/`Size`, `trade_count`,
   `revision`). Each payload carries/knows its `schema_version`. `mod.rs` defines a `Payload` trait
@@ -97,7 +97,7 @@ and documented.
 ### P0-T05 — Event envelope
 - **Goal:** The universal `EventEnvelope<T>`.
 - **Files:** `crates/domain/src/envelope.rs`, `crates/domain/tests/envelope_roundtrip.rs`.
-- **Context:** Exactly the struct in [`../specs/DATA-001-event-envelope-and-payloads.md`](../specs/DATA-001-event-envelope-and-payloads.md)
+- **Context:** Exactly the struct in [`../specs/DATA-001-event-envelope-and-payloads.md`](../../../specs/DATA-001-event-envelope-and-payloads.md)
   §envelope: `event_id`, `event_type`, `schema_version`, `lane`, `instrument_id`, `venue_id`,
   `source`, `trust_tier`, the four timestamps, `sequence`, `correlation_id`, `causation_id`,
   `payload: T`. Generic over payload `T: Payload`.
@@ -108,10 +108,10 @@ and documented.
 - **Goal:** Deterministic identity derived from the source (never a random UUID at ingest), plus the
   canonical lane names.
 - **Files:** `crates/domain/src/ids.rs`, `crates/domain/src/lanes.rs`.
-- **Context:** Dedup-key forms from [`../specs/DATA-003-timestamps-and-identity.md`](../specs/DATA-003-timestamps-and-identity.md)
+- **Context:** Dedup-key forms from [`../specs/DATA-003-timestamps-and-identity.md`](../../../specs/DATA-003-timestamps-and-identity.md)
   §identity: `lane+instrument+venue+sequence+source`, `venue+exchange_trade_id`,
   `chain+tx_hash+log_index` (future). `lanes.rs` enumerates lane name constants + a typed lane enum
-  from the lane list in [`../specs/SYS-001-system-overview.md`](../specs/SYS-001-system-overview.md)
+  from the lane list in [`../specs/SYS-001-system-overview.md`](../../../specs/SYS-001-system-overview.md)
   (`market.trades`, `market.quotes`, `market.orderbook.l2`, `market.bars.1s`, `market.bars.1m`,
   `features.technical`, `strategy.signals`, `orders.commands`, `orders.events`, `positions.events`,
   `quarantine`).
@@ -122,7 +122,7 @@ and documented.
 ### P0-T07 — Instrument metadata model
 - **Goal:** The `Instrument` model that makes asset classes a data concern, not a code concern.
 - **Files:** `crates/domain/src/instrument.rs`.
-- **Context:** Exactly the struct in [`../specs/DATA-002-instrument-metadata.md`](../specs/DATA-002-instrument-metadata.md)
+- **Context:** Exactly the struct in [`../specs/DATA-002-instrument-metadata.md`](../../../specs/DATA-002-instrument-metadata.md)
   §instrument metadata: `instrument_id`, `asset_class` (`Crypto`/`Equity`, extensible), `venue_id`,
   `base_precision`, `quote_precision`, `tick_size`, `lot_size`, `trading_hours` (`TradingSchedule`:
   24/7 for crypto, session+auctions for equities), `halt_behavior` (`HaltPolicy`), `trust_tier`,
@@ -136,7 +136,7 @@ and documented.
   front doors (Phase 5) target; freezing it now is the whole point of doing it in Phase 0.
 - **Files:** `crates/domain/src/strategy_def/{mod,inputs,nodes,actions,risk_overrides}.rs`,
   `crates/domain/tests/strategy_def_schema.rs`.
-- **Context:** Build out the sketch in [`../specs/DATA-004-strategy-definition-format.md`](../specs/DATA-004-strategy-definition-format.md)
+- **Context:** Build out the sketch in [`../specs/DATA-004-strategy-definition-format.md`](../../../specs/DATA-004-strategy-definition-format.md)
   into concrete types: `StrategyDefinition { strategy_id, definition_version: "1.0", asset_universe,
   min_trust_tier, inputs, nodes, actions, risk_overrides }`. Decide and **document in module
   docs** (resolving Q3):
@@ -149,7 +149,7 @@ and documented.
   - that **`risk_overrides` may only tighten** the global gate (documented invariant; enforced by
     `strategy-validator` in Phase 5 and `risk` in Phase 2).
 - **Acceptance:** `strategy_def_schema.rs` deserializes the example JSON from
-  [`../specs/DATA-004-strategy-definition-format.md`](../specs/DATA-004-strategy-definition-format.md)
+  [`../specs/DATA-004-strategy-definition-format.md`](../../../specs/DATA-004-strategy-definition-format.md)
   and re-serializes it stably; `definition_version` is `"1.0"`; module docs state the frozen grammar
   and the tighten-only rule.
 - **Depends on:** P0-T02 (trust tier), P0-T01 (sizes in actions).
@@ -159,7 +159,7 @@ and documented.
 - **Files:** `crates/domain/src/order.rs`, `crates/domain/src/position.rs`,
   `crates/domain/src/error.rs`, and re-exports in `crates/domain/src/lib.rs`.
 - **Context:** `OrderRequest`/`OrderIntent` (with an **idempotency key** field — see
-  [`../specs/COMP-002-execution-and-risk-gate.md`](../specs/COMP-002-execution-and-risk-gate.md)
+  [`../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)
   §idempotency), `OrderState` machine states
   (`accepted/submitted/partially_filled/filled/cancelled/rejected`), `Side`, `OrderType`.
   `Position`, `Balance`. `error.rs` seeds `NormalizeError`, `ValidationError`, `RiskRejection`.
@@ -175,11 +175,11 @@ and documented.
   `migrations/0005_risk_config.sql`; `clickhouse/01_trades.sql`, `clickhouse/02_bars.sql`,
   `clickhouse/03_features.sql`.
 - **Context:** Money columns are Postgres `NUMERIC` / ClickHouse `Decimal128(scale)` — **never
-  float** (see [`../specs/DATA-001-event-envelope-and-payloads.md`](../specs/DATA-001-event-envelope-and-payloads.md)
+  float** (see [`../specs/DATA-001-event-envelope-and-payloads.md`](../../../specs/DATA-001-event-envelope-and-payloads.md)
   §money, §storage). ClickHouse tables use `ReplacingMergeTree` ordered on the dedup key,
   `ORDER BY (instrument, available_time)`, partitioned by month (see
-  [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
-  §9, [`../specs/COMP-004-storage-and-replay.md`](../specs/COMP-004-storage-and-replay.md)).
+  [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
+  §9, [`../specs/COMP-004-storage-and-replay.md`](../../../specs/COMP-004-storage-and-replay.md)).
   Instruments table mirrors P0-T07. `0005` includes the global `trading_enabled` flag + per-user
   risk limits.
 - **Acceptance:** `just migrate` applies Postgres migrations cleanly against the compose Postgres;
@@ -193,7 +193,7 @@ and documented.
   (`docs/specs/COMP-004-storage-and-replay.md`) with the raw-archive section (partition layout,
   immutability, batching, compaction); stub `crates/storage/src/parquet/partition.rs` with the path
   function signature + doc.
-- **Context:** Per [`../specs/COMP-004-storage-and-replay.md`](../specs/COMP-004-storage-and-replay.md):
+- **Context:** Per [`../specs/COMP-004-storage-and-replay.md`](../../../specs/COMP-004-storage-and-replay.md):
   raw normalized events written **before any derivation**, append-only, immutable, partitioned
   `lane/instrument/date`, e.g. `s3://bucket/events/market_trades/venue=binance/instrument=BTC-USDT/date=2026-06-08/`.
   Document batching policy (10k events or 100ms) and nightly compaction as the contract Phase 1

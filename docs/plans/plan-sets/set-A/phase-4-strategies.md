@@ -7,11 +7,11 @@ Note: Canonical executable plans live in docs/plans/. This copy is the traceable
 
 # Phase 4 — Strategies (feature engine + runtime + market_simulator adapter + multi-instance)
 
-> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../architecture.md),
+> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../../../architecture.md),
 > and the specs — especially
-> [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md),
-> [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
-> §5–§6, and [`../specs/COMP-004-storage-and-replay.md`](../specs/COMP-004-storage-and-replay.md).
+> [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md),
+> [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
+> §5–§6, and [`../specs/COMP-004-storage-and-replay.md`](../../../specs/COMP-004-storage-and-replay.md).
 
 ## Phase goal
 
@@ -58,8 +58,8 @@ simulation is owned entirely by `market_simulator`.
 - **Files:** `crates/features/src/{lib,ema,rsi,window}.rs`,
   `crates/features/tests/features_versioned.rs`; a live adapter (bus I/O) wired in `apps/platform`.
 - **Context:** EMA(n), RSI(n) over bars, built on a shared rolling `window`. Per
-  [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
-  §5–§6 and [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md)
+  [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
+  §5–§6 and [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md)
   §determinism: pure, no I/O; feature values **versioned** (a `feature_version`) and recorded; each
   feature stamps `available_time` to include its processing delay so live and replay agree. Float
   math is acceptable for *feature values* because they are versioned and recorded.
@@ -70,7 +70,7 @@ simulation is owned entirely by `market_simulator`.
 ### P4-T02 — WorldState / WorldContext
 - **Goal:** The local view a strategy reads so it never manually joins across tables.
 - **Files:** `crates/strategy-runtime/src/{world,clock}.rs`.
-- **Context:** Per [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md)
+- **Context:** Per [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md)
   §runtime: `world.now()`, `latest_bar(instrument, timeframe)`, `latest_orderbook(instrument)`,
   `feature(instrument, name)`, `recent_events(instrument, Duration)`, `position(instrument)`,
   `open_orders(instrument)`, `place_order(req)` → risk gate → execution. `clock.rs` is real live,
@@ -84,7 +84,7 @@ simulation is owned entirely by `market_simulator`.
   node graph, emit intents.
 - **Files:** `crates/strategy-runtime/src/{lib,runtime,interpreter,intents}.rs`,
   `crates/strategy-runtime/tests/{no_wallclock,replay_determinism}.rs`.
-- **Context:** Per [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md):
+- **Context:** Per [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md):
   `runtime.rs` loads a `StrategyDefinition`, declares demand to the Demand Manager for its `inputs`
   (expanding `$each` across `asset_universe`), subscribes to **canonical** bus lanes (never the UI
   feed), and on each event calls the strategy. `interpreter.rs` evaluates the node graph /
@@ -101,7 +101,7 @@ simulation is owned entirely by `market_simulator`.
   `github.com/MHughesDev/market_simulator`, returning results through the REST API.
 - **Files:** `crates/market-simulator-adapter/src/{lib,export,run_request,results,contract}.rs`,
   `tests/backtest_adapter.rs`.
-- **Context:** Per [`../specs/COMP-004-storage-and-replay.md`](../specs/COMP-004-storage-and-replay.md):
+- **Context:** Per [`../specs/COMP-004-storage-and-replay.md`](../../../specs/COMP-004-storage-and-replay.md):
   - `export.rs`: read raw archive (Parquet/ClickHouse) for the requested instruments/lanes/range;
     serialize to Apache Arrow IPC files matching market_simulator's data contract. For MVP, export
     1-minute OHLCV `BarPayload` events — this is what Coinbase and Alpaca provide reliably.
@@ -128,7 +128,7 @@ simulation is owned entirely by `market_simulator`.
 - **Files:** `crates/api/src/routes/backtests.rs` (+ register in `routes/mod.rs`).
 - **Context:** `POST /api/backtests` (strategy def + time range → async job → market_simulator
   adapter call), `GET /api/backtests/{id}` (BacktestReport: metrics, PnL, risk) per
-  [`../specs/COMP-003-ui-streaming-gateway.md`](../specs/COMP-003-ui-streaming-gateway.md).
+  [`../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md).
 - **Acceptance:** a definition + range submitted via REST triggers the adapter, runs against
   market_simulator, and returns a BacktestReport; an unsupported asset class or missing data
   returns a structured error.
@@ -139,7 +139,7 @@ simulation is owned entirely by `market_simulator`.
   user — each with its own WorldState, all funneling intents through the single risk gate.
 - **Files:** extend `crates/strategy-runtime/src/runtime.rs` (instance manager keyed by
   `(user_id, instrument_id)`); wiring in `apps/platform/src/main.rs`.
-- **Context:** Per [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md)
+- **Context:** Per [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md)
   §asset model: a user initializes a strategy on an asset → one runtime instance is created bound
   to that instrument. Multiple users can each have strategies on the same instrument (separate
   instances). The Demand Manager deduplicates overlapping lane demand. Manual orders on the same

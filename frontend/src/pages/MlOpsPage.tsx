@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils'
 import { useModels } from '@/hooks/useMlOps'
 import { ModelStatusPill } from '@/components/mlops/ModelStatusPill'
 import { PlatformHealthPanel } from '@/components/mlops/PlatformHealthPanel'
+import { FalsificationPanel } from '@/components/mlops/FalsificationPanel'
 import type { AiModel, ModelKind, ModelStatus } from '@/api/mlops'
 import { format } from 'date-fns'
 
@@ -242,6 +243,7 @@ export function MlOpsPage() {
           navigates to is a self-monitoring panel nobody reads, and §16.2's whole
           observation is that this is the layer that gets skipped. */}
       <PlatformHealthPanel className="mb-4" />
+      <FalsificationPanel className="mb-4" />
 
       {/* Filter bar */}
       <div className="mb-5 flex flex-wrap items-center gap-3">

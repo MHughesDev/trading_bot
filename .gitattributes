@@ -1,0 +1,30 @@
+# Line endings are content as far as a migration checksum is concerned.
+#
+# sqlx records a SHA-384 of each migration's bytes when it applies it, and
+# refuses to run against a database whose recorded checksum disagrees with the
+# file. With `core.autocrlf=true` and no rule here, a Windows checkout produces
+# CRLF and a Linux one produces LF, so the *same commit* yields two different
+# checksums — and a database migrated on one machine cannot be migrated on the
+# other. That is not hypothetical: it happened to 0036 on 2026-09-14.
+#
+# Pinning LF makes the checksum a property of the commit rather than of whoever
+# ran it. Use `cargo run -p storage --example normalize_checksums` to re-record
+# a database that was migrated under the old behaviour; it refuses to touch a
+# row whose difference is anything but line endings.
+migrations/*.sql text eol=lf
+
+# Everything else keeps the platform default. A repo-wide renormalisation would
+# be a thousand-file whitespace diff, and nothing outside `migrations/` has its
+# bytes hashed and compared across machines.
+
+# Binary: never touched.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.pdf   binary
+*.parquet binary

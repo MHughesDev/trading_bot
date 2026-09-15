@@ -345,6 +345,7 @@ fn draft_to_definition(draft: &StrategyDraft) -> Result<StrategyDefinition, Stri
     let strategy_id = draft.strategy_id.clone().ok_or("strategy_id not set")?;
     let asset_class = draft.asset_class.clone().ok_or("asset_class not set")?;
     Ok(StrategyDefinition {
+        exits: None,
         strategy_id,
         definition_version: draft.definition_version.clone(),
         asset_class,

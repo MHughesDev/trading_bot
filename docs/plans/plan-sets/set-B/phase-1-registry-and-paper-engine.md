@@ -7,10 +7,10 @@ Derived From: C-055, C-056, C-058, C-068, C-073, C-086, C-087, C-088, C-089, C-0
 
 # Phase 1 — Registry & Paper Engine
 
-> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../architecture.md),
-> the specs under [`../../specs/`](../../specs/) (especially
-> [`../../specs/DATA-002-instrument-metadata.md`](../../specs/DATA-002-instrument-metadata.md) and
-> [`../../specs/COMP-002-execution-and-risk-gate.md`](../../specs/COMP-002-execution-and-risk-gate.md)),
+> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../../architecture.md),
+> the specs under [`../../specs/`](../../../specs/) (especially
+> [`../../specs/DATA-002-instrument-metadata.md`](../../../specs/DATA-002-instrument-metadata.md) and
+> [`../../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)),
 > and the existing codebase. `crates/domain` is already implemented (`Price`/`Size` newtypes,
 > `EventEnvelope`, `Instrument`/`AssetClass`, `OrderIntent`/`OrderState`); read it before editing.
 

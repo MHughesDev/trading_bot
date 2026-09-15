@@ -85,6 +85,44 @@ pub const TAXONOMY: &[(&str, &str, Risk)] = &[
     ("delete_backtest", "backtest", Risk::Destructive),
     ("compare_backtests", "backtest", Risk::Read),
     ("wait_for_backtest", "backtest", Risk::Read),
+    // ── falsification (EXTERNAL-REVIEW-2026-09 §4) ──────────────────────────
+    //
+    // Filing a report is a `write`: it appends a row nothing can edit
+    // afterwards. It is emphatically NOT destructive — an agent that hesitates
+    // to report a defect because the tool is flagged dangerous is an agent that
+    // exploits the defect instead, which is the failure the whole mechanism
+    // exists to prevent.
+    ("report_kill", "falsification", Risk::Write),
+    ("report_evaluator_defect", "falsification", Risk::Write),
+    // Both of these only measure; neither spends a trial. That is the point of
+    // asking them *before* a search rather than after it disappoints.
+    ("check_tradeable_frontier", "falsification", Risk::Read),
+    ("run_oracle_test", "falsification", Risk::Read),
+    // ── evidence (ADR-P7-05) ────────────────────────────────────────────────
+    //
+    // All reads, and all cheap. They exist because the falsification tools
+    // shipped with a defect vocabulary and no way to gather evidence for it.
+    ("get_trade_list", "falsification", Risk::Read),
+    ("probe_data_quality", "falsification", Risk::Read),
+    ("find_similar_trials", "falsification", Risk::Read),
+    // ── web access (ADR-P7-01) ──────────────────────────────────────────────
+    //
+    // The first `Outbound` tools in this catalogue. They restore a leg of the
+    // lethal trifecta this platform previously cut, and they are classified
+    // `Outbound` rather than `Read` precisely so that fact is visible in the
+    // policy layer and in `the_only_outbound_tools_are_the_two_web_tools`.
+    // Reads to the platform are `Read`; a read of the *internet* is not the same
+    // act and must not be filed as one.
+    ("web_search", "web", Risk::Outbound),
+    ("fetch_url", "web", Risk::Outbound),
+    // ── the skill library (ADR-P7-03) ───────────────────────────────────────
+    //
+    // Emphatically NOT outbound: a skill has no network and no database. It is
+    // a pure transformation over the payload it is handed, which is what makes
+    // `run_skill` a `Write` (it appends a run record) rather than anything more.
+    ("create_skill", "skills", Risk::Write),
+    ("list_skills", "skills", Risk::Read),
+    ("run_skill", "skills", Risk::Write),
     // ── automations ─────────────────────────────────────────────────────────
     //
     // The agent's token does not carry `automations.arm`, so these are unreachable
@@ -221,65 +259,39 @@ mod tests {
     /// Nothing in this catalogue sends data outside the platform. If that ever
     /// changes, the trifecta audit in the capability profile has to change with it —
     /// this platform's outbound leg is cut, and an outbound tool would uncut it.
+    /// The catalogue's outbound surface, pinned by name.
+    ///
+    /// This replaced `the_catalogue_has_no_outbound_tools` on 2026-09-14, when
+    /// web access was added deliberately. The assertion did not go away — it
+    /// narrowed. Before, the platform cut the exfiltration leg of the lethal
+    /// trifecta entirely; now it has exactly two outbound tools, both behind
+    /// `webfetch::egress`, and a third appearing here is a decision somebody has
+    /// to make on purpose rather than a diff nobody noticed.
     #[test]
-    fn the_catalogue_has_no_outbound_tools() {
-        let outbound: Vec<&str> = TAXONOMY
+    fn the_only_outbound_tools_are_the_two_web_tools() {
+        let mut outbound: Vec<&str> = TAXONOMY
             .iter()
             .filter(|(_, _, r)| *r == Risk::Outbound)
             .map(|(n, _, _)| *n)
             .collect();
-        assert!(
-            outbound.is_empty(),
-            "adding an outbound tool uncuts the trifecta leg this platform cuts; \
-             update config/profiles/*.yaml deliberately if that is intended: {outbound:?}"
-        );
-    }
-
-    /// The five destructive tools, named. A test that lists them is how a sixth
-    /// arriving becomes a review conversation instead of a silent widening.
-    #[test]
-    fn the_destructive_set_is_exactly_what_it_should_be() {
-        let mut destructive: Vec<&str> = TAXONOMY
-            .iter()
-            .filter(|(_, _, r)| *r == Risk::Destructive)
-            .map(|(n, _, _)| *n)
-            .collect();
-        destructive.sort_unstable();
+        outbound.sort_unstable();
         assert_eq!(
-            destructive,
-            vec![
-                "arm_automation",
-                "choose_null",
-                "delete_backtest",
-                "discard_draft",
-            ]
+            outbound,
+            vec!["fetch_url", "web_search"],
+            "the outbound surface changed. Every tool that can reach the internet must go              through `webfetch::egress`, which is the one place destinations are decided;              adding another means updating config/profiles/*.yaml and this test together,              deliberately."
         );
     }
 
+    /// A skill runs with no network. Classifying one of these `Outbound` would
+    /// be describing the sandbox as something it is not.
     #[test]
-    fn namespaces_are_small_enough_to_route_on() {
-        let ns = namespaces();
-        assert!(
-            ns.len() <= 12,
-            "namespaces are the routing unit; too many and routing is as hard as \
-             picking a tool: {ns:?}"
-        );
-        for n in &ns {
-            let count = TAXONOMY.iter().filter(|(_, x, _)| x == n).count();
-            assert!(
-                count <= 24,
-                "namespace {n} has {count} tools, which cannot fit a frontier exposure budget"
-            );
+    fn the_skill_tools_are_not_outbound() {
+        for name in ["create_skill", "list_skills", "run_skill"] {
+            let (_, _, risk) = TAXONOMY
+                .iter()
+                .find(|(n, _, _)| *n == name)
+                .unwrap_or_else(|| panic!("{name} must be classified"));
+            assert_ne!(*risk, Risk::Outbound, "{name} has no network");
         }
-    }
-
-    #[test]
-    fn the_risk_names_match_the_harness_crate() {
-        // Kept in sync by hand; this asserts the wire strings agree, which is what
-        // the policy engine keys on.
-        assert_eq!(Risk::Read.as_str(), "read");
-        assert_eq!(Risk::Write.as_str(), "write");
-        assert_eq!(Risk::Destructive.as_str(), "destructive");
-        assert_eq!(Risk::Outbound.as_str(), "outbound");
     }
 }

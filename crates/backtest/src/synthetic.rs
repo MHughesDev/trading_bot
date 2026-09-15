@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// The seven generators of DATA-005 §9.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Generator {
     /// GARCH(1,1) with Student-t innovations. Volatility clusters; mean is zero.

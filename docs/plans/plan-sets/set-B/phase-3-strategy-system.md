@@ -7,10 +7,10 @@ Derived From: C-061, C-072, C-082, C-084, C-085, C-100, C-113, C-117
 
 # Phase 3 — Strategy System
 
-> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../architecture.md),
+> **Self-contained execution doc.** You need only: this file, [`../../architecture.md`](../../../architecture.md),
 > the specs (especially
-> [`../../specs/DATA-004-strategy-definition-format.md`](../../specs/DATA-004-strategy-definition-format.md)
-> and [`../../specs/FEAT-001-strategy-system.md`](../../specs/FEAT-001-strategy-system.md)), and the
+> [`../../specs/DATA-004-strategy-definition-format.md`](../../../specs/DATA-004-strategy-definition-format.md)
+> and [`../../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md)), and the
 > existing codebase. `crates/strategy-runtime` (WorldState/interpreter/instance lifecycle, partial
 > node graph), `crates/strategy-validator`, the frozen `StrategyDefinition` v1.0 in `crates/domain`,
 > and the `DataType` enum (Phase 1) are your foundation — read them first. Phase 1 must be complete.

@@ -7,10 +7,10 @@ Note: Canonical executable plans live in docs/plans/. This copy is the traceable
 
 # Phase 2 — Money safety (before any automation touches orders)
 
-> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../architecture.md),
+> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../../../architecture.md),
 > and the specs — especially
-> [`../specs/COMP-002-execution-and-risk-gate.md`](../specs/COMP-002-execution-and-risk-gate.md) and
-> [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
+> [`../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md) and
+> [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
 > §3, §7.
 >
 > **This is the phase that separates a fun project from "the night a strategy drained the account."**
@@ -55,7 +55,7 @@ that flows UI → risk gate → paper execution → position update.
 - **Goal:** The individual limit checks.
 - **Files:** `crates/risk/src/limits.rs`.
 - **Context:** Implement, reading instrument metadata where needed (per
-  [`../specs/COMP-002-execution-and-risk-gate.md`](../specs/COMP-002-execution-and-risk-gate.md)
+  [`../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)
   §checks): max position size per instrument, max order rate (per second/minute — catches a submit
   loop), price sanity bounds (using `tick_size` + a band around current market), lot/tick validity,
   max daily loss per user/account. Each returns a structured pass/`RiskRejection`.
@@ -70,8 +70,8 @@ that flows UI → risk gate → paper execution → position update.
   `crates/risk/tests/tighten_only.rs`.
 - **Context:** `overrides.rs` takes global limits + a definition's overrides and produces the
   effective limits, rejecting any override that would loosen a global value (per
-  [`../specs/COMP-002-execution-and-risk-gate.md`](../specs/COMP-002-execution-and-risk-gate.md)
-  and [`../specs/DATA-004-strategy-definition-format.md`](../specs/DATA-004-strategy-definition-format.md)).
+  [`../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)
+  and [`../specs/DATA-004-strategy-definition-format.md`](../../../specs/DATA-004-strategy-definition-format.md)).
   `trust_gate.rs` compares the event trust tier behind an intent against `min_trust_tier`.
 - **Acceptance:** `tighten_only.rs` proves a loosening override is rejected and a tightening one is
   applied; a too-low-trust intent is refused.
@@ -81,7 +81,7 @@ that flows UI → risk gate → paper execution → position update.
 - **Goal:** A global `trading_enabled` flag, checked synchronously, that blocks all new orders and
   trips on danger conditions — and works even if half the system is broken.
 - **Files:** `crates/risk/src/kill_switch.rs`, `crates/risk/tests/kill_switch_trips.rs`.
-- **Context:** Per [`../specs/COMP-002-execution-and-risk-gate.md`](../specs/COMP-002-execution-and-risk-gate.md)
+- **Context:** Per [`../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)
   §kill switch: trips automatically on max-daily-loss breach, position/broker reconciliation
   divergence, market-data staleness on an active instrument, broker disconnect, bus down. Manual trip
   via a method (REST endpoint added in P2-T07). The flag is checked synchronously by the gate. It
@@ -98,7 +98,7 @@ that flows UI → risk gate → paper execution → position update.
 - **Context:** `RiskGate::check(intent) -> Result<ApprovedOrder, RiskRejection>` runs the kill-switch
   check, all limits, the trust gate, and applies effective (tightened) limits. **Idempotent by
   idempotency key**: a redelivered intent with a seen key returns the prior decision, never a second
-  approval (per [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
+  approval (per [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
   §3). `ApprovedOrder` is the only type `execution` will accept — it cannot be constructed outside
   `risk`.
 - **Acceptance:** `idempotent_gate.rs` proves a redelivered intent does not double-approve; rejections
@@ -109,7 +109,7 @@ that flows UI → risk gate → paper execution → position update.
 - **Goal:** The order state machine + **Alpaca paper account** adapter behind the `Broker` interface.
 - **Files:** `crates/execution/src/{lib,broker,alpaca,order_state,fills,positions,audit,events}.rs`,
   `crates/execution/tests/{idempotent_fills,ack_timeout_query,partial_fill}.rs`.
-- **Context:** Per [`../specs/COMP-002-execution-and-risk-gate.md`](../specs/COMP-002-execution-and-risk-gate.md)
+- **Context:** Per [`../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)
   §execution. `Broker` trait: `submit`, `cancel`, `query_open_orders`, `query_positions`. Implement
   `alpaca.rs` against the **Alpaca paper trading REST API** (all assets/domains). The Coinbase live
   adapter (`coinbase.rs`) is added post-Phase-6; the market_simulator backtest adapter
@@ -128,9 +128,9 @@ that flows UI → risk gate → paper execution → position update.
 - **Goal:** Continuously reconcile internal vs broker state; halt + alarm on divergence.
 - **Files:** `crates/reconciliation/src/{lib,positions,freshness,sequence,divergence}.rs`,
   `crates/reconciliation/tests/{position_divergence_halts,freshness_respects_hours}.rs`.
-- **Context:** Per [`../specs/COMP-002-execution-and-risk-gate.md`](../specs/COMP-002-execution-and-risk-gate.md)
+- **Context:** Per [`../specs/COMP-002-execution-and-risk-gate.md`](../../../specs/COMP-002-execution-and-risk-gate.md)
   §reconciliation and
-  [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
+  [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
   §7: position reconciliation on every fill + a 30-second sweep + on every reconnect; on divergence →
   `divergence.rs` trips the kill switch for that instrument + alarms. `freshness.rs` is the per-lane
   watchdog that **reads instrument `trading_hours`/`halt_behavior`** so a normal 4pm equity close
@@ -147,9 +147,9 @@ that flows UI → risk gate → paper execution → position update.
   in `crates/api/src/routes/mod.rs`.
 - **Context:** `POST /api/orders` (manual) builds an `OrderIntent` (with idempotency key) and runs it
   through **the same risk gate** as strategies will (per
-  [`../specs/FEAT-001-strategy-system.md`](../specs/FEAT-001-strategy-system.md) §manual+automated
+  [`../specs/FEAT-001-strategy-system.md`](../../../specs/FEAT-001-strategy-system.md) §manual+automated
   coexist); `DELETE /api/orders/{id}` cancels; `POST /api/trading/kill` trips the kill switch (per
-  [`../specs/COMP-003-ui-streaming-gateway.md`](../specs/COMP-003-ui-streaming-gateway.md)). Private
+  [`../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md)). Private
   order/position data is scoped to the authenticated user.
 - **Acceptance:** a manual order via REST flows through the gate to paper execution and updates the
   position; a rejected order returns the structured reason; `POST /api/trading/kill` blocks the next

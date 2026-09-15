@@ -1,6 +1,47 @@
 # AGENT-003: Knowledge, Memory and Skills
 
 **Status:** Proposed (Phase 0 contract; not implemented)
+**Derivation Status: STALE as of 2026-09-15** — see the amendment note below before planning Set R-a or R-b.
+
+> ## Amendment note — 2026-09-15 (roadmap gap G-2)
+>
+> **The roadmap recorded this spec as "a Phase-0 contract, not a build spec." That was too
+> pessimistic** — the same error made about the regime engine. §6.2–§6.4 already assign work to
+> Set R-a and R-b by section, §8 gives a REST surface, §9 maps every `KM-` and `SK-` requirement
+> to a section, and §10's acceptance criteria are labelled by plan set. **Set R-a is plannable
+> from this document**, once the five items below are re-derived.
+>
+> What moved underneath it since 2026-09-11:
+>
+> 1. **`migrations/0039_knowledge_skills.sql` does not exist and cannot.** 0039 was taken by
+>    `0039_synthetic_and_evals.sql`. §3's storage needs a number from the **Stage-5 reserve
+>    (0141–0160)**, and the table names must be checked against what the ML platform pack
+>    actually built rather than assumed free.
+> 2. **§2's memory layers are superseded by [AGENT-007](AGENT-007-research-memory.md).** Set S
+>    Phase 4 builds three memories — episodic turn summaries, semantic entry kinds, procedural
+>    "three things, three names" — with retention rules and a `open_question` kind. Where §2 and
+>    AGENT-007 disagree, **AGENT-007 wins**; this spec's L0–L5 table is the older cut.
+> 3. **§5 findings are superseded too.** AGENT-007 §3.1 makes `record_finding` *verified*, and
+>    §3.2 makes negative results **derived, not declared** — a negative result cannot carry a
+>    failure class the gate funnel did not produce. `tbot memory add` as a free-form agent write
+>    is exactly the shape AGENT-007 P1 forbids (D-S5: memory is written by tools from verified
+>    results, never by the model's prose).
+> 4. **§4's local embeddings and §7's instrument profiles are partly built.** The ML platform
+>    pack has `knowledge.asset_embedding`, the outcome tensor and an insight store with shapes
+>    and grants; **track 8** is writing the `InstrumentProfile` job and the tensor rebuild timer,
+>    and **track 13** is building the insight store's retrieval, 4K cap and decay-on-contradiction.
+>    Set R-a must consume those, not build a parallel path. Note the pack uses `pgvector` with
+>    **exact kNN and no ANN index** (ADR-P3-05) — Milvus is not what was built.
+> 5. **§6's admission path is partly concrete already.** AGENT-007 §5 is "admission for
+>    procedures (ADR-0028, made concrete)", and Set S Phase 4 carries playbook admission.
+>    **What genuinely remains for Set R-a** is §6.2's dynamic materialiser, §6.3's propose and
+>    verify, project admission, and §8's REST surface; §6.4's promotion, curator and A/B remain
+>    for R-b together with the regime engine.
+>
+> **What did not change:** ADR-0028 (skill registry, platform-side admission, glossary as a
+> view), ADR-0025 (scopes), the ~40-resident cap, experience-only triggers, human review for
+> global skills, and the `tainted` rule for memory derived from untrusted text. Those are the
+> load-bearing decisions and they stand.
 **Version:** 0.1
 **ADR(s):** ADR-0028 (skill registry, platform-side admission, glossary as view),
 ADR-0025 (scopes), ADR-0030 (jobs, artifacts)

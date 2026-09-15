@@ -1,6 +1,36 @@
 # FEAT-005: Backtest Engine Integration v2
 
 **Status:** Proposed (Phase 0 contract; not implemented)
+**Derivation Status: STALE as of 2026-09-15** — see the amendment note below before planning Set M.
+
+> ## Amendment note — 2026-09-15 (roadmap gap G-3)
+>
+> This spec was written 2026-09-11, **before** the ML platform pack's Phases 0–5 and the
+> external-review sprint landed. Six things it assumes have since changed underneath it. None
+> invalidate its *purpose* (engine truthfulness); all change how a Set M task must be written.
+> Re-derive against this list; do not plan Set M from the body below alone.
+>
+> 1. **Costs are a `FeeSchedule`/`FeeBook`, not a flat per-asset-class rate** (ADR-P6). The
+>    spec's `cost/` module must read the book, and the **tradeable frontier is a pre-trial
+>    admission check, not a gate**.
+> 2. **Every run registers a trial through `crates/ledger`** before it computes (INV-16, now
+>    enforced across every dispatch path). The spec predates the `mlops` ledger entirely; there
+>    is no longer any such thing as a run that is not a counted look.
+> 3. **Evidence binds to `strategy_revision`, not `strategy_id`** — the id is a pointer
+>    (ADR-P6). Any task that stores a result against a strategy must say which revision.
+> 4. **Exits are typed fields at `definition_version` 1.3** and `ExitTracker` drives them. The
+>    simulator did not call it; **track 15 is fixing that now**, so a Set M task must not
+>    re-solve it. The grammar stays frozen.
+> 5. **The oracle test exists** in the adversarial suite and fails the build if a
+>    perfect-foresight always-in strategy is profitable at one minute. Every engine change is
+>    now gated by it.
+> 6. **`Numeraire` and `capacity::Exposure` exist.** P&L aggregation must not sum USDT as USD,
+>    and exposure aggregates across every instance of a revision.
+>
+> **What did not change:** ADR-0006 (market_simulator is the engine), the Run atom, the
+> one-feature-engine rule, and the requirement that live and replay share builder code.
+> **Set S Phase 5** takes the DATA-006 feature engine out of Set M's original scope; what
+> remains for Set M is engine truthfulness *beyond features*.
 **Version:** 0.1
 **ADR(s):** ADR-0006 (market_simulator as the backtest engine), ADR-0019 (Run atom),
 ADR-0026, ADR-0029, ADR-0030

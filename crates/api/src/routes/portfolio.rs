@@ -40,11 +40,16 @@ fn dec_str(d: Decimal) -> String {
     d.normalize().to_string()
 }
 
-/// Asset classes whose account currency is the USD base. Everything else is
+/// Asset classes whose account currency can enter a USD sum. Everything else is
 /// reported but excluded from cross-class sums — adding ETH to USD without a
 /// rate is how a dashboard starts lying.
+///
+/// Dollar *tokens* pass, at assumed parity, which is a real assumption about a
+/// private issuer and not an identity. [`domain::numeraire`] is where that is
+/// written down; this predicate exists so there is exactly one answer to
+/// "does this currency belong in the total".
 fn is_base_currency(currency: &str) -> bool {
-    matches!(currency, "USD" | "USDC" | "USDT")
+    domain::numeraire::Numeraire::of(currency).is_dollar_denominated()
 }
 
 // ── equity curve ─────────────────────────────────────────────────────────────

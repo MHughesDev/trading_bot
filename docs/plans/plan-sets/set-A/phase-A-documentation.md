@@ -55,7 +55,7 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Traceability is the point.** Every spec cites the ADR(s) and research that informed it; every
   plan task traces to a spec section or architecture node (**Derived From**); every open question
   records options, resolution, and evidence. The end state must pass
-  [`../procedures/verify-traceability.md`](../procedures/verify-traceability.md).
+  [`../procedures/verify-traceability.md`](../../../procedures/verify-traceability.md).
 - **Nothing is deleted that carries history.** Specs and ADRs retire (`Deprecated`/`Superseded`),
   they are not deleted.
 - **`[deleted - see Phase 7]/` is read-only and permanent until the very end.** It stays at the
@@ -151,7 +151,7 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Goal:** Convert the `spec/` documents into template specs with `<TYPE>-<NNN>` IDs and the fixed
   seven-section structure, each citing its ADR(s) and the artifact `SC-N` it serves.
 - **Files:** `docs/specs/<TYPE>-<NNN>-*.md` + `docs/specs/README.md` index. Use the spec template and
-  procedure in [`../procedures/add-spec.md`](../procedures/add-spec.md).
+  procedure in [`../procedures/add-spec.md`](../../../procedures/add-spec.md).
 - **Context:** Recommended mapping (split further if a file would exceed ~7 cohesive sections):
   - `[deleted - see Phase 7]/spec/02-data-model.md` → `DATA-001` event-envelope-and-payloads,
     `DATA-002` instrument-metadata, `DATA-003` timestamps-and-identity.
@@ -211,7 +211,7 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Files:** `docs/plans/rust-rewrite-master-plan.md` (from
   `docs/plans/00-master-plan.md`); `docs/plans/phase-A-documentation.md` …
   `phase-7-cutover.md` (from `docs/plans/`); `docs/plans/README.md` index rows. Follow
-  [`../procedures/add-plan.md`](../procedures/add-plan.md).
+  [`../procedures/add-plan.md`](../../../procedures/add-plan.md).
 - **Context:** Each migrated plan gets a header with `Type: Formal`, `Status: Current`, and a
   **Derived From** section listing the specs/ADRs/`SC-N` it traces to **at spec-ID granularity**
   (e.g. "Phase 0 ← `DATA-001`, `DATA-002`, `DATA-003`, `DATA-004`, ADR-0002, ADR-0007, SC-1, SC-2";
@@ -235,7 +235,7 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Context:** `README.md` = project overview pointing into `docs/`. `AGENT.md` = agent operating
   instructions (the Research-First Protocol referenced by `add-spec.md`, the "search `skills/` first"
   rule from the skills README, and the traceability discipline). `glossary.md` = the terms from
-  [`../glossary.md`](../glossary.md). Note: the legacy root `AGENTS.md` from the
+  [`../glossary.md`](../../../glossary.md). Note: the legacy root `AGENTS.md` from the
   Python system is swept into `legacy_python/` in Phase B — the new `AGENT.md` is the workspace's.
 - **Acceptance:** `README.md` and `AGENT.md` exist at root and reference `docs/`; `glossary.md`
   carries the spec's terms; the template's `../AGENT.md`/`../README.md` references now resolve.
@@ -245,7 +245,7 @@ This phase **only moves and restructures documentation** — it writes no system
 - **Goal:** Prove the initialized workspace is internally consistent — all references resolve, no
   broken links, indexes complete. `[deleted - see Phase 7]/` is **not** touched here; it remains at
   root throughout the entire refactor.
-- **Files:** run [`../procedures/verify-traceability.md`](../procedures/verify-traceability.md)
+- **Files:** run [`../procedures/verify-traceability.md`](../../../procedures/verify-traceability.md)
   steps 1–4 and 7–8 (the structural checks) against `docs/`. Skip step 9 ("Verification evidence on
   implemented specs") entirely — at initialize every spec is `Draft` with empty `Verified by: [—]`
   fields, and that is correct and intentional. Record the report.

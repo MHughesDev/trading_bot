@@ -15,6 +15,7 @@ use strategy_runtime::manifest::{compile_manifest, EvaluationTrigger};
 /// Default 7/21 EMA discovery strategy.
 fn ema_discovery_def() -> StrategyDefinition {
     StrategyDefinition {
+        exits: None,
         strategy_id: "default_ema_7_21_discovery".into(),
         definition_version: "1.0".into(),
         asset_class: "crypto_spot_cex".into(),
@@ -113,6 +114,7 @@ fn execution_strategy_manifest_kind_is_execution() {
 #[test]
 fn data_source_node_contributes_required_lane() {
     let def = StrategyDefinition {
+        exits: None,
         strategy_id: "pipeline_test".into(),
         definition_version: "1.0".into(),
         asset_class: "crypto_spot_cex".into(),
@@ -138,6 +140,7 @@ fn data_source_node_contributes_required_lane() {
 #[test]
 fn duplicate_lanes_are_deduplicated() {
     let def = StrategyDefinition {
+        exits: None,
         strategy_id: "dedup_test".into(),
         definition_version: "1.0".into(),
         asset_class: "crypto_spot_cex".into(),

@@ -7,10 +7,10 @@ Note: Canonical executable plans live in docs/plans/. This copy is the traceable
 
 # Phase 1 — Spine + one of each
 
-> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../architecture.md),
-> and the specs — especially [`../specs/SYS-001-system-overview.md`](../specs/SYS-001-system-overview.md),
-> [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md),
-> and [`../specs/COMP-004-storage-and-replay.md`](../specs/COMP-004-storage-and-replay.md).
+> **Self-contained execution doc.** You need only: this file, [`../architecture.md`](../../../architecture.md),
+> and the specs — especially [`../specs/SYS-001-system-overview.md`](../../../specs/SYS-001-system-overview.md),
+> [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md),
+> and [`../specs/COMP-004-storage-and-replay.md`](../../../specs/COMP-004-storage-and-replay.md).
 
 ## Phase goal
 
@@ -61,7 +61,7 @@ ClickHouse and the Parquet archive, and a 1m bar is published on the bus.
   ports, batch sizes, watermark defaults, risk defaults) and fails fast. `observability::init()`
   sets up JSON tracing + a metrics registry, including the **correctness** metrics scaffold (consumer
   lag, queue depth, quarantine rate) per
-  [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md) §7.
+  [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md) §7.
 - **Acceptance:** `platform` boots, loads config from compose env, emits a structured startup log and
   exposes a metrics endpoint/exporter.
 - **Depends on:** Phase 0.
@@ -71,7 +71,7 @@ ClickHouse and the Parquet archive, and a 1m bar is published on the bus.
 - **Files:** `crates/event-bus/src/{lib,nats,lanes,publish,subscribe,quarantine,backpressure}.rs`.
 - **Context:** `Producer`/`Consumer` traits in `lib.rs`; `nats.rs` implements them with `async-nats`
   JetStream (durable streams, partitioned by instrument/venue per
-  [`../specs/SYS-001-system-overview.md`](../specs/SYS-001-system-overview.md)). `publish<T>(EventEnvelope<T>)` serde-
+  [`../specs/SYS-001-system-overview.md`](../../../specs/SYS-001-system-overview.md)). `publish<T>(EventEnvelope<T>)` serde-
   encodes; `subscribe` gives durable consumers with ack/nack and handles redelivery. `quarantine.rs`
   publishes raw bytes + error to the `quarantine` lane. `backpressure.rs` wraps bounded queues + lag
   metrics (never unbounded growth).
@@ -85,7 +85,7 @@ ClickHouse and the Parquet archive, and a 1m bar is published on the bus.
   `crates/storage/src/clickhouse/{mod,bars,trades,features}.rs`,
   `crates/storage/src/parquet/{mod,partition,compaction}.rs`, `crates/storage/src/redis.rs`,
   `crates/storage/src/writer.rs`.
-- **Context:** Backends per [`../specs/COMP-004-storage-and-replay.md`](../specs/COMP-004-storage-and-replay.md).
+- **Context:** Backends per [`../specs/COMP-004-storage-and-replay.md`](../../../specs/COMP-004-storage-and-replay.md).
   `writer.rs` is the bus consumer that **batches 10k events or 100ms, whichever first**, writes the
   **raw event to Parquet first** (ground truth), then inserts to ClickHouse; dedup via
   `domain::ids` + a Redis seen-set; `compaction.rs` is the nightly small→big file job. Postgres
@@ -102,7 +102,7 @@ ClickHouse and the Parquet archive, and a 1m bar is published on the bus.
 - **Files:** `crates/builders/src/{lib,bars,watermark}.rs`,
   `crates/builders/tests/{bars_watermark,bars_determinism}.rs`.
 - **Context:** Pure: input is an ordered trade stream + watermark config; output is `BarPayload`
-  events. Per [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
+  events. Per [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
   §4: trades before the watermark go into the bar; a trade after the published watermark emits a
   **revision event** (`revision: 1`, new `available_time`) — the original bar is never mutated.
   `watermark.rs` reads the per-source watermark (default 2s, from instrument metadata). Stamp
@@ -120,7 +120,7 @@ ClickHouse and the Parquet archive, and a 1m bar is published on the bus.
   NormalizeError>`, reconnect policy). `reconnect.rs` backoff + replay-on-reconnect (which causes
   duplicate delivery — handled by dedup downstream). `gap.rs` detects `sequence` gaps, triggers a
   snapshot re-request, and emits `gap.detected` so downstream marks the window suspect
-  (per [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
+  (per [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
   §7). `normalizer.rs` validates schema-on-write; failures route to quarantine.
 - **Acceptance:** unit tests: a sequence gap emits `gap.detected` + re-request; a malformed message
   routes to quarantine (not dropped, not coerced).
@@ -134,7 +134,7 @@ ClickHouse and the Parquet archive, and a 1m bar is published on the bus.
   `OrderBookPayload`. Port connection/auth/heartbeat behavior from
   `legacy_python/data_plane/ingest/` (read for parity; do not import). The app binary is
   wiring-only: load config, construct the collector, publish to the bus, reconnect independently of
-  the core (satellite process per [`../specs/SYS-001-system-overview.md`](../specs/SYS-001-system-overview.md)).
+  the core (satellite process per [`../specs/SYS-001-system-overview.md`](../../../specs/SYS-001-system-overview.md)).
   **The collector process does NOT start automatically on system boot.** It is started on demand by
   the venue-router when demand for a Kraken lane is registered (P1-T10).
 - **Acceptance:** when started by the venue-router on demand, live Kraken trades appear on
@@ -163,7 +163,7 @@ ClickHouse and the Parquet archive, and a 1m bar is published on the bus.
   tech stack spec. Auth scopes private data per user (Q5 — keep minimal: session/token for the
   trusted group). Implement `GET /api/assets`, `GET /api/instruments/{id}`,
   `GET /api/streams/available` (per
-  [`../specs/COMP-003-ui-streaming-gateway.md`](../specs/COMP-003-ui-streaming-gateway.md)).
+  [`../specs/COMP-003-ui-streaming-gateway.md`](../../../specs/COMP-003-ui-streaming-gateway.md)).
   `state.rs` holds handles to storage/bus. Serve `frontend/dist` static files.
 - **Acceptance:** `GET /api/assets` returns seeded instruments; `GET /api/instruments/{id}` returns
   metadata; unauthenticated access to a private route is rejected; the SPA static files are served.
@@ -195,7 +195,7 @@ ClickHouse and the Parquet archive, and a 1m bar is published on the bus.
 - **Context:** `ingest_to_storage`: a simulated venue feed → collector → bus → storage writer →
   ClickHouse row + Parquet file + a published 1m bar. `quarantine_replay`: malformed feed →
   quarantine → (simulate normalizer fix) → replay quarantine → row reaches storage (per
-  [`../specs/COMP-001-data-quality-and-ingestion.md`](../specs/COMP-001-data-quality-and-ingestion.md)
+  [`../specs/COMP-001-data-quality-and-ingestion.md`](../../../specs/COMP-001-data-quality-and-ingestion.md)
   §1).
 - **Acceptance:** both tests pass against the compose infra.
 - **Depends on:** P1-T07, P1-T08.

@@ -19,6 +19,7 @@ pub mod instrument;
 pub mod interned;
 pub mod lanes;
 pub mod money;
+pub mod numeraire;
 pub mod order;
 pub mod payloads;
 pub mod position;

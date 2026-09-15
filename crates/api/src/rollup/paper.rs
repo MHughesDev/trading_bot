@@ -38,9 +38,15 @@ pub struct PaperPositionInfo {
 
 /// Bot-wide paper account totals across all asset classes.
 ///
-/// Non-USD accounts are converted 1:1 for stablecoins (USDC); accounts in
-/// other currencies (e.g. the ETH-denominated NFT account) are excluded from
+/// Stablecoin accounts are folded in **at assumed parity**, and every one of
+/// them is listed in `peg_assumptions` with the size of the exposure. Accounts
+/// in other currencies (e.g. the ETH-denominated NFT account) are excluded from
 /// the USD totals and listed in `excluded_currencies`.
+///
+/// The peg list is not decoration. `USDC` moved about ten percent against the
+/// dollar in March 2023, and until 2026-09 this rollup added `USDT`, `USDC` and
+/// `USD` into one number with no record that it had done so — so a depeg would
+/// have shown up as equity, not as a credit event. See [`domain::numeraire`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaperAccountTotals {
     pub equity_usd: Decimal,
@@ -50,10 +56,29 @@ pub struct PaperAccountTotals {
     pub fees_paid_usd: Decimal,
     pub open_positions: usize,
     pub excluded_currencies: Vec<String>,
+    /// Every stablecoin folded into the totals above at assumed parity, with
+    /// the gross exposure to each issuer. Empty when the totals are real
+    /// dollars.
+    #[serde(default)]
+    pub peg_assumptions: Vec<domain::numeraire::PegAssumption>,
 }
 
+impl PaperAccountTotals {
+    /// Dollars in the totals above that depend on a peg holding.
+    #[must_use]
+    pub fn peg_exposure_usd(&self) -> Decimal {
+        self.peg_assumptions.iter().map(|a| a.gross * a.rate).sum()
+    }
+}
+
+/// Whether an account's currency can be summed into a dollar total at all.
+///
+/// `USDT` was absent from the old list and `USDC` was present, which meant the
+/// platform had two different opinions about dollar tokens depending on which
+/// file you read. Both are now classified by [`domain::numeraire::Numeraire`],
+/// which is the one place the question is answered.
 fn usd_convertible(currency: &str) -> bool {
-    matches!(currency, "USD" | "USDC")
+    domain::numeraire::Numeraire::of(currency).is_dollar_denominated()
 }
 
 fn tile_from_snapshot(snap: &PaperAccountSnapshot) -> AssetClassTile {
@@ -106,6 +131,7 @@ pub fn paper_rollup(engine: &PaperTradingEngine) -> RollupResponse {
         fees_paid_usd: Decimal::ZERO,
         open_positions: 0,
         excluded_currencies: vec![],
+        peg_assumptions: vec![],
     };
     let mut wins: u64 = 0;
     let mut closes: u64 = 0;
@@ -116,6 +142,24 @@ pub fn paper_rollup(engine: &PaperTradingEngine) -> RollupResponse {
             wins += snap.winning_trades;
             closes += snap.closed_trades;
             totals.open_positions += snap.positions.len();
+            let numeraire = domain::numeraire::Numeraire::of(snap.currency);
+            if numeraire.has_peg_risk() {
+                // Recorded before the amount is added, so a total can never
+                // exist without the assumption that produced it.
+                match totals
+                    .peg_assumptions
+                    .iter_mut()
+                    .find(|a| a.symbol == numeraire.symbol())
+                {
+                    Some(existing) => existing.gross += snap.equity,
+                    None => totals.peg_assumptions.push(domain::numeraire::PegAssumption {
+                        symbol: numeraire.symbol().to_owned(),
+                        rate: Decimal::ONE,
+                        policy: domain::numeraire::PegPolicy::AssumeParity,
+                        gross: snap.equity,
+                    }),
+                }
+            }
             if usd_convertible(snap.currency) {
                 totals.equity_usd += snap.equity;
                 totals.cash_usd += snap.cash;

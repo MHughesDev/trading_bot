@@ -18,6 +18,7 @@ use strategy_runtime::{StrategyClock, StrategyInstance, WallClock, WorldEvent};
 
 fn minimal_def() -> StrategyDefinition {
     StrategyDefinition {
+        exits: None,
         strategy_id: "test".into(),
         definition_version: "1.0".into(),
         asset_class: "crypto_spot_cex".into(),
