@@ -1,0 +1,39 @@
+[package]
+name = "monitor"
+version = "0.1.0"
+edition = "2021"
+
+# COMP-007: the live strategy monitor and kill switch.
+#
+# This is a separate crate with its own binary because that separation *is* the
+# design. A monitor inside the API process dies with it and has therefore checked
+# nothing; the research brief's strongest operational finding is that a kill switch
+# must run in a different process from the strategy, or the failure that requires
+# killing also disables the kill.
+#
+# It depends on `risk` for the scope vocabulary and the in-memory mirror type, and
+# on nothing in `api`. That direction is deliberate and is asserted by a test.
+
+[[bin]]
+name = "tbot-monitor"
+path = "src/bin/tbot-monitor.rs"
+
+[dependencies]
+domain = { workspace = true }
+risk = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+rust_decimal = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -76,6 +76,12 @@ pub struct GateContext {
     pub is_halted: bool,
     /// The instrument's halt policy.
     pub halt_policy: HaltPolicy,
+    /// The venue this order would reach, if known (COMP-007 §4: a reconciliation
+    /// mismatch halts one venue's flow and leaves the others trading).
+    pub venue_id: Option<String>,
+    /// The strategy instance this order came from, if any. `None` for a manual
+    /// order, which no strategy-scoped halt applies to.
+    pub strategy_id: Option<String>,
 }
 
 impl GateContext {
@@ -109,7 +115,24 @@ impl GateContext {
             is_in_session: true,
             is_halted: false,
             halt_policy: HaltPolicy::NonHaltable,
+            venue_id: None,
+            strategy_id: None,
         }
+    }
+
+    /// Name the venue this order would reach, so a venue-scoped halt applies.
+    #[must_use]
+    pub fn on_venue(mut self, venue_id: impl Into<String>) -> Self {
+        self.venue_id = Some(venue_id.into());
+        self
+    }
+
+    /// Name the strategy instance this order came from, so a strategy-scoped
+    /// halt applies.
+    #[must_use]
+    pub fn from_strategy(mut self, strategy_id: impl Into<String>) -> Self {
+        self.strategy_id = Some(strategy_id.into());
+        self
     }
 }
 
@@ -183,21 +206,41 @@ impl RiskGate {
         intent: OrderIntent,
         ctx: &GateContext,
     ) -> Result<ApprovedOrder, RiskRejection> {
-        // 1. Kill switch — synchronous fast path; checked before everything else.
-        if self.kill_switch.is_active() {
+        // 1. The monitor lease — fail closed before anything else (COMP-007 §4).
+        //
+        //    Checked ahead of the kill switch on purpose. The switch says what the
+        //    monitor decided; the lease says whether there *is* a monitor. A
+        //    platform that cannot tell whether it should stop has already failed
+        //    the only question this gate exists to answer.
+        if !self.kill_switch.monitor_available() {
+            return Err(RiskRejection::MonitorUnavailable);
+        }
+
+        // 2. Kill switch — scoped, synchronous fast path.
+        if self
+            .kill_switch
+            .refuses(ctx.venue_id.as_deref(), ctx.strategy_id.as_deref())
+        {
             return Err(RiskRejection::KillSwitchActive);
         }
 
-        // 2. Idempotency cache — redelivered intents return the prior decision.
+        // 3. Idempotency cache — redelivered intents return the prior decision.
         //    For cached approvals the kill switch must still be re-checked: a
         //    JetStream redelivery arriving after the switch was tripped must
         //    be blocked, not passed through on the cached-approval fast path.
+        //    Same for the lease — a redelivery is a *new* order at the venue.
         {
             let cache = self.seen_keys.lock().expect("seen_keys lock");
             if let Some(prior) = cache.get(&intent.idempotency_key) {
                 return match prior {
                     CachedDecision::Approved => {
-                        if self.kill_switch.is_active() {
+                        if !self.kill_switch.monitor_available() {
+                            return Err(RiskRejection::MonitorUnavailable);
+                        }
+                        if self
+                            .kill_switch
+                            .refuses(ctx.venue_id.as_deref(), ctx.strategy_id.as_deref())
+                        {
                             return Err(RiskRejection::KillSwitchActive);
                         }
                         Ok(ApprovedOrder {
@@ -210,10 +253,10 @@ impl RiskGate {
             }
         }
 
-        // 3. Run checks.  Apply tighten-only overrides first.
+        // 4. Run checks.  Apply tighten-only overrides first.
         let decision = self.run_checks(&intent, ctx);
 
-        // 4. Cache the decision.
+        // 5. Cache the decision.
         {
             let cached = match &decision {
                 Ok(_) => CachedDecision::Approved,

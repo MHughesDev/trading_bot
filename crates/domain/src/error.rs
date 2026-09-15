@@ -114,4 +114,12 @@ pub enum RiskRejection {
 
     #[error("order rejected: {instrument_id} is halted")]
     InstrumentHalted { instrument_id: String },
+
+    /// COMP-007 §4: no live monitor lease, so the platform fails **closed**.
+    ///
+    /// Deliberately distinct from [`RiskRejection::KillSwitchActive`]. A halt is a
+    /// decision somebody or something made and recorded; this is a silence. An
+    /// operator who cannot tell those apart will reset the wrong one.
+    #[error("monitor_unavailable — no live monitor lease; new orders refused")]
+    MonitorUnavailable,
 }

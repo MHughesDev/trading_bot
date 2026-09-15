@@ -22,6 +22,12 @@ async-trait = "0.1"
 features = { workspace = true }
 model-registry = { workspace = true }
 reconciliation = { workspace = true }
+# COMP-007. A path dependency rather than a `workspace = true` one: the workspace
+# manifest is not this track's file to edit, and a path dependency inside the
+# workspace directory makes `crates/monitor` a member anyway. The API only ever
+# *reads* the monitor's tables and refreshes the order gate's mirror from them;
+# `tbot-monitor` is a separate process and does not run here.
+monitor = { path = "../monitor" }
 llm = { workspace = true }
 mcp-server-lib = { workspace = true }
 research = { workspace = true }

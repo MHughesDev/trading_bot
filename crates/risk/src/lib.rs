@@ -7,5 +7,5 @@ pub mod overrides;
 pub mod trust_gate;
 
 pub use gate::{ApprovedOrder, GateContext, RiskGate};
-pub use kill_switch::KillSwitch;
+pub use kill_switch::{KillSwitch, LeaseGate, Scope, UnknownScope};
 pub use limits::GlobalRiskLimits;
