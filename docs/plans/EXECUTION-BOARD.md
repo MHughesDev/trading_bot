@@ -31,9 +31,14 @@ Eight tracks, dispatched 2026-09-15. Each is one agent, one branch, one disjoint
 | **6** | Pack §5.1 — AT-61 bit-identical resume | `ml-platform-context-pack/decisions/HANDOFF.md` §5.1 | `claude/pack-at61-resume` | none | every framework's resume claim |
 | **7** | Pack §5.2 — campaign child workers `Study`, `EvalTask` | HANDOFF §5.2 | `claude/pack-campaign-workers` | 0113 | campaigns dispatching at all |
 | **8** | Pack §5.4 — Phase 3 writers (`asset_embedding`, tensor) | HANDOFF §5.4 | `claude/pack-phase3-writers` | 0114 | the knowledge plane having any rows |
+| **25** | Set S Phase 6 — the Research Desk (AGENT-012) | [set-S/phase-6](plan-sets/set-S/phase-6-research-desk.md) | `claude/set-s-phase-6-desk` | none (0125 reserved, unused) | nothing |
 
 Tracks 6–8 take migrations from the roadmap's Stage-2 reserve (0113–0120), **not** from Set S's
 or Set P's ranges.
+
+Track 25 writes only `frontend/src/{api,hooks,lib,components/desk,pages}` plus the three shared
+frontend files named in §2.2 (`App.tsx`, `TopBar.tsx`, `AppLayout.tsx`), and deletes the two
+surfaces the desk replaces (`/agent`, `/research`). It adds no migration and no Rust route.
 
 `ResearchRun`, the third campaign child worker, is **not** in track 7 — it is Set S task S-10.6
 and belongs to the lifecycle phase. Do not build it twice.
