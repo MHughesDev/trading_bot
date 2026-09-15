@@ -114,4 +114,15 @@ pub enum RiskRejection {
 
     #[error("order rejected: {instrument_id} is halted")]
     InstrumentHalted { instrument_id: String },
+
+    /// Reconciliation found this strategy's realised behaviour diverging from
+    /// what the backtest predicted, or its internal position view disagreeing
+    /// with the broker's, and stopped its order flow (`artifact.md` SC-6, FM-4).
+    ///
+    /// Scoped to one strategy rather than tripping the global kill switch: a
+    /// divergence is evidence about *that* strategy's simulator fidelity, and
+    /// halting everything on it would make the halt something operators learn
+    /// to clear reflexively.
+    #[error("order rejected: strategy {strategy_id} is halted on divergence — {reason}")]
+    StrategyHalted { strategy_id: String, reason: String },
 }

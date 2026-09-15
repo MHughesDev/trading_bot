@@ -27,6 +27,22 @@ pub struct FillEvent {
     pub filled_at: DateTime<Utc>,
 }
 
+/// Something that wants to be told about every fill the engine newly applies.
+///
+/// Added for Set T T-0.1: `crates/reconciliation` exists and nothing called it,
+/// so the platform's most expensive unanswered question — does the simulator
+/// tell the truth? — had no input. The observer is notified only on
+/// [`FillResult::Applied`], never on a duplicate, because a redelivered fill
+/// that counted twice would inflate exactly the evidence that is hardest to
+/// acquire.
+///
+/// Deliberately synchronous and infallible: an observer that could fail would
+/// need a policy for what to do when it does, and every such policy either
+/// drops evidence or blocks the execution path.
+pub trait FillObserver: Send + Sync {
+    fn on_fill(&self, fill: &FillEvent);
+}
+
 /// Outcome of applying a fill to the processor.
 #[derive(Debug, PartialEq, Eq)]
 pub enum FillResult {

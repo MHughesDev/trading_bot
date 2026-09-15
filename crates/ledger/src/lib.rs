@@ -515,6 +515,17 @@ pub const TRIAL_STATISTICS: &[&str] = &[
     "permutation_p_value",
     "breakeven_cost_multiple",
     "prereg_hash_present",
+    // Gate 15 (§12.6), from `mlops.forward_observation` rows whose source is
+    // 'observed'. The last two are not measurements the gate judges on — they
+    // are the count and the window it judged over, recorded because a gate
+    // passed on four observations and one passed on four hundred are different
+    // claims (migration 0106).
+    "paper_signal_match",
+    "paper_slippage_ratio",
+    "paper_turnover_ratio",
+    "paper_model_rejects",
+    "paper_observed_days",
+    "paper_observation_window_days",
 ];
 
 impl<T: TrialLedger + ?Sized> TrialLedger for std::sync::Arc<T> {
