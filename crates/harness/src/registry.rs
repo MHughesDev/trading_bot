@@ -144,6 +144,30 @@ pub const RECORD_FINDING: &str = "record_finding";
 /// because a harness with no workspace mounted must not advertise them.
 pub const FS_TOOLS: &[&str] = &["write_file", "read_file", "list_files", "delete_file"];
 
+/// Tools whose work runs in the job service rather than in the call (AGENT-010 §8).
+///
+/// A call to one of these returns a handle immediately; the loop then suspends on
+/// `Effect::Await` and the run holds no process, no model connection and no tokens
+/// until the job completes. The list lives here, beside the catalogue, because the
+/// driver and the loop must agree about it and a second copy is a copy that drifts.
+///
+/// It is a *list*, not a `ToolDef` flag, for one reason: the flag would have to be
+/// set correctly on every tool a later phase adds, and a tool that forgets it does
+/// not fail — it silently goes back to blocking a driver for forty minutes. A short
+/// named list is something a reviewer can check.
+pub const LONG_RUNNING_TOOLS: &[&str] = &[
+    "run_sweep",
+    "run_study",
+    "train_model",
+    "run_shadow_session",
+];
+
+/// Whether a call to this tool starts a job instead of doing the work.
+#[must_use]
+pub fn is_long_running(name: &str) -> bool {
+    LONG_RUNNING_TOOLS.contains(&name)
+}
+
 impl ToolRegistry {
     /// An empty registry.
     ///

@@ -168,9 +168,7 @@ fn five_findings_render_one_ledger_not_five() {
             raw: r#"{"name":"record_finding"}"#.into(),
         });
         last = l.next(Input::ModelReply {
-            raw: format!(
-                r#"{{"finding":"fact number {i} about the data","evidence":"read it"}}"#
-            ),
+            raw: format!(r#"{{"finding":"fact number {i} about the data","evidence":"read it"}}"#),
         });
     }
     let body = prompt(&last);
@@ -338,8 +336,7 @@ fn a_run_carries_one_wrap_up_directive_however_many_fire() {
     );
     let body = prompt(&last);
     assert_eq!(
-        body.matches("Stop and report").count()
-            + body.matches("This is your last turn").count(),
+        body.matches("Stop and report").count() + body.matches("This is your last turn").count(),
         1,
         "one directive, whatever fired it:\n{body}"
     );
@@ -354,7 +351,10 @@ fn a_run_carries_one_wrap_up_directive_however_many_fire() {
 #[test]
 fn the_anchor_and_the_card_read_the_same_plan_step() {
     let p = profile(); // planner_executor
-    assert_eq!(p.orchestration.mode, harness::profile::Mode::PlannerExecutor);
+    assert_eq!(
+        p.orchestration.mode,
+        harness::profile::Mode::PlannerExecutor
+    );
     let mut l = Loop::new(p, registry(), task());
     l.next(Input::Admission(Admission::Admit));
     let fx = l.next(Input::ModelReply {
@@ -363,7 +363,10 @@ fn the_anchor_and_the_card_read_the_same_plan_step() {
             .into(),
     });
     let body = prompt(&fx);
-    assert!(body.contains("THIS STEP (plan step 1 of 2): pull bars"), "{body}");
+    assert!(
+        body.contains("THIS STEP (plan step 1 of 2): pull bars"),
+        "{body}"
+    );
     assert!(body.contains("NOW: step 1 of 2 — pull bars"), "{body}");
 
     // Finish step one; both renderings must move together.
@@ -378,7 +381,10 @@ fn the_anchor_and_the_card_read_the_same_plan_step() {
         source: "platform.data".into(),
     });
     let body = prompt(&fx);
-    assert!(body.contains("THIS STEP (plan step 2 of 2): check momentum"), "{body}");
+    assert!(
+        body.contains("THIS STEP (plan step 2 of 2): check momentum"),
+        "{body}"
+    );
     assert!(body.contains("NOW: step 2 of 2 — check momentum"), "{body}");
     assert_eq!(
         l.working().plan[0].status,

@@ -113,6 +113,13 @@ pub enum State {
     AwaitingApproval,
     /// A tool call is outstanding.
     Executing,
+    /// Suspended on a platform job (AGENT-010 §8, P5).
+    ///
+    /// The run holds no process, no model connection and no tokens. A forty-minute
+    /// sweep spends nothing while it runs, which is the whole point: the driver
+    /// writes the `Await` down and **exits**, and the job's completion is what
+    /// starts the run again.
+    Waiting,
     /// Folding a result into working state.
     Recording,
     /// Over budget; dropping and truncating.
@@ -138,6 +145,7 @@ impl State {
             State::Gating => "gating",
             State::AwaitingApproval => "awaiting_approval",
             State::Executing => "executing",
+            State::Waiting => "waiting",
             State::Recording => "recording",
             State::Compacting => "compacting",
             State::Fenced => "fenced",
@@ -234,6 +242,19 @@ pub enum Effect {
         arguments: Map<String, Value>,
         risk: Risk,
         idempotent: bool,
+    },
+    /// Suspend on a platform job (AGENT-010 §8).
+    ///
+    /// The driver persists this and **exits**. It does not poll — polling is a bug
+    /// (P5), and the two in-driver polling loops this replaces held a model
+    /// connection and wrote a status row every thirty seconds for forty minutes to
+    /// learn nothing the job service could not have told them once.
+    Await {
+        step: u32,
+        job_id: String,
+        /// The tool whose call started the job, so the timeline can say what is
+        /// being waited for rather than only that something is.
+        tool: String,
     },
     /// Persist a pending approval and surface it. The loop suspends until answered;
     /// the approval outlives a process restart because the driver writes it down.
@@ -404,6 +425,22 @@ pub enum Input {
     /// A tool failed. Handed to the model — a failing tool is information, not a
     /// reason to end the task.
     ToolError { detail: String },
+    /// The dispatched tool did not do the work; it started a job and returned a
+    /// handle (AGENT-010 §8).
+    ///
+    /// The driver decides this, not the loop: which tools are long-running is a fact
+    /// about the platform's job service, and the loop names no platform. What the
+    /// loop does with it is the part that matters — it suspends.
+    JobAccepted { job_id: String },
+    /// A job the run was suspended on finished. The shape mirrors
+    /// [`Input::ToolResult`] and [`Input::ToolError`] because that is what it is:
+    /// the result of the tool call that started it, arriving late.
+    JobDone {
+        job_id: String,
+        output: String,
+        source: String,
+        ok: bool,
+    },
     /// The operator stopped it.
     Cancel,
 }
@@ -570,6 +607,18 @@ pub struct Loop {
     held: Option<ToolCall>,
     /// The call currently executing, kept so its result can be attributed.
     running: Option<ToolCall>,
+    /// The job this run is suspended on, and the call that started it.
+    ///
+    /// The call is kept because the job's result is that call's result: it must be
+    /// attributed to the tool that produced it, and it must advance the same plan
+    /// step, however many hours later it lands.
+    ///
+    /// Named `suspended_on` rather than `awaiting` because
+    /// `the_loop_names_no_runtime_no_client_and_no_provider` scans this file for the
+    /// substring that an `await` expression starts with, and a field of that name
+    /// reached through `self` contains it. Renaming the field is cheaper than
+    /// loosening the guard that keeps this module sans-IO.
+    suspended_on: Option<(String, ToolCall)>,
     /// Tool calls dispatched this session, successful or not.
     ///
     /// Distinct from `evidence_candidates`, which holds only the ones that RETURNED
@@ -674,6 +723,7 @@ impl Loop {
             idempotent_calls: BTreeMap::new(),
             held: None,
             running: None,
+            suspended_on: None,
             prior_provenance: Provenance::System,
             pending_provenance: Provenance::System,
             gated_actions: BTreeSet::new(),
@@ -908,6 +958,19 @@ impl Loop {
             (State::Executing, Input::ToolError { detail }) => {
                 self.on_tool_error(&detail, &mut fx);
             }
+            (State::Executing, Input::JobAccepted { job_id }) => {
+                self.on_job_accepted(job_id, &mut fx);
+            }
+
+            (
+                State::Waiting,
+                Input::JobDone {
+                    job_id,
+                    output,
+                    source,
+                    ok,
+                },
+            ) => self.on_job_done(&job_id, &output, &source, ok, &mut fx),
 
             // Anything else is the driver desynchronised from the loop. Fence rather
             // than guess: a loop that tolerates inputs it did not ask for will happily
@@ -2101,6 +2164,74 @@ impl Loop {
         self.finish_into(Outcome::Finished { result, evidence }, State::Finished, fx);
     }
 
+    // ── Long work: suspend, do not poll (AGENT-010 §8) ──────────────────────
+
+    /// The dispatched tool started a job. Suspend.
+    ///
+    /// Nothing is folded into state here: no result exists yet, and recording the
+    /// handle as though it were one is how a run comes to cite a sweep it never
+    /// read. The step is still open, the plan has not advanced, and the run holds
+    /// nothing at all until [`Input::JobDone`].
+    fn on_job_accepted(&mut self, job_id: String, fx: &mut Vec<Effect>) {
+        let Some(call) = self.running.take() else {
+            self.fence(
+                Degradation::BackendFailure {
+                    detail: "a job handle arrived with no tool call outstanding".into(),
+                },
+                fx,
+            );
+            return;
+        };
+        let tool = call.name.clone();
+        self.suspended_on = Some((job_id.clone(), call));
+        self.enter(State::Waiting, fx);
+        fx.push(Effect::Await {
+            step: self.step,
+            job_id,
+            tool,
+        });
+    }
+
+    /// The job finished. Its result is the tool call's result, arriving late.
+    fn on_job_done(
+        &mut self,
+        job_id: &str,
+        output: &str,
+        source: &str,
+        ok: bool,
+        fx: &mut Vec<Effect>,
+    ) {
+        let Some((expected, call)) = self.suspended_on.take() else {
+            self.fence(
+                Degradation::BackendFailure {
+                    detail: "a job result arrived with nothing suspended".into(),
+                },
+                fx,
+            );
+            return;
+        };
+        if expected != job_id {
+            // Not pedantry: a run resumed against the wrong job's result would
+            // attribute a sweep's numbers to a different question and never say so.
+            self.suspended_on = Some((expected.clone(), call));
+            self.fence(
+                Degradation::BackendFailure {
+                    detail: format!("job {job_id} finished but this run is waiting on {expected}"),
+                },
+                fx,
+            );
+            return;
+        }
+        // Put the call back where the ordinary result path expects it, so a job
+        // result and an immediate result fold into state through ONE code path.
+        self.running = Some(call);
+        if ok {
+            self.on_tool_result(output, source, fx);
+        } else {
+            self.on_tool_error(output, fx);
+        }
+    }
+
     // ── Tool results ────────────────────────────────────────────────────────
 
     fn on_tool_result(&mut self, output: &str, source: &str, fx: &mut Vec<Effect>) {
@@ -2230,6 +2361,7 @@ impl Loop {
             State::AwaitingModel
                 | State::AwaitingApproval
                 | State::Executing
+                | State::Waiting
                 | State::Fenced
                 | State::Refused
                 | State::Finished
@@ -2287,6 +2419,8 @@ fn input_name(i: &Input) -> &'static str {
         Input::Approval { .. } => "an approval",
         Input::ToolResult { .. } => "a tool result",
         Input::ToolError { .. } => "a tool error",
+        Input::JobAccepted { .. } => "a job handle",
+        Input::JobDone { .. } => "a job result",
         Input::Cancel => "a cancel",
     }
 }
