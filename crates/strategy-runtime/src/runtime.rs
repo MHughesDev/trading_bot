@@ -68,6 +68,21 @@ pub struct StrategyInstance {
     /// Whether any action in this definition uses an equity-relative size mode.
     /// Computed once at init.
     needs_sizing_context: bool,
+    /// Signals that were already firing at the previous event.
+    ///
+    /// Orders are emitted on a signal's **rising edge** only: a signal must
+    /// clear and re-fire before it places another order.  `crates/backtest`'s
+    /// simulator has always done this, and its comment claimed the rule "is the
+    /// crossover semantics live strategies get from event-driven dispatch" —
+    /// which was not true.  The live runtime emitted on *every* event where the
+    /// condition held, so `ema_7 > ema_21` would have placed an order per tick
+    /// for as long as the cross lasted, against one order per crossing in
+    /// replay.  Nobody noticed because hot-path stage 3 produced no intents at
+    /// all; wiring it is what made the divergence observable.
+    ///
+    /// The two must agree or ADR-0008 does not hold and Gate 15 cannot
+    /// reconcile a forward fill stream against the backtest that justified it.
+    active_signals: HashSet<String>,
 }
 
 impl StrategyInstance {
@@ -122,6 +137,7 @@ impl StrategyInstance {
             inference_slot_map,
             sizing: None,
             needs_sizing_context,
+            active_signals: HashSet::new(),
         }
     }
 
@@ -299,19 +315,43 @@ impl StrategyInstance {
         }
 
         // Feature slot array passed directly — no allocation, no string clone.
-        let signals = self.run_signals();
+        let fired = self.run_signals();
+
+        // Nothing firing and nothing was firing: the overwhelmingly common
+        // case, and it allocates nothing beyond what `run_signals` already did.
+        if fired.is_empty() && self.active_signals.is_empty() {
+            return SizedIntents::default();
+        }
+
+        // Rising edge only — see `active_signals`.  A signal that stays true
+        // places one order, not one per event.
+        let rising: HashSet<String> = fired
+            .difference(&self.active_signals)
+            .cloned()
+            .collect();
+        self.active_signals = fired;
+
+        if rising.is_empty() {
+            return SizedIntents::default();
+        }
 
         // Resolve Sizing-node fractions for any SizeMode::Model actions.
         let size_overrides = self.size_overrides();
 
         build_intents_for_signals(
             &self.definition.actions,
-            &signals,
+            &rising,
             &self.instrument_id,
             &self.definition.strategy_id,
             &size_overrides,
             self.sizing.as_ref(),
         )
+    }
+
+    /// Signals currently held true, for diagnostics and tests.
+    #[must_use]
+    pub fn active_signals(&self) -> &HashSet<String> {
+        &self.active_signals
     }
 
     /// Collect resolved size fractions from `Sizing` nodes that produced an
@@ -688,45 +728,79 @@ mod tests {
     }
 
     #[test]
-    fn intent_emitted_when_condition_true() {
+    /// Orders fire on the rising edge of a signal, not on every event where
+    /// the signal is true.  This is the rule `crates/backtest`'s simulator has
+    /// always applied; before track 16 the live runtime did not, and the
+    /// difference was invisible only because hot-path stage 3 produced no
+    /// intents at all (ADR-0008 / Gate 15).
+    fn intent_emitted_on_the_rising_edge_only() {
         let clock = Arc::new(WallClock) as Arc<dyn StrategyClock>;
         let mut manager = InstanceManager::new(registry());
         manager
             .initialize("user1", "BTC-USDT", ema_cross_def(), &clock)
             .unwrap();
 
-        // Inject features that satisfy ema_7 > ema_21
-        manager.dispatch("BTC-USDT", feature_event("ema_7", 11.0));
-        manager.dispatch("BTC-USDT", feature_event("ema_21", 10.0));
-
-        // Now inject a bar event — the condition should fire
         use chrono::Utc;
         use domain::money::{Price, Size};
         use domain::payloads::bar::{BarPayload, Timeframe};
         use std::str::FromStr;
 
-        let bar = BarPayload::new(
-            Timeframe::Minutes1,
-            Price::from_str("100").unwrap(),
-            Price::from_str("110").unwrap(),
-            Price::from_str("95").unwrap(),
-            Price::from_str("105").unwrap(),
-            Size::from_str("500").unwrap(),
-            200,
-        );
-        let event = WorldEvent::Bar {
-            instrument_id: "BTC-USDT".into(),
-            timeframe: Timeframe::Minutes1,
-            bar,
-            available_time: Utc::now(),
+        let bar_event = || {
+            let bar = BarPayload::new(
+                Timeframe::Minutes1,
+                Price::from_str("100").unwrap(),
+                Price::from_str("110").unwrap(),
+                Price::from_str("95").unwrap(),
+                Price::from_str("105").unwrap(),
+                Size::from_str("500").unwrap(),
+                200,
+            );
+            WorldEvent::Bar {
+                instrument_id: "BTC-USDT".into(),
+                timeframe: Timeframe::Minutes1,
+                bar,
+                available_time: Utc::now(),
+            }
         };
-        let results = manager.dispatch("BTC-USDT", event);
-        assert_eq!(results.len(), 1);
-        let (uid, outcome) = &results[0];
-        assert_eq!(uid.as_ref(), "user1");
-        assert!(outcome.errors.is_empty(), "no sizing errors expected");
-        assert_eq!(outcome.intents.len(), 1);
-        assert_eq!(outcome.intents[0].instrument_id, "BTC-USDT");
+
+        let mut intents = 0;
+        let mut count = |results: Vec<(Arc<str>, SizedIntents)>| {
+            for (uid, outcome) in &results {
+                assert_eq!(uid.as_ref(), "user1");
+                assert!(outcome.errors.is_empty(), "no sizing errors expected");
+                for intent in &outcome.intents {
+                    assert_eq!(intent.instrument_id, "BTC-USDT");
+                }
+                intents += outcome.intents.len();
+            }
+        };
+
+        // ema_7 arrives first; ema_21 is still unknown, so nothing fires.
+        count(manager.dispatch("BTC-USDT", feature_event("ema_7", 11.0)));
+        assert_eq!(intents, 0);
+
+        // ema_21 arrives and the cross is true — this is the rising edge.
+        count(manager.dispatch("BTC-USDT", feature_event("ema_21", 10.0)));
+        assert_eq!(intents, 1, "the crossing places exactly one order");
+
+        // The condition stays true across three more events.  A strategy that
+        // placed an order on each of them would accumulate position on every
+        // tick — and would not resemble the backtest, which has always fired
+        // on the rising edge only.
+        count(manager.dispatch("BTC-USDT", bar_event()));
+        count(manager.dispatch("BTC-USDT", feature_event("ema_7", 12.0)));
+        count(manager.dispatch("BTC-USDT", bar_event()));
+        assert_eq!(intents, 1, "a signal that stays true must not re-fire");
+
+        // It clears …
+        count(manager.dispatch("BTC-USDT", feature_event("ema_7", 9.0)));
+        assert_eq!(intents, 1);
+
+        // … and crosses again: a second order, and only one.
+        count(manager.dispatch("BTC-USDT", feature_event("ema_7", 13.0)));
+        assert_eq!(intents, 2, "a fresh crossing places a second order");
+        count(manager.dispatch("BTC-USDT", bar_event()));
+        assert_eq!(intents, 2);
     }
 
     #[test]
