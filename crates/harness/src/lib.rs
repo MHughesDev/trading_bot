@@ -36,6 +36,7 @@ pub mod canary;
 pub mod context;
 pub mod drive;
 pub mod hardware;
+pub mod memory;
 pub mod policy;
 pub mod profile;
 pub mod provenance;
