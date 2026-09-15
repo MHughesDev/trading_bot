@@ -65,6 +65,33 @@ pub struct Trade {
     pub pnl: Decimal,
 }
 
+/// What the executor measured about one instrument **from the run's own bars,
+/// over the run's own window** (SPEC §12.3 Gate 4).
+///
+/// It lives on the result rather than being looked up later on purpose. ADV and
+/// volatility read at gate time would be *today's* liquidity judged against a
+/// backtest that ran in 2023 — a non-PIT read, and the kind that looks harmless
+/// because the number is real. Measured here, it is a fact about the same data
+/// the Run saw.
+///
+/// Every field but the name is `Option`, and absence is honest: the synthetic
+/// executor has no bars and declares none, which leaves Gate 4 inconclusive
+/// rather than passing on a guess.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct InstrumentStat {
+    pub instrument: String,
+    /// The venue's quote currency — the unit this instrument's P&L is in. Gate
+    /// 12's concentration share refuses to sum across two of them.
+    #[serde(default)]
+    pub numeraire: Option<String>,
+    /// 20-day rolling dollar ADV over the run's window.
+    #[serde(default)]
+    pub adv_usd: Option<f64>,
+    /// Daily close-to-close return volatility over the same window.
+    #[serde(default)]
+    pub daily_vol: Option<f64>,
+}
+
 /// An integrity / sanity finding written by Gate 0 (Phase 4).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Flag {
@@ -97,6 +124,10 @@ pub struct RunResult {
     /// Leakage/lookahead/cost-sanity findings (Gate 0 populates).
     #[serde(default)]
     pub integrity_flags: Vec<Flag>,
+    /// Per-instrument liquidity measured from this Run's own bars (Gate 4).
+    /// Empty when the executor had no bars to measure.
+    #[serde(default)]
+    pub instrument_stats: Vec<InstrumentStat>,
     pub compute_cost: ComputeCost,
     pub produced_at: DateTime<Utc>,
     /// Engine version (see [`super::ENGINE_VERSION`]).
@@ -130,6 +161,7 @@ impl RunResult {
                 code: "run.failed".into(),
                 detail: reason.into(),
             }],
+            instrument_stats: Vec::new(),
             compute_cost: ComputeCost::default(),
             produced_at: Utc::now(),
             produced_by: produced_by.into(),
@@ -152,6 +184,7 @@ impl RunResult {
             trades: Vec::new(),
             metrics: MetricSet::empty(),
             integrity_flags: flags,
+            instrument_stats: Vec::new(),
             compute_cost: ComputeCost::default(),
             produced_at: Utc::now(),
             produced_by: produced_by.into(),
@@ -201,6 +234,7 @@ mod tests {
             }],
             metrics: MetricSet::empty(),
             integrity_flags: vec![],
+            instrument_stats: Vec::new(),
             compute_cost: ComputeCost {
                 wall_ms: 5,
                 cpu_ms: 4,

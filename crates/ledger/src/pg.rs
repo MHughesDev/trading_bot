@@ -894,6 +894,14 @@ impl TrialLedger for PgTrialLedger {
         self.block(self.record_statistic_async(tenant_id, trial_id, name, value, produced_by))
     }
 
+    fn record_gate_evidence(
+        &self,
+        tenant_id: &str,
+        trial_id: Uuid,
+        evidence: &crate::evidence::TrialEvidence,
+    ) -> Result<(), LedgerError> {
+        self.block(self.record_gate_evidence_async(tenant_id, trial_id, evidence))
+    }
 }
 
 impl PgTrialLedger {
@@ -1242,6 +1250,322 @@ impl PgTrialLedger {
         .map_err(be)?;
         tx.commit().await.map_err(be)?;
         Ok(())
+    }
+
+    /// Write the shaped evidence gates 3, 4, 10 and 12 read (migration 0119).
+    ///
+    /// One transaction, so a bundle is on the record whole or not at all: a gate
+    /// that read half a capacity ladder would compute a capacity number from a
+    /// curve that was still being written.
+    ///
+    /// `mlops.trial_capacity` is the one upsert-shaped row here and it is
+    /// `ON CONFLICT DO NOTHING`, not an update — the table's trigger refuses
+    /// UPDATE anyway, and a second base AUM for the same trial is a
+    /// contradiction rather than a correction.
+    ///
+    /// # Errors
+    /// Anything [`crate::evidence::TrialEvidence::validate`] refuses, and
+    /// backend failures.
+    #[allow(clippy::too_many_lines)]
+    pub async fn record_gate_evidence_async(
+        &self,
+        tenant_id: &str,
+        trial_id: Uuid,
+        evidence: &crate::evidence::TrialEvidence,
+    ) -> Result<(), LedgerError> {
+        evidence.validate()?;
+        if evidence.is_empty() {
+            return Ok(());
+        }
+        let by = evidence.produced_by.as_str();
+        let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
+
+        for rung in &evidence.cost_ladder {
+            sqlx::query(
+                "INSERT INTO mlops.trial_cost_rung
+                   (tenant_id, trial_id, multiple, net_metric, produced_by)
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(tenant_id)
+            .bind(trial_id)
+            .bind(rung.multiple)
+            .bind(rung.net_metric)
+            .bind(by)
+            .execute(&mut *tx)
+            .await
+            .map_err(be)?;
+        }
+
+        if let Some(base) = evidence.capacity_base {
+            sqlx::query(
+                "INSERT INTO mlops.trial_capacity
+                   (trial_id, tenant_id, base_aum_usd, single_venue, produced_by)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (trial_id) DO NOTHING",
+            )
+            .bind(trial_id)
+            .bind(tenant_id)
+            .bind(base.base_aum_usd)
+            .bind(base.single_venue)
+            .bind(by)
+            .execute(&mut *tx)
+            .await
+            .map_err(be)?;
+        }
+
+        for point in &evidence.capacity_curve {
+            sqlx::query(
+                "INSERT INTO mlops.trial_capacity_point
+                   (tenant_id, trial_id, aum_usd, net_sharpe, member_trial_id, produced_by)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(tenant_id)
+            .bind(trial_id)
+            .bind(point.aum_usd)
+            .bind(point.net_sharpe)
+            .bind(point.member_trial_id)
+            .bind(by)
+            .execute(&mut *tx)
+            .await
+            .map_err(be)?;
+        }
+
+        for row in &evidence.instrument_pnl {
+            sqlx::query(
+                "INSERT INTO mlops.trial_instrument_pnl
+                   (tenant_id, trial_id, instrument, numeraire, net_pnl, traded_notional,
+                    peak_daily_notional, adv_usd, daily_vol, produced_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            )
+            .bind(tenant_id)
+            .bind(trial_id)
+            .bind(&row.instrument)
+            .bind(&row.numeraire)
+            .bind(row.net_pnl)
+            .bind(row.traded_notional)
+            .bind(row.peak_daily_notional)
+            .bind(row.adv_usd)
+            .bind(row.daily_vol)
+            .bind(by)
+            .execute(&mut *tx)
+            .await
+            .map_err(be)?;
+        }
+
+        for p in &evidence.neighbourhood {
+            sqlx::query(
+                "INSERT INTO mlops.trial_neighbourhood_point
+                   (tenant_id, trial_id, param, param_value, metric, is_center, produced_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            )
+            .bind(tenant_id)
+            .bind(trial_id)
+            .bind(&p.param)
+            .bind(p.param_value)
+            .bind(p.metric)
+            .bind(p.is_center)
+            .bind(by)
+            .execute(&mut *tx)
+            .await
+            .map_err(be)?;
+        }
+
+        for f in &evidence.factors {
+            sqlx::query(
+                "INSERT INTO mlops.trial_factor_return
+                   (tenant_id, trial_id, factor, ts, returns, produced_by)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(tenant_id)
+            .bind(trial_id)
+            .bind(&f.factor)
+            .bind(&f.ts)
+            .bind(&f.returns)
+            .bind(by)
+            .execute(&mut *tx)
+            .await
+            .map_err(be)?;
+        }
+
+        tx.commit().await.map_err(be)?;
+        Ok(())
+    }
+
+    /// Read back everything migration 0119 stores for a trial.
+    ///
+    /// `None` when nothing was recorded, and never an empty bundle: a caller
+    /// handed `TrialEvidence::default()` could not tell "nobody measured this"
+    /// from "it measured zero", which is the confusion these gates exist to
+    /// prevent.
+    ///
+    /// Where a part was recorded more than once, the newest write wins — the
+    /// same rule `statistics_async` follows, and the history stays readable in
+    /// the append-only tables.
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn gate_evidence_async(
+        &self,
+        tenant_id: &str,
+        trial_id: Uuid,
+    ) -> Result<Option<crate::evidence::TrialEvidence>, LedgerError> {
+        use crate::evidence::{
+            CapacityBase, CapacityPoint, CostRung, FactorSeries, InstrumentPnl, NeighbourhoodPoint,
+            TrialEvidence,
+        };
+
+        let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
+
+        // Only the newest recording of the ladder, not every recording ever: two
+        // ladders concatenated would interpolate a breakeven between rungs that
+        // were never measured together.
+        let cost: Vec<(f64, f64)> = sqlx::query_as(
+            "SELECT multiple, net_metric FROM mlops.trial_cost_rung
+             WHERE tenant_id = $1 AND trial_id = $2
+               AND recorded_at = (SELECT max(recorded_at) FROM mlops.trial_cost_rung
+                                  WHERE tenant_id = $1 AND trial_id = $2)
+             ORDER BY multiple",
+        )
+        .bind(tenant_id)
+        .bind(trial_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(be)?;
+
+        let base: Option<(f64, bool)> = sqlx::query_as(
+            "SELECT base_aum_usd, single_venue FROM mlops.trial_capacity
+             WHERE tenant_id = $1 AND trial_id = $2",
+        )
+        .bind(tenant_id)
+        .bind(trial_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(be)?;
+
+        let curve: Vec<(f64, f64, Uuid)> = sqlx::query_as(
+            "SELECT aum_usd, net_sharpe, member_trial_id FROM mlops.trial_capacity_point
+             WHERE tenant_id = $1 AND trial_id = $2 ORDER BY aum_usd",
+        )
+        .bind(tenant_id)
+        .bind(trial_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(be)?;
+
+        let instruments: Vec<(String, String, f64, f64, f64, Option<f64>, Option<f64>)> =
+            sqlx::query_as(
+                "SELECT DISTINCT ON (instrument)
+                        instrument, numeraire, net_pnl, traded_notional, peak_daily_notional,
+                        adv_usd, daily_vol
+                 FROM mlops.trial_instrument_pnl
+                 WHERE tenant_id = $1 AND trial_id = $2
+                 ORDER BY instrument, recorded_at DESC",
+            )
+            .bind(tenant_id)
+            .bind(trial_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(be)?;
+
+        let neighbourhood: Vec<(String, f64, f64, bool)> = sqlx::query_as(
+            "SELECT DISTINCT ON (param, param_value) param, param_value, metric, is_center
+             FROM mlops.trial_neighbourhood_point
+             WHERE tenant_id = $1 AND trial_id = $2
+             ORDER BY param, param_value, recorded_at DESC",
+        )
+        .bind(tenant_id)
+        .bind(trial_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(be)?;
+
+        let factors: Vec<(String, Vec<chrono::DateTime<chrono::Utc>>, Vec<f64>)> = sqlx::query_as(
+            "SELECT DISTINCT ON (factor) factor, ts, returns
+             FROM mlops.trial_factor_return
+             WHERE tenant_id = $1 AND trial_id = $2
+             ORDER BY factor, recorded_at DESC",
+        )
+        .bind(tenant_id)
+        .bind(trial_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(be)?;
+
+        let produced_by: Option<(String,)> = sqlx::query_as(
+            "SELECT produced_by FROM (
+                 SELECT produced_by, recorded_at FROM mlops.trial_cost_rung
+                   WHERE tenant_id = $1 AND trial_id = $2
+                 UNION ALL
+                 SELECT produced_by, recorded_at FROM mlops.trial_capacity
+                   WHERE tenant_id = $1 AND trial_id = $2
+                 UNION ALL
+                 SELECT produced_by, recorded_at FROM mlops.trial_instrument_pnl
+                   WHERE tenant_id = $1 AND trial_id = $2
+                 UNION ALL
+                 SELECT produced_by, recorded_at FROM mlops.trial_neighbourhood_point
+                   WHERE tenant_id = $1 AND trial_id = $2
+                 UNION ALL
+                 SELECT produced_by, recorded_at FROM mlops.trial_factor_return
+                   WHERE tenant_id = $1 AND trial_id = $2
+             ) AS all_parts ORDER BY recorded_at DESC LIMIT 1",
+        )
+        .bind(tenant_id)
+        .bind(trial_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(be)?;
+
+        tx.commit().await.map_err(be)?;
+
+        let evidence = TrialEvidence {
+            cost_ladder: cost
+                .into_iter()
+                .map(|(multiple, net_metric)| CostRung { multiple, net_metric })
+                .collect(),
+            capacity_base: base.map(|(base_aum_usd, single_venue)| CapacityBase {
+                base_aum_usd,
+                single_venue,
+            }),
+            capacity_curve: curve
+                .into_iter()
+                .map(|(aum_usd, net_sharpe, member_trial_id)| CapacityPoint {
+                    aum_usd,
+                    net_sharpe,
+                    member_trial_id,
+                })
+                .collect(),
+            instrument_pnl: instruments
+                .into_iter()
+                .map(
+                    |(instrument, numeraire, net_pnl, traded, peak, adv_usd, daily_vol)| {
+                        InstrumentPnl {
+                            instrument,
+                            numeraire,
+                            net_pnl,
+                            traded_notional: traded,
+                            peak_daily_notional: peak,
+                            adv_usd,
+                            daily_vol,
+                        }
+                    },
+                )
+                .collect(),
+            neighbourhood: neighbourhood
+                .into_iter()
+                .map(|(param, param_value, metric, is_center)| NeighbourhoodPoint {
+                    param,
+                    param_value,
+                    metric,
+                    is_center,
+                })
+                .collect(),
+            factors: factors
+                .into_iter()
+                .map(|(factor, ts, returns)| FactorSeries { factor, ts, returns })
+                .collect(),
+            produced_by: produced_by.map(|(p,)| p).unwrap_or_default(),
+        };
+        Ok((!evidence.is_empty()).then_some(evidence))
     }
 
     /// The newest value of each statistic recorded for a trial.

@@ -15,6 +15,7 @@ pub mod audit;
 pub mod campaign;
 pub mod capacity;
 pub mod capital;
+pub mod evidence;
 pub mod falsification;
 pub mod falsification_store;
 pub mod gates;
@@ -554,6 +555,30 @@ pub trait TrialLedger: Send + Sync {
         produced_by: &str,
     ) -> Result<(), LedgerError>;
 
+    /// Record the *shaped* evidence gates 3, 4, 10 and 12 read — a cost ladder,
+    /// a capacity curve, a per-instrument cross-section, a neighbourhood, a
+    /// factor battery (SPEC §12.3, migration 0119).
+    ///
+    /// Separate from [`Self::record_statistic`] because these are not scalars: a
+    /// breakeven multiple is *interpolated* between two rungs and a "no cliff"
+    /// verdict is a statement about consecutive points, neither of which
+    /// survives being flattened to one number. Written in one call so a bundle
+    /// is either on the record or is not.
+    ///
+    /// An empty bundle is a no-op, not an error: a producer that could measure
+    /// none of this has nothing to say, and every gate concerned stays
+    /// `inconclusive`.
+    ///
+    /// # Errors
+    /// Anything [`evidence::TrialEvidence::validate`] refuses, and backend
+    /// failures.
+    fn record_gate_evidence(
+        &self,
+        tenant_id: &str,
+        trial_id: Uuid,
+        evidence: &evidence::TrialEvidence,
+    ) -> Result<(), LedgerError>;
+
     /// Claim a strategy lineage's one sealed-holdout evaluation, or receive the
     /// evaluation it already had (SPEC §12.7). Every request is logged.
     ///
@@ -719,6 +744,14 @@ impl<T: TrialLedger + ?Sized> TrialLedger for std::sync::Arc<T> {
         (**self).record_statistic(tenant_id, trial_id, name, value, produced_by)
     }
 
+    fn record_gate_evidence(
+        &self,
+        tenant_id: &str,
+        trial_id: Uuid,
+        evidence: &evidence::TrialEvidence,
+    ) -> Result<(), LedgerError> {
+        (**self).record_gate_evidence(tenant_id, trial_id, evidence)
+    }
 }
 
 /// A trial registration row as read back.
@@ -1022,12 +1055,31 @@ pub struct InMemoryLedger {
     /// `(tenant, trial, name) -> value`, newest write wins, mirroring the
     /// `DISTINCT ON … ORDER BY recorded_at DESC` the Postgres reader uses.
     statistics: Mutex<std::collections::BTreeMap<(String, Uuid, String), f64>>,
+    /// `(tenant, trial) -> the shaped evidence gates 3, 4, 10 and 12 read`.
+    /// Appended part-by-part like the Postgres tables, so a second write that
+    /// carries only a factor battery does not erase the cost ladder.
+    gate_evidence: Mutex<std::collections::BTreeMap<(String, Uuid), evidence::TrialEvidence>>,
 }
 
 impl InMemoryLedger {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The shaped gate evidence recorded for a trial, or `None` when none was.
+    ///
+    /// `None` is the honest answer and is never an empty bundle: a caller that
+    /// received `TrialEvidence::default()` could not tell "nobody measured this"
+    /// from "it measured zero", and that is the exact confusion every gate here
+    /// exists to prevent.
+    #[must_use]
+    pub fn gate_evidence(&self, tenant_id: &str, trial_id: Uuid) -> Option<evidence::TrialEvidence> {
+        self.gate_evidence
+            .lock()
+            .expect("ledger poisoned")
+            .get(&(tenant_id.to_string(), trial_id))
+            .cloned()
     }
 
     #[must_use]
@@ -1278,6 +1330,43 @@ impl TrialLedger for InMemoryLedger {
         Ok(())
     }
 
+    fn record_gate_evidence(
+        &self,
+        tenant_id: &str,
+        trial_id: Uuid,
+        ev: &evidence::TrialEvidence,
+    ) -> Result<(), LedgerError> {
+        ev.validate()?;
+        if ev.is_empty() {
+            return Ok(());
+        }
+        let mut held = self.gate_evidence.lock().expect("ledger poisoned");
+        let slot = held
+            .entry((tenant_id.to_string(), trial_id))
+            .or_insert_with(|| evidence::TrialEvidence::produced_by(ev.produced_by.clone()));
+        // Append, mirroring the append-only tables: a later bundle carrying only
+        // a factor battery must not erase a cost ladder recorded earlier.
+        if !ev.cost_ladder.is_empty() {
+            slot.cost_ladder.clone_from(&ev.cost_ladder);
+        }
+        if ev.capacity_base.is_some() {
+            slot.capacity_base = ev.capacity_base;
+        }
+        if !ev.capacity_curve.is_empty() {
+            slot.capacity_curve.clone_from(&ev.capacity_curve);
+        }
+        if !ev.instrument_pnl.is_empty() {
+            slot.instrument_pnl.clone_from(&ev.instrument_pnl);
+        }
+        if !ev.neighbourhood.is_empty() {
+            slot.neighbourhood.clone_from(&ev.neighbourhood);
+        }
+        if !ev.factors.is_empty() {
+            slot.factors.clone_from(&ev.factors);
+        }
+        slot.produced_by.clone_from(&ev.produced_by);
+        Ok(())
+    }
 }
 
 impl InMemoryLedger {

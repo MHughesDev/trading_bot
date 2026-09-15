@@ -23,11 +23,13 @@
 //! (paged 1000-bar requests) straight into `ClickHouse`, then re-checks.
 
 pub mod aggregate;
-pub mod census;
 pub mod backfill_sink;
+pub mod capacity;
+pub mod census;
 pub mod collect;
 pub mod costs;
 pub mod experiment;
+pub mod factors;
 pub mod forensics;
 pub mod gaps;
 pub mod gates;

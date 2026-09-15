@@ -105,6 +105,7 @@ pub fn map_sim_result(
         trades,
         metrics,
         integrity_flags: Vec::new(),
+        instrument_stats: Vec::new(),
         compute_cost,
         produced_at: Utc::now(),
         produced_by: produced_by.into(),
