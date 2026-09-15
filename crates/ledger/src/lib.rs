@@ -1440,7 +1440,59 @@ mod statistic_tests {
                 "permutation_p_value",
                 "breakeven_cost_multiple",
                 "prereg_hash_present",
+                // Gate 15 (§12.6), added by Set T T-0.2 with migration 0106.
+                "paper_signal_match",
+                "paper_slippage_ratio",
+                "paper_turnover_ratio",
+                "paper_model_rejects",
+                "paper_observed_days",
+                "paper_observation_window_days",
             ]
+        );
+    }
+
+    /// The list above and the database's CHECK have to be the same set, and
+    /// keeping two copies in step by hand is how one of them quietly stops
+    /// matching. Migration 0106 holds the current CHECK, so it is read here.
+    ///
+    /// A name in the const but not the CHECK is an INSERT that fails at
+    /// runtime; a name in the CHECK but not the const is a statistic nothing
+    /// can write. Both are silent until a gate is inconclusive forever.
+    #[test]
+    fn every_name_is_also_in_the_database_check() {
+        let sql = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../migrations/0106_gate15_statistics.sql"),
+        )
+        .expect("migration 0106 is readable from crates/ledger");
+
+        // The CHECK is the text after `ADD CONSTRAINT` — the DO block above it
+        // names one statistic as a probe and must not be counted as the list —
+        // with `--` comment lines dropped, because a comment explaining the
+        // list is allowed to quote things that are not in it.
+        let check: String = sql
+            .split_once("ADD CONSTRAINT")
+            .expect("0106 adds the constraint")
+            .1
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("--"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let check = check.as_str();
+
+        for name in TRIAL_STATISTICS {
+            assert!(
+                check.contains(&format!("'{name}'")),
+                "{name} is in TRIAL_STATISTICS but not in migration 0106's CHECK"
+            );
+        }
+
+        let quoted = check.matches('\'').count() / 2;
+        assert_eq!(
+            quoted,
+            TRIAL_STATISTICS.len(),
+            "migration 0106's CHECK lists {quoted} names, TRIAL_STATISTICS has {}",
+            TRIAL_STATISTICS.len()
         );
     }
 }
