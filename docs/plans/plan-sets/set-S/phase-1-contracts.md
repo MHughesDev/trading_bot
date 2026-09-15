@@ -1,6 +1,6 @@
 # Phase 1 — Contracts
 
-**Completion: 20% (4 / 20 done, 1 partial). Track A landed; tracks B and C not started except S-1.13's type.**
+**Completion: 25% (5 / 20 done, 2 partial). Track A landed, plus S-1.10; the rest of tracks B and C not started.**
 
 > Status 2026-09-15, track 1. The three contracts the other Set S phases wait on now exist:
 > `ToolSpec`/`ToolResult` (`crates/mcp-server/src/spec.rs`), the generated taxonomy and
@@ -8,7 +8,11 @@
 > is done. Track B (the context contract, S-1.5 … S-1.12) is **not started**. Track C has
 > S-1.13's type but none of its wiring, and S-1.14 … S-1.20 are not started.
 >
-> Two things a following track must know before touching this phase:
+> S-1.10 is done as well, out of track order: phase 1 says track C rebases onto it and track B
+> has not started, so leaving the one shared file in tracks B and C unwritten would have blocked
+> C for no reason.
+>
+> Three things a following track must know before touching this phase:
 >
 > 1. **The catalogue here is 60 tools, not 73.** The thirteen `falsification` and
 >    `web`/`skills` tools are untracked and cannot be committed without adding
@@ -20,6 +24,13 @@
 >    Declaring them was necessary so six phases do not each have to revisit their
 >    declarations later; the dispatch wrapper that writes the ledger row before the tool
 >    runs is AGENT-006 §2.5 and belongs to a later phase.
+> 3. **Do not share `CARGO_TARGET_DIR` across worktrees.** EXECUTION-BOARD §2.3 says to; it is
+>    wrong, and two tracks found it independently. Artifacts collide between worktrees, so a
+>    suite can run against another worktree's code — observed here as a `static_invariants`
+>    binary with 23 tests built from a source with 27, and a link against an `mcp-server-lib`
+>    with no `spec` module. Everything reported green in this phase was re-run from cold in a
+>    private target directory. The `jobs = 2` pin is separately real and still must not be
+>    raised. Details in phase 0's S-0.1 triage.
 
 **Requirement IDs:** TC-01…TC-10 (track A), CA-01…CA-09 (track B), RP-01…RP-07 (track C).
 **Specs:** [AGENT-006 §2.3–2.4, §3](../../../specs/AGENT-006-tool-catalog.md),
@@ -243,7 +254,24 @@ cached and 10 fresh reports 1,000 total.
 **Traces:** AGENT-005 §6.1, §7; §10.2.
 
 ### S-1.10 `assemble_reserving` — the budget counts what leaves the body — M
-`NOT STARTED`
+`DONE` 2026-09-15 — `crates/harness/src/context.rs`. Landed by track 1 out of track order,
+because phase 1 says track C rebases onto it and track B has not started.
+
+Verified by `a_reservation_moves_the_compaction_point` — the spec's worked example run as
+written: the same 6,500 tokens of blocks pass through untouched against a 10,000-token window
+and compact once 4,000 are reserved. `the_body_keeps_its_floor_when_a_reservation_would_take_everything`
+is the adversarial one: reserving 9,000, 10,000, 25,000 and `u32::MAX` all leave the body
+exactly 2,500 tokens and a non-empty prompt. Without the floor, a profile whose schemas happen
+to be large hands the body a budget near zero and the model reads a full description of its
+tools and nothing about its task — which is the wrong thing to keep.
+`assemble_is_assemble_reserving_with_nothing_reserved` pins the delegation, so no existing
+caller changed behaviour.
+
+`CompactionReport` gained **two** fields, not one: `reserved_tokens` and
+`body_budget_tokens`. The second is what makes an over-reservation diagnosable — when it equals
+`window × MIN_BODY_SHARE` the floor bound and the caller should expose fewer schemas. "The
+prompt was compacted" and "the prompt was compacted because the schemas took two thirds of the
+window" are different findings and only the second says what to change.
 
 `assemble_reserving(profile, blocks, reserved_tokens)` with `MIN_BODY_SHARE = 0.25`;
 `assemble` delegates with 0. `reserved_tokens` joins `CompactionReport`.

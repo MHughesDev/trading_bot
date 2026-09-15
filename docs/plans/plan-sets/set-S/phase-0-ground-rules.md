@@ -123,11 +123,25 @@ it, and cargo reuses artifacts across them. Observed twice in one session:
   worktree where `spec.rs` does not exist. `cargo clean -p mcp-server-lib` fixed it.
 
 So **a green test run from any track on this board is not by itself evidence**: it may have
-exercised another worktree's code. The cheap mitigation, which is what this track used, is
-`cargo clean -p <crate>` for the crate under test and its changed dependencies before the run
-that you intend to believe. The correct fix is a per-worktree `CARGO_TARGET_DIR`, which costs
-disk the machine does not have — so this is a real trade-off for the user to make, not an
-oversight to correct silently. Worth verifying before any track reports a suite green.
+exercised another worktree's code.
+
+Track 5 found the same defect independently and from the other side — `cargo test -p domain`
+passing and `cargo test -p risk` immediately afterwards failing against a *stale* `domain`,
+plus phantom `E0599 no variant named X` in a file that plainly contains `X`. The mechanism
+matches: identically-named workspace crates at identical *workspace-relative* paths get
+colliding artifact hashes, so worktrees overwrite each other's `.rmeta`.
+
+**EXECUTION-BOARD §2.3 is wrong on this point and should be corrected.** It attributes the
+`E0463`/`E0786` cascades to raising `-j`. The page-file OOM from raising `-j` is separately
+real and `jobs = 2` must stay — but the cascade that contradicts the source in front of you is
+the shared cache. The board's instruction to share the 237 GB cache is what produces it.
+
+The fix is a per-worktree `CARGO_TARGET_DIR`. Cost, measured here: this worktree's own target
+directory after building `mcp-server-lib`, `harness`, `invariants` and `ledger` from cold. Free
+space on this box was 230 GB when the switch was made, which is enough for a handful of tracks
+and *not* for eighteen — so the real decision is how many worktrees exist at once, and that is
+the user's to make. Every suite this track reports green was re-run from cold in a private
+target directory after the shared one was abandoned.
 
 **Recommendation, not done.** `cargo xtask lint-no-json-hotpath` enforces a rule a prior phase
 established, is **not wired into CI**, and fails on one pre-existing line in
