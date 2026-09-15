@@ -14,12 +14,23 @@ pub mod ema;
 pub mod feature_sets;
 pub mod leakage;
 pub mod leakage_harness;
+pub mod registry;
 pub mod rsi;
 pub mod runtime;
 pub mod training_frame;
 pub mod walk_forward;
 
 use chrono::{DateTime, Utc};
+
+/// Publication lag, in milliseconds, of anything derived from a closed bar.
+///
+/// Zero, and named rather than written as a literal in fifty places: the moment a
+/// family reads a source that is *published* after the period it describes — a
+/// filing, a macro release, a revision-bearing series — its declared lag is the
+/// source's lag, and the PIT check has something to check. A family over a lagged
+/// source that copied this constant would be claiming the source arrives
+/// instantly, which is the leak DATA-005 exists to prevent.
+pub const PIT_LAG_BAR_DERIVED_MS: u64 = 0;
 pub use dataplane::feature::{
     p99_relative_diff, ConsistencyDiff, Diagnosis, Feature, FeatureDef, FeatureError, FeatureRow, FeatureRuntime, MemoryServeLog, ServeLog,
     ServeRecord,
@@ -30,6 +41,7 @@ pub use feature_sets::{
     is_known as is_known_feature, list_feature_sets, resolve as resolve_feature_set,
     validate_features, validate_user_spec, FeatureSetSpec, REGISTRY_VERSION,
 };
+pub use registry::{families as feature_families, list as list_features, resolve as resolve_feature, CostClass, Family, Phase};
 pub use rsi::{Rsi, RSI_FEATURE_VERSION};
 pub use training_frame::{
     align_higher_tf, build_aligned_training_frame, build_training_frame, devol, fit_sigma, label_horizon_bars, HigherTfBar,

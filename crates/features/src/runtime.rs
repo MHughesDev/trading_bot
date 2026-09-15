@@ -69,10 +69,6 @@ impl Feature for Passthrough {
     }
 }
 
-fn closes(f: &WindowedFrame<'_>) -> Result<Vec<f64>, FeatureError> {
-    (0..f.lookback() as usize).map(|b| f.close(b)).collect()
-}
-
 #[allow(clippy::cast_precision_loss)]
 fn mean(v: &[f64]) -> f64 {
     v.iter().sum::<f64>() / v.len() as f64
@@ -88,185 +84,574 @@ fn sample_std(v: &[f64]) -> f64 {
     (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (v.len() as f64 - 1.0)).sqrt()
 }
 
+
+/// The computation behind a catalogued family.
+///
+/// One variant per *algorithm*, not per name: `sma_20` and `rolling_mean_20` are
+/// the same `RollingMean`, and `returns_5` and `momentum_5` the same
+/// `SimpleReturn` — the registry rewrites the alias before anything is built, so
+/// there is one implementation per computation (INV-14) and one name per
+/// implementation in the `code_hash`.
 #[derive(Clone, Copy)]
 enum Kind {
+    // ── rolling statistics over the close ────────────────────────────────────
     RollingMean,
     RollingStd,
-    /// `close / close[k] − 1`; `returns_k` and `momentum_k` are the same feature
-    /// under two names and share this one implementation.
-    SimpleReturn(usize),
-    LogReturn1,
-    Parkinson,
-    GarmanKlass,
+    RollingVar,
+    RollingMin,
+    RollingMax,
+    RollingSum,
+    RollingMedian,
+    /// Percentile of the window, `q` in whole percent, linear interpolation.
+    RollingQuantile(usize),
+    RollingSkew,
+    RollingKurt,
     Zscore,
-    RelVolume,
+    /// Fraction of the window strictly below the decision bar's close, 0..1.
+    PctRank,
+    Ewma(usize),
+
+    // ── returns, lags, differences ───────────────────────────────────────────
+    /// `close / close[k] − 1`; `returns_k`, `momentum_k` and `ret_k` are one
+    /// feature under three names and share this implementation.
+    SimpleReturn(usize),
+    LogReturn(usize),
+    Lag(usize),
+    Diff(usize),
+    Roc(usize),
+
+    // ── indicators ───────────────────────────────────────────────────────────
+    /// Wilder average true range, in price units.
+    Atr(usize),
+    /// `ema(fast) − ema(slow)`.
+    Macd { fast: usize, slow: usize },
+    /// `ema(signal)` of the macd series.
+    MacdSignal { fast: usize, slow: usize, signal: usize },
+    /// macd minus its signal line.
+    MacdHist { fast: usize, slow: usize, signal: usize },
+    /// Bollinger band, `k` sample standard deviations from the rolling mean.
+    Bollinger { k: usize, part: BandPart },
+    /// Donchian channel over the window's highs and lows.
+    Donchian(BandPart),
+    /// Keltner band: `ema(n)` ± `k · atr(n)`.
+    Keltner { n: usize, k: usize, upper: bool },
     Obv,
+    RelVolume,
+
+    // ── calendar ─────────────────────────────────────────────────────────────
     HourSin,
     HourCos,
     DowSin,
     DowCos,
+    /// 1 inside `[from, to)` UTC hours, else 0.
+    UtcSession { from: i64, to: i64 },
+
+    // ── range volatility and realised measures (F2) ──────────────────────────
+    Parkinson,
+    GarmanKlass,
+    RogersSatchell,
+    /// Root sum of squared bar log returns over the window.
+    RealisedVol,
+    /// Bipower variation, jump-robust, on the same scale as `RealisedVol`.
+    BipowerVar,
+    /// `max(0, (rv² − bv²) / rv²)` — the share of realised variance that is jump.
+    JumpShare,
+    Autocorr(usize),
+    VarianceRatio(usize),
+    EfficiencyRatio,
+}
+
+/// Which line of a two-sided band a feature returns.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BandPart {
+    Upper,
+    Lower,
+    Mid,
+    /// Band height relative to the midpoint — a squeeze is a low value.
+    Width,
+    /// Where the close sits in the band: 0 at the lower line, 1 at the upper.
+    PctB,
 }
 
 struct Windowed(FeatureDef, Kind);
+
+/// The window's bars, **newest first**: index `b` is `b` bars before the decision
+/// bar, the same indexing `WindowedFrame::back` uses.
+///
+/// Newest-first and not oldest-first for one reason: the pre-existing families
+/// summed their windows in this order, and a sum reordered is a different `f64`.
+/// The golden parity test DATA-006 §5 requires compares old and new values with
+/// tolerance zero, so the order is part of the contract, not a style choice.
+struct Series {
+    open: Vec<f64>,
+    high: Vec<f64>,
+    low: Vec<f64>,
+    close: Vec<f64>,
+    volume: Vec<f64>,
+}
+
+impl Series {
+    fn read(f: &WindowedFrame<'_>) -> Result<Self, FeatureError> {
+        let n = f.lookback() as usize;
+        let mut s = Self {
+            open: Vec::with_capacity(n),
+            high: Vec::with_capacity(n),
+            low: Vec::with_capacity(n),
+            close: Vec::with_capacity(n),
+            volume: Vec::with_capacity(n),
+        };
+        for back in 0..n {
+            let r = f.back(back)?;
+            s.open.push(r.open);
+            s.high.push(r.high);
+            s.low.push(r.low);
+            s.close.push(r.close);
+            s.volume.push(r.volume);
+        }
+        Ok(s)
+    }
+
+    /// The closes oldest first — what the EMA kernel and every path-ordered
+    /// measure want.
+    fn closes_oldest_first(&self) -> Vec<f64> {
+        self.close.iter().rev().copied().collect()
+    }
+}
+
+/// Bar log returns, newest first: element `i` is `ln(close[i] / close[i+1])`.
+/// `NaN` for any non-positive close, never zero.
+fn log_returns(closes_newest_first: &[f64]) -> Vec<f64> {
+    closes_newest_first
+        .windows(2)
+        .map(|w| if w[0] <= 0.0 || w[1] <= 0.0 { f64::NAN } else { (w[0] / w[1]).ln() })
+        .collect()
+}
+
+/// The `m`-th central moment of `v`, population form.
+#[allow(clippy::cast_precision_loss)]
+fn central_moment(v: &[f64], m: i32) -> f64 {
+    let mu = mean(v);
+    v.iter().map(|x| (x - mu).powi(m)).sum::<f64>() / v.len() as f64
+}
+
+/// Linear-interpolated percentile of `v`, `q` in whole percent.
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn percentile(v: &[f64], q: usize) -> f64 {
+    if v.is_empty() {
+        return f64::NAN;
+    }
+    let mut s = v.to_vec();
+    s.sort_by(f64::total_cmp);
+    let pos = (q as f64 / 100.0) * (s.len() - 1) as f64;
+    let (lo, hi) = (pos.floor(), pos.ceil());
+    let (a, b) = (s[lo as usize], s[hi as usize]);
+    if (hi - lo).abs() < f64::EPSILON {
+        a
+    } else {
+        a + (b - a) * (pos - lo)
+    }
+}
+
+/// Bipower variation of `returns`, on the same scale as realised volatility.
+///
+/// `μ₁ = √(2/π)` is the expectation of the absolute value of a standard normal;
+/// dividing by `μ₁²` makes bipower an unbiased estimator of integrated variance
+/// under a continuous price path, so `rv² − bv²` isolates the jump component.
+fn bipower(returns: &[f64]) -> f64 {
+    if returns.len() < 2 {
+        return f64::NAN;
+    }
+    let mu1_sq = 2.0 / std::f64::consts::PI;
+    let acc: f64 = returns.windows(2).map(|x| x[0].abs() * x[1].abs()).sum();
+    (acc / mu1_sq).sqrt()
+}
+
+impl Windowed {
+    /// `ema(fast) − ema(slow)` over the `slow`-span window ending `back` bars
+    /// before the decision bar. Both legs go through the one EMA kernel.
+    fn macd_at(closes_oldest_first: &[f64], fast: usize, slow: usize, back: usize) -> f64 {
+        let span = slow * crate::ema::EMA_LOOKBACK_PERIODS;
+        let end = closes_oldest_first.len().checked_sub(back);
+        let Some(end) = end.filter(|e| *e >= span) else { return f64::NAN };
+        let w = &closes_oldest_first[end - span..end];
+        let fast_span = fast * crate::ema::EMA_LOOKBACK_PERIODS;
+        crate::ema::ema_from_oldest(&w[span - fast_span.min(span)..], fast) - crate::ema::ema_from_oldest(w, slow)
+    }
+
+    /// `ema(signal)` of the macd series ending at the decision bar.
+    fn macd_signal_at(closes_oldest_first: &[f64], fast: usize, slow: usize, signal: usize) -> f64 {
+        let span = slow * crate::ema::EMA_LOOKBACK_PERIODS;
+        let available = closes_oldest_first.len().saturating_sub(span) + 1;
+        let count = (signal * crate::ema::EMA_LOOKBACK_PERIODS).min(available);
+        if count == 0 || closes_oldest_first.len() < span {
+            return f64::NAN;
+        }
+        // Oldest first: j = 0 is `count - 1` bars back, j = count - 1 is the
+        // decision bar.
+        let macds: Vec<f64> = (0..count).map(|j| Self::macd_at(closes_oldest_first, fast, slow, count - 1 - j)).collect();
+        crate::ema::ema_from_oldest(&macds, signal)
+    }
+
+    /// Wilder's average true range over the window, in price units. Samples are
+    /// pushed oldest first, as Wilder's recurrence requires.
+    fn atr_value(s: &Series, period: usize) -> f64 {
+        let mut w = crate::rsi::WilderAverage::new(period);
+        for i in (0..s.close.len().saturating_sub(1)).rev() {
+            let prev = s.close[i + 1];
+            let tr = (s.high[i] - s.low[i]).max((s.high[i] - prev).abs()).max((s.low[i] - prev).abs());
+            w.push(tr);
+        }
+        w.value()
+    }
+}
 
 impl Feature for Windowed {
     fn def(&self) -> &FeatureDef {
         &self.0
     }
 
-    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_precision_loss, clippy::too_many_lines)]
     fn compute(&self, f: &WindowedFrame<'_>) -> Result<f64, FeatureError> {
-        let w = f.lookback() as usize;
-        Ok(match self.1 {
-            Kind::RollingMean => mean(&closes(f)?),
-            Kind::RollingStd => sample_std(&closes(f)?),
-            Kind::SimpleReturn(k) => {
-                let base = f.close(k)?;
-                if base == 0.0 {
-                    f64::NAN
-                } else {
-                    f.close(0)? / base - 1.0
-                }
-            }
-            Kind::LogReturn1 => {
-                let (c, p) = (f.close(0)?, f.close(1)?);
-                if c <= 0.0 || p <= 0.0 {
-                    f64::NAN
-                } else {
-                    (c / p).ln()
-                }
-            }
-            Kind::Parkinson => {
-                let inv_4ln2 = 1.0 / (4.0 * 2.0_f64.ln());
-                let mut sum = 0.0;
-                for b in 0..w {
-                    let r = f.back(b)?;
-                    if r.low <= 0.0 || r.high <= 0.0 {
-                        return Ok(f64::NAN);
-                    }
-                    sum += (r.high / r.low).ln().powi(2) * inv_4ln2;
-                }
-                (sum / w as f64).sqrt()
-            }
-            Kind::GarmanKlass => {
-                let c1 = 2.0 * 2.0_f64.ln() - 1.0;
-                let mut sum = 0.0;
-                for b in 0..w {
-                    let r = f.back(b)?;
-                    if r.low <= 0.0 || r.high <= 0.0 || r.open <= 0.0 || r.close <= 0.0 {
-                        return Ok(f64::NAN);
-                    }
-                    sum += (0.5 * (r.high / r.low).ln().powi(2) - c1 * (r.close / r.open).ln().powi(2)).max(0.0);
-                }
-                (sum / w as f64).sqrt()
-            }
-            Kind::Zscore => {
-                let c = closes(f)?;
-                let s = sample_std(&c);
-                if s == 0.0 {
-                    f64::NAN
-                } else {
-                    (c[0] - mean(&c)) / s
-                }
-            }
-            Kind::RelVolume => {
-                let v: Vec<f64> = (0..w).map(|b| f.back(b).map(|r| r.volume)).collect::<Result<_, _>>()?;
-                let m = mean(&v);
-                if m <= 0.0 {
-                    f64::NAN
-                } else {
-                    v[0] / m
-                }
-            }
-            Kind::Obv => {
-                let mut obv = 0.0;
-                for b in 0..w - 1 {
-                    let (now, before) = (f.back(b)?, f.back(b + 1)?);
-                    if now.close > before.close {
-                        obv += now.volume;
-                    } else if now.close < before.close {
-                        obv -= now.volume;
-                    }
-                }
-                obv
-            }
+        // The calendar kinds read one bar; reading the whole window for them
+        // would be a lie about what they depend on as well as a waste.
+        match self.1 {
             Kind::HourSin | Kind::HourCos => {
                 let hour = (f.back(0)?.ts_ns.div_euclid(3_600_000_000_000)).rem_euclid(24) as f64;
                 let a = hour * std::f64::consts::TAU / 24.0;
-                if matches!(self.1, Kind::HourSin) {
-                    a.sin()
-                } else {
-                    a.cos()
-                }
+                return Ok(if matches!(self.1, Kind::HourSin) { a.sin() } else { a.cos() });
             }
             Kind::DowSin | Kind::DowCos => {
                 // Unix day 0 was a Thursday; 0 = Monday.
                 let dow = (f.back(0)?.ts_ns.div_euclid(86_400_000_000_000) + 3).rem_euclid(7) as f64;
                 let a = dow * std::f64::consts::TAU / 7.0;
-                if matches!(self.1, Kind::DowSin) {
-                    a.sin()
+                return Ok(if matches!(self.1, Kind::DowSin) { a.sin() } else { a.cos() });
+            }
+            Kind::UtcSession { from, to } => {
+                let hour = (f.back(0)?.ts_ns.div_euclid(3_600_000_000_000)).rem_euclid(24);
+                return Ok(f64::from(u8::from(hour >= from && hour < to)));
+            }
+            _ => {}
+        }
+
+        let w = f.lookback() as usize;
+        let s = Series::read(f)?;
+        let c = &s.close;
+        Ok(match self.1 {
+            Kind::HourSin | Kind::HourCos | Kind::DowSin | Kind::DowCos | Kind::UtcSession { .. } => unreachable!("handled above"),
+
+            Kind::RollingMean => mean(c),
+            Kind::RollingStd => sample_std(c),
+            Kind::RollingVar => {
+                let sd = sample_std(c);
+                sd * sd
+            }
+            Kind::RollingMin => c.iter().copied().fold(f64::INFINITY, f64::min),
+            Kind::RollingMax => c.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            Kind::RollingSum => c.iter().sum(),
+            Kind::RollingMedian => percentile(c, 50),
+            Kind::RollingQuantile(q) => percentile(c, q),
+            Kind::RollingSkew => {
+                let m2 = central_moment(c, 2);
+                if m2 <= 0.0 {
+                    f64::NAN
                 } else {
-                    a.cos()
+                    central_moment(c, 3) / m2.powf(1.5)
+                }
+            }
+            Kind::RollingKurt => {
+                let m2 = central_moment(c, 2);
+                if m2 <= 0.0 {
+                    f64::NAN
+                } else {
+                    central_moment(c, 4) / (m2 * m2) - 3.0
+                }
+            }
+            Kind::Zscore => {
+                let sd = sample_std(c);
+                if sd == 0.0 {
+                    f64::NAN
+                } else {
+                    (c[0] - mean(c)) / sd
+                }
+            }
+            Kind::PctRank => {
+                let below = c[1..].iter().filter(|x| **x < c[0]).count();
+                below as f64 / (c.len() - 1).max(1) as f64
+            }
+            Kind::Ewma(halflife) => {
+                // A halflife h decays by 2^(−1/h) per bar; the equivalent EMA
+                // period is what the one kernel takes, so there is no second
+                // exponential recurrence in the crate.
+                let alpha = 1.0 - (-(2.0_f64.ln()) / halflife as f64).exp();
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let p = (2.0 / alpha - 1.0).round().max(1.0) as usize;
+                crate::ema::ema_from_oldest(&s.closes_oldest_first(), p)
+            }
+
+            Kind::SimpleReturn(k) => {
+                let base = c[k];
+                if base == 0.0 {
+                    f64::NAN
+                } else {
+                    c[0] / base - 1.0
+                }
+            }
+            Kind::LogReturn(k) => {
+                if c[0] <= 0.0 || c[k] <= 0.0 {
+                    f64::NAN
+                } else {
+                    (c[0] / c[k]).ln()
+                }
+            }
+            Kind::Lag(k) => c[k],
+            Kind::Diff(k) => c[0] - c[k],
+            Kind::Roc(k) => {
+                if c[k] == 0.0 {
+                    f64::NAN
+                } else {
+                    (c[0] / c[k] - 1.0) * 100.0
+                }
+            }
+
+            Kind::Atr(p) => Self::atr_value(&s, p),
+            Kind::Macd { fast, slow } => Self::macd_at(&s.closes_oldest_first(), fast, slow, 0),
+            Kind::MacdSignal { fast, slow, signal } => Self::macd_signal_at(&s.closes_oldest_first(), fast, slow, signal),
+            Kind::MacdHist { fast, slow, signal } => {
+                let o = s.closes_oldest_first();
+                Self::macd_at(&o, fast, slow, 0) - Self::macd_signal_at(&o, fast, slow, signal)
+            }
+            Kind::Bollinger { k, part } => {
+                let (m, sd) = (mean(c), sample_std(c));
+                let d = k as f64 * sd;
+                match part {
+                    BandPart::Upper => m + d,
+                    BandPart::Lower => m - d,
+                    BandPart::Mid => m,
+                    BandPart::Width if m == 0.0 => f64::NAN,
+                    BandPart::Width => 2.0 * d / m,
+                    BandPart::PctB if d == 0.0 => f64::NAN,
+                    BandPart::PctB => (c[0] - (m - d)) / (2.0 * d),
+                }
+            }
+            Kind::Donchian(part) => {
+                let hi = s.high.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                let lo = s.low.iter().copied().fold(f64::INFINITY, f64::min);
+                let mid = (hi + lo) / 2.0;
+                match part {
+                    BandPart::Upper => hi,
+                    BandPart::Lower => lo,
+                    BandPart::Mid => mid,
+                    BandPart::Width if mid == 0.0 => f64::NAN,
+                    BandPart::Width => (hi - lo) / mid,
+                    BandPart::PctB if hi == lo => f64::NAN,
+                    BandPart::PctB => (c[0] - lo) / (hi - lo),
+                }
+            }
+            Kind::Keltner { n, k, upper } => {
+                let o = s.closes_oldest_first();
+                let span = n * crate::ema::EMA_LOOKBACK_PERIODS;
+                if o.len() < span {
+                    f64::NAN
+                } else {
+                    let centre = crate::ema::ema_from_oldest(&o[o.len() - span..], n);
+                    let band = k as f64 * Self::atr_value(&s, n);
+                    if upper {
+                        centre + band
+                    } else {
+                        centre - band
+                    }
+                }
+            }
+            Kind::Obv => {
+                let mut obv = 0.0;
+                for b in 0..w - 1 {
+                    if c[b] > c[b + 1] {
+                        obv += s.volume[b];
+                    } else if c[b] < c[b + 1] {
+                        obv -= s.volume[b];
+                    }
+                }
+                obv
+            }
+            Kind::RelVolume => {
+                let m = mean(&s.volume);
+                if m <= 0.0 {
+                    f64::NAN
+                } else {
+                    s.volume[0] / m
+                }
+            }
+
+            Kind::Parkinson => {
+                let inv_4ln2 = 1.0 / (4.0 * 2.0_f64.ln());
+                let mut acc = 0.0;
+                for b in 0..w {
+                    if s.low[b] <= 0.0 || s.high[b] <= 0.0 {
+                        return Ok(f64::NAN);
+                    }
+                    acc += (s.high[b] / s.low[b]).ln().powi(2) * inv_4ln2;
+                }
+                (acc / w as f64).sqrt()
+            }
+            Kind::GarmanKlass => {
+                let c1 = 2.0 * 2.0_f64.ln() - 1.0;
+                let mut acc = 0.0;
+                for b in 0..w {
+                    if s.low[b] <= 0.0 || s.high[b] <= 0.0 || s.open[b] <= 0.0 || s.close[b] <= 0.0 {
+                        return Ok(f64::NAN);
+                    }
+                    acc += (0.5 * (s.high[b] / s.low[b]).ln().powi(2) - c1 * (s.close[b] / s.open[b]).ln().powi(2)).max(0.0);
+                }
+                (acc / w as f64).sqrt()
+            }
+            Kind::RogersSatchell => {
+                let mut acc = 0.0;
+                for b in 0..w {
+                    if s.low[b] <= 0.0 || s.high[b] <= 0.0 || s.open[b] <= 0.0 || s.close[b] <= 0.0 {
+                        return Ok(f64::NAN);
+                    }
+                    let (h, l, o, cl) = (s.high[b], s.low[b], s.open[b], s.close[b]);
+                    acc += (h / cl).ln() * (h / o).ln() + (l / cl).ln() * (l / o).ln();
+                }
+                (acc.max(0.0) / w as f64).sqrt()
+            }
+            Kind::RealisedVol => log_returns(c).iter().map(|x| x * x).sum::<f64>().sqrt(),
+            Kind::BipowerVar => bipower(&log_returns(c)),
+            Kind::JumpShare => {
+                let r = log_returns(c);
+                let rv2 = r.iter().map(|x| x * x).sum::<f64>();
+                let bv = bipower(&r);
+                if rv2 <= 0.0 {
+                    f64::NAN
+                } else {
+                    ((rv2 - bv * bv) / rv2).clamp(0.0, 1.0)
+                }
+            }
+            Kind::Autocorr(lag) => {
+                let r = log_returns(c);
+                if r.len() <= lag + 1 {
+                    f64::NAN
+                } else {
+                    let m = mean(&r);
+                    let denom: f64 = r.iter().map(|x| (x - m) * (x - m)).sum();
+                    if denom <= 0.0 {
+                        f64::NAN
+                    } else {
+                        let num: f64 = (lag..r.len()).map(|i| (r[i] - m) * (r[i - lag] - m)).sum();
+                        num / denom
+                    }
+                }
+            }
+            Kind::VarianceRatio(q) => {
+                let r = log_returns(c);
+                let v1 = central_moment(&r, 2);
+                let agg: Vec<f64> = r.chunks_exact(q).map(|x| x.iter().sum()).collect();
+                if agg.len() < 2 || v1 <= 0.0 {
+                    f64::NAN
+                } else {
+                    central_moment(&agg, 2) / (q as f64 * v1)
+                }
+            }
+            Kind::EfficiencyRatio => {
+                let net = (c[0] - c[w - 1]).abs();
+                let path: f64 = c.windows(2).map(|x| (x[0] - x[1]).abs()).sum();
+                if path == 0.0 {
+                    f64::NAN
+                } else {
+                    net / path
                 }
             }
         })
     }
 }
 
-fn suffix(name: &str, prefix: &str) -> Option<usize> {
-    name.strip_prefix(prefix)?.parse().ok().filter(|n| *n > 0)
-}
-
-fn lb(n: usize) -> Option<u32> {
-    u32::try_from(n).ok()
-}
-
 /// Construct the implementation for `name`, unregistered.
+///
+/// The registry decides what exists; this decides how it is computed. Every
+/// family in [`crate::registry::families`] is answered here and nothing else is
+/// — `the_catalogue_and_the_constructor_agree_in_both_directions` fails the build
+/// on either kind of drift, so a family cannot be listed and uncomputable, nor
+/// computable and unlisted.
 fn construct(name: &str) -> Option<Arc<dyn Feature>> {
+    let r = crate::registry::resolve(name)?;
+    let p = r.params();
+    let lookback = r.lookback_bars()?;
+    let family = r.family;
     let passthrough = |field| Some(Arc::new(Passthrough(def(name, "passthrough", 1), field)) as Arc<dyn Feature>);
-    let windowed = |family: &str, lookback: u32, kind| Some(Arc::new(Windowed(def(name, family, lookback), kind)) as Arc<dyn Feature>);
-    match name {
+    let windowed = |kind| {
+        let mut d = def(name, family.name, lookback);
+        d.knowledge_lag_ms = family.pit_lag_ms;
+        d.output_dtype = family.output_dtype.to_string();
+        Some(Arc::new(Windowed(d, kind)) as Arc<dyn Feature>)
+    };
+    match family.name {
         "open" => passthrough(Field::Open),
         "high" => passthrough(Field::High),
         "low" => passthrough(Field::Low),
         "close" => passthrough(Field::Close),
         "volume" => passthrough(Field::Volume),
-        "log_returns_1" => windowed("log_return", 2, Kind::LogReturn1),
-        "obv" => windowed("obv", OBV_WINDOW, Kind::Obv),
-        "hour_sin" => windowed("calendar", 1, Kind::HourSin),
-        "hour_cos" => windowed("calendar", 1, Kind::HourCos),
-        "dow_sin" => windowed("calendar", 1, Kind::DowSin),
-        "dow_cos" => windowed("calendar", 1, Kind::DowCos),
-        _ => {
-            if let Some(p) = suffix(name, "ema_") {
-                return (p <= 100_000).then(|| Arc::new(Ema::new(p)) as Arc<dyn Feature>);
-            }
-            if let Some(p) = suffix(name, "rsi_") {
-                return (2..=100_000).contains(&p).then(|| Arc::new(Rsi::new(p)) as Arc<dyn Feature>);
-            }
-            if let Some(w) = suffix(name, "rolling_mean_") {
-                return windowed("rolling_mean", lb(w)?, Kind::RollingMean);
-            }
-            if let Some(w) = suffix(name, "rolling_std_").filter(|w| *w >= 2) {
-                return windowed("rolling_std", lb(w)?, Kind::RollingStd);
-            }
-            if let Some(k) = suffix(name, "returns_").or_else(|| suffix(name, "momentum_")) {
-                return windowed("simple_return", lb(k + 1)?, Kind::SimpleReturn(k));
-            }
-            if let Some(w) = suffix(name, "parkinson_vol_") {
-                return windowed("parkinson_vol", lb(w)?, Kind::Parkinson);
-            }
-            if let Some(w) = suffix(name, "garman_klass_vol_") {
-                return windowed("garman_klass_vol", lb(w)?, Kind::GarmanKlass);
-            }
-            if let Some(w) = suffix(name, "zscore_").filter(|w| *w >= 2) {
-                return windowed("zscore", lb(w)?, Kind::Zscore);
-            }
-            if let Some(w) = suffix(name, "rel_volume_") {
-                return windowed("rel_volume", lb(w)?, Kind::RelVolume);
-            }
-            None
-        }
+
+        "ema" => Some(Arc::new(Ema::new(p[0])) as Arc<dyn Feature>),
+        "rsi" => Some(Arc::new(Rsi::new(p[0])) as Arc<dyn Feature>),
+
+        "returns" => windowed(Kind::SimpleReturn(p[0])),
+        "log_returns" => windowed(Kind::LogReturn(p[0])),
+        "lag" => windowed(Kind::Lag(p[0])),
+        "diff" => windowed(Kind::Diff(p[0])),
+        "roc" => windowed(Kind::Roc(p[0])),
+
+        "rolling_mean" => windowed(Kind::RollingMean),
+        "rolling_std" => windowed(Kind::RollingStd),
+        "rolling_var" => windowed(Kind::RollingVar),
+        "rolling_min" => windowed(Kind::RollingMin),
+        "rolling_max" => windowed(Kind::RollingMax),
+        "rolling_sum" => windowed(Kind::RollingSum),
+        "rolling_median" => windowed(Kind::RollingMedian),
+        "rolling_quantile" => windowed(Kind::RollingQuantile(p[1])),
+        "rolling_skew" => windowed(Kind::RollingSkew),
+        "rolling_kurt" => windowed(Kind::RollingKurt),
+        "zscore" => windowed(Kind::Zscore),
+        "pct_rank" => windowed(Kind::PctRank),
+        "ewma" => windowed(Kind::Ewma(p[0])),
+
+        "atr" => windowed(Kind::Atr(p[0])),
+        "macd" => windowed(Kind::Macd { fast: p[0], slow: p[1] }),
+        "macd_signal" => windowed(Kind::MacdSignal { fast: p[0], slow: p[1], signal: p[2] }),
+        "macd_hist" => windowed(Kind::MacdHist { fast: p[0], slow: p[1], signal: p[2] }),
+        "bb_upper" => windowed(Kind::Bollinger { k: p[1], part: BandPart::Upper }),
+        "bb_lower" => windowed(Kind::Bollinger { k: p[1], part: BandPart::Lower }),
+        "bb_width" => windowed(Kind::Bollinger { k: p[1], part: BandPart::Width }),
+        "bb_pctb" => windowed(Kind::Bollinger { k: p[1], part: BandPart::PctB }),
+        "donchian_upper" => windowed(Kind::Donchian(BandPart::Upper)),
+        "donchian_lower" => windowed(Kind::Donchian(BandPart::Lower)),
+        "donchian_mid" => windowed(Kind::Donchian(BandPart::Mid)),
+        "donchian_width" => windowed(Kind::Donchian(BandPart::Width)),
+        "keltner_upper" => windowed(Kind::Keltner { n: p[0], k: p[1], upper: true }),
+        "keltner_lower" => windowed(Kind::Keltner { n: p[0], k: p[1], upper: false }),
+        "obv" => windowed(Kind::Obv),
+        "rel_volume" => windowed(Kind::RelVolume),
+
+        "hour_sin" => windowed(Kind::HourSin),
+        "hour_cos" => windowed(Kind::HourCos),
+        "dow_sin" => windowed(Kind::DowSin),
+        "dow_cos" => windowed(Kind::DowCos),
+        "utc_session_asia" => windowed(Kind::UtcSession { from: 0, to: 8 }),
+        "utc_session_london" => windowed(Kind::UtcSession { from: 7, to: 16 }),
+        "utc_session_us" => windowed(Kind::UtcSession { from: 13, to: 22 }),
+
+        "parkinson_vol" => windowed(Kind::Parkinson),
+        "garman_klass_vol" => windowed(Kind::GarmanKlass),
+        "rogers_satchell_vol" => windowed(Kind::RogersSatchell),
+        "rv" => windowed(Kind::RealisedVol),
+        "bv" => windowed(Kind::BipowerVar),
+        "jump_share" => windowed(Kind::JumpShare),
+        "autocorr" => windowed(Kind::Autocorr(p[1])),
+        "variance_ratio" => windowed(Kind::VarianceRatio(p[1])),
+        "efficiency_ratio" => windowed(Kind::EfficiencyRatio),
+
+        // Unreachable while the catalogue and this match agree, which
+        // `the_catalogue_and_the_constructor_agree_in_both_directions` asserts.
+        _ => None,
     }
 }
 
@@ -444,5 +829,240 @@ mod tests {
     #[test]
     fn feature_set_version_hash_refuses_an_unknown_member() {
         assert!(feature_set_version_hash(&["ema_7".into(), "not_a_feature".into()]).is_err());
+    }
+
+    // ── the catalogue and the engine are one thing ───────────────────────────
+
+    /// The match arms of `construct`, read out of its own source.
+    fn constructor_arms() -> std::collections::BTreeSet<&'static str> {
+        let body = SOURCE.split("fn construct(name: &str)").nth(1).expect("construct is in this file");
+        let mut arms = std::collections::BTreeSet::new();
+        for piece in body.split('"').skip(1).step_by(2).zip(body.split('"').skip(2).step_by(2)) {
+            let (name, after) = piece;
+            if after.trim_start().starts_with("=>") {
+                arms.insert(name);
+            }
+        }
+        arms
+    }
+
+    /// The registry says what exists and `construct` says how it is computed.
+    /// Either can drift from the other, and both directions are silent failures
+    /// with opposite symptoms: a listed-but-unbuildable family is a feature the
+    /// model is told about and cannot use; a buildable-but-unlisted one is a
+    /// feature that works and that nothing can discover, which is how the
+    /// platform came to hold three disagreeing answers to "what features exist"
+    /// (AGENT-011 §8.1).
+    #[test]
+    fn the_catalogue_and_the_constructor_agree_in_both_directions() {
+        let mut unbuildable = Vec::new();
+        for f in crate::registry::families() {
+            let name = f.example();
+            if construct(&name).is_none() {
+                unbuildable.push(name);
+            }
+        }
+        assert!(unbuildable.is_empty(), "catalogued but not constructible: {unbuildable:?}");
+
+        let arms = constructor_arms();
+        assert!(arms.len() > 40, "the arm scan found only {}; it has drifted", arms.len());
+        let known: std::collections::BTreeSet<&str> = crate::registry::families().iter().filter(|f| f.alias_of.is_none()).map(|f| f.name).collect();
+        let orphan: Vec<&&str> = arms.difference(&known).collect();
+        assert!(orphan.is_empty(), "constructor arms with no catalogue row: {orphan:?}");
+        let unhandled: Vec<&&str> = known.difference(&arms).collect();
+        assert!(unhandled.is_empty(), "catalogue rows with no constructor arm: {unhandled:?}");
+    }
+
+    /// Every family, at its example parameters, passes the declared-lookback
+    /// registration check (AT-13) — so no catalogued feature can serve a value
+    /// computed from bars outside the window it declares (INV-13).
+    #[test]
+    fn every_catalogued_family_passes_the_declared_lookback_check() {
+        for f in crate::registry::families() {
+            let name = f.example();
+            feature(&name).unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+    }
+
+    /// Adversarial (EXECUTION-BOARD §3.3): a family that reads further back than
+    /// it declares must be **refused**, not merely reported. Without this the
+    /// declaration is a comment — and a feature quietly reading three times its
+    /// declared window is exactly what makes a warm-up requirement wrong, because
+    /// the executor would load a lead-in that does not cover it.
+    #[test]
+    fn a_feature_that_reads_past_its_declared_lookback_is_refused() {
+        struct UnderDeclared(FeatureDef);
+        impl Feature for UnderDeclared {
+            fn def(&self) -> &FeatureDef {
+                &self.0
+            }
+            fn compute(&self, f: &WindowedFrame<'_>) -> Result<f64, FeatureError> {
+                let mut acc = 0.0;
+                for b in 0..12 {
+                    acc += f.close(b)?;
+                }
+                Ok(acc)
+            }
+        }
+        let under = UnderDeclared(def("liar_4", "liar", 4));
+        let err = register_check(&under).expect_err("a feature reading past its window must not register");
+        assert!(
+            matches!(err, FeatureError::Registration { .. } | FeatureError::LookbackExceeded { .. }),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// A zero lookback is refused too. It reads like "no history needed" and is
+    /// really "no window at all", which `WindowedFrame` cannot serve a bar from.
+    #[test]
+    fn a_feature_declaring_no_window_is_refused() {
+        struct NoWindow(FeatureDef);
+        impl Feature for NoWindow {
+            fn def(&self) -> &FeatureDef {
+                &self.0
+            }
+            fn compute(&self, _: &WindowedFrame<'_>) -> Result<f64, FeatureError> {
+                Ok(0.0)
+            }
+        }
+        assert!(register_check(&NoWindow(def("void", "void", 0))).is_err());
+    }
+
+    // ── the families themselves ─────────────────────────────────────────────
+
+    /// The ceiling this phase existed to remove: the platform used to accept
+    /// `ema_N` and `rsi_N` and nothing else on the backtest path. These are the
+    /// families a strategy can now name, and each produces a finite value.
+    #[test]
+    fn the_whole_catalogue_computes_a_finite_value_on_ordinary_bars() {
+        let r = rows(&(0..4_000).map(|i| 100.0 + (f64::from(i) * 0.013).sin() * 8.0 + f64::from(i) * 0.002).collect::<Vec<_>>());
+        let mut absent = Vec::new();
+        for f in crate::registry::families() {
+            let name = f.example();
+            let feat = feature(&name).unwrap();
+            match value_at(feat.as_ref(), &r, r.len() - 1) {
+                Some(v) => assert!(v.is_finite(), "{name} = {v}"),
+                None => absent.push(name),
+            }
+        }
+        assert!(absent.is_empty(), "no value on 4,000 clean bars: {absent:?}");
+    }
+
+    #[test]
+    fn atr_is_the_wilder_average_of_the_true_range() {
+        // Constant 2.0-wide bars with no gaps: every true range is 2.0, so any
+        // weighting of them averages to 2.0.
+        let r: Vec<FeatureRow> = (0..200)
+            .map(|i| FeatureRow { ts_ns: i as i64 * 3_600_000_000_000, open: 100.0, high: 101.0, low: 99.0, close: 100.0, volume: 1.0 })
+            .collect();
+        let v = value_at(feature("atr_14").unwrap().as_ref(), &r, 199).unwrap();
+        assert!((v - 2.0).abs() < 1e-12, "atr_14 = {v}");
+    }
+
+    #[test]
+    fn macd_is_the_difference_of_the_two_emas_it_names() {
+        let closes: Vec<f64> = (0..1_000).map(|i| 100.0 + (f64::from(i) * 0.07).sin() * 6.0).collect();
+        let r = rows(&closes);
+        let d = r.len() - 1;
+        let macd = value_at(feature("macd_12_26").unwrap().as_ref(), &r, d).unwrap();
+        let fast = value_at(feature("ema_12").unwrap().as_ref(), &r, d).unwrap();
+        let slow = value_at(feature("ema_26").unwrap().as_ref(), &r, d).unwrap();
+        assert_eq!(macd.to_bits(), (fast - slow).to_bits(), "macd must be exactly its two legs");
+    }
+
+    #[test]
+    fn macd_hist_is_macd_minus_its_signal() {
+        let closes: Vec<f64> = (0..1_500).map(|i| 100.0 + (f64::from(i) * 0.05).cos() * 4.0).collect();
+        let r = rows(&closes);
+        let d = r.len() - 1;
+        let hist = value_at(feature("macd_hist_12_26_9").unwrap().as_ref(), &r, d).unwrap();
+        let macd = value_at(feature("macd_12_26").unwrap().as_ref(), &r, d).unwrap();
+        let sig = value_at(feature("macd_signal_12_26_9").unwrap().as_ref(), &r, d).unwrap();
+        assert!((hist - (macd - sig)).abs() < 1e-9, "{hist} vs {}", macd - sig);
+    }
+
+    #[test]
+    fn a_bollinger_band_brackets_its_own_middle() {
+        let r = rows(&(0..200).map(|i| 100.0 + (f64::from(i) * 0.3).sin() * 5.0).collect::<Vec<_>>());
+        let d = 199;
+        let up = value_at(feature("bb_upper_20_2").unwrap().as_ref(), &r, d).unwrap();
+        let lo = value_at(feature("bb_lower_20_2").unwrap().as_ref(), &r, d).unwrap();
+        let mid = value_at(feature("rolling_mean_20").unwrap().as_ref(), &r, d).unwrap();
+        let pctb = value_at(feature("bb_pctb_20_2").unwrap().as_ref(), &r, d).unwrap();
+        assert!(lo < mid && mid < up, "{lo} {mid} {up}");
+        let close = r[d].close;
+        assert!((pctb - (close - lo) / (up - lo)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_donchian_channel_contains_every_bar_of_its_window() {
+        let r = rows(&(0..120).map(|i| 100.0 + f64::from(i % 17)).collect::<Vec<_>>());
+        let d = 119;
+        let up = value_at(feature("donchian_upper_20").unwrap().as_ref(), &r, d).unwrap();
+        let lo = value_at(feature("donchian_lower_20").unwrap().as_ref(), &r, d).unwrap();
+        for row in &r[d - 19..=d] {
+            assert!(row.high <= up + 1e-12 && row.low >= lo - 1e-12);
+        }
+    }
+
+    #[test]
+    fn pct_rank_is_one_at_a_window_high_and_zero_at_a_window_low() {
+        let rising = rows(&(0..60).map(|i| 100.0 + f64::from(i)).collect::<Vec<_>>());
+        assert_eq!(value_at(feature("pct_rank_20").unwrap().as_ref(), &rising, 59), Some(1.0));
+        let falling = rows(&(0..60).map(|i| 100.0 - f64::from(i)).collect::<Vec<_>>());
+        assert_eq!(value_at(feature("pct_rank_20").unwrap().as_ref(), &falling, 59), Some(0.0));
+    }
+
+    #[test]
+    fn efficiency_ratio_is_one_on_a_straight_line_and_near_zero_on_a_saw() {
+        let straight = rows(&(0..80).map(|i| 100.0 + f64::from(i)).collect::<Vec<_>>());
+        let v = value_at(feature("efficiency_ratio_20").unwrap().as_ref(), &straight, 79).unwrap();
+        assert!((v - 1.0).abs() < 1e-12, "{v}");
+        let saw = rows(&(0..80).map(|i| 100.0 + f64::from(i % 2)).collect::<Vec<_>>());
+        let v = value_at(feature("efficiency_ratio_20").unwrap().as_ref(), &saw, 79).unwrap();
+        assert!(v < 0.1, "{v}");
+    }
+
+    #[test]
+    fn a_utc_session_is_one_inside_its_window_and_zero_outside() {
+        let r: Vec<FeatureRow> = (0..24)
+            .map(|h| FeatureRow { ts_ns: i64::from(h) * 3_600_000_000_000, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0 })
+            .collect();
+        let f = feature("utc_session_london").unwrap();
+        assert_eq!(value_at(f.as_ref(), &r, 7), Some(1.0));
+        assert_eq!(value_at(f.as_ref(), &r, 15), Some(1.0));
+        assert_eq!(value_at(f.as_ref(), &r, 16), Some(0.0));
+        assert_eq!(value_at(f.as_ref(), &r, 6), Some(0.0));
+    }
+
+    /// An alias is a name, not a second implementation: it must produce the same
+    /// `code_hash` as its canonical family, or two paths could compute the same
+    /// number and record different provenance for it (INV-14).
+    #[test]
+    fn an_alias_and_its_canonical_family_are_the_same_implementation() {
+        for (alias, canonical) in [("sma_20", "rolling_mean_20"), ("momentum_5", "returns_5"), ("ret_5", "returns_5"), ("logret_1", "log_returns_1")] {
+            let a = feature(alias).unwrap();
+            let c = feature(canonical).unwrap();
+            assert_eq!(a.def().code_hash, c.def().code_hash, "{alias} vs {canonical}");
+            assert_eq!(a.def().lookback_bars, c.def().lookback_bars);
+        }
+        let r = rows(&(0..200).map(|i| 100.0 + (f64::from(i) * 0.21).sin() * 3.0).collect::<Vec<_>>());
+        for (alias, canonical) in [("sma_20", "rolling_mean_20"), ("momentum_5", "returns_5")] {
+            let a = value_at(feature(alias).unwrap().as_ref(), &r, 199);
+            let c = value_at(feature(canonical).unwrap().as_ref(), &r, 199);
+            assert_eq!(a.map(f64::to_bits), c.map(f64::to_bits), "{alias} vs {canonical}");
+        }
+    }
+
+    /// Every family declares the bar-derived lag, and it travels onto the
+    /// definition. A family over a lagged source that forgot to set it would be
+    /// claiming the source arrives instantly.
+    #[test]
+    fn the_declared_pit_lag_reaches_the_feature_definition() {
+        for f in crate::registry::families() {
+            let name = f.example();
+            let built = feature(&name).unwrap();
+            assert_eq!(built.def().knowledge_lag_ms, f.pit_lag_ms, "{name}");
+        }
     }
 }
