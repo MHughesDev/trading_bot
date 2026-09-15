@@ -18,6 +18,15 @@
 //! instant the platform received the bytes, or it is `event_time + the source's
 //! declared lag` carrying [`QualityFlags::BACKFILLED_KNOWLEDGE_TIME`]. There is no
 //! third option and no unflagged path between them.
+//!
+//! The axis is **the receipt, not the transport.** A row the platform watched
+//! arrive is observed whether it came over a WebSocket or an HTTP poll; a row
+//! pulled from a history endpoint long afterwards is derived, because no receipt
+//! for it was ever recorded. Keying this on push-versus-pull instead looks
+//! conservative and is not: it marks every forward poll derived, so a forward
+//! collector runs for months and still supplies Gate 15 with nothing, and it
+//! overwrites a real receipt with a sentinel that can land *later* than the moment
+//! the bytes were actually in hand.
 
 use std::time::Duration;
 
@@ -26,35 +35,27 @@ use serde::{Deserialize, Serialize};
 
 use crate::quality::QualityFlags;
 
-/// How a source delivers data, which decides whether its knowledge time can be
-/// observed at all.
+/// How a source delivers data.
+///
+/// This records the transport and the shape of the endpoint. It does **not** decide
+/// provenance — [`Collection`] does, per row, because one source commonly supplies
+/// both forward polls and after-the-fact history.
 ///
 /// Mirrors the `kind` column of `dataplane.source` (migration 0046).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
-    /// A push stream. Receipt time *is* knowledge time, so it can be observed.
+    /// A push stream.
     LiveStream,
-    /// A pull endpoint returning history. Whatever it returns was knowable before
-    /// we asked, so our receipt time is not the knowledge time and must not be
-    /// recorded as one.
+    /// A pull endpoint. Rows the platform polls forward carry a real receipt and
+    /// are observed; rows it pulls out of the endpoint's history do not and are
+    /// derived.
     RestHistory,
     VendorFile,
     Derived,
 }
 
 impl SourceKind {
-    /// Whether a row from this source may ever carry an observed knowledge time.
-    ///
-    /// `RestHistory` cannot, *even for a row that happens to be fresh*. A REST poll
-    /// that catches a value seconds after it was published still did not observe
-    /// its publication: it observed our poll. Treating a fresh pull as observed is
-    /// how the sentinel leaks into Gate 15's evidence.
-    #[must_use]
-    pub const fn can_observe_knowledge(self) -> bool {
-        matches!(self, Self::LiveStream)
-    }
-
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -85,10 +86,13 @@ impl SourceDecl {
     /// Kraken Futures public `/derivatives` ticker poll: funding rate, funding rate
     /// prediction and open interest.
     ///
-    /// REST, therefore never observed. The declared lag is one funding hour, the
-    /// interval at which the underlying value changes: a value read from the ticker
-    /// could have been published at any point since the last hourly settlement, and
-    /// the honest bound is the whole interval, not the round-trip time.
+    /// Polled forward on a schedule, so its rows carry a real receipt and are
+    /// **observed** — this is the leg that produces forward evidence for Gate 15
+    /// (D-P3), and the reason switching this collector on is urgent.
+    ///
+    /// The declared lag of one funding hour is not this source's knowledge time; it
+    /// is the bound a *backfill* through the same source would have to use, and what
+    /// a dataset carries into `EmbargoInputs.max_knowledge_lag_ms`.
     #[must_use]
     pub const fn kraken_futures_ticker() -> Self {
         Self {
@@ -101,7 +105,9 @@ impl SourceDecl {
 
     /// Kraken Futures `/derivatives/api/v3/historical-funding-rates`.
     ///
-    /// Explicit history. Every row is a backfill by construction.
+    /// Explicit history: a year of settlements nobody watched arrive. Every row is
+    /// [`Collection::Historical`] by construction, and there is no call site that
+    /// could say otherwise.
     #[must_use]
     pub const fn kraken_futures_funding_history() -> Self {
         Self {
@@ -112,9 +118,13 @@ impl SourceDecl {
         }
     }
 
-    /// Tradier option chain snapshots. Delayed data: the row is observed, but
-    /// observed *late*, and those are not the same thing — so it is a REST source
-    /// with a 900 s declared lag, not a live one.
+    /// Tradier option chain snapshots.
+    ///
+    /// Delayed data: a forward snapshot IS observed — the platform held the bytes
+    /// and knows when — but it observed a quote that was already 900 s stale. The
+    /// receipt is the knowledge time; the 900 s is the declared lag the row carries
+    /// into embargo arithmetic. Observed and observed-late are different facts and
+    /// this source records both.
     #[must_use]
     pub const fn tradier_chain() -> Self {
         Self {
@@ -125,24 +135,71 @@ impl SourceDecl {
         }
     }
 
-    /// Derive the knowledge time for a row from this source.
+    /// The knowledge time for one row, given how that row was collected.
     ///
-    /// `received_at` is when the platform had the bytes; `event_time` is when the
-    /// fact happened. A live stream's knowledge time is the receipt. Anything else
-    /// is `event_time + declared_lag`, flagged.
+    /// The axis that decides observed-versus-derived is **whether the platform
+    /// holds a receipt for this particular row** — not whether the transport was a
+    /// push or a pull. A WebSocket frame and an HTTP poll that the platform watched
+    /// arrive are equally observed: in both cases there is a real instant at which
+    /// the bytes were in hand, and recording it is the honest thing to do. A row
+    /// pulled out of a history endpoint months later is derived, because no such
+    /// instant was ever recorded and inventing one is the whole failure mode.
     ///
-    /// Note what this function does *not* take: an override, an `Option`, or a
-    /// "trust me, it's live" flag. The source's kind decides, and a caller cannot
-    /// argue with it.
-    #[must_use]
-    pub fn knowledge_for(&self, event_time: DateTime<Utc>, received_at: DateTime<Utc>) -> Knowledge {
-        if self.kind.can_observe_knowledge() {
-            Knowledge::Observed { at: received_at }
-        } else {
-            let lag = chrono::Duration::from_std(self.declared_lag).unwrap_or_else(|_| chrono::Duration::zero());
-            Knowledge::Derived { at: event_time + lag, from_event_time: event_time, declared_lag: self.declared_lag }
+    /// Getting this axis wrong is not academic. Keying it on transport marks every
+    /// forward poll as derived, which means a forward collector produces **no
+    /// forward evidence at all** under D-P3 — the collector runs, the disk fills,
+    /// and Gate 15 still has nothing. It also replaces a real receipt with
+    /// `event_time + declared_lag`, which for a 05:00 settlement polled at 05:40
+    /// stamps 06:00: an invented knowledge time *later* than the moment the
+    /// platform actually held the bytes.
+    ///
+    /// Note what this function does not take: an override, an `Option`, or a
+    /// defaulted flag. The caller must say which [`Collection`] this row came from,
+    /// and there is no third answer.
+    ///
+    /// # Errors
+    /// [`KnowledgeError::ObservedBeforeEvent`] if a receipt precedes the event it
+    /// claims to observe. Nothing is observed before it happens, and a clock skew
+    /// that says otherwise must surface rather than be written.
+    pub fn knowledge_for(&self, event_time: DateTime<Utc>, how: Collection) -> Result<Knowledge, KnowledgeError> {
+        match how {
+            Collection::Forward { received_at } => {
+                if received_at < event_time {
+                    return Err(KnowledgeError::ObservedBeforeEvent { received_at, event_time, source_name: self.name });
+                }
+                Ok(Knowledge::Observed { at: received_at })
+            }
+            Collection::Historical => {
+                let lag = chrono::Duration::from_std(self.declared_lag).unwrap_or_else(|_| chrono::Duration::zero());
+                Ok(Knowledge::Derived { at: event_time + lag, from_event_time: event_time, declared_lag: self.declared_lag })
+            }
         }
     }
+}
+
+/// How one row reached the platform.
+///
+/// This is per-row, not per-source, because one source legitimately supplies both:
+/// Kraken Futures' ticker is polled forward every hour *and* its
+/// `historical-funding-rates` endpoint hands back a year nobody watched arrive.
+/// The same `SourceDecl` produces observed rows for the first and derived rows for
+/// the second, and the distinction has to travel with the row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Collection {
+    /// The platform held the bytes at `received_at` and is recording that fact.
+    /// The row is forward evidence (D-P3).
+    Forward { received_at: DateTime<Utc> },
+    /// Fetched from a history endpoint after the fact. No receipt exists, so the
+    /// knowledge time is the declared sentinel and the row is flagged.
+    Historical,
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum KnowledgeError {
+    // `source_name`, not `source`: thiserror treats a field called `source` as the
+    // error's cause and demands it implement `StdError`.
+    #[error("source {source_name}: receipt {received_at} precedes the event {event_time} it claims to observe")]
+    ObservedBeforeEvent { received_at: DateTime<Utc>, event_time: DateTime<Utc>, source_name: &'static str },
 }
 
 /// When the platform could first have known a fact — and, inseparably, whether that
@@ -221,44 +278,70 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 9, 15, h, 0, 0).unwrap()
     }
 
+    fn fwd(at: DateTime<Utc>) -> Collection {
+        Collection::Forward { received_at: at }
+    }
+
     #[test]
     fn a_live_stream_observes_its_knowledge_time() {
-        let live = SourceDecl {
-            name: "kraken_ws",
-            kind: SourceKind::LiveStream,
-            declared_lag: Duration::ZERO,
-            notes: "live",
-        };
-        let k = live.knowledge_for(t(1), t(1) + chrono::Duration::milliseconds(40));
+        let live = SourceDecl { name: "kraken_ws", kind: SourceKind::LiveStream, declared_lag: Duration::ZERO, notes: "live" };
+        let recv = t(1) + chrono::Duration::milliseconds(40);
+        let k = live.knowledge_for(t(1), fwd(recv)).unwrap();
         assert!(!k.is_derived());
         assert!(k.is_forward_evidence());
         assert_eq!(k.quality_flags(), QualityFlags::NONE);
-        assert_eq!(k.time(), t(1) + chrono::Duration::milliseconds(40));
+        assert_eq!(k.time(), recv);
     }
 
-    /// The bug, as a test. A REST poll that happens to catch a fresh value must
-    /// still be derived: we observed our poll, not the publication.
+    /// The correction that matters most in this module: a **forward poll** is
+    /// observed. Marking it derived because the transport was a pull would mean a
+    /// collector running for months supplies Gate 15 with nothing (D-P3), which is
+    /// the opposite of why P-0.3 is urgent.
     #[test]
-    fn a_fresh_rest_poll_is_still_derived_not_observed() {
-        let rest = SourceDecl::kraken_futures_ticker();
-        // Received one second after the event — as fresh as a poll can be.
-        let k = rest.knowledge_for(t(1), t(1) + chrono::Duration::seconds(1));
-        assert!(k.is_derived(), "a REST read is never observed knowledge, however fresh");
+    fn a_forward_rest_poll_is_observed_and_is_forward_evidence() {
+        let src = SourceDecl::kraken_futures_ticker();
+        let recv = t(5) + chrono::Duration::minutes(40);
+        let k = src.knowledge_for(t(5), fwd(recv)).unwrap();
+        assert!(!k.is_derived(), "a poll the platform watched arrive is observed, whatever the transport");
+        assert!(k.is_forward_evidence(), "this is the leg that feeds Gate 15");
+        assert_eq!(k.quality_flags(), QualityFlags::NONE);
+        assert_eq!(k.time(), recv, "the real receipt is kept, not replaced by a sentinel");
+        let sentinel = src.knowledge_for(t(5), Collection::Historical).unwrap();
+        assert!(sentinel.time() > recv, "the sentinel would have post-dated the real receipt");
+    }
+
+    /// The original bug, as a test. A row pulled from a history endpoint has no
+    /// receipt, so its knowledge time is the declared sentinel and it is flagged.
+    #[test]
+    fn a_historical_pull_is_derived_and_flagged() {
+        let src = SourceDecl::kraken_futures_funding_history();
+        let k = src.knowledge_for(t(1), Collection::Historical).unwrap();
+        assert!(k.is_derived());
         assert!(!k.is_forward_evidence(), "the sentinel must never reach Gate 15's evidence (D-P3)");
         assert!(k.quality_flags().contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
-        assert_eq!(k.time(), t(2), "derived knowledge is event_time + the declared lag, not receipt");
+        assert_eq!(k.time(), t(2), "derived knowledge is event_time + the declared lag");
     }
 
-    /// Adversarial: an observed row and a derived row for the same event must be
-    /// distinguishable after a serialization round trip. If they collapse to the
-    /// same JSON, provenance is lost in transit and the whole discipline is
-    /// decorative.
+    /// Adversarial: nothing is observed before it happens. A receipt that precedes
+    /// its event is clock skew or a parsing error, and it must surface rather than
+    /// be written as a row that knows the future.
+    #[test]
+    fn a_receipt_before_its_event_is_refused() {
+        let src = SourceDecl::kraken_futures_ticker();
+        let err = src.knowledge_for(t(5), fwd(t(4))).unwrap_err();
+        assert!(matches!(err, KnowledgeError::ObservedBeforeEvent { .. }));
+        assert!(err.to_string().contains("precedes"));
+        assert!(src.knowledge_for(t(5), fwd(t(5))).is_ok());
+    }
+
+    /// Adversarial: an observed row and a derived row for the same event must stay
+    /// distinguishable through a serialization round trip. If they collapse to the
+    /// same JSON, provenance is lost in transit and the discipline is decorative.
     #[test]
     fn observed_and_derived_stay_distinguishable_through_serde() {
-        let rest = SourceDecl::kraken_futures_ticker();
-        let live = SourceDecl { name: "x", kind: SourceKind::LiveStream, declared_lag: Duration::ZERO, notes: "" };
-        let d = rest.knowledge_for(t(1), t(1));
-        let o = live.knowledge_for(t(1), t(2));
+        let src = SourceDecl::kraken_futures_ticker();
+        let d = src.knowledge_for(t(1), Collection::Historical).unwrap();
+        let o = src.knowledge_for(t(1), fwd(t(2))).unwrap();
         assert_ne!(d, o);
         let dj = serde_json::to_string(&d).unwrap();
         let oj = serde_json::to_string(&o).unwrap();
@@ -267,18 +350,20 @@ mod tests {
         assert!(oj.contains("observed"), "{oj}");
         assert_eq!(serde_json::from_str::<Knowledge>(&dj).unwrap(), d);
         assert_eq!(serde_json::from_str::<Knowledge>(&oj).unwrap(), o);
-        // Even when both land on the same instant, the provenance differs.
-        let same_instant = live.knowledge_for(t(1), t(2));
-        assert_eq!(same_instant.time(), d.time());
-        assert_ne!(same_instant.is_derived(), d.is_derived());
+        assert_eq!(o.time(), d.time());
+        assert_ne!(o.is_derived(), d.is_derived());
+        assert_ne!(o.quality_flags().0, d.quality_flags().0);
     }
 
+    /// One source, both legs. This is why [`Collection`] is per row and not a
+    /// property of the [`SourceDecl`].
     #[test]
-    fn only_a_live_stream_may_observe() {
-        assert!(SourceKind::LiveStream.can_observe_knowledge());
-        for k in [SourceKind::RestHistory, SourceKind::VendorFile, SourceKind::Derived] {
-            assert!(!k.can_observe_knowledge(), "{} must not claim observed knowledge", k.as_str());
-        }
+    fn one_source_supplies_both_legs() {
+        let src = SourceDecl::kraken_futures_ticker();
+        let forward = src.knowledge_for(t(5), fwd(t(5) + chrono::Duration::minutes(1))).unwrap();
+        let history = src.knowledge_for(t(5), Collection::Historical).unwrap();
+        assert!(forward.is_forward_evidence());
+        assert!(!history.is_forward_evidence());
     }
 
     #[test]
@@ -296,8 +381,9 @@ mod tests {
 
     #[test]
     fn implied_lag_is_what_a_dataset_must_carry() {
-        let rest = SourceDecl::tradier_chain();
-        let k = rest.knowledge_for(t(1), t(1));
+        let src = SourceDecl::tradier_chain();
+        let k = src.knowledge_for(t(1), Collection::Historical).unwrap();
         assert_eq!(k.implied_lag(t(1)), Duration::from_secs(900));
     }
 }
+

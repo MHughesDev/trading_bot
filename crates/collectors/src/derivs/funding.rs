@@ -23,16 +23,30 @@
 //! instruments, a declared User-Agent identifying the platform, and a limiter that
 //! refuses rather than retries.
 //!
-//! # Why the knowledge time is derived
+//! # The two legs, and their two provenances
 //!
-//! Both endpoints are REST. A poll that catches a funding rate one second after it
-//! settled still did not observe the settlement; it observed our poll. So every row
-//! this module produces carries [`Knowledge::Derived`] and
-//! `BACKFILLED_KNOWLEDGE_TIME`, with `knowledge_time = event_time + one settlement
-//! interval`. That is deliberately pessimistic and deliberately honest: Gate 15
-//! takes forward evidence from observed rows only (Set P D-P3), and a REST poller
-//! claiming observation is exactly the bug that left all 158,259 rows of
-//! `market_bars_v2` indistinguishable from live observation.
+//! This collector has a forward leg and a history leg, and they are not the same
+//! kind of fact.
+//!
+//! The **forward leg** polls `/tickers` on a schedule. The platform holds those
+//! bytes at a known instant, so `knowledge_time` is that receipt, the row is
+//! [`Knowledge::Observed`], and it carries no sentinel. This is the leg that
+//! matters: it is the only thing here that produces forward evidence for Gate 15
+//! (Set P D-P3), and it is why switching this collector on is urgent rather than
+//! merely useful.
+//!
+//! The **history leg** reads `historical-funding-rates` — about a rolling year of
+//! settlements nobody watched arrive. No receipt for those exists, so their
+//! knowledge time is the declared sentinel `event_time + one settlement interval`
+//! and every row carries `BACKFILLED_KNOWLEDGE_TIME`.
+//!
+//! The axis is the receipt, not the transport. Marking the forward leg derived
+//! because it happens to be a pull would leave the collector running for months and
+//! Gate 15 still empty, and would replace a real receipt with a sentinel that lands
+//! *after* it — a 05:00 settlement polled at 05:40 would be stamped 06:00. The
+//! failure this discipline actually guards against is the opposite one:
+//! back-dating, which is how all 158,259 rows of `market_bars_v2` ended up stamped
+//! `available_time = event_time` and indistinguishable from live observation.
 //!
 //! Predicted and realized rates are stored under different `kind`s because they
 //! have different knowability. A *prediction* of the next settlement is published
@@ -41,7 +55,7 @@
 //! would hand a strategy tomorrow's funding today.
 
 use chrono::{DateTime, Duration, Utc};
-use dataplane::source::{Knowledge, SourceDecl};
+use dataplane::source::{Collection, Knowledge, SourceDecl};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
@@ -71,6 +85,19 @@ pub enum FundingError {
     VenueError(String, String),
     #[error("unparseable field {field}: {value:?}")]
     Unparseable { field: &'static str, value: String },
+    /// A row could not state whether its knowledge time was observed or derived.
+    /// It is not written (Set P §5).
+    #[error("provenance: {0}")]
+    Provenance(String),
+}
+
+/// Stamp a row the platform watched arrive.
+///
+/// Wraps the refusal so a clock skew that would make a row observed *before* its
+/// event surfaces as a collector error rather than a stored row that knows the
+/// future.
+fn observed(src: &SourceDecl, event_time: DateTime<Utc>, received_at: DateTime<Utc>) -> Result<Knowledge, FundingError> {
+    src.knowledge_for(event_time, Collection::Forward { received_at }).map_err(|e| FundingError::Provenance(e.to_string()))
 }
 
 /// A realized settlement, or the venue's prediction of the next one.
@@ -276,7 +303,7 @@ pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSna
                         event_time: settled,
                         venue_ts,
                         ingest_time: received_at,
-                        knowledge: src.knowledge_for(settled, received_at),
+                        knowledge: observed(&src, settled, received_at)?,
                         rate,
                         relative_rate: relative,
                     });
@@ -300,7 +327,7 @@ pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSna
                         event_time: next,
                         venue_ts,
                         ingest_time: received_at,
-                        knowledge: src.knowledge_for(settled, received_at),
+                        knowledge: observed(&src, settled, received_at)?,
                         rate,
                         relative_rate: None,
                     });
@@ -322,7 +349,7 @@ pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSna
                         event_time: received_at,
                         venue_ts: t.last_time.or(venue_ts),
                         ingest_time: received_at,
-                        knowledge: src.knowledge_for(received_at, received_at),
+                        knowledge: observed(&src, received_at, received_at)?,
                         open_interest: oi,
                         mark_price: mark,
                     });
@@ -365,7 +392,9 @@ pub fn parse_history(body: &str, instrument: &str, received_at: DateTime<Utc>) -
             event_time: r.timestamp,
             venue_ts: Some(r.timestamp),
             ingest_time: received_at,
-            knowledge: src.knowledge_for(r.timestamp, received_at),
+            knowledge: src
+                .knowledge_for(r.timestamp, Collection::Historical)
+                .map_err(|e| FundingError::Provenance(e.to_string()))?,
             rate,
             relative_rate: relative,
         });
@@ -514,38 +543,54 @@ mod tests {
         assert!(btc.relative_rate.is_some());
     }
 
-    /// The load-bearing test: **a REST poll never produces an observed knowledge
-    /// time.** Every row carries the sentinel, so Gate 15 cannot mistake a polled
-    /// value for forward evidence (D-P3).
+    /// The load-bearing test, and the whole point of P-0.3: **the forward leg
+    /// produces observed rows.** Every polled row records its real receipt, carries
+    /// no sentinel, and is admissible as forward evidence under D-P3. A collector
+    /// whose rows were all flagged would run for months and leave Gate 15 empty.
     #[test]
-    fn every_row_from_a_rest_poll_is_derived_and_flagged() {
-        let s = parse_tickers(TICKERS, at(5, 40)).unwrap();
+    fn the_forward_leg_is_observed_and_is_forward_evidence() {
+        let received = at(5, 40);
+        let s = parse_tickers(TICKERS, received).unwrap();
         assert!(!s.funding.is_empty() && !s.open_interest.is_empty());
         for f in &s.funding {
-            assert!(f.knowledge.is_derived(), "{} funding claimed observed knowledge", f.instrument);
-            assert!(!f.knowledge.is_forward_evidence());
-            assert!(f.knowledge.quality_flags().contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+            assert!(!f.knowledge.is_derived(), "{} was polled forward and must be observed", f.instrument);
+            assert!(f.knowledge.is_forward_evidence(), "{} must be admissible under D-P3", f.instrument);
+            assert!(!f.knowledge.quality_flags().contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+            assert_eq!(f.knowledge.time(), received, "the real receipt is kept, not a sentinel");
         }
         for o in &s.open_interest {
-            assert!(o.knowledge.is_derived(), "{} open interest claimed observed knowledge", o.instrument);
-            assert!(o.knowledge.quality_flags().contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
-        }
-        for f in parse_history(HISTORY, "PF_XBTUSD", at(5, 40)).unwrap() {
-            assert!(f.knowledge.is_derived());
-            assert!(f.knowledge.quality_flags().contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+            assert!(!o.knowledge.is_derived(), "{} was polled forward and must be observed", o.instrument);
+            assert!(o.knowledge.is_forward_evidence());
+            assert_eq!(o.knowledge.time(), received);
         }
     }
 
-    /// Adversarial: a realized rate may not be knowable before it settles. If the
-    /// derived knowledge time ever landed at or before `event_time`, a strategy
-    /// reading `knowledge_time <= as_of` would receive a settlement that had not
-    /// happened yet.
+    /// And the history leg is the other thing entirely: nobody watched those
+    /// settlements arrive, so every row is derived and flagged.
+    #[test]
+    fn the_history_leg_is_derived_and_flagged() {
+        let rows = parse_history(HISTORY, "PF_XBTUSD", at(5, 40)).unwrap();
+        assert!(!rows.is_empty());
+        for f in &rows {
+            assert!(f.knowledge.is_derived(), "a pulled settlement has no receipt");
+            assert!(!f.knowledge.is_forward_evidence(), "the sentinel must never reach Gate 15's evidence (D-P3)");
+            assert!(f.knowledge.quality_flags().contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+            assert_eq!(f.knowledge.time(), f.event_time + Duration::seconds(SETTLEMENT_SECS));
+        }
+    }
+
+    /// Adversarial: a realized rate may never be knowable *before* it settles. If a
+    /// knowledge time ever landed before `event_time`, a strategy reading
+    /// `knowledge_time <= as_of` would receive a settlement that had not happened.
+    /// This holds on both legs, for different reasons: the forward leg because a
+    /// poll happens after the settlement it reports, the history leg because its
+    /// sentinel is `event_time + lag`.
     #[test]
     fn a_realized_rate_is_never_knowable_before_it_settles() {
         let s = parse_tickers(TICKERS, at(5, 40)).unwrap();
         for f in s.funding.iter().filter(|f| f.kind == FundingKind::Realized) {
             assert!(
-                f.knowledge.time() > f.event_time,
+                f.knowledge.time() >= f.event_time,
                 "{} realized funding is knowable at {} for a settlement at {}",
                 f.instrument,
                 f.knowledge.time(),
@@ -554,6 +599,25 @@ mod tests {
         }
         for f in parse_history(HISTORY, "PF_XBTUSD", at(5, 40)).unwrap() {
             assert!(f.knowledge.time() > f.event_time);
+        }
+    }
+
+    /// Adversarial: a receipt that precedes the settlement it reports is clock skew,
+    /// and the collector must refuse the whole poll rather than write a row that
+    /// knows the future. Reachable in practice — the venue's clock and ours differ.
+    #[test]
+    fn a_poll_that_predates_its_settlement_is_refused() {
+        // A prediction is stamped for the NEXT settlement, so a receipt exactly on
+        // an hour boundary makes the realized leg fine and lets us aim the skew at
+        // a row whose event time is genuinely ahead of the receipt.
+        let src = SourceDecl::kraken_futures_ticker();
+        let skewed = src.knowledge_for(at(6, 0), Collection::Forward { received_at: at(5, 40) });
+        assert!(skewed.is_err(), "a receipt before its event must be refused, not written");
+        assert!(observed(&src, at(6, 0), at(5, 40)).is_err());
+        // The collector surfaces it as a provenance error rather than a silent row.
+        match observed(&src, at(6, 0), at(5, 40)) {
+            Err(FundingError::Provenance(m)) => assert!(m.contains("precedes"), "{m}"),
+            other => panic!("expected a provenance refusal, got {other:?}"),
         }
     }
 

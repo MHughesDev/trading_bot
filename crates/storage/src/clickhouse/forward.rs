@@ -329,7 +329,7 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use dataplane::quality::QualityFlags;
-    use dataplane::source::SourceDecl;
+    use dataplane::source::{Collection, SourceDecl};
     use rust_decimal::prelude::FromStr;
 
     fn t(h: u32) -> DateTime<Utc> {
@@ -352,15 +352,22 @@ mod tests {
     }
 
     /// The flag is computed from the provenance, so a derived row cannot reach the
-    /// wire without `BACKFILLED_KNOWLEDGE_TIME`. There is no argument to get wrong.
+    /// wire without `BACKFILLED_KNOWLEDGE_TIME` and a forward-polled one cannot
+    /// reach it wearing a sentinel it did not earn. There is no argument to get
+    /// wrong, because there is no argument.
     #[test]
     fn a_derived_row_carries_the_sentinel_and_an_observed_one_does_not() {
-        let rest = SourceDecl::kraken_futures_ticker();
-        let derived = row(rest.knowledge_for(t(5), t(5)));
+        let src = SourceDecl::kraken_futures_ticker();
+        let derived = row(src.knowledge_for(t(5), Collection::Historical).unwrap());
         assert_eq!(derived.knowledge.quality_flags().0, QualityFlags::BACKFILLED_KNOWLEDGE_TIME.0);
-        let observed = row(Knowledge::Observed { at: t(6) });
+
+        let observed = row(src.knowledge_for(t(5), Collection::Forward { received_at: t(6) }).unwrap());
         assert_eq!(observed.knowledge.quality_flags().0, QualityFlags::NONE.0);
-        // And the two are distinguishable in the row that goes to storage.
+        assert!(observed.knowledge.is_forward_evidence(), "a forward poll is what Gate 15 reads (D-P3)");
+
+        // And the two are distinguishable in the row that goes to storage, even
+        // though both land on the same instant here.
+        assert_eq!(derived.knowledge.time(), observed.knowledge.time());
         assert_ne!(derived.knowledge.quality_flags().0, observed.knowledge.quality_flags().0);
     }
 

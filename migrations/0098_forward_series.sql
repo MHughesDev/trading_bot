@@ -20,11 +20,17 @@
 -- /derivatives/api/v3/historical-funding-rates?symbol=PF_XBTUSD returned 8,870
 -- hourly rates covering 2025-09-10 to 2026-09-15. No 451 and no geo-block.
 --
--- Both are declared `rest_history`, not `live_stream`, and that is the whole point.
--- A REST poll that catches a value one second after publication still did not
--- observe the publication — it observed our poll. Declaring them live would put the
--- sentinel's absence on rows that never earned it, and Gate 15 takes forward
--- evidence from observed rows only (Set P D-P3).
+-- `kind` here records the transport, not the provenance. Provenance is decided per
+-- row by how that row was collected (`dataplane::source::Collection`), because one
+-- source legitimately supplies both: the ticker is polled forward every hour, and
+-- those rows carry a real receipt and are OBSERVED — that is the leg Gate 15 reads
+-- (Set P D-P3), and the reason switching this on is urgent. The
+-- historical-funding-rates endpoint hands back a year nobody watched arrive, and
+-- those rows are DERIVED and flagged.
+--
+-- `declared_vendor_lag_ms` is therefore not these sources' knowledge time. It is the
+-- bound a backfill through them must use, and what a dataset carries into
+-- EmbargoInputs.max_knowledge_lag_ms.
 INSERT INTO dataplane.source (source_id, name, kind, declared_vendor_lag_ms, notes) VALUES
   (17, 'kraken_futures_rest',    'rest_history', 3600000,
        'public /derivatives/api/v3/tickers poll: funding rate, prediction and open interest. Funding settles hourly, so a polled value is bounded by one settlement interval, not by the round trip.'),
