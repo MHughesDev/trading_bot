@@ -726,14 +726,8 @@ pub async fn drive(
                                 }
                             })
                         } else {
-                            dispatch_under(
-                                &mcp_ctx,
-                                &call.name,
-                                &call.arguments,
-                                None,
-                                &envelope,
-                            )
-                            .await
+                            dispatch_under(&mcp_ctx, &call.name, &call.arguments, None, &envelope)
+                                .await
                         }
                     };
                     mcp_ctx.audit().close(envelope, &raw).await;

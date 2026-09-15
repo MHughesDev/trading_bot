@@ -524,7 +524,15 @@ fn at64_no_dispatch_path_can_skip_the_audit_trail() {
     //
     // `AuditEnvelope(` appearing outside `AuditSink::open` would be a second
     // constructor, and a second constructor is a way to dispatch with no record.
-    let constructions: Vec<usize> = src.match_indices("AuditEnvelope(").map(|(i, _)| i).collect();
+    let declaration = src
+        .find("pub struct AuditEnvelope(")
+        .expect("AuditEnvelope is a newtype over the platform's audit id");
+    let constructions: Vec<usize> = src
+        .match_indices("AuditEnvelope(")
+        .map(|(i, _)| i)
+        // The type's own declaration is not a construction of it.
+        .filter(|i| *i != declaration + "pub struct ".len())
+        .collect();
     let sink_open = src.find("pub async fn open(").expect("AuditSink::open exists");
     let sink_open_end = src[sink_open..]
         .find("pub async fn close(")
@@ -569,7 +577,9 @@ fn at64_no_dispatch_path_can_skip_the_audit_trail() {
     // client writes is an audit a client can decline to write.
     let sink = {
         let at = src.find("impl AuditSink {").expect("the sink exists");
-        &src[at..src[at..].find("\n// ── Context").map_or(src.len(), |o| at + o)]
+        // Comments are stripped, so the section banner is gone; the next item
+        // in the file is the context struct.
+        &src[at..src[at..].find("pub struct McpContext").map_or(src.len(), |o| at + o)]
     };
     assert!(
         sink.contains("self.api.post(\"/api/agent/audit\""),

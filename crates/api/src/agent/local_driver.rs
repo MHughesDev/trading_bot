@@ -24,8 +24,6 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 use sqlx::PgPool;
-
-
 use tokio::time::Instant;
 use uuid::Uuid;
 
