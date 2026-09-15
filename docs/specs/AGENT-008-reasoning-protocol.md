@@ -201,15 +201,27 @@ Everything in this table is a profile value read by the loop, and `tests/conform
 
 ## 7. Acceptance
 
-1. No `WorkingState` content is appended across steps; the block is rewritten and its rendered size is bounded per tier.
-2. A plan containing a non-tool step is rejected at parse with the named correction; the replay eval that exposed the bug passes.
-3. On `qwen2.5-7b`, a lookup goal completes with ≤ 3 tool calls and 0 trials; a research goal on the same profile reaches a plan whose every step is a catalogue name.
-4. A claim citing an id not in `evidence` is corrected, never stored `established`.
-5. Re-asking a `decided` question is corrected with the step number of the decision.
-6. Escalation resumes on the stronger tier from the carried working state without re-running completed steps (verified by trial count).
-7. The truncated-reply fence from LOCAL_TIER_FINDINGS §8 cannot recur: a truncated select reply produces a re-ask, not a `Degradation`.
-8. The working state carries `mode`, `workflow`, `ring`, `stage` and `prereg`; a Chat run classified `Research` produces a Research offer and no plan; a stage transition the workflow's skeleton forbids is refused and recorded. *(Added 2026-09-14, AGENT-013.)*
+> **Form note (Set S task S-0.4, 2026-09-15).** Converted from a plain numbered
+> list to the repository's acceptance form so `docs/procedures/execute-plan.md`
+> step 3c can close the chain requirement -> criterion -> evidence. No criterion
+> was added, removed, reworded or softened; each kept its position, so item *n* of
+> the old list is `AC-n`. An unticked box with `Verified by: [--]` means nothing
+> has been proved, which is the honest default.
+>
+> The plan's S-0.4 gives the target form as `6.1.A [ ] ... - Verified by: [--]`.
+> The form actually used across the tracked specs (DATA-003, COMP-001..004,
+> FEAT-001, SYS-001) is `- [ ] AC-n: ... - Verified by: [--]`, and that is what
+> execute-plan step 3c ticks. This uses the tracked form; the plan's example is
+> stale.
 
+- [ ] AC-1: No `WorkingState` content is appended across steps; the block is rewritten and its rendered size is bounded per tier. - Verified by: `harness::state::tests::the_card_stops_growing_once_it_is_populated` (200 updates change the card by < 40 bytes) and `a_flat_card_is_bounded_however_long_the_goal_is`. **Partial:** proved of the type; `Loop` does not own one yet, so the nine append sites in `drive.rs` are still live.
+- [ ] AC-2: A plan containing a non-tool step is rejected at parse with the named correction; the replay eval that exposed the bug passes. - Verified by: [--]
+- [ ] AC-3: On `qwen2.5-7b`, a lookup goal completes with ≤ 3 tool calls and 0 trials; a research goal on the same profile reaches a plan whose every step is a catalogue name. - Verified by: [--]
+- [ ] AC-4: A claim citing an id not in `evidence` is corrected, never stored `established`. - Verified by: [--]
+- [ ] AC-5: Re-asking a `decided` question is corrected with the step number of the decision. - Verified by: `harness::state::tests::re_asking_a_decided_question_is_corrected`. **Partial:** the correction is produced by `WorkingState::redecision_correction`; nothing in the loop calls it yet.
+- [ ] AC-6: Escalation resumes on the stronger tier from the carried working state without re-running completed steps (verified by trial count). - Verified by: [--]
+- [ ] AC-7: The truncated-reply fence from LOCAL_TIER_FINDINGS §8 cannot recur: a truncated select reply produces a re-ask, not a `Degradation`. - Verified by: [--]
+- [ ] AC-8: The working state carries `mode`, `workflow`, `ring`, `stage` and `prereg`; a Chat run classified `Research` produces a Research offer and no plan; a stage transition the workflow's skeleton forbids is refused and recorded. *(Added 2026-09-14, AGENT-013.)* - Verified by: [--]
 ## 8. Non-goals
 
 - Chain-of-thought capture or scoring: the model's private reasoning is not stored; its *decisions* are.

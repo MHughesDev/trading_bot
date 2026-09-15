@@ -135,7 +135,11 @@ pub struct OutputBudget {
 
 impl Default for OutputBudget {
     fn default() -> Self {
-        Self { summary_tokens: 400, summary_template: None, detail_fields: &[] }
+        Self {
+            summary_tokens: 400,
+            summary_template: None,
+            detail_fields: &[],
+        }
     }
 }
 
@@ -225,7 +229,11 @@ impl ToolSpec {
         superseded_by: Option<&'static str>,
         reason: &'static str,
     ) -> Self {
-        self.status = ToolStatus::Deprecated { since, superseded_by, reason };
+        self.status = ToolStatus::Deprecated {
+            since,
+            superseded_by,
+            reason,
+        };
         self
     }
 
@@ -396,7 +404,10 @@ pub struct ToolResult {
 impl ToolResult {
     #[must_use]
     pub fn new(summary: impl Into<String>) -> Self {
-        Self { summary: summary.into(), ..Self::default() }
+        Self {
+            summary: summary.into(),
+            ..Self::default()
+        }
     }
 
     #[must_use]
@@ -438,18 +449,34 @@ impl ToolResult {
     #[must_use]
     pub fn render_within(&self, max_bytes: usize, handle_hint: &str) -> Value {
         let full = self.to_value(None);
-        if serde_json::to_string(&full).map(|s| s.len()).unwrap_or(usize::MAX) <= max_bytes {
+        if serde_json::to_string(&full)
+            .map(|s| s.len())
+            .unwrap_or(usize::MAX)
+            <= max_bytes
+        {
             return full;
         }
-        let handle = self.handle.clone().unwrap_or_else(|| handle_hint.to_string());
+        let handle = self
+            .handle
+            .clone()
+            .unwrap_or_else(|| handle_hint.to_string());
         let trimmed = self.to_value(Some(&handle));
-        if serde_json::to_string(&trimmed).map(|s| s.len()).unwrap_or(usize::MAX) <= max_bytes {
+        if serde_json::to_string(&trimmed)
+            .map(|s| s.len())
+            .unwrap_or(usize::MAX)
+            <= max_bytes
+        {
             return trimmed;
         }
         // Even without `detail` it does not fit: keep the identity and as much
         // summary as the cap allows.
-        let overhead = serde_json::to_string(&Self { summary: String::new(), ..self.clone() }
-            .to_value(Some(&handle)))
+        let overhead = serde_json::to_string(
+            &Self {
+                summary: String::new(),
+                ..self.clone()
+            }
+            .to_value(Some(&handle)),
+        )
         .map(|s| s.len())
         .unwrap_or(0);
         let room = max_bytes.saturating_sub(overhead);
@@ -457,7 +484,11 @@ impl ToolResult {
         while cut > 0 && !self.summary.is_char_boundary(cut) {
             cut -= 1;
         }
-        Self { summary: self.summary[..cut].to_string(), ..self.clone() }.to_value(Some(&handle))
+        Self {
+            summary: self.summary[..cut].to_string(),
+            ..self.clone()
+        }
+        .to_value(Some(&handle))
     }
 
     fn to_value(&self, handle: Option<&str>) -> Value {
@@ -501,9 +532,13 @@ impl ToolResult {
 pub enum TemplateError {
     /// The template names a field the spec never declared. This is the one the
     /// spec says must fail the build.
-    UndeclaredField { slot: String },
+    UndeclaredField {
+        slot: String,
+    },
     /// Declared, but absent from this particular `detail`.
-    MissingValue { slot: String },
+    MissingValue {
+        slot: String,
+    },
     Unterminated,
 }
 
@@ -557,7 +592,9 @@ pub fn render_summary(
             .iter()
             .find(|(f, _)| *f == slot)
             .map(|(_, u)| *u)
-            .ok_or_else(|| TemplateError::UndeclaredField { slot: slot.to_string() })?;
+            .ok_or_else(|| TemplateError::UndeclaredField {
+                slot: slot.to_string(),
+            })?;
         match detail.get(slot) {
             Some(Value::Null) | None => out.push_str("(n unknown)"),
             Some(Value::String(s)) => out.push_str(s),
@@ -659,8 +696,15 @@ mod tests {
         let names = names();
         let mut deduped = names.clone();
         deduped.dedup();
-        assert_eq!(names, deduped, "a tool declared twice makes its risk ambiguous");
-        assert!(names.len() >= 60, "the catalogue lost tools: {}", names.len());
+        assert_eq!(
+            names, deduped,
+            "a tool declared twice makes its risk ambiguous"
+        );
+        assert!(
+            names.len() >= 60,
+            "the catalogue lost tools: {}",
+            names.len()
+        );
     }
 
     /// Adversarial: the duplicate check *rejects*, and names both sites.
@@ -680,7 +724,9 @@ mod tests {
     #[test]
     fn a_deprecated_tool_still_resolves_but_is_exposed_to_nobody() {
         let live = spec("x").internal();
-        let dead = spec("y").internal().deprecated("2026-09-15", Some("x"), "superseded");
+        let dead = spec("y")
+            .internal()
+            .deprecated("2026-09-15", Some("x"), "superseded");
 
         assert!(live.exposed_to(ToolProfile::InternalAgent));
         assert!(!dead.exposed_to(ToolProfile::InternalAgent));
@@ -688,17 +734,30 @@ mod tests {
         // But the declaration is still there to be read, which is what an old
         // trial ticket citing it needs.
         assert_eq!(dead.name, "y");
-        assert!(matches!(dead.status, ToolStatus::Deprecated { superseded_by: Some("x"), .. }));
+        assert!(matches!(
+            dead.status,
+            ToolStatus::Deprecated {
+                superseded_by: Some("x"),
+                ..
+            }
+        ));
     }
 
     #[test]
     fn a_new_spec_defaults_to_the_conservative_reading() {
         let s = spec("t");
         assert_eq!(s.version, 1);
-        assert_eq!(s.profiles, &[ToolProfile::Mcp], "a tool is not agent-exposed by accident");
+        assert_eq!(
+            s.profiles,
+            &[ToolProfile::Mcp],
+            "a tool is not agent-exposed by accident"
+        );
         assert_eq!(s.envelope, Envelope::None);
         assert_eq!(s.spends_trial, TrialKind::None);
-        assert!(s.evidence.is_empty(), "nothing is citeable unless it says so");
+        assert!(
+            s.evidence.is_empty(),
+            "nothing is citeable unless it says so"
+        );
         assert_eq!(s.max_calls_per_run, None);
     }
 
@@ -708,8 +767,12 @@ mod tests {
     fn a_summary_renders_from_its_declared_fields() {
         let declared = [("bars", "bars"), ("ret_pct", "%"), ("instrument", "")];
         let detail = json!({ "bars": 1234, "ret_pct": 3.5, "instrument": "BTC-USD" });
-        let s = render_summary("{instrument}: {bars} over the window, {ret_pct}", &declared, &detail)
-            .unwrap();
+        let s = render_summary(
+            "{instrument}: {bars} over the window, {ret_pct}",
+            &declared,
+            &detail,
+        )
+        .unwrap();
         assert_eq!(s, "BTC-USD: 1234 bars over the window, 3.5 %");
     }
 
@@ -720,8 +783,14 @@ mod tests {
     #[test]
     fn a_template_naming_an_undeclared_field_is_rejected() {
         let declared = [("bars", "bars")];
-        let err = render_summary("{bars} and {sharpe}", &declared, &json!({"bars": 1})).unwrap_err();
-        assert_eq!(err, TemplateError::UndeclaredField { slot: "sharpe".into() });
+        let err =
+            render_summary("{bars} and {sharpe}", &declared, &json!({"bars": 1})).unwrap_err();
+        assert_eq!(
+            err,
+            TemplateError::UndeclaredField {
+                slot: "sharpe".into()
+            }
+        );
     }
 
     /// Adversarial: every template in the real catalogue names only declared
@@ -730,7 +799,9 @@ mod tests {
     fn a_summary_template_only_names_declared_fields() {
         let mut problems = Vec::new();
         for s in catalog() {
-            let Some(t) = s.output.summary_template else { continue };
+            let Some(t) = s.output.summary_template else {
+                continue;
+            };
             match template_slots(t) {
                 Err(e) => problems.push(format!("{}: {e:?}", s.name)),
                 Ok(slots) => {
@@ -760,7 +831,9 @@ mod tests {
 
     #[test]
     fn a_result_within_the_cap_keeps_its_detail_and_needs_no_handle() {
-        let r = ToolResult::new("short").with_detail(json!({"a": 1})).with_n(10);
+        let r = ToolResult::new("short")
+            .with_detail(json!({"a": 1}))
+            .with_n(10);
         let v = r.render_within(6_144, "work/x.json");
         assert_eq!(v.get("detail"), Some(&json!({"a": 1})));
         assert!(v.get("handle").is_none());
@@ -774,8 +847,14 @@ mod tests {
         let big: Vec<u32> = (0..5_000).collect();
         let r = ToolResult::new("a summary that survives").with_detail(json!({ "rows": big }));
         let v = r.render_within(6_144, "work/describe_returns-step7.json");
-        assert_eq!(v.get("handle"), Some(&json!("work/describe_returns-step7.json")));
-        assert!(v.get("detail").is_none(), "detail must not be truncated in place");
+        assert_eq!(
+            v.get("handle"),
+            Some(&json!("work/describe_returns-step7.json"))
+        );
+        assert!(
+            v.get("detail").is_none(),
+            "detail must not be truncated in place"
+        );
         assert_eq!(v.get("summary"), Some(&json!("a summary that survives")));
         assert!(serde_json::to_string(&v).unwrap().len() <= 6_144);
     }
@@ -789,7 +868,10 @@ mod tests {
         let v = r.render_within(120, "work/x.json");
         let encoded = serde_json::to_string(&v).unwrap();
         assert!(encoded.len() <= 120, "{} bytes", encoded.len());
-        assert!(v.get("summary").and_then(Value::as_str).is_some_and(|s| !s.is_empty()));
+        assert!(v
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.is_empty()));
     }
 
     // ── Errors ───────────────────────────────────────────────────────────────
@@ -806,7 +888,11 @@ mod tests {
         let err = v.get("error").unwrap();
         assert_eq!(err.get("code"), Some(&json!("window_exceeds_coverage")));
         assert_eq!(err.get("retryable"), Some(&json!(false)));
-        assert!(err.get("fix").and_then(Value::as_str).unwrap().starts_with("start at"));
+        assert!(err
+            .get("fix")
+            .and_then(Value::as_str)
+            .unwrap()
+            .starts_with("start at"));
         assert!(serde_json::to_string(&v).unwrap().len() <= MAX_ERROR_BYTES);
     }
 
@@ -817,11 +903,15 @@ mod tests {
         fn ok(code: &str) -> bool {
             !code.is_empty()
                 && code.len() <= 48
-                && code.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                && code
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
         }
         assert!(ok("window_exceeds_coverage"));
         assert!(!ok("Invalid argument"), "free text is not a routable code");
-        assert!(!ok("the window you asked for exceeds the coverage we have on file"));
+        assert!(!ok(
+            "the window you asked for exceeds the coverage we have on file"
+        ));
         assert!(!ok(""));
     }
 }

@@ -1,6 +1,6 @@
 # Phase 0 — Ground rules
 
-**Completion: 33% (2 / 6 tasks; 2 BLOCKED:HUMAN, 2 not started)**
+**Completion: 1 done, 2 partial, 2 blocked on gate H-1, 1 not started.**
 
 **Requirement IDs:** GR-01…GR-06.
 **Spec:** none directly — this phase makes the other eight executable.
@@ -60,6 +60,35 @@ self-describing hunks that cite the ADR that introduced them.
 | Migrations | `migrations/005{8,9}_*.sql`, `0060_web_and_skills.sql` | The DDL those modules read. |
 | Test/plan bookkeeping | `crates/invariants/tests/external_review_invariants.rs`, `crates/ledger/tests/pg_{falsification,strategy_revision}.rs`, `crates/skills/tests/live_runner.rs`, `crates/webfetch/tests/live_web.rs`, `docs/{adr,plans,research,specs}/README*.md`, `ml-platform-context-pack/{backlog,decisions}/*.md`, `docs/artifact.md`, `docs/BRAINSTORM/BS-007/17_BUILD_ORDER.MD` | Index rows and test files added by the same commits. |
 
+**(a′) Should have been committed a week ago — 2 files, with a consequence.**
+`crates/mcp-server/src/tools/falsification.rs` (645 lines) and `research_tools.rs` (384) hold
+thirteen catalogue tools and have been untracked since AGENT-006 §0 first flagged it. Two
+things follow, and the second is the one that matters:
+
+1. `tools/mod.rs`, `taxonomy.rs` and `lib.rs` carry ~112 changed lines that reference them.
+   Committing those three without the two files breaks the build for everyone else. This track
+   hit it directly while regenerating `taxonomy.rs` from `ToolSpec`, and resolved it by
+   regenerating the **tracked** 60-tool catalogue only; the thirteen need a `ToolSpec` each when
+   they land, and the shape will not change.
+2. `cargo xtask check-money-f64` and `check-bars-v1-frozen` scan `git ls-files`, so **thirteen
+   agent-facing tools have never been lint-checked.** Measured rather than assumed: both files
+   were copied into this worktree, `git add`ed, and both lints run.
+   - `check-bars-v1-frozen`: **OK.**
+   - `check-money-f64`: **FAILED — but on ten pre-existing violations, none of them in these
+     two files.** Neither file contains the string `f64` or `f32` at all. The exemption has
+     cost nothing.
+   - The files were then unstaged and removed again, because without the `Cargo.toml` change
+     they would sit in the tree in no module at all — worse than absent.
+
+   **The ten `check-money-f64` violations are a pre-existing failure that EXECUTION-BOARD §2.5
+   does not list**, and `cargo xtask check-money-f64` is in `just check-money`. They are in
+   `apps/platform/src/book_feed.rs:72`, `crates/backtest/src/gates/evaluators.rs:{615,987}`,
+   `crates/backtest/src/gates/profile.rs:{70,72}`, `crates/backtest/src/synthetic.rs:{153,204}`,
+   `crates/dataplane/src/options.rs:60`, `crates/ledger/src/neff.rs:198` and
+   `crates/ledger/src/outcome.rs:29`. Several look like genuine false positives — a P&L *share*
+   and an HHI are ratios, not money — which is its own problem: a lint that cries wolf on
+   ratios is a lint people learn to run with their eyes closed. Not chased, per §2.5's spirit.
+
 **(b) Clearly the user's — 5 files, and they are the reason this is blocked.**
 `Cargo.lock`, `Cargo.toml`, `apps/platform/src/main.rs`, `crates/config/Cargo.toml`,
 `crates/config/src/lib.rs`. Named in `BS-007/HANDOFF.MD` §6 and re-stated in
@@ -80,6 +109,32 @@ blocked for the same reason.
 | `crates/strategy-{runtime,validator}/**` (13 files) and `crates/{backtest,domain}/src/**` | The `exits` feature: new `exits.rs` in three crates plus `exits: None` threaded through call sites. Coherent, agent-shaped — but it is *strategy semantics*, the part of the system the user has opinions about. |
 | `crates/api/src/rollup/paper.rs`, `routes/{portfolio,strategies}.rs`, `frontend/src/pages/MlOpsPage.tsx` | Small edits with no accompanying spec or ADR in the change set. The weakest evidence of the three groups. |
 | `docs/specs/README.MD` **and** `docs/specs/README.md` | Both are tracked, and on this Windows checkout they are one file on disk. Pre-existing pathology, not a new edit — see the note under S-0.3. |
+
+**A build-infrastructure defect that affects every track on the board, found while verifying
+this work.** EXECUTION-BOARD §2.3 tells every track to point `CARGO_TARGET_DIR` at the shared
+237 GB cache instead of creating a ninth one. There are currently **eighteen worktrees** sharing
+it, and cargo reuses artifacts across them. Observed twice in one session:
+
+- `cargo test -p invariants --test static_invariants` ran a binary containing **23** tests while
+  the source in this worktree has **27**. `-- --list` confirmed the four new ones were absent.
+  It had passed with 27 half an hour earlier.
+- After `cargo clean -p invariants`, the rebuild failed with
+  `cannot find 'spec' in 'mcp_server_lib'` — against an `mcp-server-lib` rlib built from a
+  worktree where `spec.rs` does not exist. `cargo clean -p mcp-server-lib` fixed it.
+
+So **a green test run from any track on this board is not by itself evidence**: it may have
+exercised another worktree's code. The cheap mitigation, which is what this track used, is
+`cargo clean -p <crate>` for the crate under test and its changed dependencies before the run
+that you intend to believe. The correct fix is a per-worktree `CARGO_TARGET_DIR`, which costs
+disk the machine does not have — so this is a real trade-off for the user to make, not an
+oversight to correct silently. Worth verifying before any track reports a suite green.
+
+**Recommendation, not done.** `cargo xtask lint-no-json-hotpath` enforces a rule a prior phase
+established, is **not wired into CI**, and fails on one pre-existing line in
+`crates/collectors/src/crypto/kraken.rs`. Wiring it into `.github/workflows/ci.yml` is one job
+block and would cost nothing once that line is resolved — but a lint added to CI while it is
+red just makes every PR red, so the order is: fix the line, then wire it. Left for whoever owns
+that line.
 
 **What would unblock it.** The user says which of (c) is theirs, and decides gate H-1:
 whether an agent may add the two workspace-member lines to `Cargo.toml`, or whether the user
@@ -106,9 +161,17 @@ answers to — and so reported promotion as gated for as long as the defect exis
 in the same change. A test that names a constant instead of the catalogue is how an
 invariant check ends up guarding nothing.
 
-**Not done here:** the reverse direction of AGENT-006 §2.6 — "every tool whose spec declares
-an envelope is in the corresponding list" — needs `ToolSpec.envelope`, which arrives in
-S-1.1. Tracked there.
+The reverse direction of AGENT-006 §2.6 — "every tool whose spec declares an envelope is in
+the corresponding list" — needed `ToolSpec.envelope` and landed with S-1.1, as
+`every_tool_envelope_matches_the_ledger`. It also pins the gated catalogue set to exactly
+`{arm_automation, promote_model_version}`, so widening it is a decision rather than a diff.
+
+**A judgment call, recorded as ADR-S1-02.** Eleven of the twelve gated actions are *not*
+catalogue tools — `place_order`, `submit_job`, `open_vault` and the rest are reached through a
+route or a job. §2.6's literal form ("every name in every list is a catalogue tool") would fail
+on all eleven and would have been deleted rather than fixed. `NON_TOOL_GATED_ACTIONS` names each
+with its reason; everything else must resolve to a tool, and an exemption that goes stale
+(because the tool now exists) is rejected too, so the list cannot rot into an allow-everything.
 
 `crates/ledger/src/audit.rs:98` lists `promote_model` in `PROMOTION_ACTIONS`; the tool is
 named `promote_model_version` (`crates/mcp-server/src/taxonomy.rs:149`), so
@@ -180,7 +243,26 @@ green.
 **Traces:** AGENT-006 §0 ("untracked in git"), MASTER §5 hazards.
 
 ### S-0.4 Give the eleven specs the acceptance form the evidence chain needs — M
-`NOT STARTED`
+`PARTIAL` 2026-09-15 — three of eleven converted: AGENT-005, AGENT-006, AGENT-008.
+
+Those three are the specs this track's tasks trace to, so converting them is what let the
+`Verified by:` slots actually be filled rather than left empty. AGENT-007, AGENT-009…014 and
+COMP-007 are **not converted**.
+
+**The plan's target form is wrong, and the conversion did not use it.** S-0.4 names
+`6.1.A [ ] <condition> (verifies §N.M) — Verified by: [—]`. No tracked spec uses that. Every
+tracked spec that carries acceptance evidence — DATA-003, COMP-001…004, FEAT-001, SYS-001 —
+uses `- [ ] AC-n: <condition> — Verified by: [—]` under a `## N. Acceptance` heading, and that
+is the checkbox `execute-plan.md` step 3c ticks. Converting to a form nothing reads would have
+closed no chain. Recorded as ADR-S1-05; a form note is written into each converted section.
+
+No criterion was added, removed, reworded or softened. Item *n* of each old numbered list is
+`AC-n`, so positions are unchanged and a spot check of any three shows identical wording.
+
+A second rule came out of doing it, recorded as ADR-S1-06: **a criterion whose verification is
+partial stays unticked**, with the evidence and the word "Partial" beside it. The tick is what a
+reader scans, and a ticked box with a caveat in the prose is precisely how a partially enforced
+invariant comes to be reported as enforced.
 
 `docs/procedures/execute-plan.md` step 3c closes the chain requirement → criterion →
 evidence by writing a test name into a spec's `§6.1.x … — Verified by: [—]` slot. The Set S
@@ -195,7 +277,12 @@ wording unchanged. No criterion is added, removed or softened in the conversion.
 **Traces:** `docs/procedures/execute-plan.md` §3c, `add-spec.md` §6.
 
 ### S-0.5 Update every index that now points at nothing — S
-`NOT STARTED`
+`NOT STARTED` — and it needs one more file than it lists.
+
+`docs/specs/README.MD` **and** `docs/specs/README.md` are both tracked and both point at the
+same blob; on this Windows checkout they are one file on disk. That is not in this task's file
+list and it is the same class of defect S-0.3 exists to prevent. Whichever entry survives is a
+decision, and `git rm --cached` on the other has to be run from a case-sensitive checkout.
 
 **Files:** `docs/specs/README.md` (target table `Plan set` column → `S` for the eleven specs;
 mark AGENT-001…004 and COMP-006 as superseded per each spec's header),
@@ -207,7 +294,11 @@ resolves from a case-sensitive checkout; no index row points at a missing file.
 **Traces:** `add-plan.md` step 6, `add-adr.md`.
 
 ### S-0.6 Correct the governance register, and reserve the migration ranges — S
-`NOT STARTED`
+`NOT STARTED` — not reached by track 1.
+
+The stale CRITICAL it describes is still there. Nothing in this track depended on it, and
+correcting a governance register on a branch that also rewrites the tool catalogue would put an
+unrelated change in a diff reviewers are reading for something else.
 
 `docs/governance/COMPLACENCY_LOG.md` lists as CRITICAL that
 `crates/api/src/auth/session.rs` accepts any non-empty bearer token. **That is stale** —

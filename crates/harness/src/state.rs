@@ -336,7 +336,10 @@ pub const FLAT_CARD_TOKENS: u32 = 400;
 impl WorkingState {
     #[must_use]
     pub fn new(goal: impl Into<String>) -> Self {
-        Self { goal: goal.into(), ..Self::default() }
+        Self {
+            goal: goal.into(),
+            ..Self::default()
+        }
     }
 
     /// The index of the first step that is not finished, if any.
@@ -356,7 +359,9 @@ impl WorkingState {
     #[must_use]
     pub fn already_decided(&self, question: &str) -> Option<&Decision> {
         let q = question.trim().to_lowercase();
-        self.decided.iter().find(|d| d.question.trim().to_lowercase() == q)
+        self.decided
+            .iter()
+            .find(|d| d.question.trim().to_lowercase() == q)
     }
 
     /// The correction for re-asking a settled question (§3.6).
@@ -373,10 +378,25 @@ impl WorkingState {
     /// Record a choice. Re-recording the same question **updates** it rather than
     /// appending, so `decided` cannot grow without bound on a loop that keeps
     /// changing its mind.
-    pub fn decide(&mut self, question: impl Into<String>, choice: impl Into<String>, reason: impl Into<String>, step: u32) {
+    pub fn decide(
+        &mut self,
+        question: impl Into<String>,
+        choice: impl Into<String>,
+        reason: impl Into<String>,
+        step: u32,
+    ) {
         let question = question.into();
-        let entry = Decision { question, choice: choice.into(), reason: reason.into(), step };
-        match self.decided.iter_mut().find(|d| d.question == entry.question) {
+        let entry = Decision {
+            question,
+            choice: choice.into(),
+            reason: reason.into(),
+            step,
+        };
+        match self
+            .decided
+            .iter_mut()
+            .find(|d| d.question == entry.question)
+        {
             Some(existing) => *existing = entry,
             None => self.decided.push(entry),
         }
@@ -384,12 +404,24 @@ impl WorkingState {
 
     /// Record an id a tool returned. Duplicates are ignored: the same id seen
     /// twice is one piece of evidence.
-    pub fn observe(&mut self, id: impl Into<String>, tool: impl Into<String>, step: u32) {
+    ///
+    /// Named `record_evidence` rather than `observe` because
+    /// `invariants::no_metric_name_embeds_an_instrument_id` scans for
+    /// `observe(format!(…))` — the shape that puts an instrument id into a metric
+    /// name and melts the metrics backend (§16.1). This records evidence, not a
+    /// metric, but a scanner that has to tell them apart by context is a scanner
+    /// that will get it wrong in the other direction one day. Cheaper to not use
+    /// the word.
+    pub fn record_evidence(&mut self, id: impl Into<String>, tool: impl Into<String>, step: u32) {
         let id = id.into();
         if self.evidence.iter().any(|e| e.id == id) {
             return;
         }
-        self.evidence.push(EvidenceRef { id, tool: tool.into(), step });
+        self.evidence.push(EvidenceRef {
+            id,
+            tool: tool.into(),
+            step,
+        });
     }
 
     /// Whether an id the model wants to cite was actually produced this run.
@@ -407,9 +439,10 @@ impl WorkingState {
     #[must_use]
     pub fn anchor(&self) -> String {
         let (position, step_goal) = match self.active_step() {
-            Some((i, s)) => {
-                (format!(" (plan step {} of {})", i + 1, self.plan.len()), s.goal.clone())
-            }
+            Some((i, s)) => (
+                format!(" (plan step {} of {})", i + 1, self.plan.len()),
+                s.goal.clone(),
+            ),
             None => (String::new(), self.goal.clone()),
         };
         let established = if self.findings.is_empty() {
@@ -494,7 +527,12 @@ impl WorkingState {
 
         if !self.decided.is_empty() {
             out.push_str("ALREADY DECIDED (do not re-ask):\n");
-            for d in self.decided.iter().rev().take(if detail == Detail::Flat { 3 } else { 12 }) {
+            for d in self
+                .decided
+                .iter()
+                .rev()
+                .take(if detail == Detail::Flat { 3 } else { 12 })
+            {
                 out.push_str(&format!(
                     "  - {}: {} (step {})\n",
                     clamp(&d.question, 80),
@@ -601,9 +639,14 @@ fn json_name<T: Serialize>(v: &T) -> String {
 }
 
 /// The evidence map a `ToolResult`'s `ids` field contributes, folded into state.
-pub fn observe_ids(state: &mut WorkingState, ids: &BTreeMap<String, String>, tool: &str, step: u32) {
+pub fn record_evidence_ids(
+    state: &mut WorkingState,
+    ids: &BTreeMap<String, String>,
+    tool: &str,
+    step: u32,
+) {
     for value in ids.values() {
-        state.observe(value.clone(), tool, step);
+        state.record_evidence(value.clone(), tool, step);
     }
 }
 
@@ -615,16 +658,25 @@ mod tests {
         let mut s = WorkingState::new("find the best timeframe for BTC momentum");
         s.kind = GoalKind::Research;
         s.mode = Mode::Research;
-        s.budget = BudgetView { steps_remaining: 9, steps_total: 15, trials_spent: 2, ..Default::default() };
+        s.budget = BudgetView {
+            steps_remaining: 9,
+            steps_total: 15,
+            trials_spent: 2,
+            ..Default::default()
+        };
         s.plan = vec![
             PlannedStep {
                 goal: "list what data exists".into(),
-                kind: StepKind::Tool { name: "list_instruments".into() },
+                kind: StepKind::Tool {
+                    name: "list_instruments".into(),
+                },
                 status: StepStatus::Done,
             },
             PlannedStep {
                 goal: "sweep the parameters".into(),
-                kind: StepKind::Tool { name: "run_sweep".into() },
+                kind: StepKind::Tool {
+                    name: "run_sweep".into(),
+                },
                 status: StepStatus::Active,
             },
         ];
@@ -651,7 +703,7 @@ mod tests {
         fn drive(steps: u32) -> WorkingState {
             let mut s = state();
             for step in 0..steps {
-                s.observe(format!("bt-{step}"), "run_sweep", step);
+                s.record_evidence(format!("bt-{step}"), "run_sweep", step);
                 s.decide("timeframe", "1h", "the only one with coverage", step);
                 s.last_error = Some(Correction {
                     code: "window_exceeds_coverage".into(),
@@ -665,7 +717,11 @@ mod tests {
 
         let short = drive(5);
         let long = drive(200);
-        assert_eq!(long.decided.len(), 1, "re-deciding the same question updates, not appends");
+        assert_eq!(
+            long.decided.len(),
+            1,
+            "re-deciding the same question updates, not appends"
+        );
         assert_eq!(long.evidence.len(), 200, "the ids themselves are all kept");
 
         // Forty times the history, and the card the model reads is the same size
@@ -689,8 +745,12 @@ mod tests {
     fn a_flat_card_is_bounded_however_long_the_goal_is() {
         let mut s = state();
         s.goal = "why ".repeat(4_000);
-        s.open_questions = (0..50).map(|i| format!("question {i} ").repeat(40)).collect();
-        s.acceptance = (0..50).map(|i| format!("criterion {i} ").repeat(40)).collect();
+        s.open_questions = (0..50)
+            .map(|i| format!("question {i} ").repeat(40))
+            .collect();
+        s.acceptance = (0..50)
+            .map(|i| format!("criterion {i} ").repeat(40))
+            .collect();
         let card = s.card(Detail::Flat);
         assert!(
             estimate_tokens(&card) <= FLAT_CARD_TOKENS,
@@ -726,7 +786,9 @@ mod tests {
     fn re_asking_a_decided_question_is_corrected() {
         let mut s = state();
         s.decide("which timeframe", "1h", "the only one with coverage", 4);
-        let c = s.redecision_correction("Which Timeframe").expect("matched case-insensitively");
+        let c = s
+            .redecision_correction("Which Timeframe")
+            .expect("matched case-insensitively");
         assert!(c.starts_with("decided at step 4: 1h"));
         assert!(c.contains("say why it should change or move on"));
         assert!(s.redecision_correction("which instrument").is_none());
@@ -739,11 +801,14 @@ mod tests {
     #[test]
     fn an_id_no_tool_returned_cannot_be_cited() {
         let mut s = state();
-        s.observe("bt-real", "get_backtest", 3);
+        s.record_evidence("bt-real", "get_backtest", 3);
         assert!(s.can_cite("bt-real"));
-        assert!(!s.can_cite("bt-invented"), "an unattributable id must not pass");
+        assert!(
+            !s.can_cite("bt-invented"),
+            "an unattributable id must not pass"
+        );
         // Seeing it twice is still one piece of evidence.
-        s.observe("bt-real", "get_backtest", 5);
+        s.record_evidence("bt-real", "get_backtest", 5);
         assert_eq!(s.evidence.len(), 1);
     }
 

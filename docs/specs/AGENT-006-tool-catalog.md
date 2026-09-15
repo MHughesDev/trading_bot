@@ -410,18 +410,30 @@ The funnel (`advance_gate`, `get_funnel`) is amended so that Gate 2 requires a `
 
 ## 10. Acceptance
 
-1. One `ToolSpec` per tool; `TAXONOMY`, `INTERNAL_AGENT_TOOLS` and the four envelope lists are generated, and `every_tool_is_classified` / `the_taxonomy_has_no_entries_for_tools_that_do_not_exist` / `no_tool_is_classified_twice` still pass against the generated arrays.
-2. `Envelope::for_action(name)` equals `spec.envelope` for every catalogue tool; `promote_model_version` is `Promotion`; `spend_holdout_look` is `SealedHoldout`.
-3. Every description ≤ 1,200 B rich and ≤ 400 B flat (AGENT-005 §5.4 test); every `notes_section` resolves.
-4. No namespace > 16 tools (`bridge.rs:355`), and every namespace is in §2.1.
-5. Every templated tool's header schema equals its catalogue schema (build-time test); every template runs under the runner's limits on the reference dataset with `seed` fixed and produces byte-identical `detail` twice.
-6. Every tool that runs the simulator has `spends_trial ≠ None`, and a run of `precapital_battery` raises the family's N_eff by exactly the number of simulator runs it made.
-7. `finish_task` on both drivers refuses an `evidence` id that no tool result of the run produced.
-8. `advance_gate` to Gate 2 fails without `leakage_audit = clean` and `selection_bias_verdict = passes` tickets; to Gate 3 without `precapital_battery`; to paper without `go_live_readiness`.
-9. Every §5 tool returns a `ToolResult` whose `summary` ≤ 400 tokens on the reference dataset and whose `handle` is set whenever the raw result exceeds the smallest profile's cap (6,144 B).
-10. AGENT-002 §6 tables are replaced by a pointer to this spec; `docs/Specs/README.md` lists it.
-11. The `lifecycle` namespace is in §2.1 at 12 tools, the cap test passes at twenty-two namespaces with `research` at exactly 16, the three session views are read-only on every profile, and the static test finds no `Risk::Write` tool targeting a registry table outside `lifecycle.propose` (AGENT-013 §8.6).
+> **Form note (Set S task S-0.4, 2026-09-15).** Converted from a plain numbered
+> list to the repository's acceptance form so `docs/procedures/execute-plan.md`
+> step 3c can close the chain requirement -> criterion -> evidence. No criterion
+> was added, removed, reworded or softened; each kept its position, so item *n* of
+> the old list is `AC-n`. An unticked box with `Verified by: [--]` means nothing
+> has been proved, which is the honest default.
+>
+> The plan's S-0.4 gives the target form as `6.1.A [ ] ... - Verified by: [--]`.
+> The form actually used across the tracked specs (DATA-003, COMP-001..004,
+> FEAT-001, SYS-001) is `- [ ] AC-n: ... - Verified by: [--]`, and that is what
+> execute-plan step 3c ticks. This uses the tracked form; the plan's example is
+> stale.
 
+- [x] AC-1: One `ToolSpec` per tool; `TAXONOMY`, `INTERNAL_AGENT_TOOLS` and the four envelope lists are generated, and `every_tool_is_classified` / `the_taxonomy_has_no_entries_for_tools_that_do_not_exist` / `no_tool_is_classified_twice` still pass against the generated arrays. - Verified by: `mcp-server-lib::spec::tests::every_catalogue_tool_has_exactly_one_spec`, `spec::tests::a_tool_declared_twice_is_rejected_naming_both_sites` (adversarial), and the three taxonomy tests running against the generated rows (`taxonomy::tests::{every_tool_is_classified,the_taxonomy_has_no_entries_for_tools_that_do_not_exist,no_tool_is_classified_twice}`). The four envelope lists are reconciled rather than generated - see AC-2.
+- [ ] AC-2: `Envelope::for_action(name)` equals `spec.envelope` for every catalogue tool; `promote_model_version` is `Promotion`; `spend_holdout_look` is `SealedHoldout`. - Verified by: `invariants::static_invariants::every_tool_envelope_matches_the_ledger` (both directions) plus `every_envelope_entry_is_a_real_action`, `the_envelope_name_check_rejects_a_name_no_tool_answers_to` and `the_old_promotion_spelling_matches_no_envelope` (adversarial). **Partial:** `spend_holdout_look` does not exist yet, so its `SealedHoldout` half is unproved.
+- [ ] AC-3: Every description ≤ 1,200 B rich and ≤ 400 B flat (AGENT-005 §5.4 test); every `notes_section` resolves. - Verified by: `mcp-server-lib::catalogue_tests::{no_tool_descriptor_exceeds_the_rich_budget,every_first_sentence_fits_the_flat_budget,every_notes_section_resolves_to_a_heading}`. **Partial:** the flat bound is asserted on the first sentence, not on `registry::render(_, Flat)`.
+- [x] AC-4: No namespace > 16 tools (`bridge.rs:355`), and every namespace is in §2.1. - Verified by: `mcp-server-lib::catalogue_tests::no_namespace_holds_more_than_sixteen_tools` and `taxonomy::tests::every_namespace_is_canonical`.
+- [ ] AC-5: Every templated tool's header schema equals its catalogue schema (build-time test); every template runs under the runner's limits on the reference dataset with `seed` fixed and produces byte-identical `detail` twice. - Verified by: [--]
+- [ ] AC-6: Every tool that runs the simulator has `spends_trial ≠ None`, and a run of `precapital_battery` raises the family's N_eff by exactly the number of simulator runs it made. - Verified by: [--]
+- [ ] AC-7: `finish_task` on both drivers refuses an `evidence` id that no tool result of the run produced. - Verified by: [--]
+- [ ] AC-8: `advance_gate` to Gate 2 fails without `leakage_audit = clean` and `selection_bias_verdict = passes` tickets; to Gate 3 without `precapital_battery`; to paper without `go_live_readiness`. - Verified by: [--]
+- [ ] AC-9: Every §5 tool returns a `ToolResult` whose `summary` ≤ 400 tokens on the reference dataset and whose `handle` is set whenever the raw result exceeds the smallest profile's cap (6,144 B). - Verified by: [--]
+- [ ] AC-10: AGENT-002 §6 tables are replaced by a pointer to this spec; `docs/Specs/README.md` lists it. - Verified by: [--]
+- [ ] AC-11: The `lifecycle` namespace is in §2.1 at 12 tools, the cap test passes at twenty-two namespaces with `research` at exactly 16, the three session views are read-only on every profile, and the static test finds no `Risk::Write` tool targeting a registry table outside `lifecycle.propose` (AGENT-013 §8.6). - Verified by: [--]
 ## 11. Non-goals
 
 - Generating the dispatch arms (kept as a match with a coverage test; a macro can come later).
