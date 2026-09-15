@@ -76,7 +76,11 @@ async fn a_revision_hash_must_be_sixty_four_lowercase_hex_characters() {
             "{bad:?} is not a revision hash and must be refused"
         );
     }
-    assert!(insert_revision(&pool, &hash("ok"), &s, None).await.is_ok());
+    // Derived from `s`, which is a fresh UUID per run. A constant here passes
+    // the first time against a database and fails forever after on the
+    // primary key — these suites are run repeatedly against the developer
+    // database, so a non-idempotent live test is a test that breaks itself.
+    assert!(insert_revision(&pool, &hash(&s), &s, None).await.is_ok());
 }
 
 /// A revision that is its own parent is a cycle of length one, and the only way

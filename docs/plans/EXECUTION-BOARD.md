@@ -376,6 +376,7 @@ Merge in these waves. Within a wave, order does not matter.
 | **6** | `claude/live-runtime-honours-exits` (19), `claude/set-p-phase-3-altdata` (9) | 19 needs wave 2; 9 needs wave 5's collector scaffolding |
 | **7** | Set S phases: 21, 22, 23, 24, 25 | all need wave 1. Mutually disjoint by crate |
 | **8** | pack tracks: 6, 7, 8, 10, 12, 13, 14, 18 | mostly disjoint. 18 needs 6; 14 shares `crates/backtest/src/gates/` with 5, so after wave 4 |
+| **—** | ~~`claude/set-p-phase-2-quality`~~ | **already on `main` at `70cfc1f`.** Dispatched and landed after this table was written. Disjoint: a new `crates/dataplane/src/qc/` and migration 0100, which no branch claims. Its only shared touches are one `pub mod` line and a `toml` dependency |
 
 ### 8.2 Known conflicts, named in advance
 
@@ -404,6 +405,33 @@ Merge in these waves. Within a wave, order does not matter.
   into their branches to get code their tasks depended on (gate H-1). **The authoritative commit
   now exists: `37faade`.** Drop the mirrors rather than deduplicating them — rebasing onto `main`
   makes them empty, and a mirror kept alongside the real commit conflicts with it line for line.
+
+### 8.2a The migration namespace was audited, 2026-09-15 — it is clean
+
+Every migration file in every worktree was hashed and compared. **Nothing
+collides.**
+
+- **No two branches claim the same number for different files.**
+- **No file with the same name differs in content across branches** — zero, over
+  every migration in all twenty-five worktrees.
+- Three branches carry `0120_exit_policy_evaluator_defect.sql` and two carry
+  `0097`/`0098`; in both cases the downstream branch inherited the file from a
+  landed track rather than writing its own, and the bytes are identical.
+- Highest number anywhere: **0124** (`knowledge-time-provenance-repair`). `main`
+  is at 0100.
+
+Re-run it before integration; the sweep is a few minutes and the failure it
+catches is the one that is hardest to read at merge time.
+
+### 8.2b What `70cfc1f` touches that others also touch
+
+- **`crates/dataplane/src/lib.rs`** — also tracks 3, 4, 9 and 20. Every one adds
+  distinct `pub mod` lines (`census`, `backfill`, `fundamentals`, `qc`, …). The
+  conflict is a list; take all the lines.
+- **`crates/dataplane/Cargo.toml`** — also track 4. One dependency each.
+- **`scripts/verify_plans.py`** — tracks 15, 19 and 24 each carry a copy, and all
+  three are **byte-identical to `37faade`**: they mirrored it, none modified it.
+  On rebase their copy becomes a no-op and `70cfc1f`'s two changes stand.
 
 ### 8.3 Verify after every merge, not at the end
 
@@ -457,6 +485,7 @@ pass — fix the file, or if the check itself is wrong, say so in your report.
 
 | Date | Change |
 |---|---|
+| 2026-09-15 | **Set P Phase 2 landed on `main` (`70cfc1f`), and the migration namespace was audited clean.** The battery found a real defect on its first run against live data: `BTC-USD/coinbase/1m` contains **2026-08-13 twice** — 2,879 rows for 1,440 distinct minutes. Nothing had caught it because duplicates are not gaps, not bad prices and not stale, so every other check passes over them. Blast radius **A 0 · B 3 · C 1 · D 5** of nine series, so P-2.3's enforcement was deliberately **not built** — the phase sequences publication before enforcement, and that is now satisfied more strongly than asked. Also found and fixed: **`pg_strategy_revision` was not idempotent** — it used a constant hash, so it passed once against a database and failed forever after. Every live suite has now been run twice in a row; the rest are clean. |
 | 2026-09-15 | **H-1 closed, `37faade`.** The baseline moved. Every track rebases onto `main`; anyone who mirrored the user's tree drops that commit rather than keeping it. §2.5a rewritten from a workaround into an instruction. The plan corpus was untracked too — tracks had neither the code nor the plans in their baseline. |
 | 2026-09-15 | **Found an unclaimed block on the critical path.** Track 1 completed 5 of Phase 1's 20 tasks and its handoff named what came next, but nothing owned it: fourteen tasks, including the whole context-budget and reasoning-protocol halves. Track 26 dispatched for the first; S-1.14–S-1.20 recorded in §7 as the next dispatch. The lesson for the queue: **a landed track's partials are not automatically someone's work** — a phase is only finished when its file says so, and §7 now carries the residue explicitly rather than trusting that a successor picks it up. |
 | 2026-09-15 | Tracks 10 and 12 resumed — both sit directly on unmet completion conditions. Track 10 closes **DONE-5** (the external MCP door is the last INV-16 exemption; the human and agent doors are already shut). Track 12 plus track 14 take the gate funnel from eleven judging on real numbers to sixteen, which is **Stage 2's exit**. Thirteen live. |
