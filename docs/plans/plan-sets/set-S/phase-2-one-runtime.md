@@ -1,6 +1,6 @@
 # Phase 2 — One runtime
 
-**Completion: 13% (2 / 16 tasks). S-2.1 and S-2.3 landed 2026-09-15.**
+**Completion: 19% (3 / 16 tasks). S-2.1, S-2.3 and S-2.4 landed 2026-09-15.**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
@@ -114,7 +114,28 @@ field; frontier = `session`/4, locals = `step`/1.
 **Traces:** AGENT-005 §5.1; AGENT-010 §14.9.
 
 ### S-2.4 Session-scoped exposure — M
-`NOT STARTED`
+`DONE` 2026-09-15 — routed once per turn, append-only after, and a full slice says so.
+
+The order is the part that is easy to get wrong and expensive to get wrong. A cached prefix
+matches by **bytes**, so re-sorting the tools array invalidates it exactly as thoroughly as
+removing an entry — a slice that re-rendered whatever routing returned each step would pay the
+full prompt on all thirty iterations while looking, from the outside, like caching. So the kept
+order is appended to rather than rebuilt, and each call's array is a strict prefix of the next.
+
+Mid-turn eviction is forbidden and a full slice reports `exposure_full` instead. Dropping a tool
+to make room for a better one is a trade that looks free at the moment it is made and is paid for
+by every later call in the turn.
+
+One exception, and it is not a hole: a tool the S-1.20 breaker opened leaves even a held slice.
+The reason it is gone is that it does not work, and holding a broken tool to protect a cache is
+protecting the wrong thing.
+
+Verified by `a_session_slice_is_append_only_and_each_order_is_a_prefix_of_the_next` (six steps,
+every earlier name still present), `a_searched_tool_joins_the_session_slice_in_one_round_trip`
+(the goal never says "skill"; a search for "run python" puts `run_skill` in the slice on the very
+next call), `a_full_session_slice_reports_rather_than_evicting` (three searches against a
+five-slot budget: the cap holds, nothing that was there leaves, and `exposure_full` is recorded),
+and `a_step_scoped_profile_still_reroutes_every_step`.
 
 Routed once per turn from the opening message, then **append-only**: `search_tools` adds,
 and only at the cap does the least-recently-used non-core tool get evicted (one cache

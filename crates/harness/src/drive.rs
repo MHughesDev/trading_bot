@@ -58,7 +58,7 @@ use serde_json::{json, Map, Value};
 use crate::context::{self, Block, CompactionReport, Section};
 use crate::hardware::{Admission, TaskDemand};
 use crate::policy::{self, ActionContext, Decision, Ruling};
-use crate::profile::{Mode, Profile, SchemaStyle};
+use crate::profile::{ExposureScope, Mode, Profile, SchemaStyle};
 use crate::provenance::{self, Provenance, Tagged};
 use crate::registry::{
     self, Risk, ToolRegistry, FINISH_TASK, RECORD_FINDING, REFLECT, SEARCH_TOOLS,
@@ -601,6 +601,15 @@ pub struct Loop {
     /// Kept as well as the namespace because the namespace alone loses which tool was
     /// wanted, and the budget then hands the slot to whichever sibling sorts first.
     discovered_tools: Vec<String>,
+    /// The turn's exposure slice, in order, on a `Session`-scoped profile
+    /// (§5.2, S-2.4).
+    ///
+    /// **Append-only within a turn.** Tools are the first layer of the cached
+    /// prefix, so dropping one invalidates the cache for the system prompt and the
+    /// whole transcript behind it — on a thirty-iteration run that costs far more
+    /// than the missing tool did. Empty on a `Step`-scoped profile, which re-routes
+    /// every step because it has no cache to protect.
+    session_exposure: Vec<String>,
     exposed: BTreeSet<String>,
     exposed_schemas: Vec<Value>,
     step_namespaces: Vec<String>,
@@ -799,6 +808,7 @@ impl Loop {
             directive: None,
             discovered: BTreeSet::new(),
             discovered_tools: Vec::new(),
+            session_exposure: Vec::new(),
             evidence_candidates: Vec::new(),
             exposed: BTreeSet::new(),
             exposed_schemas: Vec::new(),
@@ -1510,11 +1520,6 @@ impl Loop {
             }
         };
         self.step_namespaces = wanted;
-        // A tool the breaker opened leaves exposure for the rest of the run
-        // (§3.7, S-1.20). Removed here, after routing, rather than filtered out of
-        // `pinned` and `wanted` earlier: routing should still be able to say the
-        // tool was the right answer, and the run should still be able to report
-        // that the right answer was unavailable.
         // Two withholdings, both after routing.
         //
         // A tool the breaker opened leaves exposure for the rest of the run
@@ -1529,14 +1534,72 @@ impl Loop {
         // refuses — which on that profile is the slot `list_instruments` loses to
         // two alphabetical siblings.
         let reflects = self.profile.orchestration.reflection;
-        self.exposed = exposure
-            .names
-            .iter()
-            .filter(|n| !self.broken_tools.contains(*n))
-            .filter(|n| reflects || n.as_str() != REFLECT)
-            .cloned()
-            .collect();
-        self.exposed_schemas = if self.broken_tools.is_empty() && reflects {
+        let admissible = |n: &String| {
+            !self.broken_tools.contains(n) && (reflects || n.as_str() != REFLECT)
+        };
+
+        // Session-scoped exposure (§5.2, S-2.4): routed once per turn, then
+        // append-only, and the order is a strict prefix of the previous call's.
+        //
+        // The order is load-bearing, not cosmetic. A cached prefix matches by
+        // bytes, so reordering the tools array invalidates it exactly as
+        // thoroughly as removing one — which is why this appends to a kept order
+        // rather than re-rendering whatever routing returned this step.
+        //
+        // **Mid-turn eviction is forbidden.** A full slice says so and keeps what
+        // it has; eviction happens at a turn boundary, where the prefix is rebuilt
+        // anyway. Dropping a tool to make room for a better one is a trade that
+        // looks free here and is paid for by every later call in the turn.
+        if matches!(self.profile.tools.exposure_scope, ExposureScope::Session) {
+            let budget = self.profile.tools.max_exposed_per_step;
+            if self.session_exposure.is_empty() {
+                self.session_exposure = exposure
+                    .names
+                    .iter()
+                    .filter(|n| admissible(n))
+                    .take(budget)
+                    .cloned()
+                    .collect();
+            } else {
+                // Core and already-held tools keep their places; anything new is
+                // appended, in routing order, while there is room.
+                let mut full = false;
+                for name in exposure.names.iter().filter(|n| admissible(n)) {
+                    if self.session_exposure.iter().any(|h| h == name) {
+                        continue;
+                    }
+                    if self.session_exposure.len() >= budget {
+                        full = true;
+                        break;
+                    }
+                    self.session_exposure.push(name.clone());
+                }
+                if full {
+                    fx.push(Effect::Note(Note::CoreTool {
+                        name: "exposure_full".to_string(),
+                        detail: format!(
+                            "the slice is full for this turn ({budget} tools); nothing was                              evicted to make room, because dropping a tool invalidates the                              cached prefix for the whole transcript behind it"
+                        ),
+                    }));
+                }
+            }
+            // A tool the breaker opened leaves even a held slice: the reason it is
+            // gone is that it does not work, and holding a broken tool to protect a
+            // cache is protecting the wrong thing.
+            self.session_exposure.retain(|n| admissible(n));
+            self.exposed = self.session_exposure.iter().cloned().collect();
+        } else {
+            self.exposed = exposure
+                .names
+                .iter()
+                .filter(|n| admissible(n))
+                .cloned()
+                .collect();
+        }
+        self.exposed_schemas = if self.broken_tools.is_empty()
+            && reflects
+            && matches!(self.profile.tools.exposure_scope, ExposureScope::Step)
+        {
             exposure.schemas.clone()
         } else {
             self.exposed

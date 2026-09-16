@@ -1081,3 +1081,151 @@ fn a_non_retryable_error_tells_the_model_not_to_repeat_it() {
     assert!(!untyped.contains("This will fail again"));
     assert!(!untyped.contains("may be transient"));
 }
+
+// ── S-2.4: session-scoped exposure is append-only ───────────────────────────
+
+/// A registry with a skill tool the goal never mentions, so only a search finds it.
+fn registry_with_skills() -> ToolRegistry {
+    let mut reg = registry();
+    for (name, ns, desc) in [
+        (
+            "run_skill",
+            "skills",
+            "Run a saved Python skill against a payload. Use it to run python.",
+        ),
+        ("list_skills", "skills", "Every saved skill with its record."),
+        ("get_funnel", "research", "The gate funnel for an experiment."),
+        ("advance_gate", "research", "Advance an experiment's gate."),
+        ("list_lanes", "discovery", "Which lanes exist."),
+    ] {
+        reg.register(ToolDef {
+            name: name.into(),
+            namespace: ns.into(),
+            description: desc.into(),
+            risk: Risk::Read,
+            core: false,
+            idempotent: true,
+            input_schema: json!({"type": "object", "properties": {}}),
+        })
+        .unwrap();
+    }
+    reg
+}
+
+fn session_loop(budget: usize) -> (Loop, Vec<Effect>) {
+    let mut p = profile();
+    p.orchestration.mode = harness::profile::Mode::Freeform;
+    p.orchestration.max_steps = 40;
+    p.tools.exposure_scope = harness::profile::ExposureScope::Session;
+    p.tools.max_exposed_per_step = budget;
+    p.tools.search_reserve_slots = 1;
+    let mut l = Loop::new(p, registry_with_skills(), task());
+    let fx = l.next(Input::Admission(Admission::Admit));
+    (l, fx)
+}
+
+/// Within a turn the slice only grows, and its order is a strict PREFIX of the
+/// previous call's.
+///
+/// The order is load-bearing rather than cosmetic: a cached prefix matches by
+/// bytes, so reordering the tools array invalidates it exactly as thoroughly as
+/// removing an entry. A slice that re-sorted itself every step would pay the full
+/// prompt on all thirty iterations while looking, from the outside, like caching.
+#[test]
+fn a_session_slice_is_append_only_and_each_order_is_a_prefix_of_the_next() {
+    let (mut l, _) = session_loop(8);
+    let mut previous: Vec<String> = l.exposed().iter().cloned().collect();
+    assert!(!previous.is_empty());
+
+    for i in 0..6u32 {
+        step(&mut l, i, "{\"bars\": 500}");
+        let now: Vec<String> = l.exposed().iter().cloned().collect();
+        assert!(
+            now.len() >= previous.len(),
+            "the slice shrank: {previous:?} -> {now:?}"
+        );
+        for name in &previous {
+            assert!(
+                now.contains(name),
+                "`{name}` left the slice mid-turn; eviction invalidates the cached prefix"
+            );
+        }
+        previous = now;
+    }
+}
+
+/// A goal that never says "skill", a search for "run python", and the tool is in
+/// the slice on the next call — one round-trip, no eviction.
+#[test]
+fn a_searched_tool_joins_the_session_slice_in_one_round_trip() {
+    let (mut l, _) = session_loop(8);
+    assert!(
+        !l.exposed().contains("run_skill"),
+        "the goal never mentions skills, so routing did not offer it: {:?}",
+        l.exposed()
+    );
+
+    l.next(Input::ModelReply {
+        raw: r#"{"name":"search_tools"}"#.into(),
+    });
+    l.next(Input::ModelReply {
+        raw: r#"{"query":"run python"}"#.into(),
+    });
+
+    assert!(
+        l.exposed().contains("run_skill"),
+        "the searched tool is in the slice on the very next call: {:?}",
+        l.exposed()
+    );
+}
+
+/// A full slice says so and keeps what it has.
+///
+/// Dropping a tool to make room for a better one is a trade that looks free at the
+/// moment it is made and is paid for by every later call in the turn.
+#[test]
+fn a_full_session_slice_reports_rather_than_evicting() {
+    // Small enough that core plus one routed tool fills it.
+    let (mut l, _) = session_loop(5);
+    let before: Vec<String> = l.exposed().iter().cloned().collect();
+
+    let mut reported = false;
+    for query in ["run python", "the gate funnel", "which lanes exist"] {
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"search_tools"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: json!({ "query": query }).to_string(),
+        });
+        reported |= fx.iter().any(|e| {
+            matches!(e, Effect::Note(harness::drive::Note::CoreTool { name, .. })
+                if name == "exposure_full")
+        });
+    }
+
+    assert!(
+        l.exposed().len() <= 5,
+        "the cap held: {:?}",
+        l.exposed()
+    );
+    for name in &before {
+        assert!(
+            l.exposed().contains(name),
+            "`{name}` was evicted to make room, which is what this forbids"
+        );
+    }
+    assert!(reported, "a full slice reports `exposure_full`");
+}
+
+/// And a step-scoped profile still re-routes, because it has no cache to protect
+/// and six slots to spend on the step in front of it.
+#[test]
+fn a_step_scoped_profile_still_reroutes_every_step() {
+    let (l, _) = started();
+    assert_eq!(
+        profile().tools.exposure_scope,
+        harness::profile::ExposureScope::Step,
+        "the 7B is step-scoped"
+    );
+    assert!(!l.exposed().is_empty());
+}
