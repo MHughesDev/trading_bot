@@ -145,7 +145,41 @@ control is matched, not naive; results are stable across two seeded runs.
 **Traces:** AGENT-006 §5.2; AGENT-002 §6.3.
 
 ### S-3.4 Liquidity, correlation, seasonality, stationarity, cointegration — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — four of the five tools are complete; `estimate_liquidity_cost`
+ships three of the four spread estimators §5.2 names.
+
+Done: `apps/skill-runner/templates/analysis/{estimate_liquidity_cost,rolling_correlation,
+seasonality,stationarity,cointegration}.py`.
+
+`seasonality` applies **both** corrections and reports the Romano-Wolf one, which is the
+stricter: BH assumes independence or positive dependence and hourly buckets of one price
+series are neither. `n_raw_significant` is in the summary beside `n_survivors` on purpose —
+on the reference series four of 31 buckets are significant before correction and none
+survive it, and showing that gap is more convincing than explaining it. A bucket is never
+reported without its adjusted p-value.
+
+`stationarity` reports a **joint** verdict over ADF and KPSS, whose nulls are opposites. Two
+of the four combinations are honest "cannot tell", and a tool reporting only ADF would turn
+"neither test rejects" into "random walk" and "both reject" into "mean-reverting", both
+confidently.
+
+`cointegration` runs Engle-Granger in both directions because the test is asymmetric, and
+says so when they disagree. It does not search for pairs: testing a named pair is a
+hypothesis, scanning a universe for the best p-value is a search and spends trials.
+
+**Missing: EDGE** (Ardia, Guidotti & Kroencke 2024). Written from memory of the method
+rather than from the paper, it returned a negative spread variance against a series whose
+spread is known exactly — which means the moment conditions were wrong, not that the data
+was hard. A cost estimator biased low makes every strategy look profitable and the error is
+invisible, so it is absent rather than approximate. **OQ-15**, and the tool's own description
+says three estimators, not four.
+
+That defect was found by a new test rather than by inspection:
+`the_cost_estimators_recover_the_fixtures_known_spread` checks every estimator against the
+fixture's known 60 bps. It also caught a fixture bug — the reference dataset drew a
+proportional wick around `max(open, close)`, whose mid is not an estimate of the efficient
+price, and Abdi-Ranaldo came out at half the true spread because of it. The fixture now
+simulates an intrabar path.
 
 `estimate_liquidity_cost` (EDGE, Roll, Corwin-Schultz, Amihud, sqrt-impact — wraps what
 `check_tradeable_frontier` already computes for one horizon), `rolling_correlation` (with

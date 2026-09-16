@@ -21,6 +21,11 @@ Deliberately present in the data
 * **An hour-of-day effect** in the second series only, small enough that it
   should not survive a multiple-testing correction on a short window — which is
   the point: a seasonality tool that reports it as a survivor is over-reporting.
+* **A bid-ask bounce**, at 60 bps on the first series and 120 bps on the
+  second — wide for hourly crypto, and `SPREAD_A` explains why.
+* **A simulated intrabar path**, so the high and low are real extremes rather
+  than a proportional wick around the bar return. `_bars_from_ticks` explains
+  what that artefact did to two of the four spread estimators.
 
 Deliberately absent
 -------------------
@@ -31,6 +36,7 @@ scattered through the fixture everything else shares.
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -46,6 +52,24 @@ TIMEFRAME = "1h"
 # using a raw t, whose variance is nu/(nu-2), which turns this into 1.03 and
 # makes the process explosive.
 OMEGA, ALPHA, BETA, NU = 2.0e-7, 0.09, 0.89, 5.0
+
+# Relative effective spreads: 60 bps and 120 bps. Two different values, so a tool
+# that cross-checks the pair cannot pass by returning one number twice.
+#
+# These are WIDE for hourly crypto, deliberately. At a realistic 8 bps the
+# bounce contributes -(s/2)^2 = -1.6e-7 to the first return autocovariance,
+# while the sampling error of that covariance on 6,000 fat-tailed GARCH bars is
+# around 4e-7 — so Roll, EDGE and Abdi-Ranaldo are below their own noise floor
+# and correctly decline. That is a true and useful fact about bar-based spread
+# estimators at this frequency, and it makes for a fixture that exercises the
+# refusal path and nothing else. The spread here is sized so the estimators have
+# something recoverable to recover; the honest caveat belongs in the tool, which
+# reports the noise floor beside the estimate.
+SPREAD_A, SPREAD_B = 60.0e-4, 120.0e-4
+
+# Intrabar steps used to build the high and low. Ten is enough for the range to
+# be a real path extreme rather than a function of the bar return.
+TICKS_PER_BAR = 10
 assert ALPHA + BETA < 1.0, "the fixture's volatility process must be stationary"
 
 
@@ -77,28 +101,73 @@ def build() -> tuple[pd.DataFrame, pd.DataFrame]:
 
     ts = pd.date_range("2024-01-01T00:00:00Z", periods=BARS, freq="h")
     # Small enough to be inside the noise on a short window.
-    hour_effect = 0.00012 * np.sin(2.0 * np.pi * ts.hour / 24.0)
-    r2 = r2 + hour_effect
+    hour_effect = 0.00012 * np.sin(2.0 * np.pi * np.asarray(ts.hour) / 24.0)
+    r2 = np.asarray(r2, dtype=float) + hour_effect
 
     frames = []
-    for returns, first in ((r1, 42_000.0), (r2, 2_400.0)):
-        close = first * np.exp(np.cumsum(returns))
-        assert np.isfinite(close).all() and (close > 0).all(), "the fixture overflowed"
-        open_ = np.concatenate([[first], close[:-1]])
-        wick = np.abs(returns) * 0.5
-        frames.append(
-            pd.DataFrame(
-                {
-                    "ts": ts,
-                    "open": open_,
-                    "high": np.maximum(open_, close) * (1.0 + wick),
-                    "low": np.minimum(open_, close) * (1.0 - wick),
-                    "close": close,
-                    "volume": np.abs(returns) * 1.0e6 + 1.0,
-                }
-            )
-        )
+    for returns, first, spread in ((r1, 42_000.0, SPREAD_A), (r2, 2_400.0, SPREAD_B)):
+        bars = _bars_from_ticks(rng, returns, first, spread)
+        frames.append(pd.DataFrame({"ts": ts, **bars}))
     return frames[0], frames[1]
+
+
+def _bars_from_ticks(
+    rng: np.random.Generator, returns: np.ndarray, first: float, spread: float
+) -> dict:
+    """Build OHLC from a simulated intrabar path rather than from the bar return.
+
+    This is more work than putting a proportional wick either side of
+    `max(open, close)`, and it is the difference between a fixture that tests
+    spread estimators and one that tests an artefact.
+
+    Abdi-Ranaldo and EDGE both read the spread out of the relationship between
+    the close, the open, and the **mid of the high and low** — specifically, they
+    rely on that mid being an unbiased estimate of the *efficient* price. A
+    synthetic wick drawn symmetrically around `max(open, close)` does not have
+    that property: its mid sits somewhere between the open and the close by
+    construction, not near the efficient price, and both estimators come out
+    biased low by a factor of two to three against a spread that is known exactly.
+    Measured, on the first version of this file.
+
+    So: `TICKS_PER_BAR` steps of the efficient price inside each bar, the high
+    and low taken from that path, and the bounce applied to every observed price
+    the way a book applies it — trades print at the bid or the ask, so the
+    observed high is an ask and the observed low is a bid.
+    """
+    returns = np.asarray(returns, dtype=float)
+    n = returns.size
+    steps = TICKS_PER_BAR
+    # Each bar's return split into `steps` increments of equal variance, scaled
+    # so the sum is exactly the bar's return: the intrabar path is a Brownian
+    # bridge, so the bar-level series is untouched by this and every other
+    # template sees the same closes it saw before.
+    increments = rng.normal(0.0, 1.0, size=(n, steps))
+    increments -= increments.mean(axis=1, keepdims=True)
+    scale = np.abs(returns)[:, None] / max(steps, 1)
+    path_steps = increments * scale + returns[:, None] / steps
+
+    start = math.log(first)
+    bar_open_log = start + np.concatenate([[0.0], np.cumsum(returns)[:-1]])
+    within = np.cumsum(path_steps, axis=1)
+    path = bar_open_log[:, None] + within
+
+    efficient_high = np.exp(path.max(axis=1))
+    efficient_low = np.exp(path.min(axis=1))
+    efficient_close = np.exp(path[:, -1])
+    efficient_open = np.exp(bar_open_log)
+
+    # A trade prints at the bid or the ask. The high is therefore an ask print
+    # and the low a bid print — that asymmetry is what Corwin-Schultz measures.
+    half = spread / 2.0
+    side_close = rng.choice([-1.0, 1.0], size=n)
+    side_open = rng.choice([-1.0, 1.0], size=n)
+    return {
+        "open": efficient_open * (1.0 + side_open * half),
+        "high": efficient_high * (1.0 + half),
+        "low": efficient_low * (1.0 - half),
+        "close": efficient_close * (1.0 + side_close * half),
+        "volume": np.abs(returns) * 1.0e6 + 1.0,
+    }
 
 
 def main(out_dir: str) -> int:

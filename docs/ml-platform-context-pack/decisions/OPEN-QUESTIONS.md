@@ -138,3 +138,17 @@ Write here instead of guessing. One entry per question. Keep working on unrelate
 **Decision:** **B for now**, taken because a mirror that disagrees with its original is worse than either version of the original, and because A's blast radius is every stored manifest. Recorded rather than closed: C is the right answer if a number ever does arrive both ways, and the test that asserts the deviation is what will say so.
 
 **Status:** open — decision B in force, revisit if a duplicate key is ever observed.
+
+### OQ-15 · The EDGE spread estimator is specified by AGENT-006 §5.2 and is not implemented — implement it from the paper, or drop it?
+**Context:** found 2026-09-16 while building `analysis.estimate_liquidity_cost` (S-3.4). The spec names five cost estimators and EDGE (Ardia, Guidotti & Kroencke, 2024) is one of them. The first implementation here was written from memory of the method rather than from the paper, and it returned a *negative* spread variance against a reference series whose spread is known exactly (60 bps, set by `apps/skill-runner/reference_dataset.py`). A negative variance is not a hard-data refusal; it means the moment conditions were wrong.
+
+**What it costs to get wrong:** a cost estimator that is biased low makes every strategy look profitable, and the error is invisible — the number is plausible, it has a citation behind it, and nothing downstream can tell it is too small. This is the same failure shape as a zero spread from a clamped Roll estimator, which the tool now refuses to produce.
+
+**Options.**
+**A. Implement it from the paper** and check it against the fixture, which now measures exactly this (`the_cost_estimators_recover_the_fixtures_known_spread`). EDGE is the current best single choice on both daily and intraday bars, so this is the only option that delivers what §5.2 asked for.
+**B. Drop it from the spec.** The three that remain — Roll, Corwin-Schultz, Abdi-Ranaldo — recover the fixture's known spread to 58.4, 45.0 and 59.6 bps, and the consensus is a median, so a fourth estimator is an improvement rather than a necessity.
+**C. Ship the approximation with a caveat.** Refused outright: a caveat in prose does not travel with the number into a cost model.
+
+**Decision:** **A, deferred.** The tool ships with three verified estimators and its description says three; the docstring names EDGE and says why it is absent. Nothing is blocked on it — the consensus is a median of estimators that agree — and the calibration test means whoever implements it will know immediately whether they got it right, which is not true of the version that was nearly committed.
+
+**Status:** open — `estimate_liquidity_cost` is correct and incomplete, and says so in its own description.

@@ -270,14 +270,93 @@ async fn every_declared_summary_field_is_actually_emitted() {
             .and_then(|r| r.get("detail"))
             .unwrap_or_else(|| panic!("`{}` returned no detail", h.name));
 
-        for slot in skills::template::slots(template) {
-            let value = detail.get(&slot);
+        // Presence, not non-nullness. A null is a legitimate answer — the
+        // reference series is a random walk, so `stationarity` has no half-life
+        // to report and correctly says so — and the renderer prints
+        // "(n unknown)" for it. A *missing* key is the template having forgotten
+        // the field, which renders identically and means something entirely
+        // different.
+        let mut non_null = 0;
+        let slots = skills::template::slots(template);
+        for slot in &slots {
+            let value = detail.get(slot);
             assert!(
-                value.is_some() && !value.unwrap().is_null(),
-                "`{}` declares `{slot}` in its summary and did not emit it on the reference \
-                 dataset",
+                value.is_some(),
+                "`{}` declares `{slot}` in its summary and did not emit the field at all on the \
+                 reference dataset. An absent field and a null field both render as \
+                 \"(n unknown)\"; only one of them is deliberate.",
                 h.name
             );
+            if !value.unwrap().is_null() {
+                non_null += 1;
+            }
         }
+        assert!(
+            slots.is_empty() || non_null > 0,
+            "every slot in `{}`'s summary is null on the reference dataset, so the one line a \
+             flat-tier model reads first carries nothing at all",
+            h.name
+        );
+    }
+}
+
+/// The fixture's spread is known exactly, so a cost estimator can be checked
+/// rather than believed.
+///
+/// This is not a smoke test. It is the test that caught a real defect: the first
+/// version of the reference dataset drew a proportional wick around
+/// `max(open, close)` instead of simulating an intrabar path, and the mid of
+/// that wick is not an estimate of the efficient price — so Abdi-Ranaldo came
+/// out at half the true spread and EDGE at a third. Both would have shipped,
+/// and a cost estimator that is wrong *low* makes every strategy look
+/// profitable.
+///
+/// The tolerance is wide (±40%) on purpose. These estimators are biased by
+/// construction and disagree with each other; the claim being made is "recovers
+/// the right order of magnitude from data whose answer we know", which is the
+/// claim a cost model actually needs. A tight tolerance here would be a tolerance
+/// tuned to the current fixture.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_cost_estimators_recover_the_fixtures_known_spread() {
+    // `SPREAD_A` in apps/skill-runner/reference_dataset.py.
+    const TRUE_SPREAD_BPS: f64 = 60.0;
+
+    let fixture = fixture_dir();
+    let Some(t) = mcp_server_lib::tools::templated::find("estimate_liquidity_cost") else {
+        return;
+    };
+    let (outcome, result) = run_once(t, &payload_for(t, &fixture)).await;
+    assert_eq!(outcome, Outcome::Ok, "{outcome:?}");
+    let detail = result
+        .as_ref()
+        .and_then(|r| r.get("detail"))
+        .expect("a detail");
+
+    let consensus = detail
+        .get("spread_bps")
+        .and_then(Value::as_f64)
+        .expect("a consensus spread");
+    let error = (consensus - TRUE_SPREAD_BPS).abs() / TRUE_SPREAD_BPS;
+    assert!(
+        error < 0.4,
+        "the consensus spread is {consensus:.1} bps against a true {TRUE_SPREAD_BPS} bps          ({:.0}% out). Per-estimator values: {}",
+        error * 100.0,
+        detail.get("estimators_bps").unwrap_or(&Value::Null)
+    );
+
+    // And every estimator that did not decline has to be in the same territory.
+    // One that is out by a factor is one that should be declining instead.
+    let per = detail
+        .get("estimators_bps")
+        .and_then(Value::as_object)
+        .expect("per-estimator values");
+    assert!(!per.is_empty(), "every estimator declined on the fixture");
+    for (name, value) in per {
+        let bps = value.as_f64().unwrap_or(f64::NAN);
+        let out = (bps - TRUE_SPREAD_BPS).abs() / TRUE_SPREAD_BPS;
+        assert!(
+            out < 0.6,
+            "`{name}` reports {bps:.1} bps against a true {TRUE_SPREAD_BPS}. An estimator that              cannot recover a spread from data built to contain it should return None, not a              number a cost model will use."
+        );
     }
 }
