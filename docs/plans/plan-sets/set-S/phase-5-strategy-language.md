@@ -269,7 +269,20 @@ anchor from S-5.3 resolves.
 **Traces:** AGENT-011 §6; §8.8. AGENT-005 §3.3.
 
 ### S-5.14 F2 families — L
-`PARTIAL` 2026-09-16 — The F2 families are largely present and resolve: `parkinson_vol`, `garman_klass_vol`, `rogers_satchell_vol`, `bv`, `jump_share`, `efficiency_ratio`, `autocorr`, the `rolling_*` set and the calendar terms. **The acceptance is the interesting half and is not met**: the analysis templates and the strategy engine must compute identical values for the same family on the same window. Phase 3 built those templates in Python against numpy and scipy (ADR-S3-01) and the engine computes in Rust — so there are now two implementations of Parkinson volatility in this repository and nothing compares them. That is exactly the drift a one-engine rule exists to prevent, and it should be a reconciliation test.
+`PARTIAL` 2026-09-16 — The F2 families are largely present and resolve, and **the acceptance is now met for every family that exists on both sides of the language barrier**: `crates/mcp-server/tests/volatility_reconciliation.rs` runs the Python template and the Rust engine over the same bars and asserts they agree.
+
+Seven families, and it found two real defects on the way:
+
+- `parkinson_vol`, `garman_klass_vol`, `rogers_satchell_vol` — agree to 1e-9, as `engine**2 == template_variance`. The engine reports a per-bar deviation (`..._vol`), the template a variance (under `variance_per_bar`); both are correctly labelled, and a second test pins that shape so a future change fails saying which claim broke.
+- `rv`, `bv` — the engine sums and the template means, so they agree up to the term count, exactly.
+- `autocorr` at lags 1–3 — already identical.
+- `variance_ratio` — **was wrong.** See below.
+
+**Defect 1, in the fixture.** Garman-Klass came out 7.5e-4 high. Neither implementation was at fault: `reference_dataset.py` built the intrabar path as a cumulative sum of the steps *after* the open, so `efficient_high` and `efficient_low` need not bracket the opening point, and with a 60 bps spread the observed open landed above the observed high on **2,526 bars of 6,000**. `0.5·ln(h/l)² − (2ln2−1)·ln(c/o)²` is non-negative for any bar whose range contains both ends, so the engine's per-bar floor at zero can never bind — and it was binding on fifteen bars. Fixed in the generator; the floor stays, because it is what made a silent malformation visible.
+
+**Defect 2, in the engine.** `variance_ratio`'s registry line says "Lo-MacKinlay variance ratio at horizon q" and the implementation aggregated with `chunks_exact(q)` — every qth window, the rest discarded. That is not Lo-MacKinlay, whose contribution was the overlapping estimator. Measured at 0.4515 against the template's 0.4266 on the same 2,011 bars. Now overlapping on both sides, with the property pinned inside `crates/features` as well, since the cross-language test needs a Python interpreter.
+
+**What keeps this `PARTIAL`**: the reconciliation can only cover families that exist twice. `yang_zhang` and `hurst` are in the templates and not in the engine; `efficiency_ratio` is in the engine and not the templates; `fracdiff` and `lookback_ensemble` are in neither. Those are gaps in the F2 set rather than drift — a family that exists once cannot disagree with itself — but the phase is not done until they exist.
 
 Audited 2026-09-16 against the source. `crates/features` is a real engine — about 5,100 lines over 101 passing tests, with `registry.rs` (583), `runtime.rs` (1,068) and `leakage.rs` (1,301) — and `crates/backtest/src/sim.rs:987` resolves every strategy feature through `features::runtime::feature`. Proven by construction rather than by reading: `atr_14`, `parkinson_vol_20`, `rolling_std_30`, `donchian_upper_20`, `obv` and `hour_sin` all resolve and run.
 
