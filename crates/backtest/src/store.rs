@@ -512,6 +512,17 @@ impl BarStore {
     /// reported as derived if *any* of its revisions was — a series is no more
     /// trustworthy than the least honest stamp in it.
     ///
+    /// `unflagged_sentinel` is computed here with **the vendor lag treated as
+    /// zero**: a row is flagged when its `knowledge_time` precedes its own bar
+    /// close and it carries no `BACKFILLED_KNOWLEDGE_TIME`. That is a lower
+    /// bound on `dataplane::bar::is_unflagged_sentinel_violation`, which uses
+    /// `close + declared_vendor_lag`. It catches every row that is impossible on
+    /// any lag and misses rows that are merely too early for *their* venue,
+    /// because this query has no venue-lag join. **A zero here therefore means
+    /// "no impossible row", not "no violation"** — the census's own pass over
+    /// `CanonicalBar`s is the authority, and this is the cheap ClickHouse-side
+    /// screen that runs over the whole table.
+    ///
     /// # Errors
     /// Backend failures.
     pub async fn census_bars(&self, symbol: &str, venue: &str, period_secs: u32) -> anyhow::Result<Vec<dataplane::census::CensusBar>> {
@@ -519,13 +530,16 @@ impl BarStore {
         struct CensusRow {
             open_ns: i64,
             derived: u8,
+            sentinel: u8,
         }
         let horizon = self.horizon_ns();
         let rows: Vec<CensusRow> = self
             .client
             .query(&format!(
                 "SELECT toInt64(toUnixTimestamp64Nano(m.event_time)) AS open_ns,
-                        toUInt8(max(bitAnd(m.quality_flags, {bf}) != 0)) AS derived
+                        toUInt8(max(bitAnd(m.quality_flags, {bf}) != 0)) AS derived,
+                        toUInt8(max(m.knowledge_time < m.event_time + toIntervalSecond({period_secs})
+                                    AND bitAnd(m.quality_flags, {bf}) = 0)) AS sentinel
                    FROM market_bar AS m
                    INNER JOIN (SELECT DISTINCT instrument_id, venue_id, symbol FROM instrument_symbol_dim FINAL
                                 WHERE knowledge_time <= fromUnixTimestamp64Nano({horizon})) AS s
@@ -543,7 +557,11 @@ impl BarStore {
             .await?;
         Ok(rows
             .into_iter()
-            .map(|r| dataplane::census::CensusBar { open_ns: r.open_ns, knowledge_derived: r.derived != 0 })
+            .map(|r| dataplane::census::CensusBar {
+                open_ns: r.open_ns,
+                knowledge_derived: r.derived != 0,
+                unflagged_sentinel: r.sentinel != 0,
+            })
             .collect())
     }
 

@@ -1090,10 +1090,22 @@ fn the_old_promotion_spelling_matches_no_envelope() {
     );
     assert_eq!(Envelope::for_action("promote_model_version"), Envelope::Promotion);
     assert!(Envelope::for_action("promote_model_version").requires_approval());
+}
+
 /// The one module allowed to name the smoothed regime path, and the reason it
 /// is allowed: it is analysis, it writes its answer into the research schema,
 /// and nothing that evaluates holds USAGE on that schema.
 const REGIME_ANALYSIS_MODULE: &str = "crates/api/src/regime_separation.rs";
+
+/// Everything before a file's `#[cfg(test)]`, which is the code that ships.
+///
+/// A file with no test module is returned whole.
+fn production_only(src: &str) -> &str {
+    match src.find("#[cfg(test)]") {
+        Some(i) => &src[..i],
+        None => src,
+    }
+}
 
 /// Everything a strategy's result passes through on its way to a verdict.
 fn evaluating_path(path: &str) -> bool {
@@ -1128,7 +1140,12 @@ fn at42_no_evaluating_module_names_the_smoothed_regime_path() {
             path, REGIME_ANALYSIS_MODULE,
             "the analysis module must not be on the evaluating list"
         );
-        let code = strip_comments(&src);
+        // Production code only. A test that asserts a module offers no smoothed
+        // read has to name the thing it forbids — `knowledge.rs` carries exactly
+        // such a test, and its own comment says so. Scanning the test module
+        // would make the stronger, file-local version of this rule the reason
+        // the weaker repo-wide one fails, which is the wrong way round.
+        let code = strip_comments(production_only(&src));
         if let Some(m) = forbidden.find(&code) {
             let line = code[..m.start()].matches('\n').count() + 1;
             hits.push(format!("{path}:{line} names `{}`", m.as_str()));
@@ -1146,7 +1163,13 @@ fn at42_no_evaluating_module_names_the_smoothed_regime_path() {
     // other module in the tree names the smoothed path at all.
     let named: Vec<String> = rust_files()
         .into_iter()
-        .filter(|(p, s)| p.starts_with("crates/") && forbidden.is_match(&strip_comments(s)))
+        // Production code, for the same reason as above: `knowledge.rs`
+        // names the schema only inside the test that forbids it, and a
+        // module proving it has no smoothed read must not be counted as
+        // having one.
+        .filter(|(p, s)| {
+            p.starts_with("crates/") && forbidden.is_match(&strip_comments(production_only(s)))
+        })
         .map(|(p, _)| p)
         .filter(|p| !p.contains("/tests/"))
         .collect();

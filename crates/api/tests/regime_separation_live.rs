@@ -265,7 +265,7 @@ fn candidate_series(
     let rsi_params = [7_u32, 14, 21];
     if let Some(p) = best(&rsi_params, |p| mean(&rsi_reversion(bars, **p)[..split.min(bars.len())]))
     {
-        let full = rsi_reversion(bars, **p);
+        let full = rsi_reversion(bars, *p);
         out.push((format!("rsi_reversion_{p}"), oos(bars, &full, split)));
     }
 
