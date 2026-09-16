@@ -30,8 +30,45 @@ pub enum ReconcileOutcome {
 
 /// Compare `internal_qty` against `broker_qty`.  If they diverge beyond
 /// tolerance, trip the kill switch and return `Diverged`.
+///
+/// Trips the **global** scope, because this signature does not know which venue
+/// the divergence is at. Prefer [`check_position_divergence_at_venue`] wherever
+/// the venue is known: COMP-007 §4 halts the venue that disagrees and leaves the
+/// others trading, and a global halt for one venue's bookkeeping is the kind of
+/// over-reaction that gets a safety mechanism switched off.
 pub fn check_position_divergence(
     instrument_id: &str,
+    internal_qty: Decimal,
+    broker_qty: Decimal,
+    kill_switch: &Arc<KillSwitch>,
+) -> ReconcileOutcome {
+    check_divergence(instrument_id, None, internal_qty, broker_qty, kill_switch)
+}
+
+/// The venue-scoped form (COMP-007 §4, §8.3).
+///
+/// Halts `venue:<id>` and nothing else. The other venues keep trading, because
+/// the fact established here is "this venue and our book disagree about what is
+/// owned", which says nothing at all about the others.
+pub fn check_position_divergence_at_venue(
+    instrument_id: &str,
+    venue_id: &str,
+    internal_qty: Decimal,
+    broker_qty: Decimal,
+    kill_switch: &Arc<KillSwitch>,
+) -> ReconcileOutcome {
+    check_divergence(
+        instrument_id,
+        Some(venue_id),
+        internal_qty,
+        broker_qty,
+        kill_switch,
+    )
+}
+
+fn check_divergence(
+    instrument_id: &str,
+    venue_id: Option<&str>,
     internal_qty: Decimal,
     broker_qty: Decimal,
     kill_switch: &Arc<KillSwitch>,
@@ -42,12 +79,16 @@ pub fn check_position_divergence(
     if delta > tolerance {
         error!(
             %instrument_id,
+            venue_id = venue_id.unwrap_or("<unknown>"),
             %internal_qty,
             %broker_qty,
             %delta,
             "POSITION DIVERGENCE — tripping kill switch"
         );
-        kill_switch.trip();
+        match venue_id {
+            Some(v) => kill_switch.trip_scope(&risk::Scope::venue(v)),
+            None => kill_switch.trip(),
+        }
         ReconcileOutcome::Diverged {
             instrument_id: instrument_id.to_owned(),
             internal_qty: internal_qty.to_string(),
@@ -281,6 +322,29 @@ mod tests {
         );
         assert!(matches!(result, ReconcileOutcome::Diverged { .. }));
         assert!(ks.is_active(), "kill switch must be tripped on divergence");
+    }
+
+    #[test]
+    fn a_venue_scoped_divergence_halts_that_venue_and_only_that_venue() {
+        // COMP-007 §8.3. The old behaviour halted the whole platform because one
+        // venue's bookkeeping disagreed — which is both an over-reaction and the
+        // reason an operator reaches for a global reset, losing the information
+        // about which venue was actually wrong.
+        let ks = ks();
+        let result = check_position_divergence_at_venue(
+            "BTC-USD",
+            "kraken",
+            Decimal::from_str("1.0").unwrap(),
+            Decimal::from_str("2.0").unwrap(),
+            &ks,
+        );
+        assert!(matches!(result, ReconcileOutcome::Diverged { .. }));
+        assert!(ks.refuses(Some("kraken"), None), "the divergent venue halts");
+        assert!(
+            !ks.refuses(Some("alpaca"), None),
+            "the other venues keep trading"
+        );
+        assert!(!ks.is_active(), "and the platform is not globally halted");
     }
 
     #[test]

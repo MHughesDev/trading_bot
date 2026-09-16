@@ -52,6 +52,8 @@ fn crypto_ctx() -> GateContext {
         is_in_session: true,
         is_halted: false,
         halt_policy: HaltPolicy::NonHaltable,
+        venue_id: None,
+        strategy_id: None,
     }
 }
 
@@ -77,6 +79,8 @@ fn equity_ctx(is_in_session: bool) -> GateContext {
         is_in_session,
         is_halted: false,
         halt_policy: HaltPolicy::Haltable,
+        venue_id: None,
+        strategy_id: None,
     }
 }
 

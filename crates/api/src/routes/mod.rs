@@ -13,6 +13,7 @@ pub mod jobs;
 pub mod llm;
 pub mod models;
 pub mod models_phase6;
+pub mod monitor;
 pub mod orders;
 pub mod paper;
 pub mod platform_health;
@@ -171,6 +172,41 @@ pub fn router(state: AppState) -> Router {
         .route("/api/trading/status", get(trading::trading_status))
         .route("/api/trading/kill", post(trading::trip_kill_switch))
         .route("/api/trading/resume", post(trading::reset_kill_switch))
+        // ── COMP-007: the live monitor and kill switch ───────────────────────
+        .route("/api/monitor/kill-switch", get(monitor::get_kill_switch))
+        .route(
+            "/api/monitor/kill-switch/{scope}/trip",
+            post(monitor::trip),
+        )
+        .route(
+            "/api/monitor/kill-switch/{scope}/reset",
+            post(monitor::reset),
+        )
+        .route("/api/monitor/events", get(monitor::list_events))
+        .route(
+            "/api/monitor/events/{event_id}/label",
+            post(monitor::label_breach),
+        )
+        .route("/api/monitor/strategies", get(monitor::list_strategies))
+        .route(
+            "/api/monitor/strategies/{strategy_id}/{action}",
+            post(monitor::strategy_action),
+        )
+        .route(
+            "/api/monitor/limits/{strategy_id}",
+            axum::routing::put(monitor::declare_limit),
+        )
+        .route(
+            "/api/monitor/limits/{strategy_id}/promotion-gate",
+            get(monitor::promotion_gate),
+        )
+        .route("/api/monitor/drill", post(monitor::record_drill))
+        .route("/api/monitor/windows", post(monitor::open_window))
+        .route(
+            "/api/monitor/windows/{window_id}",
+            delete(monitor::close_window),
+        )
+        .route("/api/monitor/precision", get(monitor::get_precision))
         // Phase 3 UI streaming
         .route("/ws/live", get(ws_live))
         .route(

@@ -579,6 +579,7 @@ mod tests {
         e.paper
             .on_mark(instrument_id, Price::from_str(mark).unwrap());
         e.meta.put(InstrumentMeta {
+            venue_id: "paper".into(),
             instrument_id: instrument_id.to_owned(),
             // Kraken's published increments for a USD spot pair.
             tick_size: Decimal::from_str("0.1").unwrap(),
@@ -977,6 +978,7 @@ mod tests {
             .paper
             .register_instrument(instrument, AssetClass::CryptoSpotCex);
         env().meta.put(InstrumentMeta {
+            venue_id: "paper".into(),
             instrument_id: instrument.to_owned(),
             tick_size: Decimal::from_str("0.1").unwrap(),
             lot_size: Decimal::from_str("0.00000001").unwrap(),

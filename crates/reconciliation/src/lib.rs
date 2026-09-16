@@ -11,7 +11,8 @@ pub mod sequence;
 pub mod store;
 
 pub use divergence::{
-    check_position_divergence, DivergenceMonitor, DivergenceVerdict, ReconcileOutcome,
+    check_position_divergence, check_position_divergence_at_venue, DivergenceMonitor,
+    DivergenceVerdict, ReconcileOutcome,
 };
 pub use forward::{
     AlignedBar, AlignmentError, DeploymentSpec, DivergenceThresholds, ExpectedBar, ForwardError,

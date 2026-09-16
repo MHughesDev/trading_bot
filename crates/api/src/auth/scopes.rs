@@ -27,6 +27,14 @@ pub const REPORT: &str = "research:report";
 /// Call the model through the platform proxy.
 pub const LLM_PROXY: &str = "llm:proxy";
 
+/// Trip, scale, halt, resume or reset the live monitor (COMP-007 §5, §6).
+///
+/// Not a research scope, and never granted to an agent. The monitor is a service
+/// the agent may **query** and never **skip**: `check_control_limits` reads these
+/// tables, and there is no agent-callable halt, scale or reset at any risk class.
+/// An agent that could reset the switch could trade through its own halt.
+pub const MONITOR_CONTROL: &str = "monitor.control";
+
 /// Everything a research session may hold.
 ///
 /// Deliberately small and complete: a reader should be able to tell what the agent
@@ -51,6 +59,10 @@ pub const NEVER_FOR_AGENTS: &[&str] = &[
     // can read the planted mechanism does not have to find it, and every number on
     // the scorecard stops meaning what it says.
     "evals.truth",
+    // COMP-007 §5/§8.6. The monitor is the last line before money and the agent is
+    // one of the things it watches; a watched party that can reset the alarm is not
+    // being watched.
+    MONITOR_CONTROL,
     "web:full",
 ];
 
@@ -63,6 +75,15 @@ pub const WEB_FULL: &str = "web:full";
 /// unchanged; a service session must hold the exact scope.
 pub fn permits(held: &[String], required: &str) -> bool {
     held.iter().any(|s| s == WEB_FULL || s == required)
+}
+
+/// Whether a token may act on the live monitor (COMP-007 §6).
+///
+/// A thin wrapper over [`permits`], which is the point: the authority question is
+/// asked once, by name, in one place, so a new monitor route cannot be added
+/// without answering it. Every monitor POST calls this and nothing else.
+pub fn permits_monitor_control(held: &[String]) -> bool {
+    permits(held, MONITOR_CONTROL)
 }
 
 /// Validates a scope set destined for a project-bound agent session.
@@ -142,6 +163,34 @@ mod tests {
         // Silently dropping an unrecognised scope would make a typo look like a
         // granted capability in one direction and a missing one in the other.
         assert!(validate_agent_scopes(&owned(&["research:whatever"])).is_err());
+    }
+
+    #[test]
+    fn no_research_scope_reaches_the_monitor() {
+        // COMP-007 §8.6, from the authority side. Asserted over the whole research
+        // vocabulary rather than against one scope, so a scope added to
+        // RESEARCH_SCOPES cannot quietly become a way to reset the kill switch.
+        assert!(!permits_monitor_control(&owned(RESEARCH_SCOPES)));
+        for scope in RESEARCH_SCOPES {
+            assert!(
+                !permits_monitor_control(&owned(&[scope])),
+                "{scope} must not reach the monitor"
+            );
+        }
+    }
+
+    #[test]
+    fn an_agent_session_cannot_be_minted_with_monitor_control() {
+        assert!(validate_agent_scopes(&owned(&[MONITOR_CONTROL])).is_err());
+        assert!(NEVER_FOR_AGENTS.contains(&MONITOR_CONTROL));
+    }
+
+    #[test]
+    fn an_empty_service_token_reaches_nothing_on_the_monitor() {
+        // What `POST /auth/service-tokens` actually mints: a session with no
+        // scopes at all. The failure this guards is an `is_empty()` check
+        // somewhere reading as "unrestricted".
+        assert!(!permits_monitor_control(&[]));
     }
 
     #[test]

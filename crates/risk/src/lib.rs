@@ -11,7 +11,7 @@ pub mod trust_gate;
 
 pub use context::RiskContextProvider;
 pub use gate::{ApprovedOrder, GateContext, InstrumentLimits, Measured, RateSource, RiskGate};
-pub use kill_switch::KillSwitch;
+pub use kill_switch::{KillSwitch, LeaseGate, Scope, UnknownScope};
 pub use limits::GlobalRiskLimits;
 pub use rate::{RateCounts, RateKey, RateTracker};
 pub use strategy_halt::{

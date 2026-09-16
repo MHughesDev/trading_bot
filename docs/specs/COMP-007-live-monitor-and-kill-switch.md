@@ -50,9 +50,26 @@ Per strategy: `nominal → warning → breach → scaled_down → halted`, plus 
 |---|---|---|
 | warning | record; notify (AGENT-012 §13) | acknowledge; open diagnosis conversation (`attribute_divergence`) |
 | breach (behaviour/execution/data) | **scale down** to 25% size for that strategy; record; notify | resume at full; halt |
-| breach (P&L CUSUM or MC-drawdown) | **halt strategy** (no new orders); existing positions handled by the strategy's `HaltPolicy` (`crates/domain/src/instrument.rs:198`: hold / flatten / reduce) | resume (typed confirmation), flatten now |
+| breach (P&L CUSUM or MC-drawdown) | **halt strategy** (no new orders); existing positions handled by the strategy's halt policy (`monitor::state::HaltPolicy`: hold / flatten / reduce — see the correction below) | resume (typed confirmation), flatten now |
 | venue reconciliation mismatch or connection loss | **halt venue** order flow; positions held | resume after reconciliation passes |
 | platform heartbeat loss, monitor lag > 2 cadences, DB unreachable | **global halt**: the runtime's order gate refuses all new orders | reset (typed confirmation, reason required) |
+
+> **Correction, 2026-09-15 (Set S Phase 7 implementation).** §4 above and S-7.8
+> cited `crates/domain/src/instrument.rs:198` for a `HaltPolicy` carrying `hold /
+> flatten / reduce`. That enum exists but is a **different concept**: it is
+> `Haltable | NonHaltable` and answers "can the *exchange* halt this instrument",
+> which the risk gate already consults in `limits::check_halt`. Nothing anywhere
+> has ever carried hold/flatten/reduce.
+>
+> Reusing the name for two questions would have been worse than the missing type:
+> `check_halt` and the monitor would have matched on the same enum meaning
+> opposite things. So the policy is implemented as `monitor::state::HaltPolicy`
+> (`hold | flatten | reduce`), persisted per strategy on
+> `monitor.strategy_state.halt_policy`, with `hold` the default. §10's open
+> question — that the default for a new *live* crypto promotion should probably be
+> `reduce` — is left open and is a promotion-time choice, not a schema default.
+>
+> Everything else in §4 stands unchanged.
 
 ### 4.1 Dwell time, and the monitor's own precision
 
@@ -146,18 +163,28 @@ The runtime keeps an in-memory mirror refreshed on every lease renewal and on a 
 ## 8. Acceptance
 
 1. Killing the API process while a paper strategy runs: within one cadence the runtime refuses new orders with `monitor_unavailable`; restarting the API does not resume orders until the monitor's lease is valid again.
+   **Verified by:** `risk::lease_fails_closed::a_restarted_monitor_does_not_resume_orders_until_its_lease_is_valid_again`, `monitor::fail_closed_drill::a_database_the_runtime_cannot_read_closes_the_gate`.
 2. Killing the monitor: same outcome from the runtime's side, visible in the UI banner within one cadence.
+   **Verified by:** `monitor::fail_closed_drill::killing_the_monitor_stops_order_flow_within_one_cadence` (a real lease in a real database, allowed to lapse), `risk::lease_fails_closed::a_gate_with_no_monitor_seen_refuses_every_order`.
 3. An injected reconciliation mismatch halts the venue and only that venue; `resume` is refused until reconciliation passes.
+   **Verified by:** `monitor::fail_closed_drill::an_injected_mismatch_halts_one_venue_and_blocks_resume_until_clean`, `risk::lease_fails_closed::a_venue_halt_stops_that_venue_and_leaves_the_others_trading`.
 4. A strategy whose fill rate drops 3σ below its paper baseline is scaled to 25% automatically and the event names the metric, values and limit.
-5. A CUSUM breach halts the strategy and applies its `HaltPolicy`; the trip record is present before the first refused order.
+   **Verified by:** `monitor::evaluate::tests::a_sustained_execution_breach_scales_down_and_names_the_numbers`, `monitor::events::tests::a_breach_event_names_the_metric_the_value_and_the_limit`, `monitor::baseline::tests::a_seeded_baseline_measures_distance_in_sigmas`.
+5. A CUSUM breach halts the strategy and applies its halt policy; the trip record is present before the first refused order.
+   **Verified by:** `monitor::state::tests::a_pnl_breach_halts_and_applies_the_policy`, `monitor::state::tests::the_record_always_comes_before_the_halt`, `monitor::fail_closed_drill::the_trip_record_is_present_before_the_first_refused_order`, `monitor::baseline::tests::a_persistent_downward_shift_is_caught`.
 6. No agent token can call any monitor POST; `tripped_by` is never `agent:*` in any test or migration.
+   **Verified by:** `api::monitor_authority::nothing_in_the_agents_vocabulary_reaches_the_monitor`, `api::monitor_authority::the_database_refuses_to_grant_monitor_control_to_any_service_session`, `api::monitor_authority::every_mutating_monitor_handler_asks_the_one_authority_question`, `monitor::fail_closed_drill::the_database_refuses_an_agent_tripped_or_agent_reset_row`, `monitor::fail_closed_drill::no_agent_tripped_row_exists_anywhere`.
 7. A global reset without a typed scope confirmation and reason is refused; a second reset within five minutes is refused.
+   **Verified by:** `monitor::control::tests::a_global_reset_without_the_typed_scope_is_refused`, `monitor::control::tests::a_reset_without_a_reason_is_refused`, `monitor::control::tests::a_second_reset_within_five_minutes_is_refused`, `monitor::control::tests::nothing_that_is_not_a_named_human_can_reset`, `monitor::fail_closed_drill::a_second_reset_within_five_minutes_is_refused_by_the_store`.
 8. A strategy with no `monitor_limits` cannot be promoted to `live`.
+   **Verified by:** `monitor::limits::tests::promotion_is_refused_with_no_limits_at_all`, `monitor::limits::tests::one_token_limit_does_not_satisfy_the_gate`, `monitor::fail_closed_drill::a_strategy_with_no_declared_limits_cannot_be_promoted_to_live`.
 9. A single-cadence excursion produces a `blip` and no state change; a three-cadence breach
    acts. A metric oscillating on its limit does not flap the book, asserted with a synthetic
    oscillating series.
+   **Verified by:** `monitor::dwell::tests::a_single_cadence_excursion_is_a_blip_and_nothing_else`, `monitor::dwell::tests::three_consecutive_cadences_act`, `monitor::dwell::tests::a_synthetic_oscillating_series_never_flaps_the_book`, `monitor::dwell::tests::recovery_needs_twice_the_dwell`.
 10. Per-metric-family precision is computed and published; a family below 0.5 is flagged for
    re-derivation.
+   **Verified by:** `monitor::precision::tests::a_family_below_half_is_flagged_for_rederivation`, `monitor::precision::tests::an_unlabelled_family_is_unmeasured_rather_than_perfect_or_terrible`, `monitor::precision::tests::the_report_covers_every_family_including_the_silent_ones`.
 
 ## 9. Non-goals
 

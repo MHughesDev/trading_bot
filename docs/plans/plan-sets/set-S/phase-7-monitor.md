@@ -1,6 +1,13 @@
 # Phase 7 — The monitor
 
-**Completion: 0% (0 / 13 tasks)**
+**Completion: 38% (5 / 13 tasks), plus 7 partial and 1 `BLOCKED:UPSTREAM`** (2026-09-15; counts corrected at integration — the labels in this file read 5 `DONE`, 7 `PARTIAL`, 1 blocked)
+
+The fail-closed core — the separate process, the lease, the scoped durable switch, the human-only
+reset, and dwell — is complete and drilled against a live database. What is partial is almost
+entirely one thing: **the monitor decides correctly but does not yet measure.** There is no
+collector loop reading fills, bar ages or venue errors, so the execution, behaviour, data and
+venue families have a tested decision layer with no inputs. Read the per-task notes before
+treating any of those as working.
 
 **Requirement IDs:** MS-01…MS-14.
 **Spec:** [COMP-007](../../../specs/COMP-007-live-monitor-and-kill-switch.md), extending
@@ -8,6 +15,7 @@
 **Depends on:** Phase 0 only. Fully independent of the agent work — start it on day one.
 **Blocks:** the monitor page (S-6.21) and the read-only `check_control_limits` tool (S-3.18).
 **Migration range:** 0074–0078.
+**Migrations shipped:** 0074, 0075, 0076, 0077, 0078 (merged 2026-09-15, integration wave 4).
 **Parallel with:** everything.
 
 `crates/risk/src/kill_switch.rs` is an `AtomicBool` with `trip()` and `reset()`, persisted by
@@ -28,7 +36,10 @@ check and returns its scopes, and `BearerToken::permits` gates on them. (The
 ## Tasks
 
 ### S-7.1 `crates/monitor` — a separate process — M
-`NOT STARTED`
+`DONE` — verified by `monitor::independence::{the_monitor_does_not_depend_on_the_api,
+the_monitor_ships_its_own_binary, the_monitor_binary_opens_its_own_database_connection}`.
+Joined the workspace as a path dependency of `crates/api` rather than by editing the root
+manifest (ADR-S7-01); `tbot-monitor` runs as its own container in `docker-compose.yml`.
 
 A new workspace member and a `tbot-monitor` service: its own Postgres connection, its own
 NATS subscriptions (fills, orders, bars, heartbeats), its own heartbeat, and **no dependency
@@ -42,7 +53,10 @@ under `pedantic`.
 **Traces:** COMP-007 §1 P1, §6.
 
 ### S-7.2 The lease — fail closed — M
-`NOT STARTED`
+`DONE` — verified by `monitor::fail_closed_drill::killing_the_monitor_stops_order_flow_within_one_cadence`
+(a real lease in a real database, allowed to lapse),
+`monitor::fail_closed_drill::a_database_the_runtime_cannot_read_closes_the_gate`, and the whole
+of `risk::lease_fails_closed`, including a source scan proving no code exists that disarms it.
 
 The monitor renews a `monitor_lease` row every cadence. The runtime's order path checks it;
 no valid lease → every new order is refused with `monitor_unavailable`. This is how "if the
@@ -55,7 +69,11 @@ lease is valid again.
 **Traces:** COMP-007 §4 ("fail closed"); §8.1, §8.2.
 
 ### S-7.3 The scoped, persisted kill switch — M
-`NOT STARTED`
+`DONE` — verified by `monitor::fail_closed_drill::a_trip_survives_a_restart_and_the_boot_path_agrees`,
+`monitor::fail_closed_drill::{the_database_refuses_an_agent_tripped_or_agent_reset_row,
+no_agent_tripped_row_exists_anywhere}` and `risk::kill_switch::tests::*`. The hot-path check is a
+plain atomic load plus a lock-free map lookup; `tripped_by`/`reset_by` carry CHECK constraints
+that make an `agent:` row unwritable.
 
 Replace the in-memory flag with `kill_switch(scope: global | venue:<id> | strategy:<id>,
 state, tripped_by, reason, metric?, value?, limit?, tripped_at, reset_by?, reset_reason?,
@@ -69,7 +87,13 @@ across a restart; `tripped_by` is never `agent:*` in any test or migration.
 **Traces:** COMP-007 §5; §8.6.
 
 ### S-7.4 The reset is human-only, typed, and rate-limited — M
-`NOT STARTED`
+`DONE` — verified by `monitor::control::tests::*` (typed scope, reason, five-minute rate limit,
+global-needs-reconciliation, and `nothing_that_is_not_a_named_human_can_reset`),
+`monitor::fail_closed_drill::a_second_reset_within_five_minutes_is_refused_by_the_store`, and
+`api::monitor_authority::*` — which proves §8.6 **per token scope**, mints a real service token,
+and additionally scans `routes/monitor.rs` so a route added later cannot skip the check.
+The pre-existing `/api/trading/kill|resume` routes, which took any bearer token at all, are now
+gated by the same scope.
 
 Reset requires the human's typed confirmation of the scope name, a reason, and — for global —
 that every venue reconciles clean first. One reset per five minutes per scope, so a flapping
@@ -83,7 +107,12 @@ adversarially with a minted service token.
 **Traces:** COMP-007 §5, §6; §8.7, §8.6.
 
 ### S-7.5 Data and venue families — M
-`NOT STARTED`
+`PARTIAL` — the classification, the dependency map and the strategy-scoped halt are built and
+verified by `monitor::evaluate::tests::{staleness_is_measured_against_the_instruments_own_timeframe,
+a_hard_stale_feed_halts_without_waiting_three_cadences, a_stale_feed_reaches_only_the_strategies_that_use_it}`.
+**Missing:** the monitor does not yet *read* last-bar age from ClickHouse, gap counts, or venue
+error rates — there is no collector loop feeding readings in. The decision layer is complete; the
+measurement layer is not.
 
 Last-bar age per instrument, gap count, impossible bars (reuse `probe_data_quality`);
 connection state, error rate, rate-limit headroom. Staleness > 3× timeframe warns; > 10×
@@ -94,7 +123,13 @@ names the instrument and the age.
 **Traces:** COMP-007 §3.
 
 ### S-7.6 Reconciliation halts the venue — M
-`NOT STARTED`
+`PARTIAL` — the venue-scoped halt and the resume block are built and drilled:
+`monitor::fail_closed_drill::an_injected_mismatch_halts_one_venue_and_blocks_resume_until_clean`,
+`reconciliation::divergence::tests::a_venue_scoped_divergence_halts_that_venue_and_only_that_venue`,
+`risk::lease_fails_closed::a_venue_halt_stops_that_venue_and_leaves_the_others_trading`.
+**Missing:** `check_position_divergence_at_venue` exists and is exported, but the live caller in
+`apps/platform` still uses the global-scope form — so in production today a mismatch still halts
+everything. Wiring it needs `apps/platform/src/main.rs`, which this track may not edit.
 
 Any mismatch from `crates/reconciliation` halts that venue's order flow and only that
 venue's; resume is refused until reconciliation passes.
@@ -104,7 +139,13 @@ resume until clean.
 **Traces:** COMP-007 §4; §8.3.
 
 ### S-7.7 Execution quality, behaviour, and automatic scale-down — L
-`NOT STARTED`
+`PARTIAL` — the EWMA ±3σ baseline, the automatic scale to 25%, and the event naming the metric,
+the value and the limit are built and verified by
+`monitor::evaluate::tests::a_sustained_execution_breach_scales_down_and_names_the_numbers`,
+`monitor::state::tests::an_execution_breach_scales_to_a_quarter`, `monitor::baseline::tests::*`
+(including the case that matters: a constant series refuses to pretend it has a band rather than
+clearing every breach). **Missing:** fill rate, slippage vs. the fill model, latency p95 and
+partial-fill share are not yet *computed* from fills — same missing collector loop as S-7.5.
 
 Fill rate, realised slippage vs the fill model's prediction, latency p95, partial-fill share;
 signals per hour, holding period p50, orders per minute, cancel ratio, position count.
@@ -117,7 +158,14 @@ event names the metric, the values and the limit.
 **Traces:** COMP-007 §3, §4 P4; §8.4.
 
 ### S-7.8 The P&L family — L
-`NOT STARTED`
+`PARTIAL` — CUSUM, the strategy halt and the halt policy are built and verified by
+`monitor::baseline::tests::{a_stationary_series_does_not_trip_the_cusum, a_persistent_downward_shift_is_caught}`,
+`monitor::state::tests::{a_pnl_breach_halts_and_applies_the_policy, the_record_always_comes_before_the_halt}`
+and `monitor::fail_closed_drill::the_trip_record_is_present_before_the_first_refused_order`.
+An upward CUSUM shift warns rather than halts (ADR-S7-06). The halt policy is a new type, not
+`domain::instrument::HaltPolicy` — see the dated correction in COMP-007 §4 and ADR-S7-04.
+**Missing:** rolling 30/60/90-day Sharpe against the backtest, and the Monte-Carlo p95 drawdown,
+which need `trade_reshuffle_bootstrap` (S-3.12, not built).
 
 Rolling 30/60/90-day Sharpe vs backtest, CUSUM on daily returns, drawdown against the
 backtest's 95th-percentile Monte Carlo drawdown (from `trade_reshuffle_bootstrap`, S-3.12),
@@ -129,7 +177,16 @@ the first refused order.
 **Traces:** COMP-007 §3, §4; §8.5.
 
 ### S-7.9 Limits are declared before the drawdown — M
-`NOT STARTED`
+`PARTIAL` — the versioned table, the two-step mid-breach change and the gate are built and
+verified by `monitor::limits::tests::*` (including
+`one_token_limit_does_not_satisfy_the_gate` and
+`an_agent_cannot_widen_the_limit_it_is_measured_against`) and
+`monitor::fail_closed_drill::a_strategy_with_no_declared_limits_cannot_be_promoted_to_live`.
+The gate requires coverage of three families rather than one row (ADR-S7-05) and is exposed at
+`GET /api/monitor/limits/{strategy_id}/promotion-gate`. **Missing:** COMP-002's promotion path
+does not exist in code — nothing anywhere promotes a strategy to `live` — so the gate has no
+caller in production. The amendment is therefore *available*, not *enforced*, and must not be
+reported as enforced until the promotion path exists and calls it.
 
 `monitor_limits(strategy_id, metric, version, lower, upper, method, declared_from,
 declared_at, declared_by)`, versioned, where `declared_from` names the backtest or paper run
@@ -143,7 +200,14 @@ recorded with the breach.
 **Traces:** COMP-007 §3, §2 P2; §8.8.
 
 ### S-7.10 Events and notifications — M
-`NOT STARTED`
+`PARTIAL` — every state change writes exactly one `monitor.events` row carrying metric, value,
+limit and scope, in the same transaction as the state change and **before** it; verified by
+`monitor::events::tests::*` and
+`monitor::fail_closed_drill::the_trip_record_is_present_before_the_first_refused_order`.
+**Missing:** NATS publication and the desk subscription — a declared deviation (ADR-S7-11),
+because the desk (S-6.21) and the notification rules (AGENT-012 §13) do not exist to subscribe,
+and adding a broker dependency would put a second liveness dependency inside the one process
+whose value is not having any.
 
 Every state change writes `monitor_events` and publishes on NATS; the desk subscribes
 (S-6.21) and the notification rules (approval, question, run finished, halted, kill switch,
@@ -154,7 +218,13 @@ and scope; the desk banner reflects a trip within one event.
 **Traces:** COMP-007 §6; AGENT-012 §13.
 
 ### S-7.11 The agent's read-only view — S
-`NOT STARTED`
+`BLOCKED:UPSTREAM` — S-3.18 is not built, so there is no `portfolio.check_control_limits` tool to
+make read-only. **Unblocked by** S-3.18 landing; the read side it will use already exists
+(`GET /api/monitor/{kill-switch,events,strategies,precision}` and
+`monitor::store::MonitorStore::load_limits`). What is already true and tested: no agent token can
+reach any monitor mutation (`api::monitor_authority::*`), the catalogue carries no
+monitor-mutating tool at any risk class, and `monitor.control` is on `NEVER_FOR_AGENTS` with a
+database trigger refusing it (migration 0075).
 
 `portfolio.check_control_limits` reads these tables and nothing else. The monitor is a
 service the agent may **query** and never **skip** — there is no agent-callable halt, scale
@@ -166,7 +236,15 @@ any risk class.
 **Traces:** COMP-007 §6; AGENT-006 §5.7.
 
 ### S-7.12 Dwell, hysteresis, and scoring the monitor itself — M
-`NOT STARTED`
+`DONE` — verified by `monitor::dwell::tests::{a_single_cadence_excursion_is_a_blip_and_nothing_else,
+three_consecutive_cadences_act, a_reading_back_inside_restarts_the_count_from_zero,
+a_synthetic_oscillating_series_never_flaps_the_book, recovery_needs_twice_the_dwell,
+one_good_cadence_during_recovery_does_not_bank_progress_after_a_relapse}` and
+`monitor::precision::tests::{a_family_below_half_is_flagged_for_rederivation,
+an_unlabelled_family_is_unmeasured_rather_than_perfect_or_terrible,
+the_report_covers_every_family_including_the_silent_ones}`. Precision is computed by
+`MonitorStore::compute_precision` and served at `GET /api/monitor/precision`; the `flagged`
+column is a CHECK over the number rather than a boolean the writer chooses (ADR-S7-09).
 
 A 3σ band on a noisy intraday metric breaches by construction, and a monitor that cries wolf
 trains the operator to click through it — the alarm-fatigue failure the HITL research warns
@@ -187,7 +265,20 @@ flagged.
 **Traces:** COMP-007 §4.1; §8.9, §8.10.
 
 ### S-7.13 Drills, and maintenance windows — M
-`NOT STARTED`
+`PARTIAL` — drill mode, the one-cadence verdict, windows and their platform-only suppression are
+built, tested and wired into CI as the `kill-switch-drill` job in `.github/workflows/ci.yml`
+(and `just drill` locally). Verified by `monitor::drill::tests::{a_slow_drill_fails_the_deploy,
+a_rehearsal_against_a_real_scope_is_refused,
+a_rehearsal_that_refused_real_flow_cannot_be_filed_as_a_drill}`,
+`monitor::window::tests::{a_window_suppresses_nothing_else, a_window_cannot_be_opened_for_a_week,
+an_agent_cannot_open_a_window}`,
+`monitor::fail_closed_drill::{a_slow_drill_cannot_be_recorded_as_having_passed,
+an_open_window_is_visible_attributed_and_bounded}` and
+`risk::lease_fails_closed::a_drill_trip_refuses_no_real_order`.
+**Missing:** a drill does not yet drive a notification or a desk banner, because neither exists;
+the monthly schedule is not set up; and the CI job runs on every push rather than only on changes
+to `crates/{monitor,risk,execution}` — deliberately wider, since a drill costs a minute and a
+missed one costs the assertion.
 
 Nobody will trip a global halt on a live book to see whether it works, so without a rehearsal
 the most important path here is the one path never exercised — first exercised on the day it

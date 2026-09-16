@@ -17,6 +17,15 @@ use ui_gateway::SubscriptionRegistry;
 
 use domain::strategy_def::StrategyDefinition;
 
+/// How often the order gate's mirror is refreshed from the monitor's tables.
+///
+/// Much faster than the monitor's own cadence on purpose. COMP-007 §8.1 and §8.2
+/// both say "within one cadence", and the lease lapses one cadence after the last
+/// renewal — so the refresher has to notice promptly for the total to stay inside
+/// one. Five seconds is the order-flow cadence from §3 and costs one small
+/// indexed read.
+const MONITOR_MIRROR_REFRESH_MS: u64 = 5_000;
+
 /// Request to start a continuous live-data pipeline for an instrument.  Sent by
 /// the asset-init handler after seeding so a newly initialized asset begins
 /// 1-minute aggregation immediately, without a platform restart.  The platform
@@ -289,6 +298,38 @@ impl AppState {
             pg.clone(),
             Arc::from(storage::artifacts::from_env()),
         ));
+
+        // ── COMP-007 §4: arm the fail-closed monitor lease ──────────────────
+        //
+        // Arming happens here, in `AppState::new`, rather than in the platform
+        // binary, for two reasons. The binary is not this track's file to edit;
+        // and more usefully, every process that builds an `AppState` is a process
+        // that can place orders, so arming at construction means there is no
+        // startup window in which the gate is open and no monitor has been seen.
+        //
+        // `LeaseWatcher::new` arms the switch before its first refresh, so the
+        // state between here and the first successful read of `monitor.lease` is
+        // `Missing` — orders refused with `monitor_unavailable`. That is the
+        // intended behaviour and it is the whole exit criterion of Set S Phase 7:
+        // **the platform stops trading when the monitor is not running.**
+        //
+        // The watcher also restores the durable scoped state on its first pass, so
+        // a halt tripped before a restart is back in force within one cadence
+        // rather than being silently forgotten.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let watcher = monitor::service::LeaseWatcher::new(
+                monitor::store::MonitorStore::new(pg.clone()),
+                Arc::clone(&kill_switch),
+                tokio::time::Duration::from_millis(MONITOR_MIRROR_REFRESH_MS),
+            );
+            handle.spawn(watcher.run());
+        } else {
+            tracing::warn!(
+                "no tokio runtime — the monitor lease watcher is not running; \
+                 the order gate will refuse with monitor_unavailable"
+            );
+            kill_switch.require_monitor_lease();
+        }
 
         let profiles = load_profiles();
 

@@ -118,6 +118,49 @@ jobs:
       - name: Run the leakage suite
         run: cargo test -p features --lib leakage
 
+  kill-switch-drill:
+    name: Kill-switch drill (COMP-007 §4.2)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: trading
+          POSTGRES_PASSWORD: trading
+          POSTGRES_DB: trading
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U trading" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://trading:trading@localhost:5432/trading
+      MONITOR_TEST_DATABASE_URL: postgres://trading:trading@localhost:5432/trading
+      API_TEST_DATABASE_URL: postgres://trading:trading@localhost:5432/trading
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Nobody will trip a global halt on a live book to see whether it works, so
+      # without this job the most important path in the platform is the one path
+      # never exercised — first exercised on the day it matters, by someone under
+      # pressure. This kills a real monitor, lets a real lease lapse, and asserts
+      # the order gate refuses afterwards. A drill whose propagation exceeds one
+      # cadence fails here, which is what stops the fail-closed design from being
+      # a claim.
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --version ^0.8 --no-default-features --features postgres,rustls --locked
+      - name: Apply migrations
+        run: sqlx migrate run --source migrations
+      - name: The pure state machine, dwell, limits, drills and windows
+        run: cargo test -p monitor --lib
+      - name: The monitor is its own failure domain
+        run: cargo test -p monitor --test independence
+      - name: Fail-closed drill against a live database
+        run: cargo test -p monitor --test fail_closed_drill -- --test-threads=1
+      - name: The order gate refuses without a lease
+        run: cargo test -p risk --test lease_fails_closed
+      - name: No agent token reaches any monitor mutation
+        run: cargo test -p api --test monitor_authority -- --test-threads=1
+
   check-money:
     name: Money safety (no f64 on price/size)
     runs-on: ubuntu-latest

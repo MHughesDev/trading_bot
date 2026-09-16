@@ -5,6 +5,9 @@ edition = "2021"
 
 [dependencies]
 domain = { workspace = true }
+# Lock-free map: `is_active(scope)` is on the order hot path and must not block
+# behind a writer refreshing the mirror from Postgres (COMP-007 §5).
+dashmap = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }

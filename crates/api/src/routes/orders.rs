@@ -299,6 +299,14 @@ fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
             StatusCode::SERVICE_UNAVAILABLE,
             "trading is currently halted",
         ),
+        // COMP-007 §4. Worded distinctly from a halt on purpose: a halt is a
+        // decision somebody recorded, this is the monitor being unreachable, and
+        // an operator who cannot tell them apart will go looking for the wrong
+        // thing to reset.
+        RiskRejection::MonitorUnavailable => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "monitor_unavailable — no live monitor lease; new orders are refused",
+        ),
         RiskRejection::PositionLimitExceeded { .. } => (
             StatusCode::UNPROCESSABLE_ENTITY,
             "position limit would be exceeded",

@@ -149,6 +149,12 @@ impl RiskContextProvider for PaperRiskContextProvider {
             .unwrap_or_default();
 
         Ok(GateContext {
+            // The two the monitor scopes on. A manual order names no strategy;
+            // the venue comes from the instrument's metadata, and is `None`
+            // when that metadata is missing — in which case `instrument_limits`
+            // is `Unavailable` and the gate refuses before the scope matters.
+            strategy_id: intent.strategy_id.clone(),
+            venue_id: meta.as_ref().map(|m| m.venue_id.clone()),
             current_position,
             market_price,
             instrument_limits,

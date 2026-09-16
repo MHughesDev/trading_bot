@@ -47,6 +47,8 @@ fn equity_ctx(is_in_session: bool, is_halted: bool) -> GateContext {
         is_in_session,
         is_halted,
         halt_policy: HaltPolicy::Haltable,
+        venue_id: None,
+        strategy_id: None,
     }
 }
 

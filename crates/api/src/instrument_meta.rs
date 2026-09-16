@@ -28,6 +28,13 @@ use domain::TrustTier;
 #[derive(Clone, Debug)]
 pub struct InstrumentMeta {
     pub instrument_id: String,
+    /// The venue this instrument trades on.
+    ///
+    /// Carried because the kill switch scopes on it (COMP-007 §3): an order
+    /// whose venue the gate cannot name cannot be stopped by a venue-scoped
+    /// kill, and that hole would be silent — the switch would report itself
+    /// active while orders kept reaching the venue it named.
+    pub venue_id: String,
     pub tick_size: Decimal,
     pub lot_size: Decimal,
     pub trading_hours: TradingSchedule,
@@ -73,9 +80,9 @@ impl InstrumentMetaCache {
 
     /// Replace the cache from the `instruments` table.
     pub async fn reload(&self, pg: &PgPool) -> Result<usize, sqlx::Error> {
-        let rows: Vec<(String, Decimal, Decimal, serde_json::Value, String, String, bool)> =
+        let rows: Vec<(String, String, Decimal, Decimal, serde_json::Value, String, String, bool)> =
             sqlx::query_as(
-                "SELECT instrument_id, tick_size, lot_size, trading_hours_json, halt_policy, \
+                "SELECT instrument_id, venue_id, tick_size, lot_size, trading_hours_json, halt_policy, \
                         trust_tier, active \
                  FROM instruments",
             )
@@ -83,13 +90,14 @@ impl InstrumentMetaCache {
             .await?;
 
         let mut map = HashMap::with_capacity(rows.len());
-        for (instrument_id, tick_size, lot_size, hours, halt, trust, active) in rows {
+        for (instrument_id, venue_id, tick_size, lot_size, hours, halt, trust, active) in rows {
             let trading_hours =
                 serde_json::from_value(hours).unwrap_or_else(|_| TradingSchedule::always_open());
             map.insert(
                 instrument_id.clone(),
                 InstrumentMeta {
                     instrument_id,
+                    venue_id,
                     tick_size,
                     lot_size,
                     trading_hours,
