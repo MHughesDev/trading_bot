@@ -68,6 +68,23 @@ pub struct GateVerdict {
     /// versioned precisely so a pass under one bar is not read as a pass under
     /// another.
     pub profile_id: String,
+    /// Typed reasons this verdict failed, when the gate has them.
+    ///
+    /// `summary` says why in prose, which is right for a person and useless to
+    /// anything that must branch. Gate 0's `integrity_scan` already produces
+    /// codes — `lookahead.higher_tf_open`, `cost.below_floor` — and they were
+    /// being formatted into a sentence and discarded, which left a caller with
+    /// no way to tell a leak from a cost failure except by reading the prose.
+    ///
+    /// That matters where the difference is consequential: a negative result's
+    /// `failure_class` decides its retry condition, and "when the leak is fixed"
+    /// and "when costs fall" are different futures for the same idea.
+    ///
+    /// Empty for the gates that have no codes, rather than a restatement of
+    /// `summary`: an empty list says "this gate does not classify its failures",
+    /// which is true, where a duplicated sentence would say something false.
+    #[serde(default)]
+    pub reasons: Vec<String>,
     pub at: DateTime<Utc>,
 }
 
@@ -85,8 +102,16 @@ impl GateVerdict {
             summary: summary.into(),
             evidence,
             profile_id: profile_id.to_string(),
+            reasons: Vec::new(),
             at: Utc::now(),
         }
+    }
+
+    /// The same verdict, carrying the codes that produced it.
+    #[must_use]
+    fn with_reasons(mut self, reasons: Vec<String>) -> Self {
+        self.reasons = reasons;
+        self
     }
 }
 
@@ -310,8 +335,10 @@ impl<'e> GateRunner<'e> {
         } else {
             format!("{} integrity violation(s): {}", flags.len(), flags[0].code)
         };
-        self.ledger
-            .record(GateVerdict::new(Gate::Integrity, passed, summary, vec![], self.profile.profile_id()));
+        self.ledger.record(
+            GateVerdict::new(Gate::Integrity, passed, summary, vec![], self.profile.profile_id())
+                .with_reasons(flags.iter().map(|f| f.code.clone()).collect()),
+        );
         if !passed {
             return Err(GateError::IntegrityHardStop);
         }

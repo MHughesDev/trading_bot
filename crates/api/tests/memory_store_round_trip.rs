@@ -544,3 +544,90 @@ async fn a_negative_result_cannot_carry_a_class_the_funnel_never_produced() {
         .await
         .expect("a finding is not a negative result and is not asked for a class");
 }
+
+/// A refused gate becomes a storable negative result (S-4.4).
+///
+/// The mapping is unit-tested; this is the half that needs a database — that the
+/// derived entry satisfies every constraint 0125 adds. A mapping that produced a
+/// class the CHECK rejects would pass its own tests and fail on the first real
+/// refusal, which is the worst moment to find out.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires live Postgres"]
+async fn every_gate_refusal_produces_an_entry_the_store_accepts() {
+    let pool = store_db().await;
+    let store = api::memory_store::MemoryStore::new(pool);
+    let user = Uuid::new_v4();
+
+    let gates = [
+        (backtest::gates::Gate::Integrity, vec!["cost.below_floor"]),
+        (backtest::gates::Gate::Integrity, vec!["lookahead.higher_tf_open"]),
+        (backtest::gates::Gate::SinglePath, vec![]),
+        (backtest::gates::Gate::Robustness, vec![]),
+        (backtest::gates::Gate::Significance, vec![]),
+        (backtest::gates::Gate::Vault, vec![]),
+    ];
+
+    for (i, (gate, reasons)) in gates.iter().enumerate() {
+        let verdict = backtest::gates::GateVerdict {
+            gate: *gate,
+            passed: false,
+            summary: format!("{gate:?} refused: the evidence did not clear the bar"),
+            evidence: vec![],
+            profile_id: "strict_v1".into(),
+            reasons: reasons.iter().map(|s| (*s).to_string()).collect(),
+            at: chrono::Utc::now(),
+        };
+        let mut entry = api::negative_from_funnel::entry_for(
+            &verdict,
+            &format!("t_{i}"),
+            "ema_cross_v1",
+            DataWindow::new("2026-04-01", "2026-06-30"),
+            "run_1",
+        )
+        .expect("a refused gate produces an entry");
+        // Ids collide across the two Integrity cases, which share a gate.
+        entry.id = format!("{}_{i}", entry.id);
+
+        store.put(user, &entry).await.unwrap_or_else(|e| {
+            panic!(
+                "the entry derived for {gate:?} is refused by the store: {e}. The mapping and \
+                 the CHECK disagree, and the first real refusal would have found out."
+            )
+        });
+    }
+
+    let stored = store
+        .by_kind(user, Kind::NegativeResult, 20)
+        .await
+        .expect("reads back");
+    assert_eq!(stored.len(), gates.len(), "one entry per refused gate");
+
+    // Every one carries a class the funnel produces and the ticket it came from.
+    for e in &stored {
+        let class = e.extra["failure_class"]
+            .as_str()
+            .expect("every negative result carries a class");
+        assert!(
+            harness::memory::negative::FailureClass::all()
+                .iter()
+                .any(|c| c.as_str() == class),
+            "`{class}` is not a class the funnel produces"
+        );
+        assert!(
+            e.extra["ticket_id"].as_str().is_some_and(|t| !t.is_empty()),
+            "every refusal names the ticket that issued it"
+        );
+    }
+
+    // And the two integrity failures are told apart, which is the whole reason
+    // `GateVerdict` carries typed reasons.
+    let classes: Vec<&str> = stored
+        .iter()
+        .filter_map(|e| e.extra["failure_class"].as_str())
+        .collect();
+    assert!(
+        classes.contains(&"costs_dominate") && classes.contains(&"leakage"),
+        "a leak and a cost failure were given the same class, so one of them has the other's \
+         retry condition: {classes:?}"
+    );
+}

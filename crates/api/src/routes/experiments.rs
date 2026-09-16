@@ -190,6 +190,47 @@ pub async fn get_funnel(
     }
 }
 
+/// Store one negative result per gate this funnel refused.
+///
+/// Idempotent by construction: the entry id is derived from the ticket and the
+/// gate, so re-advancing a funnel — which returns the board as it stands without
+/// re-running anything — rewrites the same rows rather than accumulating a
+/// second account of the same refusal.
+///
+/// Every failure here is a warning. The funnel's verdict is already recorded and
+/// already returned; what is lost is the durable note for the *next* run, and
+/// trading a verdict for a note would be the wrong way round.
+async fn record_refusals(state: &AppState, user_id: uuid::Uuid, id: Uuid) {
+    let Some((verdicts, start, end, family)) = state.suite.funnel_record(user_id, id) else {
+        return;
+    };
+    let window = harness::memory::DataWindow::new(
+        start.date_naive().to_string(),
+        end.date_naive().to_string(),
+    );
+    let store = crate::memory_store::MemoryStore::new(state.pg.clone());
+
+    for v in verdicts.iter().filter(|v| !v.passed) {
+        let Some(entry) = crate::negative_from_funnel::entry_for(
+            v,
+            &id.to_string(),
+            &family,
+            window.clone(),
+            &id.to_string(),
+        ) else {
+            continue;
+        };
+        if let Err(e) = store.put(user_id, &entry).await {
+            tracing::warn!(
+                experiment = %id,
+                gate = ?v.gate,
+                error = %e,
+                "the refusal did not persist as a negative result"
+            );
+        }
+    }
+}
+
 /// POST /api/backtest/experiments/:id/funnel/advance — drive Gates 0→3.
 pub async fn advance_funnel(
     State(state): State<AppState>,
@@ -201,7 +242,19 @@ pub async fn advance_funnel(
     let suite = state.suite.clone();
     let user = token.user_id();
     match tokio::task::spawn_blocking(move || suite.advance_funnel(user, id)).await {
-        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Ok(view)) => {
+            // A refused gate is a negative result the **platform** writes
+            // (AGENT-007 §3.2, S-4.4). Written here rather than inside the
+            // funnel, which would give the gate runner a dependency on a memory
+            // store it does not need to run gates.
+            //
+            // After the response is built and before it is returned, because a
+            // funnel that refused a gate has refused it whether or not the note
+            // stored — and failing the request would turn a bookkeeping problem
+            // into a lost verdict.
+            record_refusals(&state, token.user_id(), id).await;
+            Json(view).into_response()
+        }
         Ok(Err(e)) => map_err(e),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

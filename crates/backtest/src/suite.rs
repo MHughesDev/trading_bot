@@ -1262,6 +1262,33 @@ impl SuiteManager {
     /// verdict. Stops at the first gate that fails or is refused. The vault (Gate
     /// 4) is the separate one-shot [`SuiteManager::run_vault`]. Idempotent across
     /// calls: each gate is recorded once.
+    /// What a refused gate needs to become a negative result (S-4.4).
+    ///
+    /// The verdicts themselves, not the `FunnelView`: the view renders a gate
+    /// for a person and drops `reasons` and `profile_id`, and those are exactly
+    /// what tells a leak from a cost failure and says which threshold set judged
+    /// it. A view is a rendering; this is the record.
+    ///
+    /// Returned rather than acted on here, because writing to the memory store
+    /// from inside the suite would give the funnel a dependency on a store it
+    /// does not need to run gates — `crates/api` has both and is where the join
+    /// belongs.
+    #[must_use]
+    pub fn funnel_record(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+    ) -> Option<(Vec<GateVerdict>, DateTime<Utc>, DateTime<Utc>, String)> {
+        let records = self.records.read().expect("suite lock poisoned");
+        let r = records.get(&id).filter(|r| r.user_id == user_id)?;
+        Some((
+            r.gate_verdicts.clone(),
+            r.research_slice.start,
+            r.research_slice.end,
+            r.exp.strategy_family.clone(),
+        ))
+    }
+
     pub fn advance_funnel(&self, user_id: Uuid, id: Uuid) -> Result<FunnelView, SuiteError> {
         // A null must be chosen before significance can be tested (D-7 / INV-3).
         {
