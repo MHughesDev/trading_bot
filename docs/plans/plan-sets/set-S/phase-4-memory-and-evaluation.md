@@ -79,7 +79,15 @@ refusal is asserted.
 **Traces:** AGENT-007 §3.1, P1; §8.1.
 
 ### S-4.3 The semantic schema — M
-`NOT STARTED` — Unchanged, and it is the keystone: nearly every other task in this phase is waiting on this schema. `migrations/0066_semantic_memory.sql` does not exist and `0055_knowledge_plane.sql` is unextended.
+`PARTIAL` 2026-09-16 — `migrations/0122_semantic_memory.sql` written: `agent_memory.entry` with all the shared fields, the seven kinds, and the constraints that make the acceptance real.
+
+**Two corrections to this task's own text.** It names `0066`, which was taken long ago — the tree is at 0121 and Set S's declared ranges were allocated against a tree that has since moved, the same collision ADR-S3-08 records for S-3.7's `0079`. And it says "the six entry kinds": that count is from §2's summary row, written before AGENT-013 §9 added `open_question`. The spec's own §2.2 table and `memory::Kind` both carry seven, and they agree with each other.
+
+Every CHECK restates a rule `Entry::validate` already enforces. That is the point rather than redundancy: the acceptance is that an entry without provenance **cannot be inserted**, which is a claim about the database and not about one caller. All four provenance columns are `NOT NULL` with non-empty CHECKs, because `Provenance::is_complete` requires all four — a run id with no tool is not provenance.
+
+Two constraints exist to stop a *future* writer: a `model_summary` can never be `established` (a named CHECK — it is the whole distinction the evidence classes draw), and there is no `winner` / `resolved_by` / `resolution` column, because §2.2.1 says conflicts are surfaced and never merged and a column recording which side won is a merge with a record of the loser. `crates/invariants/tests/schema_mirrors_memory_types.rs` asserts both, and compares the SQL's CHECK lists against the Rust enums so the two cannot drift.
+
+**What keeps it `PARTIAL`, and it is the acceptance itself**: `cargo test -p invariants --test db_invariants -- --ignored` — the check that every migration applies to an empty database — **has not been run**. Docker is not running on this box. The schema is unverified against a live Postgres, and nothing here should be treated as proven until that passes. The mirror test runs without a database precisely because the acceptance's own check does not.
 
 Extend `migrations/0055_knowledge_plane.sql`'s tables with the shared fields (subject, claim,
 evidence_ids, n, se, confidence, evidence_class, data_window, valid_until, provenance,
