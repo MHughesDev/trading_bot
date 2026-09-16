@@ -183,7 +183,7 @@ fn compact(v: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harness::registry::{FINISH_TASK, RECORD_FINDING, REFLECT, SEARCH_TOOLS};
+    use harness::registry::{FINISH_TASK, RECORD_FINDING, REFLECT, SEARCH_TOOLS, SELF_STATUS};
 
     /// The check that makes an unclassified tool impossible to ship. `stamp` already
     /// defaults an unknown tool to destructive, which is the safe direction — but
@@ -200,6 +200,7 @@ mod tests {
                 || name == FINISH_TASK
                 || name == RECORD_FINDING
                 || name == REFLECT
+                || name == SELF_STATUS
             {
                 continue;
             }

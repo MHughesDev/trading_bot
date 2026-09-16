@@ -699,7 +699,7 @@ fn spec_15_tool_surface_conformance() {
         ("get_regime", None),
         // experiments
         ("propose_experiment", Some("create_experiment")),
-        ("estimate_cost", None),
+        ("estimate_cost", Some("estimate_cost")),
         ("launch_trials", Some("run_sweep")),
         ("get_trial", Some("get_backtest")),
         ("cancel_trials", Some("cancel_sweep")),

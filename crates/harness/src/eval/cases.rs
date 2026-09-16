@@ -1222,6 +1222,10 @@ mod tests {
         crate::registry::REFLECT
     }
 
+    fn harness_self_status() -> &'static str {
+        crate::registry::SELF_STATUS
+    }
+
     #[test]
     fn the_eval_catalogue_sorts_so_the_truncation_case_is_reproducible() {
         let mut names: Vec<&str> = vec!["compare_backtests", "create_strategy", "list_instruments"];
@@ -1238,18 +1242,26 @@ mod tests {
         assert_eq!(degraded_7b().tools.max_exposed_per_step, 6);
         assert_eq!(
             ToolRegistry::with_core().names().len(),
-            4,
-            "four core tools are registered"
+            5,
+            "five core tools are registered"
         );
-        // `reflect` is the fourth and is withheld on a profile that does not
-        // reflect, which every local profile is. It is registered so the loop can
-        // ANSWER it; offering it would cost this profile the slot above.
+        // `reflect` and `get_self_status` are the fourth and fifth, and both are
+        // withheld on a profile that does not reflect — which every local profile
+        // is. They are registered so the loop can ANSWER them; offering either
+        // would cost this profile one of the three slots above, because core
+        // tools are selected before namespace filling and count against the
+        // budget.
+        //
+        // This is the assertion that matters, not the count: the six-slot
+        // arithmetic is what makes `list_instruments` the tool that loses a slot
+        // to two alphabetical siblings, and a new core tool that reached a 7B
+        // would break the case §8.3 is built on.
         assert!(!degraded_7b().orchestration.reflection);
         assert_eq!(
             ToolRegistry::with_core()
                 .names()
                 .iter()
-                .filter(|n| **n != harness_reflect())
+                .filter(|n| **n != harness_reflect() && **n != harness_self_status())
                 .count(),
             3,
             "three reach a 7B, which is what the six-slot arithmetic assumes"

@@ -741,3 +741,36 @@ It also checks whether the reported value matches a *different* metric of the
 same run. That is the common honest mistake — the right number under the wrong
 label — and from the outside it looks exactly like the dishonest case until
 something checks.
+
+### estimate_cost
+
+What another tool would cost if you called it with those arguments, without
+calling it. It dispatches nothing and spends no trial, so there is no reason not
+to ask before committing to something expensive.
+
+Three numbers come back and they are not equally solid, which is why each is
+labelled:
+
+* **`trials`** is exact. It is the tool's own `spends_trial` declaration, which
+  is the same thing the call gate reads — so this cannot disagree with what
+  happens when you actually call it.
+* **`est_seconds`** carries a band and a `confidence`. The throughput is measured
+  from *your own completed runs* (rows per second of wall clock), because there
+  is no configured throughput anywhere in this platform to read. With no
+  completed runs the answer is `null` and `confidence` is `unmeasured` — not a
+  default constant, which would be indistinguishable from a measurement. Below
+  ten runs it is `indicative`. The band is a factor of three and models
+  arithmetic only: not I/O, not contention, not the warm-up the first batch pays.
+* **`est_usd`** is `null`. This platform has no price table for compute or
+  tokens, so no dollar figure exists to give you (OQ-16). A made-up rate would be
+  worse than none — the dollar threshold pauses for a human, so a rate that is
+  too low never pauses and one that is too high pauses on everything, and both
+  look like it working.
+
+`est_rows` is `null` when your arguments name no window, because a tool called
+without one is a tool whose size this cannot know. That is a real answer, not a
+failure: it means the cost depends on something the arguments do not say.
+
+The reply also carries `requires_approval` and `max_calls_per_run`, which are
+often the more useful facts. A tool that will pause for a human costs a human's
+attention whatever its seconds say.

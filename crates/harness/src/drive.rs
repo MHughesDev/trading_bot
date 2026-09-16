@@ -61,7 +61,7 @@ use crate::policy::{self, ActionContext, Decision, Ruling};
 use crate::profile::{ExposureScope, Mode, Profile, SchemaStyle};
 use crate::provenance::{self, Provenance, Tagged};
 use crate::registry::{
-    self, Risk, ToolRegistry, FINISH_TASK, RECORD_FINDING, REFLECT, SEARCH_TOOLS,
+    self, Risk, ToolRegistry, FINISH_TASK, RECORD_FINDING, REFLECT, SEARCH_TOOLS, SELF_STATUS,
 };
 use crate::state::{
     Steer,
@@ -1546,9 +1546,26 @@ impl Loop {
         // it to a 7B would spend one of six exposure slots on a tool whose handler
         // refuses — which on that profile is the slot `list_instruments` loses to
         // two alphabetical siblings.
+        //
+        // `get_self_status` is withheld on the same profiles and for the same
+        // arithmetic (S-3.19). Core tools are selected *before* namespace filling
+        // and count against `max_exposed_per_step`, so a fifth one always offered
+        // would take a work slot from every profile — and the tightest shipped
+        // profile has three slots in total. The two tools are the same kind of
+        // thing: a diagnostic turn that costs a model call and no step, useful
+        // exactly when there is room to spend a turn on looking rather than
+        // doing.
+        //
+        // The cost is real and is not hidden: the tier that most needs to be told
+        // it is degraded is the one that cannot afford the tool. What softens it
+        // is that `WorkingState` already carries the budget and the last
+        // rejection into every step's prompt, so what a degraded profile loses is
+        // the breaker list — smaller than a work slot, measured against a profile
+        // that has three.
         let reflects = self.profile.orchestration.reflection;
         let admissible = |n: &String| {
-            !self.broken_tools.contains(n) && (reflects || n.as_str() != REFLECT)
+            !self.broken_tools.contains(n)
+                && (reflects || !matches!(n.as_str(), REFLECT | SELF_STATUS))
         };
 
         // Session-scoped exposure (§5.2, S-2.4): routed once per turn, then
@@ -2125,6 +2142,10 @@ impl Loop {
             self.on_reflect(&call, fx);
             return;
         }
+        if call.name == SELF_STATUS {
+            self.on_self_status(fx);
+            return;
+        }
         if call.name == FINISH_TASK {
             self.on_finish(&call, fx);
             return;
@@ -2574,6 +2595,118 @@ impl Loop {
         }));
         self.advance_plan();
         self.begin_step(fx);
+    }
+
+    /// `get_self_status` — what the run knows about itself (S-3.19).
+    ///
+    /// Every line is a fact this loop already holds. Nothing is estimated and
+    /// nothing is fetched: the loop is sans-IO, so it cannot ask the monitor
+    /// whether a kill switch is set, and it says so rather than reporting a
+    /// state it has not seen. AGENT-006 §2.4b lists the monitor and kill-switch
+    /// among the fields; reporting a stale or invented one would defeat the
+    /// tool's entire purpose, which is that an agent unable to tell it is
+    /// degraded reports confidently from a degraded state.
+    ///
+    /// Like `search_tools`, it costs a turn and not a step.
+    fn on_self_status(&mut self, fx: &mut Vec<Effect>) {
+        let mut lines: Vec<String> = Vec::new();
+
+        lines.push(format!(
+            "profile {} ({}, tier {:?}, archetype {:?}); tool calling {:?}{}",
+            self.profile.model_id,
+            self.profile.provider,
+            self.profile.tier,
+            self.profile.archetype,
+            self.profile.tool_calling,
+            if self.profile.multi_step_evidence.is_some() {
+                ", measured"
+            } else {
+                ""
+            }
+        ));
+
+        let b = &self.working.budget;
+        lines.push(format!(
+            "budget: {}/{} steps left, {} trials spent{}. Tokens and dollars are NOT tracked \
+             by this run — the fields exist and nothing writes them (OQ-16), so treat them as \
+             unknown rather than as remaining.",
+            b.steps_remaining,
+            b.steps_total,
+            b.trials_spent,
+            match b.n_eff {
+                Some(n) => format!(", n_eff {n:.1}"),
+                None => String::new(),
+            }
+        ));
+
+        lines.push(format!(
+            "this step: {} tool call(s) attempted this run, {} returned something citable; \
+             {} consecutive barren step(s) of {MAX_BARREN_STEPS} before the loop stops and \
+             reports; {} reflection(s) used; {} plan(s) accepted",
+            self.tools_attempted,
+            self.evidence_candidates.len(),
+            self.barren_steps,
+            self.reflections_used,
+            self.plans_accepted
+        ));
+
+        lines.push(format!(
+            "exposure: {} tool(s) offered this step, scope {:?}; namespaces {}",
+            self.exposed.len(),
+            self.profile.tools.exposure_scope,
+            if self.step_namespaces.is_empty() {
+                "none".to_string()
+            } else {
+                self.step_namespaces.join(", ")
+            }
+        ));
+
+        // The breaker is the field most worth surfacing: a tool that has left
+        // exposure for the rest of the run is invisible from inside the model's
+        // view, and "the tool I need is not offered" reads as a routing miss.
+        if self.broken_tools.is_empty() {
+            lines.push("no tool has tripped its breaker".to_string());
+        } else {
+            let mut broken: Vec<&str> = self.broken_tools.iter().map(String::as_str).collect();
+            broken.sort_unstable();
+            lines.push(format!(
+                "BREAKER OPEN on {} — these have left exposure for the rest of this run after \
+                 repeated failures, and searching for them will not bring them back",
+                broken.join(", ")
+            ));
+        }
+
+        if self.wrapping_up {
+            lines.push(
+                "the step budget is spent: this turn exposes finish_task only, so report what \
+                 you have"
+                    .to_string(),
+            );
+        }
+        if let Some(d) = &self.directive {
+            lines.push(format!("standing instruction: {d}"));
+        }
+        if let Some(e) = &self.working.last_error {
+            lines.push(format!(
+                "last rejection (step {}): {} — {}",
+                e.step, e.code, e.message
+            ));
+        }
+
+        lines.push(
+            "monitor and kill-switch state are not visible from here: this loop performs no \
+             I/O, and a state it has not seen is one it will not report."
+                .to_string(),
+        );
+
+        let detail = lines.join("\n");
+        fx.push(Effect::Note(Note::CoreTool {
+            name: SELF_STATUS.to_string(),
+            detail: detail.clone(),
+        }));
+        self.observe(Tagged::system("get_self_status", detail), 220, None);
+        // A turn, not a step — see the constant's doc comment.
+        self.route(fx);
     }
 
     fn on_search(&mut self, call: &ToolCall, fx: &mut Vec<Effect>) {
@@ -3585,6 +3718,62 @@ mod tests {
     }
 
     // ── The escape hatch ────────────────────────────────────────────────────
+
+    /// The run can ask what state it is in, and asking costs a turn rather than a
+    /// step — for the reason `reflect` does: a run that will not stop to check
+    /// where it is spends its remaining steps going wherever it was going.
+    ///
+    /// The breaker line is the one worth having. A tool the breaker opened has
+    /// left exposure for the rest of the run, which from inside the model's view
+    /// is indistinguishable from a routing miss — so without this the model
+    /// searches for it, finds it, and is still not offered it.
+    #[test]
+    fn self_status_answers_from_the_loops_own_state_without_spending_a_step() {
+        // A reflecting profile, because `get_self_status` is withheld on one that
+        // does not reflect — a fifth core tool always offered would cost a work
+        // slot on every profile, and the tightest shipped one has three in total.
+        let mut p = local();
+        p.orchestration.reflection = true;
+        let mut l = Loop::new(p, registry(), task());
+        l.next(Input::Admission(Admission::Admit));
+        let before = l.step();
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"get_self_status"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply { raw: "{}".into() });
+
+        assert!(
+            !fx.iter().any(|e| matches!(e, Effect::ExecuteTool { .. })),
+            "self-status is harness introspection, not a platform call"
+        );
+        assert_eq!(
+            l.step(),
+            before,
+            "looking at yourself is not charged to the task"
+        );
+
+        let detail = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::Note(Note::CoreTool { name, detail }) if name == SELF_STATUS => {
+                    Some(detail.clone())
+                }
+                _ => None,
+            })
+            .expect("a self-status note");
+
+        // It reports the budget that is actually tracked, and says so about the
+        // two that are not. Reporting an untracked budget as remaining is the
+        // failure this tool exists to avoid.
+        assert!(detail.contains("steps left"), "{detail}");
+        assert!(
+            detail.contains("Tokens and dollars are NOT tracked"),
+            "{detail}"
+        );
+        // And it does not invent a monitor state it has not seen.
+        assert!(detail.contains("not visible from here"), "{detail}");
+        assert!(detail.contains("no tool has tripped its breaker"), "{detail}");
+    }
 
     /// A routing miss costs one turn, not one step of the task's budget, and it never
     /// leaves the harness — `search_tools` reads the registry the loop already holds.

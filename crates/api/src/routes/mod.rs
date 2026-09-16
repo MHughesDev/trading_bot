@@ -3,6 +3,7 @@ pub mod web_and_skills;
 pub mod falsification;
 pub mod agent_sessions;
 pub mod agent_audit;
+pub mod agent_cost;
 pub mod agent_templates;
 pub mod asset_lifecycle;
 pub mod assets;
@@ -118,6 +119,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agent/audit/probability-of-overfit", post(agent_audit::probability_of_overfit))
         .route("/api/agent/audit/family-wise", post(agent_audit::family_wise))
         .route("/api/agent/audit/metric-integrity", post(agent_audit::metric_integrity))
+        .route("/api/agent/cost/estimate", post(agent_cost::estimate))
         // Evidence for the falsification tools (ADR-P7-05). None of these
         // returns a verdict; each answers one defect class with a number.
         .route("/api/evidence/trades", post(evidence::trades))

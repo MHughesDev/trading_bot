@@ -1711,6 +1711,59 @@ impl SuiteManager {
         })
     }
 
+    /// Rows per second, measured from this user's own completed runs
+    /// (Set S task S-3.19).
+    ///
+    /// Returns `(throughput, runs_it_was_measured_from)`. The second half is not
+    /// decoration: `jobs::models::estimate_cost` takes it as
+    /// `completed_runs_in_class` and uses it to choose the rung, so an estimate
+    /// derived from three runs is *labelled* differently from one derived from
+    /// three hundred.
+    ///
+    /// Measured rather than configured, because there is no measured throughput
+    /// anywhere in this platform to configure it from — `ledger::internal`'s own
+    /// note says the closed form is "a rule with no table behind it". The runs
+    /// are the table. They are this machine's runs, on this machine's data, which
+    /// is the only throughput that predicts this machine's next run.
+    ///
+    /// `(0.0, 0)` when nothing has run. That is the honest answer and it
+    /// propagates: a zero throughput makes the estimate infinite, and the caller
+    /// reports "unmeasured" rather than a number.
+    #[must_use]
+    pub fn observed_throughput(&self, user_id: Uuid) -> (f64, usize) {
+        let records = self.records.read().expect("suite lock poisoned");
+        let mut rows = 0u64;
+        let mut millis = 0u64;
+        let mut runs = 0usize;
+        let mut seen = std::collections::HashSet::new();
+        for r in records.values().filter(|r| r.user_id == user_id) {
+            for study in &r.studies {
+                for member in study.result.members() {
+                    if !seen.insert(member.as_str().to_string()) {
+                        continue;
+                    }
+                    let Some(res) = self.bt.store().get(member) else {
+                        continue;
+                    };
+                    // A run that produced no bars and a run that took no time
+                    // both make the ratio meaningless, so neither contributes.
+                    if res.equity_curve.is_empty() || res.compute_cost.wall_ms == 0 {
+                        continue;
+                    }
+                    rows += res.equity_curve.len() as u64;
+                    millis += res.compute_cost.wall_ms;
+                    runs += 1;
+                }
+            }
+        }
+        if millis == 0 {
+            return (0.0, 0);
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let throughput = rows as f64 / (millis as f64 / 1000.0);
+        (throughput, runs)
+    }
+
     /// What `audit.metric_integrity` re-derives (Set S task S-3.8).
     ///
     /// Recomputes a run's headline metric **from the run's own recorded result**

@@ -697,6 +697,7 @@ async fn dispatch_untraced(
     match tool_name {
         // ── Protocol ───────────────────────────────────────────────────────────
         "get_authoring_guide" => json!({ "guide": authoring_guide() }),
+        "estimate_cost" => tools::core::estimate_cost(&ctx.api, params).await,
 
         // ── Discovery ──────────────────────────────────────────────────────────
         "list_lanes" => {

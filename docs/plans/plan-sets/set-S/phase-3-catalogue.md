@@ -577,7 +577,52 @@ has no write path and no agent-callable halt.
 **Traces:** AGENT-006 §5.7, COMP-007 §6.
 
 ### S-3.19 Spending guards: call budgets, cost preview, self-status — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — all three tools exist; `estimate_cost` cannot produce dollars, and
+that is **OQ-16** rather than a gap to fill in.
+
+**`max_calls_per_run` was already enforced** and needed nothing. `crates/mcp-server/src/gate.rs`
+returns a typed `call_budget_exhausted` naming the budget and the count, ahead of the handler.
+This entry says so rather than claiming credit for it.
+
+**`estimate_cost`** — `crates/mcp-server/src/tools/core.rs`, `crates/api/src/routes/agent_cost.rs`,
+`SuiteManager::observed_throughput`. It dispatches nothing and spends no trial. Of its three
+numbers:
+
+* `trials` is **exact** — the target tool's own `spends_trial`, which is also what the call
+  gate reads, so it cannot disagree with what happens;
+* `est_seconds` is measured then extrapolated, with a band and a `confidence`. The throughput
+  comes from the caller's **own completed runs** (rows per second of wall clock), because
+  nothing in this platform configures one — `ledger::internal` says as much: the closed form
+  is "a rule with no table behind it". The runs are the table. With none, the answer is
+  `null` and `unmeasured`, never a constant;
+* `est_usd` is **always null**. There is no price table anywhere — a workspace grep finds no
+  price per token, per second or per GPU-hour, and `jobs::models` answers in seconds.
+  **OQ-16.** A made-up rate is worse than none, because `ask_above_usd` pauses for a human:
+  too low never pauses, too high pauses on everything, and both look like the gate working.
+
+Adding it flipped `spec_15_tool_surface_conformance`'s `("estimate_cost", None)` row to
+`Some("estimate_cost")` — which is that test doing its job in the direction it advertises
+("a pending tool that quietly appears").
+
+**`get_self_status`** — harness-owned, `crates/harness/src/{registry,drive}.rs`. It reads this
+loop's own fields and answers in the loop, costing a turn and not a step, like `reflect`.
+
+Two things it refuses to do, both deliberate:
+
+* it does **not** report the monitor or kill-switch state, which §2.4b lists. The loop is
+  sans-IO and has not seen them, and a stale or invented kill-switch reading would defeat the
+  tool's whole purpose — an agent that cannot tell it is degraded reporting confidently from a
+  degraded state;
+* it does **not** report tokens or dollars remaining as though they were tracked.
+  `BudgetView::usd_tenth_cents_remaining` and `tokens_remaining` are declared and **nothing
+  anywhere writes them** (checked by grep: one hit each, the declaration). The state card
+  renders neither, so nothing misleading reaches a model today — but a future line in that
+  renderer would print "$0.00 remaining", and the tool says the axes are untracked instead.
+
+**It is withheld on profiles that do not reflect** (ADR-S3-12). Core tools are selected before
+namespace filling and count against `max_exposed_per_step`; the tightest shipped profile has
+three slots, and the eval's degraded 7B has six of which three are core — the arithmetic
+§8.3's truncation case is built on.
 
 `spends_trial` bounded simulator runs and nothing bounded anything else — a loop could call
 `run_sweep` fifty times and exhaust a dollar budget without moving the trial counter. Add

@@ -144,6 +144,21 @@ pub const REFLECT: &str = "reflect";
 /// uses to tell progress from spinning.
 pub const RECORD_FINDING: &str = "record_finding";
 
+/// The run looking at itself (AGENT-006 §2.4b, AGENT-010 §12.1; Set S S-3.19).
+///
+/// An agent that cannot tell it is degraded reports confidently from a degraded
+/// state — and every other mechanism in this harness acts on the run without
+/// telling it: the breaker removes a tool, the barren-step detector decides
+/// nothing is being learned, the budget quietly runs down. This is the one tool
+/// that hands that information back.
+///
+/// Harness-owned, like the other four. It reads this loop's own fields and
+/// touches no platform state, so a policy ruling on it would be a ruling on the
+/// harness talking to itself. It costs a turn and not a step, for the reason
+/// `reflect` does: a run that will not stop to check where it is spends its
+/// remaining steps going wherever it was already going.
+pub const SELF_STATUS: &str = "get_self_status";
+
 /// The agent's own folder (guide §4.3, §10.1).
 ///
 /// Every conversation gets a workspace and these four tools over it. They are
@@ -269,6 +284,24 @@ impl ToolRegistry {
             }),
         })
         .expect("the core reflection tool is well-formed");
+        reg.register(ToolDef {
+            name: SELF_STATUS.to_string(),
+            namespace: "core".into(),
+            description: "What this run knows about itself: budget left, what has been tried, \
+                          which tools are broken, and whether anything has degraded. Use it \
+                          before reporting, and whenever something is not working and you \
+                          cannot see why."
+                .into(),
+            risk: Risk::Read,
+            core: true,
+            // Not idempotent, for the same reason `reflect` is not: the answer is
+            // about the state at the moment it is asked, so two identical calls at
+            // different points are two different questions and the repeat cache
+            // must not answer the second with the first's answer.
+            idempotent: false,
+            input_schema: serde_json::json!({ "type": "object", "properties": {} }),
+        })
+        .expect("the core self-status tool is well-formed");
         reg.register(ToolDef {
             name: FINISH_TASK.to_string(),
             namespace: "core".into(),
