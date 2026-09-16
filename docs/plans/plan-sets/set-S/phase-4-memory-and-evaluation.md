@@ -75,7 +75,15 @@ first's conclusions with ids on both a 7B and a frontier profile.
 **Traces:** AGENT-007 §2.1; §8.2.
 
 ### S-4.2 `record_finding` becomes verified — M
-`PARTIAL` 2026-09-16 — **The acceptance is met in full on the harness side**, and this is the task that exposed the drift. `memory/verify.rs` (468 lines, 10 tests) carries exactly the named cases, adversarial one included: `a_finding_citing_an_id_no_tool_returned_is_refused` and `a_number_absent_from_the_cited_result_is_stored_suggestive`. `drive.rs:2518` names this task in a comment. What is missing is `0066_semantic_memory.sql`: the verdict is computed and the `suggestive` label has nowhere to be stored.
+`DONE` 2026-09-16 — the verdict is computed **and stored**.
+
+The harness half was met all along and is what exposed this file's drift: `memory/verify.rs` (468 lines, 10 tests) carries exactly the named cases, adversarial one included — `a_finding_citing_an_id_no_tool_returned_is_refused` and `a_number_absent_from_the_cited_result_is_stored_suggestive`.
+
+What was missing was the write, and the blocker was one field: `Entry` requires a `data_window` and the loop tracked none, so the verdict lived for exactly one run. **OQ-18 is resolved as ADR-S4-04** — the window is the union of the windows of the results the finding cites, derived rather than stated, because the claim rests on those results and nothing else. `Effect::Remember` carries the row out of the sans-IO loop and the driver stamps the run id, blank rather than a sentinel so `Entry::validate` refuses it if the driver ever forgets.
+
+Building it found the real constraint. The first version *refused* a finding whose window could not be derived, and the eval suite went red on `honesty/a_suggestive_finding_is_labelled` — which led to the discovery that **`run_backtest` stamped no window** while every other producer did. Refusing would have rejected the central case. That is now fixed at the source (`shape_snapshot`), and until it was, a finding with no derivable window was recorded for the run and said out loud that it had not persisted.
+
+**PARTIAL history:** this entry read `PARTIAL` for the harness-only state above. `memory/verify.rs` (468 lines, 10 tests) carries exactly the named cases, adversarial one included: `a_finding_citing_an_id_no_tool_returned_is_refused` and `a_number_absent_from_the_cited_result_is_stored_suggestive`. `drive.rs:2518` names this task in a comment. What is missing is `0066_semantic_memory.sql`: the verdict is computed and the `suggestive` label has nowhere to be stored.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
