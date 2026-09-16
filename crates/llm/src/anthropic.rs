@@ -82,13 +82,68 @@ fn build_messages(req: &ChatRequest) -> Vec<Value> {
     out
 }
 
+/// The marker that closes a cache prefix.
+///
+/// Anthropic caches the prompt *up to and including* the block carrying this, so a
+/// breakpoint is a statement about everything before it, not about the block it
+/// sits on. That is why the three below are placed at the end of each layer rather
+/// than at its start.
+fn cache_control() -> Value {
+    json!({ "type": "ephemeral" })
+}
+
+/// Three breakpoints, in prefix order (AGENT-005 §6.1, task S-1.8).
+///
+/// The layers are ordered by how often they change, longest-lived first, because a
+/// prefix is only reusable if everything before it is byte-identical:
+///
+/// 1. **tools** — the catalogue slice for this step. Changes when routing changes.
+/// 2. **system** — the charter. Byte-stable for the life of the run.
+/// 3. **the last content block of the last message** — closes the conversation so
+///    far, so the next turn reads everything up to here from the cache.
+///
+/// A segment under the provider's minimum cacheable length is ignored by the API
+/// rather than rejected, so marking a small prompt is safe and costs nothing. The
+/// failure this avoids is the opposite one: no breakpoints at all, and a 40,000-token
+/// prompt re-billed in full on every one of thirty iterations.
 fn build_body(req: &ChatRequest) -> Value {
     let mut body = Map::new();
     body.insert("model".into(), json!(req.model));
     body.insert("max_tokens".into(), json!(req.max_tokens));
-    body.insert("messages".into(), Value::Array(build_messages(req)));
+
+    let mut messages = build_messages(req);
+    // Breakpoint 3, innermost. The *last content block* of the *last* message, so a
+    // plain-string message has to become a block array to carry it — and only that
+    // one does. An earlier user message stays a plain string, which is what
+    // `cache_breakpoints_close_each_prefix_layer` asserts: marking every message
+    // would create a separate prefix per turn and cache nothing usefully.
+    if let Some(last) = messages.last_mut() {
+        let content = last.get("content").cloned().unwrap_or(Value::Null);
+        let mut blocks: Vec<Value> = match content {
+            Value::Array(a) => a,
+            Value::String(t) => vec![json!({ "type": "text", "text": t })],
+            _ => Vec::new(),
+        };
+        if let Some(block) = blocks.last_mut() {
+            if let Some(obj) = block.as_object_mut() {
+                obj.insert("cache_control".into(), cache_control());
+            }
+        }
+        if !blocks.is_empty() {
+            if let Some(obj) = last.as_object_mut() {
+                obj.insert("content".into(), Value::Array(blocks));
+            }
+        }
+    }
+    body.insert("messages".into(), Value::Array(messages));
+
     if let Some(system) = &req.system {
-        body.insert("system".into(), json!(system));
+        // Breakpoint 2. A text block rather than a bare string, because a string
+        // has nowhere to put the marker.
+        body.insert(
+            "system".into(),
+            json!([{ "type": "text", "text": system, "cache_control": cache_control() }]),
+        );
     }
     if let Some(t) = req.temperature {
         body.insert("temperature".into(), json!(t));
@@ -105,6 +160,15 @@ fn build_body(req: &ChatRequest) -> Value {
                 })
             })
             .collect();
+        // Breakpoint 1, outermost: the LAST tool only. The marker closes the whole
+        // tools array, so marking every entry would be three dozen prefixes where
+        // one is meant.
+        let mut tools = tools;
+        if let Some(last) = tools.last_mut() {
+            if let Some(obj) = last.as_object_mut() {
+                obj.insert("cache_control".into(), cache_control());
+            }
+        }
         body.insert("tools".into(), Value::Array(tools));
         if let Some(choice) = &req.tool_choice {
             body.insert(
@@ -169,6 +233,17 @@ fn parse_response(body: Value) -> Result<ChatResponse, LlmError> {
             .unwrap_or(0),
         output_tokens: body
             .pointer("/usage/output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        // Absent on a response that used no cache, which is why both default to
+        // zero rather than being required. Zero here is honest: nothing was read
+        // from the cache and nothing was written to it.
+        cache_read_input_tokens: body
+            .pointer("/usage/cache_read_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        cache_creation_input_tokens: body
+            .pointer("/usage/cache_creation_input_tokens")
             .and_then(|v| v.as_u64())
             .unwrap_or(0),
     };
@@ -267,6 +342,113 @@ pub async fn list_models(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ToolDef;
+
+    /// The three breakpoints, and — as importantly — where there are none.
+    ///
+    /// A prefix is only reusable if everything before it is byte-identical, so the
+    /// marker has to sit at the END of each layer and nowhere else. Marking every
+    /// tool would make three dozen prefixes where one is meant; marking every
+    /// message would make a fresh prefix per turn and cache nothing.
+    #[test]
+    fn cache_breakpoints_close_each_prefix_layer() {
+        let req = ChatRequest {
+            model: "claude-test".into(),
+            system: Some("the charter".into()),
+            messages: vec![
+                Message::User { content: "first".into() },
+                Message::User { content: "second".into() },
+            ],
+            tools: vec![
+                ToolDef {
+                    name: "a".into(),
+                    description: "first".into(),
+                    input_schema: json!({"type": "object"}),
+                },
+                ToolDef {
+                    name: "b".into(),
+                    description: "last".into(),
+                    input_schema: json!({"type": "object"}),
+                },
+            ],
+            ..ChatRequest::default()
+        };
+        let body = build_body(&req);
+
+        // 1. Tools: the last one only.
+        let tools = body["tools"].as_array().expect("tools");
+        assert!(tools[0].get("cache_control").is_none(), "not the first tool");
+        assert_eq!(tools[1]["cache_control"]["type"], "ephemeral", "the last tool closes the layer");
+
+        // 2. System: a text block, because a bare string has nowhere to put it.
+        let system = body["system"].as_array().expect("system is a block array");
+        assert_eq!(system[0]["text"], "the charter");
+        assert_eq!(system[0]["cache_control"]["type"], "ephemeral");
+
+        // 3. The last content block of the LAST message, and only that one.
+        let messages = body["messages"].as_array().expect("messages");
+        assert!(
+            messages[0]["content"].is_string(),
+            "an earlier message stays a plain string: {}",
+            messages[0]["content"]
+        );
+        let last = messages.last().expect("a last message");
+        let blocks = last["content"].as_array().expect("the last message carries blocks");
+        assert_eq!(blocks.last().unwrap()["cache_control"]["type"], "ephemeral");
+    }
+
+    /// A request with no tools and no system still produces a valid body: the
+    /// breakpoints are placed where the layers exist, not asserted into being.
+    #[test]
+    fn a_request_with_no_tools_and_no_system_is_still_well_formed() {
+        let req = ChatRequest {
+            model: "claude-test".into(),
+            messages: vec![Message::User { content: "hi".into() }],
+            ..ChatRequest::default()
+        };
+        let body = build_body(&req);
+        assert!(body.get("tools").is_none());
+        assert!(body.get("system").is_none());
+        let blocks = body["messages"][0]["content"].as_array().expect("blocks");
+        assert_eq!(blocks[0]["cache_control"]["type"], "ephemeral");
+    }
+
+    /// `input_tokens` is what was BILLED as fresh, not how big the prompt was.
+    /// Reading the first as the second is how a budget comes to believe it has
+    /// thirty-nine thousand tokens of headroom it does not have.
+    #[test]
+    fn a_cached_response_reports_the_whole_prompt_not_only_the_fresh_part() {
+        let body = json!({
+            "content": [{ "type": "text", "text": "ok" }],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 900,
+                "cache_creation_input_tokens": 90
+            }
+        });
+        let resp = parse_response(body).expect("parses");
+        assert_eq!(resp.usage.input_tokens, 10, "fresh tokens, as billed");
+        assert_eq!(resp.usage.prompt_tokens(), 1_000, "the prompt was a thousand tokens");
+        let hit = resp.usage.cache_hit_fraction().expect("there was a prompt");
+        assert!((hit - 0.9).abs() < 1e-9, "90% served from cache, got {hit}");
+    }
+
+    /// And a response that used no cache reports the prompt unchanged — the two
+    /// counters default to zero rather than being required, because they are
+    /// absent on a call that never touched the cache.
+    #[test]
+    fn an_uncached_response_reports_the_prompt_as_its_fresh_tokens() {
+        let body = json!({
+            "content": [{ "type": "text", "text": "ok" }],
+            "stop_reason": "end_turn",
+            "usage": { "input_tokens": 1_000, "output_tokens": 5 }
+        });
+        let resp = parse_response(body).expect("parses");
+        assert_eq!(resp.usage.prompt_tokens(), 1_000);
+        assert_eq!(resp.usage.cache_hit_fraction(), Some(0.0));
+    }
 
     #[test]
     fn consecutive_tool_results_merge_into_one_user_message() {
@@ -318,9 +500,10 @@ mod tests {
         let results = messages[2]["content"].as_array().unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[1]["is_error"], true);
-        // System prompt is top-level, not a message.
+        // System prompt is top-level, not a message. A block array rather than a
+        // bare string since S-1.8: a string has nowhere to carry the cache marker.
         let body = build_body(&req);
-        assert_eq!(body["system"], "sys");
+        assert_eq!(body["system"][0]["text"], "sys");
     }
 
     #[test]

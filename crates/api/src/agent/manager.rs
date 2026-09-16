@@ -289,7 +289,7 @@ impl AgentManager {
             .cloned();
 
         if let Some(profile) = local {
-            let charter = prompt::system_prompt(&serde_json::json!({}));
+            let charter = prompt::charter();
             let params = LocalRunParams {
                 run_id,
                 user_id,
@@ -297,6 +297,9 @@ impl AgentManager {
                 goal: text.to_string(),
                 charter,
                 prior,
+                // The chat path carries none; the field exists so the research
+                // path can, and so both drivers frame a turn identically.
+                constraints: serde_json::json!({}),
                 profile,
                 namespaces: vec!["core".into(), "discovery".into()],
                 demand: harness::hardware::TaskDemand::MultiStep,

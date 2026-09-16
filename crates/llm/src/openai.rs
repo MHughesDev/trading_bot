@@ -237,6 +237,22 @@ fn parse_response(body: Value) -> Result<ChatResponse, LlmError> {
             .pointer("/usage/completion_tokens")
             .and_then(|v| v.as_u64())
             .unwrap_or(0),
+        // OpenAI reports the cached portion *inside* `prompt_tokens` rather than
+        // beside it, so this is subtracted below rather than added — the sum has to
+        // come out as the prompt on every provider or `Usage::prompt_tokens` means
+        // something different depending on who answered.
+        cache_read_input_tokens: body
+            .pointer("/usage/prompt_tokens_details/cached_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        // OpenAI's cache is implicit: there is no creation charge to report.
+        cache_creation_input_tokens: 0,
+    };
+    let usage = Usage {
+        input_tokens: usage
+            .input_tokens
+            .saturating_sub(usage.cache_read_input_tokens),
+        ..usage
     };
 
     Ok(ChatResponse {

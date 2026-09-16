@@ -35,7 +35,7 @@ use harness::profile::Profile;
 use llm::{ChatRequest, LlmClient, LlmError, Message, ToolDef};
 use mcp_server_lib::{ApiClient, McpContext};
 
-use super::{bridge, hardware_probe, workspace_tools};
+use super::{bridge, hardware_probe, prompt, workspace_tools};
 
 /// How long a local backend should hold the weights resident between steps.
 ///
@@ -57,6 +57,13 @@ pub struct LocalRunParams {
     pub charter: String,
     /// What earlier turns concluded. Empty on the first turn.
     pub prior: String,
+    /// The run's constraints — instrument, timeframe, window, balance.
+    ///
+    /// Carried here so both drivers build their opening message the same way
+    /// (S-1.6). `{}` when the caller has none, which is the chat path's normal
+    /// case: an empty object renders no constraints block rather than a block
+    /// saying nothing.
+    pub constraints: serde_json::Value,
     /// Where agent workspaces live. One folder per conversation underneath.
     pub workspace_root: std::path::PathBuf,
     pub profile: Profile,
@@ -502,15 +509,15 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         params.profile.clone(),
         registry,
         Task {
-            goal: if params.prior.trim().is_empty() {
-                params.goal.clone()
-            } else {
-                format!(
-                    "{}\n\nThe user now asks: {}",
-                    params.prior.trim(),
-                    params.goal
-                )
-            },
+            // One builder for both drivers (S-1.6). This path had its own copy of
+            // the prior-turn framing and the hosted one had none at all, so the two
+            // front doors disagreed about what the model was told: the local agent
+            // remembered the conversation and the hosted agent did not.
+            goal: prompt::opening_message(
+                Some(params.prior.as_str()),
+                &params.constraints,
+                &params.goal,
+            ),
             charter: format!(
                 "{}\n\n\u{2500}\u{2500} YOUR WORKSPACE \u{2500}\u{2500}\n\n{}",
                 params.charter,
@@ -942,6 +949,9 @@ mod tests {
             usage: llm::Usage {
                 input_tokens: 1,
                 output_tokens: 1,
+                // The cache counters default to zero: this fixture is about
+                // decoding a reply, not about what it cost.
+                ..llm::Usage::default()
             },
         };
         let raw = reply_text(&Decode::Native { tools: vec![] }, &resp);
@@ -961,6 +971,9 @@ mod tests {
             usage: llm::Usage {
                 input_tokens: 1,
                 output_tokens: 1,
+                // The cache counters default to zero: this fixture is about
+                // decoding a reply, not about what it cost.
+                ..llm::Usage::default()
             },
         };
         let raw = reply_text(

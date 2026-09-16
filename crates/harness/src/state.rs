@@ -69,6 +69,102 @@ impl GoalKind {
     pub fn may_spend_trials(self) -> bool {
         self != GoalKind::Lookup
     }
+
+    /// Classify a goal **before** planning (§3.1, task S-1.16).
+    ///
+    /// Deterministic, and deliberately so. The charter used to carry a plea —
+    /// "many goals are lookups, do not plan five steps for one" — and a plea is
+    /// not a mechanism: the 7B read it every turn and planned five steps anyway.
+    /// This is the same sentence turned into something the loop can act on, at
+    /// zero model calls.
+    ///
+    /// The ordering of the checks is the design. `Compare` is looked for first
+    /// because "compare A and B" is also a research question and the narrower
+    /// reading is the useful one; `Diagnose` before `Research` for the same
+    /// reason. `Lookup` is **last and is the default**, because it is the only
+    /// kind that withholds the trial budget, and a run that was going to be a
+    /// lookup and is treated as research merely costs more, while the reverse
+    /// spends trials on a question that never needed one.
+    ///
+    /// Wrong is survivable in one direction only, and this is the direction.
+    #[must_use]
+    pub fn classify(goal: &str, constraints: &[String]) -> Self {
+        let text = format!("{goal} {}", constraints.join(" ")).to_lowercase();
+        let has = |words: &[&str]| words.iter().any(|w| text.contains(w));
+
+        // "compare", "versus", "which of", "better than" — two or more things
+        // held to one measurement.
+        if has(&["compare", " versus ", " vs ", "which of", "better than", "against each other"]) {
+            return GoalKind::Compare;
+        }
+        // Something is already wrong and the run must find out what.
+        if has(&["why is", "why did", "why does", "diagnose", "debug", "root cause",
+                 "went wrong", "is broken", "is failing", "regression", "investigate the"]) {
+            return GoalKind::Diagnose;
+        }
+        // A question that needs evidence *produced* — the only kind that earns the
+        // trial budget. Two ways in, and the second needs two signals.
+        //
+        // The first is a verb that only makes sense as producing evidence:
+        // backtesting, sweeping, optimising. Those are unambiguous.
+        //
+        // The second is the hard case, and one keyword cannot decide it. "Find
+        // whether BTC-USD has momentum at 1h" and "find whether we hold 1m bars for
+        // BTC-USD" are the same sentence shape and different kinds: the first has
+        // to be *measured*, the second is a stored fact and a `Lookup`. What
+        // separates them is the subject, so a market property alone is not enough
+        // either — "what is the sharpe of run_42" reads a number the platform
+        // already holds.
+        //
+        // So: an inquiry verb AND a market property. Both, or it stays a lookup.
+        if has(&["backtest", "sweep", "run an experiment", "hypothes", "optimi",
+                 "find an edge", "is there an edge", "strategy that"]) {
+            return GoalKind::Research;
+        }
+        let asks = has(&["find whether", "test whether", "does ", "do we know whether",
+                         "is there", "measure", "evaluate", "how well"]);
+        let about_the_market = has(&["momentum", "mean revers", "edge", "alpha", "predict",
+                                     "correlat", "seasonal", "autocorrel", "overfit",
+                                     "signal", "drawdown", "sharpe"]);
+        if asks && about_the_market {
+            return GoalKind::Research;
+        }
+        GoalKind::Lookup
+    }
+
+    /// What "done" means for a goal of this kind, in the run's own words.
+    ///
+    /// Derived rather than asked for: the model is a poor judge of when it is
+    /// finished, and a criterion it wrote is one it can rewrite. These are the
+    /// criteria `finish_task` is checked against.
+    #[must_use]
+    pub fn acceptance_for(self, goal: &str) -> Vec<String> {
+        let goal = goal.trim();
+        let cite = "every number reported is in a tool result this run cited".to_string();
+        match self {
+            GoalKind::Lookup => vec![
+                format!("the question \"{goal}\" is answered in one sentence"),
+                cite,
+                "no trial was spent".to_string(),
+            ],
+            GoalKind::Research => vec![
+                format!("a claim about \"{goal}\" is stated with its evidence"),
+                cite,
+                "the claim survives the null it was measured against".to_string(),
+            ],
+            GoalKind::Diagnose => vec![
+                "the cause is named, not the symptom".to_string(),
+                "a reproduction is given that a reader could follow".to_string(),
+                cite,
+            ],
+            GoalKind::Compare => vec![
+                "every item is measured the same way over the same window".to_string(),
+                "the comparison states which is better AND by how much, with its uncertainty"
+                    .to_string(),
+                cite,
+            ],
+        }
+    }
 }
 
 /// Chat or Research (AGENT-013 §2, ADR-0037). Two modes, not three.
@@ -211,6 +307,18 @@ pub enum StepKind {
 }
 
 impl StepKind {
+    /// The catalogue tool this step will call, when it names one.
+    ///
+    /// `Reflect` and `AskUser` name none, and that is not a missing value — they
+    /// are the two steps the loop serves itself.
+    #[must_use]
+    pub fn tool_name(&self) -> Option<&str> {
+        match self {
+            StepKind::Tool { name } | StepKind::Workflow { name } => Some(name),
+            StepKind::Reflect | StepKind::AskUser => None,
+        }
+    }
+
     fn label(&self) -> String {
         match self {
             StepKind::Tool { name } | StepKind::Workflow { name } => name.clone(),

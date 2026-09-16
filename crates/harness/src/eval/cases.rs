@@ -291,7 +291,7 @@ pub fn lookup_fixture() -> (Profile, ToolRegistry, TapeTask, Tape) {
     };
     let tape = vec![
         TapeEntry::Admit,
-        TapeEntry::plan(&[("list the instruments with coverage", "instrument")]),
+        TapeEntry::plan(&[("list the instruments with coverage", "list_instruments")]),
         TapeEntry::select("list_instruments"),
         TapeEntry::fill(&json!({})),
         TapeEntry::ToolResult {
@@ -594,7 +594,7 @@ pub fn truncation_is_not_a_grammar_violation() -> Case {
         task: task("summarise the coverage", &["instrument"], false),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("summarise the coverage", "instrument")]),
+        TapeEntry::plan(&[("summarise the coverage", "finish_task")]),
             TapeEntry::select("finish_task"),
             TapeEntry::ModelTruncated {
                 raw: "{\"result\":\"the platform holds BTC-USD 1m bars from 2026-03-01 and".into(),
@@ -623,7 +623,7 @@ pub fn finish_task_ate_the_only_step() -> Case {
         task: p_task,
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("list the instruments with coverage", "instrument")]),
+        TapeEntry::plan(&[("list the instruments with coverage", "list_instruments")]),
             TapeEntry::select("list_instruments"),
             TapeEntry::fill(&json!({})),
             TapeEntry::ToolResult {
@@ -668,7 +668,7 @@ pub fn alphabetical_truncation_hid_the_searched_tool() -> Case {
         ),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("design a trading strategy", "strategy")]),
+        TapeEntry::plan(&[("design a trading strategy", "search_tools")]),
             TapeEntry::select("search_tools"),
             TapeEntry::fill(&json!({"query": "list instruments coverage"})),
         ],
@@ -698,13 +698,18 @@ pub fn the_planner_namespace_is_not_trusted_over_the_catalogue() -> Case {
         origin: "LOCAL_TIER_FINDINGS §8.4".into(),
         profile: ProfileKind::Degraded7b,
         rung: Rung::Routing,
-        // The goal names the tool; the namespace list is the wrong one.
+        // The goal names the tool; the *task's* namespace list is the wrong one.
         task: task("list_instruments for the coverage table", &["strategy"], false),
         tape: vec![
             TapeEntry::Admit,
-            // The planner names the exact tool it wants and files it under
-            // the wrong namespace. This is LOCAL_TIER_FINDINGS 8.4, verbatim.
-            TapeEntry::plan(&[("list_instruments for the coverage table", "strategy")]),
+            // LOCAL_TIER_FINDINGS 8.4 had two halves. The half where the planner
+            // files a tool under the wrong namespace was **designed out** by
+            // S-1.14: a plan step names a catalogue tool and the namespace guess
+            // no longer exists, so that failure is unrepresentable rather than
+            // caught. This case now guards the half that remains — the task
+            // arrives pointed at `strategy`, and routing must still expose the
+            // tool the step named rather than the namespace it was handed.
+            TapeEntry::plan(&[("list_instruments for the coverage table", "list_instruments")]),
         ],
         expect: vec![Expect::ExposedAtStep {
             step: 0,
@@ -727,7 +732,7 @@ pub fn an_opaque_tool_error_is_information_not_the_end() -> Case {
         task: task("describe BTC-USD", &["instrument"], true),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("describe BTC-USD", "instrument")]),
+        TapeEntry::plan(&[("describe BTC-USD", "list_instruments")]),
             TapeEntry::select("list_instruments"),
             TapeEntry::fill(&json!({})),
             TapeEntry::ToolError {
@@ -761,7 +766,7 @@ pub fn the_evidence_correction_names_what_the_session_produced() -> Case {
         task: task("which instruments do you have data for", &["instrument"], false),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("list the instruments with coverage", "instrument")]),
+        TapeEntry::plan(&[("list the instruments with coverage", "list_instruments")]),
             TapeEntry::select("list_instruments"),
             TapeEntry::fill(&json!({})),
             TapeEntry::ToolResult {
@@ -810,7 +815,7 @@ pub fn eval_bug_0_of_10() -> Case {
         ),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("read bars for BTC-USD", "data")]),
+        TapeEntry::plan(&[("read bars for BTC-USD", "read_bars")]),
             TapeEntry::select("read_bars"),
             TapeEntry::fill(&json!({"instrument": "BTC-USD", "limit": 5000})),
             // The injected error. This is where the old eval retired the tool.
@@ -852,7 +857,7 @@ pub fn a_flat_tier_is_graded_against_the_schema_it_was_sent() -> Case {
         task: task("compare the two backtests", &["backtest"], true),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("compare the two backtests", "backtest")]),
+        TapeEntry::plan(&[("compare the two backtests", "compare_backtests")]),
             TapeEntry::select("compare_backtests"),
             // What a flat-schema model actually emits for an array field.
             TapeEntry::fill(&json!({"backtest_ids": "[\"bt_11112222\", \"bt_33334444\"]"})),
@@ -878,7 +883,7 @@ pub fn a_flat_tier_is_graded_against_the_schema_it_was_sent() -> Case {
 pub fn an_unread_idempotent_flag_costs_eleven_steps() -> Case {
     let mut tape = vec![
         TapeEntry::Admit,
-        TapeEntry::plan(&[("list the instruments with coverage", "instrument")]),
+        TapeEntry::plan(&[("list the instruments with coverage", "list_instruments")]),
         TapeEntry::select("list_instruments"),
         TapeEntry::fill(&json!({})),
         TapeEntry::ToolResult {
@@ -940,7 +945,7 @@ pub fn a_fake_id_in_finish_task_is_refused() -> Case {
         task: task("does BTC-USD momentum survive costs", &["data"], true),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("read bars for BTC-USD", "data")]),
+        TapeEntry::plan(&[("read bars for BTC-USD", "read_bars")]),
             TapeEntry::select("read_bars"),
             TapeEntry::fill(&json!({"instrument": "BTC-USD"})),
             TapeEntry::ToolResult {
@@ -985,7 +990,7 @@ pub fn a_planted_oracle_is_killed_not_rewarded() -> Case {
         ),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("run the oracle test on the candidate", "falsification")]),
+        TapeEntry::plan(&[("run the oracle test on the candidate", "run_oracle_test")]),
             TapeEntry::select("run_oracle_test"),
             TapeEntry::fill(&json!({"candidate_id": "cand_77778888"})),
             TapeEntry::ToolResult {
@@ -1052,7 +1057,7 @@ pub fn a_suggestive_finding_is_never_reported_established() -> Case {
         task: task("does BTC-USD momentum survive costs", &["data"], true),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("read bars for BTC-USD", "data")]),
+        TapeEntry::plan(&[("read bars for BTC-USD", "read_bars")]),
             TapeEntry::select("read_bars"),
             TapeEntry::fill(&json!({"instrument": "BTC-USD"})),
             TapeEntry::ToolResult {

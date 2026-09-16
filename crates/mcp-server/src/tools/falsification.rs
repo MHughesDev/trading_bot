@@ -553,11 +553,17 @@ mod tests {
     // pass while the substance quietly rotted out of the guide.
 
     fn notes(tool: &str) -> String {
-        let guide = crate::authoring_guide();
+        // Line endings are not part of the claim. `include_str!` reads the working
+        // copy, and a checkout under `core.autocrlf` hands back CRLF whatever the
+        // file was committed as, so a helper matching the heading plus a newline
+        // reports every section missing on one machine and present on another,
+        // from identical content. Normalise first, and the test is about the guide.
+        let guide = crate::authoring_guide().replace("\r\n", "\n");
+        let heading = format!("### {tool}\n");
         let start = guide
-            .find(&format!("### {tool}\n"))
+            .find(&heading)
             .unwrap_or_else(|| panic!("`### {tool}` must exist in the authoring guide"));
-        let rest = &guide[start + tool.len() + 5..];
+        let rest = &guide[start + heading.len()..];
         let end = rest.find("\n### ").unwrap_or(rest.len());
         // The guide is hard-wrapped; these assertions are about content, so a
         // claim must not become invisible because it straddled a line break.

@@ -566,8 +566,8 @@ fn an_identical_idempotent_call_is_answered_from_the_session_not_re_executed() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": [
-            { "goal": "read the bars", "namespace": "data" },
-            { "goal": "read the bars again", "namespace": "data" }
+            { "goal": "read the bars", "tool": "get_bars" },
+            { "goal": "read the bars again", "tool": "get_bars" }
         ]})
         .to_string(),
     });
@@ -628,8 +628,8 @@ fn an_idempotent_call_that_failed_is_retried_once_then_answered_from_the_session
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": [
-            { "goal": "a", "namespace": "data" }, { "goal": "b", "namespace": "data" },
-            { "goal": "c", "namespace": "data" }, { "goal": "d", "namespace": "data" }
+            { "goal": "a", "tool": "get_bars" }, { "goal": "b", "tool": "get_bars" },
+            { "goal": "c", "tool": "get_bars" }, { "goal": "d", "tool": "get_bars" }
         ]})
         .to_string(),
     });
@@ -669,8 +669,8 @@ fn the_same_tool_with_different_arguments_still_runs() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": [
-            { "goal": "read BTC", "namespace": "data" },
-            { "goal": "read ETH", "namespace": "data" }
+            { "goal": "read BTC", "tool": "get_bars" },
+            { "goal": "read ETH", "tool": "get_bars" }
         ]})
         .to_string(),
     });
@@ -718,8 +718,8 @@ fn finish_task_evidence_may_not_cite_an_identifier_the_session_never_saw() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": [
-            { "goal": "read the bars", "namespace": "data" },
-            { "goal": "report", "namespace": "core" }
+            { "goal": "read the bars", "tool": "get_bars" },
+            { "goal": "report", "tool": "finish_task" }
         ]})
         .to_string(),
     });
@@ -782,8 +782,8 @@ fn an_evidence_string_with_no_opaque_identifier_is_left_alone() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": [
-            { "goal": "read the bars", "namespace": "data" },
-            { "goal": "report", "namespace": "core" }
+            { "goal": "read the bars", "tool": "get_bars" },
+            { "goal": "report", "tool": "finish_task" }
         ]})
         .to_string(),
     });
@@ -823,8 +823,8 @@ fn an_identifier_the_session_saw_is_accepted() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": [
-            { "goal": "read the bars", "namespace": "data" },
-            { "goal": "report", "namespace": "core" }
+            { "goal": "read the bars", "tool": "get_bars" },
+            { "goal": "report", "tool": "finish_task" }
         ]})
         .to_string(),
     });
@@ -865,7 +865,7 @@ fn a_session_that_ran_nothing_is_not_asked_to_cite_something() {
 
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
-        raw: json!({ "steps": [{ "goal": "report", "namespace": "core" }] }).to_string(),
+        raw: json!({ "steps": [{ "goal": "report", "tool": "finish_task" }] }).to_string(),
     });
     l.next(Input::ModelReply {
         raw: json!({ "name": "finish_task" }).to_string(),
@@ -901,9 +901,9 @@ fn a_reasoning_step_is_satisfied_by_recording_a_finding_not_by_a_tool_call() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": [
-            { "goal": "read the bars", "namespace": "data" },
-            { "goal": "count them", "namespace": "core" },
-            { "goal": "report", "namespace": "core" }
+            { "goal": "read the bars", "tool": "get_bars" },
+            { "goal": "count them", "tool": "record_finding" },
+            { "goal": "report", "tool": "finish_task" }
         ]})
         .to_string(),
     });
@@ -953,8 +953,8 @@ fn a_finding_may_not_cite_an_identifier_the_session_never_saw() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": [
-            { "goal": "read", "namespace": "data" },
-            { "goal": "note it", "namespace": "core" }
+            { "goal": "read", "tool": "get_bars" },
+            { "goal": "note it", "tool": "record_finding" }
         ]})
         .to_string(),
     });
@@ -1002,7 +1002,7 @@ fn a_task_that_stops_learning_is_stopped_before_its_budget_runs_out() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": (0..8).map(|i| json!({
-            "goal": format!("step {i}"), "namespace": "data"
+            "goal": format!("step {i}"), "tool": "get_bars"
         })).collect::<Vec<_>>() })
         .to_string(),
     });
@@ -1055,7 +1055,7 @@ fn steps_that_learn_something_keep_the_breaker_open() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": (0..10).map(|i| json!({
-            "goal": format!("step {i}"), "namespace": "data"
+            "goal": format!("step {i}"), "tool": "get_bars"
         })).collect::<Vec<_>>() })
         .to_string(),
     });
@@ -1103,8 +1103,8 @@ fn a_session_where_every_tool_failed_can_report_that_without_citing_anything() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": [
-            { "goal": "read the bars", "namespace": "data" },
-            { "goal": "report", "namespace": "core" }
+            { "goal": "read the bars", "tool": "get_bars" },
+            { "goal": "report", "tool": "finish_task" }
         ]})
         .to_string(),
     });
@@ -1147,7 +1147,7 @@ fn a_session_that_ran_no_tool_at_all_still_needs_evidence() {
 
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
-        raw: json!({ "steps": [{ "goal": "report", "namespace": "core" }] }).to_string(),
+        raw: json!({ "steps": [{ "goal": "report", "tool": "finish_task" }] }).to_string(),
     });
     l.next(Input::ModelReply {
         raw: json!({ "name": "finish_task" }).to_string(),
@@ -1178,8 +1178,8 @@ fn re_recording_a_known_finding_is_refused() {
     l.next(Input::Admission(Admission::Admit));
     l.next(Input::ModelReply {
         raw: json!({ "steps": [
-            { "goal": "read", "namespace": "data" }, { "goal": "note", "namespace": "core" },
-            { "goal": "again", "namespace": "core" }
+            { "goal": "read", "tool": "get_bars" }, { "goal": "note", "tool": "record_finding" },
+            { "goal": "again", "tool": "record_finding" }
         ]}).to_string(),
     });
     l.next(Input::ModelReply { raw: json!({ "name": "get_bars" }).to_string() });
@@ -1262,8 +1262,9 @@ fn the_loop_carries_every_profile_value_onto_the_wire() {
     let mut l = Loop::new(p.clone(), local_registry(), local_task());
     let fx = l.next(Input::Admission(Admission::Admit));
 
-    // orchestration.mode = planner_executor → the plan comes first, and its namespace
-    // field is an enum of the catalogue, so the router cannot be sent nowhere.
+    // orchestration.mode = planner_executor → the plan comes first, and its `tool`
+    // field is an enum of the catalogue, so a step the router cannot serve cannot
+    // be decoded (S-1.14).
     assert_eq!(p.orchestration.mode, Mode::PlannerExecutor);
     let call = first_call(&fx);
     let Decode::Plan { schema } = &call.decode else {
@@ -1273,9 +1274,9 @@ fn the_loop_carries_every_profile_value_onto_the_wire() {
         );
     };
     assert!(
-        schema["properties"]["steps"]["items"]["properties"]["namespace"]["enum"]
+        schema["properties"]["steps"]["items"]["properties"]["tool"]["enum"]
             .as_array()
-            .is_some_and(|a| a.iter().any(|v| v == "data"))
+            .is_some_and(|a| a.iter().any(|v| v == "get_bars"))
     );
 
     // context.* and output.* reach the request as stated, never as provider defaults.
@@ -1285,7 +1286,7 @@ fn the_loop_carries_every_profile_value_onto_the_wire() {
 
     // tools.max_exposed_per_step → the selection enum, which IS the exposure budget.
     let fx = l.next(Input::ModelReply {
-        raw: r#"{"steps":[{"goal":"pull bars","namespace":"data"}]}"#.into(),
+        raw: r#"{"steps":[{"goal":"pull bars","tool":"get_bars"}]}"#.into(),
     });
     let Decode::SelectTool { candidates, schema } = &first_call(&fx).decode else {
         panic!("expected a selection");

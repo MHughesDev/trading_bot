@@ -5,6 +5,77 @@ You are talking to a trading-strategy research platform. Through these tools you
 the results, and iterate**. You cannot place orders or trade — there is deliberately
 no order tool on this server.
 
+## The research protocol
+
+**Follow this when the goal is to find a trading edge, and ignore it otherwise.** A
+goal that asks a question is finished when the question is answered; most goals are
+questions. This section lives here rather than in the charter because it applies to
+one kind of goal and the charter is paid for on every turn of every run.
+
+**0. Model, if the strategy needs one.** `list_models`. If nothing suitable exists,
+`train_model` — one call that creates, trains on real stored bars, waits, and returns
+the trained version with its metrics. Pin `seed` so the run can be repeated, and
+check the instrument has bars first with `list_instruments`. Then
+`promote_model_version` so strategies resolve to it.
+
+**1. Design.** Write a strategy definition with a `parameters` block for every number
+you might tune — periods, thresholds, gates — and `param('name')` / `{{name}}`
+references. Declare honest ranges: a range you know the answer is outside of is a
+number you picked.
+
+Write the full JSON and check it with `validate_strategy`, which returns structured,
+fixable errors. A `when` on a node names ANOTHER NODE'S ID; it is not an expression.
+`feature('x') > 0.5` belongs in a condition node, and the node that uses it refers to
+that node by id.
+
+**2. Experiment.** `create_experiment` for that `strategy_ref` with an objective — a
+primary metric plus constraints such as `min_trades` and `max_drawdown_lte`. The
+holdout is locked at creation and every Study you run is a counted trial. Experiments
+are the only path to a backtest; raw backtests are not offered, because a run with no
+trial row is a look nobody counted.
+
+**3. Sweep.** `run_sweep` to tune the parameters. **You never pick a number** — you
+may only narrow ranges, and the sampler chooses. Read `surface.text`: a plateau is
+robust, a spike is fragile. Build on `carried_forward`, the stable centroid, never on
+a best sample. There is no best sample: the best of forty draws from noise is still
+noise, and it is the draw most likely to be noise.
+
+**4. Diagnose.** `get_diagnostics` on a member run (ids come from `list_studies`) to
+learn WHAT loses — which months, which trades, how long the drawdown, how much cost
+drag. Propose ONE structural change in response (add or remove a filter, change an
+exit, gate on a regime) as a new versioned strategy (`…_v2`), then repeat from step 2
+with a new Experiment. One change at a time, or the next result cannot be attributed
+to anything.
+
+**5. Validate.** `run_study` with `walk_forward` and `cpcv` on the carried-forward
+parameters; then `choose_null` and `advance_gate` through the funnel. A candidate that
+fails Gate 2 or Gate 3 is a finding, not a failure — say why, and move on.
+
+### Before you search, and before you claim
+
+Two questions that cost nothing and routinely save a whole sweep:
+
+- **Can this horizon pay its costs?** `check_tradeable_frontier`. Break-even goes as
+  the square of cost over edge, so below the frontier no signal of any quality is
+  profitable and a positive backtest is a statement about the backtest. Ask before
+  designing the search, not after it disappoints.
+- **Has somebody already published this?** `web_search`. Published strategies decay —
+  roughly 26% lower returns out-of-sample and 58% lower after publication — so a
+  crowded, well-cited idea is evidence AGAINST an edge, not for one.
+
+And when a result looks good: `run_oracle_test` asks whether the evaluator can see an
+edge at all. If a perfect-foresight strategy does not profit through the cost model,
+nothing will, and a negative result about your strategy meant nothing.
+
+### What counts as done
+
+Prefer `run_sweep` and `run_study`, which block server-side at no cost to you, over
+polling. Keep slugs versioned. Change one thing at a time.
+
+A candidate that survives is a candidate, not a conclusion. A candidate that dies with
+a reproduction is a finding, and `report_kill` is how it is recorded.
+
+
 ## The recommended loop
 
 1. `list_instruments` — see which instruments have stored bar history (and how much,

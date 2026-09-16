@@ -392,14 +392,18 @@ mod tests {
     /// this test.
     #[test]
     fn no_construction_of_the_gate_can_disable_trial_enforcement() {
-        const SRC: &str = include_str!("gate.rs");
-        let body = SRC
+        // Normalised, because `include_str!` reads the working copy and a
+        // checkout under `core.autocrlf` hands back CRLF: the split below then
+        // finds nothing and this test fails on line endings, not on the code.
+        let src = include_str!("gate.rs").replace("\r\n", "\n");
+        let body = src
             .split_once("impl CallGate {")
             .expect("CallGate has an impl block")
             .1
             .split_once("\n}\n")
             .expect("the impl block ends")
             .0;
+        let body = body.to_string();
         for forbidden in ["std::env::var", "env!(", "option_env!", "cfg!(test)"] {
             assert!(
                 !body.contains(forbidden),

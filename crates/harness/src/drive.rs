@@ -508,7 +508,18 @@ pub enum Outcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PlanStep {
     pub goal: String,
-    pub namespace: String,
+    /// The catalogue tool this step will call (AGENT-008 §3.2, task S-1.14).
+    ///
+    /// A **name**, not a namespace. The planner used to guess a namespace and the
+    /// router used to treat the guess as an answer; observed live, a 7B planned
+    /// `{goal: "list_instruments", namespace: "strategy"}` — naming the exact tool
+    /// it wanted and then filing it under the wrong namespace. Routing exposed the
+    /// strategy tools and the model dutifully created a strategy.
+    ///
+    /// Asking for the tool directly removes the guess rather than compensating for
+    /// it, and the grammar enumerates the catalogue, so an unbindable step cannot
+    /// be decoded in the first place.
+    pub tool: String,
 }
 
 /// How many times one step may consult the escape hatch before it counts as a
@@ -547,15 +558,6 @@ pub struct Loop {
     /// an *observation* (below), and the difference between the two is the whole
     /// mechanism: state is a fixed-size view over an unbounded history.
     working: WorkingState,
-    /// The namespace the planner named for each step of `working.plan`, in the same
-    /// order and never mutated after the plan is accepted.
-    ///
-    /// It lives here rather than on [`PlannedStep`] because AGENT-008's step type
-    /// names a catalogue entry (`StepKind::Tool`), not a namespace, while the plan
-    /// grammar this loop sends asks for a namespace as the router's *fallback*. Two
-    /// vectors written once at the same moment is the cheapest honest way to hold
-    /// both; see the report note on AGENT-008 §3.2.
-    plan_namespaces: Vec<String>,
     /// The raw observations: what tools actually returned, in order.
     ///
     /// This is the transcript, and it is deliberately NOT the working state. It is
@@ -702,10 +704,29 @@ impl Loop {
         // signal available here, so it is the one that decides — the lifecycle
         // phase (AGENT-013) sets `mode`, `workflow`, `ring` and `stage` properly.
         let mut working = WorkingState::new(task.goal.clone());
+        // The caller's demand decides the mode; the goal text decides the kind
+        // (§3.1, task S-1.16).
+        //
+        // `TaskDemand` is a statement about the *tier* — can this run take more
+        // than one step — and it was standing in for a statement about the
+        // *question*. The two are not the same: "what is the deepest 1m series we
+        // hold" is a lookup that arrives as `MultiStep` whenever the caller is a
+        // research session, and it was getting the trial budget as a result.
+        //
+        // A single-lookup demand still pins `Lookup` regardless of what the text
+        // says. It is the narrower reading and it cannot be widened by a goal that
+        // happens to contain the word "backtest": a tier that can only take one
+        // step must not be handed a kind that expects several.
         (working.kind, working.mode) = match task.demand {
             TaskDemand::SingleLookup => (GoalKind::Lookup, RunMode::Chat),
-            TaskDemand::MultiStep => (GoalKind::Research, RunMode::Research),
+            TaskDemand::MultiStep => (
+                GoalKind::classify(&task.goal, &[]),
+                RunMode::Research,
+            ),
         };
+        // Derived, never asked for: the model is a poor judge of when it is
+        // finished, and a criterion it wrote is one it can rewrite.
+        working.acceptance = working.kind.acceptance_for(&task.goal);
         working.budget = BudgetView {
             steps_remaining: profile.orchestration.max_steps,
             steps_total: profile.orchestration.max_steps,
@@ -719,7 +740,6 @@ impl Loop {
             step: 0,
             path: vec![State::Admitting],
             working,
-            plan_namespaces: Vec::new(),
             observations: Vec::new(),
             directive: None,
             discovered: BTreeSet::new(),
@@ -1047,7 +1067,18 @@ impl Loop {
     }
 
     fn plan_schema(&self) -> Value {
-        let namespaces: Vec<String> = self.registry.namespace_index().into_keys().collect();
+        // The catalogue, not the namespaces. A step that cannot bind to a tool is
+        // not a step the loop can serve, and the cheapest place to say so is the
+        // sampler — a grammar refusal costs nothing and never reaches a retry.
+        //
+        // `search_tools` is always in the enum even when routing did not expose it:
+        // AGENT-008 §3.2 names it as the honest answer to "no tool fits", and a
+        // planner that cannot say that has to guess instead.
+        let mut tools: Vec<String> =
+            self.registry.names().into_iter().map(str::to_string).collect();
+        tools.push(SEARCH_TOOLS.to_string());
+        tools.sort();
+        tools.dedup();
         json!({
             "type": "object",
             "properties": {
@@ -1067,11 +1098,15 @@ impl Loop {
                         "properties": {
                             "goal": {
                                 "type": "string",
-                                "description": "The OUTCOME this step produces, in plain words. Not a tool name."
+                                "description": "The OUTCOME this step produces, in plain words."
                             },
-                            "namespace": {"type": "string", "enum": namespaces},
+                            "tool": {
+                                "type": "string",
+                                "enum": tools,
+                                "description": "The tool that produces it. If none fits, use search_tools."
+                            },
                         },
-                        "required": ["goal", "namespace"],
+                        "required": ["goal", "tool"],
                     },
                 },
             },
@@ -1083,10 +1118,11 @@ impl Loop {
         format!(
             "Plan this task in AS FEW STEPS AS IT NEEDS, up to {}. Most tasks need two \
              or three. A short plan that is right beats a long one that pads.\n\n\
-             Each step states an OUTCOME in plain words — what you will KNOW when it is \
-             done — not the name of a tool.\n\
-             good: \"find which instrument has the most 1m bars\"\n\
-             bad:  \"list_instruments\"\n\n\
+             Each step has two parts: the OUTCOME in plain words — what you will KNOW \
+             when it is done — and the TOOL that produces it.\n\
+             good: {{\"goal\": \"find which instrument has the most 1m bars\", \
+             \"tool\": \"list_instruments\"}}\n\
+             If no tool fits a step, name `search_tools` and find one.\n\
              Do not add steps to reach the limit. Do not plan file work unless the task \
              asks for a file. If one step answers the task, plan one step.\n\n\
              Task: {}",
@@ -1104,7 +1140,7 @@ impl Loop {
                     .filter_map(|s| {
                         Some(PlanStep {
                             goal: s.get("goal")?.as_str()?.to_string(),
-                            namespace: s.get("namespace")?.as_str()?.to_string(),
+                            tool: s.get("tool")?.as_str()?.to_string(),
                         })
                     })
                     .collect()
@@ -1117,7 +1153,7 @@ impl Loop {
             self.reject_and_retry(
                 Rejection::semantic(
                     "drive.empty_plan",
-                    "the plan has no steps; give at least one step with a goal and a namespace",
+                    "the plan has no steps; give at least one step with a goal and a tool",
                 ),
                 fx,
             );
@@ -1128,27 +1164,47 @@ impl Loop {
             .into_iter()
             .take(self.profile.orchestration.max_steps as usize)
             .collect();
+
+        // Every step names a tool, and the tool exists (§3.2, task S-1.14).
+        //
+        // The grammar already enumerates the catalogue, so a compliant sampler
+        // cannot get here with an unbindable name. This is the second half, for
+        // the adapters that cannot constrain decoding at all: the same rule,
+        // enforced where the reply is read rather than where it is generated. A
+        // plan the loop would have to guess its way through is refused before it
+        // becomes six steps of guessing.
+        let unbindable: Vec<&str> = steps
+            .iter()
+            .map(|s| s.tool.as_str())
+            .filter(|n| *n != SEARCH_TOOLS && self.registry.get(n).is_none())
+            .collect();
+        if !unbindable.is_empty() {
+            self.reject_and_retry(
+                Rejection::semantic_owned(
+                    "drive.plan_step_is_not_a_tool",
+                    format!(
+                        "each step names a tool; if none fits, use {SEARCH_TOOLS}.                          These are not tools: {}",
+                        unbindable.join(", ")
+                    ),
+                ),
+                fx,
+            );
+            return;
+        }
         // Into the working state, where the plan carries its own status and the card
-        // renders it. `plan_namespaces` keeps the router's fallback beside it.
-        self.plan_namespaces = steps.iter().map(|s| s.namespace.clone()).collect();
+        // renders it.
         self.working.plan = steps
             .iter()
             .enumerate()
             .map(|(i, s)| PlannedStep {
                 goal: s.goal.clone(),
-                // The planner names an outcome and a namespace, not a tool, so the
-                // step's kind is the best catalogue match for the outcome — the same
-                // lookup the router does. A step nothing matches is `search_tools`,
-                // which AGENT-008 §3.2 names as the honest answer to "no namespace
-                // to route to".
-                kind: self.registry.search(&s.goal, 1).first().map_or_else(
-                    || StepKind::Tool {
-                        name: SEARCH_TOOLS.to_string(),
-                    },
-                    |t| StepKind::Tool {
-                        name: t.name.clone(),
-                    },
-                ),
+                // The planner named the tool, so the step's kind is that name. No
+                // search, no fallback: the previous version re-derived the kind from
+                // the goal text because the plan only carried a namespace, and the
+                // derivation could disagree with what the planner meant.
+                kind: StepKind::Tool {
+                    name: s.tool.clone(),
+                },
                 status: if i == 0 {
                     StepStatus::Active
                 } else {
@@ -1260,37 +1316,35 @@ impl Loop {
         let active = self
             .working
             .active_step()
-            .map(|(i, s)| (i, s.goal.clone()))
-            .map(|(i, goal)| PlanStep {
-                goal,
-                namespace: self.plan_namespaces.get(i).cloned().unwrap_or_default(),
-            });
-        if let Some(step) = active {
-            // Route from the step's goal **deterministically** (§2.2 step 2a), and
-            // treat the namespace the planner named as a fallback rather than an
-            // answer.
+            .map(|(_, s)| (s.goal.clone(), s.kind.tool_name().map(str::to_string)));
+        if let Some((goal, named)) = active {
+            // The step names its tool now (S-1.14), so routing starts from a fact
+            // rather than from a guess. It is pinned first and by name: the planner
+            // chose it with the whole catalogue in front of it, which is more than
+            // the router's three-hit search over the goal text has.
             //
-            // The planner's namespace is a guess made before the step ran, by the
-            // weakest model in the system. Observed live: a 7B planned
-            // `{goal: "list_instruments", namespace: "strategy"}` — naming the exact
-            // tool it wanted and then filing it under the wrong namespace. Routing
-            // trusted the guess, exposed the strategy tools, and the model dutifully
-            // created a strategy instead. The catalogue was right there.
-            //
-            // So the harness does the lookup itself. This is the guide's "move
-            // intelligence out of the model and into the harness" at its cheapest:
-            // no extra model call, no heuristic, just the search the registry already
-            // implements.
-            for t in self.registry.search(&step.goal, 3) {
+            // The search still runs, and still runs over the goal rather than over
+            // the tool name. It is what covers the step after this one — the model
+            // reaches for `get_bars` having planned `list_instruments`, and the
+            // neighbours of the outcome are what make that possible without a
+            // round-trip through `search_tools`.
+            if let Some(name) = named {
+                if let Some(t) = self.registry.get(&name) {
+                    if !pinned.contains(&t.name) {
+                        pinned.push(t.name.clone());
+                    }
+                    if !wanted.contains(&t.namespace) {
+                        wanted.push(t.namespace.clone());
+                    }
+                }
+            }
+            for t in self.registry.search(&goal, 3) {
                 if !pinned.contains(&t.name) {
                     pinned.push(t.name.clone());
                 }
                 if !wanted.contains(&t.namespace) {
                     wanted.push(t.namespace.clone());
                 }
-            }
-            if !wanted.contains(&step.namespace) {
-                wanted.push(step.namespace.clone());
             }
         }
 
@@ -1555,6 +1609,32 @@ impl Loop {
                     self.on_truncated(fx);
                     return;
                 }
+                // One carve-out, and it is narrow: a plan step naming a tool that
+                // is not in the enum (§3.2, task S-1.14).
+                //
+                // Everything else here is evidence that the *backend* did not apply
+                // the grammar, and continuing on a backend that ignores grammars
+                // produces garbage — that is why this is a fence. But a plan whose
+                // step names the wrong tool is the model being wrong once, about a
+                // thing the correction can name exactly, and the plan has not been
+                // acted on yet. Fencing it ends a healthy session over a recoverable
+                // slip, which is precisely the failure LOCAL_TIER_FINDINGS §8
+                // records: the fence made a working 7B unreachable.
+                //
+                // Scoped to the plan, and scoped to the tool field, so the fence
+                // keeps its meaning everywhere else.
+                if matches!(pending.decode, Decode::Plan { .. }) && detail.contains(".tool") {
+                    self.reject_and_retry(
+                        Rejection::semantic_owned(
+                            "drive.plan_step_is_not_a_tool",
+                            format!(
+                                "each step names a tool; if none fits, use {SEARCH_TOOLS}. {detail}"
+                            ),
+                        ),
+                        fx,
+                    );
+                    return;
+                }
                 self.fence(
                     Degradation::ConstraintIgnored {
                         schema_for: pending.decode.label(),
@@ -1792,13 +1872,38 @@ impl Loop {
                     "You already called {} with these arguments this session. The result,                      unchanged, was: {}. {advice}",
                     call.name, previous.payload
                 );
+                let question = format!("call {} with these arguments", call.name);
+
+                // Asked a third time, this stops being a repeat and starts being a
+                // loop (§3.6, task S-1.15).
+                //
+                // The first repeat is answered: the session holds the result, and
+                // handing it back costs nothing and teaches the model what it
+                // already knows. The second is a correction naming the step the
+                // question was settled at, because a model that did not take the
+                // answer will not take the same answer again — re-listing
+                // instruments and re-choosing timeframes is the dominant waste in
+                // the local traces, and it is always the *third* call that reveals
+                // it as a cycle rather than a slip.
+                //
+                // The correction says "say why it should change or move on", not
+                // "you already decided". Changing a decision has to stay possible;
+                // making it silently is what must not.
+                if let Some(correction) = self.working.redecision_correction(&question) {
+                    self.reject_and_retry(
+                        Rejection::semantic_owned("drive.question_already_decided", correction),
+                        fx,
+                    );
+                    return;
+                }
+
                 // An observation: it carries the result the session already holds,
                 // which is data the model needs to read. What the harness *decided*
                 // — that this call is settled — goes on the card instead, where
                 // asking again is answered by "decided at step N".
                 self.observe(Tagged::tool(&call.name, &message), 215, None);
                 self.working.decide(
-                    format!("call {} with these arguments", call.name),
+                    question,
                     if previous.failed {
                         "no — it already failed with them".to_string()
                     } else {
@@ -3289,45 +3394,50 @@ mod tests {
         assert!(matches!(model_call(&fx).decode, Decode::Plan { .. }));
 
         let fx = l.next(Input::ModelReply {
-            raw: r#"{"steps":[{"goal":"pull bars","namespace":"data"}]}"#.into(),
+            raw: r#"{"steps":[{"goal":"pull bars","tool":"read_bars"}]}"#.into(),
         });
         assert!(fx
             .iter()
             .any(|e| matches!(e, Effect::Note(Note::Planned { .. }))));
         assert!(
             l.exposed().contains("read_bars"),
-            "the plan's namespace is what the router used"
+            "the tool the step named is what the router exposed"
         );
     }
 
-    /// The planner is the weakest model in the system and its namespace is a guess
-    /// made before the step ran. Observed live: a 7B planned
-    /// `{goal: "list_instruments", namespace: "strategy"}` — naming the exact tool it
+    /// The planner is the weakest model in the system, and it used to be asked for
+    /// a namespace — a guess made before the step ran. Observed live: a 7B planned
+    /// `{goal: "list_instruments", namespace: "strategy"}`, naming the exact tool it
     /// wanted and filing it under the wrong namespace. Routing trusted the guess and
     /// the model created a strategy instead.
+    ///
+    /// S-1.14 removed the guess rather than compensating for it: the step names the
+    /// tool. What this test now holds is that the *task's* namespaces do not
+    /// override it — a run pointed at `admin` still gets the tool its plan named.
     #[test]
-    fn a_plan_step_routes_by_what_it_names_not_by_the_namespace_it_guessed() {
+    fn a_plan_step_routes_by_the_tool_it_names_not_by_the_task_namespaces() {
         let mut p = local();
         p.orchestration.mode = Mode::PlannerExecutor;
         let mut t = task();
-        t.namespaces = vec![];
+        t.namespaces = vec!["admin".into()];
         let mut l = Loop::new(p, registry(), t);
         l.next(Input::Admission(Admission::Admit));
 
-        // The goal names `read_bars`; the namespace says `admin`, which is wrong.
         let fx = l.next(Input::ModelReply {
-            raw: r#"{"steps":[{"goal":"read_bars for BTC-USD","namespace":"admin"}]}"#.into(),
+            raw: r#"{"steps":[{"goal":"the first bars","tool":"read_bars"}]}"#.into(),
         });
         assert!(
             l.exposed().contains("read_bars"),
-            "the tool the step named must be exposed despite the wrong namespace: {:?}",
+            "the tool the step named must be exposed whatever the task pointed at: {:?}",
             l.exposed()
         );
         assert!(matches!(model_call(&fx).decode, Decode::SelectTool { .. }));
     }
 
+    /// The grammar enumerates the catalogue, so an unbindable step cannot be
+    /// decoded at all on an adapter that constrains decoding.
     #[test]
-    fn a_plan_naming_a_namespace_that_does_not_exist_cannot_be_decoded() {
+    fn a_plan_naming_a_tool_that_does_not_exist_cannot_be_decoded() {
         let mut p = local();
         p.orchestration.mode = Mode::PlannerExecutor;
         let mut l = Loop::new(p, registry(), task());
@@ -3335,11 +3445,35 @@ mod tests {
         let Decode::Plan { schema } = &model_call(&fx).decode else {
             unreachable!()
         };
-        let ns = schema["properties"]["steps"]["items"]["properties"]["namespace"]["enum"]
+        let tools = schema["properties"]["steps"]["items"]["properties"]["tool"]["enum"]
             .as_array()
             .unwrap();
-        assert!(ns.iter().any(|v| v == "data"));
-        assert!(!ns.iter().any(|v| v == "nonsense"));
+        assert!(tools.iter().any(|v| v == "read_bars"));
+        assert!(tools.iter().any(|v| v == SEARCH_TOOLS), "the escape hatch is always offered");
+        assert!(!tools.iter().any(|v| v == "nonsense"));
+    }
+
+    /// And the second half, for adapters that cannot constrain decoding: the same
+    /// rule enforced where the reply is read. A plan the loop would have to guess
+    /// its way through is refused before it becomes six steps of guessing.
+    #[test]
+    fn a_plan_step_that_is_not_a_tool_is_rejected_with_the_named_correction() {
+        let mut p = local();
+        p.orchestration.mode = Mode::PlannerExecutor;
+        let mut l = Loop::new(p, registry(), task());
+        l.next(Input::Admission(Admission::Admit));
+
+        let fx = l.next(Input::ModelReply {
+            raw: r#"{"steps":[{"goal":"think about it","tool":"ponder"}]}"#.into(),
+        });
+        let rejected = fx.iter().any(|e| {
+            matches!(e, Effect::Note(Note::Rejected { code, .. }) if &**code == "drive.plan_step_is_not_a_tool")
+        });
+        assert!(rejected, "an unbindable step is rejected at parse: {fx:?}");
+        assert!(
+            l.working.plan.is_empty(),
+            "and no plan is accepted from it"
+        );
     }
 
     // ── Flat schemas round-trip ─────────────────────────────────────────────

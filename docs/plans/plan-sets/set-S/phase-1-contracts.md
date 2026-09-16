@@ -1,6 +1,6 @@
 # Phase 1 — Contracts
 
-**Completion: 25% (5 / 20 tasks), plus 2 partial. Track A landed, plus S-1.10; the rest of tracks B and C not started.**
+**Completion: 65% (13 / 20 tasks), plus 1 partial. Track A complete bar S-1.2; track B needs S-1.11–S-1.12; track C's reasoning protocol landed, S-1.17–S-1.20 remain.**
 
 > Status 2026-09-15, track 1. The three contracts the other Set S phases wait on now exist:
 > `ToolSpec`/`ToolResult` (`crates/mcp-server/src/spec.rs`), the generated taxonomy and
@@ -190,7 +190,22 @@ spec has an arm; every `notes_section` resolves to a heading.
 ## Track B — the context contract
 
 ### S-1.5 Split `system_prompt` into a lean charter — M
-`NOT STARTED`
+`DONE` 2026-09-15 — 15.5 KB → 2.9 KB, and it no longer instructs tools the agent cannot call.
+
+Out: the five-step research protocol (now `## The research protocol` in the served guide,
+S-1.7), the inlined 10.7 KB authoring guide, the run constraints (now the opening message,
+S-1.6), and the draft builder — instructed at `prompt.rs:31` and withheld at `lib.rs:495`, so
+the one document the model cannot ignore told it to call four tools it would never be offered.
+A model told to call a tool that is not there does not conclude the prompt is wrong.
+
+In: identity, an edge-finding pointer, the tools/`search_tools` paragraph, and the termination
+contract. `charter()` takes no arguments, so there is nothing for it to vary on — which is what
+makes it cacheable, and `the_charter_fits_its_budget_and_is_byte_stable` asserts rather than
+assumes it.
+
+Verified by that test plus `the_charter_names_only_tools_the_agent_can_actually_call` (both
+directions: the three it must name, the five it must not) and
+`the_charter_does_not_inline_the_authoring_guide`.
 
 15.5 KB → ≤ 3.2 KB. Out: the five-step research protocol (moves to the guide), the inlined
 10.7 KB authoring guide, the run constraints (move to the opening message), and **the
@@ -205,7 +220,21 @@ contain `new_strategy_draft`; no test or prompt names a tool the internal profil
 **Traces:** AGENT-005 §3.1; §10.1.
 
 ### S-1.6 The opening message carries everything that varies — S
-`NOT STARTED`
+`DONE` 2026-09-15 — one builder, both drivers, and the hosted driver stops discarding `prior`.
+
+`run_constraints()` and `opening_message(prior, constraints, goal)`. The hosted driver computed
+`prior` at `manager.rs:253` and never read it, so a follow-up question arrived with no memory of
+the answer it was following up on and the agent re-derived it or contradicted it. The local
+driver had its own copy of the framing, so the two front doors disagreed about what the model
+was told.
+
+The constraints block renders only when a constraint was actually set, and the check is keyed on
+the **input**: the unset form has exactly as many lines as the set one, because "your choice" is
+itself a line, so the line-count guard this shipped with was one off from being a no-op.
+
+Verified by `constraints_render_into_the_opening_message_and_never_into_the_charter`,
+`a_follow_up_turn_carries_what_the_conversation_already_established` (prior first, the question
+last and marked), and `a_goal_with_nothing_to_frame_it_is_passed_through_unchanged`.
 
 `run_constraints()` + `opening_message(prior, constraints, goal)`. Both drivers seed their
 first user message with it. This also fixes the hosted driver silently discarding
@@ -218,7 +247,15 @@ neither is passed through unchanged.
 **Traces:** AGENT-005 §3.2; §10.1.
 
 ### S-1.7 Move the research protocol into the served guide — S
-`NOT STARTED`
+`DONE` 2026-09-15 — the guide opens with `## The research protocol`.
+
+Moved rather than copied: it is gone from the charter, so there is one statement of it. It also
+gained the two questions that cost nothing and save a sweep — `check_tradeable_frontier` before
+designing a search, `web_search` before claiming a discovery — and the oracle test, none of
+which the old charter mentioned.
+
+A lookup goal never fetches it, because fetching is a tool call the goal has no reason to
+make.
 
 **Files:** `crates/mcp-server/docs/authoring_guide.md`, `crates/mcp-server/src/lib.rs:615`.
 Coordinate with S-1.4 — same two files.
@@ -227,7 +264,18 @@ description names it; a lookup goal never fetches it.
 **Traces:** AGENT-005 §3.3.
 
 ### S-1.8 Prompt caching: three breakpoints, in prefix order — S
-`NOT STARTED`
+`DONE` 2026-09-15 — three breakpoints, and nowhere else.
+
+`tools` (the last entry only) → `system` (as a text block, because a bare string has nowhere to
+carry the marker) → the last content block of the last message. The layers are ordered by how
+often they change, because a prefix is reusable only if everything before it is byte-identical.
+
+The negative half is the point and is asserted: an earlier user message stays a plain string.
+Marking every message would create a fresh prefix per turn and cache nothing; marking every tool
+would make three dozen prefixes where one is meant.
+
+Verified by `cache_breakpoints_close_each_prefix_layer` and
+`a_request_with_no_tools_and_no_system_is_still_well_formed`.
 
 `tools` (last entry) → `system` (as a text block) → the last content block of the last
 message. Segments under the provider's minimum are ignored by the API, so this is safe on
@@ -240,7 +288,19 @@ plain string.
 **Traces:** AGENT-005 §6.1; §10.2.
 
 ### S-1.9 `Usage` learns about the cache — S
-`NOT STARTED`
+`DONE` 2026-09-15 — `prompt_tokens()`, and why `input_tokens` was never it.
+
+`input_tokens` is what was BILLED as fresh. With caching on, a 40,000-token prompt of which
+39,000 was a cache hit reports `input_tokens: 1000`, and reading that as the prompt size is how a
+context budget comes to believe it has thirty-nine thousand tokens of headroom it does not have.
+
+Anthropic reports the cache counters beside `input_tokens`; OpenAI reports the cached portion
+**inside** `prompt_tokens`, so that provider subtracts rather than adds — the sum has to come out
+as the prompt everywhere or `prompt_tokens()` means something different depending on who
+answered. Ollama has no prompt cache, and zero there is the fact rather than a placeholder.
+
+Verified by `a_cached_response_reports_the_whole_prompt_not_only_the_fresh_part` (900 cached + 90
+written + 10 fresh = 1,000) and `an_uncached_response_reports_the_prompt_as_its_fresh_tokens`.
 
 `cache_read_input_tokens` + `cache_creation_input_tokens` with `#[serde(default)]`, a
 `prompt_tokens()` total, Anthropic parsing both, OpenAI reading
@@ -312,7 +372,8 @@ it lists 20 lines; `the_section_budget_shares_do_not_exceed_the_whole` still pas
 ## Track C — the reasoning contract
 
 ### S-1.13 `WorkingState`: the model reads state instead of rebuilding it — L
-`PARTIAL` 2026-09-15 — the type is landed; `Loop` does not own one.
+`DONE` 2026-09-15 — `Loop` owns one, the nine append sites are gone, and the bound is now
+proved of the loop rather than only of the type.
 
 `crates/harness/src/state.rs` carries every field AGENT-008 §2 names, including AGENT-013's
 lifecycle fields, with two renderers: a ≤ 400-token flat card bounded by construction and a
@@ -325,10 +386,18 @@ nine append sites are not), `a_flat_card_is_bounded_however_long_the_goal_is`,
 the narrowest reading: `Ring::Research`, `Stage::Explore`, `GoalKind::Lookup`, no trials), and
 `re_asking_a_decided_question_is_corrected`.
 
-**Missing, and it is the larger half:** `Loop` does not own a `WorkingState`, the nine
-`Section::WorkingState` pushes in `drive.rs` are untouched, and nothing renders this type into a
-prompt. Until that lands, AGENT-008 AC-1 is proved of the type and not of the system, which is
-why its box is unticked.
+~~**Missing, and it is the larger half:**~~ **Closed.** `Loop` owns the `WorkingState`; the
+nine `Section::WorkingState` pushes are two, and neither is an append — one renders the card
+into `Section::Subtask` at priority 255, rewritten every step, and the other is `observe()`,
+which records what a tool *returned*. That distinction is the mechanism: state is rewritten,
+evidence accumulates and is what compaction drops.
+
+The bound is asserted on the prompt the model is actually sent, which is the only place the
+claim is true or false: `the_state_card_does_not_grow_across_fifty_steps` runs fifty whole
+steps and holds the rich card to +400 bytes and the flat card to its 400-token tier budget.
+`the_anchor_is_derived_from_the_same_state_the_card_renders` closes the third clause — two
+sources of truth for "where am I" is how the card and the anchor come to disagree, and the
+model reads both.
 
 Note for whoever wires it: `state::Decision` is deliberately not re-exported at the crate root
 because `policy::Decision` already owns that name and means a policy ruling (ADR-S1-04).
@@ -345,7 +414,28 @@ bounded per tier; the anchor text derives from the state rather than being built
 **Traces:** AGENT-008 §2; §7.1.
 
 ### S-1.14 Plans are made of tools — closes the open planner bug — M
-`NOT STARTED`
+`DONE` 2026-09-15 — a plan step names a catalogue tool; the namespace guess is deleted.
+
+The grammar enumerates the catalogue (with `search_tools` always offered, because AGENT-008
+§3.2 names it as the honest answer to "no tool fits" and a planner that cannot say that has to
+guess instead). `PlanStep.namespace` and the `plan_namespaces` vector beside it are gone, and
+routing starts from the tool the planner named with the whole catalogue in front of it.
+
+Two enforcement halves, because they fail differently. Under a grammar the sampler cannot emit
+an unbindable name at all. Without one, `on_plan` refuses it — **and the schema ladder was
+changed to refuse rather than fence**: a plan step naming the wrong tool is the model being
+wrong once about a thing the correction can name exactly, and the plan has not been acted on.
+Fencing it ends a healthy session over a recoverable slip, which is exactly the failure
+LOCAL_TIER_FINDINGS §8 records. The carve-out is scoped to `Decode::Plan` and to the `tool`
+field so the fence keeps its meaning everywhere else.
+
+Verified by `a_plan_step_that_is_not_a_tool_is_rejected_with_the_named_correction`,
+`a_plan_naming_a_tool_that_does_not_exist_cannot_be_decoded`, and
+`a_plan_step_routes_by_the_tool_it_names_not_by_the_task_namespaces`. The replay case
+`routing/goal_text_outranks_the_guessed_namespace` was **re-aimed rather than deleted**: the
+half where a planner files a tool under the wrong namespace is now unrepresentable, so the
+case guards the half that survives — a task pointed at the wrong namespace must still get the
+tool its step named.
 
 `PlanStep` gains `kind: Tool{name} | Workflow{name} | Reflect | AskUser`; the plan grammar
 enumerates catalogue names rather than free text; a step that cannot bind to a catalogue
@@ -360,7 +450,19 @@ the deeper cause and is still open") passes.
 **Traces:** AGENT-008 §3.2; §7.2.
 
 ### S-1.15 Decisions are remembered — S
-`NOT STARTED`
+`DONE` 2026-09-15 — three asks, three answers, and the third names the step.
+
+The first call dispatches. The second is answered from what the session already holds — free,
+and it puts the answer back in front of the model. The third is a correction:
+`decided at step N: …; say why it should change or move on`. A model that did not take the
+answer twice will not take it a third time, and by then a repeat is a cycle rather than a slip.
+
+The correction leaves changing the decision possible. That is the point of storing the reason
+beside the choice: making it silently is what must not happen.
+
+Verified by `re_asking_a_settled_question_is_corrected_with_the_step_it_was_decided_at`, which
+reproduces the observed waste (an instrument list re-read until the step budget ran out) and
+asserts it stops.
 
 `WorkingState.decided` records each choice the protocol asked for with its reason and
 renders it. Re-asking a decided question returns
@@ -373,7 +475,27 @@ test and stops.
 **Traces:** AGENT-008 §3.6; §7.5.
 
 ### S-1.16 Classify the goal before planning — M
-`NOT STARTED`
+`DONE` 2026-09-15 — the charter's plea became a mechanism, at zero model calls.
+
+Deterministic rules over the goal text, run before the planner is asked anything.
+`TaskDemand` was standing in for this and is a statement about the *tier*, not the *question*:
+"what is the deepest 1m series we hold" arrives as `MultiStep` whenever the caller is a
+research session, and was getting the trial budget as a result. A `SingleLookup` demand still
+pins `Lookup` whatever the text says — a tier that can take one step must not be handed a kind
+that expects several.
+
+Two signals, not one, for the hard case. "Find whether BTC-USD has momentum at 1h" and "find
+whether we hold 1m bars for BTC-USD" are the same sentence shape and different kinds; a market
+property alone is not enough either, because "what is the sharpe of run_42" reads a number the
+platform already holds. An inquiry verb **and** a market property, or it stays a lookup.
+
+The default is `Lookup` and that is the direction the error is survivable in: being wrong that
+way costs a run that could have spent trials and did not; the reverse spends trials on a
+question that never needed one. Acceptance criteria are derived here too, never asked of the
+model — a criterion the model wrote is one it can rewrite.
+
+Verified by `a_goal_is_classified_before_planning_and_the_default_withholds_trials` and
+`the_loop_classifies_the_goal_and_derives_acceptance_before_the_first_call`.
 
 Deterministic rules over goal + constraints → `GoalKind{Lookup|Research|Diagnose|Compare}`
 and acceptance criteria. `Lookup` gets ≤ 3 read-only tools and no trials. On profiles with

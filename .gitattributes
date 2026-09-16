@@ -13,9 +13,22 @@
 # row whose difference is anything but line endings.
 migrations/*.sql text eol=lf
 
-# Everything else keeps the platform default. A repo-wide renormalisation would
-# be a thousand-file whitespace diff, and nothing outside `migrations/` has its
-# bytes hashed and compared across machines.
+# Everything else keeps the platform default, and that is a live trade-off rather
+# than a settled one. A repo-wide renormalisation would be a thousand-file
+# whitespace diff; against that, `migrations/` is no longer the only place where
+# bytes are compared.
+#
+# The structural invariants read their own source with `include_str!` and split on
+# newlines -- `gate.rs`'s `no_construction_of_the_gate_can_disable_trial_enforcement`,
+# `lib.rs`'s dispatch-arm scan, `falsification.rs`'s guide lookup. Under
+# `core.autocrlf` those see CRLF on a Windows checkout and LF in CI, from the same
+# commit. Two of them failed exactly that way on 2026-09-15 and reported it as a
+# missing heading and a missing impl block, which is the worst kind of wrong: a
+# structural test that says the structure is gone when only the newlines changed.
+#
+# Each of those now normalises before it reads, which fixes them and does not fix
+# the next one. **Any new `include_str!` test must normalise, or this file must
+# gain `*.rs text eol=lf` and the renormalisation that comes with it.**
 
 # Binary: never touched.
 *.png   binary

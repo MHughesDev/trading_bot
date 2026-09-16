@@ -111,11 +111,17 @@ impl TapeEntry {
 
     /// A plan, for a `planner_executor` tier. Every tape on the 7B profile opens
     /// with one, because that tier plans before it acts.
+    ///
+    /// `(goal, tool)`. It was `(goal, namespace)` until S-1.14: the planner named
+    /// an outcome and guessed a namespace, and the guess is the thing that task
+    /// removed. A tape that still emits the old shape is a tape recorded against
+    /// a contract that no longer exists, and the loop refuses it by name rather
+    /// than routing on whatever it can salvage.
     #[must_use]
     pub fn plan(steps: &[(&str, &str)]) -> Self {
         let steps: Vec<Value> = steps
             .iter()
-            .map(|(goal, ns)| serde_json::json!({"goal": goal, "namespace": ns}))
+            .map(|(goal, tool)| serde_json::json!({"goal": goal, "tool": tool}))
             .collect();
         TapeEntry::ModelReply {
             raw: serde_json::json!({ "steps": steps }).to_string(),

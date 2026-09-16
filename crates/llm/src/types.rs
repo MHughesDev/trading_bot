@@ -9,7 +9,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// A chat completion request in provider-neutral form.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// `Default` is derived so a test can name the two or three fields it is about and
+/// let the rest stand. Every default is the inert reading — no tools, no schema, no
+/// system prompt, no cache hints — so a field a test forgets cannot quietly turn
+/// something on.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ChatRequest {
     pub model: String,
     /// System prompt; mapped to the provider's native system slot.
@@ -128,8 +133,50 @@ pub enum StopReason {
 /// Token accounting for one call.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Usage {
+    /// Tokens the provider billed as fresh input on this call.
+    ///
+    /// **Not the size of the prompt.** With caching on, a 40,000-token prompt of
+    /// which 39,000 was a cache hit reports `input_tokens: 1000`, and reading that
+    /// as "the prompt was a thousand tokens" is how a context budget comes to
+    /// believe it has thirty-nine thousand tokens of headroom it does not have.
+    /// [`Usage::prompt_tokens`] is the number that answers "how big was the
+    /// prompt".
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Tokens served from the prompt cache. Billed at a fraction, and the whole
+    /// point of the breakpoints in `anthropic::build_body`.
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
+    /// Tokens written *into* the cache on this call. Billed at a premium, once.
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+}
+
+impl Usage {
+    /// How big the prompt actually was, however it was billed.
+    ///
+    /// The three input counters are disjoint by construction on every provider
+    /// that reports them: a token is fresh, or read from the cache, or written to
+    /// it. Summing them is therefore the prompt, and it is the only one of the
+    /// four numbers a budget may be compared against.
+    #[must_use]
+    pub fn prompt_tokens(&self) -> u64 {
+        self.input_tokens
+            .saturating_add(self.cache_read_input_tokens)
+            .saturating_add(self.cache_creation_input_tokens)
+    }
+
+    /// What fraction of the prompt the cache served, or `None` when there was no
+    /// prompt to serve.
+    ///
+    /// `None` rather than zero: a call with no prompt has no cache hit rate, and
+    /// reporting 0.0 would drag an average down with a run that never had the
+    /// chance to hit.
+    #[must_use]
+    pub fn cache_hit_fraction(&self) -> Option<f64> {
+        let total = self.prompt_tokens();
+        (total > 0).then(|| self.cache_read_input_tokens as f64 / total as f64)
+    }
 }
 
 /// A chat completion response in provider-neutral form.

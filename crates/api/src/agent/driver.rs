@@ -510,10 +510,20 @@ pub async fn drive(
     // run-scoped token — identical code path to the external MCP front door.
     let mcp_ctx = McpContext::new(api.clone());
     let tools = tool_defs();
-    let system = prompt::system_prompt(&params.constraints);
+    // The charter takes no arguments and is the same bytes every call, which is
+    // what lets the provider cache it. Everything that varies — the constraints,
+    // the prior turns, the question — is the first user message (S-1.5, S-1.6).
+    let system = prompt::charter();
 
+    // `params.prior` was computed at `manager.rs:253` and never read here, so a
+    // follow-up question arrived with no memory of the answer it was following up
+    // on, and the agent re-derived it or contradicted it.
     let mut messages: Vec<Message> = vec![Message::User {
-        content: params.goal.clone(),
+        content: prompt::opening_message(
+            Some(params.prior.as_str()),
+            &params.constraints,
+            &params.goal,
+        ),
     }];
     let mut iterations: i32 = 0;
     let mut tokens_in: i64 = 0;

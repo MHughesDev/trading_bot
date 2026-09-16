@@ -358,8 +358,8 @@ fn the_anchor_and_the_card_read_the_same_plan_step() {
     let mut l = Loop::new(p, registry(), task());
     l.next(Input::Admission(Admission::Admit));
     let fx = l.next(Input::ModelReply {
-        raw: r#"{"steps":[{"goal":"pull bars","namespace":"data"},
-                          {"goal":"check momentum","namespace":"data"}]}"#
+        raw: r#"{"steps":[{"goal":"pull bars","tool":"get_bars"},
+                          {"goal":"check momentum","tool":"get_bars"}]}"#
             .into(),
     });
     let body = prompt(&fx);
@@ -428,5 +428,222 @@ fn the_body_is_budgeted_against_what_the_schemas_leave() {
         body_tokens + schema_tokens <= p.input_budget_tokens(),
         "body {body_tokens} + schemas {schema_tokens} exceeds the window {}",
         p.input_budget_tokens()
+    );
+}
+
+// ── S-1.13: the bound, proved of the loop rather than of the type ────────────
+
+/// The acceptance criterion S-1.13 was unticked for: **no working-state content is
+/// appended across steps**, asserted on the prompt the model is actually sent.
+///
+/// `state.rs` proves a `WorkingState` does not grow under 200 updates. That is a
+/// statement about the type. This runs the loop for fifty whole steps and measures
+/// the state block in the rendered prompt — which is where nine append sites used
+/// to accumulate, and where the claim is either true or false.
+///
+/// Observations are excluded on purpose and that is not a loophole: an observation
+/// is evidence, it is what compaction drops, and the section it lives in is the one
+/// with a budget. The card is the part that has no budget and therefore must not
+/// grow.
+#[test]
+fn the_state_card_does_not_grow_across_fifty_steps() {
+    let (mut l, fx) = started();
+    let first = l.working().card(Detail::Rich).len();
+    assert!(first > 0, "the card is rendered from the start");
+    assert!(prompt(&fx).contains("GOAL:"), "and it reaches the prompt");
+
+    for i in 0..50u32 {
+        step(&mut l, i, &format!("{{\"bars\": {}, \"run\": \"run_{i}\"}}", 500 + i));
+    }
+
+    let after = l.working().card(Detail::Rich).len();
+    assert!(
+        after <= first + 400,
+        "the state card grew from {first} to {after} bytes over fifty steps; \
+         it is a fixed-size view over an unbounded history, not a transcript"
+    );
+
+    // And the flat card stays inside its tier's budget however long the run is.
+    let flat = l.working().card(Detail::Flat);
+    assert!(
+        harness::context::estimate_tokens(&flat) <= 400,
+        "the flat card is {} tokens after fifty steps",
+        harness::context::estimate_tokens(&flat)
+    );
+}
+
+/// The anchor derives from the state rather than being built beside it — the third
+/// clause of S-1.13's acceptance. Two sources of truth for "where am I" is how the
+/// card and the anchor come to disagree, and the model reads both.
+#[test]
+fn the_anchor_is_derived_from_the_same_state_the_card_renders() {
+    let (mut l, _) = started();
+    for i in 0..3u32 {
+        step(&mut l, i, "{\"bars\": 500}");
+    }
+    let anchor = l.working().anchor();
+    let card = l.working().card(Detail::Rich);
+    assert!(
+        card.contains("find whether BTC-USD has momentum"),
+        "the card names the goal: {card}"
+    );
+    assert!(
+        anchor.contains("find whether BTC-USD has momentum"),
+        "and so does the anchor, from the same field: {anchor}"
+    );
+}
+
+// ── S-1.15: decisions are remembered ────────────────────────────────────────
+
+/// The dominant waste in the local traces, reproduced and then stopped.
+///
+/// The observed shape: a 7B lists the instruments, does not act on the answer,
+/// lists them again, and keeps going until the step budget runs out. Every call is
+/// legal, every call is idempotent, and the run learns nothing after the first.
+///
+/// Three calls, three different answers from the loop, and the escalation is the
+/// design. The first dispatches. The second is answered from what the session
+/// already holds — free, and it puts the answer back in front of the model. The
+/// third is a **correction naming the step it was settled at**, because a model
+/// that did not take the answer twice will not take it a third time, and by then a
+/// repeat is a cycle rather than a slip.
+#[test]
+fn re_asking_a_settled_question_is_corrected_with_the_step_it_was_decided_at() {
+    // The constrained path, deliberately: a redecision is a SEMANTIC rejection, not
+    // a schema violation, so it retries on either path — and the constrained one is
+    // where the waste this reproduces was actually observed.
+    let (mut l, _) = started();
+
+    // 1. The first call dispatches.
+    let fx = step(&mut l, 1, "{\"instruments\": [\"BTC-USD\"]}");
+    assert!(
+        fx.iter().any(|e| matches!(e, Effect::CallModel(_))),
+        "the first call runs and the loop asks for the next step"
+    );
+
+    // 2. The second, identical, is answered from the session.
+    l.next(Input::ModelReply {
+        raw: r#"{"name":"get_bars"}"#.into(),
+    });
+    let fx = l.next(Input::ModelReply {
+        raw: r#"{"instrument":"BTC-USD","nonce":1}"#.into(),
+    });
+    assert!(
+        !fx.iter().any(|e| matches!(e, Effect::ExecuteTool { .. })),
+        "an idempotent read the session already made is not made again"
+    );
+    assert!(
+        l.working().decided.iter().any(|d| d.question.contains("get_bars")),
+        "and the decision is on the card, not only in a comment"
+    );
+
+    // 3. The third is corrected, and the correction says when it was settled.
+    l.next(Input::ModelReply {
+        raw: r#"{"name":"get_bars"}"#.into(),
+    });
+    let fx = l.next(Input::ModelReply {
+        raw: r#"{"instrument":"BTC-USD","nonce":1}"#.into(),
+    });
+    let correction = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::Note(harness::drive::Note::Rejected { code, message, .. })
+                if &**code == "drive.question_already_decided" =>
+            {
+                Some(message.clone())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the third ask is corrected, got {fx:?}"));
+    assert!(
+        correction.contains("decided at step"),
+        "the correction names the step: {correction}"
+    );
+    assert!(
+        correction.contains("say why it should change or move on"),
+        "and leaves changing it possible: {correction}"
+    );
+}
+
+// ── S-1.16: the goal is classified before it is planned ─────────────────────
+
+/// The charter's plea becomes a mechanism.
+///
+/// "Many goals are lookups; do not plan five steps for one" was a sentence in the
+/// charter, read every turn and acted on never. Classification makes it something
+/// the loop does before the planner is asked anything, at zero model calls.
+///
+/// The direction of the default is the design and is asserted here: an
+/// unrecognised goal is a `Lookup`, which withholds the trial budget. Being wrong
+/// that way costs a run that could have spent trials and did not; being wrong the
+/// other way spends trials on a question that never needed one.
+#[test]
+fn a_goal_is_classified_before_planning_and_the_default_withholds_trials() {
+    use harness::state::GoalKind;
+
+    // The four kinds, from the words a goal actually uses.
+    assert_eq!(GoalKind::classify("how many 1m bars do we hold for BTC-USD", &[]), GoalKind::Lookup);
+    assert_eq!(
+        GoalKind::classify("backtest an ema cross on BTC-USD and report the sharpe", &[]),
+        GoalKind::Research
+    );
+    assert_eq!(
+        GoalKind::classify("why did the gate 3 verdict flip overnight", &[]),
+        GoalKind::Diagnose
+    );
+    assert_eq!(
+        GoalKind::classify("compare the 1h and 4h variants on the same window", &[]),
+        GoalKind::Compare
+    );
+
+    // The narrower reading wins where two apply: "compare these two backtests" is a
+    // comparison, and reading it as research loses the thing that makes it checkable.
+    assert_eq!(
+        GoalKind::classify("compare these two backtests", &[]),
+        GoalKind::Compare
+    );
+
+    // The hard pair, and why one keyword cannot decide it: same sentence shape,
+    // different kinds. The first has to be measured; the second is a stored fact.
+    assert_eq!(
+        GoalKind::classify("find whether BTC-USD has momentum at 1h", &[]),
+        GoalKind::Research
+    );
+    assert_eq!(
+        GoalKind::classify("find whether we hold 1m bars for BTC-USD", &[]),
+        GoalKind::Lookup
+    );
+    // And a market property on its own is not enough: this reads a number the
+    // platform already holds.
+    assert_eq!(GoalKind::classify("what is the sharpe of run_42", &[]), GoalKind::Lookup);
+
+    // The default, and what it costs.
+    assert_eq!(GoalKind::classify("something entirely unfamiliar", &[]), GoalKind::Lookup);
+    assert!(!GoalKind::Lookup.may_spend_trials(), "a lookup never spends a trial");
+    assert_eq!(GoalKind::Lookup.max_tools(), 3, "and sees at most three tools");
+    assert!(GoalKind::Research.may_spend_trials());
+}
+
+/// And the loop uses it: the classification and its acceptance criteria are on the
+/// state before the first model call, not derived later from what the run did.
+#[test]
+fn the_loop_classifies_the_goal_and_derives_acceptance_before_the_first_call() {
+    use harness::state::GoalKind;
+
+    let (l, _) = started();
+    // `task()`'s goal is "find whether BTC-USD has momentum at 1h" — a question that
+    // needs evidence produced, on a `MultiStep` demand.
+    assert_eq!(l.working().kind, GoalKind::Research);
+    assert!(
+        !l.working().acceptance.is_empty(),
+        "acceptance is derived from the goal, not asked of the model"
+    );
+    assert!(
+        l.working()
+            .acceptance
+            .iter()
+            .any(|a| a.contains("every number reported is in a tool result")),
+        "and every kind carries the citation criterion: {:?}",
+        l.working().acceptance
     );
 }
