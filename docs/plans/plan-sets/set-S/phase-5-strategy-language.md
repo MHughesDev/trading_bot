@@ -1,6 +1,6 @@
 # Phase 5 — The language
 
-**Completion: 7% (1 / 15 tasks), plus 4 `PARTIAL` — the feature engine is built; the language is not.**
+**Completion: 13% (2 / 15 tasks), plus 3 `PARTIAL` — the feature engine is built; the language is not.**
 
 > **This file was wrong about the engine and right about the language.** Until 2026-09-16 it
 > recorded all fifteen tasks as `NOT STARTED`. `crates/features` is in fact about 5,100 lines
@@ -62,7 +62,11 @@ in `AGENT.md` ("same builder code live and in replay") and it is not negotiable.
 ## The feature engine
 
 ### S-5.1 F1 families, inside the existing engine — L
-`PARTIAL` 2026-09-16 — The F1 families are in the registry and resolve: `ema`, `rsi`, `atr`, `macd`, the Bollinger and Donchian and Keltner sets, `obv`, `roc`, `momentum`. What is not evidenced is the **golden parity test** DATA-006 §5 requires — old and new values identical for each legacy alias over three instruments — so the families are present and the equivalence is unproven.
+`DONE` 2026-09-16 — the F1 families are in the registry and resolve, and **the golden parity test exists and passes**.
+
+This entry was wrong in the same direction as the rest of the file. `crates/features/tests/golden_legacy_parity.rs` is 339 lines: three instruments (trending, mean-reverting, volatility-clustered) against three timeframes (1m, 5m, 1h), comparing `to_bits` against transcriptions of the pre-change source rather than re-derivations of the formulas — tolerance zero, because `consistency::diff_serve` compares stored values bit for bit and any drift would surface as `Diagnosis::CodeChanged` on every historical serve.
+
+What was genuinely missing was narrower and hidden by the test's shape: it names legacy features one at a time, so it covered `momentum_n` and missed `ret_n`, `logret_n` and `sma_n` — a hand-written list covers what its author remembered. `every_alias_is_bit_identical_to_the_family_it_aliases` now reads the aliases out of the registry, so a family that gains one is covered the day it does, and asserts the pair declare the same warm-up as well as the same values.
 
 Audited 2026-09-16 against the source. `crates/features` is a real engine — about 5,100 lines over 101 passing tests, with `registry.rs` (583), `runtime.rs` (1,068) and `leakage.rs` (1,301) — and `crates/backtest/src/sim.rs:987` resolves every strategy feature through `features::runtime::feature`. Proven by construction rather than by reading: `atr_14`, `parkinson_vol_20`, `rolling_std_30`, `donchian_upper_20`, `obv` and `hour_sin` all resolve and run.
 
