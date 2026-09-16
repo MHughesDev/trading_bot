@@ -28,21 +28,30 @@ pub enum Section {
     Charter,
     /// 2. The ONE thing being done now, with acceptance criteria.
     Subtask,
-    /// 3. Exposed tool schemas, post-routing and post-flattening.
-    Tools,
-    /// 4. Worked examples. Local profiles only.
+    /// 3. Worked examples. Local profiles only.
     FewShot,
-    /// 5. Compressed progress + the last N raw tool results.
+    /// 4. Compressed progress + the last N raw tool results.
     WorkingState,
-    /// 6. Retrieved reference material for this subtask only.
+    /// 5. Retrieved reference material for this subtask only.
     Reference,
+    //
+    // There was a sixth, `Tools`, holding 20% of the window for the exposed
+    // schemas. **Nothing ever rendered it.** The schemas do not travel in the body
+    // at all — they leave on the wire as the request's `tools` array, or as the
+    // selection menu under the two-step decode — which is why `assemble_reserving`
+    // charges them separately (S-1.10).
+    //
+    // So the section was a fifth of the budget held for content that could not
+    // arrive, and the other five were sized against a whole that was never
+    // available. Deleting it and renormalising is the same window, honestly
+    // divided: the working state, which is the section that actually grows, goes
+    // from .45 to .55.
 }
 
 impl Section {
     pub const ORDER: &'static [Section] = &[
         Section::Charter,
         Section::Subtask,
-        Section::Tools,
         Section::FewShot,
         Section::WorkingState,
         Section::Reference,
@@ -56,12 +65,11 @@ impl Section {
     #[must_use]
     pub fn budget_share(self) -> f32 {
         match self {
-            Section::Charter => 0.08,
-            Section::Subtask => 0.07,
-            Section::Tools => 0.20,
+            Section::Charter => 0.10,
+            Section::Subtask => 0.10,
             Section::FewShot => 0.05,
-            Section::WorkingState => 0.45,
-            Section::Reference => 0.15,
+            Section::WorkingState => 0.55,
+            Section::Reference => 0.20,
         }
     }
 }
@@ -84,7 +92,6 @@ fn section_name(s: Section) -> &'static str {
     match s {
         Section::Charter => "the charter",
         Section::Subtask => "the subtask",
-        Section::Tools => "the tool schemas",
         Section::FewShot => "the examples",
         Section::WorkingState => "working state",
         Section::Reference => "reference material",
@@ -469,7 +476,7 @@ pub fn cap_tool_result(profile: &Profile, text: &str) -> (String, bool) {
 #[must_use]
 pub fn provenance_allowed(section: Section, p: Provenance) -> bool {
     match section {
-        Section::Charter | Section::Subtask | Section::Tools | Section::FewShot => {
+        Section::Charter | Section::Subtask | Section::FewShot => {
             !p.is_untrusted()
         }
         Section::WorkingState | Section::Reference => true,
@@ -713,7 +720,7 @@ mod tests {
             &p,
             vec![
                 Block {
-                    section: Section::Tools,
+                    section: Section::Reference,
                     tagged: Tagged::system("tools", &tools_body),
                     priority: 1,
                     reference: Some("art_1".into()),
@@ -831,10 +838,6 @@ mod tests {
         ));
         assert!(!provenance_allowed(
             Section::Subtask,
-            Provenance::ExternalUntrusted
-        ));
-        assert!(!provenance_allowed(
-            Section::Tools,
             Provenance::ExternalUntrusted
         ));
         assert!(provenance_allowed(

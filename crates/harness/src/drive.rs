@@ -694,6 +694,21 @@ pub struct Loop {
     outcome: Option<Outcome>,
 }
 
+/// The assembled body, and the charter that was assembled *with* it.
+///
+/// Two values because they are one arithmetic. `assemble_reserving` budgets every
+/// section against the window, and the charter is a section -- so it can be
+/// truncated, and `ask` was sending `task.charter` raw regardless. The model
+/// therefore received a system prompt the budget had not accounted for, and the
+/// compaction that made room for it was performed on a body that then travelled
+/// beside the untruncated original.
+///
+/// Returning both is what makes the sum true: what is budgeted is what is sent.
+struct Assembled {
+    system: String,
+    body: String,
+}
+
 impl Loop {
     #[must_use]
     pub fn new(profile: Profile, registry: ToolRegistry, task: Task) -> Self {
@@ -1037,7 +1052,14 @@ impl Loop {
                 if self.profile.orchestration.mode == Mode::PlannerExecutor {
                     self.enter(State::Planning, fx);
                     let schema = self.plan_schema();
-                    let prompt = self.plan_prompt();
+                    // The plan call precedes any assembly: there are no observations
+                    // yet, so there is nothing for the charter to be truncated
+                    // against and the raw one IS the assembled one. Stated rather
+                    // than assumed, because it is the only call where that holds.
+                    let prompt = Assembled {
+                        system: self.task.charter.clone(),
+                        body: self.plan_prompt(),
+                    };
                     self.ask(Decode::Plan { schema }, prompt, fx);
                 } else {
                     self.begin_step(fx);
@@ -1428,7 +1450,7 @@ impl Loop {
     /// `assemble` is where compaction happens, so this is the only place the
     /// `Compacting` state can be entered — and it is entered only when compaction
     /// actually dropped something.
-    fn working_prompt(&mut self, fx: &mut Vec<Effect>) -> String {
+    fn working_prompt(&mut self, fx: &mut Vec<Effect>) -> Assembled {
         // `assemble_reserving`, not `assemble`: the tool schemas (or the menu that
         // stands in for them) leave the body on the way to the model and are charged
         // to the same window, so budgeting the body against the whole window is how
@@ -1441,13 +1463,19 @@ impl Loop {
             self.enter(State::Compacting, fx);
             fx.push(Effect::Note(Note::Compacted(c.clone())));
         }
-        assembled
+        let system = assembled
+            .sections
+            .iter()
+            .find(|(s, _)| *s == Section::Charter)
+            .map_or_else(|| self.task.charter.clone(), |(_, text)| text.clone());
+        let body = assembled
             .sections
             .iter()
             .filter(|(s, _)| *s != Section::Charter)
             .map(|(_, text)| text.as_str())
             .collect::<Vec<_>>()
-            .join("\n\n")
+            .join("\n\n");
+        Assembled { system, body }
     }
 
     /// Where the task is, restated for every single decode.
@@ -1472,8 +1500,8 @@ impl Loop {
         self.working.anchor()
     }
 
-    fn select_prompt(&mut self, candidates: &[String], fx: &mut Vec<Effect>) -> String {
-        let body = self.working_prompt(fx);
+    fn select_prompt(&mut self, candidates: &[String], fx: &mut Vec<Effect>) -> Assembled {
+        let Assembled { system, body } = self.working_prompt(fx);
         let menu = candidates
             .iter()
             .map(|n| {
@@ -1493,14 +1521,17 @@ impl Loop {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        format!(
-            "{body}\n\n{}\n\nChoose exactly one tool for THIS step.\n{menu}\n\nReply with {{\"name\": \"<tool>\"}}.",
-            self.anchor()
-        )
+        Assembled {
+            system,
+            body: format!(
+                "{body}\n\n{}\n\nChoose exactly one tool for THIS step.\n{menu}\n\nReply with {{\"name\": \"<tool>\"}}.",
+                self.anchor()
+            ),
+        }
     }
 
-    fn fill_prompt(&mut self, tool: &str, fx: &mut Vec<Effect>) -> String {
-        let body = self.working_prompt(fx);
+    fn fill_prompt(&mut self, tool: &str, fx: &mut Vec<Effect>) -> Assembled {
+        let Assembled { system, body } = self.working_prompt(fx);
         let desc = self
             .registry
             .get(tool)
@@ -1510,18 +1541,24 @@ impl Loop {
         // position. That is the call that writes the ARGUMENTS, so it is precisely
         // where a drifting session does its damage: the right tool with arguments
         // aimed at something the task never asked for.
-        format!(
-            "{body}\n\n{}\n\nYou chose {tool}. {desc}\n\nGive its arguments as a JSON \
-             object, serving the step above.",
-            self.anchor()
-        )
+        Assembled {
+            system,
+            body: format!(
+                "{body}\n\n{}\n\nYou chose {tool}. {desc}\n\nGive its arguments as a JSON \
+                 object, serving the step above.",
+                self.anchor()
+            ),
+        }
     }
 
-    fn ask(&mut self, decode: Decode, prompt: String, fx: &mut Vec<Effect>) {
+    /// Send the assembled pair. `system` comes from the same assembly as `body`
+    /// (S-1.11), so a charter the budget truncated is the charter the model reads.
+    fn ask(&mut self, decode: Decode, prompt: Assembled, fx: &mut Vec<Effect>) {
+        let Assembled { system, body } = prompt;
         let call = ModelCall {
             step: self.step,
-            system: self.task.charter.clone(),
-            prompt,
+            system,
+            prompt: body,
             decode: decode.clone(),
             temperature: self.profile.output.temperature_tool_calls,
             max_tokens: self.profile.context.reserve_for_output,
@@ -1538,7 +1575,10 @@ impl Loop {
         // not a stale copy of it.
         match pending.decode {
             Decode::Plan { schema } => {
-                let prompt = self.plan_prompt();
+                let prompt = Assembled {
+                    system: self.task.charter.clone(),
+                    body: self.plan_prompt(),
+                };
                 self.ask(Decode::Plan { schema }, prompt, fx);
             }
             Decode::SelectTool { schema, candidates } => {

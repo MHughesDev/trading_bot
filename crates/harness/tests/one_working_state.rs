@@ -647,3 +647,102 @@ fn the_loop_classifies_the_goal_and_derives_acceptance_before_the_first_call() {
         l.working().acceptance
     );
 }
+
+// ── S-1.11: what is budgeted is what is sent ────────────────────────────────
+
+/// The whole prompt fits the window: system, schemas and body, summed.
+///
+/// `assemble_reserving` budgets the body against the window MINUS what leaves it
+/// on the wire. The gap this closes is the other end: `ask` sent `task.charter`
+/// raw while the assembly had already decided what the Charter section could be,
+/// so the compaction that made room was performed on a body that then travelled
+/// beside the untruncated original. Budgeted and sent were two different prompts.
+#[test]
+fn the_system_the_schemas_and_the_body_fit_the_window_together() {
+    use harness::context::estimate_tokens;
+
+    let (mut l, fx) = started();
+    let p = profile();
+
+    // A long run, so compaction has actually had to make choices.
+    for i in 0..40u32 {
+        step(&mut l, i, &format!("{{\"bars\": {}, \"run\": \"run_{i}\"}}", 500 + i));
+    }
+    let fx = l.next(Input::ModelReply {
+        raw: r#"{"name":"get_bars"}"#.into(),
+    });
+    let call = call(&fx);
+
+    let system = estimate_tokens(&call.system);
+    let body = estimate_tokens(&call.prompt);
+    let schemas: u32 = match &call.decode {
+        Decode::SelectTool { candidates, .. } => {
+            candidates.iter().map(|c| estimate_tokens(c)).sum::<u32>()
+        }
+        Decode::Native { tools } => tools
+            .iter()
+            .map(|t| estimate_tokens(&t.to_string()))
+            .sum::<u32>(),
+        _ => 0,
+    };
+    assert!(
+        system + schemas + body <= p.input_budget_tokens(),
+        "system {system} + schemas {schemas} + body {body} exceeds the window {}",
+        p.input_budget_tokens()
+    );
+    // And the BUDGET the body was assembled against is still a usable share of the
+    // window — the 25% floor. The rendered body is smaller than its budget
+    // whenever there is less to say, which is the normal case and not a failure;
+    // what must not happen is the reservation eating the allowance.
+    let budget = p.input_budget_tokens() - schemas.min(p.input_budget_tokens());
+    assert!(
+        budget >= 3_500,
+        "the body was budgeted {budget} tokens after reserving {schemas} for schemas;          the 25% floor is 3,500"
+    );
+    let _ = fx;
+}
+
+// ── S-1.12: one findings block, however many findings ───────────────────────
+
+/// Twenty findings, one block, twenty lines.
+///
+/// The shape this replaces pushed a new block per `record_finding`, each holding
+/// every finding so far — so twenty calls cost two hundred and ten renderings of
+/// a finding, and the section grew as the square of the run.
+#[test]
+fn twenty_findings_render_as_one_block_of_twenty_lines() {
+    let (mut l, _) = started();
+    // A tool first: `record_finding` is held to the same evidence standard as
+    // `finish_task`, so a finding citing a tool this run never called is refused —
+    // which is the point, and means the fixture has to run one.
+    step(&mut l, 0, "{\"bars\": 500}");
+    for i in 0..20u32 {
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"record_finding"}"#.into(),
+        });
+        l.next(Input::ModelReply {
+            raw: serde_json::json!({
+                "finding": format!("finding number {i} about BTC-USD"),
+                "evidence": "get_bars"
+            })
+            .to_string(),
+        });
+    }
+    assert_eq!(l.working().findings.len(), 20, "all twenty were recorded");
+
+    let fx = l.next(Input::ModelReply {
+        raw: r#"{"name":"get_bars"}"#.into(),
+    });
+    let prompt = prompt(&fx);
+    assert_eq!(
+        prompt.matches("ESTABLISHED SO FAR").count(),
+        1,
+        "exactly one findings block, not one per finding"
+    );
+    for i in 0..20u32 {
+        assert!(
+            prompt.contains(&format!("finding number {i} ")),
+            "finding {i} is listed"
+        );
+    }
+}

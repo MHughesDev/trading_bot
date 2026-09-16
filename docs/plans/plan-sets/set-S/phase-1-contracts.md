@@ -1,6 +1,6 @@
 # Phase 1 — Contracts
 
-**Completion: 65% (13 / 20 tasks), plus 1 partial. Track A complete bar S-1.2; track B needs S-1.11–S-1.12; track C's reasoning protocol landed, S-1.17–S-1.20 remain.**
+**Completion: 75% (15 / 20 tasks), plus 1 partial. Tracks A and B complete bar S-1.2; track C's reasoning protocol landed, S-1.17–S-1.20 remain.**
 
 > Status 2026-09-15, track 1. The three contracts the other Set S phases wait on now exist:
 > `ToolSpec`/`ToolResult` (`crates/mcp-server/src/spec.rs`), the generated taxonomy and
@@ -343,7 +343,22 @@ take the whole window.
 **Traces:** AGENT-005 §4.1; §10.4.
 
 ### S-1.11 Reserve the schemas; send the assembled charter — M
-`NOT STARTED`
+`DONE` 2026-09-15 — what is budgeted is what is sent.
+
+The reservation half landed with S-1.10. This is the other end: `ask` sent `task.charter` raw
+while the assembly had already decided what the Charter section could be, so the compaction
+that made room was performed on a body that then travelled beside the untruncated original.
+Budgeted and sent were two different prompts.
+
+`working_prompt` now returns `Assembled { system, body }` and `ask` takes the pair. The one
+call where the raw charter is still the assembled one is the plan call, which precedes any
+observations — stated at the site rather than assumed, because it is the only place it holds.
+
+Verified by `the_system_the_schemas_and_the_body_fit_the_window_together`, which runs forty
+whole steps on the real `qwen2.5-7b-instruct.yaml` so compaction has had to make choices, then
+sums system + schemas + body against the window. The body's **budget** is asserted against the
+25% floor rather than its rendered size: a body smaller than its budget is a run with less to
+say, and the failure to catch is the reservation eating the allowance.
 
 `working_prompt` reserves `exposed_schemas`. Separately, `ask()` currently sends the raw
 `task.charter` (`drive.rs:1227`) while `working_prompt` discards the possibly-truncated
@@ -356,7 +371,22 @@ against the real `config/profiles/qwen2.5-7b-instruct.yaml`.
 **Traces:** AGENT-005 §4.2, §4.3; §10.4.
 
 ### S-1.12 Findings stop growing quadratically; the dead section goes — S
-`NOT STARTED`
+`DONE` 2026-09-15 — one block, and a section that held a fifth of the window for nothing.
+
+`record_finding` rewrites one block instead of pushing a new one holding every finding so far;
+twenty calls cost twenty renderings rather than two hundred and ten, and the section stops
+growing as the square of the run.
+
+`Section::Tools` is deleted. **Nothing ever rendered it** — the schemas do not travel in the
+body at all, they leave on the wire as the request's `tools` array or as the selection menu, and
+`assemble_reserving` charges them separately. So it held 20% of the window for content that
+could not arrive, and the other five sections were sized against a whole that was never
+available. Renormalised to Charter .10 / Subtask .10 / FewShot .05 / WorkingState .55 /
+Reference .20: the same window, honestly divided, with the growth going to the section that
+grows.
+
+Verified by `twenty_findings_render_as_one_block_of_twenty_lines` (one `ESTABLISHED SO FAR`,
+all twenty listed) and `the_section_budget_shares_do_not_exceed_the_whole`, still passing.
 
 `record_finding` rewrites one block instead of pushing a new one holding all findings
 (`drive.rs:1751`). Delete `Section::Tools` (nothing ever rendered it) and renormalise the
