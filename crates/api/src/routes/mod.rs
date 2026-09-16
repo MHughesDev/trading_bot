@@ -7,6 +7,7 @@ pub mod agent_cost;
 pub mod agent_preview;
 pub mod desk_catalogue;
 pub mod desk_digest;
+pub mod memory;
 pub mod agent_templates;
 pub mod asset_lifecycle;
 pub mod assets;
@@ -127,6 +128,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/catalogue", get(desk_catalogue::catalogue))
         .route("/api/catalogue/exposure", get(desk_catalogue::exposure))
         .route("/api/desk/digest", get(desk_digest::digest))
+        .route("/api/memory/{bucket}", get(memory::list))
+        .route("/api/memory/{bucket}/{id}", delete(memory::forget))
         // Evidence for the falsification tools (ADR-P7-05). None of these
         // returns a verdict; each answers one defect class with a number.
         .route("/api/evidence/trades", post(evidence::trades))

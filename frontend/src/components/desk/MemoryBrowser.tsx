@@ -14,7 +14,17 @@ import { EmptyState } from '@/components/primitives/States'
 import { deskApi } from '@/api/desk'
 import { ProvenanceBadge } from './Shared'
 
-type Bucket = 'findings' | 'negative' | 'profiles' | 'questions' | 'preferences' | 'playbooks' | 'signals'
+// The tabs are the store's kinds (AGENT-007 section 2.2), and they did not use
+// to be. There was a `playbooks` tab that no kind answers to, and no tab for
+// `platform_defect` — so `report_evaluator_defect` wrote somewhere nobody could
+// look, and a tab that could never fill sat next to six that could.
+//
+// `/api/memory/{bucket}` refuses an unknown bucket by name rather than
+// returning an empty list, because the two render almost identically and mean
+// opposite things: "you have recorded none of these" is a fact about your
+// research, and "this tab is connected to nothing" is a fact about the platform.
+// Only the first invites you to stop looking.
+type Bucket = 'findings' | 'negative' | 'profiles' | 'questions' | 'preferences' | 'defects' | 'signals'
 
 const BUCKETS: Array<{ value: Bucket; label: string }> = [
   { value: 'findings', label: 'Findings' },
@@ -22,7 +32,7 @@ const BUCKETS: Array<{ value: Bucket; label: string }> = [
   { value: 'profiles', label: 'Instrument profiles' },
   { value: 'questions', label: 'Open questions' },
   { value: 'preferences', label: 'Preferences' },
-  { value: 'playbooks', label: 'Playbooks' },
+  { value: 'defects', label: 'Platform defects' },
   { value: 'signals', label: 'Signal registry' },
 ]
 
@@ -117,8 +127,8 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
 
       {data.data === null && (
         <EmptyState
-          message="The memory API is not built yet"
-          detail="/api/memory/{bucket} lands with Set S phase 4 (AGENT-007). The browser is wired and fills the day it answers."
+          message="Memory is unavailable"
+          detail="/api/memory/{bucket} is served, so this is the endpoint failing rather than the endpoint missing — check the API logs."
         />
       )}
 
