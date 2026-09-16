@@ -7,12 +7,21 @@
 > components totalling about 5,300 lines, `/agent` and `/research` already redirecting into
 > it, 57 tests passing, `tsc -p tsconfig.app.json` clean and `npm run build` green.
 >
-> **The missing half is the backend, and it is three specific endpoints.** Searched across
-> all of `crates/api/src`, not just the router:
+> **The missing half was the backend, and it was three specific endpoints.** Searched across
+> all of `crates/api/src`, not just the router. Two were built 2026-09-16:
 >
-> * `/api/catalogue` — S-6.19's page calls it and nobody serves it;
-> * `/api/desk/digest` — S-6.24's away digest, the same;
-> * `/api/research/sessions` — phase 11's continuous research.
+> * `/api/catalogue` and `/api/catalogue/exposure` — **served** (S-6.19). Building it exposed
+>   the larger defect: the desk filters every tool surface on `tool.ring` and nothing on the
+>   server assigned one, so that filter's behaviour rested on how `undefined` compared.
+> * `/api/desk/digest` — **served** (S-6.24) for the four line kinds that have a source here,
+>   with the other three declared uncovered rather than approximated.
+> * `/api/research/sessions` — **not a missing endpoint.** It is the tail of S-11.1, which
+>   needs the `crates/research-session` crate, the `research_sessions` / `session_events` /
+>   `agenda_items` / `session_digests` tables and a `JobKind::ContinuousResearch`, and which
+>   depends on phases 10, 2, 4 and 7. Listing it beside the other two made it look like a
+>   handler somebody forgot. Building it ahead of its own plan would mean inventing the
+>   session schema, and phase 11's declared migration range (0092–0096) is already taken —
+>   the tree is at 0121, the same collision ADR-S3-08 records.
 >
 > Two more tabs render against a store that was never created: S-6.10 and S-6.18 browse
 > phase 4's memory, whose migrations are all absent.
