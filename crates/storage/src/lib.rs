@@ -2,6 +2,7 @@
 //! Postgres=transactional, ClickHouse=time-series, Parquet=raw archive, Redis=latest-state cache.
 pub mod artifacts;
 pub mod automation;
+pub mod backfill_state;
 pub mod clickhouse;
 pub mod identity;
 pub mod ledger;

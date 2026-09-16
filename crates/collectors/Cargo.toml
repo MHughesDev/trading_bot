@@ -22,6 +22,8 @@ rust_decimal = { workspace = true }
 rtrb = { workspace = true }
 rkyv = { workspace = true }
 xxhash-rust = { workspace = true, features = ["xxh3"] }
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

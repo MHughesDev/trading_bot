@@ -2,6 +2,7 @@
 
 pub mod align;
 pub mod asof;
+pub mod backfill;
 pub mod bar;
 pub mod calendar;
 pub mod census;

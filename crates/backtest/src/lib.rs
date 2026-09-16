@@ -24,6 +24,7 @@
 
 pub mod aggregate;
 pub mod census;
+pub mod backfill_sink;
 pub mod collect;
 pub mod costs;
 pub mod experiment;
