@@ -2206,6 +2206,12 @@ impl Loop {
         let ruling = policy::decide(
             &self.profile,
             &ActionContext {
+                // No estimator yet (S-3.19), so the cost axis does not fire from
+                // here. `None` is "not estimated", never "free": treating unknown as
+                // zero would be a gate that reads as present in the config and never
+                // fires, which is worse than no gate.
+                estimated_usd: None,
+                remaining_usd: None,
                 tool: call.name.clone(),
                 risk,
                 prior_provenance: self.prior_provenance,

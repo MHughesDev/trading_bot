@@ -209,6 +209,8 @@ fn every_profile_field_is_enforced_somewhere() {
             user_present: true,
             session_allowlisted: false,
             approval_envelope: None,
+            estimated_usd: None,
+            remaining_usd: None,
         },
     );
     // Was `Deny`, when the profile declared the outbound leg cut. Now the leg is
@@ -236,6 +238,8 @@ fn every_profile_field_is_enforced_somewhere() {
             user_present: true,
             session_allowlisted: false,
             approval_envelope: None,
+            estimated_usd: None,
+            remaining_usd: None,
         },
     );
     assert_eq!(

@@ -107,6 +107,21 @@ pub struct ActionContext {
     /// (SPEC §15). Supplied by the platform, which owns the classification;
     /// this crate only honours it. `None` means ungated, which is most tools.
     pub approval_envelope: Option<String>,
+    /// What this call is expected to cost, in dollars (§4, S-2.16).
+    ///
+    /// `None` means **not estimated**, not free. The estimator is AGENT-006's
+    /// `estimate_cost` (Set S task S-3.19) and does not exist yet, so most callers
+    /// pass `None` today and the cost axis does not fire for them. That is the
+    /// honest default: a policy that treated "unknown" as "zero" would be a cost
+    /// gate that silently never fired, which is worse than no gate at all because it
+    /// would read as one in the config.
+    pub estimated_usd: Option<f64>,
+    /// What is left of the task's dollar budget, for the approval card.
+    ///
+    /// The card shows the estimate *beside* this, because $4 is a different
+    /// question with $100 left than with $5 left, and a human asked to approve a
+    /// number with nothing to compare it to will approve it.
+    pub remaining_usd: Option<f64>,
 }
 
 /// Whether this agent is permitted an outbound channel at all.
@@ -149,7 +164,34 @@ pub fn decide(profile: &Profile, ctx: &ActionContext) -> Ruling {
         );
     }
 
-    // 3. Untrusted content escalation. Regardless of tier, archetype, or an
+    // 3. Cost, whatever the reversibility (§4, S-2.16).
+    //
+    // Above the untrusted-content escalation and below the envelopes, and the
+    // position is the argument: an envelope is a statement about WHAT the action is
+    // and outranks everything, while cost is a statement about what it *spends*,
+    // which is worth asking about even on an action nobody would otherwise pause.
+    //
+    // Reversibility is deliberately not consulted. It is about whether the state can
+    // be put back and says nothing about whether the money can — a sweep that spends
+    // a day of budget and produces nothing is perfectly reversible and perfectly
+    // wasted.
+    if let (Some(estimate), Some(threshold)) = (ctx.estimated_usd, profile.budgets.ask_above_usd) {
+        if estimate > threshold {
+            let remaining = ctx
+                .remaining_usd
+                .map_or_else(|| "unknown".to_string(), |r| format!("${r:.2}"));
+            return Ruling::ask(
+                "policy.cost_above_threshold",
+                format!(
+                    "{} is estimated at ${estimate:.2}, above the ${threshold:.2} threshold;                      {remaining} of the task budget remains",
+                    ctx.tool
+                ),
+                "a human answers this one. Approve it, or narrow the call so it costs less",
+            );
+        }
+    }
+
+    // 4. Untrusted content escalation. Regardless of tier, archetype, or an
     //    allowlist: an action with reach proposed immediately after reading a
     //    stranger's text is the shape of a successful injection.
     if ctx.prior_provenance.is_untrusted() && matches!(ctx.risk, Risk::Destructive | Risk::Outbound)
@@ -223,6 +265,87 @@ mod tests {
     use super::*;
     use crate::profile::frontier_fixture;
 
+    /// An expensive REVERSIBLE call asks (§4, S-2.16).
+    ///
+    /// This is the case the task exists for. The checkpoint policy gates on
+    /// reversibility, and reversibility is about whether the *state* can be put back
+    /// — it says nothing about whether the money can. A sweep that spends a day of
+    /// budget and finds nothing is perfectly reversible and perfectly wasted.
+    #[test]
+    fn an_expensive_reversible_call_asks_anyway() {
+        let mut p = frontier_fixture();
+        p.budgets.ask_above_usd = Some(5.0);
+        let mut c = ctx(Risk::Read); // reversible, and nothing else would pause it
+        c.tool = "run_sweep".into();
+        c.estimated_usd = Some(42.0);
+        c.remaining_usd = Some(60.0);
+
+        let r = decide(&p, &c);
+        assert_eq!(r.decision, Decision::Ask, "{r:?}");
+        assert_eq!(r.code, "policy.cost_above_threshold");
+        assert!(r.reason.contains("$42.00"), "the estimate is on the card: {}", r.reason);
+        assert!(
+            r.reason.contains("$60.00"),
+            "and the remaining budget beside it — $42 is a different question with $60              left than with $45: {}",
+            r.reason
+        );
+    }
+
+    /// A cheap call below the threshold does not ask on cost. A gate that fired on
+    /// everything would be a gate nobody reads.
+    #[test]
+    fn a_cheap_call_is_not_stopped_by_the_cost_axis() {
+        let mut p = frontier_fixture();
+        p.budgets.ask_above_usd = Some(5.0);
+        let mut c = ctx(Risk::Read);
+        c.estimated_usd = Some(0.02);
+        assert_eq!(decide(&p, &c).decision, Decision::Allow);
+    }
+
+    /// `None` is NOT ESTIMATED, never free.
+    ///
+    /// The estimator is S-3.19 and does not exist, so most callers pass `None`
+    /// today. Treating that as zero would be a cost gate that reads as present in
+    /// the config and silently never fires — worse than no gate, because the config
+    /// would be lying.
+    #[test]
+    fn an_unestimated_call_does_not_silently_pass_the_cost_gate_as_free() {
+        let mut p = frontier_fixture();
+        p.budgets.ask_above_usd = Some(5.0);
+        let mut c = ctx(Risk::Read);
+        c.estimated_usd = None;
+
+        // It does not ask on COST, because there is no cost to compare.
+        let r = decide(&p, &c);
+        assert_ne!(r.code, "policy.cost_above_threshold");
+        // And the field is genuinely optional rather than defaulted to 0.0, which is
+        // the distinction this test exists to keep.
+        assert!(c.estimated_usd.is_none());
+    }
+
+    /// A profile with no threshold has no cost axis — the honest reading for a local
+    /// tier, where a call costs electricity rather than dollars.
+    #[test]
+    fn a_profile_without_a_threshold_has_no_cost_axis() {
+        let mut p = frontier_fixture();
+        p.budgets.ask_above_usd = None;
+        let mut c = ctx(Risk::Read);
+        c.estimated_usd = Some(1_000.0);
+        assert_eq!(decide(&p, &c).decision, Decision::Allow);
+    }
+
+    /// And the other half of the task's acceptance: a cheap IRREVERSIBLE call still
+    /// asks, because the cost axis is added to the existing gates rather than
+    /// replacing them.
+    #[test]
+    fn a_cheap_irreversible_call_still_asks() {
+        let mut p = frontier_fixture();
+        p.budgets.ask_above_usd = Some(5.0);
+        let mut c = ctx(Risk::Destructive);
+        c.estimated_usd = Some(0.01);
+        assert_eq!(decide(&p, &c).decision, Decision::Ask);
+    }
+
     fn ctx(risk: Risk) -> ActionContext {
         ActionContext {
             tool: "some_tool".into(),
@@ -231,6 +354,8 @@ mod tests {
             user_present: true,
             session_allowlisted: false,
             approval_envelope: None,
+            estimated_usd: None,
+            remaining_usd: None,
         }
     }
 
@@ -392,6 +517,8 @@ mod envelope_tests {
             user_present: true,
             session_allowlisted: allowlisted,
             approval_envelope: envelope.map(ToString::to_string),
+            estimated_usd: None,
+            remaining_usd: None,
         }
     }
 

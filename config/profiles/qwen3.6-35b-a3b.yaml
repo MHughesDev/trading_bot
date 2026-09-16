@@ -105,6 +105,8 @@ budgets:
   max_usd_per_task: 2.0
   max_wall_clock_s: 28800
   max_tokens_per_task: 40000000
+  # No cost axis on a local tier: a call here costs electricity, not dollars,
+  # and a threshold in dollars would be a number nothing could exceed.
 
 notes: >
   Reference model for the local tier. Decode is two constrained calls per step -

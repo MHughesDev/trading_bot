@@ -98,6 +98,8 @@ fn an_injected_instruction_cannot_reach_a_destructive_action() {
             user_present: true,
             session_allowlisted: false,
             approval_envelope: None,
+            estimated_usd: None,
+            remaining_usd: None,
         },
     );
     assert_eq!(
@@ -120,6 +122,8 @@ fn an_injected_exfiltration_attempt_has_no_channel_to_use() {
             user_present: true,
             session_allowlisted: false,
             approval_envelope: None,
+            estimated_usd: None,
+            remaining_usd: None,
         },
     );
     // **Changed on 2026-09-14 (ADR-P7-01).** This used to be `Deny` /
@@ -155,6 +159,8 @@ fn an_outbound_call_on_clean_provenance_is_not_escalated() {
             user_present: true,
             session_allowlisted: false,
             approval_envelope: None,
+            estimated_usd: None,
+            remaining_usd: None,
         },
     );
     assert_ne!(
@@ -178,6 +184,8 @@ fn an_injection_cannot_ride_a_session_allowlist_into_destruction() {
             user_present: true,
             session_allowlisted: true,
             approval_envelope: None,
+            estimated_usd: None,
+            remaining_usd: None,
         },
     );
     assert_ne!(ruling.decision, Decision::Allow);

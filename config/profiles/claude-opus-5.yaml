@@ -122,6 +122,11 @@ budgets:
   max_usd_per_task: 25.0
   max_wall_clock_s: 14400
   max_tokens_per_task: 40000000
+  # A single call above this asks a human WHATEVER its reversibility.
+  # Reversibility is about whether the state can be put back; it says nothing
+  # about whether the money can, and a sweep that spends a day of budget and
+  # finds nothing is perfectly reversible and perfectly wasted.
+  ask_above_usd: 5.0
 
 notes: >
   Frontier tier per D-01. The harness-side discipline here is not a concession to

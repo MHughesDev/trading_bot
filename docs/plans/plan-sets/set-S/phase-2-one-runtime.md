@@ -1,6 +1,6 @@
 # Phase 2 — One runtime
 
-**Completion: 19% (3 / 16 tasks), plus 3 partial (S-2.5, S-2.6, S-2.8).**
+**Completion: 19% (3 / 16 tasks), plus 5 partial (S-2.5, S-2.6, S-2.8, S-2.11, S-2.16).**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
@@ -382,7 +382,22 @@ no transcript anywhere can read `[elided` without a handle when a workspace exis
 **Traces:** AGENT-010 §2, §13 step 4; §14.1. AGENT-005 §6.3; §10.6.
 
 ### S-2.11 Waiting costs nothing — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — the loop half is built and proved; the two driver polling loops stay until
+the resume path can replace them.
+
+`crates/harness/tests/waiting_costs_nothing.rs` asserts the thing that actually matters, and
+asserts it the only way it can be asserted: a run suspended on `Effect::Await` **emits no model
+call at all**. A polling loop produces the right answer too — "the answer arrives" is not the
+acceptance, "no tokens are spent while waiting" is — and the only proof of the second is the
+absence of the effect. Six tests, including that nothing short of the job finishing restarts the
+run and that another job's result does not resume this one.
+
+`local_driver` exits on `Await` rather than polling, and says so plainly.
+
+**Not done, and not deletable yet.** `driver.rs`'s two polling loops (`:400`, `:462`) are what the
+task says to remove, and removing them now would break waiting outright: the replacement is the
+manager resuming from the effect log on `JobDone`, which needs S-2.6's replay, which is not
+wired. A deletion that leaves nothing behind is not a refactor. **That is why this is `PARTIAL`.**
 
 `run_sweep`, `run_study`, `train_model`, `run_shadow_session` and any workflow containing
 them return a `job_id`; the loop emits `Effect::Await{job_id}` and the driver **exits**. The
@@ -469,7 +484,35 @@ is killed mid-write; COMP-007 records a maintenance window rather than a platfor
 **Traces:** AGENT-010 §10.1; COMP-007 §4.3.
 
 ### S-2.16 Cost is an approval axis — S
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — the axis exists and refuses correctly; the estimator that feeds it is
+S-3.19 and does not.
+
+Cost is now its own gate, above the untrusted-content escalation and below the approval
+envelopes. The position is the argument: an envelope is a statement about **what** the action is
+and outranks everything; cost is a statement about what it **spends**, which is worth asking about
+even on an action nobody would otherwise pause.
+
+Reversibility is deliberately not consulted. It is about whether the *state* can be put back and
+says nothing about whether the money can — a sweep that spends a day of budget and finds nothing
+is perfectly reversible and perfectly wasted. `an_expensive_reversible_call_asks_anyway` is the
+case the task exists for, and `a_cheap_irreversible_call_still_asks` holds the other half: the
+axis is added to the existing gates rather than replacing them.
+
+The card carries the estimate **beside the remaining budget**, because $42 is a different question
+with $60 left than with $45, and a human asked to approve a number with nothing to compare it to
+will approve it.
+
+`estimated_usd: None` means **not estimated, never free**. Treating unknown as zero would be a
+cost gate that reads as present in the config and silently never fires — worse than no gate,
+because the config would be lying.
+`an_unestimated_call_does_not_silently_pass_the_cost_gate_as_free` holds that.
+
+`ask_above_usd` is `$5` on the frontier profile and absent on both locals, which is the honest
+reading for a tier where a call costs electricity rather than dollars.
+
+**Not done:** nothing supplies `estimated_usd` yet. `estimate_cost` is S-3.19, this task's
+declared dependency, so every caller passes `None` today and the axis does not fire in practice.
+The mechanism is built and tested; it is not yet reached. **That is why this is `PARTIAL`.**
 
 The checkpoint policy gates on reversibility and confidence, which is right and incomplete: a
 reversible action can still be expensive, and "reversible" is no comfort after a sweep has

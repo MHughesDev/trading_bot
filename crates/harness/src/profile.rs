@@ -347,6 +347,19 @@ pub struct Budgets {
     pub max_usd_per_task: f64,
     pub max_wall_clock_s: u64,
     pub max_tokens_per_task: u64,
+    /// A single call above this asks a human, **whatever its reversibility**
+    /// (AGENT-008 §4, Set S task S-2.16).
+    ///
+    /// The checkpoint policy gates on reversibility and confidence, which is right
+    /// and incomplete: a reversible action can still be expensive, and "reversible"
+    /// is no comfort after a sweep has spent a day of budget. Reversibility is about
+    /// whether the *state* can be put back; it says nothing about whether the money
+    /// can.
+    ///
+    /// `None` means no cost axis on this profile, which is the honest reading for a
+    /// local tier where a call costs electricity rather than dollars.
+    #[serde(default)]
+    pub ask_above_usd: Option<f64>,
 }
 
 /// One model's harness configuration.
@@ -883,6 +896,7 @@ pub(crate) fn frontier_fixture() -> Profile {
             max_usd_per_task: 25.0,
             max_wall_clock_s: 14_400,
             max_tokens_per_task: 20_000_000,
+            ask_above_usd: None,
         },
         notes: String::new(),
     }
@@ -948,6 +962,7 @@ pub(crate) fn degraded_fixture() -> Profile {
             max_usd_per_task: 0.5,
             max_wall_clock_s: 3600,
             max_tokens_per_task: 2_000_000,
+            ask_above_usd: None,
         },
         notes: String::new(),
     }

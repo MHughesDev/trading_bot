@@ -148,6 +148,7 @@ pub fn degraded_7b() -> Profile {
             max_usd_per_task: 0.5,
             max_wall_clock_s: 3_600,
             max_tokens_per_task: 2_000_000,
+            ask_above_usd: None,
         },
         notes: "eval fixture, copied from config/profiles/qwen2.5-7b-instruct.yaml".into(),
     }
@@ -205,6 +206,7 @@ pub fn frontier() -> Profile {
             max_usd_per_task: 25.0,
             max_wall_clock_s: 14_400,
             max_tokens_per_task: 20_000_000,
+            ask_above_usd: None,
         },
         notes: "eval fixture".into(),
     }

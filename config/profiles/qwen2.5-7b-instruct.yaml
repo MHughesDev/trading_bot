@@ -170,6 +170,8 @@ budgets:
   max_usd_per_task: 0.5
   max_wall_clock_s: 3600
   max_tokens_per_task: 2000000
+  # No cost axis on a local tier: a call here costs electricity, not dollars,
+  # and a threshold in dollars would be a number nothing could exceed.
 
 notes: >
   DEGRADED TIER, PROMOTED ON EVIDENCE - still the dev box, still not the target.
