@@ -493,6 +493,40 @@ impl ToolRegistry {
         self.tools.values().filter(|t| t.risk <= ceiling).collect()
     }
 
+    /// How many search hits a goal contributes to routing.
+    ///
+    /// Three because the step after this one is what the search is really for:
+    /// the model reaches for `get_bars` having planned `list_instruments`, and
+    /// the neighbours of the outcome are what make that possible without a
+    /// round trip through `search_tools`.
+    pub const GOAL_HITS: usize = 3;
+
+    /// The namespaces and pinned tools one goal selects.
+    ///
+    /// Extracted from the driver so that the catalogue page's "simulate
+    /// exposure" and the router itself are the **same** code rather than two
+    /// implementations that agree today. S-6.19's acceptance is that the
+    /// simulation returns the slice the router would choose; two copies could
+    /// only ever make that true by inspection, and the page exists precisely to
+    /// let someone argue with the router's choices.
+    ///
+    /// Returns `(namespaces, pinned)` in selection order, which `expose_pinned`
+    /// treats as priority.
+    #[must_use]
+    pub fn route_goal(&self, goal: &str) -> (Vec<String>, Vec<String>) {
+        let mut namespaces: Vec<String> = Vec::new();
+        let mut pinned: Vec<String> = Vec::new();
+        for t in self.search(goal, Self::GOAL_HITS) {
+            if !pinned.contains(&t.name) {
+                pinned.push(t.name.clone());
+            }
+            if !namespaces.contains(&t.namespace) {
+                namespaces.push(t.namespace.clone());
+            }
+        }
+        (namespaces, pinned)
+    }
+
     /// Selects and renders the tools for one step.
     ///
     /// `namespaces` is what the router chose — deterministically from the plan step

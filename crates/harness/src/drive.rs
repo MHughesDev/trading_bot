@@ -1482,12 +1482,17 @@ impl Loop {
                     }
                 }
             }
-            for t in self.registry.search(&goal, 3) {
-                if !pinned.contains(&t.name) {
-                    pinned.push(t.name.clone());
+            // The same routing the catalogue page simulates — one implementation,
+            // so "the slice the router would choose" is true by construction.
+            let (goal_namespaces, goal_pinned) = self.registry.route_goal(&goal);
+            for name in goal_pinned {
+                if !pinned.contains(&name) {
+                    pinned.push(name);
                 }
-                if !wanted.contains(&t.namespace) {
-                    wanted.push(t.namespace.clone());
+            }
+            for ns in goal_namespaces {
+                if !wanted.contains(&ns) {
+                    wanted.push(ns);
                 }
             }
         }

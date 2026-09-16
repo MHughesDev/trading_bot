@@ -178,7 +178,51 @@ pub struct ToolSpec {
     pub notes_section: Option<&'static str>,
 }
 
+/// How far from capital a tool reaches (AGENT-013 section 4; ADR-0037 section 1).
+///
+/// Named with the strings `harness::state::Ring` serialises to, and the same
+/// three the desk's `lib/desk/rings.ts` indexes, so the value travels from a
+/// `ToolSpec` to the surface unchanged.
+///
+/// It lives here rather than in `crates/api` because the desk enforces it: the
+/// Tools panel, the catalogue's pin action and the composer's attach menu all
+/// filter on `tool.ring`, and until now **nothing on this side assigned one**.
+/// A filter is worth exactly what the field it reads is worth.
+///
+/// **Derived, never listed.** The alternative was an array of tool names beside
+/// the catalogue, which is precisely the shape `internal_agent_tools` had until
+/// S-1.3 — and the direction of a miss there was silent, because a tool absent
+/// from a list is simply a tool nobody notices is absent. Here a miss would be
+/// worse than silent: a tool that reaches paper and is not in the list reports
+/// ring 0 and becomes clickable inside a Chat turn.
+pub const RING_RESEARCH: &str = "research";
+pub const RING_PLATFORM_ARTIFACTS: &str = "platform_artifacts";
+pub const RING_PAPER: &str = "paper";
+
 impl ToolSpec {
+    /// The outermost ring this tool reaches.
+    ///
+    /// Read from what the tool already declares, so it cannot disagree with the
+    /// gate:
+    ///
+    /// * [`Envelope::Promotion`] is defined as "moving a strategy toward
+    ///   capital", which is ring 2 by definition. `arm_automation` is the
+    ///   member that matters.
+    /// * A write or a destructive call changes the platform's own artifacts —
+    ///   strategies, models, experiments — which is ring 1.
+    /// * Everything else reads, and a read reaches nothing. `Outbound` is here
+    ///   too: the two web tools fetch, they do not write.
+    #[must_use]
+    pub fn ring(&self) -> &'static str {
+        if self.envelope == Envelope::Promotion {
+            return RING_PAPER;
+        }
+        match self.risk {
+            Risk::Write | Risk::Destructive => RING_PLATFORM_ARTIFACTS,
+            Risk::Read | Risk::Outbound => RING_RESEARCH,
+        }
+    }
+
     /// The five things a tool cannot omit. Everything else has a default that is
     /// the conservative reading: MCP-only exposure, no trial, no envelope, no
     /// evidence ids, `Active`, version 1, `Typed`.
@@ -1024,5 +1068,76 @@ mod tests {
             undeclared.is_empty(),
             "error codes constructed but not declared in ERROR_CODES: {undeclared:?}.              Add them there — a code nothing can route on is a sentence."
         );
+    }
+
+    // ── rings ───────────────────────────────────────────────────────────────
+
+    /// Every tool gets one of exactly three rings, and the desk indexes all three.
+    #[test]
+    fn every_tool_reports_a_ring_the_surface_knows() {
+        for spec in catalog() {
+            let r = spec.ring();
+            assert!(
+                [RING_RESEARCH, RING_PLATFORM_ARTIFACTS, RING_PAPER].contains(&r),
+                "`{}` reports the ring `{r}`, which `lib/desk/rings.ts` cannot index — so the                  desk would compare it against `undefined` and let it through",
+                spec.name
+            );
+        }
+    }
+
+    /// The direction that matters: nothing that writes may claim to reach nothing.
+    ///
+    /// The desk lets a Chat turn offer any ring-0 tool. A write reporting
+    /// `research` would therefore be clickable in a turn that may not write, and
+    /// the failure would be a successful call rather than an error.
+    #[test]
+    fn nothing_that_writes_claims_the_innermost_ring() {
+        for spec in catalog() {
+            if matches!(spec.risk, Risk::Write | Risk::Destructive) {
+                assert_ne!(
+                    spec.ring(),
+                    RING_RESEARCH,
+                    "`{}` is {:?} and reports ring 0, which the desk offers inside a Chat turn",
+                    spec.name,
+                    spec.risk
+                );
+            }
+        }
+    }
+
+    /// And the converse: a read must not be pushed out to paper, or the desk
+    /// hides a harmless tool and the model is told it has less than it has.
+    #[test]
+    fn a_read_reaches_nothing() {
+        for spec in catalog() {
+            if spec.risk == Risk::Read && spec.envelope != Envelope::Promotion {
+                assert_eq!(spec.ring(), RING_RESEARCH, "`{}`", spec.name);
+            }
+        }
+    }
+
+    /// The promotion envelope is the paper ring, and at least one tool holds it —
+    /// otherwise this rule is untested prose and the ring-2 branch is dead code.
+    #[test]
+    fn the_promotion_envelope_is_the_only_door_to_paper() {
+        let paper: Vec<&str> = catalog()
+            .iter()
+            .filter(|s| s.ring() == RING_PAPER)
+            .map(|s| s.name)
+            .collect();
+        assert!(
+            !paper.is_empty(),
+            "no tool reaches paper, so the ring-2 branch is never taken and this derivation is              asserting nothing"
+        );
+        for spec in catalog() {
+            assert_eq!(
+                spec.ring() == RING_PAPER,
+                spec.envelope == Envelope::Promotion,
+                "`{}` disagrees: ring {} against envelope {:?}. The two must move together, or                  the gate a human sees and the ring the desk filters on are different claims.",
+                spec.name,
+                spec.ring(),
+                spec.envelope
+            );
+        }
     }
 }

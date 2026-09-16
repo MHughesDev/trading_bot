@@ -5,6 +5,8 @@ pub mod agent_sessions;
 pub mod agent_audit;
 pub mod agent_cost;
 pub mod agent_preview;
+pub mod desk_catalogue;
+pub mod desk_digest;
 pub mod agent_templates;
 pub mod asset_lifecycle;
 pub mod assets;
@@ -122,6 +124,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agent/audit/metric-integrity", post(agent_audit::metric_integrity))
         .route("/api/agent/cost/estimate", post(agent_cost::estimate))
         .route("/api/agent/strategy/preview", post(agent_preview::preview))
+        .route("/api/catalogue", get(desk_catalogue::catalogue))
+        .route("/api/catalogue/exposure", get(desk_catalogue::exposure))
+        .route("/api/desk/digest", get(desk_digest::digest))
         // Evidence for the falsification tools (ADR-P7-05). None of these
         // returns a verdict; each answers one defect class with a number.
         .route("/api/evidence/trades", post(evidence::trades))
