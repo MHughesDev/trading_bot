@@ -1,6 +1,6 @@
 # Phase 1 — Contracts
 
-**Completion: 80% (16 / 20 tasks), plus 1 partial. Tracks A and B complete bar S-1.2; S-1.17, S-1.19 and S-1.20 remain.**
+**Completion: 80% (16 / 20 tasks), plus 3 partial (S-1.2, S-1.18’s measurement, S-1.20’s re-plan trigger). S-1.17 and S-1.19 remain.**
 
 > Status 2026-09-15, track 1. The three contracts the other Set S phases wait on now exist:
 > `ToolSpec`/`ToolResult` (`crates/mcp-server/src/spec.rs`), the generated taxonomy and
@@ -623,7 +623,41 @@ non-retryable error consumes no retry budget.
 **Traces:** AGENT-006 §2.4a, §2.4b; §10.9.
 
 ### S-1.20 Liveness: the two loops the protocol could sustain — S
-`NOT STARTED`
+`PARTIAL` 2026-09-15 — the breaker is built and tested end to end; the re-plan bound is built
+and its trigger does not exist.
+
+**The breaker is done.** Three consecutive failures from one tool withdraw it from exposure for
+the rest of the run, the model is told once, and the withdrawal is recorded as a
+`platform_defect` candidate rather than absorbed. Consecutive rather than cumulative, because a
+tool that fails once an hour has a flaky dependency and pulling it would cost the run more than
+the failures do — one success clears the count. Removal happens *after* routing, so routing can
+still say the tool was the right answer and the run can still report that the right answer was
+unavailable.
+
+One deviation from the task text, stated rather than glossed: §3.7 says **non-retryable**
+errors, and the harness cannot yet tell. Typed errors with a `retryable` field are S-1.19 and
+are not built. Counting every failure is the conservative reading in the direction that matters
+— a retryable error repeating three times running is also a tool worth removing — and the reset
+on first success keeps it narrow. Revisit when S-1.19 lands.
+
+**The re-plan bound is written and cannot be exercised.** `max_replans_per_run` is counted where
+a plan is ACCEPTED (a rejected plan that is re-asked is a retry, and the retry budget already
+covers that), and exhausting it wraps up holding the working state rather than fencing — a
+report of what defeated the plan is a finding, and a run that fenced would report nothing.
+
+But **this `Loop` has no re-plan trigger**: the plan is made once at admission and never re-made,
+and when it is exhausted `active_step()` returns `None` and the loop carries on without one. So
+the four-plans-in-a-row case the task is written for is unreachable from here. The guard is
+tested with the allowance set to zero, which proves the counter is consulted and the wrap-up is
+the right shape; it does not prove the thing the task names. **That is why this is `PARTIAL`.**
+
+Adding the trigger is the missing half and belongs with whoever owns plan lifecycle — an
+exhausted plan on an unmet goal is the natural place for it.
+
+Verified by `exhausting_the_replan_allowance_wraps_up_holding_the_working_state`,
+`a_tool_that_fails_three_times_running_is_withdrawn_and_announced_once` (told once, not once per
+step), `a_success_resets_the_failure_run`, and the two conformance readers, which also floor the
+breaker at two: a tool withdrawn on its first failure is a tool withdrawn for a timeout.
 
 Re-planning and retrying both look like progress to the barren-step breaker, so neither was
 bounded. `max_replans_per_run` (3; 2 local) — on exhaustion the run wraps up with its working

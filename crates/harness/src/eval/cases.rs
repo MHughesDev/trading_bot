@@ -126,6 +126,8 @@ pub fn degraded_7b() -> Profile {
             few_shot_examples: 2,
             reflection: false,
             max_subagent_depth: 1,
+            max_replans_per_run: 2,
+            tool_breaker_threshold: 3,
             code_execution: CodeExecution::Denied,
         },
         trifecta: Trifecta {
@@ -178,6 +180,8 @@ pub fn frontier() -> Profile {
             few_shot_examples: 0,
             reflection: true,
             max_subagent_depth: 1,
+            max_replans_per_run: 3,
+            tool_breaker_threshold: 3,
             code_execution: CodeExecution::Full,
         },
         trifecta: Trifecta {

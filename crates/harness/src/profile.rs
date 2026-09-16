@@ -146,6 +146,20 @@ pub enum Mode {
     PlannerExecutor,
 }
 
+/// Three on a frontier tier, and the local profiles pin two (§3.7).
+///
+/// A default rather than a required field so an older profile still loads; the
+/// value is deliberately small because the fourth plan has never been the one that
+/// worked.
+fn default_max_replans() -> u32 {
+    3
+}
+
+/// Three consecutive failures is a broken tool, not a run of bad luck.
+fn default_tool_breaker() -> u32 {
+    3
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Orchestration {
     pub mode: Mode,
@@ -157,6 +171,22 @@ pub struct Orchestration {
     pub reflection: bool,
     /// Sub-agent recursion depth (§13.3). 1 unless an eval proves the need.
     pub max_subagent_depth: u32,
+    /// How many times one run may re-plan before it wraps up (§3.7, S-1.20).
+    ///
+    /// Re-planning looks like progress to the barren-step breaker — a new plan is a
+    /// new step that learned something — so it was the one loop nothing bounded. On
+    /// exhaustion the run wraps up **with its working state intact**: a report of
+    /// what defeated it is a finding, and a fourth plan is drift.
+    #[serde(default = "default_max_replans")]
+    pub max_replans_per_run: u32,
+    /// Consecutive errors from one tool before it leaves exposure for the rest of
+    /// the run (§3.7, S-1.20).
+    ///
+    /// An agent burning fifteen steps on a tool the platform has broken is the
+    /// platform's fault, and absorbing that silently is how a platform defect is
+    /// charged to the agent's budget.
+    #[serde(default = "default_tool_breaker")]
+    pub tool_breaker_threshold: u32,
     /// Free-form code execution, tiered per §11.
     pub code_execution: CodeExecution,
 }
@@ -774,6 +804,8 @@ pub(crate) fn frontier_fixture() -> Profile {
             few_shot_examples: 0,
             reflection: true,
             max_subagent_depth: 1,
+            max_replans_per_run: 3,
+            tool_breaker_threshold: 3,
             code_execution: CodeExecution::Full,
         },
         trifecta: Trifecta {
@@ -828,6 +860,8 @@ pub(crate) fn degraded_fixture() -> Profile {
             few_shot_examples: 2,
             reflection: false,
             max_subagent_depth: 1,
+            max_replans_per_run: 3,
+            tool_breaker_threshold: 3,
             code_execution: CodeExecution::Denied,
         },
         trifecta: Trifecta {

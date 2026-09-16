@@ -641,6 +641,17 @@ pub struct Loop {
     /// findings are still true and the model is not under pressure to manufacture a
     /// conclusion.
     barren_steps: u32,
+    /// Plans accepted this run. The first is the plan; every later one is a re-plan
+    /// (§3.7, S-1.20).
+    plans_accepted: u32,
+    /// Consecutive errors per tool, reset by that tool's first success.
+    ///
+    /// Consecutive, not cumulative: a tool that fails once an hour is a tool with a
+    /// flaky dependency, and removing it from exposure would cost the run more than
+    /// the failures do. A tool that fails three times in a row is broken.
+    consecutive_tool_errors: BTreeMap<String, u32>,
+    /// Tools the breaker has opened. They leave exposure for the rest of the run.
+    broken_tools: BTreeSet<String>,
     /// Whether the step now running has learned anything yet.
     ///
     /// Progress is a SUCCESSFUL tool result or a recorded finding — deliberately not
@@ -770,6 +781,9 @@ impl Loop {
             searches_this_step: 0,
             tools_attempted: 0,
             barren_steps: 0,
+            plans_accepted: 0,
+            consecutive_tool_errors: BTreeMap::new(),
+            broken_tools: BTreeSet::new(),
             step_learned_something: false,
             results_by_id: BTreeMap::new(),
             finding_claims: Vec::new(),
@@ -1232,6 +1246,28 @@ impl Loop {
             );
             return;
         }
+        // The re-plan bound (§3.7, S-1.20). Counted where a plan is ACCEPTED rather
+        // than where one is requested, so a rejected plan that is re-asked does not
+        // spend the allowance — that is a retry, and the retry budget already
+        // covers it.
+        //
+        // Re-planning looks like progress to the barren-step breaker: a new plan is
+        // a step that learned something. That is why it was the one loop nothing
+        // bounded, and why the bound has to be its own counter.
+        self.plans_accepted += 1;
+        if self.plans_accepted > self.profile.orchestration.max_replans_per_run {
+            self.wrapping_up = true;
+            self.directive = Some(format!(
+                "You have re-planned {} times, which is the limit. Stop and report what                  you established with the plans you had. What defeated the plan is a                  finding; say it plainly, cite the calls that showed it, and call                  finish_task. Do not plan again.",
+                self.plans_accepted - 1
+            ));
+            // The working state is kept deliberately: the findings are still true,
+            // and a run that wraps up holding them reports something. A run that
+            // fenced here would report nothing at all.
+            self.begin_step(fx);
+            return;
+        }
+
         // Into the working state, where the plan carries its own status and the card
         // renders it.
         self.working.plan = steps
@@ -1430,8 +1466,26 @@ impl Loop {
             }
         };
         self.step_namespaces = wanted;
-        self.exposed = exposure.names.clone();
-        self.exposed_schemas = exposure.schemas.clone();
+        // A tool the breaker opened leaves exposure for the rest of the run
+        // (§3.7, S-1.20). Removed here, after routing, rather than filtered out of
+        // `pinned` and `wanted` earlier: routing should still be able to say the
+        // tool was the right answer, and the run should still be able to report
+        // that the right answer was unavailable.
+        self.exposed = exposure
+            .names
+            .iter()
+            .filter(|n| !self.broken_tools.contains(*n))
+            .cloned()
+            .collect();
+        self.exposed_schemas = if self.broken_tools.is_empty() {
+            exposure.schemas.clone()
+        } else {
+            self.exposed
+                .iter()
+                .filter_map(|n| self.registry.get(n))
+                .map(|d| registry::render(d, self.profile.tools.schema_style))
+                .collect()
+        };
         fx.push(Effect::Note(Note::Exposure {
             namespaces: self.step_namespaces.clone(),
             exposed: self.exposed.iter().cloned().collect(),
@@ -2466,6 +2520,9 @@ impl Loop {
 
         self.tools_attempted += 1;
         self.step_learned_something = true;
+        // One success is enough to clear the run: what the breaker is looking for is
+        // a tool that cannot work, not one that sometimes does not.
+        self.consecutive_tool_errors.remove(&name);
 
         // Everything the session has actually seen an id for, recorded in the state
         // with the tool and the step that produced it. Cheap: only tokens that look
@@ -2538,6 +2595,51 @@ impl Loop {
             .map_or_else(|| "tool".to_string(), |c| c.name.clone());
 
         self.tools_attempted += 1;
+
+        // The breaker (§3.7, S-1.20). Three consecutive failures from one tool is a
+        // broken tool, and an agent burning fifteen steps on a tool the platform has
+        // broken is the platform's fault — absorbing that silently charges a
+        // platform defect to the agent's budget.
+        //
+        // Consecutive, not cumulative: a tool that fails once an hour has a flaky
+        // dependency, and pulling it from exposure would cost the run more than the
+        // failures do.
+        //
+        // **Keyed on failure, not on `retryable`.** AGENT-008 §3.7 says
+        // non-retryable, and the harness cannot yet tell: typed tool errors are
+        // S-1.19 and are not built. Counting every failure is the conservative
+        // reading in the direction that matters — a retryable error repeating three
+        // times in a row is also a tool worth removing — and it is narrower than it
+        // looks, because the first success resets the count. Revisit when S-1.19
+        // lands and the distinction exists.
+        let threshold = self.profile.orchestration.tool_breaker_threshold;
+        let failures = {
+            let n = self
+                .consecutive_tool_errors
+                .entry(name.clone())
+                .and_modify(|n| *n += 1)
+                .or_insert(1);
+            *n
+        };
+        if failures >= threshold && self.broken_tools.insert(name.clone()) {
+            // Told once. A notice repeated every step is a notice the model learns
+            // to skip, and the tool is gone from exposure anyway.
+            self.observe(
+                Tagged::system(
+                    "harness",
+                    format!(
+                        "`{name}` has failed {failures} times in a row and has been withdrawn                          for the rest of this run. This is a platform fault, not yours. Do not                          wait for it: answer with the tools that work, or report what it                          prevented."
+                    ),
+                ),
+                220,
+                None,
+            );
+            fx.push(Effect::Note(Note::Degraded(Degradation::BackendFailure {
+                detail: format!(
+                    "tool `{name}` withdrawn after {failures} consecutive failures                      (platform_defect candidate)"
+                ),
+            })));
+        }
 
         // A FAILED idempotent read is recorded too, and this is the case that was
         // actually costing budget: a degraded-tier run called `compare_backtests`

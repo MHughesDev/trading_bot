@@ -166,6 +166,24 @@ fn every_profile_field_is_enforced_somewhere() {
     let _ = p.orchestration.few_shot_examples;
     let _ = p.orchestration.reflection;
 
+    // orchestration.max_replans_per_run and .tool_breaker_threshold → `drive.rs`
+    // (S-1.20). Both bound a loop that looks like progress from the outside, so a
+    // profile that set either to something absurd would be discovered as a session
+    // that never stops rather than as a configuration error.
+    //
+    // The floor on the breaker is two, not one: a tool withdrawn on its first
+    // failure is a tool withdrawn for a timeout, and the run loses a working tool
+    // to one bad moment.
+    assert!(
+        p.orchestration.tool_breaker_threshold >= 2,
+        "a breaker that opens on one failure withdraws working tools"
+    );
+    assert!(
+        p.orchestration.max_replans_per_run <= 5,
+        "a run allowed more than a handful of plans is a run that plans instead of          working; {} is not a bound",
+        p.orchestration.max_replans_per_run
+    );
+
     // trifecta.* → the policy engine reads the outbound leg directly.
     let ruling = decide(
         &p,

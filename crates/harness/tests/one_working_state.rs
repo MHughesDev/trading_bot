@@ -746,3 +746,136 @@ fn twenty_findings_render_as_one_block_of_twenty_lines() {
         );
     }
 }
+
+// ── S-1.20: the two loops the protocol could sustain ────────────────────────
+
+/// The re-plan allowance is enforced where a plan is ACCEPTED, and exhausting it
+/// wraps the run up rather than fencing it.
+///
+/// Re-planning looks like progress to the barren-step breaker — a new plan is a
+/// step that learned something — which is exactly why it was the loop nothing
+/// bounded, and why the bound has to be its own counter.
+///
+/// **Driven with the allowance set to zero, because this `Loop` has no re-plan
+/// trigger.** The plan is made once at admission and never re-made; when it is
+/// exhausted `active_step()` returns `None` and the loop carries on without one.
+/// So the guard is real and tested, and the four-plans-in-a-row case it is written
+/// for cannot be reached from here until that trigger exists. Stated rather than
+/// asserted around: a test that pretends to exercise a path the code does not have
+/// is worse than one that says which half it covers.
+///
+/// What it does prove: the counter is consulted, the run wraps up instead of
+/// fencing, the last turn can only report, and the working state survives — which
+/// is the difference between reporting what defeated the plan and reporting
+/// nothing.
+#[test]
+fn exhausting_the_replan_allowance_wraps_up_holding_the_working_state() {
+    let mut p = profile();
+    p.orchestration.mode = harness::profile::Mode::PlannerExecutor;
+    p.orchestration.max_replans_per_run = 0;
+    let mut l = Loop::new(p, registry(), task());
+    l.next(Input::Admission(Admission::Admit));
+
+    let fx = l.next(Input::ModelReply {
+        raw: r#"{"steps":[{"goal":"pull bars","tool":"get_bars"}]}"#.into(),
+    });
+    assert!(
+        !fx.iter()
+            .any(|e| matches!(e, Effect::Note(harness::drive::Note::Planned { .. }))),
+        "a plan past the allowance is not served"
+    );
+    assert!(
+        !fx.iter().any(|e| matches!(e, Effect::Done(_))),
+        "and it is not a fence: the run still has a report to make"
+    );
+    assert_eq!(
+        l.exposed().iter().collect::<Vec<_>>(),
+        vec!["finish_task"],
+        "the wrap-up turn can only report"
+    );
+    assert_eq!(
+        l.working().goal,
+        "find whether BTC-USD has momentum at 1h",
+        "and it wraps up holding its working state, not empty-handed"
+    );
+}
+
+/// Three consecutive failures from one tool withdraw it for the rest of the run,
+/// and the model is told once.
+///
+/// An agent burning fifteen steps on a tool the platform has broken is the
+/// platform's fault, and absorbing that silently charges a platform defect to the
+/// agent's budget.
+#[test]
+fn a_tool_that_fails_three_times_running_is_withdrawn_and_announced_once() {
+    let (mut l, _) = started();
+
+    let mut notices = 0;
+    for i in 0..4 {
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"get_bars"}"#.into(),
+        });
+        l.next(Input::ModelReply {
+            raw: format!(r#"{{"instrument":"BTC-USD","nonce":{i}}}"#),
+        });
+        let fx = l.next(Input::ToolError {
+            detail: "http_500".into(),
+        });
+        notices += fx
+            .iter()
+            .filter(|e| match e {
+                Effect::Note(harness::drive::Note::Degraded(d)) => {
+                    format!("{d:?}").contains("withdrawn")
+                }
+                _ => false,
+            })
+            .count();
+        if i < 2 {
+            assert!(
+                l.exposed().contains("get_bars"),
+                "two failures is bad luck, not a broken tool (failure {i})"
+            );
+        }
+    }
+
+    assert_eq!(notices, 1, "told once, not once per step");
+    assert!(
+        !l.exposed().contains("get_bars"),
+        "the withdrawn tool is gone from exposure: {:?}",
+        l.exposed()
+    );
+}
+
+/// And one success clears the run. What the breaker looks for is a tool that
+/// cannot work, not one that sometimes does not.
+#[test]
+fn a_success_resets_the_failure_run() {
+    let (mut l, _) = started();
+    for i in 0..2 {
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"get_bars"}"#.into(),
+        });
+        l.next(Input::ModelReply {
+            raw: format!(r#"{{"instrument":"BTC-USD","nonce":{i}}}"#),
+        });
+        l.next(Input::ToolError {
+            detail: "http_500".into(),
+        });
+    }
+    step(&mut l, 99, "{\"bars\": 500}");
+    for i in 2..4 {
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"get_bars"}"#.into(),
+        });
+        l.next(Input::ModelReply {
+            raw: format!(r#"{{"instrument":"BTC-USD","nonce":{i}}}"#),
+        });
+        l.next(Input::ToolError {
+            detail: "http_500".into(),
+        });
+    }
+    assert!(
+        l.exposed().contains("get_bars"),
+        "two before a success and two after is not three in a row"
+    );
+}

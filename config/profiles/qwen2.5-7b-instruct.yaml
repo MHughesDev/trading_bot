@@ -139,6 +139,12 @@ orchestration:
   few_shot_examples: 2
   reflection: false
   max_subagent_depth: 1
+  # Re-planning looks like progress to the barren-step breaker, so it is bounded
+  # here instead. Local tiers get one fewer: a 7B that has re-planned twice is
+  # not on its way to a third plan that works.
+  max_replans_per_run: 2
+  # Consecutive errors from one tool before it leaves exposure for the run.
+  tool_breaker_threshold: 3
   code_execution: "denied"
 
 trifecta:
