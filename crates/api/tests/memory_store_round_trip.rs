@@ -218,3 +218,102 @@ async fn one_users_memory_is_not_another_users() {
     assert_eq!(mine.len(), 1, "and user a still sees their own");
     assert_eq!(mine[0].claim, full_entry("f_a").claim, "and it came back whole");
 }
+
+/// A user preference stores, lists and archives (S-4.6).
+///
+/// The acceptance's second half is "the user can delete a preference and the
+/// next brief omits it". Archiving is what delete means here — §2.4 — so what
+/// must be true is that the next *read* does not return it. A test that only
+/// checked the row's `archived` flag would pass while the brief still showed it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires live Postgres"]
+async fn a_preference_stores_and_a_deleted_one_stops_being_returned() {
+    let pool = store_db().await;
+    let store = api::memory_store::MemoryStore::new(pool.clone());
+    let user = Uuid::new_v4();
+
+    let today = chrono::Utc::now().date_naive().to_string();
+    let mut pref = Entry::finding(
+        "pref_1",
+        "BTC-USD",
+        "never trade through a weekend gap",
+        DataWindow::new(today.clone(), today),
+        Provenance::new("user", "ask_user", "1", "n/a"),
+    );
+    pref.kind = Kind::UserPreference;
+    pref.confidence = Confidence::Established;
+    pref.evidence_class = EvidenceClass::Human;
+    pref.created_by = user.to_string();
+
+    // `human` + `established` is the one combination that needs no verification
+    // pass: the user is the authority on their own preferences. The CHECK that
+    // forbids `model_summary` + `established` must not catch this.
+    store.put(user, &pref).await.expect("a preference stores");
+
+    let listed = store
+        .by_kind(user, Kind::UserPreference, 10)
+        .await
+        .expect("preferences list");
+    assert_eq!(listed.len(), 1, "one preference, listed");
+    assert_eq!(listed[0].confidence, Confidence::Established);
+    assert_eq!(listed[0].evidence_class, EvidenceClass::Human);
+
+    // Delete is archive.
+    sqlx::query("UPDATE agent_memory.entry SET archived = true WHERE entry_id = 'pref_1'")
+        .execute(&pool)
+        .await
+        .expect("the archive lands");
+
+    let after = store
+        .by_kind(user, Kind::UserPreference, 10)
+        .await
+        .expect("preferences list again");
+    assert!(
+        after.is_empty(),
+        "the preference was deleted and is still being returned, so the next brief would \
+         still show it"
+    );
+}
+
+/// An entry with no kind-specific fields stores.
+///
+/// `Entry::extra` is `#[serde(default)]`, so it arrives as JSON `null` unless a
+/// caller sets it — and the column requires an object. Every
+/// `Entry::finding(...)` therefore failed to insert until the store started
+/// normalising it.
+///
+/// This is the regression test, and it is here rather than in the unit tests
+/// because no unit test could have caught it: the round-trip fixture sets
+/// `extra` explicitly and passed throughout. The defect was in the pairing of a
+/// Rust default with a database CHECK, which only a real write exercises.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires live Postgres"]
+async fn an_entry_with_no_extra_fields_still_stores() {
+    let pool = store_db().await;
+    let store = api::memory_store::MemoryStore::new(pool);
+    let user = Uuid::new_v4();
+
+    let bare = Entry::finding(
+        "f_bare",
+        "ETH-USD",
+        "nothing kind-specific about this one",
+        DataWindow::new("2026-04-01", "2026-06-30"),
+        Provenance::new("run_1", "get_bars", "1", "abc"),
+    );
+    assert!(
+        !bare.extra.is_object(),
+        "the fixture must exercise the default, or this test proves nothing"
+    );
+
+    store
+        .put(user, &bare)
+        .await
+        .expect("an entry with no kind-specific fields stores");
+
+    let back = store.by_kind(user, Kind::Finding, 10).await.expect("reads");
+    assert_eq!(back.len(), 1);
+    assert!(
+        back[0].extra.is_object(),
+        "and it reads back as an empty object rather than a null"
+    );
+}

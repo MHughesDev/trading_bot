@@ -203,6 +203,93 @@ pub async fn forget(
     }
 }
 
+// ── the user's own knowledge (AGENT-007 §3.4; Set S task S-4.6) ─────────────
+
+/// A preference the user stated, in their own words.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreferenceBody {
+    /// `global`, or an instrument or strategy the preference is about. It is
+    /// what the brief matches on, so a preference with the wrong scope is a
+    /// preference that is retrieved into the wrong runs — or none.
+    pub scope: String,
+    /// The preference itself. Stored as the user wrote it: this is the one kind
+    /// whose claim is not the platform's sentence, and paraphrasing it would
+    /// make "the user said so" untrue of the text under that label.
+    pub statement: String,
+}
+
+/// POST /api/memory/preferences — record what the user told the agent.
+///
+/// # Why this needs no table of its own
+///
+/// The phase plan names `migrations/0068_user_preferences.sql`. There is no such
+/// migration and there should not be: `user_preference` is one of the seven
+/// kinds in `agent_memory.entry` (AGENT-007 §2.2), with its scope in `extra`. A
+/// second table would be a second store to retrieve from, a second retention
+/// rule, and a second thing the brief has to merge — for a kind that shares
+/// every shared field with the other six. Recorded as ADR-S4-01.
+///
+/// # The window, and why this kind has an easy answer
+///
+/// Every entry needs a `data_window` and the loop does not track one for
+/// findings (OQ-18). A preference is the case where the question does not
+/// arise: the claim is "the user said this", and it is true as of the moment
+/// they said it. Today to today, and that is a fact rather than a guess.
+///
+/// `evidence_class` is `human` and the confidence is `established`, which is the
+/// one combination where `established` needs no verification pass — the user is
+/// the authority on their own preferences.
+pub async fn record_preference(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(body): Json<PreferenceBody>,
+) -> impl IntoResponse {
+    let scope = body.scope.trim();
+    let statement = body.statement.trim();
+    if scope.is_empty() || statement.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "missing_field",
+                "message": "a preference needs a `scope` and a `statement`; `global` is a                             legitimate scope and an empty one is not",
+            })),
+        )
+            .into_response();
+    }
+
+    let today = chrono::Utc::now().date_naive().to_string();
+    let id = format!("pref_{}", uuid::Uuid::new_v4().simple());
+    let mut entry = Entry::finding(
+        &id,
+        scope,
+        statement,
+        harness::memory::DataWindow::new(today.clone(), today),
+        // The user is the source, and the provenance says so rather than naming
+        // whichever tool happened to carry the message.
+        harness::memory::Provenance::new("user", "ask_user", "1", "n/a"),
+    );
+    entry.kind = Kind::UserPreference;
+    entry.confidence = harness::memory::Confidence::Established;
+    entry.evidence_class = harness::memory::EvidenceClass::Human;
+    entry.created_by = token.user_id().to_string();
+    entry.extra = json!({ "scope": scope, "statement": statement });
+
+    let store = MemoryStore::new(state.pg.clone());
+    match store.put(token.user_id(), &entry).await {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(json!({ "id": id, "scope": scope, "statement": statement })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "preference_rejected", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

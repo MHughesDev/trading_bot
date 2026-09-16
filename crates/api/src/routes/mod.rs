@@ -128,6 +128,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/catalogue", get(desk_catalogue::catalogue))
         .route("/api/catalogue/exposure", get(desk_catalogue::exposure))
         .route("/api/desk/digest", get(desk_digest::digest))
+        .route("/api/memory/preferences", post(memory::record_preference))
         .route("/api/memory/{bucket}", get(memory::list))
         .route("/api/memory/{bucket}/{id}", delete(memory::forget))
         // Evidence for the falsification tools (ADR-P7-05). None of these

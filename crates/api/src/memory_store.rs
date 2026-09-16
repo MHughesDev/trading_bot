@@ -165,6 +165,36 @@ impl MemoryStore {
             .as_deref()
             .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
         let evidence_ids = serde_json::to_value(&entry.evidence_ids).unwrap_or(Value::Null);
+        // `Entry::extra` is `#[serde(default)]`, so an entry that carries no
+        // kind-specific fields arrives as JSON `null` — and the column requires
+        // an object. Every `Entry::finding(...)` therefore failed to insert
+        // until this line, which is a defect a unit test could not see: the
+        // round-trip fixture set `extra` explicitly and passed.
+        //
+        // Normalised here rather than relaxed in the schema. "No kind-specific
+        // fields" is `{}`; storing `null` as a second way to say the same thing
+        // would be a distinction every reader has to handle and none can act on.
+        let extra = if entry.extra.is_object() {
+            entry.extra.clone()
+        } else {
+            serde_json::json!({})
+        };
+        // Attribution. §2.2 makes `created_by` a shared field of every kind —
+        // `{agent_model | user_id}` — and the schema requires it. The harness
+        // never sets it: `Entry::finding` leaves it empty and nothing in
+        // `crates/harness` fills it, so a harness-written entry could not be
+        // stored at all.
+        //
+        // The store supplies it, because the store is the only place that knows
+        // the user. Filling it here rather than relaxing the CHECK: an entry
+        // nobody is attributed to is the one §2.2 forbids, and the fix is to
+        // attribute it, not to stop asking. A caller that sets it — the
+        // preference route stamps the user explicitly — keeps its own value.
+        let created_by = if entry.created_by.trim().is_empty() {
+            user_id.to_string()
+        } else {
+            entry.created_by.clone()
+        };
         let m = entry.measurement.as_ref();
 
         sqlx::query(
@@ -219,7 +249,7 @@ impl MemoryStore {
         .bind(&entry.provenance.tool)
         .bind(&entry.provenance.tool_version)
         .bind(&entry.provenance.template_hash)
-        .bind(&entry.created_by)
+        .bind(&created_by)
         .bind(entry.superseded_by.as_deref())
         .bind(&entry.conflicts_with)
         .bind(entry.stale)
@@ -227,7 +257,7 @@ impl MemoryStore {
         .bind(i32::try_from(entry.corroborations).unwrap_or(i32::MAX))
         .bind(&entry.corroborated_by)
         .bind(entry.cited_by_chain)
-        .bind(entry.extra.clone())
+        .bind(extra)
         .execute(&self.pool)
         .await?;
         Ok(())
