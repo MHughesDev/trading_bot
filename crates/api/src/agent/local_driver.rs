@@ -131,6 +131,15 @@ fn describe_input(i: &Input) -> (&'static str, Value) {
     }
 }
 
+/// [`describe_effect`], reachable from the trace projection's tests.
+///
+/// The projection consumes exactly what this produces, and nothing in the type
+/// system connects the two — so the test that checks they agree has to call the
+/// real producer rather than build a fixture that resembles it.
+#[cfg(test)]
+pub(crate) fn describe_effect_for_test(e: &Effect) -> (&'static str, Value) {
+    describe_effect(e)
+}
 /// One effect, as the log records it (AGENT-010 §5, S-2.5).
 ///
 /// The kind is the **variant name**, not a presentational category. `agent_messages`
@@ -194,6 +203,23 @@ fn describe_effect(e: &Effect) -> (&'static str, Value) {
                 "confidence": e.confidence.as_str(),
                 "window": format!("{}→{}", e.data_window.start, e.data_window.end),
             }),
+        ),
+        // A core-tool note is the only note a replay needs, and it is recorded
+        // structurally rather than as a debug string.
+        //
+        // `search_tools`, `record_finding`, `reflect` and `finish_task` are
+        // never dispatched — the gate short-circuits them, on the grounds that
+        // ruling on them would be the harness ruling on itself — so they never
+        // become `ExecuteTool` rows. A trajectory without them cannot replay a
+        // run whose whole content was findings, which is ADR-P0-18's gap and the
+        // `honesty` suite's cases are made of exactly these calls.
+        //
+        // Structured, because the alternative is reading the name back out of a
+        // `{n:?}`, and a field recovered by parsing a debug format is a field
+        // one derive away from being gone.
+        Effect::Note(Note::CoreTool { name, detail }) => (
+            "Note",
+            serde_json::json!({ "core_tool": name, "detail": detail }),
         ),
         Effect::Note(n) => (
             "Note",

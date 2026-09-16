@@ -20,6 +20,7 @@ pub mod llm_proxy;
 pub mod memory_store;
 pub mod negative_from_funnel;
 pub mod retrieval_store;
+pub mod trace_from_effects;
 pub mod turn_summary_store;
 pub mod orchestrator;
 pub mod projects;
