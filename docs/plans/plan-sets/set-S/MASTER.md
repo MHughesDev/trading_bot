@@ -1,6 +1,30 @@
 # The Agent Platform — Set S
 
-**Completion: 0% (0 / 189 tasks). NOT STARTED.**
+**Completion: this header was wrong and is superseded by the per-phase files.**
+
+> **Every phase has now been audited against the source (2026-09-16).** Read the per-phase
+> header, not this line. The audit ran in two passes: phases 4, 5 and 6 read task by task, and
+> then every phase's `**Files:**` list checked for existence with brace and glob expansion.
+>
+> What it found, and it went one way only: **phases 4, 5 and 6 were recorded as `NOT STARTED`
+> and were substantially built.** Phase 4 has roughly 6,800 lines of memory and eval code over
+> 98 passing tests; phase 5's `crates/features` is a real engine of about 5,100 lines over 101
+> tests that the simulator already resolves through; phase 6's desk is 18 components and 13
+> routes over roughly 5,300 lines. Going to implement a task and finding it already built, with
+> its adversarial test passing, is how this was noticed.
+>
+> Phases 0, 1, 2 and 7 were already tracked honestly and needed no correction — phase 7's note
+> that the monitor "decides correctly but does not yet measure" is the standard the others are
+> now held to. Phases 8, 9, 10 and 11 really are at 0%: the file audit confirms
+> `crates/research-session/`, `crates/harness/src/report/`, `crates/harness/src/lifecycle/` and
+> most of `crates/harness/src/context/` do not exist.
+>
+> **The failure mode this file had is worth naming, because it is the expensive one.** A task
+> recorded as not started when it is built costs a reimplementation and, worse, hides the real
+> bottleneck: phase 5's was never the missing engine, it was one sentence in the MCP server's
+> `initialize` instructions telling every model that "backtests support only ema_N and rsi_N
+> features" while fifty families resolved. A plan that is wrong in the "not started" direction
+> sends people to build what exists and leaves what is actually blocking untouched.
 
 **Status:** DRAFT (2026-09-14) — ready for execution.
 **Created:** 2026-09-14
