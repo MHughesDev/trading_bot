@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 domain = { workspace = true }
+dataplane = { workspace = true }
 event-bus = { workspace = true }
 dashmap = { workspace = true }
 serde = { workspace = true }
@@ -21,3 +22,6 @@ rust_decimal = { workspace = true }
 rtrb = { workspace = true }
 rkyv = { workspace = true }
 xxhash-rust = { workspace = true, features = ["xxh3"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

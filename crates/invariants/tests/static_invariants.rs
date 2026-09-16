@@ -109,7 +109,13 @@ fn at04_price_columns_are_decimal_38_18() {
     let price = Regex::new(r"(?im)^\s*(open|high|low|close|vwap|bid_close|ask_close|underlying_close|strike|price|rate|tick_size|lot_size|contract_size|tick_value|price_factor|volume_factor|cash_amount|reserve0|reserve1|tvl_usd|sqrt_price|liquidity)\s+(\w+(?:\((?:[^()]|\([^()]*\))*\))?)").unwrap();
     let mut bad = Vec::new();
     for (path, src) in ddl() {
-        let in_scope = path.ends_with("0046_dataplane.sql") || path.ends_with("07_canonical_market.sql");
+        // Every DDL file that defines ML-data-plane prices must be listed here, or
+        // it escapes INV-05 silently. `08_forward_series.sql` (Set P P-0.3/P-0.4)
+        // did exactly that until it was added: a new file is out of scope by
+        // default, which is the wrong default for an invariant.
+        let in_scope = path.ends_with("0046_dataplane.sql")
+            || path.ends_with("07_canonical_market.sql")
+            || path.ends_with("08_forward_series.sql");
         if !in_scope {
             continue;
         }

@@ -501,6 +501,52 @@ impl BarStore {
             .collect())
     }
 
+    /// Bar opens and their knowledge provenance for one `(symbol, venue, period)`,
+    /// for the coverage census (Set P, P-0.1).
+    ///
+    /// Point-in-time like every other read: a bar the platform could not have known
+    /// by the horizon is not counted, so a census cannot report depth a strategy
+    /// could not have used.
+    ///
+    /// Two rows are returned per bar only if the bar has revisions, and a bar is
+    /// reported as derived if *any* of its revisions was — a series is no more
+    /// trustworthy than the least honest stamp in it.
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn census_bars(&self, symbol: &str, venue: &str, period_secs: u32) -> anyhow::Result<Vec<dataplane::census::CensusBar>> {
+        #[derive(Row, Deserialize)]
+        struct CensusRow {
+            open_ns: i64,
+            derived: u8,
+        }
+        let horizon = self.horizon_ns();
+        let rows: Vec<CensusRow> = self
+            .client
+            .query(&format!(
+                "SELECT toInt64(toUnixTimestamp64Nano(m.event_time)) AS open_ns,
+                        toUInt8(max(bitAnd(m.quality_flags, {bf}) != 0)) AS derived
+                   FROM market_bar AS m
+                   INNER JOIN (SELECT DISTINCT instrument_id, venue_id, symbol FROM instrument_symbol_dim FINAL
+                                WHERE knowledge_time <= fromUnixTimestamp64Nano({horizon})) AS s
+                     ON m.instrument_id = s.instrument_id AND m.venue_id = s.venue_id
+                   INNER JOIN (SELECT venue_id, name FROM venue_dim FINAL) AS v ON m.venue_id = v.venue_id
+                  WHERE s.symbol = ? AND v.name = ? AND m.period_secs = {period_secs}
+                    AND m.knowledge_time <= fromUnixTimestamp64Nano({horizon})
+                  GROUP BY m.event_time
+                  ORDER BY m.event_time",
+                bf = QualityFlags::BACKFILLED_KNOWLEDGE_TIME.0,
+            ))
+            .bind(symbol)
+            .bind(venue)
+            .fetch_all()
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| dataplane::census::CensusBar { open_ns: r.open_ns, knowledge_derived: r.derived != 0 })
+            .collect())
+    }
+
     /// Close time of the latest visible bar.
     pub async fn last_bar_time(&self, instrument_id: &str, timeframe: Timeframe) -> anyhow::Result<Option<DateTime<Utc>>> {
         let facts = self.facts(instrument_id).await?;

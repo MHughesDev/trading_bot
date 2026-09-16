@@ -1102,6 +1102,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "dashmap",
+ "dataplane",
  "domain",
  "event-bus",
  "futures-util",
