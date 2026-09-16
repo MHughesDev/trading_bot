@@ -203,4 +203,8 @@ Persisting it needs an `Entry`, and `Entry::validate` refuses one without a data
 
 **What holds meanwhile:** `MemoryStore` and `/api/memory/{bucket}` are built and tested, `verify_finding` keeps labelling, and findings still reach the next turn through `WorkingState`. What does not happen is persistence across runs — so phase 4's "the harness computes and nothing persists" is now "the harness computes, the store exists, and the last wire is a decision away".
 
-**Status:** open — blocks the write half of S-4.2, and with it S-4.5's `memory_retrievals.cited`.
+**Narrowed 2026-09-16.** It is a question about **findings**, not about every kind. `user_preference` has a natural answer and is now built on it: the claim is "the user said this", which is true as of the moment they said it, so the window is that day to that day — a fact rather than a guess (ADR-S4-01). The same reasoning covers `platform_defect`, whose claim is about the platform on the day it was observed. What has no answer is the kind whose claim is *about a period of market data*: a finding, a negative result, an instrument profile.
+
+**Also narrowed by what shipped around it.** `memory_retrievals.cited` no longer waits on this — S-4.5's log is built and verified, because a retrieval row names an entry id and needs no window of its own. What still waits is `record_finding` writing through, which is the one path where the window is the claim's own subject.
+
+**Status:** open — blocks the write half of S-4.2. No longer blocks S-4.5.
