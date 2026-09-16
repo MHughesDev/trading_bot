@@ -123,7 +123,13 @@ being used to keep a dead idea alive.
 **Traces:** AGENT-007 §3.2; §8.3.
 
 ### S-4.5 The task brief, and the retrieval log — L
-`PARTIAL` 2026-09-16 — `memory/brief.rs` (936 lines, 14 tests) assembles the brief. `migrations/0067_memory_retrievals.sql` does not exist, so `memory_retrievals.cited` — the one field the evaluation half reads from the memory half — has no table.
+`PARTIAL` 2026-09-16 — `memory/brief.rs` (936 lines, 14 tests) assembles the brief, and **the retrieval log now exists**: `migrations/0124_memory_retrievals.sql` (not 0067; the ADR-S3-08 collision), `crates/api/src/retrieval_store.rs`.
+
+The acceptance's fourth clause is met and verified against a live Postgres: `cited` is set when a later act names the entry, and the recall share follows from it. Four decisions are written into the migration rather than left implicit — `None` and `Some(0.0)` stay different answers (a run with nothing to recall has not failed at recall); there is **no foreign key to the entry**, because §2.4 lets an uncited entry be deleted and a cascade would remove the misses while keeping the hits, so the metric would improve whenever the store was tidied; one row per `(run_id, entry_id)` so a re-planned run is not penalised for reassembling its brief; and `mark_cited` returns its count, because citing an id the brief never showed is a different failure from a low share and is otherwise invisible.
+
+The slot CHECK was wrong in every entry on the first attempt and would have refused every row the brief produced, at runtime — `schema_mirrors_memory_types.rs` now compares it against `Slot` directly.
+
+**What keeps it `PARTIAL`**: the first three acceptance clauses are about the brief, not the log — two conflicting findings both retrieved and marked, a stale finding flagged, retrieval working with the embedding sidecar stopped. `brief.rs`'s own tests cover them in-memory (`retrieval_works_with_the_embedding_sidecar_stopped` is named there); what is not yet wired is the brief calling `RetrievalStore::log` at run start, which needs the driver.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
