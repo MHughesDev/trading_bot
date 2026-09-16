@@ -1,12 +1,14 @@
 # Phase 4 — Memory and evaluation
 
-**Completion: 6% (1 / 17 tasks) done, 15 `PARTIAL`, 1 `BLOCKED:HUMAN` — the harness half was built and tested, and now some of it persists.**
+**Completion: 12% (2 / 17 tasks) done, 14 `PARTIAL`, 1 `BLOCKED:HUMAN` — the harness half was built and tested, and now much of it persists.**
 
 > **Updated 2026-09-16.** The sentence this header used to end with — "and nothing persists" — was true that morning and is no longer. Four tables exist and are verified against a live Postgres: `agent_memory.entry` (0122), `agent_turn_summaries` (0123), `memory_retrievals` (0124), and the stores over them. The carry between turns is structured rather than the model's own prose, and `assemble_brief` — 936 tested lines that had **no caller anywhere in the workspace** — now runs in the driver.
 >
 > **The migration numbers are not the plan's.** 0065–0073 were allocated against a tree that has since moved past them; the tree is at 0121 and these follow it. The same collision ADR-S3-08 records for S-3.7.
 >
-> **What most of the remaining `PARTIAL`s now wait on is one decision, not more code.** `Entry` requires a `data_window` and the loop tracks none, so `record_finding` cannot write through — OQ-18. Kinds whose claim is not about a period of market data have a natural answer and are built on it: a preference is true as of the day it was said. Kinds whose claim *is* about a window — findings, negative results, instrument profiles — are the blocked ones, and guessing there would silently degrade the conflict check rather than fail.
+> **OQ-18 is resolved** (ADR-S4-04) and the write path is open: a finding's window is the union of the windows of the results it cites, and every evidence-producing tool now stamps one — `run_backtest` was the last, and its absence would have rejected the central case.
+>
+> **What the remaining `PARTIAL`s wait on is mostly the funnel and the scheduler, not the store.** The derivations are built and the constraints enforce them; what is missing is the event that fires them: the funnel does not call `derive_negative_result` when it refuses a gate (S-4.4), and nothing enqueues the weekly profiler (S-4.7).
 >
 > The other half of the remainder is the evaluation side (S-4.8 onward), which depends on phase 2's `agent_events` for real trajectories.
 
