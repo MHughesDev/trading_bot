@@ -139,6 +139,16 @@ function ApproveControls({
 }) {
   const twoStep = isIrreversibleEnvelope(envelope)
   const [armed, setArmed] = useState(false)
+  // Why this was approved. Optional, and offered only on the irreversible path:
+  // a one-click approval that stopped to ask for prose would not be one click,
+  // and the reversible ones are the ones you take back rather than explain.
+  //
+  // It is offered at all because the platform asks for it on the other side —
+  // `spend_holdout_look` refuses without a reason of at least twenty characters,
+  // written into an append-only log that outlives the run. Until this field
+  // existed the desk had nowhere to type one, and `onApprove`'s `note` parameter
+  // was declared in the type and passed by nobody.
+  const [note, setNote] = useState('')
   return (
     <div className="desk-actions">
       <Button
@@ -150,11 +160,21 @@ function ApproveControls({
             setArmed(true)
             return
           }
-          actions.onApprove?.(id)
+          actions.onApprove?.(id, note.trim() || undefined)
         }}
       >
         {twoStep ? (armed ? `Confirm — ${envelope} cannot be undone` : 'Approve…') : 'Approve'}
       </Button>
+      {armed && (
+        <input
+          className="desk-approve-note"
+          data-testid="approve-note"
+          type="text"
+          value={note}
+          placeholder="why — recorded permanently"
+          onChange={(e) => setNote(e.target.value)}
+        />
+      )}
       {armed && (
         <Button size="xs" variant="ghost" onClick={() => setArmed(false)}>
           Cancel

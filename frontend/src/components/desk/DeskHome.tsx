@@ -135,15 +135,18 @@ export function DeskHome() {
           {running.length === 0 ? (
             <EmptyState message="Nothing is running" detail="Start something below, or open a recent conversation." />
           ) : (
+            // `Conversation` is a typed interface, so read its fields. The cast to
+            // `Record<string, unknown>` that used to be here was defensive access
+            // over a shape the compiler already knows — and TypeScript refused
+            // it, which is why this file did not typecheck.
             running.map((c) => {
-              const row = c as Record<string, unknown>
-              const id = String(row.conversation_id ?? '')
+              const id = c.conversation_id
               return (
                 <div key={id} className="desk-card">
                   <div className="desk-card-hd">
-                    <Link to={`/desk/c/${id}`}>{String(row.title ?? id)}</Link>
+                    <Link to={`/desk/c/${id}`}>{c.title ?? id}</Link>
                     <Badge tone="accent">working</Badge>
-                    <span className="sub">{String(row.model ?? '')}</span>
+                    <span className="sub">{c.model}</span>
                   </div>
                   <div className="desk-actions">
                     <Button size="xs" variant="secondary" onClick={() => void deskApi.cancel(id)}>
@@ -165,12 +168,11 @@ export function DeskHome() {
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
               {recent.map((c) => {
-                const row = c as Record<string, unknown>
-                const id = String(row.conversation_id ?? '')
+                const id = c.conversation_id
                 return (
                   <li key={id} style={{ fontSize: 'var(--t-12)' }}>
-                    <Link to={`/desk/c/${id}`}>{String(row.title ?? id)}</Link>{' '}
-                    <span className="sub">{ago(String(row.last_activity_at ?? ''))} ago</span>
+                    <Link to={`/desk/c/${id}`}>{c.title ?? id}</Link>{' '}
+                    <span className="sub">{ago(c.last_activity_at)} ago</span>
                   </li>
                 )
               })}

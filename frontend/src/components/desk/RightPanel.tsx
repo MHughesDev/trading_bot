@@ -87,7 +87,14 @@ export function StateTab({
       {/* 1. What is this, and what is it doing right now. */}
       <div>
         <div style={{ display: 'flex', gap: 'var(--s-2)', flexWrap: 'wrap', marginBottom: 'var(--s-2)' }}>
-          <Badge tone="outline">{state.mode}</Badge>
+          {/*
+            The mode is labelled for the reason the ring is: `mode` and `kind`
+            both take the value "research" and both rendered as a bare badge, so
+            the panel showed two identical chips meaning different things. That
+            is not a test artefact — a person reading "research · falsify ·
+            research" cannot tell which is which either.
+          */}
+          <Badge tone="outline">mode: {state.mode}</Badge>
           <Badge tone="outline">{state.workflow}</Badge>
           <Badge tone="outline">{state.kind}</Badge>
           <Badge tone={state.ring === 'research' ? 'neutral' : 'warn'}>ring: {state.ring}</Badge>

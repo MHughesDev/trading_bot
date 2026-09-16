@@ -28,6 +28,23 @@ function walk(dir: string, exts: string[]): string[] {
   return out
 }
 
+/**
+ * Strip comments before scanning.
+ *
+ * A ban you may not name in its own documentation is a ban nobody can explain.
+ * `styles/desk.css` opens by saying which aliases must not appear in it, and a
+ * scan over raw text reads that sentence as a violation — so the file that
+ * documents the rule was the file breaking it.
+ *
+ * The Rust side of this repository already solved the same problem the same way
+ * (`crates/invariants/tests/static_invariants.rs::strip_comments`): these scans
+ * forbid *usages*, and explaining a ban is not a usage. Line comments are only
+ * stripped when the `//` is not part of a `://`, so a URL survives.
+ */
+function stripComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+}
+
 /** The back-compat aliases `tailwind.theme.css` marks "do not introduce new usages". */
 const FORBIDDEN = [
   'bg-surface-2',
@@ -60,10 +77,9 @@ describe('the desk is not built on the aliases it replaces', () => {
   for (const alias of FORBIDDEN) {
     it(`no desk file uses ${alias}`, () => {
       const offenders = files.filter((f) => {
-        const text = readFileSync(f, 'utf8')
         // This test file names the aliases on purpose; exclude only itself.
         if (f === fileURLToPath(import.meta.url)) return false
-        return text.includes(alias)
+        return stripComments(readFileSync(f, 'utf8')).includes(alias)
       })
       expect(offenders).toEqual([])
     })

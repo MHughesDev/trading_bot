@@ -14,6 +14,7 @@ import { ASSET_CLASSES } from '@/lib/assetClass'
 import { TIMEFRAMES } from '@/hooks/useBars'
 import { DASH, clockTime, dateTime, money, pct, price as fmtPrice, signedMoney, signedPct } from '@/lib/format'
 import { Panel, PanelBody, PanelFooter, PanelHeader } from '@/components/primitives/Panel'
+import { Link } from 'react-router-dom'
 import { Button } from '@/components/primitives/Button'
 import { Badge, KeyValue, StatusDot } from '@/components/primitives/Badge'
 import { Label } from '@/components/primitives/Num'
@@ -23,8 +24,7 @@ import { Select } from '@/components/primitives/Overlay'
 import { ConfirmDialog, Modal } from '@/components/primitives/Modal'
 import { EmptyState } from '@/components/primitives/States'
 import { VenueCredentials } from '@/components/settings/VenueCredentials'
-import { LlmCredentialForm } from '@/components/agent/LlmCredentialForm'
-import { ApiAccessCard } from '@/components/agent/ApiAccessCard'
+import { ApiAccessCard } from '@/components/settings/ApiAccessCard'
 import { cn } from '@/lib/utils'
 
 /* =============================================================================
@@ -1094,15 +1094,24 @@ function VenuesSection() {
   )
 }
 
+// Providers and keys live on the desk now (AGENT-012 §10, task S-6.20). This
+// section points there rather than holding a second form: two places to set one
+// key is two places for it to be wrong, and the desk's page is the one that also
+// shows which profile is calibrated and which reads `unmeasured`.
 function AiSection() {
   return (
     <Panel>
       <PanelBody>
         <p className="sec" style={{ fontSize: 'var(--t-12)', lineHeight: 1.55, marginBottom: 'var(--s-4)' }}>
-          Connect an LLM provider for the research agent. Keys are verified against the provider, encrypted
-          at rest, and never returned.
+          Providers and keys moved to the desk, where they sit beside the model tiers they
+          configure. Keys are verified against the provider, encrypted at rest, and never
+          returned.
         </p>
-        <LlmCredentialForm />
+        <Link to="/desk/models">
+          <Button size="xs" variant="secondary">
+            Open Models and tiers
+          </Button>
+        </Link>
       </PanelBody>
     </Panel>
   )

@@ -23,9 +23,17 @@ export function SignificanceCard({ significance }: { significance: SignificanceV
           <SignificanceBody s={significance} />
         ) : (
           <div className="rounded-md border border-dashed border-border-2 p-4 text-sm text-text-dim">
-            Not yet tested. A result appears once the Significance checkpoint runs your
-            strategy against its randomized baseline — and it is always shown alongside
-            how many times you searched.
+            {/*
+              "not yet significance-tested", not "not yet tested". The strategy
+              may well have been backtested; what has not happened is the
+              comparison against a randomized baseline, and the shorter wording
+              reads as though nothing has been run at all. This file's own header
+              comment and its test both said the longer phrase while the markup
+              said the shorter one.
+            */}
+            Not yet significance-tested. A result appears once the Significance checkpoint
+            runs your strategy against its randomized baseline — and it is always shown
+            alongside how many times you searched.
           </div>
         )}
       </CardContent>
