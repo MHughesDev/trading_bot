@@ -183,7 +183,21 @@ def _bars_from_ticks(
     start = math.log(first)
     bar_open_log = start + np.concatenate([[0.0], np.cumsum(returns)[:-1]])
     within = np.cumsum(path_steps, axis=1)
-    path = bar_open_log[:, None] + within
+    # The bar's opening point is part of the bar. Prepending a zero increment
+    # puts it in the path, and without it `efficient_high` and `efficient_low`
+    # are the extremes of everything *after* the open — so they need not bracket
+    # the open at all, and on a wide spread the observed open printed at the ask
+    # comes out above the observed high.
+    #
+    # That produced 2,526 bars of 6,000 whose open lay outside their own range,
+    # which is not a bar. It was invisible until the Garman-Klass reconciliation
+    # (S-5.14): `0.5·ln(h/l)² − (2ln2−1)·ln(c/o)²` is non-negative for any
+    # well-formed bar, because `ln(h/l) ≥ |ln(c/o)|` when the range contains both
+    # ends — so the engine's per-bar floor at zero can never bind, and it was
+    # binding on fifteen bars.
+    path = bar_open_log[:, None] + np.concatenate(
+        [np.zeros((n, 1)), within], axis=1
+    )
 
     efficient_high = np.exp(path.max(axis=1))
     efficient_low = np.exp(path.min(axis=1))
