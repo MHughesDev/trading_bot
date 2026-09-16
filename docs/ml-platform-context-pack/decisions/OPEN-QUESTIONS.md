@@ -184,3 +184,23 @@ What is not in the brief, and not anywhere else in this repository, is a **numbe
 **Decision:** none yet. The table ships with the mechanism (versioned facts, a 90-day staleness bound that reports itself in the summary) and every numeric field flagged `verified: false`, asserted by `no_numeric_limit_claims_to_be_verified` so a later edit cannot quietly promote a guess. A is the right answer and it needs someone to read three sets of exchange docs, which is not a thing to infer.
 
 **Status:** open — `get_venue_constraints` is correct, useful and incomplete, and says so in its own output.
+
+### OQ-18 · A verified finding has no data window, and `data_window` is mandatory. Where does it come from?
+**Context:** found 2026-09-16 wiring `record_finding` to the store built for S-4.3. The loop already does the hard half: `memory::verify_finding` checks every cited id against what tools actually returned and labels the claim `established` or `suggestive` (S-4.2, tested and passing). That verdict then lives for exactly one run — `WorkingState` carries it, the turn ends, and the platform forgets what it checked.
+
+Persisting it needs an `Entry`, and `Entry::validate` refuses one without a data window, correctly: AGENT-007 §2.2 makes `data_window {start, end}` a shared field of every kind, and §2.2.1's near-duplicate check is "same subject, same measured quantity, **overlapping window**". The window is not decoration; it is one of the three keys the conflict machinery joins on.
+
+**The loop does not have one.** `drive.rs` tracks no window, `Task` has no window, and `WorkingState` has none. Neither does the loop have a `run_id` — the driver owns that — so `provenance` is half-absent too, though that half is mechanical to pass down.
+
+**What it costs:** a wrong window is worse than a missing one. Two findings about different periods that both claim the same window will be offered to the near-duplicate check as candidates and to §2.2.1 as a possible contradiction; two findings about the same period carrying different windows will never be compared at all. Either way the conflict surface — the thing P5 says must be surfaced and never merged — silently stops working, and nothing about the stored row looks wrong.
+
+**Options.**
+**A. Derive it from the cited evidence.** The results in `results_by_id` often carry a window (`get_bars`, a backtest, every `analysis` template stamps one in `detail.window`). Take the union, or the intersection, of the windows of the cited results. This is the most faithful — the claim rests on those results and on nothing else — and it needs a rule for the case the spec does not cover: three cited results with three different windows, and a claim that is about all of them or about one.
+**B. Make the model state it.** Add a required `data_window` argument to `record_finding`. Honest about provenance and it moves a factual matter into the model's prose, which is the class of thing AGENT-011 keeps pulling *out* of free-form strings — and an unverifiable window is exactly the field a model under pressure will fill with the widest range it can.
+**C. Carry the run's window.** Give the run a declared research window at admission and stamp every finding with it. Simple, always correct at run granularity, and wrong at claim granularity the moment one run looks at two periods — which is what a comparison workflow does by definition.
+
+**Decision:** none yet, and nothing is implemented. An `Effect::Remember` variant was written and then backed out rather than left emitting entries stamped with a guessed window: a stored finding with a plausible wrong window is undetectable afterwards, and it degrades the conflict check rather than failing it. A is most likely right and its tie-breaking rule is the part that needs deciding.
+
+**What holds meanwhile:** `MemoryStore` and `/api/memory/{bucket}` are built and tested, `verify_finding` keeps labelling, and findings still reach the next turn through `WorkingState`. What does not happen is persistence across runs — so phase 4's "the harness computes and nothing persists" is now "the harness computes, the store exists, and the last wire is a decision away".
+
+**Status:** open — blocks the write half of S-4.2, and with it S-4.5's `memory_retrievals.cited`.
