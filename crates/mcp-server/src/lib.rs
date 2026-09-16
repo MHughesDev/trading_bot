@@ -25,6 +25,7 @@
 // macro recursion limit.
 #![recursion_limit = "256"]
 
+pub mod gate;
 pub mod spec;
 pub mod taxonomy;
 pub mod tools;
@@ -312,15 +313,45 @@ pub struct McpContext {
     /// the sink is attached. Private makes `McpContext::new` the only way to have
     /// a context at all, and therefore the only way to reach `dispatch_tool`.
     audit: AuditSink,
+    /// Call budgets and the trial ledger, consulted before any handler runs
+    /// (INV-16, AGENT-006 §2.4b/§2.5). One gate per run: `max_calls_per_run`
+    /// means this run's budget, so a fresh context is a fresh budget.
+    pub gate: Arc<gate::CallGate>,
 }
 
 impl McpContext {
+    /// A context whose trials are registered through the platform API.
+    ///
+    /// This is the constructor every front door should use. [`Self::unledgered`]
+    /// exists for the case where there is genuinely no ledger behind the door,
+    /// and it does not weaken the invariant — it makes every trial-spending tool
+    /// refuse.
     pub fn new(api: ApiClient) -> Self {
+        let registrar = Arc::new(gate::ApiTrialRegistrar::new(api.clone()));
         Self {
             audit: AuditSink::through_platform(api.clone()),
             api,
             draft_store: Arc::new(Mutex::new(HashMap::new())),
             trajectory: Arc::new(Trajectory::new()),
+            gate: Arc::new(gate::CallGate::new(registrar)),
+        }
+    }
+
+    /// A context with no trial ledger behind it: reads work and every
+    /// trial-spending tool refuses with `trial_registration_unavailable`.
+    ///
+    /// Not a bypass — the opposite. It is the honest shape for a front door
+    /// pointed at a platform that cannot register a trial, and it is what tests
+    /// use when they want to prove the refusal rather than the happy path.
+    pub fn unledgered(api: ApiClient) -> Self {
+        Self {
+            // Still audited. The ledger is what this constructor does without;
+            // the audit trail is not optional on any path.
+            audit: AuditSink::through_platform(api.clone()),
+            api,
+            draft_store: Arc::new(Mutex::new(HashMap::new())),
+            trajectory: Arc::new(Trajectory::new()),
+            gate: Arc::new(gate::CallGate::without_registrar()),
         }
     }
 
@@ -338,8 +369,18 @@ impl McpContext {
     /// Record one tool step. Every step `dispatch_tool` runs is recorded
     /// automatically; harness-side tools that never reach dispatch (a driver's
     /// inline wait, its termination tool) call this themselves.
-    pub async fn record_step(&self, tool_name: &str, arguments: &Value, result: &Value, latency_ms: u128, tokens: Option<(u64, u64)>) {
-        let step_idx = self.trajectory.next_step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    pub async fn record_step(
+        &self,
+        tool_name: &str,
+        arguments: &Value,
+        result: &Value,
+        latency_ms: u128,
+        tokens: Option<(u64, u64)>,
+    ) {
+        let step_idx = self
+            .trajectory
+            .next_step
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let body = json!({
             "traj_id": self.trajectory.id,
             "step_idx": step_idx,
@@ -355,7 +396,9 @@ impl McpContext {
             "tokens_out": tokens.map(|t| i32::try_from(t.1).unwrap_or(i32::MAX)),
         });
         if let Err(e) = self.api.post("/api/agent/trajectory", body).await {
-            self.trajectory.unrecorded.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.trajectory
+                .unrecorded
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             tracing::warn!(traj_id = %self.trajectory.id, step_idx, tool = tool_name, error = ?e.body, "trajectory step not recorded");
         }
     }
@@ -400,14 +443,20 @@ pub fn tool_schema_hash(tool_name: &str) -> String {
             .as_array()
             .map(|defs| {
                 defs.iter()
-                    .filter_map(|d| Some((d.get("name")?.as_str()?.to_string(), dataplane::content_hash(d).ok()?)))
+                    .filter_map(|d| {
+                        Some((
+                            d.get("name")?.as_str()?.to_string(),
+                            dataplane::content_hash(d).ok()?,
+                        ))
+                    })
                     .collect()
             })
             .unwrap_or_default()
     });
-    map.get(tool_name)
-        .cloned()
-        .unwrap_or_else(|| dataplane::content_hash(&json!({ "name": tool_name, "descriptor": null })).unwrap_or_default())
+    map.get(tool_name).cloned().unwrap_or_else(|| {
+        dataplane::content_hash(&json!({ "name": tool_name, "descriptor": null }))
+            .unwrap_or_default()
+    })
 }
 
 /// Whether live automations are permitted via the MCP server.
@@ -464,21 +513,35 @@ fn definition_arg(params: &Value) -> String {
     }
 }
 
-/// Dispatch a tool call under a fresh audit envelope, and record the step in the
-/// agent trajectory. There is no unaudited and no unrecorded variant.
+/// Dispatch a tool call under a fresh audit envelope, gated, and record the step
+/// in the agent trajectory. There is no unaudited, no ungated and no unrecorded
+/// variant.
 ///
-/// The order is the mechanism (SPEC §15, ADR-P2-21, AT-64): the `pre` record is
-/// written **before** the call reaches the platform's authorisation, so a request
-/// the platform refuses has already been recorded as having been made — the only
-/// way a denial leaves any evidence at all. The `post` record follows with what
-/// the platform decided.
+/// The order is the mechanism (SPEC §15, ADR-P2-21, AT-64; AGENT-006 §2.5,
+/// INV-16):
+///
+/// 1. the `pre` audit record — written **before** anything else, so a request the
+///    platform refuses has already been recorded as having been made. That is the
+///    only way a denial leaves any evidence at all;
+/// 2. resolve the [`spec::ToolSpec`] — an unknown name never reaches a handler;
+/// 3. [`gate::CallGate::admit`] — the call budget, then the ledger row;
+/// 4. **only then** the handler;
+/// 5. the `post` audit record with what the platform decided, and the ticket id
+///    attached to the result, so what the model cites and what the ledger
+///    recorded are the same row.
+///
+/// Step 4 is unreachable except through step 3, asserted structurally by
+/// `the_only_call_to_the_dispatch_table_is_behind_the_gate` rather than left to
+/// review.
 ///
 /// **A dispatch the platform would not record does not happen.** If the `pre`
 /// write fails, this returns `audit_unavailable` and the tool is never run. That
 /// is a reversal of an earlier fail-open stance and it is deliberate
 /// (ADR-P2-34): the audit store *is* the platform store, so "the trail is down
-/// but the platform is up" is not a state this system has, and the product claim
-/// is that it is structurally unable to not count a look.
+/// but the platform is up" is not a state this system has. A refusal is recorded
+/// in the trajectory like any other step — a call that was refused is evidence
+/// about the run, and dropping it would make the trajectory disagree with the
+/// ledger about what was attempted.
 pub async fn dispatch_tool(
     ctx: &McpContext,
     tool_name: &str,
@@ -526,8 +589,42 @@ pub async fn dispatch_under(
     _envelope: &AuditEnvelope,
 ) -> Value {
     let started = std::time::Instant::now();
-    let result = dispatch_untraced(ctx, tool_name, params, progress).await;
-    ctx.record_step(tool_name, params, &result, started.elapsed().as_millis(), None).await;
+    let result = match spec::find(tool_name) {
+        None => json!({ "error": "unknown_tool", "tool": tool_name }),
+        Some(s) if !s.status.is_active() => spec::ToolError::new(
+            "tool_deprecated",
+            format!("`{tool_name}` is no longer offered."),
+            match s.status {
+                spec::ToolStatus::Deprecated {
+                    superseded_by: Some(next),
+                    ..
+                } => format!("call `{next}` instead"),
+                _ => "there is no replacement; the capability was withdrawn".to_string(),
+            },
+        )
+        .to_value(),
+        Some(s) => match ctx.gate.admit(s, params).await {
+            Err(e) => e.to_value(),
+            Ok(ticket) => {
+                let mut out = dispatch_untraced(ctx, tool_name, params, progress).await;
+                if let (Some(t), Some(obj)) = (ticket, out.as_object_mut()) {
+                    obj.entry("ids")
+                        .or_insert_with(|| json!({}))
+                        .as_object_mut()
+                        .map(|ids| ids.insert("ticket_id".into(), json!(t.ticket_id)));
+                }
+                out
+            }
+        },
+    };
+    ctx.record_step(
+        tool_name,
+        params,
+        &result,
+        started.elapsed().as_millis(),
+        None,
+    )
+    .await;
     result
 }
 
@@ -688,8 +785,10 @@ pub enum ToolProfile {
 /// A deprecated tool is absent whatever its `profiles` still says (§2.7).
 #[must_use]
 pub fn internal_agent_tools() -> Vec<&'static str> {
-    let mut names: Vec<&str> =
-        spec::exposed(ToolProfile::InternalAgent).iter().map(|s| s.name).collect();
+    let mut names: Vec<&str> = spec::exposed(ToolProfile::InternalAgent)
+        .iter()
+        .map(|s| s.name)
+        .collect();
     names.sort_unstable();
     names
 }
@@ -706,7 +805,12 @@ pub fn tool_definitions() -> Value {
 /// copy to disagree with, which is what retired `stamp()` — it existed to graft
 /// the taxonomy's namespace and risk onto a JSON literal that did not carry them.
 pub fn tool_definitions_for(profile: ToolProfile) -> Value {
-    Value::Array(spec::exposed(profile).iter().map(|s| s.descriptor()).collect())
+    Value::Array(
+        spec::exposed(profile)
+            .iter()
+            .map(|s| s.descriptor())
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -741,13 +845,21 @@ mod catalogue_tests {
             if !t.starts_with('"') {
                 continue;
             }
-            let Some(rest) = t.strip_prefix('"') else { continue };
-            let Some((name, after)) = rest.split_once('"') else { continue };
+            let Some(rest) = t.strip_prefix('"') else {
+                continue;
+            };
+            let Some((name, after)) = rest.split_once('"') else {
+                continue;
+            };
             if after.trim_start().starts_with("=>") {
                 arms.insert(name);
             }
         }
-        assert!(arms.len() > 50, "the arm scan found only {}; it has drifted", arms.len());
+        assert!(
+            arms.len() > 50,
+            "the arm scan found only {}; it has drifted",
+            arms.len()
+        );
 
         let declared: BTreeSet<&str> = spec::names().into_iter().collect();
         let no_spec: Vec<&&str> = arms.difference(&declared).collect();
@@ -800,12 +912,18 @@ mod catalogue_tests {
     fn every_first_sentence_fits_the_flat_budget() {
         let mut over: Vec<(String, usize)> = Vec::new();
         for s in spec::catalog() {
-            let first = s.description.split_once(". ").map_or(s.description, |(a, _)| a);
+            let first = s
+                .description
+                .split_once(". ")
+                .map_or(s.description, |(a, _)| a);
             if first.len() > 400 {
                 over.push((s.name.to_string(), first.len()));
             }
         }
-        assert!(over.is_empty(), "first sentence over 400 B (AGENT-005 §5.4): {over:?}");
+        assert!(
+            over.is_empty(),
+            "first sentence over 400 B (AGENT-005 §5.4): {over:?}"
+        );
     }
 
     /// The routing unit stays routable (AGENT-006 §2.1, §10.4;
@@ -822,7 +940,10 @@ mod catalogue_tests {
             *counts.entry(s.namespace).or_default() += 1;
         }
         let over: Vec<(&&str, &usize)> = counts.iter().filter(|(_, n)| **n > 16).collect();
-        assert!(over.is_empty(), "namespaces over the 16-tool routing cap: {over:?}");
+        assert!(
+            over.is_empty(),
+            "namespaces over the 16-tool routing cap: {over:?}"
+        );
     }
 
     /// Every `notes_section` resolves to a heading in the guide (§10.3).
@@ -848,20 +969,26 @@ mod catalogue_tests {
     /// §2.5, the static half: a write in a namespace that can run the simulator
     /// either declares a trial kind or is on this list with a reason.
     ///
-    /// **This asserts the declaration, not the enforcement.** Wrapping dispatch
-    /// so the ledger row is written before the tool runs is AGENT-006 §2.5 and is
-    /// not implemented here; until it is, `spends_trial` says what *should*
-    /// register a trial, and `run_sweep`/`run_study` register theirs through the
-    /// platform's own Experiment path as they always did.
+    /// The *enforcement* half is [`gate::CallGate::admit`], called by
+    /// `dispatch_tool` before any handler runs (Set S task S-3.13). This test
+    /// still matters because the gate can only enforce what a spec declares: a
+    /// simulator-running tool that declares `TrialKind::None` would pass the gate
+    /// honestly and be wrong at the declaration.
     #[test]
     fn a_write_that_can_run_the_simulator_declares_a_trial() {
         use spec::TrialKind;
         // Each entry is a write in one of the three namespaces that does not run
         // anything: it records a verdict or cancels work already counted.
         const RECORDS_ONLY: &[(&str, &str)] = &[
-            ("create_experiment", "creates the container; the trials are the Studies"),
+            (
+                "create_experiment",
+                "creates the container; the trials are the Studies",
+            ),
             ("cancel_sweep", "stops work already registered"),
-            ("stop_backtest", "cancels a run whose trial was registered when it started"),
+            (
+                "stop_backtest",
+                "cancels a run whose trial was registered when it started",
+            ),
         ];
         let mut problems = Vec::new();
         for s in spec::catalog() {
@@ -883,5 +1010,88 @@ mod catalogue_tests {
             }
         }
         assert!(problems.is_empty(), "{problems:#?}");
+    }
+
+    /// §2.5, the enforcement half, asserted **structurally**: the dispatch table
+    /// has exactly one caller and that caller is behind the gate (Set S S-3.13,
+    /// INV-16, board §4).
+    ///
+    /// A behavioural test can only prove the paths it thinks to try. This one
+    /// proves there is no second path: `dispatch_untraced` is called once, from
+    /// inside the `Ok(ticket)` arm of `gate.admit`. A future refactor that adds a
+    /// convenient second call site — a "fast path" for reads, a test helper that
+    /// skips the ledger — fails here before it can ship.
+    #[test]
+    fn the_only_call_to_the_dispatch_table_is_behind_the_gate() {
+        const SRC: &str = include_str!("lib.rs");
+        // Only the shipping half of the file: this module names the call site in
+        // string literals, which are assertions about it, not entrances to it.
+        let shipping = SRC
+            .split_once("mod catalogue_tests {")
+            .expect("the test module is the last thing in this file")
+            .0;
+        let sites = shipping.matches("dispatch_untraced(ctx").count();
+        assert_eq!(
+            sites, 1,
+            "`dispatch_untraced` has {sites} call sites; every handler in this \
+             crate must be reachable only through `CallGate::admit`, or a \
+             trial-spending tool has an unregistered path to compute"
+        );
+
+        let dispatcher = SRC
+            .split_once("pub async fn dispatch_tool")
+            .expect("dispatch_tool exists")
+            .1
+            .split_once("async fn dispatch_untraced")
+            .expect("dispatch_untraced follows it")
+            .0;
+        let admit = dispatcher
+            .find("ctx.gate.admit(")
+            .expect("dispatch_tool consults the gate");
+        let call = dispatcher
+            .find("dispatch_untraced(ctx")
+            .expect("dispatch_tool reaches the table");
+        assert!(
+            admit < call,
+            "the gate is consulted after the handler runs, which registers the \
+             trial for work already done"
+        );
+    }
+
+    /// Adversarial, end to end: a tool declaring a trial cannot reach its handler
+    /// on a context with no ledger. Together with the structural test above, this
+    /// is the pair the phase's definition of done asks for — the mechanism
+    /// refuses, and there is no route around the mechanism.
+    #[tokio::test]
+    async fn a_trial_spending_tool_is_refused_on_an_unledgered_context() {
+        let ctx = McpContext::unledgered(ApiClient::new("http://127.0.0.1:1", "t"));
+        // `backtest_strategy` declares `TrialKind::Search`; its handler would post
+        // to the platform. The refusal happens first, so the unreachable base URL
+        // above is never contacted — which is itself the assertion.
+        let out = dispatch_tool(&ctx, "backtest_strategy", &json!({}), None).await;
+        let err = out.get("error").expect("refused");
+        assert_eq!(
+            err.get("code"),
+            Some(&json!("trial_registration_unavailable"))
+        );
+    }
+
+    /// And the complement: a read on the same unledgered context is not blocked.
+    /// A gate that refuses everything is easy and useless.
+    #[tokio::test]
+    async fn a_read_is_not_blocked_by_the_absence_of_a_ledger() {
+        let ctx = McpContext::unledgered(ApiClient::new("http://127.0.0.1:1", "t"));
+        let out = dispatch_tool(&ctx, "list_lanes", &json!({}), None).await;
+        assert!(out.get("lanes").is_some(), "{out}");
+    }
+
+    /// An unknown name is refused before dispatch rather than by the table's
+    /// catch-all, so a tool that is not in the catalogue can never run even if
+    /// someone adds an arm for it without a spec.
+    #[tokio::test]
+    async fn a_name_with_no_spec_never_reaches_the_table() {
+        let ctx = McpContext::unledgered(ApiClient::new("http://127.0.0.1:1", "t"));
+        let out = dispatch_tool(&ctx, "x_skill", &json!({}), None).await;
+        assert_eq!(out.get("error"), Some(&json!("unknown_tool")));
     }
 }
