@@ -152,12 +152,6 @@ pub const TEACHINGS: &[Teaching] = &[
         see: Some("guide#exits"),
     },
     Teaching {
-        code: "risk_exceeds_platform",
-        fix: "the platform's ceiling is the ceiling. Lower the override, or leave it out and \
-              inherit the platform value.",
-        see: Some("guide#risk"),
-    },
-    Teaching {
         code: "parameter_out_of_range",
         fix: "the sample violates the parameter's declared `min`/`max`. Either the sample is \
               wrong or the range is — and the range is what the sweep is checked against, so \

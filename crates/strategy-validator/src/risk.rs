@@ -17,7 +17,7 @@ pub fn validate_risk_overrides(overrides: &RiskOverrides) -> Vec<ValidationError
     if let Some(max_pos) = overrides.max_position {
         if max_pos > limits.max_position {
             errors.push(ValidationError {
-                code: "risk_exceeds_platform",
+                code: "loosening",
                 path: "risk_overrides.max_position".into(),
                 message: format!(
                     "override {max_pos} exceeds global limit {g}; \
@@ -31,7 +31,7 @@ pub fn validate_risk_overrides(overrides: &RiskOverrides) -> Vec<ValidationError
     if let Some(rate) = overrides.max_order_rate_per_minute {
         if rate > limits.max_orders_per_minute {
             errors.push(ValidationError {
-                code: "risk_exceeds_platform",
+                code: "loosening",
                 path: "risk_overrides.max_order_rate_per_minute".into(),
                 message: format!(
                     "override {rate} exceeds global limit {g}; \
@@ -45,7 +45,7 @@ pub fn validate_risk_overrides(overrides: &RiskOverrides) -> Vec<ValidationError
     if let Some(rate) = overrides.max_order_rate_per_second {
         if rate > limits.max_orders_per_second {
             errors.push(ValidationError {
-                code: "risk_exceeds_platform",
+                code: "loosening",
                 path: "risk_overrides.max_order_rate_per_second".into(),
                 message: format!(
                     "override {rate} exceeds global limit {g}; \

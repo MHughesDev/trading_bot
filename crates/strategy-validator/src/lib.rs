@@ -4,6 +4,7 @@
 //! before persisting or applying a definition. No door has a privileged bypass.
 
 pub mod exits;
+pub mod feature_names;
 pub mod expressions;
 pub mod risk;
 pub mod schema;
@@ -124,6 +125,12 @@ pub fn validate(def: &StrategyDefinition) -> Result<ValidatedDefinition, Vec<Val
     let mut errors = Vec::new();
 
     errors.extend(schema::validate_schema(def));
+
+    // Declared features must resolve. Before this pass a typo validated cleanly
+    // and failed inside `features::runtime::feature` during the run — which for
+    // an agent is after a trial was spent, so the cheapest error in the system
+    // was charged at its most expensive point.
+    errors.extend(feature_names::check(def));
 
     // Parameters: declarations, references, constraints — then materialize
     // defaults so the expression pass sees plain literals.
