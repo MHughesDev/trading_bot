@@ -828,3 +828,46 @@ all, and that looks identical to a strategy with no edge.
 What it lists, the engine resolves — both read the same registry table, so there
 is no second catalogue to drift. That is asserted by
 `every_example_name_resolves_in_the_engine`.
+
+### preview_signals
+
+What a definition would have done on a window, before you pay for a backtest.
+
+It exists because the cheapest question you can ask about a strategy — *does this
+thing ever trigger?* — used to be priced the same as the most expensive one. The
+only way to find out was to run a backtest, and a backtest costs a trial: a ledger
+row, a draw against the family's effective number of trials, a permanent entry in
+the multiple-testing arithmetic. You were paying confirmatory currency for typos.
+
+It reports **signals only**. No fills, no costs, no P&L, no Sharpe. That is not a
+limitation waiting to be lifted — it is the reason the tool is free. A preview
+that reported a return would be a backtest with the ledger switched off.
+
+Read these fields:
+
+- `entries` — rising edges of a signal an action actually trades. A condition
+  that is true on four hundred bars and fires twice is a regime flag, not an
+  entry trigger; `bars_true` and `fires` are reported separately so you can see
+  which one you wrote.
+- `bars_evaluated` — bars on which every feature had a value. Bars before that
+  are warm-up and cannot produce a signal whatever the conditions say.
+- `sample_events` — the first firings, each with the feature values that caused
+  it. The reason, not just the fact.
+- `never_fires_because` — set when nothing fired, naming which of the several
+  possible reasons it was: a window shorter than the warm-up, a feature producing
+  no values, a condition never true, a condition *always* true (an entry fires on
+  the rising edge, so a condition true from the first bar never fires), or a
+  signal no action names. A bare zero sends you to change the wrong thing.
+
+The entry count and the entry bars agree with the simulator — same feature
+derivation, same rising-edge rule — and that agreement is asserted by
+`preview_matches_simulator.rs`. If a preview and the backtest that follows it
+ever disagree, the preview is the bug.
+
+**The window.** It reads through the same point-in-time store everything else
+does, so the research cutoff clips it and says so in `cutoff_applied`. A window
+reaching into the **sealed holdout is refused**, naming the date the holdout
+begins, rather than quietly shortened. The refusal is deliberate and it is not
+there to be worked around: a shortened preview would report entries from a window
+the backtest would refuse outright, and you would learn a number the next tool
+disagrees with.

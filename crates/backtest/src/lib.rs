@@ -33,6 +33,7 @@ pub mod gaps;
 pub mod gates;
 pub mod manager;
 pub mod nulls;
+pub mod preview;
 pub mod procedure_null;
 pub mod reconcile;
 pub mod requirements;

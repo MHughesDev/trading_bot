@@ -28,6 +28,8 @@
 
 use serde_json::{json, Value};
 
+use crate::ApiClient;
+
 use crate::spec::ToolSpec;
 use crate::taxonomy::Risk;
 
@@ -126,8 +128,27 @@ pub fn list_features(params: &Value) -> Value {
     })
 }
 
+/// `preview_signals` — what a definition would have done, before buying a trial.
+///
+/// Routed rather than answered here: it reads bars, and every path to bars goes
+/// through the API's project resolution and point-in-time store. A local
+/// shortcut would be a second read path, which is the one thing the data layer
+/// does not have.
+pub async fn preview_signals(api: &ApiClient, params: &Value) -> Value {
+    for field in ["definition", "instrument_id", "start", "end"] {
+        if params.get(field).is_none() {
+            return json!({ "error": "missing_field", "field": field });
+        }
+    }
+    match api.post("/api/agent/strategy/preview", params.clone()).await {
+        Ok(v) => v,
+        Err(e) => e.to_tool_error(),
+    }
+}
+
 pub fn specs() -> Vec<ToolSpec> {
-    vec![ToolSpec::new(
+    vec![
+    ToolSpec::new(
         "list_features",
         "strategy",
         Risk::Read,
@@ -152,7 +173,41 @@ pub fn specs() -> Vec<ToolSpec> {
         "{n_shown} of {n_matched} matching families ({n_total} in the engine)",
         &[("n_shown", ""), ("n_matched", ""), ("n_total", "")],
     )
-    .notes("list_features")]
+    .notes("list_features"),
+    ToolSpec::new(
+        "preview_signals",
+        "strategy",
+        Risk::Read,
+        "What a strategy definition would have done on a window: how many entries, on which          bars, with the feature values that caused them — and, when it never fires, which of          the several possible reasons it was. Spends no trial. Use it to check a draft before          paying for a backtest; it reports signals only, never P&L.",
+        json!({
+            "type": "object",
+            "required": ["definition", "instrument_id", "start", "end"],
+            "properties": {
+                "definition": {
+                    "type": "object",
+                    "description": "the strategy definition to preview — a draft, not a saved id"
+                },
+                "instrument_id": {"type": "string"},
+                "timeframe": {"type": "string", "default": "1m"},
+                "start": {"type": "string", "description": "RFC3339"},
+                "end": {
+                    "type": "string",
+                    "description": "RFC3339. A window reaching into the sealed holdout is                                     refused by name rather than shortened."
+                },
+                "project_id": {"type": "string", "description": "defaults to your Desk"}
+            }
+        }),
+    )
+    // Stated rather than left to the default. This is the whole reason the tool
+    // exists: the cheapest question an author asks used to cost a trial, and a
+    // reader of this spec should be able to see that it no longer does.
+    .spends_trial(crate::spec::TrialKind::None)
+    .summary(
+        "{entries} entries over {bars_evaluated} evaluated bars",
+        &[("entries", ""), ("bars_evaluated", "")],
+    )
+    .notes("preview_signals"),
+    ]
 }
 
 #[cfg(test)]

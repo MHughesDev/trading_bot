@@ -2885,6 +2885,7 @@ dependencies = [
  "chrono",
  "dataplane",
  "domain",
+ "features",
  "reqwest",
  "rust_decimal",
  "serde",

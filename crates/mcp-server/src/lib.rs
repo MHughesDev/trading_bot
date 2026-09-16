@@ -704,6 +704,7 @@ async fn dispatch_untraced(
         // exception `list_lanes` takes (see `tools::venues`).
         "get_venue_constraints" => tools::venues::get_venue_constraints(params),
         "list_features" => tools::strategy::list_features(params),
+        "preview_signals" => tools::strategy::preview_signals(&ctx.api, params).await,
 
         // ── Discovery ──────────────────────────────────────────────────────────
         "list_lanes" => {
