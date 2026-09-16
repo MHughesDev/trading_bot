@@ -142,6 +142,12 @@ pub const REFLECT: &str = "reflect";
 /// A recorded finding is high-priority context, so it outlives the result it came
 /// from; it is what `finish_task` can honestly cite; and it is the signal the loop
 /// uses to tell progress from spinning.
+///
+/// Since S-4.2 it also outlives the **run**: a verified finding is stored, and a
+/// later run reads it back through the brief. That is why the schema now asks
+/// which results showed it rather than for prose about them — a stored finding
+/// carries a window derived from its evidence (ADR-S4-04), and one whose
+/// evidence names no period is kept for the run and not beyond it.
 pub const RECORD_FINDING: &str = "record_finding";
 
 /// The run looking at itself (AGENT-006 §2.4b, AGENT-010 §12.1; Set S S-3.19).
@@ -254,7 +260,7 @@ impl ToolRegistry {
                     },
                     "evidence": {
                         "type": "string",
-                        "description": "Which tool call showed it, and what it returned."
+                        "description": "The ids of the results that showed it,                                         comma-separated. A finding is kept beyond this                                         run only if one of them says which period it                                         covers."
                     }
                 },
                 "required": ["finding", "evidence"]
