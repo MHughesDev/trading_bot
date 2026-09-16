@@ -129,6 +129,7 @@ pub fn degraded_7b() -> Profile {
             few_shot_examples: 2,
             reflection: false,
             max_subagent_depth: 1,
+            idle_timeout_s: 600,
             max_replans_per_run: 2,
             tool_breaker_threshold: 3,
             max_reflections_per_run: 3,
@@ -146,8 +147,9 @@ pub fn degraded_7b() -> Profile {
         escalate_to: Some("claude-opus-5".into()),
         budgets: Budgets {
             max_usd_per_task: 0.5,
-            max_wall_clock_s: 3_600,
             max_tokens_per_task: 2_000_000,
+            // Ignored by the loop; see `Budgets::max_wall_clock_s`.
+            max_wall_clock_s: 0,
             ask_above_usd: None,
         },
         notes: "eval fixture, copied from config/profiles/qwen2.5-7b-instruct.yaml".into(),
@@ -187,6 +189,7 @@ pub fn frontier() -> Profile {
             few_shot_examples: 0,
             reflection: true,
             max_subagent_depth: 1,
+            idle_timeout_s: 600,
             max_replans_per_run: 3,
             tool_breaker_threshold: 3,
             max_reflections_per_run: 3,
@@ -204,8 +207,9 @@ pub fn frontier() -> Profile {
         escalate_to: None,
         budgets: Budgets {
             max_usd_per_task: 25.0,
-            max_wall_clock_s: 14_400,
             max_tokens_per_task: 20_000_000,
+            // Ignored by the loop; see `Budgets::max_wall_clock_s`.
+            max_wall_clock_s: 0,
             ask_above_usd: None,
         },
         notes: "eval fixture".into(),

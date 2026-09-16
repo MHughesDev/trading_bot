@@ -250,7 +250,21 @@ fn every_profile_field_is_enforced_somewhere() {
 
     // budgets.* → validated on load, enforced by the job/proxy budget check.
     assert!(p.budgets.max_usd_per_task > 0.0);
-    assert!(p.budgets.max_wall_clock_s > 0);
+    // `budgets.max_wall_clock_s` is DELETED from the profiles and ignored by the loop
+    // (S-2.12). A wall clock cannot tell a run that is stuck from one that is
+    // waiting, and after S-2.11 waiting is the common case: a suspended run holds no
+    // process and spends nothing for forty minutes. Asserted absent rather than
+    // silently dropped, so re-adding it to a profile is a test failure.
+    assert_eq!(
+        p.budgets.max_wall_clock_s, 0,
+        "no shipped profile sets a wall clock any more; the idle watchdog replaced it"
+    );
+    // orchestration.idle_timeout_s → the watchdog that answers the question the wall
+    // clock was being asked. Suspended waits are not idle time.
+    assert!(
+        p.orchestration.idle_timeout_s >= 60,
+        "an idle timeout under a minute would kill a run mid-step"
+    );
     assert!(p.budgets.max_tokens_per_task > 0);
 }
 

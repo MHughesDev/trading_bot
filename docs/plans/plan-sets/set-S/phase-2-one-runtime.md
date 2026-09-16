@@ -1,6 +1,6 @@
 # Phase 2 — One runtime
 
-**Completion: 31% (5 / 16 tasks), plus 8 partial (S-2.5–S-2.8, S-2.11, S-2.14, S-2.15, S-2.16). Three remain `NOT STARTED`: S-2.9, S-2.10 and S-2.12, which interlock — the flag has nothing to compare against until the shadow replay (S-4.8) exists, and the deletion waits on the flag.**
+**Completion: 31% (5 / 16 tasks), plus 9 partial (S-2.5–S-2.8, S-2.11, S-2.12, S-2.14–S-2.16). Two remain `NOT STARTED`: **S-2.9 and S-2.10**, and they interlock with a phase-4 dependency — the flag has nothing to compare against until the shadow replay (S-4.8) exists, and deleting `driver.rs` waits on the flag having been proved.**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
@@ -462,7 +462,29 @@ tokens** until the job completes.
 **Traces:** AGENT-010 §8, P5; §14.4.
 
 ### S-2.12 Budgets, watchdog, approvals, steering, escalation, sub-runs — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — the wall clock is gone and the steer half landed with S-2.14; the budget,
+approval, escalation and sub-run halves are not started.
+
+**No wall clock.** `budgets.max_wall_clock_s` is deleted from every shipped profile and ignored
+by the loop, replaced by `orchestration.idle_timeout_s` (600 s). The reason it had to go is that
+S-2.11 made the common case unmeasurable by it: a run suspended on a forty-minute sweep has been
+*alive* for forty minutes and *idle* for none of them, and a wall clock cannot tell the two
+apart. Killing it at the hour mark destroys work proceeding exactly as designed, and raising the
+limit to accommodate it means a genuinely hung run takes four hours to notice. Idleness answers
+the question the wall clock was being asked, and can answer it correctly, because a suspended
+wait is not idle time.
+
+The field is kept on the struct, `#[serde(default)]`, ignored. Removing it outright would fail
+every deployment carrying a config written before today, for a field nothing reads. Conformance
+asserts it is **zero** on every shipped profile rather than merely unused, so re-adding one is a
+test failure rather than a quiet regression.
+
+**`Input::Steer`** landed with S-2.14, which is where the classification belonged.
+
+**Not started:** pricing from `config/prices.yaml` and the 90%-of-budget wrap-up; `AskHuman` over
+an event subscription instead of the 5-second DB poll; `Outcome::Escalated` carrying the
+`WorkingState`; and the sub-run `BudgetLease` with migration 0063. Four of the six. **That is why
+this is `PARTIAL`.**
 
 The loop reads `max_tokens_per_task` and `max_usd_per_task` (priced from a new
 `config/prices.yaml`), wrapping up at 90% and ending after the report turn. **No wall

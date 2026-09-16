@@ -199,6 +199,12 @@ fn default_tool_breaker() -> u32 {
     3
 }
 
+/// Ten minutes: longer than the slowest single step, shorter than a person's
+/// patience.
+fn default_idle_timeout() -> u64 {
+    600
+}
+
 /// Three, on the tiers that reflect at all. Local tiers set `reflection: false`
 /// and never reach this.
 fn default_max_reflections() -> u32 {
@@ -216,6 +222,18 @@ pub struct Orchestration {
     pub reflection: bool,
     /// Sub-agent recursion depth (§13.3). 1 unless an eval proves the need.
     pub max_subagent_depth: u32,
+    /// Seconds of **idleness** before the run is stopped (§6, S-2.12).
+    ///
+    /// Idle, not elapsed. The distinction is the whole reason this replaced
+    /// `budgets.max_wall_clock_s`: a run suspended on a forty-minute sweep has been
+    /// alive for forty minutes and idle for none of them, and a wall clock cannot
+    /// tell the two apart. Suspended waits do not count.
+    ///
+    /// Ten minutes. Long enough for the slowest single step this platform has — a
+    /// large local model on a cold load — and short enough that a hung run is
+    /// noticed while somebody is still looking.
+    #[serde(default = "default_idle_timeout")]
+    pub idle_timeout_s: u64,
     /// How many times one run may re-plan before it wraps up (§3.7, S-1.20).
     ///
     /// Re-planning looks like progress to the barren-step breaker — a new plan is a
@@ -345,6 +363,24 @@ const MIN_EVIDENCE_TRIALS: u32 = 10;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Budgets {
     pub max_usd_per_task: f64,
+    /// **Deleted in favour of an idle watchdog** (AGENT-010 §6, Set S task S-2.12).
+    ///
+    /// A wall clock cannot tell a run that is stuck from a run that is *waiting*,
+    /// and after S-2.11 the second is the common case: a suspended run holds no
+    /// process and spends nothing for forty minutes while a sweep runs. Killing it
+    /// at the hour mark destroys work that was proceeding exactly as designed, and
+    /// the cost of raising the limit to accommodate it is that a genuinely hung run
+    /// now takes four hours to notice.
+    ///
+    /// `orchestration.idle_timeout_s` answers the question the wall clock was being
+    /// asked to answer — has anything happened lately — and can answer it correctly,
+    /// because a suspended wait is not idle time.
+    ///
+    /// Kept as a field, ignored by the loop, and the profiles no longer set it. It
+    /// is `#[serde(default)]` so an old profile still loads; removing it outright
+    /// would fail every deployment carrying a config written before today, for a
+    /// field nothing reads.
+    #[serde(default)]
     pub max_wall_clock_s: u64,
     pub max_tokens_per_task: u64,
     /// A single call above this asks a human, **whatever its reversibility**
@@ -598,7 +634,9 @@ impl Profile {
             }
         }
 
-        if self.budgets.max_usd_per_task <= 0.0 || self.budgets.max_wall_clock_s == 0 {
+        // `max_wall_clock_s` is no longer validated: nothing reads it, and a
+        // required value nothing reads is a value that will be wrong.
+        if self.budgets.max_usd_per_task <= 0.0 {
             return Err(bad("per-task budgets must be positive (guide §15.3)"));
         }
         Ok(())
@@ -877,6 +915,7 @@ pub(crate) fn frontier_fixture() -> Profile {
             few_shot_examples: 0,
             reflection: true,
             max_subagent_depth: 1,
+            idle_timeout_s: 600,
             max_replans_per_run: 3,
             tool_breaker_threshold: 3,
             max_reflections_per_run: 3,
@@ -894,8 +933,9 @@ pub(crate) fn frontier_fixture() -> Profile {
         escalate_to: None,
         budgets: Budgets {
             max_usd_per_task: 25.0,
-            max_wall_clock_s: 14_400,
             max_tokens_per_task: 20_000_000,
+            // Ignored by the loop; see `Budgets::max_wall_clock_s`.
+            max_wall_clock_s: 0,
             ask_above_usd: None,
         },
         notes: String::new(),
@@ -937,6 +977,7 @@ pub(crate) fn degraded_fixture() -> Profile {
             few_shot_examples: 2,
             reflection: false,
             max_subagent_depth: 1,
+            idle_timeout_s: 600,
             max_replans_per_run: 3,
             tool_breaker_threshold: 3,
             max_reflections_per_run: 3,
@@ -960,8 +1001,9 @@ pub(crate) fn degraded_fixture() -> Profile {
         escalate_to: Some("test-frontier".into()),
         budgets: Budgets {
             max_usd_per_task: 0.5,
-            max_wall_clock_s: 3600,
             max_tokens_per_task: 2_000_000,
+            // Ignored by the loop; see `Budgets::max_wall_clock_s`.
+            max_wall_clock_s: 0,
             ask_above_usd: None,
         },
         notes: String::new(),

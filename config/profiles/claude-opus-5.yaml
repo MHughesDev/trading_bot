@@ -85,6 +85,10 @@ orchestration:
   # A reflection costs a model call and is not charged to max_steps: a budget
   # that charges for noticing a wrong turn discourages noticing.
   max_reflections_per_run: 3
+  # Idle, not elapsed. A run suspended on a forty-minute sweep has been alive for
+  # forty minutes and idle for none of them, and the wall clock this replaces could
+  # not tell the two apart. Suspended waits do not count.
+  idle_timeout_s: 600
   code_execution: "full"
 
 # The trifecta audit (guide §14.1), recorded rather than believed.
@@ -120,7 +124,6 @@ trifecta:
 
 budgets:
   max_usd_per_task: 25.0
-  max_wall_clock_s: 14400
   max_tokens_per_task: 40000000
   # A single call above this asks a human WHATEVER its reversibility.
   # Reversibility is about whether the state can be put back; it says nothing

@@ -81,6 +81,10 @@ orchestration:
   # A reflection costs a model call and is not charged to max_steps: a budget
   # that charges for noticing a wrong turn discourages noticing.
   max_reflections_per_run: 3
+  # Idle, not elapsed. A run suspended on a forty-minute sweep has been alive for
+  # forty minutes and idle for none of them, and the wall clock this replaces could
+  # not tell the two apart. Suspended waits do not count.
+  idle_timeout_s: 600
   # Templated, not full. A 35B-A3B MoE writes decent short scripts; multi-step
   # programmatic tool calling is a frontier capability until an eval says otherwise.
   code_execution: "templated"
@@ -103,7 +107,6 @@ budgets:
   # Local inference trades latency for cost. Surfaced honestly rather than hidden
   # (guide §15.3); the UI shows expected duration.
   max_usd_per_task: 2.0
-  max_wall_clock_s: 28800
   max_tokens_per_task: 40000000
   # No cost axis on a local tier: a call here costs electricity, not dollars,
   # and a threshold in dollars would be a number nothing could exceed.
