@@ -9,12 +9,18 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use demand_manager::DemandRegistry;
 use domain::lanes::Lane;
+use domain::money::Size;
+use domain::order::{OrderIntent, OrderType, Side};
+use domain::payloads::bar::Timeframe;
+use domain::strategy_def::exits::PositionSide;
 use domain::strategy_def::StrategyDefinition;
 use domain::InstrumentId;
+use rust_decimal::Decimal;
 use thiserror::Error;
 
 use crate::bytecode;
 use crate::clock::StrategyClock;
+use crate::exits::{BarAggregator, ExitTracker, NetEffect, NetPosition, Triggered};
 use crate::ids::NodeId;
 use crate::intents::{build_intents_for_signals, SizedIntents, SizingContext};
 use crate::interpreter::evaluate_condition;
@@ -31,6 +37,45 @@ pub enum RuntimeError {
         user_id: String,
         instrument_id: String,
     },
+}
+
+/// The order side that flattens a position.
+const fn flattening_side(side: PositionSide) -> Side {
+    match side {
+        PositionSide::Long => Side::Sell,
+        PositionSide::Short => Side::Buy,
+    }
+}
+
+/// The declared exit policy, driven live (ADR-P6-14, SC-3).
+///
+/// Held by the instance because the instance is the one place live that knows
+/// the definition, sees every bar and emits every intent — which is exactly
+/// what an exit needs. There is no second evaluation site: the decision is
+/// [`ExitTracker`]'s, the same one the backtest simulator drives.
+struct LiveExits {
+    /// The one shared tracker. Never given an intrabar policy of its own:
+    /// `WorstFirst` is the default and the only one usable for evidence.
+    tracker: ExitTracker,
+    /// Folds the live feed's granularity into the declared bar. The hot path
+    /// publishes one event per trade tick, so without this the holding count
+    /// would count trades where the strategy declared minutes.
+    bars: BarAggregator,
+    /// The timeframe adopted at the first bar. Bars of any other timeframe are
+    /// ignored for exit purposes: a holding period is counted in one unit.
+    timeframe: Timeframe,
+    /// The netted position, assumed from this instance's own emitted intents
+    /// and corrected by [`WorldEvent::PositionUpdate`].
+    position: Option<NetPosition>,
+    /// The last exit this instance fired, kept so that the rule and the level
+    /// it rested at stay observable after the flattening order has gone.
+    ///
+    /// Live has no `conservative_exit_fill`: the simulator needs it because it
+    /// cannot rest an order and must reconcile the level with the close it
+    /// actually got, whereas a live fill is simply what happened. Keeping the
+    /// level is what makes the gap between the two measurable rather than
+    /// assumed (ADR-P6-15).
+    last_exit: Option<Triggered>,
 }
 
 /// A single runtime binding of a strategy definition to one instrument for one user.
@@ -82,6 +127,23 @@ pub struct StrategyInstance {
     ///
     /// The two must agree or ADR-0008 does not hold and Gate 15 cannot
     /// reconcile a forward fill stream against the backtest that justified it.
+    /// Declared exits, or `None` when the definition declares none that can
+    /// close a position on its own. `None` covers two different claims that
+    /// happen to behave the same here — a pre-1.3 document, and an explicit
+    /// `RiskLayerOnly` — and neither is collapsed into the other.
+    exits: Option<LiveExits>,
+    /// Signals that were already emitted on the previous event.
+    ///
+    /// An action fires on a signal's **rising edge**: the signal must clear and
+    /// re-fire before it places another order. The simulator has always done
+    /// this and the live runtime never did, so a condition that stays true —
+    /// `ema_fast > ema_slow` holds for as long as the cross lasts — placed one
+    /// order per bar in replay and one per *trade tick* live.
+    ///
+    /// That is a divergence on its own (SC-3), and it is also what would make
+    /// the declared exits below decorative: every re-entry averages into the
+    /// position and moves the entry reference with the price, so a stop
+    /// measured from entry can never be reached. See ADR-P6-14.
     active_signals: HashSet<String>,
 }
 
@@ -137,6 +199,7 @@ impl StrategyInstance {
             inference_slot_map,
             sizing: None,
             needs_sizing_context,
+            exits: None,
             active_signals: HashSet::new(),
         }
     }
@@ -293,7 +356,11 @@ impl StrategyInstance {
     /// 1. Update `WorldState` from the event.
     /// 2. If it is a Feature event, write the value into the slot array (no HashMap, no alloc).
     /// 3. Evaluate the definition node graph via compiled bytecode against the slot array.
-    /// 4. Collect and return any order intents — the caller routes them through the risk gate.
+    /// 4. Drive the declared exit policy and, if it fired, emit the flattening
+    ///    order **before** this event's entries — the same order the simulator
+    ///    uses, so a bar that both stops a position out and signals a new one
+    ///    produces the same two orders in the same sequence either side.
+    /// 5. Collect and return any order intents — the caller routes them through the risk gate.
     ///
     /// Returns [`SizedIntents`]: the intents produced **and** any action that
     /// asked for a size and could not get one.  The caller must surface the
@@ -317,35 +384,263 @@ impl StrategyInstance {
         // Feature slot array passed directly — no allocation, no string clone.
         let fired = self.run_signals();
 
+        // ── the declared exit, before this event's entries ───────────────────
+        //
+        // Ahead of every early return below, and deliberately: a stop must fire
+        // on a bar where *nothing* signalled. Behind the "nothing fired and
+        // nothing was firing" fast path, a position would only ever be checked
+        // against its stop on bars that happened to produce a signal, which is
+        // the same as having no stop.
+        //
+        // The tracker is passed the **full** emitted set, not the rising edge:
+        // an `OnSignal` exit asks whether the signal is present, not whether it
+        // just became present — the same split `sim.rs` makes.
+        let emitted: Vec<String> = fired.iter().cloned().collect();
+        let mut exit_intents = Vec::new();
+        if let Some(exit) = self.drive_exits(event, &emitted) {
+            exit_intents.push(exit);
+        }
+
         // Nothing firing and nothing was firing: the overwhelmingly common
         // case, and it allocates nothing beyond what `run_signals` already did.
         if fired.is_empty() && self.active_signals.is_empty() {
-            return SizedIntents::default();
+            return SizedIntents { intents: exit_intents, errors: Vec::new() };
         }
 
         // Rising edge only — see `active_signals`.  A signal that stays true
         // places one order, not one per event.
-        let rising: HashSet<String> = fired
-            .difference(&self.active_signals)
-            .cloned()
-            .collect();
+        let rising: HashSet<String> = fired.difference(&self.active_signals).cloned().collect();
         self.active_signals = fired;
 
         if rising.is_empty() {
-            return SizedIntents::default();
+            return SizedIntents { intents: exit_intents, errors: Vec::new() };
         }
 
         // Resolve Sizing-node fractions for any SizeMode::Model actions.
         let size_overrides = self.size_overrides();
 
-        build_intents_for_signals(
+        let mut out = build_intents_for_signals(
             &self.definition.actions,
             &rising,
             &self.instrument_id,
             &self.definition.strategy_id,
             &size_overrides,
             self.sizing.as_ref(),
-        )
+        );
+        self.note_entry_fills(&out.intents);
+        // The exit leads. A bar that both stops a position out and signals a new
+        // one must produce flatten-then-enter in that order, or the two paths
+        // net differently from the same bar.
+        out.intents.splice(0..0, exit_intents);
+        out
+    }
+
+    /// Advance the declared exit policy and return the flattening order if it
+    /// fired.
+    ///
+    /// # Why the live path counts bars the way it does
+    ///
+    /// The simulator's entries fill at the close of the bar that emitted them,
+    /// because the venue processes that bar's ticks before the handler runs.
+    /// Live is the same clock arrived at differently: the hot path writes the
+    /// tick's price to the paper engine's mark board *before* it publishes the
+    /// event, and a market order fills at the mark — so a live entry also
+    /// fills at the close of the bar that emitted it. Both paths open the
+    /// position at the same reference price, and the bar that opened it is
+    /// consumed in both.
+    ///
+    /// What differs is granularity. The simulator gets one event per bar; the
+    /// live feed gets one per trade, and one per trade is not one per bar. So
+    /// [`BarAggregator`] reassembles the declared bar, [`ExitTracker::bar_closed`]
+    /// advances the holding count once per reassembled bar, and
+    /// [`ExitTracker::on_bar_update`] evaluates prices as often as the feed
+    /// allows. A stop therefore fires live on the tick that breaches it rather
+    /// than at the end of the minute — earlier than replay, never later, which
+    /// is the only direction a bound on loss may err in.
+    ///
+    /// The one consequence worth stating: `ExitTracker::opened_at_bar_close`
+    /// is *not* called here, and that is not a divergence. It exists to add the
+    /// holding bar the simulator's entry bar never supplies; here the roll out
+    /// of the entry bar supplies it, and calling both would count it twice.
+    /// `live_and_replay_fire_the_time_exit_on_the_same_bar` is the test that
+    /// says so.
+    fn drive_exits(&mut self, event: &WorldEvent, signals: &[String]) -> Option<OrderIntent> {
+        // A fill or a reconciliation is the venue's word about the position and
+        // outranks this instance's assumption about its own orders.
+        if let WorldEvent::PositionUpdate { quantity, .. } = event {
+            self.reconcile_position(*quantity);
+            return None;
+        }
+
+        let WorldEvent::Bar {
+            timeframe,
+            bar,
+            available_time,
+            ..
+        } = event
+        else {
+            return None;
+        };
+
+        // Built on the first bar, because the declared bar is what the feed
+        // says it is. `RiskLayerOnly` and a pre-1.3 definition both leave this
+        // `None`: this instance closes nothing on its own, and the two are
+        // different claims that happen to agree here.
+        if self.exits.is_none() {
+            let policy = self.definition.exit_policy()?;
+            if !policy.is_self_closing() {
+                return None;
+            }
+            self.exits = Some(LiveExits {
+                // No `with_intrabar`: `WorstFirst` is the default and the only
+                // policy usable for evidence. A per-instance choice between a
+                // pessimistic and an optimistic assumption is a knob, and a
+                // static invariant fails the build on one.
+                tracker: ExitTracker::new(policy.clone()),
+                bars: BarAggregator::new(*timeframe),
+                timeframe: *timeframe,
+                position: None,
+                last_exit: None,
+            });
+        }
+
+        let instrument_id = self.instrument_id.clone();
+        let strategy_id = self.definition.strategy_id.clone();
+        let exits = self.exits.as_mut()?;
+        if *timeframe != exits.timeframe {
+            // A holding period is counted in one unit. A second timeframe on
+            // the same instance would make `max_holding_bars` mean whichever
+            // lane happened to tick.
+            return None;
+        }
+
+        let observed = exits.bars.observe(
+            *available_time,
+            bar.high.inner(),
+            bar.low.inner(),
+            bar.close.inner(),
+        );
+        if observed.opened_new_bar {
+            exits.tracker.bar_closed();
+        }
+
+        let triggered = exits.tracker.on_bar_update(&observed.bar, signals)?;
+
+        // The tracker reports; the caller fills. A tracker that closed itself
+        // would mark a position flat that the venue still holds.
+        let Some(open) = exits.position else {
+            // The tracker believes it holds something this instance does not.
+            // Re-synchronise rather than send an order for a position that is
+            // not there.
+            exits.tracker.closed();
+            return None;
+        };
+
+        exits.position = None;
+        exits.tracker.closed();
+        exits.last_exit = Some(triggered.clone());
+        tracing::info!(
+            instrument_id = %instrument_id,
+            strategy_id = %strategy_id,
+            rule = %triggered.rule,
+            level = %triggered.price,
+            bars_held = triggered.bars_held,
+            "declared exit fired; flattening"
+        );
+
+        // A market order, deliberately. The venue can rest a stop and the
+        // simulator cannot, so resting one live would make the deployment
+        // behave unlike the backtest that admitted it — see ADR-P6-15.
+        Some(OrderIntent::new(
+            instrument_id,
+            flattening_side(open.side),
+            OrderType::Market,
+            Size::from_decimal(open.qty),
+            None,
+            Some(strategy_id),
+        ))
+    }
+
+    /// Net this event's own entry intents into the tracked position.
+    ///
+    /// The instance assumes its orders fill at the price the bar closed at,
+    /// which is what the simulator assumes and what the paper engine actually
+    /// does — a market order fills at the mark, and the mark is this tick's
+    /// price. The assumption is corrected by [`WorldEvent::PositionUpdate`]
+    /// whenever the venue disagrees.
+    fn note_entry_fills(&mut self, entries: &[OrderIntent]) {
+        let Some(exits) = self.exits.as_mut() else {
+            return;
+        };
+        for intent in entries {
+            let Some(bar) = self.state.bars.get(&exits.timeframe) else {
+                continue;
+            };
+            let fill = bar.close.inner();
+            let side = match intent.side {
+                Side::Sell => PositionSide::Short,
+                Side::Buy => PositionSide::Long,
+            };
+            match NetPosition::apply(&mut exits.position, side, intent.size.inner(), fill) {
+                NetEffect::Reopened { side, entry } => {
+                    exits.tracker.opened(side, entry);
+                    // The prices this bar traded at before the fill are prices
+                    // the position was never exposed to.
+                    exits.bars.restart_at(fill);
+                }
+                NetEffect::Flat => exits.tracker.closed(),
+                NetEffect::Unchanged => {}
+            }
+        }
+    }
+
+    /// Take the venue's word for the position size.
+    ///
+    /// The only correction that can be made honestly is to flat: a rejected or
+    /// unfilled entry leaves this instance holding an assumption the venue
+    /// never agreed to, and a stop measured from an entry that never happened
+    /// is worse than no stop. The opposite direction — the venue holding a
+    /// position this instance does not know the entry price of — cannot be
+    /// repaired here and is logged rather than guessed at.
+    fn reconcile_position(&mut self, quantity: Decimal) {
+        let Some(exits) = self.exits.as_mut() else {
+            return;
+        };
+        if quantity.is_zero() {
+            if exits.tracker.is_open() {
+                tracing::debug!(
+                    instrument_id = %self.instrument_id,
+                    "venue reports flat; releasing the tracked position"
+                );
+            }
+            exits.position = None;
+            exits.tracker.closed();
+        } else if !exits.tracker.is_open() {
+            tracing::warn!(
+                instrument_id = %self.instrument_id,
+                quantity = %quantity,
+                "venue holds a position this strategy did not open; its declared exits \
+                 cannot bound it and the risk layer is the only thing that can"
+            );
+        }
+    }
+
+    /// Bars the declared exit policy has held the current position, or `None`
+    /// when it holds nothing. Test and diagnostic surface.
+    #[must_use]
+    pub fn exit_bars_held(&self) -> Option<u32> {
+        self.exits.as_ref().and_then(|e| e.tracker.bars_held())
+    }
+
+    /// The last declared exit this instance fired: which rule, the level it
+    /// rested at, and how many bars the position was held.
+    ///
+    /// The level is what the policy said, not what the venue paid. The gap
+    /// between the two is live slippage, and it is only measurable because
+    /// this is kept (ADR-P6-15).
+    #[must_use]
+    pub fn last_declared_exit(&self) -> Option<&Triggered> {
+        self.exits.as_ref().and_then(|e| e.last_exit.as_ref())
     }
 
     /// Signals currently held true, for diagnostics and tests.
@@ -728,6 +1023,16 @@ mod tests {
         );
     }
 
+    /// An action fires once when its signal becomes true, and again only after
+    /// the signal has cleared.
+    ///
+    /// This used to assert that the *bar* after the features produced the
+    /// intent, which passed for the wrong reason: the condition became true on
+    /// the second feature event, so the intent was emitted there and then
+    /// re-emitted on the bar, and on every event after it. That is the
+    /// divergence ADR-P6-14 closes — the simulator has always used the rising
+    /// edge — and it is also what would make a declared stop unreachable, since
+    /// every re-entry averages the entry reference towards the current price.
     #[test]
     /// Orders fire on the rising edge of a signal, not on every event where
     /// the signal is true.  This is the rule `crates/backtest`'s simulator has

@@ -43,6 +43,7 @@
 //! bar short and fires every `max_holding_bars` one bar late.
 
 use chrono::{DateTime, Utc};
+use domain::payloads::bar::Timeframe;
 use domain::strategy_def::exits::{
     first_triggered, ExitPolicy, ExitRule, PositionSide, PositionState,
 };
@@ -184,7 +185,41 @@ impl ExitTracker {
     /// The tracker does **not** close itself on a trigger: the caller owns the
     /// position and may not be able to fill. Call [`ExitTracker::closed`] when
     /// the fill is done.
+    ///
+    /// This is the whole-bar form, for a caller whose feed delivers one event
+    /// per bar — the backtest simulator. A caller whose feed is finer than a
+    /// bar drives the same evaluation through
+    /// [`ExitTracker::on_bar_update`] and marks the bar boundary with
+    /// [`ExitTracker::bar_closed`]; `on_bar` is exactly those two in order, so
+    /// there is one evaluation and one holding-bar count for both.
     pub fn on_bar(&mut self, bar: &Bar, signals: &[String]) -> Option<Triggered> {
+        let fired = self.on_bar_update(bar, signals);
+        self.bar_closed();
+        fired
+    }
+
+    /// Evaluate the policy against the bar **so far**, without advancing the
+    /// holding-bar count.
+    ///
+    /// A live feed is finer-grained than the bar the strategy declared: the
+    /// hot path publishes one event per trade, so a one-minute strategy sees
+    /// many events inside one minute. Waiting for the minute to close before
+    /// asking whether the stop was breached would leave a position exposed for
+    /// up to a bar past its own stop — the exact bound the declaration exists
+    /// to impose. Waiting is therefore not an option, and counting each tick as
+    /// a bar is not either: `max_holding_bars: 5` would mean five minutes in
+    /// replay and five trades live.
+    ///
+    /// Splitting the two lets the caller do the right thing on both axes:
+    /// evaluate prices as often as the feed allows, and advance the holding
+    /// count once per declared bar. The evaluation is the same code either
+    /// way, including the intrabar policy.
+    ///
+    /// `bar` is the *running* bar — the extremes reached inside the current
+    /// bar up to now, and the latest price as its close. Calling this twice on
+    /// the same bar is safe: the favourable extreme only ratchets, and a rule
+    /// that fired on the first call fires on the second.
+    pub fn on_bar_update(&mut self, bar: &Bar, signals: &[String]) -> Option<Triggered> {
         let open = self.open.as_mut()?;
 
         open.favourable_extreme = match open.side {
@@ -231,15 +266,220 @@ impl ExitTracker {
             }
         }
 
-        let result = fired.map(|(rule, probe)| Triggered {
+        fired.map(|(rule, probe)| Triggered {
             rule: rule.kind().to_string(),
             price: fill_level(rule, open, probe, bar),
             ts: bar.ts,
             bars_held: open.bars_held,
-        });
+        })
+    }
 
-        open.bars_held += 1;
-        result
+    /// Mark the end of one declared bar.
+    ///
+    /// The holding-bar count — and therefore [`ExitRule::MaxHoldingBars`] —
+    /// advances here and nowhere else, so it counts bars of the timeframe the
+    /// strategy declared whatever granularity the feed arrives at. A no-op
+    /// when flat: bars that elapse with no position are not held.
+    pub fn bar_closed(&mut self) {
+        if let Some(open) = self.open.as_mut() {
+            open.bars_held += 1;
+        }
+    }
+}
+
+/// Folds a feed of any granularity into the bars the strategy declared.
+///
+/// The backtest feed delivers one event per bar, so its bars need no
+/// assembling. The live feed does not: the hot path publishes one
+/// `WorldEvent::Bar` per trade tick, each carrying that tick's price as all
+/// four of O/H/L/C. Left alone, an [`ExitTracker`] driven from it would count
+/// trades where the strategy declared minutes.
+///
+/// This is where the two feeds become the same sequence of bars, so that
+/// `max_holding_bars` means the same thing in both (SC-3, ADR-P6-14). It is
+/// deliberately part of the shared module rather than the live caller's: a
+/// second place that decides where a bar ends is a second place the two paths
+/// can disagree.
+#[derive(Clone, Debug)]
+pub struct BarAggregator {
+    bucket_secs: i64,
+    open: Option<Running>,
+}
+
+#[derive(Clone, Debug)]
+struct Running {
+    bucket: i64,
+    ts: DateTime<Utc>,
+    high: Decimal,
+    low: Decimal,
+    close: Decimal,
+}
+
+/// One folded observation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Observed {
+    /// The declared bar as it stands *now*: the extremes reached inside it so
+    /// far, and the latest price as its close.
+    pub bar: Bar,
+    /// Whether this observation opened a new declared bar, meaning the
+    /// previous one is complete. The caller advances the holding count here
+    /// and nowhere else.
+    pub opened_new_bar: bool,
+}
+
+impl BarAggregator {
+    /// An aggregator for `timeframe`.
+    #[must_use]
+    pub fn new(timeframe: Timeframe) -> Self {
+        Self {
+            bucket_secs: bar_seconds(timeframe),
+            open: None,
+        }
+    }
+
+    /// Whether a bar is currently in progress.
+    #[must_use]
+    pub const fn is_open(&self) -> bool {
+        self.open.is_some()
+    }
+
+    /// Fold one event into the bar in progress, or start a new one.
+    ///
+    /// Bucketing is by `ts` floored to the timeframe, which is correct whether
+    /// the feed stamps a bar with its open or its close: both are stable
+    /// within a bar and at least one bar apart between bars.
+    pub fn observe(
+        &mut self,
+        ts: DateTime<Utc>,
+        high: Decimal,
+        low: Decimal,
+        close: Decimal,
+    ) -> Observed {
+        let bucket = ts.timestamp().div_euclid(self.bucket_secs);
+        let opened_new_bar = match self.open.as_mut() {
+            Some(run) if run.bucket == bucket => {
+                run.ts = ts;
+                run.high = run.high.max(high);
+                run.low = run.low.min(low);
+                run.close = close;
+                false
+            }
+            _ => {
+                self.open = Some(Running { bucket, ts, high, low, close });
+                // The very first bar of a position opens no *previous* bar, and
+                // `ExitTracker::bar_closed` is a no-op while flat in any case.
+                true
+            }
+        };
+        let run = self.open.as_ref().expect("just set");
+        Observed {
+            bar: Bar { ts: run.ts, high: run.high, low: run.low, close: run.close },
+            opened_new_bar,
+        }
+    }
+
+    /// Restart the bar in progress from `price`, discarding the extremes it
+    /// reached before now, without opening a new declared bar.
+    ///
+    /// Called when a position opens part-way through a bar. The prices that
+    /// bar traded at before the fill are prices the position was never exposed
+    /// to, and letting them stop it out is the defect ADR-P6-11 named: it
+    /// would hand every strategy a stop measured against a market it was not
+    /// in. The bar itself is unchanged — this is the position's clock, not the
+    /// market's.
+    pub fn restart_at(&mut self, price: Decimal) {
+        if let Some(run) = self.open.as_mut() {
+            run.high = price;
+            run.low = price;
+            run.close = price;
+        }
+    }
+}
+
+/// The netted position an exit policy is tracking, and nothing else.
+///
+/// This decides *how much* to flatten, never *whether* to — every "should this
+/// position close" question belongs to [`ExitTracker`] and is asked there
+/// (INV-14). It is here rather than in either caller because both the live
+/// runtime and the simulator have to answer the same three questions the same
+/// way: what an averaging-in fill does to the entry reference, what a partial
+/// close does to it, and what a reversal does.
+///
+/// `crates/backtest/src/sim.rs` still carries a private twin of this
+/// (`SimPosition`), written first and byte-for-byte equivalent. Unifying them
+/// was out of this track's file scope; it is a deletion, not a change.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NetPosition {
+    pub side: PositionSide,
+    pub qty: Decimal,
+    pub entry: Decimal,
+}
+
+/// What a fill did to the netted position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NetEffect {
+    /// Untouched, or reduced without changing the entry reference.
+    Unchanged,
+    /// Opened, averaged into, or reversed — the entry reference moved.
+    Reopened { side: PositionSide, entry: Decimal },
+    /// Back to flat.
+    Flat,
+}
+
+impl NetPosition {
+    /// Apply one fill of `qty` at `fill` on `side` to `pos`.
+    pub fn apply(
+        pos: &mut Option<Self>,
+        side: PositionSide,
+        qty: Decimal,
+        fill: Decimal,
+    ) -> NetEffect {
+        if qty <= Decimal::ZERO {
+            return NetEffect::Unchanged;
+        }
+        match *pos {
+            None => {
+                *pos = Some(Self { side, qty, entry: fill });
+                NetEffect::Reopened { side, entry: fill }
+            }
+            Some(mut open) if open.side == side => {
+                let total = open.qty + qty;
+                open.entry = (open.entry * open.qty + fill * qty) / total;
+                open.qty = total;
+                *pos = Some(open);
+                NetEffect::Reopened { side, entry: open.entry }
+            }
+            Some(mut open) => match qty.cmp(&open.qty) {
+                std::cmp::Ordering::Less => {
+                    open.qty -= qty;
+                    *pos = Some(open);
+                    NetEffect::Unchanged
+                }
+                std::cmp::Ordering::Equal => {
+                    *pos = None;
+                    NetEffect::Flat
+                }
+                // A reversal is an exit and a new entry, and the new position's
+                // stop is measured from the new entry.
+                std::cmp::Ordering::Greater => {
+                    *pos = Some(Self { side, qty: qty - open.qty, entry: fill });
+                    NetEffect::Reopened { side, entry: fill }
+                }
+            },
+        }
+    }
+}
+
+/// Seconds in one bar of `timeframe`.
+const fn bar_seconds(timeframe: Timeframe) -> i64 {
+    match timeframe {
+        Timeframe::Seconds1 => 1,
+        Timeframe::Minutes1 => 60,
+        Timeframe::Minutes5 => 300,
+        Timeframe::Minutes15 => 900,
+        Timeframe::Hours1 => 3_600,
+        Timeframe::Hours4 => 14_400,
+        Timeframe::Daily => 86_400,
     }
 }
 
@@ -537,5 +777,161 @@ mod tests {
     #[test]
     fn worst_first_is_the_default() {
         assert_eq!(IntrabarPolicy::default(), IntrabarPolicy::WorstFirst);
+    }
+
+    // ── the split form, for a feed finer than a bar (ADR-P6-14) ──────────────
+
+    /// `on_bar` must remain exactly `on_bar_update` followed by `bar_closed`,
+    /// or the simulator and the live runtime are counting different things.
+    #[test]
+    fn the_whole_bar_form_is_the_split_form_in_order() {
+        let bars = [
+            bar(1, dec!(101), dec!(99), dec!(100)),
+            bar(2, dec!(103), dec!(97), dec!(99)),
+            bar(3, dec!(104), dec!(96), dec!(98)),
+        ];
+        let rules = || {
+            policy(vec![
+                ExitRule::MaxHoldingBars { bars: 3 },
+                ExitRule::StopLoss { fraction: dec!(0.05) },
+            ])
+        };
+
+        let mut whole = ExitTracker::new(rules());
+        let mut split = ExitTracker::new(rules());
+        whole.opened(PositionSide::Long, dec!(100));
+        split.opened(PositionSide::Long, dec!(100));
+
+        for b in &bars {
+            let a = whole.on_bar(b, &[]);
+            let c = split.on_bar_update(b, &[]);
+            split.bar_closed();
+            assert_eq!(a, c, "the two forms disagreed on {}", b.ts);
+            assert_eq!(whole.bars_held(), split.bars_held());
+        }
+    }
+
+    /// Many updates inside one bar are one bar of holding. Counting each
+    /// update would make `max_holding_bars: 2` mean two trades live and two
+    /// minutes in replay.
+    #[test]
+    fn updates_within_one_bar_do_not_advance_the_holding_count() {
+        let mut t = ExitTracker::new(policy(vec![ExitRule::MaxHoldingBars { bars: 2 }]));
+        t.opened(PositionSide::Long, dec!(100));
+
+        // Twenty ticks inside bar one; none of them is a second bar.
+        for _ in 0..20 {
+            assert!(t.on_bar_update(&bar(1, dec!(100), dec!(100), dec!(100)), &[]).is_none());
+        }
+        assert_eq!(t.bars_held(), Some(0));
+        t.bar_closed();
+
+        for _ in 0..20 {
+            assert!(t.on_bar_update(&bar(2, dec!(100), dec!(100), dec!(100)), &[]).is_none());
+        }
+        t.bar_closed();
+
+        let fired = t
+            .on_bar_update(&bar(3, dec!(100), dec!(100), dec!(100)), &[])
+            .expect("two bars held");
+        assert_eq!(fired.rule, "max_holding_bars");
+        assert_eq!(fired.bars_held, 2);
+    }
+
+    /// The running-bar form still resolves a bar that breached both adversely.
+    /// The intrabar policy is not something the split form gets to skip.
+    #[test]
+    fn a_running_bar_that_breached_both_still_resolves_to_the_stop() {
+        let mut t = ExitTracker::new(policy(vec![
+            ExitRule::TakeProfit { fraction: dec!(0.05) },
+            ExitRule::StopLoss { fraction: dec!(0.02) },
+        ]));
+        t.opened(PositionSide::Long, dec!(100));
+        let fired = t
+            .on_bar_update(&bar(1, dec!(106), dec!(97), dec!(104)), &[])
+            .unwrap();
+        assert_eq!(fired.rule, "stop_loss");
+        assert_eq!(fired.price, dec!(98));
+    }
+
+    // ── the aggregator: one bar sequence from either feed ────────────────────
+
+    /// Sixty ticks inside a minute are one minute.
+    #[test]
+    fn ticks_inside_one_minute_are_one_declared_bar() {
+        let mut agg = BarAggregator::new(Timeframe::Minutes1);
+        // Minute-aligned on purpose: this test is about what happens *inside*
+        // one bar, and the boundary is what the next assertion measures.
+        let base = DateTime::from_timestamp(1_699_999_980, 0).unwrap();
+        let mut opened = 0;
+        for s in 0..60 {
+            let o = agg.observe(base + chrono::Duration::seconds(s), dec!(100), dec!(100), dec!(100));
+            if o.opened_new_bar {
+                opened += 1;
+            }
+        }
+        assert_eq!(opened, 1, "one minute is one bar, not sixty");
+
+        let o = agg.observe(base + chrono::Duration::seconds(60), dec!(100), dec!(100), dec!(100));
+        assert!(o.opened_new_bar, "the next minute is the next bar");
+    }
+
+    /// The running bar carries the extremes the position was exposed to, not
+    /// only the latest tick. A stop must see the low the minute traded to.
+    #[test]
+    fn the_running_bar_keeps_the_extremes_reached_inside_it() {
+        let mut agg = BarAggregator::new(Timeframe::Minutes1);
+        let base = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        agg.observe(base, dec!(100), dec!(100), dec!(100));
+        agg.observe(base + chrono::Duration::seconds(10), dec!(95), dec!(95), dec!(95));
+        let o = agg.observe(base + chrono::Duration::seconds(20), dec!(103), dec!(103), dec!(103));
+        assert_eq!(o.bar.high, dec!(103));
+        assert_eq!(o.bar.low, dec!(95));
+        assert_eq!(o.bar.close, dec!(103));
+    }
+
+    /// A one-event-per-bar feed produces exactly one declared bar per event,
+    /// whether the stamp is the bar's open or its close.
+    #[test]
+    fn a_bar_per_event_feed_opens_one_declared_bar_per_event() {
+        for offset in [0, 60] {
+            let mut agg = BarAggregator::new(Timeframe::Minutes1);
+            let base = DateTime::from_timestamp(1_700_000_000 + offset, 0).unwrap();
+            for n in 0..5 {
+                let o = agg.observe(
+                    base + chrono::Duration::seconds(60 * n),
+                    dec!(101),
+                    dec!(99),
+                    dec!(100),
+                );
+                assert!(o.opened_new_bar, "event {n} at offset {offset}");
+            }
+        }
+    }
+
+    /// The prices a bar traded at before the position existed must not be able
+    /// to stop it out.
+    #[test]
+    fn restarting_discards_the_extremes_from_before_the_fill() {
+        let mut agg = BarAggregator::new(Timeframe::Minutes1);
+        let base = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        agg.observe(base, dec!(90), dec!(90), dec!(90));
+        agg.restart_at(dec!(100));
+        let o = agg.observe(base + chrono::Duration::seconds(5), dec!(101), dec!(101), dec!(101));
+        assert!(!o.opened_new_bar, "still the same minute");
+        assert_eq!(o.bar.low, dec!(100), "the 90 happened before the position");
+        assert_eq!(o.bar.high, dec!(101));
+    }
+
+    /// A bar that elapses while flat is not a bar held. Otherwise a position
+    /// opened after a long quiet stretch inherits somebody else's clock.
+    #[test]
+    fn bars_that_close_while_flat_are_not_counted() {
+        let mut t = ExitTracker::new(policy(vec![ExitRule::MaxHoldingBars { bars: 1 }]));
+        for _ in 0..5 {
+            t.bar_closed();
+        }
+        t.opened(PositionSide::Long, dec!(100));
+        assert_eq!(t.bars_held(), Some(0));
     }
 }
