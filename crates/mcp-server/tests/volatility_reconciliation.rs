@@ -109,7 +109,12 @@ fn fixture_dir() -> PathBuf {
 
 /// The fixture's bars, read through `preamble.load` — the template's own loader.
 fn bars(fixture: &Path) -> Vec<features::FeatureRow> {
-    let path = fixture.join("primary.parquet");
+    bars_at(&fixture.join("primary.parquet"))
+}
+
+/// The bars in one parquet file, read the same way.
+fn bars_at(path: &Path) -> Vec<features::FeatureRow> {
+    let path = path.to_path_buf();
     // The paths travel as argv rather than interpolated into the source. A
     // Windows path is full of backslashes, and quoting one into a Python literal
     // is an escaping bug waiting for the first directory whose name starts with
@@ -158,7 +163,59 @@ fn bars(fixture: &Path) -> Vec<features::FeatureRow> {
         .collect()
 }
 
-async fn run_template(name: &str, fixture: &Path) -> Value {
+/// Write a copy of the primary fixture holding exactly its first `rows` bars.
+///
+/// This is how a family whose declared window is not simply "every row" gets
+/// compared honestly. The engine evaluates over a window of `lookback_bars`
+/// ending at the decision bar; the template evaluates over whatever file it is
+/// handed. Trimming the file to exactly the engine's window makes those the same
+/// bars by construction, instead of leaving the two to agree only when the
+/// lookback arithmetic happens to land on the file's length.
+fn trimmed(fixture: &Path, rows: usize) -> PathBuf {
+    let out = fixture.join(format!("trim_{rows}.parquet"));
+    if out.is_file() {
+        return out;
+    }
+    const SCRIPT: &str = "import sys, pandas as pd; f = pd.read_parquet(sys.argv[1]); f.head(int(sys.argv[3])).to_parquet(sys.argv[2], index=False)";
+    let status = Command::new(python())
+        .arg("-c")
+        .arg(SCRIPT)
+        .arg(fixture.join("primary.parquet"))
+        .arg(&out)
+        .arg(rows.to_string())
+        .output()
+        .unwrap_or_else(|e| panic!("could not trim the fixture: {e}"));
+    assert!(
+        status.status.success(),
+        "trimming the fixture failed:\n{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    out
+}
+
+/// The engine's window for one family, and its value over exactly that window.
+fn engine_on(family: &str, params: &[usize], rows_of: &Path) -> (usize, f64) {
+    let mut name = family.to_string();
+    for p in params {
+        name.push('_');
+        name.push_str(&p.to_string());
+    }
+    let f = features::runtime::feature(&name)
+        .unwrap_or_else(|e| panic!("the engine does not resolve `{name}`: {e}"));
+    let window = f.def().lookback_bars as usize;
+    let rows = bars_at(rows_of);
+    assert_eq!(
+        rows.len(),
+        window,
+        "`{name}` declares a {window}-bar window and the trimmed fixture has {}",
+        rows.len()
+    );
+    let v = features::runtime::value_at(f.as_ref(), &rows, rows.len() - 1)
+        .unwrap_or_else(|| panic!("`{name}` produced no value over its own declared window"));
+    (window, v)
+}
+
+async fn run_template_on(name: &str, data: &Path) -> Value {
     let t = mcp_server_lib::tools::templated::templates()
         .iter()
         .find(|t| t.header().name == name)
@@ -170,7 +227,7 @@ async fn run_template(name: &str, fixture: &Path) -> Value {
         "start": "2024-01-08T00:00:00Z",
         "end": "2024-08-01T00:00:00Z",
         "seed": 7,
-        "data": { "primary": fixture.join("primary.parquet").to_string_lossy() },
+        "data": { "primary": data.to_string_lossy() },
     });
 
     let skill = Skill::author(
@@ -196,6 +253,10 @@ async fn run_template(name: &str, fixture: &Path) -> Value {
     );
     done.result
         .unwrap_or_else(|| panic!("`{name}` returned no result"))
+}
+
+async fn run_template(name: &str, fixture: &Path) -> Value {
+    run_template_on(name, &fixture.join("primary.parquet")).await
 }
 
 /// The engine's value for one family over the whole window.
@@ -270,6 +331,140 @@ async fn the_templates_and_the_engine_compute_the_same_volatility() {
              wrong and neither says which."
         );
     }
+}
+
+/// The realised measures, where the two sides differ by a normalisation rather
+/// than by a square root.
+///
+/// The engine's `rv_n` is documented as the "root **sum** of squared bar log
+/// returns over n bars" and its `bv_n` sums the adjacent-absolute products the
+/// same way. `estimate_volatility.py` reports both as a **mean** — a variance
+/// per bar, consistent with everything else under its `variance_per_bar` key.
+/// Neither is wrong and the difference is exactly the term count, so that is
+/// what this asserts.
+///
+/// It is worth asserting precisely because the two are so easy to confuse. A
+/// model that read `realised` from the template and `rv_500` from the engine
+/// would see numbers differing by a factor of five hundred, and nothing in
+/// either name says which is which.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_realised_measures_differ_only_by_their_term_count() {
+    let fixture = fixture_dir();
+    let rows = bars(&fixture);
+    let result = run_template("estimate_volatility", &fixture).await;
+    let per_bar = &result["detail"]["variance_per_bar"];
+
+    // The template works in returns; `n_bars` is how many it had.
+    let returns = result["detail"]["n_bars"]
+        .as_u64()
+        .expect("the template reports its return count") as usize;
+    assert_eq!(returns + 1, rows.len(), "the two are reading different windows");
+
+    const TOL: f64 = 1e-9;
+
+    // `rv_n` is over n returns, so it needs n+1 closes — the family declares
+    // exactly that lookback, and asking for `rv_{returns}` spends every row.
+    let rv_engine = engine("rv", returns, &rows);
+    let rv_template = per_bar["realised"].as_f64().expect("realised variance");
+    let rel = (rv_engine * rv_engine - returns as f64 * rv_template).abs()
+        / (returns as f64 * rv_template);
+    assert!(
+        rel < TOL,
+        "`rv_{returns}` squared is {}, and {returns} × the template's realised variance \
+         {rv_template} is {}. The engine sums and the template means; if that is no longer the \
+         only difference, one of them has changed what it measures.",
+        rv_engine * rv_engine,
+        returns as f64 * rv_template
+    );
+
+    // Bipower pairs adjacent returns, so it has one term fewer.
+    let bv_engine = engine("bv", returns, &rows);
+    let bv_template = per_bar["bipower"].as_f64().expect("bipower variance");
+    let terms = (returns - 1) as f64;
+    let rel = (bv_engine * bv_engine - terms * bv_template).abs() / (terms * bv_template);
+    assert!(
+        rel < TOL,
+        "`bv_{returns}` squared is {}, and {terms} × the template's bipower variance \
+         {bv_template} is {}. Both divide by mu1² and pair the same adjacent absolute \
+         returns; only the term count should separate them.",
+        bv_engine * bv_engine,
+        terms * bv_template
+    );
+}
+
+/// Autocorrelation and the variance ratio, the remaining families computed on
+/// both sides of the language barrier.
+///
+/// Everything else is one-sided: the engine has no `yang_zhang` or `hurst`, and
+/// the templates have no `efficiency_ratio`. A family that exists once cannot
+/// drift, so those are a gap in the F2 set rather than a reconciliation failure.
+///
+/// Both comparisons run on a fixture trimmed to the engine's own declared
+/// window, so the two sides are looking at the same bars by construction rather
+/// than by an arithmetic coincidence. `autocorr` in particular declares a window
+/// wider than the returns it consumes, and on the untrimmed 6,000-bar fixture
+/// the engine simply refuses — there is no `n` for which it would read every row.
+#[tokio::test(flavor = "multi_thread")]
+async fn autocorrelation_and_the_variance_ratio_agree_across_the_language_barrier() {
+    let fixture = fixture_dir();
+    const TOL: f64 = 1e-9;
+
+    // `describe_returns` reports the ACF inside its Ljung-Box block — `acf[0]`
+    // is lag 1 — computed by `preamble.autocorr`. The engine answers
+    // `autocorr_n_lag`. Same estimator: mean-adjusted cross-products over the
+    // total sum of squares.
+    for lag in 1..=3usize {
+        let (window, engine_rho) = {
+            let name = format!("autocorr_2000_{lag}");
+            let f = features::runtime::feature(&name).expect("the engine resolves autocorr");
+            (f.def().lookback_bars as usize, f)
+        };
+        let data = trimmed(&fixture, window);
+        let (_, engine_rho) = (engine_rho, engine_on("autocorr", &[2000, lag], &data).1);
+
+        let described = run_template_on("describe_returns", &data).await;
+        let template_rho = described["detail"]["ljung_box_returns"]["acf"]
+            .get(lag - 1)
+            .and_then(Value::as_f64)
+            .unwrap_or_else(|| {
+                panic!(
+                    "`describe_returns` reports no autocorrelation at lag {lag}: {}",
+                    described["detail"]["ljung_box_returns"]["acf"]
+                )
+            });
+
+        assert!(
+            (engine_rho - template_rho).abs() < TOL,
+            "`autocorr_2000_{lag}` says {engine_rho} and `preamble.autocorr` says \
+             {template_rho} over the same {window} bars. Both are mean-adjusted \
+             cross-products over the total sum of squares, so they are the same number or one \
+             of them is not the estimator it is named for."
+        );
+    }
+
+    // The variance ratio, which is where the two genuinely disagreed.
+    let q = 5usize; // `_variance_ratio`'s default, and the horizon it reports.
+    let window = features::runtime::feature(&format!("variance_ratio_2000_{q}"))
+        .expect("the engine resolves variance_ratio")
+        .def()
+        .lookback_bars as usize;
+    let data = trimmed(&fixture, window);
+    let (_, engine_vr) = engine_on("variance_ratio", &[2000, q], &data);
+
+    let regime = run_template_on("detect_regime", &data).await;
+    let template_vr = regime["detail"]["variance_ratio"]
+        .as_f64()
+        .expect("detect_regime reports a variance ratio");
+
+    let rel = (engine_vr - template_vr).abs() / template_vr.abs();
+    assert!(
+        rel < TOL,
+        "`variance_ratio_2000_{q}` says {engine_vr} and `detect_regime.py` says {template_vr} \
+         over the same {window} bars — a relative difference of {rel:.3e}. Both are named for \
+         Lo and MacKinlay, whose estimator aggregates over **overlapping** q-windows; a \
+         non-overlapping one keeps every qth observation and throws the rest away, which is a \
+         different and much noisier statistic wearing the same name."
+    );
 }
 
 /// The relationship the test above rests on, stated separately so a failure says

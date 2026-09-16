@@ -542,14 +542,49 @@ impl Feature for Windowed {
                     }
                 }
             }
+            // Lo-MacKinlay, over **overlapping** q-windows.
+            //
+            // The obvious implementation aggregates with `chunks_exact(q)`,
+            // which keeps every qth window and discards the rest — on 2,000
+            // returns at q=5 that is 400 observations instead of 1,996. It is a
+            // different and much noisier statistic, and this family's registry
+            // description names Lo and MacKinlay, whose whole contribution was
+            // the overlapping estimator and its variance.
+            //
+            // It was the non-overlapping form until the S-5.14 reconciliation
+            // measured it against `detect_regime.py`, which had the overlapping
+            // one: 0.4515 against 0.4266 on the same 2,011 bars.
+            //
+            // The divisors are the template's, deliberately, so that the two
+            // implementations are the same estimator and not merely the same
+            // family: `n - 1` for the one-bar variance and `(n - q + 1) · q` for
+            // the aggregated one.
             Kind::VarianceRatio(q) => {
                 let r = log_returns(c);
-                let v1 = central_moment(&r, 2);
-                let agg: Vec<f64> = r.chunks_exact(q).map(|x| x.iter().sum()).collect();
-                if agg.len() < 2 || v1 <= 0.0 {
+                let n = r.len();
+                if n <= q || q == 0 {
                     f64::NAN
                 } else {
-                    central_moment(&agg, 2) / (q as f64 * v1)
+                    let mu = mean(&r);
+                    #[allow(clippy::cast_precision_loss)]
+                    let var1 = r.iter().map(|x| (x - mu) * (x - mu)).sum::<f64>() / (n - 1) as f64;
+                    if var1 <= 0.0 {
+                        f64::NAN
+                    } else {
+                        // Every window of q consecutive returns, not every qth.
+                        let windows = n - q + 1;
+                        let q_mu = q as f64 * mu;
+                        let mut acc = 0.0;
+                        let mut running: f64 = r[..q].iter().sum();
+                        acc += (running - q_mu) * (running - q_mu);
+                        for i in q..n {
+                            running += r[i] - r[i - q];
+                            acc += (running - q_mu) * (running - q_mu);
+                        }
+                        #[allow(clippy::cast_precision_loss)]
+                        let var_q = acc / (windows as f64 * q as f64);
+                        var_q / var1
+                    }
                 }
             }
             Kind::EfficiencyRatio => {
@@ -748,6 +783,69 @@ mod tests {
             .map(|(i, &c)| FeatureRow { ts_ns: i as i64 * 3_600_000_000_000, open: c, high: c * 1.01, low: c * 0.99, close: c, volume: 1.0 + (i % 3) as f64 })
             .collect()
     }
+
+    /// The variance ratio aggregates over **overlapping** q-windows.
+    ///
+    /// Pinned here as well as in the cross-language reconciliation
+    /// (`crates/mcp-server/tests/volatility_reconciliation.rs`) because that one
+    /// needs a Python interpreter, and a developer without one would otherwise
+    /// lose the only guard on this.
+    ///
+    /// Both aggregations are written out below. That is a formula restated in a
+    /// test, which is usually a smell, and here it is the point: the two differ
+    /// only in which windows they keep, the family was the non-overlapping one
+    /// until S-5.14 measured it, and a test that could not tell them apart is
+    /// what let that stand.
+    #[test]
+    fn the_variance_ratio_aggregates_over_overlapping_windows() {
+        // Alternating returns: strongly mean-reverting, which is the case the
+        // statistic exists to detect and where the two aggregations differ most.
+        let mut closes = vec![100.0];
+        for i in 0..80 {
+            let step = if i % 2 == 0 { 1.03 } else { 1.0 / 1.02 };
+            closes.push(closes[closes.len() - 1] * step);
+        }
+        let (n_param, q) = (50usize, 5usize);
+        let f = feature(&format!("variance_ratio_{n_param}_{q}")).unwrap();
+        let w = f.def().lookback_bars as usize;
+        let r = rows(&closes);
+        let got = value_at(f.as_ref(), &r, r.len() - 1).expect("a value");
+
+        // The same window the engine read: the last `w` rows, newest first.
+        let window: Vec<f64> = r[r.len() - w..].iter().rev().map(|x| x.close).collect();
+        let ret = log_returns(&window);
+        let n = ret.len();
+        let mu = mean(&ret);
+        let var1 = ret.iter().map(|x| (x - mu) * (x - mu)).sum::<f64>() / (n - 1) as f64;
+
+        let overlapping = {
+            let sums: Vec<f64> = (0..=n - q).map(|i| ret[i..i + q].iter().sum()).collect();
+            let acc: f64 = sums
+                .iter()
+                .map(|s| (s - q as f64 * mu) * (s - q as f64 * mu))
+                .sum();
+            acc / (sums.len() as f64 * q as f64) / var1
+        };
+        let non_overlapping = {
+            let sums: Vec<f64> = ret.chunks_exact(q).map(|x| x.iter().sum()).collect();
+            let m = mean(&sums);
+            let acc: f64 = sums.iter().map(|s| (s - m) * (s - m)).sum();
+            acc / sums.len() as f64 / (q as f64 * central_moment(&ret, 2))
+        };
+
+        assert!(
+            (got - overlapping).abs() < 1e-12,
+            "the engine says {got} and the overlapping Lo-MacKinlay estimator says {overlapping}"
+        );
+        assert!(
+            (got - non_overlapping).abs() > 1e-6,
+            "the engine's {got} is indistinguishable from the non-overlapping aggregation \
+             ({non_overlapping}) on a fixture chosen to separate them, so this test would not \
+             have caught the bug it exists for"
+        );
+    }
+
+
 
     #[test]
     fn every_catalogued_feature_registers() {
