@@ -457,6 +457,68 @@ impl Recorder {
     /// the two call for different actions: `failed` means look at the task, `fenced`
     /// means look at the **backend** — the harness is asserting it stopped getting
     /// the guarantee it was promised.
+    /// Write the structured summary of this turn (AGENT-007 §2.1; S-4.1).
+    ///
+    /// Built from the loop's own state and the two ledgers — never from the
+    /// model's closing prose, which is what `agent_runs.summary` holds and what
+    /// the carry used to read. `TurnSummary::from_state` has no parameter
+    /// through which prose could arrive.
+    ///
+    /// Failure is logged and not propagated. A turn whose summary does not
+    /// store has still finished, and failing the run here would turn a carry
+    /// problem into a lost result; `prior_context` falls back to the prose path
+    /// and says so in a warning.
+    async fn write_turn_summary(
+        &mut self,
+        conversation_id: Uuid,
+        governor: &Loop,
+        outcome: &Outcome,
+    ) {
+        let status = match outcome {
+            Outcome::Finished { .. } => "finished",
+            Outcome::Refused { .. } => "refused",
+            Outcome::Escalated { .. } => "escalated",
+            Outcome::Fenced(_) => "fenced",
+            Outcome::Cancelled => "cancelled",
+        };
+
+        // The turn this run is. Read rather than passed, so no call site has to
+        // carry it and none can pass a stale one.
+        let turn: i32 = sqlx::query_scalar(
+            "SELECT COALESCE(turn_index, 0) FROM agent_runs WHERE run_id = $1",
+        )
+        .bind(self.run_id)
+        .fetch_optional(&self.pg)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(0);
+
+        let summary = harness::memory::TurnSummary::from_state(
+            turn,
+            status,
+            governor.working(),
+            governor.summary_findings().to_vec(),
+            // Negative results are derived by the platform from the funnel's
+            // verdict (S-4.4), not by the loop, so the loop has none to give.
+            // An empty list is the honest answer rather than a place to guess.
+            Vec::new(),
+            harness::memory::TurnBudget {
+                tokens: self.prompt_tokens.max(0).unsigned_abs(),
+                usd_tenth_cents: 0,
+            },
+        );
+
+        let store = crate::turn_summary_store::TurnSummaryStore::new(self.pg.clone());
+        if let Err(e) = store.put(conversation_id, &summary).await {
+            tracing::warn!(
+                run_id = %self.run_id,
+                error = %e,
+                "the turn summary did not store; the next turn falls back to the prose carry"
+            );
+        }
+    }
+
     async fn finish(&mut self, outcome: &Outcome) {
         let (status, summary, error) = match outcome {
             Outcome::Finished { result, evidence } => (
@@ -826,6 +888,11 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
             match e {
                 Effect::Note(n) => rec.note(&n).await,
                 Effect::Done(o) => {
+                    // Before `finish`, because `finish` stamps the run complete
+                    // and a reader that saw the row finish without a summary
+                    // would take the prose path for a turn that has a real one.
+                    rec.write_turn_summary(params.conversation_id, &governor, &o)
+                        .await;
                     rec.finish(&o).await;
                     return;
                 }

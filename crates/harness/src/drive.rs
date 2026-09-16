@@ -720,6 +720,19 @@ pub struct Loop {
     /// opens with `[established]` or `[suggestive]`, and the `starts_with` over
     /// it matched nothing.
     finding_claims: Vec<String>,
+    /// The findings this run recorded, **structured** (S-4.1).
+    ///
+    /// `WorkingState.findings` carries a rendered headline — `[established] …
+    /// [evidence]` — because that is what the model re-reads. Nothing
+    /// downstream can recover the confidence from it without parsing display
+    /// text, which is the mistake the dedup key above already cost: a key built
+    /// from a rendered string is one formatting change from being a no-op.
+    ///
+    /// So the structure is kept where it is computed, beside the rendering
+    /// rather than inside it. This is not a second copy of `WorkingState`
+    /// content and does not breach AGENT-008 AC-1: AC-1 is about what is
+    /// *appended to the prompt* across steps, and nothing here is rendered.
+    summary_findings: Vec<crate::memory::SummaryFinding>,
     /// Idempotent calls already made this session, keyed by name + arguments.
     ///
     /// `ToolDef::idempotent` was set on every tool in the catalogue and read by
@@ -836,6 +849,7 @@ impl Loop {
             step_learned_something: false,
             results_by_id: BTreeMap::new(),
             finding_claims: Vec::new(),
+            summary_findings: Vec::new(),
             idempotent_calls: BTreeMap::new(),
             held: None,
             running: None,
@@ -902,6 +916,16 @@ impl Loop {
     /// so an escalation can carry it — not so anything outside can mutate it. There
     /// is exactly one of these per run and the loop owns it.
     #[must_use]
+    /// The findings this run recorded, structured — for the turn summary.
+    ///
+    /// Parallel to [`Self::working`] rather than inside it: `WorkingState` is
+    /// what the model reads and this is what the platform stores, and the two
+    /// have different shapes for that reason.
+    #[must_use]
+    pub fn summary_findings(&self) -> &[crate::memory::SummaryFinding] {
+        &self.summary_findings
+    }
+
     pub fn working(&self) -> &WorkingState {
         &self.working
     }
@@ -2576,6 +2600,20 @@ impl Loop {
         // the compressed form outlives the results it was distilled from without the
         // list being pushed again for every finding.
         self.finding_claims.push(finding.clone());
+        self.summary_findings.push(crate::memory::SummaryFinding {
+            id: format!("finding-{}", self.working.findings.len() + 1),
+            claim: finding.clone(),
+            // The ids the next turn may cite, kept as the map they arrived as.
+            ids: evidence
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|id| (id.to_string(), id.to_string()))
+                .collect(),
+            n: None,
+            se: None,
+            confidence,
+        });
         self.working.findings.push(FindingRef {
             id: format!("finding-{}", self.working.findings.len() + 1),
             // The confidence travels **with** the finding, in the text the
