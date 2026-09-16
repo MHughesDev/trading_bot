@@ -20,6 +20,7 @@ building what *right now*, what each track may touch, and what every track must 
 ## 1. Live tracks
 
 Eighteen tracks dispatched (two landed), 2026-09-15. Each is one agent, one branch, one disjoint file set.
+Fifteen tracks, dispatched 2026-09-15. Each is one agent, one branch, one disjoint file set.
 
 | # | Track | Plan | Branch | Migrations | Blocks |
 |---|---|---|---|---|---|
@@ -92,6 +93,7 @@ and belongs to the lifecycle phase. Do not build it twice.
 ---
 
 ## 2. Rules that exist because eighteen agents share one workspace
+## 2. Rules that exist because fifteen agents share one workspace
 
 ### 2.1 Migrations
 
@@ -130,6 +132,7 @@ reorganisation. If your change to a shared file is more than a few lines, say so
 rather than landing it quietly.
 
 ### 2.3 The build box cannot run eighteen builds
+### 2.3 The build box cannot run fifteen builds
 
 Measured on this machine, and none of it is negotiable:
 
@@ -169,6 +172,7 @@ Measured on this machine, and none of it is negotiable:
 - **Never run `cargo test --workspace` or `cargo build --workspace`.** Use `-p <your crate>`.
   This matters twice over now that each worktree has its own target directory: narrow builds are
   what keep twenty of them from filling the disk.
+  Fifteen agents running workspace builds will fill the disk and thrash the page file.
 - **`target/` is ~237 GB.** Check free space before anything large. `cargo clean` costs a
   rebuild of 639 crates. **Never delete a Docker VHDX to make room.**
 - **Never pipe cargo through another command** — it hides the exit code.
