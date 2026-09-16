@@ -82,6 +82,28 @@ fn shape_snapshot(mut snapshot: Value, detail: &str) -> Value {
             );
         }
     }
+    // The window this run covered, in the shape every other evidence-producing
+    // tool uses (S-4.2, ADR-S4-04).
+    //
+    // The snapshot has carried `start` and `end` at the top level all along, and
+    // that is not the same thing: a finding's `data_window` is derived by looking
+    // for `window: {start, end}`, and a bare `start` beside twenty other fields
+    // is not something a reader can safely treat as the period under study.
+    // Without this a finding citing a backtest — the most important evidence a
+    // finding can cite — had no derivable window and could not be stored.
+    //
+    // These are the **requested** ends. A run whose coverage was partial says so
+    // loudly in `coverage_warning` above, which is the right place for it: the
+    // window is what the claim is about, and the coverage is how well it was
+    // measured.
+    let window = match (snapshot.get("start").cloned(), snapshot.get("end").cloned()) {
+        (Some(start), Some(end)) => Some(json!({ "start": start, "end": end })),
+        _ => None,
+    };
+    if let (Some(w), Some(obj)) = (window, snapshot.as_object_mut()) {
+        obj.insert("window".into(), w);
+    }
+
     if detail == "full" {
         snapshot
     } else {
@@ -460,4 +482,77 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
         )
         .internal(),
     ]
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    /// A backtest result says what period it covered, in the shape a finding's
+    /// window is derived from (S-4.2, ADR-S4-04).
+    ///
+    /// The snapshot has carried `start` and `end` at the top level all along,
+    /// and that is not the same thing: `memory::window::from_evidence` looks for
+    /// `window: {start, end}`, and a bare `start` among twenty other fields is
+    /// not something a reader can safely treat as the period under study. Until
+    /// this, a finding citing a backtest had no derivable window and could not
+    /// be stored — and a backtest is the most important evidence a finding can
+    /// cite.
+    #[test]
+    fn a_shaped_snapshot_carries_the_window_it_covered() {
+        let snap = json!({
+            "id": "11112222-0000-0000-0000-000000000000",
+            "status": "completed",
+            "start": "2026-04-01T00:00:00Z",
+            "end": "2026-06-30T00:00:00Z",
+            "result": { "metrics": { "sharpe": 1.4 } },
+        });
+        for detail in ["summary", "full"] {
+            let out = shape_snapshot(snap.clone(), detail);
+            assert_eq!(
+                out.pointer("/window/start").and_then(Value::as_str),
+                Some("2026-04-01T00:00:00Z"),
+                "`{detail}` lost the window"
+            );
+            assert_eq!(
+                out.pointer("/window/end").and_then(Value::as_str),
+                Some("2026-06-30T00:00:00Z"),
+                "`{detail}` lost the window"
+            );
+        }
+    }
+
+    /// A snapshot with no ends grows no window rather than an empty one.
+    ///
+    /// A `window` whose fields are null reads as "this ran over no period",
+    /// which is a claim. Absent reads as "this does not say", which is true.
+    #[test]
+    fn a_snapshot_without_ends_grows_no_window() {
+        let out = shape_snapshot(json!({ "id": "x", "status": "queued" }), "summary");
+        assert!(out.get("window").is_none());
+    }
+
+    /// The coverage warning is untouched: the window is what the claim is
+    /// about, and the coverage is how well it was measured.
+    #[test]
+    fn partial_coverage_still_warns_beside_the_window() {
+        let out = shape_snapshot(
+            json!({
+                "start": "2026-04-01T00:00:00Z",
+                "end": "2026-06-30T00:00:00Z",
+                "coverage": {
+                    "missing_ranges": [{"from": "2026-05-01", "to": "2026-05-09"}],
+                    "expected_bars": 2160,
+                    "present_bars": 1944,
+                },
+            }),
+            "full",
+        );
+        assert!(out.get("window").is_some(), "the window is still stamped");
+        assert!(
+            out.get("coverage_warning").is_some(),
+            "and the partial-coverage warning still fires — a run that covered less than it \
+             asked for must not look complete because it now has a window"
+        );
+    }
 }

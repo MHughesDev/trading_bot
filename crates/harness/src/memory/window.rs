@@ -10,19 +10,25 @@
 //! quietly stops two findings about the same period from being compared, or
 //! starts comparing two about different ones.
 //!
-//! # Derived from the cited results, and refused when it cannot be
+//! # Derived from the cited results, and absent when it cannot be
 //!
 //! The claim rests on the results it cites and on nothing else, so its window is
 //! theirs. Every producer stamps one in the same shape — the analysis templates,
-//! `GET /api/data/bars`, `preview_signals` — as `window: {start, end}`, which is
-//! what this reads.
+//! `GET /api/data/bars`, `preview_signals`, and now `get_backtest` — as
+//! `window: {start, end}`, which is what this reads. A bare top-level `start` is
+//! deliberately **not** read: among twenty other fields it is not a period a
+//! reader may assume, and it could as easily belong to a lease or a schedule.
 //!
-//! When no cited result carries a window, this returns `None` and the caller
-//! **refuses the finding**. That is the whole point of deriving rather than
-//! defaulting: a finding whose window cannot be established is a finding nobody
-//! can later check for conflict, and storing it under a guessed window would
-//! make it look checkable. The refusal is cheap and says what to cite instead;
-//! the guess is undetectable afterwards.
+//! When no cited result carries a window this returns `None`, and the caller
+//! records the finding for the run without persisting it. That is the whole
+//! point of deriving rather than defaulting: a finding whose period cannot be
+//! established is one nobody can later check for conflict, and storing it under
+//! a guessed window would make it look checkable.
+//!
+//! `None` is not yet a refusal, and the reason is in ADR-S4-04: the producers
+//! did not all stamp a window, and `run_backtest` — the most important evidence
+//! a finding can cite — was the one that did not. That is fixed, so the refusal
+//! is now a small change rather than a breaking one.
 //!
 //! # The union, not the intersection
 //!
@@ -237,6 +243,43 @@ mod tests {
         let r = results(&[("x", r#"{"window":{"start":"2026-06-30","end":"2026-04-01"}}"#)]);
         // The union takes min(start) and max(end): 2026-06-30 and 2026-04-01,
         // which fails the ordering check rather than being swapped.
+        assert_eq!(from_evidence("x", &r), None);
+    }
+
+    /// The shape a backtest result now carries (ADR-S4-04's follow-up).
+    ///
+    /// This is the case the rule exists for and the one that was broken: a
+    /// finding citing a backtest is the central use, and until
+    /// `shape_snapshot` stamped a `window` the snapshot said `start` and `end`
+    /// at the top level — which this deliberately does not read, because a bare
+    /// `start` among twenty fields is not a period a reader may assume.
+    #[test]
+    fn a_backtest_snapshot_yields_the_window_it_covered() {
+        let r = results(&[(
+            "11112222",
+            r#"{"id":"11112222","status":"completed","start":"2026-04-01T00:00:00Z",
+                "end":"2026-06-30T00:00:00Z",
+                "window":{"start":"2026-04-01T00:00:00Z","end":"2026-06-30T00:00:00Z"},
+                "result":{"metrics":{"sharpe":1.4}}}"#,
+        )]);
+        assert_eq!(
+            from_evidence("11112222", &r),
+            Some(DataWindow::new("2026-04-01", "2026-06-30"))
+        );
+    }
+
+    /// Top-level `start`/`end` alone are not a window.
+    ///
+    /// Stated as a test because it is the tempting loosening: accepting them
+    /// would make the derivation work on more documents and would also make it
+    /// read a `start` that belonged to something else — a schedule, a lease, a
+    /// subscription — as the period a claim is about.
+    #[test]
+    fn bare_start_and_end_are_not_read_as_a_window() {
+        let r = results(&[(
+            "x",
+            r#"{"start":"2026-04-01","end":"2026-06-30","lease":{"start":"2020-01-01"}}"#,
+        )]);
         assert_eq!(from_evidence("x", &r), None);
     }
 }

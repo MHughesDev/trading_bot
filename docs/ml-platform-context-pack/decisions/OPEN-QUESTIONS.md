@@ -211,4 +211,8 @@ Persisting it needs an `Entry`, and `Entry::validate` refuses one without a data
 
 One thing found while implementing it, and it is the reason this is not yet a refusal: **`run_backtest` does not stamp a window**, while the analysis templates, `get_bars` and `preview_signals` all do. A backtest is the most important evidence a finding can cite, so refusing an underivable window today would reject the central case. The finding is therefore recorded for the run exactly as before and says out loud that it did not persist. Making every evidence-producing tool stamp a window turns this into a refusal in one line.
 
-**Status:** resolved. Follow-up: `run_backtest`'s result carries no `window`, which is worth fixing on its own merits — a backtest result that does not say what period it covered is under-specified whatever memory does with it.
+**The follow-up is done too.** `shape_snapshot` now stamps `window: {start, end}` on every backtest result, in the shape every other producer uses. The snapshot had carried `start` and `end` at the top level all along and that is not the same thing — a bare `start` among twenty fields is not a period a reader may assume, and the derivation deliberately refuses to read one, because it could as easily belong to a lease or a schedule. The requested ends are used and `coverage_warning` keeps flagging a run that covered less than it asked for: the window is what the claim is about, the coverage is how well it was measured.
+
+So every evidence-producing tool now stamps a window, and making `None` a refusal is a small change rather than a breaking one. It is left as a decision rather than taken silently.
+
+**Status:** resolved.
