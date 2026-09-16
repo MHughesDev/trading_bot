@@ -329,6 +329,7 @@ pub fn catalog() -> &'static [ToolSpec] {
         specs.extend(crate::tools::models::specs());
         specs.extend(crate::tools::automations::specs());
         specs.extend(crate::tools::research::specs());
+        specs.extend(crate::tools::audit::specs());
         specs.extend(crate::tools::falsification::specs());
         specs.extend(crate::tools::research_tools::specs());
         // Last, and appended rather than interleaved: the templated tier's order is

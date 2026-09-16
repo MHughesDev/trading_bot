@@ -2,6 +2,7 @@ pub mod evidence;
 pub mod web_and_skills;
 pub mod falsification;
 pub mod agent_sessions;
+pub mod agent_audit;
 pub mod agent_templates;
 pub mod asset_lifecycle;
 pub mod assets;
@@ -108,6 +109,15 @@ pub fn router(state: AppState) -> Router {
         // The templated tier (S-3.1). One route for every template: which one is
         // a field, not a path, so adding a tool never touches this file.
         .route("/api/agent/templates/run", post(agent_templates::run_template))
+        // The honesty arithmetic (S-3.6, S-3.7). `holdout-look` is the only
+        // agent-reachable path to holdout rows in the whole platform.
+        .route("/api/agent/audit/deflated-sharpe", post(agent_audit::deflated_sharpe))
+        .route("/api/agent/audit/min-track-record", post(agent_audit::min_track_record))
+        .route("/api/agent/audit/holdout-budget", post(agent_audit::holdout_budget))
+        .route("/api/agent/audit/holdout-look", post(agent_audit::holdout_look))
+        .route("/api/agent/audit/probability-of-overfit", post(agent_audit::probability_of_overfit))
+        .route("/api/agent/audit/family-wise", post(agent_audit::family_wise))
+        .route("/api/agent/audit/metric-integrity", post(agent_audit::metric_integrity))
         // Evidence for the falsification tools (ADR-P7-05). None of these
         // returns a verdict; each answers one defect class with a number.
         .route("/api/evidence/trades", post(evidence::trades))

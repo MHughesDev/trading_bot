@@ -196,6 +196,32 @@ def rng(payload: dict) -> np.random.Generator:
     return np.random.default_rng(int(seed))
 
 
+def epoch_seconds(index) -> np.ndarray:
+    """Whole seconds since the epoch, whatever resolution the index carries.
+
+    The trap this exists for, measured rather than imagined: a parquet round
+    trip yields `datetime64[us]` on some writer/pandas combinations and
+    `datetime64[ns]` on others, and `.view("int64")` hands back the raw count in
+    whichever unit it happens to be. Dividing that by 1e9 "to get seconds" is
+    correct for one of them and silently wrong by a factor of a thousand for the
+    rest — which lands every timestamp in January 1970 and collapses every
+    time bucket into one.
+
+    It was found by `bar_boundary_check` reporting 720 of 720 hourly bars as
+    violating, on a fixture built to contain no violation at all. A tool that
+    detects a timestamp defect had one.
+
+    Subtracting a `Timestamp` and dividing by a `Timedelta` is resolution-
+    independent by construction, which is why it is done that way rather than
+    by inspecting the dtype.
+    """
+    ts = pd.DatetimeIndex(index)
+    if ts.tz is None:
+        ts = ts.tz_localize("UTC")
+    epoch = pd.Timestamp("1970-01-01T00:00:00Z")
+    return np.asarray((ts - epoch) // pd.Timedelta(seconds=1), dtype="int64")
+
+
 def close_returns(frame: pd.DataFrame, kind: str = "log") -> np.ndarray:
     """Bar returns from a close column, with non-positive prices dropped.
 

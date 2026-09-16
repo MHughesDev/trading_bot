@@ -26,6 +26,10 @@ Deliberately present in the data
 * **A simulated intrabar path**, so the high and low are real extremes rather
   than a proportional wick around the bar return. `_bars_from_ticks` explains
   what that artefact did to two of the four spread estimators.
+* **A timeframe pair** — `fast.parquet` (1m), `slow.parquet` (its exact 1h
+  aggregate) and `slow_leaky.parquet` (the same hours written before their last
+  minute landed). The leak is planted the way the platform's real one occurs, so
+  a check that passes on it has actually caught the bug rather than noise.
 
 Deliberately absent
 -------------------
@@ -70,6 +74,17 @@ SPREAD_A, SPREAD_B = 60.0e-4, 120.0e-4
 # Intrabar steps used to build the high and low. Ten is enough for the range to
 # be a real path extreme rather than a function of the bar return.
 TICKS_PER_BAR = 10
+# The timeframe-pair fixture, for `audit.bar_boundary_check`. Thirty days of
+# minutes is enough for 720 hourly bars — plenty to find a planted defect and
+# small enough that the parquet stays a few megabytes.
+PAIR_DAYS = 30
+PAIR_MINUTES = PAIR_DAYS * 24 * 60
+# How many hourly bars in the leaky variant were written before their last
+# minute landed, and how many minutes early. Both are checked by the test, so a
+# change here that made the defect undetectable fails rather than passes.
+LEAKY_FRACTION = 0.25
+LEAKY_MINUTES_EARLY = 20
+
 assert ALPHA + BETA < 1.0, "the fixture's volatility process must be stationary"
 
 
@@ -170,13 +185,69 @@ def _bars_from_ticks(
     }
 
 
+def build_timeframe_pair() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """A 1m series, its exact 1h aggregate, and a deliberately leaking one.
+
+    The leaking variant is what the platform's continuous aggregation produces
+    when a row is read at its open timestamp: the hourly bar exists from the
+    moment its first minute lands, and its `close` is whatever had arrived when
+    the row was last written. So the defect is planted the way the real bug
+    occurs — the close of minute 40 stored as the close of the hour — rather than
+    as random noise, which any check would catch and which would prove nothing.
+    """
+    rng = np.random.default_rng(SEED + 1)
+    minutes = pd.date_range("2024-01-01T00:00:00Z", periods=PAIR_MINUTES, freq="min")
+    r = _standardised_t(rng, PAIR_MINUTES, NU) * 0.0004
+    bars = _bars_from_ticks(rng, r, 42_000.0, SPREAD_A)
+    fast = pd.DataFrame({"ts": minutes, **bars})
+
+    hourly = fast.set_index("ts").resample("1h")
+    slow = pd.DataFrame(
+        {
+            "open": hourly["open"].first(),
+            "high": hourly["high"].max(),
+            "low": hourly["low"].min(),
+            "close": hourly["close"].last(),
+            "volume": hourly["volume"].sum(),
+        }
+    ).dropna()
+
+    # The leak: for a quarter of the hours, the stored close is the close of a
+    # minute that is not the last one, and the high and low only cover the
+    # minutes that had landed by then.
+    leaky = slow.copy()
+    partial = fast.set_index("ts").iloc[:, :].copy()
+    chosen = rng.random(len(slow)) < LEAKY_FRACTION
+    cut = 60 - LEAKY_MINUTES_EARLY
+    for i, (stamp, _) in enumerate(slow.iterrows()):
+        if not chosen[i]:
+            continue
+        window = partial.loc[stamp : stamp + pd.Timedelta(minutes=59)].iloc[:cut]
+        if len(window) < cut:
+            continue
+        leaky.loc[stamp, "close"] = float(window["close"].iloc[-1])
+        leaky.loc[stamp, "high"] = float(window["high"].max())
+        leaky.loc[stamp, "low"] = float(window["low"].min())
+
+    return (
+        fast,
+        slow.reset_index().rename(columns={"index": "ts"}),
+        leaky.reset_index().rename(columns={"index": "ts"}),
+    )
+
 def main(out_dir: str) -> int:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     primary, secondary = build()
     primary.to_parquet(out / "primary.parquet", index=False)
     secondary.to_parquet(out / "secondary.parquet", index=False)
-    print(f"{len(primary)} bars -> {out}")
+
+    fast, slow, leaky = build_timeframe_pair()
+    fast.to_parquet(out / "fast.parquet", index=False)
+    slow.to_parquet(out / "slow.parquet", index=False)
+    leaky.to_parquet(out / "slow_leaky.parquet", index=False)
+
+    print(f"{len(primary)} bars, {len(fast)} minutes, {len(slow)} hours -> {out}")
     return 0
 
 

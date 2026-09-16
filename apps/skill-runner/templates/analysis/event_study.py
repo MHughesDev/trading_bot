@@ -5,7 +5,7 @@
   "name": "event_study",
   "version": 1,
   "namespace": "analysis",
-  "description": "Forward return paths after a threshold event, compared against volatility-matched random entries with block-bootstrap bands. Use it to check whether a pattern is worth building a strategy on before spending a trial.",
+  "description": "Forward return paths after a named event, compared against volatility-matched random entries with block-bootstrap bands. Use it to check whether a pattern is worth building a strategy on before spending a trial.",
   "input_schema": {
     "type": "object",
     "required": ["instrument_id", "timeframe", "start", "end", "event", "seed"],
@@ -19,10 +19,8 @@
       "event": {
         "type": "string",
         "enum": ["large_up_move", "large_down_move", "volatility_spike", "volatility_collapse", "new_high", "new_low"],
-        "description": "which bars count as events"
+        "description": "which bars count as events; the size that counts as large is fixed by the platform"
       },
-      "threshold_sigma": {"type": "number", "minimum": 0.5, "maximum": 10, "default": 3.0,
-                          "description": "event size in trailing standard deviations"},
       "horizon": {"type": "integer", "minimum": 1, "maximum": 500, "default": 24,
                   "description": "bars of forward path to measure"},
       "lookback": {"type": "integer", "minimum": 20, "maximum": 2000, "default": 168,
@@ -61,10 +59,20 @@ grows with the horizon.
 
 What is deliberately not here
 -----------------------------
-No "optimise the threshold" mode. Sweeping `threshold_sigma` until the p-value
-drops is exactly the search this platform counts trials to prevent, and a tool
-that offered it as a convenience would be the easiest place in the catalogue to
-do it accidentally. A sweep is a sweep: register it and spend the trials.
+**The event size is not an argument.** It is fixed at `EVENT_SIGMA` below, and
+that is not an oversight about flexibility — sweeping it until the p-value drops
+is exactly the search this platform counts trials to prevent, and a tool that
+offered the knob as a convenience would be the easiest place in the catalogue to
+do it by accident.
+
+The first version of this file shipped the knob anyway, under a docstring saying
+this. `inv23_no_governance_fields_in_tool_schemas` and
+`spec_15_tool_surface_conformance` both refused it: INVARIANTS forbids a tool
+schema exposing a threshold, and they were right about this one for the reason
+written directly above them.
+
+If a different size is genuinely wanted, that is a sweep over a registered
+family, and it spends trials like any other.
 
 Overlap
 -------
@@ -73,6 +81,13 @@ them away would bias the sample toward isolated events, which are a different
 population — and the block bootstrap's block length is set to at least `horizon`
 so the resampling respects the dependence that the overlap creates.
 """
+
+#: How large a move counts as an event, in trailing standard deviations.
+#:
+#: A platform constant rather than an argument. Three sigma on a fat-tailed
+#: series is roughly the 99.5th percentile of |r| — rare enough to be an event
+#: and common enough to leave a testable sample on a year of hourly bars.
+EVENT_SIGMA = 3.0
 
 
 def _trailing_sigma(r, lookback):
@@ -138,7 +153,7 @@ def run(payload: dict) -> dict:
 
     horizon = int(payload.get("horizon") or 24)
     lookback = int(payload.get("lookback") or 168)
-    threshold = float(payload.get("threshold_sigma") or 3.0)
+    threshold = EVENT_SIGMA
     kind = payload.get("event") or "large_down_move"
 
     if n < lookback + horizon * 10:
@@ -157,11 +172,12 @@ def run(payload: dict) -> dict:
     if events.size < 10:
         return refuse(
             f"only {events.size} `{kind}` events at {threshold} sigma over this window. Below "
-            f"ten there is nothing to compare; widen the window or lower the threshold — but "
-            f"lowering it to reach significance is a search, and searches spend trials",
+            f"ten there is nothing to compare, so widen the window or pick an event class that "
+            f"fires more often. The event size is fixed by the platform and is not an argument, "
+            f"because lowering it until a result appears is a search",
             n_events=int(events.size),
             event=kind,
-            threshold_sigma=threshold,
+            event_sigma=threshold,
         )
 
     # Cumulative forward return from each entry.
@@ -245,7 +261,7 @@ def run(payload: dict) -> dict:
 
     detail = {
         "event": kind,
-        "threshold_sigma": threshold,
+        "event_sigma": threshold,
         "lookback_bars": lookback,
         "horizon": horizon,
         "n_bars": n,

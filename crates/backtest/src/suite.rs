@@ -166,6 +166,31 @@ fn daily_returns(curve: &[(DateTime<Utc>, f64)]) -> Vec<f64> {
         .collect()
 }
 
+/// Observations per year, from the equity curve's own median spacing.
+///
+/// Not a constant: the same code serves daily bars and hourly ones, and a
+/// hard-coded 252 turns an hourly run's MinTRL into a number that is wrong by a
+/// factor of thirty-five in the direction that says "this is ready".
+fn observations_per_year(curve: &[(DateTime<Utc>, f64)]) -> f64 {
+    if curve.len() < 3 {
+        return 0.0;
+    }
+    let mut gaps: Vec<i64> = curve
+        .windows(2)
+        .map(|w| (w[1].0 - w[0].0).num_seconds())
+        .filter(|s| *s > 0)
+        .collect();
+    if gaps.is_empty() {
+        return 0.0;
+    }
+    gaps.sort_unstable();
+    let median = gaps[gaps.len() / 2] as f64;
+    if median <= 0.0 {
+        return 0.0;
+    }
+    365.25 * 24.0 * 3600.0 / median
+}
+
 fn mean(xs: &[f64]) -> f64 {
     if xs.is_empty() { 0.0 } else { xs.iter().sum::<f64>() / xs.len() as f64 }
 }
@@ -372,6 +397,74 @@ pub struct VaultView {
     /// Whether the vault action is enabled (Gate-3 passed, unspent, not unsafe).
     pub can_run: bool,
     pub access_log: Vec<VaultAccessView>,
+}
+
+/// What `audit.deflated_sharpe` answers with (Set S task S-3.6).
+///
+/// Every field is a number Gate 3 recorded. `source` says so in the payload, so
+/// a reader who sees this in a report knows it is not a second opinion.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuditDsrView {
+    pub deflated_sharpe: f64,
+    pub probability_of_overfit: f64,
+    pub raw_p_value: f64,
+    pub corrected_p_value: f64,
+    /// `ceil(N_eff)` over the tenant's whole ledger, as the gate used it.
+    pub trials: i64,
+    pub corroborators_agree: bool,
+    pub source: &'static str,
+}
+
+/// What `audit.probability_of_overfit` answers with (Set S task S-3.9).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuditPboView {
+    pub probability_of_overfit: f64,
+    pub n_configs: usize,
+    pub n_periods: usize,
+    pub observations_per_config: usize,
+    /// Capped, because a thousand-point sweep's run ids are not a summary.
+    pub config_run_ids: Vec<String>,
+}
+
+/// One candidate's place in the stepdown.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuditFamilyVerdict {
+    pub run_id: String,
+    pub statistic: f64,
+    pub adjusted_p_value: f64,
+    pub rejected: bool,
+}
+
+/// What `audit.family_wise_test` answers with (Set S task S-3.9).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuditFamilyWiseView {
+    pub n_candidates: usize,
+    pub observations: usize,
+    pub alpha: f64,
+    pub resamples: usize,
+    pub n_survivors: usize,
+    pub survivors: Vec<String>,
+    pub verdicts: Vec<AuditFamilyVerdict>,
+}
+
+/// What `audit.min_track_record` answers with (Set S task S-3.6).
+///
+/// `required_observations` is `None` when the observed Sharpe is not above zero:
+/// no record of any length establishes a Sharpe the strategy does not have, and
+/// a very large number there would read as "keep going".
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuditTrlView {
+    pub run_id: String,
+    pub n_observations: usize,
+    pub observations_per_year: f64,
+    pub sharpe_per_observation: f64,
+    pub sharpe_annualised: f64,
+    pub skew: f64,
+    pub kurtosis: f64,
+    pub confidence: f64,
+    pub required_observations: Option<f64>,
+    pub required_years: Option<f64>,
+    pub observed_years: f64,
 }
 
 /// Reconciliation read-out for one Experiment (live vs backtest distribution).
@@ -1576,6 +1669,335 @@ impl SuiteManager {
     // ── vault ──────────────────────────────────────────────────────────────────
 
     #[must_use]
+    /// What `audit.deflated_sharpe` reports (Set S task S-3.6).
+    ///
+    /// This **reads the gate's recorded number**; it does not compute a second
+    /// one. `Gate3Outcome` already holds the DSR that `gate3` used, computed
+    /// from a trial count minted by the ledger and a dispersion measured across
+    /// the studies the Experiment actually ran — and both of those are products
+    /// of having executed the funnel, not of asking a question.
+    ///
+    /// Recomputing here would need a trial count and a dispersion from
+    /// somewhere, and the only "somewhere" available to a read tool is the
+    /// caller. A deflated Sharpe whose denominator the selector supplies is the
+    /// exact failure the statistic exists to expose.
+    ///
+    /// # Errors
+    /// [`SuiteError::NotFound`] for an unknown or other-user Experiment;
+    /// [`SuiteError::Gate`] when the family has not been sealed by a Gate 3 run.
+    pub fn audit_deflated_sharpe(&self, user_id: Uuid, id: Uuid) -> Result<AuditDsrView, SuiteError> {
+        let records = self.records.read().expect("suite lock poisoned");
+        let r = records
+            .get(&id)
+            .filter(|r| r.user_id == user_id)
+            .ok_or(SuiteError::NotFound)?;
+        let outcome = r.gate3.as_ref().ok_or_else(|| {
+            SuiteError::Gate(
+                "this experiment has not run Gate 3, so its hypothesis family is not sealed and \
+                 there is no honest trial count to discount by. Advance the funnel first — a \
+                 deflated Sharpe computed against a trial count supplied by the caller is the \
+                 thing the statistic exists to prevent."
+                    .into(),
+            )
+        })?;
+        Ok(AuditDsrView {
+            deflated_sharpe: outcome.deflated_sharpe,
+            probability_of_overfit: outcome.pbo,
+            raw_p_value: outcome.raw_p_value,
+            corrected_p_value: outcome.significance.p_value(),
+            trials: outcome.significance.trial_count_at_eval(),
+            corroborators_agree: outcome.corroborators_agree,
+            source: "gate 3, as recorded",
+        })
+    }
+
+    /// What `audit.metric_integrity` re-derives (Set S task S-3.8).
+    ///
+    /// Recomputes a run's headline metric **from the run's own recorded result**
+    /// and hands back the platform's number for a caller to diff against a
+    /// claim. Nothing the agent wrote is read — not its prose, not its summary,
+    /// not a number it passed in as "the previous value". The claim arrives
+    /// separately and is only ever compared.
+    ///
+    /// The failure this targets is measured rather than hypothetical: frontier
+    /// models with tool access game reward specifications, and the cheapest way
+    /// to do it is to report a metric that no logged call produced.
+    ///
+    /// # Errors
+    /// [`SuiteError::NotFound`] when the run is not this user's, or
+    /// [`SuiteError::Gate`] for a metric name outside the closed set.
+    pub fn audit_metric(
+        &self,
+        user_id: Uuid,
+        run_id: &str,
+        metric: &str,
+    ) -> Result<(f64, Vec<(String, f64)>), SuiteError> {
+        let kind = match metric {
+            "cagr" => MetricKind::Cagr,
+            "total_return" => MetricKind::TotalReturn,
+            "sharpe" => MetricKind::Sharpe,
+            "sortino" => MetricKind::Sortino,
+            "calmar" => MetricKind::Calmar,
+            "detrended_sharpe" => MetricKind::DetrendedSharpe,
+            "max_drawdown" => MetricKind::MaxDrawdown,
+            "profit_factor" => MetricKind::ProfitFactor,
+            "expectancy" => MetricKind::Expectancy,
+            other => {
+                return Err(SuiteError::Gate(format!(
+                    "{other:?} is not a metric this platform computes. The closed set is cagr, \
+                     total_return, sharpe, sortino, calmar, detrended_sharpe, max_drawdown, \
+                     profit_factor, expectancy — a metric outside it is one nothing can \
+                     re-derive, which is the whole point of asking."
+                )));
+            }
+        };
+        let res = self.run_result(user_id, run_id).ok_or(SuiteError::NotFound)?;
+        let all = [
+            ("cagr", MetricKind::Cagr),
+            ("total_return", MetricKind::TotalReturn),
+            ("sharpe", MetricKind::Sharpe),
+            ("sortino", MetricKind::Sortino),
+            ("calmar", MetricKind::Calmar),
+            ("detrended_sharpe", MetricKind::DetrendedSharpe),
+            ("max_drawdown", MetricKind::MaxDrawdown),
+            ("profit_factor", MetricKind::ProfitFactor),
+            ("expectancy", MetricKind::Expectancy),
+        ]
+        .into_iter()
+        .map(|(name, k)| (name.to_string(), Self::metric_of(&res, k)))
+        .collect();
+        Ok((Self::metric_of(&res, kind), all))
+    }
+
+    /// Every recorded run of an Experiment, as `(run_id, per-period returns)`.
+    ///
+    /// Recorded, not dispatched: these audits are reads, and a read that
+    /// executed a grid would be a read that spent trials. Everything here has
+    /// already been counted.
+    fn recorded_family(&self, user_id: Uuid, id: Uuid) -> Result<Vec<(String, Vec<f64>)>, SuiteError> {
+        let records = self.records.read().expect("suite lock poisoned");
+        let r = records
+            .get(&id)
+            .filter(|r| r.user_id == user_id)
+            .ok_or(SuiteError::NotFound)?;
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for study in &r.studies {
+            for member in study.result.members() {
+                if !seen.insert(member.as_str().to_string()) {
+                    continue;
+                }
+                let Some(res) = self.bt.store().get(member) else {
+                    continue;
+                };
+                let returns = daily_returns(&res.equity_curve);
+                if returns.len() >= 2 {
+                    out.push((member.as_str().to_string(), returns));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// What `audit.probability_of_overfit` reports (Set S task S-3.9).
+    ///
+    /// CSCV over the Experiment's **recorded** configurations. Refuses below ten
+    /// distinct ones, and the refusal is the interesting half: PBO asks how often
+    /// the in-sample-best configuration underperforms out of sample, and with
+    /// four configurations the answer is a number drawn from four possible
+    /// rankings. It is not a small sample, it is a statistic that does not exist
+    /// yet.
+    ///
+    /// # Errors
+    /// [`SuiteError::NotFound`], or [`SuiteError::Gate`] with the count.
+    pub fn audit_probability_of_overfit(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+        n_periods: usize,
+    ) -> Result<AuditPboView, SuiteError> {
+        const MIN_CONFIGS: usize = 10;
+        let family = self.recorded_family(user_id, id)?;
+        if family.len() < MIN_CONFIGS {
+            return Err(SuiteError::Gate(format!(
+                "the probability of backtest overfitting needs at least {MIN_CONFIGS} distinct \
+                 configurations and this experiment has {}. PBO asks how often the \
+                 in-sample-best configuration underperforms out of sample; below ten that is \
+                 not a small sample, it is a statistic with too few rankings to take a value. \
+                 Run a wider sweep.",
+                family.len()
+            )));
+        }
+        // Truncate to the shortest series so every configuration is scored over
+        // the same periods. A ragged matrix would compare a config's good years
+        // against another's whole history.
+        let length = family.iter().map(|(_, r)| r.len()).min().unwrap_or(0);
+        let periods = n_periods.clamp(2, length.max(2));
+        let matrix: Vec<Vec<f64>> = family
+            .iter()
+            .map(|(_, returns)| {
+                let step = (length / periods).max(1);
+                (0..periods)
+                    .map(|p| {
+                        let from = (p * step).min(length);
+                        // The last period absorbs the remainder rather than the
+                        // remainder being dropped: with 1,000 observations and 8
+                        // periods, dropping it discards the most recent 125 —
+                        // which are the ones an out-of-sample claim rests on.
+                        let to = if p + 1 == periods {
+                            length
+                        } else {
+                            ((p + 1) * step).min(length)
+                        };
+                        let slice = &returns[from..to];
+                        let sd = variance(slice).sqrt();
+                        if sd > 0.0 {
+                            mean(slice) / sd
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+
+        Ok(AuditPboView {
+            probability_of_overfit: crate::stats::probability_of_backtest_overfitting(
+                &matrix, periods,
+            ),
+            n_configs: family.len(),
+            n_periods: periods,
+            observations_per_config: length,
+            config_run_ids: family.iter().map(|(id, _)| id.clone()).take(64).collect(),
+        })
+    }
+
+    /// What `audit.family_wise_test` reports (Set S task S-3.9).
+    ///
+    /// Romano-Wolf over the Experiment's recorded return series, with the block
+    /// length taken from the family's own pooled autocorrelation by
+    /// Politis-White — derived, never a constant, which is the acceptance
+    /// criterion. The series are resampled at the *same* time indices across
+    /// every candidate, so a 200-point sweep over one idea is not penalised as
+    /// 200 independent tests.
+    ///
+    /// # Errors
+    /// [`SuiteError::NotFound`], or [`SuiteError::Gate`] carrying the bootstrap's
+    /// own refusal — a family of one, ragged series, or too few observations.
+    pub fn audit_family_wise(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+        alpha: f64,
+        seed: u64,
+    ) -> Result<AuditFamilyWiseView, SuiteError> {
+        let family = self.recorded_family(user_id, id)?;
+        if family.len() < 2 {
+            return Err(SuiteError::Gate(
+                "a family-wise test needs at least two candidates; with one there is no family \
+                 and the ordinary p-value is the answer"
+                    .into(),
+            ));
+        }
+        // Aligned in time by truncation to the common length — the test's whole
+        // value is resampling the same indices across candidates, and ragged
+        // series would break exactly that.
+        let length = family.iter().map(|(_, r)| r.len()).min().unwrap_or(0);
+        let series: Vec<Vec<f64>> = family
+            .iter()
+            .map(|(_, r)| r[..length].to_vec())
+            .collect();
+
+        let stepdown = crate::stats::bootstrap::romano_wolf(
+            &series,
+            alpha,
+            crate::stats::bootstrap::MIN_STEPDOWN_RESAMPLES,
+            seed,
+        )
+        .map_err(|e| SuiteError::Gate(e.to_string()))?;
+
+        let survivors: Vec<String> = (0..family.len())
+            .filter(|i| stepdown.for_index(*i).is_some_and(|v| v.rejected))
+            .map(|i| family[i].0.clone())
+            .collect();
+
+        Ok(AuditFamilyWiseView {
+            n_candidates: family.len(),
+            observations: length,
+            alpha,
+            resamples: crate::stats::bootstrap::MIN_STEPDOWN_RESAMPLES,
+            n_survivors: survivors.len(),
+            survivors,
+            verdicts: (0..family.len())
+                .filter_map(|i| {
+                    stepdown.for_index(i).map(|v| AuditFamilyVerdict {
+                        run_id: family[i].0.clone(),
+                        statistic: v.t_stat,
+                        adjusted_p_value: v.adjusted_p,
+                        rejected: v.rejected,
+                    })
+                })
+                .collect(),
+        })
+    }
+
+    /// What `audit.min_track_record` reports (Set S task S-3.6).
+    ///
+    /// Unlike the deflated Sharpe this *is* computed on demand, and can be: it
+    /// needs only the run's own returns, and nothing about it depends on how
+    /// many things were tried. That is what makes it usable *before* the funnel
+    /// — which is where it is worth having, because it answers "is this record
+    /// long enough to be worth testing" rather than "did this pass".
+    ///
+    /// # Errors
+    /// [`SuiteError::NotFound`] when the run is not this user's.
+    pub fn audit_track_record(
+        &self,
+        user_id: Uuid,
+        run_id: &str,
+        confidence: f64,
+    ) -> Result<AuditTrlView, SuiteError> {
+        let res = self.run_result(user_id, run_id).ok_or(SuiteError::NotFound)?;
+        let returns = daily_returns(&res.equity_curve);
+        let n = returns.len();
+        // Per observation, which is the unit MinTRL wants. The metric set's
+        // Sharpe is annualised; using it here would be wrong by the square of
+        // the annualisation factor.
+        let sd = variance(&returns).sqrt();
+        let per_observation_sharpe = if sd > 0.0 { mean(&returns) / sd } else { 0.0 };
+        let skew = skewness(&returns);
+        let kurt = kurtosis(&returns);
+
+        let observations_per_year = observations_per_year(&res.equity_curve);
+        let required = crate::stats::min_track_record_length(
+            per_observation_sharpe,
+            0.0,
+            skew,
+            kurt,
+            confidence,
+        );
+
+        Ok(AuditTrlView {
+            run_id: run_id.to_string(),
+            n_observations: n,
+            observations_per_year,
+            sharpe_per_observation: per_observation_sharpe,
+            sharpe_annualised: Self::metric_of(&res, MetricKind::Sharpe),
+            skew,
+            kurtosis: kurt,
+            confidence,
+            required_observations: required,
+            required_years: required
+                .filter(|_| observations_per_year > 0.0)
+                .map(|r| r / observations_per_year),
+            observed_years: if observations_per_year > 0.0 {
+                n as f64 / observations_per_year
+            } else {
+                0.0
+            },
+        })
+    }
+
     pub fn vault(&self, user_id: Uuid, id: Uuid) -> Option<VaultView> {
         let records = self.records.read().expect("suite lock poisoned");
         let r = records.get(&id).filter(|r| r.user_id == user_id)?;

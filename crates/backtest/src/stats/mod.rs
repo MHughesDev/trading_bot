@@ -140,6 +140,43 @@ pub fn deflated_sharpe_ratio(
     probabilistic_sharpe_ratio(sharpe, sr0, n, skew, kurtosis)
 }
 
+/// Minimum Track Record Length: how many observations are needed before a Sharpe
+/// of `sharpe` could be distinguished from `sr0` at `confidence` (Bailey &
+/// López de Prado).
+///
+/// `MinTRL = 1 + [1 - γ₃·SR + (γ₄-1)/4·SR²] · (Z_α / (SR - SR₀))²`
+///
+/// Everything is in per-observation units: a Sharpe annualised before it reaches
+/// here gives an answer in the wrong units by the square of the annualisation
+/// factor, which is the mistake this function is easiest to make with.
+///
+/// Returns `None` when the observed Sharpe does not exceed the benchmark. That is
+/// not a failure — it is the honest answer, because no track record of any length
+/// establishes a Sharpe the strategy does not have, and returning a very large
+/// number instead would read as "keep going".
+#[must_use]
+pub fn min_track_record_length(
+    sharpe: f64,
+    sr0: f64,
+    skew: f64,
+    kurtosis: f64,
+    confidence: f64,
+) -> Option<f64> {
+    if !(sharpe.is_finite() && sr0.is_finite()) || sharpe <= sr0 {
+        return None;
+    }
+    if !(0.5..1.0).contains(&confidence) {
+        return None;
+    }
+    let z = inverse_normal_cdf(confidence);
+    // The same non-normality adjustment PSR uses, floored for the same reason:
+    // a fat left tail can drive it negative, and a negative variance under the
+    // root is a NaN three lines later.
+    let adjustment = (1.0 - skew * sharpe + ((kurtosis - 1.0) / 4.0) * sharpe * sharpe).max(1e-9);
+    let ratio = z / (sharpe - sr0);
+    Some(1.0 + adjustment * ratio * ratio)
+}
+
 /// Probability of Backtest Overfitting via Combinatorially-Symmetric Cross
 /// Validation (Bailey et al.). `performance[config][period]` is a matrix of a
 /// per-period performance metric for each candidate config. Returns the
@@ -354,6 +391,34 @@ mod tests {
             let back = inverse_normal_cdf(normal_cdf(x));
             assert!((back - x).abs() < 1e-2, "x={x} back={back}");
         }
+    }
+
+    /// The property that makes MinTRL a gate and not a statistic: a weaker
+    /// Sharpe needs a longer record, and a Sharpe that does not beat the
+    /// benchmark needs no record because no record establishes it.
+    #[test]
+    fn a_weaker_sharpe_needs_a_longer_track_record() {
+        let strong = min_track_record_length(0.15, 0.0, 0.0, 3.0, 0.95).expect("positive");
+        let weak = min_track_record_length(0.05, 0.0, 0.0, 3.0, 0.95).expect("positive");
+        assert!(weak > strong, "weak {weak} should need longer than strong {strong}");
+
+        // Not a large number — nothing at all. A very large number reads as
+        // "keep going", and the truth is that this never establishes anything.
+        assert!(min_track_record_length(0.0, 0.0, 0.0, 3.0, 0.95).is_none());
+        assert!(min_track_record_length(-0.1, 0.0, 0.0, 3.0, 0.95).is_none());
+        assert!(min_track_record_length(0.05, 0.10, 0.0, 3.0, 0.95).is_none());
+    }
+
+    /// Negative skew and fat tails make a Sharpe harder to believe, so they
+    /// lengthen the record required. A version that ignored the higher moments
+    /// would clear exactly the strategies that sell tail risk.
+    #[test]
+    fn negative_skew_and_fat_tails_lengthen_the_requirement() {
+        let normal = min_track_record_length(0.10, 0.0, 0.0, 3.0, 0.95).unwrap();
+        let skewed = min_track_record_length(0.10, 0.0, -1.5, 3.0, 0.95).unwrap();
+        let fat = min_track_record_length(0.10, 0.0, 0.0, 12.0, 0.95).unwrap();
+        assert!(skewed > normal, "{skewed} vs {normal}");
+        assert!(fat > normal, "{fat} vs {normal}");
     }
 
     #[test]

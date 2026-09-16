@@ -109,7 +109,16 @@ pub const PROMOTION_ACTIONS: &[&str] =
     &["promote_model_version", "promote_strategy", "raise_capital_fraction"];
 
 /// The one-shot holdout (§12.7).
-pub const SEALED_HOLDOUT_ACTIONS: &[&str] = &["evaluate_sealed_holdout", "open_vault"];
+///
+/// `spend_holdout_look` is the agent-facing tool (Set S task S-3.7). It is here
+/// rather than relying on the two internal action names because
+/// `Envelope::for_action` is matched on the **tool** name both drivers pass, and
+/// a tool that declares `sealed_holdout` in its `ToolSpec` while this list does
+/// not name it is a tool whose declaration says a human sees the call and whose
+/// gate says otherwise. `every_tool_envelope_matches_the_ledger` caught exactly
+/// that on the run this line was added in.
+pub const SEALED_HOLDOUT_ACTIONS: &[&str] =
+    &["evaluate_sealed_holdout", "open_vault", "spend_holdout_look"];
 
 /// Durable memory later decisions will read (§13, AGENT-003).
 pub const TIER3_MEMORY_ACTIONS: &[&str] = &["write_insight", "record_insight", "update_playbook"];

@@ -1,6 +1,35 @@
 # Phase 3 — The catalogue
 
-**Completion: 0% (0 / 19 tasks)**
+**Completion: 37% (7 / 19 tasks), plus 3 partial. 9 not started.**
+
+> Status 2026-09-16. The **templated tier is real**: a tool is a Python file under
+> `apps/skill-runner/templates/<ns>/<name>.py` whose module docstring carries a fenced JSON
+> `ToolSpec`, `build.rs` embeds it, and one parser in `crates/skills` serves both the
+> catalogue and the runner. The catalogue went from 60 tools to 80; every namespace is inside
+> its cap of 16.
+>
+> Four things a following track must know:
+>
+> 1. **`crates/mcp-server/tests/templates_run.rs` is deliberately not `#[ignore]`d.** It runs
+>    every template twice on a reference dataset and compares `detail` byte for byte. It needs
+>    an interpreter with `apps/skill-runner/requirements.txt`; if the default one has the
+>    stack in a user directory, `RunnerConfig::stack_path` is how the platform names where its
+>    stack is (the runner keeps `PYTHONNOUSERSITE=1`, correctly).
+> 2. **statsmodels and `arch` are not in the runner's stack**, and that is ADR-S3-01 rather
+>    than an omission. ADF, KPSS, Ljung-Box, ARCH-LM, Engle-Granger, Johansen, GARCH(1,1) and
+>    HAR are written out against numpy and scipy, with embedded critical-value tables that
+>    name their source.
+> 3. **Two acceptance criteria are recorded as unmet rather than approximated**: EDGE
+>    (OQ-15) and Hansen SPA / White's Reality Check (ADR-S3-06). Both tools ship with fewer
+>    procedures than §5.2 and §5.4 name, and both say so in their own descriptions.
+> 4. **The invariants refused three things on the first full run and were right every time.**
+>    ADR-S3-09, -10 and -11 record what changed. If you add a tool with an approval envelope,
+>    `ledger::audit`'s action list and the pinned set in `every_tool_envelope_matches_the_ledger`
+>    both need you.
+>
+> Remaining: S-3.10, S-3.11's static scan, S-3.12 … S-3.19. Most of what is left needs data
+> beyond OHLCV — a family's recorded return series, a venue table, or the simulator — so the
+> next increment is a second `SeriesKind` for the materialiser rather than more templates.
 
 **Requirement IDs:** TC-11…TC-37.
 **Spec:** [AGENT-006 §3.3, §5](../../../specs/AGENT-006-tool-catalog.md), and the research
@@ -119,9 +148,11 @@ the sample sizes an agent will actually ask about.
 
 `event_study`'s control is matched on volatility decile and its p-value comes from a block
 bootstrap whose block is at least the horizon, because events within a horizon of each other
-share forward bars. It has no threshold-sweep mode: sweeping until the p-value drops is the
-search this platform counts trials to prevent, and offering it as a convenience would make
-the catalogue the easiest place to do it by accident.
+share forward bars. **The event size is a platform constant, not an argument** (ADR-S3-10):
+the first version shipped a `threshold_sigma` knob under a docstring explaining why sweeping
+it is the search trials exist to prevent, and `inv23_no_governance_fields_in_tool_schemas`
+plus `spec_15_tool_surface_conformance` both refused the schema — correctly, and for exactly
+the reason written above them.
 
 Reproducibility is asserted rather than asserted-about: `templates_run.rs` runs all four
 twice on the reference dataset and compares `detail` byte for byte.
@@ -237,7 +268,29 @@ paths whose annualised return exceeds a configured bound, and the rejection is r
 ## `audit` — the honesty arithmetic
 
 ### S-3.6 Deflated Sharpe and minimum track record — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `crates/mcp-server/src/tools/audit.rs`,
+`crates/api/src/routes/agent_audit.rs`, `SuiteManager::{audit_deflated_sharpe,audit_track_record}`,
+`backtest::stats::min_track_record_length`.
+
+`deflated_sharpe` **reads the number Gate 3 recorded** rather than computing a second one, and
+refuses when the experiment has not reached Gate 3. That is the acceptance criterion
+implemented literally: a read tool that recomputed the statistic would need a trial count from
+somewhere, and the only somewhere available to it is the caller — a Sharpe discounted by a
+denominator the selector supplies is not discounted. `N_eff` stays the ledger's, which has no
+public constructor.
+
+`min_track_record` is computed on demand, because nothing in it depends on how many things
+were tried — which is what makes it usable *before* a funnel, where it answers "is this worth
+testing". It is blocking: `blocks_promotion` carries the profile floor (`strict_v1` five
+years, `paper_v1` none), and the answer for a Sharpe at or below zero is **no number at all**
+rather than a very large one, because no record of any length establishes a Sharpe the
+strategy does not have and a large number reads as "keep going".
+
+Two things `min_track_record_length` does that a textbook version does not, both tested:
+it works in per-observation units with observations-per-year taken from the equity curve's own
+spacing (an hourly run scored as daily looks ~35x more established than it is), and negative
+skew and fat tails lengthen the requirement rather than being ignored — a version that dropped
+the higher moments clears exactly the strategies that sell tail risk.
 
 Both read `N_eff` from the trial ledger, which already tracks it. The family is fixed at
 hypothesis-registration time, never at call time, or the agent can shrink its own
@@ -250,7 +303,32 @@ number.
 **Traces:** AGENT-006 §5.4; research brief Theme 1.
 
 ### S-3.7 The holdout has a budget, and one door — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `check_holdout_budget` and `spend_holdout_look` in
+`crates/mcp-server/src/tools/audit.rs`, served by `crates/api/src/routes/agent_audit.rs`.
+
+**No migration was needed and none was written.** The plan called for
+`0079_holdout_budget.sql`; the experiment vault in `0028_backtest_experiments.sql` already
+is this mechanism — one logged access, self-sealing, a trial counter with no decrement path
+and an append-only access log, both enforced by database triggers rather than by a caller. A
+second holdout implementation for the agent would be a holdout that has been looked at twice,
+and the second look is the one nobody counts. (Migration 0079 is also long since taken; the
+tree is at 0121.)
+
+`spend_holdout_look` carries `Envelope::SealedHoldout` so it suspends for a human on every
+tier, and is capped at `max_calls_per_run: 1` independently of that — the cap is the
+arithmetic refusing a second attempt inside one run even where a human would have said yes
+again. `check_holdout_budget` is free, deliberately: an agent that can only discover the
+budget by exhausting it will exhaust it.
+
+Both orderings are checked **ahead** of the spend, so a look that was going to be refused does
+not consume the look: Gate 3 must have passed (a holdout reachable before the significance
+gate is one a candidate can be tuned against) and the experiment must not be unsafe. The
+`reason` needs 20 characters because it is written into a log that outlives the run and is the
+only record of why the one look was used.
+
+Verified adversarially by `tools::audit::tests::the_holdout_has_exactly_one_door`, which scans
+the **whole catalogue** for `Envelope::SealedHoldout` and fails if any second tool carries it —
+a test against this module alone would pass while another module opened a second door.
 
 `check_holdout_budget` and `spend_holdout_look`. The second is the **only** path that may
 read holdout rows; every other tool's query scope excludes them. It carries the
@@ -265,7 +343,29 @@ explanation rather than returning data.
 holdout regardless of sample size).
 
 ### S-3.8 `metric_integrity` — re-derive what the agent claims — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `crates/mcp-server/src/tools/audit.rs`,
+`crates/api/src/routes/agent_audit.rs`, `SuiteManager::audit_metric`.
+
+The acceptance criterion is structural rather than tested-for: `claimed_value` arrives as a
+separate argument and is **only ever compared**. The recomputation's inputs are the run's
+recorded `RunResult` and nothing else — no prose, no summary, no number the agent passed in
+as "the previous value".
+
+Two things it does that a naive diff does not:
+
+* the comparison is **relative**, because a Sharpe of 0.001 reported as 0.01 is a tenfold
+  error that an absolute tolerance waves through;
+* it checks whether the claim matches a *different* metric of the same run, and says so. The
+  right number under the wrong label is the common honest mistake, and from outside it is
+  indistinguishable from the dishonest case until something checks.
+
+**Deviation from the plan's wording, recorded:** the plan says to read `agent_events`. That
+table is migration 0036's UI event stream — the same name collision phase 2 hit when it had to
+rename the effect log to `agent_effect_log`. The metric is re-derived from the run store,
+which is the platform-side record the plan's phrase means.
+
+The metric name is a closed set of nine and anything outside it is refused, because a metric
+nothing can re-derive is exactly the kind this tool exists to catch.
 
 Recomputes the headline metric from platform-logged tool calls (`agent_events`, not the
 agent's prose) and diffs against the report. Targets the measured failure mode that current
@@ -276,7 +376,30 @@ the audit reads only platform-side logs, never agent-authored text.
 **Traces:** AGENT-006 §5.4; AGENT-009 honesty suite; research brief Theme 9.
 
 ### S-3.9 PBO and family-wise significance — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — both tools exist; `family_wise_test` offers **one** family-wise
+procedure rather than the three §5.4 names.
+
+`crates/mcp-server/src/tools/audit.rs`, `crates/api/src/routes/agent_audit.rs`,
+`SuiteManager::{audit_probability_of_overfit,audit_family_wise}`.
+
+Neither tool computes a new statistic: `probability_of_overfit` runs the existing
+`stats::probability_of_backtest_overfitting` over runs the experiment has **already recorded**,
+and `family_wise_test` runs the existing `stats::bootstrap::romano_wolf`. Nothing is
+dispatched, so neither spends a trial — a statistic computed from an existing look is not a
+new look.
+
+Both acceptance criteria hold. PBO refuses below ten distinct configurations and says why:
+below ten there are too few possible rankings for the statistic to take a value, so it is not
+a small sample but a number that does not exist yet. The bootstrap block length is
+Politis-White over the family's *pooled* autocorrelation — derived, and pooled so one
+unusually smooth candidate cannot set the block for everyone.
+
+**Missing: Hansen's SPA and White's Reality Check.** This is a deliberate deviation, not an
+omission — recorded as **ADR-S3-06**. Romano-Wolf dominates both (per-candidate adjusted
+p-values rather than only a test of the global null), and offering three family-wise
+procedures behind one question is a menu to shop between, which is the error the tool exists
+to correct, one level up. The same reasoning is why `seed` defaults to 0: re-rolling a
+bootstrap until a candidate survives is that error again.
 
 `probability_of_overfit` (CSCV; refuses below 10 distinct configs) and `family_wise_test`
 (Romano-Wolf / Hansen SPA / White's Reality Check) reusing the null library's existing block
@@ -304,7 +427,43 @@ strategy produces no divergence.
 **Traces:** AGENT-006 §5.4; research brief Theme 2 (Freqtrade's shipped precedent).
 
 ### S-3.11 Bar-boundary and feature leakage — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `bar_boundary_check` is built and tested against a planted defect;
+`feature_leakage_scan` (the static pass in `crates/strategy-validator`) is **deferred to
+phase 5, with a reason**.
+
+The reason is an ordering fact, checked rather than assumed. The frozen expression grammar
+admits exactly two calls — `crates/strategy-validator/src/expressions.rs::check_call` accepts
+`feature(name)` and `bar(open|high|low|close|volume)` and rejects everything else — and the
+feature vocabulary a backtest can actually evaluate is `ema_N` and `rsi_N`, both causal. A
+scan for full-window statistics, future correlation and disguised label transforms therefore
+has nothing expressible to find: the constructs it looks for cannot be written today.
+
+Building it now would produce a pass that returns clean on every strategy the platform can
+represent, which is worse than not having it — a leakage scan that has never found anything
+reads as evidence there is nothing to find. It belongs with AGENT-011's SLv2, which is what
+introduces expressions rich enough to hide a leak (phase 5).
+
+`apps/skill-runner/templates/audit/bar_boundary_check.py`. It compares two stored resolutions
+of one instrument and asks whether every aggregate is reconstructible from *completed*
+constituents — so it detects the defect for every strategy at once rather than one at a time,
+and reads no strategy code. A strategy that passes a code review while reading a mis-aggregated
+series is exactly what a code review cannot catch.
+
+The fixture now carries a timeframe pair: `fast.parquet` (1m), `slow.parquet` (its exact 1h
+aggregate) and `slow_leaky.parquet`, where a quarter of the hours were written twenty minutes
+before their last minute landed — the way the platform's continuous aggregation actually
+produces the bug, rather than as noise any check would catch.
+
+Acceptance met exactly: the planted leak is caught **with its first violating timestamp**
+(`2024-01-01T10:00:00Z`), and the tool recovers *how far early* the row was readable — 20
+bars, which is the planted value, asserted.
+
+The clean half of that test is the half that earned its place. The first version of this
+template reported **720 of 720** bars violating on a fixture built to contain none: a parquet
+round trip had handed it `datetime64[us]` and it divided by 1e9 to get seconds, landing every
+timestamp in January 1970 and collapsing every bucket into one. A tool for detecting timestamp
+defects had one. `preamble.py::epoch_seconds` now does this resolution-independently, and the
+docstring records why.
 
 `bar_boundary_check` proves a decision at T could not have seen an unfinished
 higher-timeframe candle — the bug class that lives exactly in this platform's continuous

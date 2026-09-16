@@ -1103,7 +1103,14 @@ fn every_tool_envelope_matches_the_ledger() {
     gated.sort_unstable();
     assert_eq!(
         gated,
-        vec!["arm_automation", "promote_model_version"],
+        // `spend_holdout_look` joined this list on 2026-09-16 (Set S task S-3.7),
+        // and it is the clearest member of it: the sealed holdout is one
+        // evaluation per experiment, ever, so the call a human is asked about is
+        // the only one that will ever be made. It carries `SealedHoldout` in its
+        // `ToolSpec` and is named in `ledger::audit::SEALED_HOLDOUT_ACTIONS`;
+        // this test is what made the second half necessary rather than optional,
+        // by failing when only the first existed.
+        vec!["arm_automation", "promote_model_version", "spend_holdout_look"],
         "the gated catalogue tools changed; that is a decision, not a diff"
     );
 }

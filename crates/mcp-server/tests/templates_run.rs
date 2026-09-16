@@ -114,7 +114,15 @@ fn fixture_dir() -> PathBuf {
 /// template with a new argument should force a decision about what a
 /// *representative* value for it is, rather than letting the test invent `0` and
 /// quietly exercise the degenerate path.
-fn argument(name: &str) -> Option<Value> {
+fn argument(tool: &str, name: &str) -> Option<Value> {
+    // Per-tool first, and only where the fixture forces it. This is not an
+    // escape hatch: `bar_boundary_check` compares two resolutions of one
+    // instrument, so its `timeframe` is the *fast* leg and the shared default
+    // would have it comparing 1h against 1h — which the template correctly
+    // refuses, and which is how this override came to exist.
+    if tool == "bar_boundary_check" && name == "timeframe" {
+        return Some(json!("1m"));
+    }
     Some(match name {
         "instrument_id" => json!("BTC-USD"),
         "secondary_instrument_id" => json!("ETH-USD"),
@@ -128,12 +136,34 @@ fn argument(name: &str) -> Option<Value> {
         // the template runs and reproduces, and a threshold that yields four
         // events exercises the refusal path instead.
         "event" => json!("large_down_move"),
-        "threshold_sigma" => json!(2.5),
         // The evidentiary generator, so the suite exercises the path whose
         // output a run is allowed to cite.
         "generator" => json!("stationary_block_bootstrap"),
+        // The timeframe pair: same instrument, two resolutions.
+        "higher_timeframe" => json!("1h"),
         _ => return None,
     })
+}
+
+/// Which fixture file a declared role is fed from.
+///
+/// Named rather than positional, for the same reason `argument` is: a template
+/// that adds a role should force a decision about what that role's
+/// *representative* data is. The pairs are deliberate — `secondary` is a
+/// different instrument (correlation, cointegration, spanning), `slow` is the
+/// **same** instrument at a coarser resolution (bar-boundary), and conflating
+/// the two would make a cointegration test pass against a series' own
+/// aggregate.
+fn fixture_file(role: &str) -> &'static str {
+    match role {
+        "primary" => "primary.parquet",
+        "secondary" => "secondary.parquet",
+        "fast" => "fast.parquet",
+        "slow" => "slow.parquet",
+        other => panic!(
+            "no fixture file for the series role `{other}`. Add one to `fixture_file` and, if              the fixture does not contain suitable data yet, to reference_dataset.py."
+        ),
+    }
 }
 
 fn payload_for(t: &skills::Template, fixture: &Path) -> Value {
@@ -151,7 +181,7 @@ fn payload_for(t: &skills::Template, fixture: &Path) -> Value {
         })
         .unwrap_or_default();
     for name in required {
-        let value = argument(&name).unwrap_or_else(|| {
+        let value = argument(&h.name, &name).unwrap_or_else(|| {
             panic!(
                 "`{}` requires the argument `{name}`, and this suite has no representative value \
                  for it. Add one to `argument()` rather than letting the test guess.",
@@ -166,14 +196,9 @@ fn payload_for(t: &skills::Template, fixture: &Path) -> Value {
 
     let mut data = serde_json::Map::new();
     for series in &h.series {
-        let file = if series.role == "primary" {
-            "primary.parquet"
-        } else {
-            "secondary.parquet"
-        };
         data.insert(
             series.role.clone(),
-            json!(fixture.join(file).to_string_lossy()),
+            json!(fixture.join(fixture_file(&series.role)).to_string_lossy()),
         );
     }
     map.insert("data".into(), Value::Object(data));
@@ -362,4 +387,88 @@ async fn the_cost_estimators_recover_the_fixtures_known_spread() {
             "`{name}` reports {bps:.1} bps against a true {TRUE_SPREAD_BPS}. An estimator that              cannot recover a spread from data built to contain it should return None, not a              number a cost model will use."
         );
     }
+}
+
+/// A planted lookahead is caught, and a clean pair is not flagged.
+///
+/// Both halves matter. A checker that flags everything would pass the first
+/// assertion alone, and that is not a hypothetical failure mode — the first
+/// version of `bar_boundary_check` reported 720 of 720 bars violating on the
+/// clean fixture, because a parquet round trip had handed it `datetime64[us]`
+/// and it divided by 1e9 to "get seconds". Every timestamp landed in 1970 and
+/// every bucket became one bucket. A tool for detecting timestamp defects had
+/// one, and only the clean half of this test says so.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_planted_bar_boundary_leak_is_caught_and_a_clean_pair_is_not() {
+    let fixture = fixture_dir();
+    let Some(t) = mcp_server_lib::tools::templated::find("bar_boundary_check") else {
+        return;
+    };
+
+    let call = |slow_file: &str| {
+        json!({
+            "instrument_id": "BTC-USD",
+            "timeframe": "1m",
+            "higher_timeframe": "1h",
+            "start": "2024-01-01T00:00:00Z",
+            "end": "2024-02-01T00:00:00Z",
+            "seed": 7,
+            "data": {
+                "fast": fixture.join("fast.parquet").to_string_lossy(),
+                "slow": fixture.join(slow_file).to_string_lossy(),
+            }
+        })
+    };
+
+    let detail_of = |result: Option<Value>| -> Value {
+        result
+            .and_then(|r| r.get("detail").cloned())
+            .expect("a detail")
+    };
+
+    let (outcome, clean) = run_once(t, &call("slow.parquet")).await;
+    assert_eq!(outcome, Outcome::Ok, "{outcome:?}");
+    let clean = detail_of(clean);
+    assert_eq!(
+        clean.get("n_violations").and_then(Value::as_u64),
+        Some(0),
+        "the clean aggregate was flagged: {}",
+        clean.get("verdict").and_then(Value::as_str).unwrap_or("")
+    );
+    assert!(
+        clean.get("n_checked").and_then(Value::as_u64).unwrap_or(0) > 100,
+        "too few bars were actually checked for the clean result to mean anything"
+    );
+
+    let (outcome, leaky) = run_once(t, &call("slow_leaky.parquet")).await;
+    assert_eq!(outcome, Outcome::Ok, "{outcome:?}");
+    let leaky = detail_of(leaky);
+    let violations = leaky.get("n_violations").and_then(Value::as_u64).unwrap_or(0);
+    assert!(
+        violations > 0,
+        "the planted lookahead was not caught at all"
+    );
+
+    // The first violating timestamp, which is the acceptance criterion: "caught
+    // with its first violating timestamp".
+    let first = leaky
+        .get("first_violation")
+        .and_then(|v| v.get("bar_open"))
+        .and_then(Value::as_str)
+        .expect("the first violation names its bar");
+    assert!(
+        first.starts_with("2024-"),
+        "the first violation's timestamp is {first}, which is not inside the fixture's window          — the epoch conversion is wrong again"
+    );
+
+    // And it recovers *how far early*, not merely that something is off.
+    let early = leaky
+        .get("first_violation")
+        .and_then(|v| v.get("readable_bars_early"))
+        .and_then(Value::as_u64)
+        .expect("how many bars early");
+    assert_eq!(
+        early, 20,
+        "the fixture plants a 20-minute-early write (LEAKY_MINUTES_EARLY); the tool recovered          {early}"
+    );
 }

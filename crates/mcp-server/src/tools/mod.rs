@@ -7,6 +7,7 @@
 //! like any other path.
 
 pub mod assets;
+pub mod audit;
 pub mod authoring;
 pub mod core;
 pub mod automations;

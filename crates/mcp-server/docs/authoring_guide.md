@@ -617,3 +617,127 @@ was missing a declared key — your mistake, not the skill's).
 Every run is recorded, including failures. That record is the library's value: it
 is how a skill that works becomes visibly different from one that does not,
 without anything being trained.
+
+### deflated_sharpe
+
+The number it returns is the one **Gate 3 recorded**, not a second computation.
+That matters more than it sounds: the deflated Sharpe is the observed Sharpe
+discounted by how many things were tried, and the trial count is `N_eff` over the
+tenant's whole ledger — a value with no public constructor, which only a ledger
+can mint. A version of this tool that recomputed the statistic would need the
+trial count from somewhere, and the only somewhere available to a read tool is
+you. A Sharpe discounted by a denominator the selector chose is not discounted.
+
+So it refuses until the experiment's funnel has reached Gate 3. The refusal is
+not a limitation to work around — it is the tool telling you the hypothesis
+family is not sealed yet, and that no honest discount exists to report.
+
+Read `corroborators_agree` before quoting the number. Gate 3 runs a primary
+permutation p-value and two corroborators (this and PBO); when they disagree,
+that is a flag to investigate, never a menu to pick the friendlier answer from.
+
+### min_track_record
+
+How long a record has to be before a Sharpe this size could be told apart from
+luck. Unlike `deflated_sharpe` this does not depend on how many strategies were
+tried, so it works before any funnel has run — which is where it earns its place,
+because it answers "is this worth testing" rather than "did this pass".
+
+Two things it does that a textbook MinTRL does not:
+
+* it works in **per-observation** units and derives observations-per-year from
+  the equity curve's own spacing. A Sharpe annualised before it reaches the
+  formula gives an answer wrong by the square of the annualisation factor, and an
+  hourly run scored as though it were daily looks about thirty-five times more
+  established than it is;
+* it returns **nothing** rather than a very large number when the Sharpe is not
+  above zero. No record of any length establishes a Sharpe the strategy does not
+  have, and a large number there reads as "keep going".
+
+`blocks_promotion` is what it sounds like. The profile floor (`strict_v1`: five
+years; `paper_v1`: none) is a precondition, not advice.
+
+### spend_holdout_look
+
+The only tool in the catalogue that reads holdout data, once per experiment,
+ever. It needs a human's approval on every tier and it is capped at one call per
+run independently of that approval — the cap is the arithmetic refusing a second
+attempt inside one run even where a human would have said yes again.
+
+Ask `check_holdout_budget` first. It is free, and that is deliberate: an agent
+that can only discover the budget by exhausting it will exhaust it.
+
+The `reason` is not a formality. It is written into an append-only access log
+that outlives the run and is the only record of why the one look was used, so it
+has to say why *this* candidate is ready. Twenty characters is the floor, and
+"testing" does not clear it.
+
+Two orderings are enforced ahead of the spend, so a look that was going to be
+refused does not consume the look:
+
+* Gate 3 must have passed. A holdout reachable before the significance gate is a
+  holdout a candidate can be tuned against.
+* the experiment must not be marked unsafe.
+
+After it returns, the result is out of sample exactly once. Anything fitted
+having seen it is in sample, whatever it is called afterwards.
+
+### probability_of_overfit
+
+Combinatorially-symmetric cross-validation over the configurations an experiment
+has already run. It splits the period into groups, takes every half-and-half
+split, picks the in-sample best configuration on each, and asks how often that
+choice underperformed the out-of-sample median. A high number means the sweep's
+winner is the winner of a lottery.
+
+It refuses below ten distinct configurations, and the refusal is the useful half.
+With four configurations there are four possible rankings, so the "probability"
+would be a number drawn from a handful of outcomes — not a small sample, but a
+statistic that does not have a value yet. Run a wider sweep rather than quoting
+the number it would otherwise have returned.
+
+Nothing is dispatched: it reads runs already recorded, so it spends no trials.
+Series are truncated to the shortest so that every configuration is scored over
+the same periods; a ragged matrix compares one config's good years against
+another's whole history.
+
+### family_wise_test
+
+Romano-Wolf stepdown over the experiment's candidates. Use it before reporting
+the best result of a sweep — the raw best of a family is, by construction, what
+the best of that many draws looks like.
+
+It resamples the **same time indices** across every candidate, which is what
+makes it right for a sweep: a 200-point grid over one idea is highly correlated,
+and correcting it as 200 independent tests would reject everything. The block
+length comes from the family's own pooled autocorrelation (Politis-White), never
+a constant.
+
+Hansen's SPA and White's Reality Check are deliberately not offered. Romano-Wolf
+dominates both — it produces per-candidate adjusted p-values instead of only
+testing the global null — and three family-wise tests behind one question is a
+menu to shop between. If none of your candidates survive, that is the answer.
+
+`seed` defaults to 0 and is yours to fix, not to vary: re-rolling a bootstrap
+until a candidate survives is the same error the test exists to correct, one
+level up.
+
+### metric_integrity
+
+Re-derives a metric from the platform's own record of a run and diffs it against
+the number you are about to report. Nothing you wrote is an input: the claimed
+value arrives on the side and is only ever compared.
+
+It exists because of a measured failure mode, not a hypothetical one — models
+with tool access game reward specifications, and the cheapest way to do that is
+to report a number no logged call produced. Running this before putting a figure
+in a finding is the difference between a report that can be checked and one that
+has to be trusted.
+
+The comparison is relative rather than absolute, because a Sharpe of 0.001
+reported as 0.01 is a tenfold error that an absolute tolerance waves through.
+
+It also checks whether the reported value matches a *different* metric of the
+same run. That is the common honest mistake — the right number under the wrong
+label — and from the outside it looks exactly like the dishonest case until
+something checks.

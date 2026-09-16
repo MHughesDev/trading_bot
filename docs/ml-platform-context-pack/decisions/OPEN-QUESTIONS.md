@@ -152,3 +152,19 @@ Write here instead of guessing. One entry per question. Keep working on unrelate
 **Decision:** **A, deferred.** The tool ships with three verified estimators and its description says three; the docstring names EDGE and says why it is absent. Nothing is blocked on it — the consensus is a median of estimators that agree — and the calibration test means whoever implements it will know immediately whether they got it right, which is not true of the version that was nearly committed.
 
 **Status:** open — `estimate_liquidity_cost` is correct and incomplete, and says so in its own description.
+
+### OQ-16 · `max_usd_per_task` and `ask_above_usd` are declared in every profile and there is no price table anywhere in the platform. What are the prices, and who owns them?
+**Context:** found 2026-09-16 building `estimate_cost` (S-3.19). `harness::profile::Budgets` carries `max_usd_per_task` (0.5 on the local profile, 25.0 on the frontier one) and `ask_above_usd`; `policy::decide` has a cost axis that fires when an estimate exceeds the threshold. The axis is correct and has never fired, because `drive.rs` passes `estimated_usd: None` — and it says so in a comment, honestly: *"No estimator yet (S-3.19) … `None` is 'not estimated', never 'free'."*
+
+S-3.19's `estimate_cost` is supposed to supply that number. It cannot supply the dollars. A grep across the workspace finds **no price per token, per second, per GPU-hour or per job** — `jobs::models::estimate_cost` answers in *seconds* with a factor-of-three band, and nothing converts seconds or tokens into money.
+
+**What it costs to get wrong:** a made-up rate is worse than none. `ask_above_usd` is a gate that pauses for a human, so a rate that is too low never pauses and a rate that is too high pauses on everything until somebody raises the threshold — and both failures look like the gate working. The same argument the code comment already makes about `None` versus zero applies one level up.
+
+**Options.**
+**A. A static price table in config**, per provider model (input/output per million tokens) and per hardware class (per second). Prices are public and change a few times a year; a stale entry is visible and correctable, and the table is one file to review.
+**B. Read prices from the provider.** Correct for LLM tokens and unavailable for the local GPU, which has no invoice. It also makes a budget depend on a network call.
+**C. Budget in tokens and seconds only**, and delete the dollar fields. Honest, and it loses the one unit a human actually reasons about when approving a spend.
+
+**Decision:** none yet — this is a pricing question the platform owner should answer, not one to guess. Until then `estimate_cost` returns `est_seconds`, `est_rows` and `trials` for real, and `est_usd: null` beside a stated reason, so the tool is correct and incomplete rather than confident and wrong. `ask_above_usd` stays unfired and `policy.cost_above_threshold` stays unreachable, which is recorded here so it is not reported as enforced.
+
+**Status:** open — needs a decision on where prices come from.

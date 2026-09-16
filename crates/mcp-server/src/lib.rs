@@ -816,6 +816,15 @@ async fn dispatch_untraced(
         "list_skills" => tools::research_tools::list_skills(&ctx.api, params).await,
         "run_skill" => tools::research_tools::run_skill(&ctx.api, params).await,
 
+        // ── Audit (S-3.6, S-3.7) ───────────────────────────────────────────────
+        "deflated_sharpe" => tools::audit::deflated_sharpe(&ctx.api, params).await,
+        "min_track_record" => tools::audit::min_track_record(&ctx.api, params).await,
+        "check_holdout_budget" => tools::audit::check_holdout_budget(&ctx.api, params).await,
+        "spend_holdout_look" => tools::audit::spend_holdout_look(&ctx.api, params).await,
+        "probability_of_overfit" => tools::audit::probability_of_overfit(&ctx.api, params).await,
+        "family_wise_test" => tools::audit::family_wise_test(&ctx.api, params).await,
+        "metric_integrity" => tools::audit::metric_integrity(&ctx.api, params).await,
+
         // ── The templated tier ─────────────────────────────────────────────────
         //
         // One arm for all of them, and it has to come last: a templated tool is
