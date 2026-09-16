@@ -76,6 +76,9 @@ orchestration:
   max_replans_per_run: 3
   # Consecutive errors from one tool before it leaves exposure for the run.
   tool_breaker_threshold: 3
+  # A reflection costs a model call and is not charged to max_steps: a budget
+  # that charges for noticing a wrong turn discourages noticing.
+  max_reflections_per_run: 3
   code_execution: "full"
 
 # The trifecta audit (guide §14.1), recorded rather than believed.

@@ -879,3 +879,111 @@ fn a_success_resets_the_failure_run() {
         "two before a success and two after is not three in a row"
     );
 }
+
+// ── S-1.17: reflect costs a call, not a step ────────────────────────────────
+
+/// A reflection does not decrement the step budget, and is capped.
+///
+/// The mechanism is the whole point: a fifteen-step budget that spends 7% of
+/// itself on noticing a wrong turn is a budget that teaches the model not to
+/// notice, and the runs that went wrong went wrong early and kept going.
+///
+/// Capped because the opposite failure is cheap to reach — reflection costs a
+/// model call and produces no evidence, so a run that can always take one more is
+/// a run that thinks about thinking.
+#[test]
+fn a_reflection_costs_a_call_but_not_a_step_and_runs_out() {
+    let mut p = profile();
+    p.orchestration.mode = harness::profile::Mode::Freeform;
+    p.orchestration.reflection = true;
+    p.orchestration.max_reflections_per_run = 2;
+    p.orchestration.max_steps = 40;
+    let mut l = Loop::new(p, registry(), task());
+    l.next(Input::Admission(Admission::Admit));
+
+    let before = l.step();
+    for i in 0..2 {
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"reflect"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: serde_json::json!({ "doubt": format!("is 1h the right timeframe, take {i}") })
+                .to_string(),
+        });
+        assert!(
+            fx.iter().any(|e| matches!(e, Effect::CallModel(_))),
+            "a reflection costs a model call"
+        );
+        assert_eq!(l.step(), before, "and does not spend a step");
+    }
+    assert_eq!(
+        l.working().open_questions.len(),
+        2,
+        "the doubt lands on the card as an OPEN question, not as a result"
+    );
+
+    // The third is refused, and refusing is not a failure state.
+    l.next(Input::ModelReply {
+        raw: r#"{"name":"reflect"}"#.into(),
+    });
+    let fx = l.next(Input::ModelReply {
+        raw: r#"{"doubt":"one more"}"#.into(),
+    });
+    let refused = fx.iter().any(|e| {
+        matches!(e, Effect::Note(harness::drive::Note::Rejected { code, .. })
+            if &**code == "drive.reflection_exhausted")
+    });
+    assert!(refused, "the third reflection is refused: {fx:?}");
+    assert!(
+        !fx.iter().any(|e| matches!(e, Effect::Done(_))),
+        "and refusing does not end the run"
+    );
+}
+
+/// A profile that does not reflect is never offered the tool.
+///
+/// It is registered so the loop can ANSWER it; offering it to a 7B would spend one
+/// of six exposure slots on a tool whose handler refuses — and on that profile
+/// that is the slot `list_instruments` loses to two alphabetical siblings.
+#[test]
+fn a_profile_that_does_not_reflect_is_not_offered_the_tool() {
+    let (l, _) = started();
+    assert!(!profile().orchestration.reflection, "the 7B does not reflect");
+    assert!(
+        !l.exposed().contains("reflect"),
+        "and is not offered it: {:?}",
+        l.exposed()
+    );
+}
+
+/// The worked examples reach the prompt on a profile that asked for them, and the
+/// count is the count.
+#[test]
+fn few_shot_examples_reach_the_prompt_on_the_profiles_that_declare_them() {
+    let (_, fx) = started();
+    let p = profile();
+    assert_eq!(p.orchestration.few_shot_examples, 2, "the 7B declares two");
+
+    let prompt = prompt(&fx);
+    assert!(
+        prompt.contains("WORKED EXAMPLES"),
+        "a declared value that never reaches a prompt is a bug: {prompt}"
+    );
+    assert_eq!(
+        prompt.matches("you are asked to choose").count(),
+        2,
+        "two means two"
+    );
+}
+
+/// And a frontier profile gets none: two examples in the prefix is two examples
+/// paid for on every turn, and a frontier model does not need the format help.
+#[test]
+fn a_frontier_profile_gets_no_examples() {
+    let mut p = profile();
+    p.orchestration.mode = harness::profile::Mode::Freeform;
+    p.orchestration.few_shot_examples = 0;
+    let mut l = Loop::new(p, registry(), task());
+    let fx = l.next(Input::Admission(Admission::Admit));
+    assert!(!prompt(&fx).contains("WORKED EXAMPLES"));
+}

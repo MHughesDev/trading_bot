@@ -23,7 +23,7 @@
 
 use serde_json::{Map, Value};
 
-use harness::registry::{Risk, ToolDef, ToolRegistry};
+use harness::registry::{Risk, ToolDef, ToolRegistry, REFLECT};
 use mcp_server_lib::{dispatch_tool, taxonomy, tool_definitions_for, McpContext, ToolProfile};
 
 /// Tools the harness answers itself, so the bridge must not also register them.
@@ -183,7 +183,7 @@ fn compact(v: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harness::registry::{FINISH_TASK, RECORD_FINDING, SEARCH_TOOLS};
+    use harness::registry::{FINISH_TASK, RECORD_FINDING, REFLECT, SEARCH_TOOLS};
 
     /// The check that makes an unclassified tool impossible to ship. `stamp` already
     /// defaults an unknown tool to destructive, which is the safe direction — but
@@ -196,7 +196,11 @@ mod tests {
         for name in reg.names() {
             // Core harness tools are answered inside the loop and never cross the
             // bridge, so the platform taxonomy has nothing to say about them.
-            if name == SEARCH_TOOLS || name == FINISH_TASK || name == RECORD_FINDING {
+            if name == SEARCH_TOOLS
+                || name == FINISH_TASK
+                || name == RECORD_FINDING
+                || name == REFLECT
+            {
                 continue;
             }
             assert!(

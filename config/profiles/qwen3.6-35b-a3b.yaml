@@ -73,6 +73,9 @@ orchestration:
   max_replans_per_run: 2
   # Consecutive errors from one tool before it leaves exposure for the run.
   tool_breaker_threshold: 3
+  # A reflection costs a model call and is not charged to max_steps: a budget
+  # that charges for noticing a wrong turn discourages noticing.
+  max_reflections_per_run: 3
   # Templated, not full. A 35B-A3B MoE writes decent short scripts; multi-step
   # programmatic tool calling is a frontier capability until an eval says otherwise.
   code_execution: "templated"

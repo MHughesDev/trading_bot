@@ -60,7 +60,9 @@ use crate::hardware::{Admission, TaskDemand};
 use crate::policy::{self, ActionContext, Decision, Ruling};
 use crate::profile::{Mode, Profile, SchemaStyle};
 use crate::provenance::{self, Provenance, Tagged};
-use crate::registry::{self, Risk, ToolRegistry, FINISH_TASK, RECORD_FINDING, SEARCH_TOOLS};
+use crate::registry::{
+    self, Risk, ToolRegistry, FINISH_TASK, RECORD_FINDING, REFLECT, SEARCH_TOOLS,
+};
 use crate::state::{
     BudgetView, Correction, Detail, FindingRef, GoalKind, Mode as RunMode, PlannedStep, StepKind,
     StepStatus, WorkingState,
@@ -652,6 +654,18 @@ pub struct Loop {
     consecutive_tool_errors: BTreeMap<String, u32>,
     /// Tools the breaker has opened. They leave exposure for the rest of the run.
     broken_tools: BTreeSet<String>,
+    /// Whether this step has already spent its one doubled re-ask (§3.3, S-1.17).
+    ///
+    /// Outside the retry budget on purpose. A truncated reply is not the model
+    /// getting the task wrong — it is the model being cut off mid-sentence — so
+    /// charging it to the budget for wrong answers is how a session that is working
+    /// runs out of retries and fences. LOCAL_TIER_FINDINGS §8 is that fence.
+    truncation_reask_used: bool,
+    /// Reflections taken this run (§3.3, S-1.17). Capped, and never charged to
+    /// `max_steps`.
+    reflections_used: u32,
+    /// The output cap to send on the next call, when a re-ask has raised it.
+    max_tokens_override: Option<u32>,
     /// Whether the step now running has learned anything yet.
     ///
     /// Progress is a SUCCESSFUL tool result or a recorded finding — deliberately not
@@ -784,6 +798,9 @@ impl Loop {
             plans_accepted: 0,
             consecutive_tool_errors: BTreeMap::new(),
             broken_tools: BTreeSet::new(),
+            truncation_reask_used: false,
+            reflections_used: 0,
+            max_tokens_override: None,
             step_learned_something: false,
             results_by_id: BTreeMap::new(),
             finding_claims: Vec::new(),
@@ -917,6 +934,14 @@ impl Loop {
                 priority: 250,
                 reference: None,
             });
+        }
+        // Worked examples, for the tiers that asked for them (S-1.17). Chosen by
+        // this step's namespaces, so the pair is the one the model is about to need.
+        if let Some(examples) = crate::fewshot::block(
+            &self.step_namespaces,
+            self.profile.orchestration.few_shot_examples,
+        ) {
+            blocks.push(examples);
         }
         blocks.extend(self.observations.iter().cloned());
         blocks
@@ -1305,6 +1330,10 @@ impl Loop {
             }
         }
         self.step_learned_something = false;
+        // One doubled re-ask per step, not per run: a step that legitimately needs
+        // room should get it, and a run that keeps needing it is a run the barren
+        // breaker should be looking at.
+        self.truncation_reask_used = false;
 
         // A task that has stopped moving is stopped here rather than left to grind
         // into its ceiling. It gets the same last turn a spent budget buys — the
@@ -1471,13 +1500,28 @@ impl Loop {
         // `pinned` and `wanted` earlier: routing should still be able to say the
         // tool was the right answer, and the run should still be able to report
         // that the right answer was unavailable.
+        // Two withholdings, both after routing.
+        //
+        // A tool the breaker opened leaves exposure for the rest of the run
+        // (§3.7, S-1.20). Removed here rather than filtered out of `pinned` and
+        // `wanted` earlier: routing should still be able to say the tool was the
+        // right answer, and the run should still be able to report that the right
+        // answer was unavailable.
+        //
+        // `reflect` is withheld on a profile that does not reflect (§3.3, S-1.17).
+        // It is registered by `with_core` so the loop can answer it, and offering
+        // it to a 7B would spend one of six exposure slots on a tool whose handler
+        // refuses — which on that profile is the slot `list_instruments` loses to
+        // two alphabetical siblings.
+        let reflects = self.profile.orchestration.reflection;
         self.exposed = exposure
             .names
             .iter()
             .filter(|n| !self.broken_tools.contains(*n))
+            .filter(|n| reflects || n.as_str() != REFLECT)
             .cloned()
             .collect();
-        self.exposed_schemas = if self.broken_tools.is_empty() {
+        self.exposed_schemas = if self.broken_tools.is_empty() && reflects {
             exposure.schemas.clone()
         } else {
             self.exposed
@@ -1634,7 +1678,12 @@ impl Loop {
             prompt: body,
             decode: decode.clone(),
             temperature: self.profile.output.temperature_tool_calls,
-            max_tokens: self.profile.context.reserve_for_output,
+            // A doubled cap, once, when a truncated two-step reply asked for one.
+            // Taken rather than read, so it cannot leak into the step after.
+            max_tokens: self
+                .max_tokens_override
+                .take()
+                .unwrap_or(self.profile.context.reserve_for_output),
             num_ctx: self.profile.context.effective_budget_tokens,
         };
         self.pending = Some(Pending { decode });
@@ -1774,17 +1823,59 @@ impl Loop {
     /// brevity rather than for a different shape. When the retries run out the
     /// degradation names `reserve_for_output`, because that is the thing an operator
     /// would actually change — "the model got stuck" would send them to the prompt.
+    /// A cut-off reply, handled without ever fencing (§3.3, §7.7, S-1.17).
+    ///
+    /// Three things happen here and the order matters.
+    ///
+    /// **First**, a two-step decode gets one re-ask with the output cap doubled and
+    /// a JSON-only instruction. A `select_fill` reply is a small object; a model
+    /// that ran out of room writing one was writing prose around it, and the fix is
+    /// to say so and give it room, not to ask for brevity it already failed at.
+    /// This does **not** touch the retry budget: being cut off is not being wrong.
+    ///
+    /// **Second**, a native reply gets the existing nudge, which is the right advice
+    /// there — a native turn can legitimately be long and the ask is for less of it.
+    ///
+    /// **Third, and this is the point: truncation never fences.** LOCAL_TIER_FINDINGS
+    /// §8 is a healthy 7B session made permanently unreachable because a cut-off
+    /// reply was treated as evidence the backend had ignored the grammar. It is not:
+    /// the object was well-formed up to the cap. A step that keeps truncating is
+    /// recorded as barren and the run moves on, and the barren-step breaker is what
+    /// stops it — a bound that reports what it has, rather than one that kills the
+    /// session.
     fn on_truncated(&mut self, fx: &mut Vec<Effect>) {
-        self.reject_and_retry_as(
-            Rejection::semantic(
-                "drive.output_truncated",
-                "your reply was cut off at the output limit. Answer again, much more briefly: a few sentences at most, and no restating of what you already did",
-            ),
-            Some(Degradation::OutputTruncated {
-                reserve_for_output: self.profile.context.reserve_for_output,
-            }),
-            fx,
+        let two_step = matches!(
+            self.pending.as_ref().map(|p| &p.decode),
+            Some(Decode::SelectTool { .. } | Decode::FillArguments { .. })
         );
+        if two_step && !self.truncation_reask_used {
+            self.truncation_reask_used = true;
+            self.max_tokens_override = Some(self.profile.context.reserve_for_output.saturating_mul(2));
+            fx.push(Effect::Note(Note::Degraded(Degradation::OutputTruncated {
+                reserve_for_output: self.profile.context.reserve_for_output,
+            })));
+            self.directive = Some(
+                "Your last reply was cut off. Answer with the JSON object ONLY                  — no explanation before or after it, no code fence."
+                    .to_string(),
+            );
+            if let Some(pending) = self.pending.take() {
+                self.reissue(pending, fx);
+            }
+            return;
+        }
+
+        // Out of re-asks. Not a fence: the step is barren, the run continues, and
+        // the barren-step breaker decides when to stop — which it does by reporting.
+        self.step_learned_something = false;
+        fx.push(Effect::Note(Note::Degraded(Degradation::OutputTruncated {
+            reserve_for_output: self.profile.context.reserve_for_output,
+        })));
+        self.directive = Some(
+            "Your reply was cut off again. Answer much more briefly: a few sentences at              most, and do not restate what you already did."
+                .to_string(),
+        );
+        self.pending = None;
+        self.begin_step(fx);
     }
 
     fn on_selection(&mut self, parsed: &Value, candidates: &[String], fx: &mut Vec<Effect>) {
@@ -1937,6 +2028,10 @@ impl Loop {
         }
         if call.name == RECORD_FINDING {
             self.on_record_finding(&call, fx);
+            return;
+        }
+        if call.name == REFLECT {
+            self.on_reflect(&call, fx);
             return;
         }
         if call.name == FINISH_TASK {
@@ -2139,6 +2234,65 @@ impl Loop {
     }
 
     // ── Core tools, answered here ───────────────────────────────────────────
+
+    /// Stop and check the direction, without spending a step (§3.3, S-1.17).
+    ///
+    /// The step counter is deliberately not advanced and `begin_step` is not called:
+    /// a reflection is a turn, not a step. That is the whole mechanism — a budget
+    /// that charges for noticing a wrong turn teaches the model not to notice, and
+    /// the fifteen-step runs that went wrong went wrong early and kept going.
+    ///
+    /// Capped, because the opposite failure is cheap to reach: reflection costs a
+    /// model call and produces no evidence, so a run that can always take one more
+    /// is a run that thinks about thinking. On exhaustion the model is told plainly
+    /// and the loop carries on — refusing is not a failure state.
+    ///
+    /// The doubt goes into the working state as an open question rather than into
+    /// the observations. It is something the run has NOT settled, and the card is
+    /// where unsettled things belong; an observation would make it look like a
+    /// result.
+    fn on_reflect(&mut self, call: &ToolCall, fx: &mut Vec<Effect>) {
+        let cap = self.profile.orchestration.max_reflections_per_run;
+        if !self.profile.orchestration.reflection || self.reflections_used >= cap {
+            self.reject_and_retry(
+                Rejection::semantic_owned(
+                    "drive.reflection_exhausted",
+                    format!(
+                        "no reflections left ({} of {cap} used). Act on what you have:                          take the next step, or call {FINISH_TASK} and say what is unresolved.",
+                        self.reflections_used
+                    ),
+                ),
+                fx,
+            );
+            return;
+        }
+        self.reflections_used += 1;
+
+        let doubt = call
+            .arguments
+            .get("doubt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !doubt.is_empty() && !self.working.open_questions.contains(&doubt) {
+            self.working.open_questions.push(doubt.clone());
+        }
+        fx.push(Effect::Note(Note::CoreTool {
+            name: REFLECT.to_string(),
+            detail: format!(
+                "reflection {} of {cap}: {doubt}",
+                self.reflections_used
+            ),
+        }));
+
+        // The same step, re-rendered. The doubt is now on the card, so the next
+        // decode reads it — which is the only way a reflection changes anything.
+        self.directive = Some(format!(
+            "You stopped to reflect: \"{doubt}\". Answer it with the tools you have,              or say plainly that it cannot be answered and move on. Do not reflect again              on the same doubt."
+        ));
+        self.render(fx);
+    }
 
     /// Records one established fact and advances the step.
     ///
@@ -3113,13 +3267,24 @@ mod tests {
             "truncation says nothing about the grammar: {:?}",
             done(&fx)
         );
+        // The signal is a `Degraded`, not a `Rejected`, since S-1.17: being cut off
+        // is not being wrong, so it is not charged to the budget for wrong answers.
         assert!(fx.iter().any(|e| matches!(
             e,
-            Effect::Note(Note::Rejected {
-                code: "drive.output_truncated",
-                ..
-            })
+            Effect::Note(Note::Degraded(Degradation::OutputTruncated { .. }))
         )));
+        // And the re-ask asks for the JSON only, with room to write it.
+        let call = model_call(&fx);
+        assert_eq!(
+            call.max_tokens,
+            local().context.reserve_for_output * 2,
+            "the one re-ask doubles the output cap"
+        );
+        assert!(
+            call.prompt.contains("JSON object ONLY"),
+            "and says what to do with the room: {}",
+            call.prompt
+        );
 
         // The identical bytes, reported as a COMPLETE reply, are the fence.
         let (mut l2, _) = started();
@@ -3135,15 +3300,23 @@ mod tests {
         ));
     }
 
-    /// And it still terminates. When the retries run out the degradation names
-    /// `reserve_for_output`, because that is the thing an operator would change.
+    /// It still terminates, and it terminates by REPORTING (§7.7, S-1.17).
+    ///
+    /// This test used to assert a fence, and the fence was the bug:
+    /// LOCAL_TIER_FINDINGS §8 is a healthy 7B session made permanently unreachable
+    /// because replies that ran out of room were read as a backend ignoring the
+    /// grammar. They were not — the object was well-formed up to the cap.
+    ///
+    /// So a step that keeps truncating is barren, the run moves on, and the
+    /// barren-step breaker stops it. The difference is what the operator gets: a
+    /// fenced run reports nothing, and a wrapped-up run reports what it had.
     #[test]
-    fn replies_that_keep_being_cut_off_name_the_budget_not_the_model() {
+    fn replies_that_keep_being_cut_off_never_fence() {
         let (mut l, _) = started();
         l.next(Input::ModelReply {
             raw: r#"{"name":"read_bars"}"#.into(),
         });
-        for _ in 0..8 {
+        for _ in 0..30 {
             if l.state().is_terminal() {
                 break;
             }
@@ -3151,12 +3324,19 @@ mod tests {
                 raw: r#"{"instrument":"BTC-US"#.into(),
             });
         }
-        let Some(Outcome::Fenced(Degradation::OutputTruncated { reserve_for_output })) =
+        assert!(
+            !matches!(
+                l.outcome(),
+                Some(Outcome::Fenced(Degradation::OutputTruncated { .. }))
+            ),
+            "truncation must never fence, got {:?}",
             l.outcome()
-        else {
-            panic!("expected an output-budget fence, got {:?}", l.outcome());
-        };
-        assert_eq!(*reserve_for_output, local().context.reserve_for_output);
+        );
+        // And it does not grind for ever either: the barren breaker owns the bound.
+        assert!(
+            l.state().is_terminal() || l.step() > 1,
+            "the run moved on rather than retrying in place"
+        );
     }
 
     /// Same bytes, unconstrained tier, completely different meaning: nothing was

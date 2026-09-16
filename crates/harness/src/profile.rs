@@ -160,6 +160,12 @@ fn default_tool_breaker() -> u32 {
     3
 }
 
+/// Three, on the tiers that reflect at all. Local tiers set `reflection: false`
+/// and never reach this.
+fn default_max_reflections() -> u32 {
+    3
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Orchestration {
     pub mode: Mode,
@@ -187,6 +193,19 @@ pub struct Orchestration {
     /// charged to the agent's budget.
     #[serde(default = "default_tool_breaker")]
     pub tool_breaker_threshold: u32,
+    /// How many reflections one run may take (§3.3, S-1.17).
+    ///
+    /// A reflection costs a model call and is deliberately **not** charged to
+    /// `max_steps`. A fifteen-step budget that spends 7% of itself on noticing a
+    /// wrong turn is a budget that discourages noticing, and a run that will not
+    /// stop to think is the run that spends the other fourteen steps going the
+    /// wrong way.
+    ///
+    /// Capped because the opposite failure is real too: reflection is the cheapest
+    /// thing in the loop to reach for, and an uncapped one is a run that thinks
+    /// about thinking.
+    #[serde(default = "default_max_reflections")]
+    pub max_reflections_per_run: u32,
     /// Free-form code execution, tiered per §11.
     pub code_execution: CodeExecution,
 }
@@ -806,6 +825,7 @@ pub(crate) fn frontier_fixture() -> Profile {
             max_subagent_depth: 1,
             max_replans_per_run: 3,
             tool_breaker_threshold: 3,
+            max_reflections_per_run: 3,
             code_execution: CodeExecution::Full,
         },
         trifecta: Trifecta {
@@ -862,6 +882,7 @@ pub(crate) fn degraded_fixture() -> Profile {
             max_subagent_depth: 1,
             max_replans_per_run: 3,
             tool_breaker_threshold: 3,
+            max_reflections_per_run: 3,
             code_execution: CodeExecution::Denied,
         },
         trifecta: Trifecta {

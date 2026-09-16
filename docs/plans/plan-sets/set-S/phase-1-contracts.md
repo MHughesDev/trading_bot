@@ -1,6 +1,6 @@
 # Phase 1 — Contracts
 
-**Completion: 80% (16 / 20 tasks), plus 3 partial (S-1.2, S-1.18’s measurement, S-1.20’s re-plan trigger). S-1.17 and S-1.19 remain.**
+**Completion: 85% (17 / 20 tasks), plus 3 partial (S-1.2, S-1.18’s measurement, S-1.20’s re-plan trigger). S-1.19 is the last one open.**
 
 > Status 2026-09-15, track 1. The three contracts the other Set S phases wait on now exist:
 > `ToolSpec`/`ToolResult` (`crates/mcp-server/src/spec.rs`), the generated taxonomy and
@@ -538,7 +538,51 @@ research goal on the same profile reaches a plan whose every step is a catalogue
 **Traces:** AGENT-008 §3.1; §7.3.
 
 ### S-1.17 The decode ladder: truncation, exemplars, and `reflect` — M
-`NOT STARTED`
+`DONE` 2026-09-15 — all three, and the first one removes a fence rather than adding a check.
+
+**Truncation never fences.** LOCAL_TIER_FINDINGS §8 is a healthy 7B session made permanently
+unreachable because replies that ran out of room were read as a backend ignoring the grammar.
+They were not: the object was well-formed up to the cap. A two-step decode now gets one re-ask
+with the output cap **doubled** and "answer with the JSON object ONLY" — a `select_fill` reply
+is a small object, so a model that ran out of room was writing prose around it, and asking for
+brevity it already failed at is not the fix. That re-ask is **outside the retry budget**: being
+cut off is not being wrong, and charging it to the budget for wrong answers is how a working
+session runs out of retries. Out of re-asks, the step is recorded barren and the run moves on;
+the barren-step breaker owns the bound, and it stops by reporting rather than by dying.
+
+The test that asserted the old fence was rewritten, not deleted —
+`replies_that_keep_being_cut_off_never_fence` now holds the opposite and says why.
+
+**`reflect` costs a call and not a step,** capped at `max_reflections_per_run` (3). That is the
+whole mechanism: a fifteen-step budget that spends 7% of itself on noticing a wrong turn teaches
+the model not to notice, and the runs that went wrong went wrong early and kept going. The doubt
+lands in `open_questions` rather than the observations — it is something the run has *not*
+settled, and an observation would make it look like a result. Exhaustion is refused plainly and
+the loop carries on; refusing is not a failure state.
+
+It is registered by `with_core` so the loop can answer it, and **withheld from exposure on a
+profile that does not reflect**. Offering it to a 7B would spend one of six slots on a tool whose
+handler refuses — and on that profile that is precisely the slot `list_instruments` loses to two
+alphabetical siblings.
+
+**`few_shot_examples` finally reaches a prompt.** Declared in both local profiles since the
+profiles existed, read by nothing but `appendix_a`'s band check: a value that validated and never
+reached a model. `crates/harness/src/fewshot.rs` renders worked select→fill pairs chosen by the
+step's namespace, with a shape-only fallback for an unfamiliar one. Canned rather than retrieved
+— an example drawn from the run's own transcript teaches the model to repeat what it just did,
+which is the failure mode when it is stuck — and asserted to contain no instrument, date or
+number a model could copy into a finding.
+
+Verified by `a_reply_cut_off_at_the_output_cap_is_not_a_grammar_violation` (now also checking the
+doubled cap and the JSON-only instruction), `replies_that_keep_being_cut_off_never_fence`,
+`a_reflection_costs_a_call_but_not_a_step_and_runs_out`,
+`a_profile_that_does_not_reflect_is_not_offered_the_tool`,
+`few_shot_examples_reach_the_prompt_on_the_profiles_that_declare_them`,
+`a_frontier_profile_gets_no_examples`, and the six tests in `fewshot.rs`.
+
+**Not done, and named:** the scorecard measurement ("few-shot blocks are measured before being
+kept") needs the eval scorecard, which is Set S phase 4. The blocks are wired and bounded;
+whether they help is not yet measured.
 
 The forward-coverage gap in the first draft of this plan: AGENT-008 §7.7 requires that the
 `LOCAL_TIER_FINDINGS §8` truncation fence cannot recur, and no task implemented it — S-4.9

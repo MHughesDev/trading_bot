@@ -128,6 +128,7 @@ pub fn degraded_7b() -> Profile {
             max_subagent_depth: 1,
             max_replans_per_run: 2,
             tool_breaker_threshold: 3,
+            max_reflections_per_run: 3,
             code_execution: CodeExecution::Denied,
         },
         trifecta: Trifecta {
@@ -182,6 +183,7 @@ pub fn frontier() -> Profile {
             max_subagent_depth: 1,
             max_replans_per_run: 3,
             tool_breaker_threshold: 3,
+            max_reflections_per_run: 3,
             code_execution: CodeExecution::Full,
         },
         trifecta: Trifecta {
@@ -1205,6 +1207,10 @@ mod tests {
         }
     }
 
+    fn harness_reflect() -> &'static str {
+        crate::registry::REFLECT
+    }
+
     #[test]
     fn the_eval_catalogue_sorts_so_the_truncation_case_is_reproducible() {
         let mut names: Vec<&str> = vec!["compare_backtests", "create_strategy", "list_instruments"];
@@ -1214,15 +1220,28 @@ mod tests {
             vec!["compare_backtests", "create_strategy", "list_instruments"],
             "§8.3's collision depends on this order"
         );
-        // Six, of which three are core: exactly three work slots, which is what
+        // Six, of which three reach a 7B: exactly three work slots, which is what
         // makes `list_instruments` the tool that loses one to two alphabetical
         // siblings unless it is pinned. The shipped profile's own comment says
         // four was not enough for the same reason.
         assert_eq!(degraded_7b().tools.max_exposed_per_step, 6);
         assert_eq!(
             ToolRegistry::with_core().names().len(),
+            4,
+            "four core tools are registered"
+        );
+        // `reflect` is the fourth and is withheld on a profile that does not
+        // reflect, which every local profile is. It is registered so the loop can
+        // ANSWER it; offering it would cost this profile the slot above.
+        assert!(!degraded_7b().orchestration.reflection);
+        assert_eq!(
+            ToolRegistry::with_core()
+                .names()
+                .iter()
+                .filter(|n| **n != harness_reflect())
+                .count(),
             3,
-            "three core tools come out of the six"
+            "three reach a 7B, which is what the six-slot arithmetic assumes"
         );
     }
 }

@@ -111,6 +111,18 @@ pub const SEARCH_TOOLS: &str = "search_tools";
 /// can end a task by writing the right words can end it by accident.
 pub const FINISH_TASK: &str = "finish_task";
 
+/// Stopping to ask whether this is still the right direction (§3.3, S-1.17).
+///
+/// Costs a model call and is **not** charged to `max_steps`. A fifteen-step budget
+/// that spends 7% of itself on noticing a wrong turn is a budget that discourages
+/// noticing, and a run that will not stop to think is the run that spends the other
+/// fourteen steps going the wrong way.
+///
+/// Capped per run, because the opposite failure is real: reflection is the cheapest
+/// thing in the loop to reach for, and an uncapped one is a run that thinks about
+/// thinking.
+pub const REFLECT: &str = "reflect";
+
 /// Writing down something established, so a long task can outlive its transcript.
 ///
 /// The gap this closes has two halves that turn out to be the same hole.
@@ -234,6 +246,29 @@ impl ToolRegistry {
             }),
         })
         .expect("the core finding recorder is well-formed");
+        reg.register(ToolDef {
+            name: REFLECT.to_string(),
+            namespace: "core".into(),
+            description: "Stop and check the direction. Use it when two steps in a row                           did not move the goal, or when a result surprised you. It does                           not spend a step."
+                .into(),
+            risk: Risk::Read,
+            core: true,
+            // Not idempotent: the answer depends on the state at the moment it is
+            // asked, so two identical calls at different points are two different
+            // questions and the repeat cache must not answer the second.
+            idempotent: false,
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "doubt": {
+                        "type": "string",
+                        "description": "What you are unsure about, in one sentence."
+                    }
+                },
+                "required": ["doubt"]
+            }),
+        })
+        .expect("the core reflection tool is well-formed");
         reg.register(ToolDef {
             name: FINISH_TASK.to_string(),
             namespace: "core".into(),
