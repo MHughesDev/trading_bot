@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use harness::registry::FINISH_TASK;
 use llm::{ChatRequest, ChatResponse, LlmClient, LlmError, Message, StopReason, ToolDef};
-use mcp_server_lib::{dispatch_tool, tool_definitions_for, ApiClient, McpContext, ToolProfile};
+use mcp_server_lib::{dispatch_under, tool_definitions_for, ApiClient, McpContext, ToolProfile};
 
 use super::prompt;
 
@@ -473,9 +473,12 @@ pub async fn drive(
     cancel: Arc<AtomicBool>,
 ) {
     // Every platform tool call is recorded before it is authorised and after it
-    // is answered (SPEC §15, ADR-P2-21). This driver dispatches directly rather
-    // than through `bridge::execute`, so it opens the record itself.
-    let audit_trail = super::audit::AuditTrail::for_agent(pg.clone(), params.user_id, params.run_id);
+    // is answered (SPEC §15, ADR-P2-21, ADR-P2-34). This driver dispatches
+    // directly rather than through `bridge::execute`, and it has paths that
+    // answer without dispatching at all, so it opens the record itself — through
+    // the platform's audit endpoint, the same one the external MCP front door
+    // uses, which is what makes the principal the platform's reading rather than
+    // this process's claim.
     let mut ctx = RunCtx {
         pg: pg.clone(),
         run_id: params.run_id,
@@ -665,43 +668,69 @@ pub async fn drive(
 
             let started = std::time::Instant::now();
             let inline = call.name == "wait_for_backtest" || call.name == "run_sweep";
-            let result = if call.name == "wait_for_backtest" {
-                let backtest_id = call
-                    .arguments
-                    .get("backtest_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if backtest_id.is_empty() {
-                    json!({ "error": "missing_field", "field": "backtest_id" })
-                } else {
-                    wait_for_backtest_inline(&mut ctx, &api, &backtest_id, None, &cancel).await
-                }
-            } else if call.name == "run_sweep" {
-                run_sweep_inline(&mut ctx, &api, &call.arguments, None, &cancel).await
-            } else {
-                let opened = audit_trail.pre(&call.name, &call.arguments).await;
-                let envelope = ledger::audit::Envelope::for_action(&call.name);
-                if envelope.requires_approval() {
-                    // This driver has no pause: it is the older SDK loop, and its
-                    // state machine cannot hold a call across a human answer. So a
-                    // §15 action is **refused** here rather than executed
-                    // unapproved. The GOVERNOR loop (`local_driver`) is the path
-                    // that pauses and resumes; a session that needs one of these
-                    // four belongs on it.
-                    audit_trail
-                        .post(opened, ledger::audit::AuditVerdict::Denied)
-                        .await;
+            // One audit record per tool call, opened **before** anything decides
+            // anything about it — the policy gate below included — and closed
+            // with whatever came back (SPEC §15, ADR-P2-21, ADR-P2-34, AT-64).
+            //
+            // It is opened out here rather than inside the dispatch because two
+            // of this driver's paths never reach the dispatch: `run_sweep` and
+            // `wait_for_backtest` are answered inline, and the policy gate
+            // refuses four actions outright. Under the previous shape the two
+            // inline paths wrote no audit record at all — `run_sweep` launches
+            // trials, so that was a look this driver took and did not count.
+            let result = match mcp_ctx.audit().open(&call.name, &call.arguments).await {
+                Err(e) => {
+                    tracing::error!(
+                        tool = %call.name,
+                        detail = ?e.detail,
+                        "refusing the tool call: the platform opened no audit record"
+                    );
                     json!({
-                        "error": {
-                            "code": "policy_denied",
-                            "envelope": envelope.as_str(),
-                            "fix": "this action needs a human approval; run it from a session that can pause"
-                        }
+                        "error": "audit_unavailable",
+                        "detail": e.detail,
+                        "fix": "the platform's audit trail must be reachable before any tool runs"
                     })
-                } else {
-                    let raw = dispatch_tool(&mcp_ctx, &call.name, &call.arguments, None).await;
-                    audit_trail.post(opened, super::audit::verdict_of(&raw)).await;
+                }
+                Ok(envelope) => {
+                    let raw = if call.name == "wait_for_backtest" {
+                        let backtest_id = call
+                            .arguments
+                            .get("backtest_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if backtest_id.is_empty() {
+                            json!({ "error": "missing_field", "field": "backtest_id" })
+                        } else {
+                            wait_for_backtest_inline(&mut ctx, &api, &backtest_id, None, &cancel)
+                                .await
+                        }
+                    } else if call.name == "run_sweep" {
+                        run_sweep_inline(&mut ctx, &api, &call.arguments, None, &cancel).await
+                    } else {
+                        let gate = ledger::audit::Envelope::for_action(&call.name);
+                        if gate.requires_approval() {
+                            // This driver has no pause: it is the older SDK loop,
+                            // and its state machine cannot hold a call across a
+                            // human answer. So a §15 action is **refused** here
+                            // rather than executed unapproved. The GOVERNOR loop
+                            // (`local_driver`) is the path that pauses and
+                            // resumes; a session that needs one of these four
+                            // belongs on it. The open record above is what makes
+                            // that refusal provable afterwards.
+                            json!({
+                                "error": {
+                                    "code": "policy_denied",
+                                    "envelope": gate.as_str(),
+                                    "fix": "this action needs a human approval; run it from a session that can pause"
+                                }
+                            })
+                        } else {
+                            dispatch_under(&mcp_ctx, &call.name, &call.arguments, None, &envelope)
+                                .await
+                        }
+                    };
+                    mcp_ctx.audit().close(envelope, &raw).await;
                     raw
                 }
             };

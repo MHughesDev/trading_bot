@@ -142,30 +142,15 @@ pub struct Executed {
 
 /// Dispatches one validated, gated call.
 ///
-/// The audit trail's `pre` record is written **here, before the dispatch**
-/// (SPEC §15, ADR-P2-21, AT-64). The dispatch is where the call meets the
-/// platform's authorisation, so a request refused by it has already been
-/// recorded as having been made — which is the only way a denial leaves any
-/// evidence at all. `post` follows with what the platform decided.
-///
-/// `trail` is `None` only for callers with no principal to attribute to (the
-/// external MCP front door authenticates separately); an internal agent session
-/// always has one.
-pub async fn execute(
-    ctx: &McpContext,
-    name: &str,
-    arguments: &Map<String, Value>,
-    trail: Option<&crate::agent::audit::AuditTrail>,
-) -> Executed {
+/// The audit trail is no longer opened here. `dispatch_tool` opens the `pre`
+/// record before the call reaches the platform's authorisation and closes it
+/// after (SPEC §15, ADR-P2-21, ADR-P2-34, AT-64), which is the same record this
+/// function used to write and is now written for **every** front door rather
+/// than the two internal ones. A second pair opened here would double every row
+/// in the trail for internal sessions only.
+pub async fn execute(ctx: &McpContext, name: &str, arguments: &Map<String, Value>) -> Executed {
     let params = Value::Object(arguments.clone());
-    let opened = match trail {
-        Some(t) => t.pre(name, &params).await,
-        None => None,
-    };
     let raw = dispatch_tool(ctx, name, &params, None).await;
-    if let Some(t) = trail {
-        t.post(opened, crate::agent::audit::verdict_of(&raw)).await;
-    }
     // `error: null` is NOT an error. `is_some()` on an Option<&Value> is true for a
     // JSON null, so any tool that reports its error slot explicitly — the natural way
     // to write a uniform result shape — had every success classified as a failure.

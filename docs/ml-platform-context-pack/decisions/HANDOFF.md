@@ -34,7 +34,7 @@ Phase 0 and 1: done. Phase 2: every item done except 2.1, 2.14 and 2.16, which a
 
 ## 4. Known violations still in code (reported, not fixed)
 
-- **The external MCP front door writes no audit trail.** `apps/mcp-server` is a separate process; the `pre`/`post` records cover the two internal agent dispatch paths only. AT-64 enumerates every `dispatch_tool` caller, so this is a named exemption rather than an oversight.
+- **The GOVERNOR loop's approval pause writes no audit record.** `local_driver`'s `Effect::AskHuman` holds a §15 action across a human answer with no `pre`/`post` pair of its own, so the *asking* is in `agent_messages` and not in `audit_event`. The dispatch that follows an approval is recorded like any other. Found while closing AT-64; narrower than the exemption it replaces, and not the same claim.
 - **The older SDK driver refuses gated actions rather than pausing on them.** Its loop cannot hold a call across a human answer. The GOVERNOR loop (`local_driver`) pauses and resumes.
 - **The trainer's failure classification is not total.** An exception type nobody has classified maps to `dependency_failure`.
 - **Overlapping-label leakage has no static detector** (OQ-12, deliberate). Visible only as the 1.10 CV/WF gap, and the test asserts that.

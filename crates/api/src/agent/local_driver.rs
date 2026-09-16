@@ -24,8 +24,6 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 use sqlx::PgPool;
-
-use super::audit;
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -323,10 +321,11 @@ async fn run_canary(client: &LlmClient, profile: &Profile) -> Result<Vec<Verdict
 #[allow(clippy::too_many_lines)]
 pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: Arc<AtomicBool>) {
     // Every platform tool call this session makes is recorded before it is
-    // authorised and after it is answered (SPEC §15, ADR-P2-21). The principal
-    // is stamped from the session the API authenticated, so "agent X acting for
+    // authorised and after it is answered (SPEC §15, ADR-P2-21, ADR-P2-34) —
+    // by `dispatch_tool`, through the platform's own audit endpoint, which is
+    // the same trail the external MCP front door now writes. The principal is
+    // derived from the session the API authenticated, so "agent X acting for
     // user Y" is a fact the agent has no field to write.
-    let audit_trail = audit::AuditTrail::for_agent(pg.clone(), params.user_id, params.run_id);
     let mut rec = Recorder {
         pg: pg.clone(),
         run_id: params.run_id,
@@ -630,7 +629,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
                         is_error,
                     }
                 } else {
-                    bridge::execute(&mcp_ctx, &name, &arguments, Some(&audit_trail)).await
+                    bridge::execute(&mcp_ctx, &name, &arguments).await
                 };
                 rec.append(
                     "tool_result",

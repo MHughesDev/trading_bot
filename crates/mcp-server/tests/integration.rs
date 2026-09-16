@@ -16,12 +16,22 @@ use mcp_server_lib::{
     McpContext, ToolProfile,
 };
 
-/// Shared stub-server state: strategies posted, and a per-backtest poll counter
-/// so `wait_for_backtest` sees an in-flight run resolve.
+/// Shared stub-server state: strategies posted, a per-backtest poll counter so
+/// `wait_for_backtest` sees an in-flight run resolve, and the audit trail the
+/// platform would have written.
 #[derive(Default)]
 struct StubState {
     strategies: Vec<Value>,
     backtest_polls: usize,
+    /// `(phase, action_or_audit_id)` in the order the platform was asked to
+    /// write them. AT-64 is an assertion about this order.
+    audit: Vec<(String, String)>,
+    /// When true the stub refuses to open an audit record — the adversarial
+    /// case. A dispatch must then not happen at all.
+    audit_broken: bool,
+    /// Every tool-bearing API path the stub was actually asked for, so a test
+    /// can prove a refused dispatch touched nothing.
+    api_calls: Vec<String>,
 }
 
 type Shared = Arc<Mutex<StubState>>;
@@ -30,6 +40,46 @@ async fn spawn_stub() -> (String, Shared) {
     let state: Shared = Arc::new(Mutex::new(StubState::default()));
 
     let app = Router::new()
+        // The platform's audit front door (SPEC §15, AT-64). Every dispatch
+        // opens a record here first; the id it returns is the proof the tool is
+        // allowed to run at all.
+        .route(
+            "/api/agent/audit",
+            post(
+                |State(s): State<Shared>, Json(body): Json<Value>| async move {
+                    let action = body
+                        .get("action")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let mut st = s.lock().unwrap();
+                    if st.audit_broken {
+                        return (
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            Json(json!({ "error": "audit_unavailable" })),
+                        );
+                    }
+                    let id = uuid::Uuid::new_v4();
+                    st.audit.push(("pre".to_string(), action));
+                    (
+                        axum::http::StatusCode::CREATED,
+                        Json(json!({ "audit_id": id })),
+                    )
+                },
+            ),
+        )
+        .route(
+            "/api/agent/audit/{audit_id}",
+            post(
+                |State(s): State<Shared>, Path(id): Path<String>, Json(_): Json<Value>| async move {
+                    s.lock().unwrap().audit.push(("post".to_string(), id));
+                    (
+                        axum::http::StatusCode::CREATED,
+                        Json(json!({ "recorded": true })),
+                    )
+                },
+            ),
+        )
         .route(
             "/api/strategies",
             get(|State(s): State<Shared>| async move {
@@ -181,6 +231,13 @@ async fn spawn_stub() -> (String, Shared) {
                 )
             }),
         )
+        // Records every platform path the dispatch actually touched, so a test
+        // can assert that a refused dispatch touched *nothing* — the difference
+        // between refusing a call and logging that it happened.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            record_path,
+        ))
         .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -193,12 +250,36 @@ async fn spawn_stub() -> (String, Shared) {
 
 use axum::response::IntoResponse;
 
+/// Notes every non-audit platform path the stub was asked for.
+async fn record_path(
+    State(s): State<Shared>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let path = req.uri().path().to_string();
+    if !path.starts_with("/api/agent/") {
+        s.lock().unwrap().api_calls.push(path);
+    }
+    next.run(req).await
+}
+
 async fn ctx() -> (McpContext, Shared) {
     let (base_url, state) = spawn_stub().await;
     (
         McpContext::new(ApiClient::new(base_url, "test-token")),
         state,
     )
+}
+
+/// The audit phases the stub was asked to write, in order.
+fn audit_phases(state: &Shared) -> Vec<String> {
+    state
+        .lock()
+        .unwrap()
+        .audit
+        .iter()
+        .map(|(phase, _)| phase.clone())
+        .collect()
 }
 
 async fn call(ctx: &McpContext, tool: &str, params: Value) -> Value {
@@ -678,4 +759,128 @@ fn no_tool_profile_can_dispatch_an_unregistered_backtest() {
             "{profile:?} must retain the registered path (create_experiment + run_sweep); got {names:?}"
         );
     }
+}
+
+// ── AT-64 · the external front door's audit trail ────────────────────────────
+//
+// These run through exactly the code path `apps/mcp-server` runs: an
+// `McpContext` over an `ApiClient`, and `dispatch_tool`. There is nothing the
+// external process does that these do not, which is the point — the front door
+// used to be exempt from the audit trail, and the exemption was structural
+// rather than accidental.
+
+/// AT-64 · every dispatch through the external front door opens a `pre` record
+/// before the tool runs and closes it after (SPEC §15, ADR-P2-21, ADR-P2-34).
+#[tokio::test]
+async fn at64_the_external_front_door_writes_pre_and_post_around_every_dispatch() {
+    let (ctx, state) = ctx().await;
+
+    let out = call(&ctx, "list_instruments", json!({})).await;
+    assert!(out.get("instruments").is_some(), "the tool ran: {out}");
+
+    let trail = state.lock().unwrap().audit.clone();
+    assert_eq!(
+        trail.len(),
+        2,
+        "one dispatch must write exactly one pair, not zero and not two: {trail:?}"
+    );
+    assert_eq!(trail[0].0, "pre", "the pre record comes first");
+    assert_eq!(
+        trail[0].1, "list_instruments",
+        "the record names the action asked for"
+    );
+    assert_eq!(trail[1].0, "post");
+
+    // And a second call adds a second pair, so the trail counts looks rather
+    // than sessions.
+    call(&ctx, "list_lanes", json!({})).await;
+    assert_eq!(audit_phases(&state), vec!["pre", "post", "pre", "post"]);
+}
+
+/// AT-64 adversarial · a dispatch the platform will not record **does not
+/// happen**.
+///
+/// This is the half that makes the invariant a property rather than a claim. It
+/// is not enough that a failure to audit is logged: the tool must not run. The
+/// assertion that carries the weight is the last one — the stub was asked for no
+/// platform path at all, so the call was refused rather than executed and
+/// regretted.
+#[tokio::test]
+async fn at64_a_dispatch_the_platform_will_not_record_is_refused_not_logged() {
+    let (ctx, state) = ctx().await;
+    state.lock().unwrap().audit_broken = true;
+
+    let out = call(&ctx, "list_instruments", json!({})).await;
+
+    assert_eq!(
+        out.get("error").and_then(|e| e.as_str()),
+        Some("audit_unavailable"),
+        "the dispatch must be refused, and say why: {out}"
+    );
+    assert!(
+        out.get("instruments").is_none(),
+        "no tool output may come back from a call that was never allowed to run: {out}"
+    );
+    assert!(
+        state.lock().unwrap().audit.is_empty(),
+        "nothing was recorded, which is exactly why nothing may have run"
+    );
+    assert!(
+        state.lock().unwrap().api_calls.is_empty(),
+        "the tool touched the platform despite having no audit record: {:?}",
+        state.lock().unwrap().api_calls
+    );
+}
+
+/// AT-64 adversarial · the refusal covers **every** tool, including the ones
+/// answered from process memory.
+///
+/// The tempting exemption is the other direction from the one this track closed:
+/// `list_lanes`, `get_authoring_guide` and the whole draft builder never touch
+/// the platform, so it looks free to let them through when the trail is down.
+/// It is not. A look at the lane catalogue is a look, `new_strategy_draft` is the
+/// first step of authoring, and an audit with a "cheap tools" carve-out is an
+/// audit with a list of tools to hide behind.
+#[tokio::test]
+async fn at64_even_a_tool_answered_from_memory_is_refused_without_a_record() {
+    let (ctx, state) = ctx().await;
+    state.lock().unwrap().audit_broken = true;
+
+    for tool in ["list_lanes", "get_authoring_guide", "new_strategy_draft"] {
+        let out = call(&ctx, tool, json!({})).await;
+        assert_eq!(
+            out.get("error").and_then(|e| e.as_str()),
+            Some("audit_unavailable"),
+            "{tool} ran without an audit record: {out}"
+        );
+    }
+    assert!(state.lock().unwrap().audit.is_empty());
+}
+
+/// AT-64 · the trail survives a failing tool, because a failure is a look too.
+///
+/// A tool that errors has still been dispatched, and the `post` record is what
+/// tells a reader afterwards that the platform answered rather than that the
+/// agent never asked.
+#[tokio::test]
+async fn at64_a_failing_tool_still_closes_its_record() {
+    let (ctx, state) = ctx().await;
+    let out = call(&ctx, "get_backtest", json!({ "backtest_id": "00000000-0000-0000-0000-000000000000" })).await;
+    assert!(out.get("error").is_some(), "the stub 404s this id: {out}");
+    assert_eq!(audit_phases(&state), vec!["pre", "post"]);
+}
+
+/// AT-64 · an unknown tool is a look at the tool surface, and it is recorded.
+///
+/// The failure mode this guards is a dispatcher that opens the record only on
+/// the paths it recognises: an agent probing for a tool that does not exist is
+/// exactly the behaviour an audit is read to find.
+#[tokio::test]
+async fn at64_an_unknown_tool_is_still_recorded() {
+    let (ctx, state) = ctx().await;
+    let out = call(&ctx, "open_vault", json!({})).await;
+    assert!(out.get("error").is_some(), "no such tool: {out}");
+    let trail = state.lock().unwrap().audit.clone();
+    assert_eq!(trail.len(), 2, "{trail:?}");
+    assert_eq!(trail[0].1, "open_vault");
 }

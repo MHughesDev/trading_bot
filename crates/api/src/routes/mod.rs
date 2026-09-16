@@ -264,6 +264,10 @@ pub fn router(state: AppState) -> Router {
             post(crate::agent::routes::cancel_conversation),
         )
         .route("/api/agent/trajectory", post(crate::agent::routes::record_trajectory_step))
+        // The audit trail's two halves (SPEC §15, AT-64). Every front door opens
+        // a record here before it dispatches, including the external MCP process.
+        .route("/api/agent/audit", post(crate::agent::routes::open_audit_record))
+        .route("/api/agent/audit/{audit_id}", post(crate::agent::routes::close_audit_record))
         .route("/api/agent/runs", get(crate::agent::routes::list_runs))
         .route("/api/agent/runs/{id}", get(crate::agent::routes::get_run))
         .route(

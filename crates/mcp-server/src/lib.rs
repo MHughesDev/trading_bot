@@ -6,6 +6,20 @@
 //! keeps process-local state (a scratchpad that persists nothing).
 //!
 //! No privileged path; no order-placement tool.
+//!
+//! # Every dispatch is on the record
+//!
+//! [`dispatch_tool`] is the one function all three front doors go through — the
+//! external MCP process, the SDK driver and the GOVERNOR loop — and it cannot
+//! run a tool without the platform having opened an audit record for it first
+//! (SPEC §15, ADR-P2-21, ADR-P2-34, AT-64). The record is opened *by the
+//! platform*, not written here: this crate asks, and is told the id. An audit a
+//! client writes is an audit a client can decline to write.
+//!
+//! The seal is [`AuditEnvelope`], which only [`AuditSink::open`] can mint, and
+//! [`McpContext`]'s private `audit` field, which means a context — and therefore
+//! a dispatch — cannot exist without one. A new dispatch path that forgets to
+//! audit does not fail a test; it fails to compile.
 
 // The tool-definitions json! literal is large enough to exceed the default
 // macro recursion limit.
@@ -177,6 +191,108 @@ impl ApiClient {
     }
 }
 
+// ── The audit envelope every dispatch runs inside ────────────────────────────
+
+/// The `pre`/`post` audit record a dispatch cannot run without
+/// (SPEC §15, ADR-P2-21, ADR-P2-34, AT-64).
+///
+/// # Why this is not written here
+///
+/// The row is written by the **platform**, over the same authenticated HTTP API
+/// every tool call already goes through. This process — whichever front door it
+/// is — asks the platform to open a record and is told the id; it cannot choose
+/// the tenant, the actor, or the approval envelope, because the platform derives
+/// all three from the session the bearer token resolves to. An audit a client
+/// writes is an audit a client can decline to write, and an audit a client
+/// *stamps* is an audit a client can attribute to somebody else.
+///
+/// # Why there is no way past it
+///
+/// [`AuditEnvelope`] is sealed: [`AuditSink::open`] is its only constructor.
+/// [`dispatch_under`] takes one by reference, so a caller that has not opened a
+/// record cannot call it, and [`dispatch_tool`] opens one itself and **refuses
+/// to dispatch** when the platform does not answer. There is no `AuditSink::none`,
+/// no `Default`, and no flag: the sink is built inside [`McpContext::new`] from
+/// the context's own `ApiClient`, and the field is private, so a context without
+/// one cannot be constructed at all.
+#[derive(Clone)]
+pub struct AuditSink {
+    api: ApiClient,
+}
+
+/// Proof that the platform opened an audit record for this call.
+///
+/// Sealed on purpose: only [`AuditSink::open`] mints one, so holding it *is* the
+/// evidence that a `pre` row exists. Passing one to [`dispatch_under`] is how the
+/// type system, rather than a convention, keeps dispatch and audit together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AuditEnvelope(Uuid);
+
+impl AuditEnvelope {
+    #[must_use]
+    pub fn id(self) -> Uuid {
+        self.0
+    }
+}
+
+/// The platform would not open an audit record, so nothing was dispatched.
+#[derive(Debug)]
+pub struct AuditUnavailable {
+    pub detail: Value,
+}
+
+impl AuditSink {
+    /// The only constructor. Every record it opens is written platform-side.
+    #[must_use]
+    fn through_platform(api: ApiClient) -> Self {
+        Self { api }
+    }
+
+    /// Ask the platform to open the `pre` half — before anyone has decided
+    /// anything about the call.
+    ///
+    /// # Errors
+    /// The platform refused or could not be reached. The caller must not
+    /// dispatch: a look nobody counted is the one thing this platform claims it
+    /// cannot take.
+    pub async fn open(
+        &self,
+        action: &str,
+        arguments: &Value,
+    ) -> Result<AuditEnvelope, AuditUnavailable> {
+        let body = json!({ "action": action, "arguments": arguments });
+        match self.api.post("/api/agent/audit", body).await {
+            Ok(v) => match v.get("audit_id").and_then(Value::as_str).and_then(|s| s.parse().ok()) {
+                Some(id) => Ok(AuditEnvelope(id)),
+                None => Err(AuditUnavailable {
+                    detail: json!({ "reason": "the platform opened no audit record", "response": v }),
+                }),
+            },
+            Err(e) => Err(AuditUnavailable { detail: e.to_tool_error() }),
+        }
+    }
+
+    /// Close the record with what came back.
+    ///
+    /// The **verdict is the platform's**, derived from the result: a caller that
+    /// classified its own refusals would be marking its own homework, and
+    /// `denied` is the verdict the trail exists to make provable.
+    pub async fn close(&self, envelope: AuditEnvelope, result: &Value) {
+        let body = json!({ "result": result });
+        if let Err(e) = self
+            .api
+            .post(&format!("/api/agent/audit/{}", envelope.id()), body)
+            .await
+        {
+            tracing::error!(
+                audit_id = %envelope.id(),
+                error = ?e.body,
+                "the audit trail's post-record failed; the pre-record stands alone"
+            );
+        }
+    }
+}
+
 // ── Context ──────────────────────────────────────────────────────────────────
 
 /// Shared context injected into every MCP tool call.
@@ -189,15 +305,34 @@ pub struct McpContext {
     pub draft_store: Arc<Mutex<HashMap<Uuid, StrategyDraft>>>,
     /// The trajectory every tool step of this context is logged under (SPEC §14.6).
     pub trajectory: Arc<Trajectory>,
+    /// The audit trail every dispatch through this context runs inside.
+    ///
+    /// **Private on purpose.** A public field would let any crate build an
+    /// `McpContext` with a struct literal and skip `new`, which is the one place
+    /// the sink is attached. Private makes `McpContext::new` the only way to have
+    /// a context at all, and therefore the only way to reach `dispatch_tool`.
+    audit: AuditSink,
 }
 
 impl McpContext {
     pub fn new(api: ApiClient) -> Self {
         Self {
+            audit: AuditSink::through_platform(api.clone()),
             api,
             draft_store: Arc::new(Mutex::new(HashMap::new())),
             trajectory: Arc::new(Trajectory::new()),
         }
+    }
+
+    /// The audit trail this context dispatches inside.
+    ///
+    /// Callers that must record a refusal they made *themselves* — the SDK
+    /// driver's policy gate denies four actions without ever dispatching them —
+    /// open and close the record around their own decision and hand the envelope
+    /// to [`dispatch_under`] on the path that does dispatch.
+    #[must_use]
+    pub fn audit(&self) -> &AuditSink {
+        &self.audit
     }
 
     /// Record one tool step. Every step `dispatch_tool` runs is recorded
@@ -329,13 +464,66 @@ fn definition_arg(params: &Value) -> String {
     }
 }
 
-/// Dispatch a tool call and record the step in the agent trajectory. There is no
-/// unrecorded variant.
+/// Dispatch a tool call under a fresh audit envelope, and record the step in the
+/// agent trajectory. There is no unaudited and no unrecorded variant.
+///
+/// The order is the mechanism (SPEC §15, ADR-P2-21, AT-64): the `pre` record is
+/// written **before** the call reaches the platform's authorisation, so a request
+/// the platform refuses has already been recorded as having been made — the only
+/// way a denial leaves any evidence at all. The `post` record follows with what
+/// the platform decided.
+///
+/// **A dispatch the platform would not record does not happen.** If the `pre`
+/// write fails, this returns `audit_unavailable` and the tool is never run. That
+/// is a reversal of an earlier fail-open stance and it is deliberate
+/// (ADR-P2-34): the audit store *is* the platform store, so "the trail is down
+/// but the platform is up" is not a state this system has, and the product claim
+/// is that it is structurally unable to not count a look.
 pub async fn dispatch_tool(
     ctx: &McpContext,
     tool_name: &str,
     params: &Value,
     progress: Option<tokio::sync::mpsc::Sender<ProgressUpdate>>,
+) -> Value {
+    let envelope = match ctx.audit.open(tool_name, params).await {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!(
+                tool = tool_name,
+                detail = ?e.detail,
+                "refusing to dispatch: the platform opened no audit record"
+            );
+            return json!({
+                "error": "audit_unavailable",
+                "detail": e.detail,
+                "fix": "the platform's audit trail must be reachable before any tool runs; \
+                        this call was refused rather than run off the books"
+            });
+        }
+    };
+    let result = dispatch_under(ctx, tool_name, params, progress, &envelope).await;
+    ctx.audit.close(envelope, &result).await;
+    result
+}
+
+/// Dispatch under an audit envelope the caller opened and will close.
+///
+/// The `_envelope` argument is never read. It is a **proof obligation**: only
+/// [`AuditSink::open`] can mint an [`AuditEnvelope`], so a caller that reaches
+/// this function has demonstrably had a `pre` record written for the call. A new
+/// dispatch path that forgets to audit does not fail a test — it fails to
+/// compile.
+///
+/// The caller closes rather than this function, because the callers that use it
+/// are the ones whose envelope has to span more than the dispatch: the SDK
+/// driver opens the record before its policy gate decides, so the four §15
+/// actions it refuses are recorded as asked-for and denied.
+pub async fn dispatch_under(
+    ctx: &McpContext,
+    tool_name: &str,
+    params: &Value,
+    progress: Option<tokio::sync::mpsc::Sender<ProgressUpdate>>,
+    _envelope: &AuditEnvelope,
 ) -> Value {
     let started = std::time::Instant::now();
     let result = dispatch_untraced(ctx, tool_name, params, progress).await;
