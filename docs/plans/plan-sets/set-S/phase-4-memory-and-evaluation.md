@@ -117,7 +117,15 @@ every migration applies to an empty database); an entry without provenance canno
 **Traces:** AGENT-007 §2.2.
 
 ### S-4.4 Negative results are derived, not declared — M
-`PARTIAL` 2026-09-16 — `memory/negative.rs` (486 lines, 7 tests) derives the failure class from the verdict and holds the closed enum. Nothing writes a row, so the refusal of a class the funnel did not produce is enforced in the type and not yet at the database.
+`PARTIAL` 2026-09-16 — `memory/negative.rs` (486 lines, 7 tests) derives the class from the verdict, and **the database now enforces the same rule** (`migrations/0125_negative_result_class.sql`).
+
+The acceptance says "cannot be created", not "is not created", and the difference is where the rule lives. `derive_negative_result` has no class parameter — the class comes from `FailureClass::from_source` over an event the funnel emitted, so there is no path from a string the model chose. That is a property of one function and holds until the second writer.
+
+Three constraints, verified live, and the last two exist because the first alone is not enough: the class must be one of the ten; a negative result must *have* a class (without which the first is satisfied vacuously by omitting the field); and it must name its ticket, since a refusal nobody can trace to the gate that issued it cannot be checked against its own retry condition. Written over `extra` and phrased so the other six kinds are never asked about a field they do not have — asserted, because a constraint that quietly applied to findings would refuse every one of them.
+
+`schema_mirrors_memory_types.rs` compares the list against `FailureClass::all()`, so a class added to one and not the other fails the build rather than a run.
+
+**What keeps it `PARTIAL`**: nothing writes the row yet. The funnel does not call `derive_negative_result` when it refuses a gate, so the derivation and the enforcement are both in place and the event that should trigger them is not wired.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
