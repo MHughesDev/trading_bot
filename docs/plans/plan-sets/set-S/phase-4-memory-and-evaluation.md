@@ -87,7 +87,13 @@ Every CHECK restates a rule `Entry::validate` already enforces. That is the poin
 
 Two constraints exist to stop a *future* writer: a `model_summary` can never be `established` (a named CHECK — it is the whole distinction the evidence classes draw), and there is no `winner` / `resolved_by` / `resolution` column, because §2.2.1 says conflicts are surfaced and never merged and a column recording which side won is a merge with a record of the loser. `crates/invariants/tests/schema_mirrors_memory_types.rs` asserts both, and compares the SQL's CHECK lists against the Rust enums so the two cannot drift.
 
-**What keeps it `PARTIAL`, and it is the acceptance itself**: `cargo test -p invariants --test db_invariants -- --ignored` — the check that every migration applies to an empty database — **has not been run**. Docker is not running on this box. The schema is unverified against a live Postgres, and nothing here should be treated as proven until that passes. The mirror test runs without a database precisely because the acceptance's own check does not.
+**Verified against a live Postgres 2026-09-16.** The earlier note here said this was unverified because Docker was not running. That premise was false: there is a **native PostgreSQL 17.7 on port 5433** on this machine, and the verification took minutes once the assumption was checked rather than believed.
+
+`crates/invariants/tests/semantic_memory_refuses.rs` states the acceptance as behaviour and proves it: fourteen refusals, each asserting the error names *the constraint it expects* rather than merely that the insert failed — a row can fail for the wrong reason, and an assertion that only checks for failure passes on all of them. All four provenance columns, both blank-string CHECKs, the 300-character claim, the empty subject, the three closed vocabularies, `a_model_summary_is_never_established`, `the_window_runs_forwards`, `measurement_is_whole_or_absent` and `entry_corroborations_check`.
+
+`crates/api/tests/memory_store_round_trip.rs` covers what no unit test could: `MemoryStore::put` binds twenty-nine columns positionally, and a transposed pair is invisible to the compiler. Seventeen fields plus all five measurement parts survive the round trip, compared one at a time so a failure names the column.
+
+**What is still `PARTIAL`**: the whole-chain check. `0055_knowledge_plane.sql` does `CREATE EXTENSION vector` and this Postgres has no pgvector, so `db_invariants` — "every migration applies to an empty database" — still needs the `pgvector/pgvector` image. Both new suites apply the migration under test directly and substitute the embedding column's type, printing a loud note, because a pass there is not a full-fidelity apply. No constraint under test touches `embedding`.
 
 Extend `migrations/0055_knowledge_plane.sql`'s tables with the shared fields (subject, claim,
 evidence_ids, n, se, confidence, evidence_class, data_window, valid_until, provenance,
