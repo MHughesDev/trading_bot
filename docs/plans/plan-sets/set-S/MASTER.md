@@ -25,6 +25,22 @@
 > `initialize` instructions telling every model that "backtests support only ema_N and rsi_N
 > features" while fifty families resolved. A plan that is wrong in the "not started" direction
 > sends people to build what exists and leaves what is actually blocking untouched.
+>
+> **A second pattern, found the same day and worth more than the first.** Four of
+> the five defects that mattered were not missing code but **unreached** code:
+> `assemble_brief` with 936 lines, 14 passing tests and no caller anywhere;
+> `crates/features` resolving fifty families while the server's own instructions
+> said two; thirteen `/api/…` endpoints the desk calls that nothing serves; a
+> `memory_recall` field and a `Retrieval` type built around a table that did not
+> exist. Each looked exactly like working code, because its own tests passed.
+>
+> A green suite says every module is correct. It says nothing about whether any of
+> them are connected. Before building anything downstream of a module, check it
+> has a caller — and prefer a test to an audit, because a list maintained by
+> looking is wrong by the amount nobody looked. The frontend/backend route diff
+> gave three answers on three passes (3, 12, 13) before it became
+> `crates/api/tests/the_desk_calls_routes_that_exist.rs` and stopped needing a
+> human to run it.
 
 **Status:** DRAFT (2026-09-14) — ready for execution.
 **Created:** 2026-09-14
