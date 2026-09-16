@@ -147,7 +147,13 @@ when a later finding or `finish_task` names the entry.
 **Traces:** AGENT-007 §4, P4, P5; §8.4, §8.5, §8.8.
 
 ### S-4.6 The user's own knowledge — S
-`NOT STARTED` — Unchanged. Both named files are absent: `crates/api/src/routes/memory.rs` and `migrations/0068_user_preferences.sql`.
+`PARTIAL` 2026-09-16 — `crates/api/src/routes/memory.rs` exists and serves the whole listable/deletable half; `POST /api/memory/preferences` records what the user said.
+
+**`migrations/0068_user_preferences.sql` is not written, and that is the decision rather than the omission** (ADR-S4-01): `user_preference` is one of §2.2's seven kinds and shares every shared field with the other six, so a second table would be a second store for the brief to retrieve from, a second retention rule and a second thing `memory.search` must union — in exchange for a `scope` that fits in `extra`.
+
+The acceptance's second half holds and is verified live: a deleted preference stops being returned, asserted on the *read* rather than on the `archived` flag, since a test of the flag would pass while the brief still showed it. This is also the one kind OQ-18 does not block — "the user said this" is true as of when they said it, so today-to-today is a fact rather than a guess, and `human` + `established` is the one combination needing no verification pass.
+
+**What keeps it `PARTIAL`**: the first half of the acceptance — "the agent stops re-asking a question the user has answered, demonstrated by a two-turn test" — needs the brief retrieving preferences into the run, which is the driver wiring S-4.5 also waits on.
 
 `ask_user` answers and "remember that…" turns become `user_preference` entries with a scope,
 retrieved into every brief for that scope at top rank, listable and deletable by the user.
