@@ -44,7 +44,13 @@ fn check_list(sql: &str, column: &str) -> Vec<String> {
     let at = sql
         .find(&format!("{column} IN ("))
         .unwrap_or_else(|| panic!("no `{column} IN (` CHECK in the migration"));
+    // Scan from after the `IN (`, not from the column. A column expression can
+    // itself contain a quoted literal — `extra->>'failure_class' IN (…)` — and
+    // starting at the column swept that literal into the list, which read as an
+    // eleventh failure class.
     let rest = &sql[at..];
+    let open = rest.find("IN (").expect("the list opens") + "IN (".len();
+    let rest = &rest[open..];
     let close = rest.find(')').expect("the IN list closes");
     rest[..close]
         .split('\'')
@@ -231,5 +237,28 @@ fn the_retrieval_log_has_no_foreign_key_to_the_entry() {
     assert!(
         !sql.contains("references agent_memory"),
         "a foreign key from memory_retrievals to the entry would delete the misses and keep          the hits"
+    );
+}
+
+/// The failure-class CHECK lists exactly `memory::negative::FailureClass`.
+///
+/// A class in Rust and not in the CHECK makes that refusal unstorable — the
+/// funnel produces a verdict the platform cannot record. A class in the CHECK
+/// and not in Rust is a class nothing can produce and a model could ask for,
+/// which is the direction S-4.4 exists to close: `capacity_insufficient` used to
+/// keep a dead idea alive.
+#[test]
+fn the_failure_class_check_lists_exactly_the_rust_classes() {
+    use harness::memory::negative::FailureClass;
+    let names: Vec<&str> = FailureClass::all().iter().map(|c| c.as_str()).collect();
+    assert!(
+        names.len() >= 10,
+        "the enum reports {} classes, so this test is reading the wrong thing",
+        names.len()
+    );
+    assert_mirrors(
+        &migration_named("0125_negative_result_class.sql"),
+        "extra->>'failure_class'",
+        &names,
     );
 }

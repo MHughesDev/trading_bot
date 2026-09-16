@@ -84,6 +84,19 @@ async fn store_db() -> PgPool {
     pool.execute(sql.as_str())
         .await
         .expect("the migration applies");
+
+    // The negative-result constraints ride on the same table (S-4.4).
+    let class_sql = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("crates/<name> sits two below the root")
+            .join("migrations/0125_negative_result_class.sql"),
+    )
+    .expect("0125 is readable");
+    pool.execute(class_sql.as_str())
+        .await
+        .expect("0125_negative_result_class.sql applies");
     pool
 }
 
@@ -443,4 +456,91 @@ async fn a_succession_that_cannot_write_marks_nothing() {
         1,
         "and the current view still shows exactly one"
     );
+}
+
+/// A negative result's class must be one the funnel produces (S-4.4).
+///
+/// This is the mechanism that stops `capacity_insufficient` being used to keep a
+/// dead idea alive. `derive_negative_result` already makes the class unforgeable
+/// in Rust — it has no class parameter — but that is a property of one function
+/// and holds until the second writer. The CHECK is the same rule where a writer
+/// cannot route around it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires live Postgres"]
+async fn a_negative_result_cannot_carry_a_class_the_funnel_never_produced() {
+    let pool = store_db().await;
+    let store = api::memory_store::MemoryStore::new(pool);
+    let user = Uuid::new_v4();
+
+    let mut base = Entry::finding(
+        "neg_1",
+        "ema_cross_v1",
+        "refused at gate 3 — weak_effect (t = 1.1)",
+        DataWindow::new("2026-04-01", "2026-06-30"),
+        Provenance::new("run_9", "advance_funnel", "1", "h"),
+    );
+    base.kind = Kind::NegativeResult;
+
+    // A real class stores.
+    base.extra = serde_json::json!({ "failure_class": "weak_effect", "ticket_id": "t_1" });
+    store.put(user, &base).await.expect("a real class stores");
+
+    // An invented one does not, however plausible it reads.
+    let mut invented = base.clone();
+    invented.id = "neg_2".into();
+    invented.extra =
+        serde_json::json!({ "failure_class": "needs_more_capital", "ticket_id": "t_2" });
+    let err = store
+        .put(user, &invented)
+        .await
+        .expect_err("a class the funnel never produced is refused");
+    assert!(
+        err.to_string()
+            .contains("a_failure_class_is_one_the_funnel_produces"),
+        "refused by the wrong constraint: {err}"
+    );
+
+    // A negative result with no class at all is refused too — without this the
+    // constraint above is satisfied vacuously by omitting the field.
+    let mut classless = base.clone();
+    classless.id = "neg_3".into();
+    classless.extra = serde_json::json!({ "ticket_id": "t_3" });
+    let err = store
+        .put(user, &classless)
+        .await
+        .expect_err("a negative result with no class is refused");
+    assert!(
+        err.to_string()
+            .contains("a_negative_result_carries_a_class"),
+        "refused by the wrong constraint: {err}"
+    );
+
+    // And one with no ticket: a refusal nobody can trace to the gate that
+    // issued it cannot be checked against its own retry condition.
+    let mut ticketless = base.clone();
+    ticketless.id = "neg_4".into();
+    ticketless.extra = serde_json::json!({ "failure_class": "weak_effect" });
+    let err = store
+        .put(user, &ticketless)
+        .await
+        .expect_err("a negative result with no ticket is refused");
+    assert!(
+        err.to_string()
+            .contains("a_negative_result_names_its_ticket"),
+        "refused by the wrong constraint: {err}"
+    );
+
+    // The constraint says nothing about the other kinds: a finding carries no
+    // `failure_class` and must never be asked about one.
+    let plain = Entry::finding(
+        "f_plain",
+        "BTC-USD",
+        "an ordinary finding with no class",
+        DataWindow::new("2026-04-01", "2026-06-30"),
+        Provenance::new("run_9", "get_bars", "1", "h"),
+    );
+    store
+        .put(user, &plain)
+        .await
+        .expect("a finding is not a negative result and is not asked for a class");
 }

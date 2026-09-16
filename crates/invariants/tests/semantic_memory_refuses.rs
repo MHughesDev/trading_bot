@@ -108,6 +108,19 @@ async fn migrated() -> PgPool {
     pool.execute(sql.as_str())
         .await
         .expect("0122_semantic_memory.sql applies to an empty database");
+
+    // The negative-result constraints ride on the same table (S-4.4).
+    let class_sql = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("crates/<name> sits two below the root")
+            .join("migrations/0125_negative_result_class.sql"),
+    )
+    .expect("0125 is readable");
+    pool.execute(class_sql.as_str())
+        .await
+        .expect("0125_negative_result_class.sql applies");
     pool
 }
 
