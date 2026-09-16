@@ -17,6 +17,19 @@ import { DisconnectedBanner, EmptyState, ErrorState, NoResults, PanelLoading, Sk
 import { AllocationBar, AreaChart, BarChart, Legend, Meter, MiniBar, Sparkline } from '@/components/charts/Primitives'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { toast } from '@/hooks/useToast'
+import {
+  BudgetMeter,
+  ConfidencePill,
+  EnvelopeBanner,
+  EvidenceChip,
+  InertText,
+  JobProgress,
+  ProvenanceBadge,
+  RiskBadge,
+  StageStrip,
+  StepHeader,
+  TierBadge,
+} from '@/components/desk/Shared'
 
 /* =============================================================================
    The design-system preview.
@@ -365,6 +378,70 @@ export function DesignSystemPage() {
               Fire a toast
             </Button>
           </Row>
+        </Section>
+
+        <Section
+          title="Research desk"
+          blurb="AGENT-012 §6 — every desk component, so none of them is reviewable only inside a running conversation"
+        >
+          <Row>
+            <TierBadge tier="frontier" measured detail="claude-opus-5 · ladder greedy→sampled" />
+            <TierBadge tier="local_high" measured={false} detail="no scorecard row exists" />
+            <ConfidencePill value="established" />
+            <ConfidencePill value="suggestive" />
+            <ConfidencePill value="refuted" />
+            <ConfidencePill value="stale" />
+            <RiskBadge value="read" />
+            <RiskBadge value="write" />
+            <RiskBadge value="destructive" />
+            <RiskBadge value="outbound" />
+          </Row>
+          <div style={{ height: 'var(--s-3)' }} />
+          <Row>
+            <EvidenceChip id="exp_7f0c" resolve={() => ({ label: 'an experiment', kind: 'experiment' })} />
+            <EvidenceChip id="exp_missing" resolve={() => null} />
+            <ProvenanceBadge mark={{ provenance: 'untrusted', source: 'example.com', evidence_class: 'model_summary' }} />
+            <ProvenanceBadge mark={{ provenance: 'platform', evidence_class: 'direct_stat' }} />
+          </Row>
+          <div style={{ height: 'var(--s-3)' }} />
+          <StageStrip stage="run" />
+          <div style={{ height: 'var(--s-3)' }} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 'var(--s-3)' }}>
+            <Panel>
+              <PanelHeader title="Budget meter" />
+              <PanelBody>
+                <BudgetMeter
+                  budget={{
+                    steps_remaining: 4,
+                    steps_total: 20,
+                    tokens_remaining: 12000,
+                    usd_tenth_cents_remaining: 900,
+                    trials_spent: 7,
+                    n_eff: 3.1,
+                  }}
+                  caps={{ steps: 20, tokens: 80000, usdTenthCents: 25000, trials: 10 }}
+                />
+              </PanelBody>
+            </Panel>
+            <Panel>
+              <PanelHeader title="Job progress and the envelope banner" />
+              <PanelBody>
+                <JobProgress done={34} planned={120} eta="~6m" />
+                <div style={{ height: 'var(--s-3)' }} />
+                <JobProgress done={null} planned={null} />
+                <div style={{ height: 'var(--s-3)' }} />
+                <EnvelopeBanner envelope="SealedHoldout" changes="unseals the holdout for one evaluation" reversible={false} />
+              </PanelBody>
+            </Panel>
+            <Panel>
+              <PanelHeader title="Step header and untrusted text" />
+              <PanelBody>
+                <StepHeader step={7} label="sweep parameters" tools={2} seconds={41} open={false} rawCount={3} onToggle={() => {}} />
+                <div style={{ height: 'var(--s-3)' }} />
+                <InertText>{'<b>fetched</b> markup renders as characters, never as elements'}</InertText>
+              </PanelBody>
+            </Panel>
+          </div>
         </Section>
 
         <Section title="States" blurb="Empty · filtered · loading · error · stale · disconnected">

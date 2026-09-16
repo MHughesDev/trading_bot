@@ -16,5 +16,6 @@
 @import "./styles/tailwind.theme.css";
 @import "./styles/base.css";
 @import "./styles/app.css";
+@import "./styles/desk.css";
 @import "./styles/screens.css";
 @import "./styles/compat.css";

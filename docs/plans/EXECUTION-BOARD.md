@@ -49,6 +49,7 @@ Eighteen tracks dispatched (two landed), 2026-09-15. Each is one agent, one bran
 | **24** | Set S Phase 5 — the strategy language (DATA-006 engine, SLv2, `preview_signals`) | [set-S/phase-5](plan-sets/set-S/phase-5-strategy-language.md) | `claude/set-s-phase-5-language` | 0082–0084 | **the archetype ceiling** — today it is `ema_N`/`rsi_N` |
 | **25** | Set S Phase 6 — the Research Desk (Chat/Research + Continuous toggle) | [set-S/phase-6](plan-sets/set-S/phase-6-research-desk.md) | `claude/set-s-phase-6-desk` | 0125 if needed | **DONE-1 — a question typed into the desk** |
 | **26** | Set S Phase 1 remainder — the context budget (S-1.2, 1.5–1.9, 1.11, 1.12) | [set-S/phase-1](plan-sets/set-S/phase-1-contracts.md); AGENT-005 Part I | `claude/set-s-phase-1-context-budget` | 0126 if needed | **Phase 9** — Part II may only ship by beating Part I |
+| **25** | Set S Phase 6 — the Research Desk (AGENT-012) | [set-S/phase-6](plan-sets/set-S/phase-6-research-desk.md) | `claude/set-s-phase-6-desk` | none (0125 reserved, unused) | nothing |
 
 **H-1 closed 2026-09-15 (`37faade`) — every paused and running track should rebase onto
 `main` before doing anything else. See §2.5a.**
@@ -80,6 +81,10 @@ from Set S's, Set P's or Set T's ranges. Track 11 writes no code.
 **Track 11 is read-only against production code** and must not edit `ROADMAP.md`,
 `EXECUTION-BOARD.md`, `artifact.md` or any `set-{P,S,T}` file — it reports what should change
 in those rather than changing them.
+
+Track 25 writes only `frontend/src/{api,hooks,lib,components/desk,pages}` plus the three shared
+frontend files named in §2.2 (`App.tsx`, `TopBar.tsx`, `AppLayout.tsx`), and deletes the two
+surfaces the desk replaces (`/agent`, `/research`). It adds no migration and no Rust route.
 
 `ResearchRun`, the third campaign child worker, is **not** in track 7 — it is Set S task S-10.6
 and belongs to the lifecycle phase. Do not build it twice.

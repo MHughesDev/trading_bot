@@ -40,18 +40,9 @@ const ModelLineagePage = lazy(() =>
 const LeaderboardPage = lazy(() =>
   import('@/pages/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage })),
 )
-// Lazy, like the other heavy pages: the workspace pulls in the timeline, the panes
-// and their polling, and most visits to the app never open it.
-const ResearchWorkspacePage = lazy(() =>
-  import('@/pages/ResearchWorkspacePage').then((m) => ({
-    default: m.ResearchWorkspacePage,
-  })),
-)
-const ApprovalsPage = lazy(() =>
-  import('@/pages/ApprovalsPage').then((m) => ({ default: m.ApprovalsPage })),
-)
-const AgentPage = lazy(() =>
-  import('@/pages/AgentPage').then((m) => ({ default: m.AgentPage })),
+// The Research Desk (AGENT-012) — one surface replacing /agent and /research.
+const DeskPage = lazy(() =>
+  import('@/pages/DeskPage').then((m) => ({ default: m.DeskPage })),
 )
 // The design-system preview is public on purpose: the system must be reviewable
 // without a session (spec §8.7 — every state reachable outside the app).
@@ -179,19 +170,12 @@ export default function App() {
               <Route path="/mlops/graph" element={<ModelLineagePage />} />
               <Route path="/mlops/leaderboard" element={<LeaderboardPage />} />
               <Route path="/mlops/:id" element={<ModelDetailPage />} />
-              <Route path="/agent" element={<AgentPage />} />
-              {/* The research workspace (COMP-006). One layout, no modes: a Desk
-                  question and an overnight campaign are the same screen. */}
-              <Route path="/research" element={<ResearchWorkspacePage />} />
-              <Route
-                path="/research/:projectId"
-                element={<ResearchWorkspacePage />}
-              />
-              <Route
-                path="/research/:projectId/sessions/:sessionId"
-                element={<ResearchWorkspacePage />}
-              />
-              <Route path="/approvals" element={<ApprovalsPage />} />
+              {/* One desk (AGENT-012). /agent and /research were two surfaces
+                  showing the same run in two vocabularies; both redirect here. */}
+              <Route path="/desk/*" element={<DeskPage />} />
+              <Route path="/agent" element={<Navigate to="/desk" replace />} />
+              <Route path="/research/*" element={<Navigate to="/desk" replace />} />
+              <Route path="/approvals" element={<Navigate to="/desk/approvals" replace />} />
               <Route path="/settings" element={<SettingsPage />} />
 
               <Route path="/markets" element={<MarketsPage />} />

@@ -1,0 +1,192 @@
+/* =============================================================================
+   THE RESEARCH DESK (AGENT-012)
+
+   Semantic Meridian tokens only. No back-compat alias (`--color-surface-2`,
+   `--color-text-muted`, …) appears here or in any file under
+   `components/desk/` — that is asserted by
+   `src/components/desk/__tests__/no-deprecated-aliases.test.ts`, not by review.
+   The desk exists to replace two surfaces written in those aliases; building it
+   on them would make the whole exercise a rename.
+   ============================================================================= */
+
+/* --- shell ----------------------------------------------------------------- */
+.desk {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-canvas);
+}
+.desk > .desk-rail { border-right: 1px solid var(--line-hairline); min-height: 0; overflow: auto; }
+.desk > .desk-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* Three columns at wide width: rail | centre | panel. The panel is a child of
+   the main column rather than of the grid so a route without one (the memory
+   browser, the catalogue) simply does not render it. */
+.desk-body { flex: 1 1 auto; min-height: 0; display: flex; }
+.desk-center { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.desk-side {
+  width: 360px; flex: none; border-left: 1px solid var(--line-hairline);
+  min-height: 0; display: flex; flex-direction: column; background: var(--bg-canvas);
+}
+.desk-rail-toggle { display: none; }
+
+.desk-rail-hd, .desk-side-hd {
+  display: flex; align-items: center; gap: var(--s-2); justify-content: space-between;
+  padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--line-hairline);
+}
+.desk-rail ul { list-style: none; margin: 0; padding: var(--s-2); display: flex; flex-direction: column; gap: 2px; }
+.desk-rail li > button {
+  width: 100%; text-align: left; background: transparent; border: 0; cursor: pointer;
+  color: var(--fg-secondary); font: inherit; font-size: var(--t-12);
+  padding: var(--s-2); border-radius: var(--r-sm); display: block;
+}
+.desk-rail li > button:hover { background: var(--bg-hover); color: var(--fg-primary); }
+.desk-rail li > button[aria-current="true"] { background: var(--bg-selected); color: var(--fg-primary); }
+.desk-rail .child { margin-left: var(--s-4); }
+
+.desk-hd {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2);
+  padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--line-hairline);
+  background: var(--bg-surface-raised);
+}
+.desk-hd .title { font-weight: var(--w-semibold); font-size: var(--t-13); color: var(--fg-primary); }
+.desk-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--s-3); }
+.desk-side-bd { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--s-3); }
+.desk-dock { border-top: 1px solid var(--line-hairline); background: var(--bg-surface-raised); padding: var(--s-2) var(--s-3); }
+
+/* --- step groups and cards -------------------------------------------------- */
+.desk-step { margin-bottom: var(--s-4); }
+.desk-step-hd {
+  display: flex; align-items: center; gap: var(--s-2); width: 100%;
+  background: transparent; border: 0; cursor: pointer; font: inherit;
+  color: var(--fg-tertiary); font-size: var(--t-11); text-transform: uppercase;
+  letter-spacing: var(--tr-wide); padding: var(--s-1) 0; border-bottom: 1px solid var(--line-hairline);
+}
+.desk-card {
+  border: 1px solid var(--line-hairline); border-radius: var(--r-sm);
+  background: var(--bg-surface-raised); padding: var(--s-3); margin-top: var(--s-2);
+}
+.desk-card:focus-visible { outline: 2px solid var(--fg-accent); outline-offset: 1px; }
+.desk-card .desk-card-hd {
+  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; margin-bottom: var(--s-2);
+}
+.desk-card .desk-card-kind {
+  font-size: var(--t-10); text-transform: uppercase; letter-spacing: var(--tr-wide);
+  color: var(--fg-tertiary); font-weight: var(--w-semibold);
+}
+.desk-card p { margin: 0; font-size: var(--t-12); color: var(--fg-primary); line-height: 1.5; }
+.desk-card p + p { margin-top: var(--s-2); }
+.desk-card .sub { color: var(--fg-secondary); font-size: var(--t-11); }
+.desk-card.you { background: var(--bg-sunken); }
+.desk-card.raw { background: var(--bg-sunken); border-style: dashed; }
+.desk-card.attn { box-shadow: inset 2px 0 0 var(--fg-warn); }
+.desk-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-2); }
+
+/* --- shared components (§6) -------------------------------------------------- */
+.ev-chip {
+  display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-numeric);
+  font-size: var(--t-11); padding: 1px 5px; border-radius: var(--r-xs);
+  border: 1px solid var(--line-hairline); background: var(--bg-sunken); color: var(--fg-primary);
+  cursor: pointer;
+}
+.ev-chip.missing { text-decoration: line-through; color: var(--fg-tertiary); cursor: not-allowed; }
+.ev-chip[disabled] { cursor: not-allowed; }
+
+.prov-mark {
+  display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-10);
+  padding: 1px 5px; border-radius: var(--r-xs);
+  border: 1px dashed var(--fg-warn); color: var(--fg-warn); background: transparent;
+}
+.inert-text {
+  display: block; white-space: pre-wrap; word-break: break-word;
+  font-family: var(--font-numeric); font-size: var(--t-11);
+  background: var(--bg-inset); border-left: 2px solid var(--fg-warn);
+  padding: var(--s-2); color: var(--fg-secondary);
+}
+
+.budget-meter { display: flex; flex-direction: column; gap: var(--s-2); }
+.budget-row { display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: var(--s-2); }
+.budget-row .lbl-t { font-size: var(--t-10); text-transform: uppercase; letter-spacing: var(--tr-wide); color: var(--fg-tertiary); }
+.budget-row .val { font-family: var(--font-numeric); font-size: var(--t-11); color: var(--fg-secondary); }
+.budget-track { position: relative; height: 8px; border-radius: var(--r-pill); background: var(--bg-inset); overflow: hidden; }
+.budget-track > i { display: block; height: 100%; background: var(--bg-accent); }
+.budget-track > i.warn { background: var(--fg-warn); }
+.budget-track > i.neg { background: var(--bg-neg); }
+.budget-track > b { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--fg-primary); opacity: 0.55; }
+
+.stage-strip { display: flex; flex-wrap: wrap; gap: 3px; }
+.stage-strip > span {
+  font-size: var(--t-10); text-transform: uppercase; letter-spacing: var(--tr-wide);
+  padding: 1px 5px; border-radius: var(--r-xs); border: 1px solid var(--line-hairline);
+  color: var(--fg-tertiary);
+}
+.stage-strip > span.on { border-color: var(--fg-accent); color: var(--fg-accent); font-weight: var(--w-semibold); }
+.stage-strip > span.past { color: var(--fg-secondary); }
+
+.job-progress { display: flex; align-items: center; gap: var(--s-2); }
+.job-progress .meter { flex: 1 1 auto; }
+
+.envelope {
+  border: 1px solid var(--fg-warn); border-radius: var(--r-sm);
+  padding: var(--s-2); background: var(--bg-warn-subtle); color: var(--fg-primary);
+  font-size: var(--t-11);
+}
+
+.kill-banner {
+  position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: var(--s-3);
+  padding: var(--s-2) var(--s-3); background: var(--bg-neg); color: var(--fg-on-neg);
+  font-size: var(--t-12); font-weight: var(--w-semibold);
+}
+
+/* --- composer ---------------------------------------------------------------- */
+.desk-composer { display: flex; flex-direction: column; gap: var(--s-2); }
+.desk-composer .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.desk-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1); }
+.charter-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--s-3); }
+.charter-form .full { grid-column: 1 / -1; }
+
+/* --- reading layout for a dossier (§5) ---------------------------------------- */
+.dossier {
+  max-width: 74ch; margin: 0 auto; font-family: var(--font-display);
+  font-size: var(--t-13); line-height: 1.6; color: var(--fg-primary);
+}
+.dossier h2 { font-size: var(--t-16); margin: var(--s-4) 0 var(--s-2); }
+.dossier h3 { font-size: var(--t-13); margin: var(--s-4) 0 var(--s-2); color: var(--fg-secondary); }
+
+/* --- replay ------------------------------------------------------------------- */
+.replay-strip { display: flex; gap: 2px; flex-wrap: wrap; }
+.replay-strip button {
+  min-width: 26px; height: 22px; border-radius: var(--r-xs); cursor: pointer;
+  border: 1px solid var(--line-hairline); background: var(--bg-sunken);
+  color: var(--fg-secondary); font-family: var(--font-numeric); font-size: var(--t-10);
+}
+.replay-strip button[aria-current="true"] { border-color: var(--fg-accent); color: var(--fg-accent); }
+.replay-prompt {
+  white-space: pre; overflow: auto; max-height: 52vh; font-family: var(--font-numeric);
+  font-size: var(--t-11); background: var(--bg-inset); padding: var(--s-3);
+  border-radius: var(--r-sm); color: var(--fg-primary);
+}
+
+/* --- responsive (§1 layout rules) --------------------------------------------- */
+@media (max-width: 1200px) {
+  .desk { grid-template-columns: 200px minmax(0, 1fr); }
+  /* The right panel becomes a drawer rather than a squeezed third column. */
+  .desk-side {
+    position: fixed; right: 0; top: var(--nav-h); bottom: 0; width: min(380px, 92vw);
+    background: var(--bg-surface-raised); z-index: 30; box-shadow: var(--shadow-3);
+  }
+}
+@media (max-width: 768px) {
+  /* The rail becomes a sheet, the conversation is full-bleed and the controls
+     row docks to the bottom (§1). */
+  .desk { grid-template-columns: minmax(0, 1fr); }
+  .desk > .desk-rail {
+    position: fixed; left: 0; top: var(--nav-h); bottom: 0; width: min(280px, 88vw);
+    background: var(--bg-surface-raised); z-index: 31;
+  }
+  .desk > .desk-rail[hidden] { display: none; }
+  .desk-rail-toggle { display: inline-flex; position: absolute; left: var(--s-2); top: var(--s-2); z-index: 32; }
+  .desk-dock { position: sticky; bottom: 0; }
+  .desk-hd { padding-left: var(--s-10, 40px); }
+  .charter-form { grid-template-columns: minmax(0, 1fr); }
+}
