@@ -214,6 +214,17 @@ struct Recorder {
     /// number alone has nothing to check it.
     est_prompt_tokens: i64,
     cache_read_tokens: i64,
+    /// Trials this run spent (§4, S-2.8).
+    ///
+    /// Counted from the catalogue's own `spends_trial` declaration rather than from
+    /// anything the loop tracks, because the declaration is the single place a tool
+    /// says whether calling it registers a trial (AGENT-006 §2.5) and a second
+    /// counter would be a second thing to keep in agreement with it.
+    ///
+    /// Counted at **dispatch**, not at success: a trial is registered before the tool
+    /// runs, so a call that failed still spent one. Counting successes would report a
+    /// run as having searched less than it did, which is the direction that flatters.
+    trials_spent: i32,
     /// The effect log's own sequence, separate from `agent_messages`'s.
     ///
     /// Separate because the two record different things at different rates: one row
@@ -467,7 +478,7 @@ impl Recorder {
         let _ = sqlx::query(
             "UPDATE agent_runs SET status = $2, summary = $3, error = $4, outcome_json = $5,
                  harness_version = $6, prompt_tokens = $7, est_prompt_tokens = $8,
-                 cache_read_tokens = $9, outcome = $10,
+                 cache_read_tokens = $9, outcome = $10, trials_spent = $11,
                  finished_at = now() WHERE run_id = $1",
         )
         .bind(self.run_id)
@@ -483,6 +494,7 @@ impl Recorder {
         // holds the whole thing; this is the part an index can group by, so "how
         // many runs fenced last week" does not require parsing every row.
         .bind(outcome_word(outcome))
+        .bind(self.trials_spent)
         .execute(&self.pg)
         .await;
     }
@@ -587,6 +599,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         prompt_tokens: 0,
         est_prompt_tokens: 0,
         cache_read_tokens: 0,
+        trials_spent: 0,
     };
     // No deadline. The agent runs until it calls `finish_task`.
     //
@@ -887,6 +900,14 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
                 risk,
                 ..
             } => {
+                // The catalogue says whether this call registers a trial. A tool
+                // with no spec is not a catalogue tool — `fs` and the harness-owned
+                // ones — and spends nothing.
+                if mcp_server_lib::spec::find(&name).is_some_and(|spec| {
+                    spec.spends_trial != mcp_server_lib::spec::TrialKind::None
+                }) {
+                    rec.trials_spent += 1;
+                }
                 rec.append(
                     "tool_call",
                     json!({ "step": step, "name": name, "risk": risk.as_str(),

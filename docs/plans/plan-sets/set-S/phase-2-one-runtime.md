@@ -327,10 +327,23 @@ Verified by `a_finished_run_carries_its_telemetry` (which asserts `prompt_tokens
 rather than just that both exist), `a_run_that_never_finished_leaves_its_telemetry_null` and
 `a_negative_token_count_is_refused`.
 
-**Not done:** `trials_spent` and `n_eff_after` are declared, CHECKed and indexed, and **nothing
-writes them** — the loop does not yet count its own trials, and N_eff lives in `crates/ledger`
-behind an API the driver does not call. The task says "every finished run populates all ten", and
-eight is not ten. **That is why this is `PARTIAL`.** The SDK driver writes none of them.
+**`trials_spent` is now written** (2026-09-16), counted from the catalogue's own `spends_trial`
+declaration rather than from a second counter — the declaration is the single place a tool says
+whether calling it registers a trial (AGENT-006 §2.5), and a parallel count would be a second
+thing to keep in agreement with it.
+
+Counted at **dispatch, not at success**. A trial is registered before the tool runs, so a call
+that failed still spent one; counting successes would report a run as having searched less than it
+did, and under-reporting trials inflates every selection-adjusted statistic that divides by them.
+That is the direction that flatters, which is why
+`the_tools_that_spend_trials_say_so_and_the_ones_that_do_not_say_that` asserts both halves —
+`backtest_strategy` is a `Search`, `report_kill` is a `Falsification`, `get_bars` is neither —
+and `a_harness_owned_tool_is_not_in_the_catalogue_and_spends_nothing` holds the other side.
+
+**Still not done:** `n_eff_after` has a column, a CHECK and an index, and **nothing writes it** —
+N_eff lives in `crates/ledger` behind an API the driver does not call, and inventing a number for
+it would be worse than the null. Nine of ten. The SDK driver writes none of them. **That is why
+this is still `PARTIAL`.**
 
 `agent_runs` gains `harness_version, profile_name, adapter, transport, prompt_tokens,
 est_prompt_tokens, cache_read_tokens, trials_spent, n_eff_after, outcome`.

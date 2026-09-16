@@ -342,3 +342,52 @@ mod tests {
         assert!(matches!(decide(&[], V), Resume::Nothing { .. }));
     }
 }
+
+#[cfg(test)]
+mod trial_counting {
+    use mcp_server_lib::spec::{self, TrialKind};
+
+    /// `trials_spent` is counted from the catalogue's own declaration, so this is
+    /// the test that the declaration is there to be counted from.
+    ///
+    /// The pair matters: a tool that runs the simulator and declares nothing would
+    /// make every run report fewer trials than it spent, and under-reporting trials
+    /// inflates every selection-adjusted statistic that divides by them. That is the
+    /// direction that flatters, which is why it is asserted rather than assumed.
+    #[test]
+    fn the_tools_that_spend_trials_say_so_and_the_ones_that_do_not_say_that() {
+        let spends = |n: &str| {
+            spec::find(n)
+                .unwrap_or_else(|| panic!("{n} is in the catalogue"))
+                .spends_trial
+        };
+        assert_eq!(
+            spends("backtest_strategy"),
+            TrialKind::Search,
+            "running the simulator is a search"
+        );
+        assert_eq!(
+            spends("report_kill"),
+            TrialKind::Falsification,
+            "an attack on a strategy is counted separately from a search for one"
+        );
+        assert_eq!(
+            spends("get_bars"),
+            TrialKind::None,
+            "a read spends nothing, or every lookup would inflate the count"
+        );
+        assert_eq!(spends("list_instruments"), TrialKind::None);
+    }
+
+    /// A tool the harness owns is not in the catalogue, and spends nothing. The
+    /// driver's counter asks `spec::find` and gets `None` for these.
+    #[test]
+    fn a_harness_owned_tool_is_not_in_the_catalogue_and_spends_nothing() {
+        for name in ["search_tools", "record_finding", "finish_task", "reflect"] {
+            assert!(
+                spec::find(name).is_none(),
+                "{name} is answered inside the loop and must not appear in the catalogue"
+            );
+        }
+    }
+}
