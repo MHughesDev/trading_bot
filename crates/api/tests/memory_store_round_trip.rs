@@ -317,3 +317,130 @@ async fn an_entry_with_no_extra_fields_still_stores() {
         "and it reads back as an empty object rather than a null"
     );
 }
+
+/// A superseded profile is retained, not overwritten (S-4.7).
+///
+/// The acceptance's second clause, and the distinction `put` cannot make: `put`
+/// is `ON CONFLICT DO UPDATE`, which is right for a correction and wrong for a
+/// succession. A weekly profiler that overwrote would leave no way to ask what
+/// the instrument looked like last month — and "the profile changed" is often
+/// the finding.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires live Postgres"]
+async fn a_superseded_profile_is_retained_and_the_current_view_shows_one() {
+    let pool = store_db().await;
+    let store = api::memory_store::MemoryStore::new(pool.clone());
+    let user = Uuid::new_v4();
+
+    let mut january = Entry::finding(
+        "profile_jan",
+        "BTC-USD",
+        "1h coverage complete; spread 8bps; hill alpha 3.4",
+        DataWindow::new("2026-01-01", "2026-01-31"),
+        Provenance::new("profiler_1", "estimate_liquidity_cost", "1", "h1"),
+    );
+    january.kind = Kind::InstrumentProfile;
+    store.put(user, &january).await.expect("january stores");
+
+    let mut february = Entry::finding(
+        "profile_feb",
+        "BTC-USD",
+        "1h coverage complete; spread 19bps; hill alpha 2.6",
+        DataWindow::new("2026-02-01", "2026-02-28"),
+        Provenance::new("profiler_2", "estimate_liquidity_cost", "1", "h1"),
+    );
+    february.kind = Kind::InstrumentProfile;
+
+    store
+        .supersede(user, "profile_jan", &february)
+        .await
+        .expect("february supersedes january");
+
+    // Retained: the January row is still there, unchanged but for the pointer.
+    let old = store
+        .get(user, "profile_jan")
+        .await
+        .expect("the audit read runs")
+        .expect("the superseded profile is retained, not overwritten");
+    assert_eq!(
+        old.claim, january.claim,
+        "the old profile's content was overwritten rather than kept"
+    );
+    assert_eq!(
+        old.superseded_by.as_deref(),
+        Some("profile_feb"),
+        "and it points forward to what replaced it"
+    );
+
+    // Shown: the current view has one profile, the new one. Retained and shown
+    // are different things — a brief listing every profile the instrument ever
+    // had is a brief nobody can read.
+    let current = store
+        .by_kind(user, Kind::InstrumentProfile, 10)
+        .await
+        .expect("the current view reads");
+    assert_eq!(current.len(), 1, "the current view shows the succession twice");
+    assert_eq!(current[0].id, "profile_feb");
+    assert!(current[0].claim.contains("19bps"));
+}
+
+/// A failed succession leaves neither half.
+///
+/// Half of a succession is worse than neither: a new profile with the old one
+/// still current shows two, and an old one marked superseded by a row that never
+/// wrote shows none.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires live Postgres"]
+async fn a_succession_that_cannot_write_marks_nothing() {
+    let pool = store_db().await;
+    let store = api::memory_store::MemoryStore::new(pool.clone());
+    let user = Uuid::new_v4();
+
+    let mut first = Entry::finding(
+        "profile_a",
+        "ETH-USD",
+        "the first profile",
+        DataWindow::new("2026-01-01", "2026-01-31"),
+        Provenance::new("profiler_1", "estimate_liquidity_cost", "1", "h1"),
+    );
+    first.kind = Kind::InstrumentProfile;
+    store.put(user, &first).await.expect("stores");
+
+    // A replacement the database will refuse: `model_summary` may never be
+    // `established`.
+    let mut bad = Entry::finding(
+        "profile_b",
+        "ETH-USD",
+        "a summary the model wrote about itself",
+        DataWindow::new("2026-02-01", "2026-02-28"),
+        Provenance::new("profiler_2", "estimate_liquidity_cost", "1", "h1"),
+    );
+    bad.kind = Kind::InstrumentProfile;
+    bad.evidence_class = EvidenceClass::ModelSummary;
+    bad.confidence = Confidence::Established;
+
+    store
+        .supersede(user, "profile_a", &bad)
+        .await
+        .expect_err("the replacement is refused");
+
+    let still = store
+        .get(user, "profile_a")
+        .await
+        .expect("reads")
+        .expect("the original survives");
+    assert!(
+        still.superseded_by.is_none(),
+        "the original was marked superseded by a row that never wrote, so the current view \
+         now has no profile at all"
+    );
+    assert_eq!(
+        store
+            .by_kind(user, Kind::InstrumentProfile, 10)
+            .await
+            .expect("reads")
+            .len(),
+        1,
+        "and the current view still shows exactly one"
+    );
+}

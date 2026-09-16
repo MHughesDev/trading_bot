@@ -154,10 +154,22 @@ impl MemoryStore {
     /// Insert or replace one entry.
     ///
     /// # Errors
-    /// [`MemoryError::Invalid`] when `Entry::validate` refuses it — which is the
-    /// same refusal the database would give, with a message naming the field;
+    /// [`MemoryError::Invalid`] when `Entry::validate` refuses it — the same
+    /// refusal the database would give, with a message naming the field;
     /// [`MemoryError::Sqlx`] for anything the database refuses that this did not.
     pub async fn put(&self, user_id: Uuid, entry: &Entry) -> Result<(), MemoryError> {
+        Self::write(&self.pool, user_id, entry).await
+    }
+
+    /// The one INSERT, over any executor.
+    ///
+    /// Generic so [`Self::supersede`] can run it inside a transaction without a
+    /// second copy of twenty-nine bindings — and a second copy is exactly how the
+    /// two paths would drift, with only one of them ever exercised by a test.
+    async fn write<'e, E>(executor: E, user_id: Uuid, entry: &Entry) -> Result<(), MemoryError>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         entry.validate()?;
         let (start, end) = window_dates(&entry.data_window)?;
         let valid_until = entry
@@ -258,11 +270,77 @@ impl MemoryStore {
         .bind(&entry.corroborated_by)
         .bind(entry.cited_by_chain)
         .bind(extra)
-        .execute(&self.pool)
+        .execute(executor)
         .await?;
         Ok(())
     }
 
+    /// Replace an entry with a newer one, **keeping the old row** (§3.3, S-4.7).
+    ///
+    /// The distinction the acceptance turns on: a superseded profile is
+    /// *retained*, not overwritten. `put` would overwrite — it is
+    /// `ON CONFLICT DO UPDATE` — which is right for a correction and wrong for a
+    /// succession. A weekly profiler that overwrote would leave no way to ask
+    /// what the instrument looked like last month, and "the profile changed" is
+    /// often the finding.
+    ///
+    /// So the old row stays exactly as it was and gains a forward pointer. The
+    /// reads above exclude anything superseded, so the *current* view shows one
+    /// profile per instrument while the history stays queryable — retained and
+    /// shown are different things, and collapsing them would mean the brief
+    /// listing every profile the instrument has ever had.
+    ///
+    /// Both writes go in one transaction. Half of a succession is worse than
+    /// neither: a new profile with the old one still current shows two, and an
+    /// old one marked superseded by a row that failed to write shows none.
+    ///
+    /// # Errors
+    /// [`MemoryError::Invalid`] if the replacement does not validate;
+    /// [`MemoryError::Sqlx`] if either write fails — in which case neither
+    /// lands.
+    pub async fn supersede(
+        &self,
+        user_id: Uuid,
+        old_id: &str,
+        replacement: &Entry,
+    ) -> Result<(), MemoryError> {
+        replacement.validate()?;
+        let mut tx = self.pool.begin().await?;
+
+        // The new row first: if it fails, nothing has been marked superseded.
+        Self::write(&mut *tx, user_id, replacement).await?;
+
+        sqlx::query(
+            "UPDATE agent_memory.entry SET superseded_by = $1, updated_at = now()               WHERE entry_id = $2 AND user_id = $3",
+        )
+        .bind(&replacement.id)
+        .bind(old_id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// One entry by id, superseded or not.
+    ///
+    /// The audit read: `by_kind` and `for_subject` show the current view, and
+    /// this is how a caller follows a `superseded_by` pointer back through the
+    /// history the current view hides.
+    ///
+    /// # Errors
+    /// As [`Self::by_kind`].
+    pub async fn get(&self, user_id: Uuid, entry_id: &str) -> Result<Option<Entry>, MemoryError> {
+        let row = sqlx::query(
+            "SELECT * FROM agent_memory.entry WHERE user_id = $1 AND entry_id = $2",
+        )
+        .bind(user_id)
+        .bind(entry_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(row_to_entry).transpose()
+    }
     /// The live entries for one subject, newest first.
     ///
     /// Archived rows are excluded here rather than by the caller — the partial
@@ -280,7 +358,7 @@ impl MemoryStore {
     ) -> Result<Vec<Entry>, MemoryError> {
         let rows = sqlx::query(
             "SELECT * FROM agent_memory.entry \
-              WHERE user_id = $1 AND subject = $2 AND NOT archived \
+              WHERE user_id = $1 AND subject = $2 AND NOT archived \n                AND superseded_by IS NULL \
               ORDER BY created_at DESC LIMIT $3",
         )
         .bind(user_id)
@@ -303,7 +381,7 @@ impl MemoryStore {
     ) -> Result<Vec<Entry>, MemoryError> {
         let rows = sqlx::query(
             "SELECT * FROM agent_memory.entry \
-              WHERE user_id = $1 AND kind = $2 AND NOT archived \
+              WHERE user_id = $1 AND kind = $2 AND NOT archived \n                AND superseded_by IS NULL \
               ORDER BY created_at DESC LIMIT $3",
         )
         .bind(user_id)
