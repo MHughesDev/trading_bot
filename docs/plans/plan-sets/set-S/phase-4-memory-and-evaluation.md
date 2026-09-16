@@ -178,7 +178,13 @@ two-turn test; the user can delete a preference and the next brief omits it.
 **Traces:** AGENT-007 §3.4.
 
 ### S-4.7 Instrument profiles by schedule — M
-`PARTIAL` 2026-09-16 — `memory::Kind::InstrumentProfile` and `jobs::JobKind::InstrumentProfile` exist, so the profile is a job kind that spends no trial. The schedule, and retaining a superseded profile rather than overwriting it, need the semantic schema.
+`PARTIAL` 2026-09-16 — `memory::Kind::InstrumentProfile` and `jobs::JobKind::InstrumentProfile` exist, so the profile is a job kind that spends no trial: the acceptance's first clause holds by construction, since a job kind that registers no trial cannot spend one.
+
+**The second clause is now built and verified**: `MemoryStore::supersede` writes the replacement and points the old row at it, leaving the old content untouched. `put` could not do this — it is `ON CONFLICT DO UPDATE`, right for a correction and wrong for a succession — and a profiler that overwrote would leave no way to ask what the instrument looked like last month, when "the profile changed" is often the finding.
+
+The current view (`by_kind`, `for_subject`) excludes anything superseded, so one profile per instrument reaches the brief while the history stays queryable through `get`: retained and shown are different things. Both writes are one transaction with the replacement first, asserted by a succession the database refuses — half a succession shows either two profiles or none.
+
+**What keeps it `PARTIAL`**: the schedule. Nothing runs the profiler weekly per initialised asset; the job kind exists and no scheduler enqueues it.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
