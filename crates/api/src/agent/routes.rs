@@ -48,6 +48,11 @@ fn start_error(e: &StartError) -> (StatusCode, &'static str) {
             (StatusCode::UNPROCESSABLE_ENTITY, "provider_not_configured")
         }
         StartError::Busy => (StatusCode::CONFLICT, "agent_busy"),
+        // 503 with a duration, not 409. The desk shows it as a wait rather than
+        // failing the click, and the two are different instructions: `agent_busy`
+        // means try again when something finishes, this means try again in about a
+        // minute (S-2.15).
+        StartError::Draining { .. } => (StatusCode::SERVICE_UNAVAILABLE, "platform_draining"),
         StartError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     }
 }

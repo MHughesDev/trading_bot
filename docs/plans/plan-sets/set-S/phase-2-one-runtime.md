@@ -1,6 +1,6 @@
 # Phase 2 — One runtime
 
-**Completion: 31% (5 / 16 tasks), plus 7 partial (S-2.5, S-2.6, S-2.7, S-2.8, S-2.11, S-2.14, S-2.16). Four remain `NOT STARTED`: S-2.9, S-2.10, S-2.12, S-2.15.**
+**Completion: 31% (5 / 16 tasks), plus 8 partial (S-2.5–S-2.8, S-2.11, S-2.14, S-2.15, S-2.16). Three remain `NOT STARTED`: S-2.9, S-2.10 and S-2.12, which interlock — the flag has nothing to compare against until the shadow replay (S-4.8) exists, and the deletion waits on the flag.**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
@@ -590,7 +590,33 @@ reason survive in `decided`; a second concurrent turn is rejected naming the liv
 **Traces:** AGENT-008 §3.4a; AGENT-010 §4.1.
 
 ### S-2.15 Draining: a deploy with live runs — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — the platform drains on a signal; the monitor is not told.
+
+There was no shutdown path at all: the process simply stopped, and `recover_orphans` marked every
+unfinished run `failed` on the way back up. A deploy during a research session cost the session.
+
+Now `SIGTERM` (and Ctrl-C, because a drain path only exercised in production is a drain path
+nobody has tested) closes the door and waits. New turns are refused with **503 and a duration**,
+not 409 `agent_busy` — the two are different instructions, and a desk that cannot tell them apart
+shows "at capacity" through every deploy until the message means nothing to anyone.
+
+The three cases are handled differently on purpose: a **suspended** run needs nothing; a
+**mid-step** run finishes its step, which is one model call plus one tool call and therefore
+seconds; a run still **inside a tool** past the thirty-second deadline is **left `running` and
+recovered by resume, never killed**. A tool killed mid-write is exactly the duplicated-write case
+the effect log exists to avoid, and a deploy is not a good enough reason to create one.
+
+`drain` returns how many were still going, so the caller reports what it observed rather than
+claiming a clean stop it did not.
+
+Verified by `a_draining_platform_says_how_long_rather_than_saying_busy` (which asserts the two
+messages differ, not merely that one exists) and
+`draining_an_idle_manager_is_immediate_and_says_so` — including that a drain does not reopen,
+since a reopened one would accept a turn the process is about to stop serving.
+
+**Not done:** COMP-007 is not told, so a rolling deploy still reads to the monitor as a heartbeat
+loss and can trip a global halt. That needs the monitor's maintenance-window API, which is
+`set-S/phase-7`'s territory rather than this one. **That is why this is `PARTIAL`.**
 
 Resume makes a *crash* survivable; a deploy is not a crash, and treating it as one throws away
 work that did not need to be lost. On `SIGTERM`: refuse new turns with a `503` naming the

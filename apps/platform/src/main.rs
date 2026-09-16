@@ -342,7 +342,7 @@ async fn main() -> anyhow::Result<()> {
         cfg.email.clone(),
         cfg.clickhouse.url.clone(),
         Some(stream_tx),
-        agent_manager,
+        agent_manager.clone(),
         Some(live_bus.clone()),
     );
     // ── Portfolio sampler + alert evaluator (migration 0042) ─────────────────
@@ -473,11 +473,62 @@ async fn main() -> anyhow::Result<()> {
 
     info!(addr, "listening");
 
+    // A deploy is not a crash, and treating it as one throws away work that did not
+    // need to be lost (AGENT-010 §10.1, S-2.15).
+    //
+    // On the signal: stop accepting turns, let the ones in flight reach a step
+    // boundary — one model call plus one tool call, so seconds — and only then let
+    // the process go. A run still inside a tool past the deadline is left `running`
+    // and recovered by resume rather than killed: a tool killed mid-write is exactly
+    // the duplicated-write case the effect log exists to avoid, and a deploy is not a
+    // good enough reason to create one.
+    let drain_target = agent_manager.clone();
     axum::serve(listener, router)
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            info!("shutdown signal received; draining agent turns");
+            let left = drain_target
+                .drain(std::time::Duration::from_secs(30))
+                .await;
+            if left > 0 {
+                info!(runs = left, "left running for resume rather than killed mid-write");
+            }
+        })
         .await
         .context("axum serve error")?;
 
     Ok(())
+}
+
+/// Whichever the platform is asked to stop by.
+///
+/// `SIGTERM` is what a container runtime sends on a deploy; Ctrl-C is what a person
+/// sends. Both mean the same thing here, and handling only one would make a deploy
+/// behave differently from a restart on a developer's machine — which is how a
+/// drain path stays untested until it matters.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut term = match signal(SignalKind::terminate()) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot listen for SIGTERM; Ctrl-C only");
+                let _ = tokio::signal::ctrl_c().await;
+                return;
+            }
+        };
+        tokio::select! {
+            _ = term.recv() => {}
+            _ = tokio::signal::ctrl_c() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows has no SIGTERM. Ctrl-C is what a developer sends, and a deploy
+        // here is a developer restarting the platform.
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 /// Read `trading_enabled` from Postgres.  Returns `true` (halted) if the row

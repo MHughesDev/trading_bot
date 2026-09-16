@@ -217,3 +217,63 @@ async fn a_session_token_is_bound_to_one_project() {
 
     cleanup(&pool, user).await;
 }
+
+// ── S-2.15: draining ────────────────────────────────────────────────────────
+
+/// A draining platform refuses a new turn with a duration, not with "busy".
+///
+/// The two are different instructions. `agent_busy` means try again when something
+/// finishes; draining means try again in about a minute. A desk that cannot tell
+/// them apart shows "at capacity" through every deploy, and teaches the user that
+/// the message means nothing.
+#[test]
+fn a_draining_platform_says_how_long_rather_than_saying_busy() {
+    use api::agent::manager::StartError;
+
+    let draining = StartError::Draining { seconds: 30 };
+    let busy = StartError::Busy;
+
+    let text = draining.to_string();
+    assert!(
+        text.contains("30"),
+        "the caller is told how long to wait: {text}"
+    );
+    assert!(
+        text.contains("deploy") || text.contains("restarting"),
+        "and why, so it does not read as a fault: {text}"
+    );
+    assert_ne!(
+        text,
+        busy.to_string(),
+        "a deploy and a full queue must not produce the same message"
+    );
+}
+
+/// The drain returns how many runs were still going, rather than claiming a clean
+/// stop it did not observe.
+///
+/// A run still inside a tool past the deadline is left `running` and recovered by
+/// resume — never killed. A tool killed mid-write is exactly the duplicated-write
+/// case the effect log exists to avoid, and a deploy is not a good enough reason to
+/// create one.
+#[tokio::test]
+async fn draining_an_idle_manager_is_immediate_and_says_so() {
+    use api::agent::AgentManager;
+
+    let cfg = cfg::model::AgentConfig::default();
+    let m = AgentManager::new(
+        // No pool is touched: `drain` reads the in-process run table only.
+        sqlx::PgPool::connect_lazy("postgres://unused/unused").expect("lazy pool"),
+        "http://127.0.0.1:1".into(),
+        cfg,
+    );
+    assert!(!m.is_draining(), "a fresh manager accepts turns");
+
+    let left = m.drain(std::time::Duration::from_millis(200)).await;
+    assert_eq!(left, 0, "nothing was running");
+    assert!(
+        m.is_draining(),
+        "and it stays closed: a drain that reopened would accept a turn the process \
+         is about to stop serving"
+    );
+}

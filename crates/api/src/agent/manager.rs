@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{Duration as ChronoDuration, Utc};
@@ -32,9 +32,25 @@ pub enum StartError {
     NotConfigured(String),
     #[error("agent is at capacity — wait for a run to finish")]
     Busy,
+    /// The platform is shutting down for a deploy (AGENT-010 §10.1, S-2.15).
+    ///
+    /// Separate from `Busy` because the two call for different things from the
+    /// caller and from the desk: `Busy` means try again when something finishes,
+    /// and this means try again in about a minute. A desk that cannot tell them
+    /// apart shows "at capacity" through a deploy and teaches the user that the
+    /// message means nothing.
+    #[error("the platform is restarting for a deploy; try again in about {seconds}s")]
+    Draining { seconds: u64 },
     #[error("internal error: {0}")]
     Internal(String),
 }
+
+/// How long a deploy waits for in-flight turns before giving up on a clean stop.
+///
+/// Thirty seconds, which is a long time for "one model call plus one tool call" and
+/// a short time for a deploy. Longer would hold a rolling restart on a run that is
+/// stuck rather than working; shorter would cut steps that were about to finish.
+const DRAIN_DEADLINE_SECS: u64 = 30;
 
 /// Where agent workspaces live on disk.
 ///
@@ -60,6 +76,14 @@ pub struct AgentManager {
     cfg: AgentConfig,
     /// Cancel flags for in-process runs.
     running: Mutex<HashMap<Uuid, Arc<AtomicBool>>>,
+    /// Set on `SIGTERM`: no new turns, and the ones in flight get to finish
+    /// (§10.1, S-2.15).
+    ///
+    /// Resume makes a *crash* survivable; a deploy is not a crash, and treating it
+    /// as one throws away work that did not need to be lost. A step is one model
+    /// call plus one tool call — seconds — so waiting for a boundary costs a status
+    /// line rather than a turn.
+    draining: AtomicBool,
 }
 
 impl AgentManager {
@@ -73,6 +97,7 @@ impl AgentManager {
             base_url,
             cfg,
             running: Mutex::new(HashMap::new()),
+            draining: AtomicBool::new(false),
         }
     }
 
@@ -218,6 +243,55 @@ impl AgentManager {
     }
 
 
+    /// Stop accepting turns, and wait for the ones in flight to reach a boundary
+    /// (§10.1, S-2.15).
+    ///
+    /// Three cases, and the third is the one worth being careful about:
+    ///
+    /// * a **suspended** run needs nothing — it holds no process, and S-2.6's schema
+    ///   rule lets it resume across the version change;
+    /// * a **mid-step** run finishes its step and suspends at the boundary. A step is
+    ///   one model call plus one tool call, so this is seconds;
+    /// * a run still **inside a tool** past the deadline is left `running` and
+    ///   recovered by resume. It is never killed: a tool killed mid-write is exactly
+    ///   the duplicated-write case the effect log exists to avoid, and a deploy is
+    ///   not a good enough reason to create one.
+    ///
+    /// Returns how many runs were still going when the deadline passed, so the caller
+    /// can say so rather than claiming a clean stop it did not observe.
+    pub async fn drain(&self, deadline: std::time::Duration) -> usize {
+        self.draining.store(true, Ordering::SeqCst);
+        tracing::info!("draining: no new agent turns will be accepted");
+
+        let started = std::time::Instant::now();
+        while started.elapsed() < deadline {
+            let left = self.active_count();
+            if left == 0 {
+                tracing::info!(
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "drained cleanly"
+                );
+                return 0;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        let left = self.active_count();
+        if left > 0 {
+            // Reported, not killed. These are recovered by resume, and saying so is
+            // what stops the next reader assuming they were lost.
+            tracing::warn!(
+                runs = left,
+                "drain deadline passed with runs still inside a tool; leaving them                  `running` for resume rather than killing them mid-write"
+            );
+        }
+        left
+    }
+
+    #[must_use]
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(Ordering::SeqCst)
+    }
+
     fn active_count(&self) -> usize {
         self.running.lock().expect("agent running lock").len()
     }
@@ -266,6 +340,14 @@ impl AgentManager {
         }
 
         let provider = Provider::from_str(&convo.provider).map_err(StartError::InvalidRequest)?;
+        // Refused before capacity, because the two answers differ and this one is
+        // the more specific: a caller told "at capacity" during a deploy waits for a
+        // run to finish that is never going to start.
+        if self.is_draining() {
+            return Err(StartError::Draining {
+                seconds: DRAIN_DEADLINE_SECS,
+            });
+        }
         if self.active_count() >= self.cfg.max_concurrent_runs {
             return Err(StartError::Busy);
         }
