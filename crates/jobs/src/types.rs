@@ -644,3 +644,66 @@ mod tests {
         assert!(JobError::infrastructure("lost_worker").retryable);
     }
 }
+
+#[cfg(test)]
+mod profiler_cost_tests {
+    use super::*;
+
+    /// The profiler spends no trial (AGENT-007 §3.3; Set S task S-4.7).
+    ///
+    /// Half of S-4.7's acceptance, and it holds by construction rather than by
+    /// care: `counts_trial` is the single place the platform decides, and the
+    /// counting happens inside the submission transaction, so a profiler that
+    /// spent one could not do it quietly.
+    ///
+    /// Asserted anyway, because the property is easy to lose by accident — a
+    /// weekly job per instrument that counted trials would burn a family's
+    /// effective sample on maintenance, and nothing about the change would look
+    /// wrong at the call site.
+    #[test]
+    fn the_instrument_profiler_spends_no_trial() {
+        assert!(
+            !JobKind::InstrumentProfile.counts_trial(),
+            "a weekly profile per instrument that counts trials spends a family's effective \
+             sample on housekeeping"
+        );
+        // It is logged as exploration instead, which is the honest record: the
+        // platform looked, and looking is reported rather than counted (D-13).
+        assert!(
+            JobKind::InstrumentProfile.logs_exploration(),
+            "a profiler that neither counts nor logs is work nobody can account for"
+        );
+    }
+
+    /// The kinds that *do* count are the ones that look at out-of-sample
+    /// behaviour, and nothing else has crept in.
+    #[test]
+    fn only_out_of_sample_work_counts_a_trial() {
+        let counting: Vec<&str> = [
+            JobKind::Backtest,
+            JobKind::Sweep,
+            JobKind::Study,
+            JobKind::GateAdvance,
+            JobKind::Train,
+            JobKind::Hpo,
+            JobKind::InstrumentProfile,
+            JobKind::DataQc,
+            JobKind::ResearchRun,
+            JobKind::FeatureMaterialise,
+            JobKind::SimulatePaths,
+            JobKind::AssetInit,
+            JobKind::Backfill,
+        ]
+        .iter()
+        .filter(|k| k.counts_trial())
+        .map(|k| k.as_str())
+        .collect();
+        assert_eq!(
+            counting,
+            vec!["backtest", "sweep", "study", "gate_advance", "train", "hpo"],
+            "the trial-counting set changed. That is a decision about the platform's \
+             multiple-testing exposure, not a refactor: every kind added here spends from \
+             every family's effective sample."
+        );
+    }
+}
