@@ -31,6 +31,12 @@ tools:
   # The catalogue is 56 tools. This is what may be in front of the model at once.
   # The gap between the two numbers is what dynamic routing closes.
   max_exposed_per_step: 24
+  # Routed once per turn and appended to, because tools are the first layer of
+  # the cached prefix: dropping one mid-turn invalidates the cache for the
+  # system prompt and the whole transcript behind it.
+  exposure_scope: session
+  # Slots held back so `search_tools` can add a tool without evicting one.
+  search_reserve_slots: 4
   schema_style: "rich"
   routing: "dynamic"
   parallel_calls: true

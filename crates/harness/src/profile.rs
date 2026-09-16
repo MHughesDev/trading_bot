@@ -113,6 +113,24 @@ pub enum Routing {
     Dynamic,
 }
 
+/// How long an exposure slice lives (AGENT-005 §5.1, Set S task S-2.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExposureScope {
+    /// Routed once per turn and then append-only: `search_tools` adds, and a tool
+    /// leaves only at a turn boundary.
+    ///
+    /// For tiers with a prompt cache. Tools are the first layer of the cached
+    /// prefix, so dropping one mid-turn invalidates the cache for the system prompt
+    /// and the whole transcript behind it — on a thirty-iteration run that costs
+    /// more than the missing tool did.
+    Session,
+    /// Re-routed every step. For tiers with no cache to invalidate and an exposure
+    /// budget small enough that carrying a tool the step does not need is the more
+    /// expensive mistake.
+    Step,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolPolicy {
     /// Simultaneous exposure cap (§2.1). The catalogue may be any size.
@@ -120,6 +138,27 @@ pub struct ToolPolicy {
     pub schema_style: SchemaStyle,
     pub routing: Routing,
     pub parallel_calls: bool,
+    /// Whether the slice is routed per turn or per step (§5.1, S-2.3).
+    #[serde(default = "default_exposure_scope")]
+    pub exposure_scope: ExposureScope,
+    /// Slots held back so `search_tools` can add a tool without evicting one.
+    ///
+    /// The escape hatch is useless if using it costs the tool that prompted it. On a
+    /// six-slot profile one reserved slot is the difference between "search and use"
+    /// and "search, and now something else is gone".
+    #[serde(default = "default_search_reserve")]
+    pub search_reserve_slots: usize,
+}
+
+/// `Step` is the narrower reading: it re-routes, which is always correct, and only
+/// wastes a cache the profile may not have.
+fn default_exposure_scope() -> ExposureScope {
+    ExposureScope::Step
+}
+
+/// One. Zero would make `search_tools` evict to make room for its own answer.
+fn default_search_reserve() -> usize {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -810,6 +849,8 @@ pub(crate) fn frontier_fixture() -> Profile {
             schema_style: SchemaStyle::Rich,
             routing: Routing::Dynamic,
             parallel_calls: true,
+            exposure_scope: ExposureScope::Step,
+            search_reserve_slots: 1,
         },
         output: OutputPolicy {
             constrained_decoding: false,
@@ -867,6 +908,8 @@ pub(crate) fn degraded_fixture() -> Profile {
             schema_style: SchemaStyle::Flat,
             routing: Routing::Dynamic,
             parallel_calls: false,
+            exposure_scope: ExposureScope::Step,
+            search_reserve_slots: 1,
         },
         output: OutputPolicy {
             constrained_decoding: true,

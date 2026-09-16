@@ -46,6 +46,11 @@ tools:
   # ~6 simultaneous schemas is a cliff, not a soft limit. The catalogue is 56 tools
   # and routing is what closes the gap.
   max_exposed_per_step: 6
+  # Re-routed every step: there is no prompt cache here to invalidate, and with
+  # six slots a tool the step does not need is the more expensive mistake.
+  exposure_scope: step
+  # One slot held back, or using the escape hatch costs the tool that prompted it.
+  search_reserve_slots: 1
   schema_style: "flat"
   routing: "dynamic"
   parallel_calls: false

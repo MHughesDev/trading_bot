@@ -38,6 +38,7 @@ use crate::context::estimate_tokens;
 use crate::drive::{Effect, Input, Loop, Note, Outcome};
 use crate::hardware::ToolCalling;
 use crate::profile::{
+    ExposureScope,
     Archetype, Budgets, CodeExecution, ContextBudget, Mode, Orchestration, OutputPolicy, Profile,
     Routing, SchemaStyle, Tier, ToolPolicy, Trifecta,
 };
@@ -113,6 +114,8 @@ pub fn degraded_7b() -> Profile {
             schema_style: SchemaStyle::Flat,
             routing: Routing::Dynamic,
             parallel_calls: false,
+            exposure_scope: ExposureScope::Step,
+            search_reserve_slots: 1,
         },
         output: OutputPolicy {
             constrained_decoding: true,
@@ -168,6 +171,8 @@ pub fn frontier() -> Profile {
             schema_style: SchemaStyle::Rich,
             routing: Routing::Dynamic,
             parallel_calls: true,
+            exposure_scope: ExposureScope::Step,
+            search_reserve_slots: 1,
         },
         output: OutputPolicy {
             constrained_decoding: false,

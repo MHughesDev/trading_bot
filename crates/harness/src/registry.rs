@@ -554,14 +554,45 @@ impl ToolRegistry {
             }
         }
 
-        // Over budget: keep core, then take in the priority order established above.
+        // Over budget: keep core, hold back the reserve, then take in the priority
+        // order established above.
+        //
+        // The reserve (§5.1, S-2.3) is what makes the escape hatch usable. Without
+        // it a full slice means `search_tools` finds the right tool and cannot be
+        // given it without evicting something — so using the hatch costs the tool
+        // that prompted it, and the model is no better off than before it searched.
+        //
+        // Held back only from the ROUTED fill, never from `pinned`. A tool the model
+        // explicitly asked for is the thing the reserve exists to make room for, and
+        // reserving a slot against it would be the same bug in a new place.
         if selected.len() > budget {
+            let reserve = profile
+                .tools
+                .search_reserve_slots
+                // Never more than a third of the budget: a reserve larger than that
+                // starves the routed fill, and a step with no routed tools is a step
+                // that can only search.
+                .min(budget / 3);
             let (core, rest): (Vec<&ToolDef>, Vec<&ToolDef>) =
                 selected.into_iter().partition(|t| t.core);
-            let room = budget.saturating_sub(core.len());
+            let pinned_kept: Vec<&ToolDef> = rest
+                .iter()
+                .filter(|t| pinned.iter().any(|p| p == &t.name))
+                .copied()
+                .collect();
+            let routed: Vec<&ToolDef> = rest
+                .iter()
+                .filter(|t| !pinned.iter().any(|p| p == &t.name))
+                .copied()
+                .collect();
+            let room = budget
+                .saturating_sub(core.len())
+                .saturating_sub(pinned_kept.len());
+            let routed_room = room.saturating_sub(reserve.min(room));
             selected = core
                 .into_iter()
-                .chain(rest.into_iter().take(room))
+                .chain(pinned_kept)
+                .chain(routed.into_iter().take(routed_room))
                 .collect();
         }
 
@@ -1117,11 +1148,49 @@ mod tests {
         let e = reg
             .expose(&p, &["data".into(), "jobs".into(), "research".into()])
             .unwrap();
-        assert_eq!(e.schemas.len(), 6, "the budget is a hard cap, not a target");
+        assert!(
+            e.schemas.len() <= 6,
+            "the budget is a hard cap, not a target: got {}",
+            e.schemas.len()
+        );
+        // And it comes in one UNDER, because a slot is held for `search_tools`
+        // (S-2.3). Asserted rather than tolerated: the reserve is the difference
+        // between an escape hatch the model can use and one that costs it the tool
+        // it just found, and a test that accepted either number would not notice
+        // the day it stops being held.
+        assert_eq!(
+            e.schemas.len(),
+            5,
+            "one of the six is reserved for a searched tool"
+        );
         assert!(
             e.names.contains("finish_task"),
             "core tools survive truncation"
         );
+    }
+
+    /// A tool the model explicitly asked for is never held out by the reserve.
+    ///
+    /// The reserve exists to make room for exactly that tool; reserving a slot
+    /// against it would be the same bug in a new place.
+    #[test]
+    fn the_reserve_is_never_held_back_against_a_pinned_tool() {
+        let reg = registry_of(50);
+        let mut p = frontier_fixture();
+        p.tools.max_exposed_per_step = 6;
+        p.tools.search_reserve_slots = 1;
+        // A tool from a namespace the router did NOT ask for, so its only route into
+        // the slice is the pin, which is exactly the case `search_tools` produces.
+        let pinned = vec!["research_op_2".to_string()];
+        let e = reg
+            .expose_pinned(&p, &["data".into(), "jobs".into()], &pinned)
+            .unwrap();
+        assert!(
+            e.names.contains("research_op_2"),
+            "the searched tool is exposed, which is what the reserve is for: {:?}",
+            e.names
+        );
+        assert!(e.schemas.len() <= 6);
     }
 
     #[test]

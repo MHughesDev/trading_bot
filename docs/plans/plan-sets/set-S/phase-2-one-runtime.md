@@ -1,6 +1,6 @@
 # Phase 2 — One runtime
 
-**Completion: 0% (0 / 16 tasks)**
+**Completion: 13% (2 / 16 tasks). S-2.1 and S-2.3 landed 2026-09-15.**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
@@ -23,7 +23,34 @@ arithmetic and escalation payload meaningful.
 ## Tasks
 
 ### S-2.1 Adapters declare what they can do — M
-`NOT STARTED`
+`DONE` 2026-09-15 — `Capabilities` on `ModelAdapter`, checked by `verify`, and the refusal names the
+field.
+
+Every one of the eight was an assumption made at a call site, and each fails as a *model-quality*
+problem rather than as a configuration error: a `native` profile on a backend with no tool API
+gets prose where it expected a tool call and reads as a model that will not follow instructions;
+a `select_fill` profile on a backend that cannot constrain gets malformed JSON at a rate that
+looks like quantisation damage; a window larger than the backend's is silently left-truncated and
+what goes first is the charter.
+
+`Capabilities::none()` is the default, and every field's `false` is the conservative answer —
+`max_context: 0` refuses every profile rather than admitting all of them. A default that admitted
+would make the check decoration the first time someone adds an adapter and forgets the method.
+
+`supports_constrained_decoding` is now **derived** from `capabilities().grammar` rather than
+answered separately. Two sources of truth for one property is one too many: an adapter could
+declare `grammar: false` and return `true`, and `verify` would take whichever it asked first.
+
+One thing the fixtures were saying that is not true: four tests gave a `LocalMid` profile the
+frontier fixture's 120,000-token window. No local backend offers that, and a fixture claiming one
+would make the `max_context` check pass for a configuration that cannot exist. They now use
+24,000, which is `qwen3.6-35b-a3b`'s own setting.
+
+Verified adversarially, as the task asks: `a_profile_needing_a_grammar_is_refused_by_a_backend_without_one`,
+`a_profile_decoding_native_is_refused_by_a_backend_without_tool_calls`,
+`a_window_larger_than_the_backend_accepts_is_refused_with_both_numbers` (the message carries both
+numbers, because "this configuration is impossible" is not actionable and "asks 200000, accepts
+32768" is), and `an_adapter_that_declares_nothing_admits_nothing`.
 
 `Capabilities { native_tools, parallel_tools, grammar, prompt_cache, num_ctx_settable,
 keep_alive, max_context, reports_usage }` on `ModelAdapter` (`adapter.rs:20`), checked by
@@ -51,7 +78,30 @@ size.
 **Traces:** AGENT-010 §3, P1; §14.2.
 
 ### S-2.3 Two profile fields, and readers that prove they mean something — S
-`NOT STARTED`
+`DONE` 2026-09-15 — both fields, both read, and `search_reserve_slots` changes what is exposed.
+
+`tools.exposure_scope: Session|Step` and `tools.search_reserve_slots`. Frontier is `session`/4,
+both locals are `step`/1, exactly as the task specifies.
+
+The reserve is what makes the escape hatch usable. Without it a full slice means `search_tools`
+finds the right tool and cannot be given it without evicting something, so using the hatch costs
+the tool that prompted it and the model is no better off than before it searched. It is held back
+from the **routed fill only, never from `pinned`** — a tool the model explicitly asked for is the
+thing the reserve exists to make room for, and reserving a slot against it would be the same bug
+in a new place. Capped at a third of the budget, because a reserve larger than that starves the
+fill and leaves a step that can only search.
+
+Three existing tests asserted `exposure == max_exposed_per_step` and now come in one (or four)
+under. All three were updated to assert **both** halves — the cap is never exceeded, *and* the
+reserve is actually held — rather than being relaxed to `<=`. A reserve that quietly stopped being
+held would restore the original bug and nothing would notice.
+
+Verified by `every_profile_field_is_enforced_somewhere` (which now reads both fields),
+`exposure_never_exceeds_the_profile_budget`, `the_reserve_is_never_held_back_against_a_pinned_tool`
+and `a_flooded_catalogue_still_respects_the_exposure_budget`.
+
+`exposure_scope` has a reader in conformance but **does not yet change behaviour** — the
+session-scoped, append-only slice is S-2.4, which is the next task and names it.
 
 `tools.exposure_scope: Session|Step` and `tools.search_reserve_slots`. The harness crate's
 own rule is that a profile value nothing enforces is a bug, and

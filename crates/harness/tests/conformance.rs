@@ -16,7 +16,7 @@ use harness::context::{assemble, cap_tool_result, Block, Section};
 use harness::drive::{Decode, Effect, Input, Loop, Outcome, Task};
 use harness::hardware::{Admission, TaskDemand};
 use harness::policy::{decide, ActionContext};
-use harness::profile::{CodeExecution, Mode, ProfileSet, Routing, SchemaStyle};
+use harness::profile::{ExposureScope, CodeExecution, Mode, ProfileSet, Routing, SchemaStyle};
 use harness::provenance::{Provenance, Tagged};
 use harness::registry::{Risk, ToolDef, ToolRegistry};
 use harness::{Decision, Tier};
@@ -124,7 +124,22 @@ fn every_profile_field_is_enforced_somewhere() {
         .unwrap();
     }
     let exposure = reg.expose(&p, &["data".into()]).unwrap();
-    assert_eq!(exposure.schemas.len(), p.tools.max_exposed_per_step);
+    // The cap, less the slots held for a searched tool (S-2.3). Both halves are
+    // asserted: the cap is never exceeded, and the reserve is actually held — a
+    // reserve that quietly stopped being held would make the escape hatch cost the
+    // tool it just found, and nothing else would notice.
+    let reserve = p.tools.search_reserve_slots.min(p.tools.max_exposed_per_step / 3);
+    assert!(exposure.schemas.len() <= p.tools.max_exposed_per_step);
+    assert_eq!(
+        exposure.schemas.len(),
+        p.tools.max_exposed_per_step - reserve,
+        "the reserve is held back from the routed fill"
+    );
+    // tools.exposure_scope → `drive.rs`'s router. Session-scoped slices are routed
+    // once per turn and appended to; step-scoped ones are re-routed each step.
+    match p.tools.exposure_scope {
+        ExposureScope::Session | ExposureScope::Step => {}
+    }
     match p.tools.schema_style {
         SchemaStyle::Rich | SchemaStyle::Flat => {}
     }
@@ -307,8 +322,13 @@ fn a_local_profile_cannot_start_on_the_current_adapter() {
     let err = adapter::verify(&*adapter::for_profile(local), local)
         .expect_err("no local backend is wired; starting one would be dishonest");
     let msg = err.to_string();
+    // Three spellings of one refusal, and all three are correct. Which one fires
+    // depends on whether the backend was probed and on how it failed; what this
+    // test holds is that a local profile cannot START without a grammar.
     assert!(
-        msg.contains("constrained decoding") || msg.contains("no adapter"),
+        msg.contains("constrained decoding")
+            || msg.contains("no adapter")
+            || msg.contains("capabilities.grammar"),
         "{msg}"
     );
 }

@@ -387,7 +387,14 @@ fn a_flooded_catalogue_still_respects_the_exposure_budget() {
         .unwrap();
     }
     let e = reg.expose(&p, &["data".into()]).unwrap();
-    assert_eq!(e.schemas.len(), p.tools.max_exposed_per_step);
+    // The claim is that flooding the catalogue cannot exceed the cap. It comes in
+    // under it because a slot is reserved for a searched tool (S-2.3), and that is
+    // the point of this test either way: three hundred tools do not get through.
+    assert!(
+        e.schemas.len() <= p.tools.max_exposed_per_step,
+        "a flooded catalogue exceeded the budget: {}",
+        e.schemas.len()
+    );
 }
 
 // ── The local tier's real failure modes ─────────────────────────────────────
