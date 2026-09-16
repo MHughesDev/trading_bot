@@ -228,7 +228,15 @@ overwritten.
 ## Evaluation
 
 ### S-4.8 Trajectories and tapes — L
-`PARTIAL` 2026-09-16 — `harness/src/trace.rs`, `eval/tape.rs` (579 lines, 6 tests) and the `evals/` harness all exist. The acceptance is about **live runs** — every live run's trajectory replaying to identical effects — and there are none, which is S-4.14's blocker rather than this one's.
+`PARTIAL` 2026-09-16 — this entry was right that live runs are the blocker and wrong that they are the only one.
+
+**`harness::trace` had no producer.** 422 lines over nine tests — `Span`, `Event`, `is_replayable`, `unreplayable_reason` — and no `Span::new` anywhere in `crates/` or `apps/` outside its own tests. So "every live run's trajectory replays" was unreachable twice over: a live run would have produced no trajectory either.
+
+`crates/api/src/trace_from_effects.rs` now derives spans from `agent_effect_log`, which already holds the ordered rows for every run and is what a resume reads. **Derived, not written twice**: a second write path would be a second record of one history, and `knowledge_jobs` already states the rule — a derived table that drifts from its source is worse than none, being a second answer with no way to tell which is stale.
+
+**ADR-P0-18's gap is closed**: core-tool notes are logged structurally. `search_tools`, `record_finding`, `reflect` and `finish_task` are never dispatched — the gate short-circuits them — so they never became `ExecuteTool` rows, and a trajectory without them cannot replay a run whose whole content was findings, which is what the `honesty` suite's cases are made of. They had been written as a debug string, and a field recovered by parsing one is a derive away from being gone.
+
+**What keeps it `PARTIAL`**: the acceptance itself, which needs live runs (gate H-2, S-4.14) and a nightly `is_replayable` sample over them. The machinery a replay needs now exists and is asserted against the real log producer, so what remains is the credential, not the code.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
