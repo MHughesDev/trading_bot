@@ -123,8 +123,8 @@ def _cap_and_renormalise(weights, cap):
 
 
 def run(payload: dict) -> dict:
-    frame = load(payload, "family")
-    table = frame.reset_index() if frame.index.name == "period" else frame.copy()
+    frame = load_family(payload, "family")
+    table = frame
     if "run_id" not in table.columns:
         return refuse("the materialised family has no `run_id` column")
 

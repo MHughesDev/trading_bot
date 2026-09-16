@@ -539,7 +539,35 @@ reports "unauditable", never a false clean.
 ## Attribution, models, portfolio
 
 ### S-3.16 What the signal actually is — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `alpha_health_check` is built;
+`factor_spanning_test` and `signal_half_life` are not, and both are blocked on data that
+does not exist yet rather than on effort.
+
+`apps/skill-runner/templates/attribution/alpha_health_check.py` checks three ways an alpha is
+worthless that a Sharpe ratio cannot show: **redundant** with a sibling (0.8+ correlated, so
+a book holding both is levered into one idea it thinks is two), **sign-unstable** between
+halves (a full-sample Sharpe averages the two and says nothing about which half the future
+resembles), and **concentrated** (most of the return from 5% of periods — an event, not an
+edge). Checked separately rather than folded into a score, because a single number lets a
+strategy failing one badly pass on the other two.
+
+**Scope is narrower than §5.3 asks**, and says so in its own docstring: it compares against
+the experiment's own members, not the platform's whole alpha pool. That catches the common
+case — a sweep promoting three points off one plateau as three alphas — and the pool-wide
+version needs a tenant-scoped materialisation that does not exist.
+
+**Missing, with reasons:** `signal_half_life` needs an IC-vs-horizon curve over a *signal*
+series, and there is no signal materialisation — only bars and trial returns.
+`factor_spanning_test` needs the crypto proxy factors §5.3 names, and one of the two is
+funding-rate carry, whose history is `get_funding_history` in S-3.15 and is not built. Doing
+BTC-beta alone and calling it a spanning test would be reporting a one-factor result under a
+two-factor name.
+
+This task is also what produced the family's **timestamps**. Trial returns were
+`(run_id, period, ret)`, and an integer index cannot be aligned to anything outside itself —
+no factor series, no regime label, no second family. The materialiser now carries `ts` in
+nanoseconds, matching the bar materialiser's column, so a template joins the two without
+converting between clocks.
 
 `factor_spanning_test` (needs a **crypto** proxy factor set — BTC beta, funding-rate carry —
 because Fama-French does not apply), `signal_half_life` (IC-vs-horizon curve, fitted

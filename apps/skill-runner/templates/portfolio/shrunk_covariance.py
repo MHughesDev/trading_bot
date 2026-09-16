@@ -68,7 +68,7 @@ sharing fewer than `min_overlap` periods with the rest is excluded and named.
 
 
 def run(payload: dict) -> dict:
-    frame = load(payload, "family")
+    frame = load_family(payload, "family")
     for column in ("run_id", "period", "ret"):
         if column not in frame.columns and frame.index.name != column:
             return refuse(
@@ -76,7 +76,7 @@ def run(payload: dict) -> dict:
                 f"long-format trial-returns table"
             )
 
-    table = frame.reset_index() if frame.index.name == "period" else frame.copy()
+    table = frame
     wide = table.pivot_table(index="period", columns="run_id", values="ret", aggfunc="first")
 
     min_overlap = int(payload.get("min_overlap") or 60)

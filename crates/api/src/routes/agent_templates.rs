@@ -369,19 +369,21 @@ async fn materialise(
 /// experiment id would go stale the first time somebody added a run. The digest
 /// covers the run ids, so a family with a new member is a new file.
 fn materialise_returns(
-    family: &[(String, Vec<f64>)],
+    family: &backtest::suite::Family,
     experiment_id: Uuid,
     root: &Path,
 ) -> anyhow::Result<PathBuf> {
-    use arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray};
-    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::array::{
+        ArrayRef, Float64Array, Int64Array, StringArray, TimestampNanosecondArray,
+    };
+    use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
     use arrow::record_batch::RecordBatch;
     use parquet::arrow::ArrowWriter;
     use sha2::{Digest, Sha256};
 
     let mut hasher = Sha256::new();
     hasher.update(experiment_id.as_bytes());
-    for (run, returns) in family {
+    for (run, _, returns) in family {
         hasher.update(run.as_bytes());
         hasher.update(returns.len().to_le_bytes());
     }
@@ -393,11 +395,18 @@ fn materialise_returns(
 
     let mut run_ids: Vec<&str> = Vec::new();
     let mut periods: Vec<i64> = Vec::new();
+    let mut stamps: Vec<i64> = Vec::new();
     let mut rets: Vec<f64> = Vec::new();
-    for (run, returns) in family {
+    for (run, times, returns) in family {
         for (i, r) in returns.iter().enumerate() {
             run_ids.push(run.as_str());
             periods.push(i64::try_from(i).unwrap_or(i64::MAX));
+            // Nanoseconds, matching the bar materialiser's `ts` column, so a
+            // template joins a family to a factor series without converting
+            // between two clocks.
+            stamps.push(times.get(i).map_or(0, |t| {
+                t.timestamp_nanos_opt().unwrap_or(0)
+            }));
             rets.push(*r);
         }
     }
@@ -405,11 +414,17 @@ fn materialise_returns(
     let schema = Arc::new(Schema::new(vec![
         Field::new("run_id", DataType::Utf8, false),
         Field::new("period", DataType::Int64, false),
+        Field::new(
+            "ts",
+            DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),
+            false,
+        ),
         Field::new("ret", DataType::Float64, false),
     ]));
     let arrays: Vec<ArrayRef> = vec![
         Arc::new(StringArray::from(run_ids)),
         Arc::new(Int64Array::from(periods)),
+        Arc::new(TimestampNanosecondArray::from(stamps).with_timezone("UTC")),
         Arc::new(Float64Array::from(rets)),
     ];
     let batch = RecordBatch::try_new(schema.clone(), arrays)?;

@@ -181,6 +181,36 @@ def load(payload: dict, role: str = "primary") -> pd.DataFrame:
     return frame
 
 
+def load_family(payload: dict, role: str = "family") -> pd.DataFrame:
+    """A long-format family table: `run_id, period, ts, ret`, untouched.
+
+    Deliberately **not** `load`. That one is for bars: it sets a timestamp index
+    and drops duplicate timestamps, which is right when one row is one bar and
+    catastrophic when one row is one strategy at one instant. Every member of a
+    family shares the same timestamps, so `load`'s de-duplication keeps the first
+    strategy and silently discards the rest — measured, on a twelve-strategy
+    fixture that arrived as a family of one, with no error anywhere.
+
+    So this returns the frame as stored, sorted by `(run_id, period)`, and leaves
+    every pivot decision to the tool.
+    """
+    data = payload.get("data") or {}
+    path = data.get(role)
+    if not path:
+        raise ValueError(
+            f"this template asked for the `{role}` family and the payload has no path for it"
+        )
+    frame = pd.read_parquet(path)
+    missing = [c for c in ("run_id", "ret") if c not in frame.columns]
+    if missing:
+        raise ValueError(
+            f"the `{role}` table is missing {missing}; a family is long format "
+            f"(run_id, period, ts, ret)"
+        )
+    order = [c for c in ("run_id", "period") if c in frame.columns]
+    return frame.sort_values(order).reset_index(drop=True) if order else frame
+
+
 def rng(payload: dict) -> np.random.Generator:
     """The run's generator, seeded from the call.
 

@@ -501,6 +501,19 @@ async fn the_covariance_finds_exactly_the_factor_the_fixture_plants() {
         .and_then(|r| r.get("detail"))
         .expect("a detail");
 
+    // Every member arrived. This is not padding out the test: the preamble's
+    // `load` sets a timestamp index and drops duplicate timestamps, which is
+    // right for bars and catastrophic for a family — every member shares the
+    // same timestamps, so it keeps the first strategy and discards the rest,
+    // silently. `load_family` exists because of that, and this is the assertion
+    // that says whether it is being used.
+    assert_eq!(
+        detail.get("n_strategies").and_then(Value::as_u64),
+        Some(12),
+        "the fixture has twelve strategies; a smaller number means the family was collapsed on \
+         the way in"
+    );
+
     let significant = detail
         .get("n_significant")
         .and_then(Value::as_u64)

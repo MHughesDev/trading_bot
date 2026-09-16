@@ -415,6 +415,14 @@ pub struct AuditDsrView {
     pub source: &'static str,
 }
 
+/// A family's recorded returns: `(run_id, timestamps, returns)` per member.
+///
+/// The timestamps make the family joinable to anything else on the same clock —
+/// a factor series, a regime label, another family. Without them it is an
+/// integer-indexed matrix, which is enough for a covariance and enough for
+/// nothing the attribution tools do.
+pub type Family = Vec<(String, Vec<DateTime<Utc>>, Vec<f64>)>;
+
 /// What `audit.probability_of_overfit` answers with (Set S task S-3.9).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AuditPboView {
@@ -1836,11 +1844,11 @@ impl SuiteManager {
     ///
     /// # Errors
     /// [`SuiteError::NotFound`] for an unknown or other-user experiment.
-    pub fn recorded_returns(&self, user_id: Uuid, id: Uuid) -> Result<Vec<(String, Vec<f64>)>, SuiteError> {
+    pub fn recorded_returns(&self, user_id: Uuid, id: Uuid) -> Result<Family, SuiteError> {
         self.recorded_family(user_id, id)
     }
 
-    fn recorded_family(&self, user_id: Uuid, id: Uuid) -> Result<Vec<(String, Vec<f64>)>, SuiteError> {
+    fn recorded_family(&self, user_id: Uuid, id: Uuid) -> Result<Family, SuiteError> {
         let records = self.records.read().expect("suite lock poisoned");
         let r = records
             .get(&id)
@@ -1858,7 +1866,25 @@ impl SuiteManager {
                 };
                 let returns = daily_returns(&res.equity_curve);
                 if returns.len() >= 2 {
-                    out.push((member.as_str().to_string(), returns));
+                    // The timestamps of the returns, which are the curve's own
+                    // less the first point: `daily_returns` is a diff, so return
+                    // `i` is the move *into* `equity_curve[i + 1]` and belongs at
+                    // that instant.
+                    //
+                    // Carried rather than dropped because without them a family
+                    // is an integer-indexed matrix, and an integer index cannot
+                    // be aligned to anything outside itself — no factor series,
+                    // no market regime, no second family. The index is fine for
+                    // a covariance and useless for everything the attribution
+                    // tools need.
+                    let stamps: Vec<DateTime<Utc>> = res
+                        .equity_curve
+                        .iter()
+                        .skip(1)
+                        .map(|(t, _)| *t)
+                        .take(returns.len())
+                        .collect();
+                    out.push((member.as_str().to_string(), stamps, returns));
                 }
             }
         }
@@ -1897,11 +1923,11 @@ impl SuiteManager {
         // Truncate to the shortest series so every configuration is scored over
         // the same periods. A ragged matrix would compare a config's good years
         // against another's whole history.
-        let length = family.iter().map(|(_, r)| r.len()).min().unwrap_or(0);
+        let length = family.iter().map(|(_, _, r)| r.len()).min().unwrap_or(0);
         let periods = n_periods.clamp(2, length.max(2));
         let matrix: Vec<Vec<f64>> = family
             .iter()
-            .map(|(_, returns)| {
+            .map(|(_, _, returns)| {
                 let step = (length / periods).max(1);
                 (0..periods)
                     .map(|p| {
@@ -1934,7 +1960,7 @@ impl SuiteManager {
             n_configs: family.len(),
             n_periods: periods,
             observations_per_config: length,
-            config_run_ids: family.iter().map(|(id, _)| id.clone()).take(64).collect(),
+            config_run_ids: family.iter().map(|(id, _, _)| id.clone()).take(64).collect(),
         })
     }
 
@@ -1968,10 +1994,10 @@ impl SuiteManager {
         // Aligned in time by truncation to the common length — the test's whole
         // value is resampling the same indices across candidates, and ragged
         // series would break exactly that.
-        let length = family.iter().map(|(_, r)| r.len()).min().unwrap_or(0);
+        let length = family.iter().map(|(_, _, r)| r.len()).min().unwrap_or(0);
         let series: Vec<Vec<f64>> = family
             .iter()
-            .map(|(_, r)| r[..length].to_vec())
+            .map(|(_, _, r)| r[..length].to_vec())
             .collect();
 
         let stepdown = crate::stats::bootstrap::romano_wolf(

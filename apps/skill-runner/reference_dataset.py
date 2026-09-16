@@ -263,6 +263,7 @@ def build_family(rng: np.random.Generator) -> pd.DataFrame:
     the common periods and says how many it dropped.
     """
     factor = rng.standard_normal(FAMILY_PERIODS) * 0.01
+    stamps = pd.date_range("2024-01-01T00:00:00Z", periods=FAMILY_PERIODS, freq="h")
     rows = []
     for i in range(FAMILY_STRATEGIES):
         loading = FAMILY_FACTOR_LOADINGS * (0.4 + 0.6 * (i / max(FAMILY_STRATEGIES - 1, 1)))
@@ -271,8 +272,8 @@ def build_family(rng: np.random.Generator) -> pd.DataFrame:
         # The last two are short. A ragged family is the normal case.
         length = FAMILY_PERIODS if i < FAMILY_STRATEGIES - 2 else FAMILY_PERIODS // 2
         for period in range(length):
-            rows.append((f"run_{i:02d}", period, float(series[period])))
-    return pd.DataFrame(rows, columns=["run_id", "period", "ret"])
+            rows.append((f"run_{i:02d}", period, stamps[period], float(series[period])))
+    return pd.DataFrame(rows, columns=["run_id", "period", "ts", "ret"])
 
 
 def build_concentrated_family(rng: np.random.Generator) -> pd.DataFrame:
@@ -287,13 +288,14 @@ def build_concentrated_family(rng: np.random.Generator) -> pd.DataFrame:
     Nothing here is unrealistic. A strategy that barely trades has exactly this
     profile, and it is the one a variance-minimising optimiser loves.
     """
+    stamps = pd.date_range("2024-01-01T00:00:00Z", periods=FAMILY_PERIODS, freq="h")
     rows = []
     for i in range(FAMILY_STRATEGIES):
         scale = 0.0001 if i == 0 else 0.01
         series = rng.standard_normal(FAMILY_PERIODS) * scale
         for period in range(FAMILY_PERIODS):
-            rows.append((f"run_{i:02d}", period, float(series[period])))
-    return pd.DataFrame(rows, columns=["run_id", "period", "ret"])
+            rows.append((f"run_{i:02d}", period, stamps[period], float(series[period])))
+    return pd.DataFrame(rows, columns=["run_id", "period", "ts", "ret"])
 
 
 def main(out_dir: str) -> int:
