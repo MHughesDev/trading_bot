@@ -1,6 +1,6 @@
 # Phase 2 — One runtime
 
-**Completion: 19% (3 / 16 tasks), plus 5 partial (S-2.5, S-2.6, S-2.8, S-2.11, S-2.16).**
+**Completion: 31% (5 / 16 tasks), plus 5 partial (S-2.5, S-2.6, S-2.8, S-2.11, S-2.16).**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
@@ -66,7 +66,31 @@ is asserted, not just the happy path.
 **Traces:** AGENT-010 §3; §14.9.
 
 ### S-2.2 The native transport — M
-`NOT STARTED`
+`DONE` 2026-09-16 — the adapter owns the difference, and the difference is exactly one thing.
+
+`native` keeps a provider transcript for the run (`crates/harness/src/transcript.rs`),
+append-only and elided at step boundaries; `select_fill` stays single-turn over the assembled
+body. Both are driven by the same effects.
+
+Re-rendering a body on every native call would have thrown away the cache S-1.8's breakpoints
+exist to earn — a prefix is reusable only if its bytes do not change — so the transcript is what
+makes that task pay rather than a second copy of the same idea.
+
+The transcript is **provider-neutral** and lives in `crates/harness`, which does not depend on
+`crates/llm`: the loop is sans-IO, knowing about a wire format is knowing about IO, and the point
+of the neutrality is that adding a provider is an impl in the driver rather than a change in the
+harness. `transcript_messages` does that mapping.
+
+Tool results rejoin the conversation **paired with the call that asked for them**, and the id
+comes from the assistant turn rather than being invented: most providers reject a result whose
+`tool_call_id` matches no call in the thread.
+
+The acceptance is asserted as `both_transports_ask_the_world_for_the_same_things`, and what it
+excludes is the argument rather than a weakening. The two transports differ in exactly one place
+by design — `select_fill` spends two model calls per step where `native` spends one, because a
+grammar cannot pin a choice and an object at the same time — so `CallModel` is excluded and
+everything else is compared: the tools run, the approvals sought, the outcome reached. Those are
+what a guarantee is about, and they are identical.
 
 `decode: native` means the adapter keeps a provider transcript for the run (append-only
 messages, the S-1.8 breakpoints); `select_fill` stays single-turn over the assembled body.
@@ -432,7 +456,45 @@ re-run completed steps (verified by trial count).
 **Traces:** AGENT-010 §6, §7, §9; §14.5, §14.6, §14.7. AGENT-008 §4.
 
 ### S-2.13 The native transcript is managed, not merely appended — M
-`NOT STARTED`
+`DONE` 2026-09-16 — landed with S-2.2, because shipping S-2.2 without it would have been the
+regression this task names.
+
+An append-only transcript grows without bound and a thirty-step run exceeds any window: *a
+regression hidden inside an improvement*, exactly as written. So the transcript appends **and**
+elides, under four rules, each because the obvious alternative is wrong:
+
+1. **The opening is never elided.** It carries the goal, and a transcript that dropped it would
+   have the model working on whatever the most recent tool result implies — drift with extra
+   steps.
+2. **Tool results before assistant prose.** A result is reproducible (call it again) and the
+   model's reasoning is not, so taking the cheaper one first is the only ordering that loses less.
+3. **The last three results stay.** The model is usually acting on what it just read, and eliding
+   that is how a run forgets the answer it was about to use.
+4. **Everything elided leaves a `work/…` handle.** AGENT-005 P6 forbids `[elided — was N bytes]`:
+   a placeholder that cannot be fetched back is a permanent hole the model cannot tell from a tool
+   that returned nothing.
+
+A tool **call** is never elided, only the prose beside it — a transcript missing a call leaves its
+result answering nothing, and providers reject that outright.
+
+Elision happens at **step boundaries**, because moving a cache breakpoint invalidates everything
+after it: once per step costs one re-read, per call costs the cache entirely. And it emits the
+same `CompactionReport` as the block path, so one metric covers both transports — two compaction
+metrics is two numbers that disagree with no way to say which is real.
+
+Verified by eight tests, including `a_two_hundred_step_transcript_stays_under_budget` (the
+regression itself), `the_opening_message_is_never_elided`,
+`a_reproducible_result_is_elided_before_irreproducible_reasoning`,
+`the_most_recent_results_are_protected`, `every_elided_body_says_where_to_read_the_rest`,
+`a_tool_call_is_never_elided_only_the_prose_around_it` and
+`a_transcript_that_fits_is_left_alone` — compaction that ran anyway would move the breakpoint for
+nothing, which costs the whole prefix.
+
+One thing worth recording about those tests: they were first written against a 3,000-token window
+and **passed for the wrong reason.** The frontier profile reserves 16,000 for output, so any
+window below that leaves an input budget of zero and every test passes by eliding everything. The
+fixture now leaves a small but positive budget, which is what forces the choices these rules are
+about.
 
 `driver.rs` held the only transcript elision on the hosted path and S-2.10 deletes it. Without
 this the native transport grows an unbounded provider-side transcript — a regression hidden

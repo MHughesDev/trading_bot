@@ -45,6 +45,7 @@ pub mod provenance;
 pub mod registry;
 pub mod state;
 pub mod trace;
+pub mod transcript;
 pub mod validation;
 pub mod workspace;
 

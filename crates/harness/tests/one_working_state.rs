@@ -1229,3 +1229,79 @@ fn a_step_scoped_profile_still_reroutes_every_step() {
     );
     assert!(!l.exposed().is_empty());
 }
+
+// ── S-2.2: one loop, two transports ───────────────────────────────────────/// The same goal on both transports asks the world for the same things.
+///
+/// This is the property that makes "one runtime" true rather than aspirational. If
+/// the two produced different sequences of world-facing effects, there would be two
+/// loops wearing one name, and every guarantee proved on one would have to be
+/// re-proved on the other.
+///
+/// **`CallModel` is excluded, and that is the point rather than a weakening.** The
+/// two transports differ in exactly one place by design: `select_fill` spends two
+/// model calls per step (choose a tool, then fill its arguments) where `native`
+/// spends one, because a grammar cannot constrain a choice and an object at the same
+/// time. That difference is the adapter's whole job. What must be identical is the
+/// sequence of things the loop asks the *world* to do — the tools it runs, the
+/// approvals it seeks, the outcome it reaches — because those are what a guarantee
+/// is about.
+#[test]
+fn both_transports_ask_the_world_for_the_same_things() {
+    fn world_effects(constrained: bool) -> Vec<String> {
+        let mut p = profile();
+        p.orchestration.mode = harness::profile::Mode::Freeform;
+        p.orchestration.max_steps = 40;
+        p.output.constrained_decoding = constrained;
+        let mut l = Loop::new(p, registry(), task());
+
+        let mut seen: Vec<String> = Vec::new();
+        let mut record = |fx: &[Effect]| {
+            for e in fx {
+                match e {
+                    // The one legitimate difference, and notes are the loop talking
+                    // to its own trace rather than to the world.
+                    Effect::CallModel(_) | Effect::Note(_) => {}
+                    Effect::ExecuteTool { name, .. } => seen.push(format!("run:{name}")),
+                    Effect::AskHuman { tool, .. } => seen.push(format!("ask:{tool}")),
+                    Effect::Await { tool, .. } => seen.push(format!("await:{tool}")),
+                    Effect::Done(_) => seen.push("done".into()),
+                }
+            }
+        };
+
+        record(&l.next(Input::Admission(Admission::Admit)));
+        // Each transport's own reply shape. A native reply is one object carrying
+        // the name and the arguments together; `select_fill` is two constrained
+        // objects, because a grammar cannot pin a choice and an object at once.
+        if constrained {
+            record(&l.next(Input::ModelReply {
+                raw: r#"{"name":"get_bars"}"#.into(),
+            }));
+            record(&l.next(Input::ModelReply {
+                raw: r#"{"instrument":"BTC-USD"}"#.into(),
+            }));
+        } else {
+            record(&l.next(Input::ModelReply {
+                raw: r#"{"name":"get_bars","arguments":{"instrument":"BTC-USD"}}"#.into(),
+            }));
+        }
+        record(&l.next(Input::ToolResult {
+            output: "{\"bars\": 500}".into(),
+            source: "platform.data".into(),
+        }));
+        seen
+    }
+
+    let native = world_effects(false);
+    let select_fill = world_effects(true);
+    assert_eq!(
+        native, select_fill,
+        "the two transports must ask the world for the same things in the same order;
+           native:      {native:?}
+  select_fill: {select_fill:?}"
+    );
+    assert!(
+        native.iter().any(|e| e == "run:get_bars"),
+        "and the run actually got somewhere: {native:?}"
+    );
+}

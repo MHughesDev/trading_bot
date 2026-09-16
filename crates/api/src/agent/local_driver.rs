@@ -800,6 +800,16 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
     // session allowlist (ADR-P2-20).
     .with_gated_actions(ledger::audit::gated_actions());
 
+    // One transcript per native run (S-2.2). `None` on `select_fill`, where every
+    // call re-renders the body and nothing accumulates provider-side.
+    let mut transcript = (!params.profile.output.constrained_decoding).then(|| {
+        harness::transcript::Transcript::new(prompt::opening_message(
+            Some(params.prior.as_str()),
+            &params.constraints,
+            &params.goal,
+        ))
+    });
+
     rec.input("Admission", serde_json::json!({ "admission": format!("{admission:?}") }))
         .await;
     let mut effects = governor.next(Input::Admission(admission));
@@ -842,7 +852,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         let input = match blocking {
             Effect::CallModel(call) => {
                 let started = Instant::now();
-                let req = build_request(&params.profile, &call);
+                let req = build_request(&params.profile, &call, transcript.as_ref());
                 match client.chat(&req).await {
                     Ok(resp) => {
                         // The harness's own estimate of the request it just sent,
@@ -858,6 +868,37 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
                             started.elapsed().as_millis(),
                         )
                         .await;
+                        // The conversation grows here, and is brought back inside
+                        // the window at the same moment (S-2.13). Elision at a step
+                        // boundary rather than per call: moving a cache breakpoint
+                        // invalidates everything after it, so doing it once per step
+                        // costs one re-read and doing it per call costs the cache.
+                        if let Some(t) = transcript.as_mut() {
+                            t.push_assistant(
+                                resp.content.clone(),
+                                resp.tool_calls
+                                    .iter()
+                                    .map(|c| harness::transcript::CallRef {
+                                        id: c.id.clone(),
+                                        name: c.name.clone(),
+                                        arguments: c.arguments.to_string(),
+                                    })
+                                    .collect(),
+                            );
+                            let report = t.compact(&params.profile, 0);
+                            if report.truncated > 0 {
+                                rec.append(
+                                    "compaction",
+                                    json!({
+                                        "transport": "native",
+                                        "truncated": report.truncated,
+                                        "tokens_before": report.tokens_before,
+                                        "tokens_after": report.tokens_after,
+                                    }),
+                                )
+                                .await;
+                            }
+                        }
                         let raw = reply_text(&call.decode, &resp);
                         // The decision record: everything that went INTO this choice,
                         // beside what came out of it.
@@ -935,6 +976,25 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
                     json!({ "name": name, "is_error": out.is_error, "content": out.raw }),
                 )
                 .await;
+                // Back into the conversation, paired with the call that asked for it
+                // (S-2.2). Most providers reject a tool result whose `tool_call_id`
+                // matches no call in the thread, so the id comes from the assistant
+                // turn appended above rather than being invented here.
+                if let Some(t) = transcript.as_mut() {
+                    let call_id = t
+                        .turns()
+                        .iter()
+                        .rev()
+                        .find_map(|turn| match turn {
+                            harness::transcript::Turn::Assistant { calls, .. } => calls
+                                .iter()
+                                .find(|c| c.name == name)
+                                .map(|c| c.id.clone()),
+                            harness::transcript::Turn::ToolResult { .. } => None,
+                        })
+                        .unwrap_or_else(|| format!("call_{step}"));
+                    t.push_result(call_id, &name, &out.text, out.is_error, None);
+                }
                 if out.is_error {
                     Input::ToolError { detail: out.text }
                 } else {
@@ -1000,17 +1060,40 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
 /// The mapping is mechanical on purpose: every value here was decided by the loop,
 /// and a driver that second-guessed one of them would be enforcing a policy in the
 /// place the design put outside the tested boundary.
-fn build_request(profile: &Profile, call: &harness::drive::ModelCall) -> ChatRequest {
+/// The request for one call, on whichever transport the profile decodes with
+/// (AGENT-010 §3, S-2.2).
+///
+/// The two are genuinely different shapes and the adapter owns the difference:
+///
+/// * **`select_fill`** is single-turn. Every call carries the body the harness just
+///   assembled, and nothing accumulates provider-side — which is right for a tier
+///   with no prompt cache and a window measured in thousands.
+/// * **`native`** is a conversation. The messages are the run's transcript, appended
+///   to and elided by `harness::transcript`, because re-rendering a body each call
+///   would throw away the cache the S-1.8 breakpoints exist to earn: a prefix is only
+///   reusable if its bytes do not change.
+///
+/// `transcript` is `None` on the `select_fill` path, and the `call.prompt` fallback
+/// covers the first native call, before the conversation has a turn in it.
+fn build_request(
+    profile: &Profile,
+    call: &harness::drive::ModelCall,
+    transcript: Option<&harness::transcript::Transcript>,
+) -> ChatRequest {
     let (schema, tools) = match &call.decode {
         Decode::Native { tools } => (None, native_tools(tools)),
         other => (other.schema().cloned(), Vec::new()),
     };
+    let messages = match transcript.filter(|t| matches!(call.decode, Decode::Native { .. })) {
+        Some(t) => transcript_messages(t),
+        None => vec![Message::User {
+            content: call.prompt.clone(),
+        }],
+    };
     ChatRequest {
         model: profile.model_id.clone(),
         system: Some(call.system.clone()),
-        messages: vec![Message::User {
-            content: call.prompt.clone(),
-        }],
+        messages,
         tools,
         max_tokens: call.max_tokens,
         temperature: Some(call.temperature),
@@ -1022,6 +1105,50 @@ fn build_request(profile: &Profile, call: &harness::drive::ModelCall) -> ChatReq
         keep_alive: profile.tier.is_local().then(|| KEEP_ALIVE.to_string()),
         tool_choice: None,
     }
+}
+
+/// The transcript, as this provider's wire format.
+///
+/// The mapping lives here rather than in `crates/harness` because the harness is
+/// sans-IO: knowing about a wire format is knowing about IO, and the whole reason
+/// the transcript is provider-neutral is so that adding a provider is an impl here
+/// rather than a change there.
+fn transcript_messages(t: &harness::transcript::Transcript) -> Vec<Message> {
+    use harness::transcript::Turn;
+
+    let mut out = Vec::with_capacity(t.len() + 1);
+    out.push(Message::User {
+        content: t.opening().to_string(),
+    });
+    for turn in t.turns() {
+        match turn {
+            Turn::Assistant { text, calls } => out.push(Message::Assistant {
+                content: text.clone(),
+                tool_calls: calls
+                    .iter()
+                    .map(|c| llm::ToolCall {
+                        id: c.id.clone(),
+                        name: c.name.clone(),
+                        arguments: serde_json::from_str(&c.arguments)
+                            .unwrap_or_else(|_| json!({})),
+                    })
+                    .collect(),
+            }),
+            Turn::ToolResult {
+                call_id,
+                name,
+                body,
+                is_error,
+                ..
+            } => out.push(Message::ToolResult {
+                tool_call_id: call_id.clone(),
+                name: name.clone(),
+                content: body.clone(),
+                is_error: *is_error,
+            }),
+        }
+    }
+    out
 }
 
 fn native_tools(schemas: &[Value]) -> Vec<ToolDef> {
@@ -1197,7 +1324,7 @@ mod tests {
             max_tokens: 3000,
             num_ctx: 24_000,
         };
-        let req = build_request(&p, &call);
+        let req = build_request(&p, &call, None);
         assert!(req.schema.is_some());
         assert!(
             req.tools.is_empty(),
@@ -1228,7 +1355,7 @@ mod tests {
                 max_tokens: 100,
                 num_ctx: 24_000,
             };
-            assert_eq!(build_request(&p, &call).num_ctx, Some(24_000));
+            assert_eq!(build_request(&p, &call, None).num_ctx, Some(24_000));
         }
     }
 
