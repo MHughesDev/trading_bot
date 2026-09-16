@@ -23,7 +23,38 @@ and namespace-cap tests from S-1.4 are mechanical gates every PR must pass.
 ## The templated tier
 
 ### S-3.1 `templated.rs` — tools that are Python files — L
-`NOT STARTED`
+`DONE` 2026-09-16 — `crates/skills/src/template.rs` (the one parser),
+`crates/mcp-server/build.rs` (embeds the files), `crates/mcp-server/src/tools/templated.rs`
+(the catalogue entries), `apps/skill-runner/preamble.py` (the shared statistics),
+`apps/skill-runner/requirements.txt` (what a template may import).
+
+The parser lives in `skills` rather than being mirrored into `mcp-server`, so the catalogue
+and the runner cannot read one file two ways — a template declaring one schema to the model
+and running under another would present as a model calling a tool wrongly.
+
+Enforced, not documented: a template is `read` (it has no network and no database, so
+`write` names a side effect it cannot cause and `outbound` is an attempt at the egress
+policy's exemptions); wall-clock ceilings are per namespace and asking for more is a parse
+error rather than a clamp; CPU seconds follow the wall clock; `deny_unknown_fields` on the
+header, so a typo'd `spend_trial` cannot parse as "no trial"; a summary slot must name a
+declared field; and a malformed template panics at catalogue construction rather than
+vanishing from the list (ADR-I-01).
+
+Verified by `crates/mcp-server/tests/templates_run.rs`, which is deliberately **not**
+`#[ignore]`d — an unrun determinism check is an invariant claimed and not enforced. It runs
+every template on the reference dataset twice and compares `detail` byte for byte.
+`every_template_on_disk_reached_the_catalogue` walks the directory independently of
+`build.rs` so an empty catalogue cannot pass.
+
+Two runner changes this needed: pyarrow imports `socket` during initialisation and the
+import guard refused it, so `read_parquet` failed with "Unable to find a usable engine" —
+the analysis stack now loads before the door closes, and a skill's own `import socket` still
+raises. And `PYTHONNOUSERSITE=1` hides the platform's own numpy on a developer machine, so
+`RunnerConfig::stack_path` lets the platform name where its stack is.
+
+**ADR-S3-01** records why statsmodels and `arch` are not in the runner's stack: pinning them
+would pin a second, older numpy into a deployment that already has one, and two numpys are
+two answers to the same arithmetic. The statistics are written out against numpy and scipy.
 
 A template is a Python file under `apps/skill-runner/templates/<ns>/<name>.py` whose module
 docstring carries a fenced JSON `ToolSpec`. `build.rs` reads the directory into `specs()`.
@@ -46,7 +77,24 @@ versions used.
 **Traces:** AGENT-006 §2.2, §3.3; §10.5.
 
 ### S-3.2 Data materialisation and the determinism test — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `crates/api/src/routes/agent_templates.rs`,
+`skills::template::DataKey`.
+
+Rows reach a template through `BarStore::as_of` — the same point-in-time read
+`GET /api/data/bars` uses, clipped by the same `Project::clip`. There is no second query.
+
+`as_of` is part of the cache key, which is the half that is easy to leave out: it bounds
+which *revisions* are visible, so two projects with different horizons asking for one window
+are asking for different data. Without it the first caller would decide what the second saw,
+which is a future leak with a cache in front of it.
+
+Write-once by rename, so a reader sees no file or a whole one. Losing the rename race is
+success: the content is addressed by its key.
+
+Verified by `routes::agent_templates::tests::{a_window_past_the_cutoff_is_clipped_not_served,
+a_window_entirely_past_the_cutoff_is_refused, two_horizons_do_not_share_a_materialised_file,
+the_materialised_schema_is_the_one_templates_read}`. The static scan refusing `socket`,
+`requests` and `subprocess` is `crates/skills/src/lib.rs`'s existing one and is unchanged.
 
 **Files:** `crates/mcp-server/src/tools/templated.rs`, `crates/api/src/routes/`.
 **Acceptance:** the same (instrument, timeframe, window) hashes to the same parquet path and
@@ -61,7 +109,31 @@ the existing static scan (`crates/skills/src/lib.rs:218`).
 All templated, all take `(instrument, timeframe, start, end, seed)`, all return `ToolResult`.
 
 ### S-3.3 Moments, volatility, regime, event study — L
-`NOT STARTED`
+`DONE` 2026-09-16 — `apps/skill-runner/templates/analysis/{describe_returns,
+estimate_volatility,detect_regime,event_study}.py`.
+
+Every estimate carries `n`, and `se` wherever it has a closed form worth trusting — the HAC
+error on a mean, the quarticity error on realised variance, the finite-sample errors on
+skewness and kurtosis rather than the asymptotic `sqrt(6/n)`, which is badly optimistic at
+the sample sizes an agent will actually ask about.
+
+`event_study`'s control is matched on volatility decile and its p-value comes from a block
+bootstrap whose block is at least the horizon, because events within a horizon of each other
+share forward bars. It has no threshold-sweep mode: sweeping until the p-value drops is the
+search this platform counts trials to prevent, and offering it as a convenience would make
+the catalogue the easiest place to do it by accident.
+
+Reproducibility is asserted rather than asserted-about: `templates_run.rs` runs all four
+twice on the reference dataset and compares `detail` byte for byte.
+
+Two real bugs this found on the way, both of the kind that produce a confident wrong answer:
+
+* `_hurst` was handed the cumulative price path, and it forms the cumulative deviation
+  itself. Double-integrating returns H ≈ 1.0 for a random walk — every series would have
+  been reported as strongly trending.
+* the reference fixture's first GARCH used a raw Student-t, whose variance is `nu/(nu-2)`,
+  so the effective persistence was 1.03 and the price path overflowed. The generator now
+  standardises the innovation and asserts stationarity.
 
 `describe_returns` (moments ± SE, JB, Ljung-Box on r and r², ARCH-LM, Hill, max DD, jump
 share), `estimate_volatility` (PK/GK/RS/YZ, RV/BV/RQ, EWMA/GARCH/HARQ forecasts, percentile),

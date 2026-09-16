@@ -124,6 +124,11 @@ fn argument(name: &str) -> Option<Value> {
         "start" => json!("2024-01-08T00:00:00Z"),
         "end" => json!("2024-08-01T00:00:00Z"),
         "seed" => json!(7),
+        // A representative event, not a rare one: the suite is checking that
+        // the template runs and reproduces, and a threshold that yields four
+        // events exercises the refusal path instead.
+        "event" => json!("large_down_move"),
+        "threshold_sigma" => json!(2.5),
         _ => return None,
     })
 }
