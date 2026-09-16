@@ -23,6 +23,20 @@
 >   session schema, and phase 11's declared migration range (0092–0096) is already taken —
 >   the tree is at 0121, the same collision ADR-S3-08 records.
 >
+> **That list of three was itself undercounted, and the correction is the useful part.**
+> It came from searching `crates/api/src` for the endpoints the audit went looking for. A
+> *systematic* diff — every `/api/…` literal in `frontend/src/api/*.ts` against every one
+> in `crates/api/src` — found **twelve**, four of which no audit had named: the State
+> panel's by-step fetch (`/api/agent/runs/{id}/state`), Replay's `/trajectory`, phase 10's
+> `/lifecycle`, and the run controls `desk.ts` already marks unbuilt in its own comment.
+>
+> A list maintained by looking is wrong by the amount nobody looked, so this is now a
+> test: `crates/api/tests/the_desk_calls_routes_that_exist.rs` fails on any path the desk
+> calls and nothing serves, with an `UNBUILT` allowlist naming the task that owns each
+> forward reference. An unserved endpoint renders as an empty panel, indistinguishable
+> from a panel with nothing in it — the failure looks exactly like the success, which is
+> why it survived three passes.
+>
 > Two more tabs render against a store that was never created: S-6.10 and S-6.18 browse
 > phase 4's memory, whose migrations are all absent.
 >
