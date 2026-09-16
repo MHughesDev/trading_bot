@@ -1,6 +1,6 @@
 # Phase 5 — The language
 
-**Completion: 0% (0 / 15 tasks), plus 4 `PARTIAL` — the feature engine is built; the language is not.**
+**Completion: 7% (1 / 15 tasks), plus 4 `PARTIAL` — the feature engine is built; the language is not.**
 
 > **This file was wrong about the engine and right about the language.** Until 2026-09-16 it
 > recorded all fifteen tasks as `NOT STARTED`. `crates/features` is in fact about 5,100 lines
@@ -14,9 +14,10 @@
 > and the instructions point at it.
 >
 > `crates/strategy-lang` does not exist, so S-5.5 … S-5.9, S-5.12, S-5.13 and S-5.15 are
-> genuinely not started. The highest-value task that needs no language is **S-5.4,
-> `preview_signals`** — a model can now discover fifty families and still cannot see what one
-> does on a window without buying a backtest.
+> genuinely not started. The highest-value task that needed no language was **S-5.4,
+> `preview_signals`**, and it shipped 2026-09-16: a model can now look at what a draft does on
+> a window without buying a backtest, and a window reaching into the sealed holdout is refused
+> by name rather than quietly shortened.
 >
 > One finding worth acting on: phase 3 implemented Parkinson, Garman-Klass and Rogers-Satchell
 > volatility in Python templates while `crates/features` computes the same families in Rust.
@@ -116,7 +117,19 @@ envelope.
 **Traces:** AGENT-011 §5, P4; §8.4.
 
 ### S-5.4 `preview_signals` — look before you spend — L
-`NOT STARTED` — `preview_signals` is not in the catalogue — checked across `crates/mcp-server/src`. This is the task that lets a model look before it spends a trial, and it is the one most worth doing next now that `list_features` exists: a model can discover fifty families and still has no way to see what any of them does on a window without buying a backtest.
+`DONE` 2026-09-16 — `crates/backtest/src/preview.rs` walks the window; `crates/api/src/routes/agent_preview.rs` serves it at `POST /api/agent/strategy/preview`; `tools::strategy::preview_signals` declares it with `spends_trial: None`.
+
+All three acceptance criteria are met and tested. **No trial row**: the route touches no ledger, and the spec says so where a reader will see it. **`sample_events` match a subsequent backtest's fills**: `crates/backtest/tests/preview_matches_simulator.rs` runs the same definition through `preview_signals` and `run_simulation_detailed` on one fixture and asserts every position the simulator opened was opened on a bar the preview called an entry — five for five, well inside the "first ten events" the acceptance asks for. **The holdout refusal is asserted**: five tests over `judge_window`, including the boundary at the cutoff second.
+
+Three things the acceptance test had to learn about the simulator, each of which had made an earlier version of it wrong:
+
+- `DetailedOutcome::trades` is a list of **closed round trips**, not entries — `Trade` carries an `exit_time`. A definition with no exit policy opens a position that never closes and reports zero trades however often it fired, so the first version of this test compared 1 against 0 and blamed the fixture. The fixture now declares `MaxHoldingBars`.
+- **`ema_N` warms up over `5N` bars**, not `N`. The original 86-bar fixture put every crossing inside `ema_10`'s 50-bar warm-up.
+- The simulator places an order only where an action's `on_signal` matches. The preview counted every rising edge, which would have promised entries to a definition carrying a signal it does not trade. Fixed — see ADR-S5-02.
+
+**One deviation from the body text above, recorded as ADR-S5-01**: sample events carry the feature values that caused the firing, not an exit reason. An exit reason needs position state, which needs the exit tracker, which is the simulator; a preview that ran it would be a second simulator with its own answers about fills and holding periods. The declared exit policy is reported instead, which answers the question a preview can answer honestly — did you remember to write exits.
+
+The holdout rule is ADR-S5-03, and it deliberately contradicts `Project::clip`'s own documentation: the cutoff clips, the holdout refuses.
 
 A dry run over stored bars through the feature engine and the exit policy: entries per month,
 sample events with exit reasons, warm-up status, and `never_fires_because` when it does not.
