@@ -60,6 +60,20 @@ pub struct RunnerConfig {
     pub python: String,
     pub script: std::path::PathBuf,
     pub limits: Limits,
+    /// Directories the platform's analysis stack lives in, passed as
+    /// `PYTHONPATH`.
+    ///
+    /// The child runs with `PYTHONNOUSERSITE=1`, so whatever a developer happens
+    /// to have installed in their own user directory is invisible — which is the
+    /// right default for a process that executes agent-authored code, and is
+    /// also why numpy has to be *named* rather than found. This is the platform
+    /// saying where its own stack is, not a hole in that rule: a package that is
+    /// not in one of these directories or in the interpreter's own
+    /// `site-packages` still does not load.
+    ///
+    /// Empty in deployment, where the container installs the stack into the
+    /// interpreter's `site-packages` and there is no user directory at all.
+    pub stack_path: Vec<std::path::PathBuf>,
 }
 
 impl RunnerConfig {
@@ -70,6 +84,11 @@ impl RunnerConfig {
             python: std::env::var("SKILL_RUNNER_PYTHON").unwrap_or_else(|_| "python".into()),
             script: root.join("apps/skill-runner/skill_runner.py"),
             limits: Limits::default(),
+            stack_path: std::env::var("SKILL_RUNNER_STACK_PATH")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| std::env::split_paths(&s).collect())
+                .unwrap_or_default(),
         }
     }
 }
@@ -165,6 +184,12 @@ pub async fn run(
         // surprises from a user directory.
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .env("PYTHONNOUSERSITE", "1");
+
+    if !config.stack_path.is_empty() {
+        if let Ok(joined) = std::env::join_paths(&config.stack_path) {
+            command.env("PYTHONPATH", joined);
+        }
+    }
 
     #[cfg(windows)]
     {

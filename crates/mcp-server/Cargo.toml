@@ -16,6 +16,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 dataplane = { workspace = true }
+skills = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

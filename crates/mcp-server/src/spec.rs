@@ -331,6 +331,10 @@ pub fn catalog() -> &'static [ToolSpec] {
         specs.extend(crate::tools::research::specs());
         specs.extend(crate::tools::falsification::specs());
         specs.extend(crate::tools::research_tools::specs());
+        // Last, and appended rather than interleaved: the templated tier's order is
+        // the directory's, and a tool moving namespace should not reshuffle the
+        // hand-written half of the catalogue in every diff.
+        specs.extend(crate::tools::templated::specs());
         assert_no_duplicates(&specs);
         specs
     })

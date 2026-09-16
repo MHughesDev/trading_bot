@@ -133,6 +133,33 @@ def _block_network() -> None:
     builtins.__import__ = guarded_import
 
 
+#: The analysis stack, imported before the network guard goes up.
+#:
+#: This is not a convenience. `_block_network` refuses any `import socket`, and
+#: pyarrow imports socket during its own initialisation — so a skill whose first
+#: line is `pandas.read_parquet(...)` failed with "Unable to find a usable
+#: engine", which reads as a missing dependency and is really the guard firing
+#: three frames down inside a library nobody suspected.
+#:
+#: Importing them here, before the guard, fixes that without weakening anything:
+#: the guard's purpose is to stop *skill* code reaching the network with a
+#: sentence rather than a timeout, and these are platform dependencies that were
+#: going to be in the address space either way. A skill's own `import socket`
+#: still raises, which is what the rule was ever about.
+_PRELOAD = ("numpy", "pandas", "pyarrow", "pyarrow.parquet", "scipy", "scipy.stats")
+
+
+def _preload() -> list:
+    """Import the analysis stack. Returns the names that were not available."""
+    missing = []
+    for name in _PRELOAD:
+        try:
+            __import__(name)
+        except ImportError:
+            missing.append(name)
+    return missing
+
+
 def _peak_memory() -> int | None:
     try:
         import resource
@@ -159,7 +186,14 @@ def main() -> int:
         return 0
 
     note = _apply_resource_limits(limits)
+    # Order matters: the stack loads, then the door closes. See `_PRELOAD`.
+    missing = _preload()
     _block_network()
+    if missing:
+        note = (note or "") + (
+            f" this interpreter is missing {', '.join(missing)}; templated tools need the "
+            f"packages in apps/skill-runner/requirements.txt."
+        )
 
     # The skill's `print` goes here, not to our stdout, which is carrying the
     # envelope. A runner that lets a skill write to the result channel is a

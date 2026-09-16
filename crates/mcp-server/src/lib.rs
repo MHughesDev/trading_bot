@@ -816,6 +816,16 @@ async fn dispatch_untraced(
         "list_skills" => tools::research_tools::list_skills(&ctx.api, params).await,
         "run_skill" => tools::research_tools::run_skill(&ctx.api, params).await,
 
+        // ── The templated tier ─────────────────────────────────────────────────
+        //
+        // One arm for all of them, and it has to come last: a templated tool is
+        // a Python file, and adding one must not mean editing this file. The
+        // guard is `find`, so a name only reaches here if the catalogue already
+        // declares it — this is not a fallback that would swallow a typo.
+        name if tools::templated::find(name).is_some() => {
+            tools::templated::dispatch(&ctx.api, name, params).await
+        }
+
         unknown => {
             json!({ "error": "unknown_tool", "tool": unknown })
         }
@@ -920,6 +930,15 @@ mod catalogue_tests {
             "the arm scan found only {}; it has drifted",
             arms.len()
         );
+
+        // The templated tier is routed by one guarded arm rather than sixty
+        // literals, so its names are covered by construction. They are added
+        // here rather than exempted: the test still fails if a *templated* spec
+        // stops being findable, which is the way that arm can silently stop
+        // routing.
+        for t in tools::templated::templates() {
+            arms.insert(t.header().name.as_str());
+        }
 
         let declared: BTreeSet<&str> = spec::names().into_iter().collect();
         let no_spec: Vec<&&str> = arms.difference(&declared).collect();

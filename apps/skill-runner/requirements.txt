@@ -1,0 +1,31 @@
+# What a templated tool may import (AGENT-006 §3.3; Set S task S-3.1).
+#
+# This is a short list on purpose. Every package here is one whose version is
+# stamped into `detail.provenance` and therefore one that a stored result is
+# reproducible *against* — adding a package means adding a thing that can change
+# a historical number when it is upgraded.
+#
+# statsmodels and arch are deliberately absent, and that is a decision rather
+# than an omission (ADR-I-15). The statistics the catalogue needs from them —
+# ADF, KPSS, Ljung-Box, ARCH-LM, Engle-Granger, Johansen, GARCH(1,1), HAR — are
+# implemented in `preamble.py` and in the templates against numpy and scipy,
+# because:
+#
+#   * `infra/agent-image/requirements.txt` pins statsmodels 0.14.4 against numpy
+#     2.2 and pandas 2.2. The skill runner is a different interpreter with a
+#     different lifecycle, and pinning a second, older numpy there to satisfy
+#     statsmodels would mean two numpys in one deployment producing two answers
+#     to the same arithmetic;
+#   * the tests that matter here are reproducibility tests, and every library
+#     whose default `ddof`, p-value approximation or optimiser tolerance can
+#     move between minor releases is a library that can break a stored result
+#     without anyone editing a template.
+#
+# The cost is real and is written down: the implementations here are the
+# textbook ones, they carry embedded critical-value tables rather than exact
+# distributions, and each one names its source in the template that uses it.
+
+numpy==2.2.1
+pandas==2.2.3
+pyarrow==18.1.0
+scipy==1.15.0

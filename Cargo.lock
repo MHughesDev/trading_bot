@@ -2886,6 +2886,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
+ "skills",
  "strategy-validator",
  "thiserror 2.0.18",
  "tokio",

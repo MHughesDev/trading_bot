@@ -38,6 +38,7 @@
 pub mod contract;
 pub mod run;
 pub mod runner;
+pub mod template;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -45,6 +46,7 @@ use sha2::{Digest, Sha256};
 pub use contract::{Contract, ContractError};
 pub use run::{Outcome, RunRecord, SkillStats};
 pub use runner::{Completed, Limits, RunnerConfig};
+pub use template::{DataKey, Template, TemplateError, TemplateHeader};
 
 /// The content address of one skill revision: lowercase hex SHA-256 of the
 /// source.
