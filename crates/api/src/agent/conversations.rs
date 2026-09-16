@@ -345,11 +345,49 @@ pub async fn archive(
 /// Deliberately the *conclusions*, not the transcripts. Replaying every prior tool
 /// call would refill the context window with work already done and summarised; the
 /// detail is still in the agent's own workspace if it wants it back.
+///
+/// # Structured first, prose only as a fallback (Set S task S-4.1)
+///
+/// This used to read `agent_runs.summary`, which is the model's **own closing
+/// prose**. So a later turn was told it had concluded whatever the earlier turn
+/// said it concluded, with nothing checking that against what the run did — the
+/// one place in the loop where a claim compounds instead of meeting a tool. The
+/// hosted driver then ignored that prose entirely, which made the carry both
+/// unchecked and unused.
+///
+/// `agent_turn_summaries` holds what the **harness** wrote from `WorkingState`
+/// and the two ledgers (`TurnSummary::from_state` has no parameter through which
+/// prose could arrive). When a turn has one, it is rendered from there, with the
+/// finding ids intact.
+///
+/// The prose path stays for turns that predate the table. Falling back is right
+/// and silence would not be: a conversation whose early turns have no summary
+/// row would otherwise look to the model like a conversation that had not
+/// happened.
 pub async fn prior_context(
     pg: &PgPool,
     conversation_id: Uuid,
     before_turn: i32,
 ) -> Result<String, ConversationError> {
+    // The structured carry, when the harness wrote one.
+    let store = crate::turn_summary_store::TurnSummaryStore::new(pg.clone());
+    match store.before(conversation_id, before_turn).await {
+        Ok(summaries) if !summaries.is_empty() => {
+            return Ok(crate::turn_summary_store::render(&summaries));
+        }
+        Ok(_) => {}
+        Err(e) => {
+            // Reported rather than swallowed. A malformed row that fell back to
+            // prose would look like a working carry and quietly reintroduce
+            // exactly the failure this task removed.
+            tracing::warn!(
+                conversation_id = %conversation_id,
+                error = %e,
+                "turn summaries unreadable; falling back to the pre-S-4.1 prose carry"
+            );
+        }
+    }
+
     let rows: Vec<(i32, String, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT turn_index, goal, summary, error
            FROM agent_runs
