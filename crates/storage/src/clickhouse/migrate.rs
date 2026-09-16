@@ -84,6 +84,7 @@ pub async fn run_migrations(url: &str) -> Result<(), ChError> {
     // Schema corrections that a CREATE TABLE IF NOT EXISTS cannot express, because
     // the table already exists with the wrong shape.
     ensure_market_bars_v2_engine(url).await?;
+    ensure_market_bar_constraints(url).await?;
 
     info!(
         files = MIGRATIONS.len(),
@@ -91,6 +92,53 @@ pub async fn run_migrations(url: &str) -> Result<(), ChError> {
         "clickhouse schema migrations applied"
     );
     Ok(())
+}
+
+/// The knowledge-time constraints `market_bar` must carry, keyed by name.
+///
+/// A `CREATE TABLE IF NOT EXISTS` cannot add a constraint to a table that already
+/// exists, and an install created before these were written would otherwise keep
+/// accepting exactly the rows they exist to refuse. ClickHouse evaluates them on
+/// every INSERT, so they hold for writers that never pass through `BarStore` —
+/// which is the point: the 158,259 dishonest rows in `market_bars_v2` were not
+/// written by a Rust validator, they were written around one.
+///
+/// Kept byte-identical to `clickhouse/07_canonical_market.sql` by
+/// [`tests::constraint_definitions_match_the_ddl`].
+pub const MARKET_BAR_CONSTRAINTS: &[(&str, &str)] = &[
+    (
+        "knowledge_time_is_after_the_bar_closes",
+        "knowledge_time >= event_time + toIntervalSecond(period_secs)",
+    ),
+    (
+        "unflagged_knowledge_time_is_a_real_receipt",
+        "bitAnd(quality_flags, 32768) != 0 OR knowledge_time >= ingest_time",
+    ),
+];
+
+/// Adds [`MARKET_BAR_CONSTRAINTS`] to an existing `market_bar`.
+///
+/// `ADD CONSTRAINT IF NOT EXISTS` is a metadata-only operation and does not validate
+/// rows already stored — deliberately. History written before the rule existed is
+/// repaired by `canonical::migrate_to_canonical`, not refused: blocking would remove
+/// essentially every bar the platform has, which ADR-P2-24 rejected outright.
+/// Flag the past, refuse the future.
+///
+/// # Errors
+/// Backend failures.
+pub async fn ensure_market_bar_constraints(url: &str) -> Result<usize, ChError> {
+    let client = super::connect(url);
+    let mut added = 0usize;
+    for (name, expr) in MARKET_BAR_CONSTRAINTS {
+        client
+            .query(&format!("ALTER TABLE market_bar ADD CONSTRAINT IF NOT EXISTS {name} CHECK {expr}"))
+            .execute()
+            .await
+            .map_err(|e| ChError::Client(format!("market_bar constraint {name}: {e}")))?;
+        added += 1;
+    }
+    debug!(constraints = added, "market_bar knowledge-time constraints ensured");
+    Ok(added)
 }
 
 /// Sorting key and engine the v2 bar table must have (`clickhouse/06_market_bars_v2.sql`).
@@ -282,6 +330,32 @@ fn split_statements(sql: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The DDL and the ALTER path must state the *same* rule. If a fresh install and
+    /// an upgraded one disagreed about what `market_bar` refuses, the invariant would
+    /// hold on one box and not the other — which is the kind of partial enforcement
+    /// that must never be reported as enforcement.
+    #[test]
+    fn constraint_definitions_match_the_ddl() {
+        let ddl = include_str!("../../../../clickhouse/07_canonical_market.sql");
+        for (name, expr) in MARKET_BAR_CONSTRAINTS {
+            let decl = format!("CONSTRAINT {name}\n        CHECK {expr}");
+            assert!(
+                ddl.replace("\r\n", "\n").contains(&decl),
+                "07_canonical_market.sql does not declare `{name}` exactly as the ALTER path adds it.\n\
+                 expected to find:\n{decl}"
+            );
+        }
+    }
+
+    /// The flag bit is persisted and the constraint hard-codes it, because a
+    /// ClickHouse CHECK cannot call into Rust. If the bit ever moved, the constraint
+    /// would silently start guarding the wrong flag.
+    #[test]
+    fn the_constraint_guards_the_backfill_flag_bit() {
+        assert_eq!(dataplane::quality::QualityFlags::BACKFILLED_KNOWLEDGE_TIME.0, 32768);
+        assert!(MARKET_BAR_CONSTRAINTS[1].1.contains("32768"));
+    }
 
     #[test]
     fn splits_on_semicolons() {

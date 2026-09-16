@@ -73,12 +73,42 @@ async fn migrates_v2_honestly() {
     let flagged = q("SELECT countIf(bitAnd(quality_flags, 32768) != 0) AS n FROM market_bar").await;
     assert!(flagged > 0, "the REST history is backfilled");
 
-    // Live websocket bars kept their observed knowledge time.
-    let live_observed = q(
-        "SELECT count() AS n FROM market_bar WHERE source_id = 9 AND bitAnd(quality_flags, 32768) = 0",
+    // Provenance follows the receipt, not the transport. Two halves, and only the
+    // first is an assertion about the data:
+    //
+    //  (a) an unflagged row must hold a real receipt — its knowledge time is at or
+    //      after the moment the platform held the bytes;
+    //  (b) a `live_stream` source buys no exemption. There is deliberately NO
+    //      assertion that source 9 has observed rows: if none of kraken_ws's ingest
+    //      stamps are credible receipts then zero is the honest answer, and a test
+    //      demanding a positive number is a test demanding a fabrication.
+    let unflagged_without_receipt = q(
+        "SELECT count() AS n FROM market_bar WHERE bitAnd(quality_flags, 32768) = 0 AND knowledge_time < ingest_time",
     )
     .await;
-    assert!(live_observed > 0);
+    assert_eq!(unflagged_without_receipt, 0, "an unflagged row must be a real receipt");
+    let observed = q("SELECT countIf(bitAnd(quality_flags, 32768) = 0) AS n FROM market_bar").await;
+    println!("defensibly observed rows (Gate-15-admissible, D-P3): {observed}");
+    assert_eq!(
+        observed,
+        report.observed_rows,
+        "the repair's recorded count must equal what is on disk"
+    );
+
+    // And the rule is symmetric: a row from a `rest_history` source that WAS watched
+    // arrive is observed. Nothing here requires such a row to exist, only that if it
+    // does it was not flagged for its transport.
+    let rest_marked_derived_despite_a_receipt = q(
+        "SELECT count() AS n FROM market_bar
+          WHERE bitAnd(quality_flags, 32768) != 0
+            AND ingest_time <= event_time + toIntervalSecond(period_secs) + INTERVAL 5 MINUTE
+            AND ingest_time >= event_time + toIntervalSecond(period_secs)",
+    )
+    .await;
+    assert_eq!(
+        rest_marked_derived_despite_a_receipt, 0,
+        "a row the platform watched arrive must not be flagged derived because of its transport"
+    );
 
     // Venues are not blended: BTC-USD exists on two venues as two instruments.
     let btc_venues = q(
