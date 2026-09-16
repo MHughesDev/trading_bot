@@ -774,3 +774,29 @@ failure: it means the cost depends on something the arguments do not say.
 The reply also carries `requires_approval` and `max_calls_per_run`, which are
 often the more useful facts. A tool that will pause for a human costs a human's
 attention whatever its seconds say.
+
+### get_venue_constraints
+
+Venue rules that quietly invalidate a backtest. Every fact carries the date it
+was verified, and the answer computes its own staleness — past ninety days it
+says so in the summary, where you cannot miss it.
+
+The three that matter most today:
+
+* **Coinbase is price-time priority.** A resting order earns its queue position
+  by arriving early, so a strategy that re-quotes on every tick keeps giving that
+  position up. A backtest filling at the bar close models none of it.
+* **Kraken's order rate limit decays, and cancelling a younger order costs more.**
+  This is the rule most likely to invalidate a market-making backtest, because
+  the naive model assumes a cancel is free. Post-and-pull pays the highest
+  penalty per action and throttles itself live while backtesting perfectly.
+* **Alpaca's 2026 margin framework replaced the PDT rule**, and the minimum
+  equity moved from $25,000 to $2,000. A strategy modelled against the old rule
+  is modelled against a constraint that no longer applies — in the permissive
+  direction, which is the direction that does not announce itself.
+
+**Every numeric limit in this table is flagged `verified: false`.** That is
+deliberate: this repository has no verified source for the thresholds, and a
+guessed limit reads exactly like a checked one. Too high and a strategy is
+throttled live; too low and a workable strategy is refused. Read the numbers from
+the venue's current documentation before sizing a requote rate against them.

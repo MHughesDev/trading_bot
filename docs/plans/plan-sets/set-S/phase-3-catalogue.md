@@ -509,7 +509,36 @@ across regimes is applied.
 ## Execution realism
 
 ### S-3.14 Venue constraints, funding, divergence attribution — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `get_venue_constraints` is built with the staleness mechanism and the
+qualitative rules; its numeric limits are **OQ-17**. `apply_funding_costs` and
+`attribute_divergence` are not started.
+
+`crates/mcp-server/src/tools/venues.rs`, answered locally rather than over HTTP — static
+reference data with no tenant and no secret, the same exception `list_lanes` takes from
+ADR-0010. Updating a fact is therefore a code review and a deploy, which is the right friction
+for something whose whole value is that somebody checked it.
+
+The durable half is the **mechanism**: every fact carries `verified_at`, the tool computes its
+own age, and past 90 days the answer says `STALE` in the *summary* — where a flat-tier model
+that never opens `detail` still sees it.
+
+The qualitative rules are the ones from the brief, and the most useful is Kraken's: the order
+rate limit decays and cancelling a younger order costs more, which penalises exactly the
+post-and-pull pattern a naive market-making backtest assumes is free. That strategy backtests
+perfectly and throttles itself live.
+
+**Every numeric limit is flagged `verified: false`**, and
+`no_numeric_limit_claims_to_be_verified` asserts it across the whole table so a later edit
+cannot quietly promote a guess. This repository has no verified source for Kraken's counter
+maximum, its decay rate, the penalty schedule by order age, or the four Coinbase STP mode
+identifiers — so §5.6's "a requote rate exceeding Kraken's limit is refused" cannot be met
+honestly. A threshold guessed high lets a strategy be throttled live having passed the check;
+one guessed low refuses a strategy that works. Both read like a verified threshold, which is
+what makes the guess worse than the stated gap.
+
+Namespace note: `execution`, not `market`. `market` is not in §2.1's canonical list and the
+catalogue test caught it; `apply_funding_costs` and `attribute_divergence` belong in
+`execution` too.
 
 `get_venue_constraints` is a versioned table with a `verified_at` and a 90-day staleness
 flag, carrying the facts verified on 2026-09-14: Coinbase's price-time priority and four

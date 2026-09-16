@@ -698,6 +698,9 @@ async fn dispatch_untraced(
         // ── Protocol ───────────────────────────────────────────────────────────
         "get_authoring_guide" => json!({ "guide": authoring_guide() }),
         "estimate_cost" => tools::core::estimate_cost(&ctx.api, params).await,
+        // Static reference data, answered here rather than over HTTP — the same
+        // exception `list_lanes` takes (see `tools::venues`).
+        "get_venue_constraints" => tools::venues::get_venue_constraints(params),
 
         // ── Discovery ──────────────────────────────────────────────────────────
         "list_lanes" => {

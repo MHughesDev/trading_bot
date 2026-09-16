@@ -168,3 +168,19 @@ S-3.19's `estimate_cost` is supposed to supply that number. It cannot supply the
 **Decision:** none yet — this is a pricing question the platform owner should answer, not one to guess. Until then `estimate_cost` returns `est_seconds`, `est_rows` and `trials` for real, and `est_usd: null` beside a stated reason, so the tool is correct and incomplete rather than confident and wrong. `ask_above_usd` stays unfired and `policy.cost_above_threshold` stays unreachable, which is recorded here so it is not reported as enforced.
 
 **Status:** open — needs a decision on where prices come from.
+
+### OQ-17 · `get_venue_constraints` carries the venues' qualitative rules and none of their numeric limits. Who verifies the numbers?
+**Context:** found 2026-09-16 building S-3.14. The platform's own research brief records, as verified on 2026-09-14, that Coinbase matches price-time with four self-trade-prevention modes, that Kraken's order rate limit *decays* and cancelling a younger order costs more, and that Alpaca's 2026 margin framework replaced the PDT rule with a minimum equity of 2,000 USD rather than 25,000. Those are in the table.
+
+What is not in the brief, and not anywhere else in this repository, is a **number**: Kraken's counter maximum, its decay rate, the penalty schedule by order age, Coinbase's request budget, the four STP mode identifiers.
+
+**What it costs:** §5.6's acceptance is "a requote rate exceeding Kraken's limit is refused before paper testing validates it", and that refusal needs a threshold. A threshold guessed too high lets a strategy be rate-limited live, having passed the check; one guessed too low refuses a strategy that would have worked. Both read exactly like a verified threshold to whoever calls the tool — which is the property that makes a guess worse than a stated gap.
+
+**Options.**
+**A. Verify them from the venues' current documentation** and record each with its own `verified_at`, which is what the table is already shaped for. The staleness machinery, the per-fact `verified` flag and the coverage note all exist; only the values are missing.
+**B. Read them from the venues' APIs** where exposed. Kraken returns rate-limit headers; that makes the table self-updating for one venue and leaves the others.
+**C. Drop the numeric acceptance criterion** and keep the tool qualitative — it still catches the failure that matters most, which is a market-making backtest that assumes cancels are free.
+
+**Decision:** none yet. The table ships with the mechanism (versioned facts, a 90-day staleness bound that reports itself in the summary) and every numeric field flagged `verified: false`, asserted by `no_numeric_limit_claims_to_be_verified` so a later edit cannot quietly promote a guess. A is the right answer and it needs someone to read three sets of exchange docs, which is not a thing to infer.
+
+**Status:** open — `get_venue_constraints` is correct, useful and incomplete, and says so in its own output.
