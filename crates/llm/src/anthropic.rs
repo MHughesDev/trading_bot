@@ -16,6 +16,24 @@ use crate::types::{
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+/// The beta that lets a cache breakpoint live longer than five minutes.
+///
+/// Without it the `ttl` below is ignored and the breakpoints fall back to 5m.
+const EXTENDED_CACHE_BETA: &str = "extended-cache-ttl-2025-04-11";
+
+/// How long a cache breakpoint lives (AGENT-005 §6.1; Set S task S-2.7).
+///
+/// One hour, not the five-minute default. A research session runs for hours with a
+/// stable charter and a stable tool slice, and a 5m TTL re-pays for the same prefix
+/// over and over — the breakpoints S-1.8 places are only worth placing if they
+/// outlive the gap between one step and the next, and a step that waits on a tool
+/// can easily take longer than five minutes.
+///
+/// The same value `llm_proxy::rewrite_cache_ttl` forces on the container's requests.
+/// It is set here rather than only there so **every** caller gets it: the proxy only
+/// sees what the CLI sends, and the internal drivers do not go through it.
+const CACHE_TTL: &str = "1h";
+
 fn build_messages(req: &ChatRequest) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     for msg in &req.messages {
@@ -89,7 +107,7 @@ fn build_messages(req: &ChatRequest) -> Vec<Value> {
 /// sits on. That is why the three below are placed at the end of each layer rather
 /// than at its start.
 fn cache_control() -> Value {
-    json!({ "type": "ephemeral" })
+    json!({ "type": "ephemeral", "ttl": CACHE_TTL })
 }
 
 /// Three breakpoints, in prefix order (AGENT-005 §6.1, task S-1.8).
@@ -270,6 +288,7 @@ pub async fn chat(
         .post(format!("{base_url}/v1/messages"))
         .header("x-api-key", api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)
+        .header("anthropic-beta", EXTENDED_CACHE_BETA)
         .json(&build_body(req))
         .send()
         .await
@@ -306,6 +325,7 @@ pub async fn list_models(
         .get(format!("{base_url}/v1/models"))
         .header("x-api-key", api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)
+        .header("anthropic-beta", EXTENDED_CACHE_BETA)
         .send()
         .await
         .map_err(|e| LlmError::Network(e.to_string()))?;
@@ -395,6 +415,39 @@ mod tests {
         let last = messages.last().expect("a last message");
         let blocks = last["content"].as_array().expect("the last message carries blocks");
         assert_eq!(blocks.last().unwrap()["cache_control"]["type"], "ephemeral");
+    }
+
+    /// Every breakpoint carries the one-hour TTL, not the five-minute default.
+    ///
+    /// A research session runs for hours with a stable charter and tool slice, and a
+    /// 5m TTL re-pays for the same prefix over and over — the breakpoints S-1.8
+    /// places are only worth placing if they outlive the gap between one step and the
+    /// next, and a step that waits on a tool can easily exceed five minutes.
+    #[test]
+    fn every_breakpoint_lives_an_hour() {
+        let req = ChatRequest {
+            model: "claude-test".into(),
+            system: Some("the charter".into()),
+            messages: vec![Message::User { content: "go".into() }],
+            tools: vec![ToolDef {
+                name: "t".into(),
+                description: "d".into(),
+                input_schema: json!({"type": "object"}),
+            }],
+            ..ChatRequest::default()
+        };
+        let body = build_body(&req);
+        for place in [
+            body["tools"][0]["cache_control"].clone(),
+            body["system"][0]["cache_control"].clone(),
+            body["messages"][0]["content"][0]["cache_control"].clone(),
+        ] {
+            assert_eq!(place["type"], "ephemeral");
+            assert_eq!(
+                place["ttl"], "1h",
+                "a five-minute breakpoint re-pays for the same prefix every step"
+            );
+        }
     }
 
     /// A request with no tools and no system still produces a valid body: the

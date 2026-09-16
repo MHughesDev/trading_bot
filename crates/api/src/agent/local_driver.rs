@@ -853,6 +853,34 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
             Effect::CallModel(call) => {
                 let started = Instant::now();
                 let req = build_request(&params.profile, &call, transcript.as_ref());
+
+                // The same refusal the proxy makes, applied to the internal driver
+                // too (S-2.7). With S-1.10 and S-1.11 in place this should never
+                // fire — the assembler budgets the body against the window and
+                // `ask` sends what it budgeted — so reaching it means the
+                // arithmetic has drifted from what is actually sent.
+                //
+                // **It is therefore a regression alarm rather than a safety net**,
+                // and it refuses rather than truncating for exactly that reason: a
+                // silent truncation here would hide the drift and take the charter
+                // with it, which is the failure the whole budget exists to prevent.
+                let estimated = crate::llm_proxy::estimate_request_tokens(
+                    &serde_json::to_value(&req).unwrap_or_else(|_| json!({})),
+                );
+                let cap = params.profile.input_budget_tokens();
+                if estimated > cap {
+                    tracing::error!(
+                        run_id = %params.run_id, estimated, cap,
+                        "an internal request exceeded the context budget; the assembler's                          arithmetic and what is sent have drifted apart"
+                    );
+                    rec.finish(&Outcome::Fenced(Degradation::BackendFailure {
+                        detail: format!(
+                            "context_budget_exceeded: about {estimated} input tokens against                              a budget of {cap}. The context assembler and the request builder                              disagree; this is a harness defect, not a model one."
+                        ),
+                    }))
+                    .await;
+                    return;
+                }
                 match client.chat(&req).await {
                     Ok(resp) => {
                         // The harness's own estimate of the request it just sent,

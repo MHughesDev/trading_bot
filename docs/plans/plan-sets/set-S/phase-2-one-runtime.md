@@ -1,6 +1,6 @@
 # Phase 2 — One runtime
 
-**Completion: 31% (5 / 16 tasks), plus 6 partial (S-2.5, S-2.6, S-2.8, S-2.11, S-2.14, S-2.16).**
+**Completion: 31% (5 / 16 tasks), plus 7 partial (S-2.5, S-2.6, S-2.7, S-2.8, S-2.11, S-2.14, S-2.16). Four remain `NOT STARTED`: S-2.9, S-2.10, S-2.12, S-2.15.**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
@@ -304,7 +304,35 @@ job result.
 **Traces:** AGENT-010 §5; §14.3.
 
 ### S-2.7 Every adapter through the proxy — S
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — the three behaviours now apply to every caller; they are shared code rather
+than a shared HTTP hop.
+
+The task says "route all of them through the proxy". The proxy is an HTTP endpoint, and routing
+the internal drivers through it would mean the platform making HTTP calls to itself for every
+model call — a round trip, a serialisation, and a second place for a request to be malformed, to
+buy something a shared function buys for nothing. What the task is actually asking for is that
+the policy exist **once**, and that is what this does.
+
+* **The 1-hour cache TTL** moved to `crates/llm/src/anthropic.rs`, where the breakpoints are set,
+  with the `extended-cache-ttl-2025-04-11` beta beside it. Every caller gets it now, which the
+  proxy could not do: the proxy only sees what the container's CLI sends, and the internal
+  drivers do not pass through it. A five-minute TTL re-pays for the same prefix every step, and a
+  step that waits on a tool can easily exceed five minutes — so S-1.8's breakpoints were being
+  placed and then expiring before they paid.
+* **Usage with cache fields** reaches the run end to end as of S-1.9, and lands in
+  `agent_runs.prompt_tokens` / `cache_read_tokens` as of S-2.8.
+* **The budget refusal** now fires on the internal path too, using the proxy's own
+  `estimate_request_tokens`. With S-1.10 and S-1.11 in place it should never fire — the assembler
+  budgets the body against the window and `ask` sends what it budgeted — so reaching it means the
+  arithmetic and what is sent have drifted apart. **It is a regression alarm, not a safety net,**
+  and it refuses rather than truncating for exactly that reason: a silent truncation would hide
+  the drift and take the charter with it.
+
+Verified by `every_breakpoint_lives_an_hour`, and by S-1.9's cache-usage tests.
+
+**Not done:** the container still reaches the proxy over HTTP and the internal drivers do not, so
+there are two code paths even though there is now one policy. Collapsing them is S-2.10's
+territory. **That is why this is `PARTIAL`.**
 
 The internal drivers call providers directly today; only the container goes through
 `crates/api/src/llm_proxy.rs`. Route all of them so the 1-hour cache TTL rewrite, the usage
