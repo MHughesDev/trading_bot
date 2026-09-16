@@ -19,6 +19,16 @@
 
 use std::path::{Path, PathBuf};
 
+fn migration_named(file: &str) -> String {
+    let p: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("crates/<name> sits two below the root")
+        .join("migrations")
+        .join(file);
+    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display()))
+}
+
 fn migration() -> String {
     let p: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -162,4 +172,64 @@ fn the_schema_offers_no_way_to_resolve_a_conflict() {
              the loser."
         );
     }
+}
+
+/// `memory_retrievals.slot` lists exactly `memory::brief::Slot`.
+///
+/// This CHECK was written from memory on the first attempt and was wrong in
+/// every entry — `preference`, `profile`, `negative`, `playbook` against the
+/// enum's `user_preference`, `instrument_profile`, `negative_result`,
+/// `open_question`. It would have refused every row the brief produced, at
+/// runtime, on a real run.
+#[test]
+fn the_retrieval_slot_check_lists_exactly_the_rust_slots() {
+    use harness::memory::brief::Slot;
+    let names: Vec<String> = [
+        Slot::UserPreference,
+        Slot::InstrumentProfile,
+        Slot::Finding,
+        Slot::NegativeResult,
+        Slot::OpenQuestion,
+        Slot::Conflict,
+    ]
+    .iter()
+    .map(|s| {
+        serde_json::to_string(s)
+            .expect("Slot serialises")
+            .trim_matches('"')
+            .to_string()
+    })
+    .collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    assert_mirrors(&migration_named("0124_memory_retrievals.sql"), "slot", &refs);
+}
+
+/// `agent_turn_summaries.outcome` lists the outcomes the loop actually reaches.
+///
+/// A closed set, because the renderer has a sentence per outcome and one it has
+/// never seen renders as nothing at all.
+#[test]
+fn the_turn_outcome_check_lists_the_outcomes_the_loop_produces() {
+    let sql = migration_named("0123_agent_turn_summaries.sql");
+    for outcome in ["finished", "refused", "escalated", "fenced", "cancelled"] {
+        assert!(
+            sql.contains(outcome),
+            "`{outcome}` is an outcome a turn can end in and the CHECK does not list it, so              that turn's summary could never be stored"
+        );
+    }
+}
+
+/// Retrieval rows outlive the entries they name, on purpose.
+///
+/// §2.4 lets an uncited entry be hard-deleted. A foreign key would cascade the
+/// *misses* away and leave the hits, so `memory_recall` would rise every time
+/// the store was tidied — a metric that improves when you delete data is worse
+/// than no metric.
+#[test]
+fn the_retrieval_log_has_no_foreign_key_to_the_entry() {
+    let sql = statements(&migration_named("0124_memory_retrievals.sql")).to_lowercase();
+    assert!(
+        !sql.contains("references agent_memory"),
+        "a foreign key from memory_retrievals to the entry would delete the misses and keep          the hits"
+    );
 }
