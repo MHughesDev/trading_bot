@@ -129,11 +129,13 @@ The acceptance's fourth clause is met and verified against a live Postgres: `cit
 
 The slot CHECK was wrong in every entry on the first attempt and would have refused every row the brief produced, at runtime — `schema_mirrors_memory_types.rs` now compares it against `Slot` directly.
 
-**What keeps it `PARTIAL`, and it is sharper than "needs the driver"**: `assemble_brief` is exported from `memory/brief.rs` — 936 lines, 14 passing tests — and **has no caller anywhere in the workspace**. Searched across `crates/` and `apps/`; the only reference outside the module is the `pub use` that exports it.
+**The assembler had no caller at all**, which is sharper than "needs the driver": 936 lines and 14 passing tests, exported and never executed. A module can be entirely correct and entirely unreached, and its own tests cannot tell you which.
 
-So the brief is not merely unlogged, it is never assembled in a run. Its first three acceptance clauses — two conflicting findings both retrieved and marked, a stale finding flagged, retrieval working with the embedding sidecar stopped — are covered by `brief.rs`'s own tests against fixtures, and by nothing against a run.
+It is wired now. `Loop::with_brief` takes what the driver assembled — a builder, so a run with no memory stays the ordinary construction — and the brief enters `body()` as `Reference`, below the state card and above the raw observations, held apart from `observations` so a retrieved claim does not read like something this run established. The budget is `Section::Reference`'s own 20% of the assembler's *effective* budget rather than the advertised window. Retrievals are logged before the run reads the brief, so the denominator survives a crash.
 
-Wiring it needs four things in order: entries in the store to retrieve (the write path, OQ-18 for findings but open now for preferences and profiles), a call at run start, `RetrievalStore::log` on what it showed, and the `Reference` blocks reaching the context assembler. The table and the log are built; the assembler and its caller are the gap.
+`crates/api/tests/memory_reaches_the_run.rs` walks the whole chain against the live Postgres: written through `MemoryStore`, read as the driver reads, assembled as the driver assembles, the user's own words found in the rendered blocks, and the recall share moving from 0.0 to 1.0 as the entry is cited.
+
+**What keeps it `PARTIAL`**: the first three acceptance clauses are about what the brief *chooses* — two conflicting findings both retrieved and marked, a stale finding flagged, retrieval working with the embedding sidecar stopped. `brief.rs`'s own tests cover all three against fixtures, and now that the assembler runs in a real path they are worth re-asserting there; that needs findings in the store, which is OQ-18.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
