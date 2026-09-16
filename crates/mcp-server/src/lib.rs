@@ -62,8 +62,10 @@ pub fn server_instructions() -> &'static str {
      executes; there is no way to run one off the books.\n\
      \n\
      Backtests run in the background and can take from minutes to over an hour. \
-     Expressions use a tiny frozen grammar (feature('ema_7') > feature('ema_21')); \
-     backtests support only ema_N and rsi_N features. If an instrument has no \
+     Expressions use a tiny frozen grammar (feature('ema_7') > feature('ema_21')), \
+     and the engine computes far more than moving averages — volatility \
+     estimators, channels, ranks, calendar terms and more. Call list_features to \
+     see what it will actually resolve; do not assume. If an instrument has no \
      stored history, init_asset onboards it (background seeding job).\n\
      \n\
      Call get_authoring_guide before authoring anything."
@@ -701,6 +703,7 @@ async fn dispatch_untraced(
         // Static reference data, answered here rather than over HTTP — the same
         // exception `list_lanes` takes (see `tools::venues`).
         "get_venue_constraints" => tools::venues::get_venue_constraints(params),
+        "list_features" => tools::strategy::list_features(params),
 
         // ── Discovery ──────────────────────────────────────────────────────────
         "list_lanes" => {

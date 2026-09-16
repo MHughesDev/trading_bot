@@ -800,3 +800,31 @@ deliberate: this repository has no verified source for the thresholds, and a
 guessed limit reads exactly like a checked one. Too high and a strategy is
 throttled live; too low and a workable strategy is refused. Read the numbers from
 the venue's current documentation before sizing a requote rate against them.
+
+### list_features
+
+What the backtest engine will actually resolve. Call it before writing a
+definition.
+
+It exists because the catalogue and the engine had drifted apart in the direction
+that costs the most: the engine grew to around fifty feature families — volatility
+estimators, Donchian and Keltner channels, rolling ranks and quantiles, OBV,
+calendar terms — and the server's own instructions still told every model that
+"backtests support only ema_N and rsi_N". A ceiling written in prose is still a
+ceiling. A model told it has two indicators uses two indicators.
+
+Read the `example` field and write that form. A family with parameters does not
+resolve from its bare name: `rolling_std` is not a feature, `rolling_std_30` is.
+
+`use_when` is one line per family saying when to reach for it, which is usually
+more useful than the name. Filter with `query` — it matches the name and the
+`use_when` text — rather than pulling the whole catalogue; the answer is capped
+and tells you how many it left out.
+
+`warmup_bars` is the number of bars the feature needs before it produces a value.
+A strategy whose longest warm-up exceeds its test window produces no signals at
+all, and that looks identical to a strategy with no edge.
+
+What it lists, the engine resolves — both read the same registry table, so there
+is no second catalogue to drift. That is asserted by
+`every_example_name_resolves_in_the_engine`.

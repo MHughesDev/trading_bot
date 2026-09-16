@@ -17,6 +17,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 dataplane = { workspace = true }
 skills = { workspace = true }
+features = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -20,5 +20,6 @@ pub mod models;
 pub mod portfolio;
 pub mod research;
 pub mod research_tools;
+pub mod strategy;
 pub mod templated;
 pub mod venues;
