@@ -26,6 +26,7 @@
 #![recursion_limit = "256"]
 
 pub mod gate;
+pub mod idempotency;
 pub mod spec;
 pub mod taxonomy;
 pub mod tools;
@@ -317,6 +318,17 @@ pub struct McpContext {
     /// (INV-16, AGENT-006 §2.4b/§2.5). One gate per run: `max_calls_per_run`
     /// means this run's budget, so a fresh context is a fresh budget.
     pub gate: Arc<gate::CallGate>,
+    /// What this context has already written, so it does not write it twice
+    /// (§2.4b, S-1.19).
+    ///
+    /// Per context, like the gate, and for the same reason: one run, one record.
+    pub idempotency: Arc<idempotency::Ledger>,
+    /// The run this context belongs to, which is part of every idempotency key.
+    ///
+    /// `Uuid::nil()` for a context with no run behind it — the MCP front door
+    /// serving an external client. Keys are still unique within it, because the
+    /// tool and the arguments are in the material too.
+    pub run_id: Uuid,
 }
 
 impl McpContext {
@@ -334,6 +346,8 @@ impl McpContext {
             draft_store: Arc::new(Mutex::new(HashMap::new())),
             trajectory: Arc::new(Trajectory::new()),
             gate: Arc::new(gate::CallGate::new(registrar)),
+            idempotency: Arc::new(idempotency::Ledger::default()),
+            run_id: Uuid::nil(),
         }
     }
 
@@ -352,7 +366,32 @@ impl McpContext {
             draft_store: Arc::new(Mutex::new(HashMap::new())),
             trajectory: Arc::new(Trajectory::new()),
             gate: Arc::new(gate::CallGate::without_registrar()),
+            idempotency: Arc::new(idempotency::Ledger::default()),
+            run_id: Uuid::nil(),
         }
+    }
+
+    /// What this context already returned for this call, if anything.
+    ///
+    /// The step is the trajectory's current length, so a retry of the step that is
+    /// running collapses and the same call at a later step does not — placing the
+    /// same order twice is what a trader means when they do it twice.
+    #[must_use]
+    pub fn replay(&self, tool: &str, params: &Value) -> Option<Value> {
+        self.idempotency.replay(&idempotency::key(
+            self.run_id,
+            u32::try_from(self.trajectory.steps_taken().max(0)).unwrap_or(0),
+            tool,
+            params,
+        ))
+    }
+
+    /// Record what a write returned, so a repeat of it returns the same thing.
+    pub fn remember(&self, tool: &str, params: &Value, result: &Value) {
+        self.idempotency.record(
+            &idempotency::key(self.run_id, u32::try_from(self.trajectory.steps_taken().max(0)).unwrap_or(0), tool, params),
+            result,
+        );
     }
 
     /// The audit trail this context dispatches inside.
@@ -603,6 +642,21 @@ pub async fn dispatch_under(
             },
         )
         .to_value(),
+        // A write already made under this key returns its original result, and the
+        // platform is not touched a second time (§2.4b, S-1.19).
+        //
+        // Ahead of the gate on purpose. A replay is not a new call: it must not
+        // spend a call budget, must not register a second trial, and must not
+        // reach a handler. Behind the gate it would do all three and still be
+        // called idempotent.
+        //
+        // Reads are excluded. `Risk::Read` is idempotent by definition, so
+        // recording one buys nothing and costs a copy of every result — and a read
+        // whose answer CHANGED between two calls is information the run wants,
+        // not a duplicate to collapse.
+        Some(s) if s.risk != taxonomy::Risk::Read && ctx.replay(s.name, params).is_some() => {
+            ctx.replay(s.name, params).unwrap_or_else(|| json!({}))
+        }
         Some(s) => match ctx.gate.admit(s, params).await {
             Err(e) => e.to_value(),
             Ok(ticket) => {
@@ -612,6 +666,12 @@ pub async fn dispatch_under(
                         .or_insert_with(|| json!({}))
                         .as_object_mut()
                         .map(|ids| ids.insert("ticket_id".into(), json!(t.ticket_id)));
+                }
+                // Recorded only on success. A failed write did not happen, and
+                // replaying its error would turn one transient failure into a
+                // permanent one for the rest of the run.
+                if s.risk != taxonomy::Risk::Read && out.get("error").is_none() {
+                    ctx.remember(s.name, params, &out);
                 }
                 out
             }

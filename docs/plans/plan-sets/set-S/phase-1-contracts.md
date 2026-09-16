@@ -1,6 +1,6 @@
 # Phase 1 — Contracts
 
-**Completion: 85% (17 / 20 tasks), plus 3 partial (S-1.2, S-1.18’s measurement, S-1.20’s re-plan trigger). S-1.19 is the last one open.**
+**Completion: 85% (17 / 20 tasks), plus 4 partial (S-1.2, S-1.18’s measurement, S-1.19’s durability and per-tool migration, S-1.20’s re-plan trigger). Nothing is `NOT STARTED`.**
 
 > Status 2026-09-15, track 1. The three contracts the other Set S phases wait on now exist:
 > `ToolSpec`/`ToolResult` (`crates/mcp-server/src/spec.rs`), the generated taxonomy and
@@ -649,7 +649,56 @@ the calibrated factor is the p90 ratio and the `budget` suite reports an over-es
 **Traces:** AGENT-005 §2.2, §7; §10.4.
 
 ### S-1.19 The error contract, and not writing twice — M
-`NOT STARTED`
+`PARTIAL` 2026-09-15 — the contract is closed and enforced; the durable half of idempotency is
+not built, and the per-tool migration is not started.
+
+**A free-text error code fails the build.** `ERROR_CODES` is the closed set, and
+`every_error_code_this_crate_constructs_is_declared` scans the crate's own production source for
+`ToolError::new(` and rejects any code not in it — including a *computed* one, which is the
+version of this hole that a string-literal check would miss. The scan reads production code only:
+its own source contains the string it searches for, and the fixtures below construct
+deliberately-invalid codes to prove the shape check rejects them.
+
+**A write replayed with the same key acts once.** `crates/mcp-server/src/idempotency.rs` derives
+the key from `(run_id, step, tool, canonical(arguments))`. `step` is in the key deliberately —
+placing the same order twice is what a trader means when they do it twice, so collapsing across
+steps would drop an intended repeat, while collapsing within one catches exactly the retry,
+reconnect or resumed dispatch where the repeat was never intended.
+
+The replay check sits **ahead of the call gate** (ADR-I-16). Behind it, a replay would spend a
+call budget, register a second trial and reach a handler, and still be called idempotent. Reads
+are excluded: `Risk::Read` is idempotent by definition, and a read whose answer *changed* between
+two calls is information the run wants. Only successes are recorded — replaying an error would
+turn one transient failure into a permanent one for the rest of the run.
+
+The canonicaliser is a **mirror** of `jobs::manifest::canonical` rather than a dependency, because
+`crates/jobs` pulls `sqlx`, `ledger` and `storage` — the same trade `spec::Envelope` already
+makes. It is held to the original by `canonical_json_agrees` in `crates/invariants`, which
+**caught a real divergence on its first run**: `jobs` deviates from RFC 8785 on integral floats,
+its output is already hashed into stored manifests, and correcting it would invalidate every
+recorded hash. The mirror follows `jobs`, the deviation is tested rather than assumed, and the
+decision is **OQ-14** (ADR-I-13, ADR-I-14).
+
+**A non-retryable error consumes no retry budget.** It never did — a tool error is an observation
+— but nothing said so and nothing read the flag. The flag now decides what the model is *told*,
+and the bound is S-1.20's breaker rather than the retry budget (ADR-I-17). That division is the
+point: the retry budget governs how many times the MODEL may be corrected, the breaker governs how
+long the run tolerates a TOOL that does not work, and charging a platform failure to the model's
+allowance is how a run ends unable to answer because the platform was broken. An untyped error
+yields `None` and the harness invents nothing.
+
+Verified by `every_declared_error_code_is_shaped_like_a_code`,
+`every_error_code_this_crate_constructs_is_declared`, the seven tests in `idempotency.rs`
+(including `a_replayed_key_returns_the_original_result_and_does_not_act_again`, which counts the
+actions), the three in `canonical_json_agrees`, and
+`a_non_retryable_tool_error_spends_no_retry_budget` /
+`a_non_retryable_error_tells_the_model_not_to_repeat_it` in the harness.
+
+**Two halves are not done and are not claimed.** The record is **in-memory and per-context**, so
+an in-run retry and a reconnect are covered and a **post-crash resume is not** — that needs a
+table and a write on the dispatch path, and belongs with run persistence. And the **per-tool
+migration to typed errors has not started**: the contract, the closed set and the enforcement
+exist, and most of the catalogue still returns untyped errors. **That is why this is `PARTIAL`.**
 
 Half of what a model learns it learns from being told no, and the error shape was never
 specified — the UI already renders `error.code — error.fix` while every new tool invents its

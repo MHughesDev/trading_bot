@@ -312,6 +312,21 @@ impl Repeat {
     }
 }
 
+/// The `retryable` flag a typed tool error carries, if it carries one.
+///
+/// `None` for an untyped error, and that is the honest reading: a tool that has not
+/// been migrated to the typed shape has said nothing about whether retrying helps,
+/// and inventing an answer either way would be worse than saying nothing. Most of
+/// the catalogue is in that state — the typed contract is `ToolError` in
+/// `crates/mcp-server` and the migration is per-tool.
+fn retryable_flag(detail: &str) -> Option<bool> {
+    let parsed: Value = serde_json::from_str(detail).ok()?;
+    parsed
+        .pointer("/error/retryable")
+        .or_else(|| parsed.pointer("/retryable"))
+        .and_then(Value::as_bool)
+}
+
 /// Tokens that look like machine-generated handles rather than words.
 ///
 /// Length 8 or more, made of identifier characters, and containing at least one digit.
@@ -2816,8 +2831,26 @@ impl Loop {
                 entry.failed = true;
             }
         }
+        // `retryable` decides what the model is told, and nothing else (§2.4a,
+        // S-1.19). A tool error has never spent the retry budget — the budget is for
+        // replies the harness rejected, and a tool failing is an observation — but
+        // `retryable: false` is the tool saying "this exact call will fail again",
+        // and repeating it is the waste this field exists to prevent.
+        //
+        // The bound is the breaker above, not the retry budget. That division is the
+        // point: the retry budget governs how many times the MODEL may be corrected,
+        // and the breaker governs how long the run tolerates a TOOL that does not
+        // work. Charging a platform failure to the model's allowance is how a run
+        // ends unable to answer because the platform was broken.
+        let advice = match retryable_flag(detail) {
+            Some(false) => {
+                " This will fail again with these arguments. Change them, or use a                  different tool."
+            }
+            Some(true) => " This may be transient; one more attempt is reasonable.",
+            None => "",
+        };
         self.observe(
-            Tagged::system("harness", format!("{name} failed: {detail}")),
+            Tagged::system("harness", format!("{name} failed: {detail}{advice}")),
             200,
             None,
         );

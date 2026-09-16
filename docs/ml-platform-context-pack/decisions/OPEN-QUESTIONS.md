@@ -124,3 +124,17 @@ Write here instead of guessing. One entry per question. Keep working on unrelate
 **Options:** A. Leave it — nothing reaches paper, so nothing accumulates the years honestly. B. Lower `strict_v1` — forbidden (immutable) and wrong. C. A second profile for paper deployment only.
 **Decision:** **C** (ADR-P2-14): `paper_v1` = `strict_v1` minus the five-year calendar floor (MinBTL(N_eff) and ≥ 300 events kept) and minus Gate 16 (it cannot authorise capital). Live capital requires `strict_v1`, unchanged. The two are non-comparable by mechanism (built, AT-29). This is the spec's own remedy — "changing thresholds creates a new profile" — applied to a *purpose*, not a relaxation.
 **Status:** answered 2026-09-14.
+
+### OQ-14 · `jobs::manifest::canonical` deviates from RFC 8785 on integral floats, and its output is already hashed. Fix it, or pin the deviation?
+**Context:** found 2026-09-15 by `canonical_json_agrees`, the reconciliation test added with S-1.19 — on its first run, which is what the test is for. RFC 8785 renders numbers by ECMAScript `Number::toString`, under which `1.0` is `"1"`, so `{"n": 1}` and `{"n": 1.0}` are one JSON value and must canonicalise identically. `serde_json` renders them `"1"` and `"1.0"`, and `jobs` takes that as-is.
+
+**What it costs:** two callers that spell the same number differently get two different hashes for the same object. For a job manifest that means a duplicate job; for an idempotency key (S-1.19) it means a write that happens twice. Both are narrow — a schema types its fields, so a field is an integer or it is not, and nothing currently round-trips a number through a float and back — but neither is impossible.
+
+**Options.**
+**A. Fix `jobs`.** Correct by the RFC. It changes the canonical form of every job manifest, so every recorded manifest hash stops matching — the same failure shape as the sqlx migration-checksum divergence that produced `.gitattributes`, and that one cost a day.
+**B. Pin the deviation and mirror it.** `crates/mcp-server`'s copy renders numbers exactly as `jobs` does, the reconciliation test holds them equal, and the deviation is documented at `idempotency::canonical_number` with a test that asserts `1` and `1.0` differ — so a change to either side is loud.
+**C. Fix `jobs` behind a version field.** Manifests gain a canonicalisation version; old hashes verify under v1, new ones under v2. Correct and costly: a column, a migration, and a branch in the verifier for a defect nothing has yet hit.
+
+**Decision:** **B for now**, taken because a mirror that disagrees with its original is worse than either version of the original, and because A's blast radius is every stored manifest. Recorded rather than closed: C is the right answer if a number ever does arrive both ways, and the test that asserts the deviation is what will say so.
+
+**Status:** open — decision B in force, revisit if a duplicate key is ever observed.

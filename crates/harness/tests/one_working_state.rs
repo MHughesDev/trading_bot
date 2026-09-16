@@ -987,3 +987,97 @@ fn a_frontier_profile_gets_no_examples() {
     let fx = l.next(Input::Admission(Admission::Admit));
     assert!(!prompt(&fx).contains("WORKED EXAMPLES"));
 }
+
+// ── S-1.19: a wrong call is corrected, not retried ──────────────────────────
+
+/// A tool error spends no retry budget, whatever it says.
+///
+/// The division is the point. The retry budget governs how many times the MODEL
+/// may be corrected; the breaker governs how long the run tolerates a TOOL that
+/// does not work. Charging a platform failure to the model's allowance is how a
+/// run ends unable to answer because the platform was broken — measured once as a
+/// degraded-tier session that called one tool eleven times and died with its
+/// budget spent on the platform's mistake.
+#[test]
+fn a_non_retryable_tool_error_spends_no_retry_budget() {
+    let (mut l, _) = started();
+
+    // Two typed, non-retryable failures. Neither is a retry.
+    for i in 0..2 {
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"get_bars"}"#.into(),
+        });
+        l.next(Input::ModelReply {
+            raw: format!(r#"{{"instrument":"BTC-USD","nonce":{i}}}"#),
+        });
+        let fx = l.next(Input::ToolError {
+            detail: r#"{"error":{"code":"invalid_request","message":"no such instrument","fix":"name one from list_instruments","retryable":false}}"#.into(),
+        });
+        assert!(
+            !fx.iter().any(|e| matches!(e, Effect::Done(_))),
+            "a tool failing is an observation, not the end of the run"
+        );
+    }
+
+    // The budget was never touched, so a genuine SEMANTIC rejection still has its
+    // full allowance and is corrected rather than fenced.
+    //
+    // A semantic one deliberately: a schema violation under a grammar fences by
+    // design, because the sampler could not have produced it and that says
+    // something about the backend rather than about the model. A fabricated
+    // citation is the model being wrong, which is what the retry budget is for.
+    l.next(Input::ModelReply {
+        raw: r#"{"name":"record_finding"}"#.into(),
+    });
+    let fx = l.next(Input::ModelReply {
+        raw: r#"{"finding":"BTC-USD has 500 bars","evidence":"run_deadbeef01"}"#.into(),
+    });
+    assert!(
+        !fx.iter().any(|e| matches!(e, Effect::Done(_))),
+        "the retry budget is intact, so the model is corrected rather than fenced: {fx:?}"
+    );
+    assert!(
+        fx.iter().any(|e| matches!(
+            e,
+            Effect::Note(harness::drive::Note::Rejected { .. })
+        )),
+        "and the correction is the thing it gets: {fx:?}"
+    );
+}
+
+/// And the flag reaches the model, because being told "this will fail again" is
+/// the whole reason a tool declares it.
+#[test]
+fn a_non_retryable_error_tells_the_model_not_to_repeat_it() {
+    let (mut l, _) = started();
+    l.next(Input::ModelReply {
+        raw: r#"{"name":"get_bars"}"#.into(),
+    });
+    l.next(Input::ModelReply {
+        raw: r#"{"instrument":"NOPE"}"#.into(),
+    });
+    let fx = l.next(Input::ToolError {
+        detail: r#"{"error":{"code":"invalid_request","message":"no such instrument","fix":"name one from list_instruments","retryable":false}}"#.into(),
+    });
+    let typed = prompt(&fx);
+    assert!(
+        typed.contains("This will fail again with these arguments"),
+        "the advice reaches the prompt: {typed}"
+    );
+
+    // An untyped error says nothing about retrying, and the harness does not
+    // invent an answer — most of the catalogue is still untyped.
+    let (mut l2, _) = started();
+    l2.next(Input::ModelReply {
+        raw: r#"{"name":"get_bars"}"#.into(),
+    });
+    l2.next(Input::ModelReply {
+        raw: r#"{"instrument":"NOPE"}"#.into(),
+    });
+    let fx = l2.next(Input::ToolError {
+        detail: "http_500".into(),
+    });
+    let untyped = prompt(&fx);
+    assert!(!untyped.contains("This will fail again"));
+    assert!(!untyped.contains("may be transient"));
+}

@@ -638,6 +638,42 @@ pub struct ToolError {
 /// §2.4a: errors obey the output budget — no stack traces, no SQL.
 pub const MAX_ERROR_BYTES: usize = 400;
 
+/// Every error code this crate may return (§2.4a, S-1.19).
+///
+/// Closed, so a harness can route on a code and an eval can assert on one. The
+/// alternative is what the UI already renders around: `error.code — error.fix`,
+/// with every new tool inventing its own spelling of "bad argument", and nothing
+/// downstream able to tell two failures apart or two spellings together.
+///
+/// A code added here is a deliberate act. A code that reaches a caller without
+/// being here fails `every_error_code_is_declared`, which reads the source of this
+/// crate — so the way to add one is to add it, not to write a string.
+pub const ERROR_CODES: &[&str] = &[
+    // The gate, before any handler runs.
+    "call_budget_exhausted",
+    "trial_registration_failed",
+    "trial_registration_unavailable",
+    // Dispatch.
+    "tool_deprecated",
+    "unknown_tool",
+    // The audit envelope.
+    "audit_unavailable",
+];
+
+/// Whether a string is shaped like a code rather than like a sentence.
+///
+/// `snake_case`, short enough to read in a log line, and long enough to mean
+/// something. A message is prose and belongs in `message`; a code is a routing
+/// decision and belongs here.
+#[must_use]
+pub fn is_code_shaped(code: &str) -> bool {
+    !code.is_empty()
+        && code.len() <= 48
+        && code
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
 impl ToolError {
     #[must_use]
     pub fn new(code: &'static str, message: impl Into<String>, fix: impl Into<String>) -> Self {
@@ -902,18 +938,84 @@ mod tests {
     /// a harness routes on; a sentence is not routable.
     #[test]
     fn an_error_code_is_snake_case_and_short() {
-        fn ok(code: &str) -> bool {
-            !code.is_empty()
-                && code.len() <= 48
-                && code
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        }
-        assert!(ok("window_exceeds_coverage"));
-        assert!(!ok("Invalid argument"), "free text is not a routable code");
-        assert!(!ok(
+        assert!(is_code_shaped("window_exceeds_coverage"));
+        assert!(
+            !is_code_shaped("Invalid argument"),
+            "free text is not a routable code"
+        );
+        assert!(!is_code_shaped(
             "the window you asked for exceeds the coverage we have on file"
         ));
-        assert!(!ok(""));
+        assert!(!is_code_shaped(""));
+    }
+
+    /// Every declared code is shaped like one. This is the cheap half.
+    #[test]
+    fn every_declared_error_code_is_shaped_like_a_code() {
+        for code in ERROR_CODES {
+            assert!(is_code_shaped(code), "{code} is not a routable code");
+        }
+        let mut sorted = ERROR_CODES.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            ERROR_CODES.len(),
+            "a code is declared twice, so two failures render as one"
+        );
+    }
+
+    /// And the half that matters: a code CONSTRUCTED anywhere in this crate is a
+    /// declared one. A free-text code fails here, which is the build.
+    ///
+    /// Read from the source rather than exercised, because reaching every error
+    /// path needs a live platform for all of them — and the property is about
+    /// what the source is allowed to contain, which is exactly what a scan can
+    /// answer.
+    #[test]
+    fn every_error_code_this_crate_constructs_is_declared() {
+        // Every file that can build one. Named rather than globbed: a new file
+        // that constructs errors has to be added here, which is the moment to
+        // notice it is doing so.
+        const SOURCES: &[(&str, &str)] = &[
+            ("spec.rs", include_str!("spec.rs")),
+            ("lib.rs", include_str!("lib.rs")),
+            ("gate.rs", include_str!("gate.rs")),
+        ];
+        let mut undeclared: Vec<String> = Vec::new();
+        for (file, src) in SOURCES {
+            // Production code only, and this file most of all: the scan's own
+            // source contains the string it searches for, and the fixtures below
+            // construct deliberately-invalid codes to prove the shape check
+            // rejects them. Counting either would make the test fail on itself.
+            let src = src.replace("\r\n", "\n");
+            let src = match src.find("\n#[cfg(test)]") {
+                Some(i) => src[..i].to_string(),
+                None => src,
+            };
+            for (i, _) in src.match_indices("ToolError::new(") {
+                let rest = &src[i + "ToolError::new(".len()..];
+                // The code is the first string literal after the paren, whether it
+                // is on that line or the next.
+                let Some(open) = rest.find('"') else { continue };
+                // Anything but whitespace between them means this is not a literal
+                // code — a variable, say — and that is itself a violation.
+                let gap = &rest[..open];
+                if !gap.trim().is_empty() {
+                    undeclared.push(format!("{file}: a computed error code"));
+                    continue;
+                }
+                let after = &rest[open + 1..];
+                let Some(close) = after.find('"') else { continue };
+                let code = &after[..close];
+                if !ERROR_CODES.contains(&code) {
+                    undeclared.push(format!("{file}: `{code}`"));
+                }
+            }
+        }
+        assert!(
+            undeclared.is_empty(),
+            "error codes constructed but not declared in ERROR_CODES: {undeclared:?}.              Add them there — a code nothing can route on is a sentence."
+        );
     }
 }

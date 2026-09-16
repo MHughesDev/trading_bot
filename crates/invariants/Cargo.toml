@@ -15,6 +15,9 @@ regex = "1"
 ledger = { workspace = true }
 serde_json = { workspace = true }
 mcp-server-lib = { workspace = true }
+# For the canonical-JSON reconciliation:  mirrors 
+# rather than depending on it (sqlx, ledger, storage), so the two are asserted equal here.
+jobs = { workspace = true }
 sqlx = { workspace = true }
 tokio = { workspace = true }
 clickhouse = { workspace = true }
