@@ -208,7 +208,9 @@ two-turn test; the user can delete a preference and the next brief omits it.
 
 The current view (`by_kind`, `for_subject`) excludes anything superseded, so one profile per instrument reaches the brief while the history stays queryable through `get`: retained and shown are different things. Both writes are one transaction with the replacement first, asserted by a succession the database refuses — half a succession shows either two profiles or none.
 
-**What keeps it `PARTIAL`**: the schedule. Nothing runs the profiler weekly per initialised asset; the job kind exists and no scheduler enqueues it.
+**Both acceptance clauses are now met and asserted.** The first — "the profiler spends no trial" — holds by construction: `JobKind::counts_trial` is the single place the platform decides and the counting happens inside the submission transaction, so a profiler that spent one could not do it quietly. `the_instrument_profiler_spends_no_trial` asserts it anyway, because it is cheap to lose by accident and expensive when lost, and a companion test pins the whole counting set so adding to it reads as the decision it is rather than a refactor.
+
+**What is described but not in the acceptance, and remains unbuilt**: the schedule. Nothing enqueues the profiler weekly per initialised asset — the job kind exists, the supersession it needs exists, and no scheduler fires it. Recorded as a gap rather than folded into the acceptance, since the acceptance does not ask for it.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
