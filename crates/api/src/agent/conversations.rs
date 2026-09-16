@@ -254,17 +254,26 @@ pub async fn turns(pg: &PgPool, conversation_id: Uuid) -> Result<Vec<Turn>, Conv
 pub async fn next_turn(
     pg: &PgPool,
     conversation_id: Uuid,
-) -> Result<(i32, bool), ConversationError> {
-    let row: Option<(Option<i32>, Option<i64>)> = sqlx::query_as(
-        "SELECT MAX(turn_index), COUNT(*) FILTER (WHERE status = ANY($2))
+) -> Result<(i32, Option<Uuid>), ConversationError> {
+    // The live run's **id**, not a boolean (AGENT-010 §4.1, S-2.14).
+    //
+    // A caller told "this conversation is still working" and nothing else cannot go
+    // and look at it, cannot stop it, and cannot tell a genuinely running turn from
+    // a stale row left by a crash. The id answers all three, and it costs the same
+    // query.
+    let row: Option<(Option<i32>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT MAX(turn_index),
+                (SELECT run_id FROM agent_runs
+                  WHERE conversation_id = $1 AND status = ANY($2)
+                  ORDER BY created_at DESC LIMIT 1)
            FROM agent_runs WHERE conversation_id = $1",
     )
     .bind(conversation_id)
     .bind(ACTIVE_RUN_STATES)
     .fetch_optional(pg)
     .await?;
-    let (max, active) = row.unwrap_or((None, Some(0)));
-    Ok((max.unwrap_or(-1) + 1, active.unwrap_or(0) > 0))
+    let (max, live) = row.unwrap_or((None, None));
+    Ok((max.unwrap_or(-1) + 1, live))
 }
 
 pub async fn touch(pg: &PgPool, conversation_id: Uuid) {

@@ -1305,3 +1305,106 @@ fn both_transports_ask_the_world_for_the_same_things() {
         "and the run actually got somewhere: {native:?}"
     );
 }
+
+// ── S-2.14: steering ────────────────────────────────────────────────────────
+
+/// A redirection re-plans and **keeps the findings**.
+///
+/// The split is the design. A finding was true about the *data*, and changing the
+/// question does not make it false — throwing findings away on every steer would
+/// teach the user not to steer. The plan is the opposite: it was built for the old
+/// question, and every remaining step serves it.
+#[test]
+fn a_redirection_replans_and_keeps_what_was_established() {
+    use harness::state::GoalKind;
+
+    let (mut l, _) = started();
+    step(&mut l, 0, "{\"bars\": 500}");
+    l.next(Input::ModelReply {
+        raw: r#"{"name":"record_finding"}"#.into(),
+    });
+    l.next(Input::ModelReply {
+        raw: r#"{"finding":"BTC-USD has 500 bars at 1h","evidence":"get_bars"}"#.into(),
+    });
+    assert_eq!(l.working().findings.len(), 1, "one thing established");
+
+    let fx = l.next(Input::Steer {
+        text: "actually, forget BTC — do the same for ETH-USD".into(),
+    });
+
+    assert_eq!(
+        l.working().findings.len(),
+        1,
+        "the finding survives: it was true about the data, not about the goal"
+    );
+    assert!(
+        l.working().goal.contains("ETH-USD"),
+        "and the goal is the new one: {}",
+        l.working().goal
+    );
+    assert!(
+        l.working().plan.is_empty(),
+        "while the plan, which served the old question, is dropped"
+    );
+    assert_eq!(l.working().kind, GoalKind::Lookup, "and re-classified");
+
+    // The old goal and the reason survive, so the run can say what it was doing.
+    assert!(
+        l.working()
+            .decided
+            .iter()
+            .any(|d| d.question.contains("momentum") && d.reason.contains("redirected")),
+        "the old goal and why it changed are on the card: {:?}",
+        l.working().decided
+    );
+    assert!(fx.iter().any(|e| matches!(e, Effect::CallModel(_))));
+}
+
+/// A constraint narrows without re-planning. Re-planning a healthy run because the
+/// user said "only 1h" costs a step and loses the plan for nothing.
+#[test]
+fn a_constraint_narrows_without_dropping_the_plan() {
+    use harness::state::Steer;
+    assert_eq!(Steer::classify("only use 1h bars"), Steer::Constraint);
+    assert_eq!(Steer::classify("focus on BTC-USD"), Steer::Constraint);
+    assert_eq!(Steer::classify("just use the coinbase data"), Steer::Constraint);
+
+    let (mut l, _) = started();
+    let goal = l.working().goal.clone();
+    l.next(Input::Steer {
+        text: "only use 1h bars".into(),
+    });
+    assert_eq!(l.working().goal, goal, "same question, smaller");
+}
+
+/// Ambiguity resolves to `Redirection`, and the asymmetry is the whole design: an
+/// unnecessary re-plan costs one step, and a missed one costs a run aimed at the
+/// wrong question.
+#[test]
+fn an_ambiguous_steer_is_read_as_a_redirection_and_says_so() {
+    use harness::state::Steer;
+
+    let odd = "what about volatility clustering";
+    assert_eq!(Steer::classify(odd), Steer::Redirection);
+    let correction = Steer::Redirection.correction(odd);
+    assert!(
+        correction.contains("If this was only a narrowing"),
+        "the model is told which reading was taken, so a wrong call is one sentence \
+         to correct rather than something to discover at the end: {correction}"
+    );
+    assert!(
+        correction.contains("findings so far are KEPT"),
+        "and told the findings survive, or it will re-derive them: {correction}"
+    );
+}
+
+/// A comment has to be recognised, not defaulted to. Treating "looking good" as a
+/// redirection would re-plan a healthy run.
+#[test]
+fn encouragement_is_not_a_new_goal() {
+    use harness::state::Steer;
+    for text in ["looking good", "nice, keep going", "thanks", "how's it going"] {
+        assert_eq!(Steer::classify(text), Steer::Comment, "{text}");
+    }
+    assert_eq!(Steer::classify("   "), Steer::Comment, "silence is not a steer");
+}

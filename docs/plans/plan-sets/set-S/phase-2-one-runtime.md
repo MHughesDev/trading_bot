@@ -1,6 +1,6 @@
 # Phase 2 — One runtime
 
-**Completion: 31% (5 / 16 tasks), plus 5 partial (S-2.5, S-2.6, S-2.8, S-2.11, S-2.16).**
+**Completion: 31% (5 / 16 tasks), plus 6 partial (S-2.5, S-2.6, S-2.8, S-2.11, S-2.14, S-2.16).**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
@@ -510,7 +510,40 @@ covers both transports.
 **Traces:** AGENT-005 §6.4; §10.6.
 
 ### S-2.14 Steering that changes the goal; one live turn per conversation — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — both halves are built; nothing delivers a steer to a running loop yet.
+
+**Steering.** `state::Steer::classify` reads a mid-run message deterministically, before any
+model call — a steer that needed a model call to interpret would cost a step to read and could
+be misread, and what is being interpreted is a sentence the user just typed.
+
+Ambiguity resolves to `Redirection`, and the asymmetry is the whole design: an unnecessary
+re-plan costs one step, a missed one costs a run aimed at the wrong question. `Comment` is
+therefore the narrow case and has to be *recognised* — treating "looking good" as a redirection
+would re-plan a healthy run. The model is told which reading was taken, so a wrong call is one
+sentence to correct rather than something to discover at the end.
+
+A redirection **keeps the findings and drops the plan**, and that split is the point. A finding
+was true about the *data*, and changing the question does not make it false; throwing findings
+away on every steer would teach the user not to steer. The plan is the opposite — it was built
+for the old question and every remaining step serves it. The old goal and the reason go into
+`decided`, so the run can say what it was doing and why it stopped, and so that re-asking the old
+question is answered by §3.6's correction rather than by starting over.
+
+A steer is accepted in **any non-terminal state**. One that only landed between steps would
+arrive after the step it was meant to stop.
+
+**One live turn per conversation** was already enforced at the manager; what was missing is that
+the rejection now **names the run**. All three things a caller can do about it — watch it, stop
+it, or decide it is stale — need the id, and "this conversation is still working" gives them
+none of them.
+
+Verified by `a_redirection_replans_and_keeps_what_was_established`,
+`a_constraint_narrows_without_dropping_the_plan`,
+`an_ambiguous_steer_is_read_as_a_redirection_and_says_so` and
+`encouragement_is_not_a_new_goal`.
+
+**Not done:** no route or driver path delivers `Input::Steer` to a running loop. The loop accepts
+it, classifies it correctly and acts on it; nothing sends one. **That is why this is `PARTIAL`.**
 
 A steer is classified deterministically as Constraint (narrow, keep the plan), Redirection
 (re-classify, rewrite acceptance, skip remaining steps with a reason, re-plan — **keeping

@@ -370,6 +370,96 @@ pub struct Correction {
     pub step: u32,
 }
 
+/// What a mid-run message from the user is asking for (AGENT-008 §3.4a,
+/// Set S task S-2.14).
+///
+/// Classified **deterministically**, before any model call. A steer that needed a
+/// model call to interpret would cost a step to read and could be misread, and the
+/// thing being interpreted is a sentence the user just typed — the cheapest possible
+/// input to be careful with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Steer {
+    /// Narrows the existing goal. The plan stands.
+    Constraint,
+    /// Changes what is being asked. Re-classify, rewrite acceptance, abandon the
+    /// remaining steps with a reason, re-plan — and **keep the findings**, which
+    /// were true about the data rather than about the goal.
+    Redirection,
+    /// Neither. Encouragement, a question about progress, thinking aloud.
+    Comment,
+}
+
+impl Steer {
+    /// Read a steer from what the user actually wrote.
+    ///
+    /// **Ambiguity resolves to `Redirection`,** and the asymmetry is the whole
+    /// design: an unnecessary re-plan costs one step, and a missed one costs a run
+    /// aimed at the wrong question. The model is told which reading was taken, so a
+    /// wrong call is one sentence to correct rather than something to discover at
+    /// the end.
+    ///
+    /// `Comment` is the narrow case and has to be *recognised*, not defaulted to —
+    /// treating "looking good" as a redirection would re-plan a healthy run, and
+    /// treating a redirection as a comment is the failure this exists to prevent.
+    #[must_use]
+    pub fn classify(text: &str) -> Self {
+        let t = text.trim().to_lowercase();
+        if t.is_empty() {
+            return Steer::Comment;
+        }
+        let has = |words: &[&str]| words.iter().any(|w| t.contains(w));
+
+        // A redirection names a different subject or revokes the current one.
+        if has(&[
+            "instead", "actually", "forget", "never mind", "nevermind", "stop and",
+            "change to", "switch to", "different question", "not what i", "i meant",
+            "new goal", "rather than", "drop that", "abandon",
+        ]) {
+            return Steer::Redirection;
+        }
+        // A constraint narrows: same question, smaller. These are checked BEFORE the
+        // comment words, because "just use 1h" contains "just" and is not a comment.
+        if has(&[
+            "only ", "just use", "restrict", "limit it", "narrow", "focus on",
+            "stick to", "use the ", "on 1h", "on 4h", "exclude", "ignore the ",
+            "without ",
+        ]) {
+            return Steer::Constraint;
+        }
+        // A comment has to look like one. Deliberately the smallest list here.
+        if has(&[
+            "looking good", "nice", "thanks", "ok", "okay", "sounds good", "keep going",
+            "carry on", "how is it going", "how's it going", "what are you doing",
+        ]) {
+            return Steer::Comment;
+        }
+        // Everything else. See the doc comment: this is the cheap error.
+        Steer::Redirection
+    }
+
+    /// What the loop tells the model it decided, so a wrong reading is one sentence
+    /// to correct rather than something to find out about at the end.
+    #[must_use]
+    pub fn correction(self, text: &str) -> String {
+        match self {
+            Steer::Constraint => format!(
+                "The user narrowed the task: \"{text}\". Same goal, smaller. \
+                 Keep the plan and apply the constraint from here."
+            ),
+            Steer::Redirection => format!(
+                "The user changed the task: \"{text}\". Re-plan for the new \
+                 question. Your findings so far are KEPT - they were true about the data, \
+                 not about the goal - but the remaining plan steps are abandoned. If this \
+                 was only a narrowing and not a change, say so and carry on."
+            ),
+            Steer::Comment => {
+                format!("The user said: \"{text}\". Nothing to change. Carry on.")
+            }
+        }
+    }
+}
+
 /// A choice this run has already made, and why (§3.6).
 ///
 /// Re-asking a decided question is the dominant waste in the local traces:

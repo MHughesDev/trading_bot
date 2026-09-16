@@ -254,13 +254,15 @@ impl AgentManager {
         // One turn at a time. Two agents on one thread would interleave their tool
         // calls and their notes in one workspace, and the transcript would stop being
         // a sequence anyone could read.
-        let (turn_index, already_running) = conversations::next_turn(&self.pg, conversation_id)
+        let (turn_index, live_run) = conversations::next_turn(&self.pg, conversation_id)
             .await
             .map_err(|e| StartError::Internal(e.to_string()))?;
-        if already_running {
-            return Err(StartError::InvalidRequest(
-                "this conversation is still working — wait for it, or stop it first".into(),
-            ));
+        if let Some(run_id) = live_run {
+            // Named, because the three things a caller can do about this all need
+            // the id: look at it, stop it, or decide it is stale (S-2.14).
+            return Err(StartError::InvalidRequest(format!(
+                "this conversation is still working on run {run_id} — watch it, or stop it                  first. Two turns in one conversation would share a workspace with no lock,                  and two working states for one goal is not something the desk can render."
+            )));
         }
 
         let provider = Provider::from_str(&convo.provider).map_err(StartError::InvalidRequest)?;

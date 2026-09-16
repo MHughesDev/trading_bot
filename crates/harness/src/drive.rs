@@ -64,6 +64,7 @@ use crate::registry::{
     self, Risk, ToolRegistry, FINISH_TASK, RECORD_FINDING, REFLECT, SEARCH_TOOLS,
 };
 use crate::state::{
+    Steer,
     BudgetView, Correction, Detail, FindingRef, GoalKind, Mode as RunMode, PlannedStep, StepKind,
     StepStatus, WorkingState,
 };
@@ -437,6 +438,12 @@ pub enum Input {
     ModelError { detail: String, retryable: bool },
     /// A human answered a pending approval.
     Approval { granted: bool, note: String },
+    /// The user said something mid-run (§3.4a, S-2.14).
+    ///
+    /// Its own input rather than a second goal, because a steer arrives *while the
+    /// loop is working* and what it means depends on what the loop is doing: the
+    /// same sentence is a constraint on one plan and a redirection of another.
+    Steer { text: String },
     /// A tool finished. `source` feeds provenance classification.
     ToolResult { output: String, source: String },
     /// A tool failed. Handed to the model — a failing tool is information, not a
@@ -1087,6 +1094,12 @@ impl Loop {
             (State::AwaitingApproval, Input::Approval { granted, note }) => {
                 self.on_approval(granted, &note, &mut fx);
             }
+
+            // A steer is accepted in ANY non-terminal state (§3.4a, S-2.14). The
+            // user did not wait for a convenient moment and should not have to: a
+            // steer that only landed between steps would be a steer that arrives
+            // after the step it was meant to stop.
+            (_, Input::Steer { text }) => self.on_steer(&text, &mut fx),
 
             (State::Executing, Input::ToolResult { output, source }) => {
                 self.on_tool_result(&output, &source, &mut fx);
@@ -2378,6 +2391,58 @@ impl Loop {
         self.render(fx);
     }
 
+    /// The user said something mid-run (§3.4a, S-2.14).
+    ///
+    /// Classified deterministically, before any model call: a steer that needed a
+    /// model call to interpret would cost a step to read and could be misread, and
+    /// what is being interpreted is a sentence the user just typed.
+    ///
+    /// A **redirection keeps the findings and drops the plan.** That split is the
+    /// design: a finding was true about the *data*, and changing the question does
+    /// not make it false — throwing findings away on every steer would teach the user
+    /// not to steer. The plan is the opposite: it was built for the old question and
+    /// every remaining step serves it.
+    ///
+    /// The old goal and the reason go into `decided`, so the run can say what it was
+    /// doing before and why it stopped — and so that re-asking the old question is
+    /// answered by §3.6's correction rather than by starting over.
+    fn on_steer(&mut self, text: &str, fx: &mut Vec<Effect>) {
+        let steer = Steer::classify(text);
+        fx.push(Effect::Note(Note::CoreTool {
+            name: "steer".to_string(),
+            detail: format!("{steer:?}: {text}"),
+        }));
+
+        match steer {
+            Steer::Comment => {}
+            Steer::Constraint => {
+                // Same question, smaller. The plan stands, and the constraint is
+                // recorded so a later step cannot quietly widen back out.
+                self.working
+                    .decide(format!("constraint: {text}"), "applied", "the user narrowed the task", self.step);
+            }
+            Steer::Redirection => {
+                let old_goal = self.working.goal.clone();
+                self.working.decide(
+                    format!("the goal was: {old_goal}"),
+                    "changed",
+                    format!("the user redirected: {text}"),
+                    self.step,
+                );
+                self.working.goal = text.to_string();
+                self.working.kind = GoalKind::classify(text, &[]);
+                self.working.acceptance = self.working.kind.acceptance_for(text);
+                // The plan served the old question; every remaining step is aimed at
+                // it. Findings are KEPT — see the doc comment.
+                self.working.plan.clear();
+                self.plans_accepted = 0;
+            }
+        }
+
+        self.directive = Some(steer.correction(text));
+        self.render(fx);
+    }
+
     /// Records one established fact and advances the step.
     ///
     /// Held to the SAME evidence standard as `finish_task`: a fabricated id in the
@@ -3012,6 +3077,7 @@ fn input_name(i: &Input) -> &'static str {
         Input::ModelTruncated { .. } => "a truncated model reply",
         Input::ModelError { .. } => "a model error",
         Input::Approval { .. } => "an approval",
+        Input::Steer { .. } => "a steer from the user",
         Input::ToolResult { .. } => "a tool result",
         Input::ToolError { .. } => "a tool error",
         Input::JobAccepted { .. } => "a job handle",
