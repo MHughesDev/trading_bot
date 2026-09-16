@@ -324,7 +324,13 @@ row opens its provenance (run, tool, data window).
 **Traces:** AGENT-012 §7.
 
 ### S-6.19 The catalogue page — M
-`PARTIAL` 2026-09-16 — `Catalogue.tsx` (147 lines) is built and **`/api/catalogue` does not exist** — checked across the whole `crates/api` source, not just the router. The page calls an endpoint nobody serves.
+`DONE` 2026-09-16 — `crates/api/src/routes/desk_catalogue.rs` serves `/api/catalogue` and `/api/catalogue/exposure`.
+
+**The listing was the small half.** `lib/desk/rings.ts` filters every tool surface in the desk on `tool.ring`, refusing to offer a trial-spending tool inside a Chat turn — and **nothing on the server ever assigned a ring**. That is not a missing badge: `RING_INDEX[undefined] <= 0` is `false`, so the filter's real behaviour was decided by which way a comparison against `undefined` happened to fall. `ToolSpec::ring()` now derives it from the risk and envelope a tool already declares, so it cannot disagree with the gate a human sees, and four tests cover both directions plus the reachability of the ring-2 branch.
+
+Derived rather than listed, deliberately: an array of tool names beside the catalogue is the shape `internal_agent_tools` had until S-1.3, and a miss here is worse than silent — a paper-reaching tool absent from the list would report ring 0 and become clickable in a Chat turn.
+
+**Acceptance met.** Simulate-exposure returns the slice the router would choose because it *is* the router: `route_goal` moved into `ToolRegistry` and `drive.rs` calls it, so one implementation serves both. Two copies could only have made that true by inspection, on the page that exists to let someone argue with the router's choices. Reasons are given for the tools that did not make the cut as well, which is the half worth arguing with.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -412,7 +418,11 @@ survives PDF and Markdown export; `model_summary` and `direct_stat` are visually
 **Traces:** AGENT-012 §6.3a; §19.1a.
 
 ### S-6.24 Since you were away — M
-`PARTIAL` 2026-09-16 — `AwayDigest.tsx` (108 lines) is built and **`/api/desk/digest` does not exist**. Same shape as S-6.19.
+`PARTIAL` 2026-09-16 — `crates/api/src/routes/desk_digest.rs` serves `/api/desk/digest`.
+
+Four of the seven line kinds have a source in this deployment and are served: `concluded` from `agent_runs.summary` (the run's own conclusion, falling back to its error and only then to its goal), `approval_defaulted` from timed-out `approval_requests` **naming what defaulted**, `budget` from `llm_usage` summed over the gap, and `waiting` for what is still pending. The under-an-hour rule is implemented and tested, and it returns `absent: true` rather than an empty list — the two render differently and mean different things.
+
+**Three kinds are declared uncovered rather than approximated**, which is what keeps this `PARTIAL`: `finding` and `refuted` need phase 4's memory migrations, which do not exist; `monitor` needs a state-*change* log, and `monitor_lease` / `kill_switch` / `monitor_limits` record current state, so a change inferred by diffing against a guess at the old state would report changes that did not happen. The response carries `kinds_not_covered` with a reason for each, because an empty digest and a blind one look identical and the operator reading it is deciding whether to stop looking. A test asserts every kind in the frontend's union is in exactly one of the two lists.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
