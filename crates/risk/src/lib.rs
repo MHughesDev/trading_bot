@@ -6,6 +6,7 @@ pub mod kill_switch;
 pub mod limits;
 pub mod overrides;
 pub mod rate;
+pub mod strategy_halt;
 pub mod trust_gate;
 
 pub use context::RiskContextProvider;
@@ -13,3 +14,6 @@ pub use gate::{ApprovedOrder, GateContext, InstrumentLimits, Measured, RateSourc
 pub use kill_switch::KillSwitch;
 pub use limits::GlobalRiskLimits;
 pub use rate::{RateCounts, RateKey, RateTracker};
+pub use strategy_halt::{
+    ClearError, DivergenceHalt, DivergenceKind, HaltClearance, HumanActor, StrategyHaltRegistry,
+};

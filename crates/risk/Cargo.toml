@@ -10,6 +10,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 rust_decimal = { workspace = true }
+serde = { workspace = true }
 
 [features]
 test-helpers = []

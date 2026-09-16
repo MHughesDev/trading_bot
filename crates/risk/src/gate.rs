@@ -30,6 +30,7 @@ use crate::{
     limits::{self, GlobalRiskLimits},
     overrides,
     rate::{RateCounts, RateKey, RateTracker},
+    strategy_halt::StrategyHaltRegistry,
     trust_gate,
 };
 
@@ -238,6 +239,10 @@ impl BoundedDecisionCache {
 pub struct RiskGate {
     limits: GlobalRiskLimits,
     kill_switch: Arc<KillSwitch>,
+    /// Per-strategy divergence halts (SC-6, FM-4). Always present — there is no
+    /// construction of a gate without one, so there is no configuration in
+    /// which divergence is not checked.
+    halts: Arc<StrategyHaltRegistry>,
     seen_keys: Mutex<BoundedDecisionCache>,
     /// Order-rate accounting.  Lives inside the gate so the counts cannot be
     /// supplied — and therefore cannot be zeroed — by a call site.
@@ -268,6 +273,7 @@ impl RiskGate {
         Self {
             limits,
             kill_switch,
+            halts: Arc::new(StrategyHaltRegistry::new()),
             seen_keys: Mutex::new(BoundedDecisionCache::new(SEEN_KEYS_CAPACITY)),
             rate: Mutex::new(RateTracker::new()),
         }
@@ -277,6 +283,18 @@ impl RiskGate {
     #[must_use]
     pub fn limits(&self) -> &GlobalRiskLimits {
         &self.limits
+    }
+
+    /// The gate's divergence-halt registry.
+    ///
+    /// `reconciliation` halts through this handle, so the halt is enforced at
+    /// the same chokepoint every order already passes rather than at a second
+    /// one built beside it (SC-2). Deliberately an accessor and not a
+    /// constructor parameter: a gate cannot be built *without* a registry, so
+    /// there is no wiring mistake that silently disables divergence halting.
+    #[must_use]
+    pub fn halt_registry(&self) -> &Arc<StrategyHaltRegistry> {
+        &self.halts
     }
 
     /// Evaluate an `OrderIntent` against all limits.
@@ -291,6 +309,19 @@ impl RiskGate {
         // 1. Kill switch — synchronous fast path; checked before everything else.
         if self.kill_switch.is_active() {
             return Err(RiskRejection::KillSwitchActive);
+        }
+
+        // 1b. Divergence halt for this strategy (SC-6, FM-4) — checked here,
+        //     ahead of the idempotency cache, for the same reason the kill
+        //     switch is: a redelivered intent that was approved before the
+        //     divergence was found must not ride the cached-approval fast path
+        //     out to the venue. This is what "halts *before* the next order"
+        //     means in code.
+        if let Err(halt) = self.halts.admit(intent.strategy_id.as_deref()) {
+            return Err(RiskRejection::StrategyHalted {
+                strategy_id: halt.strategy_id,
+                reason: halt.reason,
+            });
         }
 
         // 2. Idempotency cache — redelivered intents return the prior decision.
@@ -499,6 +530,75 @@ mod tests {
             matches!(err, Err(RiskRejection::KillSwitchActive)),
             "cached-approval must be re-checked against kill switch"
         );
+    }
+
+    fn strategy_intent(instrument_id: &str, strategy_id: &str) -> OrderIntent {
+        OrderIntent::new(
+            instrument_id,
+            Side::Buy,
+            OrderType::Market,
+            domain::money::Size::from_str("1").unwrap(),
+            None,
+            Some(strategy_id.to_owned()),
+        )
+    }
+
+    #[test]
+    fn divergence_halt_blocks_that_strategy_only() {
+        let gate = gate();
+        gate.halt_registry().halt(
+            "sma-cross-1",
+            crate::DivergenceKind::Return,
+            "realised -3.1% vs expected +0.4%",
+        );
+
+        let err = gate.check(strategy_intent("AAPL", "sma-cross-1"), &simple_ctx());
+        assert!(
+            matches!(err, Err(RiskRejection::StrategyHalted { .. })),
+            "a halted strategy must not pass the gate"
+        );
+
+        // A different strategy, and a manual order, are untouched.
+        assert!(gate
+            .check(strategy_intent("AAPL", "other"), &simple_ctx())
+            .is_ok());
+        assert!(gate.check(simple_intent("BTC-USD"), &simple_ctx()).is_ok());
+    }
+
+    #[test]
+    fn divergence_halt_blocks_a_cached_approval() {
+        // The adversarial ordering: the intent was approved and cached, *then*
+        // reconciliation found the divergence, *then* JetStream redelivered.
+        // A cache consulted before the halt would send this order.
+        let gate = gate();
+        let intent = strategy_intent("AAPL", "sma-cross-1");
+        assert!(gate.check(intent.clone(), &simple_ctx()).is_ok());
+
+        gate.halt_registry()
+            .halt("sma-cross-1", crate::DivergenceKind::Position, "1 vs 2");
+
+        let err = gate.check(intent, &simple_ctx());
+        assert!(
+            matches!(err, Err(RiskRejection::StrategyHalted { .. })),
+            "a cached approval must be re-checked against the divergence halt"
+        );
+    }
+
+    #[test]
+    fn a_cleared_halt_lets_the_strategy_resume() {
+        let gate = gate();
+        gate.halt_registry()
+            .halt("sma-cross-1", crate::DivergenceKind::Return, "diverged");
+        gate.halt_registry()
+            .clear(
+                "sma-cross-1",
+                crate::HumanActor::new("mason").unwrap(),
+                "data gap repaired; series agree again",
+            )
+            .unwrap();
+        assert!(gate
+            .check(strategy_intent("AAPL", "sma-cross-1"), &simple_ctx())
+            .is_ok());
     }
 
     #[test]

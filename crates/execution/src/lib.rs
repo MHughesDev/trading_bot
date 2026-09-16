@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use domain::order::{OrderIntent, OrderState, OrderType, Side};
-use fills::{FillEvent, FillProcessor, FillResult};
+use fills::{FillEvent, FillObserver, FillProcessor, FillResult};
 use risk::ApprovedOrder;
 use rust_decimal::Decimal;
 use std::str::FromStr;
@@ -79,6 +79,10 @@ pub struct SyncResult {
 pub struct ExecutionEngine {
     broker: Arc<dyn Broker>,
     fill_processor: std::sync::Mutex<FillProcessor>,
+    /// Told about every newly-applied fill. Set T T-0.1 attaches the
+    /// reconciliation recorder here so forward observations accrue from the
+    /// fill stream itself rather than from a sweep that could miss one.
+    fill_observer: Option<Arc<dyn FillObserver>>,
 }
 
 impl ExecutionEngine {
@@ -86,6 +90,7 @@ impl ExecutionEngine {
         Self {
             broker,
             fill_processor: std::sync::Mutex::new(FillProcessor::new()),
+            fill_observer: None,
         }
     }
 

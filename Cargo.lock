@@ -4154,11 +4154,14 @@ dependencies = [
  "chrono-tz",
  "domain",
  "execution",
+ "ledger",
  "risk",
  "rust_decimal",
+ "sqlx",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4340,6 +4343,7 @@ dependencies = [
  "chrono",
  "domain",
  "rust_decimal",
+ "serde",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

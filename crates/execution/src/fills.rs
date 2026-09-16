@@ -46,8 +46,14 @@ pub enum FillResult {
 /// fill does not fire it again, because an observer that counts a fill twice
 /// reports a forward observation that never happened.
 ///
-/// Observers are notified synchronously and must not block: do the work on
-/// your own task.
+/// Added for Set T task T-0.1: `crates/reconciliation` existed and nothing
+/// called it, so the platform's most expensive unanswered question — does the
+/// simulator tell the truth? — had no input.
+///
+/// Observers are notified synchronously, must not block (do the work on your
+/// own task), and cannot fail: an observer that could fail would need a policy
+/// for what to do when it does, and every such policy either drops evidence or
+/// blocks the execution path.
 pub trait FillObserver: Send + Sync {
     fn on_fill(&self, fill: &FillEvent);
 }

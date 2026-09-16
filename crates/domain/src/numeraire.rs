@@ -442,3 +442,161 @@ mod tests {
         assert_eq!(serde_json::from_str::<Converted>(&s).unwrap(), c);
     }
 }
+
+// ── Comparability (Set T task T-0.1) ─────────────────────────────────────────
+
+/// Two series that are not in the same unit and were about to be compared.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("refusing to compare a {left} series with a {right} one: different numeraires")]
+pub struct NumeraireMismatch {
+    pub left: String,
+    pub right: String,
+}
+
+impl Numeraire {
+    /// Refuse to treat two differently-denominated series as one series.
+    ///
+    /// There is deliberately no conversion here. Converting a *return* series
+    /// between numeraires is not a scalar multiply — it needs the FX path over
+    /// the same bars, and inventing one inside a comparison is how a divergence
+    /// figure becomes a fiction. Converting happens upstream, where the equity
+    /// curve still exists and the rate is a PIT lookup; by the time two return
+    /// series meet, the only honest operation is to check they agree.
+    ///
+    /// A return series is a sequence of dimensionless ratios, which is exactly
+    /// why the unit has to travel beside it: nothing about `0.0031` says whether
+    /// the equity curve it came from was counted in dollars, in Tether, or in
+    /// the base asset.
+    ///
+    /// # Errors
+    /// [`NumeraireMismatch`] when the two differ.
+    pub fn assert_comparable(&self, other: &Numeraire) -> Result<(), NumeraireMismatch> {
+        if self == other {
+            Ok(())
+        } else {
+            Err(NumeraireMismatch {
+                left: self.symbol().to_string(),
+                right: other.symbol().to_string(),
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod comparability_tests {
+    use super::*;
+
+    #[test]
+    fn the_same_numeraire_compares() {
+        assert!(Numeraire::Usd.assert_comparable(&Numeraire::Usd).is_ok());
+    }
+
+    /// The whole point: a dollar-pegged token is not a dollar, and the
+    /// comparison has to say so rather than adding the numbers.
+    #[test]
+    fn a_stablecoin_series_is_not_comparable_with_a_dollar_one() {
+        let err = Numeraire::Usd
+            .assert_comparable(&Numeraire::of("USDT"))
+            .expect_err("USDT is not USD");
+        assert_eq!(err.left, "USD");
+        assert_eq!(err.right, "USDT");
+    }
+
+    /// And two different stablecoins are not each other either. USDC and USDT
+    /// have depegged in opposite directions on the same day.
+    #[test]
+    fn two_stablecoins_are_not_comparable_with_each_other() {
+        assert!(Numeraire::of("USDC")
+            .assert_comparable(&Numeraire::of("USDT"))
+            .is_err());
+    }
+}
+
+/// Renders the venue's own symbol: `USD`, `USDC`, `JPY`.
+///
+/// Deliberately the symbol and not a prettier form. An error message that says
+/// "USD and USDC" is one a reader can act on; one that says "dollars and
+/// dollars" is the bug this module exists to prevent, printed.
+impl std::fmt::Display for Numeraire {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.symbol())
+    }
+}
+
+// ── Storage (Set T, migration 0105) ──────────────────────────────────────────
+
+/// A numeraire the forward-observation tables have no token for.
+///
+/// The schema pins six: `usd`, `usdt`, `usdc`, `eur`, `btc`, `eth`. This type is
+/// deliberately wider than that — a venue can quote in `DAI` or `JPY` and the
+/// domain has to be able to say so — so the narrowing is a real operation that
+/// can fail, and it fails *here*, naming the symbol, rather than as a CHECK
+/// violation from Postgres three layers down with the row already built.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "no forward-observation storage token for numeraire `{symbol}`: migration 0105 accepts      usd, usdt, usdc, eur, btc and eth. Widen the CHECK and this match together, or convert      upstream where the equity curve still exists."
+)]
+pub struct UnstorableNumeraire {
+    pub symbol: String,
+}
+
+impl Numeraire {
+    /// The lowercase token migration 0105's CHECK accepts.
+    ///
+    /// # Errors
+    /// [`UnstorableNumeraire`] for anything outside the schema's six.
+    pub fn as_storage_token(&self) -> Result<&'static str, UnstorableNumeraire> {
+        match self.symbol().to_ascii_uppercase().as_str() {
+            "USD" => Ok("usd"),
+            "USDT" => Ok("usdt"),
+            "USDC" => Ok("usdc"),
+            "EUR" => Ok("eur"),
+            "BTC" => Ok("btc"),
+            "ETH" => Ok("eth"),
+            other => Err(UnstorableNumeraire { symbol: other.to_string() }),
+        }
+    }
+}
+
+/// Parses the storage token, and the venue symbol it came from.
+///
+/// Case-insensitive, because `usd` comes back from Postgres and `USD` comes in
+/// from a venue, and a comparison keyed on equality would otherwise pass for two
+/// series that were never in the same unit.
+impl std::str::FromStr for Numeraire {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Numeraire::of(s))
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn the_schemas_six_round_trip_through_their_tokens() {
+        for token in ["usd", "usdt", "usdc", "eur", "btc", "eth"] {
+            let n = Numeraire::from_str(token).unwrap();
+            assert_eq!(n.as_storage_token().unwrap(), token, "{token}");
+        }
+    }
+
+    /// The failure is named and typed, not a Postgres CHECK violation.
+    #[test]
+    fn a_numeraire_the_schema_has_no_token_for_is_refused_by_name() {
+        let err = Numeraire::of("DAI").as_storage_token().expect_err("DAI is not in the six");
+        assert_eq!(err.symbol, "DAI");
+        assert!(err.to_string().contains("migration 0105"));
+    }
+
+    /// `usd` from Postgres and `USD` from a venue are the same unit.
+    #[test]
+    fn parsing_is_case_insensitive() {
+        assert_eq!(Numeraire::from_str("usd").unwrap(), Numeraire::from_str("USD").unwrap());
+        assert_eq!(Numeraire::from_str("usdt").unwrap(), Numeraire::from_str("USDT").unwrap());
+    }
+}
+

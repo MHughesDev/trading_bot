@@ -1,6 +1,6 @@
 # Phase 0 — Reconciliation and the first observation
 
-**Completion: 75% (3 / 4 tasks). T-0.4 `BLOCKED:UPSTREAM`.**
+**Completion: 75% (3 / 4 tasks). T-0.4 `BLOCKED:HUMAN` on gate H-7 (venue credential); its code blocker cleared in integration wave 3.**
 
 > **Status, 2026-09-15 — track 5, `claude/set-t-phase-0-reconciliation`.**
 >
@@ -8,10 +8,17 @@
 > **injected**: it runs through the real `ExecutionEngine` and the real `FillProcessor`, with
 > only the venue adapter stubbed, so the pipeline works unchanged the moment real fills flow.
 >
-> T-0.4 cannot start. An audit found there is no working path to a paper fill at all — hot-path
-> stage 3 returns `None`, armed automations have no caller, and there is no `INSERT INTO orders`
-> or `INSERT INTO fills` anywhere in the repository. Track 16
-> (`claude/execution-path-to-a-fill`) owns that path and is the unblocker.
+> ~~T-0.4 cannot start.~~ **The code blocker is gone as of integration wave 3.** The audit that
+> wrote this found no working path to a paper fill at all — hot-path stage 3 returned `None`,
+> armed automations had no caller, and there was no `INSERT INTO orders` or `INSERT INTO fills`
+> anywhere in the repository. Track 16 (`claude/execution-path-to-a-fill`) built that path and it
+> is now merged: stage 3 runs strategy evaluation and pushes `OrderIntent`s, and the fill seam
+> `crates/reconciliation` attaches to is `execution::fills`, published on a fill that is both new
+> to the processor and newly inserted into `fills`.
+>
+> T-0.4 stays `BLOCKED:HUMAN` rather than becoming startable, on a different gate: deploying a
+> strategy to paper needs the venue credential (roadmap gate **H-7**). That is minutes of human
+> action, not engineering.
 > **The forward clock has not started, and no deployment exists.**
 >
 > **Note for integration:** this file was written in the track-5 worktree because the shared
@@ -24,6 +31,7 @@
 **Depends on:** nothing. `crates/reconciliation` exists and is unwired.
 **Blocks:** Phase 1, and Gate 15 everywhere.
 **Migration range:** 0105–0106. **Both used.**
+**Migrations shipped:** 0105, 0106 (merged 2026-09-15, integration wave 4).
 **Parallel with:** all of Set S and Set P.
 
 Four tasks that turn the platform's most expensive unanswered question — *does the simulator
@@ -189,7 +197,7 @@ shaped for a surface; the surface itself belongs with Phase 1's deployment UI an
 it rather than half-built here. **This criterion is not met.**
 
 ### T-0.4 Deploy one hand-authored strategy and start the clock — M
-`BLOCKED:UPSTREAM`
+`BLOCKED:HUMAN`
 
 The ops task, and the reason this phase is in Stage 0. Take a simple, hand-authored,
 already-validated strategy, run it through the existing Experiment path, deploy it to Alpaca

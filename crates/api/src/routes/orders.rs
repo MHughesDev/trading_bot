@@ -356,6 +356,14 @@ fn risk_rejection_response(r: &RiskRejection) -> (StatusCode, &'static str) {
             StatusCode::SERVICE_UNAVAILABLE,
             "account state could not be read — the daily-loss limit cannot be evaluated",
         ),
+        // A divergence halt is a refusal about one strategy, not about the
+        // platform: the venue is up and every other strategy still trades. 409
+        // rather than 503 says exactly that, and says it is not worth retrying
+        // until a human clears the halt.
+        RiskRejection::StrategyHalted { .. } => (
+            StatusCode::CONFLICT,
+            "this strategy is halted after a divergence; a human must clear it",
+        ),
         RiskRejection::GateUnavailable { .. } => (
             StatusCode::SERVICE_UNAVAILABLE,
             "the risk gate cannot evaluate orders right now",

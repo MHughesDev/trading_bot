@@ -103,6 +103,10 @@ for setdir in sorted(glob.glob(os.path.join(SETS, "set-*"))):
     for f in phase_files:
         text = open(f, encoding="utf-8").read()
         check_links(f, text, os.path.dirname(f))
+        # A phase file may record its own shipped migrations. The range
+        # lives in the phase file, so the 'these landed' note belongs
+        # beside it rather than only in the MASTER.
+        shipped |= parse_shipped(text)
 
         ids = re.findall(r"^### (%s-\d+\.\d+) " % re.escape(letter), text, re.M)
         if not ids:

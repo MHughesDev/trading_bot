@@ -1430,9 +1430,46 @@ pub struct PaperInputs {
     /// Rejects attributable to the model (not the venue, not connectivity).
     pub model_attributable_rejects: u32,
     pub observed_days: u32,
+    /// How many observed-knowledge rows the four measurements were taken over.
+    ///
+    /// Distinct from `observed_days`: forty observations on one day is not the
+    /// same evidence as forty observations over forty days, and a verdict that
+    /// stated only one of the two would be equally readable and much less true.
+    /// Backfilled rows are not counted here — a row reconstructed after the fact
+    /// is not evidence about the future however recent its timestamp (D-T1).
+    pub observations: u32,
+    /// Calendar days from the first observed bar to the last, inclusive.
+    pub window_days: u32,
     /// Whether the kill criteria were written into the campaign **before**
     /// deployment (§12.6).
     pub kill_criteria_registered: bool,
+}
+
+impl PaperInputs {
+    /// Build Gate 15's inputs from the forward record of a deployment.
+    ///
+    /// The observed-knowledge filter lives in
+    /// [`Gate15Evidence::from_observations`](domain::forward::Gate15Evidence::from_observations),
+    /// in one place. `kill_criteria_registered` cannot come from the
+    /// observations — it is a fact about the *deployment*, established before
+    /// the first fill — so the caller supplies it, and supplying `false` is what
+    /// makes the gate refuse to produce a verdict at all.
+    #[must_use]
+    pub fn from_forward_evidence(
+        e: &domain::forward::Gate15Evidence,
+        kill_criteria_registered: bool,
+    ) -> Self {
+        Self {
+            signal_match: e.signal_match,
+            slippage_ratio: e.slippage_ratio,
+            turnover_ratio: e.turnover_ratio,
+            model_attributable_rejects: e.model_attributable_rejects,
+            observed_days: e.observed_days,
+            observations: e.observations,
+            window_days: e.window.days(),
+            kill_criteria_registered,
+        }
+    }
 }
 
 /// Gate 15 — paper/shadow agreement (§12.3, §12.6).
@@ -1457,8 +1494,13 @@ pub fn gate_15_paper_shadow(profile: &GateProfile, i: PaperInputs) -> GateOutcom
              watching the result is not a stopping rule (§12.6)",
         );
     }
-    if i.observed_days == 0 {
-        return GateOutcome::inconclusive(15, NAME, "no forward-test days have been observed");
+    if i.observed_days == 0 || i.observations == 0 {
+        return GateOutcome::inconclusive(
+            15,
+            NAME,
+            "no observed-knowledge forward observations exist for this candidate; \
+             backfilled rows are not forward evidence (D-T1)",
+        );
     }
 
     let mut failures: Vec<String> = Vec::new();
@@ -1489,8 +1531,16 @@ pub fn gate_15_paper_shadow(profile: &GateProfile, i: PaperInputs) -> GateOutcom
         ));
     }
 
+    // The count and the window lead the summary rather than trailing it. A gate
+    // passed on four observations and one passed on four hundred are different
+    // claims, and a verdict that renders them identically is lying by omission
+    // — so the strength of the evidence is stated before the measurements it
+    // supports, where a reader cannot skip it.
     let summary = format!(
-        "{} days forward: signal {:.2}%, slippage {:.2}×, turnover {:+.0}%, {} model rejects",
+        "{} observations over {} days ({} days with data): signal {:.2}%, slippage {:.2}×, \
+         turnover {:+.0}%, {} model rejects",
+        i.observations,
+        i.window_days,
         i.observed_days,
         i.signal_match * 100.0,
         i.slippage_ratio,
@@ -2204,6 +2254,8 @@ mod tests {
             turnover_ratio: 1.05,
             model_attributable_rejects: 0,
             observed_days: 60,
+            observations: 60,
+            window_days: 60,
             kill_criteria_registered: true,
         }
     }
@@ -2213,6 +2265,100 @@ mod tests {
         let out = gate_15_paper_shadow(&GateProfile::strict_v1(), good_paper());
         assert!(out.passed, "{}", out.detail);
         assert!(out.detail.contains("60 days"), "{}", out.detail);
+    }
+
+    /// The verdict has to say how much evidence it rests on. Four observations
+    /// and four hundred are different claims; a stack that rendered them the
+    /// same way would let a gate pass on almost nothing and read identically to
+    /// one that passed on a quarter's worth of trading.
+    #[test]
+    fn gate_15_states_its_observation_count_and_window_on_the_verdict() {
+        let thin = PaperInputs { observations: 4, observed_days: 2, window_days: 3, ..good_paper() };
+        let thick =
+            PaperInputs { observations: 400, observed_days: 120, window_days: 180, ..good_paper() };
+
+        let thin_out = gate_15_paper_shadow(&GateProfile::strict_v1(), thin);
+        let thick_out = gate_15_paper_shadow(&GateProfile::strict_v1(), thick);
+
+        assert!(thin_out.detail.contains("4 observations"), "{}", thin_out.detail);
+        assert!(thin_out.detail.contains("over 3 days"), "{}", thin_out.detail);
+        assert!(thick_out.detail.contains("400 observations"), "{}", thick_out.detail);
+        assert!(thick_out.detail.contains("over 180 days"), "{}", thick_out.detail);
+        assert_ne!(
+            thin_out.detail, thick_out.detail,
+            "two verdicts resting on very different evidence must not read the same"
+        );
+    }
+
+    /// A deployment whose only rows are backfilled has no forward evidence, and
+    /// the gate has to say so rather than judging on them.
+    #[test]
+    fn gate_15_is_inconclusive_when_every_row_in_the_window_was_backfilled() {
+        use chrono::{DateTime, Utc};
+        use domain::forward::{ForwardObservation, Gate15Evidence, ObservationSource};
+
+        let rows: Vec<ForwardObservation> = (0..30)
+            .map(|d| ForwardObservation {
+                deployment_id: uuid::Uuid::nil(),
+                strategy_id: "sma-cross-1".into(),
+                bar: DateTime::<Utc>::from_timestamp(d * 86_400, 0).unwrap(),
+                realised_return: 0.001,
+                expected_return: 0.001,
+                numeraire: domain::numeraire::Numeraire::Usd,
+                source: ObservationSource::Backfill,
+                signal_matched: true,
+                realised_slippage_bps: 1.0,
+                modelled_slippage_bps: 1.0,
+                realised_turnover: 100.0,
+                expected_turnover: 100.0,
+                model_attributable_rejects: 0,
+                observed_at: DateTime::<Utc>::from_timestamp(d * 86_400, 0).unwrap(),
+            })
+            .collect();
+
+        assert!(
+            Gate15Evidence::from_observations(&rows).is_err(),
+            "backfilled rows must not form Gate 15 evidence"
+        );
+
+        // And with no evidence to build inputs from, the gate says so.
+        let out = gate_15_paper_shadow(
+            &GateProfile::strict_v1(),
+            PaperInputs { observations: 0, observed_days: 0, window_days: 0, ..good_paper() },
+        );
+        assert!(out.inconclusive && !out.passed, "{}", out.detail);
+        assert!(out.detail.contains("backfilled"), "{}", out.detail);
+    }
+
+    /// The bridge from the forward record to the gate's inputs keeps the count
+    /// and window the evidence reported, and does not invent a registration of
+    /// the kill criteria.
+    #[test]
+    fn paper_inputs_carry_the_evidences_count_and_window() {
+        use chrono::{DateTime, Utc};
+        use domain::forward::{Gate15Evidence, ObservationWindow};
+
+        let e = Gate15Evidence {
+            signal_match: 0.995,
+            slippage_ratio: 1.2,
+            turnover_ratio: 1.05,
+            model_attributable_rejects: 0,
+            observations: 37,
+            observed_days: 12,
+            window: ObservationWindow {
+                first_bar: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
+                last_bar: DateTime::<Utc>::from_timestamp(13 * 86_400, 0).unwrap(),
+            },
+            numeraire: domain::numeraire::Numeraire::Usd,
+        };
+        let i = PaperInputs::from_forward_evidence(&e, false);
+        assert_eq!(i.observations, 37);
+        assert_eq!(i.observed_days, 12);
+        assert_eq!(i.window_days, 14);
+        assert!(!i.kill_criteria_registered);
+
+        let out = gate_15_paper_shadow(&GateProfile::strict_v1(), i);
+        assert!(out.inconclusive, "{}", out.detail);
     }
 
     /// Unregistered kill criteria make the gate *inconclusive*, not failing and
@@ -2248,7 +2394,7 @@ mod tests {
     fn gate_15_has_nothing_to_say_before_the_first_day() {
         let out = gate_15_paper_shadow(
             &GateProfile::strict_v1(),
-            PaperInputs { observed_days: 0, ..good_paper() },
+            PaperInputs { observed_days: 0, observations: 0, window_days: 0, ..good_paper() },
         );
         assert!(out.inconclusive && !out.passed, "{}", out.detail);
     }
