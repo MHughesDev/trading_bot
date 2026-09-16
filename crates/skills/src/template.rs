@@ -79,6 +79,35 @@ fn wall_ceiling(namespace: &str) -> u64 {
 
 // ── The header ───────────────────────────────────────────────────────────────
 
+/// What kind of thing a template wants materialised.
+///
+/// The tier started with one kind — bars — and that was enough for every tool in
+/// the `analysis` namespace, because every one of them is a statement about one
+/// instrument's price. It is not enough for anything in `portfolio` or
+/// `attribution`, which are statements about a *family*: a covariance needs N
+/// series, and N is not a fixed set of named roles.
+///
+/// So the second kind is a long-format table of the recorded return series of
+/// every run in an experiment. Long rather than wide because families are ragged
+/// — runs cover different windows — and a wide table has to choose between
+/// padding (inventing returns) and truncating (discarding them) before the
+/// template can see either choice being made. Long defers that choice to the
+/// tool, which is where it can be stated.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SeriesKind {
+    /// OHLCV bars for one instrument over the call's window. The default,
+    /// because it is what every template written so far wants.
+    #[default]
+    Ohlcv,
+    /// `(run_id, period, ret)` for every recorded run of an experiment.
+    ///
+    /// Recorded, never dispatched: these are results the platform already holds,
+    /// so asking for them spends no trial. A materialisation that ran the family
+    /// to answer a read would be a read that spent a day of budget.
+    TrialReturns,
+}
+
 /// What series a template needs materialised before it runs (§3.3).
 ///
 /// A template has no network and no database — `taxonomy.rs` asserts the first
@@ -89,12 +118,17 @@ fn wall_ceiling(namespace: &str) -> u64 {
 pub struct SeriesRequest {
     /// The key under `payload["data"]` the file lands at.
     pub role: String,
+    #[serde(default)]
+    pub kind: SeriesKind,
     /// Which arguments name the instrument and timeframe. Defaults to the
     /// obvious ones so the common case declares only a role.
     #[serde(default = "default_instrument_arg")]
     pub instrument_arg: String,
     #[serde(default = "default_timeframe_arg")]
     pub timeframe_arg: String,
+    /// Which argument names the experiment, for [`SeriesKind::TrialReturns`].
+    #[serde(default = "default_experiment_arg")]
+    pub experiment_arg: String,
 }
 
 fn default_instrument_arg() -> String {
@@ -102,6 +136,9 @@ fn default_instrument_arg() -> String {
 }
 fn default_timeframe_arg() -> String {
     "timeframe".into()
+}
+fn default_experiment_arg() -> String {
+    "experiment_id".into()
 }
 
 /// The fenced JSON block in a template's module docstring.

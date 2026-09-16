@@ -141,6 +141,8 @@ fn argument(tool: &str, name: &str) -> Option<Value> {
         "generator" => json!("stationary_block_bootstrap"),
         // The timeframe pair: same instrument, two resolutions.
         "higher_timeframe" => json!("1h"),
+        // A family fixture stands in for a real experiment id.
+        "experiment_id" => json!("00000000-0000-0000-0000-000000000001"),
         _ => return None,
     })
 }
@@ -160,6 +162,7 @@ fn fixture_file(role: &str) -> &'static str {
         "secondary" => "secondary.parquet",
         "fast" => "fast.parquet",
         "slow" => "slow.parquet",
+        "family" => "family.parquet",
         other => panic!(
             "no fixture file for the series role `{other}`. Add one to `fixture_file` and, if              the fixture does not contain suitable data yet, to reference_dataset.py."
         ),
@@ -470,5 +473,137 @@ async fn a_planted_bar_boundary_leak_is_caught_and_a_clean_pair_is_not() {
     assert_eq!(
         early, 20,
         "the fixture plants a 20-minute-early write (LEAKY_MINUTES_EARLY); the tool recovered          {early}"
+    );
+}
+
+/// The noise band finds the factor that is there, and does not find factors that
+/// are not.
+///
+/// The fixture plants exactly one common factor across twelve strategies with
+/// uneven loadings. A covariance tool that reported every eigenvalue as a factor
+/// would pass a "does it run" test and be useless; one that reported none would
+/// too. Marchenko-Pastur is what separates them, and this asserts the separation
+/// rather than the arithmetic.
+///
+/// It is also the end-to-end check on `SeriesKind::TrialReturns`: the long-format
+/// family reaches a template, is pivoted, and the two deliberately short
+/// strategies cost periods rather than silently becoming padded zeros.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_covariance_finds_exactly_the_factor_the_fixture_plants() {
+    let fixture = fixture_dir();
+    let Some(t) = mcp_server_lib::tools::templated::find("shrunk_covariance") else {
+        return;
+    };
+    let (outcome, result) = run_once(t, &payload_for(t, &fixture)).await;
+    assert_eq!(outcome, Outcome::Ok, "{outcome:?}");
+    let detail = result
+        .as_ref()
+        .and_then(|r| r.get("detail"))
+        .expect("a detail");
+
+    let significant = detail
+        .get("n_significant")
+        .and_then(Value::as_u64)
+        .expect("a factor count");
+    assert_eq!(
+        significant, 1,
+        "the fixture has one common factor; the tool found {significant}. Reporting every \
+         eigenvalue as a factor and reporting none are both failures this catches."
+    );
+
+    // Ragged handled by common periods, and said out loud rather than padded.
+    let dropped = detail
+        .get("n_periods_dropped")
+        .and_then(Value::as_u64)
+        .expect("a dropped count");
+    assert!(
+        dropped > 0,
+        "two of the fixture's strategies are half length; a run that dropped no periods padded \
+         them instead"
+    );
+
+    // Raw is reported beside shrunk — AGENT-006 §5.7's requirement, and the
+    // reason is that shrinkage biases toward historical structure.
+    assert!(detail.get("covariance_raw").is_some());
+    assert!(detail.get("covariance_shrunk").is_some());
+    let shrinkage = detail
+        .get("shrinkage")
+        .and_then(Value::as_f64)
+        .expect("an intensity");
+    assert!(
+        (0.0..=1.0).contains(&shrinkage),
+        "shrinkage {shrinkage} is outside [0, 1]"
+    );
+}
+
+/// The weight cap holds against an input built to break it.
+///
+/// AGENT-006 §5.7's acceptance is "`allocate_book` cannot exceed the weight cap
+/// by any input", and the well-behaved family does not test that: its largest
+/// weight is 0.15 against a cap of 0.25, so the clip is a branch no run takes.
+/// `family_concentrated.parquet` gives one strategy a hundredth of the variance
+/// of the rest, which is what a barely-trading strategy actually looks like and
+/// is exactly what a variance-minimising optimiser wants all of.
+///
+/// The property under test is not "the number is 0.25". It is that the cap is
+/// applied *after* the objective and so cannot be negotiated with: an optimiser
+/// handed a target it cannot reach under a constraint finds the corner of the
+/// feasible set, and the corner is the cap on the most in-sample-flattering
+/// strategy.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_weight_cap_survives_a_family_built_to_concentrate() {
+    let fixture = fixture_dir();
+    let Some(t) = mcp_server_lib::tools::templated::find("allocate_book") else {
+        return;
+    };
+
+    let payload = json!({
+        "experiment_id": "00000000-0000-0000-0000-000000000001",
+        "objective": "minimum_variance",
+        "seed": 7,
+        "data": {
+            "family": fixture.join("family_concentrated.parquet").to_string_lossy(),
+        }
+    });
+
+    let (outcome, result) = run_once(t, &payload).await;
+    assert_eq!(outcome, Outcome::Ok, "{outcome:?}");
+    let detail = result
+        .as_ref()
+        .and_then(|r| r.get("detail"))
+        .expect("a detail");
+
+    let cap = detail.get("cap").and_then(Value::as_f64).expect("a cap");
+    let max = detail
+        .get("max_weight")
+        .and_then(Value::as_f64)
+        .expect("a max weight");
+    assert!(
+        max <= cap + 1e-9,
+        "a weight of {max} exceeded the cap of {cap} — the cap was negotiable"
+    );
+    assert!(
+        detail.get("n_capped").and_then(Value::as_u64).unwrap_or(0) > 0,
+        "this family is built so the objective wants a concentrated book; nothing was capped, \
+         so the clip did not run and this test proves nothing"
+    );
+
+    // Every individual weight, not just the reported maximum — a maximum is a
+    // number the template computes, and this checks the weights themselves.
+    let weights = detail
+        .get("weights")
+        .and_then(Value::as_object)
+        .expect("the weights");
+    for (name, w) in weights {
+        let w = w.as_f64().unwrap_or(f64::NAN);
+        assert!(
+            w <= cap + 1e-9,
+            "`{name}` holds {w}, above the cap of {cap}"
+        );
+    }
+    let total: f64 = weights.values().filter_map(Value::as_f64).sum();
+    assert!(
+        (total - 1.0).abs() < 1e-6,
+        "the capped weights sum to {total}, not one — the redistribution lost or created book"
     );
 }

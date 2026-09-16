@@ -564,7 +564,44 @@ continuing; `realized_coverage` is monitored and its drift reported.
 **Traces:** AGENT-006 §5.7; research brief Theme 6.
 
 ### S-3.18 Portfolio — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `shrunk_covariance` and `allocate_book` are built and tested;
+`check_control_limits` waits on phase 7's tables.
+
+This task needed a **second materialisation kind** first, and that is the reusable half:
+`SeriesKind::TrialReturns` gives a template the recorded return series of every run in an
+experiment, long format `(run_id, period, ret)`. Long rather than wide because families are
+ragged, and a wide table has to pad (inventing returns) or truncate (discarding the most
+recent, which are what an out-of-sample claim rests on) *before* the template can see either
+choice being made. Long defers the choice to the tool, where it gets stated in the result.
+Nothing is dispatched to produce it — these are results the platform already holds, so asking
+spends no trial. This unblocks S-3.16 and S-3.17 as well.
+
+`shrunk_covariance` reports the **raw estimate beside the shrunk one**, which §5.7 asks for
+and the reason is not symmetry: shrinkage pulls toward historical average correlation, which
+is exactly wrong just before a correlation breakdown — the moment diversification stops
+working is the moment the shrunk estimate is most confident it still does. The intensity is
+Ledoit-Wolf's optimal value and is not a parameter, because a caller who can shrink can shrink
+until the book looks diversified. The Marchenko-Pastur edge separates factors from noise:
+verified on a fixture carrying exactly one planted common factor, where it finds exactly one —
+a tool calling every eigenvalue a factor, or none, fails that test.
+
+`allocate_book`'s cap is applied **after** the objective and then asserted, which is the
+acceptance criterion read literally. A cap inside an optimisation is a constraint the
+optimiser negotiates with: give it a target it cannot reach and it finds the corner of the
+feasible set, which is the cap, on the strategy with the best in-sample numbers. Nothing that
+produces weights is consulted about the cap, and a run whose weights fail the final check
+refuses rather than returning them.
+
+That needed a fixture of its own to mean anything. On the well-behaved family the largest
+weight is 0.15 against a cap of 0.25, so the clip is a branch no run takes;
+`family_concentrated.parquet` gives one strategy a hundredth of the variance of the rest —
+what a barely-trading strategy actually looks like, and what a variance-minimising optimiser
+wants all of. Minimum variance wants ~99% of the book in it and receives 0.25.
+
+**Missing: `check_control_limits`.** It is a read over phase 7's monitor tables, which are
+themselves 5 done and 7 partial. Building a read against half-built tables would produce a
+tool that returns empty and reads as "no limits are breached" — the same failure shape as the
+leakage scan deferred in S-3.11.
 
 `shrunk_covariance` (Ledoit-Wolf, **raw always reported beside shrunk**, because shrinkage
 biases toward historical structure which is exactly wrong before a correlation breakdown),

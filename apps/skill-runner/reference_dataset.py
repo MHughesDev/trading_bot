@@ -30,6 +30,12 @@ Deliberately present in the data
   aggregate) and `slow_leaky.parquet` (the same hours written before their last
   minute landed). The leak is planted the way the platform's real one occurs, so
   a check that passes on it has actually caught the bug rather than noise.
+* **A family of strategy returns** — `family.parquet`, long format, twelve
+  series sharing one common factor with uneven loadings, of which two are
+  deliberately short. See `build_family`.
+* **A family an optimiser wants to concentrate** — `family_concentrated.parquet`,
+  where one strategy has a hundredth of the variance of the rest. Without it
+  `allocate_book`'s weight cap is a branch no test ever takes.
 
 Deliberately absent
 -------------------
@@ -74,6 +80,19 @@ SPREAD_A, SPREAD_B = 60.0e-4, 120.0e-4
 # Intrabar steps used to build the high and low. Ten is enough for the range to
 # be a real path extreme rather than a function of the bar return.
 TICKS_PER_BAR = 10
+
+# The family fixture, for templates that take `kind: trial_returns`.
+#
+# Twelve strategies over 500 periods is q = N/T = 0.024, which is small enough
+# that the real factor clears the Marchenko-Pastur noise edge and the rest do
+# not — so a tool that reports every eigenvalue as a factor fails here, and so
+# does one that reports none.
+FAMILY_STRATEGIES = 12
+FAMILY_PERIODS = 500
+# One common factor, loaded on unevenly. Without it the covariance is diagonal
+# noise and shrinkage has nothing to find; with every strategy loading equally
+# it is rank one and shrinkage has nothing to do.
+FAMILY_FACTOR_LOADINGS = 0.7
 # The timeframe-pair fixture, for `audit.bar_boundary_check`. Thirty days of
 # minutes is enough for 720 hourly bars — plenty to find a planted defect and
 # small enough that the parquet stays a few megabytes.
@@ -235,6 +254,48 @@ def build_timeframe_pair() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         leaky.reset_index().rename(columns={"index": "ts"}),
     )
 
+def build_family(rng: np.random.Generator) -> pd.DataFrame:
+    """A family of strategy return series, long format: `(run_id, period, ret)`.
+
+    Long rather than wide for the same reason the materialiser is: real families
+    are ragged, and the last two strategies here are deliberately short so a tool
+    that pads or pairwise-deletes produces a different answer from one that uses
+    the common periods and says how many it dropped.
+    """
+    factor = rng.standard_normal(FAMILY_PERIODS) * 0.01
+    rows = []
+    for i in range(FAMILY_STRATEGIES):
+        loading = FAMILY_FACTOR_LOADINGS * (0.4 + 0.6 * (i / max(FAMILY_STRATEGIES - 1, 1)))
+        idiosyncratic = rng.standard_normal(FAMILY_PERIODS) * 0.01
+        series = loading * factor + math.sqrt(max(1.0 - loading**2, 0.0)) * idiosyncratic
+        # The last two are short. A ragged family is the normal case.
+        length = FAMILY_PERIODS if i < FAMILY_STRATEGIES - 2 else FAMILY_PERIODS // 2
+        for period in range(length):
+            rows.append((f"run_{i:02d}", period, float(series[period])))
+    return pd.DataFrame(rows, columns=["run_id", "period", "ret"])
+
+
+def build_concentrated_family(rng: np.random.Generator) -> pd.DataFrame:
+    """A family built so an optimiser wants to put everything in one strategy.
+
+    `run_00` has a hundredth of the variance of the rest, so minimum variance
+    wants roughly all of the book in it. That is the case `allocate_book`'s cap
+    exists for, and without a fixture that provokes it the cap is a branch no
+    test ever takes — the well-behaved family reaches a maximum weight of 0.15
+    against a cap of 0.25 and never exercises the clip.
+
+    Nothing here is unrealistic. A strategy that barely trades has exactly this
+    profile, and it is the one a variance-minimising optimiser loves.
+    """
+    rows = []
+    for i in range(FAMILY_STRATEGIES):
+        scale = 0.0001 if i == 0 else 0.01
+        series = rng.standard_normal(FAMILY_PERIODS) * scale
+        for period in range(FAMILY_PERIODS):
+            rows.append((f"run_{i:02d}", period, float(series[period])))
+    return pd.DataFrame(rows, columns=["run_id", "period", "ret"])
+
+
 def main(out_dir: str) -> int:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -247,7 +308,15 @@ def main(out_dir: str) -> int:
     slow.to_parquet(out / "slow.parquet", index=False)
     leaky.to_parquet(out / "slow_leaky.parquet", index=False)
 
-    print(f"{len(primary)} bars, {len(fast)} minutes, {len(slow)} hours -> {out}")
+    family = build_family(np.random.default_rng(SEED + 2))
+    family.to_parquet(out / "family.parquet", index=False)
+    concentrated = build_concentrated_family(np.random.default_rng(SEED + 3))
+    concentrated.to_parquet(out / "family_concentrated.parquet", index=False)
+
+    print(
+        f"{len(primary)} bars, {len(fast)} minutes, {len(slow)} hours, "
+        f"{family['run_id'].nunique()} strategies -> {out}"
+    )
     return 0
 
 

@@ -121,6 +121,62 @@ pub async fn run_template(
     let mut windows = Vec::new();
 
     for series in &template.header().series {
+        // A family's recorded returns, not bars. No window and no project clip
+        // applies: these are results the platform already holds and already
+        // clipped when it produced them, and re-clipping a stored result would
+        // be clipping a number rather than a read.
+        if series.kind == skills::SeriesKind::TrialReturns {
+            let raw = args
+                .get(&series.experiment_arg)
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let Ok(experiment_id) = Uuid::parse_str(raw) else {
+                return bad(
+                    "missing_field",
+                    format!(
+                        "the `{}` series is the recorded returns of an experiment, named by \
+                         `{}`, and this call did not set it to a UUID",
+                        series.role, series.experiment_arg
+                    ),
+                );
+            };
+            let family = match state.suite.recorded_returns(token.user_id(), experiment_id) {
+                Ok(f) if f.is_empty() => {
+                    return bad(
+                        "empty_family",
+                        "this experiment has no recorded run with a usable return series. \
+                         Nothing was dispatched to find that out — run the family first."
+                            .to_string(),
+                    )
+                }
+                Ok(f) => f,
+                Err(e) => return bad("not_found", e.to_string()),
+            };
+            let runs = family.len();
+            let path = match materialise_returns(&family, experiment_id, &cache_root()) {
+                Ok(p) => p,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "materialisation_failed",
+                            "message": e.to_string(),
+                            "series": series.role,
+                        })),
+                    )
+                        .into_response()
+                }
+            };
+            data.insert(series.role.clone(), json!(path.to_string_lossy()));
+            windows.push(json!({
+                "role": series.role,
+                "kind": "trial_returns",
+                "experiment_id": raw,
+                "runs": runs,
+            }));
+            continue;
+        }
+
         let key = match data_key(&args, series, &project) {
             Ok(k) => k,
             Err(response) => return response,
@@ -294,6 +350,85 @@ async fn materialise(
             if !path.is_file() {
                 return Err(e.into());
             }
+        }
+    }
+    Ok(path)
+}
+
+/// A family's recorded returns as `(run_id, period, ret)`, written once.
+///
+/// **Long, not wide.** Runs cover different windows, so a wide table — one column
+/// per run — has to pad or truncate before the template ever sees it, and both
+/// choices are statistical decisions: padding invents returns and truncating
+/// discards the most recent ones, which are the ones an out-of-sample claim
+/// rests on. Long defers the choice to the tool, where it can be stated in the
+/// result.
+///
+/// Keyed on the experiment rather than on a window, and rewritten rather than
+/// cached-forever: a family grows as runs land, so a file keyed only on the
+/// experiment id would go stale the first time somebody added a run. The digest
+/// covers the run ids, so a family with a new member is a new file.
+fn materialise_returns(
+    family: &[(String, Vec<f64>)],
+    experiment_id: Uuid,
+    root: &Path,
+) -> anyhow::Result<PathBuf> {
+    use arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray};
+    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::record_batch::RecordBatch;
+    use parquet::arrow::ArrowWriter;
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(experiment_id.as_bytes());
+    for (run, returns) in family {
+        hasher.update(run.as_bytes());
+        hasher.update(returns.len().to_le_bytes());
+    }
+    let digest = hex::encode(&hasher.finalize()[..16]);
+    let path = root.join(&digest[..2]).join(format!("{digest}.parquet"));
+    if path.is_file() {
+        return Ok(path);
+    }
+
+    let mut run_ids: Vec<&str> = Vec::new();
+    let mut periods: Vec<i64> = Vec::new();
+    let mut rets: Vec<f64> = Vec::new();
+    for (run, returns) in family {
+        for (i, r) in returns.iter().enumerate() {
+            run_ids.push(run.as_str());
+            periods.push(i64::try_from(i).unwrap_or(i64::MAX));
+            rets.push(*r);
+        }
+    }
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("run_id", DataType::Utf8, false),
+        Field::new("period", DataType::Int64, false),
+        Field::new("ret", DataType::Float64, false),
+    ]));
+    let arrays: Vec<ArrayRef> = vec![
+        Arc::new(StringArray::from(run_ids)),
+        Arc::new(Int64Array::from(periods)),
+        Arc::new(Float64Array::from(rets)),
+    ];
+    let batch = RecordBatch::try_new(schema.clone(), arrays)?;
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut writer = ArrowWriter::try_new(&mut buf, schema, None)?;
+        writer.write(&batch)?;
+        writer.close()?;
+    }
+
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let staging = path.with_extension(format!("tmp-{}", std::process::id()));
+    std::fs::write(&staging, &buf)?;
+    if std::fs::rename(&staging, &path).is_err() {
+        let _ = std::fs::remove_file(&staging);
+        if !path.is_file() {
+            anyhow::bail!("could not publish the materialised family");
         }
     }
     Ok(path)
@@ -477,8 +612,14 @@ mod tests {
     fn series() -> skills::template::SeriesRequest {
         skills::template::SeriesRequest {
             role: "primary".into(),
+            // Bars: these tests are about the point-in-time clip, which is the
+            // OHLCV path. `TrialReturns` reads results the platform already
+            // produced and clipped, and re-clipping a stored result would be
+            // clipping a number rather than a read.
+            kind: skills::SeriesKind::Ohlcv,
             instrument_arg: "instrument_id".into(),
             timeframe_arg: "timeframe".into(),
+            experiment_arg: "experiment_id".into(),
         }
     }
 

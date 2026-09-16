@@ -54,6 +54,7 @@ reqwest = { workspace = true }
 anyhow = { workspace = true }
 aes-gcm = "0.10"
 hex = "0.4"
+sha2 = "0.10"
 argon2 = "0.5"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 

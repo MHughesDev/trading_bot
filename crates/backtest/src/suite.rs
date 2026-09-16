@@ -1827,6 +1827,19 @@ impl SuiteManager {
     /// Recorded, not dispatched: these audits are reads, and a read that
     /// executed a grid would be a read that spent trials. Everything here has
     /// already been counted.
+    /// The same recorded family, for the templated tier's materialiser
+    /// (`SeriesKind::TrialReturns`, Set S task S-3.19's successor work).
+    ///
+    /// A thin public wrapper rather than making `recorded_family` public: the
+    /// private one is used by two audits inside this module and its contract is
+    /// theirs, so a caller outside gets a name that says what it is for.
+    ///
+    /// # Errors
+    /// [`SuiteError::NotFound`] for an unknown or other-user experiment.
+    pub fn recorded_returns(&self, user_id: Uuid, id: Uuid) -> Result<Vec<(String, Vec<f64>)>, SuiteError> {
+        self.recorded_family(user_id, id)
+    }
+
     fn recorded_family(&self, user_id: Uuid, id: Uuid) -> Result<Vec<(String, Vec<f64>)>, SuiteError> {
         let records = self.records.read().expect("suite lock poisoned");
         let r = records
