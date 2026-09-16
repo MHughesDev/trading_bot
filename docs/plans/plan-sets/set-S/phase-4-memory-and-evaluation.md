@@ -1,6 +1,14 @@
 # Phase 4 — Memory and evaluation
 
-**Completion: 0% (0 / 17 tasks) done, but 14 are `PARTIAL` — the harness half is built and tested, and nothing persists.**
+**Completion: 6% (1 / 17 tasks) done, 15 `PARTIAL`, 1 `BLOCKED:HUMAN` — the harness half was built and tested, and now some of it persists.**
+
+> **Updated 2026-09-16.** The sentence this header used to end with — "and nothing persists" — was true that morning and is no longer. Four tables exist and are verified against a live Postgres: `agent_memory.entry` (0122), `agent_turn_summaries` (0123), `memory_retrievals` (0124), and the stores over them. The carry between turns is structured rather than the model's own prose, and `assemble_brief` — 936 tested lines that had **no caller anywhere in the workspace** — now runs in the driver.
+>
+> **The migration numbers are not the plan's.** 0065–0073 were allocated against a tree that has since moved past them; the tree is at 0121 and these follow it. The same collision ADR-S3-08 records for S-3.7.
+>
+> **What most of the remaining `PARTIAL`s now wait on is one decision, not more code.** `Entry` requires a `data_window` and the loop tracks none, so `record_finding` cannot write through — OQ-18. Kinds whose claim is not about a period of market data have a natural answer and are built on it: a preference is true as of the day it was said. Kinds whose claim *is* about a window — findings, negative results, instrument profiles — are the blocked ones, and guessing there would silently degrade the conflict check rather than fail.
+>
+> The other half of the remainder is the evaluation side (S-4.8 onward), which depends on phase 2's `agent_events` for real trajectories.
 
 > **This file was wrong, and the correction matters more than any single task in it.** Until
 > 2026-09-16 it recorded all seventeen tasks as `NOT STARTED`. S-4.2 was picked up to be
