@@ -8,6 +8,7 @@
 **Depends on:** nothing. Set L Phase 0 already delivered `market_bars_v2` and froze the v1 table.
 **Blocks:** Phase 1 (`backfill_state`), Phase 3 (the same job scaffolding).
 **Migration range:** 0097–0098.
+**Migrations shipped:** 0097, 0098 (merged 2026-09-15, integration wave 5).
 **Parallel with:** every Set S phase.
 
 This is the cheapest phase in the whole programme and the only one whose cost of delay is

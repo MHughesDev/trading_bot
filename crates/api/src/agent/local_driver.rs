@@ -659,6 +659,32 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
                 }
             }
 
+            // AGENT-010 §8. The loop suspends on a platform job and the driver
+            // is meant to persist the suspension and exit — it must not poll,
+            // which is the bug this effect exists to remove.
+            //
+            // **This driver cannot yet resume from a suspension.** The harness
+            // produces the effect and `crates/harness` persists it; nothing on
+            // the local-model path reads it back. So the run ends here, visibly
+            // and with the job named, rather than being reported as finished or
+            // being turned back into the polling loop it replaced. Recorded as
+            // an open gap rather than papered over: see Set S phase 2's task
+            // list. A `unreachable!` here would be false — a tool returning a
+            // job handle reaches it.
+            Effect::Await { step, job_id, tool } => {
+                tracing::warn!(
+                    run_id = %params.run_id, step, %job_id, %tool,
+                    "suspended on a platform job; this driver cannot resume a suspension yet"
+                );
+                rec.finish(&Outcome::Fenced(Degradation::BackendFailure {
+                    detail: format!(
+                        "suspended at step {step} awaiting job {job_id} started by `{tool}`.                          This driver cannot resume a suspension yet, so the run stops here                          rather than polling. The job itself continues and its result is in                          the job service."
+                    ),
+                }))
+                .await;
+                return;
+            }
+
             Effect::Note(_) | Effect::Done(_) => unreachable!("handled above"),
         };
 

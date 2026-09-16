@@ -296,7 +296,12 @@ fn every_tool_dispatch_is_trajectory_logged() {
         if path.starts_with("crates/invariants/") {
             continue;
         }
-        let n = calls.find_iter(&strip_comments(&src)).count();
+        // Production code only. `mcp-server/src/lib.rs` carries a structural
+        // test that asserts the dispatch table has exactly one caller, and it
+        // has to name `dispatch_untraced(ctx` to do so. Counting the test's own
+        // mentions would make the stronger check the reason the weaker one
+        // fails — the same shape as AT-42.
+        let n = calls.find_iter(&strip_comments(production_only(&src))).count();
         if n > 0 {
             assert_eq!(path, "crates/mcp-server/src/lib.rs", "dispatch_untraced referenced outside the MCP library");
         }
@@ -545,11 +550,39 @@ fn at64_no_dispatch_path_can_skip_the_audit_trail() {
     let sink_open_end = src[sink_open..]
         .find("pub async fn close(")
         .map_or(src.len(), |o| sink_open + o);
-    for at in constructions {
+
+    // One further site is allowed, named here rather than exempted by category.
+    //
+    // `AuditSink` has exactly one constructor and it posts to the platform, by
+    // design -- there is no offline sink. So a test of anything *downstream* of
+    // the audit record (the call gate, spec resolution) cannot reach its subject
+    // without an envelope: against an unreachable base URL every such call stops
+    // at `audit_unavailable` instead. The helper below mints one inside
+    // `#[cfg(test)]`, where production code cannot call it.
+    //
+    // It is named, singular, and asserted to be inside the test module. A blanket
+    // "tests do not count" would be the weaker rule: this one still fails if a
+    // second test-side mint appears, or if this one escapes `#[cfg(test)]`.
+    const TEST_MINT: &str = "AuditEnvelope(Uuid::nil())";
+    let test_module = src.find("#[cfg(test)]").unwrap_or(src.len());
+    let allowed: Vec<usize> = src.match_indices(TEST_MINT).map(|(i, _)| i).collect();
+    assert!(
+        allowed.len() <= 1,
+        "more than one test-side AuditEnvelope mint: {allowed:?}. One is a necessity;          two is a habit"
+    );
+    for at in &allowed {
         assert!(
-            at > sink_open && at < sink_open_end,
-            "an AuditEnvelope is minted outside AuditSink::open at byte {at}; the seal is \
-             what makes holding one proof that a pre-record exists"
+            *at > test_module,
+            "the test-side AuditEnvelope mint is outside `#[cfg(test)]` and therefore              reachable from production"
+        );
+    }
+
+    for at in constructions {
+        let sealed = at > sink_open && at < sink_open_end;
+        let test_side = allowed.contains(&at);
+        assert!(
+            sealed || test_side,
+            "an AuditEnvelope is minted outside AuditSink::open at byte {at}; the seal is              what makes holding one proof that a pre-record exists"
         );
     }
     assert!(

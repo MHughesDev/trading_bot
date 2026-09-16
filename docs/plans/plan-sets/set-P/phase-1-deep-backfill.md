@@ -9,6 +9,7 @@ ADR-P2-24 (the sentinel and the declared lags).
 **Depends on:** Phase 0 (the census, so progress is measurable against a baseline).
 **Blocks:** Phase 2 (nothing to grade without history), Phase 4.
 **Migration range:** 0099.
+**Migrations shipped:** 0099 (merged 2026-09-15, integration wave 5).
 **Parallel with:** Phase 3, and every Set S phase.
 
 Set L Phase 0 unblocked this in 2026-09-11 by replacing the bar table whose sorting key

@@ -54,8 +54,17 @@ pub struct TrialRequest<'a> {
 
 /// The row that now exists. Its id travels back on the tool's result so the
 /// model can cite the trial that produced the number.
+///
+/// **Not** `ledger::TrialTicket`, and deliberately not named like it. This is
+/// the receipt the ledger handed back across the API — an id and a family — and
+/// the sealed type is the thing the ledger itself mints and never lets out.
+/// AT-19 is a name scan over `TrialTicket {`, which is what stops a second
+/// module from minting one; a local mirror sharing the name would both trip that
+/// scan falsely and, worse, make a real violation look exactly like this file.
+/// The same reasoning is why `spec::Envelope` is reconciled by a test rather than
+/// guarded by its name: there is no name-based invariant on `Envelope`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TrialTicket {
+pub struct TrialReceipt {
     pub ticket_id: String,
     /// The family the trial was sealed into, when the caller is inside one. A
     /// family is fixed at hypothesis registration, never at call time — see
@@ -73,7 +82,7 @@ pub trait TrialRegistrar: Send + Sync {
     fn register<'a>(
         &'a self,
         req: TrialRequest<'a>,
-    ) -> BoxFuture<'a, Result<TrialTicket, ToolError>>;
+    ) -> BoxFuture<'a, Result<TrialReceipt, ToolError>>;
 }
 
 /// Registers trials through the platform's own API, which is the front door
@@ -93,7 +102,7 @@ impl TrialRegistrar for ApiTrialRegistrar {
     fn register<'a>(
         &'a self,
         req: TrialRequest<'a>,
-    ) -> BoxFuture<'a, Result<TrialTicket, ToolError>> {
+    ) -> BoxFuture<'a, Result<TrialReceipt, ToolError>> {
         Box::pin(async move {
             let body = serde_json::json!({
                 "tool": req.tool,
@@ -114,7 +123,7 @@ impl TrialRegistrar for ApiTrialRegistrar {
                         // exists to prevent.
                         return Err(registration_failed("the ledger returned no ticket_id"));
                     }
-                    Ok(TrialTicket {
+                    Ok(TrialReceipt {
                         ticket_id,
                         family_id: v
                             .get("family_id")
@@ -209,7 +218,7 @@ impl CallGate {
         &self,
         spec: &'static ToolSpec,
         arguments: &Value,
-    ) -> Result<Option<TrialTicket>, ToolError> {
+    ) -> Result<Option<TrialReceipt>, ToolError> {
         // Count first, then judge. Counting after the verdict would let a tool at
         // its budget be retried forever, each attempt refused and none recorded.
         let count = {
@@ -298,10 +307,10 @@ mod tests {
         fn register<'a>(
             &'a self,
             req: TrialRequest<'a>,
-        ) -> BoxFuture<'a, Result<TrialTicket, ToolError>> {
+        ) -> BoxFuture<'a, Result<TrialReceipt, ToolError>> {
             Box::pin(async move {
                 let n = self.registered.fetch_add(1, Ordering::SeqCst) + 1;
-                Ok(TrialTicket {
+                Ok(TrialReceipt {
                     ticket_id: format!("ticket-{}-{n}", req.tool),
                     family_id: None,
                 })
@@ -317,7 +326,7 @@ mod tests {
         fn register<'a>(
             &'a self,
             _req: TrialRequest<'a>,
-        ) -> BoxFuture<'a, Result<TrialTicket, ToolError>> {
+        ) -> BoxFuture<'a, Result<TrialReceipt, ToolError>> {
             Box::pin(async move { Err(registration_failed("the family is sealed")) })
         }
     }

@@ -113,7 +113,18 @@ fn instance(def: StrategyDefinition) -> StrategyInstance {
 
 /// Drive `events` and return, per event, the intents it produced.
 fn drive(inst: &mut StrategyInstance, events: &[WorldEvent]) -> Vec<Vec<domain::OrderIntent>> {
-    events.iter().map(|e| inst.process_event(e)).collect()
+    // `.intents`: `process_event` returns `SizedIntents`, which carries the
+    // sizing errors alongside the orders. These tests are about *which* orders
+    // a declared exit produces, and a sizing error is asserted on where it is
+    // the subject; dropping them silently here would not be.
+    events
+        .iter()
+        .map(|e| {
+            let out = inst.process_event(e);
+            assert!(out.errors.is_empty(), "unexpected sizing error: {:?}", out.errors);
+            out.intents
+        })
+        .collect()
 }
 
 /// The index of the first event that produced a flattening sell, if any.
@@ -486,7 +497,7 @@ fn a_position_the_venue_reports_flat_releases_the_tracker() {
 
     let after = inst.process_event(&bar_event(1, dec!(100), dec!(90), dec!(95)));
     assert!(
-        after.iter().all(|i| i.side != Side::Sell),
+        after.intents.iter().all(|i| i.side != Side::Sell),
         "nothing may be sold for a position that was never opened"
     );
 }

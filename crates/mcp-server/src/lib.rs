@@ -1058,6 +1058,24 @@ mod catalogue_tests {
         );
     }
 
+    /// The three tests below go through [`dispatch_under`] rather than
+    /// [`dispatch_tool`], with an envelope minted here.
+    ///
+    /// This **is** a second mint, and AT-64 knows about it by name rather than by
+    /// category — `static_invariants` asserts there is exactly one, that it is
+    /// inside `#[cfg(test)]`, and that nothing else in the file forges one. The
+    /// reason it has to exist: the audit
+    /// `pre` record is written before anything else on the dispatch path, and
+    /// `AuditSink` has exactly one constructor, which posts to the platform — by
+    /// design, so there is no offline sink to reach for. Against an unreachable
+    /// base URL every one of these calls therefore stops at `audit_unavailable`
+    /// and never reaches the thing under test. Holding an envelope stands for the
+    /// `pre` row having been written, which is what `dispatch_under` requires and
+    /// all these tests need to be true.
+    fn envelope() -> AuditEnvelope {
+        AuditEnvelope(Uuid::nil())
+    }
+
     /// Adversarial, end to end: a tool declaring a trial cannot reach its handler
     /// on a context with no ledger. Together with the structural test above, this
     /// is the pair the phase's definition of done asks for — the mechanism
@@ -1068,7 +1086,7 @@ mod catalogue_tests {
         // `backtest_strategy` declares `TrialKind::Search`; its handler would post
         // to the platform. The refusal happens first, so the unreachable base URL
         // above is never contacted — which is itself the assertion.
-        let out = dispatch_tool(&ctx, "backtest_strategy", &json!({}), None).await;
+        let out = dispatch_under(&ctx, "backtest_strategy", &json!({}), None, &envelope()).await;
         let err = out.get("error").expect("refused");
         assert_eq!(
             err.get("code"),
@@ -1081,7 +1099,7 @@ mod catalogue_tests {
     #[tokio::test]
     async fn a_read_is_not_blocked_by_the_absence_of_a_ledger() {
         let ctx = McpContext::unledgered(ApiClient::new("http://127.0.0.1:1", "t"));
-        let out = dispatch_tool(&ctx, "list_lanes", &json!({}), None).await;
+        let out = dispatch_under(&ctx, "list_lanes", &json!({}), None, &envelope()).await;
         assert!(out.get("lanes").is_some(), "{out}");
     }
 
@@ -1091,7 +1109,7 @@ mod catalogue_tests {
     #[tokio::test]
     async fn a_name_with_no_spec_never_reaches_the_table() {
         let ctx = McpContext::unledgered(ApiClient::new("http://127.0.0.1:1", "t"));
-        let out = dispatch_tool(&ctx, "x_skill", &json!({}), None).await;
+        let out = dispatch_under(&ctx, "x_skill", &json!({}), None, &envelope()).await;
         assert_eq!(out.get("error"), Some(&json!("unknown_tool")));
     }
 }

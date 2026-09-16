@@ -144,7 +144,32 @@ fn check_money_f64() {
                     line.contains(kw)
                 }
             });
-            if has_money_keyword {
+            // Named exemptions, each with the reason it is not money.
+            //
+            // A list, not a widened keyword: dropping "size" or "quantity" from
+            // the keywords would stop the scan catching an actual `size: f64` on
+            // an order, which is the thing it exists for. Every entry here is a
+            // line the heuristic reads as monetary and is not, and each has to be
+            // written down to be exempt — so a future real violation cannot hide
+            // among them, and a stale entry is visible as a line nobody can
+            // justify any more.
+            const NOT_MONEY: &[(&str, u32, &str)] = &[
+                (
+                    "crates/harness/src/eval/holdout.rs",
+                    138,
+                    "`corpus_size` is a count of eval cases; the scan matches `size`",
+                ),
+                (
+                    "crates/harness/src/memory/mod.rs",
+                    260,
+                    "`quantity` here is a String naming what was measured (a Sharpe,                      a count); `value` is that measurement, not an amount of money",
+                ),
+            ];
+            let exempt = NOT_MONEY
+                .iter()
+                .any(|(f, l, _)| file.replace('\\', "/") == *f && lineno + 1 == *l as usize);
+
+            if has_money_keyword && !exempt {
                 violations.push(format!(
                     "{}:{}: f64/f32 on monetary field — use Decimal\n  {}",
                     file,

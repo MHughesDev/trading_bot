@@ -654,6 +654,14 @@ pub struct Loop {
     /// and is bounded per tier — raw result text belongs on the driver, where
     /// nothing pays for it by the turn.
     results_by_id: BTreeMap<String, String>,
+    /// The claims alone, without the confidence label or the evidence.
+    ///
+    /// What the duplicate check compares against, kept separately from
+    /// `WorkingState::findings` so that a change to how a finding is *rendered*
+    /// cannot silently disable it. That is not hypothetical: the headline now
+    /// opens with `[established]` or `[suggestive]`, and the `starts_with` over
+    /// it matched nothing.
+    finding_claims: Vec<String>,
     /// Idempotent calls already made this session, keyed by name + arguments.
     ///
     /// `ToolDef::idempotent` was set on every tool in the catalogue and read by
@@ -729,6 +737,7 @@ impl Loop {
             barren_steps: 0,
             step_learned_something: false,
             results_by_id: BTreeMap::new(),
+            finding_claims: Vec::new(),
             idempotent_calls: BTreeMap::new(),
             held: None,
             running: None,
@@ -1996,10 +2005,9 @@ impl Loop {
         // being a no-op.
         let key = finding.to_ascii_lowercase();
         if self
-            .working
-            .findings
+            .finding_claims
             .iter()
-            .any(|f| f.headline.to_ascii_lowercase().starts_with(&key))
+            .any(|c| c.to_ascii_lowercase() == key)
         {
             self.reject_and_retry(
                 Rejection::semantic_owned(
@@ -2020,6 +2028,7 @@ impl Loop {
         // assembly at priority 250 — above raw tool results, below the charter — so
         // the compressed form outlives the results it was distilled from without the
         // list being pushed again for every finding.
+        self.finding_claims.push(finding.clone());
         self.working.findings.push(FindingRef {
             id: format!("finding-{}", self.working.findings.len() + 1),
             // The confidence travels **with** the finding, in the text the
