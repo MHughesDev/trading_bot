@@ -40,7 +40,7 @@ Phase 0 and 1: done. Phase 2: every item done except 2.1, 2.14 and 2.16, which a
 - **Overlapping-label leakage has no static detector** (OQ-12, deliberate). Visible only as the 1.10 CV/WF gap, and the test asserts that.
 - **Nothing consumes a `Comparison`.** Built, sealed, tested; the COMPARE worker that would call it is 2.1's gap.
 - **Five of the sixteen gates have no evidence source** — 3, 4, 10, 12, 15. Eleven judge on real numbers read from the ledger.
-- **No framework declares `resume_support: bit_identical`.** `BIT_IDENTICAL_FRAMEWORKS` is empty until AT-61's eval task has demonstrated it, so every resume currently restarts under the same trial.
+- **Resume still restarts, for two reasons that are no longer "nobody measured it".** AT-61 has run (2026-09-15): torch is bit-identical and is in `BIT_IDENTICAL_FRAMEWORKS`; xgboost and lightgbm are bit-identical only with row/column sampling off and are in `SAMPLING_SENSITIVE_FRAMEWORKS` (ADR-P6-11); sklearn and garch have no checkpoint boundary. What is still missing is that **no adapter writes a checkpoint during training** and **nothing calls `jobs::checkpoint::plan_resume`** — so a manifest can now honestly say `bit_identical`, and there is still no stored checkpoint for a re-queued job to find.
 
 ## 5. Next work, in order
 
@@ -63,6 +63,7 @@ Phase 0 and 1: done. Phase 2: every item done except 2.1, 2.14 and 2.16, which a
 
 
 1. **AT-61's eval task.** Train `n` steps, resume from `n−2`, assert bit-identical weights and metrics per framework. It is the one build-blocking acceptance test still unwritten, and passing it is what lets a name enter `BIT_IDENTICAL_FRAMEWORKS`.
+1. ~~**AT-61's eval task.**~~ **Done 2026-09-15** — `apps/model-trainer/app/resume_eval.py` plus `tests/test_resume_eval.py`, in CI as `resume-bit-identity`. See `PROGRESS.md` § "AT-61 · the resume measurement" for what each framework proved. **What it replaced itself with:** checkpoints are now licensed but never written. The next piece of work is the producing half — an adapter that writes a `checkpoint` artifact on the Young–Daly cadence during training, and a worker that calls `jobs::checkpoint::plan_resume` before dispatching a re-queued training job. Until both exist, every resume restarts from step 0 under the same trial.
 2. **2.1's child workers** — `Study`, `EvalTask`, `ResearchRun`. `GateAdvance` exists. Until the rest do, a campaign fails at its first dispatching phase with `no_worker`. The COMPARE worker is also what would finally call `ComparisonPlan::judge`, and with it 2.1's `DIMINISHING_RETURNS` and `CONVERGED` stop reading `NotComputable`.
 3. **The gate stack's last five inputs** — the cost sweep's breakeven multiple (3) is one `record_statistic` call from a `CostSweep` study the funnel does not currently run; capacity (4) needs ~5–8 counted runs at AUM multiples; `per_instrument_pnl` (12, also 5.2) and the factor-return series (10, also 3.1) are new artifacts; forward-test observations (15) need the reconciliation crate wired.
 4. **Phase 3's writers** — the `InstrumentProfile` job that calls `fingerprint.compute` and writes `knowledge.asset_embedding`, and a timer for `TensorProjection::rebuild`. Both modules exist and are tested; neither is scheduled.

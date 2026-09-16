@@ -19,6 +19,26 @@ A framework declares whether its resume is bit-identical. `unsupported` is a
 real and useful answer: the run restarts from step 0 under the same trial rather
 than resuming into an approximation. What is not allowed is claiming
 `bit_identical` without AT-61 having demonstrated it.
+
+The demonstration is `app/resume_eval.py`, run by
+`tests/test_resume_eval.py::test_at61_resume_reproduces_the_uninterrupted_run`.
+It trains `n` steps, trains `n-2` and **kills the process**, resumes from what
+reached the disk, and compares the parameter bytes, the prediction bytes and the
+packed metric bytes. What it found, 2026-09-15:
+
+* **torch** — bit-identical, across `mlp`, `lstm` and an `mlp` with dropout.
+  Unconditional, so it is in `BIT_IDENTICAL_FRAMEWORKS`.
+* **xgboost** and **lightgbm** — bit-identical *only when row and column
+  sampling are off*. Their sampling RNG is not part of the saved booster, so a
+  resumed run draws a different subsample for the remaining rounds. Two
+  uninterrupted runs of the sampling configuration agree with each other, so
+  this is the resume and not nondeterminism. They are therefore **not**
+  unconditionally bit-identical; `SAMPLING_SENSITIVE_FRAMEWORKS` records the
+  condition and `resume_support` requires the hyperparameters before it will say
+  `bit_identical` for one of them.
+* **sklearn** and **garch** — no checkpoint boundary at all. Both adapters fit
+  in a single call, so there is no step `n-2` to resume from. Not a failure;
+  a different answer.
 """
 
 from __future__ import annotations
@@ -30,12 +50,53 @@ from typing import Any
 
 import numpy as np
 
-# Frameworks whose resume has been demonstrated bit-identical by AT-61.
+# Frameworks whose resume AT-61 demonstrated bit-identical **under every
+# configuration the platform can produce**.
 #
-# Empty until the eval task has actually run. A name added here without that
-# evidence is the claim the whole contract exists to prevent, so the list is
-# deliberately a *record of measurements*, not a statement of intent.
-BIT_IDENTICAL_FRAMEWORKS: frozenset[str] = frozenset()
+# A record of measurements, not a statement of intent. A name enters this set
+# only when `app/resume_eval.py` has trained it, killed it, resumed it and found
+# the parameter bytes identical — and `test_resume_eval.py` re-runs that
+# measurement on every PR and fails if this set and the measurement disagree in
+# either direction. There is no way to add a name here that the test will not
+# check.
+BIT_IDENTICAL_FRAMEWORKS: frozenset[str] = frozenset({"torch"})
+
+# Frameworks whose resume is bit-identical **only when sampling is off**, with
+# the hyperparameters that turn sampling on.
+#
+# XGBoost and LightGBM both carry their boosting rounds in the saved model and
+# neither carries the state of the generator that draws the row/column sample.
+# Resume the booster and the remaining rounds are fitted on a different sample:
+# the trees differ, and nothing says so. Measured, not inferred — AT-61 runs each
+# knob below and finds the resumed model different, and finds two uninterrupted
+# runs of the same configuration identical, which is what rules out plain
+# nondeterminism.
+#
+# This is why `resume_support` will not answer for one of these frameworks
+# without being shown the hyperparameters. An unstated configuration is not a
+# measured one, and the honest answer to "I do not know what was configured" is
+# `unsupported`.
+SAMPLING_SENSITIVE_FRAMEWORKS: dict[str, tuple[str, ...]] = {
+    "xgboost": (
+        "subsample",
+        "colsample_bytree",
+        "colsample_bylevel",
+        "colsample_bynode",
+        "sampling_method",
+    ),
+    # LightGBM accepts `subsample`/`colsample_bytree` as aliases of
+    # `bagging_fraction`/`feature_fraction`, so both spellings are listed; a knob
+    # that is only caught under one of its names is not caught.
+    "lightgbm": (
+        "bagging_fraction",
+        "subsample",
+        "feature_fraction",
+        "colsample_bytree",
+        "feature_fraction_bynode",
+        "extra_trees",
+        "data_sample_strategy",
+    ),
+}
 
 # LightGBM builds histograms in thread-scheduling order unless both of these are
 # set, and then differs run to run on one machine. XGBoost needs a fixed seed and
@@ -85,13 +146,66 @@ def capture_rng_state() -> dict[str, Any]:
     }
 
 
-def resume_support(framework: str) -> str:
-    """Whether this framework's resume has been *measured* bit-identical."""
-    return (
-        "bit_identical"
-        if framework.lower() in BIT_IDENTICAL_FRAMEWORKS
-        else "unsupported"
+def _knob_is_engaged(name: str, value: Any) -> bool:
+    """Whether one sampling hyperparameter is actually turned on.
+
+    Fails closed: a value that cannot be read as a fraction is treated as
+    engaged, because a knob whose setting is unreadable is a knob nobody has
+    cleared.
+    """
+    if name == "sampling_method":
+        return str(value).lower() != "uniform"
+    if name == "data_sample_strategy":
+        return str(value).lower() != "bagging"
+    if name == "extra_trees":
+        return bool(value)
+    # `bagging_fraction < 1` with `bagging_freq = 0` is inert in LightGBM, and is
+    # reported engaged anyway. Erring this way costs a resume; erring the other
+    # way costs a trial record that says a run was reproduced when it was not.
+    try:
+        return float(value) < 1.0
+    except (TypeError, ValueError):
+        return True
+
+
+def sampling_is_stochastic(framework: str, hyperparameters: dict[str, Any]) -> bool:
+    """Whether this run draws a random row/column sample per boosting round.
+
+    Returns `True` for any framework AT-61 has not measured. The default answer
+    is the conservative one everywhere in this module.
+    """
+    knobs = SAMPLING_SENSITIVE_FRAMEWORKS.get(framework.lower())
+    if knobs is None:
+        return True
+    return any(
+        _knob_is_engaged(name, hyperparameters[name])
+        for name in knobs
+        if name in hyperparameters
     )
+
+
+def resume_support(
+    framework: str, *, hyperparameters: dict[str, Any] | None = None
+) -> str:
+    """Whether this framework's resume has been *measured* bit-identical.
+
+    `hyperparameters` are the ones the run is actually using. They matter only
+    for the frameworks in `SAMPLING_SENSITIVE_FRAMEWORKS`, and for those they are
+    **required**: omitting them answers `unsupported`, because the measurement
+    was conditional and a condition nobody stated has not been met. The default
+    is safe in the only direction that matters — it can waste a resume, never
+    claim one that is not bit-identical.
+    """
+    fw = framework.lower()
+    if fw in BIT_IDENTICAL_FRAMEWORKS:
+        return "bit_identical"
+    if fw in SAMPLING_SENSITIVE_FRAMEWORKS:
+        if hyperparameters is None:
+            return "unsupported"
+        return (
+            "unsupported" if sampling_is_stochastic(fw, hyperparameters) else "bit_identical"
+        )
+    return "unsupported"
 
 
 def build_manifest(
@@ -107,12 +221,18 @@ def build_manifest(
     dataset_id: str,
     boosting_round: int | None = None,
     seed: int | None = None,
+    hyperparameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble a manifest the Rust registry will accept.
 
     Every argument is keyword-only and required. There are no defaults, because
     a default here is a field the caller did not think about, and the field the
     caller did not think about is the one that makes the resume wrong.
+
+    `hyperparameters` is the exception, and only because its default is the
+    *conservative* answer rather than a guess: leave it out and a
+    sampling-sensitive framework declares `unsupported`, which costs a resume and
+    claims nothing.
     """
     manifest: dict[str, Any] = {
         "step": int(step),
@@ -124,7 +244,7 @@ def build_manifest(
         "code_hash": code_hash,
         "image_digest": image_digest,
         "dataset_id": dataset_id,
-        "resume_support": resume_support(framework),
+        "resume_support": resume_support(framework, hyperparameters=hyperparameters),
     }
 
     flags = DETERMINISM_FLAGS.get(framework.lower())

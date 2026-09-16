@@ -219,8 +219,30 @@ jobs:
       # checked on every PR.
       - name: Install post-hoc deps
         run: pip install numpy
+      # AT-61 needs torch, xgboost and lightgbm installed and spawns real
+      # training processes, so it runs in `resume-bit-identity` below rather than
+      # weighing this job down with a 200 MB wheel.
       - name: Run the post-hoc pipeline tests
-        run: python -m pytest apps/model-trainer/tests -q
+        run: python -m pytest apps/model-trainer/tests -q --ignore=apps/model-trainer/tests/test_resume_eval.py
+
+  resume-bit-identity:
+    name: AT-61 - checkpoint resume is bit-identical
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # The frameworks themselves, because AT-61 is a *measurement*: it trains,
+      # kills the process and resumes. `checkpoint.BIT_IDENTICAL_FRAMEWORKS` is
+      # only as honest as the last run of this job, and a framework it claims but
+      # cannot import here fails the test rather than skipping it.
+      - name: Install the training frameworks
+        run: |
+          pip install pytest numpy scikit-learn xgboost lightgbm
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Measure resume bit-identity per framework
+        run: python -m pytest apps/model-trainer/tests/test_resume_eval.py -q
 
   harness-conformance:
     name: Harness conformance and failure injection

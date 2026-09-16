@@ -1009,3 +1009,103 @@ AT-62 is live and scans Rust, TypeScript, Python, SQL and JSON across `crates`,
   `PLATFORM_WORM_DIR`. Every live-Postgres test in this pass — including AT-59 and
   AT-60's job-store half — is therefore written but has not been run against a
   database; the unit tests have.
+
+---
+
+## AT-61 · the resume measurement · 2026-09-15
+
+`BIT_IDENTICAL_FRAMEWORKS` was empty because nobody had measured it. It has been
+measured now.
+
+### What was built
+
+`apps/model-trainer/app/resume_eval.py` is the eval task, and
+`apps/model-trainer/tests/test_resume_eval.py` is AT-61. Per framework, per
+configuration, it:
+
+1. trains `n = 6` steps in a fresh process and records what it produced;
+2. trains `n − 2 = 4` steps in a second fresh process, writes a checkpoint, and
+   is **killed** by the parent — `Popen.kill()`, so the only surviving state is
+   the file that reached the disk;
+3. resumes from that file in a third fresh process and trains the last two steps;
+4. compares 1 and 3.
+
+Three processes rather than three calls, because an in-process resume can pass
+while reading a module-level generator or a warm cache that a restarted worker
+would not have. `test_the_checkpointing_process_was_actually_killed` asserts the
+middle process exited non-zero, so a test that quietly let it finish would fail.
+
+The comparison is on three things and all three must match: the **parameter
+bytes** (torch state-dict tensors as raw IEEE-754; xgboost's UBJSON `save_raw`;
+lightgbm's model string), the **prediction bytes** as `float64`, and the
+**metrics**, which are carried as `struct.pack("<d", …)` from the moment they are
+computed and never rendered as decimal. There is no `allclose` in the module.
+`test_the_comparator_detects_a_one_bit_change_in_real_weights` flips one bit of a
+real trained model and requires the comparison to fail, so a vacuous comparator
+cannot pass.
+
+### What it found
+
+- **torch — bit-identical**, across `mlp`, `lstm` and an `mlp` with dropout. The
+  dropout case is there deliberately: a resume that reproduces only because
+  nothing in the forward pass draws from the RNG has not shown that the RNG is
+  being restored. torch is the one name in `BIT_IDENTICAL_FRAMEWORKS`.
+- **xgboost — bit-identical only with sampling off.** `subsample = 0.7` and
+  `colsample_bytree = 0.6` both diverge. The cause is named rather than guessed:
+  the sampling RNG stream is not part of `save_raw`, so the resumed booster draws
+  a different sample for the remaining rounds, and
+  `test_a_divergence_is_the_resume_and_not_nondeterminism` first shows two
+  uninterrupted runs of the *same* configuration are identical, which rules out
+  plain nondeterminism. `seed_per_iteration` does not fix it.
+- **lightgbm — bit-identical only with sampling off**, under
+  `deterministic`/`force_row_wise`/`num_threads = 1`. `bagging_fraction` and
+  `feature_fraction` both diverge, same cause, same control.
+- **sklearn and garch — no checkpoint boundary.** Both adapters fit in a single
+  call (RandomForest/GradientBoosting/LogisticRegression/Ridge; one `arch`
+  maximum-likelihood fit), so there is no step `n − 2` to resume from. Checked
+  against the adapters' own source, not asserted.
+
+### What the result licenses
+
+ADR-P6-11, and the reason the split is not pedantic is in `app/hpo.py`: the GBDT
+search spaces sample `subsample` and `colsample_bytree` on [0.5, 1.0] and
+`feature_fraction`/`bagging_fraction` on [0.4, 1.0]/[0.5, 1.0], so a sweep draws
+a sampling fraction below 1.0 with probability 1. An unconditional `xgboost` in
+the set would have been true of the adapters' defaults and false of essentially
+every HPO trial the platform runs.
+
+`BIT_IDENTICAL_FRAMEWORKS` therefore holds only frameworks that reproduced under
+**every** configuration the platform can produce, so it holds `torch` alone;
+`SAMPLING_SENSITIVE_FRAMEWORKS` records xgboost's and lightgbm's condition with
+the knobs that break it. `resume_support` will not answer `bit_identical` for a
+sampling-sensitive framework without being shown the run's hyperparameters, and
+answers `unsupported` when it is not — the cost of silence is a wasted resume,
+never a wrong trial record. `test_every_sampling_knob_the_measurement_used_is_caught`
+holds the knob list and the eval's configurations to each other.
+
+The test is the gate in both directions, and both directions were verified by
+deliberately breaking them: adding `xgboost` to the set fails with the divergence
+quoted, and emptying the set fails with "the measurement and the claim disagree".
+A framework the set claims and this environment cannot import is a **failure**,
+not a skip.
+
+### What is still not true
+
+**Resume still restarts.** Two things are missing and neither is AT-61's:
+
+- **No adapter writes a checkpoint during training.** `checkpoint.py` builds and
+  validates manifests; nothing in `app/adapters/` produces one mid-run, so there
+  is no stored checkpoint for a re-queued job to find. The resumable loops in
+  `resume_eval.py` are the eval's, not the adapters'.
+- **Nothing calls `jobs::checkpoint::plan_resume`.** It is built, sealed and
+  tested, and `grep` finds no caller outside its own module.
+
+So what changed is the *precondition*: a torch checkpoint's manifest can now
+truthfully declare `resume_support: bit_identical`, which is what `plan_resume`
+needs before it can return `Resume` at all. Until an adapter writes checkpoints
+and the worker consults them, every re-queued job still restarts from step 0
+under the same trial — which remains correct behaviour, just not the cheap one.
+
+CI: a new `resume-bit-identity` job installs torch (CPU wheel), xgboost,
+lightgbm and scikit-learn and runs the file; `eval-graders` now ignores it, so
+the fast job stays fast.

@@ -86,10 +86,41 @@ def test_a_boosting_framework_must_supply_its_round_and_seed():
 
 
 def test_resume_support_is_a_measurement_not_an_intention():
-    """No framework may claim bit-identical resume until AT-61 has shown it."""
-    assert checkpoint.BIT_IDENTICAL_FRAMEWORKS == frozenset()
-    for fw in ("torch", "lightgbm", "xgboost", "sklearn"):
+    """No framework may claim bit-identical resume until AT-61 has shown it.
+
+    `test_resume_eval.py` is the half that runs the measurement and fails if this
+    set and the measurement disagree. This half is about what the set *licenses*:
+    a name that is not in it, and a sampling-sensitive name whose configuration
+    was not supplied, both answer `unsupported`.
+    """
+    for fw in ("sklearn", "garch", "jax", "catboost"):
+        assert checkpoint.resume_support(fw) == "unsupported"
+        assert complete(framework=fw)["resume_support"] == "unsupported"
+
+    # Conditional, and the condition has to be stated. Nothing is assumed about a
+    # run whose hyperparameters were not passed in.
+    for fw in ("lightgbm", "xgboost"):
         assert checkpoint.resume_support(fw) == "unsupported"
         assert complete(framework=fw, boosting_round=1, seed=1)["resume_support"] == (
             "unsupported"
         )
+        assert (
+            complete(
+                framework=fw,
+                boosting_round=1,
+                seed=1,
+                hyperparameters={"subsample": 0.8},
+            )["resume_support"]
+            == "unsupported"
+        )
+        assert (
+            complete(
+                framework=fw, boosting_round=1, seed=1, hyperparameters={}
+            )["resume_support"]
+            == "bit_identical"
+        )
+
+    # torch is unconditional: AT-61 reproduced it across every architecture the
+    # adapter builds, and one with dropout besides.
+    assert checkpoint.resume_support("torch") == "bit_identical"
+    assert complete(framework="torch")["resume_support"] == "bit_identical"
