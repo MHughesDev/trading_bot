@@ -1,6 +1,6 @@
 # Phase 4 — Memory and evaluation
 
-**Completion: 12% (2 / 17 tasks) done, 14 `PARTIAL`, 1 `BLOCKED:HUMAN` — the harness half was built and tested, and now much of it persists.**
+**Completion: 18% (3 / 17 tasks) done, 13 `PARTIAL`, 1 `BLOCKED:HUMAN` — the harness half was built and tested, and now much of it persists.**
 
 > **Updated 2026-09-16.** The sentence this header used to end with — "and nothing persists" — was true that morning and is no longer. Four tables exist and are verified against a live Postgres: `agent_memory.entry` (0122), `agent_turn_summaries` (0123), `memory_retrievals` (0124), and the stores over them. The carry between turns is structured rather than the model's own prose, and `assemble_brief` — 936 tested lines that had **no caller anywhere in the workspace** — now runs in the driver.
 >
@@ -8,7 +8,7 @@
 >
 > **OQ-18 is resolved** (ADR-S4-04) and the write path is open: a finding's window is the union of the windows of the results it cites, and every evidence-producing tool now stamps one — `run_backtest` was the last, and its absence would have rejected the central case.
 >
-> **What the remaining `PARTIAL`s wait on is mostly the funnel and the scheduler, not the store.** The derivations are built and the constraints enforce them; what is missing is the event that fires them: the funnel does not call `derive_negative_result` when it refuses a gate (S-4.4), and nothing enqueues the weekly profiler (S-4.7).
+> **What the remaining `PARTIAL`s wait on is mostly the funnel and the scheduler, not the store.** The derivations are built and the constraints enforce them; what is missing is the event that fires them: nothing enqueues the weekly profiler (S-4.7), and the evaluation half (S-4.8 onward) waits on phase 2's `agent_events` for real trajectories.
 >
 > The other half of the remainder is the evaluation side (S-4.8 onward), which depends on phase 2's `agent_events` for real trajectories.
 
@@ -127,7 +127,7 @@ every migration applies to an empty database); an entry without provenance canno
 **Traces:** AGENT-007 §2.2.
 
 ### S-4.4 Negative results are derived, not declared — M
-`PARTIAL` 2026-09-16 — `memory/negative.rs` (486 lines, 7 tests) derives the class from the verdict, and **the database now enforces the same rule** (`migrations/0125_negative_result_class.sql`).
+`DONE` 2026-09-16 — `memory/negative.rs` (486 lines, 7 tests) derives the class from the verdict, and **the database now enforces the same rule** (`migrations/0125_negative_result_class.sql`).
 
 The acceptance says "cannot be created", not "is not created", and the difference is where the rule lives. `derive_negative_result` has no class parameter — the class comes from `FailureClass::from_source` over an event the funnel emitted, so there is no path from a string the model chose. That is a property of one function and holds until the second writer.
 
@@ -135,7 +135,13 @@ Three constraints, verified live, and the last two exist because the first alone
 
 `schema_mirrors_memory_types.rs` compares the list against `FailureClass::all()`, so a class added to one and not the other fails the build rather than a run.
 
-**What keeps it `PARTIAL`**: nothing writes the row yet. The funnel does not call `derive_negative_result` when it refuses a gate, so the derivation and the enforcement are both in place and the event that should trigger them is not wired.
+**The event is wired now, and S-4.4 is `DONE`.** `advance_funnel`'s route writes one negative result per refused gate, through `crates/api/src/negative_from_funnel.rs` — in `crates/api` because it needs `backtest::gates` and `harness::memory` and neither crate depends on the other: the funnel does not need a memory store to run gates, and the store does not need a simulator to hold entries.
+
+Gate 0 forced a fix on the way. It refuses for two unrelated reasons — a lookahead leak or a gross edge under the cost floor — and `integrity_scan`'s typed codes for them were being formatted into a sentence and discarded. That difference decides the retry condition, so "when the leak is fixed" and "when costs fall" were collapsing into one future; `GateVerdict` now carries its reasons and the two are told apart.
+
+The later mappings are argued rather than assumed: gate 1 is `weak_effect` and not `no_better_than_null`, because the null has not run at that point and claiming otherwise would be a claim about a comparison nobody made; gate 2 is `fragile_parameters` and not `regime_specific`, because the gate varies configuration and windows rather than regime.
+
+Idempotent by construction — the entry id is the ticket plus the gate — and a failed store is a warning, since the verdict is already recorded and returned.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
