@@ -908,6 +908,25 @@ impl Loop {
         blocks
     }
 
+    /// Bytes of body budget this step has left, for capping an arriving result.
+    ///
+    /// Estimated from the same arithmetic the assembler uses — the window, less
+    /// what leaves it on the wire, less what the blocks already hold — and then
+    /// converted back to bytes at the estimator's four-bytes-per-token. It is an
+    /// estimate either way; the point is that it moves with the run instead of
+    /// being a constant chosen when the profile was written.
+    fn remaining_body_bytes(&self) -> usize {
+        let window = self.profile.input_budget_tokens();
+        let reserved = self.reserved_tokens();
+        let held: u32 = self
+            .observations
+            .iter()
+            .map(|b| context::estimate_tokens(&b.tagged.render()))
+            .sum();
+        let left = window.saturating_sub(reserved).saturating_sub(held);
+        (left as usize).saturating_mul(4)
+    }
+
     /// Record something a tool actually returned.
     ///
     /// The counterpart to rewriting state: an observation is evidence, it is kept in
@@ -2437,7 +2456,13 @@ impl Loop {
             .as_ref()
             .map_or_else(|| "tool".to_string(), |c| c.name.clone());
 
-        let (capped, truncated) = context::cap_tool_result(&self.profile, output);
+        // Against the body that is actually left, not only against the profile's
+        // constant (S-1.18). The two disagree by a lot on a long run, and the
+        // direction of the disagreement is the dangerous one: a 32 KiB cap against
+        // 8 KiB of remaining body admits one result that evicts the whole working
+        // state, findings included.
+        let (capped, truncated) =
+            context::cap_tool_result_within(&self.profile, output, Some(self.remaining_body_bytes()));
 
         self.tools_attempted += 1;
         self.step_learned_something = true;

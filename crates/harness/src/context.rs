@@ -461,11 +461,77 @@ pub fn assemble_reserving(
 /// output to the scratchpad and hand back a reference.
 #[must_use]
 pub fn cap_tool_result(profile: &Profile, text: &str) -> (String, bool) {
-    let cap = profile.context.max_tool_result_bytes;
+    cap_tool_result_within(profile, text, None)
+}
+
+/// The same cap, against the body that is actually left (AGENT-005 §2.2, S-1.18).
+///
+/// `max_tool_result_bytes` is a per-profile constant and the body budget is
+/// computed per call, so the two can disagree by a lot. A 32 KiB cap against 8 KiB
+/// of remaining body admits one result that evicts everything else in the working
+/// state — **including the run's own findings**, which are the compressed form of
+/// every earlier result and the thing least replaceable by re-reading.
+///
+/// So the effective cap is the smaller of the two, taken at the moment the result
+/// arrives rather than when the profile was written. A result capped this way still
+/// carries its handle, so nothing is lost that cannot be fetched back.
+///
+/// `remaining` is `None` where the caller genuinely has no per-call figure, and
+/// then the profile constant stands. That is the honest reading of "no budget
+/// information", not a licence to ignore one.
+#[must_use]
+pub fn cap_tool_result_within(
+    profile: &Profile,
+    text: &str,
+    remaining_body_bytes: Option<usize>,
+) -> (String, bool) {
+    let cap = match remaining_body_bytes {
+        // A floor of one line: a cap of zero is not a truncation, it is a
+        // deletion, and a result reduced to nothing tells the model less than a
+        // result reduced to its shape.
+        Some(r) => profile.context.max_tool_result_bytes.min(r).max(MIN_RESULT_BYTES),
+        None => profile.context.max_tool_result_bytes,
+    };
     if text.len() <= cap {
         return (text.to_string(), false);
     }
     (truncate_middle(text, cap), true)
+}
+
+/// The smallest a capped tool result may be reduced to.
+///
+/// Enough for the shape of an answer — a key, a count, an ellipsis — because a
+/// model that is handed an empty string learns nothing and one that is handed
+/// `{"bars": … }` learns what kind of thing it asked for and can fetch the handle.
+pub const MIN_RESULT_BYTES: usize = 256;
+
+/// The factor to scale a token estimate by, from observed `estimated / actual`
+/// ratios (AGENT-005 §7, S-1.18).
+///
+/// **p90, not the median.** The estimator's contract is that it OVER-estimates:
+/// a budget built on an under-estimate overflows the window, and overflowing is
+/// how a prompt loses its charter. Calibrating to the median satisfies the
+/// contract on exactly half of all calls, which is the same as not having it.
+///
+/// p90 rather than the maximum because one pathological ratio — a result that was
+/// almost all punctuation — should not inflate every later budget; the ninetieth
+/// percentile is the strongest guarantee that is still robust to the tail.
+///
+/// Returns `None` below ten samples: a percentile of nine numbers is a number
+/// about those nine numbers, and shipping a factor derived from it would be
+/// calibration in name only.
+#[must_use]
+pub fn calibration_factor(ratios: &[f64]) -> Option<f64> {
+    const MIN_SAMPLES: usize = 10;
+    let mut usable: Vec<f64> = ratios.iter().copied().filter(|r| r.is_finite() && *r > 0.0).collect();
+    if usable.len() < MIN_SAMPLES {
+        return None;
+    }
+    usable.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    // Nearest-rank: the smallest value at or above the 90th percentile position.
+    // Interpolating would produce a factor no observation supports.
+    let rank = ((usable.len() as f64) * 0.9).ceil() as usize;
+    usable.get(rank.saturating_sub(1)).copied()
 }
 
 /// Whether this section may carry content at this provenance.
@@ -872,6 +938,104 @@ mod tests {
         let s = "hello world";
         assert!(estimate_tokens(s) >= 2);
         assert_eq!(estimate_tokens(""), 0);
+    }
+
+    #[test]
+    /// The cap that matters is the smaller of the two, and the reason is the
+    /// asymmetry: a result too large evicts the run's own findings, which are the
+    /// compressed form of everything earlier and the least replaceable thing in
+    /// the window.
+    #[test]
+    fn a_result_larger_than_the_remaining_body_is_capped_to_it() {
+        let p = small_profile();
+        let huge = "x".repeat(40_000);
+
+        // Against the profile constant alone: capped to the constant.
+        // `truncate_middle` spends a fixed marker budget and then rounds the
+        // head/tail split, so the result lands within a few bytes of the cap
+        // rather than exactly on it. What matters is which cap it landed near.
+        let (a, t) = cap_tool_result(&p, &huge);
+        assert!(t);
+        assert!(
+            a.len().abs_diff(p.context.max_tool_result_bytes) < 16,
+            "capped to {} against a profile cap of {}",
+            a.len(),
+            p.context.max_tool_result_bytes
+        );
+
+        // Against 8 KiB of remaining body: capped to the body, not the constant.
+        let (b, t) = cap_tool_result_within(&p, &huge, Some(8_192));
+        assert!(t);
+        assert!(
+            b.len().abs_diff(8_192.min(p.context.max_tool_result_bytes)) < 16,
+            "capped to {} against a remaining body of 8,192",
+            b.len()
+        );
+        assert!(
+            b.len() <= a.len(),
+            "the per-call cap can only tighten, never loosen"
+        );
+    }
+
+    /// A cap of zero is a deletion, not a truncation. A result reduced to nothing
+    /// teaches the model nothing; one reduced to its shape still says what kind of
+    /// thing it asked for, and the handle fetches the rest.
+    #[test]
+    fn a_result_is_never_capped_below_the_shape_of_an_answer() {
+        let p = small_profile();
+        let (out, truncated) = cap_tool_result_within(&p, &"x".repeat(10_000), Some(0));
+        assert!(truncated);
+        assert!(
+            out.len().abs_diff(MIN_RESULT_BYTES) < 16,
+            "a zero budget must still leave the shape of an answer, got {} bytes",
+            out.len()
+        );
+        assert!(out.contains("removed from the middle"), "and it says it was cut: {out}");
+    }
+
+    /// A result that already fits is returned whole, whichever cap is smaller.
+    #[test]
+    fn a_result_that_fits_is_not_touched() {
+        let p = small_profile();
+        let (out, truncated) = cap_tool_result_within(&p, "{\"bars\": 500}", Some(8_192));
+        assert!(!truncated);
+        assert_eq!(out, "{\"bars\": 500}");
+    }
+
+    /// The estimator's contract is that it OVER-estimates. Calibrating to the
+    /// median satisfies that on exactly half of all calls, which is the same as
+    /// not having the contract.
+    #[test]
+    fn the_calibration_factor_is_the_p90_not_the_median() {
+        // 1..=10: median 5.5, p90 9.
+        let ratios: Vec<f64> = (1..=10).map(f64::from).collect();
+        let f = calibration_factor(&ratios).expect("ten samples is enough");
+        assert!((f - 9.0).abs() < 1e-9, "expected the p90 (9), got {f}");
+
+        let over = ratios.iter().filter(|r| **r <= f).count();
+        assert!(
+            over * 100 / ratios.len() >= 90,
+            "the factor must cover at least 90% of observations; it covered {over}/10"
+        );
+    }
+
+    /// One pathological ratio must not inflate every later budget — which is why
+    /// this is p90 and not the maximum.
+    #[test]
+    fn one_outlier_does_not_set_the_factor() {
+        let mut ratios: Vec<f64> = (1..=10).map(f64::from).collect();
+        ratios.push(10_000.0);
+        let f = calibration_factor(&ratios).expect("eleven samples");
+        assert!(f < 100.0, "the outlier set the factor: {f}");
+    }
+
+    /// Below ten samples there is no factor, because a percentile of nine numbers
+    /// is a statement about those nine numbers.
+    #[test]
+    fn too_few_samples_produce_no_factor_rather_than_a_confident_one() {
+        assert_eq!(calibration_factor(&[]), None);
+        let nine: Vec<f64> = (1..=9).map(f64::from).collect();
+        assert_eq!(calibration_factor(&nine), None);
     }
 
     #[test]

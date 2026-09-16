@@ -1,6 +1,6 @@
 # Phase 1 — Contracts
 
-**Completion: 75% (15 / 20 tasks), plus 1 partial. Tracks A and B complete bar S-1.2; track C's reasoning protocol landed, S-1.17–S-1.20 remain.**
+**Completion: 80% (16 / 20 tasks), plus 1 partial. Tracks A and B complete bar S-1.2; S-1.17, S-1.19 and S-1.20 remain.**
 
 > Status 2026-09-15, track 1. The three contracts the other Set S phases wait on now exist:
 > `ToolSpec`/`ToolResult` (`crates/mcp-server/src/spec.rs`), the generated taxonomy and
@@ -562,7 +562,34 @@ does not decrement the step budget and is capped; few-shot blocks appear only on
 **Traces:** AGENT-008 §3.3, §3.5; §7.7.
 
 ### S-1.18 Budget correctness: the cap, and the honest estimator — S
-`NOT STARTED`
+`DONE` 2026-09-15 — both arithmetic defects, and the second one is now a function rather than a
+comment.
+
+**The cap.** `cap_tool_result_within` takes the smaller of the profile constant and the body
+that is actually left, computed at the moment the result arrives. The asymmetry is why it
+matters: a 32 KiB cap against 8 KiB of remaining body admits one result that evicts the whole
+working state **including the run's own findings**, which are the compressed form of everything
+earlier and the least replaceable thing in the window. A floor of 256 bytes keeps a capped
+result to the shape of an answer — a cap of zero is a deletion, and a result reduced to nothing
+teaches the model less than one reduced to `{"bars": … }` plus its handle.
+
+**The estimator.** `agent_token_calibration` does not exist yet, so there was nothing to
+re-calibrate — but the *choice of statistic* can be settled now, and it is:
+`calibration_factor` returns the p90 by nearest rank. The estimator's contract is that it
+OVER-estimates, and calibrating to the median satisfies that on exactly half of all calls,
+which is the same as not having the contract. p90 rather than the maximum because one
+pathological ratio should not inflate every later budget. Below ten samples it returns `None`
+rather than a confident number.
+
+Verified by `a_result_larger_than_the_remaining_body_is_capped_to_it`,
+`a_result_is_never_capped_below_the_shape_of_an_answer`, `a_result_that_fits_is_not_touched`,
+`the_calibration_factor_is_the_p90_not_the_median` (which also asserts ≥ 90% coverage),
+`one_outlier_does_not_set_the_factor` and
+`too_few_samples_produce_no_factor_rather_than_a_confident_one`.
+
+**Partial in one respect, stated rather than ticked over:** the `budget` suite's over-estimate
+rate cannot be reported until the calibration table exists (Set S phase 4). The statistic is
+chosen and tested; the measurement it feeds is not yet running.
 
 Two arithmetic defects found on review. First, `max_tool_result_bytes` is a per-profile
 constant while the body budget is computed per call, so a 32 KiB cap against 8 KiB of
