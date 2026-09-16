@@ -45,7 +45,11 @@ harness beside it.
 ## Memory
 
 ### S-4.1 Turn summaries replace the prose carry — M
-`PARTIAL` 2026-09-16 — `memory/turn.rs` (459 lines, 5 tests) builds the structured summary. `migrations/0065_agent_turn_summaries.sql` does not exist, so `prior_context` cannot yet be a renderer over a table — the acceptance's second half, a second turn receiving the first's conclusions with ids, needs the row.
+`DONE` 2026-09-16 — `migrations/0123_agent_turn_summaries.sql` (not 0065; the ADR-S3-08 collision), `crates/api/src/turn_summary_store.rs`, and `prior_context` now renders from it.
+
+Both halves of the acceptance hold and are verified against a live Postgres. `prior_context` reads the structured summaries first and falls back to the old prose only for turns that predate the table — a silent fallback would look like a working carry while reintroducing the failure, so a malformed row warns.
+
+A second turn receives the first's conclusions **with ids**: asserted on `f_1`, `exp_42`, `t_9` and `n=812` in `crates/api/tests/turn_summary_round_trip.rs`, together with the retry-replaces-not-appends rule (the carry must be what the turn finally did) and the per-conversation scope.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
