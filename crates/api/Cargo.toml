@@ -44,6 +44,10 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 rust_decimal = { workspace = true }
+# S-3.1: materialising a template's window as parquet. The same pair
+# `crates/storage` and `crates/model-registry` already use.
+arrow = { workspace = true }
+parquet = { workspace = true }
 sqlx = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }

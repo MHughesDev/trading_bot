@@ -2,6 +2,7 @@ pub mod evidence;
 pub mod web_and_skills;
 pub mod falsification;
 pub mod agent_sessions;
+pub mod agent_templates;
 pub mod asset_lifecycle;
 pub mod assets;
 pub mod automations;
@@ -104,6 +105,9 @@ pub fn router(state: AppState) -> Router {
         // The Python skill library (ADR-P7-03).
         .route("/api/skills", get(web_and_skills::list_skills).post(web_and_skills::create_skill))
         .route("/api/skills/run", post(web_and_skills::run_skill))
+        // The templated tier (S-3.1). One route for every template: which one is
+        // a field, not a path, so adding a tool never touches this file.
+        .route("/api/agent/templates/run", post(agent_templates::run_template))
         // Evidence for the falsification tools (ADR-P7-05). None of these
         // returns a verdict; each answers one defect class with a number.
         .route("/api/evidence/trades", post(evidence::trades))

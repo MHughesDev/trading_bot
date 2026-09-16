@@ -453,15 +453,24 @@ fn fenced_json(doc: &str) -> Option<String> {
 /// hash of the request, and writing is write-once: if the path exists, the rows
 /// behind it are already there.
 ///
-/// `end` is exclusive and both bounds are RFC 3339, so the key is a *window*,
-/// not "the last N bars" — the latter changes meaning every minute and would give
-/// two runs a day apart the same key and different data.
+/// `end` is exclusive and all three instants are RFC 3339, so the key is a
+/// *window*, not "the last N bars" — the latter changes meaning every minute and
+/// would give two runs a day apart the same key and different data.
+///
+/// `as_of` is in the key and is not optional. It bounds which *revisions* of the
+/// bars are visible, which is a different thing from which bars: a restatement
+/// published yesterday is inside `end` and outside `as_of` for a project whose
+/// horizon is older. Two projects with different horizons asking for the same
+/// window are asking for different data, and a key without `as_of` would serve
+/// the first one's file to the second — which is a future leak with a cache in
+/// front of it, and the hardest kind to notice.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DataKey {
     pub instrument_id: String,
     pub timeframe: String,
     pub start: String,
     pub end: String,
+    pub as_of: String,
 }
 
 impl DataKey {
@@ -478,6 +487,7 @@ impl DataKey {
         fields.insert("timeframe", &self.timeframe);
         fields.insert("start", &self.start);
         fields.insert("end", &self.end);
+        fields.insert("as_of", &self.as_of);
         let canonical = serde_json::to_string(&fields).unwrap_or_default();
         let digest = Sha256::digest(canonical.as_bytes());
         hex::encode(&digest[..16])
@@ -624,6 +634,7 @@ mod tests {
             timeframe: "1h".into(),
             start: "2024-01-01T00:00:00Z".into(),
             end: "2025-01-01T00:00:00Z".into(),
+            as_of: "2025-01-01T00:00:00Z".into(),
         };
         let same = a.clone();
         let mut later = a.clone();
@@ -633,5 +644,16 @@ mod tests {
         assert_ne!(a.path(root), later.path(root));
         // Sharded, so the cache directory stays listable.
         assert!(a.path(root).starts_with(root.join(&a.digest()[..2])));
+
+        // The one that is easy to leave out, and is a future leak with a cache
+        // in front of it: the same window seen from two different horizons is
+        // two different sets of bar revisions.
+        let mut newer_horizon = a.clone();
+        newer_horizon.as_of = "2025-06-01T00:00:00Z".into();
+        assert_ne!(
+            a.path(root),
+            newer_horizon.path(root),
+            "two horizons must not share a cache file"
+        );
     }
 }
