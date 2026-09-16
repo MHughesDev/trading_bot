@@ -316,3 +316,82 @@ fn a_signal_no_action_names_is_not_an_entry() {
          here: {why}"
     );
 }
+
+/// Each diagnosis carries a stable code, not only prose.
+///
+/// The prose says which of the reasons it was, for a person. The code is what a
+/// retry policy, a renderer and `strategy_validator::teach` can act on — and
+/// AGENT-011 §5 names two of these (`warmup_exceeds_window`, `never_fires`) as
+/// error cases that must return a fix. Prose cannot be keyed on: re-deriving a
+/// code by matching the message is the "dedup key built from a display string"
+/// mistake this repository has already paid for once.
+#[test]
+fn every_diagnosis_carries_a_code_a_caller_can_branch_on() {
+    // Warm-up: 40 bars against a 100-bar EMA.
+    let short: Vec<LoadedBar> = (0..40).map(|i| bar(i, Decimal::from(100 + i))).collect();
+    let slow = r#"{
+        "strategy_id": "slow_v1", "definition_version": "1.0", "asset_class": "crypto_spot_cex",
+        "inputs": [{ "lane": "market.bars.1m", "instrument": "$bound_at_init" },
+                   { "lane": "features.technical", "instrument": "$bound_at_init",
+                     "features": ["ema_100"] }],
+        "nodes": [{ "id": "n1", "type": "condition", "expr": "feature('ema_100') > 0.0" },
+                  { "id": "n2", "type": "signal", "when": "n1", "emit": "long" }],
+        "actions": [{ "on_signal": "long", "type": "place_order",
+                      "order": { "side": "buy", "size_mode": "fixed", "size": "1" } }]
+    }"#;
+    let def: StrategyDefinition = serde_json::from_str(slow).expect("fixture");
+    let p = preview_signals(&def, &short, Timeframe::Minutes1).expect("the preview runs");
+    assert_eq!(
+        p.never_fires_code,
+        Some("warmup_exceeds_window"),
+        "a window shorter than the warm-up is AGENT-011 §5's `warmup_exceeds_window`, and the \
+         prose was: {:?}",
+        p.never_fires_because
+    );
+
+    // A signal nothing trades.
+    let bars = zigzag();
+    let unwired = r#"{
+        "strategy_id": "unwired_v2", "definition_version": "1.0", "asset_class": "crypto_spot_cex",
+        "inputs": [{ "lane": "market.bars.1m", "instrument": "$bound_at_init" },
+                   { "lane": "features.technical", "instrument": "$bound_at_init",
+                     "features": ["ema_3", "ema_10"] }],
+        "nodes": [{ "id": "n1", "type": "condition", "expr": "feature('ema_3') > feature('ema_10')" },
+                  { "id": "n2", "type": "signal", "when": "n1", "emit": "flag" }],
+        "actions": []
+    }"#;
+    let def: StrategyDefinition = serde_json::from_str(unwired).expect("fixture");
+    let p = preview_signals(&def, &bars, Timeframe::Minutes1).expect("the preview runs");
+    assert_eq!(
+        p.never_fires_code,
+        Some("signal_has_no_action"),
+        "prose was: {:?}",
+        p.never_fires_because
+    );
+
+    // A condition nothing satisfies.
+    let never = r#"{
+        "strategy_id": "never_v1", "definition_version": "1.0", "asset_class": "crypto_spot_cex",
+        "inputs": [{ "lane": "market.bars.1m", "instrument": "$bound_at_init" },
+                   { "lane": "features.technical", "instrument": "$bound_at_init",
+                     "features": ["ema_3"] }],
+        "nodes": [{ "id": "n1", "type": "condition", "expr": "feature('ema_3') > 1000000.0" },
+                  { "id": "n2", "type": "signal", "when": "n1", "emit": "long" }],
+        "actions": [{ "on_signal": "long", "type": "place_order",
+                      "order": { "side": "buy", "size_mode": "fixed", "size": "1" } }]
+    }"#;
+    let def: StrategyDefinition = serde_json::from_str(never).expect("fixture");
+    let p = preview_signals(&def, &bars, Timeframe::Minutes1).expect("the preview runs");
+    assert_eq!(
+        p.never_fires_code,
+        Some("never_fires"),
+        "prose was: {:?}",
+        p.never_fires_because
+    );
+
+    // And a strategy that does fire carries no diagnosis at all.
+    let firing = crossover_definition(TIMED_EXIT);
+    let p = preview_signals(&firing, &bars, Timeframe::Minutes1).expect("the preview runs");
+    assert_eq!(p.never_fires_code, None);
+    assert_eq!(p.never_fires_because, None);
+}

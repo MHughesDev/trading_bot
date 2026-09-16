@@ -93,6 +93,11 @@ pub struct SignalPreview {
     /// possible reasons it was. A bare zero sends the author to change the
     /// wrong thing.
     pub never_fires_because: Option<String>,
+    /// The same diagnosis as a stable code, for a caller that wants to branch
+    /// rather than read (AGENT-011 §5). The prose says which of the reasons it
+    /// was; this is what a retry policy, a renderer or a test can act on, and
+    /// what `strategy_validator::teach` attaches a fix to.
+    pub never_fires_code: Option<&'static str>,
     pub exit_policy: Option<String>,
 }
 
@@ -315,7 +320,8 @@ pub fn preview_signals(
         signals,
         features: feature_stats,
         sample_events: events,
-        never_fires_because: never,
+        never_fires_because: never.as_ref().map(|(_, why)| why.clone()),
+        never_fires_code: never.as_ref().map(|(code, _)| *code),
         exit_policy: definition.exit_policy().map(|p| format!("{p:?}")),
     })
 }
@@ -333,38 +339,38 @@ fn diagnose(
     features: &[FeatureStat],
     signals: &[SignalStat],
     ordering: &HashSet<&str>,
-) -> String {
+) -> (&'static str, String) {
     if (warmup as usize) >= n_bars {
-        return format!(
+        return ("warmup_exceeds_window", format!(
             "the longest feature needs {warmup} bars of warm-up and the window has {n_bars}. \
              No signal could fire here whatever the conditions say — widen the window."
-        );
+        ));
     }
     if evaluated == 0 {
-        return format!(
+        return ("warmup_exceeds_window", format!(
             "no bar had a value for every feature, so the conditions were never evaluated on a \
              complete input set. Warm-up is {warmup} bars over a {n_bars}-bar window."
-        );
+        ));
     }
     if let Some(dead) = features.iter().find(|f| f.bars_with_value == 0) {
-        return format!(
+        return ("warmup_exceeds_window", format!(
             "`{}` produced no value on any bar, so any condition naming it is false everywhere. \
              It needs {} bars of warm-up.",
             dead.name, dead.warmup_bars
-        );
+        ));
     }
     if signals.is_empty() {
-        return format!(
+        return ("never_fires", format!(
             "the conditions were evaluated on {evaluated} bars and no signal was ever true. The \
              inputs are fine; the thresholds are not met on this window."
-        );
+        ));
     }
     // The signals fired; nothing was listening. Worth naming separately because
     // every other reason here sends the author to the `nodes` block, and this
     // one is the only one whose fix is in `actions`.
     if let Some(flag) = signals.iter().find(|s| s.fires > 0) {
         if !ordering.contains(flag.signal.as_str()) {
-            return format!(
+            return ("signal_has_no_action", format!(
                 "`{}` became true {} times, but no action names it — `actions` lists {}. The \
                  conditions are working; nothing is wired to trade them.",
                 flag.signal,
@@ -376,13 +382,16 @@ fn diagnose(
                     names.sort_unstable();
                     names.join(", ")
                 }
-            );
+            ));
         }
     }
-    format!(
+    (
+        "never_fires",
+        format!(
         "signals were true on some bars but never became true — they were already true at the \
          first evaluated bar and stayed that way. An entry fires on the rising edge, so a \
          condition that is always true never fires. Evaluated on {evaluated} bars."
+        ),
     )
 }
 

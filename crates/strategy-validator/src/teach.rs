@@ -85,6 +85,11 @@ pub const TEACHINGS: &[Teaching] = &[
     },
     // ── the codes this crate constructs ──────────────────────────────────────
     Teaching {
+        code: "signal_has_no_action",
+        fix: "the conditions work and nothing is wired to trade them: add an action whose               `on_signal` names the signal your node emits. This is the only reason a preview               reports no entries whose fix is in `actions` rather than in `nodes`.",
+        see: Some("guide#actions"),
+    },
+    Teaching {
         code: "unknown_definition_version",
         fix: "set `definition_version` to a version this platform parses. 1.0 is the base, \
               1.2 adds typed `parameters`, 1.3 adds the `exits` block.",
