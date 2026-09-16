@@ -1,6 +1,31 @@
 # Phase 6 — The Research Desk
 
-**Completion: 0% (0 / 24 tasks)**
+**Completion: 4% (1 / 24 tasks), plus 23 `PARTIAL` — the desk is built and three of its endpoints do not exist.**
+
+> **This file was wrong.** Until 2026-09-16 it recorded all 24 tasks as `NOT STARTED`. The
+> Research Desk is in fact built and shipping: `pages/DeskPage.tsx` under 13 routes, 18
+> components totalling about 5,300 lines, `/agent` and `/research` already redirecting into
+> it, 57 tests passing, `tsc -p tsconfig.app.json` clean and `npm run build` green.
+>
+> **The missing half is the backend, and it is three specific endpoints.** Searched across
+> all of `crates/api/src`, not just the router:
+>
+> * `/api/catalogue` — S-6.19's page calls it and nobody serves it;
+> * `/api/desk/digest` — S-6.24's away digest, the same;
+> * `/api/research/sessions` — phase 11's continuous research.
+>
+> Two more tabs render against a store that was never created: S-6.10 and S-6.18 browse
+> phase 4's memory, whose migrations are all absent.
+>
+> **The desk was not green when this audit started.** `npm run build` failed, because
+> `SettingsPage.tsx` still imported two components from the deleted `components/agent/`. It
+> went unnoticed because `npx tsc --noEmit` — the command used as this frontend's green light
+> — runs against the root `tsconfig.json`, a solution file holding nothing but `references`.
+> It checks no files and exits 0 regardless. The real command is
+> `npx tsc -p tsconfig.app.json --noEmit`.
+>
+> S-6.22 is the one task that is genuinely `DONE`, and it is done as of this audit rather
+> than before it.
 
 **Requirement IDs:** DK-01…DK-24.
 **Spec:** [AGENT-012](../../../specs/AGENT-012-research-desk-ui.md), which supersedes
@@ -31,7 +56,9 @@ built only on the primitives and `app.css`, and S-6.22 deletes what it replaces.
 ## Shell and transport
 
 ### S-6.1 The desk shell — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `pages/DeskPage.tsx` (162 lines) with 13 routes, mounted at `/desk/*` in `App.tsx`, and `/agent`, `/research` and `/approvals` redirecting into it.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Routes under `/desk` (`App.tsx`, lazily imported, named exports), a nav entry in
 `NAV_SECTIONS` (`TopBar.tsx` — `CommandPalette` derives its "Go to" commands from it), and
@@ -47,7 +74,9 @@ without reflow.
 **Traces:** AGENT-012 §1; §19.7.
 
 ### S-6.2 One event stream — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `api/desk.ts` (582 lines) and `hooks/useDeskStream.ts` (158 lines). One stream, and the components read it rather than polling.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Copy the pattern that already works: `api/research.ts` `openTimeline` is a hand-rolled
 `fetch` SSE client with `AbortController`, `Last-Event-ID` resume, manual frame splitting,
@@ -61,7 +90,9 @@ cards; while disconnected the last state stays visible, marked stale with an age
 **Traces:** AGENT-012 §16; §14 (states).
 
 ### S-6.3 The card stream — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `CardStream.tsx` (116 lines).
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Not a transcript: cards grouped by step under a step header ("Step 7 · sweep parameters · 2
 tools · 41 s"), with raw events (exposure, compaction, validation, usage) folded behind a
@@ -72,7 +103,9 @@ conversation.
 **Traces:** AGENT-012 §3.2.
 
 ### S-6.4 Cards, part 1 — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `Cards.tsx` (548 lines) covers both card tasks.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 You · Plan (status glyphs, the tool each step names) · Tool (name, namespace, risk badge,
 collapsed arguments, duration, the `ToolResult` summary as prose with linked ids, `n`/`se`
@@ -84,7 +117,9 @@ inline, handle) · Finding (confidence pill, evidence chips, "cited later") · N
 **Traces:** AGENT-012 §3.2; §19.1.
 
 ### S-6.5 Cards, part 2 — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `Cards.tsx` (548 lines), shared with S-6.4.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Question · Approval (envelope banner, reversibility, two-step for irreversible) · Job
 (deterministic progress, never an indeterminate spinner over content) · Gate (funnel
@@ -100,7 +135,9 @@ do).
 ## Working with the agent
 
 ### S-6.6 The controls row and the keyboard map — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `ControlsRow.tsx` (174 lines), with the keyboard map exercised by `__tests__/controls-and-replay.test.tsx`.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Pause · Resume · Stop · Steer · Approve/Deny · Escalate · Budget · Details · Replay, always
 visible, never scrolled away. `space` pause/resume, `esc` stop (confirm), `a`/`x` approve or
@@ -112,7 +149,9 @@ frontier run and on a local run.
 **Traces:** AGENT-012 §3.4; §19.3.
 
 ### S-6.7 The composer — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `Composer.tsx` (247 lines).
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Model picker with tier badge and an `unmeasured` warning; constraint chips (instrument,
 timeframe, window, balance) that render into the opening message (S-1.6); attach a strategy,
@@ -129,7 +168,9 @@ mid-run produces a steer card rather than a queued turn.
 **Traces:** AGENT-012 §3.3 (amended 2026-09-14); AGENT-008 §3.1; AGENT-013 §2.
 
 ### S-6.8 Right panel — State — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — The State tab in `RightPanel.tsx` (690 lines), asserted by `__tests__/state-panel.test.tsx`. Fixed on 2026-09-16: `mode` and `kind` both render "research" and both rendered bare, so the panel showed two identical badges meaning different things. The mode is labelled now, as the ring already was.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 The `WorkingState` card: goal and kind, acceptance criteria with ticks, hypothesis, plan
 tracker, evidence with the tool that produced each id, findings, open questions, decisions,
@@ -143,7 +184,9 @@ opening a card.
 **Traces:** AGENT-012 §3.5, principle 8; §19.1.
 
 ### S-6.9 Right panel — Evidence — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — The Evidence tab in `RightPanel.tsx`.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Every id the run produced, grouped, with in-place viewers: experiment summary, study surface
 (the plateau/spike plot — `charts/Primitives.tsx` has the parts), gate ledger, trade list
@@ -154,7 +197,9 @@ with the concentration bar, bars chart, data-quality results.
 **Traces:** AGENT-012 §3.5, §6.3, principle 9; §19.2.
 
 ### S-6.10 Right panel — Memory — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — The Memory tab in `RightPanel.tsx`. It reads a store that does not exist — phase 4's migrations are all absent — so this renders against nothing.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 What the brief contained, each item marked *cited* when the run used it, with "why
 retrieved" on hover, and **add to memory** / **forget**.
@@ -165,7 +210,9 @@ retrieved" on hover, and **add to memory** / **forget**.
 **Traces:** AGENT-012 §3.5; AGENT-007 §4.
 
 ### S-6.11 Right panel — Tools — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — The Tools tab in `RightPanel.tsx`, with `lib/desk/rings.ts` deciding what a mode may show.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 What this tier can currently see, what it searched for, the whole catalogue with search,
 tool notes on click, and pin-a-tool for this run.
@@ -176,7 +223,9 @@ exactly; pinning a tool makes it available on the next step.
 **Traces:** AGENT-012 §3.5.
 
 ### S-6.12 Right panel — Cost — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — The Cost tab in `RightPanel.tsx`. `/api/agent/usage` is served; the dollar figures behind it are **OQ-16** — the platform has no price table, so the tab can show tokens and not money.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Tokens by layer (charter / schemas / body / output) per call, cache hit as a sparkline,
 cumulative dollars, and the calibrated bytes-per-token beside the harness estimate and the
@@ -188,7 +237,9 @@ calibrated error; the cache sparkline is per call, not per run.
 **Traces:** AGENT-012 §3.5, principle 11.
 
 ### S-6.13 The shared components — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `Shared.tsx` (375 lines).
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Tier badge (with measured/unmeasured), budget meter (four bars, cap, 90% line, projected
 end, `warn` at 75% / `neg` at 90%, always with the text value), evidence chip, confidence
@@ -203,7 +254,9 @@ principle 3).
 ## The other surfaces
 
 ### S-6.14 Desk home — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `DeskHome.tsx` (263 lines). Fixed on 2026-09-16: it cast `Conversation` to `Record<string, unknown>` for stringly-typed access on a shape the compiler already knew, which is what made the frontend fail to typecheck.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Needs you (approvals, questions, escalations — proposals and stalled continuous sessions join
 it in S-10.15 / S-11.13) · Running now (tier, current step, what it waits on, cost, pause/stop
@@ -215,7 +268,9 @@ data" (Meridian §3.22); the Start panel's mode control sends the mode with the 
 **Traces:** AGENT-012 §2 (amended 2026-09-14).
 
 ### S-6.15 Approvals, inline and global — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `ApprovalsInbox.tsx` (198 lines) plus the approval card in `Cards.tsx`; `/api/approvals` is served. Fixed on 2026-09-16: an irreversible approval had nowhere to say **why**. The two-step confirm worked, but `onApprove`'s `note` was declared in the type and passed by nobody — and `spend_holdout_look` refuses without twenty characters of reason on the other side.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Reuse `components/workspace/ApprovalsInbox.tsx`, which already handles eight approval kinds
 with evidence and timeouts. Keep `/approvals` as an alias of `/desk/approvals`.
@@ -225,7 +280,9 @@ with evidence and timeouts. Keep `/approvals` as an alias of `/desk/approvals`.
 **Traces:** AGENT-012 §1, §3.2.
 
 ### S-6.16 Run detail and the replay scrubber — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `RunDetail.tsx` (172 lines) with the replay scrubber, exercised by `__tests__/controls-and-replay.test.tsx`.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 A step strip; the working state **as it was** at that step; the model call's rendered prompt
 sections with their token sizes; toggles for prompt / reply / diff. **Save as case** writes
@@ -237,7 +294,9 @@ from `agent_events`, with per-layer token sizes matching AGENT-005's accounting.
 **Traces:** AGENT-012 §4; §19.4.
 
 ### S-6.17 The dossier reader — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `Dossier.tsx` (268 lines), including the Markdown export and the untrusted-chain check.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 A document, in the `paper` reading layout even when the app is in `terminal`: verdict,
 evidence table (claim → id → n/se → verification method), plan as executed, funnel with
@@ -251,7 +310,9 @@ the fold; **verify** updates in place.
 **Traces:** AGENT-012 §5; §19.5.
 
 ### S-6.18 The memory browser — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `MemoryBrowser.tsx` (161 lines). Like S-6.10, it browses a store phase 4 never created.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Findings · Negative results (with "retry now" opening a conversation with the brief) ·
 Instrument profiles · Preferences · Playbooks · Signal registry. A conflicts filter shows
@@ -263,7 +324,9 @@ row opens its provenance (run, tool, data window).
 **Traces:** AGENT-012 §7.
 
 ### S-6.19 The catalogue page — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `Catalogue.tsx` (147 lines) is built and **`/api/catalogue` does not exist** — checked across the whole `crates/api` source, not just the router. The page calls an endpoint nobody serves.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Namespaces as columns, tools as cards (tier visibility, risk, trial flag, output budget,
 notes), workflows as sequences with decision points, and **simulate exposure**: pick a
@@ -275,7 +338,9 @@ profile and goal, and names the reason each tool was included.
 **Traces:** AGENT-012 §9.
 
 ### S-6.20 Models and tiers — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `Models.tsx` (221 lines). It is where AI providers moved to, and as of 2026-09-16 the Settings page links here instead of importing a deleted component.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Per profile: capabilities, decode ladder, exposure and context budgets, calibration with
 sample size, scorecard with per-suite pass rates and five-version sparklines, hardware
@@ -288,7 +353,9 @@ providers and keys work here and the old form is gone.
 **Traces:** AGENT-012 §10; AGENT-009 §4.
 
 ### S-6.21 Usage, monitor, strategy editor — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `Operations.tsx` (257 lines) and `KillSwitchBanner.tsx`; `/api/agent/usage` and `/api/monitor/strategies` are both served.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Usage (spend by day/conversation/model/layer, cache rate, cost per finding and per gate,
 budget policies, CSV). Monitor (Phase 7's UI: strategy table with status and breaching
@@ -303,7 +370,11 @@ one event and cannot be dismissed while tripped.
 **Traces:** AGENT-012 §8, §11, §12; §19.6.
 
 ### S-6.22 Retire what this replaces — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `components/agent/` and `components/workspace/` are gone, nothing imports them, and no desk file uses a back-compat alias — all three asserted by `__tests__/no-deprecated-aliases.test.ts`, which passes.
+
+It did not pass before 2026-09-16, and both halves of the failure were real. `SettingsPage.tsx` still imported two components from the deleted `components/agent/`, which **broke `npm run build`** — proven with a scratch file, exit 2, TS2307. Service tokens had been lost rather than moved, so `ApiAccessCard` was rebuilt under `components/settings/`; the MCP server cannot start without a token that card is the only way to mint. The alias scan also read `desk.css`'s own header — which names the forbidden tokens in order to forbid them — as a violation, and now strips comments the way `static_invariants.rs` does.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 Delete `/agent` and `/research` (keep redirects), `components/agent/*` and
 `components/workspace/*` except `ApprovalsInbox`, and the back-compat Tailwind aliases in
@@ -318,7 +389,9 @@ usable; live regions announce new approval, new question and run finished.
 **Traces:** AGENT-012 §13, §14, §15; §19.7, §19.8.
 
 ### S-6.23 The provenance fence has to reach the human — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — The provenance fence is asserted by `__tests__/honesty.test.tsx`: untrusted text renders inert, the card names its source, and the mark survives the Markdown export. All passing.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 The platform fences untrusted content so the *model* can tell data from instruction. Nothing
 carried that to the *person*, who is the one who acts on it. The path is short and real: a
@@ -339,7 +412,9 @@ survives PDF and Markdown export; `model_summary` and `direct_stat` are visually
 **Traces:** AGENT-012 §6.3a; §19.1a.
 
 ### S-6.24 Since you were away — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `AwayDigest.tsx` (108 lines) is built and **`/api/desk/digest` does not exist**. Same shape as S-6.19.
+
+Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
 The operator persona's actual question, which no other panel answers. The desk knows when you
 last looked, so it can say what changed: runs that finished and what they **concluded**

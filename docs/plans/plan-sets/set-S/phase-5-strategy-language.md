@@ -1,6 +1,28 @@
 # Phase 5 — The language
 
-**Completion: 0% (0 / 15 tasks)**
+**Completion: 0% (0 / 15 tasks), plus 4 `PARTIAL` — the feature engine is built; the language is not.**
+
+> **This file was wrong about the engine and right about the language.** Until 2026-09-16 it
+> recorded all fifteen tasks as `NOT STARTED`. `crates/features` is in fact about 5,100 lines
+> over 101 passing tests, and `crates/backtest/src/sim.rs` resolves strategy features through
+> it — so the backtest has supported around fifty families for some time.
+>
+> **The agent could not see any of them.** The MCP server's `initialize` instructions told
+> every model, every session, that "backtests support only ema_N and rsi_N features". That
+> sentence was false and it was the phase's real bottleneck: a model told it has two
+> indicators uses two indicators. `list_features` now serves the registry the simulator reads,
+> and the instructions point at it.
+>
+> `crates/strategy-lang` does not exist, so S-5.5 … S-5.9, S-5.12, S-5.13 and S-5.15 are
+> genuinely not started. The highest-value task that needs no language is **S-5.4,
+> `preview_signals`** — a model can now discover fifty families and still cannot see what one
+> does on a window without buying a backtest.
+>
+> One finding worth acting on: phase 3 implemented Parkinson, Garman-Klass and Rogers-Satchell
+> volatility in Python templates while `crates/features` computes the same families in Rust.
+> **Two implementations, nothing comparing them.** S-5.14's acceptance already asks for that
+> comparison; it is now a reconciliation test this repository needs rather than a future
+> nicety.
 
 **Requirement IDs:** SA-01…SA-16.
 **Spec:** [AGENT-011](../../../specs/AGENT-011-strategy-authoring-for-models.md), which
@@ -39,7 +61,9 @@ in `AGENT.md` ("same builder code live and in replay") and it is not negotiable.
 ## The feature engine
 
 ### S-5.1 F1 families, inside the existing engine — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — The F1 families are in the registry and resolve: `ema`, `rsi`, `atr`, `macd`, the Bollinger and Donchian and Keltner sets, `obv`, `roc`, `momentum`. What is not evidenced is the **golden parity test** DATA-006 §5 requires — old and new values identical for each legacy alias over three instruments — so the families are present and the equivalence is unproven.
+
+Audited 2026-09-16 against the source. `crates/features` is a real engine — about 5,100 lines over 101 passing tests, with `registry.rs` (583), `runtime.rs` (1,068) and `leakage.rs` (1,301) — and `crates/backtest/src/sim.rs:987` resolves every strategy feature through `features::runtime::feature`. Proven by construction rather than by reading: `atr_14`, `parkinson_vol_20`, `rolling_std_30`, `donchian_upper_20`, `obv` and `hour_sin` all resolve and run.
 
 Arithmetic and math; `ret lag diff`; `rolling_mean/std/var/min/max/sum/median/quantile/skew/
 kurt`, `ewma`, `zscore`, `pct_rank`; `sma ema rsi atr macd bb donchian keltner roc`;
@@ -53,7 +77,13 @@ deleted; `static_invariants` and `builders-purity` both green.
 **Traces:** AGENT-011 §2 F1; §8.1.
 
 ### S-5.2 The registry and `list_features` — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — **The tool half landed 2026-09-16**: `crates/mcp-server/src/tools/strategy.rs` serves `list_features` from the registry, answered locally like `list_lanes`. It reads the same `FAMILIES` table `runtime::feature` does, so listed and resolvable are the same set — asserted by `every_example_name_resolves_in_the_engine`, which walks every family's own advertised example through `resolve`.
+
+This was the phase's real bottleneck and it was not a missing engine. The server's `initialize` instructions told every model at the start of every session that "backtests support only ema_N and rsi_N features" while the engine resolved around fifty families. A capability ceiling written in prose is still a ceiling. That sentence now points at `list_features` instead.
+
+Still missing: `migrations/0082_feature_registry.sql`, so nothing persists a registry version, and the second half of the acceptance — every feature the backtest accepts is served, **and** every feature listed is accepted — is proven in one direction only.
+
+Audited 2026-09-16 against the source. `crates/features` is a real engine — about 5,100 lines over 101 passing tests, with `registry.rs` (583), `runtime.rs` (1,068) and `leakage.rs` (1,301) — and `crates/backtest/src/sim.rs:987` resolves every strategy feature through `features::runtime::feature`. Proven by construction rather than by reading: `atr_14`, `parkinson_vol_20`, `rolling_std_30`, `donchian_upper_20`, `obv` and `hour_sin` all resolve and run.
 
 Each family registered with parameters and ranges, output dtype, warm-up bars, PIT lag, cost
 class (`cheap | rolling | model`) and a one-line "use when". `list_features(family?,
@@ -68,7 +98,9 @@ templates. One engine, proven by test.
 **Traces:** AGENT-011 §2, P2; §8.1.
 
 ### S-5.3 The validator teaches — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `strategy-validator` returns structured `ValidationError { path, message }` from five passes, so a rejection already names where and why. The acceptance is stronger than that: the six §5 error cases must return the listed `fix`, a third identical rejection must return an example, and `see` anchors must resolve into the guide. None of that is evidenced.
+
+Audited 2026-09-16 against the source. `crates/features` is a real engine — about 5,100 lines over 101 passing tests, with `registry.rs` (583), `runtime.rs` (1,068) and `leakage.rs` (1,301) — and `crates/backtest/src/sim.rs:987` resolves every strategy feature through `features::runtime::feature`. Proven by construction rather than by reading: `atr_14`, `parkinson_vol_20`, `rolling_std_30`, `donchian_upper_20`, `obv` and `hour_sin` all resolve and run.
 
 `ValidationError` gains `fix` and `see`. A table in `crates/strategy-validator/src/teach.rs`
 maps each error code to a concrete edit: `unknown_feature` → "did you mean `rsi(close, 14)`?
@@ -84,7 +116,7 @@ envelope.
 **Traces:** AGENT-011 §5, P4; §8.4.
 
 ### S-5.4 `preview_signals` — look before you spend — L
-`NOT STARTED`
+`NOT STARTED` — `preview_signals` is not in the catalogue — checked across `crates/mcp-server/src`. This is the task that lets a model look before it spends a trial, and it is the one most worth doing next now that `list_features` exists: a model can discover fifty families and still has no way to see what any of them does on a window without buying a backtest.
 
 A dry run over stored bars through the feature engine and the exit policy: entries per month,
 sample events with exit reasons, warm-up status, and `never_fires_because` when it does not.
@@ -110,7 +142,9 @@ is refused naming the partition. Adversarial: the refusal is asserted.
 ## SLv2
 
 ### S-5.5 The parser — L
-`NOT STARTED`
+`NOT STARTED` — The parser.
+
+`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
 New crate `crates/strategy-lang`. FEAT-004 §3.1's grammar with the AGENT-011 §3 amendments,
 all of which point one way — a small model writing it correctly: every clause on its own
@@ -126,7 +160,9 @@ an inline expression over 120 characters is refused with "bind it as an input".
 **Traces:** AGENT-011 §3, P1, P7.
 
 ### S-5.6 The compiler — M
-`NOT STARTED`
+`NOT STARTED` — The compiler.
+
+`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
 AST → the canonical `StrategyDefinition` (`crates/domain/src/strategy_def/mod.rs:64`). JSON
 remains the storage and runtime form (ADR-0010); it stops being what a model is asked to
@@ -137,7 +173,9 @@ for the three skeletons.
 **Traces:** AGENT-011 §3, P1.
 
 ### S-5.7 The decompiler and the round trip — M
-`NOT STARTED`
+`NOT STARTED` — The decompiler and the round trip.
+
+`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
 JSON → canonical text, so every stored strategy has a readable form and the v1 expression
 grammar remains a subset the decompiler emits when nothing newer is used.
@@ -146,7 +184,9 @@ grammar remains a subset the decompiler emits when nothing newer is used.
 **Traces:** AGENT-011 §3; §8.3.
 
 ### S-5.8 The authoring tools — M
-`NOT STARTED`
+`NOT STARTED` — `explain_strategy` is not in the catalogue, and `create_strategy` recording lineage needs the compiler.
+
+`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
 `compile_strategy` (never persists), `explain_strategy` (reads a strategy back in words),
 `create_strategy(text)` recording `parent_version`, and the upgraded `validate_strategy`
@@ -157,7 +197,9 @@ bars; `create_strategy` records lineage for `family_test`.
 **Traces:** AGENT-011 §4.
 
 ### S-5.9 A grammar for the small tiers — M
-`NOT STARTED`
+`NOT STARTED` — A grammar for the small tiers.
+
+`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
 A clause-level JSON-Schema grammar (one clause per fill) rather than the EBNF, so a
 `select_fill` tier writes SLv2 under constrained decoding and the compiler assembles the
@@ -168,7 +210,7 @@ fills with no `unknown_feature` error, on the eval dataset.
 **Traces:** AGENT-011 §3, P7; §8.7.
 
 ### S-5.10 Moves, diffs, lineage — M
-`NOT STARTED`
+`NOT STARTED` — `apply_move` and `diff_strategies` are not in the catalogue.
 
 `diff_strategies` classifies an AST diff into the FEAT-004 §6 move kinds and says what
 changed **in words**, with `is_single_change`; `apply_move` produces one new validated
@@ -180,7 +222,7 @@ checkable rather than exhorted.
 **Traces:** AGENT-011 §4, P5; §8.6.
 
 ### S-5.11 `suggest_moves` — S
-`NOT STARTED`
+`NOT STARTED` — `suggest_moves` is not in the catalogue.
 
 Maps `get_diagnostics` findings to candidate moves with a reason ("loses in high-vol months"
 → "add_regime_gate on `rv(20) pct_rank < 0.8`"). Deterministic rules first; model ranking
@@ -190,7 +232,9 @@ only on capable tiers. Motivated moves only — exploration belongs in the Exper
 **Traces:** AGENT-011 §4, §10.
 
 ### S-5.12 Skeletons — S
-`NOT STARTED`
+`NOT STARTED` — The three skeletons need the compiler and `preview_signals`.
+
+`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
 `strategy_skeleton(hypothesis_family)` for trend, mean reversion, breakout, carry,
 vol target and model signal, so a first version is never a syntax lesson.
@@ -200,7 +244,7 @@ preview on BTC-USD 1h with non-zero entries and no warm-up violation.
 **Traces:** AGENT-011 §4; §8.2.
 
 ### S-5.13 Rewrite the guide around the language — M
-`NOT STARTED`
+`NOT STARTED` — The guide is not rewritten around SLv2, which does not exist. Its `## Tool notes` section did grow this phase — `list_features` has an entry — but that is the catalogue's documentation, not the language's.
 
 Replace the "Strategy definition format", "Expression grammar" and "Features available"
 sections with one page of grammar, a worked example per hypothesis family, the units table,
@@ -212,7 +256,9 @@ anchor from S-5.3 resolves.
 **Traces:** AGENT-011 §6; §8.8. AGENT-005 §3.3.
 
 ### S-5.14 F2 families — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — The F2 families are largely present and resolve: `parkinson_vol`, `garman_klass_vol`, `rogers_satchell_vol`, `bv`, `jump_share`, `efficiency_ratio`, `autocorr`, the `rolling_*` set and the calendar terms. **The acceptance is the interesting half and is not met**: the analysis templates and the strategy engine must compute identical values for the same family on the same window. Phase 3 built those templates in Python against numpy and scipy (ADR-S3-01) and the engine computes in Rust — so there are now two implementations of Parkinson volatility in this repository and nothing compares them. That is exactly the drift a one-engine rule exists to prevent, and it should be a reconciliation test.
+
+Audited 2026-09-16 against the source. `crates/features` is a real engine — about 5,100 lines over 101 passing tests, with `registry.rs` (583), `runtime.rs` (1,068) and `leakage.rs` (1,301) — and `crates/backtest/src/sim.rs:987` resolves every strategy feature through `features::runtime::feature`. Proven by construction rather than by reading: `atr_14`, `parkinson_vol_20`, `rolling_std_30`, `donchian_upper_20`, `obv` and `hour_sin` all resolve and run.
 
 Range volatility (`parkinson … yang_zhang`), realised measures (`rv bv rq jump_share`),
 `hurst variance_ratio autocorr fracdiff`, `efficiency_ratio`, `lookback_ensemble` — regime
@@ -224,7 +270,9 @@ the same family on the same window.
 **Traces:** AGENT-011 §2 F2, P2.
 
 ### S-5.15 Intent survives, and the preview says which clause blocked — M
-`NOT STARTED`
+`NOT STARTED` — Intent surviving the round trip needs the round trip.
+
+`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
 **Comments are part of the language.** A strategy is read by a reviewer, by the model on its
 next turn, and by whoever opens the dossier in six months, and none of them can recover why a
