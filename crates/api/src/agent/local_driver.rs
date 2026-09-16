@@ -74,6 +74,110 @@ pub struct LocalRunParams {
     pub service_token: String,
 }
 
+/// One input, as the log records it.
+///
+/// The counterpart to [`describe_effect`], and recorded for the same reason: a
+/// replay has to know not only what the loop decided but what it was told, because
+/// the pair is what determines where a crash fell.
+fn describe_input(i: &Input) -> (&'static str, Value) {
+    match i {
+        Input::Admission(a) => ("Admission", serde_json::json!({ "admission": format!("{a:?}") })),
+        Input::ModelReply { raw } => (
+            "ModelReply",
+            // The reply in full. It is what the loop parsed, and a replay that
+            // re-parses something else is not a replay.
+            serde_json::json!({ "raw": raw }),
+        ),
+        Input::ModelTruncated { raw } => {
+            ("ModelTruncated", serde_json::json!({ "raw": raw }))
+        }
+        Input::ModelError { detail, retryable } => (
+            "ModelError",
+            serde_json::json!({ "detail": detail, "retryable": retryable }),
+        ),
+        Input::ToolResult { output, source } => (
+            "ToolResult",
+            serde_json::json!({ "output": output, "source": source }),
+        ),
+        Input::ToolError { detail } => ("ToolError", serde_json::json!({ "detail": detail })),
+        Input::Approval { granted, note } => (
+            "Approval",
+            serde_json::json!({ "granted": granted, "note": note }),
+        ),
+        Input::Cancel => ("Cancel", serde_json::json!({})),
+        other => (
+            // A variant added after this was written. Named by its debug form rather
+            // than silently dropped: a log missing a row is a log that cannot be
+            // replayed, and the failure should be visible in the row itself.
+            "Other",
+            serde_json::json!({ "debug": format!("{other:?}") }),
+        ),
+    }
+}
+
+/// One effect, as the log records it (AGENT-010 §5, S-2.5).
+///
+/// The kind is the **variant name**, not a presentational category. `agent_messages`
+/// keys on `assistant | tool_call | status | final`, which can draw a timeline and
+/// cannot drive a replay: it cannot say which effect the loop was serving when a
+/// tool ran, and it cannot distinguish an effect the loop decided on from one it
+/// carried out.
+///
+/// The payloads are deliberately small. A replay needs to know *what was decided*,
+/// and the prompt that produced the decision is already recorded by hash in
+/// `harness::trace` — a log carrying full prompts would be a permanent record of
+/// every prompt the platform ever sent, kept for a property that a hash provides.
+fn describe_effect(e: &Effect) -> (&'static str, Value) {
+    match e {
+        Effect::CallModel(c) => (
+            "CallModel",
+            serde_json::json!({
+                "step": c.step,
+                "decode": c.decode.label(),
+                "max_tokens": c.max_tokens,
+                "num_ctx": c.num_ctx,
+                "prompt_bytes": c.prompt.len(),
+            }),
+        ),
+        Effect::ExecuteTool {
+            step,
+            name,
+            namespace,
+            arguments,
+            risk,
+            idempotent,
+        } => (
+            "ExecuteTool",
+            serde_json::json!({
+                "step": step,
+                "name": name,
+                "namespace": namespace,
+                // The arguments in full: they are what a resume must NOT run twice,
+                // and a hash of them cannot answer "was this the same call".
+                "arguments": arguments,
+                "risk": format!("{risk:?}"),
+                "idempotent": idempotent,
+            }),
+        ),
+        Effect::AskHuman { step, tool, ruling, .. } => (
+            "AskHuman",
+            serde_json::json!({ "step": step, "tool": tool, "ruling": format!("{ruling:?}") }),
+        ),
+        Effect::Await { step, job_id, tool } => (
+            "Await",
+            serde_json::json!({ "step": step, "job_id": job_id, "tool": tool }),
+        ),
+        Effect::Note(n) => (
+            "Note",
+            serde_json::json!({ "note": format!("{n:?}") }),
+        ),
+        Effect::Done(o) => (
+            "Done",
+            serde_json::json!({ "outcome": format!("{o:?}") }),
+        ),
+    }
+}
+
 // ── Persistence ─────────────────────────────────────────────────────────────
 
 struct Recorder {
@@ -82,9 +186,70 @@ struct Recorder {
     seq: i32,
     tokens_in: i64,
     tokens_out: i64,
+    /// The effect log's own sequence, separate from `agent_messages`'s.
+    ///
+    /// Separate because the two record different things at different rates: one row
+    /// per rendered timeline entry against one row per effect and per input. Sharing
+    /// a counter would make each log's ordering depend on how often the other was
+    /// written, which is the one property an effect log cannot afford to lose.
+    event_seq: i32,
 }
 
+/// The harness that wrote a log. A replay by a different one is not a replay.
+///
+/// The crate version rather than a hand-maintained constant: a constant is a thing
+/// to forget to bump, and what matters is only that it changes when the loop's
+/// behaviour can.
+const HARNESS_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 impl Recorder {
+    /// One row of the effect log (AGENT-010 §5, S-2.5).
+    ///
+    /// **Called before the effect is executed, and before an input is fed back.**
+    /// That ordering is the entire value of the log: a row written afterwards
+    /// records what happened, which a transcript already does; a row written
+    /// beforehand records what was *about to* happen, which is the only thing that
+    /// can tell a crash-before from a crash-after — and therefore the only thing
+    /// that can decide whether resuming would write twice.
+    ///
+    /// Failures are logged and swallowed rather than propagated. That direction is
+    /// deliberate and is the opposite of the audit sink's: the audit trail gates
+    /// dispatch because a look nobody counted is the thing this platform claims it
+    /// cannot take, whereas a missing effect row costs a *resume* — the run in front
+    /// of the user still works. Killing a live run to protect its resumability would
+    /// be trading the certain thing for the contingent one.
+    async fn event(&mut self, direction: &str, kind: &str, payload: Value) {
+        self.event_seq += 1;
+        if let Err(e) = sqlx::query(
+            "INSERT INTO agent_effect_log              (run_id, seq, direction, kind, payload_json, harness_version)              VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(self.run_id)
+        .bind(self.event_seq)
+        .bind(direction)
+        .bind(kind)
+        .bind(&payload)
+        .bind(HARNESS_VERSION)
+        .execute(&self.pg)
+        .await
+        {
+            tracing::warn!(run_id = %self.run_id, seq = self.event_seq, error = %e,
+                "the effect log lost a row; this run is no longer resumable");
+        }
+    }
+
+    /// Every effect of one turn, recorded before any of them runs.
+    async fn effects(&mut self, fx: &[Effect]) {
+        for e in fx {
+            let (kind, payload) = describe_effect(e);
+            self.event("effect", kind, payload).await;
+        }
+    }
+
+    /// The input about to be fed back in.
+    async fn input(&mut self, kind: &str, payload: Value) {
+        self.event("input", kind, payload).await;
+    }
+
     async fn append(&mut self, kind: &str, content: Value) {
         self.seq += 1;
         if let Err(e) = sqlx::query(
@@ -339,6 +504,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         seq: 0,
         tokens_in: 0,
         tokens_out: 0,
+        event_seq: 0,
     };
     // No deadline. The agent runs until it calls `finish_task`.
     //
@@ -532,8 +698,17 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
     // session allowlist (ADR-P2-20).
     .with_gated_actions(ledger::audit::gated_actions());
 
+    rec.input("Admission", serde_json::json!({ "admission": format!("{admission:?}") }))
+        .await;
     let mut effects = governor.next(Input::Admission(admission));
     loop {
+        // **Before anything is executed.** The log's whole value is that a row says
+        // what was about to happen rather than what happened: a crash between the
+        // decision and the act is then distinguishable from a crash after it, and
+        // that distinction is what tells a resume whether running the effect again
+        // would write twice (S-2.5, and S-2.6 reads it).
+        rec.effects(&effects).await;
+
         let mut blocking: Option<Effect> = None;
         for e in effects {
             match e {
@@ -557,6 +732,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         };
 
         if cancel.load(Ordering::SeqCst) {
+            rec.input("Cancel", serde_json::json!({})).await;
             effects = governor.next(Input::Cancel);
             continue;
         }
@@ -695,6 +871,10 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
             Effect::Note(_) | Effect::Done(_) => unreachable!("handled above"),
         };
 
+        // And the answer, before it is fed back. An input recorded after the loop
+        // has consumed it cannot tell a replay whether the loop had seen it.
+        let (kind, payload) = describe_input(&input);
+        rec.input(kind, payload).await;
         effects = governor.next(input);
     }
 }

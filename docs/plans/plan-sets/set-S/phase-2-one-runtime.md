@@ -1,12 +1,13 @@
 # Phase 2 — One runtime
 
-**Completion: 19% (3 / 16 tasks). S-2.1, S-2.3 and S-2.4 landed 2026-09-15.**
+**Completion: 19% (3 / 16 tasks), plus 1 partial (S-2.5). Landed 2026-09-15.**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
 **Depends on:** Phase 1 (all three tracks).
 **Blocks:** Phase 8. Phase 6 consumes its effect log but can start before it.
 **Migration range:** 0061–0064.
+**Migrations shipped:** 0061 (as `0061_agent_effect_log.sql` — the task’s `agent_events` name was taken by 0036).
 **Parallel with:** Phases 6, 7.
 
 The serial, risky phase, and the reason the set is ordered this way. Three runtimes exist;
@@ -157,7 +158,45 @@ reports `exposure_full` rather than evicting.
 **Traces:** AGENT-005 §5.2; §10.3.
 
 ### S-2.5 `agent_events`: the effect log is the run — L
-`NOT STARTED`
+`PARTIAL` 2026-09-15 — the log exists, is written before every effect, and is proved against live
+Postgres. The dual-write to `agent_messages` is unchanged and the SDK driver is not wired.
+
+**The name in this task is already taken.** AGENT-010 §5 and this task both say `agent_events`;
+migration **0036** created a table of that name in 2026 — an SSE event stream keyed on
+`session_id` that the UI reads to draw a live session. Two tables with one name is not a
+collision anyone notices until a query joins the wrong one, so the table is
+**`agent_effect_log`** (migration 0061), which is also what it is. Recorded here rather than
+substituted silently.
+
+**The ordering is the whole value and it is the part that is easy to get wrong.** A row written
+*after* an effect records what happened, which the transcript already does. A row written
+*before* records what was about to happen — and that is the only thing that distinguishes a crash
+between the decision and the act from a crash after it, which is the only question resume
+actually asks. So `rec.effects(&effects)` runs before any of them is executed, and
+`rec.input(...)` before the answer is fed back.
+
+Rows are keyed on the **variant name** (`ExecuteTool`, `ModelReply`), not on
+`agent_messages`'s presentational kinds. `ExecuteTool` carries its arguments **in full**: they are
+what a resume must not run twice, and a hash cannot answer "was this the same call".
+
+Write failures are logged and swallowed, which is the opposite of the audit sink's direction and
+deliberately so: the audit trail gates dispatch because a look nobody counted is what this
+platform claims it cannot take, whereas a lost effect row costs a *resume* — the run in front of
+the user still works. Killing a live run to protect its resumability trades the certain thing for
+the contingent one.
+
+Verified against live Postgres by six tests in `crates/api/tests/pg_agent_effect_log.rs`:
+`an_effect_is_recorded_before_the_input_that_answers_it`,
+`an_interrupted_write_is_visible_as_a_trailing_effect` (the trailing-effect shape S-2.6 reads,
+with `idempotent: false` so a resume knows not to re-run it), `the_effect_log_refuses_to_be_edited`
+(append-only, both UPDATE and DELETE), `two_events_cannot_share_a_sequence_number`,
+`a_row_that_is_neither_a_decision_nor_an_answer_is_refused`, and
+`an_event_with_no_harness_version_is_refused`.
+
+**Not done:** `state_snapshot` rows at step boundaries (the `direction = 'state'` case is in the
+CHECK and nothing writes one yet), and the **SDK driver is not wired** — only `local_driver.rs`
+writes the log. `is_replayable` is about `harness::trace` spans and is unchanged by this task.
+**That is why this is `PARTIAL`.**
 
 Replace the untyped `agent_messages(kind, content_json)` with
 `agent_events(run_id, seq, kind, payload_json, created_at)` keyed on the `Effect`/`Input`/
