@@ -129,6 +129,9 @@ fn argument(name: &str) -> Option<Value> {
         // events exercises the refusal path instead.
         "event" => json!("large_down_move"),
         "threshold_sigma" => json!(2.5),
+        // The evidentiary generator, so the suite exercises the path whose
+        // output a run is allowed to cite.
+        "generator" => json!("stationary_block_bootstrap"),
         _ => return None,
     })
 }

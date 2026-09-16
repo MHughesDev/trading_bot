@@ -192,7 +192,35 @@ multiple-testing correction is not optional.
 **Traces:** AGENT-006 §5.2.
 
 ### S-3.5 Distributions, analogs, processes — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `apps/skill-runner/templates/analysis/{compare_distributions,find_analogs,
+fit_process,simulate_paths}.py`. The `analysis` namespace now holds 13 tools, under the cap
+of 16.
+
+`simulate_paths` labels every generator with a trust tier — `resampled_history`,
+`resampled_history_iid`, `parametric`, `parametric_naive` — and only the first is
+`admissible_as_evidence`. The implausibility filter rejects paths above a configurable
+annualised bound and **counts** them; a generator producing more than 1% of them is
+mis-calibrated, and the count is the only signal of that, which is exactly what the GAN
+failure looked like from outside. Verified on the reference series: the block bootstrap
+keeps 200 of 200 and reproduces 4/4 stylised facts; the Gaussian reference rejects 2% and
+reproduces 2/4.
+
+**There is no GAN or diffusion generator**, deliberately. The measured failure is that they
+produce 2000% annualised backtests *while passing stylised-fact checks* — so a stylised-fact
+check is not a sufficient gate, and until one exists a `generated_synthetic` tier would be a
+label on something that should not be produced. §5.10 names the tier; nothing here claims it.
+
+`find_analogs` uses six explicitly named, scale-free features rather than a learned
+embedding, because the output is a base rate a human acts on and a base rate whose reference
+class cannot be stated is not a base rate. Analogs are separated by at least one window
+length — neighbouring windows overlap almost completely, so the k nearest would otherwise be
+one episode counted k times — and the median distance between two *random* windows is in the
+summary, because with enough history the k nearest of anything are close by construction.
+
+A bug this found: the stylised-fact check compared the generated series' return
+autocorrelation against zero. The reference fixture's 60 bps bid-ask bounce gives it a real
+lag-1 autocorrelation of -0.31, so the block bootstrap was marked unfaithful precisely for
+faithfully reproducing the microstructure. The check is now against the source.
 
 `compare_distributions` (KS, Wasserstein, quantile deltas), `find_analogs` (explicit-vector
 kNN), `fit_process`, `simulate_paths` — the last two gain a **`generator_trust_tier`** field
