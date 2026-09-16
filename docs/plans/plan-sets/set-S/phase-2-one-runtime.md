@@ -1,6 +1,6 @@
 # Phase 2 — One runtime
 
-**Completion: 19% (3 / 16 tasks), plus 1 partial (S-2.5). Landed 2026-09-15.**
+**Completion: 19% (3 / 16 tasks), plus 2 partial (S-2.5, S-2.6).**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
@@ -211,7 +211,53 @@ runs.
 **Traces:** AGENT-010 §5, P3; §14.3. AGENT-009 §2.
 
 ### S-2.6 Resume from the log — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — the decision is built and tested; the replay that acts on it is not wired,
+and the run is still marked failed.
+
+**What exists.** `crates/api/src/agent/resume.rs` decides what a restart should do with one run,
+from its effect log alone, as a **pure function over rows**. That is where the logic belongs: it
+is what stands between a restart and a duplicated write, and a pure function can be tested
+against the exact shapes that matter without a process to kill.
+
+Three cases, and the third is the one the whole mechanism exists for:
+
+* the log ends on an **input** — the loop had the world's answer and was about to think; replaying
+  the inputs rebuilds exactly that;
+* it ends on an **idempotent effect** — decided, possibly done, safe either way; re-run it;
+* it ends on a **non-idempotent effect** — decided, and *unknowable* whether it happened.
+
+The third is not retried. It cannot be known from here whether the write landed, and re-running
+`create_experiment` risks a second experiment — which is a second counted trial, and that corrupts
+the one number every selection-adjusted statistic on this platform depends on. The run resumes
+with a `ToolError` the model reads, saying the call was interrupted and not retried **because it
+writes**. The model then checks, or reports that it cannot. Strictly better than both
+alternatives: failing loses the work, retrying silently corrupts the evidence.
+
+An effect whose `idempotent` was never recorded is treated as a write. Being wrong that way costs
+one message to the model; being wrong the other way costs a duplicated write nobody can see.
+
+A version mismatch **interrupts with the working state preserved** rather than replaying. A run
+that looks resumed and is not is worse than one that says it stopped.
+
+**What does not exist, and the run is still failed on restart.** Replaying inputs through a fresh
+`Loop` needs the driver to accept a pre-seeded loop, which it does not. A recovery that half-works
+is worse than one that says it did not, so `recover_orphans` now *reports* what the log says about
+each orphan — including how many ended on an interrupted write — and then marks them failed as
+before. That diagnosis is worth having on its own: it is how anyone finds out whether finishing
+this task is worth the work.
+
+The **suspended-run** half (a resume contract carrying the effect-log schema version, surviving a
+`harness_version` change, the job result attached even on an incompatible schema) is not started.
+
+Verified by eight unit tests in `agent::resume` — including
+`an_interrupted_write_is_not_retried`, `an_effect_with_no_recorded_safety_is_treated_as_a_write`,
+`a_trailing_note_does_not_mask_the_outstanding_effect` and
+`a_log_from_another_harness_interrupts_rather_than_pretending` — and by
+`the_resume_decision_reads_an_interrupted_write_out_of_the_database`, which covers the seam the
+unit tests cannot: that `idempotent` survives the JSONB round trip. If it did not, every
+interrupted write would look retryable and nothing else would notice.
+
+**That is why this is `PARTIAL`.**
 
 On restart, a `running` run replays its inputs through a fresh `Loop` of the same
 `harness_version`, then continues. An `ExecuteTool` with no recorded result is re-executed

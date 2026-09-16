@@ -13,6 +13,7 @@ pub mod hardware_probe;
 pub mod local_driver;
 pub mod manager;
 pub mod prompt;
+pub mod resume;
 pub mod routes;
 pub mod workspace_tools;
 

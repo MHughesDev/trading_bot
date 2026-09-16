@@ -200,7 +200,7 @@ struct Recorder {
 /// The crate version rather than a hand-maintained constant: a constant is a thing
 /// to forget to bump, and what matters is only that it changes when the loop's
 /// behaviour can.
-const HARNESS_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const HARNESS_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 impl Recorder {
     /// One row of the effect log (AGENT-010 §5, S-2.5).

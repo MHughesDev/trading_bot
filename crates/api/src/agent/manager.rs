@@ -84,9 +84,23 @@ impl AgentManager {
         self
     }
 
-    /// Mark runs orphaned by a previous process as failed (same policy as
-    /// backtests: jobs do not survive a platform restart).
+    /// Classify runs orphaned by a previous process (AGENT-010 §5, S-2.6).
+    ///
+    /// The policy used to be the same as backtests': everything unfinished becomes
+    /// `failed`. That is honest and expensive — a forty-minute sweep nineteen minutes
+    /// in loses nineteen minutes, and the model's findings go with it.
+    ///
+    /// The effect log (S-2.5) makes a better answer possible, and this reports what
+    /// it would be for each orphan before doing anything. **Still marking them
+    /// failed**, deliberately: replaying inputs through a fresh `Loop` needs the
+    /// driver to accept a pre-seeded loop, which it does not yet, and a recovery that
+    /// half-works is worse than one that says it did not.
+    ///
+    /// So this is the diagnosis without the treatment, and it is worth having on its
+    /// own: the log says which orphans *could* have resumed, which is how anyone
+    /// finds out whether the rest of S-2.6 is worth building.
     pub async fn recover_orphans(&self) {
+        self.report_resumable_orphans().await;
         match sqlx::query(
             "UPDATE agent_runs SET status = 'failed',
                  error = 'interrupted by platform restart', finished_at = now()
@@ -131,6 +145,78 @@ impl AgentManager {
             Err(e) => tracing::warn!(error = %e, "approval orphan recovery failed"),
         }
     }
+
+    /// What the effect log says about each orphan, logged rather than acted on.
+    ///
+    /// Reads the log for every run about to be failed and reports the decision
+    /// `super::resume::decide` would make. A run whose log ends on a **non-idempotent**
+    /// effect is the interesting one: it is the case where resuming naively would
+    /// duplicate a write, and the count of those is the argument for finishing the
+    /// rest of S-2.6 or for leaving it.
+    async fn report_resumable_orphans(&self) {
+        let runs: Vec<uuid::Uuid> = match sqlx::query_scalar(
+            "SELECT run_id FROM agent_runs              WHERE status IN ('queued', 'running', 'waiting_backtest', 'awaiting_approval')",
+        )
+        .fetch_all(&self.pg)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "could not list orphaned runs");
+                return;
+            }
+        };
+
+        for run_id in runs {
+            let rows: Vec<(i32, String, String, serde_json::Value, String)> = match sqlx::query_as(
+                "SELECT seq, direction, kind, payload_json, harness_version                  FROM agent_effect_log WHERE run_id = $1 ORDER BY seq",
+            )
+            .bind(run_id)
+            .fetch_all(&self.pg)
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(%run_id, error = %e, "could not read the effect log");
+                    continue;
+                }
+            };
+            let rows: Vec<super::resume::LogRow> = rows
+                .into_iter()
+                .map(|(seq, direction, kind, payload, harness_version)| super::resume::LogRow {
+                    seq,
+                    direction,
+                    kind,
+                    payload,
+                    harness_version,
+                })
+                .collect();
+
+            match super::resume::decide(&rows, super::local_driver::HARNESS_VERSION) {
+                super::resume::Resume::Replay { inputs, pending } => match pending {
+                    Some(p) if !p.idempotent => tracing::info!(
+                        %run_id, inputs = inputs.len(), effect = %p.kind,
+                        "orphan: resumable, with an interrupted WRITE that must not be retried"
+                    ),
+                    Some(p) => tracing::info!(
+                        %run_id, inputs = inputs.len(), effect = %p.kind,
+                        "orphan: resumable; the outstanding effect is idempotent"
+                    ),
+                    None => tracing::info!(
+                        %run_id, inputs = inputs.len(),
+                        "orphan: resumable cleanly; nothing was outstanding"
+                    ),
+                },
+                super::resume::Resume::Interrupted { reason } => {
+                    tracing::info!(%run_id, %reason, "orphan: not resumable");
+                }
+                super::resume::Resume::Nothing { reason } => {
+                    tracing::debug!(%run_id, %reason, "orphan: nothing to resume");
+                }
+            }
+        }
+    }
+
 
     fn active_count(&self) -> usize {
         self.running.lock().expect("agent running lock").len()

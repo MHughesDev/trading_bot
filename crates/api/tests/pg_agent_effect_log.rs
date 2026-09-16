@@ -214,3 +214,53 @@ async fn an_event_with_no_harness_version_is_refused() {
     .await;
     assert!(bad.is_err(), "an empty harness version is not a version");
 }
+
+/// The resume decision, made from rows actually read back out of Postgres.
+///
+/// The unit tests in `agent::resume` cover the shapes. This covers the seam: that
+/// what `decide` is handed matches what the writer put in, through JSONB and back.
+/// A `payload_json` that lost `idempotent` on the round trip would make every
+/// interrupted write look retryable, and the unit tests could not see it.
+#[tokio::test]
+#[ignore = "requires live Postgres"]
+async fn the_resume_decision_reads_an_interrupted_write_out_of_the_database() {
+    use api::agent::resume::{decide, LogRow, Resume};
+
+    let pg = pool().await;
+    let run = a_run(&pg).await;
+    append(&pg, run, 1, "input", "Admission", r#"{"admission":"Admit"}"#).await;
+    append(&pg, run, 2, "effect", "ExecuteTool",
+        r#"{"step":1,"name":"create_experiment","arguments":{"slug":"ema_v1"},"idempotent":false}"#).await;
+
+    let rows: Vec<(i32, String, String, serde_json::Value, String)> = sqlx::query_as(
+        "SELECT seq, direction, kind, payload_json, harness_version \
+         FROM agent_effect_log WHERE run_id = $1 ORDER BY seq",
+    )
+    .bind(run)
+    .fetch_all(&pg)
+    .await
+    .expect("the log reads back");
+
+    let rows: Vec<LogRow> = rows
+        .into_iter()
+        .map(|(seq, direction, kind, payload, harness_version)| LogRow {
+            seq,
+            direction,
+            kind,
+            payload,
+            harness_version,
+        })
+        .collect();
+
+    let Resume::Replay { inputs, pending } = decide(&rows, "0.1.0") else {
+        panic!("a run with a trailing effect resumes");
+    };
+    assert_eq!(inputs.len(), 1);
+    let p = pending.expect("the interrupted write is reported");
+    assert!(
+        !p.idempotent,
+        "`idempotent` survived the JSONB round trip; if it had not, every \
+         interrupted write would look retryable"
+    );
+    assert!(p.interrupted_error().contains("create_experiment"));
+}
