@@ -129,7 +129,11 @@ The acceptance's fourth clause is met and verified against a live Postgres: `cit
 
 The slot CHECK was wrong in every entry on the first attempt and would have refused every row the brief produced, at runtime — `schema_mirrors_memory_types.rs` now compares it against `Slot` directly.
 
-**What keeps it `PARTIAL`**: the first three acceptance clauses are about the brief, not the log — two conflicting findings both retrieved and marked, a stale finding flagged, retrieval working with the embedding sidecar stopped. `brief.rs`'s own tests cover them in-memory (`retrieval_works_with_the_embedding_sidecar_stopped` is named there); what is not yet wired is the brief calling `RetrievalStore::log` at run start, which needs the driver.
+**What keeps it `PARTIAL`, and it is sharper than "needs the driver"**: `assemble_brief` is exported from `memory/brief.rs` — 936 lines, 14 passing tests — and **has no caller anywhere in the workspace**. Searched across `crates/` and `apps/`; the only reference outside the module is the `pub use` that exports it.
+
+So the brief is not merely unlogged, it is never assembled in a run. Its first three acceptance clauses — two conflicting findings both retrieved and marked, a stale finding flagged, retrieval working with the embedding sidecar stopped — are covered by `brief.rs`'s own tests against fixtures, and by nothing against a run.
+
+Wiring it needs four things in order: entries in the store to retrieve (the write path, OQ-18 for findings but open now for preferences and profiles), a call at run start, `RetrievalStore::log` on what it showed, and the `Reference` blocks reaching the context assembler. The table and the log are built; the assembler and its caller are the gap.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
