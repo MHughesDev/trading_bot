@@ -66,6 +66,121 @@ impl GateAdvanceWorker {
     fn ledger(&self) -> ledger::pg::PgTrialLedger {
         ledger::pg::PgTrialLedger::new(self.pg.clone())
     }
+
+    /// The market's filtered labels, one per observation, when a scope covers
+    /// this strategy and its labels cover the whole series.
+    ///
+    /// Two refusals, both deliberate:
+    ///
+    /// * **No scope, or an ambiguous one** — the market is unconfigured, and
+    ///   choosing a series for the candidate is the guess ADR-P3-07 refused to
+    ///   make once and should not make here either.
+    /// * **Partial coverage** — every observation gets a label or none are used.
+    ///   Dropping the unlabelled days would silently change the denominator
+    ///   Gate 11 attributes P&L over, and a regime share computed over a subset
+    ///   of the sample is not the share it is reported as.
+    ///
+    /// The reason is returned either way so the job output can say which reading
+    /// the gates got.
+    async fn scope_labels(
+        &self,
+        req: &Request,
+        timestamps: &[chrono::DateTime<chrono::Utc>],
+    ) -> Result<LabelSource, sqlx::Error> {
+        use crate::knowledge::{
+            labels_as_of, RegimeScopeStore, RegimeStore, ScopeResolution, RULE_MODEL_VERSION,
+        };
+
+        if timestamps.is_empty() {
+            return Ok(LabelSource::none("the trial has no return series"));
+        }
+        let scope = match RegimeScopeStore::new(self.pg.clone())
+            .resolve(&req.asset_class, req.instrument.as_deref())
+            .await?
+        {
+            ScopeResolution::Scope(s) => s,
+            ScopeResolution::Ambiguous(names) => {
+                return Ok(LabelSource::none(format!(
+                    "{} market scopes claim asset class '{}' and the job named no instrument: {}",
+                    names.len(),
+                    req.asset_class,
+                    names.join(", ")
+                )));
+            }
+            ScopeResolution::Unconfigured => {
+                return Ok(LabelSource::none(format!(
+                    "no market scope is configured for '{}'{}",
+                    req.asset_class,
+                    req.instrument
+                        .as_deref()
+                        .map_or(String::new(), |s| format!(" covering {s}"))
+                )));
+            }
+        };
+
+        let (from, to) = (
+            *timestamps.first().expect("non-empty"),
+            *timestamps.last().expect("non-empty"),
+        );
+        let history = RegimeStore::new(self.pg.clone())
+            .history(
+                &scope.market_scope,
+                RULE_MODEL_VERSION,
+                // The labeller stamps a label at its bar close; a label in force
+                // at the first observation may have been written well before it.
+                from - chrono::Duration::days(LABEL_LOOKBEHIND_DAYS),
+                to,
+            )
+            .await?;
+        let resolved = labels_as_of(&history, timestamps);
+        let labelled = resolved.iter().filter(|l| l.is_some()).count();
+        if labelled < resolved.len() {
+            return Ok(LabelSource::none(format!(
+                "scope {} labels {labelled} of {} observations; a regime share over part of the \
+                 sample is not the share it would be reported as",
+                scope.market_scope,
+                resolved.len()
+            )));
+        }
+        Ok(LabelSource {
+            labels: Some(
+                resolved
+                    .into_iter()
+                    .map(|l| match l.expect("all labelled") {
+                        crate::knowledge::RegimeLabel::LowVol => {
+                            backtest::gates::evaluators::VolRegime::Low
+                        }
+                        crate::knowledge::RegimeLabel::MidVol => {
+                            backtest::gates::evaluators::VolRegime::Mid
+                        }
+                        crate::knowledge::RegimeLabel::HighVol => {
+                            backtest::gates::evaluators::VolRegime::High
+                        }
+                    })
+                    .collect(),
+            ),
+            reason: format!("scope {} ({})", scope.market_scope, scope.series_symbol),
+        })
+    }
+}
+
+/// How far before a series' first observation the labeller's history is read.
+///
+/// A daily label in force on the first observation was written at an earlier
+/// bar's close. Sixty days is more than the labeller's 21-day window needs and
+/// costs one bounded read.
+const LABEL_LOOKBEHIND_DAYS: i64 = 60;
+
+/// Where Gate 11's regimes came from, and why.
+struct LabelSource {
+    labels: Option<Vec<backtest::gates::evaluators::VolRegime>>,
+    reason: String,
+}
+
+impl LabelSource {
+    fn none(reason: impl Into<String>) -> Self {
+        Self { labels: None, reason: reason.into() }
+    }
 }
 
 /// What the manifest has to say.
@@ -78,6 +193,12 @@ struct Request {
     /// exactly this subject — a clean run on a *different* dataset says nothing
     /// about this one.
     dataset_id: String,
+    /// What the candidate trades, when the job says. It is how the market scope
+    /// is resolved: a regime is a property of a market, and the market is the
+    /// one the strategy is in (SPEC §5.4). Optional, because a job that does not
+    /// say gets the asset class's scope when exactly one is configured and no
+    /// labels at all when several are.
+    instrument: Option<String>,
     /// The campaign this candidate belongs to, when it belongs to one. Naming it
     /// is not supplying a statistic: the worker then reads the campaign's own
     /// immutable DEFINE hash from the ledger, which is Gate 1's evidence.
@@ -114,6 +235,10 @@ fn parse(manifest: &Value) -> Result<Request, JobError> {
         profile_id: field("profile_id").unwrap_or_else(|_| "strict_v1".to_string()),
         asset_class: field("asset_class").unwrap_or_else(|_| "crypto".to_string()),
         dataset_id: field("dataset_id")?,
+        instrument: manifest
+            .get("instrument")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
         campaign_id: manifest
             .get("campaign_id")
             .and_then(Value::as_str)
@@ -252,22 +377,46 @@ impl Worker for GateAdvanceWorker {
             None => None,
         };
 
+        // The platform's own filtered labels for this strategy's market, when a
+        // scope is configured (SPEC §5.4, ADR-P3-08). One per observation,
+        // aligned causally: the label the platform could have known at that
+        // instant, never the one it computed afterwards.
+        //
+        // This is what takes Gates 6 and 11 from "measured off the candidate's
+        // own returns, which is the weak reading ADR-P2-33 settled for" to a
+        // market reading. When no scope covers the strategy the labels stay
+        // `None` and both gates fall back to that weak reading, which the
+        // verdict still says out loud.
+        let market_labels = self
+            .scope_labels(&req, &timestamps)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("reading the regime scope: {e}")))?;
+
         // Gate 6 pairs the walk-forward Sharpe with how many regimes it spanned.
-        // The count is measured from the same series Gate 11 labels, over the
-        // same research slice — a recorded count would be better, and this is
-        // what exists (ADR-P2-33). An absent series leaves it `None`, which keeps
-        // Gate 6 inconclusive rather than passing on one regime.
+        // Counted from the market's labels when they exist, and otherwise from
+        // the candidate's own terciles — a weaker reading than a market one and
+        // a much stronger reading than none (ADR-P2-33). An absent series leaves
+        // it `None`, which keeps Gate 6 inconclusive rather than passing on one
+        // regime.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let walk_forward_regimes = stat("walk_forward_regimes").map(|v| v as u32).or_else(|| {
-            (strategy_series.len() > VOL_WINDOW).then(|| {
-                backtest::gates::stack::distinct_regimes(
-                    &backtest::gates::evaluators::vol_tercile_regimes(
-                        &strategy_series,
-                        VOL_WINDOW,
-                    ),
-                )
+        let walk_forward_regimes = stat("walk_forward_regimes")
+            .map(|v| v as u32)
+            .or_else(|| {
+                market_labels
+                    .labels
+                    .as_ref()
+                    .map(|l| backtest::gates::stack::distinct_regimes(l))
             })
-        });
+            .or_else(|| {
+                (strategy_series.len() > VOL_WINDOW).then(|| {
+                    backtest::gates::stack::distinct_regimes(
+                        &backtest::gates::evaluators::vol_tercile_regimes(
+                            &strategy_series,
+                            VOL_WINDOW,
+                        ),
+                    )
+                })
+            });
 
         let cost_ladder: Vec<backtest::gates::evaluators::CostRung> =
             match stat("breakeven_cost_multiple") {
@@ -308,16 +457,17 @@ impl Worker for GateAdvanceWorker {
             dsr: stat("deflated_sharpe"),
             length,
             factors: None,
-            // Gate 11 is handed the strategy's own series as the market when
-            // nothing better exists. The evaluator flags that case
-            // (`labelled_from_strategy`) rather than pretending it is a market
-            // reading, and a flagged verdict is more useful than a missing one —
-            // a strategy whose entire P&L came from one volatility regime is
-            // worth catching even when the regimes were labelled from its own
-            // returns. A real market series replaces this once `regime_scopes`
-            // is configured and 3.5's labels are being written (ADR-P3-07).
+            // Gate 11 reads the platform's filtered labels when a market scope
+            // is configured for what this strategy trades. When one is not, it
+            // is handed the strategy's own series as the market and the
+            // evaluator flags that case (`labelled_from_strategy`) rather than
+            // pretending it is a market reading — a flagged verdict is more
+            // useful than a missing one, because a strategy whose entire P&L
+            // came from one volatility regime is worth catching either way
+            // (ADR-P2-29, ADR-P3-08).
             market_returns: &strategy_series,
             strategy_returns: &strategy_series,
+            regime_labels: market_labels.labels.as_deref(),
             perturbation: None,
             return_series: &returns,
             family: &family,
@@ -359,6 +509,15 @@ impl Worker for GateAdvanceWorker {
                 "n_eff": n_eff,
                 "trial_count": trial_count,
                 "verdicts_recorded": ids.len(),
+                // Which reading Gates 6 and 11 got. A market reading and a
+                // fallback to the candidate's own volatility are different
+                // claims, and the record says which one was made.
+                "regime_labels": if market_labels.labels.is_some() {
+                    "market"
+                } else {
+                    "strategy_fallback"
+                },
+                "regime_label_source": market_labels.reason,
             }),
             ..Default::default()
         })

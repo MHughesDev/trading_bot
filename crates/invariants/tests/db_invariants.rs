@@ -304,6 +304,85 @@ async fn at42_smoothed_regimes_are_unreachable_from_anything_that_evaluates() {
         "the public view must still carry the shrunk score"
     );
 
+    // ── the adversarial half: try it, do not ask about it ────────────────────
+    //
+    // `has_table_privilege` asks the catalogue a question. This asks the server
+    // to actually do it, as the role that runs backtests, and requires the
+    // attempt to be refused. The difference matters: a SECURITY DEFINER view, a
+    // default privilege, or a future GRANT on a new table in the schema would
+    // all leave the catalogue answers above unchanged and let the read through.
+    for role in ["backtest_role", "agent_role", "internal_ml_role"] {
+        for table in ["regime_state_smoothed", "regime_separation"] {
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::query(&format!("SET LOCAL ROLE {role}")).execute(&mut *tx).await.unwrap();
+            let attempt = sqlx::query(&format!("SELECT 1 FROM regime_research.{table} LIMIT 1"))
+                .execute(&mut *tx)
+                .await;
+            let err = attempt.err().map(|e| e.to_string()).unwrap_or_default();
+            assert!(
+                err.contains("permission denied"),
+                "{role} could read regime_research.{table}. Smoothed probabilities are \
+                 P(state | all data) — SPEC §5.4 measured 1.74 Sharpe against 0.78 filtered — \
+                 and the separation result is a full-sample statement about which regime paid. \
+                 Neither may be reachable from anything that evaluates. Got: {err:?}"
+            );
+            tx.rollback().await.unwrap();
+        }
+
+        // The scope registry is the other half of the same idea: readable by
+        // everything that reads a regime, writable by none of them. An agent
+        // that can add a scope can choose the market its own result is measured
+        // against (§12.7).
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query(&format!("SET LOCAL ROLE {role}")).execute(&mut *tx).await.unwrap();
+        let read = sqlx::query("SELECT 1 FROM regime_causal.regime_scope LIMIT 1")
+            .execute(&mut *tx)
+            .await;
+        assert!(read.is_ok(), "{role} cannot read the scope registry: {:?}", read.err());
+        let write = sqlx::query(
+            "INSERT INTO regime_causal.regime_scope
+                 (market_scope, asset_class, series_symbol, series_base_period_secs,
+                  series_period_secs, rationale, configured_by)
+             VALUES ('mine', 'crypto', 'BTC-USD', 60, 86400,
+                     'a rationale long enough to clear the check that exists to stop exactly this',
+                     'the candidate')",
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            write.is_err(),
+            "{role} can configure a market scope — which is choosing the market its own result \
+             is judged against (SPEC §12.7)"
+        );
+        tx.rollback().await.unwrap();
+    }
+
+    // A scope with no recorded reasoning is the default ADR-P3-07 refused, and
+    // the database is what refuses it.
+    let no_reason = sqlx::query(
+        "INSERT INTO regime_causal.regime_scope
+             (market_scope, asset_class, series_symbol, series_base_period_secs,
+              series_period_secs, rationale, configured_by)
+         VALUES ('unreasoned', 'crypto', 'BTC-USD', 60, 86400, '', 'nobody')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(no_reason.is_err(), "a market scope with no rationale must be refused");
+
+    // And the seeded configuration is exactly one scope, for the one market the
+    // platform has bars for (ADR-P3-08).
+    let scopes = rows(
+        &pool,
+        "SELECT market_scope || ' -> ' || series_symbol FROM regime_causal.regime_scope
+          WHERE enabled ORDER BY market_scope",
+    )
+    .await;
+    assert_eq!(
+        scopes,
+        vec!["crypto_btc_usd -> BTC-USD".to_string()],
+        "the configured scopes are not what 0117 seeds"
+    );
+
     // Memory without evidence is a rumour the platform will act on later.
     let no_evidence = sqlx::query(
         "INSERT INTO knowledge.insight (tenant_id, tier, scope, claim, evidence_trial_ids)

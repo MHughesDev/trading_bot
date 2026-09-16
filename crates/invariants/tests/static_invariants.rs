@@ -983,4 +983,143 @@ fn the_old_promotion_spelling_matches_no_envelope() {
     );
     assert_eq!(Envelope::for_action("promote_model_version"), Envelope::Promotion);
     assert!(Envelope::for_action("promote_model_version").requires_approval());
+/// The one module allowed to name the smoothed regime path, and the reason it
+/// is allowed: it is analysis, it writes its answer into the research schema,
+/// and nothing that evaluates holds USAGE on that schema.
+const REGIME_ANALYSIS_MODULE: &str = "crates/api/src/regime_separation.rs";
+
+/// Everything a strategy's result passes through on its way to a verdict.
+fn evaluating_path(path: &str) -> bool {
+    path.starts_with("crates/backtest/")
+        || path.starts_with("crates/strategy-runtime/")
+        || path.starts_with("crates/strategy-validator/")
+        || path.starts_with("crates/features/")
+        || path.starts_with("crates/risk/")
+        || path.starts_with("crates/execution/")
+        || path == "crates/api/src/gate_worker.rs"
+        || path == "crates/api/src/knowledge.rs"
+}
+
+/// AT-42 ⛔ (static half) · Nothing on an evaluating path names the smoothed
+/// regime path (SPEC §5.4, R-07, ADR-P3-02, ADR-P3-09).
+///
+/// The GRANT is the enforcement and AT-42's live half checks it. This is the
+/// half that fails at build time rather than at runtime, and it exists because
+/// the runtime failure arrives as a permission error inside a backtest — which
+/// somebody will "fix" by widening a grant.
+#[test]
+fn at42_no_evaluating_module_names_the_smoothed_regime_path() {
+    let forbidden =
+        Regex::new(r"(?i)(regime_research|p_smoothed|regime_state_smoothed|viterbi)").unwrap();
+
+    let mut hits = Vec::new();
+    for (path, src) in rust_files() {
+        if !evaluating_path(&path) {
+            continue;
+        }
+        assert_ne!(
+            path, REGIME_ANALYSIS_MODULE,
+            "the analysis module must not be on the evaluating list"
+        );
+        let code = strip_comments(&src);
+        if let Some(m) = forbidden.find(&code) {
+            let line = code[..m.start()].matches('\n').count() + 1;
+            hits.push(format!("{path}:{line} names `{}`", m.as_str()));
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "an evaluating path names the smoothed regime state. Smoothed probabilities are \
+         P(state | all data) and are worth about 2.2x Sharpe to anything that sees them \
+         (SPEC §5.4); the separation between them and a backtest is a schema grant, and naming \
+         the schema here is the first step to widening it: {hits:?}"
+    );
+
+    // And the allowance is a statement about one file rather than a hole: no
+    // other module in the tree names the smoothed path at all.
+    let named: Vec<String> = rust_files()
+        .into_iter()
+        .filter(|(p, s)| p.starts_with("crates/") && forbidden.is_match(&strip_comments(s)))
+        .map(|(p, _)| p)
+        .filter(|p| !p.contains("/tests/"))
+        .collect();
+    assert!(
+        named.iter().all(|p| p == REGIME_ANALYSIS_MODULE),
+        "exactly one module may name the smoothed path, and it is the analysis one: {named:?}"
+    );
+}
+
+/// The separation test's own result is not reachable from an evaluating path
+/// either (ADR-P3-09).
+///
+/// It is a full-sample statement about which regime paid. A strategy that could
+/// read it would know which market state to lean into before the state was
+/// knowable — the same lookahead as a smoothed probability, in a friendlier
+/// shape. It lives in `regime_research`, which the scan above already forbids
+/// naming; this adds the table's own name, for the day somebody grants it out.
+#[test]
+fn the_separation_result_is_not_named_on_an_evaluating_path() {
+    let forbidden = Regex::new(r"regime_separation").unwrap();
+    let hits: Vec<String> = rust_files()
+        .into_iter()
+        .filter(|(p, _)| evaluating_path(p))
+        .filter(|(_, s)| forbidden.is_match(&strip_comments(s)))
+        .map(|(p, _)| p)
+        .collect();
+    assert!(
+        hits.is_empty(),
+        "the separation test's result must not be reachable from anything that evaluates: {hits:?}"
+    );
+}
+
+/// The separation test's significance level is pre-registered and cannot be
+/// supplied (SPEC §5.4).
+///
+/// A test whose alpha is a caller's parameter is a test that gets re-run with a
+/// bigger alpha, and the second run is the one that gets recorded.
+#[test]
+fn the_separation_tests_alpha_cannot_be_supplied() {
+    let src = fs::read_to_string(root().join(REGIME_ANALYSIS_MODULE))
+        .expect("the separation module exists");
+    let production = src.split("#[cfg(test)]").next().unwrap_or_default();
+    let code = strip_comments(production);
+    assert!(
+        code.contains("pub const ALPHA: f64 = 0.05;"),
+        "alpha must stay a pre-registered constant"
+    );
+    for sig in code.split("fn ").skip(1) {
+        let params = sig.split(')').next().unwrap_or_default();
+        assert!(
+            !params.contains("alpha"),
+            "alpha must not be a parameter: fn {}",
+            sig.lines().next().unwrap_or_default()
+        );
+    }
+}
+
+/// A market scope arrives with its reasoning or it does not arrive
+/// (ADR-P3-07, ADR-P3-08).
+///
+/// ADR-P3-07 made scope configuration a decision rather than a default, on the
+/// grounds that "the market" means a different series for crypto, equities and
+/// futures. A decision with no recorded reason is a default with extra steps, so
+/// `rationale` is NOT NULL under a length CHECK — in the DDL, where an INSERT
+/// that omits it fails, rather than in a convention somebody follows.
+#[test]
+fn a_regime_scope_cannot_be_configured_without_its_reasoning() {
+    let ddl = ddl()
+        .into_iter()
+        .find(|(p, _)| p.ends_with("0117_regime_scopes_and_separation.sql"))
+        .map(|(_, s)| s)
+        .expect("migration 0117 exists");
+    let code = strip_comments(&ddl);
+    assert!(code.contains("rationale              TEXT NOT NULL"), "rationale must be NOT NULL");
+    assert!(
+        Regex::new(r"(?is)CHECK\s*\(\s*length\s*\(\s*btrim\s*\(\s*rationale").unwrap().is_match(&code),
+        "an empty rationale must be refused by the database, not by review"
+    );
+    assert!(
+        !Regex::new(r"(?i)rationale[^,]*DEFAULT").unwrap().is_match(&code),
+        "a default rationale is the default ADR-P3-07 refused, wearing a different hat"
+    );
 }

@@ -12,6 +12,7 @@ pub mod campaign_driver;
 pub mod gate_worker;
 pub mod knowledge;
 pub mod knowledge_jobs;
+pub mod regime_separation;
 pub mod self_monitor;
 pub mod features_compute;
 pub mod leakage_lint;
