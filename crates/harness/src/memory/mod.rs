@@ -37,6 +37,7 @@ pub mod negative;
 pub mod retention;
 pub mod turn;
 pub mod verify;
+pub mod window;
 
 pub use brief::{assemble_brief, Brief, BriefItem, Detail as BriefDetail, Retrieval, Slot};
 pub use conflict::{relate, Relation};

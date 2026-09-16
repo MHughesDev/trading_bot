@@ -207,4 +207,8 @@ Persisting it needs an `Entry`, and `Entry::validate` refuses one without a data
 
 **Also narrowed by what shipped around it.** `memory_retrievals.cited` no longer waits on this — S-4.5's log is built and verified, because a retrieval row names an entry id and needs no window of its own. What still waits is `record_finding` writing through, which is the one path where the window is the claim's own subject.
 
-**Status:** open — blocks the write half of S-4.2. No longer blocks S-4.5.
+**Resolved 2026-09-16 as ADR-S4-04**, by option A with its tie-break settled: the window is the **union** of the windows of the cited results. The union rather than the intersection because the intersection of disjoint windows is empty — leaving the claim most in need of a window carrying none — and because the union is the wider bound, so more pairs reach §2.2.1's conflict check, and P5 says conflicts are surfaced rather than merged.
+
+One thing found while implementing it, and it is the reason this is not yet a refusal: **`run_backtest` does not stamp a window**, while the analysis templates, `get_bars` and `preview_signals` all do. A backtest is the most important evidence a finding can cite, so refusing an underivable window today would reject the central case. The finding is therefore recorded for the run exactly as before and says out loud that it did not persist. Making every evidence-producing tool stamp a window turns this into a refusal in one line.
+
+**Status:** resolved. Follow-up: `run_backtest`'s result carries no `window`, which is worth fixing on its own merits — a backtest result that does not say what period it covered is under-specified whatever memory does with it.

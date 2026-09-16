@@ -183,6 +183,18 @@ fn describe_effect(e: &Effect) -> (&'static str, Value) {
             "Await",
             serde_json::json!({ "step": step, "job_id": job_id, "tool": tool }),
         ),
+        // The row is logged by id and confidence, not in full. What a replay
+        // needs is that the loop decided to remember something and which
+        // verdict it reached; the claim text is already in the note beside it.
+        Effect::Remember(e) => (
+            "Remember",
+            serde_json::json!({
+                "entry_id": e.id,
+                "kind": e.kind.as_str(),
+                "confidence": e.confidence.as_str(),
+                "window": format!("{}→{}", e.data_window.start, e.data_window.end),
+            }),
+        ),
         Effect::Note(n) => (
             "Note",
             serde_json::json!({ "note": format!("{n:?}") }),
@@ -457,6 +469,31 @@ impl Recorder {
     /// the two call for different actions: `failed` means look at the task, `fenced`
     /// means look at the **backend** — the harness is asserting it stopped getting
     /// the guarantee it was promised.
+    /// Store a finding the loop verified (AGENT-007 §2.2; S-4.2).
+    ///
+    /// The loop leaves `provenance.run_id` blank because it is sans-IO and does
+    /// not know which run it is. Stamping it here is not a convenience:
+    /// `Entry::validate` refuses empty provenance, so a driver that forgot would
+    /// fail at the store rather than write a row attributed to nothing.
+    ///
+    /// A failure is a warning. The finding is already in the working state and
+    /// already in this turn's summary; losing the durable copy costs the *next*
+    /// run a head start and costs this one nothing, and failing the run over it
+    /// would trade a result for a cache.
+    async fn remember(&mut self, user_id: Uuid, entry: &harness::memory::Entry) {
+        let mut entry = entry.clone();
+        entry.provenance.run_id = self.run_id.to_string();
+        let store = crate::memory_store::MemoryStore::new(self.pg.clone());
+        if let Err(e) = store.put(user_id, &entry).await {
+            tracing::warn!(
+                run_id = %self.run_id,
+                entry = %entry.id,
+                error = %e,
+                "the finding did not persist; it is still in this run's state and summary"
+            );
+        }
+    }
+
     /// Write the structured summary of this turn (AGENT-007 §2.1; S-4.1).
     ///
     /// Built from the loop's own state and the two ledgers — never from the
@@ -877,6 +914,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         for effect in refused.next(Input::Admission(admission)) {
             match effect {
                 Effect::Note(n) => rec.note(&n).await,
+                Effect::Remember(e) => rec.remember(params.user_id, &e).await,
                 Effect::Done(o) => rec.finish(&o).await,
                 _ => {}
             }
@@ -987,6 +1025,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         for e in effects {
             match e {
                 Effect::Note(n) => rec.note(&n).await,
+                Effect::Remember(e) => rec.remember(params.user_id, &e).await,
                 Effect::Done(o) => {
                     // Before `finish`, because `finish` stamps the run complete
                     // and a reader that saw the row finish without a summary
@@ -1017,6 +1056,10 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         }
 
         let input = match blocking {
+            // Drained with the notes above, never blocking: storing a finding is
+            // something the platform does *because* of a decision, not something
+            // the loop waits on. Reaching here would mean the drain missed it.
+            Effect::Remember(_) => unreachable!("Remember is handled with the notes"),
             Effect::CallModel(call) => {
                 let started = Instant::now();
                 let req = build_request(&params.profile, &call, transcript.as_ref());

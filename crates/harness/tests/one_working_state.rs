@@ -1260,7 +1260,11 @@ fn both_transports_ask_the_world_for_the_same_things() {
                 match e {
                     // The one legitimate difference, and notes are the loop talking
                     // to its own trace rather than to the world.
-                    Effect::CallModel(_) | Effect::Note(_) => {}
+                    // `Remember` joins them: it is the loop handing the
+                    // platform a row to store, not a decision about the world,
+                    // and a transport that produced a different set of *those*
+                    // would not be a transport difference this test is about.
+                    Effect::CallModel(_) | Effect::Note(_) | Effect::Remember(_) => {}
                     Effect::ExecuteTool { name, .. } => seen.push(format!("run:{name}")),
                     Effect::AskHuman { tool, .. } => seen.push(format!("ask:{tool}")),
                     Effect::Await { tool, .. } => seen.push(format!("await:{tool}")),

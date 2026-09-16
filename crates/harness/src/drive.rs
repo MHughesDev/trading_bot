@@ -269,6 +269,19 @@ pub enum Effect {
     },
     /// Write one entry to the timeline and the trace.
     Note(Note),
+    /// Persist one semantic-memory entry (AGENT-007 §2.2; S-4.2, S-4.3).
+    ///
+    /// The loop verifies a finding and labels it `established` or `suggestive`,
+    /// and until this existed that verdict lived for exactly one run: the
+    /// `WorkingState` carried it, the turn ended, and the platform forgot what
+    /// it had checked. The loop is sans-IO and cannot write to Postgres, so the
+    /// entry leaves as an effect and the driver stores it.
+    ///
+    /// A `Note` would not do. A note is prose for the timeline; this is the row,
+    /// with its provenance, evidence ids, confidence and window intact — and
+    /// re-parsing a rendered line back into an entry is the mistake the dedup
+    /// key made when it matched a display string.
+    Remember(Box<crate::memory::Entry>),
     /// Terminal.
     Done(Outcome),
 }
@@ -2621,6 +2634,16 @@ impl Loop {
             return;
         }
 
+        // The window the claim is about, from the results it cites (OQ-18,
+        // ADR-S4-04). Refused rather than guessed when no cited result carries
+        // one: §2.2.1's near-duplicate check joins on an overlapping window, so
+        // a wrong one does not fail — it quietly stops two findings about the
+        // same period being compared. A refusal costs one turn; a guess is
+        // undetectable afterwards.
+        // The window the claim is about, from the results it cites (OQ-18,
+        // ADR-S4-04).
+        let window = crate::memory::window::from_evidence(&evidence, &self.results_by_id);
+
         self.step_learned_something = true;
         // Into the state. The block that renders these is rebuilt from here on every
         // assembly at priority 250 — above raw tool results, below the charter — so
@@ -2663,6 +2686,55 @@ impl Loop {
             name: RECORD_FINDING.to_string(),
             detail: format!("{finding} — stored {}: {why}", confidence.as_str()),
         }));
+
+        // The row, for the driver to store — when the window is derivable.
+        //
+        // **Not a refusal**, deliberately and for now. The rule wants to be one:
+        // a finding is a claim about a period, and one whose period cannot be
+        // established is one nobody can later check for conflict. But not every
+        // evidence-producing tool stamps a window yet — the analysis templates,
+        // `get_bars` and `preview_signals` do; `run_backtest` does not, and that
+        // is the most important evidence a finding can cite. Refusing today
+        // would reject the central case, so the finding is recorded in the
+        // working state exactly as before and simply does not persist, with the
+        // reason said out loud rather than dropped.
+        //
+        // Turning this into a refusal is a one-line change once every producer
+        // stamps one. Until then a guessed window would be the worse error:
+        // §2.2.1 joins the conflict check on an overlapping window, so a wrong
+        // one quietly stops two findings about the same period being compared.
+        let Some(window) = window else {
+            fx.push(Effect::Note(Note::CoreTool {
+                name: RECORD_FINDING.to_string(),
+                detail: format!(
+                    "{finding} — held for this run only: none of the cited results says which                      period it covers, so there is no window to store it under"
+                ),
+            }));
+            self.advance_plan();
+            self.begin_step(fx);
+            return;
+        };
+
+        let mut entry = crate::memory::Entry::finding(
+            format!("finding-{}", self.working.findings.len()),
+            self.working.goal.clone(),
+            finding.clone(),
+            window,
+            // `run_id` is left blank for the driver to stamp: this loop is
+            // sans-IO and does not know which run it is. Blank rather than a
+            // sentinel, because `Entry::validate` refuses empty provenance — so
+            // a driver that forgets to fill it fails loudly at the store rather
+            // than writing a row attributed to a placeholder.
+            crate::memory::Provenance::new("", RECORD_FINDING, "1", env!("CARGO_PKG_VERSION")),
+        );
+        entry.confidence = confidence;
+        entry.evidence_ids = evidence
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|id| (id.to_string(), id.to_string()))
+            .collect();
+        fx.push(Effect::Remember(Box::new(entry)));
         self.advance_plan();
         self.begin_step(fx);
     }
