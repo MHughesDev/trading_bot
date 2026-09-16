@@ -74,6 +74,22 @@ pub struct LocalRunParams {
     pub service_token: String,
 }
 
+/// The loop's own word for how a run ended (§4, S-2.8).
+///
+/// Deliberately not the UI's `status`, which collapses `Refused` and `Escalated`
+/// into "refused" because the timeline draws them the same. An eval that cannot
+/// tell an escalation from a refusal is measuring the wrong thing: one is the run
+/// declining, the other is the run asking for a bigger model.
+fn outcome_word(o: &Outcome) -> &'static str {
+    match o {
+        Outcome::Finished { .. } => "finished",
+        Outcome::Refused { .. } => "refused",
+        Outcome::Escalated { .. } => "escalated",
+        Outcome::Fenced(_) => "fenced",
+        Outcome::Cancelled => "cancelled",
+    }
+}
+
 /// One input, as the log records it.
 ///
 /// The counterpart to [`describe_effect`], and recorded for the same reason: a
@@ -186,6 +202,18 @@ struct Recorder {
     seq: i32,
     tokens_in: i64,
     tokens_out: i64,
+    /// How big the prompts were, summed. **Not** `tokens_in` (§4, S-2.8).
+    ///
+    /// With caching on the two differ by the cache hit rate: a 40,000-token prompt of
+    /// which 39,000 was a hit bills 1,000. `tokens_in` answers "what did this cost";
+    /// this answers "how big was the prompt", and only this one may be compared
+    /// against a context budget.
+    prompt_tokens: i64,
+    /// What the harness estimated for the same requests, by the arithmetic the
+    /// assembler budgeted with. The pair is the ratio S-1.18 calibrates on; either
+    /// number alone has nothing to check it.
+    est_prompt_tokens: i64,
+    cache_read_tokens: i64,
     /// The effect log's own sequence, separate from `agent_messages`'s.
     ///
     /// Separate because the two record different things at different rates: one row
@@ -337,12 +365,30 @@ impl Recorder {
 
     /// Latency is recorded, not hidden. Local inference trades wall clock for cost,
     /// and §15.3 asks for that to be surfaced rather than made to look like a hang.
-    async fn usage(&mut self, step: u32, input: u64, output: u64, latency_ms: u128) {
+    async fn usage(
+        &mut self,
+        step: u32,
+        usage: &llm::Usage,
+        estimated: u32,
+        latency_ms: u128,
+    ) {
+        let (input, output) = (usage.input_tokens, usage.output_tokens);
         self.tokens_in += input as i64;
         self.tokens_out += output as i64;
+        // The prompt as it actually was, and as the harness thought it would be
+        // (§4, S-2.8). Accumulated per call because the ratio that calibrates the
+        // estimator is over calls, and a run total would hide a systematic
+        // under-estimate on long steps behind an over-estimate on short ones.
+        self.prompt_tokens += i64::try_from(usage.prompt_tokens()).unwrap_or(i64::MAX);
+        self.est_prompt_tokens += i64::from(estimated);
+        self.cache_read_tokens +=
+            i64::try_from(usage.cache_read_input_tokens).unwrap_or(i64::MAX);
         self.append(
             "usage",
             json!({ "step": step, "input_tokens": input, "output_tokens": output,
+                    "prompt_tokens": usage.prompt_tokens(),
+                    "est_prompt_tokens": estimated,
+                    "cache_read_tokens": usage.cache_read_input_tokens,
                     "latency_ms": u64::try_from(latency_ms).unwrap_or(u64::MAX) }),
         )
         .await;
@@ -358,15 +404,38 @@ impl Recorder {
         .await;
     }
 
-    async fn admitted(&self, profile: &Profile, hardware: &str) {
+    async fn admitted(&self, profile: &Profile, hardware: &str, adapter: &str) {
+        // `profile_name` beside `profile_id`, and they are not the same thing
+        // (§4, S-2.8). The id is what the loader keyed on; the name is what a person
+        // reads in a scorecard, and an id renamed underneath silently changes what a
+        // historical row meant.
+        //
+        // `transport` is the decode style, which is what actually differs between two
+        // runs of the same model: `select_fill` is two constrained calls per step and
+        // `native` is one tool call, and an eval that averages them is measuring the
+        // mixture rather than either.
+        let transport = if profile.output.constrained_decoding {
+            "select_fill"
+        } else {
+            "native"
+        };
         let _ = sqlx::query(
             "UPDATE agent_runs SET profile_id = $2, tier = $3, hardware = $4, status = 'running',
+                 profile_name = $5, adapter = $6, transport = $7, harness_version = $8,
                  started_at = COALESCE(started_at, now()) WHERE run_id = $1",
         )
         .bind(self.run_id)
         .bind(&profile.model_id)
         .bind(profile.tier.as_str())
         .bind(hardware)
+        // There is no separate display name on `Profile`; the model id is what the
+        // loader keys on and what a reader recognises. Bound explicitly rather than
+        // left null so the column means something on every row, and a real display
+        // name can replace it without changing what the column is for.
+        .bind(&profile.model_id)
+        .bind(adapter)
+        .bind(transport)
+        .bind(HARNESS_VERSION)
         .execute(&self.pg)
         .await;
     }
@@ -397,6 +466,8 @@ impl Recorder {
         }
         let _ = sqlx::query(
             "UPDATE agent_runs SET status = $2, summary = $3, error = $4, outcome_json = $5,
+                 harness_version = $6, prompt_tokens = $7, est_prompt_tokens = $8,
+                 cache_read_tokens = $9, outcome = $10,
                  finished_at = now() WHERE run_id = $1",
         )
         .bind(self.run_id)
@@ -404,6 +475,14 @@ impl Recorder {
         .bind(summary)
         .bind(error)
         .bind(&json)
+        .bind(HARNESS_VERSION)
+        .bind(self.prompt_tokens)
+        .bind(self.est_prompt_tokens)
+        .bind(self.cache_read_tokens)
+        // The loop's own word for how it ended, not the UI's status. `outcome_json`
+        // holds the whole thing; this is the part an index can group by, so "how
+        // many runs fenced last week" does not require parsing every row.
+        .bind(outcome_word(outcome))
         .execute(&self.pg)
         .await;
     }
@@ -505,6 +584,9 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         tokens_in: 0,
         tokens_out: 0,
         event_seq: 0,
+        prompt_tokens: 0,
+        est_prompt_tokens: 0,
+        cache_read_tokens: 0,
     };
     // No deadline. The agent runs until it calls `finish_task`.
     //
@@ -529,7 +611,14 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
     // ── Hardware, then admission ────────────────────────────────────────────
     let hw = hardware_probe::detect().await;
     let description = hardware_probe::describe(&hw);
-    rec.admitted(&params.profile, &description).await;
+    // Which adapter served this run. Two runs on different adapters are two
+    // different experiments, and an eval that averages them is measuring the
+    // mixture rather than either (§4, S-2.8).
+    let adapter_name = harness::adapter::for_profile(&params.profile)
+        .provider()
+        .to_string();
+    rec.admitted(&params.profile, &description, &adapter_name)
+        .await;
     rec.append(
         "status",
         json!({ "hardware": description, "tier": params.profile.tier.as_str() }),
@@ -743,10 +832,16 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
                 let req = build_request(&params.profile, &call);
                 match client.chat(&req).await {
                     Ok(resp) => {
+                        // The harness's own estimate of the request it just sent,
+                        // by the same arithmetic the assembler budgeted with. Taken
+                        // here rather than in the recorder because this is the only
+                        // place that still holds the request (§4, S-2.8).
+                        let estimated = harness::context::estimate_tokens(&call.system)
+                            + harness::context::estimate_tokens(&call.prompt);
                         rec.usage(
                             call.step,
-                            resp.usage.input_tokens,
-                            resp.usage.output_tokens,
+                            &resp.usage,
+                            estimated,
                             started.elapsed().as_millis(),
                         )
                         .await;

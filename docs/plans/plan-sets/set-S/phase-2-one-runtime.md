@@ -1,13 +1,13 @@
 # Phase 2 — One runtime
 
-**Completion: 19% (3 / 16 tasks), plus 2 partial (S-2.5, S-2.6).**
+**Completion: 19% (3 / 16 tasks), plus 3 partial (S-2.5, S-2.6, S-2.8).**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
 **Depends on:** Phase 1 (all three tracks).
 **Blocks:** Phase 8. Phase 6 consumes its effect log but can start before it.
 **Migration range:** 0061–0064.
-**Migrations shipped:** 0061 (as `0061_agent_effect_log.sql` — the task’s `agent_events` name was taken by 0036).
+**Migrations shipped:** 0061, 0062 (as `0061_agent_effect_log.sql` — the task’s `agent_events` name was taken by 0036).
 **Parallel with:** Phases 6, 7.
 
 The serial, risky phase, and the reason the set is ordered this way. Three runtimes exist;
@@ -294,7 +294,43 @@ refused with `context_budget_exceeded` rather than truncated.
 **Traces:** AGENT-010 §3; AGENT-005 §6.1, §7.
 
 ### S-2.8 Columns the later phases read — S
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — eight of the ten are written by the local driver; `trials_spent` and
+`n_eff_after` have columns and no writer.
+
+Migration 0062. None of these is a reporting column — each answers a question that cannot be
+answered any other way once the run is over:
+
+* **`prompt_tokens` is not `tokens_in`.** With caching on a 40,000-token prompt of which 39,000
+  was a hit bills 1,000. `tokens_in` answers "what did this cost" and cannot answer "how big was
+  the prompt", and a reader who conflates them believes a budget has headroom it does not have.
+  The live test asserts they differ.
+* **`est_prompt_tokens` is the other half of S-1.18's ratio.** The estimator's calibration is
+  `est / actual`, and neither number survives the run without a column. Accumulated **per call**
+  rather than as a run total, because a total hides a systematic under-estimate on long steps
+  behind an over-estimate on short ones.
+* **`profile_name` beside `profile_id`**, which are not the same thing: the id is what the loader
+  keys on, the name is what a person reads, and an id renamed underneath silently changes what a
+  historical row meant.
+* **`transport`** is the decode style, which is what actually differs between two runs of the
+  same model — `select_fill` is two constrained calls per step, `native` is one tool call — and
+  an eval that averages them is measuring the mixture rather than either.
+* **`outcome`** is the loop's own word, deliberately not the UI's `status`, which collapses
+  `Refused` and `Escalated` into "refused" because the timeline draws them the same. An eval that
+  cannot tell an escalation from a refusal is measuring the wrong thing: one is the run declining,
+  the other is the run asking for a bigger model.
+
+All ten are nullable. A run that crashed before filling them is still a run, and NOT NULL would
+mean refusing to record the crash or inventing a value — and an invented `trials_spent = 0` is
+worse than a null, because a null cannot be averaged by accident.
+
+Verified by `a_finished_run_carries_its_telemetry` (which asserts `prompt_tokens > tokens_in`
+rather than just that both exist), `a_run_that_never_finished_leaves_its_telemetry_null` and
+`a_negative_token_count_is_refused`.
+
+**Not done:** `trials_spent` and `n_eff_after` are declared, CHECKed and indexed, and **nothing
+writes them** — the loop does not yet count its own trials, and N_eff lives in `crates/ledger`
+behind an API the driver does not call. The task says "every finished run populates all ten", and
+eight is not ten. **That is why this is `PARTIAL`.** The SDK driver writes none of them.
 
 `agent_runs` gains `harness_version, profile_name, adapter, transport, prompt_tokens,
 est_prompt_tokens, cache_read_tokens, trials_spent, n_eff_after, outcome`.

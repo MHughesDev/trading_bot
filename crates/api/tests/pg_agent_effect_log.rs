@@ -264,3 +264,94 @@ async fn the_resume_decision_reads_an_interrupted_write_out_of_the_database() {
     );
     assert!(p.interrupted_error().contains("create_experiment"));
 }
+
+/// The ten telemetry columns exist and hold what they claim (S-2.8).
+///
+/// `prompt_tokens` and `tokens_in` are the pair worth asserting apart. With caching
+/// on they differ by the hit rate, and a reader who took `tokens_in` for the prompt
+/// size would believe a 40,000-token prompt was a thousand — which is how a context
+/// budget comes to think it has headroom it does not have.
+#[tokio::test]
+#[ignore = "requires live Postgres"]
+async fn a_finished_run_carries_its_telemetry() {
+    let pg = pool().await;
+    let run = a_run(&pg).await;
+
+    sqlx::query(
+        "UPDATE agent_runs SET \
+             harness_version = '0.1.0', profile_name = 'qwen2.5:7b-instruct', \
+             adapter = 'ollama', transport = 'select_fill', \
+             tokens_in = 1000, prompt_tokens = 40000, est_prompt_tokens = 42000, \
+             cache_read_tokens = 39000, trials_spent = 4, n_eff_after = 2.5, \
+             outcome = 'finished', status = 'completed' \
+         WHERE run_id = $1",
+    )
+    .bind(run)
+    .execute(&pg)
+    .await
+    .expect("the telemetry writes");
+
+    let r = sqlx::query(
+        "SELECT harness_version, profile_name, adapter, transport, tokens_in, \
+                prompt_tokens, est_prompt_tokens, cache_read_tokens, trials_spent, \
+                n_eff_after, outcome \
+         FROM agent_runs WHERE run_id = $1",
+    )
+    .bind(run)
+    .fetch_one(&pg)
+    .await
+    .expect("it reads back");
+
+    assert_eq!(r.get::<String, _>("harness_version"), "0.1.0");
+    assert_eq!(r.get::<String, _>("transport"), "select_fill");
+    assert_eq!(r.get::<String, _>("outcome"), "finished");
+
+    let billed: i64 = r.get("tokens_in");
+    let prompt: i64 = r.get("prompt_tokens");
+    let cached: i64 = r.get("cache_read_tokens");
+    assert_eq!(billed, 1_000, "what it cost");
+    assert_eq!(prompt, 40_000, "how big the prompt was");
+    assert!(
+        prompt > billed,
+        "these are different numbers, and a reader who conflates them believes a \
+         40,000-token prompt was a thousand"
+    );
+    assert_eq!(cached, 39_000);
+
+    // The honesty pair: four trials that moved N_eff by less than four is the same
+    // idea searched more than once, and neither number says that alone.
+    assert_eq!(r.get::<i32, _>("trials_spent"), 4);
+    assert!((r.get::<f64, _>("n_eff_after") - 2.5).abs() < 1e-9);
+}
+
+/// A crashed run is still a run: the columns are nullable, and a null is not a zero.
+///
+/// NOT NULL here would mean either refusing to record the crash or inventing a
+/// value for it, and an invented `trials_spent = 0` is worse than a null because a
+/// null cannot be averaged by accident.
+#[tokio::test]
+#[ignore = "requires live Postgres"]
+async fn a_run_that_never_finished_leaves_its_telemetry_null() {
+    let pg = pool().await;
+    let run = a_run(&pg).await;
+    let r = sqlx::query("SELECT trials_spent, outcome FROM agent_runs WHERE run_id = $1")
+        .bind(run)
+        .fetch_one(&pg)
+        .await
+        .expect("it reads back");
+    assert!(r.get::<Option<i32>, _>("trials_spent").is_none());
+    assert!(r.get::<Option<String>, _>("outcome").is_none());
+}
+
+/// A negative token count is not a count. Refused rather than stored.
+#[tokio::test]
+#[ignore = "requires live Postgres"]
+async fn a_negative_token_count_is_refused() {
+    let pg = pool().await;
+    let run = a_run(&pg).await;
+    let bad = sqlx::query("UPDATE agent_runs SET prompt_tokens = -1 WHERE run_id = $1")
+        .bind(run)
+        .execute(&pg)
+        .await;
+    assert!(bad.is_err(), "a negative prompt size is not a prompt size");
+}
