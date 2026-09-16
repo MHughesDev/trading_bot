@@ -337,3 +337,84 @@ fn the_first_bar_with_a_value_has_not_moved_for_any_legacy_name() {
         assert_eq!(engine_first, legacy_first, "{name}");
     }
 }
+
+/// Every alias computes exactly what its canonical family computes.
+///
+/// DATA-006 §5's acceptance is parity "for each legacy alias", and the walk above
+/// names them one at a time — which covered `momentum_n` and missed `ret_n`,
+/// `logret_n` and `sma_n`, because a hand-written list covers what its author
+/// remembered.
+///
+/// This is the general form: read the aliases out of the registry, so a family
+/// that gains one is covered the day it does. INV-14 says an alias is rewritten
+/// to its canonical before anything is constructed, which makes "identical" the
+/// only acceptable answer — not "close". A one-ulp difference would mean the
+/// rewrite is not a rewrite but a second construction, and a second construction
+/// is the thing INV-14 exists to forbid.
+///
+/// Compared on `to_bits` for the reason the module header gives: stored feature
+/// values are diffed bit for bit by `consistency::diff_serve`, so drift here is
+/// reported as `Diagnosis::CodeChanged` on every historical serve.
+#[test]
+fn every_alias_is_bit_identical_to_the_family_it_aliases() {
+    let aliased: Vec<(&'static str, &'static str)> = features::feature_families()
+        .iter()
+        .filter_map(|f| f.alias_of.map(|canonical| (f.name, canonical)))
+        .collect();
+    assert!(
+        !aliased.is_empty(),
+        "the registry reports no aliases at all, so this test is asserting nothing — \
+         `alias_of` has moved or the families have"
+    );
+
+    // The parameters the aliased families take are all a single period.
+    const PERIODS: [usize; 5] = [5, 7, 14, 20, 50];
+    let mut compared = 0;
+
+    for frame in frames() {
+        for (alias, canonical) in &aliased {
+            for p in PERIODS {
+                let (a_name, c_name) = (format!("{alias}_{p}"), format!("{canonical}_{p}"));
+                let (Ok(a), Ok(c)) = (feature(&a_name), feature(&c_name)) else {
+                    panic!("`{a_name}` aliases `{c_name}` and one of them does not resolve");
+                };
+                assert_eq!(
+                    a.def().lookback_bars,
+                    c.def().lookback_bars,
+                    "`{a_name}` and `{c_name}` declare different warm-ups, so one of them is \
+                     absent on bars where the other has a value — which is a different feature, \
+                     not an alias"
+                );
+
+                let col_a = backfill_column(a.as_ref(), &frame);
+                let col_c = backfill_column(c.as_ref(), &frame);
+                assert_eq!(col_a.len(), col_c.len());
+                for (i, (va, vc)) in col_a.iter().zip(col_c.iter()).enumerate() {
+                    match (va, vc) {
+                        (None, None) => {}
+                        (Some(x), Some(y)) => {
+                            assert_eq!(
+                                x.to_bits(),
+                                y.to_bits(),
+                                "`{a_name}` and `{c_name}` differ at bar {i}: {x} against {y}. \
+                                 INV-14 says an alias is rewritten to its canonical before \
+                                 anything is constructed, so a difference of one ulp means it \
+                                 was constructed twice."
+                            );
+                            compared += 1;
+                        }
+                        _ => panic!(
+                            "`{a_name}` and `{c_name}` disagree about whether bar {i} has a \
+                             value at all"
+                        ),
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        compared > 1_000,
+        "only {compared} values were compared, so the fixtures are too short to say anything"
+    );
+}
