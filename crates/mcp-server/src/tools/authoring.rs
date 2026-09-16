@@ -20,10 +20,54 @@ pub struct ValidationResult {
     pub errors: Vec<ValidationErrorItem>,
 }
 
+/// One rejection, as the model receives it.
+///
+/// `code`, `fix` and `see` are AGENT-011 §5 (Set S task S-5.3). The validator
+/// has carried a fix for every code since that task; this struct used to drop it
+/// on the floor, which meant the teaching existed and no caller ever saw it — a
+/// rejection that says what is wrong and not what to change leaves a small model
+/// guessing, and every guess costs a turn.
+///
+/// `fix` and `see` are skipped when absent rather than serialised as null: a
+/// null `fix` reads as "there is no fix", which is a different and more
+/// discouraging claim than "this error has no canned edit".
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ValidationErrorItem {
+    /// The stable identifier, so a retry policy can branch without parsing prose.
+    pub code: String,
     pub path: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub see: Option<String>,
+    /// A correct instance of this clause, attached when the same `path` has now
+    /// been rejected repeatedly. The cheapest understanding gain on a small tier
+    /// is seeing one, not reading another rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub example: Option<String>,
+}
+
+impl From<strategy_validator::ValidationError> for ValidationErrorItem {
+    /// The one mapping. There were two identical copies of it — here and in
+    /// `builder.rs` — which is how the builder would have kept returning bare
+    /// rejections after this one learned to teach.
+    ///
+    /// The example is attached on **every** rejection rather than only the
+    /// third. AGENT-011 §5 counts rejections within a run, and that is state a
+    /// pure function of one document does not have; withholding the example
+    /// until a counter this crate cannot keep would mean never attaching it,
+    /// and an example the model did not need costs it one clause of context.
+    fn from(e: strategy_validator::ValidationError) -> Self {
+        Self {
+            code: e.code.to_string(),
+            fix: e.fix().map(str::to_string),
+            see: e.see().map(str::to_string),
+            example: e.example().map(str::to_string),
+            path: e.path,
+            message: e.message,
+        }
+    }
 }
 
 /// `validate_strategy` — validate a definition JSON without persisting.
@@ -36,8 +80,15 @@ pub fn validate_strategy(definition_json: &str) -> ValidationResult {
             return ValidationResult {
                 valid: false,
                 errors: vec![ValidationErrorItem {
+                    code: "invalid_json".into(),
                     path: "<root>".into(),
                     message: format!("JSON parse error: {e}"),
+                    fix: Some(
+                        "the definition must be a JSON object. Check for a trailing comma, an                          unquoted key, or a single quote where a double quote belongs."
+                            .into(),
+                    ),
+                    see: Some("guide#definition".into()),
+                    example: None,
                 }],
             }
         }
@@ -52,10 +103,7 @@ pub fn validate_strategy(definition_json: &str) -> ValidationResult {
             valid: false,
             errors: errs
                 .into_iter()
-                .map(|e| ValidationErrorItem {
-                    path: e.path,
-                    message: e.message,
-                })
+                .map(ValidationErrorItem::from)
                 .collect(),
         },
     }

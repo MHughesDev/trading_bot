@@ -398,10 +398,7 @@ pub async fn finalize_strategy(ctx: &McpContext, params: &Value) -> Value {
         Err(errs) => {
             let errors: Vec<ValidationErrorItem> = errs
                 .into_iter()
-                .map(|e| ValidationErrorItem {
-                    path: e.path,
-                    message: e.message,
-                })
+                .map(ValidationErrorItem::from)
                 .collect();
             return json!({ "valid": false, "errors": errors });
         }

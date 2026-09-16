@@ -11,6 +11,7 @@ pub fn validate_expression(expr: &str, path: &str) -> Vec<ValidationError> {
     match check_expr(expr) {
         Ok(()) => vec![],
         Err(msg) => vec![ValidationError {
+            code: "bad_expression",
             path: path.to_owned(),
             message: msg,
         }],

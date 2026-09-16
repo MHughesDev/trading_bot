@@ -33,6 +33,7 @@ pub fn validate_exits(def: &StrategyDefinition) -> Vec<ValidationError> {
 
     match (&def.exits, is_v13_or_later) {
         (None, true) => errors.push(ValidationError {
+            code: "exits_required",
             path: "exits".into(),
             message: format!(
                 "definition_version {} requires an `exits` block. If the risk layer's position \
@@ -43,6 +44,7 @@ pub fn validate_exits(def: &StrategyDefinition) -> Vec<ValidationError> {
             ),
         }),
         (Some(_), false) => errors.push(ValidationError {
+            code: "exits_version_too_low",
             path: "exits".into(),
             message: format!(
                 "an `exits` block needs definition_version {DEFINITION_VERSION_V1_3} or later; \
@@ -64,6 +66,7 @@ fn validate_policy(policy: &ExitPolicy) -> Vec<ValidationError> {
     if let ExitPolicy::Rules { rules } = policy {
         if rules.is_empty() {
             errors.push(ValidationError {
+                code: "exits_empty_rules",
                 path: "exits.rules".into(),
                 message: "an exit policy of `rules` with an empty list is `risk_layer_only` \
                           under another name, and the two must not hash differently while \
@@ -76,6 +79,7 @@ fn validate_policy(policy: &ExitPolicy) -> Vec<ValidationError> {
         for (i, rule) in rules.iter().enumerate() {
             if !rule.is_well_formed() {
                 errors.push(ValidationError {
+                    code: explain_code(rule),
                     path: format!("exits.rules[{i}]"),
                     message: explain(rule),
                 });
@@ -87,6 +91,7 @@ fn validate_policy(policy: &ExitPolicy) -> Vec<ValidationError> {
         for (i, rule) in rules.iter().enumerate() {
             if let Some(j) = rules[..i].iter().position(|r| r.kind() == rule.kind()) {
                 errors.push(ValidationError {
+                    code: "exit_rule_shadowed",
                     path: format!("exits.rules[{i}]"),
                     message: format!(
                         "a second `{}` rule after the one at index {j}: rules are evaluated in \
@@ -100,6 +105,22 @@ fn validate_policy(policy: &ExitPolicy) -> Vec<ValidationError> {
     }
 
     errors
+}
+
+/// The teaching code for a malformed rule.
+///
+/// Branches exactly where [`explain`] branches. One code for every rule kind
+/// would be a code nobody can act on differently — a fraction out of range and a
+/// zero holding bound are different edits — and one code for all of them would
+/// make the fix generic enough to be useless.
+fn explain_code(rule: &ExitRule) -> &'static str {
+    match rule {
+        ExitRule::StopLoss { .. } | ExitRule::TakeProfit { .. } | ExitRule::TrailingStop { .. } => {
+            "exit_fraction_out_of_range"
+        }
+        ExitRule::MaxHoldingBars { .. } => "exit_holding_bars_zero",
+        ExitRule::OnSignal { .. } => "exit_signal_name_empty",
+    }
 }
 
 fn explain(rule: &ExitRule) -> String {

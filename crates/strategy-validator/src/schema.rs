@@ -21,6 +21,7 @@ pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
     // document, so both version strings are accepted.
     if !matches!(def.definition_version.as_str(), "1.0" | "1.2") {
         errors.push(ValidationError {
+            code: "unknown_definition_version",
             path: "definition_version".into(),
             message: format!(
                 "expected '1.0' or '1.2', got '{}'; only v1.0/v1.2 definitions are accepted",
@@ -31,6 +32,7 @@ pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
 
     if def.strategy_id.trim().is_empty() {
         errors.push(ValidationError {
+            code: "empty_strategy_id",
             path: "strategy_id".into(),
             message: "must not be empty".into(),
         });
@@ -41,6 +43,7 @@ pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
     for node in &def.nodes {
         if !seen_ids.insert(node.id.as_str()) {
             errors.push(ValidationError {
+                code: "duplicate_node_id",
                 path: format!("nodes[{}].id", node.id),
                 message: format!("duplicate node id '{}'", node.id),
             });
@@ -76,6 +79,7 @@ pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
         if let NodeKind::Signal { when, .. } = &node.kind {
             if !condition_ids.contains(when.as_str()) {
                 errors.push(ValidationError {
+                    code: "when_names_expression",
                     path: format!("nodes[{}].when", node.id),
                     message: format!(
                         "references unknown condition node '{}'; \
@@ -91,6 +95,7 @@ pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
     for (i, action) in def.actions.iter().enumerate() {
         if !signal_emits.contains(action.on_signal.as_str()) {
             errors.push(ValidationError {
+                code: "unknown_signal",
                 path: format!("actions[{i}].on_signal"),
                 message: format!(
                     "references unknown signal '{}'; \
