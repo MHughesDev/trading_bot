@@ -646,6 +646,14 @@ pub struct Loop {
     /// identically over and over, and counting that as progress would make the
     /// counter blind to the thing it exists to catch.
     step_learned_something: bool,
+    /// The result text each seen id arrived in.
+    ///
+    /// `WorkingState::can_cite` proves an id is real; this is what proves a
+    /// *number* is (AGENT-007 §3.1 step 2). It is not folded into
+    /// `WorkingState` because the state is re-rendered into context every step
+    /// and is bounded per tier — raw result text belongs on the driver, where
+    /// nothing pays for it by the turn.
+    results_by_id: BTreeMap<String, String>,
     /// Idempotent calls already made this session, keyed by name + arguments.
     ///
     /// `ToolDef::idempotent` was set on every tool in the catalogue and read by
@@ -720,6 +728,7 @@ impl Loop {
             tools_attempted: 0,
             barren_steps: 0,
             step_learned_something: false,
+            results_by_id: BTreeMap::new(),
             idempotent_calls: BTreeMap::new(),
             held: None,
             running: None,
@@ -1955,12 +1964,36 @@ impl Loop {
             return;
         }
 
+        // AGENT-007 §3.1's second half (Set S task S-4.2). The id check above
+        // proves the citation is real; this proves the numbers in the claim
+        // are. It does not refuse a derived number — refusing "the two Sharpes
+        // differ by 0.31" would teach the model to stop doing arithmetic — it
+        // labels the claim, so nothing downstream renders the model's own
+        // arithmetic as an established fact.
+        let seen: BTreeSet<String> =
+            self.working.evidence.iter().map(|e| e.id.clone()).collect();
+        let verdict =
+            crate::memory::verify_finding(&finding, &evidence, &seen, &self.results_by_id);
+        let (confidence, why) = match verdict {
+            crate::memory::FindingVerdict::Refused { code, correction } => {
+                self.reject_and_retry(Rejection::semantic_owned(code, correction), fx);
+                return;
+            }
+            crate::memory::FindingVerdict::Accepted { confidence, why, .. } => (confidence, why),
+        };
+
         // Recording something already established is not progress, and allowing it
         // turns the ledger into a free skip button: `record_finding` advances the plan
         // cursor, so a model that cannot do the current step can simply re-assert an
         // old fact and move on. Observed doing precisely that — three consecutive
         // steps recording "BTC-USD has 1m bars available", walking the cursor through
         // "design a strategy" and "run a backtest" without touching either.
+        // Matched against the CLAIMS, not the rendered lines. The rendered line
+        // now opens with the confidence label, and a `starts_with` over that
+        // matches nothing — which turned the duplicate check off silently and was
+        // caught only by `re_recording_a_known_finding_is_refused`. A dedup key
+        // built from a display string is a dedup key one formatting change from
+        // being a no-op.
         let key = finding.to_ascii_lowercase();
         if self
             .working
@@ -1989,16 +2022,25 @@ impl Loop {
         // list being pushed again for every finding.
         self.working.findings.push(FindingRef {
             id: format!("finding-{}", self.working.findings.len() + 1),
+            // The confidence travels **with** the finding, in the text the
+            // model re-reads every step. A findings block headed "ESTABLISHED
+            // SO FAR" that silently contains suggestive claims is how a
+            // downgrade gets undone by the next turn's prose.
+            //
+            // It goes in the headline rather than into a second block of its
+            // own: AGENT-008 AC-1 is that no `WorkingState` content is
+            // *appended* across steps, and a `self.blocks.push` per finding is
+            // exactly that append.
             headline: if evidence.is_empty() {
-                finding.clone()
+                format!("[{}] {finding}", confidence.as_str())
             } else {
-                format!("{finding} [{evidence}]")
+                format!("[{}] {finding} [{evidence}]", confidence.as_str())
             },
             step: self.step,
         });
         fx.push(Effect::Note(Note::CoreTool {
             name: RECORD_FINDING.to_string(),
-            detail: finding,
+            detail: format!("{finding} — stored {}: {why}", confidence.as_str()),
         }));
         self.advance_plan();
         self.begin_step(fx);
@@ -2253,6 +2295,22 @@ impl Loop {
         // at step 1 and cited at step 12 must still count as seen.
         for id in opaque_ids(&capped) {
             self.working.record_evidence(id, &name, self.step);
+        }
+
+        // And which result each id arrived in (AGENT-007 §3.1 step 2).
+        //
+        // `seen_ids` alone answers "was this id real"; it cannot answer "does the
+        // result behind this id actually carry the number being claimed". Without
+        // the second question a finding citing a genuine experiment can assert any
+        // Sharpe at all and be stored `established` — and a real citation is
+        // precisely what makes a wrong number credible.
+        //
+        // Capped text, stored once per id rather than per result, so a long output
+        // with six ids costs six references to one string, not six copies.
+        for id in opaque_ids(&capped) {
+            self.results_by_id
+                .entry(id.to_string())
+                .or_insert_with(|| capped.to_string());
         }
 
         // Record idempotent reads so an identical repeat is answered from here.
