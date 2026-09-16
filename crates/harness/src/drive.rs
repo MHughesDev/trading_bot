@@ -733,6 +733,14 @@ pub struct Loop {
     /// content and does not breach AGENT-008 AC-1: AC-1 is about what is
     /// *appended to the prompt* across steps, and nothing here is rendered.
     summary_findings: Vec<crate::memory::SummaryFinding>,
+    /// What memory put in front of this run (AGENT-007 §4; S-4.5).
+    ///
+    /// Assembled by the **driver**, because retrieving it means reading
+    /// Postgres and this loop is sans-IO. Held rather than merged into
+    /// `observations`: the brief is `Reference`, not something the run
+    /// observed, and the distinction is what stops a retrieved claim from
+    /// reading like a tool result the model produced.
+    brief: Option<crate::memory::Brief>,
     /// Idempotent calls already made this session, keyed by name + arguments.
     ///
     /// `ToolDef::idempotent` was set on every tool in the catalogue and read by
@@ -850,6 +858,7 @@ impl Loop {
             results_by_id: BTreeMap::new(),
             finding_claims: Vec::new(),
             summary_findings: Vec::new(),
+            brief: None,
             idempotent_calls: BTreeMap::new(),
             held: None,
             running: None,
@@ -916,6 +925,17 @@ impl Loop {
     /// so an escalation can carry it — not so anything outside can mutate it. There
     /// is exactly one of these per run and the loop owns it.
     #[must_use]
+    /// Attach the memory brief this run starts with.
+    ///
+    /// A builder rather than a `new` parameter so every existing call site and
+    /// test keeps working: a run with no memory is the ordinary case and must
+    /// stay the ordinary construction.
+    #[must_use]
+    pub fn with_brief(mut self, brief: crate::memory::Brief) -> Self {
+        self.brief = Some(brief);
+        self
+    }
+
     /// The findings this run recorded, structured — for the turn summary.
     ///
     /// Parallel to [`Self::working`] rather than inside it: `WorkingState` is
@@ -990,6 +1010,13 @@ impl Loop {
                 priority: 250,
                 reference: None,
             });
+        }
+        // What memory retrieved, as `Reference`. Below the state card and above
+        // the raw observations: a prior finding is worth more than a tool result
+        // the run has already distilled, and worth less than what the run is
+        // doing now.
+        if let Some(brief) = &self.brief {
+            blocks.extend(brief.blocks());
         }
         // Worked examples, for the tiers that asked for them (S-1.17). Chosen by
         // this step's namespaces, so the pair is the one the model is about to need.

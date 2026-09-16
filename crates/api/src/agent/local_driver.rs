@@ -640,6 +640,93 @@ async fn run_canary(client: &LlmClient, profile: &Profile) -> Result<Vec<Verdict
     Ok(verdicts)
 }
 
+/// What memory has for this run, and a record of having shown it
+/// (AGENT-007 §4; Set S task S-4.5).
+///
+/// Assembled here rather than in the loop because retrieving it reads Postgres
+/// and the loop is sans-IO. Returns `None` when the store holds nothing for this
+/// user — a run with no memory is the ordinary case, and an empty `Reference`
+/// section would spend budget saying so.
+///
+/// # Failure is a warning, never a refusal
+///
+/// A run that cannot reach its memory has lost an advantage, not its task.
+/// Failing the run instead would make the memory store a new way for research to
+/// stop, which is a worse trade than a run repeating a question it could have
+/// looked up.
+async fn load_brief(
+    pg: &PgPool,
+    user_id: Uuid,
+    run_id: Uuid,
+    goal: &str,
+    profile: &Profile,
+) -> Option<harness::memory::Brief> {
+    let store = crate::memory_store::MemoryStore::new(pg.clone());
+
+    // Every live entry of the kinds a brief draws on. The cap is the store's,
+    // not the brief's: `assemble_brief` decides what fits, and handing it a
+    // pre-truncated set would put the truncation before the ranking rather than
+    // after it.
+    let mut entries = Vec::new();
+    for kind in [
+        harness::memory::Kind::UserPreference,
+        harness::memory::Kind::InstrumentProfile,
+        harness::memory::Kind::Finding,
+        harness::memory::Kind::NegativeResult,
+        harness::memory::Kind::OpenQuestion,
+    ] {
+        match store.by_kind(user_id, kind, 200).await {
+            Ok(mut found) => entries.append(&mut found),
+            Err(e) => {
+                tracing::warn!(error = %e, kind = kind.as_str(), "memory unreadable for this run");
+                return None;
+            }
+        }
+    }
+    if entries.is_empty() {
+        return None;
+    }
+
+    // The 20% is `Section::Reference`'s own share in `context.rs`, applied to
+    // the budget the assembler actually works from — not the advertised window,
+    // which is larger and would have the brief claim room the body needs.
+    //
+    // Frontier tiers get each entry's structured detail; everything else gets
+    // one line. A small tier spending its Reference budget on detail is a small
+    // tier with less room left for the task.
+    let detail = if profile.tier.is_local() {
+        harness::memory::BriefDetail::Lines
+    } else {
+        harness::memory::BriefDetail::Full
+    };
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let reference_budget = (profile.context.effective_budget_tokens as f64 * 0.20) as u32;
+
+    let brief = harness::memory::assemble_brief(
+        &run_id.to_string(),
+        goal,
+        &entries,
+        reference_budget,
+        detail,
+        &chrono::Utc::now().date_naive().to_string(),
+        &[],
+        &[],
+    );
+
+    // Logged before the run reads it, so the denominator exists whatever the run
+    // then does. A log written at the end would miss every run that crashed, and
+    // those are not runs where memory worked.
+    let retrievals = crate::retrieval_store::RetrievalStore::new(pg.clone());
+    if let Err(e) = retrievals.log(&brief.retrievals).await {
+        tracing::warn!(error = %e, "the retrieval log did not write; recall is unmeasured here");
+    }
+    Some(brief)
+}
+
 // ── The pump ────────────────────────────────────────────────────────────────
 
 /// Runs one local-tier task to a terminal state.
@@ -861,6 +948,19 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
     // classification; the loop pauses on them regardless of tier, attendance or
     // session allowlist (ADR-P2-20).
     .with_gated_actions(ledger::audit::gated_actions());
+
+    // What memory has to say about this goal, as `Reference`.
+    if let Some(brief) = load_brief(
+        &pg,
+        params.user_id,
+        params.run_id,
+        &params.goal,
+        &params.profile,
+    )
+    .await
+    {
+        governor = governor.with_brief(brief);
+    }
 
     // One transcript per native run (S-2.2). `None` on `select_fill`, where every
     // call re-renders the body and nothing accumulates provider-side.
