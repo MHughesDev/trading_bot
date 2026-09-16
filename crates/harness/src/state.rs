@@ -501,12 +501,18 @@ impl WorkingState {
 
         if let Some(e) = &self.last_error {
             out.push_str(&format!(
-                "LAST REJECTION (step {}): {} — {}\nFIX: {}\n",
+                "LAST REJECTION (step {}): {} — {}\n",
                 e.step,
                 e.code,
                 clamp(&e.message, 200),
-                clamp(&e.fix, 200)
             ));
+            // Only when it says something the message did not. A rejection whose
+            // message already names the edit — most of the validation ladder's do —
+            // would otherwise print the same sentence twice under two headings, and
+            // a model reading it twice weighs it twice.
+            if e.fix.trim() != e.message.trim() && !e.fix.trim().is_empty() {
+                out.push_str(&format!("FIX: {}\n", clamp(&e.fix, 200)));
+            }
         }
 
         if !self.evidence.is_empty() {
