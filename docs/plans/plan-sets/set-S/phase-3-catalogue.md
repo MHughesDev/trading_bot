@@ -27,9 +27,27 @@
 >    `ledger::audit`'s action list and the pinned set in `every_tool_envelope_matches_the_ledger`
 >    both need you.
 >
-> Remaining: S-3.10, S-3.11's static scan, S-3.12 … S-3.19. Most of what is left needs data
-> beyond OHLCV — a family's recorded return series, a venue table, or the simulator — so the
-> next increment is a second `SeriesKind` for the materialiser rather than more templates.
+> **Remaining: S-3.10, S-3.12, S-3.13, S-3.15, S-3.17 — and every one of them is blocked on
+> deployment state rather than on effort.** Checked, not assumed, on 2026-09-16:
+>
+> * the canonical PIT store **is not deployed on the development box**. ClickHouse is up and
+>   holds `market_bars` and `market_bars_v2`; `market_bar` — the table
+>   `clickhouse/07_canonical_market.sql` creates and the one `BarStore` reads — does not
+>   exist. So `probe_pit_provenance` (S-3.15), whose whole value is executing a real as-of
+>   query and diffing it against a later one, cannot be exercised against anything here;
+> * `future_perturbation_test` (S-3.10) needs a "run with column X shifted" mode in the
+>   strategy runtime, which does not exist;
+> * `cost_shock_curve` and the S-3.13 battery re-run the simulator, so they are gated on the
+>   executor rather than on statistics;
+> * S-3.17's model diagnostics need model predictions, and there is no prediction
+>   materialisation — only bars and trial returns.
+>
+> Writing them anyway would mean shipping database and simulator code that no test on this
+> machine can run. The fixtures built in this phase caught four real defects that would
+> otherwise have shipped — two wrong spread estimators, a double-integrated Hurst exponent,
+> and a timestamp bug inside the tool written to detect timestamp bugs — and none of those
+> would have been caught by code that compiles. The remainder waits for an environment that
+> can run it.
 
 **Requirement IDs:** TC-11…TC-37.
 **Spec:** [AGENT-006 §3.3, §5](../../../specs/AGENT-006-tool-catalog.md), and the research
