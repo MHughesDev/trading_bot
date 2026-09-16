@@ -80,7 +80,7 @@ fn nearest(name: &str) -> Option<String> {
     for f in features::feature_families() {
         let example = f.example();
         let d = distance(name, &example);
-        if best.as_ref().map_or(true, |(bd, _)| d < *bd) {
+        if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
             best = Some((d, example));
         }
     }

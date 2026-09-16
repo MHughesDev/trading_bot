@@ -99,7 +99,17 @@ templates. One engine, proven by test.
 **Traces:** AGENT-011 §2, P2; §8.1.
 
 ### S-5.3 The validator teaches — M
-`PARTIAL` 2026-09-16 — `strategy-validator` returns structured `ValidationError { path, message }` from five passes, so a rejection already names where and why. The acceptance is stronger than that: the six §5 error cases must return the listed `fix`, a third identical rejection must return an example, and `see` anchors must resolve into the guide. None of that is evidenced.
+`PARTIAL` 2026-09-16 — the mechanism is built and three of the six codes have real producers.
+
+`ValidationError` gains `code`, and `fix`/`see` are **methods over it** rather than fields — a stored fix is a second copy of the table a caller can forget to fill in, and the forgetting is silent because the error still renders. `teach.rs` carries §5's six plus the twelve this crate constructs, and `every_code_the_validator_constructs_can_teach` scans `src/*.rs` for `code: "…"` rather than walking a registered list, skipping `teach.rs` itself (the self-referencing scan trap, hit again).
+
+**The half that was actually broken was downstream.** `ValidationErrorItem` — what the MCP tool returns — mapped `{path, message}` and dropped the rest, in two identical copies (`authoring.rs` and `builder.rs`). The validator would have carried a fix for every code and no caller would ever have seen one. Now one `From` impl.
+
+**And it found a real defect.** The validator never checked that declared feature names resolve: a definition with `rsi14` returned `Ok` and failed inside `features::runtime::feature` during the run — for an agent, after a trial was spent. `feature_names::check` resolves every name through the registry and suggests the repair, tried against `resolve_feature` rather than against the advertised examples (the example for `rsi` is `rsi_20`, so an edit-distance search offered nothing for `rsi14`, while `rsi_14` resolves).
+
+**What keeps it `PARTIAL`: three of §5's six codes have no producer.** `unknown_feature`, `when_names_expression` and `loosening` are emitted by real passes. `warmup_exceeds_window` and `never_fires` belong to `preview_signals`, which today reports `never_fires_because` as prose rather than a coded error; `distance_without_unit` belongs to SLv2's grammar, which does not exist. The table covers all six so those producers have somewhere to point, and the acceptance is not met until they do.
+
+One deviation, deliberate: the worked example is attached on **every** rejection rather than the third. §5 counts rejections within a run; this crate is a pure function of one document and has no run, and withholding the example until a counter it cannot keep would mean never attaching it. `rejects_loosening` is untouched and green.
 
 Audited 2026-09-16 against the source. `crates/features` is a real engine — about 5,100 lines over 101 passing tests, with `registry.rs` (583), `runtime.rs` (1,068) and `leakage.rs` (1,301) — and `crates/backtest/src/sim.rs:987` resolves every strategy feature through `features::runtime::feature`. Proven by construction rather than by reading: `atr_14`, `parkinson_vol_20`, `rolling_std_30`, `donchian_upper_20`, `obv` and `hour_sin` all resolve and run.
 
