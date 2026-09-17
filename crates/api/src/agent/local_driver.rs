@@ -93,6 +93,48 @@ pub struct LocalRunParams {
     pub service_token: String,
 }
 
+/// What this run has committed to, for the trial gate (AGENT-013 §7.2; S-10.3).
+///
+/// The head of the run's amendment chain — the row with the highest amendment
+/// number, which is the one with no successor.
+///
+/// A Chat turn is [`Prereg::NotRequired`] rather than `Missing`, and the
+/// difference is not cosmetic: a Chat turn is already refused by
+/// `for_chat_turn`, and telling it to go and pre-register would point it at a
+/// tool it is not offered. Two refusals for one situation, one of which names an
+/// impossible fix, is worse than one.
+///
+/// A read that fails is `Missing`, deliberately. The alternative — treating a
+/// database error as "no registration required" — would make an outage open the
+/// gate, and the gate is the thing standing between a run and the trial budget.
+async fn sealed_registration(
+    pg: &PgPool,
+    run_id: Uuid,
+    demand: TaskDemand,
+) -> mcp_server_lib::gate::Prereg {
+    use mcp_server_lib::gate::Prereg;
+    if demand == TaskDemand::SingleLookup {
+        return Prereg::NotRequired;
+    }
+    let row: Result<Option<String>, _> = sqlx::query_scalar(
+        "SELECT prereg_hash FROM agent_lifecycle.preregistration           WHERE run_id = $1 ORDER BY amendment DESC LIMIT 1",
+    )
+    .bind(run_id)
+    .fetch_optional(pg)
+    .await;
+    match row {
+        Ok(Some(hash)) => Prereg::Sealed(hash),
+        Ok(None) => Prereg::Missing,
+        Err(e) => {
+            tracing::warn!(
+                %run_id, error = %e,
+                "could not read this run's pre-registration; trials are refused"
+            );
+            Prereg::Missing
+        }
+    }
+}
+
 /// The catalogue tools that reach paper trading (AGENT-013 §4; S-10.1).
 ///
 /// Derived from `ToolSpec::ring`, which derives it from `Envelope::Promotion` —
@@ -1065,11 +1107,16 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
     // A Chat turn spends no trials (§2.2). The exposure filter already means the
     // model cannot name such a tool; this is the refusal at the door, which is
     // the mechanism that survives a later code path routing around the filter.
+    //
+    // And a look needs a commitment behind it (§7.2): the run's sealed
+    // registration decides whether the trial gate admits anything at all. Read
+    // here, once, because `McpContext` is one per run and so is the gate.
     let mcp_ctx = {
         let ctx = McpContext::new(ApiClient::new(
             params.api_base.clone(),
             params.service_token.clone(),
-        ));
+        ))
+        .under_preregistration(sealed_registration(&pg, params.run_id, params.demand).await);
         if params.demand == TaskDemand::SingleLookup {
             ctx.for_chat_turn()
         } else {

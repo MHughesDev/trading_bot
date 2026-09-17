@@ -130,11 +130,18 @@ sealed run spends. `Prereg` is a three-state enum rather than an `Option` becaus
 authoring-guide notes. Amending reads the row it supersedes, so the trial budget is
 carried by the ledger rather than trusted from the request.
 
-**Not done:** nothing yet puts the gate into `Missing` — the driver must look up
-the run's registration and construct the `CallGate` from it, which needs the run id
-to reach `McpContext`. So a run can seal a registration and every ticket it spends
-carries the hash, but a run that seals none is not yet refused. That is one lookup
-and it is recorded rather than counted as done.
+The driver reads the head of the run's amendment chain and builds the gate from it,
+so a Research run that has sealed nothing is refused and one that has sealed
+something stamps the hash on every ticket. A read that *fails* is `Missing`, not
+`NotRequired`: treating a database error as "no registration needed" would make an
+outage open the gate, and the gate is what stands between a run and the trial
+budget.
+
+**Not done, and it is the acceptance's own sentence:** `run_study` refusing is
+asserted at the gate, not end to end — that needs a live run (gate H-2). The
+`preregistration_required` profile value does not exist either; the requirement is
+currently "every Research run", which is stricter than the spec and therefore safe,
+but it is not the spec.
 
 The object (AGENT-013 §7.2): objective in SPEC §10's shape, benchmark, `delta_practical`
 (no serde default — a request without it fails to deserialise, ADR-P0-08's technique), window,

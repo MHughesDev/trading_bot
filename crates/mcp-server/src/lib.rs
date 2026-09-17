@@ -373,6 +373,21 @@ impl McpContext {
         }
     }
 
+    /// The same context, under this run's sealed pre-registration (§7.2;
+    /// S-10.3).
+    ///
+    /// The gate is rebuilt rather than mutated because it is behind an `Arc` and
+    /// shared with nothing yet at construction time — and because a gate whose
+    /// registration could change mid-run would be a gate a run could open by
+    /// sealing a registration after its first refusal, which is the sequence the
+    /// whole mechanism exists to prevent.
+    #[must_use]
+    pub fn under_preregistration(mut self, prereg: gate::Prereg) -> Self {
+        let registrar = Arc::new(gate::ApiTrialRegistrar::new(self.api.clone()));
+        self.gate = Arc::new(gate::CallGate::new(registrar).under_preregistration(prereg));
+        self
+    }
+
     /// The same context, for a run that may not spend a trial (AGENT-013 §2.2;
     /// Set S task S-10.2).
     ///
@@ -383,7 +398,16 @@ impl McpContext {
     #[must_use]
     pub fn for_chat_turn(mut self) -> Self {
         let registrar = Arc::new(gate::ApiTrialRegistrar::new(self.api.clone()));
-        self.gate = Arc::new(gate::CallGate::new(registrar).for_chat_turn());
+        // The registration this context was already given survives. Rebuilding
+        // the gate from scratch here would silently drop it, and the two
+        // builders are written to be used together — which is exactly the shape
+        // that loses one of them.
+        let prereg = self.gate.preregistration().clone();
+        self.gate = Arc::new(
+            gate::CallGate::new(registrar)
+                .under_preregistration(prereg)
+                .for_chat_turn(),
+        );
         self
     }
 

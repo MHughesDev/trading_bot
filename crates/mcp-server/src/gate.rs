@@ -263,6 +263,12 @@ impl CallGate {
         }
     }
 
+    /// The registration this gate is holding the run to.
+    #[must_use]
+    pub fn preregistration(&self) -> &Prereg {
+        &self.prereg
+    }
+
     /// How many times this run has called `tool`.
     #[must_use]
     pub fn calls_made(&self, tool: &str) -> u32 {
@@ -566,6 +572,22 @@ mod tests {
             .await
             .is_ok());
         assert_eq!(rec.registered.load(Ordering::SeqCst), 1);
+    }
+
+    /// The two builders compose. Either one alone would be a mechanism the
+    /// other silently removed.
+    #[tokio::test]
+    async fn a_chat_turn_under_a_registration_keeps_both_rules() {
+        let rec = Arc::new(Recording::default());
+        let gate = CallGate::new(rec)
+            .under_preregistration(Prereg::Sealed("sha256:abc".into()))
+            .for_chat_turn();
+        assert_eq!(gate.preregistration(), &Prereg::Sealed("sha256:abc".into()));
+        let err = gate
+            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .await
+            .expect_err("a chat turn spends no trials, registered or not");
+        assert_eq!(err.code, "chat_turn_spends_no_trials");
     }
 
     // ── The invariant ────────────────────────────────────────────────────────
