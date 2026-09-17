@@ -1,6 +1,6 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 31% (5 / 16 tasks), plus 11 `PARTIAL`. One untouched: S-10.15.**
+**Completion: 38% (6 / 16 tasks), plus 10 `PARTIAL`. Nothing untouched.**
 
 > **Blocking finding, 2026-09-17: the trial gate's registrar posts to a route that
 > was never built, so every trial-spending tool is refused and nothing that counts
@@ -12,11 +12,19 @@
 > independently of the missing credential, and it is why several tasks below say
 > "needs a live run".
 >
-> Status 2026-09-17. **S-10.1, S-10.6, S-10.7 and S-10.13 are done**; S-10.11 is
-> partial and substantial — the `ResearchRun` worker, the campaign door, the worker
-> projection and the `propose` decision are built and reached, and what is missing
-> is the parent's resumption, which waits on `Effect::Await` resumption in the
-> driver. S-10.14's per-tier half landed with it. Only S-10.15 is untouched.
+> Status 2026-09-17. **S-10.1, S-10.6, S-10.7, S-10.13 and S-10.4 are done**, and
+> S-10.12 is done bar nothing. Every other task has been reached: S-10.11 built the
+> `ResearchRun` worker, the campaign door and the worker projection; S-10.9 built
+> the approval route and its queue; S-10.3 and S-10.14 built both profile values and
+> the skeleton; S-10.15's four surfaces are stage ✓, registration ✓, falsifier ✓,
+> proposals ✓ — the yield panel is the remainder.
+>
+> **What the rest wait on is now mostly one of three things**, and none of them is
+> more code in this phase: OQ-20 (the trial gate, above), gate H-2 (a live run,
+> which OQ-20 blocks independently of the missing credential), or a mechanism that
+> does not exist — a ±20% cost perturbation for `compare_candidates`, a durable
+> suspension record for the parent resume, a cost-model registry and a per-tier
+> trial cap for the receipt.
 >
 > What was already here and doing nothing: `WorkingState` has carried `mode`,
 > `workflow`, `ring` and `stage` since phase 1 and the state card renders all four;
