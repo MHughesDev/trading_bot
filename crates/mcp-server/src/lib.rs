@@ -388,6 +388,23 @@ impl McpContext {
         self
     }
 
+    /// The same context, under this run's spending rule (§2.2, §3).
+    ///
+    /// Preserves the registration the context was already given, for the reason
+    /// `for_chat_turn` does: the two builders are written to be used together,
+    /// which is exactly the shape that loses one of them.
+    #[must_use]
+    pub fn spending(mut self, spending: gate::Spending) -> Self {
+        let registrar = Arc::new(gate::ApiTrialRegistrar::new(self.api.clone()));
+        let prereg = self.gate.preregistration().clone();
+        self.gate = Arc::new(
+            gate::CallGate::new(registrar)
+                .under_preregistration(prereg)
+                .spending(spending),
+        );
+        self
+    }
+
     /// The same context, for a run that may not spend a trial (AGENT-013 §2.2;
     /// Set S task S-10.2).
     ///

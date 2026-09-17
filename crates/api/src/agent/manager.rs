@@ -427,8 +427,8 @@ impl AgentManager {
         let ring_str = enum_name(&ring);
         sqlx::query(
             "INSERT INTO agent_runs (run_id, user_id, status, goal, provider, model,
-                 constraints_json, conversation_id, turn_index, mode, ring)
-             VALUES ($1, $2, 'queued', $3, $4, $5, '{}'::jsonb, $6, $7, $8, $9)",
+                 constraints_json, conversation_id, turn_index, mode, ring, workflow)
+             VALUES ($1, $2, 'queued', $3, $4, $5, '{}'::jsonb, $6, $7, $8, $9, $10)",
         )
         .bind(run_id)
         .bind(user_id)
@@ -447,6 +447,10 @@ impl AgentManager {
         // disagree about what the run was.
         .bind(mode_str)
         .bind(ring_str)
+        // The workflow is on the run *and* on every trial it spends (§3), so the
+        // ledger can answer "how many of our trials are replications" and the
+        // scorecard can answer "which workflows does the 7B actually complete".
+        .bind(enum_name(&harness::state::Workflow::Investigate))
         .execute(&self.pg)
         .await
         .map_err(|e| StartError::Internal(e.to_string()))?;
@@ -549,6 +553,11 @@ impl AgentManager {
                 conversation_id,
                 prior_exposure,
                 exposure_out: Arc::clone(&exposure_out),
+                // The conversation front door does not offer a workflow chip
+                // yet (AGENT-012 §3.3), so every turn it starts is the default.
+                // Named rather than defaulted, so the day the chip lands the
+                // compiler points here.
+                workflow: harness::state::Workflow::Investigate,
                 goal: text.to_string(),
                 charter,
                 prior,

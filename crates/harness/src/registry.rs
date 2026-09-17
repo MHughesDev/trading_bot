@@ -258,6 +258,15 @@ pub struct Limits<'a> {
     pub ring: crate::state::Ring,
     /// Tools that reach paper. Supplied by the platform.
     pub paper: &'a BTreeSet<String>,
+    /// Tools that spend a trial, when this run may not spend one
+    /// (AGENT-013 §3; S-10.14).
+    ///
+    /// `None` when the run may spend. `Some(set)` hides every tool in it, which
+    /// is the exposure half of the same rule `CallGate::spending` enforces at
+    /// the door — and the two halves do different work: a survey that cannot
+    /// *see* `run_study` never reaches for it, and a survey that reached for it
+    /// anyway is refused.
+    pub trial_spending: Option<&'a BTreeSet<String>>,
 }
 
 impl Limits<'_> {
@@ -272,6 +281,7 @@ impl Limits<'_> {
             retrieval: false,
             ring: crate::state::Ring::Paper,
             paper,
+            trial_spending: None,
         }
     }
 
@@ -282,6 +292,12 @@ impl Limits<'_> {
         // on the ring would take `finish_task` away from a Chat turn.
         if def.core {
             return core_is_admissible(&def.name, true, self.retrieval);
+        }
+        if self
+            .trial_spending
+            .is_some_and(|set| set.contains(&def.name))
+        {
+            return false;
         }
         ring_of(def.risk, self.paper.contains(&def.name)) <= self.ring
     }
@@ -771,6 +787,7 @@ impl ToolRegistry {
                 retrieval,
                 ring: crate::state::Ring::Paper,
                 paper: &paper,
+                trial_spending: None,
             },
         )
     }

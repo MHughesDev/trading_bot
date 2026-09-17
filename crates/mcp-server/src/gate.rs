@@ -186,12 +186,51 @@ pub struct CallGate {
     /// refusal at the door every handler goes through.
     ///
     /// Belt and braces is the spec's own phrasing for this pair, and the reason
-    /// is worth restating: the thing being prevented is a Chat turn quietly
-    /// consuming the trial budget that makes every selection-adjusted statistic
-    /// on this platform mean anything.
-    chat_turn: bool,
+    /// is worth restating: the thing being prevented is a run quietly consuming
+    /// the trial budget that makes every selection-adjusted statistic on this
+    /// platform mean anything.
+    spending: Spending,
     /// What this run has committed to before looking (§7.2; S-10.3).
     prereg: Prereg,
+}
+
+/// Whether this run may spend a trial at all, and why not.
+///
+/// One field rather than a boolean per reason. Two booleans is the shape that
+/// drifts: a third reason arrives, somebody adds a third flag, and the refusal
+/// site grows a condition that is wrong for one combination nobody tested. An
+/// enum makes "may this run spend" a single question with a single answer, and
+/// the answer carries the reason the refusal has to state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Spending {
+    #[default]
+    Allowed,
+    /// AGENT-013 §2.2 — a Chat turn spends no trials.
+    ChatTurn,
+    /// AGENT-013 §3 — `survey` cannot issue a trial ticket. Its job is to say
+    /// what is known and what to ask next, and a survey that could spend a trial
+    /// would be an investigation with a cheaper-sounding name.
+    Survey,
+}
+
+impl Spending {
+    /// The typed refusal, or `None` when spending is allowed.
+    #[must_use]
+    pub fn refusal(self, tool: &str) -> Option<ToolError> {
+        match self {
+            Spending::Allowed => None,
+            Spending::ChatTurn => Some(ToolError::new(
+                "chat_turn_spends_no_trials",
+                format!("`{tool}` spends a trial and this is a chat turn."),
+                "start a research run for this question - the offer on this turn opens one                  with the same question and constraints",
+            )),
+            Spending::Survey => Some(ToolError::new(
+                "survey_spends_no_trials",
+                format!("`{tool}` spends a trial and this run's workflow is `survey`."),
+                "a survey reports what is known, what was ruled out and what to ask next.                  If this question needs a trial, it needs an `investigate` run",
+            )),
+        }
+    }
 }
 
 /// Whether this run has to have committed before it may look.
@@ -215,7 +254,7 @@ impl CallGate {
         Self {
             registrar: Some(registrar),
             calls: Mutex::new(BTreeMap::new()),
-            chat_turn: false,
+            spending: Spending::Allowed,
             prereg: Prereg::NotRequired,
         }
     }
@@ -237,13 +276,25 @@ impl CallGate {
     ///
     /// A builder rather than a second constructor so the registrar argument is
     /// not duplicated, and so the *default* is the one that spends — a default
-    /// of `chat_turn: true` would silently disable the simulator for every
+    /// other than `Spending::Allowed` would silently disable the simulator for every
     /// caller that had not been updated, which is a failure nobody would read as
     /// a policy decision.
     #[must_use]
-    pub fn for_chat_turn(mut self) -> Self {
-        self.chat_turn = true;
+    pub fn for_chat_turn(self) -> Self {
+        self.spending(Spending::ChatTurn)
+    }
+
+    /// Why this run may or may not spend a trial (§2.2, §3).
+    #[must_use]
+    pub fn spending(mut self, spending: Spending) -> Self {
+        self.spending = spending;
         self
+    }
+
+    /// What this gate will say about spending.
+    #[must_use]
+    pub fn spending_rule(&self) -> Spending {
+        self.spending
     }
 
     /// A gate with **no** registrar: reads work, and every trial-spending tool
@@ -258,7 +309,7 @@ impl CallGate {
         Self {
             registrar: None,
             calls: Mutex::new(BTreeMap::new()),
-            chat_turn: false,
+            spending: Spending::Allowed,
             prereg: Prereg::NotRequired,
         }
     }
@@ -322,18 +373,12 @@ impl CallGate {
             return Ok(None);
         }
 
-        // A Chat turn spends no trials (§2.2). Refused before the registrar, so
-        // no row is written and no budget is consumed — a refusal that had
-        // already registered the trial would be the exact cost this prevents.
-        if self.chat_turn {
-            return Err(ToolError::new(
-                "chat_turn_spends_no_trials",
-                format!(
-                    "`{}` spends a trial and this is a chat turn.",
-                    spec.name
-                ),
-                "start a research run for this question — the offer on this turn opens one                  with the same question and constraints",
-            ));
+        // Some runs spend no trials at all (§2.2, §3). Refused before the
+        // registrar, so no row is written and no budget is consumed — a refusal
+        // that had already registered the trial would be the exact cost this
+        // prevents.
+        if let Some(err) = self.spending.refusal(spec.name) {
+            return Err(err);
         }
 
         // A look with no commitment behind it (§7.2). Refused before the
@@ -385,7 +430,7 @@ impl std::fmt::Debug for CallGate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CallGate")
             .field("has_registrar", &self.registrar.is_some())
-            .field("chat_turn", &self.chat_turn)
+            .field("spending", &self.spending)
             .field("prereg", &self.prereg)
             .finish()
     }
@@ -464,6 +509,28 @@ mod tests {
             0,
             "refused before the registrar: a refusal that had already written the row              would be the exact cost this prevents"
         );
+    }
+
+    /// A survey cannot spend a trial either, and it is told a different thing.
+    ///
+    /// Two reasons, two codes: "start a research run" is the right advice for a
+    /// chat turn and the wrong advice for a survey, which *is* a research run
+    /// and has chosen a workflow that reports rather than looks.
+    #[tokio::test]
+    async fn a_survey_cannot_spend_a_trial_and_is_told_why_not() {
+        let rec = Arc::new(Recording::default());
+        let gate = CallGate::new(rec.clone()).spending(Spending::Survey);
+        let err = gate
+            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .await
+            .expect_err("a survey issues no ticket");
+        assert_eq!(err.code, "survey_spends_no_trials");
+        assert!(
+            err.fix.contains("investigate"),
+            "the fix names the workflow that can: {}",
+            err.fix
+        );
+        assert_eq!(rec.registered.load(Ordering::SeqCst), 0);
     }
 
     /// And it can still read.

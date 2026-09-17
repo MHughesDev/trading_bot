@@ -710,6 +710,10 @@ pub const ERROR_CODES: &[&str] = &[
     // Research offer: "start a research run for this" is an action, and an
     // action needs something to key on.
     "chat_turn_spends_no_trials",
+    // A `survey` reached a trial-spending tool (AGENT-013 §3). Its own code
+    // rather than the chat one: "start a research run" is the right advice for
+    // a chat turn and the wrong advice for a survey, which is one already.
+    "survey_spends_no_trials",
     // A look with no commitment behind it (AGENT-013 §7.2; S-10.3). Routable
     // because the desk turns it into the pre-registration card the user reads
     // *before* the run spends.

@@ -1,9 +1,10 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 25% (4 / 16 tasks), plus 3 `PARTIAL`.**
+**Completion: 31% (5 / 16 tasks), plus 4 `PARTIAL`.**
 
-> Status 2026-09-17. **S-10.1, S-10.6, S-10.7 and S-10.13 are done**; S-10.2,
-> S-10.3 and S-10.4 are partial; the other nine are untouched.
+> Status 2026-09-17. **S-10.1, S-10.6, S-10.7, S-10.13 and S-10.14 are done**;
+> S-10.2, S-10.3, S-10.4 and S-10.14's per-tier half are partial; the other eight
+> are untouched.
 >
 > What was already here and doing nothing: `WorkingState` has carried `mode`,
 > `workflow`, `ring` and `stage` since phase 1 and the state card renders all four;
@@ -428,7 +429,35 @@ carries barren rate per (tier, workflow); the usage page shows cost per knowledg
 **Traces:** AGENT-013 P5, §10; §13.14. AGENT-009 §4 (amended).
 
 ### S-10.14 Workflows as stage skeletons, per tier — M
-`NOT STARTED`
+`PARTIAL` 2026-09-17 — **the skeletons and both enforcement halves are built; the
+per-tier availability and the authoring mode are not.**
+
+`harness/src/lifecycle/workflows.rs` holds all seven as a table: required stages,
+skippable stages, verdict vocabulary, and whether the workflow may spend a trial at
+all. `may_transition` refuses a transition that skips a required stage and names the
+stage it skipped.
+
+**`survey` cannot spend a trial, in two places.** Exposure hides every
+trial-spending tool from a survey run, which costs nothing because the model never
+reaches for one; `CallGate::spending` refuses at the door, which is what holds when
+a later code path routes around the filter. Two reasons for a spending ban now share
+one field — `Spending::{Allowed, ChatTurn, Survey}` — because two booleans is the
+shape where a third reason arrives and the refusal site grows a condition nobody
+tested. The codes differ: "start a research run" is right for a chat turn and wrong
+for a survey, which is one already.
+
+`falsify` skips `hypothesise` and cannot skip pre-registration, asserted directly —
+§3 calls that one out by name, and an attack protocol chosen after seeing which
+attack works is p-hacking with extra steps.
+
+The §3 step names and this crate's `Stage` enum are **not the same list**, and the
+mapping is written into the module header rather than left for a reader to infer
+something was forgotten.
+
+**Not done:** per-tier workflow availability, the pre-registration authoring mode
+(`free | skeleton_grammar | skeleton_confirm`), and the workflow on every *trial*
+(it is on the run row; the ticket carries the pre-registration hash but not yet the
+workflow).
 
 The seven skeletons (AGENT-013 §3) as a table in `crates/harness/src/lifecycle/workflows.rs`:
 required stages, skippable stages, verdict enum. The loop refuses a stage transition the

@@ -69,6 +69,12 @@ pub struct LocalRunParams {
     pub profile: Profile,
     /// Namespaces the task starts from. `search_tools` adds more as it needs them.
     pub namespaces: Vec<String>,
+    /// Which stage skeleton this run follows (AGENT-013 §3; S-10.14).
+    ///
+    /// Carried rather than derived from the goal text, because the user may
+    /// override it with a chip in the composer and a re-derivation would
+    /// silently discard that.
+    pub workflow: harness::state::Workflow,
     /// The tool slice the previous turn of this conversation ended with
     /// (AGENT-005 §21; S-9.9).
     ///
@@ -1174,11 +1180,16 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
             params.service_token.clone(),
         ))
         .under_preregistration(sealed_registration(&pg, params.run_id, params.demand).await);
-        if params.demand == TaskDemand::SingleLookup {
-            ctx.for_chat_turn()
+        // One question with one answer (§2.2, §3). A chat turn spends nothing;
+        // so does a `survey`, for a different reason and with a different thing
+        // to tell the model.
+        ctx.spending(if params.demand == TaskDemand::SingleLookup {
+            mcp_server_lib::gate::Spending::ChatTurn
+        } else if params.workflow == harness::state::Workflow::Survey {
+            mcp_server_lib::gate::Spending::Survey
         } else {
-            ctx
-        }
+            mcp_server_lib::gate::Spending::Allowed
+        })
     };
 
     let mut governor = Loop::new(
@@ -1217,7 +1228,10 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
     // Which tools reach paper, for the ring filter (§4; S-10.1). Derived from
     // the catalogue, so the filter cannot disagree with the gate about what
     // reaches capital.
-    .with_paper_tools(paper_reaching_tools());
+    .with_paper_tools(paper_reaching_tools())
+    // The stage skeleton (§3). Set before the first render, so the exposure
+    // filter sees it on step one rather than from step two.
+    .with_workflow(params.workflow);
 
     // What memory has to say about this goal, as `Reference`.
     if let Some(brief) = load_brief(

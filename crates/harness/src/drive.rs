@@ -1173,6 +1173,31 @@ impl Loop {
         self
     }
 
+    /// The trial-spending tools this run may not see (AGENT-013 §3; S-10.14).
+    ///
+    /// `None` on a workflow that may spend. On `survey` it is the whole set:
+    /// a survey reports what is known and what to ask next, and one that could
+    /// spend a trial would be an investigation with a cheaper-sounding name.
+    ///
+    /// Exposure is the half that costs nothing — the model never reaches for the
+    /// tool — and `CallGate::spending` is the half that holds when a later code
+    /// path routes around this one.
+    fn hidden_trial_tools(&self) -> Option<&BTreeSet<String>> {
+        let skeleton = crate::lifecycle::workflows::skeleton(self.working.workflow);
+        (!skeleton.spends_trials).then_some(&self.trial_spending_tools)
+    }
+
+    /// Which stage skeleton this run follows (AGENT-013 §3; S-10.14).
+    ///
+    /// A builder because the user may override the workflow with a chip in the
+    /// composer, so it is an input rather than something derived from the goal
+    /// text — a re-derivation here would silently discard that override.
+    #[must_use]
+    pub fn with_workflow(mut self, workflow: crate::state::Workflow) -> Self {
+        self.working.workflow = workflow;
+        self
+    }
+
     /// Name the tools that reach paper trading (AGENT-013 §4; S-10.1).
     ///
     /// See `paper_tools`: it is the one ring fact this crate cannot derive, and
@@ -2016,6 +2041,7 @@ impl Loop {
                 retrieval: self.context_policy.is_retrieval(),
                 ring: self.working.ring,
                 paper: &self.paper_tools,
+                trial_spending: self.hidden_trial_tools(),
             },
         ) {
             Ok(e) => e,
@@ -3497,6 +3523,7 @@ impl Loop {
             retrieval: self.context_policy.is_retrieval(),
             ring: self.working.ring,
             paper: &self.paper_tools,
+            trial_spending: self.hidden_trial_tools(),
         };
         let hits: Vec<&registry::ToolDef> = self
             .registry
@@ -4345,6 +4372,59 @@ mod tests {
         assert!(
             !l.exposed().iter().any(|n| n == "arm_automation"),
             "ring 2 has no door that is not a proposal a human decides: {:?}",
+            l.exposed()
+        );
+    }
+
+    fn registry_with_a_trial_tool() -> ToolRegistry {
+        let mut r = registry();
+        r.register(ToolDef {
+            name: "run_sweep".into(),
+            namespace: "data".into(),
+            description: "Run a parameter sweep. Use when a design is ready to search.".into(),
+            risk: Risk::Read,
+            core: false,
+            idempotent: false,
+            input_schema: json!({"type": "object", "properties": {}}),
+        })
+        .unwrap();
+        r
+    }
+
+    /// A `survey` cannot see a tool that spends a trial (AGENT-013 §3).
+    #[test]
+    fn a_survey_run_is_not_offered_a_tool_that_spends_a_trial() {
+        let mut task = task();
+        task.namespaces = vec!["data".into()];
+        let mut l = Loop::new(local(), registry_with_a_trial_tool(), task)
+            .with_trial_spending_tools(["run_sweep"]);
+        l.working.workflow = crate::state::Workflow::Survey;
+        l.next(Input::Admission(Admission::Admit));
+
+        assert!(
+            !l.exposed().iter().any(|n| n == "run_sweep"),
+            "a survey that could spend a trial would be an investigation with a              cheaper-sounding name: {:?}",
+            l.exposed()
+        );
+        assert!(
+            l.exposed().iter().any(|n| n == "read_bars"),
+            "and the reads a survey lives on are still there: {:?}",
+            l.exposed()
+        );
+    }
+
+    /// Every other workflow still sees them.
+    #[test]
+    fn an_investigation_is_still_offered_the_tools_it_needs() {
+        let mut task = task();
+        task.namespaces = vec!["data".into()];
+        let mut l = Loop::new(local(), registry_with_a_trial_tool(), task)
+            .with_trial_spending_tools(["run_sweep"]);
+        assert_eq!(l.working().workflow, crate::state::Workflow::Investigate);
+        l.next(Input::Admission(Admission::Admit));
+        assert!(
+            l.exposed().iter().any(|n| n == "run_sweep"),
+            "{:?}",
             l.exposed()
         );
     }

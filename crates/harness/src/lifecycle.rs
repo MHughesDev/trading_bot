@@ -14,6 +14,8 @@
 //!   refine can refine forever, and each step looks locally reasonable.
 //! * [`r#yield`] — what the run actually produced. A run can end having produced
 //!   no knowledge while every dashboard shows activity.
+//! * [`workflows`] — which stages a question shape requires. A workflow may skip
+//!   a stage where its skeleton says so, and may never skip a gate.
 //!
 //! Sans-IO, like the rest of this crate: each module takes what the ledger and
 //! the funnel produced and returns a decision, so the decision is testable
@@ -22,4 +24,5 @@
 pub mod chain;
 pub mod diagnose;
 pub mod evaluate;
+pub mod workflows;
 pub mod r#yield;
