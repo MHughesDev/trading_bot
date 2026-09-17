@@ -186,6 +186,7 @@ fn outcome_word(o: &Outcome) -> &'static str {
         Outcome::Refused { .. } => "refused",
         Outcome::Escalated { .. } => "escalated",
         Outcome::Fenced(_) => "fenced",
+        Outcome::Suspended { .. } => "suspended",
         Outcome::Cancelled => "cancelled",
     }
 }
@@ -712,6 +713,7 @@ impl Recorder {
             Outcome::Refused { .. } => "refused",
             Outcome::Escalated { .. } => "escalated",
             Outcome::Fenced(_) => "fenced",
+            Outcome::Suspended { .. } => "suspended",
             Outcome::Cancelled => "cancelled",
         };
 
@@ -780,6 +782,17 @@ impl Recorder {
                 ("refused", None, Some(format!("{reason}; escalate to {to}")))
             }
             Outcome::Fenced(d) => ("fenced", None, Some(fence_message(d))),
+            // A suspension is not an error, so it does not write one. The run
+            // is waiting on a job that is still running, and the summary says
+            // which — a reader who found "error: null" and no explanation would
+            // have to guess whether the run had failed.
+            Outcome::Suspended { step, job_id, tool } => (
+                "suspended",
+                Some(format!(
+                    "suspended at step {step} waiting on job {job_id}, started by `{tool}`.                      The job continues; its result is in the job service. This driver does not                      resume a suspension yet, so the run ends here rather than polling."
+                )),
+                None,
+            ),
             Outcome::Cancelled => ("cancelled", None, None),
         };
         let json = serde_json::to_value(outcome).unwrap_or_else(|_| json!({}));
@@ -1779,25 +1792,25 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
             // is meant to persist the suspension and exit — it must not poll,
             // which is the bug this effect exists to remove.
             //
-            // **This driver cannot yet resume from a suspension.** The harness
-            // produces the effect and `crates/harness` persists it; nothing on
-            // the local-model path reads it back. So the run ends here, visibly
-            // and with the job named, rather than being reported as finished or
-            // being turned back into the polling loop it replaced. Recorded as
-            // an open gap rather than papered over: see Set S phase 2's task
-            // list. A `unreachable!` here would be false — a tool returning a
-            // job handle reaches it.
+            // **This driver cannot yet resume from a suspension**, so the run
+            // ends here. What changed on 2026-09-17 is the *word* it ends with:
+            // this recorded `Fenced(BackendFailure)`, which put a backend
+            // failure in the run record where no backend failed. Every read of
+            // "how often does this tier break" counted the platform working
+            // exactly as designed as the platform breaking, and the eval
+            // scorecard's fence rate was measuring §8 rather than a fault.
+            //
+            // `Outcome::Suspended` says what happened. It does not make the run
+            // resumable: that needs a durable suspension record naming the job
+            // and something that notices the job finished and restarts the run
+            // for `agent::resume` to replay. Named honestly and left open, which
+            // is the difference between a gap and a defect.
             Effect::Await { step, job_id, tool } => {
-                tracing::warn!(
+                tracing::info!(
                     run_id = %params.run_id, step, %job_id, %tool,
                     "suspended on a platform job; this driver cannot resume a suspension yet"
                 );
-                rec.finish(&Outcome::Fenced(Degradation::BackendFailure {
-                    detail: format!(
-                        "suspended at step {step} awaiting job {job_id} started by `{tool}`.                          This driver cannot resume a suspension yet, so the run stops here                          rather than polling. The job itself continues and its result is in                          the job service."
-                    ),
-                }))
-                .await;
+                rec.finish(&Outcome::Suspended { step, job_id, tool }).await;
                 return;
             }
 

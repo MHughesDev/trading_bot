@@ -659,10 +659,18 @@ suspension record naming the job, and something that notices the job finished an
 restarts the run. That is a phase-2 shaped task, not a line in this one, and it is
 what S-10.11's last piece actually waits on.
 
-Worth stating separately, because it is a defect rather than a gap: today an
-`Await` ends the run as `Fenced(BackendFailure)`. Nothing broke — the run suspended
-on purpose — so the run record says a backend failure happened where none did. That
-label is wrong independently of whether resumption is built.
+**The label was a defect rather than a gap, and is fixed.** An `Await` used to end
+the run as `Fenced(BackendFailure)`. Nothing broke — the run suspended on purpose —
+so every read of "how often does this tier break" counted the platform working
+exactly as §8 designed it as the platform breaking, and the eval scorecard's fence
+rate was partly measuring suspension. `Outcome::Suspended { step, job_id, tool }`
+says what happened, writes no `error`, and writes a summary naming the job so a
+reader is not left guessing whether the run failed.
+
+It does **not** make the run resumable, and the type says so: the loop never emits
+it — it emits `Effect::Await` and keeps going, and whether the run ends there is the
+driver's decision. `the_loop_never_ends_a_run_by_suspending_it` holds that line, so
+the day resumption is built the loop does not have to be changed back.
 
 Also not built: the `DiagnosticBundle` proper, and the `BudgetLease` split AGENT-010
 §9 describes — the worker runs on the parent's profile and the campaign's own budget

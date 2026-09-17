@@ -617,6 +617,37 @@ pub enum Outcome {
         to: String,
     },
     Fenced(Degradation),
+    /// The run is waiting on a platform job and holds nothing (AGENT-010 §8).
+    ///
+    /// **Not a `Fenced`, and that is the whole reason this variant exists.**
+    /// A suspension is the loop doing exactly what §8 asks: it emitted an
+    /// `Await`, the driver wrote it down, and the process exited holding no
+    /// model connection and no tokens. Recording that as
+    /// `Fenced(BackendFailure)` — which is what happened until this existed —
+    /// puts a backend failure in the run record where no backend failed, and
+    /// every read of "how often does this tier break" counted the platform
+    /// working correctly as the platform breaking.
+    ///
+    /// It is still a *terminal* outcome for this process. Resuming is a separate
+    /// mechanism and is not built: the run has to be restarted and replayed,
+    /// which needs a durable suspension record and something that notices the
+    /// job finished. Naming the ending honestly does not make the run come back,
+    /// and pretending otherwise in the type would be the same mistake wearing a
+    /// better word.
+    ///
+    /// **The loop never emits this.** It emits [`Effect::Await`] and keeps
+    /// going; whether the run ends there is the driver's decision, and today it
+    /// does because the driver cannot resume. A loop that returned `Suspended`
+    /// would be deciding a question it has no way to answer — and on the day
+    /// resumption exists, the loop's behaviour would have to change to undo it.
+    /// `the_loop_never_ends_a_run_by_suspending_it` holds that line.
+    Suspended {
+        step: u32,
+        job_id: String,
+        /// The tool whose call started the job, so the record says what is being
+        /// waited for rather than only that something is.
+        tool: String,
+    },
     Cancelled,
 }
 
@@ -5486,7 +5517,32 @@ mod tests {
         assert!(matches!(l.outcome(), Some(Outcome::Fenced(_))));
     }
 
+    /// The loop suspends by emitting an effect, never by ending the run.
+    ///
+    /// `Outcome::Suspended` is the *driver's* word for "this process stopped
+    /// here because it cannot resume", and that is a fact about the driver. A
+    /// loop that ended the run itself would be answering a question it has no
+    /// way to answer — and on the day resumption is built, the loop would have
+    /// to be changed back.
     #[test]
+    fn the_loop_never_ends_a_run_by_suspending_it() {
+        for fx in [
+            Loop::new(frontier_fixture(), registry(), task())
+                .next(Input::Admission(Admission::Admit)),
+            Loop::new(frontier_fixture(), registry(), task())
+                .next(Input::JobAccepted {
+                    job_id: "job_1".into(),
+                }),
+        ] {
+            for effect in &fx {
+                assert!(
+                    !matches!(effect, Effect::Done(Outcome::Suspended { .. })),
+                    "the loop ended a run by suspending it: {effect:?}"
+                );
+            }
+        }
+    }
+
     fn a_task_too_big_for_the_tier_escalates_rather_than_running() {
         let mut l = Loop::new(local(), registry(), task());
         let fx = l.next(Input::Admission(Admission::Escalate {

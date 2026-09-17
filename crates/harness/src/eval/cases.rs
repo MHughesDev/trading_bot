@@ -586,6 +586,7 @@ fn outcome_tag(o: &Outcome) -> String {
         Outcome::Refused { .. } => "refused",
         Outcome::Escalated { .. } => "escalated",
         Outcome::Fenced(_) => "fenced",
+        Outcome::Suspended { .. } => "suspended",
         Outcome::Cancelled => "cancelled",
     }
     .to_string()
