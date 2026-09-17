@@ -104,8 +104,7 @@ impl Envelope {
 /// `promote_model_version`. Defining a campaign *is* starting one: the route that
 /// writes the row submits the driver job in the same call, so there is one act
 /// and it now has one name.
-pub const SPEND_ACTIONS: &[&str] =
-    &["arm_automation", "define_campaign", "place_order", "submit_job"];
+pub const SPEND_ACTIONS: &[&str] = &["define_campaign", "place_order", "submit_job"];
 
 /// Actions that move a strategy toward capital.
 ///
@@ -116,8 +115,22 @@ pub const SPEND_ACTIONS: &[&str] =
 /// (`api/src/agent/driver.rs:684`, `harness/src/drive.rs:1564`). The class of
 /// defect — a gated name that no tool answers to — is now closed by
 /// `mcp-server-lib`'s `every_envelope_entry_is_a_real_action`, not by care.
-pub const PROMOTION_ACTIONS: &[&str] =
-    &["promote_model_version", "promote_strategy", "raise_capital_fraction"];
+pub const PROMOTION_ACTIONS: &[&str] = &[
+    // Moved from `SPEND_ACTIONS` on 2026-09-17 (S-10.9). `ToolSpec::ring`
+    // derives ring 2 from this list and its doc comment already named
+    // `arm_automation` as the member that matters — while the action sat under
+    // `Spend`, so the tool derived ring 1. Arming declares a strategy into the
+    // live registry: it is the act that reaches paper, and the proposal kind
+    // for it (`deploy_paper`) was already ring 2. The tool and the proposal for
+    // the tool disagreed about how far one action reaches.
+    //
+    // The gate is unchanged — both envelopes require a human — so this moves a
+    // ring, not a permission.
+    "arm_automation",
+    "promote_model_version",
+    "promote_strategy",
+    "raise_capital_fraction",
+];
 
 /// The one-shot holdout (§12.7).
 ///

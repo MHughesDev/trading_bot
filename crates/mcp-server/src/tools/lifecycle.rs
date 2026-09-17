@@ -286,6 +286,16 @@ pub async fn propose(api: &crate::ApiClient, params: &Value) -> Value {
     if text(params, "subject").is_none() {
         return missing("subject", "what is being promoted, armed or changed");
     }
+    // The row the approval acts on. Separate from `subject`, which is what the
+    // human reads: resolving a name to a row at approval time would put a guess
+    // at the one moment the platform acts on somebody's authority, and the
+    // person approving would never see it happen.
+    if text(params, "subject_id").is_none() {
+        return missing(
+            "subject_id",
+            "the id of the thing being promoted, armed or changed. `subject` is the name a              human reads on the desk; this is the row the approval writes to, and a proposal              without one is approved and then cannot be performed.",
+        );
+    }
     post(api, "/api/lifecycle/proposals", params.clone()).await
 }
 
@@ -471,7 +481,11 @@ pub fn specs() -> Vec<ToolSpec> {
                     },
                     "subject": {
                         "type": "string",
-                        "description": "What is being promoted, armed or changed."
+                        "description": "What is being promoted, armed or changed, as a person reads it."
+                    },
+                    "subject_id": {
+                        "type": "string",
+                        "description": "The id of that thing. The approval writes to this row, so a proposal without one is approved and then cannot be performed."
                     },
                     "dossier_ref": {
                         "type": "string",
@@ -479,7 +493,7 @@ pub fn specs() -> Vec<ToolSpec> {
                     },
                     "rationale": { "type": "string", "description": "One line on why." }
                 },
-                "required": ["kind", "subject", "dossier_ref"]
+                "required": ["kind", "subject", "subject_id", "dossier_ref"]
             }),
         )
         .internal()

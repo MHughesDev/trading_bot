@@ -157,9 +157,24 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
         .evidence(&["automation_id"]),
         // Arming changes what the platform will do with money, with no further
         // human step. That is the definition of destructive here, and it is why
-        // it is also the one catalogue tool under an approval envelope.
+        // it is under an approval envelope.
+        //
+        // **`Promotion`, not `Spend`** (2026-09-17, S-10.9). `ToolSpec::ring`
+        // derives ring 2 from `Envelope::Promotion` and its own doc comment
+        // named `arm_automation` as "the member that matters" — while the tool
+        // declared `Spend`, so it derived ring **1**. Arming is what declares a
+        // strategy into `strategy_runtime::live`; it is the act that reaches
+        // paper, and the proposal kind for it (`deploy_paper`) is ring 2. The
+        // tool and the proposal for the tool disagreed about how far the same
+        // action reaches, and the ring is what the desk filters on and what a
+        // run's exposure filter enforces.
+        //
+        // Both envelopes are gated, so no approval changes. What changes is the
+        // ring, and therefore which runs see it at all — which is §4's intent:
+        // ring 2 is reached by a proposal a human decides, and that door is
+        // S-10.9's `deploy_paper` with the approval route behind it.
         by_id("arm_automation", Risk::Destructive, "Arm an automation by ID.")
-            .envelope(Envelope::Spend),
+            .envelope(Envelope::Promotion),
         by_id("disarm_automation", Risk::Write, "Disarm an automation by ID."),
     ]
 }

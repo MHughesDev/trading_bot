@@ -26,6 +26,7 @@ pub mod orders;
 pub mod paper;
 pub mod platform_health;
 pub mod portfolio;
+pub mod proposals;
 pub mod research;
 pub mod strategies;
 pub mod streams;
@@ -124,6 +125,14 @@ pub fn router(state: AppState) -> Router {
         // The only doors into rings 1 and 2 (§6.8). Creating one changes
         // nothing; the envelope is on the human's decision.
         .route("/api/lifecycle/proposals", post(lifecycle::create_proposal))
+        // The human's side (AGENT-013 §7.5; S-10.9). The agent creates an
+        // inert row; a person decides here, and the registry write happens
+        // at that moment as that person.
+        .route("/api/lifecycle/proposals", get(proposals::list))
+        .route(
+            "/api/lifecycle/proposals/{proposal_id}/decision",
+            post(proposals::decide),
+        )
         .route("/api/falsification/defects", post(falsification::report_defect))
         // Feasibility: neither of these spends a trial, which is the point of
         // asking them before a search rather than after it disappoints.

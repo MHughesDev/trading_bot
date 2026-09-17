@@ -548,6 +548,13 @@ async fn head_registration(
 pub struct ProposalBody {
     kind: String,
     subject: String,
+    /// The row the approval will act on (migration 0131).
+    ///
+    /// No `serde(default)`: a body without it does not deserialise. The
+    /// alternative is a proposal that reaches a human, gets approved, and then
+    /// cannot be performed — which is the worst place to discover a missing
+    /// field, because somebody has already decided.
+    subject_id: Uuid,
     dossier_ref: String,
     #[serde(default)]
     rationale: String,
@@ -597,6 +604,7 @@ pub async fn create_proposal(
         kind,
         &body.dossier_ref,
         &body.subject,
+        body.subject_id,
         &body.rationale,
         pre,
     ) {
@@ -605,6 +613,7 @@ pub async fn create_proposal(
             let code = match e {
                 ledger::proposal::ProposalError::KillSwitchTripped => "kill_switch_tripped",
                 ledger::proposal::ProposalError::NoDossier => "no_dossier",
+                ledger::proposal::ProposalError::NoTarget => "no_target",
                 _ => "precondition_failed",
             };
             return bad_request(
@@ -618,8 +627,9 @@ pub async fn create_proposal(
 
     let res = sqlx::query(
         "INSERT INTO agent_lifecycle.proposal
-             (proposal_id, run_id, kind, ring, envelope, dossier_ref, subject, rationale)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+             (proposal_id, run_id, kind, ring, envelope, dossier_ref, subject,
+              subject_id, rationale)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
     )
     .bind(proposal.proposal_id)
     .bind(proposal.run_id)
@@ -628,6 +638,7 @@ pub async fn create_proposal(
     .bind(proposal.envelope.as_str())
     .bind(&proposal.dossier_ref)
     .bind(&proposal.subject)
+    .bind(proposal.subject_id)
     .bind(&proposal.rationale)
     .execute(&state.pg)
     .await;
@@ -659,7 +670,7 @@ pub async fn create_proposal(
 /// platform is healthy, and the direction of a wrong answer here is the whole
 /// question: a false "clear" lets a proposal into the queue during exactly the
 /// window nobody wanted one.
-async fn kill_switch_tripped(state: &AppState) -> bool {
+pub(crate) async fn kill_switch_tripped(state: &AppState) -> bool {
     // The global scope. A venue- or strategy-scoped halt is a narrower statement
     // and does not stop every proposal; a global one is the platform saying
     // something is wrong, full stop.

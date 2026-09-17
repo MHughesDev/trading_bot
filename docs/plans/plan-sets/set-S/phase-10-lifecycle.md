@@ -512,12 +512,46 @@ rejected is still worth writing down.
 reconstruction from timestamps. `Decision::permits_write` returns true only on an
 explicit approval: "not yet rejected" is how an approval queue becomes a delay.
 
-**Not done:** the desk surface, the approval route that performs the write as the
-human, and — the large one — **removing every other write path from an agent token
-into the promoted set**, with the static test that proves it. The ring-2 door is
-already closed and tested (`the_promotion_envelope_is_the_only_door_to_paper`); the
-ring-1 paths are not, and removing them is a product change rather than a
-refactor.
+**The approval route landed 2026-09-17.** `POST /api/lifecycle/proposals/{id}/decision`,
+with `GET /api/lifecycle/proposals` as the queue. Only a human decides — the scope
+check is the mechanism, and an agent session is refused with the reason, because an
+approval an agent could grant is a delay it adds to its own writes rather than a
+door somebody else opens. The kill switch is re-read **at the decision**, not only
+at creation: it was clear when the proposal was made, and now is when the write
+would happen.
+
+**A row now answers three questions instead of one** (ADR-S10-08): a person decided
+(`decided_by`, `decided_at`), the platform then acted (`performed_at`), and what it
+did (`effect`). An approval the platform cannot perform is recorded as approved and
+**not** performed, naming why — otherwise an approved-and-inert row reads exactly
+like an approved-and-performed one, which is the failure `lifecycle.propose` already
+refuses to commit on the agent's side.
+
+**A proposal now names a target** (ADR-S10-09, migration 0131). `subject` is what
+the human reads and `subject_id` is the row the approval writes to; resolving one
+into the other at approval time would put a guess at the single moment the platform
+acts on somebody's authority.
+
+**The arming path was extracted rather than duplicated.** `set_armed`'s own note
+says a second evaluation path is how this platform came to have two doors that both
+reported success and did nothing, so `arm_by_id` is now the one arming function and
+both the route and the approval call it.
+
+**Found doing it: two ring taxonomies disagreed** (ADR-S10-07). `ProposalKind::DeployPaper`
+was ring 2 and `arm_automation` — the tool that performs it, and the one
+`ToolSpec::ring`'s own doc comment names as "the member that matters" for ring 2 —
+derived ring **1**, because its envelope said `Spend`. A run barred from *asking* to
+reach paper could reach it directly. `arm_automation` now carries
+`Envelope::Promotion`; the gate is unchanged (both envelopes are gated) and the ring
+is corrected. Two new invariants hold the pairing and the derivation.
+
+**Still not done:** the desk surface, a ring-1 approval-side writer for
+`promote_strategy` and `change_limits` (the approval reports both as not performed,
+by name), and — the large one — **removing the remaining ring-1 write paths from an
+agent token**. That last one is a product change rather than a refactor: the ring-1
+write set is thirty-five tools and is the agent's entire working surface, so
+"removing every other write path" cannot mean all of them and the narrowing needs a
+decision about which registries count as the promoted set.
 
 `Proposal` (AGENT-013 §7.5) with `kind`, `ring`, `dossier_ref`, `envelope`. `lifecycle.propose`
 creates it; `promote_strategy` and `change_limits` carry `Promotion`, `deploy_paper` carries

@@ -173,22 +173,101 @@ async fn set_armed(
             Err(e) => db_error(e),
         };
     }
+    match arm_by_id(&state, id).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
 
+/// Why an automation could not be armed.
+///
+/// A typed refusal rather than a `Response`, so the **one** arming path can be
+/// called by the route and by a human's approval of a `deploy_paper` proposal
+/// (S-10.9) without either building its own. `set_armed`'s own note is the
+/// reason this is not two functions: a second evaluation path is how the
+/// platform came to have two doors that both reported success and both did
+/// nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArmError {
+    NotFound,
+    /// A multi-stage discovery pipeline needs the shared universe feed
+    /// (Set E 4.3). Refused rather than armed and never evaluated.
+    NotExecutable,
+    /// The automation's spec or its strategy will not load.
+    Unusable(String),
+    AlreadyRunning(String),
+    Storage(String),
+}
+
+impl ArmError {
+    /// The short reason, for a caller that records rather than renders.
+    #[must_use]
+    pub fn reason(&self) -> String {
+        match self {
+            Self::NotFound => "no such automation".into(),
+            Self::NotExecutable => {
+                "pipeline automations are not executable yet (Set E 4.3)".into()
+            }
+            Self::Unusable(d) => format!("the automation cannot be armed: {d}"),
+            Self::AlreadyRunning(d) => format!("already running: {d}"),
+            Self::Storage(d) => format!("storage: {d}"),
+        }
+    }
+}
+
+impl IntoResponse for ArmError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::NotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "not_found", "detail": self.reason() })),
+            )
+                .into_response(),
+            Self::NotExecutable => (
+                StatusCode::NOT_IMPLEMENTED,
+                Json(json!({
+                    "error": "pipeline automations are not executable yet",
+                    "detail": "a multi-stage discovery pipeline needs the shared universe feed \
+                               (Set E 4.3).  Refusing to arm rather than reporting success and \
+                               evaluating nothing.",
+                })),
+            )
+                .into_response(),
+            Self::AlreadyRunning(d) => (
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "already_running", "detail": d })),
+            )
+                .into_response(),
+            Self::Unusable(d) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": "unusable_automation", "detail": d })),
+            )
+                .into_response(),
+            Self::Storage(d) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "storage", "detail": d })),
+            )
+                .into_response(),
+        }
+    }
+}
+
+/// Arm one automation. **The only arming path.**
+///
+/// Arming is registration in the one live registry, not a second evaluator
+/// (ADR-0038). `armed_automations` — the query meant to resume armed plans at
+/// startup — once had no caller anywhere in the repository, so arming set a
+/// boolean, returned success, and nothing ever evaluated the spec.
+///
+/// # Errors
+/// [`ArmError`], which renders itself for a route and reports itself for an
+/// approval.
+pub async fn arm_by_id(state: &AppState, id: Uuid) -> Result<serde_json::Value, ArmError> {
     let Ok(Some(row)) = automation::get_automation(&state.pg, id).await else {
-        return not_found(id);
+        return Err(ArmError::NotFound);
     };
-
     if row.kind.as_str() != "single_instrument" {
-        return (
-            StatusCode::NOT_IMPLEMENTED,
-            Json(json!({
-                "error": "pipeline automations are not executable yet",
-                "detail": "a multi-stage discovery pipeline needs the shared universe feed \
-                           (Set E 4.3).  Refusing to arm rather than reporting success and \
-                           evaluating nothing.",
-            })),
-        )
-            .into_response();
+        return Err(ArmError::NotExecutable);
     }
 
     let spec = &row.spec;
@@ -197,11 +276,13 @@ async fn set_armed(
         .and_then(|v| v.as_str())
         .unwrap_or("crypto_spot_cex");
     let Some(instrument_id) = spec.get("instrument_id").and_then(|v| v.as_str()) else {
-        return bad_request("spec is missing instrument_id");
+        return Err(ArmError::Unusable("spec is missing instrument_id".into()));
     };
     let Some(execution_strategy_id) = spec.get("execution_strategy_id").and_then(|v| v.as_str())
     else {
-        return bad_request("spec is missing execution_strategy_id");
+        return Err(ArmError::Unusable(
+            "spec is missing execution_strategy_id".into(),
+        ));
     };
 
     // Load the execution strategy's definition.  An automation that names a
@@ -216,77 +297,54 @@ async fn set_armed(
     .flatten();
 
     let Some((def_json,)) = def_row else {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({
-                "error": "execution strategy not found",
-                "strategy_id": execution_strategy_id,
-            })),
-        )
-            .into_response();
+        return Err(ArmError::Unusable(format!(
+            "execution strategy {execution_strategy_id} not found"
+        )));
     };
 
     let definition: domain::strategy_def::StrategyDefinition =
-        match serde_json::from_value(def_json) {
-            Ok(d) => d,
-            Err(e) => {
-                return (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Json(json!({ "error": "invalid strategy definition", "detail": e.to_string() })),
-                )
-                    .into_response()
-            }
-        };
-    let definition = match domain::strategy_def::params::materialize(
+        serde_json::from_value(def_json)
+            .map_err(|e| ArmError::Unusable(format!("invalid strategy definition: {e}")))?;
+    let definition = domain::strategy_def::params::materialize(
         &definition,
         &domain::strategy_def::ParamValues::new(),
-    ) {
-        Ok(d) => d,
-        Err(e) => {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(json!({ "error": "invalid_parameters", "detail": e.to_string() })),
-            )
-                .into_response()
-        }
-    };
+    )
+    .map_err(|e| ArmError::Unusable(format!("invalid parameters: {e}")))?;
 
     // Data first, then evaluation: the pipeline that supplies marks and bars
     // must exist before anything is declared live against it.
     state.ensure_pipeline(instrument_id, asset_class);
 
     let live = strategy_runtime::live::global();
-    if let Err(e) = live.register(strategy_runtime::live::LiveStrategySpec {
+    live.register(strategy_runtime::live::LiveStrategySpec {
         user_id: row.user_id.to_string(),
         instrument_id: instrument_id.to_owned(),
         definition,
         source: strategy_runtime::live::LiveSource::Automation {
             automation_id: id.to_string(),
         },
-    }) {
-        return (
-            StatusCode::CONFLICT,
-            Json(json!({ "error": "already_running", "detail": e.to_string() })),
-        )
-            .into_response();
-    }
+    })
+    .map_err(|e| ArmError::AlreadyRunning(e.to_string()))?;
 
     match automation::set_automation_armed(&state.pg, id, true).await {
-        Ok(true) => Json(json!({
+        Ok(true) => Ok(json!({
             "id": id,
             "armed": true,
             "instrument_id": instrument_id,
             "execution_strategy_id": execution_strategy_id,
             "live_generation": live.generation(),
-        }))
-        .into_response(),
+        })),
+        // The registry declaration and the durable flag are two writes, and a
+        // failure after the first leaves the platform evaluating something it
+        // does not believe is armed. Deregistered before returning, so the two
+        // cannot disagree.
         Ok(false) => {
             live.deregister_automation(&id.to_string());
-            not_found(id)
+            Err(ArmError::NotFound)
         }
         Err(e) => {
             live.deregister_automation(&id.to_string());
-            db_error(e)
+            Err(ArmError::Storage(e.to_string()))
         }
     }
 }

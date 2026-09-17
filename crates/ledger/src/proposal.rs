@@ -122,6 +122,8 @@ pub enum ProposalError {
     ReadinessNoGo,
     #[error("a proposal must cite the dossier the decision will be made from")]
     NoDossier,
+    #[error("a proposal must name the row the approval will act on. The subject is what the human reads; the id is what the platform writes to, and resolving the one into the other at approval time would put a guess at the moment the platform acts on somebody's authority.")]
+    NoTarget,
 }
 
 /// A request for a human decision (§7.5).
@@ -142,8 +144,17 @@ pub struct Proposal {
     /// decide from the proposal itself, which is the agent's own summary of its
     /// own work.
     pub dossier_ref: String,
-    /// What is being promoted, armed or changed.
+    /// What is being promoted, armed or changed, as the human reads it.
     pub subject: String,
+    /// The row the approval acts on (migration 0131).
+    ///
+    /// Separate from `subject` because they answer different questions. A human
+    /// approving `deploy_paper` for `"ema_cross_v3"` needs to read that name;
+    /// the platform performing the approval needs an id. Resolving the name to a
+    /// row at approval time would put a guess at the one moment the platform
+    /// acts on somebody's authority — which is the free-form-string failure this
+    /// repository keeps paying for, at the worst possible site.
+    pub subject_id: Uuid,
     /// One line, in the run's words, on why.
     pub rationale: String,
 }
@@ -153,11 +164,13 @@ pub struct Proposal {
 /// # Errors
 /// [`ProposalError`] — the kill switch, the ring-2 preconditions, or a missing
 /// dossier.
+#[allow(clippy::too_many_arguments)]
 pub fn propose(
     run_id: Uuid,
     kind: ProposalKind,
     dossier_ref: &str,
     subject: &str,
+    subject_id: Uuid,
     rationale: &str,
     pre: Preconditions,
 ) -> Result<Proposal, ProposalError> {
@@ -178,6 +191,13 @@ pub fn propose(
     if dossier_ref.trim().is_empty() {
         return Err(ProposalError::NoDossier);
     }
+    // The nil UUID is what an absent id deserialises to if anything ever
+    // defaults it, and it names no row. Refused here rather than at the
+    // approval, which is where it would be discovered by a human who had
+    // already decided.
+    if subject_id.is_nil() {
+        return Err(ProposalError::NoTarget);
+    }
     Ok(Proposal {
         proposal_id: Uuid::new_v4(),
         run_id,
@@ -186,6 +206,7 @@ pub fn propose(
         envelope: kind.envelope(),
         dossier_ref: dossier_ref.trim().to_string(),
         subject: subject.trim().to_string(),
+        subject_id,
         rationale: rationale.trim().to_string(),
     })
 }
@@ -235,6 +256,7 @@ mod tests {
             ProposalKind::PromoteStrategy,
             "dossier_41",
             "ema_cross_v3",
+            Uuid::new_v4(),
             "survived the battery on two venues",
             clear(),
         )
@@ -253,6 +275,7 @@ mod tests {
             ProposalKind::PromoteStrategy,
             "   ",
             "ema_cross_v3",
+            Uuid::new_v4(),
             "it looks good",
             clear(),
         )
@@ -268,7 +291,7 @@ mod tests {
             ..clear()
         };
         for kind in ProposalKind::ALL {
-            let err = propose(Uuid::new_v4(), *kind, "d_1", "s", "r", pre)
+            let err = propose(Uuid::new_v4(), *kind, "d_1", "s", Uuid::new_v4(), "r", pre)
                 .expect_err("refused");
             assert_eq!(err, ProposalError::KillSwitchTripped, "{kind:?}");
         }
@@ -287,7 +310,7 @@ mod tests {
             ..clear()
         };
         assert_eq!(
-            propose(Uuid::new_v4(), ProposalKind::DeployPaper, "d", "s", "r", rejected),
+            propose(Uuid::new_v4(), ProposalKind::DeployPaper, "d", "s", Uuid::new_v4(), "r", rejected),
             Err(ProposalError::BatteryRejected)
         );
         let no_go = Preconditions {
@@ -295,7 +318,7 @@ mod tests {
             ..clear()
         };
         assert_eq!(
-            propose(Uuid::new_v4(), ProposalKind::DeployPaper, "d", "s", "r", no_go),
+            propose(Uuid::new_v4(), ProposalKind::DeployPaper, "d", "s", Uuid::new_v4(), "r", no_go),
             Err(ProposalError::ReadinessNoGo)
         );
     }
@@ -316,10 +339,32 @@ mod tests {
             ProposalKind::PromoteStrategy,
             "d",
             "s",
+            Uuid::new_v4(),
             "r",
             rejected,
         )
         .expect("ring 1 does not ask the battery");
+    }
+
+    /// A proposal with no target is refused where it is cheap, not at the
+    /// approval where a human has already decided.
+    #[test]
+    fn a_proposal_with_no_target_is_refused() {
+        let err = propose(
+            Uuid::new_v4(),
+            ProposalKind::DeployPaper,
+            "dossier_1",
+            "ema_cross_v3",
+            Uuid::nil(),
+            "it survived",
+            clear(),
+        )
+        .expect_err("the nil uuid names no row");
+        assert_eq!(err, ProposalError::NoTarget);
+        assert!(
+            format!("{err}").contains("what the human reads"),
+            "the refusal must say why the subject is not enough"
+        );
     }
 
     /// The envelope is derived, never supplied.
@@ -347,7 +392,7 @@ mod tests {
     #[test]
     fn the_stored_ring_is_the_derived_one() {
         for kind in ProposalKind::ALL {
-            let p = propose(Uuid::new_v4(), *kind, "d", "s", "r", clear()).unwrap();
+            let p = propose(Uuid::new_v4(), *kind, "d", "s", Uuid::new_v4(), "r", clear()).unwrap();
             assert_eq!(p.ring, kind.ring());
             assert_eq!(p.envelope, kind.envelope());
         }

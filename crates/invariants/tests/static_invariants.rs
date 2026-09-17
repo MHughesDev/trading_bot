@@ -1447,3 +1447,109 @@ fn the_metric_vocabulary_is_the_statistic_table() {
     }
 }
 
+/// AGENT-013 §4 · A proposal and the tool it authorises agree about how far the
+/// action reaches.
+///
+/// Two ring taxonomies exist and neither knew about the other.
+/// `ToolSpec::ring` derives a tool's ring from its envelope and risk;
+/// `ProposalKind::ring` states the ring of the *request* for that action. They
+/// disagreed: `deploy_paper` was ring 2 and `arm_automation` — the tool that
+/// performs it, and the one `ToolSpec::ring`'s own doc comment named as "the
+/// member that matters" for ring 2 — derived ring **1**, because its envelope
+/// said `Spend`.
+///
+/// The ring is what the desk filters on and what a run's exposure filter
+/// enforces, so the disagreement meant a run barred from *asking* to reach paper
+/// could reach it directly.
+///
+/// This holds the pairing. It is a mapping rather than a derivation because the
+/// two enums are in different crates for good reasons — `ledger` does not know
+/// the catalogue and the catalogue does not know the proposal kinds — and a
+/// mapping asserted in one place is the cheapest thing that cannot drift.
+#[test]
+fn a_proposal_and_the_tool_it_authorises_reach_the_same_ring() {
+    use ledger::proposal::ProposalKind;
+
+    // (proposal kind, the catalogue tool that performs it). `None` where the
+    // platform has no tool for it — recorded rather than omitted, so a tool
+    // appearing later is a decision rather than a silent gap.
+    const PERFORMED_BY: &[(ProposalKind, Option<&str>)] = &[
+        (ProposalKind::DeployPaper, Some("arm_automation")),
+        // Ring 1. `promote_model_version` promotes a model; a *strategy* has no
+        // promotion tool, which is why S-10.9's approval route reports
+        // `promote_strategy` as not performable.
+        (ProposalKind::PromoteStrategy, None),
+        // Risk limits are set by `set_risk_overrides`, which is ring 1 and is
+        // the write the proposal exists to move behind a human.
+        (ProposalKind::ChangeLimits, Some("set_risk_overrides")),
+    ];
+
+    // Every kind is covered, so adding one to the enum fails here rather than
+    // falling through a list that looks complete.
+    assert_eq!(
+        PERFORMED_BY.len(),
+        ProposalKind::ALL.len(),
+        "a proposal kind has no entry in PERFORMED_BY"
+    );
+    for kind in ProposalKind::ALL {
+        assert!(
+            PERFORMED_BY.iter().any(|(k, _)| k == kind),
+            "`{}` is not paired with a tool or with a stated absence",
+            kind.as_str()
+        );
+    }
+
+    let ring_of = |name: &str| {
+        mcp_server_lib::spec::catalog()
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| match s.ring() {
+                mcp_server_lib::spec::RING_PAPER => 2_u8,
+                mcp_server_lib::spec::RING_PLATFORM_ARTIFACTS => 1,
+                _ => 0,
+            })
+    };
+
+    for (kind, tool) in PERFORMED_BY {
+        let Some(tool) = tool else { continue };
+        let tool_ring = ring_of(tool)
+            .unwrap_or_else(|| panic!("`{tool}` is named here and is not in the catalogue"));
+        assert_eq!(
+            kind.ring(),
+            tool_ring,
+            "`{}` is ring {} and `{tool}`, which performs it, is ring {tool_ring}. The ring is \
+             what the desk filters on and what a run's exposure filter enforces, so a run barred \
+             from asking could reach it directly.",
+            kind.as_str(),
+            kind.ring(),
+        );
+    }
+}
+
+/// AGENT-013 §4 · Everything that reaches paper is gated, and the derivation
+/// says which.
+///
+/// The companion to the pairing above: `ToolSpec::ring` derives ring 2 from
+/// `Envelope::Promotion` and nothing else, so a tool that reaches paper under a
+/// different envelope is a tool the ring filter does not hide. Asserted from the
+/// ledger's side, which is the list `Envelope::for_action` matches on.
+#[test]
+fn every_promotion_action_that_is_a_tool_reaches_ring_two() {
+    for action in ledger::audit::PROMOTION_ACTIONS {
+        let Some(spec) = mcp_server_lib::spec::catalog()
+            .iter()
+            .find(|s| &s.name == action)
+        else {
+            // Named in NON_TOOL_GATED_ACTIONS with its reason; that list is
+            // asserted separately.
+            continue;
+        };
+        assert_eq!(
+            spec.ring(),
+            mcp_server_lib::spec::RING_PAPER,
+            "`{action}` is a promotion action and derives ring {}",
+            spec.ring()
+        );
+    }
+}
+
