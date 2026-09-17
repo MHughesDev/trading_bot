@@ -651,7 +651,18 @@ yet". Wiring `define_campaign` to suspend today would therefore kill a healthy r
 and label the death a backend failure. Instead the tool returns the campaign id and
 the driver job id as an ordinary result, the campaign runs to its terminal state in
 the job service, and `get_campaign` reads it. Correcting this is one change in the
-driver and one in the `Await` arm, and it is what this task waits on.
+driver and one in the `Await` arm — **that estimate was wrong**, and correcting it
+is worth more than repeating it. A producer for `Input::JobAccepted` and an honest
+outcome for a suspension are indeed small. *Resuming* is not: the run has to be
+restarted and replayed (`agent/resume.rs` does the replay), which needs a durable
+suspension record naming the job, and something that notices the job finished and
+restarts the run. That is a phase-2 shaped task, not a line in this one, and it is
+what S-10.11's last piece actually waits on.
+
+Worth stating separately, because it is a defect rather than a gap: today an
+`Await` ends the run as `Fenced(BackendFailure)`. Nothing broke — the run suspended
+on purpose — so the run record says a backend failure happened where none did. That
+label is wrong independently of whether resumption is built.
 
 Also not built: the `DiagnosticBundle` proper, and the `BudgetLease` split AGENT-010
 §9 describes — the worker runs on the parent's profile and the campaign's own budget
@@ -725,9 +736,30 @@ already holds the kind and `extra` already holds the kind-specific fields — AD
 argument, and `questions` is already a readable bucket with a test asserting every
 kind is reachable from one.
 
-**Not done:** `OpenQuestions.tsx`, and the platform-side closing sweep (a later
-finding's citation closes a question — `close_cited` is built and has no caller
-outside its tests).
+**The closing sweep landed 2026-09-17.** `api/src/questions.rs` closes every open
+question a stored finding cites, from `Recorder::remember` — after the write
+succeeds, and it returns early when the write fails, because closing a question on
+the strength of a finding that did not persist would leave it closed by a row
+nobody can read.
+
+Only a `Finding` closes one. A *negative result* citing a question is a run saying
+it could **not** answer it, which is the opposite — and it is the citation shape
+most likely to appear, since a run that fails often cites what it was trying to
+settle.
+
+Every role in `evidence_ids` is a candidate, not just a `question_id` key: the map
+is keyed by whatever role a producer used, and a closer that looked under one name
+would silently close nothing. Ids that are not open questions match no row, which
+is the "citing a question the store does not hold closes nothing and is not an
+error" rule falling out of the WHERE clause rather than being coded twice.
+
+`extra->>'status' = 'open'` is in that clause, so the **first** close stands — a
+second would overwrite who answered it, and that is the part worth keeping.
+
+This also fills `Yield::questions_closed`, which had been zero on every run ever
+recorded because nothing closed anything.
+
+**Not done:** `OpenQuestions.tsx`.
 
 New semantic kind `open_question` (AGENT-007 §2.2 amended) with `why_it_matters`, `blocking`,
 `value`, `status: open|closed{by, how}`; written by `lifecycle.open_question` and by the harness

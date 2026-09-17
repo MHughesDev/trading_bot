@@ -25,6 +25,7 @@ pub mod trace_from_effects;
 pub mod turn_summary_store;
 pub mod orchestrator;
 pub mod projects;
+pub mod questions;
 pub mod report_validator;
 pub mod research;
 pub mod research_run_worker;

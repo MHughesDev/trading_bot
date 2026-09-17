@@ -659,6 +659,34 @@ impl Recorder {
                 error = %e,
                 "the finding did not persist; it is still in this run's state and summary"
             );
+            // Nothing was written, so nothing it cited was answered. Closing a
+            // question on the strength of a finding that did not persist would
+            // leave the question closed by a row nobody can read.
+            return;
+        }
+        // A finding that cites an open question answers it (AGENT-013 §9;
+        // S-10.12). The platform's move, from a fact about what was written
+        // down — `close_cited` has had no caller, so a question opened in one
+        // run stayed open forever and `questions_closed` has been zero on every
+        // run ever recorded.
+        match crate::questions::close_cited(&self.pg, user_id, &entry).await {
+            Ok(closed) if !closed.is_empty() => {
+                self.yielded.questions_closed += u32::try_from(closed.len()).unwrap_or(0);
+                self.append("questions_closed", json!({ "by": entry.id, "closed": closed }))
+                    .await;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                // Logged, never fatal. The finding is stored; a question that
+                // stays open is retrieved again, which costs a step. Failing the
+                // run over it would cost the finding.
+                tracing::warn!(
+                    run_id = %self.run_id,
+                    entry = %entry.id,
+                    error = %e,
+                    "could not close the questions this finding cites"
+                );
+            }
         }
     }
 
