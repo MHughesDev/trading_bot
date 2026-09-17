@@ -568,7 +568,20 @@ reach paper could reach it directly. `arm_automation` now carries
 `Envelope::Promotion`; the gate is unchanged (both envelopes are gated) and the ring
 is corrected. Two new invariants hold the pairing and the derivation.
 
-**Still not done:** the desk surface, a ring-1 approval-side writer for
+**The desk surface landed 2026-09-17** — `ProposalsQueue.tsx` at `/desk/proposals`,
+which is what made the approval route reachable rather than a second endpoint with
+no caller. **Separate from `ApprovalsInbox` on purpose**: that inbox answers a
+*running* agent's `AskHuman` pause, where a run is stopped and a timeout has a
+default. A proposal is decided later and nothing is waiting on it, and one list
+would put a timer's urgency on decisions nothing is waiting for.
+
+Every card shows the dossier, the ring **in the words of what it protects** (a
+number alone makes "writes a strategy" and "trades on paper" read as degrees of one
+thing), and — before the button, not in the result — whether approving would
+actually do anything. A rejection is recorded as a decision, because an approval
+rate over a queue where rejections vanish is not a rate.
+
+**Still not done:** a ring-1 approval-side writer for
 `promote_strategy` and `change_limits` (the approval reports both as not performed,
 by name), and — the large one — **removing the remaining ring-1 write paths from an
 agent token**. That last one is a product change rather than a refactor: the ring-1

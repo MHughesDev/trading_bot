@@ -519,6 +519,39 @@ export interface KillSwitchState {
   at?: string | null
 }
 
+/** A request for a human decision (AGENT-013 section 7.5). */
+export interface Proposal {
+  proposal_id: string
+  kind: string
+  /** 1 = platform artifacts, 2 = paper. Derived from the kind, never sent. */
+  ring: number
+  envelope: string
+  dossier_ref: string
+  /** What is being promoted, armed or changed, as a person reads it. */
+  subject: string
+  /** The row the approval writes to. `null` on proposals predating 0131. */
+  subject_id: string | null
+  rationale: string
+  /**
+   * Whether approving it would actually do anything.
+   *
+   * Shown in the queue rather than discovered after deciding: two of the three
+   * kinds have no approval-side writer yet, and an approval that changes
+   * nothing is a fact the person deciding is owed *before* they decide.
+   */
+  actionable: boolean
+}
+
+/** What the platform did about a decision. */
+export interface ProposalDecision {
+  proposal_id: string
+  decision: string
+  decided_by: string
+  /** Whether the registry write happened. Separate from the decision. */
+  performed: boolean
+  effect: Record<string, unknown>
+}
+
 export const deskApi = {
   /** Existing: the conversation list the desk rail renders. */
   conversations: () =>
@@ -561,6 +594,18 @@ export const deskApi = {
   verifyClaim: (ticket: string, claim: string) =>
     optional<{ ok: boolean; note: string }>(client.post(`/api/dossiers/${ticket}/verify/${claim}`)),
   monitor: () => optional<{ strategies: Array<Record<string, unknown>> }>(client.get('/api/monitor/strategies')),
+
+  // — Proposals (AGENT-013 section 7.5; S-10.9). The agent creates an inert row
+  //   and a person decides here; the registry write happens at that moment, as
+  //   that person. Distinct from `ApprovalsInbox`, which answers a *running*
+  //   agent's `AskHuman` pause — one blocks a run and the other is decided
+  //   later, and collapsing them would make a queue of waiting agents and
+  //   pending decisions look like one list. —
+  proposals: () => optional<{ pending: Proposal[] }>(client.get('/api/lifecycle/proposals')),
+  decideProposal: (id: string, decision: 'approved' | 'rejected', note?: string) =>
+    optional<ProposalDecision>(
+      client.post(`/api/lifecycle/proposals/${id}/decision`, { decision, note: note ?? '' }),
+    ),
   awayDigest: (since: string) => optional<AwayDigest>(client.get('/api/desk/digest', { params: { since } })),
   sessions: () => optional<{ sessions: DeskSession[] }>(client.get('/api/research/sessions')),
   createSession: (body: { mode: Mode; continuous: boolean; question?: string; charter?: Charter; workflow?: Workflow }) =>

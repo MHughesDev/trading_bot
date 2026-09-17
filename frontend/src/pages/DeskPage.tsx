@@ -19,6 +19,7 @@ import { Conversation } from '@/components/desk/Conversation'
 import { DeskHome } from '@/components/desk/DeskHome'
 import { DossierReader } from '@/components/desk/Dossier'
 import { MemoryBrowser } from '@/components/desk/MemoryBrowser'
+import { ProposalsQueue } from '@/components/desk/ProposalsQueue'
 import { Models } from '@/components/desk/Models'
 import { Monitor, StrategyEditor, Usage } from '@/components/desk/Operations'
 import { RunDetail } from '@/components/desk/RunDetail'
@@ -59,6 +60,11 @@ function Rail({ onNew, hidden }: { onNew: () => void; hidden?: boolean }) {
         {[
           ['/desk', 'Home'],
           ['/desk/approvals', 'Approvals'],
+          // Separate from Approvals on purpose (AGENT-013 §7.5): that inbox
+          // answers a *running* agent's pause, and this queue holds inert
+          // requests decided in their own time. One list would put a timer's
+          // urgency on decisions nothing is waiting for.
+          ['/desk/proposals', 'Proposals'],
           ['/desk/memory', 'Memory'],
           ['/desk/catalogue', 'Catalogue'],
           ['/desk/models', 'Models'],
@@ -146,6 +152,7 @@ export function DeskPage() {
               </div>
             }
           />
+          <Route path="proposals" element={<ProposalsQueue />} />
           <Route path="memory" element={<MemoryBrowser onOpenConversation={startFrom} />} />
           <Route path="catalogue" element={<Catalogue />} />
           <Route path="models" element={<Models />} />
