@@ -18,6 +18,7 @@ pub mod body;
 pub mod degrade;
 pub mod manifest;
 pub mod policy;
+pub mod render;
 pub mod select;
 pub mod store;
 
