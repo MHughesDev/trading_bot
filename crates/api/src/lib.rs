@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod agent;
 pub mod auditor;
+pub mod barren;
 pub mod auth;
 pub mod credentials;
 pub mod data_admission;

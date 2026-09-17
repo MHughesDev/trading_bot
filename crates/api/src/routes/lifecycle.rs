@@ -1163,3 +1163,61 @@ pub async fn open_question(
             .into_response(),
     }
 }
+
+// ── Barren rate (AGENT-013 §10; S-10.13) ─────────────────────────────────────
+
+/// `GET /api/lifecycle/barren?days=30` — what the platform's runs cost in
+/// trials against what they produced.
+///
+/// Rows, never a single rate. "12% barren" is something nobody can act on;
+/// "`survey` on the 7B is barren 60% of the time" names a tier and a workflow.
+/// Each row carries its own `runs`, so a reader can see which rates are worth
+/// believing — a 60% rate over five runs and over five hundred are different
+/// claims, and a rate with no denominator hides the difference.
+pub async fn barren_rates(
+    State(state): State<AppState>,
+    _token: BearerToken,
+    axum::extract::Query(q): axum::extract::Query<BarrenQuery>,
+) -> impl IntoResponse {
+    // Bounded rather than clamped silently: a caller asking for ten years gets
+    // the longest window the platform will answer for, and is told so.
+    const MAX_DAYS: i32 = 365;
+    let days = q.days.unwrap_or(30).clamp(1, MAX_DAYS);
+
+    match crate::barren::rates(&state.pg, &state.profiles, days).await {
+        Ok(r) => Json(json!({
+            "days": days,
+            "max_days": MAX_DAYS,
+            "runs": r.runs(),
+            "rows": r.rows.iter().map(|b| json!({
+                "tier": b.tier,
+                "workflow": b.workflow,
+                "runs": b.runs,
+                "barren": b.barren,
+                // `None` when there are no runs, so a renderer cannot show a
+                // tier that has run nothing as one that never wastes a trial.
+                "rate": b.rate(),
+            })).collect::<Vec<_>>(),
+            // Runs whose profile the platform no longer ships. Reported rather
+            // than folded into a guessed tier or dropped: folding attributes one
+            // tier's waste to another, and dropping makes the platform look less
+            // wasteful the more configurations it retires.
+            "unresolved": r.unresolved.iter().map(|(p, n)| json!({
+                "profile": p,
+                "runs": n,
+            })).collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "storage", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BarrenQuery {
+    #[serde(default)]
+    days: Option<i32>,
+}

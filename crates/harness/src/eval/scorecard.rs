@@ -205,12 +205,48 @@ pub struct Scorecard {
     /// platform's own multiple-testing exposure, recorded rather than ignored.
     #[serde(default)]
     pub evaluations: u32,
+    /// Barren rate per `(tier, workflow)` (AGENT-013 §10; AGENT-009 §4 amended;
+    /// S-10.13).
+    ///
+    /// A run with trials and zero knowledge units is barren: it spent from the
+    /// one budget every selection-adjusted statistic on this platform depends on
+    /// and produced nothing the next run can use. Every other number on this
+    /// card measures whether the harness *worked*; this is the only one that
+    /// measures whether the work was worth doing.
+    ///
+    /// **Never a single number.** `barren_rates` keys by tier and workflow
+    /// because "12% barren" is something nobody can act on and "`survey` on the
+    /// 7B is barren 60% of the time" names a workflow and a tier. The same
+    /// argument §4 makes about pass rates, applied one level up.
+    ///
+    /// Empty means *not measured*, and cannot be confused with zero: a row
+    /// cannot exist with `runs = 0`, and [`BarrenRate::rate`] returns `None`
+    /// rather than `0.0` when it somehow does. A renderer that showed an empty
+    /// list as "0% barren" would report a platform that has produced no
+    /// knowledge at all as a platform that never wastes a trial.
+    #[serde(default)]
+    pub barren: Vec<crate::lifecycle::r#yield::BarrenRate>,
 }
 
 impl Scorecard {
     #[must_use]
     pub fn suite(&self, name: &str) -> Option<&SuiteScore> {
         self.suites.iter().find(|s| s.suite == name)
+    }
+
+    /// The barren rate over every `(tier, workflow)` on this card, or `None`
+    /// when nothing was observed.
+    ///
+    /// Provided so a caller that wants one number gets `None` for "no runs"
+    /// rather than dividing by zero or reporting `0.0`. It is still the wrong
+    /// number to show — [`Scorecard::barren`] is the one somebody can act on —
+    /// and it exists because a summary line that had to compute this itself
+    /// would compute it as zero on an empty card.
+    #[must_use]
+    pub fn barren_rate(&self) -> Option<f64> {
+        let runs: u32 = self.barren.iter().map(|b| b.runs).sum();
+        let barren: u32 = self.barren.iter().map(|b| b.barren).sum();
+        (runs > 0).then(|| f64::from(barren) / f64::from(runs))
     }
 
     /// Whether any claim on this profile is licensed by measurement (P3).
@@ -671,6 +707,7 @@ mod tests {
             memory_recall: None,
             hitl_precision: None,
             evaluations: 0,
+            barren: vec![],
         }
     }
 

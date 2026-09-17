@@ -420,6 +420,7 @@ mod tests {
             memory_recall: None,
             hitl_precision: None,
             evaluations: 1,
+            barren: vec![],
         }
     }
 

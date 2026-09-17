@@ -805,8 +805,31 @@ and a stored copy would drift the first time the weighting changed — which it 
 `barren` *is* stored, because the scorecard groups by it, and
 `a_barren_run_spent_a_trial` keeps it honest.
 
-**Not done:** the scorecard's barren column and the usage page. `barren_rates`
-exists and is tested; nothing reads it yet.
+**The scorecard column and its source landed 2026-09-17.** `Scorecard.barren`
+carries the `(tier, workflow)` rows, and an empty list means *not measured* rather
+than zero — a row cannot exist with `runs = 0` and `BarrenRate::rate` returns
+`None` regardless, so a renderer cannot show a platform that has produced no
+knowledge at all as one that never wastes a trial. `Scorecard::barren_rate`
+collapses it to one number only so a caller that wants one gets `None` for "no
+runs" instead of computing zero itself; its doc comment says not to show it.
+
+`api/src/barren.rs` is the source, over `agent_runs` — which is what made this
+worth doing now rather than waiting on the scorecard: the scorecard is built from
+recorded tapes and there are none (gate H-2), but the *runs* are real and the flag
+has been computed on every one of them and read by nothing.
+
+Two things it refuses to do quietly. Runs whose profile the platform no longer
+ships are **reported**, not folded into a guessed tier or dropped — folding
+attributes one tier's waste to another, and dropping makes the platform look less
+wasteful the more configurations it retires. And a run with no workflow recorded
+(predating S-10.1's column) is counted under `(not recorded)` rather than under
+`investigate`, which is the default and would make the default look worse than it
+is.
+
+`GET /api/lifecycle/barren?days=30` serves it, windowed — a rate over all time
+answers a question about a platform that no longer exists.
+
+**Not done:** the usage page itself (cost per knowledge unit, rendered).
 
 The platform computes `Yield` (AGENT-013 §10) at run end from the effect log and memory
 writes: findings by confidence, negatives and whether the class is new for the subject,

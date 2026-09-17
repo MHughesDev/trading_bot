@@ -113,6 +113,10 @@ pub fn router(state: AppState) -> Router {
         // (AGENT-013 §9; S-10.12). The loop writes these at run end too,
         // with the stakes unstated; this is the door that states them.
         .route("/api/lifecycle/questions", post(lifecycle::open_question))
+        // What the platform's runs cost in trials against what they
+        // produced (AGENT-013 §10; S-10.13). Per tier and workflow,
+        // never as one number.
+        .route("/api/lifecycle/barren", get(lifecycle::barren_rates))
         .route("/api/lifecycle/campaigns", post(lifecycle::define_campaign))
         .route("/api/lifecycle/campaigns/{campaign_id}", get(lifecycle::get_campaign))
         // The power check runs here, before any trial (§6.3).
