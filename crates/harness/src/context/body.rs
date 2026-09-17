@@ -155,6 +155,19 @@ pub enum Body {
         title: Option<String>,
         body: String,
     },
+    /// A body that has been spilled to the workspace (§26.3).
+    ///
+    /// The *metadata* stays resident — subject, ids, kind, `tokens_full` — so
+    /// scoring and the manifest still see the whole store. Only the bytes leave,
+    /// and `expand` reads them back. A store that dropped the metadata too would
+    /// be a store that forgot what it had, which is the one thing §14 forbids.
+    Elsewhere {
+        handle: String,
+        /// What it cost before it left, so the manifest can still say.
+        tokens: u32,
+        /// One line about what it is, so a reader can decide whether to ask.
+        summary: String,
+    },
     /// Anything else, with the keys that must survive named.
     Json {
         value: serde_json::Value,
@@ -263,6 +276,11 @@ impl Body {
                 Some(t) => t.clone(),
                 None => body.clone(),
             },
+            Body::Elsewhere {
+                handle,
+                tokens,
+                summary,
+            } => format!("{summary} [{tokens} tokens, held in {handle}; expand to read it]"),
             Body::Json { value, .. } => {
                 serde_json::to_string(value).unwrap_or_else(|_| "{}".into())
             }
@@ -332,6 +350,9 @@ impl Body {
                 None
             }
             Body::Text { title, body } => shrink_text(title.as_deref(), body),
+            // Already one line. There is nothing left to shed, and a rung that
+            // returned a shorter line would be cutting the handle.
+            Body::Elsewhere { .. } => None,
             Body::Json { value, required } => shrink_json(value, required),
         }
     }

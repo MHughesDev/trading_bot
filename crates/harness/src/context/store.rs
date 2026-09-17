@@ -349,6 +349,37 @@ impl Record {
     }
 }
 
+/// One line about a body, kept resident when the bytes spill.
+fn summarise(b: &Body) -> String {
+    match b {
+        Body::Table {
+            schema, total_rows, ..
+        } => format!(
+            "table of {total_rows} rows: {}",
+            schema
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Body::Series {
+            name, total_points, ..
+        } => format!("series {name}, {total_points} points"),
+        Body::Stat { summary, .. } => summary.lines().next().unwrap_or("a statistic").to_string(),
+        Body::Text { title, body } => title
+            .clone()
+            .unwrap_or_else(|| body.chars().take(60).collect()),
+        Body::Json { value, .. } => {
+            let keys = value
+                .as_object()
+                .map(|m| m.keys().cloned().collect::<Vec<_>>().join(", "))
+                .unwrap_or_default();
+            format!("json: {keys}")
+        }
+        Body::Elsewhere { summary, .. } => summary.clone(),
+    }
+}
+
 /// What a caller hands the store; the store assigns the id and the token count.
 #[derive(Debug, Clone)]
 pub struct Draft {
@@ -461,6 +492,23 @@ impl RunStore {
         id
     }
 
+    /// A store holding a subset of these records, ids intact.
+    ///
+    /// Ids are preserved rather than renumbered because a projection is a *view*
+    /// of one history: a critic that cites `r007` and a parent that wrote `r007`
+    /// must mean the same observation, or the citation cannot be checked against
+    /// the run that produced it.
+    ///
+    /// `next_id` carries over too, so a sub-run that records its own
+    /// observations cannot collide with a parent id it never saw.
+    #[must_use]
+    pub fn subset(&self, keep: impl Fn(&Record) -> bool) -> Self {
+        Self {
+            records: self.records.iter().filter(|r| keep(r)).cloned().collect(),
+            next_id: self.next_id,
+        }
+    }
+
     #[must_use]
     pub fn get(&self, id: RecordId) -> Option<&Record> {
         self.records.iter().find(|r| r.id == id)
@@ -525,6 +573,80 @@ impl RunStore {
             r.citations += 1;
             r.utility = Utility::Used;
         }
+    }
+
+    /// Move the coldest bodies out of memory, keeping every record (§26.3).
+    ///
+    /// Returns what the caller must persist, as `(id, handle, body)`. The store
+    /// is sans-IO, so it decides *what* spills and the driver performs the write
+    /// — the same division as every other effect in this crate.
+    ///
+    /// Coldest is `(never expanded, never cited, oldest step)`. Superseded
+    /// records go first: they are not selectable, so their bodies are pure
+    /// residency, and they are exactly what a long polling run accumulates most
+    /// of.
+    ///
+    /// **Metadata never leaves.** Subject, ids, kind and `tokens_full` stay
+    /// resident, so scoring and the manifest still see the whole store and a
+    /// spill is invisible except in latency and in `expand`.
+    pub fn spill(&mut self, max_resident: usize, handle: impl Fn(RecordId) -> String)
+        -> Vec<(RecordId, String, Body)>
+    {
+        let resident: Vec<RecordId> = self
+            .records
+            .iter()
+            .filter(|r| !matches!(r.body, Body::Elsewhere { .. }))
+            .map(|r| r.id)
+            .collect();
+        if resident.len() <= max_resident {
+            return Vec::new();
+        }
+        let mut order = resident;
+        order.sort_by_key(|id| {
+            let r = self.get(*id).expect("just listed");
+            (
+                r.is_live(),
+                r.expansions > 0,
+                r.citations > 0,
+                std::cmp::Reverse(r.step),
+            )
+        });
+        let to_spill = order.len() - max_resident;
+        let mut out = Vec::with_capacity(to_spill);
+        for id in order.into_iter().take(to_spill) {
+            let handle = handle(id);
+            let Some(record) = self.get_mut(id) else {
+                continue;
+            };
+            let summary = summarise(&record.body);
+            let tokens = record.tokens_full;
+            let body = std::mem::replace(
+                &mut record.body,
+                Body::Elsewhere {
+                    handle: handle.clone(),
+                    tokens,
+                    summary,
+                },
+            );
+            out.push((id, handle, body));
+        }
+        out
+    }
+
+    /// Put a spilled body back, for `expand` (§18, §26.3).
+    pub fn restore(&mut self, id: RecordId, body: Body) {
+        if let Some(r) = self.get_mut(id) {
+            r.body = body;
+        }
+    }
+
+    /// How many records still hold their bytes.
+    #[must_use]
+    pub fn resident(&self) -> usize {
+        self.records
+            .iter()
+            .filter(|r| !matches!(r.body, Body::Elsewhere { .. }))
+            .count()
     }
 
     /// The ids every live record carries, for matching against a step's

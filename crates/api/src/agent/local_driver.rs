@@ -241,6 +241,17 @@ fn describe_effect(e: &Effect) -> (&'static str, Value) {
                 "window": format!("{}→{}", e.data_window.start, e.data_window.end),
             }),
         ),
+        // A spill is logged by handle and size, not by content: the content is
+        // now *in* the workspace and logging it here would be a second copy of
+        // the bytes the spill exists to move out of memory.
+        Effect::Spill { record, handle, body } => (
+            "Spill",
+            serde_json::json!({
+                "record": record.to_string(),
+                "handle": handle,
+                "tokens": body.tokens(),
+            }),
+        ),
         // A core-tool note is the only note a replay needs, and it is recorded
         // structurally rather than as a debug string.
         //
@@ -990,6 +1001,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
                 Effect::Remember(e) => rec.remember(params.user_id, &e).await,
                 Effect::Done(o) => rec.finish(&o).await,
                 _ => {}
+                // A refusal has no workspace and no records, so it cannot spill.
             }
         }
         return;
@@ -1106,6 +1118,35 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
             match e {
                 Effect::Note(n) => rec.note(&n).await,
                 Effect::Remember(e) => rec.remember(params.user_id, &e).await,
+                // The bytes leave memory and land in the agent's own folder,
+                // where `expand` and `read_file` both reach them (§26.3). A
+                // failed write is logged and the body stays where it is:
+                // losing an observation to save memory would invert the whole
+                // point of a store that never deletes.
+                Effect::Spill { record, handle, body } => {
+                    let text = serde_json::to_string(&*body).unwrap_or_default();
+                    let args = serde_json::Map::from_iter([
+                        ("path".to_string(), json!(handle)),
+                        ("content".to_string(), json!(text)),
+                    ]);
+                    // The same `write_file` the agent's own tools use, so a
+                    // spilled body lands where `read_file` can reach it and
+                    // under the same path rules — a second write path would be
+                    // a second set of rules about where the agent may write.
+                    let (detail, failed) =
+                        workspace_tools::execute(&ws, "write_file", &args).await;
+                    if failed {
+                        // The body goes back. Losing an observation to save
+                        // memory would invert the point of a store that never
+                        // deletes, and the record would then say "expand to
+                        // read it" about a file that does not exist.
+                        governor.restore_spilled(record, *body);
+                        tracing::warn!(
+                            run_id = %params.run_id, %handle, %detail,
+                            "context spill failed; the record keeps its body"
+                        );
+                    }
+                }
                 Effect::Done(o) => {
                     // Before `finish`, because `finish` stamps the run complete
                     // and a reader that saw the row finish without a summary
@@ -1140,6 +1181,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
             // something the platform does *because* of a decision, not something
             // the loop waits on. Reaching here would mean the drain missed it.
             Effect::Remember(_) => unreachable!("Remember is handled with the notes"),
+            Effect::Spill { .. } => unreachable!("Spill is handled with the notes"),
             Effect::CallModel(call) => {
                 let started = Instant::now();
                 let req = build_request(&params.profile, &call, transcript.as_ref());

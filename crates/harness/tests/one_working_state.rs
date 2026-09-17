@@ -1264,7 +1264,14 @@ fn both_transports_ask_the_world_for_the_same_things() {
                     // platform a row to store, not a decision about the world,
                     // and a transport that produced a different set of *those*
                     // would not be a transport difference this test is about.
-                    Effect::CallModel(_) | Effect::Note(_) | Effect::Remember(_) => {}
+                    // `Spill` joins them for the same reason as `Remember`: it
+                    // is the loop asking the platform to hold some bytes, and
+                    // residency is a property of how long a run has been going
+                    // rather than of which transport it is on.
+                    Effect::CallModel(_)
+                    | Effect::Note(_)
+                    | Effect::Remember(_)
+                    | Effect::Spill { .. } => {}
                     Effect::ExecuteTool { name, .. } => seen.push(format!("run:{name}")),
                     Effect::AskHuman { tool, .. } => seen.push(format!("ask:{tool}")),
                     Effect::Await { tool, .. } => seen.push(format!("await:{tool}")),

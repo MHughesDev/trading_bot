@@ -51,6 +51,13 @@ use super::policy::{ContextPolicy, Normalisation, SelectionMode};
 use super::store::{Record, RecordId, RecordKind, RunStore, Subject};
 use crate::state::{GoalKind, WorkingState};
 
+/// How many records the marginal-relevance loop scores against each other.
+///
+/// See the comment at its use: the cap bounds the quadratic term so assembly
+/// time stays flat past a thousand records, and it cannot hide a must-include or
+/// a floor because both of those search the whole store.
+pub const MMR_CANDIDATES: usize = 200;
+
 /// What the step needs, derived from the working state.
 ///
 /// Built by [`Query::from_state`] rather than assembled by callers, so the query
@@ -306,6 +313,27 @@ pub fn select(
     let mut chosen: Vec<usize> = must.iter().copied().collect();
     let mut final_scores: Vec<f32> = base.clone();
     let mut remaining: Vec<usize> = (0..live.len()).filter(|i| !must.contains(i)).collect();
+    // Bounded work, so assembly time per call stays flat as the store grows
+    // (§26.4). The marginal-relevance loop is quadratic in the candidate set,
+    // and a four-hundred-step run must not spend more wall clock assembling
+    // prompts than waiting for models.
+    //
+    // Only the *scoring* is bounded. The must-includes above and the hard floors
+    // below both search the whole store, so nothing this cap hides can be
+    // something the set is required to contain — which is the property that
+    // makes a cap safe rather than a silent quality cliff.
+    if remaining.len() > MMR_CANDIDATES {
+        remaining.sort_by(|a, b| {
+            base[*b]
+                .total_cmp(&base[*a])
+                .then_with(|| (live[*a].step, live[*a].id).cmp(&(live[*b].step, live[*b].id)))
+        });
+        remaining.truncate(MMR_CANDIDATES);
+        report
+            .bound_by
+            .push(format!("scored the top {MMR_CANDIDATES} of {} candidates", live.len()));
+    }
+    let all_indices: Vec<usize> = (0..live.len()).filter(|i| !must.contains(i)).collect();
 
     while let Some((pick, score)) = best(&remaining, &base, &chosen, &live, policy) {
         let sticky = query.previously_rendered.contains(&live[pick].id);
@@ -328,10 +356,10 @@ pub fn select(
     // ---- hard floors: no weighting starves a kind (§24.1) -------------------
     for kind in [RecordKind::Correction, RecordKind::Finding] {
         if !chosen.iter().any(|i| live[*i].kind == kind) {
-            if let Some(i) = remaining
+            if let Some(i) = all_indices
                 .iter()
                 .copied()
-                .filter(|i| live[*i].kind == kind)
+                .filter(|i| !chosen.contains(i) && live[*i].kind == kind)
                 .max_by(|a, b| base[*a].total_cmp(&base[*b]))
             {
                 chosen.push(i);
@@ -344,10 +372,10 @@ pub fn select(
     // sight of what it just did.
     let recent_floor = query.step.saturating_sub(2);
     if !chosen.iter().any(|i| live[*i].step >= recent_floor) {
-        if let Some(i) = remaining
+        if let Some(i) = all_indices
             .iter()
             .copied()
-            .filter(|i| live[*i].step >= recent_floor)
+            .filter(|i| !chosen.contains(i) && live[*i].step >= recent_floor)
             .max_by(|a, b| base[*a].total_cmp(&base[*b]))
         {
             chosen.push(i);

@@ -271,6 +271,23 @@ pub enum Effect {
     },
     /// Write one entry to the timeline and the trace.
     Note(Note),
+    /// Move one record's bytes out of memory and into the workspace
+    /// (AGENT-005 §26.3; Set S task S-9.17).
+    ///
+    /// Same division as [`Effect::Remember`], and for the same reason: the loop
+    /// decides *what* spills — coldest first, superseded before live, never
+    /// something the model has cited or asked back — and it cannot write a file,
+    /// so the bytes leave as an effect and the driver performs the write.
+    ///
+    /// The record does not leave the store. Its metadata stays resident, so
+    /// scoring and the manifest still see it; only the bytes move, and `expand`
+    /// reads them back through the handle named here.
+    Spill {
+        record: crate::context::store::RecordId,
+        /// Workspace-relative, under `work/`.
+        handle: String,
+        body: Box<crate::context::body::Body>,
+    },
     /// Persist one semantic-memory entry (AGENT-007 §2.2; S-4.2, S-4.3).
     ///
     /// The loop verifies a finding and labels it `established` or `suggestive`,
@@ -1067,6 +1084,17 @@ impl Loop {
         self
     }
 
+    /// Put a spilled body back when the driver could not write it (§26.3).
+    ///
+    /// The loop replaces the body optimistically, because the alternative is a
+    /// confirmation round-trip in a sans-IO loop. That makes a failed write the
+    /// one case where an observation could be lost — a record saying "expand to
+    /// read it" about a file that does not exist — so the driver hands it back
+    /// rather than logging and moving on.
+    pub fn restore_spilled(&mut self, id: crate::context::store::RecordId, body: crate::context::body::Body) {
+        self.store.restore(id, body);
+    }
+
     /// The tool slice this turn ended with, for the next turn's prefix.
     #[must_use]
     pub fn session_exposure(&self) -> &[String] {
@@ -1319,6 +1347,31 @@ impl Loop {
     /// the same string and different kinds. The kind drives the per-kind
     /// half-life and the kind prior, so guessing it wrong is not cosmetic: a
     /// `Correction` decays in six steps and a `Finding` in two hundred.
+    /// Bytes that must leave memory, as effects (§26.3).
+    ///
+    /// Called where observations are recorded rather than where the prompt is
+    /// assembled, because assembly is `&mut self` only incidentally and a spill
+    /// is a consequence of *arriving* data, not of rendering it.
+    ///
+    /// No-op under the control policy, whose `max_resident_records` is
+    /// unbounded — Part I never spilled, and a control that did would not be one.
+    fn spill_effects(&mut self, fx: &mut Vec<Effect>) {
+        let cap = self.context_policy.max_resident_records;
+        if cap == usize::MAX {
+            return;
+        }
+        for (record, handle, body) in self
+            .store
+            .spill(cap, |id| format!("work/context/{id}.json"))
+        {
+            fx.push(Effect::Spill {
+                record,
+                handle,
+                body: Box::new(body),
+            });
+        }
+    }
+
     fn observe_as(
         &mut self,
         tagged: Tagged,
@@ -1707,6 +1760,10 @@ impl Loop {
     // ── A step ──────────────────────────────────────────────────────────────
 
     fn begin_step(&mut self, fx: &mut Vec<Effect>) {
+        // Anything the step that just ended pushed the store past its residency
+        // cap (§26.3). At a step boundary rather than inside `observe_as`, so a
+        // spill never interleaves with the effects of the call that caused it.
+        self.spill_effects(fx);
         // Close the books on the step that just ended before opening the next.
         if self.step > 0 {
             if self.step_learned_something {
@@ -3206,6 +3263,29 @@ impl Loop {
             self.reject_and_retry(Rejection::semantic_owned("context.unknown_record", msg), fx);
             return;
         };
+        // A body that has spilled is not in memory to hand back, and the loop
+        // cannot read a file. The handle is, though, and `read_file` is one of
+        // the agent's own tools — so the answer is the path rather than a
+        // refusal that leaves the model with nowhere to go (§26.3).
+        if let context::body::Body::Elsewhere { handle, tokens, summary } = &record.body {
+            let detail = format!(
+                "{id} is held in `{handle}` ({tokens} tokens): {summary}. Read it with                  read_file when you need it."
+            );
+            fx.push(Effect::Note(Note::CoreTool {
+                name: EXPAND.to_string(),
+                detail: detail.clone(),
+            }));
+            let subject = record.subject.clone();
+            self.observe_as(
+                Tagged::system(EXPAND, detail),
+                240,
+                Some(handle.clone()),
+                RecordKind::Note,
+                subject,
+            );
+            self.route(fx);
+            return;
+        }
         let full = record.body.render();
         let cost = context::estimate_tokens(&full);
         let room = self.remaining_body_bytes() / 4;
@@ -4154,6 +4234,124 @@ mod tests {
         });
         assert_eq!(l.focus, None);
         assert!(model_call(&fx).prompt.contains("what you are working on"));
+    }
+
+    /// A long run spills its coldest bodies, as effects the driver performs.
+    #[test]
+    fn a_run_past_its_residency_cap_asks_the_driver_to_hold_some_bytes() {
+        let mut policy = crate::context::policy::ContextPolicy::v2();
+        policy.max_resident_records = 2;
+        let mut l = Loop::new(local(), registry(), task()).with_context_policy(policy);
+        l.next(Input::Admission(Admission::Admit));
+
+        let mut spills = 0;
+        // A different instrument each step: an identical repeat is answered from
+        // the idempotent cache and then stopped, which is a different mechanism
+        // and would make this test about that one instead.
+        for i in 0..6 {
+            l.next(Input::ModelReply {
+                raw: r#"{"name":"read_bars"}"#.into(),
+            });
+            l.next(Input::ModelReply {
+                raw: format!(r#"{{"instrument":"SYM-{i}"}}"#),
+            });
+            let fx = l.next(Input::ToolResult {
+                output: "ts,close
+1,100".into(),
+                source: "platform.data".into(),
+            });
+            spills += fx
+                .iter()
+                .filter(|e| matches!(e, Effect::Spill { .. }))
+                .count();
+        }
+        assert!(
+            spills > 0,
+            "nothing spilled past a cap of two; store {} resident {} state {:?}",
+            l.context_store().len(),
+            l.context_store().resident(),
+            l.state()
+        );
+        assert!(
+            l.context_store().len() > l.context_store().resident(),
+            "the records stayed and only the bytes left"
+        );
+        // And every spilled record still has its metadata, which is what the
+        // manifest and the scorer read.
+        for r in l.context_store().all() {
+            assert!(r.tokens_full > 0 || r.body.render().is_empty());
+        }
+    }
+
+    /// The control never spills, because Part I never did.
+    #[test]
+    fn the_control_policy_holds_everything_in_memory() {
+        let (mut l, _) = started();
+        for i in 0..4 {
+            l.next(Input::ModelReply {
+                raw: r#"{"name":"read_bars"}"#.into(),
+            });
+            l.next(Input::ModelReply {
+                raw: format!(r#"{{"instrument":"SYM-{i}"}}"#),
+            });
+            let fx = l.next(Input::ToolResult {
+                output: "ts,close
+1,100".into(),
+                source: "platform.data".into(),
+            });
+            assert!(
+                !fx.iter().any(|e| matches!(e, Effect::Spill { .. })),
+                "a control that spilled would not be a control"
+            );
+        }
+        assert_eq!(l.context_store().len(), l.context_store().resident());
+    }
+
+    /// An `expand` of a spilled record names the file rather than refusing.
+    #[test]
+    fn expanding_a_spilled_record_points_at_its_handle() {
+        let mut policy = crate::context::policy::ContextPolicy::v2();
+        policy.max_resident_records = 1;
+        let mut l = Loop::new(local(), registry(), task()).with_context_policy(policy);
+        l.next(Input::Admission(Admission::Admit));
+        for i in 0..4 {
+            l.next(Input::ModelReply {
+                raw: r#"{"name":"read_bars"}"#.into(),
+            });
+            l.next(Input::ModelReply {
+                raw: format!(r#"{{"instrument":"SYM-{i}"}}"#),
+            });
+            l.next(Input::ToolResult {
+                output: "ts,close
+1,100".into(),
+                source: "platform.data".into(),
+            });
+        }
+        let spilled = l
+            .context_store()
+            .all()
+            .find(|r| matches!(r.body, crate::context::body::Body::Elsewhere { .. }))
+            .map(|r| r.id)
+            .expect("something spilled");
+
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"expand"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: format!(r#"{{"record_id":"{spilled}"}}"#),
+        });
+        let note = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::Note(Note::CoreTool { name, detail }) if name == EXPAND => Some(detail),
+                _ => None,
+            })
+            .expect("expand answers");
+        assert!(
+            note.contains("read_file"),
+            "a refusal would leave the model with nowhere to go: {note}"
+        );
+        assert!(note.contains("work/context/"), "{note}");
     }
 
     /// The body budget follows the step, and the run's total does not rise.
