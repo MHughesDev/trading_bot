@@ -174,10 +174,27 @@ that makes `inconclusive` say *why* and nothing else carry a reason.
 **The request type has no status field at all**, which is §6.2's mechanism rather
 than an omission — there is nothing to ignore carefully — and a test asserts it.
 
-**Not done:** `harness/src/lifecycle/evaluate.rs`. Nothing yet reads the tickets and
-writes the verdict, so every hypothesis stays `open`. The vocabulary is also a
-constant in `routes/lifecycle.rs` rather than a read of `mlops.trial_statistic`,
-which is a copy and is marked as one in its doc comment.
+`harness/src/lifecycle/evaluate.rs` is built and is a pure function of the
+tickets: it parses the falsifier out of the prose a model actually writes, decides
+`supported | refuted | inconclusive{why}`, and every `inconclusive` carries a reason
+from the closed list. **`supported` needs §6.9's whole battery** — out-of-sample,
+cost-model and benchmark tickets plus a reproducibility receipt — and a refutation
+needs none of it, deliberately: requiring the battery before admitting a failure
+would make failing expensive and passing cheap, which is backwards for a platform
+whose main output is meant to be negative results.
+
+`record_finding` is corrected when it grades its own hypothesis, and the check is
+narrow on purpose — a model corrected for writing English learns to write worse
+English rather than to stop claiming verdicts.
+
+`schema_mirrors_lifecycle.rs` holds the reasons, the statuses and the roles equal to
+the Rust enums. `open` has no Rust variant on purpose: it is the absence of a
+verdict, and a `Verdict::Open` would be a value `evaluate` could return.
+
+**Not done:** nothing *calls* `evaluate` — the funnel's return has no hook into it,
+so every hypothesis stays `open`. That needs the funnel and a live run (gate H-2).
+The metric vocabulary is also a constant in `routes/lifecycle.rs` rather than a read
+of `mlops.trial_statistic`: a copy, and marked as one.
 
 `lifecycle.hypothesise` validates the falsifier against the closed metric vocabulary
 (`mlops.trial_statistic`'s) and a comparator; a falsifier naming nothing evaluable is refused

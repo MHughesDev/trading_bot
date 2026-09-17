@@ -3027,6 +3027,20 @@ impl Loop {
             );
             return;
         }
+        // §6.2: the platform writes the verdict, not the run. Checked before the
+        // evidence, because a finding that grades its own hypothesis is wrong
+        // about something more basic than its citations — and a model told to
+        // fix its citations first would fix them and re-submit the same claim.
+        if let Some(word) = crate::lifecycle::evaluate::claims_a_verdict(&finding) {
+            self.reject_and_retry(
+                Rejection::semantic_owned(
+                    "drive.finding_claims_a_verdict",
+                    crate::lifecycle::evaluate::verdict_correction(word),
+                ),
+                fx,
+            );
+            return;
+        }
         let invented: Vec<&str> = opaque_ids(&evidence)
             .into_iter()
             .filter(|id| !self.working.can_cite(id))
@@ -4175,6 +4189,52 @@ mod tests {
             })
         );
         assert_eq!(l.state(), State::Finished);
+    }
+
+    // ── The platform writes the verdict (AGENT-013 §6.2; S-10.4) ────────────
+
+    /// A run cannot grade its own hypothesis.
+    #[test]
+    fn a_finding_that_grades_its_hypothesis_is_handed_back() {
+        let (mut l, _) = started();
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"record_finding"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: r#"{"finding":"the hypothesis is supported","evidence":"exp_1"}"#.into(),
+        });
+        let prompt = &model_call(&fx).prompt;
+        assert!(
+            prompt.contains("The platform writes that, not you"),
+            "a verdict the model writes is a verdict the model can rewrite: {prompt}"
+        );
+        assert!(
+            l.working().findings.is_empty(),
+            "and it is not recorded while it says that"
+        );
+    }
+
+    /// An ordinary finding is still recorded.
+    ///
+    /// The check is narrow on purpose: a model corrected for writing English
+    /// learns to write worse English rather than to stop claiming verdicts.
+    #[test]
+    fn an_ordinary_finding_still_goes_through() {
+        let (mut l, _) = started();
+        one_result(&mut l);
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"record_finding"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: r#"{"finding":"BTC-USD 1h momentum is weak after costs","evidence":"none"}"#
+                .into(),
+        });
+        assert!(
+            !model_call(&fx)
+                .prompt
+                .contains("The platform writes that, not you"),
+            "an ordinary finding must not be corrected"
+        );
     }
 
     // ── Rings (AGENT-013 §4; Set S task S-10.1) ─────────────────────────────

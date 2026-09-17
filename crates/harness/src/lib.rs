@@ -38,6 +38,7 @@ pub mod drive;
 pub mod fewshot;
 pub mod eval;
 pub mod hardware;
+pub mod lifecycle;
 pub mod memory;
 pub mod policy;
 pub mod profile;

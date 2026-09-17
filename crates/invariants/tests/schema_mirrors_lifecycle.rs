@@ -12,7 +12,18 @@
 
 use std::path::{Path, PathBuf};
 
+use harness::lifecycle::evaluate::{Role, Verdict, Why};
 use harness::state::{Mode, Ring, Stage, Workflow};
+
+fn migration_named(file: &str) -> String {
+    let p: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("crates/<name> sits two below the root")
+        .join("migrations")
+        .join(file);
+    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display()))
+}
 
 fn migration() -> String {
     let p: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -177,5 +188,81 @@ fn the_defaults_are_the_narrow_reading() {
         !sql.contains("workflow TEXT NOT NULL"),
         "a chat turn is doing none of the seven, and `investigate` would be a lie \
          rather than a default"
+    );
+}
+
+// ── 0127: the verdict the platform writes (AGENT-013 §6.2; S-10.4) ──────────
+
+/// The reasons an `inconclusive` may give are the Rust enum's.
+///
+/// Drift here is the bad kind: add a `Why` in Rust, forget the CHECK, and
+/// `evaluate` produces a verdict the database refuses — at whatever hour a run
+/// first reaches that reason, which by definition is a situation nobody has hit
+/// yet. Widen the CHECK and forget the Rust, and a row exists that nothing can
+/// read back.
+#[test]
+fn the_inconclusive_reasons_are_the_rust_enum() {
+    let sql = statements(&migration_named("0127_preregistration.sql"));
+    let mut listed = check_list(&sql, "inconclusive_why");
+    listed.sort();
+    let mut rust: Vec<String> = Why::ALL.iter().map(|w| w.as_str().to_string()).collect();
+    rust.sort();
+    assert_eq!(listed, rust);
+}
+
+/// The statuses are the verdicts, plus `open`.
+///
+/// `open` has no Rust variant on purpose: it is the absence of a verdict, and a
+/// `Verdict::Open` would be a value `evaluate` could return — which is the one
+/// thing it must not be able to do quietly.
+#[test]
+fn the_statuses_are_the_verdicts_plus_open() {
+    let sql = statements(&migration_named("0127_preregistration.sql"));
+    let mut listed = check_list(&sql, "status");
+    listed.sort();
+    let mut expected = vec![
+        "open".to_string(),
+        Verdict::Supported.as_str().to_string(),
+        Verdict::Refuted.as_str().to_string(),
+        Verdict::Inconclusive {
+            why: Why::InsufficientData,
+        }
+        .as_str()
+        .to_string(),
+    ];
+    expected.sort();
+    assert_eq!(listed, expected);
+}
+
+/// The roles are the Rust enum's three.
+#[test]
+fn the_roles_are_the_rust_enum() {
+    let sql = statements(&migration_named("0127_preregistration.sql"));
+    let mut listed = check_list(&sql, "role");
+    listed.sort();
+    let mut rust: Vec<String> = [Role::Primary, Role::Secondary, Role::Exploratory]
+        .iter()
+        .map(|r| r.as_str().to_string())
+        .collect();
+    rust.sort();
+    assert_eq!(listed, rust);
+}
+
+/// Only `inconclusive` carries a reason, and it must.
+///
+/// The pair is the mechanism: "we could not tell" with no reason is the answer a
+/// run reaches for when it has nothing, and it is exactly the one that must cost
+/// something to give.
+#[test]
+fn inconclusive_is_the_only_status_with_a_reason_and_it_is_required() {
+    let sql = statements(&migration_named("0127_preregistration.sql"));
+    assert!(sql.contains("inconclusive_says_why"), "the constraint is missing");
+    assert!(
+        sql.contains("status <> 'inconclusive' AND inconclusive_why IS NULL"),
+        "nothing else may carry a reason"
+    );
+    assert!(
+        sql.contains("status = 'inconclusive' AND inconclusive_why IS NOT NULL"),
+        "and an inconclusive must"
     );
 }
