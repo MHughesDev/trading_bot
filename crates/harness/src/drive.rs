@@ -839,6 +839,20 @@ pub struct Loop {
     focus: Option<String>,
     /// What the previous call rendered, for §24.5's stickiness.
     last_rendered: BTreeSet<context::store::RecordId>,
+    /// The run's body-token account (§20; S-9.7).
+    ///
+    /// A step about to spend a trial and a step listing instruments get
+    /// identically sized bodies under Part I. This is what makes them differ
+    /// without the run's total rising.
+    run_budget: context::budget::RunBudget,
+    /// The catalogue tools that spend a trial.
+    ///
+    /// Supplied by the platform, like `gated_actions`: which tools spend a trial
+    /// is the catalogue's fact and this crate is sans-IO. Empty by default, so a
+    /// harness with no platform behind it scales nothing rather than guessing.
+    trial_spending_tools: BTreeSet<String>,
+    /// The tool the previous step called, for §20's repeat discount.
+    previous_tool: Option<String>,
 
     outcome: Option<Outcome>,
 }
@@ -862,6 +876,8 @@ impl Loop {
     #[must_use]
     pub fn new(profile: Profile, registry: ToolRegistry, task: Task) -> Self {
         let retries = RetryBudget::new(profile.output.max_retries_per_call);
+        let profile_input_budget = profile.input_budget_tokens();
+        let profile_max_steps = u32::try_from(profile.orchestration.max_steps).unwrap_or(u32::MAX);
         // The state is built from what the loop actually knows at construction, not
         // left at its defaults: a card that says `lookup` on a multi-step research
         // task is a card telling the model something false. `demand` is the only
@@ -942,6 +958,12 @@ impl Loop {
             context_policy: context::policy::ContextPolicy::v1(),
             focus: None,
             last_rendered: BTreeSet::new(),
+            run_budget: context::budget::RunBudget::new(
+                profile_input_budget,
+                profile_max_steps,
+            ),
+            trial_spending_tools: BTreeSet::new(),
+            previous_tool: None,
             outcome: None,
         }
     }
@@ -1021,6 +1043,22 @@ impl Loop {
     #[must_use]
     pub fn with_context_policy(mut self, policy: crate::context::policy::ContextPolicy) -> Self {
         self.context_policy = policy;
+        self
+    }
+
+    /// Name the tools that spend a trial (§20).
+    ///
+    /// The platform's fact to supply, exactly like `with_gated_actions`: the
+    /// catalogue declares `spends_trial` and this crate cannot read a catalogue.
+    /// A harness told nothing scales nothing, rather than guessing from a tool
+    /// name — which is how `run_backtest_v2` would quietly stop counting.
+    #[must_use]
+    pub fn with_trial_spending_tools<I, S>(mut self, names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.trial_spending_tools = names.into_iter().map(Into::into).collect();
         self
     }
 
@@ -1141,7 +1179,7 @@ impl Loop {
         if !self.context_policy.is_retrieval() {
             return self.observations.clone();
         }
-        let budget = u32::try_from(self.remaining_body_bytes() / 4).unwrap_or(u32::MAX);
+        let budget = self.step_body_budget();
         let mut query = context::select::Query::from_state(&self.working, self.step);
         query.focus = self.focus.clone();
         query.previously_rendered = self.last_rendered.clone();
@@ -1159,6 +1197,62 @@ impl Loop {
         // the first chose would be a second answer to one question.
         self.last_rendered = shown;
         blocks
+    }
+
+    /// What this step is worth, from the plan step and the run's recent history
+    /// (AGENT-005 §20; S-9.7).
+    fn step_facts(&self) -> context::budget::StepFacts {
+        let active = self.working.active_step().map(|(_, s)| s);
+        let tool = active.and_then(|s| s.kind.tool_name());
+        context::budget::StepFacts {
+            spends_trial: tool.is_some_and(|t| self.trial_spending_tools.contains(t)),
+            after_correction: self.working.last_error.is_some(),
+            repeat_of_same_tool: tool.is_some() && tool == self.previous_tool.as_deref(),
+            goal_kind: self.working.kind,
+            names_a_tool: tool.is_some(),
+        }
+    }
+
+    /// The input window for this step, after a reserve sized to what the step
+    /// will actually say (§27.1; S-9.18).
+    ///
+    /// Identical to `profile.input_budget_tokens()` under the control policy,
+    /// which is what keeps `v1` a byte-for-byte control rather than a nearly one.
+    fn step_input_window(&self) -> u32 {
+        if !self.context_policy.is_retrieval() {
+            return self.profile.input_budget_tokens();
+        }
+        let reserve = context::budget::output_reserve(
+            self.profile.context.reserve_for_output,
+            &self.step_facts(),
+        );
+        self.profile
+            .context
+            .effective_budget_tokens
+            .saturating_sub(reserve)
+    }
+
+    /// Tokens this step may spend on the body, drawn from the run's account.
+    ///
+    /// The floor is Part I's `MIN_BODY_SHARE` of the window, and the ceiling is
+    /// what the blocks already hold cannot exceed — both enforced inside
+    /// `RunBudget::allow`, so no path here can hand back a number that crosses
+    /// either.
+    fn step_body_budget(&mut self) -> u32 {
+        let facts = self.step_facts();
+        let value = context::budget::step_value(&facts, &self.context_policy);
+        let window = self.step_input_window();
+        let hard = window.saturating_sub(self.reserved_tokens());
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let floor = (window as f32 * context::MIN_BODY_SHARE) as u32;
+        let granted = self.run_budget.allow(value, hard, floor);
+        // The body cannot be larger than what is actually free this step,
+        // whatever the account allows — and the difference goes back to the run
+        // rather than being charged to a step that could not use it.
+        let free = u32::try_from(self.remaining_body_bytes() / 4).unwrap_or(u32::MAX);
+        let spend = granted.min(free.max(floor));
+        self.run_budget.record(spend, granted);
+        spend
     }
 
     /// Bytes of body budget this step has left, for capping an arriving result.
@@ -1263,6 +1357,12 @@ impl Loop {
         // §18: a focus lasts for the plan step that set it. A standing focus
         // would outlive its reason and narrow every later step silently.
         self.focus = None;
+        // §20's repeat discount reads this on the next step.
+        self.previous_tool = self
+            .working
+            .active_step()
+            .and_then(|(_, s)| s.kind.tool_name())
+            .map(str::to_string);
         if let Some((i, _)) = self.working.active_step() {
             self.working.plan[i].status = StepStatus::Done;
         }
@@ -1919,7 +2019,13 @@ impl Loop {
         // a prompt that fits by arithmetic arrives over budget in fact
         // (AGENT-005 §4.2).
         let body = self.body();
-        let assembled = context::assemble_reserving(&self.profile, body, self.reserved_tokens());
+        // The window this step earned, not the profile's flat one (§27.1). Under
+        // the control policy the reserve is the profile's constant, so the
+        // window is exactly `input_budget_tokens()` and the arithmetic is
+        // Part I's unchanged.
+        let window = self.step_input_window();
+        let assembled =
+            context::assemble_within(&self.profile, body, self.reserved_tokens(), window);
         let c = &assembled.compaction;
         if c.dropped > 0 || c.truncated > 0 || c.deduped > 0 {
             self.enter(State::Compacting, fx);
@@ -4021,6 +4127,65 @@ mod tests {
         });
         assert_eq!(l.focus, None);
         assert!(model_call(&fx).prompt.contains("what you are working on"));
+    }
+
+    /// The body budget follows the step, and the run's total does not rise.
+    #[test]
+    fn a_trial_spending_step_gets_a_bigger_body_than_a_lookup_step() {
+        let mut l = Loop::new(local(), registry(), task())
+            .with_context_policy(crate::context::policy::ContextPolicy::v2())
+            .with_trial_spending_tools(["run_backtest"]);
+        l.next(Input::Admission(Admission::Admit));
+
+        // A re-read of the tool the previous step already called. Same goal
+        // kind, same profile — the only difference is what the step is worth,
+        // which is what §20 is about.
+        l.working.plan = vec![PlannedStep {
+            goal: "read the bars again".into(),
+            kind: StepKind::Tool {
+                name: "read_bars".into(),
+            },
+            status: StepStatus::Active,
+        }];
+        l.previous_tool = Some("read_bars".into());
+        let lookup = l.step_body_budget();
+
+        l.working.plan = vec![PlannedStep {
+            goal: "run the backtest".into(),
+            kind: StepKind::Tool {
+                name: "run_backtest".into(),
+            },
+            status: StepStatus::Active,
+        }];
+        l.previous_tool = None;
+        let trial = l.step_body_budget();
+
+        assert!(
+            trial > lookup,
+            "a trial step and a re-read get identically sized bodies under Part I:              {trial} vs {lookup}"
+        );
+        // The scaling can only ever *free* tokens, never conjure them: 1.3x of a
+        // window is still a window. What the multiplier buys is that the cheap
+        // step stops taking a whole one.
+        assert!(
+            trial <= l.profile.input_budget_tokens(),
+            "the hard input budget is never crossed"
+        );
+        assert!(
+            u64::from(trial + lookup) <= l.run_budget.allowance(),
+            "and neither step may take the run past its allowance"
+        );
+    }
+
+    /// Under the control, the window is Part I's exactly.
+    ///
+    /// The property that keeps `v1` a control rather than a nearly-control: a
+    /// default that quietly pre-applied half the change would make the
+    /// comparison meaningless.
+    #[test]
+    fn the_control_window_is_the_profiles_own() {
+        let (l, _) = started();
+        assert_eq!(l.step_input_window(), l.profile.input_budget_tokens());
     }
 
     /// The reason termination is a validated tool call and not a string prefix: a

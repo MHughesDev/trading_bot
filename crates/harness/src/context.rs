@@ -15,6 +15,7 @@
 //! tool output ends with; a head-only cut loses the error at the bottom of a log.
 
 pub mod body;
+pub mod budget;
 pub mod degrade;
 pub mod manifest;
 pub mod policy;
@@ -293,7 +294,29 @@ pub fn assemble_reserving(
     blocks: Vec<Block>,
     reserved_tokens: u32,
 ) -> Assembled {
-    let window = profile.input_budget_tokens();
+    assemble_within(profile, blocks, reserved_tokens, profile.input_budget_tokens())
+}
+
+/// [`assemble_reserving`] against a window this step earned, not the profile's
+/// flat one (AGENT-005 §27.1; Set S task S-9.18).
+///
+/// `reserve_for_output` is one constant per profile, so every call reserves the
+/// maximum — which is why the body is smaller than it needs to be on most of
+/// them. A lookup answers with an id and a report-writing step answers with
+/// paragraphs, and holding back a report's worth of output tokens on the lookup
+/// is a body the step could have used and did not get.
+///
+/// The window has to arrive here rather than being applied by the caller,
+/// because this function derives the floor and the compaction trigger from it.
+/// A caller that scaled its own number and passed the body through would get a
+/// floor computed against a window nobody was using.
+#[must_use]
+pub fn assemble_within(
+    profile: &Profile,
+    blocks: Vec<Block>,
+    reserved_tokens: u32,
+    window: u32,
+) -> Assembled {
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
