@@ -14,6 +14,11 @@
 //! Truncation keeps head AND tail. A tail-only cut loses the summary line that most
 //! tool output ends with; a head-only cut loses the error at the bottom of a log.
 
+pub mod body;
+pub mod degrade;
+pub mod manifest;
+pub mod store;
+
 use serde::{Deserialize, Serialize};
 
 use crate::profile::Profile;
