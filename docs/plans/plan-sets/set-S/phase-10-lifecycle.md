@@ -1,6 +1,6 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 31% (5 / 16 tasks), plus 7 `PARTIAL`.**
+**Completion: 31% (5 / 16 tasks), plus 8 `PARTIAL`.**
 
 > Status 2026-09-17. **S-10.1, S-10.6, S-10.7, S-10.13 and S-10.14 are done**;
 > S-10.2, S-10.3, S-10.4 and S-10.14's per-tier half are partial; the other eight
@@ -403,7 +403,40 @@ while tripped and succeeds after reset; the approval is a `decision` row with th
 ## Comparison, optimisation, memory, yield
 
 ### S-10.10 `compare_candidates` — SPEC §11.5 as one door — M
-`NOT STARTED`
+`PARTIAL` 2026-09-17 — **the door is built; the tool that walks through it is not.**
+
+Everything §11.5 asks for already existed in `backtest::stats::compare` — paired
+replicates, anytime-valid confidence sequences, the ROPE, the win-rate rule, Holm,
+the Multiple Comparison Matrix, `ComparisonPlan::judge` — and **nothing outside that
+file called any of it**. The tenth instance of this repository's dominant defect
+shape. What shipped was `compare_backtests`, which puts headline metrics side by
+side and lets a reader form an impression.
+
+`crates/research/src/compare.rs` is the sweep: every pair judged, Holm across them,
+the matrix assembled. It re-implements none of the statistics, because a second
+implementation is a second standard and the looser one is the one a candidate gets
+judged by.
+
+**Only `Promote` establishes an edge.** `Reject` means A's advantage is smaller than
+the declared delta — §11.5 says in as many words that it is *not* "B is better" — so
+the reverse direction is judged rather than inferred, and a sub-delta advantage
+ranks nobody.
+
+The ranking is a win **count**, not a tournament resolution: `A ≻ B` and `B ≻ C`
+does not give `A ≻ C` under a paired comparison, and inventing the transitive edge
+would state evidence nobody produced.
+
+A test found a real property worth knowing: **the confidence sequence's width
+depends on the declared ROPE scale, not on the observed spread.** With a half-width
+of 2.0 and a difference of 1.0, twenty-nine replicates leave the lower bound just
+below zero and the protocol says `KeepSampling` — correctly. Declaring a loose bound
+costs replicates, and a caller should know that before declaring one.
+
+There is no seed anywhere in the module, and a test greps for one.
+
+**Not done:** the `compare_candidates` tool and its route, which need measurements
+from real backtest runs; and the desk surface. AT-62 still stands — no
+critical-difference diagram exists anywhere.
 
 All nuisance sources randomised with **platform-held seeds** (the tool has no seed argument —
 ADR-P2-02's technique), ~29 paired replicates, `A ≻ B` iff `P(A>B) ≥ 0.75 ∧ P(A>B) − CI_lower > 0.5`,
