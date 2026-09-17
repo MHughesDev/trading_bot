@@ -58,9 +58,15 @@ pub enum Ranking {
     Indistinguishable,
 }
 
-/// The comparison, with its evidence.
+/// A sweep over every pair, with its evidence.
+///
+/// **Named `Sweep` and not `Comparison`** — `backtest::stats::compare::Comparison`
+/// is the sealed one-pair verdict, and a static invariant greps for
+/// `Comparison {` outside the protocol so that verdict cannot be constructed
+/// without its context. A second type of that name here defeats a name-based
+/// guard, which is the kind of guard that one is. The invariant caught it.
 #[derive(Debug, Clone)]
-pub struct Comparison {
+pub struct Sweep {
     pub matrix: ComparisonMatrix,
     pub ranking: Ranking,
     /// `(a, b)` → Holm-adjusted descriptive p-value, in the order the pairs were
@@ -95,7 +101,7 @@ pub enum CompareError {
 pub fn compare(
     candidates: &[Candidate],
     plan: &ComparisonPlan,
-) -> Result<Comparison, CompareError> {
+) -> Result<Sweep, CompareError> {
     if candidates.len() < 2 {
         return Err(CompareError::TooFewCandidates(candidates.len()));
     }
@@ -157,7 +163,7 @@ pub fn compare(
     let adjusted_p: BTreeMap<(String, String), f64> =
         pairs.into_iter().zip(adjusted).collect();
 
-    Ok(Comparison {
+    Ok(Sweep {
         ranking: rank(candidates, &beats),
         matrix,
         adjusted_p,

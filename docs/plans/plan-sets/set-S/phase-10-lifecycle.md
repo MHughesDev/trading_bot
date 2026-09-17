@@ -356,6 +356,11 @@ is **bit-identical**, not drift. The platform computed the same thing both times
 has been broken all along, which is a different problem and one this detector would
 otherwise file every night.
 
+**AT-63 caught a real leak.** The receipt's first version carried the platform seeds
+as values, and a receipt travels to the agent — so a type holding them hands them
+over. It carries a *digest* now, which detects the drift a receipt exists to detect
+and reveals nothing that would let a caller reproduce a favourable draw.
+
 **Not done:** `lifecycle.reproduce`, the `repro_drift` nightly job over a 2% sample
 of 30 days, and the automatic `platform_defect` filing.
 
@@ -462,7 +467,10 @@ of 2.0 and a difference of 1.0, twenty-nine replicates leave the lower bound jus
 below zero and the protocol says `KeepSampling` — correctly. Declaring a loose bound
 costs replicates, and a caller should know that before declaring one.
 
-There is no seed anywhere in the module, and a test greps for one.
+There is no seed anywhere in the module, and a test greps for one. The sweep's
+output type is named `Sweep` rather than `Comparison`: a static invariant greps for
+`Comparison {` constructed outside the protocol, and a second type of that name
+defeats a name-based guard. The invariant caught it.
 
 **Not done:** the `compare_candidates` tool and its route, which need measurements
 from real backtest runs; and the desk surface. AT-62 still stands — no

@@ -50,9 +50,17 @@ pub struct ReproSpec {
     /// may not be `ema_cross_v3`.
     pub strategy_version_hash: String,
     pub cost_model_version: String,
-    /// The seeds the **platform** held, not the caller's. A receipt carrying a
-    /// caller-chosen seed would reproduce whatever the caller wanted reproduced.
-    pub platform_seeds: Vec<u64>,
+    /// A **digest** of the seeds the platform used — never the seeds.
+    ///
+    /// AT-63 caught the first version of this field, which held them as values,
+    /// and it was right to: a receipt travels to the agent, and a type carrying
+    /// the seeds hands them over. A digest does everything a receipt needs — two
+    /// runs under different draws produce different digests, which is the drift
+    /// detection — and reveals nothing that would let a caller reproduce a
+    /// favourable draw on purpose.
+    ///
+    /// Computed by the ledger, which is the only reader of the seeds themselves.
+    pub seed_digest: String,
     pub harness_version: String,
 }
 
@@ -65,8 +73,6 @@ pub enum ReceiptError {
          believed."
     )]
     Missing { field: &'static str },
-    #[error("a receipt with no platform seeds cannot reproduce anything stochastic")]
-    NoSeeds,
 }
 
 impl ReproSpec {
@@ -80,9 +86,6 @@ impl ReproSpec {
                 return Err(ReceiptError::Missing { field });
             }
         }
-        if self.platform_seeds.is_empty() {
-            return Err(ReceiptError::NoSeeds);
-        }
         Ok(())
     }
 
@@ -91,7 +94,7 @@ impl ReproSpec {
     /// One list, used by `validate`, `digest` and `differences`. Three copies
     /// would be three chances for a field to be validated and not hashed, which
     /// is a receipt that passes and does not detect.
-    fn fields(&self) -> [(&'static str, &str); 7] {
+    fn fields(&self) -> [(&'static str, &str); 8] {
         [
             ("dataset_hash", &self.dataset_hash),
             ("feature_registry_version", &self.feature_registry_version),
@@ -99,6 +102,7 @@ impl ReproSpec {
             ("engine_version", &self.engine_version),
             ("strategy_version_hash", &self.strategy_version_hash),
             ("cost_model_version", &self.cost_model_version),
+            ("seed_digest", &self.seed_digest),
             ("harness_version", &self.harness_version),
         ]
     }
@@ -115,10 +119,6 @@ impl ReproSpec {
             h.update(name.as_bytes());
             h.update(b"=");
             h.update(value.as_bytes());
-            h.update(b"\x1f");
-        }
-        for seed in &self.platform_seeds {
-            h.update(seed.to_be_bytes());
             h.update(b"\x1f");
         }
         format!("sha256:{}", hex::encode(h.finalize()))
@@ -139,13 +139,6 @@ impl ReproSpec {
                     now: (*theirs).to_string(),
                 });
             }
-        }
-        if self.platform_seeds != other.platform_seeds {
-            out.push(Difference {
-                field: "platform_seeds".to_string(),
-                was: format!("{:?}", self.platform_seeds),
-                now: format!("{:?}", other.platform_seeds),
-            });
         }
         out
     }
@@ -281,7 +274,7 @@ mod tests {
             engine_version: "engine_v2".into(),
             strategy_version_hash: "sha256:strategy".into(),
             cost_model_version: "costs_v3".into(),
-            platform_seeds: vec![1, 2, 3],
+            seed_digest: "sha256:seeds".into(),
             harness_version: "0.1.0".into(),
         }
     }
@@ -305,6 +298,7 @@ mod tests {
                 r.strategy_version_hash = String::new();
             }),
             ("cost_model_version", |r| r.cost_model_version = String::new()),
+            ("seed_digest", |r| r.seed_digest = String::new()),
             ("harness_version", |r| r.harness_version = String::new()),
         ];
         for (field, break_it) in setters {
@@ -316,9 +310,6 @@ mod tests {
                 "{field} was not required"
             );
         }
-        let mut r = receipt();
-        r.platform_seeds.clear();
-        assert_eq!(r.validate(), Err(ReceiptError::NoSeeds));
     }
 
     /// The digest separates its fields.
@@ -342,12 +333,21 @@ mod tests {
         assert_eq!(receipt().digest(), receipt().digest());
     }
 
-    /// A seed change changes the digest.
+    /// A different draw changes the receipt — through the seed *digest*, never
+    /// the seeds.
+    ///
+    /// AT-63 caught the first version of this field holding the values, and it
+    /// was right to: a receipt travels to the agent, and a digest detects the
+    /// drift without handing over what would let a caller reproduce a
+    /// favourable draw.
     #[test]
-    fn the_seeds_are_in_the_digest() {
+    fn a_different_seed_draw_changes_the_receipt() {
         let mut other = receipt();
-        other.platform_seeds = vec![1, 2, 4];
+        other.seed_digest = "sha256:other".into();
         assert_ne!(receipt().digest(), other.digest());
+        let diffs = receipt().differences(&other);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].field, "seed_digest");
     }
 
     /// Same receipt, same number.
