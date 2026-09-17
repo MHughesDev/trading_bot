@@ -106,6 +106,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/lifecycle/preregistrations", post(lifecycle::seal))
         .route("/api/lifecycle/hypotheses", post(lifecycle::state_hypothesis))
         .route("/api/lifecycle/metrics", get(lifecycle::metrics))
+        // The power check runs here, before any trial (§6.3).
+        .route("/api/lifecycle/designs", post(lifecycle::bind_design))
         .route("/api/falsification/defects", post(falsification::report_defect))
         // Feasibility: neither of these spends a trial, which is the point of
         // asking them before a search rather than after it disappoints.

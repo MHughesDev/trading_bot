@@ -1,6 +1,6 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 31% (5 / 16 tasks), plus 4 `PARTIAL`.**
+**Completion: 31% (5 / 16 tasks), plus 5 `PARTIAL`.**
 
 > Status 2026-09-17. **S-10.1, S-10.6, S-10.7, S-10.13 and S-10.14 are done**;
 > S-10.2, S-10.3, S-10.4 and S-10.14's per-tier half are partial; the other eight
@@ -215,7 +215,37 @@ carries a `why`.
 **Traces:** AGENT-013 P3, §5.4, §5.7, §6.2, §6.6, §6.7, §7.3, §8.1; §13.5.
 
 ### S-10.5 Design, the power check, and `simplify` before the first trial — M
-`NOT STARTED`
+`PARTIAL` 2026-09-17 — **the power check is built and binding; `simplify` is not.**
+
+`crates/research/src/power.rs` asks `min_track_record_length` about the
+*pre-registered effect size* rather than about an observed Sharpe, which turns it
+from a verdict into a precondition. A run that registers a `delta_practical` and
+then looks for it in a window that could not show it spends every trial it has and
+learns that at the end; this costs nothing and says so at the start.
+
+**One-sided on purpose.** `Adequate` is a floor — "this run is not doomed on sample
+size alone" — and the refusal explicitly is not a promise the window will settle the
+question. A check that read as a guarantee would be wrong the first time the returns
+were autocorrelated, and it says so in its own `detail()`.
+
+The refusal names the window that would suffice. "Insufficient data" is not
+something a run can act on; "it needs 1,340 observations, has 512, and at this
+sampling rate that is 5.3 years" is.
+
+**Neither the delta nor the window is in the design request** — both come from the
+sealed registration, and a test asserts the request type cannot carry either. The
+observation count is derived from the window and the bar size for the same reason: a
+run that could state its own would state the one that passes.
+
+`lifecycle.design` refuses `strategy_version: latest` at the boundary — a design
+bound to it produces a result nobody can reproduce a week later — and `0128`'s
+`a_design_names_an_exact_version` refuses it again where a second writer cannot
+route around it.
+
+**Not done:** `simplify()` over the draft, and the `Move` diff it records. The
+observation count also assumes 24/7 (crypto, which is what the platform's live
+venues are); an equities window would need a trading calendar, and that limitation
+is named in `observations_in`'s doc rather than left to be discovered.
 
 `lifecycle.design` binds a hypothesis to a strategy version, split spec and null choice, and
 runs the **power check**: `min_track_record` (AGENT-006 §5.4) for the pre-registered

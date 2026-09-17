@@ -338,6 +338,197 @@ pub async fn state_hypothesis(
     }
 }
 
+/// Observations a window holds at a bar size.
+///
+/// Derived from the pre-registered window and the timeframe rather than supplied
+/// by the caller, and that is the whole point: a run that could state its own
+/// observation count would state the one that passes the power check, and the
+/// check would measure the run's preference rather than the data.
+///
+/// Crypto, so 24/7 — no trading calendar to apply. An equities window would need
+/// one, and a caller that passed an equities instrument here would get an
+/// optimistic count; that is a real limitation and it is named rather than
+/// hidden, because the platform's live venues are crypto and the day that
+/// changes this function is where it has to be fixed.
+#[must_use]
+pub fn observations_in(start: &str, end: &str, timeframe: &str) -> Option<(f64, f64)> {
+    let minutes = match timeframe {
+        "1m" => 1.0,
+        "5m" => 5.0,
+        "15m" => 15.0,
+        "30m" => 30.0,
+        "1h" => 60.0,
+        "4h" => 240.0,
+        "1d" => 1_440.0,
+        _ => return None,
+    };
+    let days = days_between(start, end)?;
+    let per_year = (365.0 * 24.0 * 60.0) / minutes;
+    Some((days * 24.0 * 60.0 / minutes, per_year))
+}
+
+/// Whole days between two `YYYY-MM-DD` dates.
+fn days_between(start: &str, end: &str) -> Option<f64> {
+    let parse = |s: &str| -> Option<chrono::NaiveDate> {
+        chrono::NaiveDate::parse_from_str(s.get(..10)?, "%Y-%m-%d").ok()
+    };
+    let (a, b) = (parse(start)?, parse(end)?);
+    let days = (b - a).num_days();
+    (days >= 0).then(|| days as f64)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DesignBody {
+    hypothesis_id: Uuid,
+    strategy_version: String,
+    #[serde(default)]
+    split_spec_id: Option<String>,
+    null_family: String,
+    /// Bar size. Decides how many observations the pre-registered window holds.
+    #[serde(default = "default_timeframe")]
+    timeframe: String,
+    #[serde(default)]
+    run_id: Option<Uuid>,
+}
+
+fn default_timeframe() -> String {
+    "1h".to_string()
+}
+
+/// `POST /api/lifecycle/designs` — bind, and check the window can settle it.
+///
+/// The power check reads the **pre-registration's** window and delta, not the
+/// request's. A design that could restate either would be a design that chose
+/// the numbers its window passes.
+pub async fn bind_design(
+    State(state): State<AppState>,
+    _token: BearerToken,
+    Json(body): Json<DesignBody>,
+) -> impl IntoResponse {
+    if body.strategy_version.trim().eq_ignore_ascii_case("latest") {
+        return bad_request(
+            "unreproducible_version",
+            "`latest` is not a version".into(),
+            "bind an exact version: `latest` means something different a week later, and a              result nobody can reproduce is not a result",
+        )
+        .into_response();
+    }
+
+    let Some(run_id) = body.run_id else {
+        return bad_request(
+            "no_run",
+            "a design belongs to a run".into(),
+            "this is supplied by the session, not by the request",
+        )
+        .into_response();
+    };
+    let prereg = match head_registration(&state, run_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return bad_request(
+                "preregistration_required",
+                "this run has sealed no pre-registration".into(),
+                "call lifecycle.preregister first: the power check reads the window and the                  delta_practical you committed to, and there are none yet",
+            )
+            .into_response()
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "storage", "message": e })),
+            )
+                .into_response()
+        }
+    };
+
+    let Some((observations, per_year)) =
+        observations_in(&prereg.window.start, &prereg.window.end, &body.timeframe)
+    else {
+        return bad_request(
+            "unknown_timeframe",
+            format!("`{}` is not a bar size this platform serves", body.timeframe),
+            "one of 1m, 5m, 15m, 30m, 1h, 4h, 1d",
+        )
+        .into_response();
+    };
+
+    // Normal moments: the run has no returns yet, so there is nothing to take
+    // skew and kurtosis from. That is the optimistic reading, which is the safe
+    // direction here — a refusal under optimistic moments is a refusal that
+    // holds under any others.
+    let (check, verdict) =
+        research::power::check(prereg.delta_practical, observations, per_year, 0.0, 3.0);
+    if !verdict.is_adequate() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "insufficient_power",
+                "message": verdict.detail(),
+                "window": { "start": prereg.window.start, "end": prereg.window.end },
+                "delta_practical": prereg.delta_practical,
+                "observations": check.observations,
+                "required_observations": check.required_observations,
+                "trials_spent": 0,
+            })),
+        )
+            .into_response();
+    }
+
+    let id = Uuid::new_v4();
+    let res = sqlx::query(
+        "INSERT INTO agent_lifecycle.design
+             (design_id, run_id, hypothesis_id, strategy_version, split_spec_id,
+              null_family, timeframe, observations, required_observations)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+    )
+    .bind(id)
+    .bind(run_id)
+    .bind(body.hypothesis_id)
+    .bind(&body.strategy_version)
+    .bind(body.split_spec_id.as_deref())
+    .bind(&body.null_family)
+    .bind(&body.timeframe)
+    .bind(check.observations)
+    .bind(check.required_observations)
+    .execute(&state.pg)
+    .await;
+    match res {
+        Ok(_) => (
+            StatusCode::CREATED,
+            Json(json!({
+                "design_id": id,
+                "observations": check.observations,
+                "required_observations": check.required_observations,
+                "power": "adequate",
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "storage", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// The head of a run's amendment chain.
+async fn head_registration(
+    state: &AppState,
+    run_id: Uuid,
+) -> Result<Option<Preregistration>, String> {
+    let row: Option<Uuid> = sqlx::query_scalar(
+        "SELECT prereg_id FROM agent_lifecycle.preregistration           WHERE run_id = $1 ORDER BY amendment DESC LIMIT 1",
+    )
+    .bind(run_id)
+    .fetch_optional(&state.pg)
+    .await
+    .map_err(|e| e.to_string())?;
+    match row {
+        Some(id) => load(state, id).await,
+        None => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,6 +588,46 @@ mod tests {
             "primary_hypothesis": "h"
         });
         assert!(serde_json::from_value::<PreregistrationBody>(body).is_err());
+    }
+
+    /// The observation count is derived from the window, never supplied.
+    ///
+    /// A run that could state its own would state the one that passes the power
+    /// check, and the check would measure the run's preference rather than the
+    /// data.
+    #[test]
+    fn the_observation_count_comes_from_the_window_and_the_bar_size() {
+        let (obs, per_year) = observations_in("2024-01-01", "2024-12-31", "1h").expect("1h");
+        assert!((obs - 365.0 * 24.0).abs() < 25.0, "{obs}");
+        assert!((per_year - 8_760.0).abs() < 1.0, "{per_year}");
+
+        let (daily, _) = observations_in("2024-01-01", "2024-12-31", "1d").expect("1d");
+        assert!((daily - 365.0).abs() < 2.0, "{daily}");
+
+        // A bar size the platform does not serve is named rather than guessed.
+        assert_eq!(observations_in("2024-01-01", "2024-12-31", "3h"), None);
+        // A backwards window has no observations.
+        assert_eq!(observations_in("2024-12-31", "2024-01-01", "1h"), None);
+    }
+
+    /// The design request cannot restate the delta or the window.
+    ///
+    /// Both come from the sealed registration. A design that could restate
+    /// either would be a design that chose the numbers its window passes, which
+    /// is the whole thing the power check exists to prevent.
+    #[test]
+    fn a_design_request_carries_neither_the_delta_nor_the_window() {
+        let body = json!({
+            "hypothesis_id": Uuid::new_v4(),
+            "strategy_version": "v3",
+            "null_family": "block_bootstrap",
+            "delta_practical": 0.0001,
+            "window": {"start": "2010-01-01", "end": "2026-01-01"}
+        });
+        let parsed: DesignBody = serde_json::from_value(body).expect("extra fields are ignored");
+        let rendered = format!("{parsed:?}");
+        assert!(!rendered.contains("delta"), "{rendered}");
+        assert!(!rendered.contains("2010"), "{rendered}");
     }
 
     /// A hypothesis body has no status field.

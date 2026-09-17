@@ -482,6 +482,24 @@ Changed your mind? Call it again with `supersedes`. **The trial budget carries
 over**, so amending does not buy a fresh one, and the third amendment ends the run
 `protocol_unstable` — a protocol rewritten three times is not a protocol.
 
+### design
+
+Bind the hypothesis to the thing that will test it: an exact strategy version, a
+split spec, and the null family the result is compared against.
+
+`strategy_version` must be an exact version. A design bound to `latest` produces
+a result nobody can reproduce, because `latest` means something different a week
+later.
+
+The **power check** runs here, before any trial. It asks whether the window you
+pre-registered is long enough for the `delta_practical` you pre-registered to be
+distinguishable from zero. If it is not, the design is refused and you are told
+how many observations the window would need — widen it, or pre-register a larger
+delta and say why that is the one that matters.
+
+Passing is a floor, not a promise. It says the run is not doomed on sample size
+alone; it does not say the window will settle the question.
+
 ### report_kill
 
 Refute a candidate: show that a strategy's apparent edge is an artifact. This is

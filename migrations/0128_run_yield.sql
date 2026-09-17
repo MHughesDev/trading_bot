@@ -85,3 +85,40 @@ ALTER TABLE agent_runs
 CREATE INDEX IF NOT EXISTS agent_runs_barren_idx
   ON agent_runs (workflow, barren, finished_at DESC)
   WHERE barren IS NOT NULL;
+
+-- ## Designs (AGENT-013 §5.5, §6.3; Set S task S-10.5)
+--
+-- A design binds a hypothesis to the exact thing that will test it, and records
+-- what the power check found. `observations` and `required_observations` are
+-- stored because the refusal is the interesting row: a design that was refused
+-- never gets here, so what is kept is the evidence that the window *was* long
+-- enough — which is the half a reader needs when the result later disappoints.
+
+CREATE TABLE IF NOT EXISTS agent_lifecycle.design (
+    design_id             UUID PRIMARY KEY,
+    run_id                UUID NOT NULL,
+    hypothesis_id         UUID NOT NULL,
+    -- An exact version. `latest` is refused at the route, because a design bound
+    -- to it produces a result nobody can reproduce a week later.
+    strategy_version      TEXT NOT NULL,
+    split_spec_id         TEXT,
+    null_family           TEXT NOT NULL,
+    timeframe             TEXT NOT NULL,
+    observations          DOUBLE PRECISION NOT NULL,
+    required_observations DOUBLE PRECISION,
+    bound_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT a_design_names_an_exact_version CHECK (
+        btrim(strategy_version) <> '' AND lower(strategy_version) <> 'latest'
+    ),
+    CONSTRAINT a_design_names_its_null CHECK (btrim(null_family) <> ''),
+    -- A stored design passed the power check, so its window holds at least what
+    -- the check demanded. A row that did not would be a design the platform
+    -- refused and then wrote down anyway.
+    CONSTRAINT a_stored_design_had_the_power_it_needed CHECK (
+        required_observations IS NULL OR observations >= required_observations
+    )
+);
+
+CREATE INDEX IF NOT EXISTS design_run_idx
+  ON agent_lifecycle.design (run_id, bound_at DESC);

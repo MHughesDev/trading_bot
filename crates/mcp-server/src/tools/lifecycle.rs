@@ -212,6 +212,28 @@ pub async fn preregister(api: &crate::ApiClient, params: &Value) -> Value {
     post(api, "/api/lifecycle/preregistrations", params.clone()).await
 }
 
+/// `design` — bind a hypothesis to what will test it, and check the window can
+/// settle it (§5.5, §6.3).
+///
+/// The power check runs **before any trial**. A run that pre-registers an effect
+/// size and then looks for it in a window that could not show it spends every
+/// trial it has and learns that at the end.
+pub async fn design(api: &crate::ApiClient, params: &Value) -> Value {
+    for (field, why) in [
+        ("hypothesis_id", "which hypothesis this design tests"),
+        (
+            "strategy_version",
+            "the exact version under test. A design bound to `latest` is a design              whose result cannot be reproduced.",
+        ),
+        ("null_family", "what the result is compared against"),
+    ] {
+        if text(params, field).is_none() {
+            return missing(field, why);
+        }
+    }
+    post(api, "/api/lifecycle/designs", params.clone()).await
+}
+
 /// `hypothesise` — state one thing and the result that would refute it (§6.2).
 ///
 /// The vocabulary comes from the platform, not from a constant here: the metrics
@@ -307,6 +329,32 @@ pub fn specs() -> Vec<ToolSpec> {
         )
         .internal()
         .evidence(&["hypothesis_id"]),
+        ToolSpec::new(
+            "design",
+            "lifecycle",
+            Risk::Write,
+            "BIND a hypothesis to the strategy version, split and null that will test it.              Refused if the pre-registered window is too short to distinguish the effect              you registered from zero — before any trial is spent.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "hypothesis_id": { "type": "string" },
+                    "strategy_version": {
+                        "type": "string",
+                        "description": "An exact version. `latest` is not reproducible."
+                    },
+                    "split_spec_id": { "type": "string" },
+                    "null_family": { "type": "string" },
+                    "timeframe": {
+                        "type": "string",
+                        "description": "Bar size, e.g. 1h. Decides how many observations the window holds."
+                    }
+                },
+                "required": ["hypothesis_id", "strategy_version", "null_family"]
+            }),
+        )
+        .internal()
+        .evidence(&["design_id"])
+        .notes("design"),
     ]
 }
 
