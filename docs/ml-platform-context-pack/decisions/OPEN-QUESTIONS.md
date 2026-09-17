@@ -284,3 +284,79 @@ before any trial-spending tool is admitted, and a read that fails is treated as
 — has no such tension and is built, because a cap on amendments has a
 conservative direction and this does not.
 
+### OQ-20 · The trial gate registers at the tool call; `mlops.trial` describes compute. The route between them was never built, and every trial-spending tool is refused.
+
+**Found 2026-09-17**, tracing `TrialRequest.prereg_hash` while wiring the workflow
+onto a ticket. Nothing is implemented in either direction.
+
+**The failure, which is live.** `gate::ApiTrialRegistrar::register` posts to
+`POST /api/ledger/trials`. **That route does not exist** — the only occurrence of
+the string in the repository is the `post` call itself. A 404 is an `Err`, which
+becomes `registration_failed`, which `CallGate::admit` returns before
+`dispatch_untraced` is reached. So every tool declaring a trial is refused at the
+gate, on every path: the internal agent goes through `bridge::execute` →
+`dispatch_tool` → `admit`, and so does the MCP front door.
+
+That is all seven of them — `backtest_strategy`, `rerun_backtest`, `run_sweep`,
+`run_study`, `advance_gate`, `report_kill`, `report_evaluator_defect` — which is
+the entire research loop. The platform can plan, author and pre-register, and
+cannot run anything that counts.
+
+`affbe59` built the gate, its three adversarial tests and the structural test that
+the dispatch table has exactly one call site behind it. All of them pass, because
+they test the refusal path and a registrar that refuses is exactly what they
+assert. The caller was built and the callee never was — this repository's dominant
+defect shape, inverted.
+
+**Why the obvious repair does not work.** `mlops.trial`'s required columns are
+`config_hash`, `config`, `dataset_id`, `code_hash`, `image_digest` and `seed_set`.
+Every one is a fact about **compute**: which configuration ran, over which data,
+from which image, under which seeds. A tool call has not chosen any of them —
+`run_sweep` is dispatched with arguments, and the sweep decides the configs and
+the data slice afterwards. Writing the route means inventing a `dataset_id` and a
+`config_hash` for a look that has not looked at anything yet, and a
+`dataset_id` of `"pending:run_sweep"` is a placeholder that reads as data
+everywhere downstream.
+
+**And the compute site already registers.** `backtest::run` calls
+`ledger.register` per Run (`run/mod.rs:174`), with a real subject from
+`trial_subject(cfg)`. INV-16 — "no compute is dispatched without a trial row in
+state REGISTERED" — is satisfied there, at the only place the required facts
+exist.
+
+**So the two designs differ in what a trial *is*.**
+
+**A. The gate registers, and `mlops.trial` grows a shape for a call.** Matches
+`affbe59`'s stated intent ("writes the ledger row"). Costs: a second grain in one
+table — one row per tool call plus N rows per Run — so `trials_counted`, the
+exploration floor's denominator and `N_eff` all change meaning, and every
+selection-adjusted statistic on this platform reads one of those. It also needs
+the required columns to become optional for one grain, which weakens them for the
+other.
+
+**B. The gate *verifies* rather than registers.** `admit` checks that the run may
+spend (it already does: the chat-turn rule, the survey rule, the pre-registration
+rule), counts the call against `max_calls_per_run` (it already does), and lets the
+compute site write the row it alone can write honestly. `TrialRegistrar` becomes a
+reservation or disappears. Costs: `admit` no longer guarantees a row exists at
+dispatch — a tool that dispatches and never reaches compute would be a look with
+no trial, which is the thing the gate was written to prevent.
+
+**C. The gate registers a *reservation* in its own table**, settled or abandoned
+by the compute site. Keeps both properties and adds a table and a reconciliation
+nobody has asked for yet.
+
+**Leaning: B**, because the required columns are evidence rather than opinion —
+`mlops.trial`'s shape says a trial is a unit of compute, and it has said so since
+`0043`. The gate's job is admission, and admission is a different question from
+registration. But B gives up a property `affbe59` deliberately bought, and giving
+it up is not something to do as a side effect of fixing a 404.
+
+**What holds meanwhile: nothing.** This is not a gap with a safe fallback — the
+research loop does not run. It is written up rather than patched because the
+patch is the design decision, and picking one to unblock a build is how the trial
+counter would come to mean something nobody chose.
+
+**Status:** open, and it blocks gate H-2 (a live run) independently of the missing
+credential.
+

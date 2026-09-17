@@ -2,6 +2,16 @@
 
 **Completion: 31% (5 / 16 tasks), plus 11 `PARTIAL`. One untouched: S-10.15.**
 
+> **Blocking finding, 2026-09-17: the trial gate's registrar posts to a route that
+> was never built, so every trial-spending tool is refused and nothing that counts
+> can run.** The gate's own tests pass — they assert that a refusing registrar
+> refuses the call, which is exactly what happens. Written up as **OQ-20** rather
+> than patched, because the repair decides what a trial *is*: `mlops.trial` has
+> required `config_hash`, `dataset_id`, `code_hash`, `image_digest` and `seed_set`
+> since `0043`, and a tool call has chosen none of them. This blocks gate H-2
+> independently of the missing credential, and it is why several tasks below say
+> "needs a live run".
+>
 > Status 2026-09-17. **S-10.1, S-10.6, S-10.7 and S-10.13 are done**; S-10.11 is
 > partial and substantial — the `ResearchRun` worker, the campaign door, the worker
 > projection and the `propose` decision are built and reached, and what is missing
@@ -124,8 +134,21 @@ unique root per run, so a run cannot seal a second convenient protocol beside th
 first instead of amending it.
 
 `CallGate::under_preregistration` refuses every trial-spending tool on a run with
-`Prereg::Missing`, before the registrar, and stamps the hash on every ticket a
-sealed run spends. `Prereg` is a three-state enum rather than an `Option` because
+`Prereg::Missing`, before the registrar.
+
+> **The second half of that sentence was not true, and the reason is worse than the
+> claim.** `TrialRequest` carries `prereg_hash`, and `ApiTrialRegistrar::register`
+> does not put it in the body it posts — so no hash reached any ticket. Tracing it
+> found why that had never been noticed: the registrar posts to
+> `POST /api/ledger/trials`, **and that route does not exist anywhere in the
+> repository**. A 404 is an `Err`, so `admit` refuses the call, so **every one of
+> the seven trial-spending tools is refused on every path** and the research loop
+> does not run. See **OQ-20** — the repair is a design decision (`mlops.trial`'s
+> required columns are all facts about compute, which a tool call has not chosen
+> yet), and picking one to unblock a build is how the trial counter would come to
+> mean something nobody chose. `every_client_path_is_served.rs` now holds the
+> general form: a literal path the MCP client calls must be a route the platform
+> serves, with the one live offender pinned so the list can only shrink. `Prereg` is a three-state enum rather than an `Option` because
 "not required" and "required and missing" must not be the same value.
 
 `lifecycle.preregister` and `lifecycle.hypothesise` exist, with their routes
