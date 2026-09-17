@@ -1327,7 +1327,11 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         // Every reservation this run makes is attributed to it (ADR-S10-10).
         // A service token names a tenant and not a run, so the platform cannot
         // derive this — the driver is the only thing that knows.
-        .for_run(params.run_id.to_string());
+        .for_run(params.run_id.to_string())
+        // The stage skeleton every look is recorded under (S-10.14). The ledger
+        // could not answer "how many trials were replications": `workflow` was
+        // on `agent_runs` and nowhere a trial could be joined to.
+        .following(params.workflow.as_str());
         // One question with one answer (§2.2, §3). A chat turn spends nothing;
         // so does a `survey`, for a different reason and with a different thing
         // to tell the model.

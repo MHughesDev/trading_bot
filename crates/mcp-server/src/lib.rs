@@ -402,6 +402,9 @@ impl McpContext {
         if let Some(run) = self.gate.run() {
             g = g.for_run(run);
         }
+        if let Some(w) = self.gate.workflow() {
+            g = g.following(w);
+        }
         self.gate = Arc::new(f(g));
         self
     }
@@ -411,6 +414,13 @@ impl McpContext {
     pub fn for_run(self, run_id: impl Into<String>) -> Self {
         let run_id = run_id.into();
         self.rebuild_gate(|g| g.for_run(run_id))
+    }
+
+    /// Record the stage skeleton this run is following (AGENT-013 §3; S-10.14).
+    #[must_use]
+    pub fn following(self, workflow: impl Into<String>) -> Self {
+        let workflow = workflow.into();
+        self.rebuild_gate(|g| g.following(workflow))
     }
 
     /// The same context, under this run's spending rule (§2.2, §3).

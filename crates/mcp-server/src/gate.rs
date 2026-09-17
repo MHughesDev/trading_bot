@@ -63,6 +63,12 @@ pub struct TrialRequest<'a> {
     /// is smaller and more visible than refusing every call from a front door
     /// that has no run.
     pub run_id: Option<&'a str>,
+    /// The stage skeleton the run is following (AGENT-013 §3; S-10.14).
+    ///
+    /// Carried so the ledger can answer "how many of these looks were
+    /// replications" — a question about the run and its call, which is why it
+    /// rides on the reservation and not on the trial.
+    pub workflow: Option<&'a str>,
 }
 
 /// The row that now exists: **a reservation, not a trial** (ADR-S10-10).
@@ -141,6 +147,7 @@ impl TrialRegistrar for ApiTrialRegistrar {
                 "arguments": req.arguments,
                 "prereg_hash": prereg_hash,
                 "run_id": req.run_id,
+                "workflow": req.workflow,
             });
             match self.api.post("/api/ledger/reservations", body).await {
                 Ok(v) => {
@@ -212,6 +219,8 @@ pub struct CallGate {
     spending: Spending,
     /// What this run has committed to before looking (§7.2; S-10.3).
     prereg: Prereg,
+    /// The stage skeleton every reservation records (AGENT-013 §3; S-10.14).
+    workflow: Option<String>,
     /// The run every reservation is attributed to (ADR-S10-10).
     ///
     /// `None` on a front door with no agent run behind it. That is not a
@@ -284,7 +293,21 @@ impl CallGate {
             spending: Spending::Allowed,
             prereg: Prereg::NotRequired,
             run_id: None,
+            workflow: None,
         }
+    }
+
+    /// The stage skeleton this gate records on a reservation.
+    #[must_use]
+    pub fn workflow(&self) -> Option<&str> {
+        self.workflow.as_deref()
+    }
+
+    /// Record this stage skeleton on every reservation (AGENT-013 §3; S-10.14).
+    #[must_use]
+    pub fn following(mut self, workflow: impl Into<String>) -> Self {
+        self.workflow = Some(workflow.into());
+        self
     }
 
     /// The run this gate attributes reservations to.
@@ -363,6 +386,7 @@ impl CallGate {
             spending: Spending::Allowed,
             prereg: Prereg::NotRequired,
             run_id: None,
+            workflow: None,
         }
     }
 
@@ -473,6 +497,7 @@ impl CallGate {
                     Prereg::NotRequired | Prereg::Missing => None,
                 },
                 run_id: self.run_id.as_deref(),
+                workflow: self.workflow.as_deref(),
             })
             .await
             .map(Some)

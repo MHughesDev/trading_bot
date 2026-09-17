@@ -1,6 +1,6 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 38% (6 / 16 tasks), plus 10 `PARTIAL`. Nothing untouched.**
+**Completion: 44% (7 / 16 tasks), plus 9 `PARTIAL`. Nothing untouched.**
 
 > **Resolved 2026-09-17 — the research loop's door exists.** The trial gate's
 > registrar posted to a route that was never built, so every trial-spending tool
@@ -966,9 +966,8 @@ carries barren rate per (tier, workflow); the usage page shows cost per knowledg
 **Traces:** AGENT-013 P5, §10; §13.14. AGENT-009 §4 (amended).
 
 ### S-10.14 Workflows as stage skeletons, per tier — M
-`PARTIAL` 2026-09-17 — **the skeletons, both enforcement halves and per-tier
-availability are built; the authoring mode and the workflow-on-every-trial are
-not.**
+`DONE` 2026-09-17 — the skeletons, both enforcement halves, per-tier availability,
+the authoring mode and the workflow on every look.
 
 **Per-tier availability landed with S-10.11**, which needed it: `Profile::workflows`
 is a declared list with `Profile::may_run` as its enforcement point, the three
@@ -1010,8 +1009,28 @@ refused below `local_high`), with two conformance readers and the skeleton it
 selects actually built. A mode that named a behaviour nothing performed would have
 been the field-as-comment this file exists to prevent.
 
-**Not done:** the workflow on every *trial* (it is on the run row; the ticket
-carries the pre-registration hash but not yet the workflow).
+**The workflow on every look landed 2026-09-17**, and resolving OQ-20 is what made
+it possible. S-10.14's acceptance is that the ledger answers *how many trials were
+replications*; it could not, because `workflow` was on `agent_runs` and
+`mlops.trial` has no run id to join through.
+
+It sits on the **reservation** (`0133`), not on the trial, and that is the point
+rather than convenience. A workflow is a property of the run and of the call it
+made — the stage skeleton being followed when it reached for a tool. It is not a
+property of the compute: one Run of a backtest is the same arithmetic whichever
+workflow asked for it, and `backtest::run` has no idea which did. Putting it on
+`mlops.trial` would also have meant a column outside that table's hash chain,
+since extending the chain invalidates every row already recorded (ADR-I-14's
+argument). The reservation has no chain, so there is no such trade.
+
+Nullable, because a front door with no agent run follows no skeleton, and refusing
+the reservation for want of one would refuse the call. Three lists are held equal
+by an invariant — the harness enum, the `ledger` constant the route validates
+against, and the CHECK at the insert — because a workflow the harness can set and
+the table refuses is a run whose every trial-spending call fails at the door,
+which is OQ-20's shape one column over.
+
+**S-10.14 is complete.**
 
 The seven skeletons (AGENT-013 §3) as a table in `crates/harness/src/lifecycle/workflows.rs`:
 required stages, skippable stages, verdict enum. The loop refuses a stage transition the

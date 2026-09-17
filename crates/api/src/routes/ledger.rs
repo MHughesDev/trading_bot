@@ -60,6 +60,12 @@ pub struct ReserveBody {
     prereg_hash: String,
     #[serde(default)]
     run_id: Option<Uuid>,
+    /// The stage skeleton the run is following (AGENT-013 §3; S-10.14).
+    ///
+    /// Optional: a front door with no agent run behind it follows none, and
+    /// refusing the reservation for want of one would refuse the call.
+    #[serde(default)]
+    workflow: Option<String>,
 }
 
 /// `POST /api/ledger/reservations`
@@ -83,6 +89,7 @@ pub async fn reserve(
         kind: body.kind,
         prereg_hash: body.prereg_hash,
         arguments_hash,
+        workflow: body.workflow,
     };
     if let Err(e) = r.validate() {
         return (
@@ -96,8 +103,8 @@ pub async fn reserve(
     let res = sqlx::query(
         "INSERT INTO mlops.trial_reservation
              (reservation_id, tenant_id, run_id, tool, tool_version, kind,
-              prereg_hash, arguments_hash)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+              prereg_hash, arguments_hash, workflow)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
     )
     .bind(reservation_id)
     .bind(&r.tenant_id)
@@ -107,6 +114,7 @@ pub async fn reserve(
     .bind(&r.kind)
     .bind(&r.prereg_hash)
     .bind(&r.arguments_hash)
+    .bind(&r.workflow)
     .execute(&state.pg)
     .await;
 

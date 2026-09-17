@@ -120,3 +120,55 @@ fn every_trial_spending_tool_declares_a_reservable_kind() {
          written, so the scan is not reading it"
     );
 }
+
+/// `0133`'s workflow CHECK is `harness::state::Workflow` (S-10.14).
+///
+/// Three lists have to agree: the harness enum a run sets, the `ledger` constant
+/// the route validates against, and the CHECK at the insert. A workflow the
+/// harness can produce and the table refuses is a run whose every
+/// trial-spending call fails at the door — the same shape as OQ-20, one column
+/// over.
+#[test]
+fn the_workflow_check_is_the_harness_enum() {
+    let sql = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("crates/<name>")
+            .join("migrations/0133_reservation_workflow.sql"),
+    )
+    .expect("0133 is readable");
+    let sql = statements(&sql);
+
+    let at = sql.find("workflow IN (").expect("no `workflow IN (` CHECK in 0133");
+    let rest = &sql[at + "workflow IN (".len()..];
+    let close = rest.find(')').expect("the list closes");
+    let mut listed: Vec<String> = rest[..close]
+        .split('\'')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect();
+    listed.sort();
+
+    let mut from_harness: Vec<String> = harness::state::Workflow::ALL
+        .iter()
+        .map(|w| w.as_str().to_string())
+        .collect();
+    from_harness.sort();
+    assert_eq!(
+        listed, from_harness,
+        "0133's workflow CHECK and `harness::state::Workflow` have drifted"
+    );
+
+    let mut from_ledger: Vec<String> = ledger::reservation::WORKFLOWS
+        .iter()
+        .map(|w| (*w).to_string())
+        .collect();
+    from_ledger.sort();
+    assert_eq!(
+        listed, from_ledger,
+        "0133's workflow CHECK and `ledger::reservation::WORKFLOWS` have drifted"
+    );
+}
+

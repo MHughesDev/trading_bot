@@ -54,6 +54,14 @@ pub struct Reserve {
     pub prereg_hash: String,
     /// The call's arguments by content.
     pub arguments_hash: String,
+    /// The stage skeleton the run was following (AGENT-013 §3; migration 0133).
+    ///
+    /// `None` for a front door with no agent run behind it, which follows no
+    /// skeleton. A workflow is a property of the run and of the call it made,
+    /// never of the compute — one Run of a backtest is the same arithmetic
+    /// whichever workflow asked for it — which is why it lives here rather than
+    /// on `mlops.trial`.
+    pub workflow: Option<String>,
 }
 
 /// The kinds a reservation may carry, mirroring the catalogue's `TrialKind`
@@ -63,6 +71,24 @@ pub struct Reserve {
 /// a kind the catalogue declares and this refuses is a tool that cannot be
 /// called at all, which is the failure OQ-20 was.
 pub const RESERVABLE_KINDS: &[&str] = &["search", "falsification"];
+
+/// The seven stage skeletons (AGENT-013 §3), as `harness::state::Workflow`
+/// serialises them.
+///
+/// Spelled here rather than imported: `ledger` does not depend on `harness`, and
+/// taking the dependency for a seven-variant enum would pull a whole runtime
+/// into a crate that stores rows. `crates/invariants` holds the two equal — a
+/// workflow the harness can set and this refuses is a run whose every
+/// trial-spending call fails at the door.
+pub const WORKFLOWS: &[&str] = &[
+    "investigate",
+    "falsify",
+    "replicate",
+    "compare",
+    "diagnose",
+    "survey",
+    "optimise",
+];
 
 impl Reserve {
     /// Structural checks that hold before any backend is involved.
@@ -95,6 +121,13 @@ impl Reserve {
         if self.arguments_hash.trim().is_empty() {
             return invalid("a reservation hashes the arguments it authorised");
         }
+        if let Some(w) = &self.workflow {
+            if !WORKFLOWS.contains(&w.as_str()) {
+                return invalid(&format!(
+                    "`{w}` is not one of AGENT-013 §3's seven stage skeletons"
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -118,6 +151,7 @@ mod tests {
             kind: "search".into(),
             prereg_hash: "sha256:abc".into(),
             arguments_hash: "sha256:def".into(),
+            workflow: Some("investigate".into()),
         }
     }
 
@@ -159,5 +193,26 @@ mod tests {
         let mut r = reserve();
         r.run_id = None;
         r.validate().expect("a front door with no run still spends");
+    }
+
+    /// A workflow the harness cannot produce is refused, and every one it can is
+    /// accepted.
+    #[test]
+    fn the_workflow_is_one_of_the_seven_or_absent() {
+        for w in WORKFLOWS {
+            let mut r = reserve();
+            r.workflow = Some((*w).to_string());
+            r.validate().unwrap_or_else(|e| panic!("{w}: {e}"));
+        }
+        let mut bad = reserve();
+        bad.workflow = Some("optimize".into());
+        // The American spelling is the plausible typo, and it is refused rather
+        // than stored as an eighth workflow nobody can count.
+        assert!(bad.validate().is_err());
+
+        // Absent is legitimate: a front door with no run follows no skeleton.
+        let mut none = reserve();
+        none.workflow = None;
+        none.validate().expect("no run, no skeleton");
     }
 }
