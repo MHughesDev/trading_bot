@@ -824,7 +824,30 @@ second would overwrite who answered it, and that is the part worth keeping.
 This also fills `Yield::questions_closed`, which had been zero on every run ever
 recorded because nothing closed anything.
 
-**Not done:** `OpenQuestions.tsx`.
+**The browser tab landed 2026-09-17, and building it found why it was empty.**
+`/api/memory/{bucket}`'s row serialiser never sent `extra` — AGENT-007 §2.2's
+right-hand column, the fields that belong to one kind rather than to all seven.
+Stored since `0122` and served by nothing, so every tab rendered the generic half
+of an entry: a question showed as a finding, with no `blocking`, no `status` and no
+`why_it_matters`. **An open question and a closed one looked identical**, which is
+the one distinction the tab exists to make.
+
+`extra` is served now, and the browser reads a question out of it: blocking and
+open/closed as badges, the closer named, and "why it matters: not stated" where the
+stakes were never stated — because the run-end write records exactly that, and a
+reader deciding what to spend a run on has to tell it from a question somebody
+asked deliberately. Closed ones are hidden by default and **counted in the button**
+rather than dropped, since a question nobody can find again is one the platform
+cannot be asked "who answered this". The order is the brief's order — blocking
+first — so what a run is shown first and what a person is shown first are the same
+thing.
+
+`blocking` defaults to **false** on a malformed row. It is the one place a wrong
+default is expensive: a question that claimed to block on nothing but a missing
+field would lead the next run's brief.
+
+Five tests, over the reader rather than the DOM: the defect was in what reached the
+component, and a renderer test would have passed on rows that carried nothing.
 
 New semantic kind `open_question` (AGENT-007 §2.2 amended) with `why_it_matters`, `blocking`,
 `value`, `status: open|closed{by, how}`; written by `lifecycle.open_question` and by the harness

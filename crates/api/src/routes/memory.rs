@@ -78,6 +78,15 @@ fn row(e: &Entry) -> Value {
         "stale": e.stale,
         "corroborations": e.corroborations,
         "cited_by_chain": e.cited_by_chain,
+        // §2.2's right-hand column: the fields that belong to one kind rather
+        // than to all seven — a question's `blocking` and `status`, a negative
+        // result's `failure_class`, a preference's `scope`.
+        //
+        // Stored since `0122` and served by nothing, so every tab in the browser
+        // rendered the generic half of an entry and none of the half that makes
+        // it actionable. An open question and a closed one looked identical, and
+        // a blocking question looked like a curiosity.
+        "extra": e.extra,
     })
 }
 

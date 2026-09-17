@@ -48,6 +48,53 @@ export interface MemoryRow {
   /** Ids of rows this one disagrees with. */
   conflicts_with?: string[]
   provenance?: { run?: string; tool?: string; window?: string }
+  /**
+   * AGENT-007 section 2.2's right-hand column: the fields that belong to one kind
+   * rather than to all seven.
+   *
+   * Stored since migration 0122 and served by nothing until 2026-09-17, so every
+   * tab rendered the generic half of an entry and none of the half that makes it
+   * actionable — an open question and a closed one looked identical.
+   */
+  extra?: Record<string, unknown>
+}
+
+/** An open question's own fields (AGENT-013 section 9). */
+export interface QuestionFields {
+  why_it_matters?: string
+  blocking: boolean
+  value?: string
+  /** `'open'`, or `{ closed: { by, how } }`. */
+  closedBy?: string
+  closedHow?: string
+}
+
+/**
+ * Read a question out of an entry's `extra`.
+ *
+ * Returns `null` when the entry is not a question, so the generic row stays
+ * generic: this is additive per kind rather than a second renderer.
+ *
+ * `blocking` defaults to **false** on a malformed row. A question that claimed
+ * to block on nothing but a missing field would lead the next run's brief, which
+ * is the one place a wrong default is expensive.
+ */
+export function questionFields(row: MemoryRow): QuestionFields | null {
+  const e = row.extra
+  if (!e || typeof e !== 'object') return null
+  if (!('blocking' in e) && !('why_it_matters' in e)) return null
+  const status = (e as { status?: unknown }).status
+  const closed =
+    status && typeof status === 'object' && 'closed' in (status as object)
+      ? ((status as { closed: { by?: string; how?: string } }).closed ?? undefined)
+      : undefined
+  return {
+    why_it_matters: typeof e.why_it_matters === 'string' ? e.why_it_matters : undefined,
+    blocking: e.blocking === true,
+    value: typeof e.value === 'string' ? e.value : undefined,
+    closedBy: closed?.by,
+    closedHow: closed?.how,
+  }
 }
 
 /**
@@ -74,14 +121,31 @@ export function conflictPairs(rows: MemoryRow[]): Array<[MemoryRow, MemoryRow]> 
 }
 
 function Row({ row, onRetry }: { row: MemoryRow; onRetry?: (r: MemoryRow) => void }) {
+  const q = questionFields(row)
   return (
     <div className="desk-card">
       <div className="desk-card-hd">
         <Badge tone="outline">{row.subject}</Badge>
         {row.confidence && <Badge tone={row.confidence === 'refuted' ? 'neg' : 'neutral'}>{row.confidence}</Badge>}
+        {q && (q.closedBy ? (
+          <Badge tone="neutral">closed · {q.closedHow ?? 'answered'}</Badge>
+        ) : (
+          <Badge tone={q.blocking ? 'neg' : 'outline'}>{q.blocking ? 'blocking' : 'open'}</Badge>
+        ))}
+        {q?.value && <Badge tone="outline">{q.value}</Badge>}
         <ProvenanceBadge mark={null} />
       </div>
       <p>{row.claim}</p>
+      {q && (
+        <p className="sub">
+          {/* The field the deliberate door exists for. A question whose stakes
+              were never stated says so rather than showing an empty line — the
+              run-end write records exactly that, and a reader deciding what to
+              spend a run on needs to tell the two apart. */}
+          why it matters: {q.why_it_matters ?? 'not stated'}
+          {q.closedBy ? ` · closed by ${q.closedBy}` : ''}
+        </p>
+      )}
       <p className="sub">
         {row.n === null || row.n === undefined ? '(n unknown)' : `n=${row.n}`}
         {row.window ? ` · ${row.window}` : ''}
@@ -105,6 +169,10 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
   const [bucket, setBucket] = useState<Bucket>('findings')
   const [q, setQ] = useState('')
   const [conflictsOnly, setConflictsOnly] = useState(false)
+  // Closed questions are hidden by default and counted in the button, never
+  // dropped from the response: a question nobody can find again is one the
+  // platform cannot be asked "who answered this".
+  const [hideClosed, setHideClosed] = useState(true)
 
   const data = useQuery({
     queryKey: ['desk', 'memory', bucket],
@@ -112,7 +180,27 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
   })
 
   const rows = useMemo(() => (data.data?.rows ?? []) as unknown as MemoryRow[], [data.data])
-  const filtered = rows.filter((r) => `${r.claim} ${r.subject}`.toLowerCase().includes(q.toLowerCase()))
+  const closedCount = useMemo(
+    () => rows.filter((r) => questionFields(r)?.closedBy).length,
+    [rows],
+  )
+  const filtered = rows
+    .filter((r) => `${r.claim} ${r.subject}`.toLowerCase().includes(q.toLowerCase()))
+    // Open first, and blocking ahead of the rest — the same order the brief
+    // uses (`questions::brief_order`), so what a run is shown first and what a
+    // person is shown first are the same thing.
+    .sort((a, b) => {
+      const qa = questionFields(a)
+      const qb = questionFields(b)
+      if (!qa || !qb) return 0
+      const rank = (x: QuestionFields) => (x.closedBy ? 2 : x.blocking ? 0 : 1)
+      return rank(qa) - rank(qb)
+    })
+    .filter((r) => {
+      if (!hideClosed) return true
+      const f = questionFields(r)
+      return !f || !f.closedBy
+    })
   const pairs = useMemo(() => conflictPairs(rows), [rows])
 
   return (
@@ -123,6 +211,11 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
         <Button size="xs" variant={conflictsOnly ? 'primary' : 'ghost'} onClick={() => setConflictsOnly((c) => !c)}>
           Conflicts ({pairs.length})
         </Button>
+        {bucket === 'questions' && (
+          <Button size="xs" variant={hideClosed ? 'ghost' : 'primary'} onClick={() => setHideClosed((h) => !h)}>
+            {hideClosed ? `Show closed (${closedCount})` : `Hide closed (${closedCount})`}
+          </Button>
+        )}
       </div>
 
       {data.data === null && (
