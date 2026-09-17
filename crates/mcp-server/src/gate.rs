@@ -50,6 +50,12 @@ pub struct TrialRequest<'a> {
     pub tool_version: u32,
     pub kind: TrialKind,
     pub arguments: &'a Value,
+    /// The run's sealed pre-registration (AGENT-013 §7.2; Set S task S-10.3).
+    ///
+    /// Carried on **every** ticket the run spends, so a look and the commitment
+    /// it was made under are joined by the ticket rather than by a timestamp and
+    /// an assumption.
+    pub prereg_hash: Option<&'a str>,
 }
 
 /// The row that now exists. Its id travels back on the tool's result so the
@@ -184,6 +190,22 @@ pub struct CallGate {
     /// consuming the trial budget that makes every selection-adjusted statistic
     /// on this platform mean anything.
     chat_turn: bool,
+    /// What this run has committed to before looking (§7.2; S-10.3).
+    prereg: Prereg,
+}
+
+/// Whether this run has to have committed before it may look.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Prereg {
+    /// No registration is demanded. The default, because the gate profile
+    /// decides and a gate constructed without one has been told nothing.
+    #[default]
+    NotRequired,
+    /// The run must have sealed a registration, and this is its hash.
+    Sealed(String),
+    /// The run must have sealed one and has not. Every trial-spending tool
+    /// refuses, naming the registration as the missing piece.
+    Missing,
 }
 
 impl CallGate {
@@ -194,7 +216,21 @@ impl CallGate {
             registrar: Some(registrar),
             calls: Mutex::new(BTreeMap::new()),
             chat_turn: false,
+            prereg: Prereg::NotRequired,
         }
+    }
+
+    /// The registration this run is spending under (§7.2; S-10.3).
+    ///
+    /// [`Prereg::Missing`] is a *state*, not an absence: a run that should have
+    /// sealed one and did not must refuse, and it must refuse differently from a
+    /// run nobody asked to. Collapsing the two into `Option<String>` would make
+    /// "not required" and "required and missing" the same value, which is the
+    /// shape that silently lets the second behave like the first.
+    #[must_use]
+    pub fn under_preregistration(mut self, prereg: Prereg) -> Self {
+        self.prereg = prereg;
+        self
     }
 
     /// The same gate, for a run that may not spend a trial (§2.2).
@@ -223,6 +259,7 @@ impl CallGate {
             registrar: None,
             calls: Mutex::new(BTreeMap::new()),
             chat_turn: false,
+            prereg: Prereg::NotRequired,
         }
     }
 
@@ -293,6 +330,21 @@ impl CallGate {
             ));
         }
 
+        // A look with no commitment behind it (§7.2). Refused before the
+        // registrar for the same reason the chat-turn refusal is: a refusal that
+        // had already written the ledger row would have spent the trial it was
+        // refusing.
+        if self.prereg == Prereg::Missing {
+            return Err(ToolError::new(
+                "preregistration_required",
+                format!(
+                    "`{}` spends a trial and this run has sealed no pre-registration.",
+                    spec.name
+                ),
+                "call lifecycle.preregister first: the objective, the benchmark, the                  delta_practical and the falsifier for your primary hypothesis. A                  falsifier written after a result is not a falsifier",
+            ));
+        }
+
         let Some(registrar) = self.registrar.as_ref() else {
             return Err(ToolError::new(
                 "trial_registration_unavailable",
@@ -309,6 +361,14 @@ impl CallGate {
                 tool_version: spec.version,
                 kind: spec.spends_trial,
                 arguments,
+                prereg_hash: match &self.prereg {
+                    Prereg::Sealed(h) => Some(h.as_str()),
+                    // `Missing` cannot reach here — it refused above — and
+                    // `NotRequired` means no run-scale registration exists to
+                    // stamp. The per-Experiment hash is still computed by the
+                    // ledger itself.
+                    Prereg::NotRequired | Prereg::Missing => None,
+                },
             })
             .await
             .map(Some)
@@ -320,6 +380,7 @@ impl std::fmt::Debug for CallGate {
         f.debug_struct("CallGate")
             .field("has_registrar", &self.registrar.is_some())
             .field("chat_turn", &self.chat_turn)
+            .field("prereg", &self.prereg)
             .finish()
     }
 }
@@ -421,6 +482,83 @@ mod tests {
     /// would read as a policy decision.
     #[tokio::test]
     async fn the_default_gate_is_not_a_chat_turn() {
+        let rec = Arc::new(Recording::default());
+        let gate = CallGate::new(rec.clone());
+        assert!(gate
+            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .await
+            .is_ok());
+        assert_eq!(rec.registered.load(Ordering::SeqCst), 1);
+    }
+
+    // ── A look needs a commitment (AGENT-013 §7.2; S-10.3) ──────────────────
+
+    /// A run that should have registered and did not cannot look.
+    #[tokio::test]
+    async fn a_run_with_no_sealed_registration_cannot_spend_a_trial() {
+        let rec = Arc::new(Recording::default());
+        let gate = CallGate::new(rec.clone()).under_preregistration(Prereg::Missing);
+        let err = gate
+            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .await
+            .expect_err("no commitment, no look");
+        assert_eq!(err.code, "preregistration_required");
+        assert!(
+            err.fix.contains("falsifier"),
+            "the fix names the part that matters: {}",
+            err.fix
+        );
+        assert_eq!(
+            rec.registered.load(Ordering::SeqCst),
+            0,
+            "a refusal that had written the row would have spent the trial it refused"
+        );
+    }
+
+    /// Every ticket the run spends carries the hash.
+    #[tokio::test]
+    async fn the_registration_hash_rides_on_every_ticket() {
+        #[derive(Default)]
+        struct Capturing {
+            seen: Mutex<Vec<Option<String>>>,
+        }
+        impl TrialRegistrar for Capturing {
+            fn register<'a>(
+                &'a self,
+                req: TrialRequest<'a>,
+            ) -> BoxFuture<'a, Result<TrialReceipt, ToolError>> {
+                self.seen
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(req.prereg_hash.map(str::to_string));
+                Box::pin(async move {
+                    Ok(TrialReceipt {
+                        ticket_id: "t1".into(),
+                        family_id: None,
+                    })
+                })
+            }
+        }
+        let cap = Arc::new(Capturing::default());
+        let gate = CallGate::new(cap.clone())
+            .under_preregistration(Prereg::Sealed("sha256:abc".into()));
+        gate.admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .await
+            .expect("admitted");
+        let seen = cap
+            .seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(seen, vec![Some("sha256:abc".to_string())]);
+    }
+
+    /// "Not required" and "required and missing" are different states.
+    ///
+    /// Collapsing them into an `Option` is the shape that silently lets the
+    /// second behave like the first.
+    #[tokio::test]
+    async fn a_run_nobody_asked_to_register_is_not_refused() {
         let rec = Arc::new(Recording::default());
         let gate = CallGate::new(rec.clone());
         assert!(gate

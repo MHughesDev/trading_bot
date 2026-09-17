@@ -105,7 +105,30 @@ with `mode = chat` is refused (adversarial test); the offer is skipped under the
 ## Pre-registration, hypotheses, verdicts
 
 ### S-10.3 `Preregistration` and the ledger gate — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — **the object, the hash, the lineage and the gate are built;
+the tool that seals one is not.**
+
+Done: `crates/ledger/src/prereg.rs` — every field required with no serde default
+(ADR-P0-08's technique, so a body without `delta_practical` fails to deserialise
+rather than arriving as zero); the embargo computed through
+`dataplane::split::compute_embargo` so a run's embargo and its splits cannot
+disagree; **the falsifier in the hash**, which is the extension §7.2 makes over the
+per-Experiment `prereg_hash` and the door the whole object exists to close; amendment
+lineage with the trial budget carried over, so amending cannot buy a fresh budget;
+the third amendment refused as `protocol_unstable`. Migration `0127` repeats each
+rule where a second writer cannot route around it, and adds one the Rust cannot: a
+unique root per run, so a run cannot seal a second convenient protocol beside the
+first instead of amending it.
+
+`CallGate::under_preregistration` refuses every trial-spending tool on a run with
+`Prereg::Missing`, before the registrar, and stamps the hash on every ticket a
+sealed run spends. `Prereg` is a three-state enum rather than an `Option` because
+"not required" and "required and missing" must not be the same value.
+
+**Not done:** `lifecycle.preregister` — the tool a run calls to seal one — and the
+store behind it, so nothing yet puts the gate into `Missing` or `Sealed`. The gate
+therefore refuses nothing today. That is the next task in this phase and it is
+recorded rather than counted as done.
 
 The object (AGENT-013 §7.2): objective in SPEC §10's shape, benchmark, `delta_practical`
 (no serde default — a request without it fails to deserialise, ADR-P0-08's technique), window,
