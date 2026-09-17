@@ -15,6 +15,90 @@ import { EmptyState } from '@/components/primitives/States'
 import { api } from '@/lib/api'
 import { deskApi } from '@/api/desk'
 
+// ── What the runs produced (AGENT-013 §10; S-10.13) ──────────────────────────
+//
+// The one number here that is not about whether the harness *worked*. A barren
+// run finished perfectly: it spent from the trial budget — the quantity every
+// selection-adjusted statistic on this platform depends on — and produced
+// nothing the next run can use.
+//
+// Rendered as rows and never as a single rate. "12% barren" is something nobody
+// can act on; "`survey` on the 7B is barren 60% of the time" names a tier and a
+// workflow, so somebody can change one of them.
+
+/** `null` and `0` are different answers, and only one of them is a measurement. */
+export function formatRate(rate: number | null, runs: number): string {
+  if (rate === null || runs === 0) return 'not measured'
+  return `${Math.round(rate * 100)}%`
+}
+
+function BarrenPanel() {
+  const q = useQuery({
+    queryKey: ['desk', 'barren'],
+    queryFn: () => deskApi.barren(30),
+  })
+  const d = q.data
+
+  return (
+    <Panel>
+      <PanelHeader title="What the runs produced" />
+      <PanelBody>
+        {d === null && (
+          <EmptyState
+            message="Not available"
+            detail="/api/lifecycle/barren is served, so this is the endpoint failing rather than the endpoint missing."
+          />
+        )}
+        {d && d.rows.length === 0 ? (
+          <EmptyState
+            message="Nothing measured"
+            detail={`No run finished in the last ${d.days} days, so there is no rate — which is not the same as a rate of zero.`}
+          />
+        ) : (
+          d && (
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Tier</th>
+                  <th style={{ textAlign: 'left' }}>Workflow</th>
+                  <th>Runs</th>
+                  <th>Barren</th>
+                  <th>Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.rows.map((r) => (
+                  <tr key={`${r.tier}|${r.workflow}`}>
+                    <td style={{ textAlign: 'left' }}>{r.tier}</td>
+                    <td style={{ textAlign: 'left' }}>{r.workflow}</td>
+                    {/* The denominator travels with the rate: 60% over five runs
+                        and over five hundred are different claims. */}
+                    <td>{r.runs}</td>
+                    <td>{r.barren}</td>
+                    <td>{formatRate(r.rate, r.runs)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        )}
+        {d && d.unresolved.length > 0 && (
+          <p className="sub">
+            {/* Named rather than folded into a guessed tier or dropped: folding
+                attributes one tier's waste to another, and dropping makes the
+                platform look less wasteful the more configurations it retires. */}
+            Not attributed to a tier — the platform no longer ships these profiles:{' '}
+            {d.unresolved.map((u) => `${u.profile} (${u.runs})`).join(', ')}
+          </p>
+        )}
+        <p className="sub">
+          A barren run spent a trial and produced no knowledge unit. Over the last {d?.days ?? 30} days.
+        </p>
+      </PanelBody>
+    </Panel>
+  )
+}
+
 // ── Usage (§12) ──────────────────────────────────────────────────────────────
 
 export function Usage() {
@@ -46,7 +130,8 @@ export function Usage() {
           <p className="sub">
             Spend by day, by conversation, by model and by layer, cost per finding and per gate, and budget
             policies come from AGENT-009's published numbers and the per-layer accounting in AGENT-005. Neither
-            is exposed by an endpoint yet, so the desk shows the totals that are.
+            is exposed by an endpoint yet, so the desk shows the totals that are. What the runs
+            *produced* is below, from `/api/lifecycle/barren`.
           </p>
           <Button
             size="xs"
@@ -66,6 +151,8 @@ export function Usage() {
           </Button>
         </PanelBody>
       </Panel>
+
+      <BarrenPanel />
     </div>
   )
 }

@@ -876,7 +876,7 @@ them; retrieval logs `cited`.
 **Traces:** AGENT-013 §9; §13.14. AGENT-007 §2.2, §4 (amended), §8.9.
 
 ### S-10.13 Yield — what the run produced, as a number — M
-`DONE` 2026-09-17 — `harness/src/lifecycle/yield.rs`, migration `0128`, computed in
+`DONE` 2026-09-17 (completed) — `harness/src/lifecycle/yield.rs`, migration `0128`, computed in
 `local_driver` as the run goes rather than reconstructed at the end: the end is
 where a fenced or cancelled run has *least* state, and a yield only computable on
 the happy path would report every failure as having produced nothing.
@@ -922,7 +922,19 @@ is.
 `GET /api/lifecycle/barren?days=30` serves it, windowed — a rate over all time
 answers a question about a platform that no longer exists.
 
-**Not done:** the usage page itself (cost per knowledge unit, rendered).
+**The usage page landed 2026-09-17.** A "What the runs produced" panel on
+`/desk/usage`, rows per `(tier, workflow)` with the denominator beside each rate —
+60% over five runs and over five hundred are different claims, and a rate without
+its denominator hides which one you are reading. Unresolved profiles are named in
+the panel rather than folded or dropped.
+
+`formatRate` renders `null` as **"not measured"** and never as `0%`, and refuses a
+rate that arrives with no runs behind it. That is the whole point of
+`BarrenRate::rate` returning `Option`, and the guarantee is worth exactly what the
+renderer does with it — so four tests pin it, including that a small rate rounds to
+1% rather than disappearing.
+
+**S-10.13 is complete.**
 
 The platform computes `Yield` (AGENT-013 §10) at run end from the effect log and memory
 writes: findings by confidence, negatives and whether the class is new for the subject,

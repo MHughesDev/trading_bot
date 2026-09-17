@@ -519,6 +519,25 @@ export interface KillSwitchState {
   at?: string | null
 }
 
+/** One `(tier, workflow)` pair's share of runs that produced nothing. */
+export interface BarrenRow {
+  tier: string
+  workflow: string
+  runs: number
+  barren: number
+  /** `null` when there are no runs — never `0`, which reads as "never wasteful". */
+  rate: number | null
+}
+
+export interface BarrenRates {
+  days: number
+  max_days: number
+  runs: number
+  rows: BarrenRow[]
+  /** Runs whose profile the platform no longer ships, named rather than folded. */
+  unresolved: Array<{ profile: string; runs: number }>
+}
+
 /** A request for a human decision (AGENT-013 section 7.5). */
 export interface Proposal {
   proposal_id: string
@@ -602,6 +621,14 @@ export const deskApi = {
   //   later, and collapsing them would make a queue of waiting agents and
   //   pending decisions look like one list. —
   proposals: () => optional<{ pending: Proposal[] }>(client.get('/api/lifecycle/proposals')),
+
+  /**
+   * Barren rate per `(tier, workflow)` (AGENT-013 section 10).
+   *
+   * Rows, never one number: "12% barren" is something nobody can act on, and
+   * "`survey` on the 7B is barren 60% of the time" names a tier and a workflow.
+   */
+  barren: (days = 30) => optional<BarrenRates>(client.get(`/api/lifecycle/barren?days=${days}`)),
   decideProposal: (id: string, decision: 'approved' | 'rejected', note?: string) =>
     optional<ProposalDecision>(
       client.post(`/api/lifecycle/proposals/${id}/decision`, { decision, note: note ?? '' }),
