@@ -94,7 +94,18 @@ impl Envelope {
 }
 
 /// Actions that commit money or compute beyond what was declared.
-pub const SPEND_ACTIONS: &[&str] = &["arm_automation", "place_order", "start_campaign", "submit_job"];
+///
+/// `define_campaign` replaced `start_campaign` on 2026-09-17, when Set S task
+/// S-10.11 built the tool this entry had been holding a place for. The rename is
+/// not cosmetic: [`Envelope::for_action`] matches on the **tool name** both
+/// drivers pass, so a gated `start_campaign` beside a catalogue
+/// `define_campaign` would have been a spend envelope that gates nothing —
+/// exactly the shape `PROMOTION_ACTIONS` was in until it said
+/// `promote_model_version`. Defining a campaign *is* starting one: the route that
+/// writes the row submits the driver job in the same call, so there is one act
+/// and it now has one name.
+pub const SPEND_ACTIONS: &[&str] =
+    &["arm_automation", "define_campaign", "place_order", "submit_job"];
 
 /// Actions that move a strategy toward capital.
 ///

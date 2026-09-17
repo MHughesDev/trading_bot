@@ -43,6 +43,7 @@ use crate::profile::{
     Routing, SchemaStyle, Tier, ToolPolicy, Trifecta,
 };
 use crate::registry::{Risk, ToolDef, ToolRegistry};
+use crate::state::Workflow;
 
 use super::scorecard::Rung;
 use super::tape::{Tape, TapeEntry, TapeTask};
@@ -153,6 +154,9 @@ pub fn degraded_7b() -> Profile {
             max_wall_clock_s: 0,
             ask_above_usd: None,
         },
+        // The shipped profile's set (AGENT-013 §11 bottom row); this fixture is a
+        // copy of it, so it copies this too.
+        workflows: vec![Workflow::Survey, Workflow::Investigate, Workflow::Replicate],
         notes: "eval fixture, copied from config/profiles/qwen2.5-7b-instruct.yaml".into(),
     }
 }
@@ -214,6 +218,7 @@ pub fn frontier() -> Profile {
             max_wall_clock_s: 0,
             ask_above_usd: None,
         },
+        workflows: crate::lifecycle::workflows::ALL.iter().map(|s| s.workflow).collect(),
         notes: "eval fixture".into(),
     }
 }

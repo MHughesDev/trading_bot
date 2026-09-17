@@ -785,3 +785,248 @@ mod tests {
         assert!(!rendered.contains("supported"), "{rendered}");
     }
 }
+
+// ── Campaigns (AGENT-013 §8.5; S-10.11) ──────────────────────────────────────
+
+/// What a run sends to turn its registration into a campaign.
+///
+/// Six DEFINE facts are missing on purpose — see `tools::campaign` for the
+/// argument. They come from the run's sealed registration, which AGENT-013 §8.5
+/// says *is* the campaign's definition.
+#[derive(Debug, Deserialize)]
+pub struct CampaignBody {
+    slug: String,
+    approval_spend_usd: f64,
+    gpu_hours: f64,
+    usd: f64,
+    wall_clock_hours: f64,
+    #[serde(default)]
+    search_space: serde_json::Value,
+    /// The run this belongs to. Supplied by the caller's session, never by the
+    /// model — a body-supplied run id would let one run spend another's budget.
+    #[serde(default)]
+    run_id: Option<Uuid>,
+    /// The projection of the run's context store this campaign's worker sub-runs
+    /// will read (AGENT-005 §29).
+    ///
+    /// Attached by the agent driver, which holds the run's store; the model never
+    /// writes it and its schema has no field for it. Without it the campaign has
+    /// no brief, which is refused here rather than at the first HYPOTHESIZE — a
+    /// campaign that got as far as its first generation and only then could not
+    /// propose would have spent a baseline trial to learn something knowable at
+    /// DEFINE.
+    #[serde(default)]
+    brief: Option<crate::agent::subrun::PinnedBrief>,
+}
+
+/// `POST /api/lifecycle/campaigns` — the registration becomes a campaign.
+pub async fn define_campaign(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(body): Json<CampaignBody>,
+) -> impl IntoResponse {
+    let Some(run_id) = body.run_id else {
+        return bad_request(
+            "no_run",
+            "a campaign belongs to the run that registered it".to_string(),
+            "this endpoint is reached through a run's session, which supplies the run id",
+        )
+        .into_response();
+    };
+    let Some(brief) = body.brief else {
+        return bad_request(
+            "no_projection",
+            "this campaign has no projection of its run's context store".to_string(),
+            "a campaign's HYPOTHESIZE is a worker sub-run over a projection of the parent's \
+             store (AGENT-013 §8.5). The agent driver attaches it; a direct HTTP caller has no \
+             store to project, and a campaign that cannot propose can only re-run what it \
+             started with.",
+        )
+        .into_response();
+    };
+    let expected = crate::agent::subrun::worker_projection_name();
+    if brief.projection != expected {
+        return bad_request(
+            "wrong_projection",
+            format!(
+                "a campaign's workers read the `{expected}` projection and this brief was \
+                 assembled under `{}`",
+                brief.projection
+            ),
+            "the projection is derived from the parent's store by kind; a different one means \
+             a different set of records reached the worker",
+        )
+        .into_response();
+    }
+
+    let head = match head_registration(&state, run_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return bad_request(
+                "not_preregistered",
+                "this run has sealed no pre-registration".to_string(),
+                "call `preregister` first: the registration IS the campaign's definition \
+                 (AGENT-013 §8.5), so there is nothing to define a campaign from until one \
+                 exists.",
+            )
+            .into_response()
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "storage", "message": e })),
+            )
+                .into_response()
+        }
+    };
+
+    let definition = ledger::campaign::CampaignDefinition::from_preregistration(
+        &head,
+        body.slug,
+        body.approval_spend_usd,
+        body.gpu_hours,
+        body.usd,
+        body.wall_clock_hours,
+        // Not from the caller, and there is no field for it: INV-21 keeps the
+        // exploration floor out of every tool schema and off every request.
+        ledger::campaign::ExplorationFloor::default_floor(),
+        body.search_space,
+    );
+    if let Err(e) = definition.validate() {
+        return bad_request(
+            "invalid_definition",
+            e.to_string(),
+            "the fields this refuses come from your registration; amend it rather than \
+             restating them here",
+        )
+        .into_response();
+    }
+
+    let tenant = token.user_id().to_string();
+    let led = ledger::pg::PgTrialLedger::new(state.pg.clone());
+    let handle = match led.define_campaign_async(&tenant, &definition).await {
+        Ok(h) => h,
+        Err(e) => {
+            return bad_request(
+                "campaign_refused",
+                e.to_string(),
+                "a campaign is defined once; a second definition under the same slug would be \
+                 an edit, and DEFINE is immutable",
+            )
+            .into_response()
+        }
+    };
+
+    let Some(jobs) = state.jobs.clone() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "jobs_unavailable" })),
+        )
+            .into_response();
+    };
+    // The driver job is submitted before the campaign row is written. A crash
+    // between them leaves a job nothing names, which is recoverable; the other
+    // order leaves a row naming a job that does not exist, which is not.
+    let job = match jobs
+        .submit(jobs::store::Submission::new(
+            jobs::JobKind::Campaign,
+            token.user_id(),
+            json!({ "campaign_id": handle.campaign_id() }),
+        ))
+        .await
+    {
+        Ok(j) => j,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "dispatch", "message": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+
+    let shown = brief.shown.len();
+    let withheld = brief.withheld;
+    match crate::agent::subrun::record_campaign(
+        &state.pg,
+        handle.campaign_id(),
+        run_id,
+        &tenant,
+        head.id,
+        &head.hash(),
+        &job.job_id,
+        &brief,
+        crate::agent::subrun::MAX_SUBAGENT_DEPTH,
+    )
+    .await
+    {
+        Ok(_) => (
+            StatusCode::CREATED,
+            Json(json!({
+                "campaign_id": handle.campaign_id(),
+                "job_id": job.job_id,
+                // The commitment's hash, which every trial this campaign spends
+                // carries.
+                "prereg_hash": head.hash(),
+                // The campaign object's own hash: the commitment plus the slug,
+                // the approval threshold, the budgets and the floor, which a
+                // registration has no place for (ADR-S10-03).
+                "define_hash": handle.define_hash(),
+                "trial_budget": head.trial_budget,
+                "shown": shown,
+                "withheld": withheld,
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "storage", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `GET /api/lifecycle/campaigns/{id}` — where a campaign is.
+pub async fn get_campaign(
+    State(state): State<AppState>,
+    token: BearerToken,
+    axum::extract::Path(campaign_id): axum::extract::Path<Uuid>,
+) -> impl IntoResponse {
+    let tenant = token.user_id().to_string();
+    let led = ledger::pg::PgTrialLedger::new(state.pg.clone());
+    let fold = match led.campaign_state_async(&tenant, campaign_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            return bad_request(
+                "unknown_campaign",
+                e.to_string(),
+                "the campaign id `define_campaign` returned",
+            )
+            .into_response()
+        }
+    };
+
+    // The most recent proposal comes from the sub-run, not from the campaign
+    // log: the log records that a HYPOTHESIZE happened, and the sub-run records
+    // what it proposed.
+    let proposal: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT outcome FROM agent_lifecycle.sub_run \
+          WHERE campaign_id = $1 AND outcome IS NOT NULL \
+          ORDER BY settled_at DESC LIMIT 1",
+    )
+    .bind(campaign_id)
+    .fetch_optional(&state.pg)
+    .await
+    .ok()
+    .flatten();
+
+    Json(json!({
+        "campaign_id": campaign_id,
+        "phase": fold.phase.as_str(),
+        "seq": fold.seq,
+        "cycles": fold.cycles,
+        "terminal": fold.terminal.map(ledger::phase::CampaignPhase::as_str),
+        "last_proposal": proposal,
+    }))
+    .into_response()
+}

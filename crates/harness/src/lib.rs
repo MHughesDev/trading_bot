@@ -45,6 +45,7 @@ pub mod profile;
 pub mod provenance;
 pub mod registry;
 pub mod state;
+pub mod subrun;
 pub mod trace;
 pub mod transcript;
 pub mod validation;

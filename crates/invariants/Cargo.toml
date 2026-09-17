@@ -24,6 +24,7 @@ tokio = { workspace = true }
 clickhouse = { workspace = true }
 serde = { workspace = true }
 storage = { workspace = true }
+uuid = { workspace = true }
 
 [lints]
 workspace = true

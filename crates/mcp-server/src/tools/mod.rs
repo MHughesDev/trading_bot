@@ -15,6 +15,7 @@ pub mod backtests;
 pub mod builder;
 pub mod discovery;
 pub mod falsification;
+pub mod campaign;
 pub mod lifecycle;
 pub mod market;
 pub mod models;

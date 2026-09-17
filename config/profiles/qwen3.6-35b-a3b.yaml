@@ -116,6 +116,19 @@ budgets:
   # No cost axis on a local tier: a call here costs electricity, not dollars,
   # and a threshold in dollars would be a number nothing could exceed.
 
+# AGENT-013 §11: all but `optimise`. The worker sub-run that drives a campaign's
+# HYPOTHESIZE has to propose a *sequence* of structural moves against a budget,
+# and the measured ceiling for this tier is one move at a time under a grammar.
+# Declared here rather than derived from the tier so the omission is a written
+# decision rather than a gap somebody reads as an oversight.
+workflows:
+  - investigate
+  - falsify
+  - replicate
+  - compare
+  - diagnose
+  - survey
+
 notes: >
   Reference model for the local tier. Decode is two constrained calls per step -
   select the tool against an enum of exactly the tools routed for this step, then

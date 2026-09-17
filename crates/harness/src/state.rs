@@ -193,6 +193,37 @@ pub enum Workflow {
     Optimise,
 }
 
+impl Workflow {
+    /// The name this serialises to, for a message or a column.
+    ///
+    /// Written out rather than round-tripped through `serde`, because a caller
+    /// that needs a name in an error path should not be able to fail to produce
+    /// one.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Workflow::Investigate => "investigate",
+            Workflow::Falsify => "falsify",
+            Workflow::Replicate => "replicate",
+            Workflow::Compare => "compare",
+            Workflow::Diagnose => "diagnose",
+            Workflow::Survey => "survey",
+            Workflow::Optimise => "optimise",
+        }
+    }
+
+    /// Every workflow, for the exhaustiveness a per-tier table needs.
+    pub const ALL: &'static [Workflow] = &[
+        Workflow::Investigate,
+        Workflow::Falsify,
+        Workflow::Replicate,
+        Workflow::Compare,
+        Workflow::Diagnose,
+        Workflow::Survey,
+        Workflow::Optimise,
+    ];
+}
+
 /// How far from capital this run is allowed to reach (AGENT-013 §4).
 ///
 /// Filters exposure *before* routing, so a tool outside the ring is not a tool

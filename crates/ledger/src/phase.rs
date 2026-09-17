@@ -114,9 +114,19 @@ impl CampaignPhase {
 
     /// Whether this phase's work is dispatched as a child job. The others are
     /// bookkeeping the driver does itself and are recorded, not executed.
+    ///
+    /// `Hypothesize` joined this list with S-10.11. It used to be bookkeeping —
+    /// "the agent or a human proposes" — which described a step nothing
+    /// performed: the driver wrote the event and moved on, and the campaign
+    /// experimented on whatever the previous cycle had left in place. It now
+    /// dispatches a worker sub-run (AGENT-010 §9), and the proposal it returns
+    /// is what EXPERIMENT runs.
     #[must_use]
     pub fn has_child_job(self) -> bool {
-        matches!(self, Baseline | Diagnose | Experiment | Compare | Gate)
+        matches!(
+            self,
+            Baseline | Diagnose | Hypothesize | Experiment | Compare | Gate
+        )
     }
 
     /// The phases that may follow this one.
@@ -405,7 +415,7 @@ mod tests {
         for p in CampaignPhase::ALL {
             assert_eq!(
                 p.has_child_job(),
-                matches!(p, Baseline | Diagnose | Experiment | Compare | Gate),
+                matches!(p, Baseline | Diagnose | Hypothesize | Experiment | Compare | Gate),
                 "{p:?}"
             );
         }

@@ -229,6 +229,29 @@ fn every_profile_field_is_enforced_somewhere() {
         );
     }
 
+    // workflows → `Profile::may_run`, and through it the run's admission
+    // (AGENT-013 §11; S-10.11, S-10.14). Read behaviourally for the same reason
+    // the refinement cap is: a list nothing consults is the bug this test is for.
+    {
+        use harness::state::Workflow;
+        assert!(
+            !p.workflows.is_empty(),
+            "a tier that may run nothing is a tier nobody can start a run on"
+        );
+        for w in &p.workflows {
+            assert!(p.may_run(*w), "a declared workflow the profile then refuses");
+        }
+        // The frontier profile declares all seven, so the enforcement point is
+        // asserted against a tier that withholds one rather than against this
+        // one, which withholds nothing.
+        let mid = set.get("qwen3.6-35b-a3b").expect("the local_mid profile ships");
+        assert!(
+            !mid.may_run(Workflow::Optimise),
+            "AGENT-013 §11 withholds `optimise` below local_high"
+        );
+        assert!(mid.may_run(Workflow::Investigate));
+    }
+
     // trifecta.* → the policy engine reads the outbound leg directly.
     let ruling = decide(
         &p,
@@ -1463,4 +1486,59 @@ fn the_startup_canary_would_catch_a_backend_that_silently_fell_back() {
     );
     let constrained = harness::canary::judge(enum_probe, Ok(r#"{"colour":"red"}"#));
     harness::canary::verdict("test", &[constrained]).unwrap();
+}
+
+/// AGENT-013 §11, as the shipped configuration: which tier may run which
+/// workflow, read off the profiles rather than off the table in the spec.
+///
+/// S-10.11's acceptance asks for exactly this — "the profile that hides
+/// `optimise` has a conformance reader" — because the alternative is the failure
+/// this file exists to catch. `optimise` drives a campaign whose HYPOTHESIZE is a
+/// worker sub-run, and a tier that cannot plan a sequence of structural moves
+/// spends the campaign's entire trial budget discovering that. If the field
+/// stopped being read, nothing would fail: every tier would simply be offered
+/// every workflow, and the evidence would be a 7B model's campaign.
+#[test]
+fn the_tiers_that_may_not_drive_a_campaign_do_not_offer_optimise() {
+    use harness::state::Workflow;
+
+    let set = load();
+    let mut saw_a_tier_that_hides_it = false;
+    for id in set.ids() {
+        let p = set.get(&id).expect("listed");
+        let offers = p.may_run(Workflow::Optimise);
+        if offers {
+            assert!(
+                p.tier >= Tier::LocalHigh,
+                "{id} is {} and offers `optimise`",
+                p.tier.as_str()
+            );
+        } else {
+            saw_a_tier_that_hides_it = true;
+        }
+        // Whatever the tier, `survey` is the floor: a run that may not even look
+        // around is not a research tier, it is a disabled one.
+        assert!(p.may_run(Workflow::Survey), "{id} may not even survey");
+    }
+    assert!(
+        saw_a_tier_that_hides_it,
+        "this test proves nothing unless at least one shipped profile withholds `optimise`"
+    );
+}
+
+/// A profile below `local_high` cannot declare `optimise` at all.
+///
+/// The reader above checks the shipped configuration; this checks that a future
+/// edit to it is refused rather than accepted. Without it, "the tier does not
+/// offer optimise" is a fact about today's YAML and not about the platform.
+#[test]
+fn a_tier_below_local_high_cannot_declare_optimise() {
+    use harness::state::Workflow;
+
+    let set = load();
+    let mut p = set.get("qwen3.6-35b-a3b").expect("the local_mid profile").clone();
+    assert!(p.validate().is_ok(), "the shipped profile is valid as it stands");
+    p.workflows.push(Workflow::Optimise);
+    let err = p.validate().expect_err("local_mid may not drive a campaign").to_string();
+    assert!(err.contains("optimise"), "{err}");
 }

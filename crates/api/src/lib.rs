@@ -26,6 +26,7 @@ pub mod orchestrator;
 pub mod projects;
 pub mod report_validator;
 pub mod research;
+pub mod research_run_worker;
 pub mod rollup;
 pub mod routes;
 pub mod live_bus;

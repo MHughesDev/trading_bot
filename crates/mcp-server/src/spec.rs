@@ -378,6 +378,7 @@ pub fn catalog() -> &'static [ToolSpec] {
         specs.extend(crate::tools::strategy::specs());
         specs.extend(crate::tools::falsification::specs());
         specs.extend(crate::tools::lifecycle::specs());
+        specs.extend(crate::tools::campaign::specs());
         specs.extend(crate::tools::research_tools::specs());
         // Last, and appended rather than interleaved: the templated tier's order is
         // the directory's, and a tool moving namespace should not reshuffle the

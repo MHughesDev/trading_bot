@@ -106,6 +106,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/lifecycle/preregistrations", post(lifecycle::seal))
         .route("/api/lifecycle/hypotheses", post(lifecycle::state_hypothesis))
         .route("/api/lifecycle/metrics", get(lifecycle::metrics))
+        // The campaign door (AGENT-013 §8.5; S-10.11). A run's registration
+        // becomes a campaign; the campaign's HYPOTHESIZE becomes a worker
+        // sub-run over a projection of that run's context store.
+        .route("/api/lifecycle/campaigns", post(lifecycle::define_campaign))
+        .route("/api/lifecycle/campaigns/{campaign_id}", get(lifecycle::get_campaign))
         // The power check runs here, before any trial (§6.3).
         .route("/api/lifecycle/designs", post(lifecycle::bind_design))
         // The only doors into rings 1 and 2 (§6.8). Creating one changes

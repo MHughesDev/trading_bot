@@ -35,7 +35,7 @@ use harness::profile::Profile;
 use llm::{ChatRequest, LlmClient, LlmError, Message, ToolDef};
 use mcp_server_lib::{ApiClient, McpContext};
 
-use super::{bridge, hardware_probe, prompt, workspace_tools};
+use super::{bridge, hardware_probe, prompt, subrun, workspace_tools};
 
 /// How long a local backend should hold the weights resident between steps.
 ///
@@ -1131,6 +1131,38 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         return;
     }
 
+    // A third reason a task may not run here, beside the two above: the tier
+    // does not offer this workflow (AGENT-013 §11; S-10.11, S-10.14).
+    //
+    // Refused rather than downgraded. A campaign quietly demoted to an
+    // `investigate` would still finish, still write a verdict, and still be read
+    // as the answer to the question that was asked — and the one place the
+    // substitution would be visible is a `workflow` column nobody compares to
+    // the request. The other two admission refusals are stated before anything
+    // is spent, and so is this one.
+    if !params.profile.may_run(params.workflow) {
+        let offered: Vec<&str> = params
+            .profile
+            .workflows
+            .iter()
+            .map(|w| w.as_str())
+            .collect();
+        rec.finish(&Outcome::Refused {
+            reason: format!(
+                "the `{}` profile does not offer the `{}` workflow (AGENT-013 §11); it offers {}",
+                params.profile.model_id,
+                params.workflow.as_str(),
+                offered.join(", ")
+            ),
+            fix: params.profile.escalate_to.as_ref().map_or_else(
+                || "choose a workflow this tier offers, or configure a tier that offers this one".to_string(),
+                |to| format!("run this on `{to}`, which is where this profile escalates"),
+            ),
+        })
+        .await;
+        return;
+    }
+
     // ── The canary ──────────────────────────────────────────────────────────
     if params.profile.output.constrained_decoding {
         let verdicts = match run_canary(&client, &params.profile).await {
@@ -1479,12 +1511,62 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
                 }) {
                     rec.trials_spent += 1;
                 }
+                // What the model asked for, before the platform completes it.
+                // The brief the driver attaches below is megabytes of the run's
+                // own evidence and is recorded on the campaign row, not here.
                 rec.append(
                     "tool_call",
                     json!({ "step": step, "name": name, "risk": risk.as_str(),
                             "arguments": arguments }),
                 )
                 .await;
+                // `define_campaign` is the one call whose arguments the platform
+                // completes (AGENT-013 §8.5, AGENT-005 §29; S-10.11).
+                //
+                // A campaign's HYPOTHESIZE is a worker sub-run reading a
+                // *projection* of this run's context store, and the model cannot
+                // supply that: it would be asking the thing whose reasoning is
+                // being withheld to hand over the set with its reasoning left
+                // out. The projection is derived here, from the store, by kind —
+                // so what the worker sees is decided by
+                // `projection::campaign_worker` and by nothing the model wrote.
+                //
+                // `run_id` travels the same way and for the same reason the
+                // registration's does: a body-supplied run id would let one run
+                // spend another's budget.
+                let arguments = if name == "define_campaign" {
+                    let mut with_brief = arguments.clone();
+                    with_brief.insert("run_id".into(), json!(params.run_id));
+                    let query = harness::context::select::Query::from_state(
+                        governor.working(),
+                        step,
+                    );
+                    let brief = subrun::assemble(
+                        governor.context_store(),
+                        &query,
+                        subrun::brief_budget(&params.profile),
+                        governor.context_policy(),
+                        subrun::BRIEF_MANIFEST_TOKENS,
+                    );
+                    with_brief.insert(
+                        "brief".into(),
+                        serde_json::to_value(subrun::PinnedBrief::of(&brief))
+                            .unwrap_or(Value::Null),
+                    );
+                    rec.append(
+                        "status",
+                        json!({
+                            "campaign_projection": brief.projection,
+                            "shown": brief.shown.len(),
+                            "withheld": brief.withheld.len(),
+                        }),
+                    )
+                    .await;
+                    with_brief
+                } else {
+                    arguments
+                };
+
                 // `fs` is the agent's own folder, not a platform call. Routed here
                 // rather than in the loop so the loop stays sans-IO and knows nothing
                 // about filesystems.

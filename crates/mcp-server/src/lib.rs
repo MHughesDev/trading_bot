@@ -860,6 +860,8 @@ async fn dispatch_untraced(
         "choose_null" => tools::research::choose_null(&ctx.api, params).await,
 
         // ── Falsification (EXTERNAL-REVIEW-2026-09 §4) and its evidence tools ──
+        "define_campaign" => tools::campaign::define_campaign(&ctx.api, params).await,
+        "get_campaign" => tools::campaign::get_campaign(&ctx.api, params).await,
         "preregister" => tools::lifecycle::preregister(&ctx.api, params).await,
         "hypothesise" => tools::lifecycle::hypothesise(&ctx.api, params).await,
         "design" => tools::lifecycle::design(&ctx.api, params).await,
@@ -1138,6 +1140,10 @@ mod catalogue_tests {
             (
                 "create_experiment",
                 "creates the container; the trials are the Studies",
+            ),
+            (
+                "define_campaign",
+                "creates the campaign and starts its driver; every trial is                  registered by the phase child that spends it (Backtest at                  BASELINE, Study at EXPERIMENT, GateAdvance at GATE), so                  declaring one here would charge the first look twice. What                  stands in for a charge at definition time is the approval: it                  carries Envelope::Spend because one call commits a whole trial                  budget",
             ),
             ("cancel_sweep", "stops work already registered"),
             (

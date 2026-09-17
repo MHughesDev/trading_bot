@@ -437,6 +437,22 @@ async fn main() -> anyhow::Result<()> {
                     job_store.clone(),
                     app_state.pg.clone(),
                 )));
+                // The `ResearchRun` child worker (AGENT-010 §9, AGENT-013 §8.5;
+                // S-10.11). The campaign driver has dispatched this kind since
+                // it was written and nothing claimed it, so a campaign reaching
+                // DIAGNOSE submitted a child job that no pool would ever pick
+                // up and the driver polled it every five seconds forever. It is
+                // in the research pool beside the driver because it is the
+                // driver's own child and spends its time waiting on a model.
+                pool = pool.register(std::sync::Arc::new(
+                    api::research_run_worker::ResearchRunWorker::new(
+                        job_store.clone(),
+                        app_state.pg.clone(),
+                        app_state.cred_crypto.clone(),
+                        app_state.profiles.clone(),
+                        app_state.default_profile.clone(),
+                    ),
+                ));
             }
             tokio::spawn(std::sync::Arc::new(pool).run_forever());
         }

@@ -181,6 +181,16 @@ budgets:
   # No cost axis on a local tier: a call here costs electricity, not dollars,
   # and a threshold in dollars would be a number nothing could exceed.
 
+# AGENT-013 §11's bottom row. Not a pessimistic guess: `compare` and `falsify`
+# need a protocol held across candidates, and `diagnose` needs the failure to be
+# attributed rather than described. This tier gets the three whose skeletons it
+# can complete, and `investigate` is capped at one refinement by
+# `orchestration.max_refinements_per_run` above.
+workflows:
+  - survey
+  - investigate
+  - replicate
+
 notes: >
   DEGRADED TIER, PROMOTED ON EVIDENCE - still the dev box, still not the target.
   The tier name remains accurate: this machine cannot run the reference model, and

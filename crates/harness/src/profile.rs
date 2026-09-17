@@ -456,9 +456,27 @@ pub struct Profile {
     #[serde(default)]
     pub escalate_to: Option<String>,
     pub budgets: Budgets,
+    /// Which stage skeletons this tier may run (AGENT-013 §11; S-10.11, S-10.14).
+    ///
+    /// **The default is the smallest set, not the whole one.** A profile that
+    /// omits the field gets `survey`, `investigate` and `replicate` — §11's
+    /// bottom row — because the direction of a mistake here is not symmetric: a
+    /// forgotten field that grants `optimise` puts a tier in charge of a
+    /// campaign it cannot plan moves for, and the evidence is a campaign that
+    /// proposes nonsense for its whole budget. A forgotten field that withholds
+    /// it is a capability visibly missing from the desk, which somebody
+    /// notices in a minute.
+    #[serde(default = "default_workflows")]
+    pub workflows: Vec<crate::state::Workflow>,
     /// Free-text note recorded on the profile, e.g. why a tier was chosen.
     #[serde(default)]
     pub notes: String,
+}
+
+/// §11's bottom row: what a tier can do when its profile says nothing.
+fn default_workflows() -> Vec<crate::state::Workflow> {
+    use crate::state::Workflow;
+    vec![Workflow::Survey, Workflow::Investigate, Workflow::Replicate]
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -482,6 +500,17 @@ pub enum ProfileError {
 }
 
 impl Profile {
+    /// Whether this tier may run a workflow (AGENT-013 §11).
+    ///
+    /// The enforcement point for [`Profile::workflows`]. A caller that asks for
+    /// a workflow the profile withholds is refused rather than downgraded: a
+    /// campaign silently demoted to an `investigate` would report a verdict from
+    /// a different lifecycle than the one that was requested.
+    #[must_use]
+    pub fn may_run(&self, workflow: crate::state::Workflow) -> bool {
+        self.workflows.contains(&workflow)
+    }
+
     /// Checks the invariants the guide states unconditionally.
     ///
     /// Called on load, so a bad profile fails at startup rather than at the first
@@ -508,6 +537,24 @@ impl Profile {
         }
         if self.context.max_tool_result_bytes == 0 {
             return Err(bad("max_tool_result_bytes must be non-zero"));
+        }
+
+        // AGENT-013 §11. A tier is a claim about what a model can hold together,
+        // and `optimise` is the workflow that asks it to plan a *sequence* of
+        // structural moves against a campaign's budget. §11 puts the line at
+        // `local_high`, and a profile below it declaring `optimise` would put a
+        // campaign's whole trial budget behind proposals nothing can use.
+        if self.workflows.is_empty() {
+            return Err(bad(
+                "workflows is empty: a tier that may run nothing is a tier nobody can start a run on",
+            ));
+        }
+        if self.workflows.contains(&crate::state::Workflow::Optimise)
+            && self.tier < Tier::LocalHigh
+        {
+            return Err(bad(
+                "this tier declares the `optimise` workflow, which AGENT-013 §11 puts at local_high and above: driving a campaign means planning a sequence of structural moves, and a tier that cannot do that spends the campaign's whole budget proving it",
+            ));
         }
 
         // §3.1: constrained decoding is required for every local tier. A local model
@@ -963,6 +1010,7 @@ pub(crate) fn frontier_fixture() -> Profile {
             max_wall_clock_s: 0,
             ask_above_usd: None,
         },
+        workflows: crate::state::Workflow::ALL.to_vec(),
         notes: String::new(),
     }
 }
@@ -1032,6 +1080,7 @@ pub(crate) fn degraded_fixture() -> Profile {
             max_wall_clock_s: 0,
             ask_above_usd: None,
         },
+        workflows: default_workflows(),
         notes: String::new(),
     }
 }
@@ -1185,6 +1234,10 @@ mod tests {
         p.tier = Tier::LocalMid;
         p.tools.parallel_calls = false;
         p.orchestration.reflection = false;
+        // Narrowed with the tier, like the two above it: a frontier profile
+        // demoted to `local_mid` while still claiming `optimise` is invalid for
+        // *that* reason too (AGENT-013 §11), and this test is about the other one.
+        p.workflows = default_workflows();
         p.output.constrained_decoding = false;
         let err = p.validate().unwrap_err().to_string();
         assert!(err.contains("constrained_decoding"), "{err}");
@@ -1221,6 +1274,7 @@ mod tests {
         p.tier = Tier::LocalSmall;
         p.tools.parallel_calls = false;
         p.orchestration.reflection = false;
+        p.workflows = default_workflows();
         p.output.constrained_decoding = true;
         assert!(p
             .validate()

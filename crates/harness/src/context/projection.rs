@@ -114,6 +114,91 @@ pub fn project(parent: &RunStore, projection: &Projection) -> Projected {
     }
 }
 
+/// The kinds a campaign's HYPOTHESIZE worker may see (AGENT-013 §8.5).
+///
+/// Findings, the results they cite — the diagnostic bundle and the parent
+/// candidate and its cousins arrive as `ToolResult`s (FEAT-003 §8.2 step 2) —
+/// and memory. Not the parent's reasoning: not its decisions, not its plan
+/// changes, not the corrections it collected while learning to call tools.
+///
+/// The exclusion is the same one [`Projection::Critic`] makes and it is made the
+/// same way, by construction rather than by instruction. A worker that proposed
+/// the move the parent had already talked itself into would be a very expensive
+/// way of asking the parent again.
+pub const CAMPAIGN_WORKER_KINDS: &[RecordKind] = &[
+    RecordKind::Finding,
+    RecordKind::ToolResult,
+    RecordKind::Memory,
+];
+
+/// Pin a campaign worker's projection from the parent's store.
+///
+/// **Derived, never listed.** The alternative — a caller assembling the id set
+/// by hand — is how a `Decision` ends up pinned: not by anybody deciding the
+/// worker should see the parent's reasoning, but by a filter somewhere else
+/// changing and this list not. The ids come out of the store through
+/// [`CAMPAIGN_WORKER_KINDS`], so there is one rule and it is this one.
+#[must_use]
+pub fn campaign_worker(parent: &RunStore) -> Projection {
+    Projection::worker(
+        parent
+            .all()
+            .filter(|r| CAMPAIGN_WORKER_KINDS.contains(&r.kind))
+            .map(|r| r.id),
+    )
+}
+
+/// A sub-run's brief: the bytes, and the account of how they were chosen.
+///
+/// `text` is what the sub-run is given. It comes out of the same
+/// [`select`](super::select) → [`degrade`](super::degrade) →
+/// [`render`](super::render) pipeline the parent's own prompts do, over the
+/// projected store — which is the whole point of projecting rather than
+/// assembling: a hand-built brief would have no manifest, no declared
+/// degradation and no selection report, and nothing afterwards could say what
+/// the sub-run actually saw.
+#[derive(Debug, Clone)]
+pub struct Brief {
+    pub text: String,
+    /// The index over the projected store, including what was elided.
+    pub manifest: String,
+    /// The records rendered, in render order.
+    pub shown: Vec<RecordId>,
+    /// Recorded on the sub-run (§29).
+    pub projection: &'static str,
+    /// What the parent had and the sub-run does not.
+    pub withheld: Vec<RecordId>,
+    /// The selection report, so "why was this in the brief" has an answer.
+    pub report: super::select::SelectionReport,
+}
+
+/// Assemble a sub-run's brief through the parent's own pipeline.
+#[must_use]
+pub fn brief(
+    projected: &Projected,
+    query: &super::select::Query,
+    budget: u32,
+    policy: &super::policy::ContextPolicy,
+    manifest_tokens: u32,
+) -> Brief {
+    let selection = super::select::select(&projected.store, query, budget, policy);
+    let shown = selection.ids();
+    let index = super::manifest::render(
+        &projected.store,
+        &shown.iter().copied().collect(),
+        manifest_tokens,
+    );
+    let rendered = super::render::render(&projected.store, &selection, policy, &index.text);
+    Brief {
+        text: rendered.text,
+        manifest: index.text,
+        shown,
+        projection: projected.projection,
+        withheld: projected.withheld.clone(),
+        report: selection.report,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +362,121 @@ mod tests {
         let full = project(&p, &Projection::Full);
         assert_eq!(full.store.len(), p.len());
         assert!(full.withheld.is_empty());
+    }
+
+    /// S-10.11's acceptance, as a mechanism: the campaign's HYPOTHESIZE worker
+    /// provably cannot see the parent's reasoning.
+    ///
+    /// This is S-9.20's critic test pointed at the other projection, and it
+    /// matters more here — a critic that was led would produce a soft verdict,
+    /// while a worker that was led produces the parent's own move wearing a
+    /// second opinion's name, and the campaign would record it as an
+    /// independent proposal.
+    #[test]
+    fn a_campaign_worker_cannot_see_the_parents_reasoning() {
+        let p = parent();
+        let projection = campaign_worker(&p);
+        assert_eq!(projection.as_str(), "worker");
+        let projected = project(&p, &projection);
+        for r in projected.store.all() {
+            assert!(
+                !matches!(
+                    r.kind,
+                    RecordKind::Decision | RecordKind::PlanChange | RecordKind::Correction
+                ),
+                "{:?} reached the campaign worker",
+                r.kind
+            );
+        }
+        let kinds: BTreeSet<RecordKind> = projected.store.all().map(|r| r.kind).collect();
+        assert!(kinds.contains(&RecordKind::Finding), "findings are the point");
+        assert!(
+            kinds.contains(&RecordKind::ToolResult),
+            "the diagnostic bundle and the parent candidate arrive as tool results"
+        );
+        assert!(kinds.contains(&RecordKind::Memory));
+        assert_eq!(
+            projected.withheld.len(),
+            3,
+            "and what was withheld is recorded, so the claim is checkable"
+        );
+    }
+
+    /// The pinned set is derived from the store, not handed in.
+    ///
+    /// A worker projection admits exactly the ids it was given, so a caller that
+    /// assembled the set by hand could pin a `Decision` and nothing would stop
+    /// it. `campaign_worker` is the single place that rule lives, and adding a
+    /// reasoning record to the parent must never add one to the brief.
+    #[test]
+    fn adding_reasoning_to_the_parent_never_widens_the_worker_brief() {
+        let mut p = parent();
+        let before = project(&p, &campaign_worker(&p)).store.len();
+        p.insert(Draft::new(
+            7,
+            RecordKind::Decision,
+            "harness",
+            Body::text("decided to try a regime gate next"),
+        ));
+        p.insert(Draft::new(
+            8,
+            RecordKind::Correction,
+            "propose_move",
+            Body::text("that node does not exist"),
+        ));
+        let after = project(&p, &campaign_worker(&p));
+        assert_eq!(after.store.len(), before);
+        assert_eq!(after.withheld.len(), 5);
+    }
+
+    /// The brief comes out of the parent's own pipeline, so it has a manifest
+    /// and a selection report rather than being a string somebody concatenated.
+    #[test]
+    fn a_brief_carries_its_manifest_and_its_reasons() {
+        let p = parent();
+        let projected = project(&p, &campaign_worker(&p));
+        let policy = ContextPolicy::v1();
+        let q = Query {
+            step: 1,
+            goal_kind: GoalKind::Research,
+            subject: Subject::instrument("BTC-USD"),
+            ..Query::default()
+        };
+        let b = brief(&projected, &q, 2_000, &policy, 200);
+        assert_eq!(b.projection, "worker");
+        assert!(!b.shown.is_empty(), "the worker was handed nothing at all");
+        assert!(!b.manifest.is_empty(), "a brief with no index is a wall of text");
+        assert_eq!(b.report.candidates, projected.store.len());
+        for id in &b.shown {
+            let r = projected.store.get(*id).expect("rendered from the projection");
+            assert!(
+                CAMPAIGN_WORKER_KINDS.contains(&r.kind),
+                "{:?} was rendered into the brief",
+                r.kind
+            );
+        }
+        assert_eq!(b.withheld.len(), 3);
+    }
+
+    /// Two workers off one projection get the same bytes.
+    ///
+    /// Fan-out is only cache-friendly if the brief is identical; a brief that
+    /// varied per worker would pay a cold prefix per worker, which on a
+    /// twelve-way fan-out is twelve.
+    #[test]
+    fn two_workers_off_one_projection_get_identical_bytes() {
+        let p = parent();
+        let projected = project(&p, &campaign_worker(&p));
+        let policy = ContextPolicy::v1();
+        let q = Query {
+            step: 1,
+            goal_kind: GoalKind::Research,
+            subject: Subject::instrument("BTC-USD"),
+            ..Query::default()
+        };
+        let a = brief(&projected, &q, 2_000, &policy, 200);
+        let b = brief(&projected, &q, 2_000, &policy, 200);
+        assert_eq!(a.text, b.text);
+        assert_eq!(a.manifest, b.manifest);
     }
 }

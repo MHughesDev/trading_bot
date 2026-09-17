@@ -175,6 +175,62 @@ impl CampaignDefinition {
         Ok(())
     }
 
+    /// Build a campaign's DEFINE from the run's sealed registration
+    /// (AGENT-013 §8.5; Set S task S-10.11).
+    ///
+    /// **Derived, never re-entered.** A run driving a campaign has already
+    /// committed to an objective, a benchmark, a `delta_practical`, a gate
+    /// profile, a hypothesis and a trial budget — and a `define_campaign` that
+    /// asked for them again would be asking a model to retype, under no
+    /// obligation to match, the one object it is being held to. The first time
+    /// the two differed, every statistic would still compute and the campaign
+    /// would be judged against a protocol the run never registered.
+    ///
+    /// So the six shared fields come out of the registration and the caller
+    /// supplies only what a registration has no place for: the slug, the
+    /// approval threshold, the three budget dimensions that are not trials, the
+    /// exploration floor and the search space.
+    ///
+    /// The hashes: `prereg.hash()` identifies **what the run committed to**, and
+    /// travels on every trial ticket. [`define_hash`](Self::define_hash) covers
+    /// the campaign object, which is the commitment plus those extra fields.
+    /// They are not the same digest because they do not cover the same bytes —
+    /// recorded as ADR-S10-03 rather than left for a reader to discover.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_preregistration(
+        prereg: &crate::prereg::Preregistration,
+        slug: String,
+        approval_spend_usd: f64,
+        gpu_hours: f64,
+        usd: f64,
+        wall_clock_hours: f64,
+        exploration_floor: ExplorationFloor,
+        search_space: serde_json::Value,
+    ) -> Self {
+        Self {
+            slug,
+            hypothesis: prereg.primary_hypothesis.clone(),
+            objective: prereg.objective.clone(),
+            benchmark: prereg.benchmark.clone(),
+            delta_practical: prereg.delta_practical,
+            approval_spend_usd,
+            budget: Budget {
+                // The registration's budget is the campaign's budget. Two
+                // numbers would mean the trial counter had two ceilings and the
+                // lower one would be the real one by accident.
+                max_trials: i64::from(prereg.trial_budget),
+                gpu_hours,
+                usd,
+                wall_clock_hours,
+            },
+            exploration_floor,
+            gates_profile: prereg.gate_profile.clone(),
+            preference_vector: None,
+            search_space,
+        }
+    }
+
     /// The hash the campaign's DEFINE facts are locked by.
     ///
     /// # Panics
@@ -644,5 +700,121 @@ mod tests {
         assert_eq!(ctx.campaign_id, Some(c.campaign_id()));
         assert_eq!(ctx.delta_practical, Some(0.25));
         assert_eq!(ctx.policy_id, POLICY_ID);
+    }
+
+    /// The six fields a registration already fixes are copied, not re-entered.
+    ///
+    /// The failure this prevents is quiet: a `define_campaign` that asked for the
+    /// objective again would let a run register one protocol and search under
+    /// another, and every downstream statistic would compute happily against the
+    /// wrong commitment.
+    #[test]
+    fn a_campaigns_define_is_its_runs_registration() {
+        use crate::prereg::{seal, Draft, Window};
+
+        let prereg = seal(
+            Draft {
+                run_id: Uuid::new_v4(),
+                objective: serde_json::json!({
+                    "maximize": ["sharpe_after_costs"],
+                    "subject_to": { "max_drawdown": 0.2 }
+                }),
+                benchmark: serde_json::json!({ "family": "buy_and_hold" }),
+                delta_practical: 0.15,
+                window: Window {
+                    start: "2020-01-01".into(),
+                    end: "2024-12-31".into(),
+                },
+                cost_model_version: "costs_v3".into(),
+                null_family: "block_bootstrap".into(),
+                trial_budget: 64,
+                gate_profile: "crypto_v2".into(),
+                primary_hypothesis: "momentum survives costs on the 4h bar".into(),
+                falsifier: "sharpe_after_costs <= 0".into(),
+            },
+            &dataplane::split::EmbargoInputs {
+                horizon_bars: 4,
+                max_lookback_bars: 60,
+                max_knowledge_lag_ms: 0,
+                settlement_lag_bars: 0,
+            },
+        )
+        .expect("a complete draft seals");
+
+        let def = CampaignDefinition::from_preregistration(
+            &prereg,
+            "momentum-4h".into(),
+            5.0,
+            2.0,
+            25.0,
+            48.0,
+            ExplorationFloor::default_floor(),
+            serde_json::json!({}),
+        );
+
+        assert_eq!(def.objective, prereg.objective);
+        assert_eq!(def.benchmark, prereg.benchmark);
+        assert_eq!(def.delta_practical, prereg.delta_practical);
+        assert_eq!(def.gates_profile, prereg.gate_profile);
+        assert_eq!(def.hypothesis, prereg.primary_hypothesis);
+        assert_eq!(
+            def.budget.max_trials,
+            i64::from(prereg.trial_budget),
+            "two ceilings on the trial counter means the lower one wins by accident"
+        );
+        // And the fields a registration has no room for are the caller's.
+        assert_eq!(def.slug, "momentum-4h");
+        assert_eq!(def.approval_spend_usd, 5.0);
+        def.validate().expect("a definition derived from a sealed registration is valid");
+    }
+
+    /// The two hashes cover different bytes, and that is stated rather than
+    /// discovered (ADR-S10-03).
+    ///
+    /// `prereg_hash` identifies what the run committed to and travels on every
+    /// ticket; `define_hash` covers the campaign object, which is the commitment
+    /// plus a slug, an approval threshold, three budget dimensions and a floor
+    /// that a registration has no place to put.
+    #[test]
+    fn the_campaign_hash_and_the_registration_hash_are_not_the_same_digest() {
+        use crate::prereg::{seal, Draft, Window};
+
+        let prereg = seal(
+            Draft {
+                run_id: Uuid::new_v4(),
+                objective: serde_json::json!({ "maximize": ["sharpe"], "subject_to": {} }),
+                benchmark: serde_json::json!({ "family": "buy_and_hold" }),
+                delta_practical: 0.1,
+                window: Window { start: "2020-01-01".into(), end: "2024-12-31".into() },
+                cost_model_version: "costs_v3".into(),
+                null_family: "block_bootstrap".into(),
+                trial_budget: 32,
+                gate_profile: "crypto_v2".into(),
+                primary_hypothesis: "h".into(),
+                falsifier: "sharpe <= 0".into(),
+            },
+            &dataplane::split::EmbargoInputs {
+                horizon_bars: 4,
+                max_lookback_bars: 60,
+                max_knowledge_lag_ms: 0,
+                settlement_lag_bars: 0,
+            },
+        )
+        .expect("seals");
+
+        let a = CampaignDefinition::from_preregistration(
+            &prereg, "a".into(), 5.0, 2.0, 25.0, 48.0,
+            ExplorationFloor::default_floor(), serde_json::json!({}),
+        );
+        let b = CampaignDefinition::from_preregistration(
+            &prereg, "b".into(), 5.0, 2.0, 25.0, 48.0,
+            ExplorationFloor::default_floor(), serde_json::json!({}),
+        );
+        assert_ne!(
+            a.define_hash(),
+            b.define_hash(),
+            "two campaigns off one registration differ in what the registration does not cover"
+        );
+        assert_eq!(prereg.hash(), prereg.hash());
     }
 }

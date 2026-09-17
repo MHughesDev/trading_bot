@@ -135,6 +135,18 @@ budgets:
   # finds nothing is perfectly reversible and perfectly wasted.
   ask_above_usd: 5.0
 
+# AGENT-013 §11: every workflow. The tier that drafts a pre-registration from
+# free text and authors a falsifier without a grammar is the tier that can plan
+# a campaign's sequence of structural moves.
+workflows:
+  - investigate
+  - falsify
+  - replicate
+  - compare
+  - diagnose
+  - survey
+  - optimise
+
 notes: >
   Frontier tier per D-01. The harness-side discipline here is not a concession to
   local models: tool overload and context rot degrade frontier models too, just

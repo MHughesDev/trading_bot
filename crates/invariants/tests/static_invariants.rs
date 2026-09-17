@@ -1003,7 +1003,6 @@ fn no_check_requires_a_non_empty_array_with_array_length() {
 /// in a tool name cannot hide among them.
 const NON_TOOL_GATED_ACTIONS: &[(&str, &str)] = &[
     ("place_order", "execution route /api/orders; no MCP tool places orders"),
-    ("start_campaign", "campaign dispatcher; Set S phase 10 may add a tool"),
     ("submit_job", "job service admission, crates/jobs"),
     ("promote_strategy", "capital path; no tool exists yet (Set T)"),
     ("raise_capital_fraction", "ramp mechanics; Set T phase 3"),
@@ -1147,7 +1146,23 @@ fn every_tool_envelope_matches_the_ledger() {
         // `ToolSpec` and is named in `ledger::audit::SEALED_HOLDOUT_ACTIONS`;
         // this test is what made the second half necessary rather than optional,
         // by failing when only the first existed.
-        vec!["arm_automation", "promote_model_version", "spend_holdout_look"],
+        //
+        // `define_campaign` joined on 2026-09-17 (Set S task S-10.11). One call
+        // commits the registration's entire trial budget plus a dollar budget and
+        // starts a driver that spends both without returning — the shape §15 and
+        // ADR-P2-20 put behind a human, and the only tool in the catalogue that
+        // commits a *budget* rather than one action's worth of it. The ledger's
+        // `SPEND_ACTIONS` gated `start_campaign` until the same day, which was a
+        // name no tool has ever answered to: `Envelope::for_action` matches on the
+        // tool name both drivers pass, so the entry gated nothing while reading as
+        // though campaigns were covered — `PROMOTION_ACTIONS`' `promote_model`
+        // defect exactly, and caught here before it could ship.
+        vec![
+            "arm_automation",
+            "define_campaign",
+            "promote_model_version",
+            "spend_holdout_look",
+        ],
         "the gated catalogue tools changed; that is a decision, not a diff"
     );
 }

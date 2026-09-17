@@ -15,6 +15,7 @@ pub mod manager;
 pub mod prompt;
 pub mod resume;
 pub mod routes;
+pub mod subrun;
 pub mod workspace_tools;
 
 pub use manager::{AgentManager, StartError};

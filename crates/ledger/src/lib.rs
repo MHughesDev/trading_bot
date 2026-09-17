@@ -104,6 +104,38 @@ impl DispatchContext {
         }
     }
 
+    /// An automated actor deciding under a named, versioned policy.
+    ///
+    /// The constructor that did not exist, and whose absence would have pushed
+    /// the campaign's `propose` decision onto [`legacy`](Self::legacy) — a
+    /// context whose whole meaning is "the calling path failed to declare an
+    /// effect size or a propensity". Labelling a new path that way would make
+    /// the one flag that marks unaccountable decisions stop meaning anything.
+    ///
+    /// `delta_practical` is required here, unlike in `legacy`. An agent deciding
+    /// on behalf of a campaign is deciding under that campaign's declared effect
+    /// size, and there is always one: a campaign cannot be defined without it.
+    #[must_use]
+    pub fn agent(
+        tenant_id: impl Into<String>,
+        actor_id: impl Into<String>,
+        policy_id: impl Into<String>,
+        policy_version: i32,
+        delta_practical: f64,
+    ) -> Self {
+        Self {
+            tenant_id: tenant_id.into(),
+            campaign_id: None,
+            experiment_id: None,
+            actor_kind: ActorKind::Agent,
+            actor_id: actor_id.into(),
+            on_behalf_of: None,
+            policy_id: policy_id.into(),
+            policy_version,
+            delta_practical: Some(delta_practical),
+        }
+    }
+
     /// The only way to register without a propensity or declared effect size. The
     /// missing declaration is a defect of the calling path; this records it.
     #[must_use]

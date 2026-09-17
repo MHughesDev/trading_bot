@@ -20,6 +20,7 @@
 pub mod calibration;
 pub mod compare;
 pub mod power;
+pub mod propose;
 pub mod search;
 pub mod sampler;
 pub mod space;
@@ -28,6 +29,7 @@ pub mod sweep;
 
 pub use calibration::{spearman, FidelityCalibration, RACING_MIN_RHO};
 pub use sampler::{RandomSampler, Rng, Sampler, SamplerKind, TpeSampler};
+pub use propose::{CombineHow, ExitMode, Move, Pending, Proposal, ProposalError, SizingMode};
 pub use space::{Narrow, SearchSpace, SpaceError};
 pub use surface::{ParamSurface, Sensitivity, SurfaceSummary};
 pub use sweep::{

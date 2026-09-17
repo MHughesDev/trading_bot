@@ -1,10 +1,12 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 31% (5 / 16 tasks), plus 10 `PARTIAL`. Two untouched: S-10.11 and S-10.15.**
+**Completion: 31% (5 / 16 tasks), plus 11 `PARTIAL`. One untouched: S-10.15.**
 
-> Status 2026-09-17. **S-10.1, S-10.6, S-10.7, S-10.13 and S-10.14 are done**;
-> S-10.2, S-10.3, S-10.4 and S-10.14's per-tier half are partial; the other eight
-> are untouched.
+> Status 2026-09-17. **S-10.1, S-10.6, S-10.7 and S-10.13 are done**; S-10.11 is
+> partial and substantial — the `ResearchRun` worker, the campaign door, the worker
+> projection and the `propose` decision are built and reached, and what is missing
+> is the parent's resumption, which waits on `Effect::Await` resumption in the
+> driver. S-10.14's per-tier half landed with it. Only S-10.15 is untouched.
 >
 > What was already here and doing nothing: `WorkingState` has carried `mode`,
 > `workflow`, `ring` and `stage` since phase 1 and the state card renders all four;
@@ -490,16 +492,76 @@ candidate → ranked first with the stated criteria; the seed field does not exi
 **Traces:** AGENT-013 §3 (`compare`), §8.3; §13.12. SPEC §11.5.
 
 ### S-10.11 `optimise`: the `ResearchRun` child worker is a worker sub-run — L
-`NOT STARTED`
+`PARTIAL` 2026-09-17 — **the worker, the door, the projection and the decision are
+built; the parent does not resume, because `Effect::Await` resumption does not
+exist in this driver.**
 
-The parent run's `Preregistration` **is** the campaign DEFINE (one object, one hash); the run
-calls `define_campaign` and emits `Effect::Await { job_id }`. At HYPOTHESIZE the campaign driver
-dispatches a **worker sub-run** (AGENT-010 §9) with a projection of the parent's context store
-(AGENT-005 §29: findings, the `DiagnosticBundle`, the parent candidate and cousins per FEAT-003
-§8.2, never the parent's reasoning) whose only output is one `Move` + hypothesis + parameter
-ranges; the driver logs a `propose` decision with its candidate set. This is the `ResearchRun`
-child worker HANDOFF §2 lists as missing. The parent resumes on the terminal event. `optimise`
-is hidden below `local_high`.
+**What was actually broken.** `campaign_driver::child_kind` has mapped DIAGNOSE to
+`JobKind::ResearchRun` since it was written, and **nothing anywhere registered a
+worker for that kind**. A campaign reaching its second phase submitted a child job
+no pool would ever claim, and `await_child` polled it every five seconds forever.
+The driver was correct, the phase machine was correct, the idempotency was correct,
+and no campaign could get past DIAGNOSE. HANDOFF §2 lists this worker as missing and
+it was missing in the strongest sense: the caller existed and the callee did not.
+
+HYPOTHESIZE was worse and quieter. It had *no* child kind at all — described in the
+source as "the agent (or a human) proposing" — so the driver wrote the event and
+moved straight to EXPERIMENT, which ran whatever the previous cycle had left in
+place. A campaign's search never changed what it was searching.
+
+**Built.**
+
+* **`research::propose`** — `Move` as the eight typed variants of FEAT-003 §8.3,
+  `Proposal { move, hypothesis, ranges }`, and a grammar emitted from beside the
+  type. Not a string: the one place a model changes the *structure* of the search
+  was prose, and prose is the bug class this repository keeps paying for. Each move
+  names the check it still owes through `Pending`, so "validated" here never claims
+  the graph validator, the feature lane, the regime labels or the simulator's
+  capability list ran — four of the eight need machinery that is elsewhere.
+* **`harness::subrun`** — `Role::{Critic, Worker, Reader}` and `Delegation::check`,
+  which refuses a role whose projection does not match it. A critic dispatched under
+  `full` would run, return a verdict, and be recorded as a critic; this is the one
+  place that cannot happen.
+* **`context::projection::campaign_worker` + `brief`** — the pinned set is *derived*
+  from the parent's store by kind, so the parent's reasoning is excluded because it
+  is not there. `adding_reasoning_to_the_parent_never_widens_the_worker_brief` is
+  S-9.20's test pointed at the other projection, and it matters more here: a critic
+  that was led gives a soft verdict, while a worker that was led returns the
+  parent's own move wearing a second opinion's name.
+* **`ResearchRunWorker`**, registered in the research pool. HYPOTHESIZE reads the
+  pinned brief, calls under `Proposal::schema()` at temperature zero, validates, and
+  retries exactly once with the validator's reason. DIAGNOSE is handled too —
+  because a campaign cannot reach HYPOTHESIZE without it — and is honest about being
+  bounded: it attaches the last phase's job result under `bundle_kind:
+  "phase_result"`, which is **not** FEAT-003 §8.2's `DiagnosticBundle`.
+* **`define_campaign` / `get_campaign`** under `research`, and
+  `POST/GET /api/lifecycle/campaigns`. The six DEFINE facts a registration already
+  fixes are **absent from the schema and refused by name** if sent, so §8.5's "one
+  object" is a mechanism rather than an instruction. The exploration floor is
+  neither offered nor accepted (INV-21), asserted both ways.
+* **The driver** claims `(campaign, phase, seq)` before dispatching — the opposite
+  order from its child jobs, because here the row is what carries the job id — and
+  logs the `propose` decision with the move vocabulary as its candidate set.
+
+**Not done, and why. The run does not suspend, and it does not resume.** §8.5 says
+it "emits `Effect::Await { job_id }`" and it does not, deliberately:
+`Input::JobAccepted` — the input that produces an `Await` — **has no producer in
+either driver**, so `Effect::Await` has never been reached by a real run, and the
+one thing `local_driver` does with an `Await` is end the run as
+`Fenced(BackendFailure)` with the message "this driver cannot resume a suspension
+yet". Wiring `define_campaign` to suspend today would therefore kill a healthy run
+and label the death a backend failure. Instead the tool returns the campaign id and
+the driver job id as an ordinary result, the campaign runs to its terminal state in
+the job service, and `get_campaign` reads it. Correcting this is one change in the
+driver and one in the `Await` arm, and it is what this task waits on.
+
+Also not built: the `DiagnosticBundle` proper, and the `BudgetLease` split AGENT-010
+§9 describes — the worker runs on the parent's profile and the campaign's own budget
+bounds it, which is a weaker guarantee and is stated here rather than implied.
+
+**Decisions:** ADR-S10-03 (two hashes, not one), ADR-S10-05 (the brief is pinned at
+DEFINE), ADR-S10-06 (propensity 1.0, and the worker refuses a profile that would
+make it unknowable).
 
 **Depends on:** S-2.12 (sub-runs), S-9.20 (projections), Phase 8 workflows.
 **Files:** `crates/api/src/campaign_driver.rs`, `crates/api/src/agent/subrun.rs`,
@@ -595,8 +657,21 @@ carries barren rate per (tier, workflow); the usage page shows cost per knowledg
 **Traces:** AGENT-013 P5, §10; §13.14. AGENT-009 §4 (amended).
 
 ### S-10.14 Workflows as stage skeletons, per tier — M
-`PARTIAL` 2026-09-17 — **the skeletons and both enforcement halves are built; the
-per-tier availability and the authoring mode are not.**
+`PARTIAL` 2026-09-17 — **the skeletons, both enforcement halves and per-tier
+availability are built; the authoring mode and the workflow-on-every-trial are
+not.**
+
+**Per-tier availability landed with S-10.11**, which needed it: `Profile::workflows`
+is a declared list with `Profile::may_run` as its enforcement point, the three
+shipped profiles declare §11's three rows, and `local_driver` refuses a run whose
+workflow the tier does not offer — a third admission refusal beside the two that
+were already stated before anything is spent. It **refuses rather than downgrades**:
+a campaign quietly demoted to an `investigate` would still finish, still write a
+verdict, and still read as the answer to the question that was asked.
+`validate` closes the other direction — a profile below `local_high` cannot
+*declare* `optimise` — and `conformance.rs` has two readers, one over the shipped
+configuration and one over a mutated copy. ADR-S10-04 records why the default is
+the smallest set rather than all seven.
 
 `harness/src/lifecycle/workflows.rs` holds all seven as a table: required stages,
 skippable stages, verdict vocabulary, and whether the workflow may spend a trial at
@@ -620,7 +695,7 @@ The §3 step names and this crate's `Stage` enum are **not the same list**, and 
 mapping is written into the module header rather than left for a reader to infer
 something was forgotten.
 
-**Not done:** per-tier workflow availability, the pre-registration authoring mode
+**Not done:** the pre-registration authoring mode
 (`free | skeleton_grammar | skeleton_confirm`), and the workflow on every *trial*
 (it is on the run row; the ticket carries the pre-registration hash but not yet the
 workflow).
