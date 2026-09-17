@@ -1,6 +1,9 @@
 # AGENT-002: Agent Toolbox — `tbot` SDK/CLI and the MCP Surface
 
-**Status:** Proposed (Phase 0 contract; not implemented)
+> **Status:** **Superseded by AGENT-006** (2026-09-17, Set S phase 8 exit). The catalogue is one `ToolSpec` per tool, from which the namespace table, the exposure list and the four approval lists are derived rather than maintained beside it (S-1.1).
+>
+> Kept rather than deleted, for the reason a deprecated tool is kept: documents written while this was current cite it by number, and a dangling reference is worse than a superseded one. Read it as the record of what was intended, never as a description of what the platform does.
+
 **Version:** 0.1
 **ADR(s):** ADR-0022 (thin client over `/api/*`, kept), ADR-0024 (agent runtime),
 ADR-0025 (scopes)

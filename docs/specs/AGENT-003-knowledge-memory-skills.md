@@ -1,6 +1,9 @@
 # AGENT-003: Knowledge, Memory and Skills
 
-**Status:** Proposed (Phase 0 contract; not implemented)
+> **Status:** **Superseded by AGENT-007** (2026-09-17, Set S phase 8 exit). Memory is written by tools rather than by the model, and a finding carries its own provenance and data window.
+>
+> Kept rather than deleted, for the reason a deprecated tool is kept: documents written while this was current cite it by number, and a dangling reference is worse than a superseded one. Read it as the record of what was intended, never as a description of what the platform does.
+
 **Derivation Status: STALE as of 2026-09-15** — see the amendment note below before planning Set R-a or R-b.
 
 > ## Amendment note — 2026-09-15 (roadmap gap G-2)

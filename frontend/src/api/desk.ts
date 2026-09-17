@@ -571,6 +571,14 @@ export interface ProposalDecision {
   effect: Record<string, unknown>
 }
 
+export interface DossierComment {
+  comment_id: string
+  author: string
+  claim: string | null
+  body: string
+  created_at: string
+}
+
 export const deskApi = {
   /** Existing: the conversation list the desk rail renders. */
   conversations: () =>
@@ -612,6 +620,12 @@ export const deskApi = {
   dossier: (ticket: string) => optional<Record<string, unknown>>(client.get(`/api/dossiers/${ticket}`)),
   verifyClaim: (ticket: string, claim: string) =>
     optional<{ ok: boolean; note: string }>(client.post(`/api/dossiers/${ticket}/verify/${claim}`)),
+  // A reviewer's notes on a dossier, which are deliberately not part of it: the
+  // document is a snapshot and a comment is a later reading of it (S-8.7).
+  dossierComments: (ticket: string) =>
+    optional<{ comments: DossierComment[] }>(client.get(`/api/dossiers/${ticket}/comments`)),
+  addDossierComment: (ticket: string, body: string, claim?: string) =>
+    client.post(`/api/dossiers/${ticket}/comments`, { body, claim: claim ?? null }),
   monitor: () => optional<{ strategies: Array<Record<string, unknown>> }>(client.get('/api/monitor/strategies')),
 
   // — Proposals (AGENT-013 section 7.5; S-10.9). The agent creates an inert row

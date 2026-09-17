@@ -234,7 +234,52 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # The `run_python` sandbox (Set S task S-8.8). One container per conversation,
+  # mounting that conversation's workspace, torn down with it.
+  #
+  # `profiles: [sandbox]` because this is not part of the default stack: a
+  # long-lived sandbox is the wrong shape. The service exists so the image is
+  # buildable and runnable locally — `docker compose run --rm agent-sandbox` with
+  # a request on stdin — and so the per-conversation launcher has something to
+  # start. It is deliberately not `restart: unless-stopped`.
+  #
+  # Everything here is a refusal:
+  #
+  #   * `network_mode: none` — no network at all. The `internal: true` network
+  #     AGENT-001 §7 describes is for a container that talked to the platform,
+  #     and this one does not.
+  #   * `read_only: true` with two tmpfs mounts — the root filesystem is not
+  #     writable, and the two paths that are do not survive the container.
+  #   * `cap_drop: [ALL]` and `no-new-privileges` — a script that finds a setuid
+  #     binary gains nothing from it.
+  #   * no `environment:` block at all. `executor.py` refuses to start if it
+  #     finds a credential, and the surest way to pass that check is to have
+  #     nothing to hand it.
+  agent-sandbox:
+    profiles: ["sandbox"]
+    build:
+      context: .
+      dockerfile: infra/agent-image/Dockerfile
+    image: tbot-agent-sandbox:local
+    network_mode: "none"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - "no-new-privileges:true"
+    pids_limit: 256
+    mem_limit: 4g
+    tmpfs:
+      - /tmp:size=512m
+      - /home/agent:size=64m
+    volumes:
+      # One conversation's workspace. The launcher replaces this with that
+      # conversation's directory; the named volume is the local-development
+      # stand-in and is why this service is not in the default profile.
+      - sandbox_workspace:/workspace
+    stdin_open: true
+
 volumes:
+  sandbox_workspace:
   nats_data:
   pg_data:
   ch_data:

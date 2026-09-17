@@ -44,6 +44,7 @@ pub mod policy;
 pub mod profile;
 pub mod provenance;
 pub mod registry;
+pub mod report;
 pub mod state;
 pub mod subrun;
 pub mod trace;

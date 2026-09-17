@@ -120,6 +120,28 @@ All "decided mechanism" tests from the spec are green:
 
 ---
 
+## Behaviours with no Python counterpart (Set S phase 8, 2026-09-17)
+
+This matrix compares the Rust platform to the Python system it replaced. The rows
+below have no Python column because the Python system had none of them — they are
+research-honesty mechanisms the rewrite added rather than ported. Recorded here so the
+matrix stays a complete map of what the platform does, with the same rule: **the
+evidence column names the test that proves the behaviour.**
+
+| Behaviour | Rust behaviour | Evidence |
+|-----------|----------------|----------|
+| A battery is one call under one trial family | `Tier::Workflow` declarations in `mcp_server_lib::tools::workflows`; a family id minted before the first step is admitted and carried on every reservation (`0134`) | `tools::workflows::tests::{a_battery_spends_nothing_of_its_own,the_result_carries_every_steps_ticket,a_caller_cannot_unpin_a_pinned_step_parameter}` |
+| A battery that cannot run is absent, never short | `Stage::Owed`; `specs()` filters on `is_runnable()` | `tools::workflows::tests::{a_battery_with_an_owed_step_is_not_offered,every_owed_stage_names_what_it_needs}` |
+| A gate refuses without the ticket that licenses it | `backtest::gates::tickets::check` over rows only the engine writes (`0135`); checked before any Study runs | `backtest::gates::tickets::tests::*` and `invariants::gates_demand_tickets::*` |
+| A report cannot be finalised on an unsupported claim | Post-hoc span alignment over the evidence bundle; `Unverified` blocks the dossier | `harness::report::claims::tests::*`, `harness::report::dossier::tests::an_unsupported_claim_blocks_compilation` |
+| A mandatory section says "none found" rather than being omitted | `Section::when_empty`, per section; `Parts.critique: Option<Vec<_>>` so "no critic ran" and "found nothing" cannot collapse | `harness::report::dossier::tests::{an_empty_section_still_renders_and_says_so,a_critique_that_never_ran_is_not_an_empty_critique,each_empty_section_says_what_was_empty}` |
+| The critic cannot read the producer's reasoning | `Projection::Critic` excludes it by construction; `Delegation::check` refuses another projection | `harness::report::critic::tests::the_model_critic_cannot_read_the_producers_reasoning` |
+| A claim can be re-derived against the platform as it stands | `POST /api/dossiers/{ticket}/verify/{claim}`; three outcomes, with "the evidence no longer resolves" distinct from "the claim failed" | `api::routes::dossiers::tests::{a_recheck_fails_only_when_the_claim_got_weaker,the_verification_words_are_the_ones_the_desk_knows}` |
+| Free-form code runs outside the platform process or not at all | `infra/agent-image` executor; `POST /api/code/run` refuses with no launcher configured; the `code` namespace is hidden below the `full` tier | CI job `agent-sandbox-image` (three refusals proved against the built image), `invariants::code_execution_is_tiered::*`, `mcp-server-lib::tools::code::tests::*` |
+| A sandbox holding a credential does not start | `executor.py` checks ten variable names and exits non-zero | CI job `agent-sandbox-image`, step "It refuses to start holding a credential" |
+
+---
+
 ## Sign-off
 
 Parity verified by: automated test suite (`cargo test --workspace`), 2026-06-08.

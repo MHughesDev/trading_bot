@@ -1,6 +1,9 @@
 # AGENT-004: Agent Evaluation Suite
 
-**Status:** Proposed (Phase 0 contract; not implemented)
+> **Status:** **Superseded by AGENT-009** (2026-09-17, Set S phase 8 exit). Replayable trajectories and model tapes, per-tier scorecards, and every profile claim calibrated from measurement rather than asserted.
+>
+> Kept rather than deleted, for the reason a deprecated tool is kept: documents written while this was current cite it by number, and a dangling reference is worse than a superseded one. Read it as the record of what was intended, never as a description of what the platform does.
+
 **Version:** 0.1
 **ADR(s):** ADR-0024, ADR-0025, ADR-0028
 **Derived from:** BS-007 [16_AGENT_EVALS](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/16_AGENT_EVALS.MD),

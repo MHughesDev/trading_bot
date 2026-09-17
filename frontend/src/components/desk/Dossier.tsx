@@ -10,11 +10,11 @@
 // export.** Both exports are generated from the same function the table renders
 // from, so there is no second code path that could forget.
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
 import { EmptyState } from '@/components/primitives/States'
-import type { EvidenceClass, Provenance } from '@/api/desk'
+import type { DossierComment, EvidenceClass, Provenance } from '@/api/desk'
 import { deskApi } from '@/api/desk'
 import { EvidenceChip, InertText, ProvenanceBadge, type IdResolver } from './Shared'
 
@@ -243,6 +243,9 @@ export function DossierReader({ ticket, resolve }: { ticket: string; resolve?: I
           {d.provenance.seeds}
         </p>
 
+        <h3>Comments</h3>
+        <CommentThread ticket={d.ticket} />
+
         <div className="desk-actions">
           <Button size="xs" onClick={() => window.print()}>
             Export PDF
@@ -263,6 +266,86 @@ export function DossierReader({ ticket, resolve }: { ticket: string; resolve?: I
           </Button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * A reviewer's notes, which are deliberately **not** part of the dossier.
+ *
+ * The document is a snapshot taken at the end of the run that produced it, and
+ * it is immutable on purpose — a reviewer six months later has to be reading the
+ * thing the decision was made on. A comment is a later reading of it, so it
+ * lives beside the document and is never folded into it.
+ *
+ * Which is also why the thread renders even when it is empty: "nobody has
+ * commented" and "comments are not loaded" look identical if the section is
+ * omitted, and that is the same mistake the mandatory-section rule exists to
+ * prevent.
+ */
+/**
+ * What an empty thread says.
+ *
+ * A pure function because the rule is worth a test and rendering it is not: the
+ * three states must stay distinguishable, and "loading" collapsing into "none
+ * yet" is the same mistake as an omitted mandatory section — it reports an
+ * absence of *data* as an absence of *comments*.
+ */
+export function commentPlaceholder(loading: boolean, count: number, failed: boolean): string | null {
+  if (loading) return 'Loading comments…'
+  if (failed) return 'Comments could not be loaded — this is not the same as none.'
+  if (count === 0) return 'None yet — nobody has commented on this dossier.'
+  return null
+}
+
+export function CommentThread({ ticket }: { ticket: string }) {
+  const qc = useQueryClient()
+  const [draft, setDraft] = useState('')
+
+  const q = useQuery({
+    queryKey: ['desk', 'dossier', ticket, 'comments'],
+    queryFn: () => deskApi.dossierComments(ticket),
+  })
+  const add = useMutation({
+    mutationFn: (body: string) => deskApi.addDossierComment(ticket, body),
+    onSuccess: () => {
+      setDraft('')
+      void qc.invalidateQueries({ queryKey: ['desk', 'dossier', ticket, 'comments'] })
+    },
+  })
+
+  const comments: DossierComment[] = q.data?.comments ?? []
+  const placeholder = commentPlaceholder(q.isLoading, comments.length, q.isError)
+
+  return (
+    <div className="dossier-comments">
+      {placeholder !== null ? (
+        <p className="sub">{placeholder}</p>
+      ) : (
+        <ul>
+          {comments.map((c) => (
+            <li key={c.comment_id}>
+              <span className="sub">
+                {c.author}
+                {c.claim ? ` · on ${c.claim}` : ''}
+              </span>
+              {/* A comment is text somebody else wrote. Rendered inert for the
+                  same reason a fetched page is. */}
+              <InertText>{c.body}</InertText>
+            </li>
+          ))}
+        </ul>
+      )}
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Add a note for the next reader"
+        rows={3}
+      />
+      <Button size="xs" disabled={draft.trim().length === 0 || add.isPending} onClick={() => add.mutate(draft)}>
+        {add.isPending ? 'Saving…' : 'Comment'}
+      </Button>
+      {add.isError && <p className="sub">The comment was not saved.</p>}
     </div>
   )
 }

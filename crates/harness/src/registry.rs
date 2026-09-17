@@ -303,6 +303,16 @@ impl Limits<'_> {
     }
 }
 
+/// The namespace free-form code execution lives in (AGENT-006 §5.9; S-8.8).
+///
+/// Spelled here rather than imported from `mcp-server`: `harness` does not
+/// depend on that crate, and taking the dependency for one string would invert
+/// the direction of the whole build. `mcp_server_lib::tools::code::NAMESPACE` is
+/// the other copy and `crates/invariants` holds the two equal — a namespace
+/// rename that reached only one of them would expose `run_python` on every tier,
+/// silently.
+pub const CODE_NAMESPACE: &str = "code";
+
 /// Whether a core tool may be offered on a run with these capabilities.
 ///
 /// Registration and exposure are different questions, and this is the second
@@ -841,10 +851,23 @@ impl ToolRegistry {
         {
             selected.push(t);
         }
+        // §11: free-form code is profile-gated, and the gate is *exposure*
+        // rather than refusal (S-8.8). A model on a `templated` tier never sees
+        // `run_python`; a refusal would cost it a step and teach it the tool
+        // exists, which is the same argument the ring filter makes.
+        //
+        // The whole namespace, not the one tool. A second code tool added later
+        // is gated by having been put in the namespace, which is where somebody
+        // would put it anyway — a name list would have to be remembered.
+        let code_allowed =
+            profile.orchestration.code_execution == crate::profile::CodeExecution::Full;
+
         // Everything below chooses from what the ring allows. Applied here, once,
         // rather than at each of the three selection paths — a filter repeated
         // three times is a filter that will be forgotten at one of them.
-        let within = |t: &&ToolDef| limits.admits(t);
+        let within = |t: &&ToolDef| {
+            limits.admits(t) && (code_allowed || t.namespace != crate::registry::CODE_NAMESPACE)
+        };
 
         // Then anything the model explicitly asked for, before namespace filling.
         for name in pinned {

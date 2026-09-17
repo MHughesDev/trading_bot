@@ -294,3 +294,54 @@ jobs:
             fi
           done
           echo "features/ purity check passed"
+
+  agent-sandbox-image:
+    name: The run_python sandbox image
+    runs-on: ubuntu-latest
+    # Nothing built this image. It was written for ADR-0024, repurposed by
+    # ADR-0035 and S-8.8, and until this job existed a change that broke it
+    # would have been found the first time somebody ran `run_python` on the
+    # `full` tier — which is to say, in front of a user.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -f infra/agent-image/Dockerfile -t tbot-agent-sandbox:ci .
+      # The acceptance S-8.8 states, checked rather than asserted: no provider
+      # credential is present. The executor refuses to start if it finds one, so
+      # a run that succeeds is a run that found none.
+      - name: It runs a script and returns its result
+        run: |
+          echo '{"script":"import json,os; open(os.environ[\"RESULT_PATH\"],\"w\").write(json.dumps({\"sharpe\": 1.43}))","payload":{}}' \
+            | docker run --rm -i --network none tbot-agent-sandbox:ci > out.json
+          cat out.json
+          python3 -c "
+          import json,sys
+          r = json.load(open('out.json'))
+          assert r['ok'], r
+          assert r['result'] == {'sharpe': 1.43}, r
+          print('the sandbox ran a script and returned its result')
+          "
+      - name: It refuses to start holding a credential
+        run: |
+          set +e
+          echo '{"script":"print(1)"}' \
+            | docker run --rm -i --network none -e ANTHROPIC_API_KEY=sk-test tbot-agent-sandbox:ci > refused.txt 2>&1
+          status=$?
+          set -e
+          cat refused.txt
+          if [ "$status" -eq 0 ]; then
+            echo "ERROR: the sandbox started while holding a provider credential"
+            exit 1
+          fi
+          grep -q "holds no credential" refused.txt
+      - name: It refuses to read outside its workspace
+        run: |
+          echo '{"script":"print(1)","data_path":"../etc/passwd"}' \
+            | docker run --rm -i --network none tbot-agent-sandbox:ci > escape.json
+          cat escape.json
+          python3 -c "
+          import json
+          r = json.load(open('escape.json'))
+          assert r['ok'] is False and r['error'] == 'refused', r
+          print('a path outside the workspace is refused')
+          "

@@ -17,6 +17,9 @@ ledger = { workspace = true }
 harness = { workspace = true }
 serde_json = { workspace = true }
 mcp-server-lib = { workspace = true }
+# S-8.4: the gate's requirement table and the batteries it names live in two
+# crates that do not depend on each other. Held equal here.
+backtest = { workspace = true }
 # For the canonical-JSON reconciliation:  mirrors 
 # rather than depending on it (sqlx, ledger, storage), so the two are asserted equal here.
 jobs = { workspace = true }

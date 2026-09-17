@@ -1,6 +1,9 @@
 # AGENT-001: Agent Runtime and Harness
 
-**Status:** Proposed (Phase 0 contract; not implemented)
+> **Status:** **Superseded by AGENT-010** (2026-09-17, Set S phase 8 exit). One loop for every tier. ADR-0035 reverses ADR-0024: the hosted SDK driver is deleted and the container is repurposed as the `run_python` sandbox (S-8.8), which is what `infra/agent-image` now builds.
+>
+> Kept rather than deleted, for the reason a deprecated tool is kept: documents written while this was current cite it by number, and a dangling reference is worse than a superseded one. Read it as the record of what was intended, never as a description of what the platform does.
+
 **Version:** 0.1
 **ADR(s):** ADR-0024 (runtime), ADR-0025 (platform-side enforcement); keeps ADR-0023 P1
 and Set J INV-1/2/3

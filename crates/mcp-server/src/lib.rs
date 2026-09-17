@@ -684,6 +684,44 @@ pub async fn dispatch_tool(
     result
 }
 
+/// Dispatch one step of a battery (S-8.1).
+///
+/// A step is a real call: it gets its own audit envelope, its own gate
+/// admission and its own reservation, exactly as it would have had the model
+/// called it directly. The only thing the battery adds is the family the
+/// reservation is written under.
+///
+/// `pub(crate)` because the workflow engine is the only legitimate caller. A
+/// front door reaching for this would be a front door dispatching a step with
+/// no battery around it, which is a family of one.
+pub(crate) async fn dispatch_step(
+    ctx: &McpContext,
+    tool_name: &str,
+    params: &Value,
+    family_id: &str,
+) -> Value {
+    let envelope = match ctx.audit.open(tool_name, params).await {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!(
+                tool = tool_name,
+                family = family_id,
+                detail = ?e.detail,
+                "refusing to dispatch a battery step: the platform opened no audit record"
+            );
+            return json!({
+                "error": "audit_unavailable",
+                "detail": e.detail,
+                "fix": "the platform's audit trail must be reachable before any tool runs; this step was refused rather than run off the books"
+            });
+        }
+    };
+    let result =
+        dispatch_in_family(ctx, tool_name, params, None, &envelope, Some(family_id)).await;
+    ctx.audit.close(envelope, &result).await;
+    result
+}
+
 /// Dispatch under an audit envelope the caller opened and will close.
 ///
 /// The `_envelope` argument is never read. It is a **proof obligation**: only
@@ -701,7 +739,32 @@ pub async fn dispatch_under(
     tool_name: &str,
     params: &Value,
     progress: Option<tokio::sync::mpsc::Sender<ProgressUpdate>>,
+    envelope: &AuditEnvelope,
+) -> Value {
+    dispatch_in_family(ctx, tool_name, params, progress, envelope, None).await
+}
+
+/// Dispatch one step of a battery, under the family the battery was minted with
+/// (AGENT-006 §6; Set S task S-8.1).
+///
+/// This is the body of [`dispatch_under`], which is the same call with no
+/// family. There is one of these rather than two paths on purpose: a second
+/// dispatcher would be a second place the gate could be forgotten, and the gate
+/// is the only thing standing between a trial-spending tool and unregistered
+/// compute.
+///
+/// `family_id` changes exactly one thing — the family the *reservation* is
+/// written under. It cannot admit a call [`dispatch_under`] would refuse, cannot
+/// skip the idempotency record, and cannot reach a handler ahead of the gate;
+/// `the_only_call_to_the_dispatch_table_is_behind_the_gate` is what keeps that
+/// true as this function changes.
+pub async fn dispatch_in_family(
+    ctx: &McpContext,
+    tool_name: &str,
+    params: &Value,
+    progress: Option<tokio::sync::mpsc::Sender<ProgressUpdate>>,
     _envelope: &AuditEnvelope,
+    family_id: Option<&str>,
 ) -> Value {
     let started = std::time::Instant::now();
     let result = match spec::find(tool_name) {
@@ -733,7 +796,7 @@ pub async fn dispatch_under(
         Some(s) if s.risk != taxonomy::Risk::Read && ctx.replay(s.name, params).is_some() => {
             ctx.replay(s.name, params).unwrap_or_else(|| json!({}))
         }
-        Some(s) => match ctx.gate.admit(s, params).await {
+        Some(s) => match ctx.gate.admit_in_family(s, params, family_id).await {
             Err(e) => e.to_value(),
             Ok(ticket) => {
                 let mut out = dispatch_untraced(ctx, tool_name, params, progress).await;
@@ -920,6 +983,32 @@ async fn dispatch_untraced(
         "family_wise_test" => tools::audit::family_wise_test(&ctx.api, params).await,
         "metric_integrity" => tools::audit::metric_integrity(&ctx.api, params).await,
 
+        // ── Code (S-8.8) ───────────────────────────────────────────────────────
+        "run_python" => tools::code::run_python(ctx, params).await,
+
+        // ── The workflow tier (S-8.1) ──────────────────────────────────────────
+        //
+        // One arm for every battery, for the same reason the templated tier has
+        // one: a battery is a declaration in `tools::workflows::batteries`, and
+        // adding one must not mean editing this file.
+        //
+        // `Box::pin` because a battery dispatches its own steps through this
+        // function, and an `async fn` that reaches itself has a future of
+        // infinite size. Boxing is what makes the recursion representable; the
+        // thing that makes it *terminate* is
+        // `no_battery_has_a_battery_for_a_step`, because a battery whose step
+        // is a battery would recurse for real.
+        name if tools::workflows::all()
+            .iter()
+            .any(|w| w.name == name && w.is_declared_complete()) =>
+        {
+            let wf = tools::workflows::all()
+                .iter()
+                .find(|w| w.name == name)
+                .unwrap_or_else(|| unreachable!("the guard just found it"));
+            Box::pin(tools::workflows::run(ctx, wf, params)).await
+        }
+
         // ── The templated tier ─────────────────────────────────────────────────
         //
         // One arm for all of them, and it has to come last: a templated tool is
@@ -1042,6 +1131,18 @@ mod catalogue_tests {
         // routing.
         for t in tools::templated::templates() {
             arms.insert(t.header().name.as_str());
+        }
+
+        // The workflow tier, for the same reason and read the same way (S-8.1):
+        // one guarded arm rather than a literal per battery, so the names come
+        // from the declaration. Added rather than exempted, so a battery that
+        // stops being declared still fails this test.
+        //
+        // The guard and `workflows::specs` share their predicate — a battery
+        // still owed a step is in neither, so the two sides of this assertion
+        // stay equal as batteries become runnable.
+        for w in tools::workflows::all().iter().filter(|w| w.is_declared_complete()) {
+            arms.insert(w.name);
         }
 
         let declared: BTreeSet<&str> = spec::names().into_iter().collect();
@@ -1232,8 +1333,19 @@ mod catalogue_tests {
             .split_once("async fn dispatch_untraced")
             .expect("dispatch_untraced follows it")
             .0;
+        // `ctx.gate.admit` rather than `ctx.gate.admit(`: S-8.1 gave the gate a
+        // second spelling, `admit_in_family`, for the steps of a battery. The
+        // two share a body — the family decides which family the reservation is
+        // written under and nothing else — so what this has to assert is that
+        // the dispatcher consults the gate exactly once, by either name, before
+        // it reaches the table.
+        let admits = dispatcher.matches("ctx.gate.admit").count();
+        assert_eq!(
+            admits, 1,
+            "the dispatcher consults the gate {admits} times; two admissions are two chances for one to be skipped"
+        );
         let admit = dispatcher
-            .find("ctx.gate.admit(")
+            .find("ctx.gate.admit")
             .expect("dispatch_tool consults the gate");
         let call = dispatcher
             .find("dispatch_untraced(ctx")

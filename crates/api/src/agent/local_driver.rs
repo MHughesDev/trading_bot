@@ -771,6 +771,15 @@ impl Recorder {
         // to answer it.
         self.decide_hypotheses().await;
 
+        // And compile the dossier, from the same rows (S-8.7). Here for the
+        // same reason as above — `finish` is the one place every ending passes
+        // through — but only for a run that produced a result: a fenced run has
+        // no report to check the claims of, and compiling one would be inventing
+        // a document about a run that did not finish.
+        if let Outcome::Finished { result, evidence } = outcome {
+            self.compile_dossier(result, evidence).await;
+        }
+
         let (status, summary, error) = match outcome {
             Outcome::Finished { result, evidence } => (
                 "completed",
@@ -847,6 +856,63 @@ impl Recorder {
         .bind(barren)
         .execute(&self.pg)
         .await;
+    }
+
+    /// Compile and store this run's dossier (AGENT-006 §5.8; S-8.7).
+    ///
+    /// The ticket is the run id. A dossier is about one run's report, and a
+    /// second identifier would be a second thing to keep in step for no gain —
+    /// the proposals queue's `dossier_ref` is this value.
+    ///
+    /// A failure is recorded in the run's events and does not fail the run. That
+    /// is not indifference: a dossier refuses to compile when a claim is not
+    /// supported by its evidence, which is a finding about the report and worth
+    /// keeping, and the run ended either way.
+    async fn compile_dossier(&mut self, result: &str, evidence: &str) {
+        let tenant = self.user_id.to_string();
+        let run = self.run_id.to_string();
+        // The profile the run was judged under, read back rather than carried:
+        // a run can be re-tiered mid-flight, and the provenance block has to say
+        // which profile the row actually ended on.
+        let profile: String = sqlx::query_scalar(
+            "SELECT COALESCE(profile_id, 'unknown') FROM agent_runs WHERE run_id = $1",
+        )
+        .bind(self.run_id)
+        .fetch_optional(&self.pg)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "unknown".to_string());
+        let produced = crate::dossier::Produced {
+            run_id: self.run_id,
+            tenant_id: &tenant,
+            ticket: &run,
+            result,
+            // What `finish_task` cited, rendered as one piece of evidence under
+            // its own name. The ids inside it are resolved from memory and the
+            // ledger by the compiler; this is the model's own sentence, kept so
+            // a number it quoted from a tool result it did not record is still
+            // alignable.
+            evidence: vec![harness::report::claims::Evidence {
+                id: format!("{run}:cited"),
+                text: evidence.to_string(),
+            }],
+            cost_usd: self.yielded.cost_usd,
+            trials: self.yielded.trials_spent,
+            harness_version: HARNESS_VERSION,
+            profile: &profile,
+            window: "the run's registered window",
+            seeds: "as recorded on each trial",
+        };
+        match crate::dossier::compile_and_store(&self.pg, self.user_id, produced).await {
+            Ok(_) => {
+                self.append("dossier", json!({ "ticket": run })).await;
+            }
+            Err(e) => {
+                self.append("dossier", json!({ "not_compiled": e.to_string() }))
+                    .await;
+            }
+        }
     }
 
     /// Decide this run's open hypotheses and count the verdicts.

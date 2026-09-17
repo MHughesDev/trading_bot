@@ -17,6 +17,8 @@ pub mod automations;
 pub mod backtests;
 pub mod dashboard;
 pub mod data;
+pub mod code;
+pub mod dossiers;
 pub mod experiments;
 pub mod jobs;
 pub mod llm;
@@ -117,7 +119,22 @@ pub fn router(state: AppState) -> Router {
         // The trial gate's door (ADR-S10-10). It has been calling this since
         // it was written; until 2026-09-17 nothing answered, so every
         // trial-spending tool was refused and the research loop did not run.
+        // S-8.8: the one route that runs a program a model wrote. Refuses
+        // unless a sandbox is configured; it never falls back to this process.
+        .route("/api/code/run", post(code::run))
+        // S-8.7: the desk's dossier reader has called these since S-6.17.
+        .route("/api/dossiers/{ticket}", get(dossiers::get))
+        .route("/api/dossiers/{ticket}/verify/{claim}", post(dossiers::verify))
+        .route(
+            "/api/dossiers/{ticket}/comments",
+            get(dossiers::comments).post(dossiers::add_comment),
+        )
         .route("/api/ledger/reservations", post(ledger::reserve))
+        // S-8.4: written by the workflow engine, read by the gates.
+        .route(
+            "/api/ledger/workflow-verdicts",
+            post(ledger::record_verdict),
+        )
         .route("/api/lifecycle/questions", post(lifecycle::open_question))
         // What the platform's runs cost in trials against what they
         // produced (AGENT-013 §10; S-10.13). Per tier and workflow,

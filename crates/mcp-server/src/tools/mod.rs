@@ -9,6 +9,7 @@
 pub mod assets;
 pub mod audit;
 pub mod authoring;
+pub mod code;
 pub mod core;
 pub mod automations;
 pub mod backtests;
@@ -25,3 +26,4 @@ pub mod research_tools;
 pub mod strategy;
 pub mod templated;
 pub mod venues;
+pub mod workflows;

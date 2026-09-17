@@ -1,6 +1,9 @@
 # COMP-006: Research Workspace UI
 
-**Status:** Proposed (Phase 0 contract; not implemented)
+> **Status:** **Superseded by AGENT-012 §2–§6** (2026-09-17, Set S phase 8 exit). The Research Desk replaces the workspace page; the dossier reader is §5 and is served by `/api/dossiers/{ticket}` as of S-8.7.
+>
+> Kept rather than deleted, for the reason a deprecated tool is kept: documents written while this was current cite it by number, and a dangling reference is worse than a superseded one. Read it as the record of what was intended, never as a description of what the platform does.
+
 **Version:** 0.1
 **ADR(s):** ADR-0024, ADR-0025
 **Derived from:** BS-007 [15_WORKSPACE_UI](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/15_WORKSPACE_UI.MD)

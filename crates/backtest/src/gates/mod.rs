@@ -13,11 +13,13 @@
 pub mod evaluators;
 pub mod stack;
 pub mod profile;
+pub mod tickets;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 pub use evaluators::{GateOutcome, LengthInputs, PerturbationInputs, VolRegime};
+pub use tickets::{check as check_tickets, Checkpoint, Missing, Requirement, Ticket};
 pub use profile::{AssetClassGates, Comparability, CrisisWindow, GateProfile, Thresholds, PAPER_V1, STRICT_V1};
 
 use crate::experiment::{Experiment, ExperimentError};

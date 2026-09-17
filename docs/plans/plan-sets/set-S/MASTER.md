@@ -215,10 +215,17 @@ absorbs parts of four reserved sets. Recorded so the roadmap stays honest:
 | 5 | [The language](phase-5-strategy-language.md) | 15 | SA-01…SA-16 | 3, 4, 6, 7 | NOT STARTED |
 | 6 | [The Research Desk](phase-6-research-desk.md) | 24 | DK-01…DK-24 | 2, 3, 4, 5, 7 | NOT STARTED |
 | 7 | [The monitor](phase-7-monitor.md) | 13 | MS-01…MS-14 | everything | NOT STARTED |
-| 8 | [Integration and honesty](phase-8-integration.md) | 9 | TC-35…TC-40, RP-05…RP-08, EC-12 | — (needs 2,3,4) | NOT STARTED |
+| 8 | [Integration and honesty](phase-8-integration.md) | 9 | TC-35…TC-40, RP-05…RP-08, EC-12 | — (needs 2,3,4) | **6 / 9 (S-8.2, S-8.3, S-8.9 partial)** — see the phase file |
 | 9 | [Context as retrieval](phase-9-context-as-retrieval.md) | 20 | CX2-01…CX2-20 | 8 | NOT STARTED |
 | 10 | [Modes and the lifecycle](phase-10-lifecycle.md) | 16 | LC-01…LC-16 | 9 | NOT STARTED |
 | 11 | [Continuous research](phase-11-continuous-research.md) | 14 | PG-01…PG-14 | 9 | NOT STARTED |
+
+> **The Status column is stale for every row but 8**, and saying so is more useful
+> than leaving it to be discovered. Phases 4, 5, 6, 9 and 10 are substantially built
+> while recorded here as `NOT STARTED` — found on 2026-09-16 by going to implement a
+> task and discovering its adversarial test already passing. Each phase file carries
+> its own count, and those are the ones that have been checked against the code.
+> Only row 8 was updated here because only row 8 was verified in this pass.
 
 ### Dependency graph
 
@@ -251,7 +258,16 @@ phase file, then the spec sections its tasks trace to. Then:
 - Never start a task without setting it `IN PROGRESS` in the phase file; never start the
   next one while the current is `IN PROGRESS` (`docs/procedures/execute-plan.md`).
 - Reserved migration ranges — **take numbers only from your own range** so concurrent
-  tracks cannot collide (latest existing is `0060_web_and_skills.sql`):
+  tracks cannot collide (latest existing was `0060_web_and_skills.sql` when this was
+  written).
+
+  > **The table below is a record of what was reserved, not of what was used.** The
+  > tracks did not run concurrently and the repository is past `0130`; phase 8 took
+  > `0134`–`0136`, phase 10 took `0127`–`0133`. Reserving a range only prevents a
+  > collision between tracks running at the same time, and once one track is ahead the
+  > next number is the next number. Kept rather than rewritten, because a reader
+  > finding `0085` cited in a phase file needs to be able to see where that came
+  > from.
 
   | Track | Range |
   |---|---|
@@ -261,7 +277,7 @@ phase file, then the spec sections its tasks trace to. Then:
   | Phase 7 monitor | 0074–0078 |
   | Phase 3 catalogue | 0079–0081 |
   | Phase 5 language | 0082–0084 |
-  | Phase 8 integration | 0085–0088 |
+  | Phase 8 integration | 0085–0088 (used `0134`–`0136`) |
   | Phase 10 lifecycle | 0089–0091 |
   | Phase 11 continuous research | 0092–0096 |
 

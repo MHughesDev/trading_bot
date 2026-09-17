@@ -191,6 +191,30 @@ Post-Phase 6:
 - [ ] One end-to-end trade (paper) completes without errors
 - [ ] API security review passed before network exposure
 
+
+---
+
+## Set S phase 8 — what is not closed, and the phase that would close it
+
+Added 2026-09-17, on the phase-8 exit review. S-8.9's rule is that **every acceptance
+criterion carries evidence or a recorded, justified exception**, and these are the
+exceptions. Each names the thing that would close it, so the next person does not have
+to re-derive why it is open.
+
+The format differs from the 2026-06 scan above because the question differs: that scan
+asked "what is wrong", and this asks "what did we ship knowing it was incomplete".
+
+| # | Exception | Why it shipped this way | What closes it |
+|---|---|---|---|
+| S8-1 | **Five of the six §6 batteries cannot run.** `leakage_audit`, `hypothesis_precheck`, `precapital_battery`, `signal_identity` and `go_live_readiness` are declared in full and are absent from the catalogue; only `selection_bias_verdict` is offered. | Sixteen stages across the five name a tool nobody has built. A battery that ran the steps that exist would emit a verdict *shaped* like the real one, and nothing downstream could tell the difference (ADR-S8-01). | The sixteen owed tools, enumerated by `mcp_server_lib::tools::workflows::owed()` with what each needs and why its verdict is unreachable without it. `precapital_battery` is one tool from running; `leakage_audit` is three. |
+| S8-2 | **Three of the four gate ticket requirements are not enforced.** Gate 2 demands `selection_bias_verdict` and not `leakage_audit`; gate 3 demands nothing; the paper door demands nothing. | Enforcing a ticket nothing can mint refuses every experiment on the platform, forever. The requirement is declared with `enforced: false` and an invariant test holds that flag equal to whether its battery can run — so this closes itself, loudly, on the day the battery lands (ADR-S8-02). | S8-1. `crates/invariants/tests/gates_demand_tickets.rs` fails until `enforced` is flipped to match. |
+| S8-3 | **Reservation settlement is still unwired.** `mlops.trial_reservation.settled_trial_id` exists and nothing sets it, so an authorised look that never ran is not distinguishable from one that did. | Inherited from ADR-S10-10 and not closed here. Threading a reservation id through tool → API → suite → Run is a change to four layers and was not phase 8's subject. | A phase that threads the id through the compute path. Until then no reconciliation is claimed anywhere, and the migration's own header says so. |
+| S8-4 | **Reviewer precision over time is not tracked**, though S-8.6 asks for it. | It needs a corpus of critiques whose findings were later confirmed or dismissed, and nothing records the second half — a critique is stored with the dossier and no one marks a finding as having been right. | A disposition on each critique finding, written when a human acts on the dossier. The comment thread (`mlops.dossier_comment`) is where that would attach. |
+| S8-5 | **The per-conversation sandbox launcher is a deployment contract, not a component.** `POST /api/code/run` creates the workspace and shells `TBOT_SANDBOX_CMD`; nothing in this repository starts or tears down a container. | The honest alternatives were worse: running the script in the platform process when no sandbox is configured (the hole), or putting the Docker socket inside the API container (a different hole). With the variable unset the tool refuses and says why (ADR-S8-06). | A launcher component with a container lifecycle, or a deployment that supplies the command. The image, the executor, the refusals and the CI build are all in place. |
+| S8-6 | **A dossier's `funnel` and `quoted_untrusted` sections are empty arrays.** The desk renders both and the compiler cannot see that they are never filled. | The funnel view is per-experiment and a dossier is per-run, and nothing in the run record says which experiment it advanced. `quoted_untrusted` needs the fetched-content provenance chain, which `agent_memory.entry` records per entry and not per quotation. | Joining a run to its experiment, and a per-quotation provenance record. Both are reads; neither is a new mechanism. |
+| S8-7 | **`claims::extract` catches only claims containing a number.** A qualitative overclaim in the prose is not extracted and therefore cannot block. | Stated in the module header rather than implied. Post-hoc span alignment is a numeric operation; a prose-level overclaim check is a model judgement, which is what the critic is for. | The checklist critic's `SuggestiveNotPresentedAsEstablished` covers the most common case by reading the platform's confidence label. A broader check would need the fresh-session model critic (S-8.6's other half) to run on every report. |
+| S8-8 | **About thirty-five string literals across the crates have swallowed line continuations** — runs of ten or more spaces mid-sentence, from an editing process that ate `\` continuations. Most are user-visible refusal messages. | Pre-existing, found while writing this phase, and unrelated to any of it. Fixing them inline would have put a thirty-file whitespace diff inside a feature change. | A sweep, spawned as its own task. The detection script is in that task's prompt. |
+
 ---
 
 ## Changelog
@@ -198,6 +222,7 @@ Post-Phase 6:
 | Date | Version | Changes |
 |------|---------|---------|
 | 2026-06-10 | v1 | Initial scan — 23 items found (3 CRITICAL, 7 HIGH, 6 MEDIUM, 4 LOW) |
+| 2026-09-17 | v3 | Set S phase 8 exit: eight recorded exceptions, each with the phase that would close it. Not a repository scan — these are things shipped knowingly incomplete, which is a different list from the one above. |
 | 2026-06-10 | v2 | Post-implementation pass — 18 items completed/improved; 2 new findings added (freshness timezone, WS serialization); overall risk downgraded from HIGH to MEDIUM |
 
 ---

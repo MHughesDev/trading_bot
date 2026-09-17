@@ -62,6 +62,14 @@ pub struct Reserve {
     /// whichever workflow asked for it — which is why it lives here rather than
     /// on `mlops.trial`.
     pub workflow: Option<String>,
+    /// The battery this look belongs to (AGENT-006 §6; migration 0134).
+    ///
+    /// A workflow is one tool call that takes five or six looks, and every one
+    /// of them is a multiple comparison. `None` is a look taken on its own,
+    /// which is the common case and a real answer — not "unknown". Minted by the
+    /// workflow engine before its first step is admitted, so no step of a
+    /// battery can fall outside its family.
+    pub family_id: Option<String>,
 }
 
 /// The kinds a reservation may carry, mirroring the catalogue's `TrialKind`
@@ -121,6 +129,17 @@ impl Reserve {
         if self.arguments_hash.trim().is_empty() {
             return invalid("a reservation hashes the arguments it authorised");
         }
+        if let Some(f) = &self.family_id {
+            if f.trim().is_empty() {
+                return invalid(
+                    concat!(
+                        "a blank family is worse than no family: it groups every ",
+                        "blank-family look on the platform into one denominator. ",
+                        "Send no family, or send its id"
+                    ),
+                );
+            }
+        }
         if let Some(w) = &self.workflow {
             if !WORKFLOWS.contains(&w.as_str()) {
                 return invalid(&format!(
@@ -152,6 +171,7 @@ mod tests {
             prereg_hash: "sha256:abc".into(),
             arguments_hash: "sha256:def".into(),
             workflow: Some("investigate".into()),
+            family_id: None,
         }
     }
 
@@ -193,6 +213,26 @@ mod tests {
         let mut r = reserve();
         r.run_id = None;
         r.validate().expect("a front door with no run still spends");
+    }
+
+    /// A look on its own has no family, and a blank one is refused rather than
+    /// stored — a blank family id would pool every blank-family look on the
+    /// platform into a single denominator, which is a correction over the wrong
+    /// family and reads as a pass.
+    #[test]
+    fn a_family_is_named_or_absent() {
+        let mut none = reserve();
+        none.family_id = None;
+        none.validate().expect("a look taken on its own");
+
+        let mut named = reserve();
+        named.family_id = Some("wf_leakage_audit_7".into());
+        named.validate().expect("a look inside a battery");
+
+        let mut blank = reserve();
+        blank.family_id = Some("   ".into());
+        let err = blank.validate().expect_err("a blank family is not a family");
+        assert!(format!("{err}").contains("denominator"), "{err}");
     }
 
     /// A workflow the harness cannot produce is refused, and every one it can is

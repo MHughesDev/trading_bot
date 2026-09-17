@@ -47,22 +47,19 @@ use std::path::{Path, PathBuf};
 /// Paths the frontend calls on purpose that nothing serves yet, with the task
 /// that owns each. Keep sorted; keep the reason.
 const UNBUILT: &[(&str, &str)] = &[
-    // Phase 8 — the report layer (S-8.6, S-8.7). `crates/harness/src/report/`
-    // does not exist. `/api/reports/{}` was found by this test and by nothing
-    // else: the shell diff that produced the other twelve only read
+    // Phase 8 — a run's report. `/api/reports/{}` was found by this test and by
+    // nothing else: the shell diff that produced the other twelve only read
     // `client.get(` calls in `frontend/src/api/*.ts`, and this one lives in
     // `research.ts` behind a different spelling. Thirteen, not twelve — which is
     // the argument for the test over the diff, made one more time.
     (
         "/api/reports/{}",
-        "S-8.6 — the report layer is not built",
+        "a run's report, which is not the compiled dossier S-8.7 built and serves",
     ),
-    // Phase 8 — the dossier (S-8.7). `crates/harness/src/report/` does not exist.
-    ("/api/dossiers/{}", "S-8.7 — the dossier layer is not built"),
-    (
-        "/api/dossiers/{}/verify/{}",
-        "S-8.7 — claim rechecking needs the dossier",
-    ),
+    // The two dossier paths that were here are served as of S-8.7, and the
+    // comment thread was added on both sides at once so it never needed an
+    // entry. What is left of phase 8 on this list is `/api/reports/{}`, which
+    // is a different surface: a run's report rather than a compiled dossier.
     // Phase 11 — continuous research (S-11.1). Needs `crates/research-session`,
     // four tables and a JobKind; depends on phases 10, 2, 4 and 7.
     ("/api/research/sessions", "S-11.1 — no research_sessions table"),

@@ -380,6 +380,13 @@ pub fn catalog() -> &'static [ToolSpec] {
         specs.extend(crate::tools::lifecycle::specs());
         specs.extend(crate::tools::campaign::specs());
         specs.extend(crate::tools::research_tools::specs());
+        // The batteries (S-8.1). Only the ones that can actually run: a
+        // workflow with a step nothing performs is absent rather than offered
+        // short — see `tools::workflows`.
+        specs.extend(crate::tools::workflows::specs());
+        // S-8.8. Hidden below the `full` code-execution tier by
+        // `ToolRegistry::expose_within`, which gates the whole namespace.
+        specs.extend(crate::tools::code::specs());
         // Last, and appended rather than interleaved: the templated tier's order is
         // the directory's, and a tool moving namespace should not reshuffle the
         // hand-written half of the catalogue in every diff.

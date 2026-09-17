@@ -69,6 +69,19 @@ pub struct TrialRequest<'a> {
     /// replications" — a question about the run and its call, which is why it
     /// rides on the reservation and not on the trial.
     pub workflow: Option<&'a str>,
+    /// The battery this look belongs to (AGENT-006 §6; Set S task S-8.1).
+    ///
+    /// A workflow is one tool call that takes five or six looks, and a
+    /// family-wise correction computed over a denominator that does not contain
+    /// them is a correction over the wrong family. `None` is a look taken on its
+    /// own, which is the common case.
+    ///
+    /// On the *request* rather than on the gate, deliberately. A gate is
+    /// per-run and a family is per-battery: one run takes many batteries, and a
+    /// field on the gate would either have to be mutated between them — a race
+    /// with every concurrent call the run makes — or force the run's every look
+    /// into one family, which over-corrects.
+    pub family_id: Option<&'a str>,
 }
 
 /// The row that now exists: **a reservation, not a trial** (ADR-S10-10).
@@ -148,6 +161,7 @@ impl TrialRegistrar for ApiTrialRegistrar {
                 "prereg_hash": prereg_hash,
                 "run_id": req.run_id,
                 "workflow": req.workflow,
+                "family_id": req.family_id,
             });
             match self.api.post("/api/ledger/reservations", body).await {
                 Ok(v) => {
@@ -418,6 +432,28 @@ impl CallGate {
         spec: &'static ToolSpec,
         arguments: &Value,
     ) -> Result<Option<TrialReceipt>, ToolError> {
+        self.admit_in_family(spec, arguments, None).await
+    }
+
+    /// Admit a call that belongs to a battery (S-8.1).
+    ///
+    /// Identical to [`Self::admit`] in every respect except the family the
+    /// reservation is written under — the workflow engine is the only caller
+    /// that passes one, because it is the only caller that knows which looks
+    /// belong together.
+    ///
+    /// Note what this is *not*: a second gate, or a way in. Every refusal
+    /// [`Self::admit`] makes is made here, in the same order, because this is
+    /// the body and that is the wrapper.
+    ///
+    /// # Errors
+    /// Every error [`Self::admit`] returns.
+    pub async fn admit_in_family(
+        &self,
+        spec: &'static ToolSpec,
+        arguments: &Value,
+        family_id: Option<&str>,
+    ) -> Result<Option<TrialReceipt>, ToolError> {
         // Count first, then judge. Counting after the verdict would let a tool at
         // its budget be retried forever, each attempt refused and none recorded.
         let count = {
@@ -498,6 +534,7 @@ impl CallGate {
                 },
                 run_id: self.run_id.as_deref(),
                 workflow: self.workflow.as_deref(),
+                family_id,
             })
             .await
             .map(Some)

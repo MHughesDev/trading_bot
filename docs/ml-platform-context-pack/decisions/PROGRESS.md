@@ -1121,3 +1121,77 @@ under the same trial — which remains correct behaviour, just not the cheap one
 CI: a new `resume-bit-identity` job installs torch (CPU wheel), xgboost,
 lightgbm and scikit-learn and runs the file; `eval-graders` now ignores it, so
 the fast job stays fast.
+
+---
+
+## Set S phase 8 — integration and honesty (2026-09-17)
+
+### What is enforced by mechanism
+
+**A battery is one call, one family, and its steps are not negotiable.**
+`Tier::Workflow` had been a category in the catalogue's vocabulary that described
+nothing; `mcp_server_lib::tools::workflows` is the engine that declares against it.
+The family id is minted before the first step is admitted and every step reserves
+under it (`0134`), so a battery's looks are countable as one multiple comparison
+rather than as six calls that happened close together. A step's `kind`, `metric` and
+`question` are pinned by the declaration and a caller's value for them loses —
+`a_caller_cannot_unpin_a_pinned_step_parameter`.
+
+**A gate reads rows, not arguments.** `backtest::gates::tickets::check` takes a list
+of `Ticket`s read from `mlops.workflow_verdict`, a table only the workflow engine
+writes. The request being judged carries no justification field at all, so "a
+persuasive argument with no ticket is refused" is a property of the type rather than
+of a check somebody remembered to write. A ticket lookup that *fails* refuses.
+
+**A report cannot be finalised with an unsupported claim.** `report::claims` aligns
+every number in every sentence against the evidence bundle by post-hoc span
+alignment, never by trusting the model's own citation. `direct_stat` requires the
+number verbatim; a faithful rounding is `derived`; anything else blocks the dossier.
+
+**The critic cannot see the reasoning it is checking.** Two mechanisms, neither an
+instruction: `Projection::Critic` leaves the producer's reasoning out of the store
+the critic selects from, and `Delegation::check` refuses a critic dispatched under
+any other projection.
+
+**A sandbox that holds a credential does not start.** `executor.py` checks ten
+environment variable names and exits; CI proves it by starting the image with
+`ANTHROPIC_API_KEY` set and asserting the failure. Free-form code is hidden below the
+`full` tier by namespace, in `ToolRegistry::expose_within`, and two crates' spellings
+of that namespace are held equal by `crates/invariants`.
+
+**`run_python` has no host fallback.** With `TBOT_SANDBOX_CMD` unset the route
+refuses. The tempting shortcut — run the script in a subprocess on the host when no
+sandbox is configured — would have worked identically in development and been a hole
+in production.
+
+### What is not true, honestly
+
+**Five of the six batteries cannot run.** They are declared in full, with every step
+the spec names, and each is absent from the catalogue because at least one of its
+steps has no tool. `mcp_server_lib::tools::workflows::owed()` is the list: sixteen
+stages, each naming what it needs and why the verdict is unreachable without it.
+`precapital_battery` is one tool away; `leakage_audit` is three.
+
+**Therefore three of the four gate requirements are declared and not enforced.**
+Gate 2 demands `selection_bias_verdict` and nothing else; gate 3 and the paper door
+demand nothing. `enforced` is a `const` held equal to `Workflow::is_runnable()` by
+`crates/invariants/tests/gates_demand_tickets.rs` — so this is not a switch anybody
+can reach, and the day a battery becomes runnable that test fails until the gate
+starts demanding it.
+
+**Reservation settlement is still unwired**, inherited from ADR-S10-10 and not closed
+here. `settled_trial_id` exists and nothing sets it.
+
+**Reviewer precision over time is not tracked**, though S-8.6 asks for it: nothing
+records whether a critique's finding was later confirmed.
+
+**A dossier's `funnel` and `quoted_untrusted` arrays are always empty.** The desk
+renders both; the compiler cannot see that nothing fills them.
+
+**The per-conversation container launcher is a deployment contract.** The image, the
+executor, the refusals and the CI build exist; nothing in this repository starts or
+tears down a container.
+
+All eight exceptions are in `docs/governance/COMPLACENCY_LOG.md` with the phase that
+would close each.
+

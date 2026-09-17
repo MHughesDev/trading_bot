@@ -1,4 +1,4 @@
-# Research stack for the agent sandbox (AGENT-001 §7).
+# Research stack for the `run_python` sandbox (AGENT-005 §8; S-8.8).
 #
 # Torch is the CPU build: the local GPU (D-17) belongs to the training-job worker,
 # not to this container. The agent trains by submitting a `train` job, which is also
@@ -26,6 +26,7 @@ torch==2.5.1
 # Plots (spec artifacts, not interactive display)
 plotly==5.24.1
 
-# Platform client
+# HTTP and validation. Not a platform client: this container holds no token, and
+# `tbot` was dropped with the SDK for exactly that reason.
 httpx==0.28.1
 pydantic==2.10.4

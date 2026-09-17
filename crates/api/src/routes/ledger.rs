@@ -31,7 +31,9 @@
 //! visible one.
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use backtest::gates::tickets::Ticket;
 use ledger::reservation::{Reserve, Reserved};
+use ledger::workflow_verdict::Record as WorkflowRecord;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -66,6 +68,13 @@ pub struct ReserveBody {
     /// refusing the reservation for want of one would refuse the call.
     #[serde(default)]
     workflow: Option<String>,
+    /// The battery this look belongs to (S-8.1; migration 0134).
+    ///
+    /// Optional, and from the body for the same reason `run_id` is: the caller
+    /// running the battery is the only party that knows which looks belong to
+    /// it, and the platform cannot derive it from a service token.
+    #[serde(default)]
+    family_id: Option<String>,
 }
 
 /// `POST /api/ledger/reservations`
@@ -90,6 +99,7 @@ pub async fn reserve(
         prereg_hash: body.prereg_hash,
         arguments_hash,
         workflow: body.workflow,
+        family_id: body.family_id,
     };
     if let Err(e) = r.validate() {
         return (
@@ -103,8 +113,8 @@ pub async fn reserve(
     let res = sqlx::query(
         "INSERT INTO mlops.trial_reservation
              (reservation_id, tenant_id, run_id, tool, tool_version, kind,
-              prereg_hash, arguments_hash, workflow)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+              prereg_hash, arguments_hash, workflow, family_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
     )
     .bind(reservation_id)
     .bind(&r.tenant_id)
@@ -115,6 +125,7 @@ pub async fn reserve(
     .bind(&r.prereg_hash)
     .bind(&r.arguments_hash)
     .bind(&r.workflow)
+    .bind(&r.family_id)
     .execute(&state.pg)
     .await;
 
@@ -136,6 +147,128 @@ pub async fn reserve(
         )
             .into_response(),
     }
+}
+
+// ── S-8.4: the battery's conclusion, so a gate can demand it ─────────────────
+
+/// What the workflow engine sends when a battery finishes.
+#[derive(Debug, Deserialize)]
+pub struct VerdictBody {
+    /// The family the battery minted before its first step was admitted.
+    family_id: String,
+    workflow: String,
+    verdict: String,
+    because: String,
+    /// What it was run over — the experiment id.
+    subject: String,
+    #[serde(default)]
+    run_id: Option<Uuid>,
+    /// Every step, as the engine rendered them. No `serde(default)`: a body
+    /// without them does not deserialise, because a verdict with no steps is a
+    /// claim and the gate that reads these exists to stop accepting claims.
+    steps: Value,
+    complete: bool,
+}
+
+/// `POST /api/ledger/workflow-verdicts`
+///
+/// Written by the engine, from a battery it ran. There is no path here for a
+/// verdict a model asserts: the body carries the steps, and
+/// [`WorkflowRecord::validate`] refuses one with none.
+pub async fn record_verdict(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(body): Json<VerdictBody>,
+) -> impl IntoResponse {
+    let r = WorkflowRecord {
+        family_id: body.family_id,
+        // The session's, never the body's — same rule as every other write here.
+        tenant_id: token.user_id().to_string(),
+        workflow: body.workflow,
+        verdict: body.verdict,
+        because: body.because,
+        // Normalised, because the gate looks a ticket up by the experiment's
+        // canonical id and the battery was handed whatever spelling the model
+        // typed. A ticket filed under `A1B2...` that a gate looks for under
+        // `a1b2...` is a battery that ran and cannot be found.
+        subject: Uuid::parse_str(body.subject.trim())
+            .map_or_else(|_| body.subject.trim().to_string(), |u| u.to_string()),
+        run_id: body.run_id,
+        steps: body.steps,
+        complete: body.complete,
+    };
+    if let Err(e) = r.validate() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "invalid_verdict", "message": e.to_string() })),
+        )
+            .into_response();
+    }
+
+    let res = sqlx::query(
+        "INSERT INTO mlops.workflow_verdict
+             (family_id, tenant_id, workflow, verdict, because, subject, run_id, steps, complete)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (family_id) DO NOTHING",
+    )
+    .bind(&r.family_id)
+    .bind(&r.tenant_id)
+    .bind(&r.workflow)
+    .bind(&r.verdict)
+    .bind(&r.because)
+    .bind(&r.subject)
+    .bind(r.run_id)
+    .bind(&r.steps)
+    .bind(r.complete)
+    .execute(&state.pg)
+    .await;
+
+    match res {
+        Ok(_) => (
+            StatusCode::CREATED,
+            Json(json!({ "family_id": r.family_id, "verdict": r.verdict })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "verdict_not_recorded", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Every battery verdict recorded for one subject, oldest first.
+///
+/// Oldest first because `backtest::gates::tickets::check` takes the **newest**
+/// ticket per battery rather than the best one, and it does that positionally.
+/// Handing it rows in the other order would silently invert that rule.
+///
+/// # Errors
+/// Backend failures. A checkpoint treats an error as "no tickets", which
+/// refuses — the only safe direction for a lookup that licenses a gate.
+pub async fn tickets_for(
+    pg: &sqlx::PgPool,
+    tenant_id: &str,
+    subject: &str,
+) -> Result<Vec<Ticket>, sqlx::Error> {
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT family_id, workflow, verdict
+           FROM mlops.workflow_verdict
+          WHERE tenant_id = $1 AND subject = $2
+          ORDER BY created_at",
+    )
+    .bind(tenant_id)
+    .bind(subject)
+    .fetch_all(pg)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(family_id, workflow, verdict)| Ticket {
+            family_id,
+            workflow,
+            verdict,
+        })
+        .collect())
 }
 
 #[cfg(test)]

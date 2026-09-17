@@ -18,9 +18,12 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
+use backtest::gates::tickets::{check as check_tickets, Checkpoint};
+use backtest::gates::Gate;
 use backtest::nulls::NullKind;
 use backtest::suite::{CreateExperimentSpec, RunStudySpec, SuiteError};
 
+use crate::routes::ledger;
 use crate::{auth::BearerToken, state::AppState};
 
 /// Translate a [`SuiteError`] into an HTTP response with a stable error code.
@@ -237,6 +240,53 @@ pub async fn advance_funnel(
     token: BearerToken,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
+    // S-8.4: the funnel drives gates 0 through 3, so the tickets gate 2 and
+    // gate 3 demand are demanded here — before a single Study runs. Checked
+    // first because the alternative is spending minutes of CPCV to arrive at a
+    // refusal that was knowable from a table lookup.
+    //
+    // The tickets come from `mlops.workflow_verdict`, which only the workflow
+    // engine writes. Nothing in this request can put a row there, which is the
+    // property that makes "a persuasive argument with no ticket is refused"
+    // true rather than aspirational.
+    let tickets = match ledger::tickets_for(&state.pg, &token.user_id().to_string(), &id.to_string())
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            // A lookup that failed is not a lookup that found tickets. The
+            // refusal direction is the only safe one: a gate advanced because
+            // the ticket table was unreachable is a gate advanced on no
+            // evidence.
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({
+                    "error": "tickets_unreadable",
+                    "message": e.to_string(),
+                    "fix": "the funnel refuses rather than advancing on evidence it could not read"
+                })),
+            )
+                .into_response();
+        }
+    };
+    for checkpoint in [
+        Checkpoint::Funnel(Gate::Robustness),
+        Checkpoint::Funnel(Gate::Significance),
+    ] {
+        if let Err(missing) = check_tickets(checkpoint, &tickets) {
+            return (
+                StatusCode::PRECONDITION_FAILED,
+                Json(json!({
+                    "error": "missing_workflow_ticket",
+                    "checkpoint": checkpoint,
+                    "message": backtest::gates::tickets::refusal(checkpoint, &missing),
+                    "missing": missing,
+                })),
+            )
+                .into_response();
+        }
+    }
+
     // Gates 2–3 run CPCV / synthetic-path / permutation Studies — real Runs,
     // minutes of work — so keep the async worker free.
     let suite = state.suite.clone();

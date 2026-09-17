@@ -27,6 +27,7 @@ pub mod phase;
 pub mod portfolio;
 pub mod prereg;
 pub mod reservation;
+pub mod workflow_verdict;
 pub mod proposal;
 pub mod presets;
 pub mod state;
