@@ -1,4 +1,19 @@
-//! A path the MCP client posts to is a path the platform serves.
+//! A path the **MCP client** posts to is a path the platform serves.
+//!
+//! # Its counterpart
+//!
+//! `crates/api/tests/the_desk_calls_routes_that_exist.rs` already does this for
+//! the desk, and found twelve unserved endpoints when it was written. This is
+//! the same check pointed at the other client, which that test does not scan.
+//!
+//! They are deliberately two tests rather than one scanner over both, because a
+//! 404 means something different on each side. The desk's is swallowed by
+//! `optional()` into an empty panel that names the phase that owes it — visible,
+//! and its allowlist is a reviewable list of forward references. The MCP
+//! client's becomes `registration_failed` and **refuses the tool call**: the
+//! platform breaks and reports that the tool failed. One displays the gap; the
+//! other hides it behind a plausible error, which is why this one's allowlist is
+//! a defect list rather than a roadmap.
 //!
 //! # The defect this generalises
 //!

@@ -628,7 +628,11 @@ export const deskApi = {
    * Rows, never one number: "12% barren" is something nobody can act on, and
    * "`survey` on the 7B is barren 60% of the time" names a tier and a workflow.
    */
-  barren: (days = 30) => optional<BarrenRates>(client.get(`/api/lifecycle/barren?days=${days}`)),
+  barren: (days = 30) =>
+    // `params`, not a query string in the path: `the_desk_calls_routes_that_exist`
+    // matches the path against the router, and a `?…` glued on makes a served
+    // route read as unserved.
+    optional<BarrenRates>(client.get('/api/lifecycle/barren', { params: { days } })),
   decideProposal: (id: string, decision: 'approved' | 'rejected', note?: string) =>
     optional<ProposalDecision>(
       client.post(`/api/lifecycle/proposals/${id}/decision`, { decision, note: note ?? '' }),
