@@ -193,6 +193,64 @@ impl Subject {
     }
 }
 
+/// A number a record states about its subject.
+///
+/// Separate from [`Record::ids`] because §24.8 joins on it: two records sharing
+/// a subject and a *measured quantity* whose values disagree beyond their stated
+/// error are a disagreement, not a near-duplicate, and the redundancy penalty
+/// must not pick a winner between them. That is the same key AGENT-007 §2.2.1
+/// uses for conflicts in the memory store — subject, quantity, window — applied
+/// inside a run, for the same reason.
+///
+/// Whole or absent: a quantity with no value, or a value with no quantity, is
+/// the shape `0122`'s `measurement_is_whole_or_absent` CHECK refuses in the
+/// store, and it is refused here by construction.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Measurement {
+    pub quantity: String,
+    pub value: f64,
+    /// The stated error. `None` means the record did not state one, and
+    /// [`Measurement::disagrees_with`] treats that as "cannot tell" rather than
+    /// as zero — a silent zero would call every pair of unequal numbers a
+    /// disagreement.
+    pub se: Option<f64>,
+}
+
+impl Measurement {
+    #[must_use]
+    pub fn new(quantity: impl Into<String>, value: f64) -> Self {
+        Self {
+            quantity: quantity.into(),
+            value,
+            se: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_se(mut self, se: f64) -> Self {
+        self.se = Some(se);
+        self
+    }
+
+    /// Whether two measurements of the same quantity disagree beyond their
+    /// stated error (§24.8).
+    ///
+    /// Both must state an error. Without one the honest answer is that we
+    /// cannot tell, and calling it a disagreement would render every pair of
+    /// unequal numbers adjacent — which spends the budget on noise and teaches
+    /// the model to ignore the marker.
+    #[must_use]
+    pub fn disagrees_with(&self, other: &Measurement) -> bool {
+        if self.quantity != other.quantity {
+            return false;
+        }
+        match (self.se, other.se) {
+            (Some(a), Some(b)) => (self.value - other.value).abs() > (a.abs() + b.abs()),
+            _ => false,
+        }
+    }
+}
+
 /// What the model did with a record after it was rendered (§19).
 ///
 /// [`Utility::Indeterminate`] is not a placeholder for "we have not looked": that
@@ -245,6 +303,8 @@ pub struct Record {
     /// produced the id the next step uses is the record that step needs.
     pub ids: BTreeMap<String, String>,
     pub body: Body,
+    /// The number this record states about its subject, if it states one.
+    pub measurement: Option<Measurement>,
     /// Tokens of the undegraded render, fixed at insert.
     pub tokens_full: u32,
     pub utility: Utility,
@@ -299,6 +359,7 @@ pub struct Draft {
     pub subject: Subject,
     pub ids: BTreeMap<String, String>,
     pub body: Body,
+    pub measurement: Option<Measurement>,
 }
 
 impl Draft {
@@ -312,7 +373,14 @@ impl Draft {
             subject: Subject::default(),
             ids: BTreeMap::new(),
             body,
+            measurement: None,
         }
+    }
+
+    #[must_use]
+    pub fn measuring(mut self, m: Measurement) -> Self {
+        self.measurement = Some(m);
+        self
     }
 
     #[must_use]
@@ -369,6 +437,7 @@ impl RunStore {
             provenance: draft.provenance,
             subject: draft.subject,
             ids: draft.ids,
+            measurement: draft.measurement,
             tokens_full: draft.body.tokens(),
             body: draft.body,
             utility: Utility::NotAttributed,
@@ -604,6 +673,28 @@ mod tests {
             s.note_expansion(RecordId(999)),
             0,
             "an unknown id is not an expansion"
+        );
+    }
+
+    /// Disagreement needs both sides to state an error.
+    ///
+    /// A missing error is "cannot tell", not zero: treating it as zero would
+    /// call every pair of unequal numbers a disagreement, spend the budget
+    /// rendering them adjacent, and teach the model to ignore the marker.
+    #[test]
+    fn two_numbers_disagree_only_beyond_their_stated_error() {
+        let a = Measurement::new("sharpe", 1.42).with_se(0.10);
+        let near = Measurement::new("sharpe", 1.50).with_se(0.10);
+        let far = Measurement::new("sharpe", 2.10).with_se(0.10);
+        assert!(!a.disagrees_with(&near), "within the intervals");
+        assert!(a.disagrees_with(&far));
+        assert!(
+            !a.disagrees_with(&Measurement::new("sharpe", 2.10)),
+            "no stated error means cannot tell"
+        );
+        assert!(
+            !a.disagrees_with(&Measurement::new("max_dd", 2.10).with_se(0.1)),
+            "a different quantity is not a disagreement at all"
         );
     }
 

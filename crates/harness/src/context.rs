@@ -17,6 +17,8 @@
 pub mod body;
 pub mod degrade;
 pub mod manifest;
+pub mod policy;
+pub mod select;
 pub mod store;
 
 use serde::{Deserialize, Serialize};
