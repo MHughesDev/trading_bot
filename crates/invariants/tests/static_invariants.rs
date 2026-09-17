@@ -785,12 +785,49 @@ fn spec_15_tool_surface_conformance() {
 
     // The not-exposed list (§15, last paragraph). AT-24 and AT-27 cover the
     // exploration floor and the trial count; this is the rest of it.
+    //
+    // **DEFINE is the exception, and it is INV-23's own word.** The invariant
+    // reads "no grant on gate thresholds, `delta_practical` *after DEFINE*,
+    // N_eff…", and something has to *be* DEFINE or the value can never be set at
+    // all. `preregister` is that something: AGENT-013 §7.2 makes the run's
+    // pre-registration the campaign DEFINE — one object, one hash (S-10.11) — and
+    // sealing it is the act of declaring the effect size, before the first trial
+    // and before any result could influence the choice.
+    //
+    // Naming a gate *profile* is likewise not a grant on its *thresholds*. The
+    // profile is immutable and versioned (INV-23's first sentence); choosing
+    // which immutable profile a run is judged under, in advance, is the thing
+    // that makes the judgement checkable afterwards.
+    //
+    // Exempted by name rather than by loosening the pattern, so a second tool
+    // that starts asking for `delta_practical` still fails here.
+    const DEFINE_TOOLS: &[&str] = &["preregister"];
     let forbidden = Regex::new(r"(?i)(n_eff|deflat|threshold|gate_profile|delta_practical|regime_research)").unwrap();
     for (tool, schema) in &props {
+        if DEFINE_TOOLS.contains(&tool.as_str()) {
+            continue;
+        }
         for p in schema {
             assert!(
                 !forbidden.is_match(p),
                 "tool {tool} exposes `{p}` — §15 exposes none of: gate thresholds,                  delta_practical after DEFINE, N_eff, the deflation formula, regime_research"
+            );
+        }
+    }
+
+    // And the exemption is not a hole: a DEFINE tool may ask for the effect size
+    // and the gate profile, and for none of the rest. N_eff, the deflation and
+    // `regime_research` are computations the platform performs, not values
+    // anything declares — there is no stage at which a tool may ask for one.
+    let never = Regex::new(r"(?i)(n_eff|deflat|regime_research)").unwrap();
+    for tool in DEFINE_TOOLS {
+        let schema = props
+            .get(*tool)
+            .unwrap_or_else(|| panic!("{tool} is exempted and must exist"));
+        for p in schema {
+            assert!(
+                !never.is_match(p),
+                "DEFINE tool {tool} exposes `{p}`: the exemption is for declaring an effect                  size before the first trial, not for reaching the platform's own arithmetic"
             );
         }
     }
