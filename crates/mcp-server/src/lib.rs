@@ -819,6 +819,8 @@ async fn dispatch_untraced(
         "choose_null" => tools::research::choose_null(&ctx.api, params).await,
 
         // ── Falsification (EXTERNAL-REVIEW-2026-09 §4) and its evidence tools ──
+        "preregister" => tools::lifecycle::preregister(&ctx.api, params).await,
+        "hypothesise" => tools::lifecycle::hypothesise(&ctx.api, params).await,
         "report_kill" => tools::falsification::report_kill(&ctx.api, params).await,
         "report_evaluator_defect" => {
             tools::falsification::report_evaluator_defect(&ctx.api, params).await

@@ -1,6 +1,7 @@
 pub mod evidence;
 pub mod web_and_skills;
 pub mod falsification;
+pub mod lifecycle;
 pub mod agent_sessions;
 pub mod agent_audit;
 pub mod agent_cost;
@@ -99,6 +100,12 @@ pub fn router(state: AppState) -> Router {
         // action the agent's token does not carry.
         .route("/api/falsification", get(falsification::list_reports))
         .route("/api/falsification/kills", post(falsification::report_kill))
+        // The research lifecycle (AGENT-013 §7.2, §6.2). Sealing a commitment is
+        // not a look and spends no trial; the trial-spending tools refuse until
+        // one exists.
+        .route("/api/lifecycle/preregistrations", post(lifecycle::seal))
+        .route("/api/lifecycle/hypotheses", post(lifecycle::state_hypothesis))
+        .route("/api/lifecycle/metrics", get(lifecycle::metrics))
         .route("/api/falsification/defects", post(falsification::report_defect))
         // Feasibility: neither of these spends a trial, which is the point of
         // asking them before a search rather than after it disappoints.

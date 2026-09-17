@@ -128,6 +128,7 @@ dependencies = [
  "cfg",
  "chrono",
  "clickhouse",
+ "dataplane",
  "demand-manager",
  "domain",
  "execution",

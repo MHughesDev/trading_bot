@@ -92,3 +92,67 @@ CREATE INDEX IF NOT EXISTS preregistration_hash_idx
 CREATE UNIQUE INDEX IF NOT EXISTS preregistration_one_root_per_run
     ON agent_lifecycle.preregistration (run_id)
     WHERE amendment = 0;
+
+-- ## Hypotheses, and the field that is deliberately not writable by the model
+--
+-- AGENT-013 §6.2: a run may state a hypothesis and its falsifier. It may not
+-- decide whether that hypothesis was supported. `status` and `verdict` are
+-- written by `evaluate`, a platform function that reads the tickets — because a
+-- verdict the model writes is a verdict the model can rewrite, and a run that can
+-- grade itself will grade itself well.
+--
+-- The request type in `routes/lifecycle.rs` has no field for either, so there is
+-- nothing to ignore carefully. These columns exist so the platform has somewhere
+-- to put the answer.
+
+CREATE TABLE IF NOT EXISTS agent_lifecycle.hypothesis (
+    hypothesis_id  UUID PRIMARY KEY,
+    run_id         UUID,
+    statement      TEXT NOT NULL,
+    -- A metric the platform computes and which way it would have to go. A
+    -- falsifier naming nothing evaluable reads like a commitment and is not one.
+    falsifier      TEXT NOT NULL,
+    role           TEXT NOT NULL DEFAULT 'primary',
+    family_id      TEXT,
+    -- Written by `evaluate`, never by a tool call. `open` until it has run.
+    status         TEXT NOT NULL DEFAULT 'open',
+    -- Only present on `inconclusive`, and required there: "we could not tell"
+    -- is not an answer unless it says why not.
+    inconclusive_why TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    decided_at     TIMESTAMPTZ,
+
+    CONSTRAINT a_hypothesis_states_something CHECK (btrim(statement) <> ''),
+    CONSTRAINT a_hypothesis_states_its_falsifier CHECK (btrim(falsifier) <> ''),
+    -- Secondary and exploratory results cap at `suggestive`; only a primary
+    -- hypothesis can produce an established finding (AGENT-007 §3.1 extended).
+    CONSTRAINT a_role_is_one_of_three CHECK (
+        role IN ('primary', 'secondary', 'exploratory')
+    ),
+    CONSTRAINT a_status_is_one_the_platform_writes CHECK (
+        status IN ('open', 'supported', 'refuted', 'inconclusive')
+    ),
+    -- The pair, deliberately: `inconclusive` must say why, and nothing else may.
+    -- "We could not tell" with no reason is the answer a run reaches for when it
+    -- has nothing, and it is exactly the one that must cost something to give.
+    CONSTRAINT inconclusive_says_why CHECK (
+        (status = 'inconclusive' AND inconclusive_why IS NOT NULL
+            AND inconclusive_why IN (
+                'insufficient_data',
+                'protocol_unstable',
+                'evidence_conflict',
+                'budget_exhausted',
+                'evidence_incomplete'
+            ))
+        OR (status <> 'inconclusive' AND inconclusive_why IS NULL)
+    ),
+    -- A decided hypothesis has a time; an open one does not.
+    CONSTRAINT a_decision_has_a_time CHECK (
+        (status = 'open' AND decided_at IS NULL)
+        OR (status <> 'open' AND decided_at IS NOT NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS hypothesis_run_idx
+    ON agent_lifecycle.hypothesis (run_id, created_at DESC)
+    WHERE run_id IS NOT NULL;

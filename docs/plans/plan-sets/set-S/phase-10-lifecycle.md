@@ -125,10 +125,16 @@ first instead of amending it.
 sealed run spends. `Prereg` is a three-state enum rather than an `Option` because
 "not required" and "required and missing" must not be the same value.
 
-**Not done:** `lifecycle.preregister` — the tool a run calls to seal one — and the
-store behind it, so nothing yet puts the gate into `Missing` or `Sealed`. The gate
-therefore refuses nothing today. That is the next task in this phase and it is
-recorded rather than counted as done.
+`lifecycle.preregister` and `lifecycle.hypothesise` exist, with their routes
+(`POST /api/lifecycle/preregistrations`, `/hypotheses`, `GET /metrics`) and their
+authoring-guide notes. Amending reads the row it supersedes, so the trial budget is
+carried by the ledger rather than trusted from the request.
+
+**Not done:** nothing yet puts the gate into `Missing` — the driver must look up
+the run's registration and construct the `CallGate` from it, which needs the run id
+to reach `McpContext`. So a run can seal a registration and every ticket it spends
+carries the hash, but a run that seals none is not yet refused. That is one lookup
+and it is recorded rather than counted as done.
 
 The object (AGENT-013 §7.2): objective in SPEC §10's shape, benchmark, `delta_practical`
 (no serde default — a request without it fails to deserialise, ADR-P0-08's technique), window,
@@ -148,7 +154,23 @@ the run spends.
 **Traces:** AGENT-013 P2, §5.3, §6.1, §7.2, §8; §13.3, §13.4.
 
 ### S-10.4 Hypotheses name their falsifier; the platform writes the verdict — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — **the falsifier is validated and the verdict is unwritable;
+`evaluate` itself is not built.**
+
+Done: `lifecycle::check_hypothesis` refuses a falsifier that names no metric in the
+closed vocabulary, and one that names a metric with no comparator — a metric alone
+is a noun, not a claim: `sharpe_after_costs` cannot turn out false and
+`sharpe_after_costs <= 0` can. The role is a closed list. `0127`'s
+`agent_lifecycle.hypothesis` has `status` and `inconclusive_why` with a CHECK pair
+that makes `inconclusive` say *why* and nothing else carry a reason.
+
+**The request type has no status field at all**, which is §6.2's mechanism rather
+than an omission — there is nothing to ignore carefully — and a test asserts it.
+
+**Not done:** `harness/src/lifecycle/evaluate.rs`. Nothing yet reads the tickets and
+writes the verdict, so every hypothesis stays `open`. The vocabulary is also a
+constant in `routes/lifecycle.rs` rather than a read of `mlops.trial_statistic`,
+which is a copy and is marked as one in its doc comment.
 
 `lifecycle.hypothesise` validates the falsifier against the closed metric vocabulary
 (`mlops.trial_statistic`'s) and a comparator; a falsifier naming nothing evaluable is refused

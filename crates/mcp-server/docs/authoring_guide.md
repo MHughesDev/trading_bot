@@ -455,6 +455,33 @@ You must supply a reproduction and quote the guarantee the component claims. If
 you found a way to make backtests look good that a real venue would not honour,
 report it here — exploiting it silently scores less than reporting it.
 
+### preregister
+
+Seal what you are testing **before the first trial**. Trial-spending tools refuse
+until you have.
+
+The field that matters is the **falsifier**: the result that would show you were
+wrong. Written afterwards it is not a falsifier — every number still computes,
+the trial count is still honest, and "it worked" and "we kept looking until
+something worked" leave exactly the same trace. Written beforehand it is the one
+thing that tells them apart.
+
+A good falsifier names a metric the platform computes and which way it would have
+to go: `sharpe_after_costs <= 0 on the out-of-sample window`. `it does not work`
+names nothing and can never refute anything.
+
+`delta_practical` is the smallest improvement that would change a decision. It
+has no default: a default here would be a decision nobody made about what is
+worth acting on. `0.0` is not a value — it means every difference matters, which
+is the same as none of them mattering.
+
+`objective` is a vector and its constraints — `{"maximize": ["sharpe_after_costs"],
+"subject_to": {"max_drawdown": 0.3}}` — never a scalar score (ADR-012).
+
+Changed your mind? Call it again with `supersedes`. **The trial budget carries
+over**, so amending does not buy a fresh one, and the third amendment ends the run
+`protocol_unstable` — a protocol rewritten three times is not a protocol.
+
 ### report_kill
 
 Refute a candidate: show that a strategy's apparent edge is an artifact. This is
