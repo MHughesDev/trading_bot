@@ -1,9 +1,9 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 19% (3 / 16 tasks), plus 3 `PARTIAL`.**
+**Completion: 25% (4 / 16 tasks), plus 3 `PARTIAL`.**
 
-> Status 2026-09-17. **S-10.1, S-10.6 and S-10.7 are done**; S-10.2, S-10.3 and
-> S-10.4 are partial; the other ten are untouched.
+> Status 2026-09-17. **S-10.1, S-10.6, S-10.7 and S-10.13 are done**; S-10.2,
+> S-10.3 and S-10.4 are partial; the other nine are untouched.
 >
 > What was already here and doing nothing: `WorkingState` has carried `mode`,
 > `workflow`, `ring` and `stage` since phase 1 and the state card renders all four;
@@ -391,7 +391,30 @@ them; retrieval logs `cited`.
 **Traces:** AGENT-013 §9; §13.14. AGENT-007 §2.2, §4 (amended), §8.9.
 
 ### S-10.13 Yield — what the run produced, as a number — M
-`NOT STARTED`
+`DONE` 2026-09-17 — `harness/src/lifecycle/yield.rs`, migration `0128`, computed in
+`local_driver` as the run goes rather than reconstructed at the end: the end is
+where a fenced or cancelled run has *least* state, and a yield only computable on
+the happy path would report every failure as having produced nothing.
+
+**The weighting is the design**, because a yield metric is a thing runs get
+optimised against the moment it exists. A suggestive finding is worth nothing — it
+is a lead, and counting it would make "record six weak findings" the cheapest way to
+look productive. An opened question is worth nothing; a run that opened four and
+answered none left more work than it did. A proposal is worth nothing; the decision
+is where the value is. A negative whose class is new for the subject is worth two,
+because it closes a door nobody had closed — and a yield metric that paid only for
+positives would be one that quietly stopped reporting failures.
+
+A **refuted** finding counts. Knowing an idea is dead is the point of keeping it,
+which is the argument `Confidence::weight` already makes about retrieval.
+
+`knowledge_units` is deliberately *not* stored: it is arithmetic over the counts,
+and a stored copy would drift the first time the weighting changed — which it will.
+`barren` *is* stored, because the scorecard groups by it, and
+`a_barren_run_spent_a_trial` keeps it honest.
+
+**Not done:** the scorecard's barren column and the usage page. `barren_rates`
+exists and is tested; nothing reads it yet.
 
 The platform computes `Yield` (AGENT-013 §10) at run end from the effect log and memory
 writes: findings by confidence, negatives and whether the class is new for the subject,

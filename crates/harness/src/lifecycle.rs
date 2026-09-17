@@ -12,6 +12,8 @@
 //!   will pick the one whose retry condition is "when the platform is bigger".
 //! * [`chain`] — whether another refinement is worth trying. A run that may
 //!   refine can refine forever, and each step looks locally reasonable.
+//! * [`r#yield`] — what the run actually produced. A run can end having produced
+//!   no knowledge while every dashboard shows activity.
 //!
 //! Sans-IO, like the rest of this crate: each module takes what the ledger and
 //! the funnel produced and returns a decision, so the decision is testable
@@ -20,3 +22,4 @@
 pub mod chain;
 pub mod diagnose;
 pub mod evaluate;
+pub mod r#yield;

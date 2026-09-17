@@ -377,6 +377,13 @@ struct Recorder {
     event_seq: i32,
     /// Where the turn's last tool slice is left for the next turn (§21; S-9.9).
     exposure_out: Arc<std::sync::Mutex<Vec<String>>>,
+    /// What this run produced (AGENT-013 §10; S-10.13).
+    ///
+    /// Accumulated as the run goes rather than reconstructed at the end, because
+    /// the end is exactly where a fenced or cancelled run has least state — and
+    /// a yield only computable on the happy path would report every failure as
+    /// having produced nothing, which is the one reading that is never right.
+    yielded: harness::lifecycle::r#yield::Yield,
 }
 
 /// The harness that wrote a log. A replay by a different one is not a replay.
@@ -715,6 +722,10 @@ impl Recorder {
             Outcome::Cancelled => ("cancelled", None, None),
         };
         let json = serde_json::to_value(outcome).unwrap_or_else(|_| json!({}));
+        // Trials are counted at dispatch, in the effect loop; the yield reads
+        // the same number rather than keeping its own.
+        self.yielded.trials_spent = u32::try_from(self.trials_spent).unwrap_or(0);
+        let barren = self.yielded.is_barren();
         if let Some(err) = &error {
             self.append("error", json!({ "error": err })).await;
         }
@@ -722,6 +733,12 @@ impl Recorder {
             "UPDATE agent_runs SET status = $2, summary = $3, error = $4, outcome_json = $5,
                  harness_version = $6, prompt_tokens = $7, est_prompt_tokens = $8,
                  cache_read_tokens = $9, outcome = $10, trials_spent = $11,
+                 findings_established = $12, findings_suggestive = $13,
+                 findings_refuted = $14, negatives = $15, negatives_new_class = $16,
+                 questions_opened = $17, questions_closed = $18,
+                 contradictions_surfaced = $19, proposals = $20,
+                 hypotheses_tested = $21, hypotheses_refuted = $22,
+                 hypotheses_supported = $23, barren = $24,
                  finished_at = now() WHERE run_id = $1",
         )
         .bind(self.run_id)
@@ -738,8 +755,47 @@ impl Recorder {
         // many runs fenced last week" does not require parsing every row.
         .bind(outcome_word(outcome))
         .bind(self.trials_spent)
+        // What the run produced (§10). The trial count is set above from the
+        // catalogue's own declaration, so it is copied here rather than
+        // recounted — two counters for one quantity is two answers.
+        .bind(i32::try_from(self.yielded.findings_established).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.findings_suggestive).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.findings_refuted).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.negatives).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.negatives_new_class).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.questions_opened).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.questions_closed).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.contradictions_surfaced).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.proposals).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.hypotheses_tested).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.hypotheses_refuted).unwrap_or(i32::MAX))
+        .bind(i32::try_from(self.yielded.hypotheses_supported).unwrap_or(i32::MAX))
+        .bind(barren)
         .execute(&self.pg)
         .await;
+    }
+
+    /// Whether this negative result's class is new for its subject.
+    ///
+    /// A question about the store, which is why it is here and not in the
+    /// sans-IO `Yield`. A read that fails answers `false` — the conservative
+    /// direction, because the bonus is for closing a door nobody had closed, and
+    /// an outage is not evidence that nobody had.
+    async fn negative_class_is_new(&self, entry: &harness::memory::Entry) -> bool {
+        let Some(class) = entry.extra.get("failure_class").and_then(|v| v.as_str()) else {
+            return false;
+        };
+        let seen: Result<Option<i64>, _> = sqlx::query_scalar(
+            "SELECT 1 FROM agent_memory.entry
+              WHERE kind = 'negative_result' AND subject = $1
+                AND extra->>'failure_class' = $2 AND id <> $3 LIMIT 1",
+        )
+        .bind(&entry.subject)
+        .bind(class)
+        .bind(&entry.id)
+        .fetch_optional(&self.pg)
+        .await;
+        matches!(seen, Ok(None))
     }
 }
 
@@ -931,6 +987,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         cache_read_tokens: 0,
         trials_spent: 0,
         exposure_out: params.exposure_out.clone(),
+        yielded: harness::lifecycle::r#yield::Yield::default(),
     };
     // No deadline. The agent runs until it calls `finish_task`.
     //
@@ -1200,7 +1257,23 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         for e in effects {
             match e {
                 Effect::Note(n) => rec.note(&n).await,
-                Effect::Remember(e) => rec.remember(params.user_id, &e).await,
+                Effect::Remember(e) => {
+                    // The yield's counts come from what the run actually wrote,
+                    // not from what it said it wrote (§10).
+                    match e.kind {
+                        harness::memory::Kind::NegativeResult => {
+                            // Whether the class is new for the subject is a
+                            // question about the store, so the store answers it.
+                            let is_new = rec.negative_class_is_new(&e).await;
+                            rec.yielded.record_negative(is_new);
+                        }
+                        harness::memory::Kind::OpenQuestion => {
+                            rec.yielded.questions_opened += 1;
+                        }
+                        _ => rec.yielded.record_finding(e.confidence),
+                    }
+                    rec.remember(params.user_id, &e).await;
+                }
                 // The bytes leave memory and land in the agent's own folder,
                 // where `expand` and `read_file` both reach them (§26.3). A
                 // failed write is logged and the body stays where it is:
