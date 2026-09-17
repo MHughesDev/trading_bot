@@ -1046,6 +1046,33 @@ impl Loop {
         self
     }
 
+    /// Start this turn's tool slice from the previous turn's (§21; S-9.9).
+    ///
+    /// `session_exposure` is already append-only *within* a turn, for the reason
+    /// stated on the field: a cached prefix matches by bytes, so reordering the
+    /// tools array invalidates it exactly as thoroughly as removing one. Across
+    /// turns it was being thrown away and rebuilt, so every turn paid a cold
+    /// prefix — ten turns paying ten, where one is correct.
+    ///
+    /// Seeding rather than pinning: routing still appends whatever this turn
+    /// needs, and the budget still bounds the slice. What it cannot do any more
+    /// is choose a different order for the same tools.
+    #[must_use]
+    pub fn with_prior_exposure<I, S>(mut self, names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.session_exposure = names.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// The tool slice this turn ended with, for the next turn's prefix.
+    #[must_use]
+    pub fn session_exposure(&self) -> &[String] {
+        &self.session_exposure
+    }
+
     /// Name the tools that spend a trial (§20).
     ///
     /// The platform's fact to supply, exactly like `with_gated_actions`: the

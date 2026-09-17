@@ -513,7 +513,12 @@ pub async fn drive(
     // The charter takes no arguments and is the same bytes every call, which is
     // what lets the provider cache it. Everything that varies — the constraints,
     // the prior turns, the question — is the first user message (S-1.5, S-1.6).
-    let system = prompt::charter();
+    // The charter for this goal's kind (§21). Byte-stable per kind, so the
+    // provider cache still hits; a lookup simply stops paying for the edge
+    // protocol on every turn. The kind is classified from the goal text by the
+    // same function the loop uses, so the charter cannot disagree with the
+    // working state about what kind of run this is.
+    let system = prompt::charter_for(harness::state::GoalKind::classify(&params.goal, &[]));
 
     // `params.prior` was computed at `manager.rs:253` and never read here, so a
     // follow-up question arrived with no memory of the answer it was following up

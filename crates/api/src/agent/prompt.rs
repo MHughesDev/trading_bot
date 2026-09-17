@@ -21,6 +21,7 @@
 //! withheld there (`lib.rs:495`), so the one document the model cannot ignore told
 //! it to call four tools it would never be offered.
 
+use harness::state::GoalKind;
 use serde_json::Value;
 
 /// Identity, the tool contract, and the termination contract. Nothing that varies.
@@ -39,6 +40,29 @@ use serde_json::Value;
 ///   that instructs a tool the model cannot call teaches it to invent one.
 #[must_use]
 pub fn charter() -> String {
+    // The widest kind, for callers that do not know the goal kind yet. A
+    // charter that omitted a fragment the run turned out to need would be
+    // worse than one that paid for a fragment it did not.
+    charter_for(GoalKind::Research)
+}
+
+/// The charter for one kind of goal (AGENT-005 §21; Set S task S-9.8).
+///
+/// # Four stable prefixes instead of one
+///
+/// The charter is four fragments — identity, the edge protocol, tools,
+/// termination — and a lookup never pays for the edge protocol. That is roughly
+/// 900 of 3,200 bytes on every turn of every lookup run, spent telling a model
+/// that is about to read one number how to design an experiment.
+///
+/// Caching is **preserved rather than sacrificed**, which is the part worth
+/// stating: this produces a byte-stable prefix *per kind*, not a prefix that
+/// varies per run. A run of a given kind sends identical charter bytes on every
+/// call, so the provider cache still hits; what changes is which of the four it
+/// hits. `each_kinds_charter_is_byte_stable` asserts exactly that.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn charter_for(kind: GoalKind) -> String {
     let mut s = String::with_capacity(3_200);
     s.push_str(
         "You are the research agent inside a quantitative trading platform. Your job is to \
@@ -51,7 +75,11 @@ pub fn charter() -> String {
          to a tool call for: \"I could not determine this\" is a correct answer, and an \
          invented one is not.\n\n",
     );
-    s.push_str(
+    // The fragment a lookup does not pay for. `Compare` keeps it: comparing
+    // two strategies is edge work with two candidates, and a comparison that
+    // does not know a Study is a counted trial will spend them.
+    if matches!(kind, GoalKind::Research | GoalKind::Compare) {
+        s.push_str(
         "── FINDING AN EDGE ──\n\n\
          Most strategies are noise. Proving one is noise is worth more than another backtest \
          that settles nothing, so a negative result is a result — report it with the evidence \
@@ -66,7 +94,20 @@ pub fn charter() -> String {
          evidence against an edge, not for one.\n\
          The full five-step protocol is `## The research protocol` in the authoring guide. \
          Fetch it with get_authoring_guide when a goal actually asks for an edge.\n\n",
-    );
+        );
+    }
+    // Diagnosis gets its own short fragment rather than the edge protocol: the
+    // run is looking for what broke, and the protocol would send it to design
+    // an experiment about it instead.
+    if kind == GoalKind::Diagnose {
+        s.push_str(
+            "── DIAGNOSING ──\n\n\
+             Something is wrong and your job is to find out what, not to work around it. \
+             Establish what actually happened before proposing a cause, and say which \
+             evidence rules each alternative out. A cause you cannot point to a tool \
+             result for is a guess; say so.\n\n",
+        );
+    }
     s.push_str(
         "── TOOLS ──\n\n\
          You are offered a slice of the catalogue each step, chosen for the step. If the tool \
@@ -193,6 +234,60 @@ pub fn opening_message(prior: Option<&str>, constraints: &Value, goal: &str) -> 
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A lookup does not pay for the edge protocol (§21).
+    #[test]
+    fn a_lookup_charter_omits_the_edge_fragment() {
+        let lookup = charter_for(GoalKind::Lookup);
+        let research = charter_for(GoalKind::Research);
+        assert!(
+            !lookup.contains("FINDING AN EDGE"),
+            "a model about to read one number does not need to be told how to design an \
+             experiment"
+        );
+        assert!(research.contains("FINDING AN EDGE"));
+        assert!(
+            research.len() - lookup.len() > 700,
+            "the saving is {} bytes on every turn of every lookup run",
+            research.len() - lookup.len()
+        );
+        // What every kind keeps: identity, tools and the termination contract.
+        // A charter that dropped any of the three would be a smaller charter
+        // and a different agent.
+        for kind in [
+            GoalKind::Lookup,
+            GoalKind::Research,
+            GoalKind::Diagnose,
+            GoalKind::Compare,
+        ] {
+            let c = charter_for(kind);
+            assert!(c.contains("TERMINATION CONTRACT"), "{kind:?}");
+            assert!(c.contains("research agent"), "{kind:?}");
+            assert!(c.contains("TOOLS"), "{kind:?}");
+        }
+    }
+
+    /// Four stable prefixes, not a prefix that varies per run.
+    ///
+    /// The distinction is the whole point: a per-run charter would trade the
+    /// provider cache for the saving and lose more than it gained.
+    #[test]
+    fn each_kinds_charter_is_byte_stable_and_within_the_cap() {
+        for kind in [
+            GoalKind::Lookup,
+            GoalKind::Research,
+            GoalKind::Diagnose,
+            GoalKind::Compare,
+        ] {
+            let a = charter_for(kind);
+            assert_eq!(a, charter_for(kind), "{kind:?} is not byte-stable");
+            assert!(
+                a.len() <= 3_200,
+                "{kind:?} charter is {} bytes, over the 3,200-byte cap (AGENT-005 §3.1)",
+                a.len()
+            );
+        }
+    }
 
     #[test]
     fn the_charter_fits_its_budget_and_is_byte_stable() {

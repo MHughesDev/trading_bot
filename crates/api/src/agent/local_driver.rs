@@ -69,9 +69,46 @@ pub struct LocalRunParams {
     pub profile: Profile,
     /// Namespaces the task starts from. `search_tools` adds more as it needs them.
     pub namespaces: Vec<String>,
+    /// The tool slice the previous turn of this conversation ended with
+    /// (AGENT-005 §21; S-9.9).
+    ///
+    /// Empty on the first turn. Carried so the next turn's prompt is a byte
+    /// superset of this one's rather than a fresh assembly that happens to
+    /// contain the same tools in a different order — which a provider cache
+    /// cannot tell apart from a different tool list.
+    pub prior_exposure: Vec<String>,
+    /// Where this turn writes the slice it ended with, for the next turn.
+    ///
+    /// A shared slot rather than a return value because `run` returns from a
+    /// dozen places — a fence, a cancel, an unresumable suspension — and a
+    /// return value would have to be threaded through every one of them. The
+    /// one that was forgotten would silently go back to paying a cold prefix,
+    /// which is a defect that shows up as a bill and never as a failure.
+    ///
+    /// Written on every exposure note, so whichever way the run ends the slot
+    /// holds the last slice it actually used.
+    pub exposure_out: Arc<std::sync::Mutex<Vec<String>>>,
     pub demand: TaskDemand,
     pub api_base: String,
     pub service_token: String,
+}
+
+/// The catalogue tools that spend a trial (AGENT-005 §20; S-9.7).
+///
+/// Read from the catalogue's own `spends_trial` declaration, which is the same
+/// source the trial *counter* reads a few hundred lines below. One source, so a
+/// tool cannot be charged a trial by one path and sized as a cheap lookup by the
+/// other — and a tool added later is picked up by both without anyone
+/// remembering to update a list.
+#[must_use]
+pub fn trial_spending_tools() -> Vec<&'static str> {
+    mcp_server_lib::spec::names()
+        .into_iter()
+        .filter(|n| {
+            mcp_server_lib::spec::find(n)
+                .is_some_and(|s| s.spends_trial != mcp_server_lib::spec::TrialKind::None)
+        })
+        .collect()
 }
 
 /// The loop's own word for how a run ended (§4, S-2.8).
@@ -270,6 +307,8 @@ struct Recorder {
     /// a counter would make each log's ordering depend on how often the other was
     /// written, which is the one property an effect log cannot afford to lose.
     event_seq: i32,
+    /// Where the turn's last tool slice is left for the next turn (§21; S-9.9).
+    exposure_out: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 /// The harness that wrote a log. A replay by a different one is not a replay.
@@ -348,7 +387,14 @@ impl Recorder {
     async fn note(&mut self, n: &Note) {
         let kind = match n {
             Note::Entered { .. } => "status",
-            Note::Exposure { .. } => "exposure",
+            Note::Exposure { exposed, .. } => {
+                // The next turn starts from this (§21). Written here rather than
+                // returned, so every exit path records it.
+                if let Ok(mut slot) = self.exposure_out.lock() {
+                    slot.clone_from(exposed);
+                }
+                "exposure"
+            }
             Note::Rejected { .. } => "validation",
             Note::Ruled { .. } => "policy",
             Note::Compacted(_) => "compaction",
@@ -812,6 +858,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         est_prompt_tokens: 0,
         cache_read_tokens: 0,
         trials_spent: 0,
+        exposure_out: params.exposure_out.clone(),
     };
     // No deadline. The agent runs until it calls `finish_task`.
     //
@@ -1011,7 +1058,14 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
     // The four §15 envelopes. The list comes from the platform, which owns the
     // classification; the loop pauses on them regardless of tier, attendance or
     // session allowlist (ADR-P2-20).
-    .with_gated_actions(ledger::audit::gated_actions());
+    .with_gated_actions(ledger::audit::gated_actions())
+    // The previous turn's tool slice, so this turn appends to it rather than
+    // re-choosing an order (§21; S-9.9). Empty on the first turn of a
+    // conversation, which is the one turn that should pay a cold prefix.
+    .with_prior_exposure(params.prior_exposure.clone())
+    // Which catalogue tools spend a trial, for §20's step value. The catalogue
+    // owns the declaration and the loop is sans-IO, so it is told.
+    .with_trial_spending_tools(trial_spending_tools());
 
     // What memory has to say about this goal, as `Reference`.
     if let Some(brief) = load_brief(

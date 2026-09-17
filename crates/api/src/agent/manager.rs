@@ -84,6 +84,18 @@ pub struct AgentManager {
     /// call plus one tool call — seconds — so waiting for a boundary costs a status
     /// line rather than a turn.
     draining: AtomicBool,
+    /// One prefix ledger per conversation (AGENT-005 §21; S-9.9).
+    ///
+    /// Every turn used to re-assemble from scratch, so the provider cache was
+    /// cold at the start of every turn even though the charter and most of the
+    /// tool slice were identical. Ten turns paid ten cold prefixes where one is
+    /// correct. This is what carries the slice across the boundary.
+    ///
+    /// In memory rather than in Postgres, deliberately: it is a cache-shaped
+    /// optimisation, a restart costs one cold prefix per live conversation, and
+    /// a persisted copy would be a second thing that can disagree with what the
+    /// provider actually has.
+    prefixes: Mutex<HashMap<Uuid, harness::context::prefix::Prefix>>,
 }
 
 impl AgentManager {
@@ -98,6 +110,7 @@ impl AgentManager {
             cfg,
             running: Mutex::new(HashMap::new()),
             draining: AtomicBool::new(false),
+            prefixes: Mutex::new(HashMap::new()),
         }
     }
 
@@ -459,11 +472,27 @@ impl AgentManager {
             .cloned();
 
         if let Some(profile) = local {
-            let charter = prompt::charter();
+            // Per-kind (§21), from the same classifier the loop uses.
+            let charter =
+                prompt::charter_for(harness::state::GoalKind::classify(text, &[]));
+            // The slice the previous turn ended with, so this one appends to it
+            // rather than re-choosing an order (§21). A cached prefix matches by
+            // bytes, so the same tools in a different order is a miss.
+            let prior_exposure = self
+                .prefixes
+                .lock()
+                .expect("agent prefix lock")
+                .get(&conversation_id)
+                .map(|p| p.tools().to_vec())
+                .unwrap_or_default();
+            let exposure_out = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let charter_for_prefix = charter.clone();
             let params = LocalRunParams {
                 run_id,
                 user_id,
                 conversation_id,
+                prior_exposure,
+                exposure_out: Arc::clone(&exposure_out),
                 goal: text.to_string(),
                 charter,
                 prior,
@@ -479,6 +508,28 @@ impl AgentManager {
             };
             tokio::spawn(async move {
                 local_driver::run(pg.clone(), llm_client, params, cancel).await;
+                // Fold this turn into the conversation's prefix. `extend` says
+                // whether the turn continued it; a conversation paying more than
+                // one cold prefix is a defect, and this is where it becomes
+                // visible rather than showing up only as a bill.
+                let used = exposure_out
+                    .lock()
+                    .map(|s| s.clone())
+                    .unwrap_or_default();
+                let continuity = manager
+                    .prefixes
+                    .lock()
+                    .expect("agent prefix lock")
+                    .entry(conversation_id)
+                    .or_default()
+                    .extend(&charter_for_prefix, &used);
+                if !continuity.is_continuous() {
+                    tracing::debug!(
+                        %conversation_id,
+                        reason = continuity.broken_by.as_deref().unwrap_or(""),
+                        "turn paid a cold prefix"
+                    );
+                }
                 conversations::touch(&pg, conversation_id).await;
                 let _ = sqlx::query("DELETE FROM sessions WHERE token = $1")
                     .bind(&run_token)

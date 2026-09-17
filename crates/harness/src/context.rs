@@ -20,6 +20,7 @@ pub mod budget;
 pub mod degrade;
 pub mod manifest;
 pub mod policy;
+pub mod prefix;
 pub mod render;
 pub mod select;
 pub mod store;

@@ -183,7 +183,8 @@ fn compact(v: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harness::registry::{FINISH_TASK, RECORD_FINDING, REFLECT, SEARCH_TOOLS, SELF_STATUS};
+    use harness::registry::{FINISH_TASK, SEARCH_TOOLS};
+
 
     /// The check that makes an unclassified tool impossible to ship. `stamp` already
     /// defaults an unknown tool to destructive, which is the safe direction — but
@@ -196,12 +197,13 @@ mod tests {
         for name in reg.names() {
             // Core harness tools are answered inside the loop and never cross the
             // bridge, so the platform taxonomy has nothing to say about them.
-            if name == SEARCH_TOOLS
-                || name == FINISH_TASK
-                || name == RECORD_FINDING
-                || name == REFLECT
-                || name == SELF_STATUS
-            {
+            //
+            // Read from the registration rather than from a list of names: the
+            // list was five names and went stale the first time a core tool was
+            // added, failing here for a tool that by construction cannot reach
+            // the bridge at all. `core: true` is the fact; the list was a copy
+            // of it.
+            if reg.get(name).is_some_and(|d| d.core) {
                 continue;
             }
             assert!(
