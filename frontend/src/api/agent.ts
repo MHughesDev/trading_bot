@@ -106,6 +106,7 @@ export type AgentMessageKind =
   | 'policy'
   | 'validation'
   | 'compaction'
+  | 'selection'
   | 'usage'
   | 'degradation'
   | 'error'

@@ -1,6 +1,24 @@
 # Phase 9 — Context as retrieval
 
-**Completion: 0% (0 / 20 tasks)**
+**Completion: 85% (17 / 20 tasks), plus 3 `PARTIAL` — S-9.5's fixture, S-9.10's
+corpus and S-9.12's promotion are built and have nothing live to run against.**
+
+> Status 2026-09-16. The phase is built and the control is intact: `ContextPolicy::v1`
+> is Part I exactly — `SelectionMode::Chronological`, `DegradationMode::PartOne`, the
+> profile's own window, no manifest, no pull tools, no spill — so every existing run is
+> unchanged and `v1` is a control that can be *asserted* rather than argued.
+>
+> `crates/harness/src/context/` is now `store`, `body`, `manifest`, `degrade`, `select`,
+> `render`, `policy`, `budget`, `prefix`, `projection`, `utility`, `ablation`, `fit`.
+> The write path reaches the loop: every `observe` site records a typed `Record`, under
+> both policies, because the manifest, `expand`, attribution and the ablation all need
+> the record to exist whichever path rendered the prompt.
+>
+> **What the three partials are waiting on is a corpus, not code.** Attribution,
+> ablation and the weight fit all run offline over recorded tapes at zero model cost —
+> and there are no recorded tapes, because there have been no live runs (roadmap gate
+> H-2). `fit` returns the declared defaults and says so when the corpus is thin, which
+> is the honest failure rather than a confident number over ten records.
 
 **Requirement IDs:** CX2-01…CX2-20.
 **Spec:** [AGENT-005 Part II §13–§30](../../../specs/AGENT-005-context-assembly.md), ADR-0036.
@@ -26,7 +44,7 @@ prompt and cannot prove the redesign helps a 7B has not earned its place.
 ## The store and the manifest
 
 ### S-9.1 The run context store — L
-`NOT STARTED`
+`DONE` 2026-09-16 — `context/store.rs`, and every `observe` site in `drive.rs` writes one.
 
 Every observation becomes an addressable typed `Record` (id, step, kind, source, provenance,
 subject, ids, typed `Body`, tokens, utility) in a per-run store, rather than a line in a
@@ -40,7 +58,7 @@ reconstructs a byte-identical store; nothing is deleted mid-run.
 **Traces:** AGENT-005 §14; §30.4.
 
 ### S-9.2 The manifest — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `context/manifest.rs`; degrades by grouping to one line per kind and never truncates.
 
 A small, **always-rendered, never-degraded** index: one line per record (id, step, kind,
 source, subject, size, shown/elided), roughly 12 tokens each, degrading by grouping rather
@@ -54,7 +72,7 @@ below one line per group; an elided entry is `expand`able by the id shown.
 **Traces:** AGENT-005 §17; §30.2.
 
 ### S-9.3 Semantic degradation — L
-`NOT STARTED`
+`DONE` 2026-09-16 — `context/body.rs` + `context/degrade.rs`; `truncate_middle` is not reachable from the record path.
 
 `Body` becomes typed (`Table`, `Series`, `Stat`, `Text`, `Json`) and each declares a shrink
 ladder: drop columns → sample rows → aggregate → schema and count; decimate → downsample →
@@ -77,7 +95,7 @@ degraded table still parses and still names its schema and row count.
 ## Selection
 
 ### S-9.4 Assembly becomes a query — L
-`NOT STARTED`
+`DONE` 2026-09-16 — `context/select.rs`; deterministic, no model call, no wall clock.
 
 `select(store, working_state, budget, policy)`. The **query is the working state**: goal and
 kind, active plan step and the tool it names, hypothesis, last error, ids already cited.
@@ -96,7 +114,7 @@ wall-clock in the path; under-budget runs are unchanged.
 **Traces:** AGENT-005 §15; §30.4, §30.10.
 
 ### S-9.5 The case this phase exists for — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — the forty-step fixture exists and both behaviours are asserted (`tests/context_is_retrieval.rs`). What is missing is the *corpus* half: the test is synthetic, and the headline claim deserves the same case drawn from a real trajectory. Waits on gate H-2.
 
 A forty-step fixture where the observation that decides step 30 arrives at step 3. Under
 recency ordering it is long gone; under selection it is rendered. Build the fixture, assert
@@ -107,7 +125,7 @@ both policy versions so the difference is the assertion.
 **Traces:** AGENT-005 §30.3.
 
 ### S-9.6 `expand` and `focus` — M
-`NOT STARTED`
+`DONE` 2026-09-16 — registered in `registry.rs`, answered in `drive.rs`, exposed only under a retrieval policy.
 
 Two harness-owned core tools, no trial: `expand(record_id, level)` brings a degraded or elided
 record back at higher fidelity for this step and the next two; `focus(subject)` biases
@@ -126,7 +144,7 @@ spend no trial.
 ## Budget and prefix
 
 ### S-9.7 Budget follows value — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `context/budget.rs`; `RunBudget` bounds the run's total rather than hoping the multipliers average out.
 
 `step_value` derived from the active plan step's tool (`spends_trial`, envelope,
 `max_calls_per_run`) and the working state (a first attempt after a correction is worth more
@@ -140,7 +158,7 @@ not rise.
 **Traces:** AGENT-005 §20.
 
 ### S-9.8 The composed charter — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `prompt::charter_for`; four byte-stable prefixes, one per `GoalKind`.
 
 The charter becomes fragments — identity, termination, tools, plus one per `GoalKind` —
 assembled at run start. A lookup goal never pays for the edge-finding protocol, roughly 900 of
@@ -153,7 +171,7 @@ across calls and under `CHARTER_MAX_BYTES`.
 **Traces:** AGENT-005 §21; §30.6.
 
 ### S-9.9 Cross-turn prefix continuity — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `context/prefix.rs` plus `Loop::with_prior_exposure` and a ledger per conversation in `AgentManager`.
 
 Every turn re-assembles from scratch today, so the provider cache is cold at the start of every
 turn even though the charter and most of the tool slice are identical. Turn N+1's prefix is
@@ -171,7 +189,7 @@ that adds a tool appends it rather than reordering the slice.
 ## Making it empirical
 
 ### S-9.10 Utility attribution — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `context/utility.rs` attributes a tape and aggregates per bucket, with §28.2's `indeterminate` kept apart from `unused`. **No corpus exists**: there have been no live runs, so `utility_rate` has nothing to report per tier. Waits on gate H-2.
 
 After each call, attribute every rendered record against what the model did next: an id
 appearing in the next tool call, a finding or `finish_task` evidence → **used**; the same tool
@@ -188,7 +206,7 @@ evidence this platform has had about what belongs in a prompt.
 **Traces:** AGENT-005 §19; §30.5.
 
 ### S-9.11 `ContextPolicy` as a versioned object — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `context/policy.rs`; `v1` is Part I exactly and is asserted to be.
 
 Weights, kind priors, degradation order, manifest budget, step-value bounds and trigger become
 one versioned object, recorded on every run and in every trajectory. `v1` is Part I exactly and
@@ -203,7 +221,7 @@ provider call.
 **Traces:** AGENT-005 §22; §30.10.
 
 ### S-9.12 Fit the weights, then earn the promotion — L
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — `context/fit.rs` fits reproducibly and the promotion calls the existing eval gate, refusing a tier that lost utility and a tier with a baseline and no candidate. **The promotion has not been run**, because running it needs scorecards under both policies and those need live runs. The shipped weights are therefore still the declared ones, and `v2` is not promoted — which is the correct state, not a gap.
 
 Fit the §15 selection weights to the attribution corpus rather than declaring them, then run
 the promotion: `v2` ships only by beating `v1` on **every** tier under AGENT-009 §4's interval
@@ -227,7 +245,7 @@ than quietly re-tuned until it passes.
 ## Refinements — the eight ways a retrieval design fails that a buffer could not
 
 ### S-9.13 Selection quality: diversity, requirements, normalisation, hysteresis — L
-`NOT STARTED`
+`DONE` 2026-09-16 — all five, in `context/select.rs`.
 
 Five defects a weighted sum has and an accumulation buffer does not. **Diversity:** top-k
 picks ten records about one subject, because whatever scored one highly scores its neighbours
@@ -250,7 +268,7 @@ cache-creation tokens do not rise against `v1`.
 **Traces:** AGENT-005 §24.1–24.6; §30.11, §30.12, §30.13.
 
 ### S-9.14 What must never be dropped, and what must never be merged — M
-`NOT STARTED`
+`DONE` 2026-09-16 — corrections pin on the *upcoming* tool; two disagreeing records both render, adjacent, with the disagreement named.
 
 **Pin corrections for the *upcoming* tool, not only the active one.** The plan names the next
 steps; a rejection about a tool the model is about to reach is worth more than one about the
@@ -270,7 +288,7 @@ stated, asserted on a fixture built from two sources.
 **Traces:** AGENT-005 §24.7, §24.8.
 
 ### S-9.15 Rendering economy — L
-`NOT STARTED`
+`DONE` 2026-09-16 — `context/render.rs`; all five savings, each with its own test.
 
 Five losses of nothing. **Tables are not JSON** — a 200-row result spends ~40% of its tokens
 on repeated keys, braces and quotes; render a header and delimited rows. **Shared schemas are
@@ -290,7 +308,7 @@ same-path corrections render as one with a count.
 **Traces:** AGENT-005 §25.1–25.5; §30.14, §30.15.
 
 ### S-9.16 Fitting the budget, and paying for the furniture — M
-`NOT STARTED`
+`DONE` 2026-09-16 — the value-loss-per-token fitter beats the greedy baseline on the fixture, and the greedy one is implemented so the claim is measured rather than asserted.
 
 **Degrade-or-drop is a choice, not a sequence.** Walking each record's ladder greedily is
 wrong: degrading one large valuable record may free less than dropping two small worthless
@@ -308,7 +326,7 @@ value; overhead stays within cap and the cap is met by shortening.
 **Traces:** AGENT-005 §25.6, §25.7; §30.17.
 
 ### S-9.17 Store discipline — M
-`NOT STARTED`
+`DONE` 2026-09-16 — supersession, per-kind half-lives, `Effect::Spill`, and `MMR_CANDIDATES` bounding the quadratic term.
 
 **Supersession:** a second read of the same instrument/timeframe/window supersedes the first;
 selection sees only the head of a chain and the manifest shows it collapsed with its depth.
@@ -327,7 +345,7 @@ flat as the store grows past a thousand records.
 **Traces:** AGENT-005 §26.1–26.4.
 
 ### S-9.18 Budget refinements, and the untrusted ceiling — M
-`NOT STARTED`
+`DONE` 2026-09-16 — step-scaled output reserve, a 25% untrusted share reported when it binds, and a manifest that groups rather than truncates.
 
 **The output reserve follows the step.** One constant per profile means reserving the maximum
 on every call, which is why the body is smaller than it needs to be on most of them. Scale it
@@ -372,7 +390,7 @@ report is in every trajectory and drives the scrubber.
 **Traces:** AGENT-005 §28.1–28.4; §30.18, §30.19.
 
 ### S-9.20 Sub-run context is a projection, not a second pipeline — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `context/projection.rs`; the critic's exclusion is by construction and the projection is recorded.
 
 AGENT-010 §9 gives a critic "the evidence bundle only" and a worker "a byte-identical brief",
 and neither says how those are built — assembling them by hand would be a second context
@@ -391,6 +409,18 @@ workers receive byte-identical briefs; the projection used is recorded on the su
 **Traces:** AGENT-005 §29; §30.20. AGENT-010 §9.
 
 ---
+
+## What is built and what is waiting
+
+Every mechanism in this phase exists and is tested. Three things are **not** claimed:
+
+* `v2` has **not** been promoted, and must not be until S-9.12's gate is run. Every
+  run is on `v1`.
+* The weights in `policy::Weights::default` are the table §15 implies, **not** a
+  measurement. `fit` exists to replace them and has not had a corpus to fit to.
+* Attribution and ablation have been exercised against fixtures, not against a
+  recorded corpus. They are correct over the tapes they have been given and have been
+  given no real ones.
 
 ## Exit criteria
 

@@ -227,6 +227,7 @@ export type CardKind =
   | 'escalation'
   | 'correction'
   | 'compaction'
+  | 'selection'
   | 'report'
   | 'stage'
   | 'prereg'

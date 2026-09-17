@@ -409,6 +409,10 @@ impl Recorder {
             Note::Rejected { .. } => "validation",
             Note::Ruled { .. } => "policy",
             Note::Compacted(_) => "compaction",
+            // Its own timeline kind, not "compaction": one says what was
+            // chosen and the other what then had to be cut to fit, and the
+            // scrubber needs to ask for either without getting both.
+            Note::Selected { .. } => "selection",
             Note::Degraded(_) => "degradation",
             Note::CoreTool { .. } => "core_tool",
             Note::Planned { .. } => "plan",

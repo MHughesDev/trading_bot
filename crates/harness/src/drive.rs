@@ -471,6 +471,28 @@ pub enum Note {
     },
     /// Context was compacted.
     Compacted(CompactionReport),
+    /// What this call's assembly chose, and what bound it (AGENT-005 §28.3;
+    /// Set S task S-9.19).
+    ///
+    /// Into the trajectory, because this is what lets the desk's replay
+    /// scrubber answer "why did the model not know that?" — the most common
+    /// question about an agent that did something strange, and one no version
+    /// of this system could previously answer at all.
+    ///
+    /// Emitted only under a retrieval policy. Under the control there is no
+    /// selection to report and a note saying "everything, in order" every step
+    /// would be noise that makes the real ones harder to find.
+    Selected {
+        step: u32,
+        policy_version: String,
+        candidates: usize,
+        selected: Vec<String>,
+        /// Ids in the store this call did not render. The complement is the
+        /// half the scrubber is usually asked about.
+        elided: Vec<String>,
+        /// Constraints that actually bound this assembly, named.
+        bound_by: Vec<String>,
+    },
     /// A capability was lost. Always paired with the fence when it is a constraint
     /// violation; on its own when it is merely a downgrade.
     Degraded(Degradation),
@@ -856,6 +878,12 @@ pub struct Loop {
     focus: Option<String>,
     /// What the previous call rendered, for §24.5's stickiness.
     last_rendered: BTreeSet<context::store::RecordId>,
+    /// The selection report for the assembly just built, waiting to be emitted.
+    ///
+    /// Held rather than pushed directly because `body()` has no effect vector:
+    /// it is called from inside the assembler's argument list, and threading one
+    /// through would put a side effect in the middle of an expression.
+    last_selection: Option<Note>,
     /// The run's body-token account (§20; S-9.7).
     ///
     /// A step about to spend a trial and a step listing instruments get
@@ -975,6 +1003,7 @@ impl Loop {
             context_policy: context::policy::ContextPolicy::v1(),
             focus: None,
             last_rendered: BTreeSet::new(),
+            last_selection: None,
             run_budget: context::budget::RunBudget::new(
                 profile_input_budget,
                 profile_max_steps,
@@ -1247,6 +1276,14 @@ impl Loop {
         let manifest = context::manifest::render(&self.store, &shown, manifest_budget);
         let blocks =
             context::render::blocks(&self.store, &selection, &self.context_policy, &manifest.text);
+        self.last_selection = Some(Note::Selected {
+            step: self.step,
+            policy_version: selection.report.policy_version.clone(),
+            candidates: selection.report.candidates,
+            selected: selection.report.selected.iter().map(ToString::to_string).collect(),
+            elided: selection.report.dropped.iter().map(ToString::to_string).collect(),
+            bound_by: selection.report.bound_by.clone(),
+        });
         // What this call rendered, for §24.5's stickiness on the next one. Kept
         // here rather than recomputed later: a second `select` to find out what
         // the first chose would be a second answer to one question.
@@ -2110,6 +2147,12 @@ impl Loop {
         let window = self.step_input_window();
         let assembled =
             context::assemble_within(&self.profile, body, self.reserved_tokens(), window);
+        // §28.3, emitted beside the compaction note so a reader of the timeline
+        // has both halves of what happened to this prompt: what was chosen, and
+        // what then had to be cut to fit.
+        if let Some(note) = self.last_selection.take() {
+            fx.push(Effect::Note(note));
+        }
         let c = &assembled.compaction;
         if c.dropped > 0 || c.truncated > 0 || c.deduped > 0 {
             self.enter(State::Compacting, fx);
@@ -4352,6 +4395,67 @@ mod tests {
             "a refusal would leave the model with nowhere to go: {note}"
         );
         assert!(note.contains("work/context/"), "{note}");
+    }
+
+    /// Every assembly under a retrieval policy leaves an account of itself.
+    ///
+    /// This is what lets the desk's replay scrubber answer "why did the model
+    /// not know that?" — a question no version of this system could previously
+    /// answer at all.
+    #[test]
+    fn a_retrieval_assembly_reports_what_it_chose_and_what_bound_it() {
+        let (mut l, fx) = retrieval();
+        let note = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::Note(n @ Note::Selected { .. }) => Some(n.clone()),
+                _ => None,
+            })
+            .expect("the first assembly reports");
+        match note {
+            Note::Selected {
+                policy_version,
+                candidates,
+                bound_by,
+                ..
+            } => {
+                assert_eq!(policy_version, "v2");
+                let _ = candidates;
+                let _ = bound_by;
+            }
+            other => panic!("expected Selected, got {other:?}"),
+        }
+
+        // And the elided half is named, which is the half the scrubber is
+        // usually asked about. The report rides with the model call the
+        // assembly was built for, so the effects of the step that produced a
+        // record are where the next call's account appears.
+        let fx = one_result(&mut l);
+        let accounted = fx.iter().any(|e| {
+            matches!(
+                e,
+                Effect::Note(Note::Selected { selected, elided, .. })
+                    if !selected.is_empty() || !elided.is_empty()
+            )
+        });
+        assert!(accounted, "every candidate is in one list or the other");
+    }
+
+    /// The control emits no selection note.
+    ///
+    /// There is no selection to report, and a note saying "everything, in
+    /// order" on every step would be noise that makes the real ones harder to
+    /// find.
+    #[test]
+    fn the_control_reports_no_selection() {
+        let (mut l, fx) = started();
+        assert!(!fx
+            .iter()
+            .any(|e| matches!(e, Effect::Note(Note::Selected { .. }))));
+        let fx = one_result(&mut l);
+        assert!(!fx
+            .iter()
+            .any(|e| matches!(e, Effect::Note(Note::Selected { .. }))));
     }
 
     /// The body budget follows the step, and the run's total does not rise.

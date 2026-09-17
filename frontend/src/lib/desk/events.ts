@@ -50,7 +50,19 @@ const KIND_MAP: Record<string, CardKind> = {
 }
 
 /** Kinds folded behind the details disclosure (§3.2), off by default. */
-const RAW_KINDS = new Set(['status', 'canary', 'exposure', 'policy', 'usage', 'heartbeat'])
+const RAW_KINDS = new Set([
+  'status',
+  'canary',
+  'exposure',
+  'policy',
+  'usage',
+  'heartbeat',
+  // What context assembly chose and what bound it (AGENT-005 §28.3). Behind the
+  // disclosure rather than on the timeline: it is the answer to "why did the
+  // model not know that?", which is a question asked *about* a step rather than
+  // a thing that happened in one.
+  'selection',
+])
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null
