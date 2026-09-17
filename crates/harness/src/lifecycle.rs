@@ -8,9 +8,15 @@
 //!
 //! * [`evaluate`] — whether the hypothesis was supported. A verdict the model
 //!   writes is a verdict the model can rewrite.
+//! * [`diagnose`] — why it failed. A model that may pick its own failure class
+//!   will pick the one whose retry condition is "when the platform is bigger".
+//! * [`chain`] — whether another refinement is worth trying. A run that may
+//!   refine can refine forever, and each step looks locally reasonable.
 //!
 //! Sans-IO, like the rest of this crate: each module takes what the ledger and
 //! the funnel produced and returns a decision, so the decision is testable
 //! without a database and cannot quietly acquire a dependency on one.
 
+pub mod chain;
+pub mod diagnose;
 pub mod evaluate;

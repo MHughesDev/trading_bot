@@ -76,6 +76,11 @@ orchestration:
   # here instead. Local tiers get one fewer: a 7B that has re-planned twice is
   # not on its way to a third plan that works.
   max_replans_per_run: 2
+  # Refinements one run may chain (AGENT-013 §6.5). Two here, three on the
+  # frontier: a smaller model loses the thread of WHAT IT WAS REPAIRING faster
+  # than it runs out of ideas, so its third link is usually a fresh guess
+  # wearing a chain's clothes.
+  max_refinements_per_run: 2
   # Consecutive errors from one tool before it leaves exposure for the run.
   tool_breaker_threshold: 3
   # A reflection costs a model call and is not charged to max_steps: a budget

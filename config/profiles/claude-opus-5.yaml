@@ -80,6 +80,10 @@ orchestration:
   # here instead. Local tiers get one fewer: a 7B that has re-planned twice is
   # not on its way to a third plan that works.
   max_replans_per_run: 3
+  # Refinements one run may chain (AGENT-013 §6.5). The chain is a search
+  # nobody counted: its selection exposure is the chain length while the ledger
+  # says one trial per link, so the cap is what bounds the exposure.
+  max_refinements_per_run: 3
   # Consecutive errors from one tool before it leaves exposure for the run.
   tool_breaker_threshold: 3
   # A reflection costs a model call and is not charged to max_steps: a budget

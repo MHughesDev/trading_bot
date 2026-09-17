@@ -194,6 +194,16 @@ fn default_max_replans() -> u32 {
     3
 }
 
+/// Refinements a run may chain before it reports what it has.
+///
+/// Three on a tier that can hold a chain together, and the local profiles set
+/// two — a smaller model loses the thread of *what it was repairing* faster than
+/// it runs out of ideas, so its third link is usually a fresh guess wearing a
+/// chain's clothes.
+fn default_max_refinements() -> u32 {
+    3
+}
+
 /// Three consecutive failures is a broken tool, not a run of bad luck.
 fn default_tool_breaker() -> u32 {
     3
@@ -242,6 +252,20 @@ pub struct Orchestration {
     /// what defeated it is a finding, and a fourth plan is drift.
     #[serde(default = "default_max_replans")]
     pub max_replans_per_run: u32,
+    /// How many refinements one run may chain (AGENT-013 §6.5, S-10.6).
+    ///
+    /// A run that may refine can refine forever, and each link looks locally
+    /// reasonable: the last one nearly worked, this one changes the thing that
+    /// broke. What the chain *is*, though, is a search nobody counted — its
+    /// selection exposure is the chain length while the ledger says one trial
+    /// per link.
+    ///
+    /// The cap is the stop rule that always works. The posterior rule
+    /// (`chain::prospect`) is better when it can speak and says `NotComputable`
+    /// below three links, which is exactly the early part of a chain where a
+    /// run is most likely to keep going.
+    #[serde(default = "default_max_refinements")]
+    pub max_refinements_per_run: u32,
     /// Consecutive errors from one tool before it leaves exposure for the rest of
     /// the run (§3.7, S-1.20).
     ///
@@ -917,6 +941,7 @@ pub(crate) fn frontier_fixture() -> Profile {
             max_subagent_depth: 1,
             idle_timeout_s: 600,
             max_replans_per_run: 3,
+            max_refinements_per_run: 3,
             tool_breaker_threshold: 3,
             max_reflections_per_run: 3,
             code_execution: CodeExecution::Full,
@@ -979,6 +1004,7 @@ pub(crate) fn degraded_fixture() -> Profile {
             max_subagent_depth: 1,
             idle_timeout_s: 600,
             max_replans_per_run: 3,
+            max_refinements_per_run: 3,
             tool_breaker_threshold: 3,
             max_reflections_per_run: 3,
             code_execution: CodeExecution::Denied,

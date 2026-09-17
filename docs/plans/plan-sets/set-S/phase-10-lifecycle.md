@@ -1,9 +1,9 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 6% (1 / 16 tasks), plus 1 `PARTIAL`.**
+**Completion: 19% (3 / 16 tasks), plus 3 `PARTIAL`.**
 
-> Status 2026-09-16. **S-10.1 is done** and **S-10.2 is half done**; the other
-> fourteen are untouched.
+> Status 2026-09-17. **S-10.1, S-10.6 and S-10.7 are done**; S-10.2, S-10.3 and
+> S-10.4 are partial; the other ten are untouched.
 >
 > What was already here and doing nothing: `WorkingState` has carried `mode`,
 > `workflow`, `ring` and `stage` since phase 1 and the state card renders all four;
@@ -230,7 +230,29 @@ the design id is on every trial that follows.
 **Traces:** AGENT-013 §5.5, §6.3; §13.6.
 
 ### S-10.6 Refinement chains, and when they stop — M
-`NOT STARTED`
+`DONE` 2026-09-17 — `harness/src/lifecycle/chain.rs`. All four stops, checked in
+the order the reasons invalidate each other: an unstable protocol makes the numbers
+meaningless, so it comes before any rule that reads one.
+
+The refusal names **both** required fields even when only one is missing — a model
+told about one requirement supplies it and is refused again, and two refusals for
+one request teach it the tool is unreliable rather than that the request was.
+
+The same class *twice consecutively*, which is not the same as twice in the chain: a
+run that hit costs, fixed them, regressed and hit them again has learned something
+between the two.
+
+`Prospect::NotComputable` below three links, and it hands the decision to the cap
+rather than guessing — ADR-P2-04's discipline, and the reason is that an
+approximation here reads as a measurement and would stop a chain that was working.
+
+`max_refinements_per_run` is a profile value (3 frontier, 2 local) and conformance
+reads it **behaviourally**: it builds a chain at the cap and asserts the cap is what
+stops it. A range assertion would have passed while nothing read the field.
+
+`retry_condition` delegates to `FailureClass::retry_condition` rather than
+re-deciding, so the `None` half survives: a weak effect has no retry condition, and
+offering one anyway is the relabelling `negative.rs` exists to stop.
 
 `lifecycle.refine` requires `diagnosis_id` and `predicted_effect`; missing either → refused
 with both named. Chains are tracked from the original design. Stop rules: `max_refinements_per_run`
@@ -247,7 +269,20 @@ ends the chain; the cap is read by conformance; `NotComputable` is reported, nev
 **Traces:** AGENT-013 P4, §5.9, §6.5, §7.4; §13.7.
 
 ### S-10.7 Failure classes, extended and derived — S
-`NOT STARTED`
+`DONE` 2026-09-17 — the four classes were already in the enum and in `0125`'s CHECK;
+what was missing was the **derivation**. `harness/src/lifecycle/diagnose.rs` maps
+each to exactly one producer — `leakage_audit`, the amendment cap,
+`parameter_fragility_map`, `regime_failure_search` — and the order encodes what
+invalidates what: leakage first, because a run told "costs dominate" about a leaking
+backtest has been told something false and will go and work on costs.
+
+A diagnostic **nobody ran** is reported separately from one that came back clear;
+collapsing them would let "we did not look" masquerade as "we looked and it was
+fine". A contradiction with memory travels beside the class rather than resolving
+into it — P5, in the fourth place it comes up.
+
+`the_agent_cannot_name_a_class` scans the module's own non-test half: no function
+here takes a class as an argument.
 
 AGENT-007 §3.2's enum gains `leakage`, `protocol_unstable`, `fragile_parameters`,
 `regime_specific`, each derived from a named ticket (`leakage_audit = leaking`; the amendment

@@ -199,6 +199,36 @@ fn every_profile_field_is_enforced_somewhere() {
         p.orchestration.max_replans_per_run
     );
 
+    // orchestration.max_refinements_per_run → `lifecycle::chain::may_continue`
+    // (S-10.6). Read here rather than asserted as a range, because the bound
+    // that matters is behavioural: the cap has to actually stop a chain, and a
+    // profile value nothing reads is the bug this whole test exists to catch.
+    {
+        use harness::lifecycle::chain::{may_continue, Refinement, Stop};
+        use harness::memory::negative::FailureClass;
+        let cap = p.orchestration.max_refinements_per_run as usize;
+        assert!(cap >= 1, "a run that may not refine at all cannot repair anything");
+        let chain: Vec<Refinement> = (0..cap)
+            .map(|i| Refinement {
+                diagnosis_id: format!("t_{i}"),
+                predicted_effect: "it improves".into(),
+                // Alternating, so the same-class rule is not what stops it and
+                // the cap is what this asserts.
+                class: if i % 2 == 0 {
+                    FailureClass::WeakEffect
+                } else {
+                    FailureClass::CostsDominate
+                },
+                observed: Some(0.9),
+            })
+            .collect();
+        assert_eq!(
+            may_continue(&chain, cap, 0.0, 0.5, 0, 3).stop,
+            Some(Stop::Cap { cap }),
+            "the profile's refinement cap must be the thing that stops the chain"
+        );
+    }
+
     // trifecta.* → the policy engine reads the outbound leg directly.
     let ruling = decide(
         &p,
