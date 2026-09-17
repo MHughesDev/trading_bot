@@ -1,6 +1,6 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 31% (5 / 16 tasks), plus 6 `PARTIAL`.**
+**Completion: 31% (5 / 16 tasks), plus 7 `PARTIAL`.**
 
 > Status 2026-09-17. **S-10.1, S-10.6, S-10.7, S-10.13 and S-10.14 are done**;
 > S-10.2, S-10.3, S-10.4 and S-10.14's per-tier half are partial; the other eight
@@ -440,7 +440,38 @@ conformance reader.
 **Traces:** AGENT-013 §3 (`optimise`), §8.5, §11; §13.13, §13.15. PHASE-2-5-PLAN §2.1, ADR-P2-04.
 
 ### S-10.12 Open questions are memory — M
-`NOT STARTED`
+`PARTIAL` 2026-09-17 — **the kind, the closing rule and the run-end write are built;
+the deliberate tool and the browser tab are not.**
+
+A run notices something it cannot answer, and that noticing used to die with the
+conversation: the next run rediscovered it, spent a step on it, and noticed it
+again. `harness/src/memory/questions.rs` makes a question an entry like any other —
+subject, retrieval, closure — and `Kind::OpenQuestion` and the brief's 10% slot
+already existed.
+
+**The model cannot close one.** Same discipline as the verdict and for the same
+reason: a run that has been thinking about something for nine steps genuinely feels
+it has resolved it. The platform closes a question when a later finding *cites* it,
+which is a fact about what was written down. The first answer is the one recorded —
+a second close would overwrite who answered it.
+
+Citing a question the store does not hold closes nothing and is **not** an error. A
+run that has learned citing is risky stops citing.
+
+`blocking` leads the brief slot whatever a question's stated value, because a brief
+that buried it under six curiosities would let the run repeat the mistake the
+question exists to prevent. `value` is the asker's estimate and scores nothing —
+`Yield` already pays zero for an opened question, and a value field that fed a
+metric would be a run grading its own output.
+
+The loop writes `WorkingState.open_questions` at run end **for every outcome**: a
+fenced run's questions are not less true, and the run that hit the thing it could
+not answer is often the one that failed. Those entries say `why_it_matters: not
+stated` rather than inventing stakes — which is exactly what
+`lifecycle.open_question` exists to improve on.
+
+**Not done:** `lifecycle.open_question` itself, the migration extending `0055`, and
+`OpenQuestions.tsx`.
 
 New semantic kind `open_question` (AGENT-007 §2.2 amended) with `why_it_matters`, `blocking`,
 `value`, `status: open|closed{by, how}`; written by `lifecycle.open_question` and by the harness

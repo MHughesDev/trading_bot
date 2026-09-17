@@ -3961,9 +3961,48 @@ impl Loop {
 
     fn finish_into(&mut self, outcome: Outcome, state: State, fx: &mut Vec<Effect>) {
         self.pending = None;
+        self.remember_open_questions(fx);
         self.enter(state, fx);
         self.outcome = Some(outcome.clone());
         fx.push(Effect::Done(outcome));
+    }
+
+    /// Write down what this run noticed and could not answer (AGENT-013 §9;
+    /// S-10.12).
+    ///
+    /// At the end, for every outcome — a fenced run's open questions are not
+    /// less true than a finished one's, and the run that hit the thing it could
+    /// not answer is often exactly the one that failed.
+    ///
+    /// `WorkingState.open_questions` is prose the model wrote, so the stakes and
+    /// the blocking flag are not available: neither is invented here. The entry
+    /// carries the question and says the stakes were not stated, which is honest
+    /// and is what `lifecycle.open_question` exists to improve on.
+    fn remember_open_questions(&mut self, fx: &mut Vec<Effect>) {
+        let questions = std::mem::take(&mut self.working.open_questions);
+        for (i, question) in questions.iter().enumerate() {
+            let mut entry = crate::memory::Entry::finding(
+                format!("question-{i}"),
+                self.working.goal.clone(),
+                question.clone(),
+                crate::memory::DataWindow::default(),
+                // Blank run id, stamped by the driver — see the finding path.
+                crate::memory::Provenance::new("", REFLECT, "1", env!("CARGO_PKG_VERSION")),
+            );
+            entry.kind = crate::memory::Kind::OpenQuestion;
+            // A question is not a claim, so it carries no confidence it could be
+            // read as asserting. `Suggestive` is the honest label for "somebody
+            // wondered this".
+            entry.confidence = crate::memory::Confidence::Suggestive;
+            entry.extra = serde_json::json!({
+                "why_it_matters": "not stated: noticed during a reflection rather than                                    opened deliberately",
+                "blocking": false,
+                "value": "curious",
+                "status": "open",
+            });
+            fx.push(Effect::Remember(Box::new(entry)));
+        }
+        self.working.open_questions = questions;
     }
 
     fn finish(&mut self, outcome: Outcome, state: State) -> Vec<Effect> {
@@ -4216,6 +4255,65 @@ mod tests {
             })
         );
         assert_eq!(l.state(), State::Finished);
+    }
+
+    // ── Open questions are memory (AGENT-013 §9; S-10.12) ───────────────────
+
+    /// What the run could not answer outlives the conversation.
+    #[test]
+    fn a_run_writes_down_what_it_could_not_answer() {
+        let (mut l, _) = started();
+        l.working.open_questions = vec![
+            "is the March funding gap missing or zero?".into(),
+            "does the 1h series survive a venue outage?".into(),
+        ];
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"finish_task"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: r#"{"result":"no momentum","evidence":"exp_1"}"#.into(),
+        });
+        let questions: Vec<&crate::memory::Entry> = fx
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Remember(entry)
+                    if entry.kind == crate::memory::Kind::OpenQuestion =>
+                {
+                    Some(&**entry)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(questions.len(), 2, "both survive the conversation");
+        assert!(questions[0].claim.contains("funding gap"));
+        assert_eq!(
+            questions[0].confidence,
+            crate::memory::Confidence::Suggestive,
+            "a question is not a claim, so it carries no confidence it could be read              as asserting"
+        );
+        assert_eq!(questions[0].extra["status"], "open");
+        assert!(
+            questions[0].extra["why_it_matters"]
+                .as_str()
+                .unwrap()
+                .contains("not stated"),
+            "the stakes are not invented: `WorkingState` holds prose, and saying so is              what `lifecycle.open_question` exists to improve on"
+        );
+    }
+
+    /// A fenced run's questions are not less true than a finished one's.
+    #[test]
+    fn a_run_that_failed_still_writes_what_it_noticed() {
+        let (mut l, _) = started();
+        l.working.open_questions = vec!["why does this venue reject every order?".into()];
+        let fx = l.next(Input::Cancel);
+        assert!(
+            fx.iter().any(|e| matches!(
+                e,
+                Effect::Remember(entry) if entry.kind == crate::memory::Kind::OpenQuestion
+            )),
+            "the run that hit the thing it could not answer is often the one that failed"
+        );
     }
 
     // ── The platform writes the verdict (AGENT-013 §6.2; S-10.4) ────────────
