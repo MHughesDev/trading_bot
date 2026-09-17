@@ -2,15 +2,25 @@
 
 **Completion: 38% (6 / 16 tasks), plus 10 `PARTIAL`. Nothing untouched.**
 
-> **Blocking finding, 2026-09-17: the trial gate's registrar posts to a route that
-> was never built, so every trial-spending tool is refused and nothing that counts
-> can run.** The gate's own tests pass — they assert that a refusing registrar
-> refuses the call, which is exactly what happens. Written up as **OQ-20** rather
-> than patched, because the repair decides what a trial *is*: `mlops.trial` has
-> required `config_hash`, `dataset_id`, `code_hash`, `image_digest` and `seed_set`
-> since `0043`, and a tool call has chosen none of them. This blocks gate H-2
-> independently of the missing credential, and it is why several tasks below say
-> "needs a live run".
+> **Resolved 2026-09-17 — the research loop's door exists.** The trial gate's
+> registrar posted to a route that was never built, so every trial-spending tool
+> was refused and nothing that counts could run. The gate's own tests passed
+> throughout: they assert that a refusing registrar refuses the call.
+>
+> **ADR-S10-10** took neither of OQ-20's two options, because both fail on a fact.
+> Writing `mlops.trial` at the door means inventing a `dataset_id` for a look that
+> has not looked. Letting the compute site be the only registrar under-counts
+> silently — `report_kill` and `report_evaluator_defect` post to a route that
+> registers nothing. They are **two questions**, and only one had a table:
+> `mlops.trial_reservation` (`0132`) answers *may this run spend*, and
+> `mlops.trial` goes on answering *what compute ran*. Additive, so
+> `trials_counted`, the exploration floor and `N_eff` are untouched.
+>
+> It fixed two things on the way. `prereg_hash` now reaches a durable row per
+> look — it was carried on the request and left out of the body, so §7.2's "every
+> ticket carries the hash" was true of no ticket. And the receipt returns a
+> `reservation_id` rather than a `ticket_id`, because permission is not a
+> measurement. **Settlement is not wired**, and nothing claims it is.
 >
 > Status 2026-09-17. **S-10.1, S-10.6, S-10.7, S-10.13 and S-10.4 are done**, and
 > S-10.12 is done bar nothing. Every other task has been reached: S-10.11 built the

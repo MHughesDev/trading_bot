@@ -1,6 +1,7 @@
 pub mod evidence;
 pub mod web_and_skills;
 pub mod falsification;
+pub mod ledger;
 pub mod lifecycle;
 pub mod agent_sessions;
 pub mod agent_audit;
@@ -113,6 +114,10 @@ pub fn router(state: AppState) -> Router {
         // Something a run could not answer, written down deliberately
         // (AGENT-013 §9; S-10.12). The loop writes these at run end too,
         // with the stakes unstated; this is the door that states them.
+        // The trial gate's door (ADR-S10-10). It has been calling this since
+        // it was written; until 2026-09-17 nothing answered, so every
+        // trial-spending tool was refused and the research loop did not run.
+        .route("/api/ledger/reservations", post(ledger::reserve))
         .route("/api/lifecycle/questions", post(lifecycle::open_question))
         // What the platform's runs cost in trials against what they
         // produced (AGENT-013 §10; S-10.13). Per tier and workflow,

@@ -56,10 +56,23 @@ pub struct TrialRequest<'a> {
     /// it was made under are joined by the ticket rather than by a timestamp and
     /// an assumption.
     pub prereg_hash: Option<&'a str>,
+    /// The run this call belongs to, when the front door knows one.
+    ///
+    /// From the caller rather than derived: a service token names a tenant and
+    /// not a run. A wrong value misattributes a look *within* one tenant, which
+    /// is smaller and more visible than refusing every call from a front door
+    /// that has no run.
+    pub run_id: Option<&'a str>,
 }
 
-/// The row that now exists. Its id travels back on the tool's result so the
-/// model can cite the trial that produced the number.
+/// The row that now exists: **a reservation, not a trial** (ADR-S10-10).
+///
+/// Its id travels back on the tool's result so a later reader can join the call
+/// to the permission that allowed it. It is deliberately *not* offered as the
+/// trial that produced a number: `mlops.trial` is written by the compute site,
+/// where the config, the dataset and the seeds are known, and a model citing a
+/// reservation as evidence would be citing permission rather than a
+/// measurement.
 ///
 /// **Not** `ledger::TrialTicket`, and deliberately not named like it. This is
 /// the receipt the ledger handed back across the API — an id and a family — and
@@ -71,11 +84,7 @@ pub struct TrialRequest<'a> {
 /// guarded by its name: there is no name-based invariant on `Envelope`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrialReceipt {
-    pub ticket_id: String,
-    /// The family the trial was sealed into, when the caller is inside one. A
-    /// family is fixed at hypothesis registration, never at call time — see
-    /// `audit::deflated_sharpe`, which refuses an unsealed ticket.
-    pub family_id: Option<String>,
+    pub reservation_id: String,
 }
 
 /// Writes the trial row. Implemented over the platform API in production
@@ -110,32 +119,43 @@ impl TrialRegistrar for ApiTrialRegistrar {
         req: TrialRequest<'a>,
     ) -> BoxFuture<'a, Result<TrialReceipt, ToolError>> {
         Box::pin(async move {
+            // The registration goes in the body. It was carried on the request
+            // and left out of the body, so no hash reached any row — which
+            // nobody noticed, because the route did not exist and no row was
+            // ever written (ADR-S10-10, OQ-20).
+            //
+            // A trial-spending call always has one: the gate refuses
+            // `Prereg::Missing`, and `Prereg::NotRequired` is set only for a
+            // single-lookup demand, which `Spending::ChatTurn` refuses first.
+            // Refused here rather than assumed, so a future builder that set one
+            // without the other is caught at the door.
+            let Some(prereg_hash) = req.prereg_hash else {
+                return Err(registration_failed(
+                    "this call spends a trial and carries no sealed pre-registration",
+                ));
+            };
             let body = serde_json::json!({
                 "tool": req.tool,
                 "tool_version": req.tool_version,
                 "kind": trial_kind_str(req.kind),
                 "arguments": req.arguments,
+                "prereg_hash": prereg_hash,
+                "run_id": req.run_id,
             });
-            match self.api.post("/api/ledger/trials", body).await {
+            match self.api.post("/api/ledger/reservations", body).await {
                 Ok(v) => {
-                    let ticket_id = v
-                        .get("ticket_id")
+                    let reservation_id = v
+                        .get("reservation_id")
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string();
-                    if ticket_id.is_empty() {
-                        // A 200 with no id is not a registered trial. Treating it
+                    if reservation_id.is_empty() {
+                        // A 200 with no id is not a recorded look. Treating it
                         // as one would be exactly the silent pass this module
                         // exists to prevent.
-                        return Err(registration_failed("the ledger returned no ticket_id"));
+                        return Err(registration_failed("the ledger returned no reservation_id"));
                     }
-                    Ok(TrialReceipt {
-                        ticket_id,
-                        family_id: v
-                            .get("family_id")
-                            .and_then(Value::as_str)
-                            .map(ToString::to_string),
-                    })
+                    Ok(TrialReceipt { reservation_id })
                 }
                 Err(e) => Err(registration_failed(
                     e.body
@@ -192,6 +212,13 @@ pub struct CallGate {
     spending: Spending,
     /// What this run has committed to before looking (§7.2; S-10.3).
     prereg: Prereg,
+    /// The run every reservation is attributed to (ADR-S10-10).
+    ///
+    /// `None` on a front door with no agent run behind it. That is not a
+    /// refusal: such a call still spends against a tenant's budget, and
+    /// declining to record it because the run is unknown would lose the look
+    /// rather than attribute it.
+    run_id: Option<String>,
 }
 
 /// Whether this run may spend a trial at all, and why not.
@@ -256,7 +283,31 @@ impl CallGate {
             calls: Mutex::new(BTreeMap::new()),
             spending: Spending::Allowed,
             prereg: Prereg::NotRequired,
+            run_id: None,
         }
+    }
+
+    /// The run this gate attributes reservations to.
+    ///
+    /// Exists so `McpContext`'s builders can carry it across a rebuild. They
+    /// preserve every field rather than the one they were written for — three
+    /// builders that each remember two of three settings is how one of them gets
+    /// dropped, and the comments on `spending` and `for_chat_turn` already say
+    /// so about the first two.
+    #[must_use]
+    pub fn run(&self) -> Option<&str> {
+        self.run_id.as_deref()
+    }
+
+    /// Attribute every reservation to this run (ADR-S10-10).
+    ///
+    /// A builder rather than a constructor argument, because a front door
+    /// without an agent run behind it is a legitimate caller and must not have
+    /// to invent one.
+    #[must_use]
+    pub fn for_run(mut self, run_id: impl Into<String>) -> Self {
+        self.run_id = Some(run_id.into());
+        self
     }
 
     /// The registration this run is spending under (§7.2; S-10.3).
@@ -311,6 +362,7 @@ impl CallGate {
             calls: Mutex::new(BTreeMap::new()),
             spending: Spending::Allowed,
             prereg: Prereg::NotRequired,
+            run_id: None,
         }
     }
 
@@ -420,6 +472,7 @@ impl CallGate {
                     // ledger itself.
                     Prereg::NotRequired | Prereg::Missing => None,
                 },
+                run_id: self.run_id.as_deref(),
             })
             .await
             .map(Some)
@@ -467,8 +520,7 @@ mod tests {
             Box::pin(async move {
                 let n = self.registered.fetch_add(1, Ordering::SeqCst) + 1;
                 Ok(TrialReceipt {
-                    ticket_id: format!("ticket-{}-{n}", req.tool),
-                    family_id: None,
+                    reservation_id: format!("reservation-{}-{n}", req.tool),
                 })
             })
         }
@@ -606,8 +658,7 @@ mod tests {
                     .push(req.prereg_hash.map(str::to_string));
                 Box::pin(async move {
                     Ok(TrialReceipt {
-                        ticket_id: "t1".into(),
-                        family_id: None,
+                        reservation_id: "r1".into(),
                     })
                 })
             }
@@ -671,7 +722,7 @@ mod tests {
             .await
             .expect("admitted")
             .expect("a trial-spending tool carries a ticket");
-        assert_eq!(ticket.ticket_id, "ticket-ablation_sweep-1");
+        assert_eq!(ticket.reservation_id, "reservation-ablation_sweep-1");
         assert_eq!(rec.registered.load(Ordering::SeqCst), 1);
     }
 

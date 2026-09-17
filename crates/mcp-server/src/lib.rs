@@ -382,10 +382,35 @@ impl McpContext {
     /// sealing a registration after its first refusal, which is the sequence the
     /// whole mechanism exists to prevent.
     #[must_use]
-    pub fn under_preregistration(mut self, prereg: gate::Prereg) -> Self {
+    pub fn under_preregistration(self, prereg: gate::Prereg) -> Self {
+        self.rebuild_gate(|g| g.under_preregistration(prereg))
+    }
+
+    /// Rebuild the gate, carrying **every** setting it already had.
+    ///
+    /// The builders below each construct a fresh `CallGate`, because the gate is
+    /// behind an `Arc` and shared. Each used to carry forward only the setting
+    /// it happened to know about, which is the shape their own comments warn
+    /// against: with two settings it was a hazard, and the third — the run a
+    /// reservation is attributed to (ADR-S10-10) — is the one that would have
+    /// been dropped by whichever builder ran last.
+    fn rebuild_gate(mut self, f: impl FnOnce(gate::CallGate) -> gate::CallGate) -> Self {
         let registrar = Arc::new(gate::ApiTrialRegistrar::new(self.api.clone()));
-        self.gate = Arc::new(gate::CallGate::new(registrar).under_preregistration(prereg));
+        let mut g = gate::CallGate::new(registrar)
+            .under_preregistration(self.gate.preregistration().clone())
+            .spending(self.gate.spending_rule());
+        if let Some(run) = self.gate.run() {
+            g = g.for_run(run);
+        }
+        self.gate = Arc::new(f(g));
         self
+    }
+
+    /// Attribute every reservation this context makes to one run (ADR-S10-10).
+    #[must_use]
+    pub fn for_run(self, run_id: impl Into<String>) -> Self {
+        let run_id = run_id.into();
+        self.rebuild_gate(|g| g.for_run(run_id))
     }
 
     /// The same context, under this run's spending rule (§2.2, §3).
@@ -394,15 +419,8 @@ impl McpContext {
     /// `for_chat_turn` does: the two builders are written to be used together,
     /// which is exactly the shape that loses one of them.
     #[must_use]
-    pub fn spending(mut self, spending: gate::Spending) -> Self {
-        let registrar = Arc::new(gate::ApiTrialRegistrar::new(self.api.clone()));
-        let prereg = self.gate.preregistration().clone();
-        self.gate = Arc::new(
-            gate::CallGate::new(registrar)
-                .under_preregistration(prereg)
-                .spending(spending),
-        );
-        self
+    pub fn spending(self, spending: gate::Spending) -> Self {
+        self.rebuild_gate(|g| g.spending(spending))
     }
 
     /// The same context, for a run that may not spend a trial (AGENT-013 §2.2;
@@ -413,19 +431,10 @@ impl McpContext {
     /// spends. See `CallGate::for_chat_turn` for why the direction of the
     /// default matters.
     #[must_use]
-    pub fn for_chat_turn(mut self) -> Self {
-        let registrar = Arc::new(gate::ApiTrialRegistrar::new(self.api.clone()));
-        // The registration this context was already given survives. Rebuilding
-        // the gate from scratch here would silently drop it, and the two
-        // builders are written to be used together — which is exactly the shape
-        // that loses one of them.
-        let prereg = self.gate.preregistration().clone();
-        self.gate = Arc::new(
-            gate::CallGate::new(registrar)
-                .under_preregistration(prereg)
-                .for_chat_turn(),
-        );
-        self
+    pub fn for_chat_turn(self) -> Self {
+        // Everything this context was already given survives — see
+        // `rebuild_gate`, which is the one place that carries it.
+        self.rebuild_gate(gate::CallGate::for_chat_turn)
     }
 
     /// What this context already returned for this call, if anything.
@@ -722,7 +731,13 @@ pub async fn dispatch_under(
                     obj.entry("ids")
                         .or_insert_with(|| json!({}))
                         .as_object_mut()
-                        .map(|ids| ids.insert("ticket_id".into(), json!(t.ticket_id)));
+                        // `reservation_id`, not `ticket_id` (ADR-S10-10). A
+                        // reservation is permission that was granted; a ticket
+                        // is compute that ran, written by the compute site where
+                        // the config, the dataset and the seeds are known.
+                        // Returning one under the other's name would let a model
+                        // cite permission as the measurement.
+                        .map(|ids| ids.insert("reservation_id".into(), json!(t.reservation_id)));
                 }
                 // Recorded only on success. A failed write did not happen, and
                 // replaying its error would turn one transient failure into a

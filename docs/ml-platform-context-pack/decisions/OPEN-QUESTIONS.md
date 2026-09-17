@@ -357,6 +357,37 @@ research loop does not run. It is written up rather than patched because the
 patch is the design decision, and picking one to unblock a build is how the trial
 counter would come to mean something nobody chose.
 
-**Status:** open, and it blocks gate H-2 (a live run) independently of the missing
-credential.
+**Resolved 2026-09-17 as ADR-S10-10, and by neither option A nor B.**
+
+Both fail on a fact. A cannot be written honestly — every required column of
+`mlops.trial` is about compute and a tool call has chosen none of them. B
+under-counts silently: `report_kill` and `report_evaluator_defect` declare a trial
+and post to `/api/falsification/kills`, which registers nothing, so two of the
+seven tools would spend nothing at all.
+
+Which made the real shape visible: these are **two questions**, and only one of
+them ever had a table. *What compute ran, under what config, over what data* is
+`mlops.trial`, written by `backtest::run` where the facts exist. *May this run
+spend, and has it spent one* is `mlops.trial_reservation` (migration `0132`),
+written by the gate at the door. The gate posts to `/api/ledger/reservations` now
+and the route exists.
+
+The choice is additive, which is most of the argument for it: `mlops.trial` keeps
+its shape, `trials_counted`, the exploration floor and `N_eff` all go on reading
+it untouched, INV-16 stays satisfied where the facts are, and the gate keeps the
+property `affbe59` bought — a look is recorded before a handler is reached.
+
+Two things it fixed on the way. `prereg_hash` now reaches a durable row per look:
+it was carried on `TrialRequest` and left out of the body the registrar posted, so
+§7.2's "every ticket carries the hash" was true of no ticket. And the receipt
+returns `reservation_id` rather than `ticket_id`, because a reservation is
+permission and a ticket is a measurement, and a model citing the first as the
+second would be citing that it was allowed to look.
+
+**What it does not do:** settlement. `settled_trial_id` exists and nothing sets it,
+so an authorised look that never ran is not yet distinguishable from one that did.
+Threading the reservation id through tool → API → suite → Run is a separate change,
+and no reconciliation is claimed until it lands.
+
+**Status:** resolved.
 

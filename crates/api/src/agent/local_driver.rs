@@ -1323,7 +1323,11 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
             params.api_base.clone(),
             params.service_token.clone(),
         ))
-        .under_preregistration(sealed_registration(&pg, params.run_id, params.demand).await);
+        .under_preregistration(sealed_registration(&pg, params.run_id, params.demand).await)
+        // Every reservation this run makes is attributed to it (ADR-S10-10).
+        // A service token names a tenant and not a run, so the platform cannot
+        // derive this — the driver is the only thing that knows.
+        .for_run(params.run_id.to_string());
         // One question with one answer (§2.2, §3). A chat turn spends nothing;
         // so does a `survey`, for a different reason and with a different thing
         // to tell the model.

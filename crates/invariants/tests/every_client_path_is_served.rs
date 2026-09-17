@@ -17,12 +17,16 @@
 //!
 //! # The defect this generalises
 //!
-//! `gate::ApiTrialRegistrar` posts to `POST /api/ledger/trials`. That route does
-//! not exist — the only occurrence of the string in the repository is the `post`
-//! call itself. A 404 is an `Err`, which becomes `registration_failed`, which
-//! `CallGate::admit` returns before the dispatch table is reached. **Every tool
-//! declaring a trial is therefore refused**, on every path, and the entire
-//! research loop cannot run (OQ-20).
+//! `gate::ApiTrialRegistrar` posted to `POST /api/ledger/trials`, and that route
+//! did not exist — the only occurrence of the string in the repository was the
+//! `post` call itself. A 404 is an `Err`, which becomes `registration_failed`,
+//! which `CallGate::admit` returns before the dispatch table is reached. **Every
+//! tool declaring a trial was therefore refused**, on every path, and the
+//! research loop could not run.
+//!
+//! Fixed on 2026-09-17 by ADR-S10-10, which is the outcome this test was built
+//! to force: holding the defect as a pinned entry made the repair a decision
+//! about what a trial *is* rather than a patch that invented a `dataset_id`.
 //!
 //! The gate's own tests all pass, and correctly: they assert that a registrar
 //! which refuses causes the call to be refused, which is exactly what happens.
@@ -130,12 +134,12 @@ fn served_paths() -> BTreeSet<String> {
 /// **Pinned, and the list may only shrink.** Each entry is a live defect with a
 /// reason and a ticket, not an exemption — the alternative is a test that fails
 /// today and gets deleted, which would take the finding with it.
-const KNOWN_UNSERVED: &[(&str, &str)] = &[(
-    "/api/ledger/trials",
-    "OQ-20: the trial gate registers at the tool call and `mlops.trial` describes compute, so \
-     the route cannot be written honestly without deciding what a trial is. Every \
-     trial-spending tool is refused until it is.",
-)];
+///
+/// Empty since 2026-09-17. It held one entry, `/api/ledger/trials`, and holding
+/// it is what made the repair a decision instead of a patch: ADR-S10-10 split the
+/// question in two, the gate now reserves at `/api/ledger/reservations` and the
+/// compute site still registers the trial.
+const KNOWN_UNSERVED: &[(&str, &str)] = &[];
 
 #[test]
 fn every_literal_client_path_is_a_route_the_platform_serves() {
@@ -178,7 +182,14 @@ fn the_known_unserved_list_holds_only_paths_that_are_still_unserved() {
 /// The scan sees the call it was written for.
 ///
 /// A regex that matched nothing would make both tests above pass on an empty
-/// set, which is the failure mode of every text-level check.
+/// set, which is the failure mode of every text-level check — and with
+/// `KNOWN_UNSERVED` now empty, an empty scan is indistinguishable from a healthy
+/// platform.
+///
+/// It anchors on the trial gate's own call, which is the one this file exists
+/// for. The path it names changed on 2026-09-17 — the gate reserves rather than
+/// registers (ADR-S10-10) — and the anchor moved with it rather than being
+/// dropped, because an anchor on a path nobody calls proves nothing.
 #[test]
 fn the_scan_finds_the_call_it_exists_for() {
     let paths = client_paths();
@@ -188,9 +199,10 @@ fn the_scan_finds_the_call_it_exists_for() {
         paths.len()
     );
     assert!(
-        paths.contains("/api/ledger/trials"),
-        "the scan no longer sees the trial registrar's call; either it was fixed — in which \
-         case KNOWN_UNSERVED should have failed first — or the scan has stopped working"
+        paths.contains("/api/ledger/reservations"),
+        "the scan no longer sees the trial gate's call, which is the one this file was written \
+         for. Either the gate stopped reserving — in which case nothing records that a look was \
+         authorised — or the scan has stopped working. Paths seen: {paths:#?}"
     );
     // And the router scan sees a route that certainly exists.
     assert!(read("crates/api/src/routes/mod.rs").contains("/api/lifecycle/preregistrations"));
