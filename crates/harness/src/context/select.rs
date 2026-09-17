@@ -74,6 +74,13 @@ pub struct Query {
     pub focus: Option<String>,
     /// What was rendered on the previous call, for stickiness (§24.5).
     pub previously_rendered: BTreeSet<RecordId>,
+    /// Records held out of this assembly.
+    ///
+    /// Exists for the counterfactual ablation (§28.1), which asks what the step
+    /// would have seen without one record. It is a *query* field rather than a
+    /// separate entry point so the ablation runs the real selector — an ablation
+    /// against a simplified copy of selection would measure the copy.
+    pub excluded: BTreeSet<RecordId>,
 }
 
 impl Query {
@@ -110,6 +117,7 @@ impl Query {
             cited_ids,
             focus: None,
             previously_rendered: BTreeSet::new(),
+            excluded: BTreeSet::new(),
         }
     }
 
@@ -224,7 +232,10 @@ pub fn select(
     budget: u32,
     policy: &ContextPolicy,
 ) -> Selection {
-    let live: Vec<&Record> = store.live().collect();
+    let live: Vec<&Record> = store
+        .live()
+        .filter(|r| !query.excluded.contains(&r.id))
+        .collect();
     let mut report = SelectionReport {
         policy_version: policy.version.clone(),
         candidates: live.len(),

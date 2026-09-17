@@ -14,6 +14,7 @@
 //! Truncation keeps head AND tail. A tail-only cut loses the summary line that most
 //! tool output ends with; a head-only cut loses the error at the bottom of a log.
 
+pub mod ablation;
 pub mod body;
 pub mod budget;
 pub mod degrade;
@@ -22,6 +23,7 @@ pub mod policy;
 pub mod render;
 pub mod select;
 pub mod store;
+pub mod utility;
 
 use serde::{Deserialize, Serialize};
 
