@@ -379,10 +379,24 @@ impl AgentManager {
         let llm_client = LlmClient::new(provider, api_key, base_url);
 
         let run_id = Uuid::new_v4();
+        // This path is the chat front door, so every turn it starts is a Chat
+        // turn — which is ring 0 and cannot be widened (AGENT-013 §2.2). The
+        // research path sets its own when it lands (S-10.2).
+        //
+        // The strings are taken from the enums rather than written out, so the
+        // row cannot say a word `0126`'s CHECK refuses or one nothing reads back.
+        let mode_str = serde_json::to_value(harness::state::Mode::Chat)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_else(|| "chat".into());
+        let ring_str = serde_json::to_value(harness::state::Ring::Research)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_else(|| "research".into());
         sqlx::query(
             "INSERT INTO agent_runs (run_id, user_id, status, goal, provider, model,
-                 constraints_json, conversation_id, turn_index)
-             VALUES ($1, $2, 'queued', $3, $4, $5, '{}'::jsonb, $6, $7)",
+                 constraints_json, conversation_id, turn_index, mode, ring)
+             VALUES ($1, $2, 'queued', $3, $4, $5, '{}'::jsonb, $6, $7, $8, $9)",
         )
         .bind(run_id)
         .bind(user_id)
@@ -391,6 +405,16 @@ impl AgentManager {
         .bind(&convo.model)
         .bind(conversation_id)
         .bind(turn_index)
+        // What this run is allowed to do, on the row rather than only inside the
+        // run (AGENT-013 §2.1, §4; S-10.1). "Could this run have armed an
+        // automation?" must be answerable without re-deriving it from a
+        // transcript.
+        //
+        // Derived here from the same two facts `Loop::new` derives them from —
+        // the demand and the mode — so the row and the state card cannot
+        // disagree about what the run was.
+        .bind(mode_str)
+        .bind(ring_str)
         .execute(&self.pg)
         .await
         .map_err(|e| StartError::Internal(e.to_string()))?;

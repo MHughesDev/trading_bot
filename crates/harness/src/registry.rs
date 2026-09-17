@@ -219,6 +219,74 @@ pub const LONG_RUNNING_TOOLS: &[&str] = &[
     "run_shadow_session",
 ];
 
+/// The outermost ring a tool reaches (AGENT-013 §4; Set S task S-10.1).
+///
+/// **Derived, never listed.** A list of tool names beside the catalogue is the
+/// shape `internal_agent_tools` had until S-1.3, and a miss there is silent —
+/// a tool absent from a list is a tool nobody notices is absent. Here a miss
+/// would be worse than silent: a tool that reaches paper and is not in the list
+/// would report ring 0 and become nameable inside a Chat turn.
+///
+/// `reaches_paper` is the one fact this crate cannot derive. `ToolSpec` gets it
+/// from `Envelope::Promotion`; the harness is sans-IO and has no catalogue, so
+/// the platform supplies the set through `Loop::with_paper_tools` — the same
+/// arrangement as `gated_actions` and the trial-spending set, and for the same
+/// reason.
+#[must_use]
+pub fn ring_of(risk: Risk, reaches_paper: bool) -> crate::state::Ring {
+    if reaches_paper {
+        return crate::state::Ring::Paper;
+    }
+    match risk {
+        // A write or a destructive call changes the platform's own artifacts.
+        Risk::Write | Risk::Destructive => crate::state::Ring::PlatformArtifacts,
+        // A read reaches nothing, and `Outbound` fetches rather than writes.
+        Risk::Read | Risk::Outbound => crate::state::Ring::Research,
+    }
+}
+
+/// What a run is allowed to reach, for filtering the catalogue before routing.
+///
+/// A struct rather than three more parameters, because the next thing added to
+/// exposure would be a fourth and the call sites are already long enough to hide
+/// an argument swapped with its neighbour.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits<'a> {
+    /// Whether the run's context policy engages the pull tools (S-9.6).
+    pub retrieval: bool,
+    /// The run's ring. Tools beyond it are **unnameable**, not refused.
+    pub ring: crate::state::Ring,
+    /// Tools that reach paper. Supplied by the platform.
+    pub paper: &'a BTreeSet<String>,
+}
+
+impl Limits<'_> {
+    /// The widest possible, for callers with no run behind them.
+    ///
+    /// The desk's catalogue page is one: it is showing what the catalogue *has*,
+    /// not what some run may reach, and narrowing it here would make the page
+    /// disagree with itself depending on who was looking.
+    #[must_use]
+    pub fn unrestricted(paper: &BTreeSet<String>) -> Limits<'_> {
+        Limits {
+            retrieval: false,
+            ring: crate::state::Ring::Paper,
+            paper,
+        }
+    }
+
+    /// Whether this tool is within reach of the run.
+    #[must_use]
+    pub fn admits(&self, def: &ToolDef) -> bool {
+        // Core tools are answered inside the loop and reach nothing: gating them
+        // on the ring would take `finish_task` away from a Chat turn.
+        if def.core {
+            return core_is_admissible(&def.name, true, self.retrieval);
+        }
+        ring_of(def.risk, self.paper.contains(&def.name)) <= self.ring
+    }
+}
+
 /// Whether a core tool may be offered on a run with these capabilities.
 ///
 /// Registration and exposure are different questions, and this is the second
@@ -694,7 +762,44 @@ impl ToolRegistry {
         pinned: &[String],
         retrieval: bool,
     ) -> Result<Exposure, RegistryError> {
+        let paper = BTreeSet::new();
+        self.expose_within(
+            profile,
+            namespaces,
+            pinned,
+            Limits {
+                retrieval,
+                ring: crate::state::Ring::Paper,
+                paper: &paper,
+            },
+        )
+    }
+
+    /// [`Self::expose_pinned_for`], filtered by what the run may reach
+    /// (AGENT-013 §4; S-10.1).
+    ///
+    /// The ring filter runs **before** routing and before the budget, which is
+    /// the whole point: a tool outside the ring is one the model never sees, not
+    /// one it asks for and is refused. A refusal costs a step and teaches the
+    /// model the tool exists; an absence costs nothing and teaches it nothing.
+    ///
+    /// It also means the budget is spent on tools the run can actually use. A
+    /// filter applied afterwards would let a ring-2 tool take a slot from a
+    /// ring-0 one and then be removed, leaving the slot empty — the same defect
+    /// the core-tool filter had.
+    ///
+    /// # Errors
+    /// [`RegistryError::CatalogueExceedsBudget`] when a `routing: none` profile's
+    /// claim that the catalogue fits is false.
+    pub fn expose_within(
+        &self,
+        profile: &Profile,
+        namespaces: &[String],
+        pinned: &[String],
+        limits: Limits<'_>,
+    ) -> Result<Exposure, RegistryError> {
         let budget = profile.tools.max_exposed_per_step;
+        let retrieval = limits.retrieval;
         let reflection = profile.orchestration.reflection;
 
         // `routing: none` is a claim that the catalogue fits. Check it rather than
@@ -719,11 +824,15 @@ impl ToolRegistry {
         {
             selected.push(t);
         }
+        // Everything below chooses from what the ring allows. Applied here, once,
+        // rather than at each of the three selection paths — a filter repeated
+        // three times is a filter that will be forgotten at one of them.
+        let within = |t: &&ToolDef| limits.admits(t);
 
         // Then anything the model explicitly asked for, before namespace filling.
         for name in pinned {
             if let Some(t) = self.tools.get(name) {
-                if !t.core && !selected.iter().any(|s| s.name == t.name) {
+                if !t.core && within(&t) && !selected.iter().any(|s| s.name == t.name) {
                     selected.push(t);
                 }
             }
@@ -743,7 +852,7 @@ impl ToolRegistry {
         // Within a namespace, alphabetical: still deterministic, so the same step
         // always sees the same tools and a failure stays reproducible.
         if matches!(profile.tools.routing, Routing::None) {
-            for t in self.tools.values().filter(|t| !t.core) {
+            for t in self.tools.values().filter(|t| !t.core).filter(within) {
                 selected.push(t);
             }
         } else {
@@ -756,6 +865,7 @@ impl ToolRegistry {
                     .tools
                     .values()
                     .filter(|t| !t.core && t.namespace == *ns)
+                    .filter(within)
                 {
                     if !selected.iter().any(|s| s.name == t.name) {
                         selected.push(t);

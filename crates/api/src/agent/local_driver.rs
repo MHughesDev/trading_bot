@@ -93,13 +93,28 @@ pub struct LocalRunParams {
     pub service_token: String,
 }
 
+/// The catalogue tools that reach paper trading (AGENT-013 §4; S-10.1).
+///
+/// Derived from `ToolSpec::ring`, which derives it from `Envelope::Promotion` —
+/// so a tool that starts reaching paper is caught by the derivation rather than
+/// by somebody remembering to add it to a list. The harness cannot compute this
+/// itself: it is sans-IO and has no catalogue.
+#[must_use]
+pub fn paper_reaching_tools() -> Vec<&'static str> {
+    mcp_server_lib::spec::names()
+        .into_iter()
+        .filter(|n| {
+            mcp_server_lib::spec::find(n)
+                .is_some_and(|s| s.ring() == mcp_server_lib::spec::RING_PAPER)
+        })
+        .collect()
+}
+
 /// The catalogue tools that spend a trial (AGENT-005 §20; S-9.7).
 ///
 /// Read from the catalogue's own `spends_trial` declaration, which is the same
-/// source the trial *counter* reads a few hundred lines below. One source, so a
-/// tool cannot be charged a trial by one path and sized as a cheap lookup by the
-/// other — and a tool added later is picked up by both without anyone
-/// remembering to update a list.
+/// source the trial *counter* reads below. One source, so a tool cannot be
+/// charged a trial by one path and sized as a cheap lookup by the other.
 #[must_use]
 pub fn trial_spending_tools() -> Vec<&'static str> {
     mcp_server_lib::spec::names()
@@ -1081,7 +1096,11 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
     .with_prior_exposure(params.prior_exposure.clone())
     // Which catalogue tools spend a trial, for §20's step value. The catalogue
     // owns the declaration and the loop is sans-IO, so it is told.
-    .with_trial_spending_tools(trial_spending_tools());
+    .with_trial_spending_tools(trial_spending_tools())
+    // Which tools reach paper, for the ring filter (§4; S-10.1). Derived from
+    // the catalogue, so the filter cannot disagree with the gate about what
+    // reaches capital.
+    .with_paper_tools(paper_reaching_tools());
 
     // What memory has to say about this goal, as `Reference`.
     if let Some(brief) = load_brief(

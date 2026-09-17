@@ -68,7 +68,7 @@ use crate::registry::{
 use crate::state::{
     Steer,
     BudgetView, Correction, Detail, FindingRef, GoalKind, Mode as RunMode, PlannedStep, StepKind,
-    StepStatus, WorkingState,
+    Ring, StepStatus, WorkingState,
 };
 use crate::validation::{self, Rejection, RetryBudget, Rung, ToolCall};
 
@@ -896,6 +896,13 @@ pub struct Loop {
     /// is the catalogue's fact and this crate is sans-IO. Empty by default, so a
     /// harness with no platform behind it scales nothing rather than guessing.
     trial_spending_tools: BTreeSet<String>,
+    /// The catalogue tools that reach paper trading (AGENT-013 §4; S-10.1).
+    ///
+    /// The one ring fact this crate cannot derive: `ToolSpec` reads it from
+    /// `Envelope::Promotion` and the harness has no catalogue. Empty by default,
+    /// which is the conservative reading in the direction that matters — an
+    /// unnamed tool is ring 0 or 1 by its risk, never ring 2 by accident.
+    paper_tools: BTreeSet<String>,
     /// The tool the previous step called, for §20's repeat discount.
     previous_tool: Option<String>,
 
@@ -948,6 +955,25 @@ impl Loop {
                 GoalKind::classify(&task.goal, &[]),
                 RunMode::Research,
             ),
+        };
+        // The ring the run starts in (AGENT-013 §4; S-10.1).
+        //
+        // **A Chat turn is ring 0 and cannot be widened.** That is the property
+        // S-10.2 needs and the one worth having: a Chat turn cannot name a tool
+        // that writes, so "it asked and was refused" and "it never saw it" stop
+        // being the same outcome.
+        //
+        // A Research run starts at ring 1 and not at 0, which is a deliberate
+        // departure from §4's default and is recorded as `ADR-S10-01`. Ring 0 is
+        // where §4 wants a Research run to start, reaching ring 1 through a
+        // proposal a human decides — and **that door does not exist yet**
+        // (S-10.9). Shipping the narrow default before the door would leave every
+        // Research run unable to create a strategy, which is the platform's main
+        // flow. Narrowing it is a one-line change on the day S-10.9 lands, and
+        // the filter it depends on is the same either way.
+        working.ring = match working.mode {
+            RunMode::Chat => Ring::Research,
+            RunMode::Research => Ring::PlatformArtifacts,
         };
         // Derived, never asked for: the model is a poor judge of when it is
         // finished, and a criterion it wrote is one it can rewrite.
@@ -1009,6 +1035,7 @@ impl Loop {
                 profile_max_steps,
             ),
             trial_spending_tools: BTreeSet::new(),
+            paper_tools: BTreeSet::new(),
             previous_tool: None,
             outcome: None,
         }
@@ -1143,6 +1170,22 @@ impl Loop {
         S: Into<String>,
     {
         self.trial_spending_tools = names.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Name the tools that reach paper trading (AGENT-013 §4; S-10.1).
+    ///
+    /// See `paper_tools`: it is the one ring fact this crate cannot derive, and
+    /// the platform derives it from `Envelope::Promotion` rather than listing
+    /// names — so a tool that starts reaching paper is caught by the derivation
+    /// and not by somebody remembering a list.
+    #[must_use]
+    pub fn with_paper_tools<I, S>(mut self, names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.paper_tools = names.into_iter().map(Into::into).collect();
         self
     }
 
@@ -1965,11 +2008,15 @@ impl Loop {
             return;
         }
 
-        let exposure = match self.registry.expose_pinned_for(
+        let exposure = match self.registry.expose_within(
             &self.profile,
             &wanted,
             &pinned,
-            self.context_policy.is_retrieval(),
+            registry::Limits {
+                retrieval: self.context_policy.is_retrieval(),
+                ring: self.working.ring,
+                paper: &self.paper_tools,
+            },
         ) {
             Ok(e) => e,
             Err(e) => {
@@ -3429,7 +3476,21 @@ impl Loop {
             .get("query")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let hits = self.registry.search(query, 5);
+        // The ring filter applies to discovery as well as to routing (§4). A
+        // search that surfaced a ring-2 tool to a Chat turn would make the tool
+        // nameable — and "unnameable, not refused" is the whole property.
+        let limits = registry::Limits {
+            retrieval: self.context_policy.is_retrieval(),
+            ring: self.working.ring,
+            paper: &self.paper_tools,
+        };
+        let hits: Vec<&registry::ToolDef> = self
+            .registry
+            .search(query, 16)
+            .into_iter()
+            .filter(|t| limits.admits(t))
+            .take(5)
+            .collect();
         let found: Vec<String> = hits.iter().map(|t| t.name.clone()).collect();
         for t in &hits {
             self.discovered.insert(t.namespace.clone());
@@ -4114,6 +4175,133 @@ mod tests {
             })
         );
         assert_eq!(l.state(), State::Finished);
+    }
+
+    // ── Rings (AGENT-013 §4; Set S task S-10.1) ─────────────────────────────
+
+    fn ringed_registry() -> ToolRegistry {
+        let mut r = registry();
+        r.register(ToolDef {
+            name: "create_strategy".into(),
+            namespace: "strategy".into(),
+            description: "Create a strategy. Use when a design is ready to save.".into(),
+            risk: Risk::Write,
+            core: false,
+            idempotent: false,
+            input_schema: json!({"type": "object", "properties": {}}),
+        })
+        .unwrap();
+        r.register(ToolDef {
+            name: "arm_automation".into(),
+            namespace: "portfolio".into(),
+            description: "Arm an automation so it trades on paper. Use after approval.".into(),
+            risk: Risk::Write,
+            core: false,
+            idempotent: false,
+            input_schema: json!({"type": "object", "properties": {}}),
+        })
+        .unwrap();
+        r
+    }
+
+    /// A tool beyond the ring is **unnameable**, not refused.
+    ///
+    /// The distinction is the point: a refusal costs a step and teaches the
+    /// model the tool exists, so it asks again. An absence costs nothing and
+    /// teaches it nothing.
+    #[test]
+    fn a_chat_turn_cannot_see_a_tool_that_writes() {
+        let mut task = task();
+        task.demand = TaskDemand::SingleLookup;
+        task.namespaces = vec!["data".into(), "strategy".into(), "portfolio".into()];
+        let mut l = Loop::new(local(), ringed_registry(), task)
+            .with_paper_tools(["arm_automation"]);
+        l.next(Input::Admission(Admission::Admit));
+
+        assert_eq!(l.working().mode, RunMode::Chat);
+        assert_eq!(l.working().ring, Ring::Research);
+        assert!(
+            !l.exposed().iter().any(|n| n == "create_strategy"),
+            "a ring-1 tool reached a chat turn: {:?}",
+            l.exposed()
+        );
+        assert!(!l.exposed().iter().any(|n| n == "arm_automation"));
+        assert!(
+            l.exposed().iter().any(|n| n == "read_bars"),
+            "and the reads it needs are still there: {:?}",
+            l.exposed()
+        );
+    }
+
+    /// `search_tools` cannot surface what the ring forbids either.
+    ///
+    /// Exposure and discovery are two doors into the same catalogue, and a
+    /// filter on one of them is a filter with a way around it.
+    #[test]
+    fn search_cannot_surface_a_tool_beyond_the_ring() {
+        let mut task = task();
+        task.demand = TaskDemand::SingleLookup;
+        task.namespaces = vec!["data".into()];
+        let mut l = Loop::new(local(), ringed_registry(), task)
+            .with_paper_tools(["arm_automation"]);
+        l.next(Input::Admission(Admission::Admit));
+
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"search_tools"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: r#"{"query":"create a strategy and arm it"}"#.into(),
+        });
+        let note = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::Note(Note::CoreTool { name, detail }) if name == SEARCH_TOOLS => {
+                    Some(detail)
+                }
+                _ => None,
+            })
+            .expect("search answers");
+        assert!(
+            !note.contains("create_strategy") && !note.contains("arm_automation"),
+            "search is the other door into the catalogue: {note}"
+        );
+    }
+
+    /// A research run reaches ring 1, which is where the platform's work is.
+    #[test]
+    fn a_research_run_may_write_platform_artifacts_and_not_reach_paper() {
+        let mut task = task();
+        task.namespaces = vec!["strategy".into(), "portfolio".into()];
+        let mut l = Loop::new(local(), ringed_registry(), task)
+            .with_paper_tools(["arm_automation"]);
+        l.next(Input::Admission(Admission::Admit));
+
+        assert_eq!(l.working().ring, Ring::PlatformArtifacts);
+        assert!(
+            l.exposed().iter().any(|n| n == "create_strategy"),
+            "{:?}",
+            l.exposed()
+        );
+        assert!(
+            !l.exposed().iter().any(|n| n == "arm_automation"),
+            "ring 2 has no door that is not a proposal a human decides: {:?}",
+            l.exposed()
+        );
+    }
+
+    /// The ring is derived from what the tool declares, never from a list.
+    #[test]
+    fn the_ring_is_derived_from_risk_and_reach() {
+        use crate::registry::ring_of;
+        assert_eq!(ring_of(Risk::Read, false), Ring::Research);
+        assert_eq!(ring_of(Risk::Outbound, false), Ring::Research);
+        assert_eq!(ring_of(Risk::Write, false), Ring::PlatformArtifacts);
+        assert_eq!(ring_of(Risk::Destructive, false), Ring::PlatformArtifacts);
+        assert_eq!(ring_of(Risk::Read, true), Ring::Paper);
+        assert!(
+            Ring::Research < Ring::PlatformArtifacts && Ring::PlatformArtifacts < Ring::Paper,
+            "the ordering is what the filter compares against"
+        );
     }
 
     // ── Context as retrieval (AGENT-005 Part II; Set S phase 9) ─────────────
