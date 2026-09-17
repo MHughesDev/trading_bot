@@ -129,6 +129,14 @@ workflows:
   - diagnose
   - survey
 
+# AGENT-013 §11. The model fills a skeleton under a grammar — the fields are
+# enums and numbers — so a malformed registration is impossible at sampling time
+# rather than refused at parse time. Two amendments, not three: a tier already
+# writing under a grammar has less room to have got the protocol subtly wrong,
+# and more risk that a third rewrite is the model circling.
+prereg_authoring: "skeleton_grammar"
+max_prereg_amendments: 2
+
 notes: >
   Reference model for the local tier. Decode is two constrained calls per step -
   select the tool against an enum of exactly the tools routed for this step, then

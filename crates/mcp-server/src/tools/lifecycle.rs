@@ -289,6 +289,75 @@ pub async fn propose(api: &crate::ApiClient, params: &Value) -> Value {
     post(api, "/api/lifecycle/proposals", params.clone()).await
 }
 
+/// Pre-flight on an open question (AGENT-013 §9; S-10.12).
+///
+/// `why_it_matters` is the field this tool exists for. The loop already writes a
+/// question down at run end from whatever the reflection said, and those entries
+/// carry "not stated" because prose does not contain stakes however confidently
+/// it is read. A question with no stated stakes sits in the store forever being
+/// retrieved and skipped, so the deliberate door asks for them and refuses
+/// without.
+///
+/// # Errors
+/// The typed refusal, with the field and the reason.
+pub fn check_question(params: &Value) -> Result<(), Value> {
+    for (field, why) in [
+        (
+            "subject",
+            "what the question is about, so the next run working on that subject is told. \
+             An instrument, a family, a component.",
+        ),
+        ("question", "the question itself, in one sentence."),
+        (
+            "why_it_matters",
+            "what changes depending on the answer. Required, and it is the whole point of \
+             opening one deliberately: the run-end write already records questions with no \
+             stated stakes, and those are the ones nobody ever prioritises.",
+        ),
+    ] {
+        if text(params, field).is_none() {
+            return Err(missing(field, why));
+        }
+    }
+    const VALUES: &[&str] = &["curious", "useful", "decisive"];
+    match text(params, "value").as_deref() {
+        None | Some("curious" | "useful" | "decisive") => {}
+        Some(other) => {
+            return Err(json!({
+                "error": "unknown_value",
+                "value": other,
+                "values": VALUES,
+                "fix": "`decisive` means something is being decided on an assumption nobody \
+                        has checked; `useful` would change how a future run is designed."
+            }))
+        }
+    }
+    // `status` is not a field on this request, and neither is `closed_by`. A run
+    // does not close its own questions — the platform closes one when a later
+    // finding cites it (§9), for the same reason a run does not write its own
+    // verdict.
+    for field in ["status", "closed_by", "how"] {
+        if params.get(field).is_some() {
+            return Err(json!({
+                "error": "not_yours_to_set",
+                "field": field,
+                "fix": "a question is closed by the platform when a later finding cites it. \
+                        A run that could close its own would close the ones it had been \
+                        thinking about longest, which is not the same as the ones it answered."
+            }));
+        }
+    }
+    Ok(())
+}
+
+/// `open_question` — write down something this run could not answer (§9).
+pub async fn open_question(api: &crate::ApiClient, params: &Value) -> Value {
+    if let Err(e) = check_question(params) {
+        return e;
+    }
+    post(api, "/api/lifecycle/questions", params.clone()).await
+}
+
 /// The catalogue entries for this namespace.
 #[must_use]
 pub fn specs() -> Vec<ToolSpec> {
@@ -416,6 +485,30 @@ pub fn specs() -> Vec<ToolSpec> {
         .internal()
         .evidence(&["proposal_id"])
         .notes("propose"),
+        ToolSpec::new(
+            "open_question",
+            "lifecycle",
+            // A write: it puts a row in semantic memory that later runs read.
+            Risk::Write,
+            "Write down something you could not answer, so the next run on this subject is \
+             told rather than rediscovering it. Say what changes depending on the answer — a \
+             question with no stated stakes is one nobody will ever prioritise.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "subject": { "type": "string", "description": "What it is about: an instrument, a family, a component." },
+                    "question": { "type": "string" },
+                    "why_it_matters": { "type": "string", "description": "What changes depending on the answer." },
+                    "blocking": {
+                        "type": "boolean",
+                        "description": "True when the answer changes what a run should do next. Blocking questions lead the next run's brief."
+                    },
+                    "value": { "type": "string", "enum": ["curious", "useful", "decisive"] }
+                },
+                "required": ["subject", "question", "why_it_matters"]
+            }),
+        )
+        .internal(),
     ]
 }
 
@@ -565,5 +658,73 @@ mod tests {
                 spec.name
             );
         }
+    }
+
+    /// The field the deliberate door exists for.
+    #[test]
+    fn a_question_without_stated_stakes_is_refused() {
+        let p = json!({ "subject": "BTC-USD", "question": "does the funding leg survive costs" });
+        let err = check_question(&p).expect_err("no stakes");
+        assert_eq!(err["field"], "why_it_matters");
+    }
+
+    #[test]
+    fn a_complete_question_passes_preflight() {
+        check_question(&json!({
+            "subject": "BTC-USD",
+            "question": "does the funding leg survive costs",
+            "why_it_matters": "the whole carry thesis rests on it",
+            "blocking": true,
+            "value": "decisive"
+        }))
+        .expect("complete");
+    }
+
+    /// §9's rule, as a refusal rather than a silently ignored field: a run does
+    /// not close its own questions. Ignoring the field would let a run believe
+    /// it had closed one and report accordingly.
+    #[test]
+    fn a_run_cannot_close_its_own_question() {
+        for field in ["status", "closed_by", "how"] {
+            let mut p = json!({
+                "subject": "BTC-USD",
+                "question": "q",
+                "why_it_matters": "w"
+            });
+            p[field] = json!("closed");
+            let err = check_question(&p).expect_err("not yours");
+            assert_eq!(err["error"], "not_yours_to_set", "{field}");
+        }
+    }
+
+    /// The schema offers no way to close one either, so the refusal above is a
+    /// second line rather than the only one.
+    #[test]
+    fn the_question_schema_offers_no_closing_fields() {
+        let spec = specs()
+            .into_iter()
+            .find(|s| s.name == "open_question")
+            .expect("open_question is in the catalogue");
+        let props = spec.input_schema["properties"].as_object().expect("properties");
+        for field in ["status", "closed_by", "how", "closed"] {
+            assert!(!props.contains_key(field), "the schema offers `{field}`");
+        }
+    }
+
+    #[test]
+    fn the_question_values_are_the_harness_enum() {
+        let spec = specs()
+            .into_iter()
+            .find(|s| s.name == "open_question")
+            .expect("in the catalogue");
+        let offered: Vec<&str> = spec.input_schema["properties"]["value"]["enum"]
+            .as_array()
+            .expect("an enum")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        // Spelled here and in `harness::memory::questions`; a mismatch would
+        // offer a value the store then refuses.
+        assert_eq!(offered, vec!["curious", "useful", "decisive"]);
     }
 }

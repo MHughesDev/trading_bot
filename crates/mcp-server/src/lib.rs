@@ -866,6 +866,7 @@ async fn dispatch_untraced(
         "hypothesise" => tools::lifecycle::hypothesise(&ctx.api, params).await,
         "design" => tools::lifecycle::design(&ctx.api, params).await,
         "propose" => tools::lifecycle::propose(&ctx.api, params).await,
+        "open_question" => tools::lifecycle::open_question(&ctx.api, params).await,
         "report_kill" => tools::falsification::report_kill(&ctx.api, params).await,
         "report_evaluator_defect" => {
             tools::falsification::report_evaluator_defect(&ctx.api, params).await

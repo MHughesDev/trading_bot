@@ -135,6 +135,11 @@ budgets:
   # finds nothing is perfectly reversible and perfectly wasted.
   ask_above_usd: 5.0
 
+# AGENT-013 §11. The model drafts the registration and the platform validates it;
+# three amendments, which is the platform ceiling.
+prereg_authoring: "free"
+max_prereg_amendments: 3
+
 # AGENT-013 §11: every workflow. The tier that drafts a pre-registration from
 # free text and authors a falsifier without a grammar is the tier that can plan
 # a campaign's sequence of structural moves.

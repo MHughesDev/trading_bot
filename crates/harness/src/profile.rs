@@ -58,6 +58,57 @@ impl Tier {
     }
 }
 
+/// How a run on this tier writes its pre-registration (AGENT-013 §11).
+///
+/// Three ways of producing one object, and **no variant meaning "none"**: §11's
+/// table gives every tier a mode, because the falsifier is the field the
+/// registration exists for and a tier that skipped it would spend trials against
+/// a hypothesis that could only ever be confirmed. Whether a *profile* should be
+/// able to switch pre-registration off entirely is OQ-19, and is deliberately
+/// not expressible here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreregAuthoring {
+    /// The model drafts it and the platform validates. Frontier and `local_high`.
+    Free,
+    /// The model fills a skeleton under a grammar: the fields are enums and
+    /// numbers, so a malformed registration is a sampling-time impossibility
+    /// rather than a parse-time refusal. `local_mid`.
+    SkeletonGrammar,
+    /// The skeleton is derived from the question's constraints and the model
+    /// confirms it. `local_small` and `degraded` — the tiers where authoring a
+    /// falsifier from nothing is the step that fails.
+    SkeletonConfirm,
+}
+
+impl PreregAuthoring {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Free => "free",
+            Self::SkeletonGrammar => "skeleton_grammar",
+            Self::SkeletonConfirm => "skeleton_confirm",
+        }
+    }
+
+    /// Every mode, so a per-tier table cannot quietly omit one.
+    pub const ALL: &'static [PreregAuthoring] = &[
+        Self::Free,
+        Self::SkeletonGrammar,
+        Self::SkeletonConfirm,
+    ];
+
+    /// Whether the model writes the registration's text itself.
+    ///
+    /// The enforcement point: a tier that does not author freely is handed a
+    /// grammar, and `Free` is the only mode under which a profile may leave the
+    /// schema unconstrained.
+    #[must_use]
+    pub fn needs_grammar(self) -> bool {
+        !matches!(self, Self::Free)
+    }
+}
+
 /// What kind of agent this is (guide §9). Drives environment, security and
 /// lifecycle decisions, so it is declared rather than inferred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -456,6 +507,26 @@ pub struct Profile {
     #[serde(default)]
     pub escalate_to: Option<String>,
     pub budgets: Budgets,
+    /// How a run on this tier writes its pre-registration (AGENT-013 §11;
+    /// S-10.3, S-10.14).
+    ///
+    /// Defaults to the most constrained mode for the same reason
+    /// [`Profile::workflows`] defaults to the smallest set: a profile that
+    /// forgot the field and got `free` would ask a 7B to author a falsifier from
+    /// nothing, which is the step §11 says fails there. A forgotten field that
+    /// hands a frontier model a grammar costs some expressiveness and nothing
+    /// else.
+    #[serde(default = "default_prereg_authoring")]
+    pub prereg_authoring: PreregAuthoring,
+    /// How many times a run on this tier may amend its registration
+    /// (AGENT-013 §7.2; S-10.3).
+    ///
+    /// `ledger::prereg::MAX_PREREG_AMENDMENTS` is the platform ceiling and this
+    /// reads under it, never over: a profile cannot buy itself more rewrites
+    /// than the protocol allows, because a protocol rewritten often enough is
+    /// not a protocol and the ceiling is what makes that mechanical.
+    #[serde(default = "default_max_prereg_amendments")]
+    pub max_prereg_amendments: u32,
     /// Which stage skeletons this tier may run (AGENT-013 §11; S-10.11, S-10.14).
     ///
     /// **The default is the smallest set, not the whole one.** A profile that
@@ -471,6 +542,21 @@ pub struct Profile {
     /// Free-text note recorded on the profile, e.g. why a tier was chosen.
     #[serde(default)]
     pub notes: String,
+}
+
+/// The most constrained authoring mode, for a profile that says nothing.
+fn default_prereg_authoring() -> PreregAuthoring {
+    PreregAuthoring::SkeletonConfirm
+}
+
+/// Three, matching `ledger::prereg::MAX_PREREG_AMENDMENTS`.
+///
+/// Not imported from `ledger`: `harness` does not depend on it, and taking the
+/// dependency to share one integer would drag sqlx and the storage layer into a
+/// sans-IO crate. `the_amendment_cap_matches_the_ledgers` in
+/// `crates/invariants` is what keeps the two numbers equal.
+fn default_max_prereg_amendments() -> u32 {
+    3
 }
 
 /// §11's bottom row: what a tier can do when its profile says nothing.
@@ -544,6 +630,27 @@ impl Profile {
         // structural moves against a campaign's budget. §11 puts the line at
         // `local_high`, and a profile below it declaring `optimise` would put a
         // campaign's whole trial budget behind proposals nothing can use.
+        // A run that may not amend at all cannot correct a protocol it found a
+        // real problem with mid-run, and its only remaining move is to finish
+        // under one it knows is wrong.
+        if self.max_prereg_amendments == 0 {
+            return Err(bad(
+                "max_prereg_amendments is zero: a run that may never amend has to finish under a protocol it has already found a problem with, which is worse than an amendment nobody can hide",
+            ));
+        }
+        if self.max_prereg_amendments > 3 {
+            return Err(bad(
+                "max_prereg_amendments is above the platform ceiling of 3 (ledger::prereg::MAX_PREREG_AMENDMENTS): a profile reads under that ceiling, never over, because a protocol rewritten four times is not a protocol and a tier cannot buy itself more rewrites",
+            ));
+        }
+        // §11 pairs the authoring mode with the tier. `free` above `local_mid`
+        // is the row's own claim; below it, authoring a falsifier from nothing
+        // is the step that fails, which is why the grammar exists.
+        if self.prereg_authoring == PreregAuthoring::Free && self.tier < Tier::LocalHigh {
+            return Err(bad(
+                "this tier declares `free` pre-registration authoring, which AGENT-013 §11 puts at local_high and above: below it the model fills a skeleton under a grammar, because authoring a falsifier from nothing is the step that fails there",
+            ));
+        }
         if self.workflows.is_empty() {
             return Err(bad(
                 "workflows is empty: a tier that may run nothing is a tier nobody can start a run on",
@@ -1011,6 +1118,8 @@ pub(crate) fn frontier_fixture() -> Profile {
             ask_above_usd: None,
         },
         workflows: crate::state::Workflow::ALL.to_vec(),
+        prereg_authoring: PreregAuthoring::Free,
+        max_prereg_amendments: 3,
         notes: String::new(),
     }
 }
@@ -1081,6 +1190,8 @@ pub(crate) fn degraded_fixture() -> Profile {
             ask_above_usd: None,
         },
         workflows: default_workflows(),
+        prereg_authoring: default_prereg_authoring(),
+        max_prereg_amendments: default_max_prereg_amendments(),
         notes: String::new(),
     }
 }
@@ -1234,10 +1345,12 @@ mod tests {
         p.tier = Tier::LocalMid;
         p.tools.parallel_calls = false;
         p.orchestration.reflection = false;
-        // Narrowed with the tier, like the two above it: a frontier profile
-        // demoted to `local_mid` while still claiming `optimise` is invalid for
-        // *that* reason too (AGENT-013 §11), and this test is about the other one.
+        // Narrowed with the tier, like the two above it. A frontier profile
+        // demoted to `local_mid` while still claiming `optimise` — or still
+        // authoring its registration freely — is invalid for *those* reasons
+        // too (AGENT-013 §11), and this test is about a different one.
         p.workflows = default_workflows();
+        p.prereg_authoring = default_prereg_authoring();
         p.output.constrained_decoding = false;
         let err = p.validate().unwrap_err().to_string();
         assert!(err.contains("constrained_decoding"), "{err}");
@@ -1275,6 +1388,7 @@ mod tests {
         p.tools.parallel_calls = false;
         p.orchestration.reflection = false;
         p.workflows = default_workflows();
+        p.prereg_authoring = default_prereg_authoring();
         p.output.constrained_decoding = true;
         assert!(p
             .validate()

@@ -24,5 +24,6 @@
 pub mod chain;
 pub mod diagnose;
 pub mod evaluate;
+pub mod skeleton;
 pub mod workflows;
 pub mod r#yield;

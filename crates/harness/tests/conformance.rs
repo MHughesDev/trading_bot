@@ -252,6 +252,41 @@ fn every_profile_field_is_enforced_somewhere() {
         assert!(mid.may_run(Workflow::Investigate));
     }
 
+    // prereg_authoring + max_prereg_amendments → AGENT-013 §11 and §7.2
+    // (S-10.3, S-10.14). Read behaviourally: the mode decides whether a
+    // registration is authored under a grammar, and the cap is what the seal
+    // path is given.
+    {
+        use harness::profile::PreregAuthoring;
+        assert!(
+            !p.prereg_authoring.needs_grammar(),
+            "a frontier profile drafts freely; §11's table says so"
+        );
+        // And a tier that does not: the mode is what hands it a grammar, so a
+        // mode nothing read would leave a 7B authoring a falsifier from nothing.
+        let small = set
+            .get("qwen2.5:7b-instruct")
+            .expect("the degraded profile ships");
+        assert!(small.prereg_authoring.needs_grammar());
+        assert_eq!(small.prereg_authoring, PreregAuthoring::SkeletonConfirm);
+
+        // The cap reads *under* the platform ceiling, never over — asserted for
+        // every shipped profile rather than for one, because the direction is
+        // the whole rule.
+        for id in set.ids() {
+            let profile = set.get(&id).expect("listed");
+            assert!(
+                profile.max_prereg_amendments >= 1,
+                "{id} may never amend, so a run that finds a real problem with its own \
+                 protocol has to finish under it"
+            );
+            assert!(
+                profile.max_prereg_amendments <= 3,
+                "{id} claims more amendments than the protocol allows"
+            );
+        }
+    }
+
     // trifecta.* → the policy engine reads the outbound leg directly.
     let ruling = decide(
         &p,
@@ -1541,4 +1576,77 @@ fn a_tier_below_local_high_cannot_declare_optimise() {
     p.workflows.push(Workflow::Optimise);
     let err = p.validate().expect_err("local_mid may not drive a campaign").to_string();
     assert!(err.contains("optimise"), "{err}");
+}
+
+/// AGENT-013 §11's authoring column, read off the shipped profiles.
+///
+/// The failure this catches is the same shape as the workflow one: if nothing
+/// read the mode, every tier would author freely, and the tier that cannot write
+/// a falsifier from nothing would be asked to. The evidence would be a 7B's
+/// registration with a falsifier that cannot refute anything — which still
+/// validates, still hashes, and still gets stamped on every ticket.
+#[test]
+fn the_tiers_that_cannot_author_freely_are_handed_a_grammar() {
+    use harness::profile::PreregAuthoring;
+
+    let set = load();
+    let mut saw_a_grammar_tier = false;
+    for id in set.ids() {
+        let p = set.get(&id).expect("listed");
+        match p.prereg_authoring {
+            PreregAuthoring::Free => assert!(
+                p.tier >= Tier::LocalHigh,
+                "{id} is {} and authors freely",
+                p.tier.as_str()
+            ),
+            PreregAuthoring::SkeletonGrammar | PreregAuthoring::SkeletonConfirm => {
+                saw_a_grammar_tier = true;
+                assert!(p.prereg_authoring.needs_grammar());
+            }
+        }
+    }
+    assert!(
+        saw_a_grammar_tier,
+        "this proves nothing unless some shipped profile is actually handed a grammar"
+    );
+}
+
+/// A profile below `local_high` cannot declare free authoring, and none may
+/// amend more than the protocol allows.
+///
+/// The readers above check today's YAML; this checks that an edit to it is
+/// refused. Without it, "the 7B fills a skeleton" is a fact about a file rather
+/// than about the platform.
+#[test]
+fn the_authoring_mode_and_the_amendment_cap_are_bounded_by_validation() {
+    use harness::profile::PreregAuthoring;
+
+    let set = load();
+    let mut p = set
+        .get("qwen3.6-35b-a3b")
+        .expect("the local_mid profile")
+        .clone();
+    assert!(p.validate().is_ok(), "the shipped profile is valid as it stands");
+
+    let mut free = p.clone();
+    free.prereg_authoring = PreregAuthoring::Free;
+    let err = free
+        .validate()
+        .expect_err("local_mid may not author freely")
+        .to_string();
+    assert!(err.contains("free"), "{err}");
+
+    p.max_prereg_amendments = 4;
+    let err = p
+        .validate()
+        .expect_err("nothing may amend more than three times")
+        .to_string();
+    assert!(err.contains("ceiling"), "{err}");
+
+    let mut none = set.get("claude-opus-5").expect("frontier").clone();
+    none.max_prereg_amendments = 0;
+    assert!(
+        none.validate().is_err(),
+        "a run that may never amend has to finish under a protocol it knows is wrong"
+    );
 }

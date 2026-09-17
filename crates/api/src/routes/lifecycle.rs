@@ -146,7 +146,14 @@ pub async fn seal(
                     &previous,
                     draft,
                     &embargo,
-                    prereg::MAX_PREREG_AMENDMENTS,
+                    // The run's own tier, not the platform ceiling
+                    // (AGENT-013 §11; S-10.3). A tier already writing under a
+                    // grammar has less room to have got the protocol subtly
+                    // wrong and more risk that a third rewrite is the model
+                    // circling, so the shipped profiles narrow it — and a
+                    // profile can only ever narrow, because `Profile::validate`
+                    // refuses one above `MAX_PREREG_AMENDMENTS`.
+                    amendment_cap(&state, run_id).await,
                 ),
                 Ok(None) => {
                     return bad_request(
@@ -510,6 +517,25 @@ pub async fn bind_design(
         )
             .into_response(),
     }
+}
+
+/// How many amendments this run's tier allows.
+///
+/// Falls back to the platform ceiling when the run's model has no profile, or
+/// when the run is not one the platform has a row for. That direction is the
+/// safe one only because the ceiling is itself a cap: a fallback *above* the
+/// tier's value costs at most one extra amendment, and `prereg::amend` still
+/// refuses past three.
+async fn amendment_cap(state: &AppState, run_id: Uuid) -> u32 {
+    let model: Option<String> = sqlx::query_scalar("SELECT model FROM agent_runs WHERE run_id = $1")
+        .bind(run_id)
+        .fetch_optional(&state.pg)
+        .await
+        .ok()
+        .flatten();
+    model
+        .and_then(|m| state.profiles.get(&m).map(|p| p.max_prereg_amendments))
+        .unwrap_or(prereg::MAX_PREREG_AMENDMENTS)
 }
 
 /// The head of a run's amendment chain.
@@ -1029,4 +1055,123 @@ pub async fn get_campaign(
         "last_proposal": proposal,
     }))
     .into_response()
+}
+
+// ── Open questions (AGENT-013 §9; S-10.12) ───────────────────────────────────
+
+/// What a run sends to open one.
+///
+/// `why_it_matters` has no `serde(default)`: a body without it does not
+/// deserialise. That is the whole difference between this door and the run-end
+/// write, which records questions whose stakes were never stated because prose
+/// does not contain them.
+///
+/// There is **no field for `status`**, and that is §9's rule rather than an
+/// omission. The platform closes a question when a later finding cites it; a run
+/// that could close its own would close the ones it had been thinking about
+/// longest, which is not the same set as the ones it answered.
+#[derive(Debug, Deserialize)]
+pub struct QuestionBody {
+    subject: String,
+    question: String,
+    why_it_matters: String,
+    #[serde(default)]
+    blocking: bool,
+    #[serde(default)]
+    value: Option<String>,
+    #[serde(default)]
+    run_id: Option<Uuid>,
+}
+
+/// `POST /api/lifecycle/questions` — write down what this run could not answer.
+pub async fn open_question(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(body): Json<QuestionBody>,
+) -> impl IntoResponse {
+    use harness::memory::questions::{self, QuestionValue};
+
+    let value = match body.value.as_deref() {
+        None | Some("curious") => QuestionValue::Curious,
+        Some("useful") => QuestionValue::Useful,
+        Some("decisive") => QuestionValue::Decisive,
+        Some(other) => {
+            return bad_request(
+                "unknown_value",
+                format!("`{other}` is not one of curious, useful, decisive"),
+                "`decisive` means something is being decided on an assumption nobody checked",
+            )
+            .into_response()
+        }
+    };
+
+    let id = format!("q_{}", uuid::Uuid::new_v4().simple());
+    let opened_by = body
+        .run_id
+        .map_or_else(|| token.user_id().to_string(), |r| r.to_string());
+    let q = match questions::open(
+        &id,
+        &body.subject,
+        &body.question,
+        &body.why_it_matters,
+        body.blocking,
+        value,
+        opened_by,
+    ) {
+        Ok(q) => q,
+        Err(e) => {
+            return bad_request(
+                "incomplete_question",
+                e.to_string(),
+                "a question with no subject or no stated stakes sits in the store being \
+                 retrieved and skipped forever",
+            )
+            .into_response()
+        }
+    };
+
+    let today = chrono::Utc::now().date_naive().to_string();
+    let mut entry = harness::memory::Entry::finding(
+        &id,
+        &q.subject,
+        &q.question,
+        harness::memory::DataWindow::new(today.clone(), today),
+        harness::memory::Provenance::new(
+            body.run_id.map(|r| r.to_string()).unwrap_or_default(),
+            "open_question",
+            "1",
+            "n/a",
+        ),
+    );
+    entry.kind = harness::memory::Kind::OpenQuestion;
+    // A question is not a claim, so it carries no confidence it could be read as
+    // asserting — the same label the loop's run-end write uses, for the same
+    // reason.
+    entry.confidence = harness::memory::Confidence::Suggestive;
+    entry.created_by = token.user_id().to_string();
+    // The one serialisation, shared with the loop (`questions::OpenQuestion::extra`).
+    entry.extra = q.extra();
+
+    let store = crate::memory_store::MemoryStore::new(state.pg.clone());
+    match store.put(token.user_id(), &entry).await {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(json!({
+                "id": id,
+                "subject": q.subject,
+                "blocking": q.blocking,
+                "value": q.value.as_str(),
+                // Returned so the caller can see that it is open and that closing
+                // it is not something it will be doing.
+                "status": "open",
+                "closed_by": "a later finding that cites this id",
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "question_rejected", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
 }

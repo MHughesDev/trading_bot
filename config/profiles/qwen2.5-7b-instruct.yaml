@@ -191,6 +191,14 @@ workflows:
   - investigate
   - replicate
 
+# AGENT-013 §11's bottom row. The skeleton comes from the question's constraints
+# and the model confirms it: authoring a falsifier from nothing is the step that
+# fails at this tier, and confirming one is a step it can complete. One
+# amendment, matching `orchestration.max_refinements_per_run` — a tier that may
+# refine once has one correction in it.
+prereg_authoring: "skeleton_confirm"
+max_prereg_amendments: 1
+
 notes: >
   DEGRADED TIER, PROMOTED ON EVIDENCE - still the dev box, still not the target.
   The tier name remains accurate: this machine cannot run the reference model, and

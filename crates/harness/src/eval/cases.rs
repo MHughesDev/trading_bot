@@ -157,6 +157,8 @@ pub fn degraded_7b() -> Profile {
         // The shipped profile's set (AGENT-013 §11 bottom row); this fixture is a
         // copy of it, so it copies this too.
         workflows: vec![Workflow::Survey, Workflow::Investigate, Workflow::Replicate],
+        prereg_authoring: crate::profile::PreregAuthoring::SkeletonConfirm,
+        max_prereg_amendments: 1,
         notes: "eval fixture, copied from config/profiles/qwen2.5-7b-instruct.yaml".into(),
     }
 }
@@ -219,6 +221,8 @@ pub fn frontier() -> Profile {
             ask_above_usd: None,
         },
         workflows: crate::lifecycle::workflows::ALL.iter().map(|s| s.workflow).collect(),
+        prereg_authoring: crate::profile::PreregAuthoring::Free,
+        max_prereg_amendments: 3,
         notes: "eval fixture".into(),
     }
 }

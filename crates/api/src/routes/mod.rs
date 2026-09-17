@@ -109,6 +109,10 @@ pub fn router(state: AppState) -> Router {
         // The campaign door (AGENT-013 §8.5; S-10.11). A run's registration
         // becomes a campaign; the campaign's HYPOTHESIZE becomes a worker
         // sub-run over a projection of that run's context store.
+        // Something a run could not answer, written down deliberately
+        // (AGENT-013 §9; S-10.12). The loop writes these at run end too,
+        // with the stakes unstated; this is the door that states them.
+        .route("/api/lifecycle/questions", post(lifecycle::open_question))
         .route("/api/lifecycle/campaigns", post(lifecycle::define_campaign))
         .route("/api/lifecycle/campaigns/{campaign_id}", get(lifecycle::get_campaign))
         // The power check runs here, before any trial (§6.3).

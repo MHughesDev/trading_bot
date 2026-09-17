@@ -1345,3 +1345,46 @@ fn a_regime_scope_cannot_be_configured_without_its_reasoning() {
         "a default rationale is the default ADR-P3-07 refused, wearing a different hat"
     );
 }
+
+/// AGENT-013 §7.2 · The harness's amendment ceiling is the ledger's.
+///
+/// `harness::profile` bounds `max_prereg_amendments` at three and
+/// `ledger::prereg::MAX_PREREG_AMENDMENTS` is three, and the two are written
+/// independently: `harness` is sans-IO and does not depend on `ledger`, so
+/// importing the constant would drag sqlx and the storage layer into it for one
+/// integer.
+///
+/// If they drifted apart the looser one would be the real one wherever it sat in
+/// front: a profile allowed four amendments would be refused by `prereg::amend`
+/// at the fourth, *after* the run had planned on having it — which is the worst
+/// place to discover a protocol is unstable, because the run has already spent
+/// the trials that made it want the rewrite.
+#[test]
+fn the_profiles_amendment_ceiling_is_the_ledgers() {
+    let ledger_ceiling = ledger::prereg::MAX_PREREG_AMENDMENTS;
+
+    // The harness bound, read from its own refusal rather than from a constant
+    // it might not export: a profile one above the ceiling must be invalid, and
+    // one at it must be valid.
+    let set = harness::ProfileSet::load_dir(&root().join("config/profiles"))
+        .expect("the shipped profiles load");
+    let mut p = set
+        .get("claude-opus-5")
+        .expect("the frontier profile ships")
+        .clone();
+
+    p.max_prereg_amendments = ledger_ceiling;
+    assert!(
+        p.validate().is_ok(),
+        "the harness refuses a profile at the ledger's own ceiling of {ledger_ceiling}"
+    );
+
+    p.max_prereg_amendments = ledger_ceiling + 1;
+    assert!(
+        p.validate().is_err(),
+        "the harness accepts {} amendments and `prereg::amend` refuses the {}th",
+        ledger_ceiling + 1,
+        ledger_ceiling + 1
+    );
+}
+

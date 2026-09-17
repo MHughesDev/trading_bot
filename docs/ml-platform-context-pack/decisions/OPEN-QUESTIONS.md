@@ -216,3 +216,71 @@ One thing found while implementing it, and it is the reason this is not yet a re
 So every evidence-producing tool now stamps a window, and making `None` a refusal is a small change rather than a breaking one. It is left as a decision rather than taken silently.
 
 **Status:** resolved.
+
+### OQ-19 · `preregistration_required` is a profile value in the build plan and a contradiction of AGENT-013 §11's own table. Which is meant?
+
+**Raised 2026-09-17**, implementing S-10.3's remaining half. Nothing is built for
+it, in either direction.
+
+**The plan's sentence.** S-10.3 says the ticket path "refuses a request carrying
+no `prereg_id` for the run with `preregistration_required`", which reads as a
+profile value: some configurations require a run-level pre-registration and some
+do not.
+
+**§11 does not contemplate a tier that skips it.** The per-tier table gives every
+tier a pre-registration *authoring mode* — `free` on frontier and `local_high`,
+a grammar-filled skeleton on `local_mid`, a skeleton derived from the question's
+constraints with the model confirming it on `local_small` and `degraded`. Three
+ways of writing one, and no row saying "none". A profile value that switched
+pre-registration off would therefore be a fourth mode the table does not have,
+available at every tier including frontier.
+
+**What is already built is stricter than either.** `sealed_registration` in
+`local_driver` gives `Prereg::NotRequired` to a `TaskDemand::SingleLookup` and
+`Prereg::Missing` to everything else, so a Chat lookup needs none and every
+Research run does. That is safe, it satisfies INV-16, and it is the behaviour
+today.
+
+**Why this is not a small call.** Pre-registration is where the falsifier is
+written, and the falsifier is the field `agent_lifecycle.preregistration` exists
+for. A configuration that skipped it would spend trials against a hypothesis
+that could only ever be confirmed — which is the specific failure §7.2 was
+written to close. INV-16 does not stop it: `mlops.trial.prereg_hash` predates
+AGENT-013 and a per-Experiment hash would satisfy the constraint while carrying
+no falsifier at all. So the flag would be legal and would still remove the thing
+that matters.
+
+**Options.**
+
+**A. There is no such profile value; the requirement is the task demand.** A
+lookup does not pre-register, everything else does, at every tier. This is what
+is built. It makes the plan's sentence a description of the *demand* check
+rather than of a profile field, and costs nothing — no tier loses a workflow,
+because §11 already gives each one a way to author a registration it can manage.
+
+**B. It exists and defaults to `true`.** Honours the plan's literal wording. The
+cost is that the value's only purpose is to be set to `false`, and the first
+configuration that does gets a tier spending trials with no falsifier. A default
+nobody changes is a field that does nothing; a default somebody changes is the
+door §7.2 closed.
+
+**C. It exists and is not a boolean but the §11 authoring mode.** The field the
+table actually implies —
+`preregistration: free | skeleton_grammar | skeleton_confirm` — with no variant
+meaning "none". This is S-10.14's remaining item and is being built regardless,
+which is part of why the boolean looks like a restatement of it rather than a
+second decision.
+
+**Leaning: A, with C built beside it**, because C is what §11 asks for by name
+and A is what the gate already does. But B is the literal reading of the plan,
+and a profile field is not something to add or omit on inference — the whole
+point of the field would be that somebody can set it.
+
+**What holds meanwhile:** every Research run must have sealed a registration
+before any trial-spending tool is admitted, and a read that fails is treated as
+`Missing` rather than `NotRequired` so an outage cannot open the gate.
+
+**Status:** open. `max_prereg_amendments` — the other profile value S-10.3 names
+— has no such tension and is built, because a cap on amendments has a
+conservative direction and this does not.
+

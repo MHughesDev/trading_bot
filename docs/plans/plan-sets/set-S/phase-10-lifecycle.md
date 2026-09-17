@@ -140,11 +140,51 @@ something stamps the hash on every ticket. A read that *fails* is `Missing`, not
 outage open the gate, and the gate is what stands between a run and the trial
 budget.
 
+**The two profile values landed 2026-09-17.** `max_prereg_amendments` is declared,
+validated (never above `ledger::prereg::MAX_PREREG_AMENDMENTS`, never zero), read
+by `POST /api/lifecycle/preregistrations` when it amends, and held equal to the
+ledger's ceiling by a cross-crate invariant — the two constants are written
+independently because `harness` is sans-IO and importing `ledger` for one integer
+would drag sqlx into it. The shipped profiles narrow it with the tier: three on
+frontier, two on `local_mid`, one on the degraded tier, which matches its
+refinement cap.
+
+**`prereg_authoring` landed with the thing it selects**, because a profile value
+whose enforcement point does not exist is the bug this phase keeps finding.
+`harness/src/lifecycle/skeleton.rs` builds the form §11's two constrained modes are
+handed, and `local_driver` attaches it to the `preregister` call — the same
+argument-completion site `define_campaign` uses, and for the same reason: the model
+cannot supply what the platform owns.
+
+What the skeleton fills is what the *question* already fixed — the window, the
+instrument the objective is about, the gate profile, the null family. What it
+refuses to fill is the point: `primary_hypothesis` and `falsifier` are the claim,
+and a skeleton that guessed them would be the platform pre-registering on the
+model's behalf and the model agreeing, which is a commitment by nobody.
+`delta_practical` has no platform default by design and a skeleton is a *worse*
+place for one than code, because it would arrive looking computed. **The model's own
+values always win** — `or_insert`, never overwrite — or "confirm this" would mean
+"your answer was discarded".
+
+Two further holes are named rather than filled, and both are findings rather than
+principles: **there is no cost-model registry** to name a `cost_model_version` from
+(the run config carries a `cost_model_ref` string and nothing resolves it), and **no
+profile declares a per-tier trial cap**, so there is no `trial_budget` the platform
+owns. Writing either would pin every result the run produces to a number nobody
+published. `Skeleton::what_you_must_write` names all five holes with why each is the
+run's own.
+
 **Not done, and it is the acceptance's own sentence:** `run_study` refusing is
-asserted at the gate, not end to end — that needs a live run (gate H-2). The
-`preregistration_required` profile value does not exist either; the requirement is
-currently "every Research run", which is stricter than the spec and therefore safe,
-but it is not the spec.
+asserted at the gate, not end to end — that needs a live run (gate H-2).
+
+**`preregistration_required` is deliberately not built.** S-10.3's text makes it a
+profile value; §11's own table gives every tier a pre-registration *authoring mode*
+and has no row meaning "none", so a boolean that switched it off would be a fourth
+mode the table does not have, available at every tier. INV-16 would not stop it
+either — `mlops.trial.prereg_hash` predates AGENT-013 and a per-Experiment hash
+satisfies the constraint while carrying no falsifier at all. Written up as **OQ-19**
+with three options rather than implemented in either direction. What holds meanwhile
+is stricter than either reading: a lookup needs none, every Research run does.
 
 The object (AGENT-013 §7.2): objective in SPEC §10's shape, benchmark, `delta_practical`
 (no serde default — a request without it fails to deserialise, ADR-P0-08's technique), window,
@@ -603,8 +643,33 @@ not answer is often the one that failed. Those entries say `why_it_matters: not
 stated` rather than inventing stakes — which is exactly what
 `lifecycle.open_question` exists to improve on.
 
-**Not done:** `lifecycle.open_question` itself, the migration extending `0055`, and
-`OpenQuestions.tsx`.
+**`open_question` landed 2026-09-17**, with `POST /api/lifecycle/questions`.
+`why_it_matters` is required and has no serde default, which is the whole
+difference between this door and the run-end write: the loop records what a
+reflection noticed and says the stakes were never stated, because prose does not
+contain them however confidently it is read.
+
+**There is no field for `status`, and sending one is refused by name rather than
+ignored.** §9's rule, and ignoring it would let a run believe it had closed a
+question and report accordingly. The schema offers no closing field either, so the
+refusal is a second line rather than the only one.
+
+**One serialisation, two writers.** `OpenQuestion::extra()` is now the single
+producer of the five `extra` keys, and `questions::noticed` the single home of the
+"stakes not stated" sentinel — before this each path built its own object, which is
+the arrangement where one grows a key and the other's rows silently lack it.
+`both_writers_produce_the_same_extra_keys` is what keeps them one shape, and
+`stakes_were_stated` is what keeps them distinguishable, which is why they are two
+paths at all.
+
+**No migration was needed.** The plan names one extending `0055`; `agent_memory.entry`
+already holds the kind and `extra` already holds the kind-specific fields — ADR-S4-01's
+argument, and `questions` is already a readable bucket with a test asserting every
+kind is reachable from one.
+
+**Not done:** `OpenQuestions.tsx`, and the platform-side closing sweep (a later
+finding's citation closes a question — `close_cited` is built and has no caller
+outside its tests).
 
 New semantic kind `open_question` (AGENT-007 §2.2 amended) with `why_it_matters`, `blocking`,
 `value`, `status: open|closed{by, how}`; written by `lifecycle.open_question` and by the harness
@@ -695,10 +760,14 @@ The §3 step names and this crate's `Stage` enum are **not the same list**, and 
 mapping is written into the module header rather than left for a reader to infer
 something was forgotten.
 
-**Not done:** the pre-registration authoring mode
-(`free | skeleton_grammar | skeleton_confirm`), and the workflow on every *trial*
-(it is on the run row; the ticket carries the pre-registration hash but not yet the
-workflow).
+**The authoring mode landed with S-10.3** —
+`free | skeleton_grammar | skeleton_confirm`, validated against the tier (`free` is
+refused below `local_high`), with two conformance readers and the skeleton it
+selects actually built. A mode that named a behaviour nothing performed would have
+been the field-as-comment this file exists to prevent.
+
+**Not done:** the workflow on every *trial* (it is on the run row; the ticket
+carries the pre-registration hash but not yet the workflow).
 
 The seven skeletons (AGENT-013 §3) as a table in `crates/harness/src/lifecycle/workflows.rs`:
 required stages, skippable stages, verdict enum. The loop refuses a stage transition the

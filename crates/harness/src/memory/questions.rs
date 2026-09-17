@@ -177,6 +177,40 @@ impl OpenQuestion {
         self.status == Status::Open
     }
 
+    /// Whether this question was opened with stated stakes.
+    ///
+    /// The desk sorts on it and the brief reads it: a question carrying
+    /// [`STAKES_NOT_STATED`] was noticed, not asked, and a reader deciding what
+    /// to spend a run on wants to know which.
+    #[must_use]
+    pub fn stakes_were_stated(&self) -> bool {
+        self.why_it_matters != STAKES_NOT_STATED
+    }
+
+    /// The `extra` payload for a memory entry.
+    ///
+    /// **One function, two writers.** `lifecycle.open_question` and the loop's
+    /// run-end write both produce it, and before this existed each inlined its
+    /// own object — which is the shape where one of them grows a key the reader
+    /// does not know about, and the entries that came from the other path
+    /// silently lose it.
+    #[must_use]
+    pub fn extra(&self) -> serde_json::Value {
+        let status = match &self.status {
+            Status::Open => serde_json::json!("open"),
+            Status::Closed { by, how } => serde_json::json!({
+                "closed": { "by": by, "how": how.as_str() }
+            }),
+        };
+        serde_json::json!({
+            "question": self.question,
+            "why_it_matters": self.why_it_matters,
+            "blocking": self.blocking,
+            "value": self.value.as_str(),
+            "status": status,
+        })
+    }
+
     /// Close it, because a finding cited it.
     ///
     /// The **platform's** move, and the only one it makes by itself. A run that
@@ -195,6 +229,50 @@ impl OpenQuestion {
             how: How::Answered,
         };
         true
+    }
+}
+
+/// What a run-end write says when the stakes were never stated.
+///
+/// A sentinel with one home. It reaches the store through
+/// [`noticed`] and is recognised through [`OpenQuestion::stakes_were_stated`],
+/// so the deliberate tool and the reflection path can be told apart afterwards
+/// — which is the whole reason the two paths exist separately.
+pub const STAKES_NOT_STATED: &str =
+    "not stated: noticed during a reflection rather than opened deliberately";
+
+/// The keys an open question occupies in a memory entry's `extra`.
+///
+/// Named so a reader of `agent_memory.entry` knows what to expect and a second
+/// writer cannot invent a sixth key nothing reads.
+pub const EXTRA_KEYS: &[&str] = &["why_it_matters", "blocking", "value", "status", "question"];
+
+/// A question a run noticed in passing, with its stakes unstated.
+///
+/// Separate from [`open`] because the difference is the point: [`open`] refuses
+/// a question with no stakes, and this one *records* that there were none rather
+/// than inventing some. A reflection produces prose, and prose does not contain
+/// a blocking flag however confidently it is read.
+#[must_use]
+pub fn noticed(
+    id: impl Into<String>,
+    subject: impl Into<String>,
+    question: impl Into<String>,
+    opened_by: impl Into<String>,
+) -> OpenQuestion {
+    OpenQuestion {
+        id: id.into(),
+        subject: subject.into(),
+        question: question.into(),
+        why_it_matters: STAKES_NOT_STATED.to_string(),
+        // Not invented. A reflection that said "I could not tell whether the
+        // funding leg matters" has not said whether the answer changes what to
+        // do next, and guessing `true` would put it at the head of the next
+        // run's brief on nobody's judgement.
+        blocking: false,
+        value: QuestionValue::Curious,
+        status: Status::Open,
+        opened_by: opened_by.into(),
     }
 }
 
@@ -386,5 +464,98 @@ mod tests {
         }
         assert_eq!(y.knowledge_units(), 0);
         assert!(y.is_barren());
+    }
+
+    /// The deliberate path and the reflection path write the same keys.
+    ///
+    /// Two writers produce these entries — `lifecycle.open_question` and the
+    /// loop at run end — and a reader of `agent_memory.entry` has to be able to
+    /// treat them as one kind. Before `extra()` existed each built its own
+    /// object, which is exactly the arrangement where one grows a key and the
+    /// other's rows quietly lack it.
+    #[test]
+    fn both_writers_produce_the_same_extra_keys() {
+        let deliberate = open(
+            "q_1",
+            "BTC-USD",
+            "does the funding leg survive costs",
+            "the whole carry thesis rests on it",
+            true,
+            QuestionValue::Decisive,
+            "run_1",
+        )
+        .expect("a complete question");
+        let in_passing = noticed("question-0", "BTC-USD", "something odd in the tail", "run_1");
+
+        for q in [&deliberate, &in_passing] {
+            let extra = q.extra();
+            let keys: Vec<&str> = extra
+                .as_object()
+                .expect("an object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let mut expected: Vec<&str> = EXTRA_KEYS.to_vec();
+            expected.sort_unstable();
+            let mut got = keys;
+            got.sort_unstable();
+            assert_eq!(got, expected, "the two writers disagree about the shape");
+        }
+    }
+
+    /// What the two paths *do* differ in is recoverable, which is the reason
+    /// they are separate paths.
+    ///
+    /// A question noticed during a reflection carries no stakes and says so; one
+    /// opened deliberately could not have been created without them. A reader
+    /// deciding what to spend a run on needs to tell those apart, and a sentinel
+    /// that only existed as a string literal in the driver could not be checked
+    /// for anywhere else.
+    #[test]
+    fn a_noticed_question_is_distinguishable_from_an_asked_one() {
+        let asked = open(
+            "q_1",
+            "BTC-USD",
+            "does the funding leg survive costs",
+            "the whole carry thesis rests on it",
+            true,
+            QuestionValue::Decisive,
+            "run_1",
+        )
+        .expect("a complete question");
+        let noticed_one = noticed("question-0", "BTC-USD", "something odd in the tail", "run_1");
+
+        assert!(asked.stakes_were_stated());
+        assert!(!noticed_one.stakes_were_stated());
+        assert_eq!(noticed_one.why_it_matters, STAKES_NOT_STATED);
+        // And nothing is invented for it: a reflection did not say the answer
+        // blocks anything, so it does not lead the next run's brief.
+        assert!(!noticed_one.blocking);
+        assert_eq!(noticed_one.value, QuestionValue::Curious);
+        assert_eq!(brief_order(&[noticed_one, asked])[0].id, "q_1");
+    }
+
+    /// A closed question's `extra` says who closed it and how.
+    ///
+    /// The status is the field the desk filters on, and "closed" with no closer
+    /// is the row that makes "who answered this" unanswerable — which is the
+    /// part `close_as_answered` exists to keep.
+    #[test]
+    fn a_closed_questions_extra_names_its_closer() {
+        let mut q = open(
+            "q_1",
+            "BTC-USD",
+            "does the funding leg survive costs",
+            "the carry thesis rests on it",
+            false,
+            QuestionValue::Useful,
+            "run_1",
+        )
+        .expect("complete");
+        assert_eq!(q.extra()["status"], serde_json::json!("open"));
+        assert!(q.close_as_answered("finding_9"));
+        let extra = q.extra();
+        assert_eq!(extra["status"]["closed"]["by"], "finding_9");
+        assert_eq!(extra["status"]["closed"]["how"], "answered");
     }
 }

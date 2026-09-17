@@ -3994,12 +3994,17 @@ impl Loop {
             // read as asserting. `Suggestive` is the honest label for "somebody
             // wondered this".
             entry.confidence = crate::memory::Confidence::Suggestive;
-            entry.extra = serde_json::json!({
-                "why_it_matters": "not stated: noticed during a reflection rather than                                    opened deliberately",
-                "blocking": false,
-                "value": "curious",
-                "status": "open",
-            });
+            // Through `questions::noticed` rather than an object written out
+            // here: `lifecycle.open_question` writes the same five keys, and two
+            // hand-built copies is the shape where one of them grows a key and
+            // the entries from the other path silently lack it.
+            entry.extra = crate::memory::questions::noticed(
+                format!("question-{i}"),
+                self.working.goal.clone(),
+                question.clone(),
+                String::new(),
+            )
+            .extra();
             fx.push(Effect::Remember(Box::new(entry)));
         }
         self.working.open_questions = questions;

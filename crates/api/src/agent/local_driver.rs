@@ -399,6 +399,14 @@ struct Recorder {
 /// behaviour can.
 pub const HARNESS_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The gate profile a run is judged under when nothing pins another.
+///
+/// `strict_v1`, which is also `gate_worker::profile_for`'s fallback — the same
+/// string in two places would be two answers to "what is this run judged
+/// against", and the one a skeleton wrote would be the one a registration got
+/// stamped with.
+pub const DEFAULT_GATE_PROFILE: &str = "strict_v1";
+
 impl Recorder {
     /// One row of the effect log (AGENT-010 §5, S-2.5).
     ///
@@ -1534,7 +1542,53 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
                 // `run_id` travels the same way and for the same reason the
                 // registration's does: a body-supplied run id would let one run
                 // spend another's budget.
-                let arguments = if name == "define_campaign" {
+                // `preregister` on a tier that does not author freely is handed
+                // the skeleton §11 says it should be (S-10.3). The platform
+                // fills what the question already fixed and names the three
+                // fields that are the run's own claim; a tier asked for eleven
+                // fields from prose produces something that validates and
+                // cannot refute anything.
+                let arguments = if name == "preregister" {
+                    match harness::lifecycle::skeleton::for_run(
+                        &params.profile,
+                        &params.constraints,
+                        // No cost-model registry exists to name a version from,
+                        // so the skeleton names the hole rather than inventing
+                        // a version nobody published.
+                        None,
+                        DEFAULT_GATE_PROFILE,
+                        // No profile declares a per-tier trial cap, so this is
+                        // the second hole the skeleton names rather than fills.
+                        None,
+                    ) {
+                        None => arguments,
+                        Some(skeleton) => {
+                            let mut filled = arguments.clone();
+                            let still_yours: Vec<&str> = skeleton
+                                .what_you_must_write()
+                                .iter()
+                                .map(|(f, _)| *f)
+                                .collect();
+                            // The model's own values win. A skeleton that
+                            // overwrote them would make "confirm this" mean
+                            // "your answer was discarded", and the run would be
+                            // held to a protocol it did not write.
+                            for (k, v) in skeleton.filled {
+                                filled.entry(k).or_insert(v);
+                            }
+                            rec.append(
+                                "status",
+                                json!({
+                                    "prereg_authoring": params.profile.prereg_authoring.as_str(),
+                                    "skeleton_filled": filled.len() - arguments.len(),
+                                    "still_yours": still_yours,
+                                }),
+                            )
+                            .await;
+                            filled
+                        }
+                    }
+                } else if name == "define_campaign" {
                     let mut with_brief = arguments.clone();
                     with_brief.insert("run_id".into(), json!(params.run_id));
                     let query = harness::context::select::Query::from_state(
