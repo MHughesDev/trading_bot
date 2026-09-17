@@ -41,10 +41,32 @@ use super::policy::ContextPolicy;
 use super::select::Selection;
 use super::store::{Record, RecordId, RecordKind, RunStore};
 
+/// One record as it will appear, kept separate so its provenance survives.
+///
+/// The pieces are **not** joined into one string before they reach the
+/// assembler, and that is a safety property rather than a style choice: an
+/// untrusted record has to travel in its own `Tagged` so `wrap_untrusted` fences
+/// it. Flattening the body into a single system-tagged block would silently
+/// unfence every fetched page in the prompt — the exact failure the provenance
+/// lane exists to prevent, arrived at by a rendering convenience.
+#[derive(Debug, Clone)]
+pub struct Piece {
+    pub id: RecordId,
+    pub provenance: crate::provenance::Provenance,
+    pub source: String,
+    /// Header, measurement line and body, in that order.
+    pub text: String,
+}
+
 /// A rendered prompt body and what economy did to it.
 #[derive(Debug, Clone, Default)]
 pub struct Rendered {
     pub text: String,
+    /// The same content, one entry per record, provenance intact.
+    pub pieces: Vec<Piece>,
+    /// Lines the harness wrote about the set as a whole — the disagreement
+    /// notices. System provenance by construction.
+    pub notices: Vec<String>,
     /// Tokens spent on the harness's own labels.
     pub overhead_tokens: u32,
     /// Tokens spent on record content.
@@ -113,6 +135,62 @@ pub fn render(
     rendered
 }
 
+/// The rendered set as assembler blocks, one per record.
+///
+/// One block per record rather than one for the body, so an untrusted record
+/// keeps its own `Tagged` and `wrap_untrusted` still fences it. Flattening the
+/// pieces into a single system-tagged block would unfence every fetched page in
+/// the prompt — which is why `pieces` exists at all.
+///
+/// The manifest leads, at `Section::WorkingState` and the highest priority in
+/// the section: it is the index of everything that exists, and dropping it turns
+/// every elision back into a silent miss.
+#[must_use]
+pub fn blocks(
+    store: &RunStore,
+    sel: &Selection,
+    policy: &ContextPolicy,
+    manifest: &str,
+) -> Vec<crate::context::Block> {
+    use crate::context::{Block, Section};
+    use crate::provenance::Tagged;
+
+    let rendered = render(store, sel, policy, "");
+    let mut out = Vec::with_capacity(rendered.pieces.len() + 2);
+    if !manifest.is_empty() {
+        out.push(Block {
+            section: Section::WorkingState,
+            tagged: Tagged::system("context", manifest.to_string()),
+            // Above every record: §17's index is what makes any of them
+            // recoverable, and it is the cheapest block in the section.
+            priority: 254,
+            reference: None,
+        });
+    }
+    for piece in &rendered.pieces {
+        let tagged = if piece.provenance.is_untrusted() {
+            Tagged::untrusted(&piece.source, &piece.text)
+        } else {
+            Tagged::system(&piece.source, piece.text.clone())
+        };
+        out.push(Block {
+            section: Section::WorkingState,
+            tagged,
+            priority: 100,
+            reference: Some(format!("expand {}", piece.id)),
+        });
+    }
+    for notice in &rendered.notices {
+        out.push(Block {
+            section: Section::WorkingState,
+            tagged: Tagged::system("context", notice.clone()),
+            priority: 250,
+            reference: None,
+        });
+    }
+    out
+}
+
 fn render_at(store: &RunStore, sel: &Selection, level: Furniture) -> Rendered {
     let reasons: BTreeMap<RecordId, &str> = sel
         .report
@@ -121,7 +199,8 @@ fn render_at(store: &RunStore, sel: &Selection, level: Furniture) -> Rendered {
         .map(|l| (l.id, l.reason.as_str()))
         .collect();
 
-    let mut text = String::new();
+    let mut pieces: Vec<Piece> = Vec::new();
+    let mut notices: Vec<String> = Vec::new();
     let mut overhead = 0u32;
     let mut content = 0u32;
     let mut savings: Vec<String> = Vec::new();
@@ -139,6 +218,7 @@ fn render_at(store: &RunStore, sel: &Selection, level: Furniture) -> Rendered {
 
     for item in &kept {
         let record = store.get(item.id);
+        let mut text = String::new();
         let head = header(item, record, reasons.get(&item.id).copied(), level);
         overhead += super::estimate_tokens(&head);
         text.push_str(&head);
@@ -178,7 +258,12 @@ fn render_at(store: &RunStore, sel: &Selection, level: Furniture) -> Rendered {
         }
         content += super::estimate_tokens(&body_text);
         text.push_str(&body_text);
-        text.push_str("\n\n");
+        pieces.push(Piece {
+            id: item.id,
+            provenance: record.map_or(crate::provenance::Provenance::System, |r| r.provenance),
+            source: record.map(|r| r.source.clone()).unwrap_or_default(),
+            text,
+        });
     }
 
     // ---- disagreements are named, never resolved (§24.8) --------------------
@@ -188,12 +273,20 @@ fn render_at(store: &RunStore, sel: &Selection, level: Furniture) -> Rendered {
              error. Both are shown; the platform does not pick between them."
         );
         overhead += super::estimate_tokens(&line);
-        text.push_str(&line);
-        text.push('\n');
+        notices.push(line);
     }
+
+    let text = pieces
+        .iter()
+        .map(|p| p.text.as_str())
+        .chain(notices.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join("\n\n");
 
     Rendered {
         text,
+        pieces,
+        notices,
         overhead_tokens: overhead,
         content_tokens: content,
         savings,

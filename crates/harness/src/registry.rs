@@ -165,6 +165,30 @@ pub const RECORD_FINDING: &str = "record_finding";
 /// remaining steps going wherever it was already going.
 pub const SELF_STATUS: &str = "get_self_status";
 
+/// Asking for a record back at higher fidelity (AGENT-005 §18; Set S S-9.6).
+///
+/// The manifest tells the model that record `r007` exists, what it is about and
+/// how big it is; this is how it gets it. Together they are the mitigation for
+/// the failure mode of any retrieval system — the miss — because they turn a
+/// silent absence into a visible line and one cheap call.
+///
+/// Harness-owned and **spends no trial**, for the same reason `reflect` does
+/// not: charging the run for noticing that the harness under-rendered something
+/// would make noticing expensive, and the harness was the one that got it wrong.
+///
+/// An expansion that does not fit is **refused with what it would have to drop**
+/// rather than silently ignored. A model that asks for a record, is told
+/// nothing, and sees the same elision is a model that will ask again.
+pub const EXPAND: &str = "expand";
+
+/// Telling the harness what the run is working on now (AGENT-005 §18).
+///
+/// "I am on ETH funding now" is a better relevance signal than anything the
+/// harness can infer from a plan step, and it costs one short call. It biases
+/// selection for the rest of the plan step and expires with it — a standing
+/// focus would outlive the reason for it and quietly narrow every later step.
+pub const FOCUS: &str = "focus";
+
 /// The agent's own folder (guide §4.3, §10.1).
 ///
 /// Every conversation gets a workspace and these four tools over it. They are
@@ -194,6 +218,37 @@ pub const LONG_RUNNING_TOOLS: &[&str] = &[
     "train_model",
     "run_shadow_session",
 ];
+
+/// Whether a core tool may be offered on a run with these capabilities.
+///
+/// Registration and exposure are different questions, and this is the second
+/// one. Every core tool is registered always — the definition belongs in one
+/// place — but core tools count against `max_exposed_per_step`, and the tightest
+/// shipped profile has six slots in total. A core tool always offered takes a
+/// work slot from every profile forever.
+///
+/// So two are withheld where they cannot pay for themselves, and two more where
+/// they cannot work at all:
+///
+/// * `reflect` and `get_self_status` need `orchestration.reflection` — they cost
+///   a model call and no step, which is a good trade only where there is room to
+///   spend a turn on looking rather than doing.
+/// * `expand` and `focus` need a retrieval context policy (S-9.6). Under
+///   `ContextPolicy::v1` the prompt carries no manifest, so there are no record
+///   ids to name and the only possible call is a mistake.
+///
+/// This predicate is the single copy: `Loop`'s routing uses it to filter
+/// exposure and `the_core_set_leaves_room_for_work_at_every_shipped_budget` uses
+/// it to count. A second copy would drift, and the drift would appear as a
+/// profile with no slot left for a tool that does the work.
+#[must_use]
+pub fn core_is_admissible(name: &str, reflection: bool, retrieval: bool) -> bool {
+    match name {
+        REFLECT | SELF_STATUS => reflection,
+        EXPAND | FOCUS => retrieval,
+        _ => true,
+    }
+}
 
 /// Whether a call to this tool starts a job instead of doing the work.
 #[must_use]
@@ -329,6 +384,55 @@ impl ToolRegistry {
             }),
         })
         .expect("the core termination tool is well-formed");
+        reg.register(ToolDef {
+            name: EXPAND.to_string(),
+            namespace: "core".into(),
+            description: "Bring back a record listed in CONTEXT that is elided or shortened.                           Use the id shown on its line. It does not spend a step."
+                .into(),
+            risk: Risk::Read,
+            core: true,
+            // Not idempotent: the same id asked twice is the promotion signal
+            // §18 describes — the model telling us a second time that the
+            // scoring was wrong — and a repeat cache answering the second call
+            // from the first would swallow it.
+            idempotent: false,
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "record_id": {
+                        "type": "string",
+                        "description": "The id from the CONTEXT list, such as r007."
+                    },
+                    "level": {
+                        "type": "string",
+                        "enum": ["more", "full"],
+                        "description": "`more` for one step up, `full` for the whole record."
+                    }
+                },
+                "required": ["record_id"]
+            }),
+        })
+        .expect("the core expansion tool is well-formed");
+        reg.register(ToolDef {
+            name: FOCUS.to_string(),
+            namespace: "core".into(),
+            description: "Say what you are working on now, so context is chosen for it.                           Use it when you move to a different instrument, strategy or                           question. It does not spend a step."
+                .into(),
+            risk: Risk::Read,
+            core: true,
+            idempotent: false,
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "subject": {
+                        "type": "string",
+                        "description": "The instrument, strategy or topic, in a few words."
+                    }
+                },
+                "required": ["subject"]
+            }),
+        })
+        .expect("the core focus tool is well-formed");
         reg
     }
 
@@ -564,7 +668,34 @@ impl ToolRegistry {
         namespaces: &[String],
         pinned: &[String],
     ) -> Result<Exposure, RegistryError> {
+        // `retrieval: false` is the shipped default — `ContextPolicy::v1` is the
+        // control and every run is under it until a promotion says otherwise.
+        self.expose_pinned_for(profile, namespaces, pinned, false)
+    }
+
+    /// [`Self::expose_pinned`], saying whether this run can use the pull tools.
+    ///
+    /// The flag has to arrive here rather than being applied afterwards, and the
+    /// reason is a bug this signature exists to prevent. Core tools are selected
+    /// first and the list is then truncated at `max_exposed_per_step`; a core
+    /// tool filtered out *after* that truncation does not give its slot back, it
+    /// loses it. With seven core tools and a six-slot profile that meant six core
+    /// tools selected, four surviving the filter, and **no slot at all for a tool
+    /// that does the work** — a run that could only ever search, record and
+    /// finish.
+    ///
+    /// # Errors
+    /// [`RegistryError::CatalogueExceedsBudget`] when a `routing: none` profile's
+    /// claim that the catalogue fits is false.
+    pub fn expose_pinned_for(
+        &self,
+        profile: &Profile,
+        namespaces: &[String],
+        pinned: &[String],
+        retrieval: bool,
+    ) -> Result<Exposure, RegistryError> {
         let budget = profile.tools.max_exposed_per_step;
+        let reflection = profile.orchestration.reflection;
 
         // `routing: none` is a claim that the catalogue fits. Check it rather than
         // trusting it: a catalogue grows, and the day it outgrows the budget the
@@ -578,8 +709,14 @@ impl ToolRegistry {
 
         let mut selected: Vec<&ToolDef> = Vec::new();
 
-        // Core first: they are the ones whose absence breaks the loop itself.
-        for t in self.tools.values().filter(|t| t.core) {
+        // Core first: they are the ones whose absence breaks the loop itself —
+        // but only the ones this run can actually use, so a withheld core tool
+        // frees its slot instead of wasting it.
+        for t in self
+            .tools
+            .values()
+            .filter(|t| t.core && core_is_admissible(&t.name, reflection, retrieval))
+        {
             selected.push(t);
         }
 
@@ -1711,9 +1848,8 @@ mod core_tool_tests {
     #[test]
     fn the_core_set_leaves_room_for_work_at_every_shipped_budget() {
         let reg = ToolRegistry::with_core();
-        let core = reg.len();
         assert!(
-            core >= 3,
+            reg.len() >= 3,
             "core is the escape hatch, the finding recorder and termination"
         );
 
@@ -1725,10 +1861,22 @@ mod core_tool_tests {
         let set = crate::profile::ProfileSet::load_dir(&dir).expect("shipped profiles load");
         for id in set.ids() {
             let p = set.get(id).unwrap();
+            // What competes for slots, not what is registered. The two diverged
+            // when `reflect` and `get_self_status` were withheld from the tight
+            // profiles, and again when `expand` and `focus` arrived. Counting
+            // registrations would fail here for tools a run never offers.
+            // Both flags are taken at their most permissive, so this is the
+            // worst case a profile can actually reach.
+            let core = reg
+                .names()
+                .iter()
+                .filter(|n| reg.get(n).is_some_and(|d| d.core))
+                .filter(|n| core_is_admissible(n, p.orchestration.reflection, true))
+                .count();
             assert!(
                 p.tools.max_exposed_per_step > core,
-                "{id} exposes {} tools a step and core alone is {core}; there would be no \
-                 slot left for a tool that does the work",
+                "{id} exposes {} tools a step and the core tools it can offer are {core}; \
+                 there would be no slot left for a tool that does the work",
                 p.tools.max_exposed_per_step
             );
         }

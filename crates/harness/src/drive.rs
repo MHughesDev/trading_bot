@@ -56,12 +56,14 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 use crate::context::{self, Block, CompactionReport, Section};
+use crate::context::store::{RecordKind, Subject};
 use crate::hardware::{Admission, TaskDemand};
 use crate::policy::{self, ActionContext, Decision, Ruling};
 use crate::profile::{ExposureScope, Mode, Profile, SchemaStyle};
 use crate::provenance::{self, Provenance, Tagged};
 use crate::registry::{
-    self, Risk, ToolRegistry, FINISH_TASK, RECORD_FINDING, REFLECT, SEARCH_TOOLS, SELF_STATUS,
+    self as registry, Risk, ToolRegistry, EXPAND, FINISH_TASK, FOCUS, RECORD_FINDING, REFLECT,
+    SEARCH_TOOLS, SELF_STATUS,
 };
 use crate::state::{
     Steer,
@@ -348,6 +350,44 @@ fn retryable_flag(detail: &str) -> Option<bool> {
 /// ordinary prose does not — `get_bars`, `BTC-USD` and `exp_1` all fall outside it, so
 /// a citation written in English is never second-guessed. The point is not to
 /// recognise every identifier; it is to never challenge a word.
+/// What a call is about, from its own arguments (AGENT-005 §14).
+///
+/// **Extracted, never parsed from prose.** The subject is one of the three keys
+/// the near-duplicate, diversity and disagreement machinery joins on, and a
+/// subject read out of a sentence changes when the sentence is reworded. The
+/// arguments are structured and the model already had to get them right for the
+/// call to run at all.
+fn subject_of(arguments: &serde_json::Map<String, Value>) -> Subject {
+    let get = |k: &str| {
+        arguments
+            .get(k)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    Subject {
+        instrument: get("instrument").or_else(|| get("symbol")),
+        timeframe: get("timeframe").or_else(|| get("interval")),
+        strategy: get("strategy_id").or_else(|| get("strategy")),
+        experiment: get("experiment_id").or_else(|| get("run_id")),
+        family: get("family_id"),
+    }
+}
+
+/// The machine-readable code inside a tool's error text, or the text itself.
+///
+/// Used to fold repeated corrections on one path into a count (§25.5). Folding
+/// on the whole message would fold nothing, because tool errors carry the
+/// arguments that caused them and no two are identical.
+fn code_of(detail: &str) -> String {
+    for token in detail.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+        if token.len() >= 4 && token.contains('_') && token.chars().all(|c| !c.is_ascii_uppercase())
+        {
+            return token.to_string();
+        }
+    }
+    detail.chars().take(48).collect()
+}
+
 fn opaque_ids(text: &str) -> Vec<&str> {
     text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
         .filter(|t| t.len() >= 8 && t.chars().any(|c| c.is_ascii_digit()))
@@ -781,6 +821,25 @@ pub struct Loop {
     /// a harness with no platform behind it gates nothing.
     gated_actions: BTreeSet<String>,
 
+    /// Every observation this run made, addressable (AGENT-005 §14; S-9.1).
+    ///
+    /// Written beside `observations` rather than instead of it, deliberately.
+    /// `ContextPolicy::v1` is the control and Part II ships only by beating it
+    /// (S-9.12), so both paths have to exist at once for the comparison to be
+    /// possible at all. `body()` reads one or the other according to the policy;
+    /// the store is always written, because the manifest, `expand`, utility
+    /// attribution and the ablation all need the record to exist whichever path
+    /// rendered the prompt.
+    store: context::store::RunStore,
+    /// Which context policy this run is under, recorded in every trajectory.
+    context_policy: context::policy::ContextPolicy,
+    /// What the model said it is working on (§18's `focus`). Cleared when the
+    /// plan step advances: a standing focus would outlive the reason for it and
+    /// quietly narrow every later step.
+    focus: Option<String>,
+    /// What the previous call rendered, for §24.5's stickiness.
+    last_rendered: BTreeSet<context::store::RecordId>,
+
     outcome: Option<Outcome>,
 }
 
@@ -879,6 +938,10 @@ impl Loop {
             prior_provenance: Provenance::System,
             pending_provenance: Provenance::System,
             gated_actions: BTreeSet::new(),
+            store: context::store::RunStore::new(),
+            context_policy: context::policy::ContextPolicy::v1(),
+            focus: None,
+            last_rendered: BTreeSet::new(),
             outcome: None,
         }
     }
@@ -949,6 +1012,30 @@ impl Loop {
         self
     }
 
+    /// Run under a context policy other than the control (AGENT-005 §22).
+    ///
+    /// A builder, and the default is `v1`, so every existing call site keeps
+    /// Part I's behaviour byte for byte. That is not caution — it is what makes
+    /// `v1` a control at all: a promotion the default quietly pre-applied would
+    /// be a comparison against something nobody is running.
+    #[must_use]
+    pub fn with_context_policy(mut self, policy: crate::context::policy::ContextPolicy) -> Self {
+        self.context_policy = policy;
+        self
+    }
+
+    /// This run's context store, for the trajectory and the offline A/B.
+    #[must_use]
+    pub fn context_store(&self) -> &crate::context::store::RunStore {
+        &self.store
+    }
+
+    /// The policy this run assembled under.
+    #[must_use]
+    pub fn context_policy(&self) -> &crate::context::policy::ContextPolicy {
+        &self.context_policy
+    }
+
     /// The findings this run recorded, structured — for the turn summary.
     ///
     /// Parallel to [`Self::working`] rather than inside it: `WorkingState` is
@@ -981,7 +1068,7 @@ impl Loop {
     /// Rebuilt rather than accumulated: that is the property the nine append sites
     /// did not have. The state card is one block however long the run is, and the
     /// only thing that grows is `observations`, which is what compaction is for.
-    fn body(&self) -> Vec<Block> {
+    fn body(&mut self) -> Vec<Block> {
         let mut blocks = Vec::with_capacity(self.observations.len() + 4);
         blocks.push(Block {
             section: Section::Charter,
@@ -1039,7 +1126,38 @@ impl Loop {
         ) {
             blocks.push(examples);
         }
-        blocks.extend(self.observations.iter().cloned());
+        blocks.extend(self.observation_blocks());
+        blocks
+    }
+
+    /// The observation half of the body, from whichever path the policy names.
+    ///
+    /// Both exist at once on purpose (S-9.11): `ContextPolicy::v1` is Part I's
+    /// buffer and is the control, and Part II ships only by beating it on every
+    /// tier (S-9.12). A branch here is what makes the two comparable over the
+    /// same recorded tapes at no model cost — which is the payoff of the
+    /// sans-IO design and the reason context tuning is an offline exercise.
+    fn observation_blocks(&mut self) -> Vec<Block> {
+        if !self.context_policy.is_retrieval() {
+            return self.observations.clone();
+        }
+        let budget = u32::try_from(self.remaining_body_bytes() / 4).unwrap_or(u32::MAX);
+        let mut query = context::select::Query::from_state(&self.working, self.step);
+        query.focus = self.focus.clone();
+        query.previously_rendered = self.last_rendered.clone();
+
+        let selection = context::select::select(&self.store, &query, budget, &self.context_policy);
+        let shown: std::collections::BTreeSet<_> = selection.ids().into_iter().collect();
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let manifest_budget =
+            (budget as f32 * self.context_policy.manifest_budget_share) as u32;
+        let manifest = context::manifest::render(&self.store, &shown, manifest_budget);
+        let blocks =
+            context::render::blocks(&self.store, &selection, &self.context_policy, &manifest.text);
+        // What this call rendered, for §24.5's stickiness on the next one. Kept
+        // here rather than recomputed later: a second `select` to find out what
+        // the first chose would be a second answer to one question.
+        self.last_rendered = shown;
         blocks
     }
 
@@ -1069,6 +1187,42 @@ impl Loop {
     /// [`Self::working`] instead, where it replaces the previous decision rather
     /// than sitting beside it.
     fn observe(&mut self, tagged: Tagged, priority: u8, reference: Option<String>) {
+        self.observe_as(tagged, priority, reference, RecordKind::Note, Subject::default());
+    }
+
+    /// [`Self::observe`], saying what kind of record it is and what it is about.
+    ///
+    /// The kind is passed rather than inferred from the `Tagged`, because
+    /// inferring it would mean reading the source string — and a tool named
+    /// `harness` returning a failure and the harness reporting a withdrawal are
+    /// the same string and different kinds. The kind drives the per-kind
+    /// half-life and the kind prior, so guessing it wrong is not cosmetic: a
+    /// `Correction` decays in six steps and a `Finding` in two hundred.
+    fn observe_as(
+        &mut self,
+        tagged: Tagged,
+        priority: u8,
+        reference: Option<String>,
+        kind: RecordKind,
+        subject: Subject,
+    ) {
+        let mut draft = context::store::Draft::new(
+            self.step,
+            kind,
+            tagged.source.clone(),
+            context::body::Body::text(tagged.content.clone()),
+        )
+        .with_provenance(tagged.provenance)
+        .with_subject(subject);
+        // The ids in the text are what selection joins a step's arguments
+        // against, and they are already extracted for `results_by_id`.
+        for id in opaque_ids(&tagged.content) {
+            draft = draft.with_id(id.to_string(), id.to_string());
+        }
+        if let Some(handle) = &reference {
+            draft = draft.with_id("handle", handle.clone());
+        }
+        self.store.insert(draft);
         self.observations.push(Block {
             section: Section::WorkingState,
             tagged,
@@ -1106,6 +1260,9 @@ impl Loop {
     /// There is no cursor: the plan carries its own status, so "where am I" has one
     /// answer rather than two that can disagree.
     fn advance_plan(&mut self) {
+        // §18: a focus lasts for the plan step that set it. A standing focus
+        // would outlive its reason and narrow every later step silently.
+        self.focus = None;
         if let Some((i, _)) = self.working.active_step() {
             self.working.plan[i].status = StepStatus::Done;
         }
@@ -1587,7 +1744,12 @@ impl Loop {
             return;
         }
 
-        let exposure = match self.registry.expose_pinned(&self.profile, &wanted, &pinned) {
+        let exposure = match self.registry.expose_pinned_for(
+            &self.profile,
+            &wanted,
+            &pinned,
+            self.context_policy.is_retrieval(),
+        ) {
             Ok(e) => e,
             Err(e) => {
                 // The catalogue outgrew a `routing: none` profile. That is a
@@ -1632,9 +1794,15 @@ impl Loop {
         // the breaker list — smaller than a work slot, measured against a profile
         // that has three.
         let reflects = self.profile.orchestration.reflection;
+        // `expand` and `focus` are offered only when there is something to pull
+        // from (S-9.6). Under `ContextPolicy::v1` there is no store-backed
+        // manifest in the prompt, so a model offered `expand` would be offered a
+        // tool with no ids to name — a slot spent on a tool whose only possible
+        // call is a mistake. A registered-but-unexposed core tool is the same
+        // arrangement `reflect` already has on the tight profiles.
+        let pulls = self.context_policy.is_retrieval();
         let admissible = |n: &String| {
-            !self.broken_tools.contains(n)
-                && (reflects || !matches!(n.as_str(), REFLECT | SELF_STATUS))
+            !self.broken_tools.contains(n) && registry::core_is_admissible(n, reflects, pulls)
         };
 
         // Session-scoped exposure (§5.2, S-2.4): routed once per turn, then
@@ -1750,8 +1918,8 @@ impl Loop {
         // to the same window, so budgeting the body against the whole window is how
         // a prompt that fits by arithmetic arrives over budget in fact
         // (AGENT-005 §4.2).
-        let assembled =
-            context::assemble_reserving(&self.profile, self.body(), self.reserved_tokens());
+        let body = self.body();
+        let assembled = context::assemble_reserving(&self.profile, body, self.reserved_tokens());
         let c = &assembled.compaction;
         if c.dropped > 0 || c.truncated > 0 || c.deduped > 0 {
             self.enter(State::Compacting, fx);
@@ -2219,6 +2387,14 @@ impl Loop {
             self.on_finish(&call, fx);
             return;
         }
+        if call.name == EXPAND {
+            self.on_expand(&call, fx);
+            return;
+        }
+        if call.name == FOCUS {
+            self.on_focus(&call, fx);
+            return;
+        }
 
         self.enter(State::Gating, fx);
         let Some(def) = self.registry.get(&call.name) else {
@@ -2290,7 +2466,13 @@ impl Loop {
                 // which is data the model needs to read. What the harness *decided*
                 // — that this call is settled — goes on the card instead, where
                 // asking again is answered by "decided at step N".
-                self.observe(Tagged::tool(&call.name, &message), 215, None);
+                self.observe_as(
+                    Tagged::tool(&call.name, &message),
+                    215,
+                    None,
+                    RecordKind::ToolResult,
+                    subject_of(&call.arguments),
+                );
                 self.working.decide(
                     question,
                     if previous.failed {
@@ -2846,8 +3028,127 @@ impl Loop {
             name: SELF_STATUS.to_string(),
             detail: detail.clone(),
         }));
-        self.observe(Tagged::system("get_self_status", detail), 220, None);
+        self.observe_as(
+            Tagged::system("get_self_status", detail),
+            220,
+            None,
+            RecordKind::Note,
+            Subject::default(),
+        );
         // A turn, not a step — see the constant's doc comment.
+        self.route(fx);
+    }
+
+    /// `expand(record_id, level)` — pull a record back (AGENT-005 §18; S-9.6).
+    ///
+    /// Three things this must not do, each of which the obvious implementation
+    /// does:
+    ///
+    /// * **Fail silently.** A model that asks for a record, is told nothing, and
+    ///   sees the same elision will ask again — and it is right to. An
+    ///   expansion that does not fit is refused *with what it would have to
+    ///   drop*.
+    /// * **Cost a step.** The harness under-rendered it; charging the run for
+    ///   noticing would make noticing expensive.
+    /// * **Forget.** A record expanded twice is promoted for the rest of the run
+    ///   (§18), because the model has now told us twice that the scoring was
+    ///   wrong. That is why the count lives in the store rather than in a flag.
+    fn on_expand(&mut self, call: &ToolCall, fx: &mut Vec<Effect>) {
+        let raw = call
+            .arguments
+            .get("record_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let Some(id) = context::store::RecordId::parse(raw) else {
+            let msg = format!(
+                "`{raw}` is not a record id. Use the id from a CONTEXT line, such as r007."
+            );
+            self.reject_and_retry(Rejection::semantic_owned("context.unknown_record", msg), fx);
+            return;
+        };
+        let Some(record) = self.store.get(id) else {
+            let msg = format!(
+                "{id} is not in this run's context. The CONTEXT list names every id that exists."
+            );
+            self.reject_and_retry(Rejection::semantic_owned("context.unknown_record", msg), fx);
+            return;
+        };
+        let full = record.body.render();
+        let cost = context::estimate_tokens(&full);
+        let room = self.remaining_body_bytes() / 4;
+        let detail = if cost as usize <= room {
+            let count = self.store.note_expansion(id);
+            format!(
+                "{id} in full ({cost} tokens){}:
+{full}",
+                if count >= 2 {
+                    " — kept for the rest of this run"
+                } else {
+                    ""
+                }
+            )
+        } else {
+            // Named, not silent. The model can then choose: narrow the ask, or
+            // drop something itself.
+            self.store.note_expansion(id);
+            format!(
+                "{id} is {cost} tokens and about {room} are free this step. It is not shown in                  full. Ask for a narrower part of it, or finish with what is here — nothing has                  been lost, and it stays in the CONTEXT list."
+            )
+        };
+        fx.push(Effect::Note(Note::CoreTool {
+            name: EXPAND.to_string(),
+            detail: detail.clone(),
+        }));
+        self.observe_as(
+            Tagged::system(EXPAND, detail),
+            240,
+            None,
+            RecordKind::Note,
+            self.store.get(id).map_or_else(Subject::default, |r| r.subject.clone()),
+        );
+        // A turn, not a step.
+        self.route(fx);
+    }
+
+    /// `focus(subject)` — bias selection toward what the run is on now (§18).
+    ///
+    /// Cleared when the plan step advances, in [`Self::advance_plan`]. A standing
+    /// focus would outlive the reason for it and quietly narrow every later step,
+    /// which is the failure mode of every "remember this preference" mechanism
+    /// that has no expiry.
+    fn on_focus(&mut self, call: &ToolCall, fx: &mut Vec<Effect>) {
+        let subject = call
+            .arguments
+            .get("subject")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if subject.is_empty() {
+            self.reject_and_retry(
+                Rejection::semantic(
+                    "context.empty_focus",
+                    "say what you are working on: an instrument, a strategy or a question.",
+                ),
+                fx,
+            );
+            return;
+        }
+        let detail = format!(
+            "context is now chosen for `{subject}` until this plan step is done. Everything              already recorded is still in the CONTEXT list."
+        );
+        self.focus = Some(subject);
+        fx.push(Effect::Note(Note::CoreTool {
+            name: FOCUS.to_string(),
+            detail: detail.clone(),
+        }));
+        self.observe_as(
+            Tagged::system(FOCUS, detail),
+            240,
+            None,
+            RecordKind::Note,
+            Subject::default(),
+        );
         self.route(fx);
     }
 
@@ -2892,7 +3193,13 @@ impl Loop {
             name: SEARCH_TOOLS.to_string(),
             detail: detail.clone(),
         }));
-        self.observe(Tagged::system("search_tools", detail), 200, None);
+        self.observe_as(
+            Tagged::system("search_tools", detail),
+            200,
+            None,
+            RecordKind::Note,
+            Subject::default(),
+        );
         // Deliberately not a new step: a routing miss costs one turn, not one step of
         // the task's budget. The step budget is for work, not for the harness's own
         // recovery from a bad route.
@@ -3155,7 +3462,10 @@ impl Loop {
         // Raw tool results are the first thing compaction drops: their summaries
         // and their scratchpad handles outlive them.
         let reference = truncated.then(|| format!("work/{name}-step{}.txt", self.step));
-        self.observe(tagged, 100, reference);
+        let subject = call
+            .as_ref()
+            .map_or_else(Subject::default, |c| subject_of(&c.arguments));
+        self.observe_as(tagged, 100, reference, RecordKind::ToolResult, subject);
 
         if !self.evidence_candidates.contains(&name) {
             self.evidence_candidates.push(name);
@@ -3202,7 +3512,7 @@ impl Loop {
         if failures >= threshold && self.broken_tools.insert(name.clone()) {
             // Told once. A notice repeated every step is a notice the model learns
             // to skip, and the tool is gone from exposure anyway.
-            self.observe(
+            self.observe_as(
                 Tagged::system(
                     "harness",
                     format!(
@@ -3211,6 +3521,8 @@ impl Loop {
                 ),
                 220,
                 None,
+                RecordKind::Note,
+                Subject::default(),
             );
             fx.push(Effect::Note(Note::Degraded(Degradation::BackendFailure {
                 detail: format!(
@@ -3258,11 +3570,27 @@ impl Loop {
             Some(true) => " This may be transient; one more attempt is reasonable.",
             None => "",
         };
-        self.observe(
-            Tagged::system("harness", format!("{name} failed: {detail}{advice}")),
-            200,
-            None,
-        );
+        // A `Correction`, not a note: it is a rejection about a specific tool,
+        // §24.7 pins it when that tool is next in the plan, and it decays on the
+        // correction half-life rather than outliving its relevance.
+        let mut draft = context::store::Draft::new(
+            self.step,
+            RecordKind::Correction,
+            "harness",
+            context::body::Body::text(format!("{name} failed: {detail}{advice}")),
+        )
+        .with_id("tool", name.clone())
+        .with_id("code", code_of(detail));
+        if let Some(c) = &call {
+            draft = draft.with_subject(subject_of(&c.arguments));
+        }
+        self.store.insert(draft);
+        self.observations.push(Block {
+            section: Section::WorkingState,
+            tagged: Tagged::system("harness", format!("{name} failed: {detail}{advice}")),
+            priority: 200,
+            reference: None,
+        });
         self.begin_step(fx);
     }
 
@@ -3454,7 +3782,7 @@ mod tests {
                 Effect::CallModel(c) => Some(&**c),
                 _ => None,
             })
-            .expect("a model call was expected")
+            .unwrap_or_else(|| panic!("a model call was expected, got {fx:?}"))
     }
 
     fn done(fx: &[Effect]) -> Option<&Outcome> {
@@ -3530,6 +3858,169 @@ mod tests {
             })
         );
         assert_eq!(l.state(), State::Finished);
+    }
+
+    // ── Context as retrieval (AGENT-005 Part II; Set S phase 9) ─────────────
+
+    fn retrieval() -> (Loop, Vec<Effect>) {
+        let mut l = Loop::new(local(), registry(), task())
+            .with_context_policy(crate::context::policy::ContextPolicy::v2());
+        let fx = l.next(Input::Admission(Admission::Admit));
+        (l, fx)
+    }
+
+    fn one_result(l: &mut Loop) -> Vec<Effect> {
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"read_bars"}"#.into(),
+        });
+        l.next(Input::ModelReply {
+            raw: r#"{"instrument":"BTC-USD"}"#.into(),
+        });
+        l.next(Input::ToolResult {
+            output: "ts,close
+1,100
+2,101".into(),
+            source: "platform.data".into(),
+        })
+    }
+
+    /// Every observation becomes a record, under both policies.
+    ///
+    /// The store is written whichever path renders the prompt, because the
+    /// manifest, `expand`, utility attribution and the ablation all need the
+    /// record to exist — and because a control that recorded nothing could not
+    /// be compared against anything.
+    #[test]
+    fn the_control_policy_still_writes_records() {
+        let (mut l, _) = started();
+        assert!(!l.context_policy().is_retrieval());
+        one_result(&mut l);
+        let store = l.context_store();
+        assert!(store.len() >= 1, "the tool result is a record");
+        let result = store
+            .all()
+            .find(|r| r.kind == crate::context::store::RecordKind::ToolResult)
+            .expect("the read is recorded as a tool result");
+        assert_eq!(
+            result.subject.instrument.as_deref(),
+            Some("BTC-USD"),
+            "the subject is extracted from the arguments, never parsed from prose"
+        );
+    }
+
+    /// The pull tools are offered only where they can work.
+    #[test]
+    fn expand_and_focus_reach_the_model_only_under_a_retrieval_policy() {
+        let (l, _) = started();
+        assert!(
+            !l.exposed().iter().any(|n| n == EXPAND || n == FOCUS),
+            "under the control there is no manifest, so there are no ids to name"
+        );
+        let (l, _) = retrieval();
+        assert!(
+            l.exposed().iter().any(|n| n == EXPAND),
+            "exposed {:?}",
+            l.exposed()
+        );
+        assert!(
+            l.exposed().iter().any(|n| n == "read_bars"),
+            "and the core tools must not have eaten every work slot: {:?}",
+            l.exposed()
+        );
+    }
+
+    /// A retrieval run renders the manifest, so nothing leaves without a handle.
+    #[test]
+    fn a_retrieval_run_renders_an_index_of_everything_it_has() {
+        let (mut l, _) = retrieval();
+        let fx = one_result(&mut l);
+        let prompt = &model_call(&fx).prompt;
+        assert!(
+            prompt.contains("CONTEXT ("),
+            "the manifest is what turns a silent miss into a recoverable one: {prompt}"
+        );
+        assert!(prompt.contains("r001"), "and it names the ids: {prompt}");
+    }
+
+    /// `expand` costs a turn, not a step, and it names the record it returned.
+    #[test]
+    fn expand_returns_the_record_without_spending_a_step() {
+        let (mut l, _) = retrieval();
+        one_result(&mut l);
+        let step_before = l.step();
+
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"expand"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: r#"{"record_id":"r001"}"#.into(),
+        });
+        assert_eq!(l.step(), step_before, "the harness under-rendered it");
+        let note = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::Note(Note::CoreTool { name, detail }) if name == EXPAND => Some(detail),
+                _ => None,
+            })
+            .expect("expand answers");
+        assert!(note.contains("r001"), "{note}");
+    }
+
+    /// An id that does not exist is corrected, not silently ignored.
+    #[test]
+    fn expanding_an_unknown_record_says_so() {
+        let (mut l, _) = retrieval();
+        one_result(&mut l);
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"expand"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: r#"{"record_id":"r999"}"#.into(),
+        });
+        let body = &model_call(&fx).prompt;
+        assert!(
+            body.contains("not in this run") || body.contains("context.unknown_record"),
+            "a model told nothing will ask again, and it would be right to: {body}"
+        );
+    }
+
+    /// `focus` biases selection and expires with the plan step.
+    #[test]
+    fn focus_lasts_for_the_plan_step_that_set_it() {
+        let (mut l, _) = retrieval();
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"focus"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: r#"{"subject":"ETH funding"}"#.into(),
+        });
+        assert!(
+            fx.iter().any(|e| matches!(
+                e,
+                Effect::Note(Note::CoreTool { name, .. }) if name == FOCUS
+            )),
+            "focus answers"
+        );
+        assert_eq!(l.focus.as_deref(), Some("ETH funding"));
+        one_result(&mut l);
+        assert_eq!(
+            l.focus, None,
+            "a standing focus would outlive its reason and narrow every later step"
+        );
+    }
+
+    /// An empty focus is a correction, not a no-op that quietly does nothing.
+    #[test]
+    fn an_empty_focus_is_refused() {
+        let (mut l, _) = retrieval();
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"focus"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: r#"{"subject":"   "}"#.into(),
+        });
+        assert_eq!(l.focus, None);
+        assert!(model_call(&fx).prompt.contains("what you are working on"));
     }
 
     /// The reason termination is a validated tool call and not a string prefix: a

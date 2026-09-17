@@ -1240,17 +1240,18 @@ mod tests {
         // siblings unless it is pinned. The shipped profile's own comment says
         // four was not enough for the same reason.
         assert_eq!(degraded_7b().tools.max_exposed_per_step, 6);
-        assert_eq!(
-            ToolRegistry::with_core().names().len(),
-            5,
-            "five core tools are registered"
-        );
-        // `reflect` and `get_self_status` are the fourth and fifth, and both are
-        // withheld on a profile that does not reflect — which every local profile
-        // is. They are registered so the loop can ANSWER them; offering either
-        // would cost this profile one of the three slots above, because core
-        // tools are selected before namespace filling and count against the
-        // budget.
+        // Registered is not offered, and the gap has grown twice: `reflect` and
+        // `get_self_status` are withheld from a profile that does not reflect,
+        // and `expand` and `focus` are withheld from a run whose context policy
+        // is not retrieval (S-9.6). They are registered so the loop can ANSWER
+        // them; offering any of them would cost this profile one of the three
+        // slots above, because core tools are selected before namespace filling
+        // and count against the budget.
+        //
+        // So this counts what a degraded 7B under the control policy can
+        // actually be offered, through the one predicate that decides it. A
+        // literal registration count would fail here every time a core tool is
+        // added for some other tier, which says nothing about §8.3's case.
         //
         // This is the assertion that matters, not the count: the six-slot
         // arithmetic is what makes `list_instruments` the tool that loses a slot
@@ -1261,7 +1262,11 @@ mod tests {
             ToolRegistry::with_core()
                 .names()
                 .iter()
-                .filter(|n| **n != harness_reflect() && **n != harness_self_status())
+                .filter(|n| crate::registry::core_is_admissible(
+                    n,
+                    degraded_7b().orchestration.reflection,
+                    crate::context::policy::ContextPolicy::v1().is_retrieval(),
+                ))
                 .count(),
             3,
             "three reach a 7B, which is what the six-slot arithmetic assumes"
