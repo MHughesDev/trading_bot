@@ -1,6 +1,6 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 31% (5 / 16 tasks), plus 9 `PARTIAL`.**
+**Completion: 31% (5 / 16 tasks), plus 10 `PARTIAL`. Two untouched: S-10.11 and S-10.15.**
 
 > Status 2026-09-17. **S-10.1, S-10.6, S-10.7, S-10.13 and S-10.14 are done**;
 > S-10.2, S-10.3, S-10.4 and S-10.14's per-tier half are partial; the other eight
@@ -327,7 +327,37 @@ knife-edge fragility map yields `fragile_parameters`; the agent tool cannot crea
 **Traces:** AGENT-013 §5.8, §8.2; AGENT-007 §3.2 (amended).
 
 ### S-10.8 A `supported` verdict needs complete evidence and a reproducibility receipt — M
-`NOT STARTED`
+`PARTIAL` 2026-09-17 — **the battery and the receipt are built; the nightly job is
+not.**
+
+`evaluate` already refuses `supported` without all three tickets *and* a receipt
+(S-10.4). `crates/backtest/src/receipt.rs` is the receipt itself: every input that
+can change a number — data by content, feature registry, calendar, engine, strategy
+by content, costs, platform seeds, harness. Every field required, no serde default;
+a receipt missing the calendar version is not a receipt with a gap, it is one that
+cannot detect the one class of drift this platform has actually seen.
+
+**There is no tolerance in `reproduce`, deliberately.** It asks whether the platform
+computed the same thing, not whether it computed something close enough — and a
+tolerance would hide exactly the small systematic drift a calendar or cost-model
+change produces.
+
+The digest separates its fields. Without the separator `("ab", "c")` and
+`("a", "bc")` hash identically, and two receipts that differ would report as the
+same — the one failure a receipt must not have.
+
+Drift under an **unchanged** receipt files a `platform_defect`; a changed receipt
+does not, because filing one for a deliberate change trains everybody to ignore the
+defects. `drift_rate` over an empty sample is `None`, not zero: "0% drift over
+nothing sampled" reads as a healthy platform.
+
+A test corrected a claim I had written wrongly: a result that was NaN and stayed NaN
+is **bit-identical**, not drift. The platform computed the same thing both times; it
+has been broken all along, which is a different problem and one this detector would
+otherwise file every night.
+
+**Not done:** `lifecycle.reproduce`, the `repro_drift` nightly job over a 2% sample
+of 30 days, and the automatic `platform_defect` filing.
 
 `evaluate` requires out-of-sample, cost-model and benchmark tickets *and* a `ReproSpec` on
 the experiment before it may write `supported`; missing any → `inconclusive: evidence_incomplete`.

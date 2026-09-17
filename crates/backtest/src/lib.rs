@@ -35,6 +35,7 @@ pub mod manager;
 pub mod nulls;
 pub mod preview;
 pub mod procedure_null;
+pub mod receipt;
 pub mod reconcile;
 pub mod requirements;
 pub mod rng;
