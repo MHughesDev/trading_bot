@@ -1,6 +1,13 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 44% (7 / 16 tasks), plus 9 `PARTIAL`. Nothing untouched.**
+**Completion: 31% (5 / 16 tasks), plus 11 `PARTIAL`. Nothing untouched.**
+
+> A correction to this line, made 2026-09-17: it briefly read 7/16, counting
+> S-10.4 and S-10.12 as done. Both have acceptance criteria that need a live run
+> (gate H-2) — a verdict written "from real ticket numbers on the reference
+> dataset", and a question "appearing in the next run's brief". Their code is
+> built and reached; the acceptance is not met, and counting built-and-unverified
+> as done is the thing this plan set exists to avoid.
 
 > **Resolved 2026-09-17 — the research loop's door exists.** The trial gate's
 > registrar posted to a route that was never built, so every trial-spending tool
@@ -245,8 +252,11 @@ the run spends.
 **Traces:** AGENT-013 P2, §5.3, §6.1, §7.2, §8; §13.3, §13.4.
 
 ### S-10.4 Hypotheses name their falsifier; the platform writes the verdict — L
-`PARTIAL` 2026-09-16 — **the falsifier is validated and the verdict is unwritable;
-`evaluate` itself is not built.**
+`PARTIAL` 2026-09-17 — **built and reached end to end in code; the acceptance
+needs a live run.** The falsifier is validated, the verdict is unwritable by the
+model, `evaluate` is built *and now called*, and the vocabulary it reads is finally
+one the ledger can store. What is missing is a verdict written from real ticket
+numbers on the reference dataset (gate H-2).
 
 Done: `lifecycle::check_hypothesis` refuses a falsifier that names no metric in the
 closed vocabulary, and one that names a metric with no comparator — a metric alone
@@ -778,8 +788,11 @@ conformance reader.
 **Traces:** AGENT-013 §3 (`optimise`), §8.5, §11; §13.13, §13.15. PHASE-2-5-PLAN §2.1, ADR-P2-04.
 
 ### S-10.12 Open questions are memory — M
-`PARTIAL` 2026-09-17 — **the kind, the closing rule and the run-end write are built;
-the deliberate tool and the browser tab are not.**
+`PARTIAL` 2026-09-17 — **every part is built and reached; the acceptance needs a
+live run.** The kind, the closing rule, the run-end write, the deliberate tool, the
+closing sweep and the browser tab. What is unverified is the end-to-end claim: a
+question opened in one conversation appearing in the next run's brief for the same
+subject (gate H-2).
 
 A run notices something it cannot answer, and that noticing used to die with the
 conversation: the next run rediscovered it, spent a step on it, and noticed it
@@ -1048,7 +1061,18 @@ the ledger answers "how many trials were replications" from the workflow column.
 ## Desk and measurement
 
 ### S-10.15 The desk shows the stage, the registration, the falsifier, the proposals, the yield — L
-`NOT STARTED`
+`PARTIAL` 2026-09-17 — **four of the five surfaces render.**
+
+The stage strip (`Shared.tsx`, in the right panel, the conversation and a card),
+the pre-registration hash and the hypothesis with its falsifier (`RightPanel.tsx`,
+`Cards.tsx`), the proposals queue (`ProposalsQueue.tsx` at `/desk/proposals`,
+S-10.9) and the yield's barren half on `/desk/usage` (S-10.13).
+
+**Not done:** the composer's mode control with workflow chips and the Continuous
+toggle; the pre-registration *card* with steer-opens-an-amendment; the Research
+offer card (S-10.2); the hypothesis verdict with the numbers that decided it
+(waits on S-10.4's live run); the yield in the Report card; and the ten stages
+being keyboard-navigable in the replay scrubber.
 
 Composer mode control → *Chat / Research* with workflow chips under Research, the Continuous
 toggle (its charter form is S-11.13) and the SLv2 editor as an action (AGENT-012 §3.3 amended). New cards: **Stage** (the ten-stage
