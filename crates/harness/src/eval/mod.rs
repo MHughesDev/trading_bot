@@ -43,6 +43,7 @@
 
 pub mod cases;
 pub mod holdout;
+pub mod judgement;
 pub mod scorecard;
 pub mod tape;
 

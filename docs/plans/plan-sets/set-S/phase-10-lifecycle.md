@@ -1,6 +1,6 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 31% (5 / 16 tasks), plus 8 `PARTIAL`.**
+**Completion: 31% (5 / 16 tasks), plus 9 `PARTIAL`.**
 
 > Status 2026-09-17. **S-10.1, S-10.6, S-10.7, S-10.13 and S-10.14 are done**;
 > S-10.2, S-10.3, S-10.4 and S-10.14's per-tier half are partial; the other eight
@@ -624,7 +624,37 @@ keyboard; both themes, both densities, 375 px.
 **Traces:** AGENT-013 §12 phase 6; AGENT-012 §2, §3.2, §3.3 (amended), §19.9.
 
 ### S-10.16 The `judgement` suite — research decisions as a scored thing — L
-`NOT STARTED`
+`PARTIAL` 2026-09-17 — **the scoring is built; the thirty cases per tier are not.**
+
+`harness/src/eval/judgement.rs` scores a run against **planted ground truth** —
+which is what the other four suites cannot do, because there is nothing to compare
+an answer against: a run that reports "no edge" and one that reports "an edge" both
+look like a run that reported something.
+
+Six criteria, and the selection principle for them is that **each is a way of being
+wrong that looks like working**: reporting a planted null as supported, refining
+past the point the chain stopped paying (looks like persistence), choosing the
+broader workflow (looks like thoroughness), sealing a falsifier nothing can evaluate
+(looks exactly like pre-registration), re-testing an idea memory records as dead
+(looks like diligence), and ending with trials spent and nothing written.
+
+**Never one number.** `Score::passed` requires every applicable criterion: a run
+that got five of six right and reported a planted null as supported has not scored
+83%, it has produced a confidently wrong answer about whether money should be
+risked. The same argument AGENT-009 §4 makes about averaging across tiers, applied
+within a case.
+
+A criterion the case cannot exercise is `not_applicable` and **not a pass** —
+counting one would let a narrow case score like a broad one, and the suite would
+drift toward narrow cases.
+
+Missing a planted leak fails even when the verdict was right: the right answer for
+the wrong reason is what this suite exists to tell apart.
+
+**Not done:** `evals/judgement/**` — the ≥ 30 cases per tier with their tapes —
+the scorecard row, the sealed 20% holdout over them, and `evals/runner/run.py`. The
+cases need recorded trajectories (gate H-2); the scoring does not, and is what will
+read them.
 
 AGENT-009 §3 gains `judgement`: cases with **planted ground truth** — synthetic datasets with a
 known edge or a known null, a known-leaking feature, a pair of candidates with a known dominance,
