@@ -373,6 +373,20 @@ impl McpContext {
         }
     }
 
+    /// The same context, for a run that may not spend a trial (AGENT-013 §2.2;
+    /// Set S task S-10.2).
+    ///
+    /// A builder on the ordinary constructor rather than a third one, so the
+    /// ledger wiring is not duplicated and the default stays the one that
+    /// spends. See `CallGate::for_chat_turn` for why the direction of the
+    /// default matters.
+    #[must_use]
+    pub fn for_chat_turn(mut self) -> Self {
+        let registrar = Arc::new(gate::ApiTrialRegistrar::new(self.api.clone()));
+        self.gate = Arc::new(gate::CallGate::new(registrar).for_chat_turn());
+        self
+    }
+
     /// What this context already returned for this call, if anything.
     ///
     /// The step is the trajectory's current length, so a retry of the step that is

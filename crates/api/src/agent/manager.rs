@@ -98,6 +98,26 @@ pub struct AgentManager {
     prefixes: Mutex<HashMap<Uuid, harness::context::prefix::Prefix>>,
 }
 
+/// What the conversation front door asks the tier for.
+///
+/// `MultiStep` rather than `SingleLookup`, and the two are not the same
+/// question: `TaskDemand` is a statement about the *tier* — can this run take
+/// more than one step — and `Mode` is a statement about the *product*. They are
+/// derived from each other here only because nothing yet sets the mode
+/// independently (S-10.2).
+const CHAT_DEMAND: harness::hardware::TaskDemand = harness::hardware::TaskDemand::MultiStep;
+
+/// How an enum serialises, which is what the column stores.
+///
+/// Taken from the enum rather than written out, so a row cannot carry a word
+/// `0126`'s CHECK refuses or one nothing reads back.
+fn enum_name<T: serde::Serialize>(v: &T) -> String {
+    serde_json::to_value(v)
+        .ok()
+        .and_then(|j| j.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
 impl AgentManager {
     pub fn new(pg: PgPool, base_url: String, cfg: AgentConfig) -> Self {
         Self {
@@ -379,20 +399,32 @@ impl AgentManager {
         let llm_client = LlmClient::new(provider, api_key, base_url);
 
         let run_id = Uuid::new_v4();
-        // This path is the chat front door, so every turn it starts is a Chat
-        // turn — which is ring 0 and cannot be widened (AGENT-013 §2.2). The
-        // research path sets its own when it lands (S-10.2).
+        // The row says what the loop will say, derived from the same input
+        // (AGENT-013 §2.1, §4; S-10.1).
         //
-        // The strings are taken from the enums rather than written out, so the
-        // row cannot say a word `0126`'s CHECK refuses or one nothing reads back.
-        let mode_str = serde_json::to_value(harness::state::Mode::Chat)
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_else(|| "chat".into());
-        let ring_str = serde_json::to_value(harness::state::Ring::Research)
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_else(|| "research".into());
+        // **This path writes `research`, not `chat`, and that is deliberate.**
+        // §2.2 makes the conversation front door a Chat turn — ring 0, lookups
+        // only, a Research *offer* when the question needs more. The offer and
+        // its Start action are S-10.2's other half and are not built yet, so
+        // declaring this front door Chat today would take the platform's main
+        // capability away and leave nothing in its place. Recorded in the phase
+        // plan as the one thing S-10.2 is waiting on rather than left as a
+        // surprise.
+        //
+        // What matters here is that the row and the loop cannot disagree: both
+        // read `TaskDemand`, through the same enum, so "what was this run
+        // allowed to do" has one answer.
+        let (mode, ring) = match CHAT_DEMAND {
+            harness::hardware::TaskDemand::SingleLookup => {
+                (harness::state::Mode::Chat, harness::state::Ring::Research)
+            }
+            harness::hardware::TaskDemand::MultiStep => (
+                harness::state::Mode::Research,
+                harness::state::Ring::PlatformArtifacts,
+            ),
+        };
+        let mode_str = enum_name(&mode);
+        let ring_str = enum_name(&ring);
         sqlx::query(
             "INSERT INTO agent_runs (run_id, user_id, status, goal, provider, model,
                  constraints_json, conversation_id, turn_index, mode, ring)
@@ -525,7 +557,7 @@ impl AgentManager {
                 constraints: serde_json::json!({}),
                 profile,
                 namespaces: vec!["core".into(), "discovery".into()],
-                demand: harness::hardware::TaskDemand::MultiStep,
+                demand: CHAT_DEMAND,
                 api_base: base_url,
                 service_token: run_token.clone(),
                 workspace_root: workspace_root(),

@@ -1062,7 +1062,20 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
     }
 
     // ── The loop ────────────────────────────────────────────────────────────
-    let mcp_ctx = McpContext::new(ApiClient::new(params.api_base.clone(), params.service_token.clone()));
+    // A Chat turn spends no trials (§2.2). The exposure filter already means the
+    // model cannot name such a tool; this is the refusal at the door, which is
+    // the mechanism that survives a later code path routing around the filter.
+    let mcp_ctx = {
+        let ctx = McpContext::new(ApiClient::new(
+            params.api_base.clone(),
+            params.service_token.clone(),
+        ));
+        if params.demand == TaskDemand::SingleLookup {
+            ctx.for_chat_turn()
+        } else {
+            ctx
+        }
+    };
 
     let mut governor = Loop::new(
         params.profile.clone(),

@@ -170,6 +170,20 @@ fn registration_failed(why: &str) -> ToolError {
 pub struct CallGate {
     registrar: Option<Arc<dyn TrialRegistrar>>,
     calls: Mutex<BTreeMap<&'static str, u32>>,
+    /// Whether this run is a Chat turn (AGENT-013 §2.2; Set S task S-10.2).
+    ///
+    /// A Chat turn spends no trials, ever. The primary mechanism is exposure:
+    /// ring 0 plus `spends_trial` filtering means the model never sees such a
+    /// tool and cannot name one. This is the second mechanism, and it exists
+    /// because the two have different failure modes — exposure is a routing
+    /// property that a future code path could route around, and this is a
+    /// refusal at the door every handler goes through.
+    ///
+    /// Belt and braces is the spec's own phrasing for this pair, and the reason
+    /// is worth restating: the thing being prevented is a Chat turn quietly
+    /// consuming the trial budget that makes every selection-adjusted statistic
+    /// on this platform mean anything.
+    chat_turn: bool,
 }
 
 impl CallGate {
@@ -179,7 +193,21 @@ impl CallGate {
         Self {
             registrar: Some(registrar),
             calls: Mutex::new(BTreeMap::new()),
+            chat_turn: false,
         }
+    }
+
+    /// The same gate, for a run that may not spend a trial (§2.2).
+    ///
+    /// A builder rather than a second constructor so the registrar argument is
+    /// not duplicated, and so the *default* is the one that spends — a default
+    /// of `chat_turn: true` would silently disable the simulator for every
+    /// caller that had not been updated, which is a failure nobody would read as
+    /// a policy decision.
+    #[must_use]
+    pub fn for_chat_turn(mut self) -> Self {
+        self.chat_turn = true;
+        self
     }
 
     /// A gate with **no** registrar: reads work, and every trial-spending tool
@@ -194,6 +222,7 @@ impl CallGate {
         Self {
             registrar: None,
             calls: Mutex::new(BTreeMap::new()),
+            chat_turn: false,
         }
     }
 
@@ -250,6 +279,20 @@ impl CallGate {
             return Ok(None);
         }
 
+        // A Chat turn spends no trials (§2.2). Refused before the registrar, so
+        // no row is written and no budget is consumed — a refusal that had
+        // already registered the trial would be the exact cost this prevents.
+        if self.chat_turn {
+            return Err(ToolError::new(
+                "chat_turn_spends_no_trials",
+                format!(
+                    "`{}` spends a trial and this is a chat turn.",
+                    spec.name
+                ),
+                "start a research run for this question — the offer on this turn opens one                  with the same question and constraints",
+            ));
+        }
+
         let Some(registrar) = self.registrar.as_ref() else {
             return Err(ToolError::new(
                 "trial_registration_unavailable",
@@ -276,6 +319,7 @@ impl std::fmt::Debug for CallGate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CallGate")
             .field("has_registrar", &self.registrar.is_some())
+            .field("chat_turn", &self.chat_turn)
             .finish()
     }
 }
@@ -329,6 +373,61 @@ mod tests {
         ) -> BoxFuture<'a, Result<TrialReceipt, ToolError>> {
             Box::pin(async move { Err(registration_failed("the family is sealed")) })
         }
+    }
+
+    // ── A chat turn spends no trials (AGENT-013 §2.2; S-10.2) ───────────────
+
+    /// The second mechanism, refusing at the door.
+    ///
+    /// Not a substitute for the exposure filter — the model should never see the
+    /// tool — but a filter on a routing property is a filter a later code path
+    /// can route around, and the thing being protected is the trial budget every
+    /// selection-adjusted statistic on this platform depends on.
+    #[tokio::test]
+    async fn a_chat_turn_cannot_spend_a_trial_even_if_it_reaches_the_door() {
+        let rec = Arc::new(Recording::default());
+        let gate = CallGate::new(rec.clone()).for_chat_turn();
+        let err = gate
+            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .await
+            .expect_err("a chat turn spends no trials");
+        assert_eq!(err.code, "chat_turn_spends_no_trials");
+        assert_eq!(
+            rec.registered.load(Ordering::SeqCst),
+            0,
+            "refused before the registrar: a refusal that had already written the row              would be the exact cost this prevents"
+        );
+    }
+
+    /// And it can still read.
+    ///
+    /// A chat turn that could not call anything would not be a chat turn; the
+    /// rule is about trials, not about tools.
+    #[tokio::test]
+    async fn a_chat_turn_can_still_call_a_tool_that_spends_nothing() {
+        let gate = CallGate::new(Arc::new(Recording::default())).for_chat_turn();
+        let read = leak(ToolSpec::new(
+            "get_bars",
+            "data",
+            Risk::Read,
+            "read bars",
+            json!({}),
+        ));
+        assert!(gate.admit(read, &json!({})).await.expect("a read").is_none());
+    }
+
+    /// The default spends. A default of "chat" would silently disable the
+    /// simulator for every caller that had not been updated — a failure nobody
+    /// would read as a policy decision.
+    #[tokio::test]
+    async fn the_default_gate_is_not_a_chat_turn() {
+        let rec = Arc::new(Recording::default());
+        let gate = CallGate::new(rec.clone());
+        assert!(gate
+            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .await
+            .is_ok());
+        assert_eq!(rec.registered.load(Ordering::SeqCst), 1);
     }
 
     // ── The invariant ────────────────────────────────────────────────────────

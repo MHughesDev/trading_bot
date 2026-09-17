@@ -1,6 +1,16 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 0% (0 / 16 tasks)**
+**Completion: 6% (1 / 16 tasks), plus 1 `PARTIAL`.**
+
+> Status 2026-09-16. **S-10.1 is done** and **S-10.2 is half done**; the other
+> fourteen are untouched.
+>
+> What was already here and doing nothing: `WorkingState` has carried `mode`,
+> `workflow`, `ring` and `stage` since phase 1 and the state card renders all four;
+> `ToolSpec::ring` has derived the ring from risk and envelope, with its own tests.
+> **Nothing filtered on any of it.** A filter is worth exactly what the field it reads
+> is worth, and this one was reading nothing — the eighth instance of this repository's
+> dominant defect shape.
 
 **Requirement IDs:** LC-01…LC-16.
 **Spec:** [AGENT-013](../../../specs/AGENT-013-modes-and-research-lifecycle.md); amendments
@@ -33,7 +43,15 @@ largest door still open.
 ## Modes and rings
 
 ### S-10.1 Mode, workflow, ring and stage on the run; the ring filter on exposure — M
-`NOT STARTED`
+`DONE` 2026-09-16 — `registry::ring_of` + `registry::Limits`, filtering in
+`expose_within` **before** the budget and in `search_tools`; migration `0126` with
+CHECK lists mirrored against the Rust enums by `schema_mirrors_lifecycle.rs`.
+
+**One departure, recorded as `ADR-S10-01`:** a Research run starts at ring 1, not
+ring 0. §4 wants ring 0, widened by a proposal a human decides — and that door is
+S-10.9 and does not exist. Shipping the narrow default first would leave every
+Research run unable to create a strategy. A Chat turn *is* ring 0 and cannot be
+widened, which is the half that can ship today.
 
 `agent_runs` gains `mode: chat|research`, `workflow` (the seven names), `ring: 0..2`, `stage`,
 `session_id` (AGENT-014 §10 — every Research run has a session row; a continuous session's
@@ -52,7 +70,22 @@ carry mode, workflow, ring, stage; conformance reads every new field.
 **Traces:** AGENT-013 §2.1, §4, §5; §13.1. ADR-0037 §6.
 
 ### S-10.2 Chat: `Lookup` forced, no ticket, and the Research offer — M
-`NOT STARTED`
+`PARTIAL` 2026-09-16 — **the refusal is built; the offer is not.**
+
+Done: `CallGate::for_chat_turn` refuses every trial-spending tool at the door,
+before the registrar, so no row is written and no budget is consumed; the code is
+`chat_turn_spends_no_trials` and it is routable, because the desk has to turn it
+into an action. That is the belt to S-10.1's braces, and the two are kept separate
+deliberately — exposure is a routing property a later code path could route around,
+and this is a refusal every handler goes through.
+
+**Not done, and this is why the conversation front door still runs as `research`:**
+the Research offer card, its *Start* action, and the `user_preference` that skips it.
+Declaring the front door `Chat` today would make it ring 0 and lookups-only with
+nothing offered in place of what it lost — a capability removed and no door built.
+The mode and the ring are derived from one input in `manager.rs` so the run row and
+the loop cannot disagree meanwhile; flipping the front door is one constant once the
+offer exists.
 
 A Chat turn forces `GoalKind::Lookup` (AGENT-008 §3.1), a plan of ≤ 3 read-only tools, hides
 `report.*`. When the classifier rates the goal `Research|Diagnose|Compare`, or the model asks

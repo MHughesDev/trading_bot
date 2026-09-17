@@ -704,6 +704,11 @@ pub const ERROR_CODES: &[&str] = &[
     "call_budget_exhausted",
     "trial_registration_failed",
     "trial_registration_unavailable",
+    // A chat turn reached a trial-spending tool (AGENT-013 §2.2; S-10.2). A
+    // routable code rather than prose because the desk turns it into the
+    // Research offer: "start a research run for this" is an action, and an
+    // action needs something to key on.
+    "chat_turn_spends_no_trials",
     // Dispatch.
     "tool_deprecated",
     "unknown_tool",
