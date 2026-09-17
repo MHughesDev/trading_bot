@@ -31,27 +31,15 @@ use crate::{auth::BearerToken, state::AppState};
 
 /// The metrics a falsifier may name.
 ///
-/// These are the columns `mlops.trial_statistic` records, which is what makes a
-/// falsifier evaluable at all: a falsifier naming something the platform does not
-/// compute reads like a commitment and can never refute anything.
-///
-/// A constant rather than a query, for now, and that is a limitation worth
-/// stating rather than hiding: the statistic table is keyed by name and the names
-/// are added by migrations, so this list is a *copy*. `the_metric_vocabulary_is_
-/// the_statistic_table` in `crates/invariants` is where that copy is checked
-/// against the schema.
-pub const METRIC_VOCABULARY: &[&str] = &[
-    "sharpe_after_costs",
-    "sortino_after_costs",
-    "max_drawdown",
-    "hit_rate",
-    "profit_factor",
-    "turnover",
-    "exposure",
-    "calmar",
-    "information_ratio",
-    "tail_ratio",
-];
+/// **A read of `ledger::OBJECTIVE_STATISTICS`, not a copy of it.** It was a copy
+/// until 2026-09-17, and the comment here claimed
+/// `the_metric_vocabulary_is_the_statistic_table` in `crates/invariants` checked
+/// the copy against the schema. That test did not exist, and the copy was not a
+/// copy: the ten names here and the eight `mlops.trial_statistic` accepted had
+/// **nothing in common**, so every falsifier the platform validated named a
+/// statistic the ledger refused to store. The test exists now, and this is a
+/// re-export so there is nothing left for it to find.
+pub const METRIC_VOCABULARY: &[&str] = ledger::OBJECTIVE_STATISTICS;
 
 #[derive(Debug, Deserialize)]
 pub struct WindowBody {

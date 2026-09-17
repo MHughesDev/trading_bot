@@ -212,6 +212,22 @@ impl Role {
             Role::Exploratory => "exploratory",
         }
     }
+
+    /// Read a role back from the column that stores it.
+    ///
+    /// Total, and the unrecognised case is **`Exploratory`, not `Primary`**.
+    /// That is the whole content of this function: the role decides the highest
+    /// confidence a finding may carry, so a string nobody recognises must
+    /// produce the *least* authority rather than the most. Defaulting to
+    /// `Primary` would turn a typo into a platform endorsement.
+    #[must_use]
+    pub fn from_column(s: &str) -> Self {
+        match s.trim() {
+            "primary" => Role::Primary,
+            "secondary" => Role::Secondary,
+            _ => Role::Exploratory,
+        }
+    }
 }
 
 /// Why the platform could not decide.

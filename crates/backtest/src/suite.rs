@@ -1472,6 +1472,56 @@ impl SuiteManager {
         // safe direction. Failing the funnel because a bookkeeping write missed
         // would throw away the evidence as well as the record of it.
         let tenant = user_id.to_string();
+        // The objective metrics go on the record beside the gate statistics
+        // (migration 0130, S-10.4). Until they did, a run's *falsifier* named
+        // metrics the ledger had no row for, so `lifecycle::evaluate` could
+        // never find a measurement and every hypothesis resolved
+        // `inconclusive: insufficient_data` — a verdict that looked like a
+        // finding about the research and was a fact about the schema.
+        //
+        // Read off `MetricSet` by field, with the name spelled the same way, so
+        // there is no mapping between a statistic's name and its value for
+        // anybody to get wrong. The observed run is the one that carries them:
+        // it is the candidate on real data, which is what the hypothesis is
+        // about.
+        let m = &observed_res.metrics;
+        let objective: [(&str, f64); 16] = [
+            ("sharpe", m.sharpe),
+            ("sortino", m.sortino),
+            ("calmar", m.calmar),
+            ("information_ratio", m.information_ratio),
+            ("detrended_sharpe", m.detrended_sharpe),
+            ("cagr", m.cagr),
+            ("total_return", m.total_return),
+            ("ann_vol", m.ann_vol),
+            ("max_drawdown", m.max_drawdown),
+            ("cvar_95", m.cvar_95),
+            ("ulcer_index", m.ulcer_index),
+            ("hit_rate", m.hit_rate),
+            ("profit_factor", m.profit_factor),
+            ("expectancy", m.expectancy),
+            ("turnover", m.turnover),
+            ("exposure_net", m.exposure_net),
+        ];
+        for (name, value) in objective {
+            // A non-finite metric is not an observation, and the column's CHECK
+            // refuses one. Skipped rather than zeroed: a zero Sharpe is a claim
+            // about the strategy and a missing one is a claim about the run, and
+            // `evaluate` treats the absence as `insufficient_data` rather than
+            // as a result.
+            if !value.is_finite() {
+                continue;
+            }
+            if let Err(e) = self.bt.ledger().record_statistic(
+                &tenant,
+                observed_trial,
+                name,
+                value,
+                "funnel_observed",
+            ) {
+                tracing::warn!(experiment = %id, statistic = name, error = %e, "statistic not recorded");
+            }
+        }
         for (name, value) in [
             ("cpcv_p05_sharpe", cpcv_res.distribution.worst_5pct),
             ("walk_forward_sharpe", wf_res.distribution.median),

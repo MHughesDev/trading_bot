@@ -544,6 +544,27 @@ pub trait TrialLedger: Send + Sync {
 /// name is a statistic the gate silently never finds — and a gate that never
 /// finds its input is inconclusive forever without anybody noticing.
 pub const TRIAL_STATISTICS: &[&str] = &[
+    // The objective metrics a falsifier may name (0130). Listed first so a
+    // reader sees the two halves; [`OBJECTIVE_STATISTICS`] is the second half's
+    // own name and `every_objective_statistic_is_a_trial_statistic` holds them
+    // in step.
+    "sharpe",
+    "sortino",
+    "calmar",
+    "information_ratio",
+    "detrended_sharpe",
+    "cagr",
+    "total_return",
+    "ann_vol",
+    "max_drawdown",
+    "cvar_95",
+    "ulcer_index",
+    "hit_rate",
+    "profit_factor",
+    "expectancy",
+    "turnover",
+    "exposure_net",
+    // The gates' own inputs.
     "cpcv_p05_sharpe",
     "walk_forward_sharpe",
     "walk_forward_regimes",
@@ -563,6 +584,44 @@ pub const TRIAL_STATISTICS: &[&str] = &[
     "paper_model_rejects",
     "paper_observed_days",
     "paper_observation_window_days",
+];
+
+/// The subset a run's **falsifier** may name (AGENT-013 §6.2; migration 0130).
+///
+/// Spelled as `backtest::run::metrics::MetricSet`'s own fields, so the funnel
+/// records them straight off the struct and no name-to-value mapping exists for
+/// anybody to get wrong. All are net of modelled costs, because a backtest
+/// applies costs before it measures.
+///
+/// **This is the list `lifecycle.hypothesise` validates against**, and until
+/// 2026-09-17 it was a different list entirely: the tool's vocabulary named
+/// `sharpe_after_costs`, `tail_ratio` and eight others, and not one of them was
+/// a name `mlops.trial_statistic` would accept. Every falsifier the platform
+/// validated therefore named a statistic the ledger refused to store, so
+/// `evaluate` could never find a measurement and every hypothesis resolved
+/// `inconclusive: insufficient_data` — with the registration hashing cleanly,
+/// the gate stamping it on every ticket, and nothing failing anywhere.
+///
+/// The gate statistics are deliberately absent. Those are the gates' own inputs,
+/// and a falsifier naming `pbo` or `deflated_sharpe` would be a run
+/// pre-registering against a gate threshold, which INV-23 forbids.
+pub const OBJECTIVE_STATISTICS: &[&str] = &[
+    "sharpe",
+    "sortino",
+    "calmar",
+    "information_ratio",
+    "detrended_sharpe",
+    "cagr",
+    "total_return",
+    "ann_vol",
+    "max_drawdown",
+    "cvar_95",
+    "ulcer_index",
+    "hit_rate",
+    "profit_factor",
+    "expectancy",
+    "turnover",
+    "exposure_net",
 ];
 
 impl<T: TrialLedger + ?Sized> TrialLedger for std::sync::Arc<T> {
@@ -1450,7 +1509,18 @@ mod statistic_tests {
             .record_statistic("t", trial, "PBO", 0.1, "funnel")
             .expect_err("case matters");
         assert!(format!("{err}").contains("not a statistic"), "{err}");
-        assert!(led.record_statistic("t", trial, "sharpe", 1.0, "funnel").is_err());
+        // `sharpe` is accepted since migration 0130: a falsifier names an
+        // objective metric, and until 0130 there was no name it could use that
+        // this table would take.
+        assert!(led.record_statistic("t", trial, "sharpe", 1.0, "funnel").is_ok());
+        // `sharpe_after_costs` is the example of a refused name on purpose. It
+        // is what `lifecycle.hypothesise` validated falsifiers against until
+        // 2026-09-17, and it was never a name this table would accept — which is
+        // how every validated falsifier came to name a statistic nothing could
+        // record, and every hypothesis to resolve `insufficient_data`.
+        assert!(led
+            .record_statistic("t", trial, "sharpe_after_costs", 1.0, "funnel")
+            .is_err());
     }
 
     #[test]
@@ -1469,6 +1539,27 @@ mod statistic_tests {
         assert_eq!(
             TRIAL_STATISTICS,
             &[
+                // The objective metrics a falsifier may name (migration 0130).
+                // Spelled as `MetricSet`'s fields so the funnel records them off
+                // the struct with no mapping to drift.
+                "sharpe",
+                "sortino",
+                "calmar",
+                "information_ratio",
+                "detrended_sharpe",
+                "cagr",
+                "total_return",
+                "ann_vol",
+                "max_drawdown",
+                "cvar_95",
+                "ulcer_index",
+                "hit_rate",
+                "profit_factor",
+                "expectancy",
+                "turnover",
+                "exposure_net",
+                // The gates' own inputs. A falsifier may not name one: that
+                // would be a run pre-registering against a threshold (INV-23).
                 "cpcv_p05_sharpe",
                 "walk_forward_sharpe",
                 "walk_forward_regimes",
@@ -1495,13 +1586,18 @@ mod statistic_tests {
     /// A name in the const but not the CHECK is an INSERT that fails at
     /// runtime; a name in the CHECK but not the const is a statistic nothing
     /// can write. Both are silent until a gate is inconclusive forever.
+    ///
+    /// **Points at the migration that holds the *current* CHECK**, which is 0130
+    /// since the objective metrics were added. Pointing at a superseded one
+    /// would make this pass against a list the database no longer uses, which is
+    /// the same failure it exists to catch, one level up.
     #[test]
     fn every_name_is_also_in_the_database_check() {
         let sql = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../migrations/0106_gate15_statistics.sql"),
+                .join("../../migrations/0130_objective_statistics.sql"),
         )
-        .expect("migration 0106 is readable from crates/ledger");
+        .expect("migration 0130 is readable from crates/ledger");
 
         // The CHECK is the text after `ADD CONSTRAINT` — the DO block above it
         // names one statistic as a probe and must not be counted as the list —
@@ -1509,7 +1605,7 @@ mod statistic_tests {
         // list is allowed to quote things that are not in it.
         let check: String = sql
             .split_once("ADD CONSTRAINT")
-            .expect("0106 adds the constraint")
+            .expect("0130 adds the constraint")
             .1
             .lines()
             .filter(|l| !l.trim_start().starts_with("--"))
@@ -1520,7 +1616,7 @@ mod statistic_tests {
         for name in TRIAL_STATISTICS {
             assert!(
                 check.contains(&format!("'{name}'")),
-                "{name} is in TRIAL_STATISTICS but not in migration 0106's CHECK"
+                "{name} is in TRIAL_STATISTICS but not in migration 0130's CHECK"
             );
         }
 
@@ -1528,7 +1624,7 @@ mod statistic_tests {
         assert_eq!(
             quoted,
             TRIAL_STATISTICS.len(),
-            "migration 0106's CHECK lists {quoted} names, TRIAL_STATISTICS has {}",
+            "migration 0130's CHECK lists {quoted} names, TRIAL_STATISTICS has {}",
             TRIAL_STATISTICS.len()
         );
     }

@@ -234,10 +234,68 @@ English rather than to stop claiming verdicts.
 the Rust enums. `open` has no Rust variant on purpose: it is the absence of a
 verdict, and a `Verdict::Open` would be a value `evaluate` could return.
 
-**Not done:** nothing *calls* `evaluate` — the funnel's return has no hook into it,
-so every hypothesis stays `open`. That needs the funnel and a live run (gate H-2).
-The metric vocabulary is also a constant in `routes/lifecycle.rs` rather than a read
-of `mlops.trial_statistic`: a copy, and marked as one.
+**The caller landed 2026-09-17, and building it found why it could not have been
+built before.**
+
+`routes/lifecycle.rs` described `METRIC_VOCABULARY` as "the columns
+`mlops.trial_statistic` records" and named
+`the_metric_vocabulary_is_the_statistic_table` in `crates/invariants` as the guard
+on the copy. **That test did not exist, and the two lists had nothing in common:**
+
+| | |
+|---|---|
+| the vocabulary | `sharpe_after_costs`, `sortino_after_costs`, `max_drawdown`, `hit_rate`, `profit_factor`, `turnover`, `exposure`, `calmar`, `information_ratio`, `tail_ratio` |
+| the table | `cpcv_p05_sharpe`, `walk_forward_sharpe`, `walk_forward_regimes`, `pbo`, `deflated_sharpe`, `permutation_p_value`, `breakeven_cost_multiple`, `prereg_hash_present` (+ gate 15) |
+
+Not one name shared. So every falsifier the platform validated named a statistic
+the ledger's CHECK refuses, `evaluate` could never find a measurement for any of
+them, and every hypothesis on the platform would have resolved `inconclusive:
+insufficient_data` — while the registration hashed cleanly, the gate stamped it on
+every ticket, and nothing failed anywhere. **A caller written before this was found
+would have written that verdict on everything**, and it looks exactly like a finding
+about the research rather than a fact about the schema.
+
+Fixed at the root rather than patched: migration **0130** gives the table the
+objective metrics, spelled as `MetricSet`'s own fields so the funnel records them
+straight off the struct and no name-to-value mapping exists to drift.
+`sharpe_after_costs` is gone as a name because the mapping it implied (to
+`MetricSet::sharpe`, already net of costs) lived only in prose.
+`METRIC_VOCABULARY` is now a re-export of `ledger::OBJECTIVE_STATISTICS`, and the
+promised invariant exists — it holds the tool's list, the ledger's list and 0130's
+CHECK to one another, and asserts a falsifier may **not** name a gate's own input
+(that would be a run pre-registering against a threshold, INV-23).
+
+`api/src/lifecycle_evaluate.rs` is the caller. It runs inside `Recorder::finish` —
+the one place every ending passes through, so a fenced run's hypotheses are decided
+too; a run that died holding a refutation still records it. `status = 'open'` is in
+the WHERE clause, so the **first** verdict stands: one that could be overwritten
+would make the answer depend on when somebody last looked.
+
+It also fills three columns that had never held anything.
+`Yield::hypotheses_{tested,refuted,supported}` were declared with S-10.13 and set by
+nothing, so "how many hypotheses has this platform settled" was unanswerable from
+the table built to answer it. They now come from the verdicts — the platform's
+count, not the run's account of it.
+
+**What is honestly not reachable: `supported`.** §6.9's battery needs an
+out-of-sample ticket, a cost-model ticket, a benchmark ticket and a reproducibility
+receipt. Only the first is derivable — `mlops.trial` carries no role for a trial, so
+"which ticket was the benchmark" has no answer in the schema, and the funnel records
+no receipt (S-10.8 built one with no caller). Absent evidence is left absent,
+`gate_worker`'s rule: a surviving hypothesis is `inconclusive: evidence_incomplete`
+**naming the three missing pieces**, not `supported`. A test pins that, so the day
+the battery becomes derivable it fails, which is the right moment to notice.
+Refutations need none of it, and that asymmetry is the design: requiring the battery
+before admitting a failure would make failing expensive and passing cheap.
+
+A falsifier that does not parse leaves its hypothesis **open** and is reported as
+`undecidable` with the reason — the registration was accepted with it, so writing a
+verdict would be the platform grading a commitment it cannot read.
+
+**Still not done:** the end-to-end assertion on the reference dataset needs a live
+run (gate H-2), and `Role::from_column` reads the role back with `Exploratory` as
+the unrecognised case rather than `Primary`, so a typo produces the least authority
+rather than the most.
 
 `lifecycle.hypothesise` validates the falsifier against the closed metric vocabulary
 (`mlops.trial_statistic`'s) and a comparator; a falsifier naming nothing evaluable is refused

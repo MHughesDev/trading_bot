@@ -335,8 +335,11 @@ fn the_funnel_records_the_statistics_the_gates_read() {
     let led = InMemoryLedger::new();
     let trial = uuid::Uuid::new_v4();
 
-    // Exactly the five the funnel writes, and every one of them in the closed
-    // vocabulary the gate worker reads.
+    // The five gate statistics the funnel writes, every one of them in the
+    // closed vocabulary the gate worker reads. It writes the sixteen objective
+    // metrics beside them since migration 0130 — a falsifier may name one of
+    // those and may not name one of these, which is why the two halves are
+    // listed apart.
     for (name, value) in [
         ("cpcv_p05_sharpe", -0.2_f64),
         ("walk_forward_sharpe", 0.9),
@@ -348,7 +351,17 @@ fn the_funnel_records_the_statistics_the_gates_read() {
             .unwrap_or_else(|e| panic!("{name} is not in the vocabulary the gates read: {e}"));
     }
 
-    // And a name that is not is refused, loudly, here rather than silently at
-    // the gate months later.
-    assert!(led.record_statistic("t", trial, "sharpe", 1.0, "funnel_advance").is_err());
+    // An objective metric is accepted since 0130: a falsifier names one, and
+    // before that it could not be stored at all.
+    led.record_statistic("t", trial, "sharpe", 1.0, "funnel_observed")
+        .expect("a falsifier's metric must be storable or no hypothesis can be decided");
+
+    // And a name in neither half is refused, loudly, here rather than silently
+    // at the gate months later. `sharpe_after_costs` is the example on purpose:
+    // it is what the falsifier vocabulary said until 2026-09-17, and it was
+    // never a name this table would take — which is exactly how a validated
+    // falsifier ended up naming a statistic nothing could record.
+    assert!(led
+        .record_statistic("t", trial, "sharpe_after_costs", 1.0, "funnel_observed")
+        .is_err());
 }

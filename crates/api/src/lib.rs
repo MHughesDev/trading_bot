@@ -8,6 +8,7 @@ pub mod feature_consistency;
 pub mod instrument_meta;
 pub mod risk_context;
 pub mod leakage_audit;
+pub mod lifecycle_evaluate;
 pub mod campaign_driver;
 pub mod gate_worker;
 pub mod knowledge;

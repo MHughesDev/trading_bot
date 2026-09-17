@@ -1388,3 +1388,62 @@ fn the_profiles_amendment_ceiling_is_the_ledgers() {
     );
 }
 
+/// AGENT-013 §6.2 · The falsifier vocabulary is the statistic table's.
+///
+/// The test `routes/lifecycle.rs` said existed and did not.
+///
+/// Until 2026-09-17 the two lists had **nothing in common**: the tool validated
+/// falsifiers naming `sharpe_after_costs`, `tail_ratio` and eight others, and
+/// `mlops.trial_statistic`'s CHECK accepted `cpcv_p05_sharpe`, `pbo` and six
+/// more. So a run could seal a registration, have its falsifier validated, spend
+/// its whole trial budget, and have `evaluate` find no measurement for the metric
+/// it committed to — resolving `inconclusive: insufficient_data` every time. The
+/// registration hashed cleanly and the gate stamped it on every ticket; nothing
+/// failed anywhere.
+///
+/// Three claims, because the vocabulary is now a re-export and the interesting
+/// drift is between the Rust list and the migration that CHECKs it.
+#[test]
+fn the_metric_vocabulary_is_the_statistic_table() {
+    // 1. The tool's vocabulary is the ledger's objective list, by identity.
+    assert_eq!(
+        api::routes::lifecycle::METRIC_VOCABULARY,
+        ledger::OBJECTIVE_STATISTICS,
+        "the falsifier vocabulary has stopped being a read of the statistic table"
+    );
+
+    // 2. Every objective name is a name the table accepts.
+    for name in ledger::OBJECTIVE_STATISTICS {
+        assert!(
+            ledger::TRIAL_STATISTICS.contains(name),
+            "a falsifier may name `{name}`, which `record_statistic` refuses"
+        );
+    }
+
+    // 3. And the Rust list is the migration's list. Read as text, so this runs
+    //    where `cargo test` does rather than only where Postgres does.
+    let sql = fs::read_to_string(root().join("migrations/0130_objective_statistics.sql")).unwrap();
+    let statements = strip_comments(&sql);
+    for name in ledger::TRIAL_STATISTICS {
+        assert!(
+            statements.contains(&format!("'{name}'")),
+            "`{name}` is in TRIAL_STATISTICS and not in 0130's CHECK, so recording it fails"
+        );
+    }
+
+    // 4. A falsifier may not name a gate's own input: that would be a run
+    //    pre-registering against a threshold, which INV-23 forbids.
+    for gate_input in [
+        "pbo",
+        "deflated_sharpe",
+        "permutation_p_value",
+        "cpcv_p05_sharpe",
+        "walk_forward_sharpe",
+    ] {
+        assert!(
+            !ledger::OBJECTIVE_STATISTICS.contains(&gate_input),
+            "`{gate_input}` is a gate's input and a falsifier may name it"
+        );
+    }
+}
+

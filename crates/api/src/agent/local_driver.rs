@@ -348,6 +348,9 @@ fn describe_effect(e: &Effect) -> (&'static str, Value) {
 struct Recorder {
     pg: PgPool,
     run_id: Uuid,
+    /// The tenant, for the ledger reads at run end. `mlops` is tenant-scoped and
+    /// a verdict assembled without one would read another tenant's tickets.
+    user_id: Uuid,
     seq: i32,
     tokens_in: i64,
     tokens_out: i64,
@@ -722,6 +725,22 @@ impl Recorder {
     }
 
     async fn finish(&mut self, outcome: &Outcome) {
+        // The platform decides every hypothesis this run sealed, from the
+        // ledger's own rows (AGENT-013 §6.2; S-10.4).
+        //
+        // Here rather than at a happy-path exit, because `finish` is the one
+        // place every ending passes through — and a fenced run's hypotheses are
+        // no less decidable than a finished one's. A run that died holding a
+        // refutation should still record it.
+        //
+        // Before the row is written, so the counts below are the verdicts and
+        // not the model's account of them. The three `hypotheses_*` fields on
+        // `Yield` were declared with S-10.13 and set by nothing: they have been
+        // zero on every run ever recorded, which made "how many hypotheses has
+        // this platform actually settled" unanswerable from the one table built
+        // to answer it.
+        self.decide_hypotheses().await;
+
         let (status, summary, error) = match outcome {
             Outcome::Finished { result, evidence } => (
                 "completed",
@@ -787,6 +806,49 @@ impl Recorder {
         .bind(barren)
         .execute(&self.pg)
         .await;
+    }
+
+    /// Decide this run's open hypotheses and count the verdicts.
+    ///
+    /// Failures are logged to the run's own event stream rather than raised: a
+    /// verdict that could not be written must not stop the run record from being
+    /// written, because the run record is how anybody finds out the run ended at
+    /// all.
+    async fn decide_hypotheses(&mut self) {
+        let tenant = self.user_id.to_string();
+        match crate::lifecycle_evaluate::decide_run(&self.pg, &tenant, self.run_id).await {
+            Ok((decided, undecidable)) => {
+                if decided.is_empty() && undecidable.is_empty() {
+                    return;
+                }
+                use harness::lifecycle::evaluate::Verdict;
+                self.yielded.hypotheses_tested =
+                    u32::try_from(decided.len()).unwrap_or(u32::MAX);
+                self.yielded.hypotheses_refuted = u32::try_from(
+                    decided
+                        .iter()
+                        .filter(|d| d.verdict == Verdict::Refuted)
+                        .count(),
+                )
+                .unwrap_or(u32::MAX);
+                self.yielded.hypotheses_supported = u32::try_from(
+                    decided
+                        .iter()
+                        .filter(|d| d.verdict == Verdict::Supported)
+                        .count(),
+                )
+                .unwrap_or(u32::MAX);
+                let payload = crate::lifecycle_evaluate::as_json(&decided, &undecidable);
+                self.append("verdicts", payload).await;
+            }
+            Err(e) => {
+                self.append(
+                    "status",
+                    json!({ "verdicts_not_written": e.to_string() }),
+                )
+                .await;
+            }
+        }
     }
 
     /// Whether this negative result's class is new for its subject.
@@ -992,6 +1054,7 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
     let mut rec = Recorder {
         pg: pg.clone(),
         run_id: params.run_id,
+        user_id: params.user_id,
         seq: 0,
         tokens_in: 0,
         tokens_out: 0,
