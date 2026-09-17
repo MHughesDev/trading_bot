@@ -260,6 +260,35 @@ pub async fn hypothesise(api: &crate::ApiClient, params: &Value) -> Value {
     post(api, "/api/lifecycle/hypotheses", params.clone()).await
 }
 
+/// `propose` — ask a human for a decision that reaches ring 1 or 2 (§6.8, §7.5).
+///
+/// **Creating one changes nothing**, which is why it is not gated. What carries
+/// the approval envelope is the *decision*, because that is where something
+/// happens — and gating the asking would teach a run that asking is expensive,
+/// which is how a run starts looking for another way to get what it wants.
+pub async fn propose(api: &crate::ApiClient, params: &Value) -> Value {
+    let Some(kind) = text(params, "kind") else {
+        return missing("kind", "promote_strategy, change_limits or deploy_paper");
+    };
+    if !["promote_strategy", "change_limits", "deploy_paper"].contains(&kind.as_str()) {
+        return json!({
+            "error": "unknown_proposal_kind",
+            "kind": kind,
+            "kinds": ["promote_strategy", "change_limits", "deploy_paper"],
+        });
+    }
+    if text(params, "dossier_ref").is_none() {
+        return missing(
+            "dossier_ref",
+            "the dossier the decision will be made from. A proposal with no dossier asks a              human to decide from your own summary of your own work.",
+        );
+    }
+    if text(params, "subject").is_none() {
+        return missing("subject", "what is being promoted, armed or changed");
+    }
+    post(api, "/api/lifecycle/proposals", params.clone()).await
+}
+
 /// The catalogue entries for this namespace.
 #[must_use]
 pub fn specs() -> Vec<ToolSpec> {
@@ -355,6 +384,38 @@ pub fn specs() -> Vec<ToolSpec> {
         .internal()
         .evidence(&["design_id"])
         .notes("design"),
+        ToolSpec::new(
+            "propose",
+            "lifecycle",
+            // A write: it creates a row. **Not** a promotion — the proposal
+            // changes nothing, and the envelope belongs on the human's decision.
+            // Declaring it `Promotion` here would gate the asking, and a run that
+            // learns asking is expensive looks for another way.
+            Risk::Write,
+            "ASK a human to approve something that reaches beyond research: registering a              strategy, changing a limit, or arming paper trading. It changes nothing by              itself — a human decides, and the change happens then.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["promote_strategy", "change_limits", "deploy_paper"]
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "What is being promoted, armed or changed."
+                    },
+                    "dossier_ref": {
+                        "type": "string",
+                        "description": "The dossier the decision is made from."
+                    },
+                    "rationale": { "type": "string", "description": "One line on why." }
+                },
+                "required": ["kind", "subject", "dossier_ref"]
+            }),
+        )
+        .internal()
+        .evidence(&["proposal_id"])
+        .notes("propose"),
     ]
 }
 

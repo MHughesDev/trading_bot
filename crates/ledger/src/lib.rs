@@ -26,6 +26,7 @@ pub mod pg;
 pub mod phase;
 pub mod portfolio;
 pub mod prereg;
+pub mod proposal;
 pub mod presets;
 pub mod state;
 pub mod tiers;

@@ -1,6 +1,6 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 31% (5 / 16 tasks), plus 5 `PARTIAL`.**
+**Completion: 31% (5 / 16 tasks), plus 6 `PARTIAL`.**
 
 > Status 2026-09-17. **S-10.1, S-10.6, S-10.7, S-10.13 and S-10.14 are done**;
 > S-10.2, S-10.3, S-10.4 and S-10.14's per-tier half are partial; the other eight
@@ -348,7 +348,41 @@ defect on drift.
 ## Rings 1 and 2
 
 ### S-10.9 Proposals: the only doors into rings 1 and 2; the kill switch reaches ring 0 — M
-`NOT STARTED`
+`PARTIAL` 2026-09-17 — **the door is built; the removal of the other write paths is
+not.**
+
+`crates/ledger/src/proposal.rs`, `lifecycle.propose`, `POST /api/lifecycle/proposals`
+and `0128`'s `agent_lifecycle.proposal`. The row is **inert**: an agent creates it, a
+human decides on the desk, and the registry write happens at that moment as that
+human. The response says `"effect": "nothing yet"` out loud, because a model that
+thinks it promoted something will report that it did.
+
+**Creating one is not gated, and that is deliberate.** The envelope is on the
+*decision*, because that is where something happens; gating the asking would teach a
+run that asking is expensive, and a run that has learned that looks for another way
+to get what it wants.
+
+Nothing is proposed while the kill switch is tripped — for every kind, not just ring
+2 — because a tripped switch is the platform saying something is wrong *now*, and a
+proposal created during it sits in the queue looking reasonable when somebody resets
+the switch an hour later. The switch is read from `monitor.kill_switch`, and **a read
+that fails answers "tripped"**: an outage is not evidence that the platform is
+healthy.
+
+Ring 2 additionally needs the battery and the readiness check. Ring 1 does not — the
+registry is where a strategy lives, not where it trades, and a candidate the battery
+rejected is still worth writing down.
+
+`a_decision_names_a_human_and_a_time` makes "who approved this" a fact rather than a
+reconstruction from timestamps. `Decision::permits_write` returns true only on an
+explicit approval: "not yet rejected" is how an approval queue becomes a delay.
+
+**Not done:** the desk surface, the approval route that performs the write as the
+human, and — the large one — **removing every other write path from an agent token
+into the promoted set**, with the static test that proves it. The ring-2 door is
+already closed and tested (`the_promotion_envelope_is_the_only_door_to_paper`); the
+ring-1 paths are not, and removing them is a product change rather than a
+refactor.
 
 `Proposal` (AGENT-013 §7.5) with `kind`, `ring`, `dossier_ref`, `envelope`. `lifecycle.propose`
 creates it; `promote_strategy` and `change_limits` carry `Promotion`, `deploy_paper` carries

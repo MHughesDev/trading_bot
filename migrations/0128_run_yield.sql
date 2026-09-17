@@ -122,3 +122,68 @@ CREATE TABLE IF NOT EXISTS agent_lifecycle.design (
 
 CREATE INDEX IF NOT EXISTS design_run_idx
   ON agent_lifecycle.design (run_id, bound_at DESC);
+
+-- ## Proposals (AGENT-013 P6, §6.8, §7.5; Set S task S-10.9)
+--
+-- The only doors into rings 1 and 2, and the row is deliberately inert: it
+-- changes nothing. A human approves it on the desk and **the registry write
+-- happens then, as that human** — not as the agent, not with the agent's token,
+-- and not at a moment the agent chose.
+--
+-- `decided_by` is NOT NULL on any decided row, and that is the load-bearing
+-- column: it is what makes "who approved this" a fact rather than a
+-- reconstruction from timestamps.
+
+CREATE TABLE IF NOT EXISTS agent_lifecycle.proposal (
+    proposal_id  UUID PRIMARY KEY,
+    run_id       UUID NOT NULL,
+    kind         TEXT NOT NULL,
+    -- Derived from the kind in `ledger::proposal`, stored so a reader does not
+    -- re-derive it, and CHECKed against the kind here so the two cannot disagree.
+    ring         SMALLINT NOT NULL,
+    envelope     TEXT NOT NULL,
+    -- What the decision is made from. A proposal with no dossier asks a human to
+    -- decide from the agent's own summary of the agent's own work.
+    dossier_ref  TEXT NOT NULL,
+    subject      TEXT NOT NULL,
+    rationale    TEXT NOT NULL DEFAULT '',
+    decision     TEXT NOT NULL DEFAULT 'pending',
+    -- The human. NULL while pending, required once decided.
+    decided_by   UUID,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    decided_at   TIMESTAMPTZ,
+
+    CONSTRAINT a_proposal_kind_is_one_of_three CHECK (
+        kind IN ('promote_strategy', 'change_limits', 'deploy_paper')
+    ),
+    -- The ring follows the kind. Two columns that could disagree are two answers
+    -- to "how far does this reach", and the looser one is the one somebody reads.
+    CONSTRAINT the_ring_follows_the_kind CHECK (
+        (kind IN ('promote_strategy', 'change_limits') AND ring = 1)
+        OR (kind = 'deploy_paper' AND ring = 2)
+    ),
+    -- Every proposal falls under an approval envelope. `none` is not available:
+    -- a proposal that needed no approval would not need to be a proposal.
+    CONSTRAINT a_proposal_is_gated CHECK (
+        envelope IN ('spend', 'promotion', 'sealed_holdout', 'tier3_memory')
+    ),
+    CONSTRAINT a_proposal_cites_a_dossier CHECK (btrim(dossier_ref) <> ''),
+    CONSTRAINT a_proposal_names_its_subject CHECK (btrim(subject) <> ''),
+    CONSTRAINT a_decision_is_one_of_three CHECK (
+        decision IN ('pending', 'approved', 'rejected')
+    ),
+    -- A decided proposal names the human who decided it and when. Pending names
+    -- neither. "Who approved this" must be a fact rather than something
+    -- reconstructed from timestamps afterwards.
+    CONSTRAINT a_decision_names_a_human_and_a_time CHECK (
+        (decision = 'pending' AND decided_by IS NULL AND decided_at IS NULL)
+        OR (decision <> 'pending' AND decided_by IS NOT NULL AND decided_at IS NOT NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS proposal_pending_idx
+  ON agent_lifecycle.proposal (created_at DESC)
+  WHERE decision = 'pending';
+
+CREATE INDEX IF NOT EXISTS proposal_run_idx
+  ON agent_lifecycle.proposal (run_id, created_at DESC);

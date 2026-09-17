@@ -25,6 +25,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use ledger::prereg::{self, Draft, Preregistration, Window};
+use ledger::proposal::ProposalKind;
 
 use crate::{auth::BearerToken, state::AppState};
 
@@ -526,6 +527,138 @@ async fn head_registration(
     match row {
         Some(id) => load(state, id).await,
         None => Ok(None),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProposalBody {
+    kind: String,
+    subject: String,
+    dossier_ref: String,
+    #[serde(default)]
+    rationale: String,
+    #[serde(default)]
+    run_id: Option<Uuid>,
+    /// What the platform found. Supplied by the caller's *session* rather than
+    /// the request on every path that has one — a run that could state its own
+    /// battery result would state the one that lets it through.
+    #[serde(default)]
+    battery_rejected: bool,
+    #[serde(default)]
+    readiness_no_go: bool,
+}
+
+/// `POST /api/lifecycle/proposals` — ask for a decision that reaches ring 1 or 2.
+///
+/// Creating one is not gated, because it changes nothing. The envelope belongs
+/// on the human's decision, which is where something happens.
+pub async fn create_proposal(
+    State(state): State<AppState>,
+    _token: BearerToken,
+    Json(body): Json<ProposalBody>,
+) -> impl IntoResponse {
+    let kind = match body.kind.as_str() {
+        "promote_strategy" => ProposalKind::PromoteStrategy,
+        "change_limits" => ProposalKind::ChangeLimits,
+        "deploy_paper" => ProposalKind::DeployPaper,
+        other => {
+            return bad_request(
+                "unknown_proposal_kind",
+                format!("`{other}` is not a proposal kind"),
+                "promote_strategy, change_limits or deploy_paper",
+            )
+            .into_response()
+        }
+    };
+
+    // The kill switch is the platform's state, never the request's. A run that
+    // could say the switch was clear would say it.
+    let pre = ledger::proposal::Preconditions {
+        battery_rejected: body.battery_rejected,
+        readiness_no_go: body.readiness_no_go,
+        kill_switch_tripped: kill_switch_tripped(&state).await,
+    };
+    let proposal = match ledger::proposal::propose(
+        body.run_id.unwrap_or_else(Uuid::new_v4),
+        kind,
+        &body.dossier_ref,
+        &body.subject,
+        &body.rationale,
+        pre,
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            let code = match e {
+                ledger::proposal::ProposalError::KillSwitchTripped => "kill_switch_tripped",
+                ledger::proposal::ProposalError::NoDossier => "no_dossier",
+                _ => "precondition_failed",
+            };
+            return bad_request(
+                code,
+                e.to_string(),
+                "nothing about this proposal is urgent enough to route around the reason                  it was refused",
+            )
+            .into_response();
+        }
+    };
+
+    let res = sqlx::query(
+        "INSERT INTO agent_lifecycle.proposal
+             (proposal_id, run_id, kind, ring, envelope, dossier_ref, subject, rationale)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+    )
+    .bind(proposal.proposal_id)
+    .bind(proposal.run_id)
+    .bind(proposal.kind.as_str())
+    .bind(i16::from(proposal.ring))
+    .bind(proposal.envelope.as_str())
+    .bind(&proposal.dossier_ref)
+    .bind(&proposal.subject)
+    .bind(&proposal.rationale)
+    .execute(&state.pg)
+    .await;
+    match res {
+        Ok(_) => (
+            StatusCode::CREATED,
+            Json(json!({
+                "proposal_id": proposal.proposal_id,
+                "ring": proposal.ring,
+                "envelope": proposal.envelope.as_str(),
+                "decision": "pending",
+                // Said out loud, because a model that thinks it promoted
+                // something will report that it did.
+                "effect": "nothing yet — a human decides, and the change happens then",
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "storage", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Whether the platform has decided something is wrong.
+///
+/// A read that fails answers **tripped**. An outage is not evidence that the
+/// platform is healthy, and the direction of a wrong answer here is the whole
+/// question: a false "clear" lets a proposal into the queue during exactly the
+/// window nobody wanted one.
+async fn kill_switch_tripped(state: &AppState) -> bool {
+    // The global scope. A venue- or strategy-scoped halt is a narrower statement
+    // and does not stop every proposal; a global one is the platform saying
+    // something is wrong, full stop.
+    let row: Result<Option<String>, _> = sqlx::query_scalar(
+        "SELECT state FROM monitor.kill_switch WHERE scope = 'global'           ORDER BY updated_at DESC LIMIT 1",
+    )
+    .fetch_optional(&state.pg)
+    .await;
+    match row {
+        Ok(Some(state)) => state == "halted",
+        // No row is a platform that has never tripped it, which is clear.
+        Ok(None) => false,
+        Err(_) => true,
     }
 }
 

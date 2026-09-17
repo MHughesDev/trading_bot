@@ -500,6 +500,28 @@ delta and say why that is the one that matters.
 Passing is a floor, not a promise. It says the run is not doomed on sample size
 alone; it does not say the window will settle the question.
 
+### propose
+
+Ask a human to approve something that reaches beyond research: registering a
+strategy, changing a live limit, or arming paper trading.
+
+**It changes nothing.** You create a row; a human reads the dossier and decides;
+the change happens at that moment, made by them. There is no version of this
+where your token writes the promoted set, which is the point — it means the worst
+thing a run can do is ask for something silly, and somebody says no.
+
+`dossier_ref` is required. A proposal with no dossier asks a human to decide from
+your own summary of your own work, which is the one input they cannot check.
+
+Nothing is proposed while the kill switch is tripped. A proposal created then
+would be sitting in the queue looking reasonable when somebody resets the switch
+an hour later.
+
+Arming paper also needs `precapital_battery` to have not rejected the candidate
+and `go_live_readiness` to have not said no-go. Registering a strategy does not:
+the registry is where a strategy lives, not where it trades, and a candidate the
+battery rejected is still worth writing down.
+
 ### report_kill
 
 Refute a candidate: show that a strategy's apparent edge is an artifact. This is

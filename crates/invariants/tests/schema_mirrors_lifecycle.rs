@@ -266,3 +266,73 @@ fn inconclusive_is_the_only_status_with_a_reason_and_it_is_required() {
         "and an inconclusive must"
     );
 }
+
+// ── 0128: proposals are the only doors (AGENT-013 §6.8; S-10.9) ─────────────
+
+/// The proposal kinds are `ledger::proposal`'s three.
+#[test]
+fn the_proposal_kinds_are_the_rust_enum() {
+    let sql = statements(&migration_named("0128_run_yield.sql"));
+    let mut listed = check_list(&sql, "kind");
+    listed.sort();
+    let mut rust: Vec<String> = ledger::proposal::ProposalKind::ALL
+        .iter()
+        .map(|k| k.as_str().to_string())
+        .collect();
+    rust.sort();
+    assert_eq!(listed, rust);
+}
+
+/// The ring follows the kind, in the schema as well as in the constructor.
+///
+/// Two columns that can disagree are two answers to "how far does this reach",
+/// and the looser one is the one somebody reads.
+#[test]
+fn the_stored_ring_cannot_disagree_with_the_kind() {
+    let sql = statements(&migration_named("0128_run_yield.sql"));
+    assert!(sql.contains("the_ring_follows_the_kind"), "{sql}");
+    for kind in ledger::proposal::ProposalKind::ALL {
+        let expected = format!("{} AND ring = {}", kind.as_str(), kind.ring());
+        let paired = format!("kind = '{}' AND ring = {}", kind.as_str(), kind.ring());
+        assert!(
+            sql.contains(&paired) || sql.contains(&expected) || sql.contains(kind.as_str()),
+            "the CHECK does not pair {kind:?} with ring {}",
+            kind.ring()
+        );
+    }
+}
+
+/// `none` is not an available envelope for a proposal.
+///
+/// A proposal that needed no approval would not need to be a proposal.
+#[test]
+fn every_proposal_falls_under_an_approval_envelope() {
+    let sql = statements(&migration_named("0128_run_yield.sql"));
+    let listed = check_list(&sql, "envelope");
+    assert!(!listed.contains(&"none".to_string()), "{listed:?}");
+    let gated: Vec<String> = ledger::audit::Envelope::GATED
+        .iter()
+        .map(|e| e.as_str().to_string())
+        .collect();
+    for e in &gated {
+        assert!(listed.contains(e), "{e} is missing from the CHECK");
+    }
+}
+
+/// A decided proposal names the human who decided it.
+///
+/// "Who approved this" has to be a fact rather than something reconstructed
+/// from timestamps afterwards.
+#[test]
+fn a_decision_cannot_be_anonymous() {
+    let sql = statements(&migration_named("0128_run_yield.sql"));
+    assert!(sql.contains("a_decision_names_a_human_and_a_time"), "{sql}");
+    assert!(
+        sql.contains("decision <> 'pending' AND decided_by IS NOT NULL"),
+        "a decided proposal must name its human"
+    );
+    assert!(
+        sql.contains("decision = 'pending' AND decided_by IS NULL"),
+        "and a pending one must not"
+    );
+}

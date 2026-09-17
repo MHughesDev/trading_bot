@@ -108,6 +108,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/lifecycle/metrics", get(lifecycle::metrics))
         // The power check runs here, before any trial (§6.3).
         .route("/api/lifecycle/designs", post(lifecycle::bind_design))
+        // The only doors into rings 1 and 2 (§6.8). Creating one changes
+        // nothing; the envelope is on the human's decision.
+        .route("/api/lifecycle/proposals", post(lifecycle::create_proposal))
         .route("/api/falsification/defects", post(falsification::report_defect))
         // Feasibility: neither of these spends a trial, which is the point of
         // asking them before a search rather than after it disappoints.
