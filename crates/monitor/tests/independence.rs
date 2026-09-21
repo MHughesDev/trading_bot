@@ -62,6 +62,53 @@ fn the_monitor_does_not_depend_on_the_api() {
 }
 
 #[test]
+fn the_monitor_reads_one_database_and_it_is_postgres() {
+    // The other half of the failure domain, and until 2026-09-21 it was a
+    // sentence in a doc comment rather than a check. `FactKind::HardDataStaleness`
+    // is unwired because the age of an instrument's last bar lives in ClickHouse
+    // and this crate has no client for it; the obvious way to "fix" that blocker
+    // is to add one, and the obvious way is the wrong one.
+    //
+    // A monitor holding a ClickHouse handle has to answer a question it cannot
+    // answer well: what does a stale feed look like when the store you would
+    // measure its staleness *from* is the thing that is down? Either it reports
+    // every feed absent and halts the whole book on its own outage, or it reports
+    // nothing and goes quiet in exactly the failure it exists to catch. Neither is
+    // a safety property. The answer is a producer writing a Postgres gauge — see
+    // `FactKind::HardDataStaleness`'s `needs` — so the monitor keeps measuring
+    // from the one database whose loss already closes the order gate by itself.
+    //
+    // Asserted over the manifest, because this is a dependency decision and a
+    // behavioural test cannot see it: a `clickhouse` line added here would break
+    // nothing and pass everything.
+    let toml = manifest();
+    for forbidden in [
+        // The client itself.
+        "clickhouse",
+        "reqwest",
+        // And the two crates that own one, which would hand this crate a bar
+        // reader by the back door while the manifest still read as Postgres-only.
+        "storage = ",
+        "backtest = ",
+    ] {
+        assert!(
+            !toml.contains(forbidden),
+            "crates/monitor must not depend on {forbidden:?}: a monitor that measures \
+             staleness from the store it is measuring cannot distinguish a dead feed \
+             from its own outage, and one of those two mistakes halts the book while \
+             the other goes quiet. The bar age reaches this crate as a Postgres gauge \
+             written by whoever observed the bar — see FactKind::HardDataStaleness"
+        );
+    }
+    // Anti-vacuity: the manifest must still declare the one database it does read,
+    // or the loop above is asserting the absence of things from an empty file.
+    assert!(
+        toml.contains("sqlx = "),
+        "crates/monitor must still depend on sqlx; this guard is broken, not satisfied"
+    );
+}
+
+#[test]
 fn the_monitor_ships_its_own_binary() {
     // COMP-007 §1 P1: "its own binary (`crates/monitor`, service `tbot-monitor`)".
     // A library alone would satisfy every other test here and would only ever run

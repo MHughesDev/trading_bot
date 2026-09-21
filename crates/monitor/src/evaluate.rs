@@ -110,7 +110,52 @@ impl DependencyMap {
     }
 }
 
-/// What a feed's age means.
+/// Why a feed's staleness could not be measured at all.
+///
+/// The sibling of [`collect::Unobserved`](crate::collect::Unobserved), and it
+/// exists for the same reason: this crate's one rule is that an absent
+/// measurement is never a zero, never a healthy one and never a small one, and
+/// the only way to keep that rule is to give "there was no measurement" a name
+/// of its own rather than a number that looks like one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnmeasurableFeed {
+    /// No last-bar time is known for this instrument, so there is no age.
+    ///
+    /// Not "the last bar was long ago" and not "the last bar was just now". A
+    /// producer that has never seen this instrument, or that read a row whose
+    /// `last_bar_at` was NULL, knows only that it does not know — and the two
+    /// numbers it would be tempted to substitute are a false halt and a false
+    /// all-clear respectively.
+    NoLastBarObserved,
+    /// No positive bar period is declared for this instrument, so there is no
+    /// multiple to measure an age against.
+    ///
+    /// A feed's staleness is defined *relative to its own timeframe* (four
+    /// minutes is fine for a daily bar and a halt for a one-minute one). With no
+    /// timeframe the question has no answer, and the fixed number of seconds
+    /// somebody would reach for instead is the single global threshold this
+    /// module exists to refuse.
+    NoTimeframeDeclared,
+}
+
+impl UnmeasurableFeed {
+    /// The string the event and the log speak.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NoLastBarObserved => "no_last_bar_observed",
+            Self::NoTimeframeDeclared => "no_timeframe_declared",
+        }
+    }
+}
+
+impl std::fmt::Display for UnmeasurableFeed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// What a feed's age means, or an explicit statement that it means nothing yet.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Staleness {
     Fresh,
@@ -123,6 +168,37 @@ pub enum Staleness {
     /// on the instrument (COMP-007 §3, §4.1; ADR-D-11). Not a scale-down —
     /// scaling to a quarter still trades on a stale price.
     Hard(Fact),
+    /// The inputs do not support any verdict, and this is the verdict.
+    ///
+    /// **Not a fourth band.** `Fresh`, `Warning` and `Hard` are three answers to
+    /// "how old is this feed"; this is the refusal to answer it. It raises no
+    /// [`Fact`] — the fact's own `reason` would have to name an age and a
+    /// timeframe, and naming either here would be a measurement nobody took —
+    /// and it is deliberately not something a caller can treat as the good news,
+    /// because [`Staleness::is_measured`] is the only predicate offered and
+    /// there is no `is_fresh`.
+    ///
+    /// A caller that reaches this has learned something real: it is watching an
+    /// instrument it cannot watch. Dropping it silently is the same defect as
+    /// reporting `Fresh`, one level up.
+    Unmeasurable {
+        instrument: String,
+        because: UnmeasurableFeed,
+    },
+}
+
+impl Staleness {
+    /// Whether this verdict rests on a measurement at all.
+    ///
+    /// The only predicate on this type, and the omissions are the point: an
+    /// `is_fresh()` would be written `matches!(self, Fresh)` by its author and
+    /// read as "the feed is fine" by everyone after them, at which point
+    /// `Unmeasurable` — a feed nobody can see — joins `Warning` and `Hard` in
+    /// the bucket marked *not fine* and is never looked at again.
+    #[must_use]
+    pub fn is_measured(&self) -> bool {
+        !matches!(self, Self::Unmeasurable { .. })
+    }
 }
 
 /// Classify a feed's age against its own timeframe.
@@ -130,11 +206,32 @@ pub enum Staleness {
 /// Against its *own* timeframe, not a fixed number of seconds: a daily bar that is
 /// four minutes old is fine and a one-minute bar that is four minutes old is not,
 /// and a single global staleness threshold gets one of those two wrong.
+///
+/// # The signature is the safety property
+///
+/// `age_secs` is an `Option` because the producer that will eventually call this
+/// has a third case as common as the other two — an instrument with no row, or a
+/// row whose `last_bar_at` is NULL — and the two ways of flattening that case
+/// into an `i64` are both wrong in a direction that costs money. A large
+/// substitute halts a healthy book; a zero reports a dead feed as current and
+/// lets a strategy price a position off it. Neither is representable here.
+///
+/// A non-positive `timeframe_secs` is the same shape: there is no multiple to
+/// measure against, so there is no verdict. This function answered `Fresh` to
+/// both of those until 2026-09-21 — an absent measurement reported as a healthy
+/// one, on the one surface in the platform whose job is to refuse exactly that.
 #[must_use]
-pub fn staleness(instrument: &str, age_secs: i64, timeframe_secs: i64) -> Staleness {
+pub fn staleness(instrument: &str, age_secs: Option<i64>, timeframe_secs: i64) -> Staleness {
+    let unmeasurable = |because| Staleness::Unmeasurable {
+        instrument: instrument.to_owned(),
+        because,
+    };
     if timeframe_secs <= 0 {
-        return Staleness::Fresh;
+        return unmeasurable(UnmeasurableFeed::NoTimeframeDeclared);
     }
+    let Some(age_secs) = age_secs else {
+        return unmeasurable(UnmeasurableFeed::NoLastBarObserved);
+    };
     if age_secs > timeframe_secs * HARD_STALENESS_MULTIPLE {
         return Staleness::Hard(Fact::HardDataStaleness {
             instrument: instrument.to_owned(),
@@ -323,17 +420,17 @@ mod tests {
 
     #[test]
     fn a_fresh_feed_is_fresh_and_a_four_minute_old_daily_bar_is_too() {
-        assert_eq!(staleness("BTC-USD", 30, 60), Staleness::Fresh);
-        assert_eq!(staleness("AAPL", 240, 86_400), Staleness::Fresh);
+        assert_eq!(staleness("BTC-USD", Some(30), 60), Staleness::Fresh);
+        assert_eq!(staleness("AAPL", Some(240), 86_400), Staleness::Fresh);
     }
 
     #[test]
     fn staleness_is_measured_against_the_instruments_own_timeframe() {
         // 240s is fine for a daily bar and a hard halt for a one-minute one. A
         // single global threshold gets exactly one of those two wrong.
-        assert!(matches!(staleness("BTC-USD", 240, 60), Staleness::Warning { .. }));
-        assert!(matches!(staleness("BTC-USD", 700, 60), Staleness::Hard(_)));
-        assert_eq!(staleness("AAPL", 700, 86_400), Staleness::Fresh);
+        assert!(matches!(staleness("BTC-USD", Some(240), 60), Staleness::Warning { .. }));
+        assert!(matches!(staleness("BTC-USD", Some(700), 60), Staleness::Hard(_)));
+        assert_eq!(staleness("AAPL", Some(700), 86_400), Staleness::Fresh);
     }
 
     #[test]
@@ -348,7 +445,7 @@ mod tests {
         // behaviour finds the name and stops. The assertion now reads
         // `Family::breach_halts` alongside the literal, so the name, the
         // assertion and the policy move together or not at all.
-        let Staleness::Hard(fact) = staleness("BTC-USD", 700, 60) else {
+        let Staleness::Hard(fact) = staleness("BTC-USD", Some(700), 60) else {
             panic!("700s on a 60s bar is past the hard multiple");
         };
         assert!(fact.family().breach_halts(), "COMP-007 §3: a hard-stale feed halts");
@@ -371,13 +468,13 @@ mod tests {
         // the book on it is the alarm fatigue §4.1 exists to prevent. Asserted so
         // that widening the halt to the whole Data family — which ADR-D-11 did —
         // cannot quietly swallow the warning band with it.
-        let Staleness::Warning { instrument, age_secs } = staleness("BTC-USD", 240, 60) else {
+        let Staleness::Warning { instrument, age_secs } = staleness("BTC-USD", Some(240), 60) else {
             panic!("240s on a 60s bar is past the warn multiple and short of the hard one");
         };
         assert_eq!(instrument, "BTC-USD");
         assert_eq!(age_secs, 240);
         assert!(
-            !matches!(staleness("BTC-USD", 240, 60), Staleness::Hard(_)),
+            !matches!(staleness("BTC-USD", Some(240), 60), Staleness::Hard(_)),
             "the soft band raises no fact, so nothing skips dwell and nothing halts"
         );
     }
@@ -394,43 +491,132 @@ mod tests {
         let hard_edge = tf * HARD_STALENESS_MULTIPLE;
         // `past the multiple`, not `at` it: a bar exactly 3× old is on time for a
         // feed that publishes on the boundary.
-        assert_eq!(staleness("BTC-USD", warn_edge, tf), Staleness::Fresh);
+        assert_eq!(staleness("BTC-USD", Some(warn_edge), tf), Staleness::Fresh);
         assert!(matches!(
-            staleness("BTC-USD", warn_edge + 1, tf),
+            staleness("BTC-USD", Some(warn_edge + 1), tf),
             Staleness::Warning { .. }
         ));
         assert!(matches!(
-            staleness("BTC-USD", hard_edge, tf),
+            staleness("BTC-USD", Some(hard_edge), tf),
             Staleness::Warning { .. }
         ));
         assert!(matches!(
-            staleness("BTC-USD", hard_edge + 1, tf),
+            staleness("BTC-USD", Some(hard_edge + 1), tf),
             Staleness::Hard(_)
         ));
     }
 
     #[test]
-    fn a_nonpositive_timeframe_reports_fresh_and_that_is_a_gap_not_a_result() {
-        // Named for what it asserts, not for what one would want it to assert.
-        // A `timeframe_secs` of zero is not a timeframe: there is no multiple to
-        // measure an age against, and `staleness` answers `Fresh` — an absent
-        // measurement reported as a healthy one, which is the shape this crate
-        // exists to refuse.
+    fn an_undeclared_timeframe_refuses_a_verdict_instead_of_reporting_fresh() {
+        // The decision this arm used to defer. Until 2026-09-21 a
+        // `timeframe_secs` of zero — which is not a timeframe, because there is
+        // no multiple to measure an age against — answered `Fresh`: an absent
+        // measurement reported as a healthy one, which is the exact shape this
+        // crate exists to refuse. It was pinned rather than changed, with a note
+        // saying the producer's author would have to decide it.
         //
-        // It is not wrong *today* only because nothing calls `staleness`:
-        // `FactKind::HardDataStaleness` is `Wiring::Unwired` and the producer it
-        // names does not exist yet. The day that producer is written, it must
-        // either guarantee a positive timeframe per instrument or this arm must
-        // become a halt — and this assertion is what makes that a decision
-        // somebody has to take rather than a default they inherit.
-        assert_eq!(staleness("BTC-USD", 999_999, 0), Staleness::Fresh);
-        assert_eq!(staleness("BTC-USD", 999_999, -60), Staleness::Fresh);
-        assert!(
-            !crate::family::FactKind::HardDataStaleness
-                .wiring()
-                .is_raised_in_production(),
-            "a producer now exists, so the zero-timeframe arm must be decided rather than inherited"
+        // Deferring it was the wrong call and it is taken here instead. The
+        // producer's author is not the person who will re-read this arm; they
+        // are the person who will call `staleness` in a loop over rows and ship
+        // whatever it returns. A default that is safe only while it is unreached
+        // is a loaded gun pointed at the day it becomes reachable.
+        assert_eq!(
+            staleness("BTC-USD", Some(999_999), 0),
+            Staleness::Unmeasurable {
+                instrument: "BTC-USD".to_owned(),
+                because: UnmeasurableFeed::NoTimeframeDeclared,
+            }
         );
+        assert_eq!(
+            staleness("BTC-USD", Some(999_999), -60),
+            Staleness::Unmeasurable {
+                instrument: "BTC-USD".to_owned(),
+                because: UnmeasurableFeed::NoTimeframeDeclared,
+            }
+        );
+    }
+
+    #[test]
+    fn an_unknown_last_bar_time_is_neither_a_stale_feed_nor_a_fresh_one() {
+        // The case the old signature could not express, which is why it was the
+        // dangerous one. A producer reading a row whose `last_bar_at` is NULL, or
+        // finding no row at all for an instrument, had to invent an `i64` — and
+        // both inventions are wrong in a direction that costs money. A large
+        // substitute halts a book whose feeds are fine; a zero reports a dead
+        // feed as current and lets a strategy price a position off it.
+        //
+        // `None` is now the honest input and it has an honest answer, and the
+        // timeframe being perfectly well known does not rescue it.
+        assert_eq!(
+            staleness("BTC-USD", None, 60),
+            Staleness::Unmeasurable {
+                instrument: "BTC-USD".to_owned(),
+                because: UnmeasurableFeed::NoLastBarObserved,
+            }
+        );
+    }
+
+    #[test]
+    fn nothing_the_monitor_did_not_measure_is_ever_reported_fresh() {
+        // The property, over the whole input space rather than over the two
+        // literals above: `Fresh` is reachable only from a measured age and a
+        // declared timeframe. Written as a sweep so that a fourth arm added later
+        // — or a `timeframe_secs <= 0` guard someone "simplifies" into a
+        // `.max(1)`, which is the tempting one — fails here rather than shipping.
+        let timeframes = [-86_400_i64, -60, 0, 1, 60, 86_400];
+        let ages = [None, Some(-1_i64), Some(0), Some(1), Some(59), Some(999_999)];
+        let mut fresh = 0;
+        let mut unmeasurable = 0;
+        for tf in timeframes {
+            for age in ages {
+                let verdict = staleness("BTC-USD", age, tf);
+                let measurable = age.is_some() && tf > 0;
+                assert_eq!(
+                    verdict.is_measured(),
+                    measurable,
+                    "staleness answered {verdict:?} for age {age:?} on a {tf}s timeframe"
+                );
+                if verdict.is_measured() {
+                    if matches!(verdict, Staleness::Fresh) {
+                        fresh += 1;
+                    }
+                } else {
+                    unmeasurable += 1;
+                }
+            }
+        }
+        // Anti-vacuity, both ways: a `staleness` that refused everything would
+        // satisfy every assertion in the loop, and so would one that measured
+        // everything.
+        assert!(fresh > 0, "the sweep never reached Fresh; it is broken, not satisfied");
+        assert!(
+            unmeasurable > 0,
+            "the sweep never reached Unmeasurable; it is broken, not satisfied"
+        );
+    }
+
+    #[test]
+    fn an_unmeasurable_feed_raises_no_fact_and_cannot_be_read_as_the_good_news() {
+        // Two halves of one rule. It raises no `Fact`, because the fact's own
+        // `reason` names an age and a timeframe and neither was measured — a halt
+        // whose stated cause is a number nobody took is worse than no halt, since
+        // the operator acts on the number. And the type offers no `is_fresh`, so
+        // the only way to sort it into the healthy bucket is to write the match
+        // out and be seen doing it.
+        let verdict = staleness("BTC-USD", None, 0);
+        assert!(!matches!(verdict, Staleness::Hard(_)));
+        assert!(!matches!(verdict, Staleness::Fresh));
+        assert!(!verdict.is_measured());
+        // And the refusal says which of the two inputs was missing: "we could not
+        // measure it" is not actionable, "no bar period is declared for BTC-USD"
+        // is. The timeframe is reported first because it is the one a human fixes
+        // by declaring a row, rather than by finding out why a collector stopped.
+        let Staleness::Unmeasurable { instrument, because } = verdict else {
+            panic!("no age and no timeframe is not measurable");
+        };
+        assert_eq!(instrument, "BTC-USD");
+        assert_eq!(because, UnmeasurableFeed::NoTimeframeDeclared);
+        assert_eq!(because.to_string(), "no_timeframe_declared");
     }
 
     #[test]

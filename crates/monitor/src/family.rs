@@ -249,17 +249,66 @@ impl FactKind {
             // ClickHouse and this crate deliberately has no client for it. Its
             // Postgres-only dependency set is what keeps it a separate failure
             // domain, so the answer is a producer, not a second database handle.
+            //
+            // Checked against the running platform on 2026-09-21 rather than
+            // inferred, because the three candidate sources a reader would reach
+            // for all look plausible from the source and are all wrong from the
+            // database. The findings are in `because`; none of them is a table
+            // this crate could start reading tomorrow.
             Self::HardDataStaleness => Wiring::Unwired {
                 because: concat!(
-                    "the age of an instrument's last bar lives in ClickHouse and ",
-                    "crates/monitor has no client for it and must not grow one — its ",
-                    "Postgres-only dependency set is what makes it a separate ",
-                    "failure domain",
+                    "no table in Postgres records that a bar arrived. The age of an ",
+                    "instrument's last bar lives only in ClickHouse `trading.market_bar`, ",
+                    "written by the platform's live 1m persister, and crates/monitor has ",
+                    "no client for it and must not grow one — its Postgres-only ",
+                    "dependency set is what makes it a separate failure domain, and a ",
+                    "monitor that could not reach ClickHouse would be a monitor unable to ",
+                    "measure staleness at the moment staleness is most likely. Three ",
+                    "Postgres columns look like the answer and are not: (1) ",
+                    "dataplane.data_coverage_census.last_bar holds 0 rows, its only writer ",
+                    "backtest::census::take_census/persist has no caller anywhere in the ",
+                    "workspace, and migration 0097 makes it an append-only series keyed on ",
+                    "`as_of` with an immutability trigger — so `now() - last_bar` ",
+                    "over-states age by the whole interval since the snapshot, which is ",
+                    "the false-halt direction; (2) dataplane.instrument.last_seen is NULL ",
+                    "in all 10 rows and nothing in Rust writes it, though migration 0046 ",
+                    "grants UPDATE (last_seen) to app_role; (3) monitor.heartbeat already ",
+                    "carries (instance, beat_at, cadence_ms) and needs no migration, but ",
+                    "it is read by component_beats/stale_components into Family::Platform, ",
+                    "which IS suppressible by a maintenance window and scales rather than ",
+                    "halts — beating feeds into it would give one condition two verdicts ",
+                    "and let a deploy window suppress the weaker one",
                 ),
                 needs: concat!(
-                    "a writer of (instrument_id, last_bar_at, timeframe_secs) into ",
-                    "Postgres — then monitor::service::MonitorService::collect_cadence ",
-                    "calls evaluate::staleness and MonitorStore::carry_out_fact",
+                    "three things, in this order. FIRST a migration (this crate must not ",
+                    "write one) creating monitor.feed_freshness as a GAUGE, not a census: ",
+                    "PRIMARY KEY (instrument_id, venue_id), last_bar_at TIMESTAMPTZ NOT ",
+                    "NULL, timeframe_secs INT NOT NULL CHECK (timeframe_secs > 0) — the ",
+                    "CHECK is what keeps the undeclared-timeframe case out of the gauge ",
+                    "rather than a comment saying it should be — observed_at TIMESTAMPTZ ",
+                    "NOT NULL DEFAULT now(), and GRANT SELECT TO app_role plus GRANT ",
+                    "INSERT, UPDATE (last_bar_at, observed_at) TO app_role. SECOND the ",
+                    "producer: apps/platform/src/bar_persist.rs::run_bar_persist is the ",
+                    "single writer of live bars and already holds every column ",
+                    "(instrument_id, venue_id, bar.available_time, Timeframe::Minutes1) ",
+                    "per bar, so it upserts one row per bar it persists and measures the ",
+                    "age rather than inferring it — no other caller may write this table, ",
+                    "because a writer that did not observe the bar is guessing. THIRD, ",
+                    "here: monitor::service::MonitorService::collect_cadence reads the ",
+                    "gauge, passes Some(age) or None to monitor::evaluate::staleness, and ",
+                    "routes a Staleness::Hard through monitor::facts::decide and ",
+                    "monitor::store::MonitorStore::carry_out_fact. NOTE for the third ",
+                    "step: Fact::HardDataStaleness and DependencyMap key on a bare symbol, ",
+                    "and in the live database BTC-USD is three instruments (dataplane ids ",
+                    "1005, 1007, 1008 at three venues) whose last 60s bars were 70 ",
+                    "minutes, 2 minutes and 91 days old at one instant — so the fact and ",
+                    "the dependency map must be keyed on (symbol, venue) or the gauge ",
+                    "halts the wrong strategies. The dependency edge itself is ",
+                    "strategy_instances (strategy_id, instrument_id), which holds 0 rows, ",
+                    "and the join from what a strategy names to what a bar is keyed on is ",
+                    "broken today: instruments.instrument_key is NULL for BTC-USD and the ",
+                    "six crypto instruments carrying live bars have no instruments row at ",
+                    "all",
                 ),
             },
         }
