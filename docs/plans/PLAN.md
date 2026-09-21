@@ -17,7 +17,7 @@ worse than no map, because people steer by it.
 
 ---
 
-## 1. Where we are — **44% left**
+## 1. Where we are — **42% left**
 
 Derived 2026-09-21 from the `### <TASK-ID>` headings and their status markers
 across sets P, S and T. Size-weighted **S = 1, M = 2, L = 4**: 189 tasks of
@@ -25,12 +25,12 @@ wildly different sizes averaged flat would flatter us.
 
 | counting rule | % of the work left |
 |---|---|
-| strict — only `DONE` counts | 66% |
-| **`PARTIAL` counts half** | **44%** |
-| generous — `PARTIAL` counts done | 22% |
+| strict — only `DONE` counts | 64% |
+| **`PARTIAL` counts half** | **42%** |
+| generous — `PARTIAL` counts done | 21% |
 
 Take the middle number and treat it as **±10**, not as a measurement. `PARTIAL`
-is 236 of 531 units and in this repository it spans "complete, one database test
+is 227 of 531 units and in this repository it spans "complete, one database test
 unwritten" to "the types exist and nothing calls them". The spread between the
 strict and generous rows *is* the uncertainty, and it is honest to show it rather
 than pick one and present it as precision.
@@ -39,7 +39,7 @@ than pick one and present it as precision.
 
 | set | subject | tasks | units | done | partial | % left |
 |---|---|---:|---:|---:|---:|---:|
-| **S** | The Agent Platform | 189 | 446 | 76 | 92 | **37%** |
+| **S** | The Agent Platform | 189 | 446 | 84 | 88 | **35%** |
 | **P** | Data Reach | 30 | 51 | 5 | 0 | **84%** |
 | **T** | Forward Evidence | 17 | 34 | 3 | 0 | **82%** |
 
@@ -55,19 +55,31 @@ being where the code is.
 | 9 — Context as retrieval | 20 | 56 | 46 | 10 | 0 | 0 | 9% |
 | 8 — Integration and honesty | 9 | 24 | 18 | 6 | 0 | 0 | 12% |
 | 7 — The monitor | 13 | 29 | 10 | 18 | 0 | 1 | 34% |
+| **6 — The Research Desk** | 24 | **66** | 18 | 48 | 0 | 0 | **36%** |
 | 10 — Modes and the lifecycle | 16 | 41 | 11 | 30 | 0 | 0 | 37% |
 | 2 — One runtime | 16 | 32 | 9 | 19 | 4 | 0 | 42% |
-| 3 — The catalogue | 19 | 50 | 18 | 20 | 12 | 0 | 44% |
+| 3 — The catalogue | 19 | 50 | 18 | 22 | 0 | **10** | 42% |
 | 4 — Memory and evaluation | 17 | 39 | 6 | 31 | 0 | 2 | 45% |
-| **6 — The Research Desk** | 24 | **66** | 4 | 62 | 0 | 0 | **47%** |
+| 5 — The language | 15 | 36 | 12 | 15 | 9 | 0 | 46% |
 | 0 — Ground rules | 6 | 7 | 1 | 4 | 1 | 1 | 57% |
-| 5 — The language | 15 | 36 | 12 | 12 | 12 | 0 | 50% |
 | **11 — Continuous research** | 14 | 32 | 0 | 19 | 13 | 0 | **70%** |
 
-The block that matters by *volume* is **6 — the Research Desk (66 units)**, and
-two desk tracks on 2026-09-21 spent themselves on the part of it that was not
-missing code at all: six tabs wired to `null` behind copy explaining their own
-emptiness. Phase 11 still has the highest percentage and the smallest body.
+The block that matters by *volume* is still **6 — the Research Desk (66
+units)**, but it moved 47% → 36% on 2026-09-21 **without anybody writing a
+feature**: a read-only audit checked every marker in the file against the tree
+and the running platform and found five tasks that were done and marked
+`PARTIAL`, and one marked `DONE` that fails its own acceptance by 28 files. The
+moves went both ways, which is the point — an audit that only promotes is a
+press release.
+
+Phase 3's ten blocked units are new and are not a setback: four tasks moved
+`NOT STARTED` → `BLOCKED:UPSTREAM` once somebody checked *why* they were
+unstarted. Two ClickHouse schema files were never applied on this deployment,
+and that single fact kills three tools. Blocked and not-started weigh the same
+in the percentage and mean completely different things to whoever picks the work
+up.
+
+Phase 11 still has the highest percentage and the smallest body.
 
 ### Set P and Set T by phase
 

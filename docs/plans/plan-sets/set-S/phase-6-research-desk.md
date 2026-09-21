@@ -1,6 +1,6 @@
 # Phase 6 — The Research Desk
 
-**Completion: 8% (2 / 24 tasks), plus 22 `PARTIAL` — the desk is built and three of its endpoints do not exist.**
+**Completion: 25% (6 / 24 tasks), plus 18 `PARTIAL` — five markers were wrong low and one was wrong high; twelve of the endpoints the desk calls do not exist on the running platform.**
 
 > **This file was wrong.** Until 2026-09-16 it recorded all 24 tasks as `NOT STARTED`. The
 > Research Desk is in fact built and shipping: `pages/DeskPage.tsx` under 13 routes, 18
@@ -302,6 +302,89 @@ prose *to explain that it is unbuilt* made it read as built and failed the suite
 
 ---
 
+### An audit that wrote no code, 2026-09-21 — six markers were wrong, in both directions
+
+A track was sent to verify every status line in this file against the tree and
+the running platform, and forbidden to edit anything. It is the cheapest track
+of the session and it found more than most of the ones that built things.
+
+**Five tasks were done and marked `PARTIAL`** — S-6.2, S-6.3, S-6.4, S-6.5,
+S-6.13 — each promoted above with the specific clause that was checked. **One
+task was marked `DONE` and fails its own acceptance by twenty-eight files**
+(S-6.22). S-6.1 is almost certainly a sixth promotion; it is held back only
+because its acceptance names a clean `npm run build` and a frontend track is
+editing the tree as this is written. A build run against a half-finished edit
+proves nothing, so the marker waits for one that means something.
+
+**How S-6.22 passed.** Its guard walks the desk directory plus five named files
+and asserts a claim about the whole repository. A test whose scope is narrower
+than its claim is worse than no test, because it converts an open question into
+a settled one. That is the lesson, not the twenty-eight files.
+
+**Four status notes stated reasons that are false**, and they had propagated:
+three separate notes said phase 4's memory migrations were absent. They are
+applied — `0122`, `0124`, `0125` — `agent_memory.entry` exists with its full
+CHECK set, and `/api/memory/{bucket}` serves all seven buckets. **The false
+claim was not only in the plan: it is shipped to the operator in a response
+body.** `/api/desk/digest` returns `kinds_not_covered` telling them *"findings
+are not persisted in this deployment — the memory engine exists and its
+migrations do not"*, and its second entry says the monitor tables *"record
+current state, not state changes"* when `monitor.events` (migration `0075`)
+carries `from_state`, `to_state`, `metric`, `observed_value` and `limit_value`
+and is precisely a state-change log. A route built to prevent a silence from
+being misread now misreads it out loud.
+
+### What the running system said that the plan did not expect
+
+- **The order gate is closed right now, and correctly.** No `tbot-monitor`
+  container is running — `docker ps` shows postgres, nats, redis, clickhouse and
+  nothing else, and the platform runs as a native binary. `monitor.lease` has 0
+  rows, so `LeaseWatcher` holds the gate at `Missing` and `/api/orders` refuses
+  every order with `monitor_unavailable`. The safety property works. **Nothing
+  in either plan file records that the default local stack has no monitor in
+  it**, which means every phase-7 claim about runtime behaviour has never been
+  exercised on a developer machine.
+- **All eleven `monitor.*` tables exist and all eleven are empty**, as are
+  `strategy_instances`, `orders` and `fills`.
+- **`llm_usage` has zero rows against 55 `agent_runs`.** Only the LLM proxy
+  writes it and the desk driver does not route through the proxy, so
+  `/api/agent/usage` returns zeros for input, output, cache read, cache write
+  **and** cost. The Cost tab is not "tokens but not money" as S-6.12 claims — it
+  is nothing, and a zero here is an invented measurement.
+- **More than half the card taxonomy has never carried a row.** Of 2,111
+  `agent_messages`: `status` 601, `usage` 428, `compaction` 202, `decision` 201,
+  `exposure` 185, `tool_call`/`tool_result` 89 each, `policy` 89, `core_tool` 52,
+  `validation` 45, `degradation` 32, `canary` 27, `plan` 26, `user` 25, `error`
+  20 — and **zero** rows of `finding`, `negative_result`, `question`,
+  `approval`, `gate`, `job`, `escalation`, `report` or `final`.
+  `approval_requests` is 0 rows too. S-6.4 and S-6.5 are complete code over
+  kinds no run has produced.
+- **Not one stored message carries a provenance mark.** 0 of 2,111 rows have
+  `provenance` or `evidence_class` in `content_json`, and `events.ts:129`
+  defaults an absent mark to `'platform'` — **so every real card asserts
+  platform provenance.** S-6.23's fence is tested, passing, and unreached by
+  data, which is this repository's dominant defect shape in the one place it is
+  least affordable.
+- **`KILL_SWITCH_EVENT` has no dispatcher and no listener.** Exported at
+  `KillSwitchBanner.tsx:16`, referenced nowhere else in `frontend/src`, while
+  the banner's doc comment claims a live event refetches immediately so *"within
+  one event"* holds. It is a three-second poll. "Within one event" is S-6.21's
+  entire acceptance and a phase-7 exit criterion.
+- **Twelve frontend-referenced API paths are unmounted on the running
+  platform**, confirmed by probe (401 = mounted, 404 = not):
+  `/api/agent/runs/{id}/{pause,resume,escalate,state,trajectory,lifecycle}`,
+  `/api/strategies/{compile,preview}`, `/api/strategies/{id}`,
+  `/api/automations/{id}/{action}`, `/api/automations/{id}/stages`,
+  `/api/reports/{id}`. Every one is wrapped in `optional()`, **which folds a 404
+  to `null`** — so nine desk controls are silent no-ops rather than errors.
+- **The "Audited 2026-09-16" boilerplate repeated verbatim under 22 tasks is
+  stale in every instance.** It claims 18 components, ~5,300 lines, 13 routes
+  and 57 tests; the tree holds 20 components, 7,594 lines, 15 routes and 37 test
+  files. Individual counts are off by up to 4× (`Operations.tsx` noted at 257,
+  now 1,095). A line count copied under every task is a number nobody
+  recomputes — the same failure the spec status lines had.
+
+
 ## Four desk tracks, 2026-09-21 — and what they found
 
 **The desk's failure mode is a `null` literal with a phase number attached to
@@ -370,7 +453,12 @@ without reflow.
 **Traces:** AGENT-012 §1; §19.7.
 
 ### S-6.2 One event stream — M
-`PARTIAL` 2026-09-16 — `api/desk.ts` (582 lines) and `hooks/useDeskStream.ts` (158 lines). One stream, and the components read it rather than polling.
+`DONE` — promoted 2026-09-21 by audit, not by new work. All four acceptance
+clauses hold and were checked individually: `useDeskStream.ts:125` sends
+`Last-Event-ID` and `agent_sessions.rs:206` honours it; the events route answers
+401 on the running platform (mounted); backoff reaches 15s; `stale` keeps the last
+state with an age and is `null` when nothing ever arrived; `mergeCards` dedups on
+`seq`. Superseded note: `PARTIAL` 2026-09-16 — `api/desk.ts` (582 lines) and `hooks/useDeskStream.ts` (158 lines). One stream, and the components read it rather than polling.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -386,7 +474,10 @@ cards; while disconnected the last state stays visible, marked stale with an age
 **Traces:** AGENT-012 §16; §14 (states).
 
 ### S-6.3 The card stream — L
-`PARTIAL` 2026-09-16 — `CardStream.tsx` (116 lines).
+`DONE` — promoted 2026-09-21 by audit. Both acceptance clauses are in
+`CardStream.tsx`: `WINDOW = 25` mounts only the last 25 step groups, which is the
+200-step jank clause, and `storageKey(conversationId)` persists the disclosure set
+per conversation inside try/catch. Superseded note: `PARTIAL` 2026-09-16 — `CardStream.tsx` (116 lines).
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -399,7 +490,12 @@ conversation.
 **Traces:** AGENT-012 §3.2.
 
 ### S-6.4 Cards, part 1 — L
-`PARTIAL` 2026-09-16 — `Cards.tsx` (548 lines) covers both card tasks.
+`DONE` — promoted 2026-09-21 by audit. All six card kinds are in
+`KIND_MAP` (`lib/desk/events.ts`); `Cards.tsx:160` renders `'(n unknown)'` for a
+null `n` rather than `0`; the tool card is prose with namespace, risk, duration and
+handle, never a table. **But see the live note below: zero rows of the `finding`,
+`question`, `approval`, `gate` or `final` kinds have ever been written.** The code
+is complete over a taxonomy no run has produced. Superseded note: `PARTIAL` 2026-09-16 — `Cards.tsx` (548 lines) covers both card tasks.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -413,7 +509,11 @@ inline, handle) · Finding (confidence pill, evidence chips, "cited later") · N
 **Traces:** AGENT-012 §3.2; §19.1.
 
 ### S-6.5 Cards, part 2 — L
-`PARTIAL` 2026-09-16 — `Cards.tsx` (548 lines), shared with S-6.4.
+`DONE` — promoted 2026-09-21 by audit. All nine kinds are mapped, and
+`Cards.tsx:229` `IRREVERSIBLE = {SealedHoldout, Promotion, Tier3Memory}` drives the
+two-step confirm, so the acceptance — that an irreversible action cannot be taken
+in one click — is structurally unsatisfiable rather than merely untested. Same
+caveat as S-6.4 about kinds with no rows. Superseded note: `PARTIAL` 2026-09-16 — `Cards.tsx` (548 lines), shared with S-6.4.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -493,7 +593,13 @@ with the concentration bar, bars chart, data-quality results.
 **Traces:** AGENT-012 §3.5, §6.3, principle 9; §19.2.
 
 ### S-6.10 Right panel — Memory — M
-`PARTIAL` 2026-09-16 — The Memory tab in `RightPanel.tsx`. It reads a store that does not exist — phase 4's migrations are all absent — so this renders against nothing.
+`PARTIAL` 2026-09-16 — The Memory tab in `RightPanel.tsx`. **The stated reason was
+false and is corrected here:** phase 4's migrations are *applied* — `0122`, `0124`
+and `0125` are all live, `agent_memory.entry` exists with its full CHECK set, and
+`/api/memory/{bucket}` is mounted. The real defect is the one this repository keeps
+producing: the tab has **no caller with data**. `Conversation.tsx:489` is literally
+`<MemoryTab items={null} />`. The store is also empty (0 rows), which is a
+different fact again and must not be rendered as the same one.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -533,6 +639,9 @@ calibrated error; the cache sparkline is per call, not per run.
 **Traces:** AGENT-012 §3.5, principle 11.
 
 ### S-6.13 The shared components — M
+`DONE` — promoted 2026-09-21 by audit. All eight named components are
+exported from `Shared.tsx` and imported into `DesignSystemPage.tsx` under its
+"Research desk" section, and `/design` is a public route. Superseded note:
 `PARTIAL` 2026-09-16 — `Shared.tsx` (375 lines).
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
@@ -606,7 +715,11 @@ the fold; **verify** updates in place.
 **Traces:** AGENT-012 §5; §19.5.
 
 ### S-6.18 The memory browser — L
-`PARTIAL` 2026-09-16 — `MemoryBrowser.tsx` (161 lines). Like S-6.10, it browses a store phase 4 never created.
+`PARTIAL` 2026-09-16 — `MemoryBrowser.tsx`. **The stated reason was false and is
+corrected here:** the store exists, `routes/memory.rs` serves all seven buckets and
+refuses `playbooks` by name, and this component genuinely calls it. The real gap is
+that `agent_memory.entry` has **0 rows**, so it browses an empty store rather than
+an absent one — and those must render differently.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -672,7 +785,16 @@ one event and cannot be dismissed while tripped.
 **Traces:** AGENT-012 §8, §11, §12; §19.6.
 
 ### S-6.22 Retire what this replaces — M
-`DONE` 2026-09-16 — `components/agent/` and `components/workspace/` are gone, nothing imports them, and no desk file uses a back-compat alias — all three asserted by `__tests__/no-deprecated-aliases.test.ts`, which passes.
+`PARTIAL` — **downgraded from `DONE` on 2026-09-21. It fails its own
+acceptance by twenty-eight files.** The criterion is *"a grep for `bg-surface-2`,
+`text-text-muted`, `text-text-dim`, `bg-pnl-down`, `text-warning` returns nothing
+outside `compat.css`"*. That grep returns **28 files** — mlops 7, workbench 6,
+automations 5, pages 4 and more. The task passed because its guard,
+`__tests__/no-deprecated-aliases.test.ts`, walks only the desk directory plus five
+named files, so it asserts a repository-wide claim over a subdirectory. Two further
+clauses are unmet: browser-notification opt-in and quiet hours do not exist, and no
+`aria-live` region announces a new approval, a new question or a finished run —
+only the kill-switch banner has one. Superseded note: `DONE` 2026-09-16 — `components/agent/` and `components/workspace/` are gone, nothing imports them, and no desk file uses a back-compat alias — all three asserted by `__tests__/no-deprecated-aliases.test.ts`, which passes.
 
 It did not pass before 2026-09-16, and both halves of the failure were real. `SettingsPage.tsx` still imported two components from the deleted `components/agent/`, which **broke `npm run build`** — proven with a scratch file, exit 2, TS2307. Service tokens had been lost rather than moved, so `ApiAccessCard` was rebuilt under `components/settings/`; the MCP server cannot start without a token that card is the only way to mint. The alias scan also read `desk.css`'s own header — which names the forbidden tokens in order to forbid them — as a violation, and now strips comments the way `static_invariants.rs` does.
 
