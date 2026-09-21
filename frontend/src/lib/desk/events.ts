@@ -248,3 +248,123 @@ export function mergeCards(existing: DeskCard[], incoming: DeskCard[]): DeskCard
   for (const c of incoming) bySeq.set(c.seq, c)
   return [...bySeq.values()].sort((a, b) => a.seq - b.seq)
 }
+
+// ── The two notes the right panel needs, read off the same stream ────────────
+//
+// Both of these were already on the wire and both panels rendered a literal
+// `null`/`[]` instead. `usage` and `exposure` are in `RAW_KINDS` above, so they
+// were folded behind the details disclosure and nothing else ever looked at
+// them — the Cost tab said "no model call has been accounted yet" over a stream
+// carrying one `usage` note per call, and the Tools tab said the harness had
+// reported no exposure over a stream carrying one per step. Neither surface was
+// broken in a way anybody could see, which is why both survived.
+
+/** The prompt broken into the layers §3.5 asks for. Nothing emits this yet. */
+export interface CallLayers {
+  charter: number
+  schemas: number
+  body: number
+  output: number
+}
+
+/**
+ * One model call's accounting, as the harness's `usage` note records it.
+ *
+ * Every field the note does not carry is `null` rather than `0`. Three of them
+ * are always null today and each for its own reason, which is why they are three
+ * fields and not one "incomplete" flag:
+ *
+ * * `layers` — the note records one prompt total, not a split. A four-column
+ *   table of zeros would be a measurement nobody made.
+ * * `usd_tenth_cents` — there is no price table in the platform (OQ-16), so a
+ *   cumulative of `0` would read as a free run.
+ * * `cache_hit_pct` — a share of a prompt total the provider did not report.
+ */
+export interface CallCost {
+  step: number
+  layers: CallLayers | null
+  cache_hit_pct: number | null
+  /** What the provider billed for the prompt. */
+  provider_prompt_tokens: number | null
+  /** What the harness predicted it would be, before sending (§3.5's last line). */
+  estimated_prompt_tokens: number | null
+  output_tokens: number | null
+  cache_read_tokens: number | null
+  latency_ms: number | null
+  usd_tenth_cents: number | null
+}
+
+/**
+ * Reads the per-call accounting out of a run's stream.
+ *
+ * Rows stay in stream order and a step may appear more than once: a step that
+ * was rejected by a rung and retried is two calls, and collapsing them would
+ * hide the retry, which is the call worth finding.
+ */
+export function costCalls(events: WireEvent[]): CallCost[] {
+  const out: CallCost[] = []
+  for (const e of events) {
+    if (e.kind !== 'usage') continue
+    const c = e.content
+    const prompt = num(c.prompt_tokens)
+    const cacheRead = num(c.cache_read_tokens)
+    out.push({
+      step: num(c.step) ?? 0,
+      // Never `{0,0,0,0}`: the note has no layer split at all.
+      layers: null,
+      cache_hit_pct:
+        prompt !== null && prompt > 0 && cacheRead !== null ? (cacheRead / prompt) * 100 : null,
+      provider_prompt_tokens: prompt ?? num(c.input_tokens),
+      estimated_prompt_tokens: num(c.est_prompt_tokens),
+      output_tokens: num(c.output_tokens),
+      cache_read_tokens: cacheRead,
+      latency_ms: num(c.latency_ms),
+      // No price table anywhere in the platform. Priced by nobody, not free.
+      usd_tenth_cents: null,
+    })
+  }
+  return out
+}
+
+/**
+ * The harness's `Note::Exposure`, which says what a step actually saw.
+ *
+ * `exposed` is the list; `namespaces`, `budget` and `pinned` are the note's own
+ * answer to "why that set and not another", and they are carried because an
+ * exposure without them is unexplainable after the fact.
+ */
+export interface ExposureNote {
+  exposed: string[]
+  namespaces: string[]
+  /** Tools held ahead of namespace filling because the model named them. */
+  pinned: string[]
+  budget: number | null
+  plan_step: string | null
+}
+
+function strList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
+
+/**
+ * The most recent exposure note, or `null` when the run has emitted none.
+ *
+ * The *latest*, because the tab's heading is "exposed this step" — an exposure
+ * from four steps ago answered under that heading would be a wrong answer rather
+ * than a stale one.
+ */
+export function latestExposure(events: WireEvent[]): ExposureNote | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const e = events[i]
+    if (e.kind !== 'exposure') continue
+    const c = e.content
+    return {
+      exposed: strList(c.exposed),
+      namespaces: strList(c.namespaces),
+      pinned: strList(c.pinned),
+      budget: num(c.budget),
+      plan_step: str(c.plan_step),
+    }
+  }
+  return null
+}

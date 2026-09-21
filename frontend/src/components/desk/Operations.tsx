@@ -159,6 +159,58 @@ export function Usage() {
 
 // ── Monitor (§11 — the UI of COMP-007) ───────────────────────────────────────
 
+/**
+ * What the kill-switch badge may claim, given what answered.
+ *
+ * `tripped` and `armed` are both claims about live trading, and the panel used
+ * to derive them from `kill.data?.kill_switch_active === true` — so an endpoint
+ * that did not answer rendered a green **armed**. That is the platform's one
+ * non-negotiable pointed at the control that stops money moving: an unknown
+ * state shown as the safe one. Absent is a third word here, not a default to
+ * either of the other two.
+ */
+export function killSwitchBadge(
+  status: { kill_switch_active?: boolean } | null | undefined,
+): { word: string; tone: 'pos' | 'neg' | 'warn' } {
+  if (!status) return { word: 'state unknown', tone: 'warn' }
+  return status.kill_switch_active === true
+    ? { word: 'tripped', tone: 'neg' }
+    : { word: 'armed', tone: 'pos' }
+}
+
+/**
+ * One row of `/api/monitor/strategies`, read under the names it is served with.
+ *
+ * The table read `name`, `status` and `breaching_metric`; the route sends
+ * `strategy_id`, `state` and `scale_pct`. Every row therefore rendered as two
+ * blanks and a dash — a monitor showing a table of empty rows for live
+ * strategies, which looks like a monitor with nothing to report. The same class
+ * of defect as `cited` against `cited_by_chain`: no error, no clue, and the
+ * wrong reading is the reassuring one.
+ */
+export interface MonitorRow {
+  strategy_id: string
+  state: string | null
+  /**
+   * `null` when the row carries no scale.
+   *
+   * Never folded into `0`: a strategy scaled to 0% has been shut down by the
+   * monitor, and one whose scale was not recorded has not. Those are opposite
+   * facts and they were one `?? 0` apart.
+   */
+  scale_pct: number | null
+}
+
+export function monitorRow(raw: Record<string, unknown>): MonitorRow {
+  const scale = raw.scale_pct
+  return {
+    strategy_id:
+      typeof raw.strategy_id === 'string' ? raw.strategy_id : String(raw.strategy_id ?? 'unnamed'),
+    state: typeof raw.state === 'string' ? raw.state : null,
+    scale_pct: typeof scale === 'number' && Number.isFinite(scale) ? scale : null,
+  }
+}
+
 export function Monitor() {
   const [halting, setHalting] = useState(false)
   const strategies = useQuery({ queryKey: ['desk', 'monitor'], queryFn: () => deskApi.monitor() })
@@ -167,20 +219,56 @@ export function Monitor() {
     queryFn: () => deskApi.killSwitch(),
     refetchInterval: 3_000,
   })
+  const scopes = useQuery({
+    queryKey: ['desk', 'monitor', 'kill-switch'],
+    queryFn: () => deskApi.monitorKillSwitch(),
+    refetchInterval: 3_000,
+  })
   const tripped = kill.data?.kill_switch_active === true
+  const badge = killSwitchBadge(kill.data)
+  const windows = scopes.data?.maintenance_windows ?? []
 
   return (
     <div className="desk-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
       <Panel>
         <PanelHeader
           title="Kill switch"
-          badges={<Badge tone={tripped ? 'neg' : 'pos'}>{tripped ? 'tripped' : 'armed'}</Badge>}
+          badges={
+            <Badge tone={badge.tone} data-testid="kill-switch-badge">
+              {badge.word}
+            </Badge>
+          }
         />
         <PanelBody>
           <p className="sub">
-            scope {kill.data?.scope ?? 'global'} · tripped by {kill.data?.tripped_by ?? 'not recorded'} ·{' '}
-            {kill.data?.reason ?? 'no reason recorded'}
+            {/* `scope` is not on `/api/trading/status` and never has been, so
+                the old `?? 'global'` printed a word the endpoint never sent —
+                and "global" is the widest possible claim to invent. The halted
+                scopes below come from the route that does know. */}
+            scope {kill.data?.scope ?? 'not recorded on this endpoint'} · tripped by{' '}
+            {kill.data?.tripped_by ?? 'not recorded'} · {kill.data?.reason ?? 'no reason recorded'}
           </p>
+          <p className="sub" data-testid="halted-scopes">
+            {scopes.data === null || scopes.data === undefined
+              ? 'halted scopes unknown — /api/monitor/kill-switch did not answer'
+              : scopes.data.halted_scopes.length === 0
+                ? 'no scope is halted · orders ' +
+                  (scopes.data.orders_permitted ? 'permitted' : 'not permitted') +
+                  ' · lease ' +
+                  scopes.data.lease
+                : `halted: ${scopes.data.halted_scopes.join(', ')} · lease ${scopes.data.lease}`}
+          </p>
+          {/* §4.3: an open maintenance window is a hole in the limits, and it is
+              as visible here as a trip. The desk showed it nowhere. */}
+          {windows.length > 0 && (
+            <p className="sub" data-testid="maintenance-windows">
+              {windows.length} open maintenance{' '}
+              {windows.length === 1 ? 'window' : 'windows'} — limits are not enforced:{' '}
+              {windows
+                .map((w) => `${w.reason} (${w.opened_by}, until ${w.expires_at})`)
+                .join('; ')}
+            </p>
+          )}
           {tripped ? (
             <Button size="xs" variant="secondary" onClick={() => void api.post('/api/trading/resume')}>
               Reset (logged)
@@ -210,27 +298,34 @@ export function Monitor() {
         <PanelBody>
           {strategies.data === null || strategies.data === undefined ? (
             <EmptyState
-              message="The monitor is not built yet"
-              detail="/api/monitor/strategies belongs to COMP-007 (Set S phase 7, track 2). This page renders the moment it answers; it will not guess a status for anything live."
+              message="The monitor did not answer"
+              detail="/api/monitor/strategies is served (COMP-007), so this is the request failing rather than the phase being unbuilt. The live strategies are unknown, not none."
+            />
+          ) : strategies.data.strategies.length === 0 ? (
+            <EmptyState
+              message="No strategy is under the monitor"
+              detail="The endpoint answered with an empty list, which is a fact about the monitor rather than about this page."
             />
           ) : (
             <table className="tbl">
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>strategy</th>
-                  <th>status</th>
-                  <th>breaching metric</th>
+                  <th>state</th>
+                  <th>scale</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
                 {strategies.data.strategies.map((s) => {
-                  const row = s as Record<string, unknown>
+                  const row = monitorRow(s as Record<string, unknown>)
                   return (
-                    <tr key={String(row.id ?? row.name)}>
-                      <td style={{ textAlign: 'left' }}>{String(row.name ?? '')}</td>
-                      <td>{String(row.status ?? '')}</td>
-                      <td>{String(row.breaching_metric ?? '—')}</td>
+                    <tr key={row.strategy_id}>
+                      <td style={{ textAlign: 'left' }}>{row.strategy_id}</td>
+                      <td>{row.state ?? 'not reported'}</td>
+                      {/* 0% is "the monitor shut this down"; an absent scale is
+                          "nobody said". They must not look the same. */}
+                      <td>{row.scale_pct === null ? 'not reported' : `${row.scale_pct}%`}</td>
                       <td>
                         <Button size="xs" variant="ghost">
                           Scale down
@@ -242,6 +337,14 @@ export function Monitor() {
               </tbody>
             </table>
           )}
+          <p className="sub">
+            {/* The column that was here read `breaching_metric`, which the route
+                does not send. An always-blank column is worse than a missing
+                one: it reads as "nothing is breaching". */}
+            Which limit a strategy is breaching is not on this route. `/api/monitor/events` carries
+            the breaches and is not joined to these rows yet, so this table says what each strategy
+            is, not what it did wrong.
+          </p>
         </PanelBody>
       </Panel>
     </div>

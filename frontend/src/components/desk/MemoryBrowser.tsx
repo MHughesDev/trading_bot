@@ -11,7 +11,7 @@ import { Button } from '@/components/primitives/Button'
 import { SearchInput } from '@/components/primitives/Field'
 import { Tabs } from '@/components/primitives/Segmented'
 import { EmptyState } from '@/components/primitives/States'
-import { deskApi } from '@/api/desk'
+import { deskApi, type EvidenceClass, type ProvenanceMark } from '@/api/desk'
 import { ProvenanceBadge } from './Shared'
 
 // The tabs are the store's kinds (AGENT-007 section 2.2), and they did not use
@@ -45,9 +45,41 @@ export interface MemoryRow {
   window?: string
   valid_until?: string | null
   cited?: number
+  /**
+   * What `/api/memory/{bucket}` actually calls the cited count.
+   *
+   * The row was read as `cited` and served as `cited_by_chain`, so the count
+   * never rendered on any tab — AGENT-012 §7 lists it as a column of the
+   * findings table. A field-name miss fails silently in exactly the way this
+   * platform's whole claim is against: the surface did not say "cited count
+   * unknown", it said nothing, and a finding nothing has cited looked identical
+   * to one cited nine times.
+   */
+  cited_by_chain?: number
+  /**
+   * The store's own staleness flag, which is **not** the confidence.
+   *
+   * `confidence` is how strong the claim was when it was made and `stale` is
+   * whether it has outlived its window. A stale `established` finding rendered
+   * as `established`, which is the platform asserting a measurement is current
+   * when its own row says it is not.
+   */
+  stale?: boolean
+  corroborations?: number
   /** Ids of rows this one disagrees with. */
   conflicts_with?: string[]
   provenance?: { run?: string; tool?: string; window?: string }
+  /**
+   * The provenance fence, when the row carries it (§6.3a).
+   *
+   * Optional because `/api/memory/{bucket}` does not serve it yet — `row()` in
+   * `crates/api/src/routes/memory.rs` omits `evidence_class`, which the entry
+   * has. Read here rather than hardcoded to `null` as it was, so the mark
+   * reaches the reader the day the field is added instead of needing this
+   * component found again.
+   */
+  mark?: ProvenanceMark | null
+  evidence_class?: EvidenceClass
   /**
    * AGENT-007 section 2.2's right-hand column: the fields that belong to one kind
    * rather than to all seven.
@@ -98,6 +130,34 @@ export function questionFields(row: MemoryRow): QuestionFields | null {
 }
 
 /**
+ * The provenance mark a memory row can honestly carry (§6.3a).
+ *
+ * Returns `null` when the row says nothing at all — an absent mark means "not
+ * recorded", and a surface that filled it in with a default would be inventing
+ * a trust claim on the reader's behalf, which is the failure the fence exists to
+ * prevent committed one layer up.
+ *
+ * A row that records only an `evidence_class` gets `provenance: 'platform'`
+ * because `ProvenanceMark` requires the field; nothing is drawn from it, since
+ * `ProvenanceBadge` renders a provenance chip only for `untrusted`.
+ *
+ * `MemoryBrowser`'s row used to pass a literal `null` here, so a memory row
+ * could not show a mark even once the store carried one.
+ */
+export function rowMark(row: MemoryRow): ProvenanceMark | null {
+  if (row.mark) return row.mark
+  if (row.evidence_class) return { provenance: 'platform', evidence_class: row.evidence_class }
+  return null
+}
+
+/** The cited count, under either of the two names it has had. */
+export function citedCount(row: MemoryRow): number | null {
+  if (typeof row.cited === 'number') return row.cited
+  if (typeof row.cited_by_chain === 'number') return row.cited_by_chain
+  return null
+}
+
+/**
  * Pairs every conflict exactly once.
  *
  * Both sides are returned together so the renderer cannot show one and rank the
@@ -122,18 +182,23 @@ export function conflictPairs(rows: MemoryRow[]): Array<[MemoryRow, MemoryRow]> 
 
 function Row({ row, onRetry }: { row: MemoryRow; onRetry?: (r: MemoryRow) => void }) {
   const q = questionFields(row)
+  const cited = citedCount(row)
   return (
     <div className="desk-card">
       <div className="desk-card-hd">
         <Badge tone="outline">{row.subject}</Badge>
         {row.confidence && <Badge tone={row.confidence === 'refuted' ? 'neg' : 'neutral'}>{row.confidence}</Badge>}
+        {/* Beside the confidence, never instead of it: `established · stale` is
+            a claim that was strong and has outlived its window, and collapsing
+            the two would either hide the strength or hide the expiry. */}
+        {row.stale === true && <Badge tone="warn">stale</Badge>}
         {q && (q.closedBy ? (
           <Badge tone="neutral">closed · {q.closedHow ?? 'answered'}</Badge>
         ) : (
           <Badge tone={q.blocking ? 'neg' : 'outline'}>{q.blocking ? 'blocking' : 'open'}</Badge>
         ))}
         {q?.value && <Badge tone="outline">{q.value}</Badge>}
-        <ProvenanceBadge mark={null} />
+        <ProvenanceBadge mark={rowMark(row)} />
       </div>
       <p>{row.claim}</p>
       {q && (
@@ -150,7 +215,10 @@ function Row({ row, onRetry }: { row: MemoryRow; onRetry?: (r: MemoryRow) => voi
         {row.n === null || row.n === undefined ? '(n unknown)' : `n=${row.n}`}
         {row.window ? ` · ${row.window}` : ''}
         {row.valid_until ? ` · valid until ${row.valid_until}` : ''}
-        {row.cited !== undefined ? ` · cited ${row.cited}×` : ''}
+        {/* Zero citations is a real and useful answer — a finding nothing has
+            leaned on — so it is printed rather than hidden behind a truthiness
+            check. An unknown count says so instead. */}
+        {cited === null ? ' · cited count not recorded' : ` · cited ${cited}×`}
       </p>
       <p className="sub">
         provenance: run {row.provenance?.run ?? 'unknown'} · tool {row.provenance?.tool ?? 'unknown'} · data{' '}

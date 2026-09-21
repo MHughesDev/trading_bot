@@ -429,3 +429,127 @@ appends `run_started` for the run that exists — asserted by
 `a_child_conversation_id_is_the_same_one_after_a_restart`.
 
 **Status:** open (spec wording); the build is not blocked.
+
+---
+
+## Q-S11-02 — §7.1's cost-drift rule is inert at the moment its own gate opens
+
+**Raised 2026-09-21 building S-11.8. Implemented under one reading, with the
+proof kept as a test; the spec sentence is what needs deciding.**
+
+AGENT-014 §7.1: *"**cost drift**: `cost_per_knowledge_unit` over the last K
+exceeds 3× the session's own median (only once ≥ 2K runs exist)."*
+
+Read literally — the median taken over **every** run, including the K being
+judged — the rule cannot fire at `2K` runs, which is the exact point its own gate
+opens. At `2K` the window is half the session, so the median falls between the
+cheap half and the dear half: with K cheap runs at `c` and K dear runs at `d`,
+the median is `(c + d) / 2`, and `d > 3 · (c + d) / 2` reduces to `-d > 3c`,
+which has no solution for positive costs. It does not matter how dear the window
+is — ten times, a thousand times, a million times the baseline all fail.
+
+**What was built** takes the median over the runs **before** the window — still
+"the session's own", not a platform-wide figure — so the rule is live from `2K`
+onward as the gate intends. The proof of the literal reading's inertness is kept
+as `the_baseline_is_the_history_because_a_window_inside_its_own_median_can_never_drift`
+in `crates/research-session/src/stall.rs`, over three orders of magnitude.
+
+**What is still open:** which reading §7.1 means. They differ by an entire class
+of alarm — the literal one has no cost-drift rule until roughly `2.5K` runs, and
+a session that never reaches `2.5K` runs never has one at all. This is a
+one-expression change in `cost_drift` either way, and the sentence should say
+which rather than leaving the next reader to re-derive it.
+
+**What holds meanwhile:** the other three rules. They have absolute thresholds
+and self-gate, so a stalling session is still caught by barren streak,
+degenerating or circling — cost drift is the only one this affects.
+
+**Status:** open (spec wording); the build is not blocked.
+
+---
+
+## Q-S11-03 — AGENT-012 §6.2 asks for four capped budget bars the data cannot fill
+
+**Raised 2026-09-21 finishing S-6.13. Implemented as "no cap recorded"; the spec
+sentence is what needs deciding.**
+
+AGENT-012 §6.2: *"Four stacked bars (steps, tokens, $, trials) with the cap, the
+90% wrap-up mark, and the projected end at current burn."*
+
+The only budget shape the desk receives is `BudgetView`, which mirrors
+`crates/harness/src/state.rs` and carries `steps_total` plus **three bare
+remainders**. Three of the four bars therefore have no cap to draw against, and
+there is no burn series to project an end from.
+
+The previous code filled the gap by inventing one: `tokensCap = caps?.tokens ??
+budget.tokens_remaining`, which makes `used = cap − remaining = 0`, so a run that
+had burned half a million tokens rendered **"0 / 40,000"**. The trials bar did it
+in reverse — `cap = max(spent, 1)` printed **"4 / 4 · 90%+"**, a run reported as
+out of trials when nothing had said how many it had.
+
+**What was built** renders an uncapped bar as `N remaining · no cap recorded`
+over a hatched track with no `aria-valuenow`, and shows no projected end. Four
+bars still render, so an uncapped one is visibly present rather than quietly
+dropped.
+
+**What is still open:** either the harness sends caps for tokens, dollars and
+trials — they exist in the profile's `Budgets` — or §6.2 stops promising four
+capped bars and a projection. Inventing a cap from a remainder is the one answer
+that is not available, because it renders a number that is not a measurement.
+
+**Status:** open (spec wording, or a harness field); the build is not blocked.
+
+---
+
+## Q-S5-01 — AGENT-011's exit units and ADR-0010's canonical form cannot both hold
+
+**Raised 2026-09-21 building S-5.6. Neither reading implemented.**
+
+AGENT-011 §3: *"Units are explicit: `exit stop 1.5 atr from entry`, `exit target
+2 % from entry`"*. AGENT-011 §9: *"Changing the canonical JSON storage form —
+ADR-0010 stands."*
+
+`domain::strategy_def::exits::ExitRule::StopLoss` carries `fraction: Decimal`,
+documented as *"Always expressed as a positive fraction of entry, never as an
+absolute price"*. An ATR- or sigma-scaled distance is a **per-bar** quantity;
+there is no fraction of entry that means it. So either `ExitRule` gains a unit —
+which contradicts §9 — or the language drops two of its three units, which
+contradicts §3 *and* S-5.5's acceptance, whose whole point is that the error
+names all three.
+
+**What was built implements neither.** The parser accepts all three units, so
+S-5.5's acceptance is met literally; the compiler refuses `atr` and `sigma` with
+`unit_not_representable`, naming the schema field that cannot hold them. A model
+gets a true sentence about why, rather than a silent conversion into a fraction
+that would mean something else.
+
+**Status:** open. The decision is whether `ExitRule` gains a unit.
+
+---
+
+## Q-S5-02 — `crossed_above` has no compilation target, and the sentence justifying it describes something that is not there
+
+**Raised 2026-09-21 building S-5.6. Refused by name rather than approximated.**
+
+AGENT-011 §3: *"`crossed_above/below`, `rising/falling(x, n)` … are
+compiler-provided; the rising-edge semantics the v1 signal node had become
+explicit."*
+
+**The v1 signal node has no rising-edge semantics.**
+`strategy-runtime::interpreter::evaluate_signals` and `runtime::run_signals` both
+evaluate the condition on the current bar and emit — there is no previous-value
+register — and `bytecode::Op` has no `CrossedAbove` (FEAT-004 §3.3 lists it as an
+unbuilt extension). The feature engine cannot supply it either:
+`features::registry`'s naming scheme is `family_p1[_p2…]` over integer
+parameters, so there is no lag *of a derived feature*.
+
+This makes AGENT-011's own headline example half-uncompilable: `entry long when
+crossed_above(ema(close,7), ema(close,21)) and rsi(close,14) < 60`.
+
+**What was built** refuses `crossed_above` with `needs_history`, pointing at the
+level comparison that does compile (`macd(close, 7, 21) > 0`) and at FEAT-004
+§3.3. Approximating a cross with a level test would compile the example and mean
+something else, which is worse than refusing it.
+
+**Status:** open. Either the runtime gains a previous-value register and an op,
+or §3 stops listing cross detection as compiler-provided.

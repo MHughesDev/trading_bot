@@ -1,6 +1,6 @@
 # Phase 11 — Continuous research: Research with the toggle on
 
-**Completion: 0% (0 / 14 tasks), plus 3 `PARTIAL`** — S-11.1 (the object, the fold, the driver), S-11.3 (the scored agenda) and S-11.14 (the API and the three read tools) landed 2026-09-21; each names what it does not cover.
+**Completion: 0% (0 / 14 tasks), plus 6 `PARTIAL`** — S-11.1 (the object, the fold, the driver), S-11.3 (the scored agenda) and S-11.14 (the API and the three read tools) landed 2026-09-21; each names what it does not cover.
 
 **Requirement IDs:** PG-01…PG-14.
 **Spec:** [AGENT-014](../../../specs/AGENT-014-continuous-research.md);
@@ -241,7 +241,7 @@ and `Objective::weight_for`, both already single-definition and tested, so the
 object would today be a second place to write the same four numbers.
 
 ### S-11.4 Duplicate work is refused three times — S
-`NOT STARTED`
+`PARTIAL`
 
 At insert: `dedupe_key` (normalised question + subject) — a match to any non-terminal item
 extends that item's `source` list instead of inserting. At intake: the child's
@@ -255,10 +255,33 @@ duplicate past the key is caught at intake and superseded with zero trials; the 
 recorded.
 **Traces:** AGENT-014 P3, §4 (dedupe), §6.5; §12.2.
 
+**Built 2026-09-21. Layers one and three were already there; this is layer two.**
+
+§4's table puts layer two in **the child's** `hypothesis_precheck`. It is
+performed by the driver *before* the child starts instead, which is stricter
+rather than looser: the spec's own words are "charges no trial", and a child
+running its own precheck has already opened a conversation and spent tokens
+before it can find out. `SessionWorker::intake_check` reads the same two
+persisted facts the battery reads and applies no rule of its own — a
+`negative_result` whose `retry_condition` is absent (→ `expired`, because blocked
+is not duplicate) and a registry hypothesis with the same normalised statement
+*and a decided status* (→ `superseded`). `open` and `inconclusive` do not count,
+which that column's own schema comment argues for.
+
+`dedupe_layer` and `trials_charged: 0` go on the event, which is what makes P3's
+"the scorecard says which layer caught it" possible and what gives `DedupeLayer`
+its first caller.
+
+**What is not covered:** the subject half is inert for an item with no subject
+and says so on the log rather than passing quietly — the charter form's seeds are
+sentences, not subjects, so most seeded items arrive without one. Giving seeds a
+subject is a desk change (S-11.13). And the scorecard that *reports* the layer
+counts is not built; the events carry what it would read.
+
 ## Execution
 
 ### S-11.5 Execution: a conversation per item, the brief, the lease, the harvest, failure — L
-`NOT STARTED`
+`PARTIAL`
 
 Claim → one child conversation tagged `session:<id>` → a Research run whose brief
 (AGENT-007 §4) includes the charter's preferences, the session's last five verdicts in scope,
@@ -277,8 +300,40 @@ continues; a harvested proposal appears in *Needs you* and is not approved by an
 human; the defect breaker pauses the session with the tool named.
 **Traces:** AGENT-014 P4, P6, §6; §12.4.
 
+**The harvest's decision half is built 2026-09-21; execution is not.**
+`crates/research-session/src/harvest.rs`: open questions become source 4.3 items
+(`OpenQuestionBlocking` when blocking), next questions become 4.8, **each through
+`agenda::offer`** — layer one of the duplicate refusal, and there is no second
+dedupe anywhere in the module. 12 tests.
+
+**P6 is a type, not a rule written near one.** Proposals come back only as
+`AwaitingHuman`, which has no decision field, no constructor that could set one,
+and a `digest_record()` with no branch that can write `awaiting: false`. Every
+fixture runs through a `harvest_checked` wrapper and a planted-violation test
+shows the guard fires. `Ring` is sealed to {1, 2}; rings 0 and 3 are refused at
+`Ring::parse`. `Harvest::skipped` names what was dropped, so nothing a run
+produced disappears silently.
+
+**One ordering that is load-bearing and has a test:** offers are made *before* the
+item is marked done, because `offer` merges onto non-terminal items only. Marked
+done first, a run suggesting its own question again would queue up the question it
+had just answered.
+
+**One spec reading, argued rather than assumed.** §6.5 routes a run's proposed
+next questions to source 4.8, and `agenda.rs` also has a `ProposalFromRun`
+variant. Everything a run suggests is emitted as `refinement_followup`, because
+`stall::degenerating` keys on `only_from(RefinementFollowup)` — routing half a
+session's self-generated work under another source would hide exactly the sessions
+that rule exists to catch, and `ProposalFromRun`'s weight of 1.0 would *up*weight
+self-generated work against §5.1's table, where follow-up is the lowest.
+
+**What is not covered:** leases (§6.3), the child conversation and brief, reading
+a real dossier into the harvest record, and §6.6's session-level
+`platform_defect` breaker — that last is a rule about the session and cannot be
+decided by a function that sees one run. `execute.rs` does not exist.
+
 ### S-11.6 Schedule windows and the day budget — M
-`NOT STARTED`
+`PARTIAL`
 
 Outside a window, or past the day budget: no new claims; live children finish the current step
 and suspend at the boundary (AGENT-010 §10.1's per-run drain), holding no connection and
@@ -292,6 +347,39 @@ zero tokens until the next window; the next window resumes before claiming; a da
 behaves identically and resets at the window; a charter created without a day budget carries
 the policy default.
 **Traces:** AGENT-014 §2.1 (budget defaults), §7 (rows 1–2); §12.5, §12.10 (budget half).
+
+**The calendar is built 2026-09-21; the drain is not.**
+`crates/research-session/src/schedule.rs`: `OpenHours::parse(&Schedule)` is the
+only way to get a readable schedule and it is **fallible**, which is the whole
+point — `is_open_at`, `next_open_after`, `next_open_on_a_later_day` (§7 row 2's
+"next day's window", which is not the same as the next window), `closes_after`
+(the drain boundary row 1 needs) and `openness()`. 15 tests.
+
+**An unknown timezone is refused by name and there is no path to UTC.** A fence
+that silently moved is not a fence, and the test proves the refusal is worth
+something by showing the same window read as UTC *is* open at an instant New York
+fences off. `00:00` as an end is refused too, as is any `end <= start`: a wrapped
+Friday 22:00–02:00 would run in Saturday's small hours while the charter said
+Friday, and the error names the two-window remedy. `desk_charter`'s grid already
+emits `24:00` for the same reason, so the two agree.
+
+DST is handled and asserted: a repeated hour is inside the window both times, an
+hour that never happens opens no window, and a window straddling the gap opens at
+the jump. The invariant that stops a driver busy-looping —
+`next_open_after` never returns an instant `is_open_at` calls closed — is swept
+over 5 schedules × 5 start points × 48 hours and **asserts it checked > 500
+instants**, so it cannot pass by sweeping nothing.
+
+**Wired at the door the same day.** `routes::desk_charter::translate` now calls
+`OpenHours::parse`, so a typo like `Amercia/New_York` is refused at the charter
+form. It used to be written into every window unchecked and failed days later, on
+a session that had been running in UTC.
+
+**What is not covered:** everything driver-side — suspending a live child at the
+boundary and resuming it before claiming anything new, and the day-budget
+accounting and its reset. §7 row 2's "the day" is also undefined for a schedule
+mixing zones or for the always-open default, and the calendar returns `None`
+rather than inventing a midnight in a zone nobody named.
 
 ### S-11.7 The couplings: kill switch, tier, platform defects — M
 `NOT STARTED`
@@ -310,7 +398,7 @@ pauses a session on that profile; the digest carries each transition.
 **Traces:** AGENT-014 §7 (rows 8–10); §12.6. COMP-007 §6.
 
 ### S-11.8 The stall detector — M
-`NOT STARTED`
+`PARTIAL`
 
 After every finished run, over the last `K = max(6, 20%)`: barren streak (≥ 4 of K, or 3
 consecutive with `knowledge_units = 0`); degenerating (all K from `refinement_followup` with no
@@ -325,6 +413,33 @@ with a diagnosis naming which, the items, and a suggested charter amendment — 
 `degenerating`; a stalled session claims nothing; the suggestion never touches `delta_practical`
 (asserted on every fixture).
 **Traces:** AGENT-014 P5, §7.1; §12.7.
+
+**Built 2026-09-21.** `crates/research-session/src/stall.rs`:
+`detect(&[FinishedRun]) -> Option<Diagnosis>`, a pure function over a slice with
+no database in it, which is why it tests. All four §7.1 rules with
+`K = max(6, ceil(20%))`; the diagnosis names which rule, **every** item involved
+and a suggested amendment. 25 tests.
+
+**"Never a lower `delta_practical`" is enforced three ways, not asserted once.**
+`Amendment` is a closed enum with no variant that can carry a number; the guard
+is an exhaustive `match` that will not compile past a new variant; and **every
+test in the module goes through a `detect_checked` wrapper**, so "asserted on
+every fixture" is a property of the module rather than of whoever wrote the last
+test. `the_guard_against_lowering_the_bar_would_catch_a_violation` plants a
+violation and asserts the guard fires — a guard nobody has seen fail is a guard
+that might be matching nothing.
+
+**One spec finding, written up as Q-S11-02 rather than resolved quietly.** §7.1's
+cost-drift rule, read literally, cannot fire at `2K` runs — the exact point its
+own gate opens — because a window inside its own median can never exceed 3× it.
+Proved over three orders of magnitude and kept as a test. The build takes the
+median over the runs *before* the window; the sentence needs deciding.
+
+**What is not covered:** the caller. `detect` needs `FinishedRun`s carrying
+knowledge units, failure class, family and cost, and `Folded::finished` is
+`item → verdict` — so the driver must join the fold to `run_yield` and the agenda
+table. **`AgendaItem` has no `family`**, and two of the four rules group on one,
+so it must come from the run's hypothesis. Nothing appends `session_stalled` yet.
 
 ### S-11.9 Autonomy, the frontier-only rule, and the `judgement` threshold — S
 `NOT STARTED`
@@ -380,7 +495,7 @@ increments the barren streak.
 ## The human's side
 
 ### S-11.12 The digest — M
-`NOT STARTED`
+`PARTIAL`
 
 Written by the platform every `review_every`: verdicts (not titles), findings established and
 refuted, negatives with new classes, questions opened/closed, contradictions found/resolved,
@@ -394,6 +509,37 @@ session's journal conversation. Also written on stall, stop and complete.
 proposal and the cost per knowledge unit; every id resolves (AGENT-012 P9's test); a stall
 writes one immediately.
 **Traces:** AGENT-014 P7, §2.4; §12.11.
+
+**Built 2026-09-21, the object and not yet the cadence.**
+`crates/research-session/src/digest.rs`: `write(&DigestInput) -> Digest`, pure,
+**no clock and no model handle** — which is where P7 is true rather than
+promised. Covers §2.4: runs by verdict, findings established and refuted,
+negatives marked when the class is new, questions opened and closed,
+contradictions found and resolved, proposals *still awaiting* only, budget with
+cost per knowledge unit, the next five items with scores and why, and pauses.
+15 tests.
+
+Two of §2.4's rules are types rather than conventions. `Line` holds a
+**non-optional** `Ref`, so a line without an id cannot be constructed — which is
+what "every line resolves on click" has to mean; `Digest::unresolvable()` catches
+the one hole a type cannot (an id that arrived empty) and is asserted empty on a
+15-line fixture. And `RunRecord` has **no title field at all**, which is §2.4's
+"verdicts, not titles" made unrepresentable.
+
+**What is not covered, and it is most of the task's wiring:** the `review_every`
+cadence and the write-on-stall/stop/complete triggers (the driver's, in
+`crates/api`), persistence to `session_digests`, and
+`frontend/src/components/desk/cards/Digest.tsx`. Everything the cadence needs is
+computable from `Folded::last_digest_seq`, `Folded::runs_started` and
+`ReviewEvery`.
+
+**One trap for whoever wires it.** `BudgetSummary.spent` and its cost-per-
+knowledge-unit line are rendered to a human beside a day budget denominated in
+**dollars**, and `cost` in this crate is in **trials** (`select.rs` scores it that
+way because `llm_usage.cost_usd` keys on the auth session, not the run). The
+stall detector survives this because drift is a ratio and the unit cancels; the
+digest does not. Pass real USD or change the digest's wording — and when per-run
+USD lands, `select.rs`'s `Provenance` machinery is the pattern to copy.
 
 ### S-11.13 The desk: the toggle, the charter form, the Agenda and Charter tabs, the rail, home — L
 `NOT STARTED`

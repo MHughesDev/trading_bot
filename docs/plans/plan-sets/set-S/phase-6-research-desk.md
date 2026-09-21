@@ -78,6 +78,58 @@ built only on the primitives and `app.css`, and S-6.22 deletes what it replaces.
 
 ## Shell and transport
 
+
+---
+
+## Two desk tracks, 2026-09-21 — and what they found
+
+**The desk's failure mode is a `null` literal with a phase number attached to
+it.** `Conversation.tsx` handed six tabs `={null}` or `={[]}`, each explaining its
+own emptiness by naming a Set S phase. That copy is what made the defect
+invisible: an unwired panel and an unbuilt endpoint rendered identically, and the
+panel's own explanation told the reader to stop looking. The catalogue had been
+served for days behind exactly such a sentence, and `deskApi.sessions()` had
+**zero callers anywhere in the app**.
+
+The audit, and what each one turned out to be:
+
+| prop | endpoint | served? | outcome |
+|---|---|---|---|
+| `AgendaTab items` | `…/{id}/agenda` | yes | wired; loading / did-not-answer / genuinely-empty are three states |
+| `CharterTab charter` | `…/{id}` | yes | wired through a decoder — the wire shape is not the shape the tab assumed |
+| `continuous` | same route | yes | wired; both tabs were unreachable on the only kind of session that has them |
+| `CostTab calls` | none — **it was on the stream** | n/a | wired to the harness's own `usage` note |
+| `ToolsTab exposed` | none — **it was on the stream** | n/a | wired to `Note::Exposure`, the exact note the prop documents |
+| `MemoryTab items` | genuinely unbuilt | no | copy corrected: the *store* is browsable, the per-run **brief** has no writer |
+
+**The most dangerous thing either track found was not in this list.**
+`Operations.tsx` computed `tripped = kill.data?.kill_switch_active === true`, so
+an endpoint that **did not answer** rendered a green *armed* badge — an unknown
+safety state shown as the safe one, on the control that stops money moving. There
+is now a third word, `state unknown`, and a test that pins it. The same file
+rendered every live strategy row as two blanks and a dash, because it read
+`name`/`status`/`breaching_metric` where the route sends
+`strategy_id`/`state`/`scale_pct`; and its `scope` badge printed `global` from a
+client-side default the route has never sent.
+
+**Also fixed:** the budget meter printed `0 / 40,000` for a run that had burned
+half a million tokens (`cap = remaining` makes `used` zero), and the trials bar
+printed `4 / 4 · 90%+` for a run nothing had given a cap to. The away digest could
+not tell "nothing was refuted" from "I cannot see refutations". *Nothing is
+waiting on you* was asserted without looking, so a run suspended in
+`AwaitingApproval` read as an evening with nothing to do.
+
+**Frontend: 103 → 193 tests in 22 files, `tsc` clean.** Every new test asserts a
+rejection rather than a happy path, and each would have failed before its change.
+
+**What the desk still cannot show, and why** — each is a field or a route, not a
+component: charter *amendments* are appended by `PUT …/{id}/charter` and read back
+by nothing; per-layer prompt accounting has no emitter; there is no price table
+(OQ-16), so Cost says "not priced… this is not $0"; `GET /api/agent/usage` keys on
+an `agent_sessions` id and the desk's runs are `agent_runs`, so calling it with a
+run id returns all-zeros — deliberately not wired; and there is no route from a
+child conversation back to its session, so §3.1's session chip cannot be built.
+
 ### S-6.1 The desk shell — M
 `PARTIAL` 2026-09-16 — `pages/DeskPage.tsx` (162 lines) with 13 routes, mounted at `/desk/*` in `App.tsx`, and `/agent`, `/research` and `/approvals` redirecting into it.
 

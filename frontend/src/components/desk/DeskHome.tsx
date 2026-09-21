@@ -12,18 +12,53 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
-import { EmptyState } from '@/components/primitives/States'
+import { EmptyState, ErrorState, PanelLoading } from '@/components/primitives/States'
 import { conversationsApi } from '@/api/agent'
 import { deskApi, type Charter, type Mode, type Workflow } from '@/api/desk'
 import { AwayDigestPanel, readLastVisit, writeLastVisit } from './AwayDigest'
 import { Composer, type ComposerSubmission } from './Composer'
 import { TierBadge, ago } from './Shared'
 
-function LastDecision({ text }: { text: string | null }) {
+/**
+ * The last decision anybody made on this desk.
+ *
+ * `/api/approvals?state=all` returns every approval newest-first with its
+ * `answer` and `answered_at`, so the answered ones are the decision log the
+ * empty state needs. Meridian §3.22 asks an empty "Needs you" to say what was
+ * last decided rather than "No data", and the panel used to pass a hardcoded
+ * `null` and then print "No decision has been recorded on this desk yet" — an
+ * assertion about the desk's whole history made without looking at anything.
+ *
+ * Returns `null` only when the rows genuinely contain no answered approval.
+ */
+export function lastDecision(rows: Array<Record<string, unknown>>): string | null {
+  const answered = rows
+    .filter((r) => typeof r.answer === 'string' && (r.answer as string).length > 0)
+    .sort((a, b) => String(b.answered_at ?? '').localeCompare(String(a.answered_at ?? '')))
+  const top = answered[0]
+  if (!top) return null
+  const who = typeof top.answered_by === 'string' && top.answered_by ? ` by ${top.answered_by}` : ''
+  return `${String(top.kind ?? 'an approval')} → ${String(top.answer)}${who}`
+}
+
+export function LastDecision({
+  text,
+  known,
+}: {
+  text: string | null
+  /** False while the decision log is loading or failed to load. */
+  known: boolean
+}) {
   return (
     <EmptyState
       message="Nothing is waiting on you"
-      detail={text ? `Last decision: ${text}` : 'No decision has been recorded on this desk yet.'}
+      detail={
+        !known
+          ? 'The decision log could not be read, so the desk cannot say what was last decided.'
+          : text
+            ? `Last decision: ${text}`
+            : 'No approval on this desk has been answered yet.'
+      }
     />
   )
 }
@@ -47,6 +82,14 @@ export function DeskHome() {
     queryKey: ['desk', 'profiles'],
     queryFn: () => conversationsApi.listProfiles().then((r) => r.data),
     staleTime: 60_000,
+  })
+  // The decision log behind the empty state. Separate from the pending query
+  // because they answer different questions: one is what is waiting, the other
+  // is what was already settled.
+  const decisions = useQuery({
+    queryKey: ['desk', 'approvals', 'all'],
+    queryFn: () => deskApi.approvals({ state: 'all' }).then((r) => r.data),
+    staleTime: 30_000,
   })
   const digest = useQuery({
     queryKey: ['desk', 'digest', lastVisit],
@@ -98,8 +141,23 @@ export function DeskHome() {
       <Panel>
         <PanelHeader title="Needs you" badges={<Badge tone={pending.length ? 'warn' : 'neutral'}>{pending.length}</Badge>} />
         <PanelBody>
-          {pending.length === 0 ? (
-            <LastDecision text={null} />
+          {/* Four states, because "nothing is waiting on you" is a claim and the
+              other three are not. A failed inbox that renders as an empty one
+              tells the operator to walk away from a run that is blocked on
+              them — the one failure this panel exists to prevent. */}
+          {approvals.isPending ? (
+            <PanelLoading lines={2} />
+          ) : approvals.isError ? (
+            <ErrorState
+              message="The approvals inbox could not be read"
+              detail="This is not the same as nothing waiting on you. A run blocked on an approval stays blocked."
+              onRetry={() => void approvals.refetch()}
+            />
+          ) : pending.length === 0 ? (
+            <LastDecision
+              text={lastDecision(decisions.data?.approvals ?? [])}
+              known={!decisions.isPending && !decisions.isError}
+            />
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {pending.map((a) => {
@@ -128,12 +186,25 @@ export function DeskHome() {
         </PanelBody>
       </Panel>
 
-      <AwayDigestPanel data={digest.data ?? null} lastVisit={lastVisit} onDismiss={() => writeLastVisit()} />
+      <AwayDigestPanel
+        data={digest.data ?? null}
+        lastVisit={lastVisit}
+        loading={digest.isPending}
+        onDismiss={() => writeLastVisit()}
+      />
 
       <Panel>
         <PanelHeader title="Running now" />
         <PanelBody>
-          {running.length === 0 ? (
+          {conversations.isPending ? (
+            <PanelLoading lines={2} />
+          ) : conversations.isError ? (
+            <ErrorState
+              message="The conversation list could not be read"
+              detail="Whether anything is running is unknown, not none."
+              onRetry={() => void conversations.refetch()}
+            />
+          ) : running.length === 0 ? (
             <EmptyState message="Nothing is running" detail="Start something below, or open a recent conversation." />
           ) : (
             // `Conversation` is a typed interface, so read its fields. The cast to
@@ -164,7 +235,15 @@ export function DeskHome() {
       <Panel>
         <PanelHeader title="Recent conclusions" />
         <PanelBody>
-          {recent.length === 0 ? (
+          {conversations.isPending ? (
+            <PanelLoading lines={3} />
+          ) : conversations.isError ? (
+            <ErrorState
+              message="The conversation list could not be read"
+              detail="Nothing below is a claim that you have concluded nothing."
+              onRetry={() => void conversations.refetch()}
+            />
+          ) : recent.length === 0 ? (
             <EmptyState message="No conversations yet" detail="The first thing you ask will appear here." />
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>

@@ -64,6 +64,18 @@ fn row(e: &Entry) -> Value {
         "subject": e.subject,
         "claim": e.claim,
         "confidence": e.confidence.as_str(),
+        // What kind of evidence the claim rests on (AGENT-007 §3.1). Served
+        // because the desk's provenance fence needs it and the row is where it
+        // has to arrive: the browser reads `evidence_class` on every row and
+        // could not render the mark without it, so a `model_summary` and a
+        // `direct_stat` looked the same in the one surface whose whole job is
+        // telling them apart.
+        //
+        // `Entry` has carried it since `0122` and `record_preference` sets it;
+        // only this serialiser dropped it. That is the repository's dominant
+        // defect shape with the halves swapped — a reader of a field nothing
+        // writes, except here the field was written and nothing served it.
+        "evidence_class": e.evidence_class,
         "n": e.measurement.as_ref().and_then(|m| m.n),
         "window": format!("{}→{}", e.data_window.start, e.data_window.end),
         "valid_until": e.valid_until,

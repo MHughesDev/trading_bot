@@ -17,7 +17,7 @@ worse than no map, because people steer by it.
 
 ---
 
-## 1. Where we are — **46% left**
+## 1. Where we are — **44% left**
 
 Derived 2026-09-21 from the `### <TASK-ID>` headings and their status markers
 across sets P, S and T. Size-weighted **S = 1, M = 2, L = 4**: 189 tasks of
@@ -25,12 +25,12 @@ wildly different sizes averaged flat would flatter us.
 
 | counting rule | % of the work left |
 |---|---|
-| strict — only `DONE` counts | 67% |
-| **`PARTIAL` counts half** | **46%** |
-| generous — `PARTIAL` counts done | 26% |
+| strict — only `DONE` counts | 66% |
+| **`PARTIAL` counts half** | **44%** |
+| generous — `PARTIAL` counts done | 22% |
 
 Take the middle number and treat it as **±10**, not as a measurement. `PARTIAL`
-is 221 of 531 units and in this repository it spans "complete, one database test
+is 236 of 531 units and in this repository it spans "complete, one database test
 unwritten" to "the types exist and nothing calls them". The spread between the
 strict and generous rows *is* the uncertainty, and it is honest to show it rather
 than pick one and present it as precision.
@@ -39,7 +39,7 @@ than pick one and present it as precision.
 
 | set | subject | tasks | units | done | partial | % left |
 |---|---|---:|---:|---:|---:|---:|
-| **S** | The Agent Platform | 189 | 446 | 72 | 85 | **39%** |
+| **S** | The Agent Platform | 189 | 446 | 76 | 92 | **37%** |
 | **P** | Data Reach | 30 | 51 | 5 | 0 | **84%** |
 | **T** | Forward Evidence | 17 | 34 | 3 | 0 | **82%** |
 
@@ -61,11 +61,13 @@ being where the code is.
 | 4 — Memory and evaluation | 17 | 39 | 6 | 31 | 0 | 2 | 45% |
 | **6 — The Research Desk** | 24 | **66** | 4 | 62 | 0 | 0 | **47%** |
 | 0 — Ground rules | 6 | 7 | 1 | 4 | 1 | 1 | 57% |
-| **5 — The language** | 15 | **36** | 8 | 8 | 20 | 0 | **67%** |
-| 11 — Continuous research | 14 | 32 | 0 | 8 | 24 | 0 | 88% |
+| 5 — The language | 15 | 36 | 12 | 12 | 12 | 0 | 50% |
+| **11 — Continuous research** | 14 | 32 | 0 | 19 | 13 | 0 | **70%** |
 
-The two blocks that matter by *volume* are **6 (66 units)** and **5 (36 units)**.
-Phase 11 has the highest percentage and the smallest body.
+The block that matters by *volume* is **6 — the Research Desk (66 units)**, and
+two desk tracks on 2026-09-21 spent themselves on the part of it that was not
+missing code at all: six tabs wired to `null` behind copy explaining their own
+emptiness. Phase 11 still has the highest percentage and the smallest body.
 
 ### Set P and Set T by phase
 
@@ -286,6 +288,7 @@ Newest first. One line per closing, with the evidence.
 
 | date | what | evidence |
 |---|---|---|
+| 2026-09-21 | **Two waves of parallel tracks, seven agents, one worktree.** Wave one: the strategy language's parser/compiler/decompiler, the stall detector, the digest, the desk's honest-rendering sweep. Wave two: schedule windows, the harvest, the `={null}` audit. **The most dangerous thing found was a kill-switch badge that rendered green *armed* when its endpoint did not answer** — an unknown safety state shown as the safe one, on the control that stops money moving. Also: a flaky test I had shipped (2 failures in 8 runs), a 61-family registry transcription, and four spec contradictions, none implemented either way | frontend 103 → 193 tests; `research-session` 39 → 108; `strategy-lang` 0 → 75 |
 | 2026-09-21 | **Documentation audit: the specs were lying about themselves.** Thirteen specs said `Proposed … not implemented` about code that was serving traffic — AGENT-005…014, COMP-005, COMP-007, DATA-006. All now say what is built and what is not, and **point at the phase file for the count instead of restating one**, because a number written into a spec is a number nobody recomputes. Two phase headlines were stale (phase 6 said 1/24 with 2 done; phase 10 said 5/16 with 6). Set S MASTER's status column was stale for eleven of twelve rows. ROADMAP §2 said Set S was untouched | `the_plan_counts_what_the_plans_say` now fails the build on any of it |
 | 2026-09-21 | **Set S phase 11 opened: S-11.1, S-11.3, S-11.14 → `PARTIAL`.** `crates/research-session` (the charter with the exploration floor as a sealed type, the agenda, the fold), migration `0138`, the session driver registered as `JobKind::ContinuousResearch`, the full §10 API, three `lifecycle` read tools, the scored agenda with its forced exploration share and `mlops.decision` rows | 211 suites / 3720 tests green; 7 live-Postgres invariants; ADR-P11-01, ADR-P11-02; Q-S11-01 opened |
 | 2026-09-21 | The desk's four forward references to `/api/research/sessions` became served; `UNBUILT` rows removed | `the_desk_calls_routes_that_exist` green |

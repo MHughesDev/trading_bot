@@ -63,18 +63,54 @@ function tone(p: number): '' | 'warn' | 'neg' {
   return ''
 }
 
+/**
+ * What a bar knows.
+ *
+ * `capped` is the only shape that can be drawn as a proportion. `uncapped` is a
+ * figure with no denominator — and the two must not collapse, because the
+ * collapse is a lie in both directions: a `tokens` bar whose cap was never sent
+ * used to compute `used = cap - remaining` with `cap = remaining`, printing
+ * **"0 / 40,000"** for a run that had spent half a million tokens, and a
+ * `trials` bar with no cap used `max(spent, 1)` as its own cap, printing
+ * "4 / 4 · 90%+" — a run reported as out of trials when nothing had said how
+ * many it had.
+ *
+ * Zero means measured and it was zero. Absent means nobody said.
+ */
+export type BarValue =
+  | { capped: true; used: number; cap: number }
+  | { capped: false; value: number; word: 'remaining' | 'spent' }
+
 function BudgetBar({
   label,
-  used,
-  cap,
+  value,
   format,
 }: {
   label: string
-  used: number
-  cap: number
+  value: BarValue
   format: (n: number) => string
 }) {
-  const p = pct(used, cap)
+  if (!value.capped) {
+    return (
+      <div className="budget-row">
+        <span className="lbl-t">{label}</span>
+        <div
+          className="budget-track unknown"
+          role="meter"
+          aria-label={`${label} used`}
+          aria-valuetext={`${format(value.value)} ${value.word}; no cap recorded`}
+        >
+          {/* No fill. A bar drawn at 0% says "none used", and the truth is that
+              nothing said what the cap is. */}
+          <b style={{ left: '90%' }} aria-hidden />
+        </div>
+        <span className="val">
+          {format(value.value)} {value.word} · no cap recorded
+        </span>
+      </div>
+    )
+  }
+  const p = pct(value.used, value.cap)
   const t = tone(p)
   return (
     <div className="budget-row">
@@ -93,29 +129,75 @@ function BudgetBar({
       </div>
       {/* Always the text value: Meridian principle 3 forbids colour alone. */}
       <span className="val">
-        {format(used)} / {format(cap)}
+        {format(value.used)} / {format(value.cap)}
         {t && ` · ${t === 'neg' ? '90%+' : '75%+'}`}
       </span>
     </div>
   )
 }
 
-export function BudgetMeter({ budget, caps }: { budget: BudgetView; caps?: Partial<BudgetCaps> }) {
-  const stepsCap = caps?.steps ?? budget.steps_total
-  const stepsUsed = Math.max(0, stepsCap - budget.steps_remaining)
-  const tokensCap = caps?.tokens ?? budget.tokens_remaining
-  const tokensUsed = Math.max(0, tokensCap - budget.tokens_remaining)
-  const usdCap = caps?.usdTenthCents ?? budget.usd_tenth_cents_remaining
-  const usdUsed = Math.max(0, usdCap - budget.usd_tenth_cents_remaining)
-  const trialsCap = caps?.trials ?? Math.max(budget.trials_spent, 1)
+/**
+ * What each of the four bars can honestly say, given a snapshot and whatever
+ * caps the caller was told.
+ *
+ * Exported because the rule is worth a test and the rendering is not: only
+ * `steps` carries its own denominator (`steps_total`), so the other three are
+ * uncapped unless the caller passes a cap it was actually given.
+ */
+export function budgetBars(budget: BudgetView, caps?: Partial<BudgetCaps>): Array<{ label: string; value: BarValue; money?: boolean }> {
+  const stepsCap = caps?.steps ?? (budget.steps_total > 0 ? budget.steps_total : null)
+  const tokensCap = caps?.tokens ?? null
+  const usdCap = caps?.usdTenthCents ?? null
+  const trialsCap = caps?.trials ?? null
+  return [
+    {
+      label: 'steps',
+      value:
+        stepsCap === null
+          ? { capped: false, value: budget.steps_remaining, word: 'remaining' }
+          : { capped: true, used: Math.max(0, stepsCap - budget.steps_remaining), cap: stepsCap },
+    },
+    {
+      label: 'tokens',
+      value:
+        tokensCap === null
+          ? { capped: false, value: budget.tokens_remaining, word: 'remaining' }
+          : { capped: true, used: Math.max(0, tokensCap - budget.tokens_remaining), cap: tokensCap },
+    },
+    {
+      label: '$',
+      money: true,
+      value:
+        usdCap === null
+          ? { capped: false, value: budget.usd_tenth_cents_remaining, word: 'remaining' }
+          : {
+              capped: true,
+              used: Math.max(0, usdCap - budget.usd_tenth_cents_remaining),
+              cap: usdCap,
+            },
+    },
+    {
+      label: 'trials',
+      value:
+        trialsCap === null
+          ? { capped: false, value: budget.trials_spent, word: 'spent' }
+          : { capped: true, used: budget.trials_spent, cap: trialsCap },
+    },
+  ]
+}
 
+export function BudgetMeter({ budget, caps }: { budget: BudgetView; caps?: Partial<BudgetCaps> }) {
   const money = (tenthCents: number) => `$${(tenthCents / 1000).toFixed(2)}`
   return (
     <div className="budget-meter">
-      <BudgetBar label="steps" used={stepsUsed} cap={stepsCap} format={(n) => String(Math.round(n))} />
-      <BudgetBar label="tokens" used={tokensUsed} cap={tokensCap} format={(n) => Math.round(n).toLocaleString()} />
-      <BudgetBar label="$" used={usdUsed} cap={usdCap} format={money} />
-      <BudgetBar label="trials" used={budget.trials_spent} cap={trialsCap} format={(n) => String(Math.round(n))} />
+      {budgetBars(budget, caps).map((b) => (
+        <BudgetBar
+          key={b.label}
+          label={b.label}
+          value={b.value}
+          format={b.money ? money : (n) => Math.round(n).toLocaleString()}
+        />
+      ))}
       <span className="val">
         n_eff {budget.n_eff === null ? '(not computed)' : budget.n_eff.toFixed(1)}
       </span>
@@ -123,10 +205,28 @@ export function BudgetMeter({ budget, caps }: { budget: BudgetView; caps?: Parti
   )
 }
 
+// ── §6.3a's vocabulary, declared here because the chip below uses it ─────────
+
+const CLASS_WORDS: Record<EvidenceClass, string> = {
+  direct_stat: 'measured',
+  derived: 'derived',
+  model_summary: 'model summary',
+  human: 'human',
+}
+
 // ── §6.3 Evidence chip ───────────────────────────────────────────────────────
 
-/** Resolves an id to something openable, or returns null if it does not exist. */
-export type IdResolver = (id: string) => { label: string; kind: string } | null
+/**
+ * Resolves an id to something openable, or returns null if it does not exist.
+ *
+ * `mark` is the provenance of the thing the id names, when the desk knows it.
+ * It is optional because most resolvers know only that an id exists — and an
+ * absent mark means "not known", never "trusted", which is why the chip says
+ * nothing rather than saying "platform" when it is missing.
+ */
+export type IdResolver = (
+  id: string,
+) => { label: string; kind: string; mark?: ProvenanceMark | null } | null
 
 /**
  * The UI's honesty check on the agent's honesty check (§6.3).
@@ -157,28 +257,50 @@ export function EvidenceChip({
       </Tooltip>
     )
   }
+  // §6.3a says "every card, chip and memory row". The chip half was missing, and
+  // it is the half that travels: an id produced by a fetched page is quoted into
+  // findings, gates and the dossier's funnel, and at each of those sites it
+  // rendered as bare monospace indistinguishable from an id the platform
+  // measured itself. The mark goes on the chip so it cannot be left behind by
+  // whichever surface quotes the id next.
+  const mark = hit.mark ?? null
+  const untrusted = mark?.provenance === 'untrusted'
+  const cls = mark?.evidence_class ?? null
   return (
     <button
       type="button"
-      className="ev-chip"
+      className={untrusted ? 'ev-chip untrusted' : 'ev-chip'}
       data-testid={`ev-${id}`}
       data-resolved="true"
+      data-provenance={mark ? mark.provenance : undefined}
+      data-evidence-class={cls ?? undefined}
       onClick={() => onOpen?.(id)}
-      title={hit.label}
+      title={
+        untrusted
+          ? `${hit.label} — fetched from ${mark?.source ?? 'an external source'}${
+              mark?.fetched_at ? ` at ${mark.fetched_at}` : ''
+            }. Treated as data, never as instruction.`
+          : hit.label
+      }
     >
       {id}
+      {/* Words, not a hue (Meridian principle 3). A reader who cannot see the
+          colour still reads "fetched". */}
+      {untrusted && (
+        <span className="prov-mark">
+          <span aria-hidden>⚑</span> fetched{mark?.source ? ` · ${mark.source}` : ''}
+        </span>
+      )}
+      {/* Every known class is named, including `direct_stat`. Labelling three of
+          the four and leaving the measurement bare would make "measured" and
+          "class not recorded" render identically, which is the same conflation
+          §6.3a exists to stop one level up. */}
+      {cls && <span className="ev-class">{CLASS_WORDS[cls]}</span>}
     </button>
   )
 }
 
 // ── §6.3a Provenance mark — the fence has to reach the human ─────────────────
-
-const CLASS_WORDS: Record<EvidenceClass, string> = {
-  direct_stat: 'measured',
-  derived: 'derived',
-  model_summary: 'model summary',
-  human: 'human',
-}
 
 /**
  * A `model_summary` must never look like a measurement, and content fetched from

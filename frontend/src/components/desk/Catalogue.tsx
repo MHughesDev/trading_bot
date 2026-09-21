@@ -64,10 +64,19 @@ export function Catalogue() {
         />
       </div>
 
+      {/* `/api/catalogue` has been served since S-6.19, so a null here is the
+          request failing, not the endpoint missing. The old copy sent a reader
+          away to wait for a phase that had already landed. */}
       {cat.data === null && (
         <EmptyState
-          message="The catalogue API is not built yet"
-          detail="/api/catalogue lands with Set S phase 3 (AGENT-006). This page is wired against the generated taxonomy Track 1 landed."
+          message="The catalogue did not answer"
+          detail="/api/catalogue is served (S-6.19), so this is the request failing rather than the endpoint missing — check the API logs. Nothing below is a claim that the registry is empty."
+        />
+      )}
+      {cat.data !== null && cat.data !== undefined && tools.length === 0 && (
+        <EmptyState
+          message="The catalogue answered with no tools"
+          detail="A fact about the registry rather than about this mode or this search."
         />
       )}
 

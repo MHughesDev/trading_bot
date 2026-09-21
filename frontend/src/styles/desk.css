@@ -101,6 +101,14 @@
 }
 .ev-chip.missing { text-decoration: line-through; color: var(--fg-tertiary); cursor: not-allowed; }
 .ev-chip[disabled] { cursor: not-allowed; }
+/* A chip whose id traces to fetched content (§6.3a). The dashed edge is the
+   second signal; the word "fetched" inside it is the first, because a reader who
+   cannot see the border still has to be told. */
+.ev-chip.untrusted { border-style: dashed; border-color: var(--fg-warn); }
+.ev-chip > .ev-class {
+  font-family: var(--font-ui); font-size: var(--t-10); color: var(--fg-tertiary);
+  border-left: 1px solid var(--line-hairline); padding-left: 4px;
+}
 
 .prov-mark {
   display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-10);
@@ -123,6 +131,17 @@
 .budget-track > i.warn { background: var(--fg-warn); }
 .budget-track > i.neg { background: var(--bg-neg); }
 .budget-track > b { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--fg-primary); opacity: 0.55; }
+/* A bar with no denominator. Hatched rather than empty: an empty track and a
+   track filled to 0% look the same, and they mean "nobody said what the cap is"
+   and "none of it has been used". The text beside it says which. */
+.budget-track.unknown {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--bg-inset) 0 4px,
+    transparent 4px 8px
+  );
+  border: 1px dashed var(--line-hairline);
+}
 
 .stage-strip { display: flex; flex-wrap: wrap; gap: 3px; }
 .stage-strip > span {
@@ -199,6 +218,36 @@
   .desk-dock { position: sticky; bottom: 0; }
   .desk-hd { padding-left: var(--s-10, 40px); }
   .charter-form { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* --- print: the dossier's PDF export (§5, §6.3a; S-6.17, S-6.23) --------------
+   "Export PDF" is `window.print()`, so the PDF a reviewer opens a month later is
+   whatever this stylesheet says. There was none, which meant the export was the
+   app shell — rail, right panel, controls row — around the document, and, worse,
+   that §6.3a's second hard rule rested on nothing: the provenance mark is drawn
+   with a dashed warn-coloured border, and browsers drop backgrounds and borders
+   from a print by default. A mark that survives on screen and vanishes on paper
+   fails the acceptance exactly where it matters, because the reviewer reading the
+   PDF is the one who no longer has the run to ask. */
+@media print {
+  .desk-rail, .desk-side, .desk-dock, .desk-hd, .desk-rail-toggle, .banner { display: none !important; }
+  .desk, .desk-body, .desk-center { display: block; height: auto; overflow: visible; }
+  .desk-scroll { overflow: visible; height: auto; max-height: none; }
+  .dossier { max-width: none; color: #000; background: #fff; }
+  .dossier .desk-actions { display: none; }
+  /* The mark, in ink. Forced rather than inherited: `print-color-adjust` is what
+     keeps a browser from helpfully removing it. */
+  .prov-mark, .ev-chip.untrusted {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    border: 1px dashed #000 !important;
+    color: #000 !important;
+  }
+  .ev-chip.missing { text-decoration: line-through !important; }
+  .inert-text { border-left: 2px solid #000 !important; background: transparent; }
+  /* A table split across a page break loses the row a mark sits on. */
+  .dossier table { page-break-inside: auto; }
+  .dossier tr { page-break-inside: avoid; }
 }
 
 /* --- settings: service tokens (S-6.22) --------------------------------------

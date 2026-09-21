@@ -8,10 +8,10 @@ import { useQuery } from '@tanstack/react-query'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
 import { StaleBadge } from '@/components/primitives/States'
-import type { DeskCard, WorkingState } from '@/api/desk'
-import { deskApi } from '@/api/desk'
+import type { DeskCard, ProvenanceMark, WorkingState } from '@/api/desk'
+import { charterView, deskApi, sessionForConversation } from '@/api/desk'
 import { conversationsApi } from '@/api/agent'
-import { mergeCards, toCards, type WireEvent } from '@/lib/desk/events'
+import { costCalls, latestExposure, mergeCards, toCards, type WireEvent } from '@/lib/desk/events'
 import { useDeskStream } from '@/hooks/useDeskStream'
 import { CardStream } from './CardStream'
 import { Composer, type ComposerHandle, type ComposerSubmission } from './Composer'
@@ -38,9 +38,16 @@ import { StageStrip, TierBadge, type IdResolver } from './Shared'
  * the model wrote into a claim but no tool ever produced is a fabrication, and
  * the chip renders struck-through. Resolving a card's ids from the card itself
  * would make every id resolve and the check would assert nothing.
+ *
+ * It also carries the **provenance** of the tool result an id came out of
+ * (§6.3a). The fence used to stop at the card border: a tool card whose content
+ * was fetched was marked, and the ids it produced were then quoted into
+ * findings, gates and the dossier's funnel as bare monospace, identical to an id
+ * the platform measured for itself. The resolver is the one place that knows
+ * which tool produced which id, so it is the place the mark has to travel from.
  */
 export function makeResolver(state: WorkingState | null, cards: DeskCard[]): IdResolver {
-  const known = new Map<string, { label: string; kind: string }>()
+  const known = new Map<string, { label: string; kind: string; mark?: ProvenanceMark | null }>()
   for (const e of state?.evidence ?? []) known.set(e.id, { label: `from ${e.tool}, step ${e.step}`, kind: 'evidence' })
   for (const f of state?.findings ?? []) known.set(f.id, { label: f.headline, kind: 'finding' })
   for (const c of cards) {
@@ -48,11 +55,15 @@ export function makeResolver(state: WorkingState | null, cards: DeskCard[]): IdR
     const produced = (c.detail?.produced_ids ?? c.detail?.ids) as unknown
     if (Array.isArray(produced)) {
       for (const id of produced) {
-        if (typeof id === 'string') known.set(id, { label: `returned by ${c.headline}`, kind: 'tool result' })
+        if (typeof id === 'string') {
+          known.set(id, { label: `returned by ${c.headline}`, kind: 'tool result', mark: c.mark ?? null })
+        }
       }
     }
     const handle = c.detail?.handle
-    if (typeof handle === 'string') known.set(handle, { label: `full result of ${c.headline}`, kind: 'handle' })
+    if (typeof handle === 'string') {
+      known.set(handle, { label: `full result of ${c.headline}`, kind: 'handle', mark: c.mark ?? null })
+    }
   }
   return (id) => known.get(id) ?? null
 }
@@ -61,10 +72,13 @@ export function Conversation({
   conversationId,
   onOpenRun,
   onOpenDossier,
+  onOpenConversation,
 }: {
   conversationId: string
   onOpenRun: (runId: string) => void
   onOpenDossier: (ticket: string) => void
+  /** A child conversation of a continuous session's agenda item (§2b). */
+  onOpenConversation?: (conversationId: string) => void
 }) {
   const [cards, setCards] = useState<DeskCard[]>([])
   const [events, setEvents] = useState<WireEvent[]>([])
@@ -109,14 +123,18 @@ export function Conversation({
     refetchInterval: running ? 1_500 : false,
   })
 
+  // The whole stream, in one place. The card list, the Cost tab's per-call rows
+  // and the Tools tab's exposure note are all folds of exactly this array, so
+  // none of the three can disagree with the other two about what happened.
+  const wire = useMemo<WireEvent[]>(
+    () => [...(polled.data?.messages ?? []), ...events],
+    [polled.data, events],
+  )
+
   useEffect(() => {
-    const wire: WireEvent[] = [
-      ...(polled.data?.messages ?? []),
-      ...events,
-    ]
     if (wire.length === 0) return
     setCards((prev) => mergeCards(prev, toCards(wire)))
-  }, [polled.data, events])
+  }, [wire])
 
   const state = useQuery({
     queryKey: ['desk', 'state', runId],
@@ -125,10 +143,57 @@ export function Conversation({
     refetchInterval: running ? 4_000 : false,
   })
 
+  // `/api/catalogue` has been served since S-6.19 and nothing in the desk's own
+  // conversation ever called it, so the Tools tab rendered "not built yet" over
+  // a built endpoint. The catalogue is a registry, not a run, so it is cached
+  // rather than polled.
+  const catalogue = useQuery({
+    queryKey: ['desk', 'catalogue'],
+    queryFn: () => deskApi.catalogue(),
+    staleTime: 5 * 60_000,
+  })
+
+  // ── The session this conversation is, if it is one (§2b) ──────────────────
+  //
+  // Two calls, because the list is the only place a conversation id maps to a
+  // session id and the charter is only on the detail. Both routes are served and
+  // neither had a caller: the panel hard-coded `continuous = false`, so the
+  // Agenda and Charter tabs could not be opened at all, on a session whose whole
+  // point is that board.
+  const sessions = useQuery({
+    queryKey: ['desk', 'sessions'],
+    queryFn: () => deskApi.sessions(),
+    staleTime: 30_000,
+  })
+  const sessionRow = useMemo(
+    () => sessionForConversation(sessions.data?.sessions, conversationId),
+    [sessions.data, conversationId],
+  )
+  const sessionId = sessionRow?.session_id ?? null
+  const session = useQuery({
+    queryKey: ['desk', 'session', sessionId],
+    queryFn: () => deskApi.session(sessionId as string),
+    enabled: !!sessionId,
+    refetchInterval: running ? 10_000 : false,
+  })
+  const continuous = session.data?.continuous === true
+  const agenda = useQuery({
+    queryKey: ['desk', 'agenda', sessionId],
+    queryFn: () => deskApi.agenda(sessionId as string),
+    enabled: !!sessionId && continuous,
+    refetchInterval: running ? 5_000 : false,
+  })
+
   const workingState = state.data ?? null
   const resolve = useMemo(() => makeResolver(workingState, cards), [workingState, cards])
   const approvals = useMemo(() => pendingApprovals(cards), [cards])
-  const continuous = false // A session's `continuous` flag arrives with S-11.13.
+
+  // The two notes that were already on this conversation's stream and that the
+  // right panel was passed a literal `[]` and `null` instead. `calls` is `null`
+  // with no run, because "nobody asked" and "no call was made" are different
+  // sentences and the Cost tab prints a different one for each.
+  const calls = useMemo(() => (runId ? costCalls(wire) : null), [wire, runId])
+  const exposure = useMemo(() => latestExposure(wire), [wire])
 
   const steer = useCallback(
     (text: string) => {
@@ -232,6 +297,21 @@ export function Conversation({
         <Badge tone={running ? 'accent' : 'neutral'}>
           {paused ? 'paused' : running ? 'working' : 'idle'}
         </Badge>
+        {/* §2b: a session's journal says so in the header, with its agenda
+            depth. The depth is the list's `agenda_open`, which is `null` when
+            the session log did not replay — shown as "unknown" rather than as
+            a depth of zero, which would read as a session with nothing left. */}
+        {continuous && (
+          <>
+            <Badge tone="info">continuous</Badge>
+            <span className="sub">
+              agenda{' '}
+              {sessionRow?.agenda_open === null || sessionRow?.agenda_open === undefined
+                ? '(unknown)'
+                : sessionRow.agenda_open}
+            </span>
+          </>
+        )}
         {stream.state === 'stale' && <StaleBadge age={`${stream.staleForSecs ?? 0}s`} />}
         {workingState && (
           <span className="sub">
@@ -325,14 +405,34 @@ export function Conversation({
           {tab === 'tools' && (
             <ToolsTab
               mode={workingState?.mode ?? 'chat'}
-              exposed={null}
-              catalogue={null}
+              exposed={exposure?.exposed ?? null}
+              exposure={exposure}
+              catalogue={catalogue.data?.tools ?? null}
+              catalogueLoading={catalogue.isPending}
               searchedFor={[]}
             />
           )}
-          {tab === 'cost' && <CostTab calls={[]} bytesPerTokenCalibrated={null} bytesPerTokenEstimate={null} />}
-          {tab === 'agenda' && <AgendaTab items={null} />}
-          {tab === 'charter' && <CharterTab charter={null} amendments={[]} />}
+          {tab === 'cost' && (
+            <CostTab calls={calls} bytesPerTokenCalibrated={null} bytesPerTokenEstimate={null} />
+          )}
+          {tab === 'agenda' && (
+            <AgendaTab
+              items={agenda.data?.items ?? null}
+              loading={agenda.isPending}
+              onVeto={(id) => {
+                if (!sessionId) return
+                void deskApi.vetoAgendaItem(sessionId, id).then(() => void agenda.refetch())
+              }}
+              onOpenChild={(cid) => onOpenConversation?.(cid)}
+            />
+          )}
+          {tab === 'charter' && (
+            <CharterTab
+              charter={charterView(session.data)}
+              amendments={[]}
+              loading={session.isPending && !!sessionId}
+            />
+          )}
         </RightPanel>
       </aside>
       </div>

@@ -140,6 +140,20 @@ pub fn translate(form: &DeskCharter) -> Result<Translated, Refusal> {
         })?,
     };
 
+    if form.max_trials == Some(0) {
+        return Err(Refusal {
+            message: "a trial cap of zero is a session that cannot research".into(),
+            fix: "leave it blank for no cap, or give it a number of trials it may spend".into(),
+        });
+    }
+
+    // Every window's timezone, checked here rather than at the first iteration
+    // of the driver. `form.timezone.unwrap_or("UTC")` used to be written into
+    // every window with no check at all, so `Amercia/New_York` was accepted at
+    // the charter form and only failed days later — and a fence that silently
+    // became UTC is a session spending money in hours the operator believed it
+    // was fenced out of. `OpenHours::parse` is the same reader the driver uses,
+    // so the form and the driver cannot disagree about what a schedule means.
     let concurrency = form.concurrency.unwrap_or(1);
     let schedule = Schedule {
         windows: windows_from_grid(&form.schedule, form.timezone.as_deref().unwrap_or("UTC"))?,
@@ -149,6 +163,13 @@ pub fn translate(form: &DeskCharter) -> Result<Translated, Refusal> {
     .map_err(|e| Refusal {
         message: e.to_string(),
         fix: "one, two or three at a time".into(),
+    })?;
+
+    // The schedule must be readable by the thing that will read it.
+    research_session::schedule::OpenHours::parse(&schedule).map_err(|e| Refusal {
+        message: e.to_string(),
+        fix: "pick the timezone from the list rather than typing it, and give a window an end               later than its start"
+            .into(),
     })?;
 
     let usd_per_day = form.budget_usd_day.unwrap_or(DEFAULT_USD_PER_DAY);
@@ -161,6 +182,14 @@ pub fn translate(form: &DeskCharter) -> Result<Translated, Refusal> {
         usd_total: form
             .budget_usd_total
             .unwrap_or(usd_per_day * research_session::charter::DEFAULT_BUDGET_DAYS),
+        // `unwrap_or(0)` was here and it conflated two answers: a user who left
+        // the field blank and a user who typed a cap of zero arrived identical,
+        // and the desk reads a stored 0 as "no cap recorded" because that is the
+        // safe reading — which makes a genuine cap of zero unexpressible. Zero
+        // is not a cap anybody wants, so the honest fix is to refuse it at the
+        // door rather than to widen the column: a session that may spend no
+        // trials is a session that cannot research, and saying so is better than
+        // storing a number that means "blank" to everyone downstream.
         trials_total: form.max_trials.unwrap_or(0),
         max_runs,
     };
@@ -363,6 +392,49 @@ mod tests {
             translate(&blank).expect("blank is not stated").charter.delta_practical_default,
             None
         );
+    }
+
+    #[test]
+    fn a_timezone_the_platform_does_not_know_is_refused_at_the_form() {
+        // It used to be written into every window unchecked, so a typo was
+        // accepted here and only failed when the driver first read it — days
+        // later, on a session that had been running in UTC rather than in the
+        // hours the operator fenced.
+        let form = DeskCharter {
+            schedule: grid(0, 9..17),
+            timezone: Some("Amercia/New_York".into()),
+            ..DeskCharter::default()
+        };
+        let e = translate(&form).expect_err("refused");
+        assert!(e.message.contains("Amercia/New_York"), "{}", e.message);
+
+        // And the spelling that is right still passes.
+        let ok = DeskCharter {
+            schedule: grid(0, 9..17),
+            timezone: Some("America/New_York".into()),
+            ..DeskCharter::default()
+        };
+        assert!(translate(&ok).is_ok());
+    }
+
+    #[test]
+    fn a_trial_cap_of_zero_is_refused_rather_than_stored_as_blank() {
+        // Blank and zero used to arrive identical, and the desk reads a stored
+        // zero as "no cap recorded" because that is the safe reading — which
+        // made a genuine cap of zero unexpressible. Refusing it keeps blank
+        // meaning blank.
+        let zero = DeskCharter {
+            max_trials: Some(0),
+            ..DeskCharter::default()
+        };
+        assert!(translate(&zero).is_err());
+        let blank = translate(&DeskCharter::default()).expect("blank is fine");
+        assert_eq!(blank.budget.trials_total, 0, "blank still stores 0");
+        let real = DeskCharter {
+            max_trials: Some(40),
+            ..DeskCharter::default()
+        };
+        assert_eq!(translate(&real).expect("a cap").budget.trials_total, 40);
     }
 
     #[test]

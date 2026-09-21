@@ -416,20 +416,198 @@ export interface AgendaItem {
   stage?: Stage | null
 }
 
+/**
+ * A row of `GET /api/research/sessions`, as that route actually answers it.
+ *
+ * This type used to declare `title`, `mode`, `workflow`, `ring`, `stage` and a
+ * `charter`, none of which the list has ever sent. Nothing read the type, so
+ * nothing noticed — but the first surface to trust it would have rendered six
+ * `undefined`s with no error anywhere, which is the failure that is hardest to
+ * see. What the list sends is below; the charter is on the *detail* route, which
+ * is why `sessionDetail` exists separately.
+ */
 export interface DeskSession {
   session_id: string
   conversation_id: string
-  title: string
   continuous: boolean
-  mode: Mode
-  workflow: Workflow
-  ring: Ring
-  stage: Stage
-  charter: Charter | null
-  /** Set when the stall detector fired; the three actions hang off it. */
-  stalled_reason?: string | null
-  agenda_depth?: number
-  spent_usd_today?: number
+  /** A bounded session's one question. `null` for a continuous one. */
+  question: string | null
+  tier: string
+  created_at: string
+  /** The folded lifecycle word, or `null` when the log did not replay. */
+  state: string | null
+  runs_started: number | null
+  /** Items neither finished nor vetoed. `null` when the fold failed. */
+  agenda_open: number | null
+}
+
+/**
+ * The session a conversation *is*, or `null` when it is an ordinary chat.
+ *
+ * A pure function over the list rather than a lookup route, because there is no
+ * `GET /api/research/sessions?conversation_id=` and inventing one in the client
+ * would be a call to a path that does not exist.
+ */
+export function sessionForConversation(
+  sessions: DeskSession[] | null | undefined,
+  conversationId: string,
+): DeskSession | null {
+  return (sessions ?? []).find((s) => s.conversation_id === conversationId) ?? null
+}
+
+// ── The session detail, which is a different shape from the charter form ─────
+//
+// `POST /api/research/sessions` takes the form's flat shape and `desk_charter::
+// translate` converts it. `GET /api/research/sessions/{id}` answers the *stored*
+// charter, which is the one AGENT-014 §2.2 defines: a nested `scope`, a tagged
+// `objective`, and the budget, autonomy and schedule as siblings of the charter
+// rather than fields of it. `Charter` above is the form. These are the wire.
+
+export interface WireScope {
+  instruments: string[]
+  asset_classes: string[]
+  families: string[]
+  timeframes: string[]
+  windows: string[]
+}
+
+/** `#[serde(tag = "kind")]` on the Rust side; the payload varies by tag. */
+export type WireObjective = { kind: string } & Record<string, unknown>
+
+export interface WireCharter {
+  scope: WireScope
+  objective: WireObjective | string
+  seeds: Array<{ question: string; subject: string; workflow: string | null }>
+  /** Empty means *all the tier supports*, not none (AGENT-014 §2.2). */
+  permitted_workflows: string[]
+  exclusions: string[]
+  standing_constraints: string[]
+  exploration_share: number
+  stop_when: unknown[]
+  delta_practical_default: number | null
+  version: number
+}
+
+export interface WireWindow {
+  /** ISO weekday numbers, Monday = 1. */
+  days: number[]
+  start: string
+  end: string
+  tz: string
+}
+
+export interface SessionDetail {
+  session_id: string
+  conversation_id: string
+  continuous: boolean
+  question: string | null
+  charter: WireCharter | null
+  budget: {
+    usd_total: number
+    usd_per_day: number
+    trials_total: number
+    max_runs: number
+  } | null
+  schedule: { windows: WireWindow[]; max_concurrent_runs: number } | null
+  autonomy: string | null
+  replenish: boolean | null
+  review_every: { kind: 'runs'; runs: number } | { kind: 'window' } | null
+  tier: string | null
+  exploration_share: number | null
+  state: unknown
+  runs_started: number | null
+  charter_version: number | null
+  /** Events the fold could not replay. Reported rather than hidden. */
+  anomalies?: unknown[]
+}
+
+/**
+ * What the Charter tab renders, decoded from the wire with the empties read the
+ * way the server reads them.
+ *
+ * Three of these decisions are the whole reason this is a function with a test
+ * rather than a spread:
+ *
+ * * **An empty scope list is *everything*, not nothing.** `Scope::admits`
+ *   returns `true` when every list is empty, so a charter that names no
+ *   instruments has not excluded them all. The tab used to print `—` for an
+ *   empty list, which reads as "nothing is in scope" — the opposite of what the
+ *   session will do.
+ * * **An empty `permitted_workflows` is *all of them*, for the same reason.**
+ * * **`trials_total: 0` is "nobody said", not "no trials".** `translate` writes
+ *   `form.max_trials.unwrap_or(0)` for a blank field, so the zero on the wire is
+ *   an absent cap. Rendering "0 trials" would describe a session that may not
+ *   run at all.
+ */
+export interface CharterView {
+  objective: string
+  scope: { instruments: string[]; asset_classes: string[]; families: string[]; timeframes: string[] }
+  /** True when every scope list is empty, which the server reads as "any". */
+  scope_is_any: boolean
+  seeds: string[]
+  permitted_workflows: string[]
+  /** True when the list is empty, which the server reads as "all of them". */
+  workflows_are_all: boolean
+  exclusions: string[]
+  standing_constraints: string[]
+  exploration_share: number | null
+  delta_practical: number | null
+  version: number | null
+  usd_per_day: number | null
+  usd_total: number | null
+  /** `null` when no cap was recorded — never `0`. */
+  trials_total: number | null
+  max_runs: number | null
+  autonomy: string | null
+  replenish: boolean | null
+  review_every: { kind: 'runs'; runs: number } | { kind: 'window' } | null
+  windows: WireWindow[]
+  /** True when no window was set, which `Schedule::default` reads as always open. */
+  always_open: boolean
+  max_concurrent_runs: number | null
+}
+
+function objectiveWord(o: WireCharter['objective']): string {
+  if (typeof o === 'string') return o
+  if (o && typeof o === 'object' && typeof o.kind === 'string') return o.kind
+  // The tag is how the server names it; without one the desk does not guess at
+  // `find_deployable`, which is the reassuring answer rather than the true one.
+  return 'not recorded'
+}
+
+export function charterView(s: SessionDetail | null | undefined): CharterView | null {
+  if (!s?.charter) return null
+  const c = s.charter
+  const scope = {
+    instruments: c.scope?.instruments ?? [],
+    asset_classes: c.scope?.asset_classes ?? [],
+    families: c.scope?.families ?? [],
+    timeframes: c.scope?.timeframes ?? [],
+  }
+  const windows = s.schedule?.windows ?? []
+  return {
+    objective: objectiveWord(c.objective),
+    scope,
+    scope_is_any: Object.values(scope).every((l) => l.length === 0),
+    seeds: (c.seeds ?? []).map((x) => x.question),
+    permitted_workflows: c.permitted_workflows ?? [],
+    workflows_are_all: (c.permitted_workflows ?? []).length === 0,
+    exclusions: c.exclusions ?? [],
+    standing_constraints: c.standing_constraints ?? [],
+    exploration_share: typeof c.exploration_share === 'number' ? c.exploration_share : null,
+    delta_practical: typeof c.delta_practical_default === 'number' ? c.delta_practical_default : null,
+    version: s.charter_version ?? (typeof c.version === 'number' ? c.version : null),
+    usd_per_day: s.budget?.usd_per_day ?? null,
+    usd_total: s.budget?.usd_total ?? null,
+    trials_total: s.budget && s.budget.trials_total > 0 ? s.budget.trials_total : null,
+    max_runs: s.budget?.max_runs ?? null,
+    autonomy: s.autonomy ?? null,
+    replenish: s.replenish ?? null,
+    review_every: s.review_every ?? null,
+    windows,
+    always_open: windows.length === 0,
+    max_concurrent_runs: s.schedule?.max_concurrent_runs ?? null,
+  }
 }
 
 // ── Desk home ────────────────────────────────────────────────────────────────
@@ -461,20 +639,53 @@ export interface RunningRow {
   day_budget_used_pct?: number | null
 }
 
+export type DigestKind =
+  | 'concluded'
+  | 'finding'
+  | 'refuted'
+  | 'approval_defaulted'
+  | 'monitor'
+  | 'budget'
+  | 'waiting'
+
 /** One line of "Since you were away" — a verdict or a state change, never an event name. */
 export interface DigestLine {
   id: string
   at: string
-  kind: 'concluded' | 'finding' | 'refuted' | 'approval_defaulted' | 'monitor' | 'budget' | 'waiting'
+  kind: DigestKind
   text: string
   href: string | null
   mark?: ProvenanceMark | null
+}
+
+/**
+ * A kind of line this deployment cannot see, and why.
+ *
+ * `/api/desk/digest` has sent these since it was built and this type did not
+ * admit them, so the panel dropped them on the floor. That is the failure the
+ * server went out of its way to prevent: three of the seven kinds have no source
+ * here — `finding` and `refuted` need phase 4's memory migrations, `monitor`
+ * needs a state-*change* log — and a digest that silently omits them says
+ * "nothing was refuted" when it means "I cannot see refutations". Only one of
+ * those two means the operator can stop looking.
+ */
+export interface DigestGap {
+  kind: DigestKind
+  why: string
 }
 
 export interface AwayDigest {
   since: string
   until: string
   lines: DigestLine[]
+  /**
+   * The server's own "do not show this at all" — it answers `absent` for a gap
+   * under an hour rather than an empty list, because "nothing happened" and
+   * "you have not been away" are different sentences.
+   */
+  absent?: boolean
+  reason?: string | null
+  kinds_not_covered?: DigestGap[]
 }
 
 // ── Replay (AGENT-012 §4) ────────────────────────────────────────────────────
@@ -544,6 +755,24 @@ export interface KillSwitchState {
   tripped_by?: string | null
   reason?: string | null
   at?: string | null
+}
+
+/** A window in which the monitor's limits are deliberately not enforced (§4.3). */
+export interface MaintenanceWindow {
+  window_id: string
+  opened_by: string
+  reason: string
+  expires_at: string
+}
+
+/** What `GET /api/monitor/kill-switch` answers. */
+export interface MonitorKillSwitch {
+  /** The lease word — `held`, `expired`, and so on, lowercased by the server. */
+  lease: string
+  orders_permitted: boolean
+  /** The scopes that are halted. Empty means none are, which is measured. */
+  halted_scopes: string[]
+  maintenance_windows: MaintenanceWindow[]
 }
 
 /** One `(tier, workflow)` pair's share of runs that produced nothing. */
@@ -629,6 +858,21 @@ export const deskApi = {
 
   killSwitch: () => optional<KillSwitchState>(client.get('/api/trading/status')),
 
+  /**
+   * COMP-007's own kill-switch read, which `/api/trading/status` is not.
+   *
+   * `desk.ts` has said since it was written that scope, who tripped it and why
+   * "come with COMP-007"; `/api/monitor/kill-switch` has been served since that
+   * phase landed and nothing called it, so the Monitor page went on printing
+   * `scope global` — a word the endpoint it did call has never sent.
+   *
+   * It carries the thing `/api/trading/status` cannot: which *scopes* are
+   * halted, and the open maintenance windows. §4.3 says an open window must be
+   * as visible in the desk chrome as a trip, because a window nobody can see is
+   * a hole nobody can audit, and the desk showed it nowhere.
+   */
+  monitorKillSwitch: () => optional<MonitorKillSwitch>(client.get('/api/monitor/kill-switch')),
+
   // — AGENT-012 §17's ✗ rows. Present so the desk is wired the day they land. —
   state: (runId: string, step?: number) =>
     optional<WorkingState>(client.get(`/api/agent/runs/${runId}/state`, { params: { step } })),
@@ -680,6 +924,15 @@ export const deskApi = {
     ),
   awayDigest: (since: string) => optional<AwayDigest>(client.get('/api/desk/digest', { params: { since } })),
   sessions: () => optional<{ sessions: DeskSession[] }>(client.get('/api/research/sessions')),
+  /**
+   * One session, with the charter the list does not carry.
+   *
+   * Two calls rather than one because the list is the only place a
+   * conversation id maps to a session id, and the charter is only on the
+   * detail. Neither route takes the other's key.
+   */
+  session: (sessionId: string) =>
+    optional<SessionDetail>(client.get(`/api/research/sessions/${sessionId}`)),
   /**
    * One door for both halves of the toggle (AGENT-014 §2.1).
    *

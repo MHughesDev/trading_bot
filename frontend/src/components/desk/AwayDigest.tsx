@@ -16,6 +16,35 @@ import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
 import type { AwayDigest as AwayDigestData, DigestLine } from '@/api/desk'
 import { ProvenanceBadge } from './Shared'
 
+/**
+ * What the digest is blind to, as a sentence.
+ *
+ * A pure function because the rule is worth a test and rendering it is not. The
+ * server names the kinds it has no source for; the panel used to drop the field
+ * entirely, so a digest that could not see refutations rendered exactly like one
+ * where nothing had been refuted. Returns `null` only when the server said
+ * nothing was uncovered — never when it simply was not asked.
+ */
+export function blindSpotNote(data: AwayDigestData | null): string | null {
+  const gaps = data?.kinds_not_covered ?? []
+  if (gaps.length === 0) return null
+  return `Not covered here: ${gaps.map((g) => `${g.kind} (${g.why})`).join('; ')}.`
+}
+
+/**
+ * Whether the panel has anything honest to say.
+ *
+ * An empty line list is **not** a reason to render nothing when the server also
+ * declared blind spots: "nothing happened" is a finding about your research and
+ * "I cannot see three of the seven kinds" is a fact about the platform, and the
+ * operator reading it is deciding whether to stop looking.
+ */
+export function hasSomethingToSay(data: AwayDigestData | null, linesInWindow: number): boolean {
+  if (!data) return false
+  if (data.absent === true) return false
+  return linesInWindow > 0 || (data.kinds_not_covered ?? []).length > 0
+}
+
 const MARKER_KEY = 'desk:last-visit'
 
 /** The gap below which the digest is not shown at all. */
@@ -62,19 +91,46 @@ export function AwayDigestPanel({
   data,
   lastVisit,
   now = Date.now(),
+  loading = false,
   onDismiss,
 }: {
   data: AwayDigestData | null
   lastVisit: number
   now?: number
+  /**
+   * True while the request is in flight. Without it a pending query and a
+   * failed one are both `null` at this boundary, and the panel would report the
+   * first as the second.
+   */
+  loading?: boolean
   onDismiss?: () => void
 }) {
   const [dismissed, setDismissed] = useState(false)
   useEffect(() => setDismissed(false), [data])
 
-  if (dismissed || !data || !shouldShowDigest(lastVisit, now)) return null
+  if (dismissed || loading || !shouldShowDigest(lastVisit, now)) return null
+
+  // `optional()` turns a 404 or a 501 into `null`, so a `null` here after a long
+  // gap means the endpoint did not answer — which is not the same as a quiet
+  // night, and the panel that is meant to save the operator an hour of
+  // reconstruction must not be the one that hides its own absence.
+  if (!data) {
+    return (
+      <Panel>
+        <PanelHeader title="Since you were away" />
+        <PanelBody>
+          <p className="sub" data-testid="digest-unavailable">
+            The digest could not be read, so this is not a report that nothing happened. Open the
+            conversations below rather than trusting this panel's silence.
+          </p>
+        </PanelBody>
+      </Panel>
+    )
+  }
+
   const lines = linesInGap(data.lines, lastVisit, now)
-  if (lines.length === 0) return null
+  if (!hasSomethingToSay(data, lines.length)) return null
+  const blind = blindSpotNote(data)
 
   return (
     <Panel>
@@ -83,14 +139,27 @@ export function AwayDigestPanel({
         actions={<span className="sub">{new Date(lastVisit).toLocaleString()} → now</span>}
       />
       <PanelBody>
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
-          {lines.map((l) => (
-            <li key={l.id} style={{ fontSize: 'var(--t-12)' }}>
-              <ProvenanceBadge mark={l.mark} />{' '}
-              {l.href ? <Link to={l.href}>{l.text}</Link> : <span>{l.text}</span>}
-            </li>
-          ))}
-        </ul>
+        {lines.length === 0 ? (
+          <p className="sub" data-testid="digest-quiet">
+            Nothing the desk can see changed while you were away.
+          </p>
+        ) : (
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
+            {lines.map((l) => (
+              <li key={l.id} style={{ fontSize: 'var(--t-12)' }}>
+                <ProvenanceBadge mark={l.mark} />{' '}
+                {l.href ? <Link to={l.href}>{l.text}</Link> : <span>{l.text}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {/* Said out loud, beside the lines rather than behind a disclosure: the
+            reader is deciding whether they have seen everything. */}
+        {blind && (
+          <p className="sub" data-testid="digest-blind-spots">
+            {blind}
+          </p>
+        )}
         <Button
           size="xs"
           variant="ghost"

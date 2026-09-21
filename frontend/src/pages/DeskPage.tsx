@@ -92,6 +92,10 @@ function ConversationRoute() {
       conversationId={conversationId}
       onOpenRun={(runId) => navigate(`/desk/c/${conversationId}/run/${runId}`)}
       onOpenDossier={(ticket) => navigate(`/desk/c/${conversationId}/dossier/${ticket}`)}
+      // A continuous session's agenda card links to the child conversation that
+      // ran it (§2b), which is a sibling route rather than one nested under this
+      // conversation.
+      onOpenConversation={(id) => navigate(`/desk/c/${id}`)}
     />
   )
 }

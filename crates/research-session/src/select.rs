@@ -452,6 +452,7 @@ pub fn by_item(scored: &[Scored]) -> BTreeMap<Uuid, Score> {
 mod tests {
     use super::*;
     use crate::agenda::Source;
+    use crate::charter::EXPLORATION_FLOOR;
 
     fn item(q: &str, source: Source) -> AgendaItem {
         AgendaItem::new(Uuid::nil(), q, "BTC-USD", source)
@@ -514,32 +515,95 @@ mod tests {
         assert!(s.rationale.contains("asked for"));
     }
 
+    /// A slate of six, all feasible and novel, for counting draws over.
+    fn six() -> Vec<Scored> {
+        let slate: Vec<(AgendaItem, Inputs)> = (0..6)
+            .map(|n| {
+                (
+                    item(&format!("q{n}"), Source::CharterSeed),
+                    inputs(f64::from(n) + 1.0, 1.0, 1.0, 1.0),
+                )
+            })
+            .collect();
+        score(&slate)
+    }
+
+    /// How many of 40 selections were detours, for one session.
+    fn explored_in_forty(scored: &[Scored], session: Uuid, share: f64) -> usize {
+        (0..40)
+            .filter(|seq| {
+                select(scored, share, seed_for(session, *seq))
+                    .expect("a choice")
+                    .exploration
+            })
+            .count()
+    }
+
     #[test]
     fn the_exploration_share_is_achieved_over_forty_selections() {
         // AGENT-014 §12.3: over 40 selections at 0.15, between 3 and 9 are
         // exploration picks. Asserted against the spec's own interval rather
         // than against whatever this implementation happens to produce.
-        let slate: Vec<(AgendaItem, Inputs)> = (0..6)
-            .map(|n| {
-                (
-                    item(&format!("q{n}"), Source::CharterSeed),
-                    #[allow(clippy::cast_precision_loss)]
-                    inputs(f64::from(n) + 1.0, 1.0, 1.0, 1.0),
-                )
-            })
-            .collect();
-        let scored = score(&slate);
-        let session = Uuid::new_v4();
-        let explored = (0..40)
-            .filter(|seq| {
-                select(&scored, 0.15, seed_for(session, *seq))
-                    .expect("a choice")
-                    .exploration
-            })
-            .count();
+        //
+        // **The session id is fixed, and that is a correction rather than a
+        // convenience.** This test drew a fresh `Uuid::new_v4()` and failed
+        // about one run in seven — because `3..=9` is only an ~86% interval for
+        // Binomial(40, 0.15), so a correct implementation fails it routinely.
+        // A test that reddens the build one run in seven teaches the reader to
+        // re-run rather than to look, which is worse than no test: the next
+        // real failure gets re-run too.
+        //
+        // So this pins one session and asserts the spec's interval on it, and
+        // the test below measures the share properly — over 8,000 draws, where
+        // the interval is tight enough to mean something.
+        let session = Uuid::from_u128(0x5E55_1074_0000_0000_0000_0000_0000_0001);
+        let explored = explored_in_forty(&six(), session, 0.15);
         assert!(
             (3..=9).contains(&explored),
             "{explored} of 40 were exploration picks, outside the spec's 3..=9"
+        );
+    }
+
+    #[test]
+    fn the_achieved_share_is_the_declared_share() {
+        // The assertion §12.3's 40-draw window cannot make. 200 sessions × 40
+        // selections is 8,000 draws, where the standard error on a 0.15 rate is
+        // about 0.004 — so ±0.02 is roughly five of them, and a share that had
+        // drifted to 0.10 or 0.20 could not pass by luck.
+        //
+        // Deterministic: the sessions are `Uuid::from_u128(n)`, not drawn. The
+        // point of a platform-held seed is that a draw replays, and a test of
+        // the draw that could not replay would be measuring something else.
+        let scored = six();
+        for share in [0.10, 0.15, 0.30] {
+            let mut explored = 0usize;
+            for n in 0..200u128 {
+                explored += explored_in_forty(&scored, Uuid::from_u128(n + 1), share);
+            }
+            #[allow(clippy::cast_precision_loss)]
+            let achieved = explored as f64 / (200.0 * 40.0);
+            assert!(
+                (achieved - share).abs() < 0.02,
+                "declared share {share}, achieved {achieved:.4} over 8,000 draws"
+            );
+        }
+    }
+
+    #[test]
+    fn the_floor_is_achieved_and_not_merely_permitted() {
+        // INV-21 at the agenda level. A session at the floor must actually take
+        // its detours — a scorer that quietly never explored would satisfy
+        // every other test here, because they all check the ranking.
+        let scored = six();
+        let mut explored = 0usize;
+        for n in 0..200u128 {
+            explored += explored_in_forty(&scored, Uuid::from_u128(n + 9_000), EXPLORATION_FLOOR);
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let achieved = explored as f64 / 8_000.0;
+        assert!(
+            achieved > EXPLORATION_FLOOR - 0.02,
+            "at the floor the session achieved only {achieved:.4}; the floor is a floor on what              happens, not on what is configured"
         );
     }
 
