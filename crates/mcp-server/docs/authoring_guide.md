@@ -602,6 +602,59 @@ count that every selection-adjusted statistic depends on.
 `experiment_id` finds neighbours — what has already been tried in this line of
 work. Use it to avoid rediscovering your own last session.
 
+### trade_reshuffle_bootstrap
+
+Two questions that look like one question, which is why `mode` has no default.
+
+`reshuffle` permutes the trades this run actually produced. The outcome set is
+held fixed, so the endpoint is fixed with it and the only thing that varies is
+the ORDER — it answers "could the path have been much uglier", and nothing else.
+A reshuffle result is NOT a worst case and NOT a capital requirement: a worse
+market would have produced worse trades, and no reordering of these can show you
+that. The tool refuses the label rather than trusting you to remember, and
+reports no endpoint dispersion at all, because a permutation's endpoint is
+arithmetic rather than evidence.
+
+`bootstrap` resamples the trades with replacement, so the outcome set varies and
+the endpoint varies with it. That is a statement about estimation uncertainty:
+what a strategy with this trade distribution might have produced over a sample
+this long. Reach for it when the question is whether the final number is
+reliable, not whether the ride was survivable.
+
+Ruin probabilities need `capital_levels`. Without them the field is null with a
+reason rather than a zero — an unmeasured ruin probability is not a ruin
+probability of nothing.
+
+Nothing is dispatched: it re-reads a run whose trial was charged when the run
+happened, so it spends none. `block` is not offered, and the refusal names the
+symbol it would need.
+
+### cost_shock_curve
+
+What this result becomes at 1x, 1.5x, 2x, 3x and 5x the costs the run was
+actually charged, and the multiple at which it reaches zero. Read it before
+believing a thin edge: an edge that dies at 1.4x is an edge that dies the first
+time the spread widens.
+
+The 1x point is the run's OWN charged costs, trade by trade — not a textbook
+basis-point figure and not a venue's published schedule. That cuts both ways. It
+is the only cost number this platform has measured, and it is exactly as good as
+the run's cost model; if `run_oracle_test` says that model undercharges, this
+curve inherits the error.
+
+The trade set is held fixed. Every point re-prices the same decisions, so nothing
+here models a strategy that would have traded less under higher costs, nor the
+worse fills that usually arrive with them. It is a re-pricing, not a
+re-optimisation, and the result says so.
+
+A run charged no costs at all is refused rather than handed an infinite
+break-even multiple. That case is a finding about the cost model, and returning
+the most reassuring number available would bury it.
+
+`live_cost_bps` is for a cost you MEASURED. Supply it and it is placed on the
+curve with a safety margin; omit it and the margin is null with a reason. Do not
+estimate one to fill the field.
+
 ### web_search
 
 Searches keyless scholarly and reference indexes: OpenAlex (250M works, with

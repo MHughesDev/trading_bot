@@ -11,7 +11,7 @@ import { StaleBadge } from '@/components/primitives/States'
 import type { DeskCard, ProvenanceMark, WorkingState } from '@/api/desk'
 import { charterView, deskApi, sessionForConversation } from '@/api/desk'
 import { conversationsApi } from '@/api/agent'
-import { costCalls, latestExposure, mergeCards, toCards, type WireEvent } from '@/lib/desk/events'
+import { costCalls, latestExposure, mergeCards, toCards, toolSearches, type WireEvent } from '@/lib/desk/events'
 import { useDeskStream } from '@/hooks/useDeskStream'
 import { CardStream } from './CardStream'
 import { Composer, type ComposerHandle, type ComposerSubmission } from './Composer'
@@ -194,6 +194,10 @@ export function Conversation({
   // sentences and the Cost tab prints a different one for each.
   const calls = useMemo(() => (runId ? costCalls(wire) : null), [wire, runId])
   const exposure = useMemo(() => latestExposure(wire), [wire])
+  // The third of them. `search_tools` is answered by the harness itself and
+  // recorded as a `core_tool` note, so a run's searches have been on this same
+  // array since the desk was written — the Tools tab was handed `[]`.
+  const searches = useMemo(() => toolSearches(wire), [wire])
 
   const steer = useCallback(
     (text: string) => {
@@ -409,7 +413,7 @@ export function Conversation({
               exposure={exposure}
               catalogue={catalogue.data?.tools ?? null}
               catalogueLoading={catalogue.isPending}
-              searchedFor={[]}
+              searchedFor={searches}
             />
           )}
           {tab === 'cost' && (

@@ -43,13 +43,24 @@
 //! is text that compiles, and the form assembles text and sends it through
 //! [`parse()`] and [`compile()`] above rather than beside them.
 //!
+//! # The three things a strategy's *history* needs
+//!
+//! [`diff`] says what changed between two definitions, in SLv2 terms and in the
+//! FEAT-004 §6 move vocabulary, with a lineage over a sequence of versions.
+//! [`block`] says which clause emptied a strategy that never fires, given the
+//! per-clause counts a preview collects. [`suggest`] reads both and proposes the
+//! next moves — and, structurally, cannot have made them: everything it hands
+//! back is a [`suggest::Fragment`], which is one line, and no SLv2 document is
+//! one line.
+//!
 //! # What is not here
 //!
-//! The typed moves (S-5.10) and the tools that serve all of it (S-5.8) are
-//! separate tasks. The comment machinery is parsed and kept on the tree
-//! ([`ast::Comments`]) and stops there: the canonical `StrategyDefinition` has
-//! no field to carry a comment, so S-5.15's "intent survives the round trip"
-//! needs a schema change in `domain`, not a change here.
+//! `apply_move` and the tools that serve all of it (S-5.8) are separate tasks.
+//! The comment machinery is parsed and kept on the tree ([`ast::Comments`]) and
+//! stops there: the canonical `StrategyDefinition` has no field to carry a
+//! comment, so the *first* half of S-5.15, "intent survives the round trip",
+//! needs a schema change in `domain` and not a change here. The second half —
+//! the preview naming the blocking clause — is [`block`].
 
 #![allow(clippy::module_name_repetitions)]
 // A `Diagnostic` is large because it teaches: a code, a span, a message, what
@@ -60,22 +71,28 @@
 #![allow(clippy::result_large_err)]
 
 pub mod ast;
+pub mod block;
 pub mod catalogue;
 pub mod compile;
 pub mod decompile;
 pub mod diagnostic;
+pub mod diff;
 pub mod form;
 pub mod lex;
 pub mod parse;
 pub mod skeleton;
+pub mod suggest;
 
+pub use block::{blocking_profile, entry_clauses, BlockingProfile, EntryCounts, Verdict};
 pub use catalogue::Catalogue;
 pub use compile::{compile, compile_with};
 pub use decompile::{decompile, decompile_with};
 pub use diagnostic::{Code, Diagnostic, Expected, Kind, Span};
+pub use diff::{diff, diff_with, lineage, Change, Diff, Lineage, MoveKind, Version};
 pub use form::{FormStrategy, Limitation, Refusal};
 pub use parse::parse;
 pub use skeleton::{skeleton, HypothesisFamily, Skeleton};
+pub use suggest::{suggest_moves, Evidence, Findings, Fragment, Suggestion, Suggestions};
 
 use domain::strategy_def::StrategyDefinition;
 

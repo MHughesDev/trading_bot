@@ -462,49 +462,80 @@ impl Plan {
     }
 
     fn render_expr(&self, e: &Expr, cat: &Catalogue, parent: u8) -> String {
-        let (text, prec) = match e {
-            Expr::Number(n) => (n.raw.clone(), 8),
-            Expr::Bar { field, .. } => (field.as_str().to_string(), 8),
-            Expr::Name { name, .. } => (name.clone(), 8),
-            Expr::Text { value, .. } => (format!("'{value}'"), 8),
-            Expr::Call { name, args, .. } => match (name.as_str(), args.as_slice()) {
-                ("feature", [Expr::Text { value, .. }]) => {
-                    let text = self
-                        .bindings
-                        .get(value)
-                        .cloned()
-                        .unwrap_or_else(|| render_feature(value, cat));
-                    (text, 8)
-                }
-                ("bar", [Expr::Text { value, .. }]) => (value.clone(), 8),
-                ("param", [Expr::Text { value, .. }]) => (value.clone(), 8),
-                _ => {
-                    let rendered: Vec<String> =
-                        args.iter().map(|a| self.render_expr(a, cat, 0)).collect();
-                    (format!("{name}({})", rendered.join(", ")), 8)
-                }
-            },
-            Expr::Unary { op, rhs, .. } => match op {
-                UnOp::Not => (format!("not {}", self.render_expr(rhs, cat, 3)), 3),
-                UnOp::Neg => (format!("-{}", self.render_expr(rhs, cat, 7)), 7),
-            },
-            Expr::Binary { op, lhs, rhs, .. } => {
-                let prec = precedence(*op);
-                let text = format!(
-                    "{} {} {}",
-                    self.render_expr(lhs, cat, prec),
-                    op.as_str(),
-                    self.render_expr(rhs, cat, prec + 1)
-                );
-                (text, prec)
-            }
-        };
-        if prec < parent {
-            format!("({text})")
-        } else {
-            text
-        }
+        render_expr(e, cat, &self.bindings, parent)
     }
+}
+
+/// Render an SLv2 expression back as text.
+///
+/// Free rather than a method on [`Plan`] because [`crate::diff`] and
+/// [`crate::block`] both have to name a clause the way its author reads it, and
+/// a second renderer in either of them would be a second answer to "how is this
+/// expression written" — the two-implementations shape this crate has already
+/// removed once from `catalogue.rs`.
+///
+/// `bindings` maps a feature name to the `input` name standing for it; pass an
+/// empty map to render every feature call in full.
+pub(crate) fn render_expr(
+    e: &Expr,
+    cat: &Catalogue,
+    bindings: &BTreeMap<String, String>,
+    parent: u8,
+) -> String {
+    let (text, prec) = match e {
+        Expr::Number(n) => (n.raw.clone(), 8),
+        Expr::Bar { field, .. } => (field.as_str().to_string(), 8),
+        Expr::Name { name, .. } => (name.clone(), 8),
+        Expr::Text { value, .. } => (format!("'{value}'"), 8),
+        Expr::Call { name, args, .. } => match (name.as_str(), args.as_slice()) {
+            ("feature", [Expr::Text { value, .. }]) => {
+                let text = bindings
+                    .get(value)
+                    .cloned()
+                    .unwrap_or_else(|| render_feature(value, cat));
+                (text, 8)
+            }
+            ("bar", [Expr::Text { value, .. }]) => (value.clone(), 8),
+            ("param", [Expr::Text { value, .. }]) => (value.clone(), 8),
+            _ => {
+                let rendered: Vec<String> = args
+                    .iter()
+                    .map(|a| render_expr(a, cat, bindings, 0))
+                    .collect();
+                (format!("{name}({})", rendered.join(", ")), 8)
+            }
+        },
+        Expr::Unary { op, rhs, .. } => match op {
+            UnOp::Not => (format!("not {}", render_expr(rhs, cat, bindings, 3)), 3),
+            UnOp::Neg => (format!("-{}", render_expr(rhs, cat, bindings, 7)), 7),
+        },
+        Expr::Binary { op, lhs, rhs, .. } => {
+            let prec = precedence(*op);
+            let text = format!(
+                "{} {} {}",
+                render_expr(lhs, cat, bindings, prec),
+                op.as_str(),
+                render_expr(rhs, cat, bindings, prec + 1)
+            );
+            (text, prec)
+        }
+    };
+    if prec < parent {
+        format!("({text})")
+    } else {
+        text
+    }
+}
+
+/// Render an expression with every feature call written out in full.
+///
+/// This is the form a diff and a blocking profile name a clause in: an `input`
+/// name means nothing to a reader who cannot see the binding, and two
+/// definitions hoist different features into inputs depending on how often each
+/// is read — so comparing un-inlined text would report a move nobody made.
+#[must_use]
+pub fn expr_to_text(e: &Expr, cat: &Catalogue) -> String {
+    render_expr(e, cat, &BTreeMap::new(), 0)
 }
 
 const fn precedence(op: BinOp) -> u8 {
@@ -633,7 +664,7 @@ fn count_features(e: &Expr, out: &mut BTreeMap<String, usize>) {
 
 /// Whether this expression is one [`crate::compile`] would have produced in a
 /// condition position, i.e. one that evaluates to exactly `0` or `1`.
-fn is_encoded_bool(e: &Expr) -> bool {
+pub(crate) fn is_encoded_bool(e: &Expr) -> bool {
     match e {
         Expr::Binary { op, lhs, rhs, .. } => {
             if op.is_comparison() {
@@ -659,7 +690,7 @@ fn is_encoded_bool(e: &Expr) -> bool {
 /// only when both sides are themselves boolean-shaped; `(x * 2)` where `x` is a
 /// comparison is left as arithmetic, because a definition that really multiplies
 /// a flag by two means that, and rewriting it as `and` would change it.
-fn deencode(e: &Expr) -> Expr {
+pub(crate) fn deencode(e: &Expr) -> Expr {
     match e {
         Expr::Binary { op, lhs, rhs, span } => {
             // `((A + B) > 0)` → `A or B`

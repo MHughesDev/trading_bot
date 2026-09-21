@@ -44,6 +44,41 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+/// Calls whose last segment is **computed**, so this scan cannot match them to
+/// a literal route however hard it tries.
+///
+/// `` `/api/automations/${id}/${armed ? 'disarm' : 'arm'}` `` normalises to
+/// `/api/automations/{}/{}`, and the router spells the two routes out. Both are
+/// served; nothing is missing. Listing them here rather than widening the
+/// matcher keeps the failure mode obvious — a new row is a claim somebody has to
+/// check, where a cleverer matcher would silently start accepting real gaps.
+///
+/// Each row names the routes it actually reaches, so the claim is falsifiable.
+const COMPUTED: &[(&str, &str)] = &[(
+    "/api/automations/{}/{}",
+    "/api/automations/{id}/arm and /api/automations/{id}/disarm",
+)];
+
+/// Calls to routes that do not exist and that **no plan task owns**.
+///
+/// Different from [`UNBUILT`] in the way that matters: an unbuilt row is a
+/// forward reference somebody scheduled, and one of these is a **defect** — a
+/// surface calling something nobody is building. They were invisible until this
+/// scan was widened past `frontend/src/api` on 2026-09-21.
+///
+/// A row here is a bug report, not a plan. It should leave by the route being
+/// built or the call being removed, never by being re-filed as unbuilt.
+const UNOWNED: &[(&str, &str)] = &[
+    (
+        "/api/automations/{}/stages",
+        "frontend/src/components/automations/StageBoard.tsx GETs it; the router serves          /api/automations/{id}, /arm and /disarm, and no /stages",
+    ),
+    (
+        "/api/strategies/{}",
+        "frontend/src/lib/api.ts PUTs and DELETEs it; the router serves          /api/strategies/{id}/config, /start and /stop, and no bare /api/strategies/{id}",
+    ),
+];
+
 /// Paths the frontend calls on purpose that nothing serves yet, with the task
 /// that owns each. Keep sorted; keep the reason.
 const UNBUILT: &[(&str, &str)] = &[
@@ -70,6 +105,21 @@ const UNBUILT: &[(&str, &str)] = &[
     (
         "/api/agent/runs/{}/lifecycle",
         "S-10.x — the lifecycle module is not built",
+    ),
+    // Phase 5 — the strategy editor's compile and preview. Found 2026-09-21 when
+    // this scan was widened past `frontend/src/api`: `Operations.tsx` posts to
+    // both directly, and they had been invisible here for as long as this test
+    // existed. The component renders honestly when they fail, so nothing is
+    // currently lying to an operator — but the desk is calling a compiler that
+    // does not answer, and `crates/strategy-lang` now holds the compiler it
+    // would reach.
+    (
+        "/api/strategies/compile",
+        "S-5.8 — the authoring tools have no HTTP surface; strategy-lang::text_to_definition exists",
+    ),
+    (
+        "/api/strategies/preview",
+        "S-5.4 — preview_signals is an MCP tool; the desk's editor has no route to it",
     ),
     // The desk's run controls. `desk.ts` already marks these unbuilt in its own
     // comment ("Pause/resume/escalate are ✗"); this is the same statement where
@@ -126,6 +176,10 @@ fn normalise(p: &str) -> String {
                     i += 1;
                 }
             }
+            // A query string is not a different route. `/api/approvals?state=all`
+            // and `/api/approvals` are one endpoint, and treating them as two
+            // would make every filtered read look unserved.
+            '?' => break,
             c => {
                 out.push(c);
                 i += 1;
@@ -133,6 +187,26 @@ fn normalise(p: &str) -> String {
         }
     }
     out
+}
+
+/// Every `/api/...` the frontend names, from **anywhere** under `frontend/src`.
+///
+/// This read `frontend/src/api` alone until 2026-09-21, on the reasoning that
+/// every call goes through the client layer. Most do. Two did not:
+/// `Operations.tsx`'s strategy editor posts to `/api/strategies/compile` and
+/// `/api/strategies/preview` directly, neither of which the router serves — and
+/// they were invisible here for as long as this test existed, while the phase
+/// documentation claimed the test "fails the build for it".
+///
+/// The cost of widening it is that a path named in a component's *prose* counts
+/// as a call. That is the same over-counting the backend side already accepts,
+/// and in the same safe direction: it can produce a row somebody has to declare,
+/// never miss one that should have been.
+fn frontend_paths(root: &Path) -> BTreeSet<String> {
+    let dir = root.join("frontend/src");
+    let mut found = api_paths_in(&dir, "ts");
+    found.extend(api_paths_in(&dir, "tsx"));
+    found
 }
 
 /// Every `/api/...` string literal in a source tree, normalised.
@@ -155,8 +229,31 @@ fn api_paths_in(dir: &Path, extension: &str) -> BTreeSet<String> {
             let src = std::fs::read_to_string(&p).unwrap_or_default();
             for quote in ['"', '\'', '`'] {
                 for piece in src.split(quote).skip(1).step_by(2) {
-                    if piece.starts_with("/api/") && !piece.contains('\n') {
-                        found.insert(normalise(piece));
+                    // A **call**, not a mention. Widening the scan past
+                    // `frontend/src/api` brought in the desk's own empty-state
+                    // copy, which by design begins with the endpoint it is about
+                    // — "`/api/catalogue` is served, so this is the request
+                    // failing rather than the endpoint missing". Those are
+                    // sentences, and a sentence is not a route.
+                    //
+                    // A path literal has no whitespace in it. That is the whole
+                    // rule, and it is one a reader can check. The entity decode
+                    // is for the same widening: JSX escapes a brace it prints,
+                    // and `&#123;bucket&#125;` is `{bucket}` written for a human.
+                    //
+                    // **Normalise first, then test.** A template's interpolation
+                    // can hold spaces of its own —
+                    // `` `/api/automations/${id}/${armed ? 'disarm' : 'arm'}` `` —
+                    // and testing the raw literal would drop a real call for
+                    // looking like prose. `normalise` collapses every
+                    // interpolation to `{}` before anything is judged.
+                    let piece = piece.replace("&#123;", "{").replace("&#125;", "}");
+                    if !piece.starts_with("/api/") {
+                        continue;
+                    }
+                    let path = normalise(&piece);
+                    if !path.contains(char::is_whitespace) {
+                        found.insert(path);
                     }
                 }
             }
@@ -168,13 +265,12 @@ fn api_paths_in(dir: &Path, extension: &str) -> BTreeSet<String> {
 #[test]
 fn every_endpoint_the_frontend_calls_is_served_or_declared_unbuilt() {
     let root = workspace_root();
-    let frontend = root.join("frontend/src/api");
-    if !frontend.is_dir() {
+    if !root.join("frontend/src").is_dir() {
         // The backend is testable without the frontend checked out.
         return;
     }
 
-    let called = api_paths_in(&frontend, "ts");
+    let called = frontend_paths(&root);
     assert!(
         called.len() > 20,
         "the scan found {} endpoints in frontend/src/api, which means it is not reading them \
@@ -183,11 +279,16 @@ fn every_endpoint_the_frontend_calls_is_served_or_declared_unbuilt() {
     );
 
     let served = api_paths_in(&root.join("crates/api/src"), "rs");
-    let unbuilt: BTreeSet<&str> = UNBUILT.iter().map(|(p, _)| *p).collect();
+    let declared: BTreeSet<&str> = UNBUILT
+        .iter()
+        .chain(UNOWNED)
+        .chain(COMPUTED)
+        .map(|(p, _)| *p)
+        .collect();
 
     let missing: Vec<&String> = called
         .iter()
-        .filter(|p| !served.contains(*p) && !unbuilt.contains(p.as_str()))
+        .filter(|p| !served.contains(*p) && !declared.contains(p.as_str()))
         .collect();
 
     assert!(
@@ -215,6 +316,53 @@ fn the_unbuilt_list_has_no_rows_that_are_already_built() {
         "these are listed as unbuilt and are served: {stale:?}. Remove them — a forward \
          reference that has landed is how the list stops being reviewable."
     );
+}
+
+/// A computed row names the routes it claims to reach, and they are served.
+///
+/// Without this the list is a way to silence the scan by asserting a match
+/// nobody checked.
+#[test]
+fn every_computed_row_reaches_routes_that_are_served() {
+    let served = api_paths_in(&workspace_root().join("crates/api/src"), "rs");
+    for (path, reaches) in COMPUTED {
+        assert!(
+            reaches.contains("/api/"),
+            "`{path}` is listed as computed and names no route it reaches"
+        );
+        let named: Vec<&str> = reaches
+            .split_whitespace()
+            .filter(|w| w.starts_with("/api/"))
+            .collect();
+        assert!(!named.is_empty(), "`{path}` names no concrete route");
+        for route in named {
+            let n = normalise(route);
+            assert!(
+                served.contains(&n),
+                "`{path}` claims to reach `{route}`, and nothing serves it — so the row is \
+                 hiding a gap rather than explaining one"
+            );
+        }
+    }
+}
+
+/// An unowned row names the file that makes the call.
+///
+/// It is a bug report, and a bug report with no reproduction is a row nobody
+/// acts on.
+#[test]
+fn every_unowned_row_names_the_caller() {
+    for (path, reason) in UNOWNED {
+        assert!(
+            reason.contains("frontend/src"),
+            "`{path}` is listed as unowned and does not say which file calls it"
+        );
+        assert!(
+            !reason.contains("S-"),
+            "`{path}` names a task, so it belongs in UNBUILT rather than here — unowned means \
+             nobody is building it"
+        );
+    }
 }
 
 /// Every row says which task owns it.

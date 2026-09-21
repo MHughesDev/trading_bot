@@ -1,6 +1,6 @@
 # Phase 3 — The catalogue
 
-**Completion: 37% (7 / 19 tasks), plus 3 partial. 9 not started.**
+**Completion: 42% (8 / 19 tasks), plus 7 `PARTIAL`.**
 
 > Status 2026-09-16. The **templated tier is real**: a tool is a Python file under
 > `apps/skill-runner/templates/<ns>/<name>.py` whose module docstring carries a fenced JSON
@@ -48,6 +48,15 @@
 > and a timestamp bug inside the tool written to detect timestamp bugs — and none of those
 > would have been caught by code that compiles. The remainder waits for an environment that
 > can run it.
+
+> **Read `crates/api/src/routes/evidence.rs` before writing a route.**
+> `/api/evidence/trades` already returns the full raw trade array — `pnl`,
+> `costs_paid`, `entry_price`, `exit_price`, `qty`, `mae`, `mfe`,
+> `holding_period_secs` — for any run the caller owns, and nobody had noticed.
+> Three notes in this file describe work as blocked on data that arrives through
+> that route today. Arithmetic over a response is allowed here (`compare_backtests`
+> already does it); arithmetic a **gate** also performs is not, for the reason
+> `tools/audit.rs`'s module docs give.
 
 **Requirement IDs:** TC-11…TC-37.
 **Spec:** [AGENT-006 §3.3, §5](../../../specs/AGENT-006-tool-catalog.md), and the research
@@ -497,7 +506,7 @@ timestamp; the static scan flags a full-dataset normalisation.
 ## Falsification — the adversarial battery
 
 ### S-3.12 Reshuffle, bootstrap, cost shock — M
-`NOT STARTED`
+`DONE`
 
 `trade_reshuffle_bootstrap` runs **two distinct** modes: reshuffle (path risk of a fixed
 outcome set) and bootstrap (estimation uncertainty of the endpoint). Conflating them is a
@@ -508,6 +517,44 @@ documented error, so the tool refuses to label reshuffle-only output "worst case
 **Acceptance:** the mode is named in every result; a reshuffle result cannot be reported as a
 capital requirement; the cost grid's origin is the measured spread.
 **Traces:** AGENT-006 §5.5; research brief Theme 3.
+
+**Built 2026-09-21 — and the reason it was not built sooner is a lesson about
+this file.** The phase header said *"Remaining: S-3.10, S-3.12, S-3.13, S-3.15,
+S-3.17 — and every one of them is blocked on deployment state rather than on
+effort."* It then gave a reason for four of them and **none at all for
+`trade_reshuffle_bootstrap`**, the one tool in the list that is pure arithmetic
+over stored results. "Every one of them" was true by omission, not by check.
+
+`crates/mcp-server/src/tools/path_risk.rs`: both tools, typed, over the
+**already-existing** `/api/evidence/trades` route. No route, no migration, no
+dependency. 35 tests.
+
+`Trade` carries `costs_paid` **and** `pnl` per trade, so `pnl(m) = pnl +
+costs_paid − m·costs_paid` is exact and the break-even multiple is
+`gross / total_costs` — no simulator re-run, which is what §5.5's `none` trial for
+`cost_shock_curve` presupposes. The plan's claim that it "re-runs the simulator,
+so it is gated on the executor" was wrong; that claim is right for S-3.13 only.
+
+**Both declare `TrialKind::None` explicitly rather than by default**, so the
+claim reads as a claim. Neither dispatches anything: the look they re-read was
+charged when the run ran (INV-18). Charging a falsification trial for re-reading
+a stored array would raise `N_eff` against work nobody did, and every
+selection-adjusted statistic divides by that count.
+
+**What they refuse, each with a test:** `mode` has no default — refusing to
+choose between path risk and estimation uncertainty is the tool's whole point;
+`endpoint_dispersion` comes back `null` **with a reason** and a `not_a_worst_case`
+field, never a zero; `block` mode is refused **by name**, naming
+`backtest::stats::bootstrap::politis_white_block` as the symbol it would need,
+because a second Politis–White would disagree with the platform's silently; any
+trade missing `costs_paid` refuses the whole curve, because a missing cost read
+as zero gives an infinite break-even multiple — the most reassuring wrong answer
+available; and a run charged zero costs is refused, pointing at `run_oracle_test`.
+A static source scan fails the build if anyone adds a `const …BPS` fallback.
+
+**Two spec problems found and neither implemented:** §5.5 assigns both tools the
+templated tier, which cannot carry per-trade rows (Q-S3-02); and the spec and this
+plan disagree about whether `regime_failure_search` spends a trial (Q-S3-01).
 
 ### S-3.13 Ablation, fragility, jitter, regime failure — L
 `NOT STARTED`

@@ -180,7 +180,17 @@ export function conflictPairs(rows: MemoryRow[]): Array<[MemoryRow, MemoryRow]> 
   return out
 }
 
-function Row({ row, onRetry }: { row: MemoryRow; onRetry?: (r: MemoryRow) => void }) {
+/**
+ * One memory entry, with the mark that says what kind of claim it is.
+ *
+ * Exported so the provenance fence can be asserted where a person meets it —
+ * the rendered row — rather than only on `rowMark`, which is the half that was
+ * already covered. `/api/memory/{bucket}` began serving `evidence_class` on
+ * 2026-09-21, and the difference between a `model_summary` and a `direct_stat`
+ * arriving and *reaching the reader* is one `<ProvenanceBadge>` nobody had
+ * looked at since the field existed.
+ */
+export function MemoryRowCard({ row, onRetry }: { row: MemoryRow; onRetry?: (r: MemoryRow) => void }) {
   const q = questionFields(row)
   const cited = citedCount(row)
   return (
@@ -303,8 +313,8 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
               style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--s-3)', marginTop: 'var(--s-3)' }}
               aria-label={`conflict between ${a.id} and ${b.id}`}
             >
-              <Row row={a} />
-              <Row row={b} />
+              <MemoryRowCard row={a} />
+              <MemoryRowCard row={b} />
               <div className="full">
                 <Button
                   size="xs"
@@ -316,9 +326,26 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
             </section>
           ))
         )
+      ) : data.isPending ? (
+        <p className="sub">Reading {bucket}…</p>
+      ) : rows.length === 0 && data.data !== null ? (
+        /* Four states, not two. An empty bucket used to render as a blank
+           panel — the same blank as a request in flight and as one that failed
+           — and this file's own header argues the distinction: "you have
+           recorded none of these" is a fact about your research, and a blank is
+           a fact about nothing. */
+        <EmptyState
+          message={`Nothing is recorded under ${bucket}`}
+          detail="The store answered with an empty list, which is a fact about your research rather than about this page."
+        />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          message="No row matches this search"
+          detail={`${rows.length} ${rows.length === 1 ? 'row is' : 'rows are'} in this bucket and none matches the filter. Clear it to see them.`}
+        />
       ) : (
         filtered.map((r) => (
-          <Row
+          <MemoryRowCard
             key={r.id}
             row={r}
             onRetry={

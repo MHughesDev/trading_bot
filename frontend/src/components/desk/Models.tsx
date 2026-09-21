@@ -111,15 +111,33 @@ function ProviderCard({
   )
 }
 
-function ProfileCard({ p }: { p: AgentProfile }) {
-  // `multi_step_evidence` is the only measurement this platform records today.
-  // No evidence means unmeasured; it never means "probably fine".
-  const measured = p.multi_step_evidence !== null
+/**
+ * Whether the platform holds a calibration row for this profile.
+ *
+ * `multi_step_evidence` is the only measurement this platform records today.
+ * No evidence means unmeasured; it never means "probably fine".
+ *
+ * The badge used to be given `measured || !p.is_local`, so **every hosted
+ * profile was declared measured** on the strength of being hosted — a default
+ * standing in for a measurement, which is the one thing S-6.20's acceptance
+ * names. The card then printed "calibration: unmeasured" three lines below the
+ * badge saying it was measured, and the badge is the half a person reads at a
+ * glance.
+ *
+ * Whether a model is hosted is an argument about whether it *needs* measuring.
+ * It is not evidence that it was.
+ */
+export function profileIsMeasured(p: Pick<AgentProfile, 'multi_step_evidence'>): boolean {
+  return p.multi_step_evidence !== null
+}
+
+export function ProfileCard({ p }: { p: AgentProfile }) {
+  const measured = profileIsMeasured(p)
   return (
     <Panel>
       <PanelHeader
         title={p.model_id}
-        badges={<TierBadge tier={p.tier} measured={measured || !p.is_local} detail={p.provider} />}
+        badges={<TierBadge tier={p.tier} measured={measured} detail={p.provider} />}
       />
       <PanelBody>
         <p className="sub">
@@ -197,9 +215,20 @@ export function Models() {
       {(profiles.data?.profiles ?? []).map((p) => (
         <ProfileCard key={p.model_id} p={p} />
       ))}
-      {profiles.data?.profiles.length === 0 && (
+      {/* Three states, because a page that renders nothing at all for a failed
+          read is a page that says "no profiles" without having asked. Nothing
+          can run without a profile, so "none configured" is an alarming claim to
+          make on a request that never came back. */}
+      {profiles.isPending ? (
+        <p className="sub">Reading the capability profiles…</p>
+      ) : profiles.data === undefined ? (
+        <EmptyState
+          message="The profile list did not answer"
+          detail="/api/agent/profiles is served, so this is the request failing rather than the surface being unbuilt. Which models may run is unknown, not none."
+        />
+      ) : profiles.data.profiles.length === 0 ? (
         <EmptyState message="No capability profile is configured" detail="Nothing can run until one is." />
-      )}
+      ) : null}
 
       {(profiles.data?.unprofiled_local_models ?? []).length > 0 && (
         <Panel>

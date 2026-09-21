@@ -377,6 +377,10 @@ pub fn catalog() -> &'static [ToolSpec] {
         specs.extend(crate::tools::venues::specs());
         specs.extend(crate::tools::strategy::specs());
         specs.extend(crate::tools::falsification::specs());
+        // S-3.12. Statistics over a run the ledger already holds, so both
+        // declare `TrialKind::None`; see the module docs for why that is a
+        // correctness claim rather than a default.
+        specs.extend(crate::tools::path_risk::specs());
         specs.extend(crate::tools::lifecycle::specs());
         specs.extend(crate::tools::campaign::specs());
         specs.extend(crate::tools::research_tools::specs());

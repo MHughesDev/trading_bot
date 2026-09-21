@@ -20,6 +20,7 @@ pub mod campaign;
 pub mod lifecycle;
 pub mod market;
 pub mod models;
+pub mod path_risk;
 pub mod portfolio;
 pub mod research;
 pub mod research_tools;

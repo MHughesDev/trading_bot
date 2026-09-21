@@ -248,6 +248,12 @@ pub enum Code {
     /// A stored expression that is not in the v1 grammar.
     BadStoredExpression,
 
+    // ── the blocking profile ─────────────────────────────────────────────────
+    /// Per-clause counts no single walk over one window could have produced,
+    /// or counts of a different strategy than the one they were handed with.
+    /// See [`crate::block::EntryCounts::new`].
+    ImpossibleTally,
+
     // ── the clause grammar for constrained tiers ───────────────────────────
     /// Well-formed SLv2 that [`crate::form`] has no fill for. The refusal
     /// carries a [`crate::form::Limitation`] saying which narrowing it hit and
@@ -289,6 +295,7 @@ impl Code {
             Self::NotExpressible => "not_expressible",
             Self::NotCanonical => "not_canonical",
             Self::BadStoredExpression => "bad_stored_expression",
+            Self::ImpossibleTally => "impossible_tally",
             Self::NotInTheForm => "not_in_the_form",
         }
     }
@@ -448,6 +455,7 @@ mod tests {
             Code::NotExpressible,
             Code::NotCanonical,
             Code::BadStoredExpression,
+            Code::ImpossibleTally,
             Code::NotInTheForm,
         ];
         assert!(all.len() >= 25, "the scan found {} codes", all.len());

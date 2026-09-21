@@ -553,3 +553,121 @@ something else, which is worse than refusing it.
 
 **Status:** open. Either the runtime gains a previous-value register and an op,
 or §3 stops listing cross detection as compiler-provided.
+
+---
+
+## Q-S7-01 — COMP-007 says a hard-stale feed halts and also that it scales down
+
+**Raised 2026-09-21 building S-7.7. Neither reading changed; the existing
+behaviour is §4's, and a test's *name* asserts §3's.**
+
+COMP-007 §3, the Data row:
+
+> *"staleness > 3 × timeframe → strategy warning; > 10 × → **strategy halt**"*
+
+COMP-007 §4, the response table:
+
+> *"breach (behaviour/execution/**data**) | **scale down** to 25% size for that
+> strategy"*
+
+The code follows §4: `state::on_sustained` halts only on `Family::Pnl`. The test
+covering it is named `a_hard_stale_feed_halts_without_waiting_three_cadences` and
+asserts `StrategyState::ScaledDown`, with a comment reading "a data fact scales
+rather than halts the book".
+
+**So the test's name says one thing and its assertion says the other**, and the
+spec can be read either way. That is worse than a plain contradiction, because a
+reader who greps for the behaviour finds the name and stops.
+
+Nothing was changed. This needs somebody with authority over COMP-007 to pick
+one, and then the test renamed to match whichever it is.
+
+**What holds meanwhile:** a hard-stale feed scales a strategy to 25% immediately,
+without the three cadences a sustained breach needs. It is the weaker of the two
+readings, on the family whose facts are not estimates.
+
+**Status:** open.
+
+---
+
+## Q-S3-01 — the spec and the plan disagree about whether `regime_failure_search` spends a trial
+
+**Raised 2026-09-21 building S-3.12. Neither implemented.**
+
+AGENT-006 §5.5's table gives `regime_failure_search` trial **`none`**.
+`docs/plans/plan-sets/set-S/phase-3-catalogue.md`'s S-3.13 says *"All spend
+`Falsification` trials."*
+
+That is a disagreement about a `spends_trial` declaration, which is a correctness
+bug in either direction and not a metadata slip. A spending tool declared free is
+an **unrecorded look** (INV-1); a free tool declared spending charges research
+for nothing and raises `N_eff` against work nobody did — and every
+selection-adjusted statistic on this platform divides by that count.
+
+The tool was not built. Whoever builds S-3.13 must settle this **at the
+declaration**, not in the handler.
+
+**Status:** open.
+
+---
+
+## Q-S3-02 — §5.5 assigns a tier that cannot serve the tools it assigns it to
+
+**Raised 2026-09-21 building S-3.12. Built typed instead, and the reason is
+recorded here rather than only in the code.**
+
+AGENT-006 §5.5 gives `trade_reshuffle_bootstrap` and `cost_shock_curve` tier
+**`P`** (templated), and §9's build-order table repeats it. A template's rows
+arrive only as `SeriesKind::Ohlcv` or `SeriesKind::TrialReturns`
+(`crates/skills/src/template.rs:98`). **Neither carries per-trade `pnl` or
+`costs_paid`**, which both tools need and which §5.5's own signatures imply.
+
+Both were built typed. P6 makes the tier invisible to the model, so the contract
+is unchanged — but the spec names a tier that cannot implement the tool it names,
+and the next person following §5.5 literally will lose a day to it.
+
+**Status:** open (spec wording).
+
+---
+
+## Q-S5-03 — §4's worked example of the flagship suggestion does not compile
+
+**Raised 2026-09-21 building S-5.11. Neither reading implemented.**
+
+AGENT-011 §4, the `suggest_moves` row: *"maps `get_diagnostics` findings ("loses
+in high-vol months") to candidate moves ("add_regime_gate on
+`rv(20) pct_rank < 0.8`")"*.
+
+That predicate is **a feature of a feature**, and the canonical expression
+grammar's only named value is `feature('name')` — a name, not an expression. So
+the spec's illustration of the platform's flagship suggestion is a document the
+compiler refuses. `skeleton.rs`'s `VOL_TARGET_NOTES` already records the same
+limit for `pct_rank(rv(close, 20), 200)`.
+
+**What was built** never invents a regime predicate: `suggest_moves` takes one
+from the caller as a `Predicate` checked against the catalogue at construction,
+or withholds the move naming what is missing.
+
+**Status:** open. Either the grammar gains nested features, or §4's example
+changes.
+
+---
+
+## Q-S5-04 — §4 defines the blocking profile's second number twice, as two different quantities
+
+**Raised 2026-09-21 building S-5.15. The order-independent reading was built and
+named so it cannot be mistaken for the other.**
+
+AGENT-011 §4 says *"for the conjunction, the share on which it was the **last**
+clause to fail"*, then two sentences later *"was the **sole blocker** on 91% of
+the rest"*.
+
+"Last clause to fail" presupposes an evaluation order. The compiled condition is
+`(A * B)`, which evaluates both operands and has **no failure order**, so that
+reading has no referent on this platform.
+
+The field is `bars_sole_blocker`, named so nobody can read it as the other.
+Phase 5's S-5.15 body text carries the same double wording and needs the same
+fix.
+
+**Status:** open (spec wording).

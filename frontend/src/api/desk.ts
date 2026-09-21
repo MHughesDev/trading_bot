@@ -775,6 +775,37 @@ export interface MonitorKillSwitch {
   maintenance_windows: MaintenanceWindow[]
 }
 
+/**
+ * The three words `POST /api/monitor/strategies/{id}/{action}` accepts.
+ *
+ * A union and not a `string`, because the route's fourth branch is
+ * `other => bad_request("unknown action …")` — a typo here would be a 400 that
+ * looks exactly like a control that quietly did nothing.
+ */
+export type StrategyAction = 'scale' | 'halt' | 'resume'
+
+/** What to do with the open position when a strategy is halted. */
+export type HaltPolicy = 'hold' | 'flatten' | 'reduce'
+
+/**
+ * The body each of the three actions needs, as the route reads it.
+ *
+ * Every field is optional on the wire and each action requires a different
+ * subset, which is what [`strategyActionBody`] exists to get right in one place:
+ *
+ * * `scale` refuses without `scale_pct`, and refuses it outside `1..=100`.
+ * * `halt` refuses without a `reason`.
+ * * `resume` is a reset by another name — it needs a `reason` **and** a
+ *   `confirm_scope` equal to `strategy:<id>` exactly, compared byte-for-byte on
+ *   the server.
+ */
+export interface StrategyActionBody {
+  reason?: string
+  scale_pct?: number
+  confirm_scope?: string
+  halt_policy?: HaltPolicy
+}
+
 /** One `(tier, workflow)` pair's share of runs that produced nothing. */
 export interface BarrenRow {
   tier: string
@@ -958,6 +989,31 @@ export const deskApi = {
     optional<{ ok: boolean }>(client.post(`/api/research/sessions/${sessionId}/agenda/${itemId}/veto`)),
   reorderAgenda: (sessionId: string, order: string[]) =>
     optional<{ ok: boolean }>(client.post(`/api/research/sessions/${sessionId}/agenda/order`, { order })),
+
+  /**
+   * Scale, halt or resume one strategy under the monitor (COMP-007 §6).
+   *
+   * `POST /api/monitor/strategies/{strategy_id}/{action}` has been served since
+   * COMP-007 landed and the desk's **Scale down** button called nothing at all
+   * — a control that looks like a control and does not reach the platform,
+   * which on this page means an operator believing they have scaled a losing
+   * strategy back when they have not. Not a missing endpoint: a missing caller.
+   *
+   * The three words are the route's own (`scale`, `halt`, `resume`) and it
+   * refuses anything else by name, so they are a union here rather than a
+   * string.
+   *
+   * Every refusal this can draw is one a person has to read, so nothing here is
+   * routed through `optional()`: a 403 from `require_control` (an agent or
+   * service token never carries monitor control), a 409 `resume_refused` from
+   * the reset rate limit, a 400 for a missing reason. Turning those into `null`
+   * would put "it did not work" and "it worked" on the same screen.
+   */
+  strategyAction: (strategyId: string, action: StrategyAction, body: StrategyActionBody) =>
+    client.post<Record<string, unknown>>(
+      `/api/monitor/strategies/${strategyId}/${action}`,
+      body,
+    ),
 
   // — Controls. Pause/resume/escalate are ✗; steer and cancel exist. —
   steer: (sessionId: string, body: { kind: 'steer' | 'interrupt' | 'stop' | 'answer'; text?: string }) =>

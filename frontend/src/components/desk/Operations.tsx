@@ -5,15 +5,20 @@
 // and says plainly when that phase has not landed, rather than rendering a
 // placeholder number somebody might believe.
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
-import { ConfirmDialog } from '@/components/primitives/Modal'
+import { ConfirmDialog, Modal } from '@/components/primitives/Modal'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
-import { TextArea } from '@/components/primitives/Field'
+import { Field, Input, TextArea } from '@/components/primitives/Field'
 import { EmptyState } from '@/components/primitives/States'
 import { api } from '@/lib/api'
-import { deskApi } from '@/api/desk'
+import {
+  deskApi,
+  type HaltPolicy,
+  type StrategyAction,
+  type StrategyActionBody,
+} from '@/api/desk'
 
 // ── What the runs produced (AGENT-013 §10; S-10.13) ──────────────────────────
 //
@@ -101,27 +106,119 @@ function BarrenPanel() {
 
 // ── Usage (§12) ──────────────────────────────────────────────────────────────
 
+/** One line of the spend table, already decided and already in words. */
+export interface UsageLine {
+  key: string
+  label: string
+  /** What to print. Never a `0` standing in for a number nobody has. */
+  value: string
+}
+
+const USAGE_LABELS: Record<string, string> = {
+  input_tokens: 'prompt tokens',
+  output_tokens: 'output tokens',
+  cache_read: 'cache reads',
+  cache_write: 'cache writes',
+  cost_usd: 'cost',
+  cache_hit_rate: 'cache hit rate',
+  verdicts: 'verdicts filed',
+  dollars_per_verdict: 'cost per verdict',
+}
+
+function numberOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+/**
+ * The spend totals, read so that three of them stop lying.
+ *
+ * `Object.entries(u)` printed the response verbatim, and the response fills
+ * three fields with a zero that means "nobody has this number":
+ *
+ * * `cost_usd` is `COALESCE(SUM(cost_usd),0)`, and the platform has **no price
+ *   table** (OQ-16). The Cost tab six tabs away already says "not priced… this
+ *   is not $0"; this page rendered a cost of 0 beside half a million tokens.
+ * * `cache_hit_rate` is `0.0` when nothing billable has been sent — an
+ *   unmeasured rate as a measured zero — and it is a fraction printed bare in a
+ *   column of token counts, so `0.35` read as thirty-five of something.
+ * * `dollars_per_verdict` is `null` with no verdicts, and `String(null)` put the
+ *   literal word **null** in the table.
+ *
+ * Returns `null` when nothing answered, which the caller must not confuse with a
+ * request still in flight.
+ */
+export function usageRows(raw: Record<string, unknown> | null | undefined): UsageLine[] | null {
+  if (!raw) return null
+  const input = numberOrNull(raw.input_tokens)
+  const output = numberOrNull(raw.output_tokens)
+  const cacheRead = numberOrNull(raw.cache_read)
+  const verdicts = numberOrNull(raw.verdicts)
+  const spentTokens = (input ?? 0) + (output ?? 0) > 0
+  const billablePrompt = (input ?? 0) + (cacheRead ?? 0)
+
+  return Object.keys(raw).map((key): UsageLine => {
+    const v = raw[key]
+    const label = USAGE_LABELS[key] ?? key
+    const n = numberOrNull(v)
+    switch (key) {
+      case 'cost_usd':
+        if (n === null) return { key, label, value: 'not reported' }
+        if (n === 0 && spentTokens) {
+          return {
+            key,
+            label,
+            value: 'not priced — the platform has no price table (OQ-16). This is not zero.',
+          }
+        }
+        return { key, label, value: `$${n.toFixed(4)}` }
+      case 'cache_hit_rate':
+        if (n === null) return { key, label, value: 'not reported' }
+        if (billablePrompt === 0) {
+          return { key, label, value: 'not measured — no prompt has been billed yet' }
+        }
+        return { key, label, value: `${(n * 100).toFixed(1)}%` }
+      case 'dollars_per_verdict':
+        if (n !== null) return { key, label, value: `$${n.toFixed(4)}` }
+        return {
+          key,
+          label,
+          value: verdicts === 0 ? 'no verdict has been filed — not zero' : 'not reported',
+        }
+      default:
+        return { key, label, value: n === null ? String(v) : n.toLocaleString() }
+    }
+  })
+}
+
 export function Usage() {
   const usage = useQuery({
     queryKey: ['desk', 'usage'],
     queryFn: () => deskApi.usage().then((r) => r.data),
   })
-  const u = usage.data as Record<string, number> | undefined
+  const rows = usageRows(usage.data as Record<string, unknown> | undefined)
 
   return (
     <div className="desk-scroll">
       <Panel>
         <PanelHeader title="Spend" />
         <PanelBody>
-          {!u ? (
-            <EmptyState message="No usage recorded" detail="/api/agent/usage answered with nothing." />
+          {/* A request in flight is not an answer of nothing. The old copy
+              asserted "/api/agent/usage answered with nothing" from the first
+              render, before it had been asked. */}
+          {usage.isPending ? (
+            <p className="sub">Reading the spend totals…</p>
+          ) : rows === null ? (
+            <EmptyState
+              message="The spend totals did not answer"
+              detail="/api/agent/usage is served, so this is the request failing rather than the endpoint missing. What this desk has spent is unknown, not zero."
+            />
           ) : (
             <table className="tbl">
               <tbody>
-                {Object.entries(u).map(([k, v]) => (
-                  <tr key={k}>
-                    <td style={{ textAlign: 'left' }}>{k}</td>
-                    <td>{typeof v === 'number' ? v.toLocaleString() : String(v)}</td>
+                {rows.map((r) => (
+                  <tr key={r.key}>
+                    <td style={{ textAlign: 'left' }}>{r.label}</td>
+                    <td>{r.value}</td>
                   </tr>
                 ))}
               </tbody>
@@ -133,12 +230,28 @@ export function Usage() {
             is exposed by an endpoint yet, so the desk shows the totals that are. What the runs
             *produced* is below, from `/api/lifecycle/barren`.
           </p>
+          <p className="sub">
+            {/* Stated rather than left for somebody to deduce from a permanent
+                zero: the count is over `agent_sessions` that filed a report, and
+                the desk's conversations are `agent_runs`. Cost per verdict is
+                therefore not a number this surface can produce today. */}
+            `verdicts` counts sessions that filed a report. The desk's conversations are runs, not
+            sessions, so this stays at zero however many dossiers the desk compiles — a gap in the
+            endpoint, not a desk that has concluded nothing.
+          </p>
           <Button
             size="xs"
             variant="secondary"
+            disabled={rows === null}
             onClick={() => {
-              if (!u) return
-              const csv = ['metric,value', ...Object.entries(u).map(([k, v]) => `${k},${v}`)].join('\n')
+              if (rows === null) return
+              // The rendered values, not the raw ones. A CSV carrying a cost of
+              // 0 makes the same claim the table used to, somewhere nobody can
+              // see the caveat beside it.
+              const csv = [
+                'metric,value',
+                ...rows.map((r) => `${r.label},"${r.value.replace(/"/g, '""')}"`),
+              ].join('\n')
               const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
               const a = document.createElement('a')
               a.href = url
@@ -211,8 +324,249 @@ export function monitorRow(raw: Record<string, unknown>): MonitorRow {
   }
 }
 
+// ── The per-row controls (§11; COMP-007 §6) ──────────────────────────────────
+//
+// `Scale down` was a `<Button>` with no `onClick`. It rendered, it took the
+// hover, it took the click, and `POST /api/monitor/strategies/{id}/{action}` had
+// been served since COMP-007 landed. A control that looks like a control and
+// reaches nothing is worse on this page than no control at all: the operator
+// walks away believing a losing strategy has been scaled back.
+
+/**
+ * The scope string the reset gate compares against, byte for byte.
+ *
+ * `Scope::Strategy(id)` displays as `strategy:<id>` and `ResetRequest::validate`
+ * refuses on `self.typed_confirmation != expected`. The word to type is
+ * therefore not ours to choose, and a friendlier one would produce a dialog that
+ * always ends in a 409.
+ */
+export function strategyScope(strategyId: string): string {
+  return `strategy:${strategyId}`
+}
+
+export interface StrategyActionInput {
+  strategyId: string
+  reason: string
+  scalePct?: number | null
+  haltPolicy?: HaltPolicy
+  /** What the person typed into the confirmation box, for `resume`. */
+  typed?: string
+}
+
+export type BuiltAction =
+  | { ok: true; body: StrategyActionBody }
+  | { ok: false; refusal: string }
+
+/**
+ * The body for one action, refusing here exactly what the route refuses there.
+ *
+ * Duplicated deliberately, and stated as a refusal the person reads *before*
+ * the request rather than a 400 they read after it. The three actions need
+ * three different subsets of the same optional-everywhere body, which is the
+ * shape where a missing field becomes a server error nobody can act on —
+ * `scale_pct is required`, `a halt requires a reason`, `resume_refused`.
+ */
+export function strategyActionBody(action: StrategyAction, input: StrategyActionInput): BuiltAction {
+  const reason = input.reason.trim()
+  switch (action) {
+    case 'scale': {
+      const pct = input.scalePct
+      if (typeof pct !== 'number' || !Number.isInteger(pct)) {
+        return { ok: false, refusal: 'Give a whole percentage between 1 and 100.' }
+      }
+      // The route's own bound. 0 is not "off" here — halting is a different
+      // action with a different record, and `scale_pct must be in 1..=100`.
+      if (pct < 1 || pct > 100) {
+        return {
+          ok: false,
+          refusal: 'The monitor takes 1–100%. To stop a strategy entirely, halt it — that is a different record.',
+        }
+      }
+      return { ok: true, body: reason ? { scale_pct: pct, reason } : { scale_pct: pct } }
+    }
+    case 'halt': {
+      if (!reason) {
+        return { ok: false, refusal: 'A halt needs a reason. The monitor refuses one without it.' }
+      }
+      return { ok: true, body: { reason, halt_policy: input.haltPolicy ?? 'hold' } }
+    }
+    case 'resume': {
+      if (!reason) {
+        return { ok: false, refusal: 'A resume is a reset, and a reset needs a reason.' }
+      }
+      const expected = strategyScope(input.strategyId)
+      // Case-sensitive, because `ResetRequest::validate` is. `ConfirmDialog`
+      // compares its own word case-insensitively, which would have let a
+      // mismatch through to a 409 the person could not explain.
+      if ((input.typed ?? '') !== expected) {
+        return { ok: false, refusal: `Type ${expected} exactly — the monitor compares it literally.` }
+      }
+      return { ok: true, body: { reason, confirm_scope: expected } }
+    }
+  }
+}
+
+/**
+ * What the monitor said when it refused, in words.
+ *
+ * Every branch of `strategy_action` can refuse for a reason the person can act
+ * on — no monitor-control scope on this session, a reset inside the rate limit,
+ * a reason left out — and a control that swallows those reports failure as
+ * silence, which reads as success.
+ */
+export function strategyActionRefusal(e: unknown): string {
+  const response = (e as { response?: { status?: number; data?: unknown } }).response
+  const data = (response?.data ?? {}) as Record<string, unknown>
+  const detail = typeof data.detail === 'string' ? data.detail : null
+  const code = typeof data.error === 'string' ? data.error : null
+  if (detail) return code ? `${code} — ${detail}` : detail
+  if (code) return code
+  if (typeof response?.status === 'number') {
+    return `The monitor answered ${response.status} and said nothing else. Nothing was changed.`
+  }
+  return 'The request never reached the monitor. Nothing was changed.'
+}
+
+const ACTION_TITLE: Record<StrategyAction, string> = {
+  scale: 'Scale down',
+  halt: 'Halt',
+  resume: 'Resume',
+}
+
+/**
+ * The two-step confirm for one strategy action (Meridian §5.5).
+ *
+ * Presentational and prop-driven: it owns the fields and nothing else, so the
+ * refusal rules can be exercised without a query client, a router or a network.
+ */
+export function StrategyActionDialog({
+  action,
+  strategyId,
+  currentScale,
+  busy = false,
+  error = null,
+  onCancel,
+  onConfirm,
+}: {
+  action: StrategyAction | null
+  strategyId: string
+  /** What the row says the strategy runs at now, or `null` if nobody said. */
+  currentScale: number | null
+  busy?: boolean
+  error?: string | null
+  onCancel: () => void
+  onConfirm: (body: StrategyActionBody) => void
+}) {
+  const [reason, setReason] = useState('')
+  const [pct, setPct] = useState('50')
+  const [typed, setTyped] = useState('')
+
+  // The caller remounts this per action with a `key`, so the fields start empty
+  // every time. An effect that cleared them on close would leave the last
+  // reason typed into the next strategy's dialog for one render — and a reason
+  // is written into the monitor's event log against a name.
+  if (action === null) return null
+
+  const parsed = /^\d+$/.test(pct.trim()) ? Number.parseInt(pct.trim(), 10) : null
+  const built = strategyActionBody(action, {
+    strategyId,
+    reason,
+    scalePct: parsed,
+    typed,
+  })
+
+  const consequence =
+    action === 'scale'
+      ? `${strategyId} will be recorded as scaled down and run at ${
+          parsed === null ? 'the percentage you give' : `${parsed}%`
+        } of full size${
+          currentScale === null
+            ? ' — the monitor has not reported its current scale, so this is not a change from a known number'
+            : `, down from ${currentScale}%`
+        }. The monitor writes a ScaledDown event against your name.`
+      : action === 'halt'
+        ? `${strategyId} stops placing orders immediately. Open positions are held, not closed. This trips the kill switch for ${strategyScope(
+            strategyId,
+          )} and only a resume — which is a reset, rate-limited — undoes it.`
+        : `${strategyId} returns to nominal at 100% of full size and may place orders again. This is a reset: it is rate-limited, logged against your name, and refused if another reset was made too recently.`
+
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      dismissible={false}
+      title={`${ACTION_TITLE[action]} ${strategyId}?`}
+      footer={
+        <>
+          <span className="spacer" />
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button
+            variant={action === 'resume' ? 'primary' : 'danger'}
+            disabled={!built.ok || busy}
+            loading={busy}
+            data-testid="strategy-action-confirm"
+            onClick={() => built.ok && onConfirm(built.body)}
+          >
+            {ACTION_TITLE[action]}
+          </Button>
+        </>
+      }
+    >
+      <div className="callout neg" style={{ marginBottom: 'var(--s-4)' }} data-testid="strategy-action-consequence">
+        {consequence}
+      </div>
+      {action === 'scale' && (
+        <Field label="Percentage of full size (1–100)">
+          <Input
+            aria-label="Percentage of full size"
+            inputMode="numeric"
+            value={pct}
+            onChange={(e) => setPct(e.target.value)}
+          />
+        </Field>
+      )}
+      <Field
+        label={action === 'scale' ? 'Reason (recorded with the event)' : 'Reason (required)'}
+      >
+        <TextArea
+          rows={2}
+          aria-label="Reason"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </Field>
+      {action === 'resume' && (
+        <Field label={`Type ${strategyScope(strategyId)} to confirm`}>
+          <Input
+            aria-label="Typed confirmation"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+          />
+        </Field>
+      )}
+      {/* The refusal the monitor would give, given before the request rather
+          than after it. A disabled button with no reason beside it is a dead
+          end the person cannot debug. */}
+      {!built.ok && (
+        <p className="sub" data-testid="strategy-action-refusal">
+          {built.refusal}
+        </p>
+      )}
+      {/* …and the refusal it actually gave, if it did. Never swallowed: a
+          failed control that says nothing reads exactly like one that worked. */}
+      {error && (
+        <p className="sub" data-testid="strategy-action-error" role="alert">
+          The monitor refused: {error}
+        </p>
+      )}
+    </Modal>
+  )
+}
+
 export function Monitor() {
   const [halting, setHalting] = useState(false)
+  const [pending, setPending] = useState<{ action: StrategyAction; row: MonitorRow } | null>(null)
+  const qc = useQueryClient()
   const strategies = useQuery({ queryKey: ['desk', 'monitor'], queryFn: () => deskApi.monitor() })
   const kill = useQuery({
     queryKey: ['desk', 'kill-switch'],
@@ -227,6 +581,21 @@ export function Monitor() {
   const tripped = kill.data?.kill_switch_active === true
   const badge = killSwitchBadge(kill.data)
   const windows = scopes.data?.maintenance_windows ?? []
+
+  const act = useMutation({
+    mutationFn: async ({ body }: { body: StrategyActionBody }) => {
+      if (!pending) throw new Error('no action is pending')
+      return (await deskApi.strategyAction(pending.row.strategy_id, pending.action, body)).data
+    },
+    onSuccess: () => {
+      setPending(null)
+      // Re-read rather than patching the row locally: the monitor decides what
+      // the state and the scale now are, and a table showing what we *asked*
+      // for would show a change a refusal may have undone.
+      void qc.invalidateQueries({ queryKey: ['desk', 'monitor'] })
+      void qc.invalidateQueries({ queryKey: ['desk', 'kill-switch'] })
+    },
+  })
 
   return (
     <div className="desk-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
@@ -327,9 +696,45 @@ export function Monitor() {
                           "nobody said". They must not look the same. */}
                       <td>{row.scale_pct === null ? 'not reported' : `${row.scale_pct}%`}</td>
                       <td>
-                        <Button size="xs" variant="ghost">
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => {
+                            act.reset()
+                            setPending({ action: 'scale', row })
+                          }}
+                        >
                           Scale down
                         </Button>
+                        {/* Halt and resume are offered on the state the route
+                            reports. When it reports none, both are offered and
+                            the dialog says the current state is unknown —
+                            guessing which one applies would be the monitor
+                            answering a question nobody asked it. */}
+                        {row.state !== 'halted' && (
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={() => {
+                              act.reset()
+                              setPending({ action: 'halt', row })
+                            }}
+                          >
+                            Halt
+                          </Button>
+                        )}
+                        {row.state !== 'nominal' && (
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={() => {
+                              act.reset()
+                              setPending({ action: 'resume', row })
+                            }}
+                          >
+                            Resume
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   )
@@ -347,6 +752,20 @@ export function Monitor() {
           </p>
         </PanelBody>
       </Panel>
+
+      <StrategyActionDialog
+        key={pending ? `${pending.action}:${pending.row.strategy_id}` : 'none'}
+        action={pending?.action ?? null}
+        strategyId={pending?.row.strategy_id ?? ''}
+        currentScale={pending?.row.scale_pct ?? null}
+        busy={act.isPending}
+        error={act.isError ? strategyActionRefusal(act.error) : null}
+        onCancel={() => {
+          act.reset()
+          setPending(null)
+        }}
+        onConfirm={(body) => act.mutate({ body })}
+      />
     </div>
   )
 }

@@ -24,7 +24,7 @@ import type {
   ToolCard,
   WorkingState,
 } from '@/api/desk'
-import type { CallCost, ExposureNote } from '@/lib/desk/events'
+import type { CallCost, ExposureNote, ToolSearch } from '@/lib/desk/events'
 import { toolsVisibleInMode, whyHidden } from '@/lib/desk/rings'
 import {
   BudgetMeter,
@@ -379,7 +379,13 @@ export function ToolsTab({
   /** `null` means the endpoint did not answer; `[]` means it answered with none. */
   catalogue: ToolCard[] | null
   catalogueLoading?: boolean
-  searchedFor: string[]
+  /**
+   * Every `search_tools` call on this run's stream (S-6.11).
+   *
+   * Read off `Note::CoreTool`, which has carried it all along; this prop was a
+   * literal `[]` at the only call site, so the section never rendered.
+   */
+  searchedFor: ToolSearch[]
   /**
    * The rest of that same note — why *that* set and not another.
    *
@@ -429,12 +435,41 @@ export function ToolsTab({
         )}
       </section>
 
-      {searchedFor.length > 0 && (
-        <section>
-          <span className="lbl">searched for</span>
-          <p className="sub">{searchedFor.join(' · ')}</p>
-        </section>
-      )}
+      <section>
+        <span className="lbl">searched for</span>
+        {searchedFor.length === 0 ? (
+          <p className="sub" data-testid="no-tool-search">
+            Nothing on this conversation's stream records a `search_tools` call. The harness
+            answers that tool itself and writes a note per search, so this means the model has not
+            gone looking — not that searches go unrecorded.
+          </p>
+        ) : (
+          <ul data-testid="tool-searches" style={{ fontSize: 'var(--t-12)', paddingLeft: 'var(--s-4)' }}>
+            {searchedFor.map((s, i) => (
+              <li key={`${s.step}-${i}`}>
+                {s.query === null ? (
+                  <>a search this panel could not read: {s.detail}</>
+                ) : (
+                  <>
+                    “{s.query}” →{' '}
+                    {s.found === null ? (
+                      'what it returned could not be read'
+                    ) : s.found.length === 0 ? (
+                      /* The case worth finding. A search that matched nothing is
+                         why a model goes round in circles naming tools it was
+                         never offered, and it is invisible in the exposure
+                         note. */
+                      <span data-testid="search-matched-nothing">no tool matched</span>
+                    ) : (
+                      s.found.join(', ')
+                    )}
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section>
         <span className="lbl">catalogue</span>

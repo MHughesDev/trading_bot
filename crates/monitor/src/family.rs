@@ -111,7 +111,130 @@ pub enum Fact {
     },
 }
 
+/// The `Fact` variants as a closed list, so the wiring guard can iterate them
+/// without inventing field values for each.
+///
+/// [`Fact::kind`] is an exhaustive match, so a new `Fact` variant does not
+/// compile until it gains a kind here — and therefore until somebody answers
+/// [`FactKind::wiring`] for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FactKind {
+    ReconciliationMismatch,
+    LeaseLost,
+    HardDataStaleness,
+}
+
+/// Whether anything in a *running platform* can raise a fact.
+///
+/// Not a doc line and not a comment. COMP-007 §4.1 says a reconciliation
+/// mismatch, a lost lease and hard staleness "act immediately"; on 2026-09-21
+/// that sentence was true in the type system, true in nine tests, and did
+/// nothing at all in production, because no non-test code raised any of the
+/// three. A sentence cannot notice that about itself. An exhaustive match can,
+/// and `facts_are_wired` asserts the [`Wiring::Unwired`] answers only ever
+/// shrink.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Wiring {
+    /// Raised in production by this function, named as a `::` path.
+    RaisedBy(&'static str),
+    /// Nothing in a running platform raises it.
+    Unwired {
+        /// Why not — the obstacle, not an apology.
+        because: &'static str,
+        /// The exact function that has to raise it, named as a `::` path. A
+        /// blocker with no named caller is a blocker nobody can clear.
+        needs: &'static str,
+    },
+}
+
+impl Wiring {
+    /// Whether a running platform can raise the fact this describes.
+    #[must_use]
+    pub fn is_raised_in_production(self) -> bool {
+        matches!(self, Self::RaisedBy(_))
+    }
+}
+
+impl FactKind {
+    /// Every kind, so the guard cannot quietly scan a shorter list than the enum.
+    #[must_use]
+    pub fn all() -> [Self; 3] {
+        [
+            Self::ReconciliationMismatch,
+            Self::LeaseLost,
+            Self::HardDataStaleness,
+        ]
+    }
+
+    /// The variant's Rust name, which is also what the guard greps for.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ReconciliationMismatch => "ReconciliationMismatch",
+            Self::LeaseLost => "LeaseLost",
+            Self::HardDataStaleness => "HardDataStaleness",
+        }
+    }
+
+    /// Who raises this fact in a running platform, or what would have to.
+    #[must_use]
+    pub fn wiring(self) -> Wiring {
+        match self {
+            // Found by `crates/reconciliation`, which runs inside the platform
+            // process. Today `check_divergence` calls `KillSwitch::trip_scope`
+            // and writes no row — and `LeaseWatcher::refresh` calls
+            // `replace_halted`, which *replaces* the scoped view from
+            // `monitor.kill_switch`. So that halt is not merely unrecorded: it is
+            // erased within one refresh cadence and the venue resumes trading.
+            Self::ReconciliationMismatch => Wiring::Unwired {
+                because: concat!(
+                    "the mismatch is detected in crates/reconciliation, which this ",
+                    "crate may not edit; it trips the in-memory KillSwitch only, and ",
+                    "KillSwitch::replace_halted erases that trip on the next refresh ",
+                    "because no monitor.kill_switch row backs it",
+                ),
+                needs: concat!(
+                    "reconciliation::divergence::check_divergence must call ",
+                    "monitor::store::MonitorStore::carry_out_fact with ",
+                    "Fact::ReconciliationMismatch { venue } before it calls ",
+                    "KillSwitch::trip_scope",
+                ),
+            },
+            Self::LeaseLost => Wiring::RaisedBy("monitor::service::LeaseWatcher::refresh"),
+            // `evaluate::staleness` builds this fact correctly and nothing calls
+            // it, because nothing can: the age of the last bar lives in
+            // ClickHouse and this crate deliberately has no client for it. Its
+            // Postgres-only dependency set is what keeps it a separate failure
+            // domain, so the answer is a producer, not a second database handle.
+            Self::HardDataStaleness => Wiring::Unwired {
+                because: concat!(
+                    "the age of an instrument's last bar lives in ClickHouse and ",
+                    "crates/monitor has no client for it and must not grow one — its ",
+                    "Postgres-only dependency set is what makes it a separate ",
+                    "failure domain",
+                ),
+                needs: concat!(
+                    "a writer of (instrument_id, last_bar_at, timeframe_secs) into ",
+                    "Postgres — then monitor::service::MonitorService::collect_cadence ",
+                    "calls evaluate::staleness and MonitorStore::carry_out_fact",
+                ),
+            },
+        }
+    }
+}
+
 impl Fact {
+    /// Which kind this is. Exhaustive, so a new variant fails to compile until
+    /// [`FactKind`] and therefore [`FactKind::wiring`] have an answer for it.
+    #[must_use]
+    pub fn kind(&self) -> FactKind {
+        match self {
+            Self::ReconciliationMismatch { .. } => FactKind::ReconciliationMismatch,
+            Self::LeaseLost => FactKind::LeaseLost,
+            Self::HardDataStaleness { .. } => FactKind::HardDataStaleness,
+        }
+    }
+
     #[must_use]
     pub fn family(&self) -> Family {
         match self {
@@ -182,6 +305,41 @@ mod tests {
             .family(),
             Family::Data
         );
+    }
+
+    #[test]
+    fn every_fact_carries_the_kind_that_owns_its_wiring_answer() {
+        // The coupling that makes the guard's question unavoidable: a new `Fact`
+        // variant does not compile until `kind` has an arm, and an arm needs a
+        // `FactKind`, and a `FactKind` needs a `wiring` answer.
+        let samples = [
+            Fact::ReconciliationMismatch { venue: "kraken".into() },
+            Fact::LeaseLost,
+            Fact::HardDataStaleness {
+                instrument: "BTC-USD".into(),
+                age_secs: 700,
+                timeframe_secs: 60,
+            },
+        ];
+        let kinds: Vec<FactKind> = samples.iter().map(Fact::kind).collect();
+        let mut sorted = kinds.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), kinds.len(), "two variants share one kind");
+        assert_eq!(sorted.len(), FactKind::all().len());
+    }
+
+    #[test]
+    fn exactly_one_fact_is_raised_in_production_today() {
+        // Not an aspiration — a measurement, so the number moving is visible in
+        // a diff. Two of the three are blocked on producers in crates this crate
+        // may not edit, and each names the caller that would clear it.
+        let raised: Vec<&str> = FactKind::all()
+            .into_iter()
+            .filter(|k| k.wiring().is_raised_in_production())
+            .map(FactKind::as_str)
+            .collect();
+        assert_eq!(raised, vec!["LeaseLost"]);
     }
 
     #[test]

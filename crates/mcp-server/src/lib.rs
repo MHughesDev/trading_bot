@@ -967,6 +967,12 @@ async fn dispatch_untraced(
         "probe_data_quality" => tools::falsification::probe_data_quality(&ctx.api, params).await,
         "find_similar_trials" => tools::falsification::find_similar_trials(&ctx.api, params).await,
 
+        // ── Path risk and cost realism over a finished run (S-3.12) ───────────
+        "trade_reshuffle_bootstrap" => {
+            tools::path_risk::trade_reshuffle_bootstrap(&ctx.api, params).await
+        }
+        "cost_shock_curve" => tools::path_risk::cost_shock_curve(&ctx.api, params).await,
+
         // ── Web access (ADR-P7-01) and the skill library (ADR-P7-03) ──────────
         "web_search" => tools::research_tools::web_search(&ctx.api, params).await,
         "fetch_url" => tools::research_tools::fetch_url(&ctx.api, params).await,

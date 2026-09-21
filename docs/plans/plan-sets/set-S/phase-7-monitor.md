@@ -106,6 +106,89 @@ within five minutes is refused; **no agent token can call any monitor POST**, as
 adversarially with a minted service token.
 **Traces:** COMP-007 §5, §6; §8.7, §8.6.
 
+
+---
+
+## The monitor track, 2026-09-21 — two defects that would have cost money
+
+**Read this before building anything else on this crate.**
+
+### The collector loop measured nothing, and now does
+
+`MonitorService::run` renewed the lease, beat, and slept. `collect.rs` and
+`pnl.rs` are new; `Cadence::assess` is pure (readings → events + transition) and
+`collect_cadence` / `evaluate_strategy` / `apply` are wired into `run()`, so it is
+not built-and-unreached. COMP-007 §8.4 is true from orders in to scale-down out:
+ten orders, a measured fill rate of 0.4 against a declared floor of 0.8, and the
+event names metric, value, limit and scope.
+
+`Measurement` is `Measured { value, observations } | Unobserved(reason)` with **no
+`Default` and no `From<_> for f64`**, so a family with no observations cannot
+report a zero — which on this surface is the dangerous direction: zero reads as
+*measured, and fine*.
+
+### (a) A collector-driven halt would have refused no orders
+
+`apply` wrote `monitor.events` and `monitor.strategy_state`. The order gate's
+mirror is refreshed from `MonitorStore::halted_scopes`, which reads
+`monitor.kill_switch` **and nothing else**. A strategy would have sat at `halted`
+on the monitor page, with an event row explaining why, **and gone on trading**.
+`apply` now routes a `Halted` decision through `MonitorStore::trip` — event and
+switch row, one transaction, record first — guarded by
+`a_halt_decision_carries_the_event_that_trips_the_switch`.
+
+### (b) Automatic scale-down never crossed the process boundary
+
+`refresh` renewed the lease and the halted scopes and never the scales. The only
+existing caller of `KillSwitch::scale_strategy` is the **manual API route**, which
+shares a process with the mirror it updates — so the manual path worked and the
+automatic one silently did nothing. `refresh` now pushes each `scale_pct` into the
+mirror, keeping the previous values on a read failure, which can only be too
+restrictive.
+
+**The general rule, and it is the thing to remember:** the manual route and the
+monitor process update two different things. Anything meant to reach the order
+gate must go through a table `refresh` reads, or it will pass every test and do
+nothing in production. That is exactly how (a) and (b) came about.
+
+### Still true, and the most dangerous thing on this page
+
+**The dwell-exempt path has no production caller.** `Fact::LeaseLost` is
+constructed nowhere in the repository outside one assertion in `family.rs`;
+`Fact::ReconciliationMismatch` only inside `evaluate.rs`'s own tests;
+`Fact::HardDataStaleness` only by `evaluate::staleness`, which itself has no
+non-test caller; and `Evaluator::on_fact` is called by nothing outside tests.
+
+So COMP-007 §4.1's *"a reconciliation mismatch, a lost lease and hard staleness
+are facts, not estimates, and act immediately"* is true in the type system, true
+in nine tests, and **does nothing at all in a running platform**. This is the
+repository's dominant defect shape on the one surface where it costs money.
+
+### One spec contradiction, unresolved by design
+
+§3 says a hard-stale feed halts; §4 says a data breach scales down. The code
+follows §4 and the test asserting it is *named* after §3. Written up as Q-S7-01;
+nothing was changed.
+
+### What the monitor cannot measure, and why — each is a column, not a component
+
+`slippage_bps_p50/p95` (nothing stores the fill model's prediction — the metric
+§3 lists *first* under execution quality), `signals_per_hour` (no per-strategy
+signal count; it is the metric that catches a strategy that has silently stopped
+trading), `position_count` (`positions` has no `strategy_id`, and joining through
+`orders` attributes a shared instrument to every strategy that ever traded it —
+an over-count against an upper limit is a false scale-down), and the P&L family's
+daily return series and baseline, which have no storage. `mlops.forward_observation`
+holds the returns but is `FORCE ROW LEVEL SECURITY` on a tenant the monitor's pool
+does not set, and **a silently-empty RLS read is indistinguishable from a strategy
+with no returns**.
+
+### A caveat on the test counts
+
+111 → 165. The 11 `fail_closed_drill` tests return early without
+`MONITOR_TEST_DATABASE_URL` — they were green-but-vacuous before and after, and
+**none of the SQL added here has been executed against a live database.**
+
 ### S-7.5 Data and venue families — M
 `PARTIAL` — the classification, the dependency map and the strategy-scoped halt are built and
 verified by `monitor::evaluate::tests::{staleness_is_measured_against_the_instruments_own_timeframe,

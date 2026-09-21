@@ -353,6 +353,85 @@ function strList(v: unknown): string[] {
  * from four steps ago answered under that heading would be a wrong answer rather
  * than a stale one.
  */
+/**
+ * One answered `search_tools` call, read off the stream.
+ *
+ * S-6.11's panel has a "searched for" section and `Conversation.tsx` handed it a
+ * literal `[]`, so it never rendered — and the note it needed was on the wire
+ * the whole time. `drive.rs` answers `search_tools` itself and pushes
+ * `Note::CoreTool { name: "search_tools", detail }`, which `local_driver.rs`
+ * appends under kind `core_tool`.
+ *
+ * Not the exposure note's `pinned`, which was the nearest-looking field: pinned
+ * tools are ones the model *named* and that were held ahead of namespace
+ * filling. A tool can be pinned without ever having been searched for, and a
+ * search that matched nothing pins nothing — so labelling `pinned` as
+ * "searched for" would have reported the opposite of the case the harness's own
+ * comment calls out, "a tool the model had just searched for losing its slot to
+ * an alphabetical sibling".
+ */
+export interface ToolSearch {
+  step: number
+  /** What was searched for, or `null` when the note's shape was not recognised. */
+  query: string | null
+  /**
+   * What the search returned.
+   *
+   * `[]` is a search that matched nothing — a real and useful answer, and the
+   * one that explains a model going round in circles. `null` is "this note did
+   * not parse", which is a fact about the desk rather than about the run, and
+   * the two must not collapse.
+   */
+  found: string[] | null
+  /** The note verbatim, so an unrecognised shape is still readable. */
+  detail: string
+}
+
+// `format!("{query:?} -> {}", …)` and `format!("no tool matches {query:?}")` in
+// `drive.rs`. `{:?}` on a `&str` is a quoted, backslash-escaped string.
+const SEARCH_HIT = /^"((?:[^"\\]|\\.)*)"\s*->\s*(.*)$/
+const SEARCH_MISS = /^no tool matches "((?:[^"\\]|\\.)*)"$/
+
+function unquote(s: string): string {
+  return s.replace(/\\(.)/g, '$1')
+}
+
+/** Every `search_tools` note on the stream, oldest first. */
+export function toolSearches(events: WireEvent[]): ToolSearch[] {
+  const out: ToolSearch[] = []
+  for (const e of events) {
+    if (e.kind !== 'core_tool') continue
+    const c = e.content
+    // Two spellings, because the note is serialised one way into
+    // `agent_messages` (`{note, name, detail}`) and another into the trajectory
+    // (`{core_tool, detail}`), and this reads whichever arrives.
+    const name = str(c.name) ?? str(c.core_tool)
+    if (name !== 'search_tools') continue
+    const detail = str(c.detail) ?? ''
+    const step = num(c.step) ?? 0
+    const miss = SEARCH_MISS.exec(detail)
+    if (miss) {
+      out.push({ step, query: unquote(miss[1]), found: [], detail })
+      continue
+    }
+    const hit = SEARCH_HIT.exec(detail)
+    if (hit) {
+      out.push({
+        step,
+        query: unquote(hit[1]),
+        found: hit[2]
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0),
+        detail,
+      })
+      continue
+    }
+    out.push({ step, query: null, found: null, detail })
+  }
+  return out
+}
+
 export function latestExposure(events: WireEvent[]): ExposureNote | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const e = events[i]

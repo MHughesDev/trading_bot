@@ -79,9 +79,66 @@ built only on the primitives and `app.css`, and S-6.22 deletes what it replaces.
 ## Shell and transport
 
 
+### The third track: controls that reached nothing, and numbers nobody measured
+
+**`Scale down` was a button with no `onClick`** — beside a live strategy, on the
+operator's page. `POST /api/monitor/strategies/{id}/{action}` has been served
+since COMP-007. All three of the route's words are wired now, and the client
+refuses **here** exactly what the route refuses **there**, stated before the
+request rather than as a 400 after it: `scale` needs `1..=100` (zero is not "off"
+— that is `halt`, a different record), `halt` needs a reason, and `resume` needs
+a reason plus the typed scope, compared **case-sensitively because
+`ResetRequest::validate` is**. A refusal renders with `role="alert"`: a control
+that swallows one reports failure as silence, which on this page reads as
+success.
+
+**A hosted profile was declared measured for being hosted.**
+`measured={measured || !p.is_local}` contradicted the line three rows below it on
+the same card. The badge is what a person reads at a glance. It is
+`multi_step_evidence !== null` and nothing else now.
+
+**The Spend table printed three zeros nobody measured.** `cost_usd` is
+`COALESCE(SUM(...),0)` and there is no price table (OQ-16), so a run that burned
+half a million tokens showed a cost of 0 — while the Cost tab six tabs away says
+"not priced… this is not $0". `dollars_per_verdict` is `null` and `String(null)`
+put the word **null** in the table. A *genuine* zero is now distinct from an
+unpriced one, and the CSV exports the rendered values so the caveat travels with
+the number.
+
+**`searchedFor` is real, and it is not `pinned`.** The note existed all along:
+`drive.rs` answers `search_tools` itself and pushes `Note::CoreTool`, already on
+the array the Tools tab reads. `found: []` (the registry matched nothing) is kept
+apart from `found: null` (the note did not parse) — and the empty case is the one
+the harness's own comment says its worst behaviours came from, so labelling
+`pinned` as `searchedFor` would have hidden exactly it.
+
+**Frontend: 193 → 239 tests in 27 files.**
+
+### The guard was weaker than this document claimed
+
+`the_desk_calls_routes_that_exist` scanned **`frontend/src/api` only**, so a call
+written directly in a component was invisible to it — while this plan said the
+test "fails the build for it". Two such calls were live:
+`Operations.tsx`'s strategy editor posts to `/api/strategies/compile` and
+`/api/strategies/preview`, and the router serves neither.
+
+The scan now covers all of `frontend/src`, `.ts` and `.tsx`, and both paths are
+declared in `UNBUILT` with the task that owns them. The claim is true now; it was
+not before.
+
+### One spec understatement, implemented against the server rather than the spec
+
+AGENT-012 §11 asks for "a per-row Scale down / Halt / Resume with the two-step
+pattern **for halt**". On this platform **resume is a reset**: it refuses without
+a reason, refuses without the typed scope, and is rate-limited. So resume needs a
+*heavier* confirmation than halt, not a lighter one — and §11's own next
+sentence agrees for the kill switch. The server's requirement was implemented and
+§11's sentence was not read as licence to ship a one-click resume.
+
+
 ---
 
-## Two desk tracks, 2026-09-21 — and what they found
+## Three desk tracks, 2026-09-21 — and what they found
 
 **The desk's failure mode is a `null` literal with a phase number attached to
 it.** `Conversation.tsx` handed six tabs `={null}` or `={[]}`, each explaining its

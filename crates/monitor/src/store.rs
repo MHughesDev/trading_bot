@@ -10,10 +10,12 @@ use risk::Scope;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+use crate::collect::{OrderObservation, OrderOutcome, Window as CollectWindow};
 use crate::control::{ResetRefusal, ResetRequest};
 use crate::drill::DrillOutcome;
 use crate::events::{EventKind, MonitorEvent};
-use crate::family::Family;
+use crate::facts::FactAction;
+use crate::family::{Fact, Family};
 use crate::lease::{Lease, LeaseStatus, LeaseTerms};
 use crate::limits::{ControlLimit, LimitBook, LimitMethod};
 use crate::precision::{FamilyPrecision, PrecisionLabel};
@@ -224,6 +226,59 @@ impl MonitorStore {
         Ok(())
     }
 
+    /// Carry out one [`FactAction`], record first (COMP-007 §4.1, §8.5).
+    ///
+    /// The funnel every raised fact goes through, and the reason it exists is
+    /// the rule in [`crate::facts`]: each arm writes to the table that action's
+    /// [`GateTable`][gt] names, and those are the three tables
+    /// [`LeaseWatcher::refresh`][r] reads. Nothing here writes only an event and
+    /// calls it a halt.
+    ///
+    /// The actor comes from the action rather than from a parameter, so there is
+    /// no string a caller can thread an `agent:` prefix through.
+    ///
+    /// [gt]: crate::facts::GateTable
+    /// [r]: crate::service::LeaseWatcher::refresh
+    pub async fn carry_out_fact(
+        &self,
+        fact: &Fact,
+        action: &FactAction,
+    ) -> Result<(), StoreError> {
+        let reason = fact.reason();
+        let event = MonitorEvent::new(
+            action.scope(),
+            fact.family(),
+            match action {
+                FactAction::Halt(_) => EventKind::Halted,
+                FactAction::Scale { .. } => EventKind::ScaledDown,
+                FactAction::RecordLeaseGap => EventKind::Halted,
+            },
+            action.actor(),
+        )
+        .map_err(|e| StoreError::Invalid(e.to_string()))?
+        .with_reason(reason.clone());
+
+        match action {
+            // One transaction, event then switch row, so §8.5's ordering holds
+            // even if the process dies between the two — there is no "between".
+            FactAction::Halt(_) => self.trip(&event, &reason).await,
+            FactAction::Scale {
+                strategy_id,
+                from,
+                state,
+                scale_pct,
+            } => {
+                let event = event.with_states(from.as_str(), state.as_str());
+                self.record_event(&event).await?;
+                self.set_strategy_state(strategy_id, state.as_str(), i16::from(*scale_pct))
+                    .await
+            }
+            // The gate is already closed by the missing lease row itself; see
+            // `FactAction::RecordLeaseGap`. What was missing is this row.
+            FactAction::RecordLeaseGap => self.record_event(&event).await,
+        }
+    }
+
     /// When this scope was last reset, for the rate limit.
     pub async fn last_reset_at(&self, scope: &Scope) -> Result<Option<DateTime<Utc>>, StoreError> {
         let row = sqlx::query("SELECT reset_at FROM monitor.kill_switch WHERE scope = $1")
@@ -347,6 +402,67 @@ impl MonitorStore {
             .collect())
     }
 
+    // ── Observations (COMP-007 §3; S-7.7) ───────────────────────────────────
+
+    /// Every strategy order that was placed inside `window`, with its outcome and
+    /// its time to first fill.
+    ///
+    /// Manual orders (`strategy_id IS NULL`) are excluded: the execution and
+    /// behaviour families are declared *per strategy*, and a human clicking buy
+    /// has no baseline to be three sigma away from.
+    ///
+    /// `slippage_vs_model_bps` comes back `None` for every row, because nothing in
+    /// `orders` or `fills` records what the fill model predicted. That is the
+    /// truth and it is deliberately not smoothed over: the slippage statistics
+    /// then report [`Unobserved::NoQualifyingObservations`][u] rather than a
+    /// comfortable zero, which is what "the fill model is not wired up" should
+    /// look like on the monitor page.
+    ///
+    /// [u]: crate::collect::Unobserved::NoQualifyingObservations
+    pub async fn order_observations(
+        &self,
+        window: &CollectWindow,
+    ) -> Result<Vec<OrderObservation>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT o.strategy_id      AS strategy_id,
+                    o.instrument_id    AS instrument_id,
+                    o.created_at       AS placed_at,
+                    o.state            AS state,
+                    COUNT(f.fill_id)   AS fill_count,
+                    MIN(f.filled_at)   AS first_fill_at
+               FROM orders o
+               LEFT JOIN fills f ON f.idempotency_key = o.idempotency_key
+              WHERE o.strategy_id IS NOT NULL
+                AND o.created_at >= $1
+                AND o.created_at <= $2
+              GROUP BY o.idempotency_key, o.strategy_id, o.instrument_id,
+                       o.created_at, o.state
+              ORDER BY o.created_at",
+        )
+        .bind(window.from)
+        .bind(window.to)
+        .fetch_all(&self.pg)
+        .await?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for r in rows {
+            let state: String = r.get("state");
+            let fill_count: i64 = r.get("fill_count");
+            out.push(OrderObservation {
+                strategy_id: r.get("strategy_id"),
+                instrument_id: r.get("instrument_id"),
+                placed_at: r.get("placed_at"),
+                outcome: OrderOutcome::observed(
+                    parse_order_state(&state)?,
+                    usize::try_from(fill_count).unwrap_or(0),
+                ),
+                first_fill_at: r.get("first_fill_at"),
+                slippage_vs_model_bps: None,
+            });
+        }
+        Ok(out)
+    }
+
     // ── Strategy state ──────────────────────────────────────────────────────
 
     pub async fn set_strategy_state(
@@ -370,6 +486,40 @@ impl MonitorStore {
         .execute(&self.pg)
         .await?;
         Ok(())
+    }
+
+    /// Every strategy the monitor is tracking, typed, with the halt policy that
+    /// applies if it breaches.
+    ///
+    /// Separate from [`Self::strategy_states`], which serves the API as strings.
+    /// The cadence needs the parsed [`StrategyState`] and the
+    /// [`HaltPolicy`][hp] — and it needs an unparseable row to be an error rather
+    /// than a default, because defaulting a state the monitor cannot read to
+    /// `nominal` would resume a halted strategy on the next cadence.
+    ///
+    /// [hp]: crate::state::HaltPolicy
+    pub async fn strategy_runtime_states(
+        &self,
+    ) -> Result<Vec<(String, crate::state::StrategyState, u8, crate::state::HaltPolicy)>, StoreError>
+    {
+        let rows = sqlx::query(
+            "SELECT strategy_id, state, scale_pct, halt_policy FROM monitor.strategy_state",
+        )
+        .fetch_all(&self.pg)
+        .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for r in rows {
+            let state: String = r.get("state");
+            let policy: String = r.get("halt_policy");
+            let scale: i16 = r.get("scale_pct");
+            out.push((
+                r.get("strategy_id"),
+                state.parse().map_err(StoreError::Invalid)?,
+                u8::try_from(scale).unwrap_or(100),
+                policy.parse().map_err(StoreError::Invalid)?,
+            ));
+        }
+        Ok(out)
     }
 
     pub async fn strategy_states(&self) -> Result<Vec<(String, String, i16)>, StoreError> {
@@ -615,6 +765,25 @@ impl MonitorStore {
     }
 }
 
+/// Parse `orders.state`, refusing an unknown one.
+///
+/// Not defaulted to `Working`, which would be the comfortable choice: an order
+/// state the monitor cannot read is an order it cannot score, and silently
+/// dropping it out of the denominator would make the fill rate a statistic over
+/// the orders the monitor happened to understand.
+fn parse_order_state(s: &str) -> Result<domain::order::OrderState, StoreError> {
+    use domain::order::OrderState as S;
+    Ok(match s {
+        "accepted" => S::Accepted,
+        "submitted" => S::Submitted,
+        "partially_filled" => S::PartiallyFilled,
+        "filled" => S::Filled,
+        "cancelled" => S::Cancelled,
+        "rejected" => S::Rejected,
+        other => return Err(StoreError::Invalid(format!("unknown order state {other:?}"))),
+    })
+}
+
 fn parse_method(s: &str) -> Result<LimitMethod, StoreError> {
     Ok(match s {
         "paper_ewma_3sigma" => LimitMethod::PaperEwma3Sigma,
@@ -696,6 +865,24 @@ mod tests {
         assert_eq!(numeric(Some(f64::INFINITY)), None);
         assert_eq!(numeric(None), None);
         assert!(numeric(Some(0.25)).is_some());
+    }
+
+    #[test]
+    fn an_unknown_order_state_is_an_error_rather_than_a_default() {
+        // Defaulting an unreadable state to "still working" would drop the order
+        // out of the fill rate's denominator, making it a statistic over the
+        // orders the monitor happened to understand.
+        assert!(parse_order_state("in_flight").is_err());
+        for s in [
+            "accepted",
+            "submitted",
+            "partially_filled",
+            "filled",
+            "cancelled",
+            "rejected",
+        ] {
+            assert!(parse_order_state(s).is_ok(), "{s}");
+        }
     }
 
     #[test]

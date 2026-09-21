@@ -35,14 +35,17 @@
 //! multiple.
 
 pub mod baseline;
+pub mod collect;
 pub mod control;
 pub mod drill;
 pub mod dwell;
 pub mod evaluate;
 pub mod events;
+pub mod facts;
 pub mod family;
 pub mod lease;
 pub mod limits;
+pub mod pnl;
 pub mod precision;
 pub mod service;
 pub mod state;
@@ -50,16 +53,22 @@ pub mod store;
 pub mod window;
 
 pub use baseline::{Cusum, CusumVerdict, Ewma};
+pub use collect::{
+    BehaviourSample, ExecutionSample, HoldingPeriod, Measurement, Metric, OrderObservation,
+    OrderOutcome, Unobserved, Window,
+};
 pub use control::{ResetRefusal, ResetRequest};
 pub use drill::{DrillOutcome, DrillTrigger};
 pub use dwell::{DwellConfig, DwellTracker, DwellVerdict};
 pub use evaluate::{Evaluation, Evaluator, MetricReading, Outcome};
 pub use events::{EventKind, MonitorEvent};
-pub use family::{Fact, Family};
+pub use facts::{FactAction, GateTable};
+pub use family::{Fact, FactKind, Family, Wiring};
 pub use lease::{Lease, LeaseStatus, LeaseTerms};
 pub use limits::{ControlLimit, LimitBook, LimitMethod, LimitSeverity, PromotionRefusal};
+pub use pnl::{BaselineRefusal, DailyReturn, PnlSample, ReturnBaseline};
 pub use precision::{FamilyPrecision, PrecisionLabel};
-pub use service::{LeaseWatcher, MonitorService};
+pub use service::{LeaseNote, LeaseWatcher, MonitorService};
 pub use state::{Action, HaltPolicy, Severity, StrategyState, Transition};
 pub use store::{MonitorStore, StoreError};
 pub use window::MaintenanceWindow;
