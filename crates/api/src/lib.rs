@@ -31,6 +31,8 @@ pub mod questions;
 pub mod report_validator;
 pub mod research;
 pub mod research_run_worker;
+pub mod session_driver;
+pub mod sessions;
 pub mod rollup;
 pub mod routes;
 pub mod live_bus;

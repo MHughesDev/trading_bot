@@ -374,17 +374,44 @@ export function emptyCharter(): Charter {
   }
 }
 
+/** The board's five columns (AGENT-014 §9). */
 export type AgendaState = 'proposed' | 'queued' | 'running' | 'done' | 'vetoed'
+
+/**
+ * An item's true status — nine of them, against the board's five columns.
+ *
+ * The card shows this on its badge and sits in the column `state` names. They
+ * are not the same thing: `expired` and a verdict both land in `done`, and a
+ * reader needs to be able to tell them apart.
+ */
+export type AgendaStatus =
+  | 'proposed'
+  | 'approved'
+  | 'queued'
+  | 'claimed'
+  | 'running'
+  | 'done'
+  | 'vetoed'
+  | 'superseded'
+  | 'expired'
 
 export interface AgendaItem {
   item_id: string
   question: string
+  subject?: string
   workflow: Workflow
   sources: string[]
-  score: { value: number; novelty: number; feasibility: number; cost: number; total: number }
-  rationale: string
-  exploration_pick: boolean
+  /** Null until the scorer runs (Set S task S-11.3). */
+  score: { value: number; novelty: number; feasibility: number; cost: number; total: number } | null
+  rationale?: string
+  exploration_pick?: boolean
+  /** The column. */
   state: AgendaState
+  /** The word on the badge. */
+  status?: AgendaStatus
+  /** True for a `user` item, which is claimed next whatever the score says. */
+  bypasses_scoring?: boolean
+  attempts?: number
   child_conversation_id?: string | null
   stage?: Stage | null
 }
@@ -653,8 +680,25 @@ export const deskApi = {
     ),
   awayDigest: (since: string) => optional<AwayDigest>(client.get('/api/desk/digest', { params: { since } })),
   sessions: () => optional<{ sessions: DeskSession[] }>(client.get('/api/research/sessions')),
-  createSession: (body: { mode: Mode; continuous: boolean; question?: string; charter?: Charter; workflow?: Workflow }) =>
-    optional<{ session_id: string; conversation_id: string }>(client.post('/api/research/sessions', body)),
+  /**
+   * One door for both halves of the toggle (AGENT-014 §2.1).
+   *
+   * `model` is the profile the session runs on. It is sent because the
+   * frontier-only rule is enforced on the server as well as in the composer —
+   * a rule enforced only in the browser is a rule a `curl` walks around — and
+   * the server answers with the profile named when it refuses.
+   */
+  createSession: (body: {
+    mode: Mode
+    continuous: boolean
+    question?: string
+    charter?: Charter
+    workflow?: Workflow
+    model?: string
+  }) =>
+    optional<{ session_id: string | null; conversation_id: string; continuous: boolean }>(
+      client.post('/api/research/sessions', body),
+    ),
   agenda: (sessionId: string) =>
     optional<{ items: AgendaItem[] }>(client.get(`/api/research/sessions/${sessionId}/agenda`)),
   vetoAgendaItem: (sessionId: string, itemId: string) =>

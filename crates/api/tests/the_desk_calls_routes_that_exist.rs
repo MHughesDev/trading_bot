@@ -60,21 +60,12 @@ const UNBUILT: &[(&str, &str)] = &[
     // comment thread was added on both sides at once so it never needed an
     // entry. What is left of phase 8 on this list is `/api/reports/{}`, which
     // is a different surface: a run's report rather than a compiled dossier.
-    // Phase 11 — continuous research (S-11.1). Needs `crates/research-session`,
-    // four tables and a JobKind; depends on phases 10, 2, 4 and 7.
-    ("/api/research/sessions", "S-11.1 — no research_sessions table"),
-    (
-        "/api/research/sessions/{}/agenda",
-        "S-11.1 — no agenda_items table",
-    ),
-    (
-        "/api/research/sessions/{}/agenda/order",
-        "S-11.1 — no agenda_items table",
-    ),
-    (
-        "/api/research/sessions/{}/agenda/{}/veto",
-        "S-11.1 — no agenda_items table",
-    ),
+    // The four phase-11 rows that were here are served as of S-11.1 and S-11.14:
+    // `crates/research-session` exists, `0138` carries the four tables, and
+    // `JobKind::ContinuousResearch` has a registered worker. They were the
+    // oldest rows on this list — the desk's composer has posted a charter to
+    // `/api/research/sessions` since it was written — which is the case this
+    // test was added for.
     // Phase 10 — lifecycle. `crates/harness/src/lifecycle/` does not exist.
     (
         "/api/agent/runs/{}/lifecycle",

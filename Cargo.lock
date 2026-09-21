@@ -146,6 +146,7 @@ dependencies = [
  "reconciliation",
  "reqwest",
  "research",
+ "research-session",
  "risk",
  "rust_decimal",
  "rust_decimal_macros",
@@ -2562,6 +2563,7 @@ dependencies = [
  "ledger",
  "mcp-server-lib",
  "regex",
+ "research-session",
  "serde",
  "serde_json",
  "sqlx",
@@ -4354,6 +4356,17 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "research-session"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
  "uuid",
 ]
 

@@ -80,6 +80,7 @@ export function DeskHome() {
         continuous: true,
         charter: s.charter as Charter,
         workflow: s.workflow as Workflow,
+        model: model || profileList[0]?.id,
       })
       if (created) navigate(`/desk/c/${created.conversation_id}`)
       return

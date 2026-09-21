@@ -195,7 +195,13 @@ export function Conversation({
       .filter(Boolean)
       .join(' ')
     if (s.continuous && s.charter) {
-      void deskApi.createSession({ mode: s.mode, continuous: true, charter: s.charter, workflow: s.workflow })
+      void deskApi.createSession({
+        mode: s.mode,
+        continuous: true,
+        charter: s.charter,
+        workflow: s.workflow,
+        model: chosen?.id,
+      })
       return
     }
     void conversationsApi.send(conversationId, `${preamble}\n${s.question}`)

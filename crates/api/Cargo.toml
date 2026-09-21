@@ -34,6 +34,7 @@ monitor = { path = "../monitor" }
 llm = { workspace = true }
 mcp-server-lib = { workspace = true }
 research = { workspace = true }
+research-session = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }

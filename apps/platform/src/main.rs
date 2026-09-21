@@ -453,6 +453,22 @@ async fn main() -> anyhow::Result<()> {
                         app_state.default_profile.clone(),
                     ),
                 ));
+                // The continuous-research session driver (AGENT-014 §3;
+                // S-11.1). Like the campaign driver it folds an append-only log
+                // and spends its time waiting on a child, so it belongs in the
+                // research pool rather than in a compute class. Registered here
+                // and not only defined, because a driver nothing claims is the
+                // defect S-10.11 was: the kind would queue and sit.
+                pool = pool.register(std::sync::Arc::new(
+                    api::session_driver::SessionWorker::new(
+                        app_state.pg.clone(),
+                        app_state.agent.clone(),
+                        api::credentials::LlmCredentialStore::new(
+                            app_state.pg.clone(),
+                            app_state.cred_crypto.clone(),
+                        ),
+                    ),
+                ));
             }
             tokio::spawn(std::sync::Arc::new(pool).run_forever());
         }

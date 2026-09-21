@@ -549,8 +549,8 @@ export function AgendaTab({
   if (items === null) {
     return (
       <EmptyState
-        message="The agenda is not available yet"
-        detail="Continuous sessions land with Set S phase 11. The tab is wired and will fill the day the endpoint exists."
+        message="The agenda could not be read"
+        detail="This conversation has no session, or the endpoint did not answer. A bounded Research run has one item and no board; a continuous one fills this the moment it starts."
       />
     )
   }
@@ -571,6 +571,10 @@ export function AgendaTab({
               <div key={i.item_id} className="desk-card">
                 <div className="desk-card-hd">
                   <Badge tone="outline">{i.workflow}</Badge>
+                  {/* The true status, which the column alone does not say: `expired`
+                      and a verdict both sit in `done`. Only shown when it differs
+                      from the column, so the common case stays quiet. */}
+                  {i.status && i.status !== i.state && <Badge tone="warn">{i.status}</Badge>}
                   {i.sources.map((s, n) => (
                     <Badge key={`${s}-${n}`} tone="neutral">
                       {s}
@@ -579,11 +583,20 @@ export function AgendaTab({
                   {i.exploration_pick && <Badge tone="info">exploration</Badge>}
                 </div>
                 <p>{i.question}</p>
-                <p className="sub">
-                  value {i.score.value} · novelty {i.score.novelty} · feasibility {i.score.feasibility} · cost{' '}
-                  {i.score.cost} → {i.score.total}
-                </p>
-                <p className="sub">{i.rationale}</p>
+                {i.score ? (
+                  <p className="sub">
+                    value {i.score.value} · novelty {i.score.novelty} · feasibility {i.score.feasibility} · cost{' '}
+                    {i.score.cost} → {i.score.total}
+                  </p>
+                ) : (
+                  // Not "score 0". An unscored item is one the scorer has not
+                  // reached, and showing a zero would read as "worthless".
+                  <p className="sub">
+                    not scored yet
+                    {i.bypasses_scoring ? ' — you asked for this one, so it goes next' : ''}
+                  </p>
+                )}
+                {i.rationale && <p className="sub">{i.rationale}</p>}
                 {i.child_conversation_id && (
                   <Button size="xs" variant="ghost" onClick={() => onOpenChild?.(i.child_conversation_id as string)}>
                     Open the run

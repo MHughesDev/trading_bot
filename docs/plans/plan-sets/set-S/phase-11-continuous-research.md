@@ -1,6 +1,6 @@
 # Phase 11 — Continuous research: Research with the toggle on
 
-**Completion: 0% (0 / 14 tasks)**
+**Completion: 14% (0 done / 2 partial of 14 tasks)** — S-11.1 (the object, the fold, the driver) and S-11.14 (the API and the three read tools) landed 2026-09-21; each names what it does not cover.
 
 **Requirement IDs:** PG-01…PG-14.
 **Spec:** [AGENT-014](../../../specs/AGENT-014-continuous-research.md);
@@ -34,7 +34,7 @@ autonomy setting).
 ## The object and its loop
 
 ### S-11.1 `ResearchSession`, `Charter`, `AgendaItem`, the event fold and the driver — L
-`NOT STARTED`
+`PARTIAL`
 
 Tables `research_sessions` (with `continuous`, `question`, `charter`, budget, schedule,
 autonomy, `replenish`, `review_every`), `session_events (session_id, seq, kind, payload_json,
@@ -55,6 +55,65 @@ child, one lease, an identical fold (AT-59's form); an illegal transition is ref
 trigger; `exploration_share = 0.05` is refused by the constructor and by the CHECK
 (adversarial, both halves); a bounded Research run has a session row with one item.
 **Traces:** AGENT-014 P1, §2, §3, §10; §12.1, §12.3 (floor half), §12.12 (bounded half).
+
+**Built 2026-09-21. `PARTIAL`, and the two halves are named rather than blurred.**
+
+**What runs.** A new crate `crates/research-session` holds the parts that are
+decisions rather than plumbing, so they test without a database: `charter.rs`
+(the charter, the budget, the schedule, `Autonomy`, and `ExplorationShare` as a
+*sealed type* whose only constructor refuses below 0.10 — including through
+`serde`, because a charter posted as JSON is a way in), `agenda.rs` (`Source`,
+`ItemStatus`, `Score`, the dedupe key and layer one of the three-layer refusal)
+and `fold.rs` (`EventKind`, `SessionState`, `transition_ok`, `fold`). 26 unit
+tests. `migrations/0138_research_sessions.sql` carries the four tables, the
+BEFORE INSERT trigger that assigns `seq` and refuses an illegal transition, and
+the partial unique index that is layer one. `api::sessions` is the store,
+`api::session_driver::SessionWorker` is the driver, `JobKind::ContinuousResearch`
+is its kind, and it is **registered** in `apps/platform/src/main.rs` — a driver
+nothing claims is the defect S-10.11 was.
+
+**Verified against a live Postgres (5433), not merely written.**
+`crates/invariants/tests/a_session_log_refuses_what_the_fold_would.rs` — seven
+cases, all green: `exploration_share = 0.05` is refused *by the column* and so is
+a charter with the key missing (`NULL >= 0.10` is NULL, and a CHECK that
+evaluates to NULL passes, which no text scan can catch); the log opens in `draft`
+and nothing else; `running -> draft` is refused; nothing appends after `stopped`;
+`seq` comes out gapless with no writer choosing it; two live items cannot share a
+dedupe key but a *finished* question can be asked again; an item cannot climb
+past two attempts; a conversation gets at most one session; and neither the log
+nor a digest can be rewritten. Two static suites hold the two copies of each rule
+equal — `a_session_transition_table_has_one_definition` walks all 36 ordered
+pairs of state words and compares Rust to SQL cell by cell, and
+`exploration_floor_is_one_number` reads the floor out of Rust and looks for it in
+the migration.
+
+**What is not built, and is not pretended to be.** The **lease** half of
+acceptance 1 (S-11.5 owns leases; nothing here bounds a child's spend), scoring
+(S-11.3 — selection is oldest-claimable with `user` first, which is §5.4's
+tie-break on an unscored agenda, and the `selected` event says so in words rather
+than writing an empty candidate set a later reader would take for "it considered
+nothing"), the harvest, the stall detector, windows, the digest, and sources
+4.3-4.9. Acceptance 4 — a bounded run has a session row with one item — is
+**wired** through `AgentManager::ensure_session` and covered at the store level,
+but has not been exercised end-to-end through a real turn.
+
+**One judgement call, recorded rather than assumed: ADR-P11-01.** AGENT-014 §3
+names `JobStore::submit_child_once` and §10 says children go "via the
+conversation/turn path". Those are two mechanisms and a child is created once — a
+conversation turn is not a job. The build takes §10's path and gets §3's stated
+*property* from a derived conversation id (`uuid5(session_id ++ item_id)`, so
+there is no second id a second conversation could open under) plus a conditional
+UPDATE out of a claimable status (so exactly one of two drivers wins). The spec
+wording is written up as **Q-S11-01** in `OPEN-QUESTIONS.md` and left open; the
+build is not blocked on it.
+
+**One small contract change:** `AgentManager::send_message` now takes
+`Option<Workflow>`. The front door passes `None` (no chip yet, AGENT-012 §3.3);
+the session driver passes the agenda item's, so a run started to replicate a
+stale finding says `replicate` on its row *and* in its loop instead of claiming
+to be an investigation. One value feeds both. `agent_conversations` also gained
+`parent_conversation_id`, which groups the rail (§9) and is how the front door
+tells a child of a session apart from a conversation a human opened.
 
 ### S-11.2 Memory-fed sources: open questions, retry conditions, contradictions, stale findings, follow-ups — M
 `NOT STARTED`
@@ -275,7 +334,7 @@ every id resolves; both themes, both densities, 375 px.
 **Traces:** AGENT-014 §9; §12.11, §12.12. AGENT-012 §2, §2b, §3.3 (amended), §19.10.
 
 ### S-11.14 Session tools and the API — M
-`NOT STARTED`
+`PARTIAL`
 
 Read-only, in the `lifecycle` namespace (9 → 12; `research` untouched at 16):
 `lifecycle.get_session`, `lifecycle.list_agenda`, `lifecycle.get_digest`. API per AGENT-014
@@ -289,6 +348,76 @@ list/add/`approve|veto|prioritise`, charter `PUT`, digests, SSE events. Agent to
 in the `InternalAgent` profile and the namespace cap test passes with `lifecycle` at 12 and
 twenty-two namespaces; SSE delivers agenda transitions to an open journal within one event.
 **Traces:** AGENT-014 §10; AGENT-006 §2.1 (amended), §10.11.
+
+**Built 2026-09-21, API and tools. `PARTIAL`.**
+
+`crates/api/src/routes/research_sessions.rs`: list, create, get, `pause` /
+`resume` / `stop`, agenda list/add, `approve` / `veto` / `prioritise`, charter
+`PUT`, digests, and SSE over the log keyed on `seq` so a reconnect resumes
+exactly where it stopped. `resume` also **submits the driver job** — without that
+the log would say `running` and nothing would ever claim, which is this
+repository's dominant defect shape reached through a job queue.
+
+Every mutating route asks for `web:full`, a scope `NEVER_FOR_AGENTS` refuses to
+attach to any project-bound session and migration 0038's trigger refuses again at
+the row. `every_mutating_handler_asks_the_same_question` scans this file and
+fails the build if a new write handler is added without the check.
+
+Three read tools in the `lifecycle` namespace: `get_session`, `list_agenda`,
+`get_digest`, all `.internal()`. Each takes an **optional** `session_id`: with it
+omitted the platform answers from the calling run's own attribution via
+`GET /api/research/sessions/current`, which reads the run id out of the token's
+minted label the way `agent::audit::principal_for` does — so a run does not have
+to be told an id it could get wrong, and cannot name another session.
+
+**The desk was already calling this, and had been for weeks.**
+`crates/api/tests/the_desk_calls_routes_that_exist.rs` carried four phase-11 rows
+in its `UNBUILT` list — `/api/research/sessions`, `…/{}/agenda`,
+`…/{}/agenda/order`, `…/{}/agenda/{}/veto`. The composer has posted a charter to
+the first since it was written. They are removed, and the test fired on its own
+the moment three of the four became served, which is what it is for.
+
+Closing that gap meant making the two sides agree rather than only making the
+path exist, and three mismatches came out of it:
+
+* the client posts `{mode, continuous, question?, charter?, workflow?}` with **no
+  conversation id**, because the composer is starting the conversation and the
+  session at once. `conversation_id` is now optional and one is opened when it is
+  absent — §2.1's "the conversation IS the session" read forwards. `model` was
+  added to the client's body so §8's frontier rule is enforced on the server too;
+  a rule enforced only in the browser is a rule a `curl` walks around;
+* the charter form is **flat** (chip lists, a 7 × 24 grid, a day budget beside a
+  `max_runs`) and `research_session::Charter` is §2.2's nested shape.
+  `crates/api/src/routes/desk_charter.rs` translates, with the decisions in it
+  tested: the grid becomes *contiguous windows* rather than 168 one-hour ones, an
+  empty grid is always-open rather than never, and an unparseable
+  `delta_practical` is **refused rather than dropped** — it is an effect size the
+  runs under the charter are suggested to register against, and silently
+  discarding what the user typed is what makes a suggestion meaningless;
+* the board has **five columns** and an item has **nine statuses**.
+  `ItemStatus::board_column` is the projection, held total by a test that also
+  asserts every column is reachable — a column nothing can be in renders empty
+  forever and teaches the reader it is broken. The response carries both, so a
+  card can say `expired` while sitting in `done`.
+
+And one crash that would have happened on the first continuous session anybody
+started: `AgendaTab` read `i.score.value` unconditionally, and the first server to
+serve it has no scorer (S-11.3). It now renders "not scored yet" — not a zero,
+which would read as *worthless* — and `agenda-board.test.tsx` covers it.
+`POST …/{id}/agenda/order` is built: a drag writes a `user` source per item, which
+is the same bypass the scorer already honours, rather than a rank column that
+would be a second ranking to keep in step.
+
+**Three things this does not yet do.** The adversarial "an agent token cannot
+call any session POST" is asserted by a source scan over the handlers, not by an
+HTTP test with a real service token — weaker, and worth upgrading. `research` is
+untouched at 16 as the task asks, but **`lifecycle` is at 9, not 12**: the task's
+"9 → 12" counted nine pre-existing lifecycle tools and there are six
+(`preregister`, `hypothesise`, `design`, `propose`, `find_prior_hypothesis`,
+`open_question`). Three named in AGENT-013 §8 are not built; which three is a
+phase-10 question, and the count is recorded here rather than the tools invented
+to make it match. The SSE half of the acceptance — "delivers agenda transitions
+to an open journal within one event" — has no journal to deliver to until S-11.13.
 
 ---
 

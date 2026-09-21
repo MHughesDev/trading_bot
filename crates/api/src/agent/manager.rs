@@ -342,12 +342,19 @@ impl AgentManager {
     /// iteration cap, no time budget: the agent chooses what to look at, how many
     /// backtests to run and when it is done, because those were never decisions a
     /// user could make correctly in advance.
+    /// `workflow` is `None` from the conversation front door, which offers no
+    /// workflow chip (AGENT-012 §3.3) and therefore starts every turn as the
+    /// default. The session driver passes the agenda item's workflow, so a run
+    /// started to replicate a stale finding says `replicate` on its row and in
+    /// its loop rather than claiming to be an investigation. One value feeds
+    /// both, which is what keeps the row and the loop from disagreeing.
     pub async fn send_message(
         self: &Arc<Self>,
         user_id: Uuid,
         conversation_id: Uuid,
         text: &str,
         creds: &LlmCredentialStore,
+        workflow: Option<harness::state::Workflow>,
     ) -> Result<Uuid, StartError> {
         let text = text.trim();
         if text.is_empty() {
@@ -399,6 +406,7 @@ impl AgentManager {
         let llm_client = LlmClient::new(provider, api_key, base_url);
 
         let run_id = Uuid::new_v4();
+        let workflow = workflow.unwrap_or(harness::state::Workflow::Investigate);
         // The row says what the loop will say, derived from the same input
         // (AGENT-013 §2.1, §4; S-10.1).
         //
@@ -450,12 +458,27 @@ impl AgentManager {
         // The workflow is on the run *and* on every trial it spends (§3), so the
         // ledger can answer "how many of our trials are replications" and the
         // scorecard can answer "which workflows does the 7B actually complete".
-        .bind(enum_name(&harness::state::Workflow::Investigate))
+        .bind(enum_name(&workflow))
         .execute(&self.pg)
         .await
         .map_err(|e| StartError::Internal(e.to_string()))?;
 
         conversations::touch(&self.pg, conversation_id).await;
+
+        // Every Research conversation is a session (AGENT-014 §2.1, §10;
+        // S-11.1). A bounded run is `continuous = false` with one agenda item,
+        // so the desk, the digest and the agenda have one shape to read rather
+        // than two — and a run started here and a run started by the session
+        // driver are the same kind of thing.
+        //
+        // Best-effort and after the run row: a session row that could not be
+        // written must not stop a turn the user asked for. What it costs is that
+        // the conversation has no agenda card, which is visible; what refusing
+        // would cost is the turn, which is the thing they came for.
+        if mode == harness::state::Mode::Research {
+            self.ensure_session(user_id, conversation_id, &convo.model, text, run_id)
+                .await;
+        }
 
         // The prompt is the first thing in the transcript, so a reader sees the
         // question before the work. Written here rather than by the driver because it
@@ -553,11 +576,10 @@ impl AgentManager {
                 conversation_id,
                 prior_exposure,
                 exposure_out: Arc::clone(&exposure_out),
-                // The conversation front door does not offer a workflow chip
-                // yet (AGENT-012 §3.3), so every turn it starts is the default.
-                // Named rather than defaulted, so the day the chip lands the
-                // compiler points here.
-                workflow: harness::state::Workflow::Investigate,
+                // The same value the row above was written from. The
+                // conversation front door still offers no chip and passes
+                // `None`; the session driver passes its agenda item's.
+                workflow,
                 goal: text.to_string(),
                 charter,
                 prior,
@@ -634,6 +656,103 @@ impl AgentManager {
         });
 
         Ok(run_id)
+    }
+
+    /// Give this conversation its session row, if it does not have one.
+    ///
+    /// Three things are deliberately *not* done here.
+    ///
+    /// **A child of a continuous session is skipped.** It already belongs to a
+    /// session — the driver opened its conversation under the journal — and
+    /// giving it a second one would be refused by the unique index on
+    /// `conversation_id` anyway. Checking the parent is how a child is
+    /// recognised without the driver having to race the front door.
+    ///
+    /// **Only the first turn writes.** A conversation's session is its first
+    /// question; later turns are turns in the same session, and the `ON
+    /// CONFLICT` in [`sessions::create`] would make a second attempt a no-op in
+    /// any case.
+    ///
+    /// **A failure is logged, not returned.** The caller is in the middle of
+    /// starting a turn the user asked for.
+    async fn ensure_session(
+        &self,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        tier: &str,
+        question: &str,
+        run_id: Uuid,
+    ) {
+        let parent: Option<(Option<Uuid>,)> = sqlx::query_as(
+            "SELECT parent_conversation_id FROM agent_conversations WHERE conversation_id = $1",
+        )
+        .bind(conversation_id)
+        .fetch_optional(&self.pg)
+        .await
+        .unwrap_or(None);
+        if matches!(parent, Some((Some(_),))) {
+            return;
+        }
+
+        let existing = crate::sessions::for_conversation(&self.pg, conversation_id)
+            .await
+            .ok()
+            .flatten();
+        let session = match existing {
+            Some(s) => s,
+            None => {
+                let session = research_session::ResearchSession::bounded(
+                    Uuid::new_v4(),
+                    conversation_id,
+                    question,
+                    tier,
+                );
+                if let Err(e) = crate::sessions::create(&self.pg, user_id, &session).await {
+                    tracing::warn!(%conversation_id, error = %e, "could not open the session row for this conversation");
+                    return;
+                }
+                // The one item it is. Written here rather than by a driver
+                // because a bounded session has no driver: the turn is the run.
+                if let Some(item) = session.sole_item() {
+                    let started = crate::sessions::insert_item(&self.pg, &item).await;
+                    if let Ok(Some(id)) = started {
+                        let _ = crate::sessions::set_status(
+                            &self.pg,
+                            id,
+                            &research_session::ItemStatus::Running { run_id },
+                        )
+                        .await;
+                        let _ = crate::sessions::append(
+                            &self.pg,
+                            session.id,
+                            research_session::EventKind::SessionStarted,
+                            serde_json::json!({ "bounded": true }),
+                        )
+                        .await;
+                        let _ = crate::sessions::append(
+                            &self.pg,
+                            session.id,
+                            research_session::EventKind::AgendaItemAdded,
+                            serde_json::json!({ "item": id, "source": "user" }),
+                        )
+                        .await;
+                        let _ = crate::sessions::append(
+                            &self.pg,
+                            session.id,
+                            research_session::EventKind::RunStarted,
+                            serde_json::json!({ "item": id, "run_id": run_id }),
+                        )
+                        .await;
+                        let _ =
+                            crate::sessions::attribute_run(&self.pg, run_id, session.id, id).await;
+                    }
+                }
+                return;
+            }
+        };
+        // A later turn in a conversation that already has its session. Nothing
+        // to write; named so the branch is not mistaken for a gap.
+        let _ = session;
     }
 
     /// Cancels whatever is running in a conversation.

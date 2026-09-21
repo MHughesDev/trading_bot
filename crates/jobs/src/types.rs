@@ -28,6 +28,12 @@ pub enum JobKind {
     PredictSeries,
     SimulatePaths,
     ResearchRun,
+    /// The continuous-research session driver (AGENT-014 §3, ADR-0037). Like
+    /// [`JobKind::Campaign`] it folds an append-only log and dispatches each
+    /// iteration's work as a child; like it, it counts no trial of its own,
+    /// because the session looks at nothing — its children do, and they are
+    /// counted where they are submitted.
+    ContinuousResearch,
     Backfill,
     DataQc,
     InstrumentProfile,
@@ -50,6 +56,7 @@ impl JobKind {
         JobKind::PredictSeries,
         JobKind::SimulatePaths,
         JobKind::ResearchRun,
+        JobKind::ContinuousResearch,
         JobKind::Backfill,
         JobKind::DataQc,
         JobKind::InstrumentProfile,
@@ -72,6 +79,7 @@ impl JobKind {
             JobKind::PredictSeries => "predict_series",
             JobKind::SimulatePaths => "simulate_paths",
             JobKind::ResearchRun => "research_run",
+            JobKind::ContinuousResearch => "continuous_research",
             JobKind::Backfill => "backfill",
             JobKind::DataQc => "data_qc",
             JobKind::InstrumentProfile => "instrument_profile",
@@ -95,7 +103,8 @@ impl JobKind {
             | JobKind::DatasetBuild
             | JobKind::FeatureMaterialise
             | JobKind::SimulatePaths
-            | JobKind::ResearchRun => WorkerClass::Research,
+            | JobKind::ResearchRun
+            | JobKind::ContinuousResearch => WorkerClass::Research,
             JobKind::Train | JobKind::Hpo | JobKind::PredictSeries => WorkerClass::Trainer,
             JobKind::Backfill
             | JobKind::DataQc

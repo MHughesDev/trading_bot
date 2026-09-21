@@ -247,6 +247,18 @@ impl Workflow {
         Workflow::Survey,
         Workflow::Optimise,
     ];
+
+    /// The workflow a name refers to, or `None`.
+    ///
+    /// `None` rather than a default, because the two callers want opposite
+    /// things from an unrecognised name: the session driver wants the run to
+    /// carry no claim at all rather than to claim to be an investigation, and a
+    /// route wants to refuse. A default here would make both of them wrong
+    /// quietly.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|w| w.as_str() == name)
+    }
 }
 
 /// How far from capital this run is allowed to reach (AGENT-013 §4).

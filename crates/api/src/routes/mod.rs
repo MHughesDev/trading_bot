@@ -19,6 +19,8 @@ pub mod dashboard;
 pub mod data;
 pub mod code;
 pub mod dossiers;
+pub mod desk_charter;
+pub mod research_sessions;
 pub mod experiments;
 pub mod jobs;
 pub mod llm;
@@ -123,6 +125,47 @@ pub fn router(state: AppState) -> Router {
         // unless a sandbox is configured; it never falls back to this process.
         .route("/api/code/run", post(code::run))
         // S-8.7: the desk's dossier reader has called these since S-6.17.
+        // Continuous research (AGENT-014 §10; S-11.1, S-11.14). Every mutating
+        // route here is human-only: an agent token holds read access and
+        // nothing else, because a session that could start, approve or unpause
+        // itself would have no human in it.
+        .route(
+            "/api/research/sessions",
+            get(research_sessions::list).post(research_sessions::create),
+        )
+        // Static before dynamic: `current` is the session the calling run is
+        // in, so a child does not have to be told an id it could get wrong.
+        .route("/api/research/sessions/current", get(research_sessions::current))
+        .route("/api/research/sessions/{id}", get(research_sessions::get))
+        .route("/api/research/sessions/{id}/pause", post(research_sessions::pause))
+        .route("/api/research/sessions/{id}/resume", post(research_sessions::resume))
+        .route("/api/research/sessions/{id}/stop", post(research_sessions::stop))
+        .route(
+            "/api/research/sessions/{id}/agenda",
+            get(research_sessions::agenda).post(research_sessions::add_item),
+        )
+        .route(
+            "/api/research/sessions/{id}/agenda/order",
+            post(research_sessions::reorder),
+        )
+        .route(
+            "/api/research/sessions/{id}/agenda/{item}/approve",
+            post(research_sessions::approve_item),
+        )
+        .route(
+            "/api/research/sessions/{id}/agenda/{item}/veto",
+            post(research_sessions::veto_item),
+        )
+        .route(
+            "/api/research/sessions/{id}/agenda/{item}/prioritise",
+            post(research_sessions::prioritise_item),
+        )
+        .route(
+            "/api/research/sessions/{id}/charter",
+            axum::routing::put(research_sessions::amend_charter),
+        )
+        .route("/api/research/sessions/{id}/digests", get(research_sessions::digests))
+        .route("/api/research/sessions/{id}/events", get(research_sessions::events))
         .route("/api/dossiers/{ticket}", get(dossiers::get))
         .route("/api/dossiers/{ticket}/verify/{claim}", post(dossiers::verify))
         .route(

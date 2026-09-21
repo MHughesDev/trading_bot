@@ -439,6 +439,110 @@ pub async fn prior_negative_results(api: &crate::ApiClient, params: &Value) -> V
     }
 }
 
+/// Resolve the session this call is about.
+///
+/// With no `session_id`, the platform answers from the calling run's own
+/// attribution (`/api/research/sessions/current`) — the run does not have to
+/// have been told an id, and cannot name another session by mistake. With one,
+/// it is used as given and ownership is checked at the boundary.
+async fn session_of(api: &crate::ApiClient, params: &Value) -> Result<String, Value> {
+    if let Some(id) = text(params, "session_id") {
+        return Ok(id);
+    }
+    match api.get("/api/research/sessions/current").await {
+        Ok(v) => v
+            .get("session_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                json!({
+                    "error": "no_session",
+                    "message": "this run is not part of a research session, and no session_id was                                 given",
+                    "fix": "a bounded Research run is its own session; a child of a continuous                             one is told which. If you are neither, there is nothing to read.",
+                })
+            }),
+        Err(e) => Err(e.to_tool_error()),
+    }
+}
+
+/// `get_session` — the session this run is part of, and what it is doing.
+///
+/// Read-only, and read-only in a way that matters: a run cannot start, approve,
+/// pause or amend its own session through any tool, because the routes behind
+/// those actions refuse anything but a human token (AGENT-014 P6).
+pub async fn get_session(api: &crate::ApiClient, params: &Value) -> Value {
+    let id = match session_of(api, params).await {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
+    match api
+        .get(&format!(
+            "/api/research/sessions/{}",
+            crate::tools::market::urlencode(&id)
+        ))
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => e.to_tool_error(),
+    }
+}
+
+/// `list_agenda` — what the session has asked, is asking and has answered.
+///
+/// The reason a run is given this at all: its siblings' questions are the
+/// cheapest way to find out that what it is about to test has already been
+/// tested. The brief carries the last five verdicts; this is for when five is
+/// not enough.
+pub async fn list_agenda(api: &crate::ApiClient, params: &Value) -> Value {
+    let id = match session_of(api, params).await {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
+    let status = text(params, "status")
+        .map(|s| format!("?status={}", crate::tools::market::urlencode(&s)))
+        .unwrap_or_default();
+    match api
+        .get(&format!(
+            "/api/research/sessions/{}/agenda{status}",
+            crate::tools::market::urlencode(&id)
+        ))
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => e.to_tool_error(),
+    }
+}
+
+/// `get_digest` — what the platform told the human about this session.
+///
+/// Written by the platform from yield and verdicts, not by any run's prose
+/// (AGENT-014 P7), which is exactly why a run reading it learns something it did
+/// not write.
+pub async fn get_digest(api: &crate::ApiClient, params: &Value) -> Value {
+    let id = match session_of(api, params).await {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
+    let want = params
+        .get("n")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        .clamp(1, 10) as usize;
+    match api
+        .get(&format!(
+            "/api/research/sessions/{}/digests",
+            crate::tools::market::urlencode(&id)
+        ))
+        .await
+    {
+        Ok(v) => {
+            let all = v.get("digests").and_then(Value::as_array).cloned().unwrap_or_default();
+            json!({ "digests": all.into_iter().take(want).collect::<Vec<_>>() })
+        }
+        Err(e) => e.to_tool_error(),
+    }
+}
+
 /// The catalogue entries for this namespace.
 #[must_use]
 pub fn specs() -> Vec<ToolSpec> {
@@ -615,6 +719,66 @@ pub fn specs() -> Vec<ToolSpec> {
                     }
                 },
                 "required": ["subject"]
+            }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "get_session",
+            "lifecycle",
+            Risk::Read,
+            "What research session you are part of: its charter or question, its state, its              budget and how many runs it has started. Omit `session_id` and the platform              answers about the session you are in.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "Omit this. The platform knows which session you are in."
+                    }
+                }
+            }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "list_agenda",
+            "lifecycle",
+            Risk::Read,
+            "What this session has asked, is asking and has already answered. Read it before              you commit to a question: a sibling run may have answered yours yesterday, and              re-testing it spends trials on a result the session already holds.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "Omit this. The platform knows which session you are in."
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["proposed", "approved", "queued", "claimed", "running",
+                                 "done", "vetoed", "superseded", "expired"],
+                        "description": "Narrow to one column of the board."
+                    }
+                }
+            }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "get_digest",
+            "lifecycle",
+            Risk::Read,
+            "What the platform last told the human about this session: verdicts, findings,              what is waiting for them. Written by the platform from the ledger, not by any              run's prose, so it is the one summary you did not write.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "Omit this. The platform knows which session you are in."
+                    },
+                    "n": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "description": "How many of the most recent digests. Default 1."
+                    }
+                }
             }),
         )
         .internal(),

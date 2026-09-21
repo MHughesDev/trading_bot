@@ -1,0 +1,12 @@
+[package]
+name = "research-session"
+version = "0.1.0"
+edition = "2021"
+description = "ResearchSession: the charter, the agenda and the append-only fold behind Research's continuous toggle (AGENT-014)"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }

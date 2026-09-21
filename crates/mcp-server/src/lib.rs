@@ -986,6 +986,9 @@ async fn dispatch_untraced(
         // ── The precheck reads (S-8.2) ─────────────────────────────────────────
         "find_prior_hypothesis" => tools::lifecycle::find_prior_hypothesis(&ctx.api, params).await,
         "prior_negative_results" => tools::lifecycle::prior_negative_results(&ctx.api, params).await,
+        "get_session" => tools::lifecycle::get_session(&ctx.api, params).await,
+        "list_agenda" => tools::lifecycle::list_agenda(&ctx.api, params).await,
+        "get_digest" => tools::lifecycle::get_digest(&ctx.api, params).await,
 
         // ── Code (S-8.8) ───────────────────────────────────────────────────────
         "run_python" => tools::code::run_python(ctx, params).await,

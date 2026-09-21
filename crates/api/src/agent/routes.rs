@@ -35,10 +35,18 @@ pub struct MessageBody {
 ///
 /// The user picks a prompt, not a model. A default that can be overridden per
 /// conversation keeps the choice available without putting it in the way.
+/// The provider a conversation opens under when nobody names one.
+///
+/// Public because the session door opens conversations too (S-11.14), and two
+/// places deciding this separately is two defaults for one desk.
+#[must_use]
+pub fn default_provider() -> String {
+    std::env::var("TBOT_AGENT_PROVIDER").unwrap_or_else(|_| "anthropic".into())
+}
+
 fn default_model(state: &AppState) -> (String, String) {
-    let provider = std::env::var("TBOT_AGENT_PROVIDER").unwrap_or_else(|_| "anthropic".into());
     let model = std::env::var("TBOT_AGENT_MODEL").unwrap_or_else(|_| state.default_profile.clone());
-    (provider, model)
+    (default_provider(), model)
 }
 
 fn start_error(e: &StartError) -> (StatusCode, &'static str) {
@@ -312,7 +320,8 @@ pub async fn send_message(
     let creds = LlmCredentialStore::new(state.pg.clone(), state.cred_crypto.clone());
     match state
         .agent
-        .send_message(token.user_id(), conversation_id, &body.text, &creds)
+        // No workflow chip on the front door yet (AGENT-012 §3.3).
+        .send_message(token.user_id(), conversation_id, &body.text, &creds, None)
         .await
     {
         Ok(run_id) => (StatusCode::ACCEPTED, Json(json!({ "run_id": run_id }))).into_response(),

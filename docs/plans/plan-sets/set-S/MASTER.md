@@ -218,7 +218,7 @@ absorbs parts of four reserved sets. Recorded so the roadmap stays honest:
 | 8 | [Integration and honesty](phase-8-integration.md) | 9 | TC-35…TC-40, RP-05…RP-08, EC-12 | — (needs 2,3,4) | **7 / 9 (S-8.3, S-8.9 partial)** — see the phase file |
 | 9 | [Context as retrieval](phase-9-context-as-retrieval.md) | 20 | CX2-01…CX2-20 | 8 | NOT STARTED |
 | 10 | [Modes and the lifecycle](phase-10-lifecycle.md) | 16 | LC-01…LC-16 | 9 | NOT STARTED |
-| 11 | [Continuous research](phase-11-continuous-research.md) | 14 | PG-01…PG-14 | 9 | NOT STARTED |
+| 11 | [Continuous research](phase-11-continuous-research.md) | 14 | PG-01…PG-14 | 9 | **2 / 14 partial (S-11.1, S-11.14)** — see the phase file |
 
 > **The Status column is stale for every row but 8**, and saying so is more useful
 > than leaving it to be discovered. Phases 4, 5, 6, 9 and 10 are substantially built
@@ -279,7 +279,7 @@ phase file, then the spec sections its tasks trace to. Then:
   | Phase 5 language | 0082–0084 |
   | Phase 8 integration | 0085–0088 (used `0134`–`0136`) |
   | Phase 10 lifecycle | 0089–0091 |
-  | Phase 11 continuous research | 0092–0096 |
+  | Phase 11 continuous research | 0092–0096 (used `0138`) |
 
 - Shared files that will conflict across tracks — coordinate, do not rebase blindly:
   `Cargo.toml` (workspace members), `Cargo.lock`, `crates/mcp-server/src/taxonomy.rs`

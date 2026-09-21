@@ -20,6 +20,10 @@ mcp-server-lib = { workspace = true }
 # S-8.4: the gate's requirement table and the batteries it names live in two
 # crates that do not depend on each other. Held equal here.
 backtest = { workspace = true }
+# S-11.1: the session transition table and the exploration floor are each
+# written twice on purpose — once in Rust, once as a constraint the database
+# holds against every writer. Held equal here.
+research-session = { workspace = true }
 # For the canonical-JSON reconciliation:  mirrors 
 # rather than depending on it (sqlx, ledger, storage), so the two are asserted equal here.
 jobs = { workspace = true }

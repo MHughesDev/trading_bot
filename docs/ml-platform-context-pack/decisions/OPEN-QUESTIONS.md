@@ -391,3 +391,41 @@ and no reconciliation is claimed until it lands.
 
 **Status:** resolved.
 
+
+---
+
+## Q-S11-01 — AGENT-014 names two different mechanisms for one child
+
+**Raised 2026-09-21 during S-11.1. Implemented under ADR-P11-01; the spec text is
+what needs a decision, not the build.**
+
+AGENT-014 §3: "each child is created through `JobStore::submit_child_once` keyed
+on `(session_id, agenda_item_id)`".
+
+AGENT-014 §10: "**Job**: `JobKind::ContinuousResearch`; children via the
+conversation/turn path with `session_id` and `agenda_item_id` on `agent_runs`".
+
+These are two mechanisms and a child is created once. A conversation turn is not
+a job: it is started by `AgentManager::send_message`, runs on a spawned task, and
+its identity is a row in `agent_runs`, not in the job store. `submit_child_once`
+keys on `(parent job, member index)` and hands back a job — it has nothing to
+hand back for a turn.
+
+**What was built** follows §10, because that is the path that exists and the one
+the desk, the rail and the steer controls already read. The exactly-once property
+§3 asks for is delivered by the derived conversation id and the conditional
+claim; see ADR-P11-01 and `api::session_driver`'s header.
+
+**What is still open:** whether §3's sentence should be amended to state the
+property rather than the mechanism, or whether the intent was a job-backed child
+after all — in which case the *worker* for that child is unbuilt and §10's
+sentence is the one that is wrong. This is a spec edit either way, and it is not
+one to make while implementing the task it is about.
+
+**What holds meanwhile:** the property. A driver killed at any point between
+claiming and recording re-derives the same conversation, finds the same run, and
+appends `run_started` for the run that exists — asserted by
+`restarting_between_start_and_record_re_derives_the_same_state` and by
+`a_child_conversation_id_is_the_same_one_after_a_restart`.
+
+**Status:** open (spec wording); the build is not blocked.
