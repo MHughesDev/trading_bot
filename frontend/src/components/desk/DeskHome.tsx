@@ -7,7 +7,7 @@
 // Meridian §3.22 applies to every panel here: an empty "Needs you" says what the
 // last decision was, never a bare "No data".
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
@@ -26,6 +26,7 @@ import {
 import { AwayDigestPanel, readLastVisit, writeLastVisit } from './AwayDigest'
 import { Composer, type ComposerSubmission } from './Composer'
 import { environmentBadge, killSwitchBadge, monitorRow, type MonitorRow } from './Operations'
+import { KILL_SWITCH_QUERY_KEY } from './KillSwitchBanner'
 import { TierBadge, ago, tierTiles } from './Shared'
 
 /**
@@ -253,12 +254,31 @@ export function TheBook({
   loading,
   kill,
   killLoading,
+  onHalted,
 }: {
   /** `null` when `/api/monitor/strategies` did not answer. */
   rows: MonitorRow[] | null
   loading: boolean
   kill: Parameters<typeof killSwitchBadge>[0]
   killLoading: boolean
+  /**
+   * Called once a halt posted from here has actually landed.
+   *
+   * The banner in `AppLayout` is what tells the operator trading has stopped,
+   * and it polls every three seconds. `Operations.tsx` invalidates its query
+   * after its own global halt so the chrome moves at once; this panel had no
+   * such path, so a halt from the desk home left the screen saying nothing for
+   * up to the whole interval — on the page where that banner is the only thing
+   * the operator is looking for.
+   *
+   * A callback rather than a `useQueryClient()` inside this component: every
+   * other input to this panel arrives as a prop, and reaching for the cache here
+   * would make a presentational component need a provider to render at all.
+   * Deliberately **not** called on a rejected halt — a 403 from
+   * `permits_monitor_control` leaves trading armed, and the error path is the
+   * one that has to run.
+   */
+  onHalted?: () => void
 }) {
   const [halting, setHalting] = useState(false)
   const [haltError, setHaltError] = useState(false)
@@ -343,6 +363,14 @@ export function TheBook({
             // operator who believes trading has stopped.
             deskApi
               .haltAll('halted from the desk home book panel')
+              // And the banner, which is the part the operator looks at to
+              // believe it. `Operations.tsx` invalidates this key after its own
+              // global halt and this panel did not, so a halt from here left the
+              // chrome saying nothing for up to three seconds — the whole poll
+              // interval — after the switch had tripped. The one case where the
+              // banner can be immediate is the one this client caused, and it
+              // was the case being missed.
+              .then(() => onHalted?.())
               .catch(() => setHaltError(true))
           }}
         />
@@ -358,6 +386,7 @@ export function TheBook({
 
 export function DeskHome() {
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const [lastVisit] = useState(() => readLastVisit())
   const [model, setModel] = useState('')
 
@@ -525,6 +554,11 @@ export function DeskHome() {
         loading={monitor.isPending}
         kill={kill.data}
         killLoading={kill.isPending}
+        // The chrome, not just this panel. `AppLayout`'s banner is the operator's
+        // confirmation that trading stopped and it polls every three seconds;
+        // this re-reads it the moment the halt lands, which is the one case where
+        // the banner can be immediate — a halt this client caused.
+        onHalted={() => void qc.invalidateQueries({ queryKey: KILL_SWITCH_QUERY_KEY })}
       />
 
 

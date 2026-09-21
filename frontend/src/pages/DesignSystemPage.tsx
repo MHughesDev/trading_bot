@@ -421,6 +421,28 @@ export function DesignSystemPage() {
                   }}
                   caps={{ steps: 20, tokens: 80000, usdTenthCents: 25000, trials: 10 }}
                 />
+                <div style={{ height: 'var(--s-3)' }} />
+                {/*
+                  The same meter with no caps — and the state a reviewer will
+                  actually meet, because nothing on this platform serves a token,
+                  dollar or trial cap for a run. S-6.13's acceptance is that
+                  every shared component appears here; a component whose only
+                  reachable state is missing from the page is half-reviewable,
+                  and this is the half where the rule lives: no fill is drawn,
+                  because a bar at 0% says "none used" and the truth is that
+                  nobody said what the cap is.
+                */}
+                <span className="lbl">with no caps recorded</span>
+                <BudgetMeter
+                  budget={{
+                    steps_remaining: 4,
+                    steps_total: 0,
+                    tokens_remaining: 12000,
+                    usd_tenth_cents_remaining: 900,
+                    trials_spent: 7,
+                    n_eff: null,
+                  }}
+                />
               </PanelBody>
             </Panel>
             <Panel>

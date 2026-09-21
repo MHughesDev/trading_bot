@@ -302,6 +302,93 @@ prose *to explain that it is unbuilt* made it read as built and failed the suite
 
 ---
 
+### The right panel, 2026-09-21 — two tabs were blaming the run for a missing route
+
+**395 tests in 44 files** (floor was 361 in 39), `tsc -b` clean.
+
+**The default tab has been empty on every conversation this platform has ever
+had, and it said the run's fault.** `deskApi.state` calls
+`/api/agent/runs/{id}/state`, which **is not mounted** — `routes/mod.rs`
+registers `/api/agent/runs`, `…/{id}`, `…/{id}/messages` and `…/{id}/cancel`
+and nothing else; the live platform answers **404** there where every mounted
+route answers 401. `optional()` folded that 404 to `null`, and `null` was also
+what "no snapshot yet" looked like — so State printed *"No working state yet —
+it appears as soon as the run's first step lands"* forever, and Evidence printed
+*"This run has produced no ids yet"* **over runs with 89 recorded tool calls**.
+Both sentences are claims about the run; the truth was a claim about the desk.
+`ServedRead<T>` / `served()` now sits beside `optional()` and the two tabs give
+three distinct sentences (`not_served`, `no_run`, unknown).
+
+**The state was not reconstructed from the card stream**, and the refusal is the
+point: §3.5 forbids it, and a reconstruction is a second answer that can
+disagree with the agent's own.
+
+**A zero that was never a measurement.** `Usage::prompt_tokens()` sums three
+counters that all default to `0`, and `0 ?? input_tokens` is `0`, not the
+fallback — so a provider that reported no usage printed a confident **0** in the
+provider column and summed those zeros into the cumulative. Fixed with a
+`nonZero()` read, deliberately **not** applied to `output_tokens`, where zero is
+a real outcome. The fix exposed a second bug in its own first cut: the cache
+share must divide by the provider's own prompt total, never by the
+`input_tokens` fallback — 200/800 reads as 25% where 200/1000 is the truth — and
+an existing test caught it.
+
+**A parser bug that presented as the run being illegible.** `search_tools` notes
+are rendered strings and the database holds **two arrow spellings**: 4 rows with
+ASCII `->` and 2 with `→` from an older build. The regex knew only the first,
+so a third of recorded searches rendered as *"a search this panel could not
+read"* — inverting the one distinction the section exists for, between
+`found: []` (a search that matched nothing) and `found: null` (the desk
+failing). **Any parser over a rendered note is a compatibility surface**: the
+harness rewrites the format and the old rows stay.
+
+**The pin button was removed rather than wired.** It was passed no handler, and
+had one been passed there was nothing to call: no route records a per-run pin,
+and `Driver::route` builds `pinned` from exactly three sources —
+`discovered_tools`, the active plan step's named tool, and a three-hit search
+over that step's goal text. A human message is none of them. The panel now names
+those three levers instead of offering a control that does nothing.
+
+**`KILL_SWITCH_EVENT` deleted, and the swap found the bug it was standing in
+front of.** `Operations.tsx` invalidates the kill-switch query after its global
+halt and **`DeskHome.tsx` did not** — so a halt from the book panel left the
+chrome silent for the full three-second poll, on the one screen where that
+banner is all the operator is looking for. `KILL_SWITCH_QUERY_KEY` replaces the
+dead export and the false comment is rewritten: the guarantee is three seconds,
+plus immediate for a halt this client caused.
+
+**Three open questions, none implemented either way.** §3.5's *"pin a tool for
+this run"* names a mechanism that does not exist (OQ below). §19.6's *"within one
+event"* has **no channel at all** — nothing on this platform pushes kill-switch
+state to a browser, `useDeskStream` is per-run, and a trip from the risk engine
+or another operator arrives by poll and by nothing else; the criterion is unmet
+and was being held up by a comment describing a mechanism that did not exist.
+And §3.5's *"acceptance criteria with ticks"* has nothing to tick —
+`WorkingState.acceptance` is `string[]` on both sides of the wire, so a tick
+would be an invented measurement.
+
+**Three more live facts the plan did not expect:**
+
+- **Zero `selection` events, against 2,111 rows of every other kind.**
+  `Note::Selected` is the only note carrying a per-record "why retrieved" clause
+  — exactly what S-6.10's Memory tab needs — but `expose_pinned` ships
+  `retrieval: false` as the default, so it is never emitted; and even under
+  retrieval its lines are bare record ids with no `RecordKind`, so nothing would
+  separate memory records from tool results. **S-6.10's problem was never the
+  store**, which is served and browsable — it is that the per-run brief has no
+  writer and its nearest candidate is structurally unusable.
+- **All 428 `usage` rows predate the current emitter.** The live payload is
+  `{step, latency_ms, input_tokens, output_tokens}` only; the emitter now also
+  writes `prompt_tokens`, `est_prompt_tokens` and `cache_read_tokens`. So
+  S-6.12's acceptance — harness estimate versus provider count — is
+  **unobtainable on every run recorded so far**, and `latency_ms` is on the wire
+  and rendered nowhere.
+- **`record_finding` lands on the stream as `core_tool`**, which `KIND_MAP`
+  routes to a tool card. A finding the agent recorded renders as a tool call,
+  not as a Finding card with a confidence pill and evidence chips. §3.2's
+  Finding card **has no live producer**.
+
+
 ### An audit that wrote no code, 2026-09-21 — six markers were wrong, in both directions
 
 A track was sent to verify every status line in this file against the tree and
@@ -349,8 +436,17 @@ being misread now misreads it out loud.
 - **`llm_usage` has zero rows against 55 `agent_runs`.** Only the LLM proxy
   writes it and the desk driver does not route through the proxy, so
   `/api/agent/usage` returns zeros for input, output, cache read, cache write
-  **and** cost. The Cost tab is not "tokens but not money" as S-6.12 claims — it
-  is nothing, and a zero here is an invented measurement.
+  **and** cost. **The first version of this note said that made the Cost tab
+  "nothing". That was wrong and the correction matters:** the right-panel Cost
+  tab does not read that route at all — it folds the per-call `usage` notes off
+  `/api/agent/runs/{id}/messages`, which is mounted and carries real numbers
+  (`input_tokens: 11528` on a live row). The surface `llm_usage` actually
+  damages is **`Operations.tsx` `usageRows()`**, whose default branch prints
+  `input_tokens`, `output_tokens`, `cache_read` and `cache_write` as bare `0`.
+  `cost_usd` and `cache_hit_rate` already have honest branches; those four do
+  not. An all-zero read of that table means "not recorded by this table", not
+  "nothing spent", and the frontend cannot tell the two apart from the numbers
+  alone — so it needs a stated caveat, not an inferred one.
 - **More than half the card taxonomy has never carried a row.** Of 2,111
   `agent_messages`: `status` 601, `usage` 428, `compaction` 202, `decision` 201,
   `exposure` 185, `tool_call`/`tool_result` 89 each, `policy` 89, `core_tool` 52,

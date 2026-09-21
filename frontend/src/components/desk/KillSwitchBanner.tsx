@@ -6,14 +6,34 @@
 // disabled one, not one behind a confirm. A banner with a close button is a
 // banner that will be closed.
 //
+// **The "within one event" half is not met, and this file says so rather than
+// implying it.** See the comment on `refetchInterval` below: it is a three-
+// second poll, plus immediate invalidation for a halt made from this client.
+// Meeting the criterion needs a push channel for kill-switch state, which the
+// platform does not have.
+//
 // It lives in `AppLayout`, above the router outlet, which is why "every route"
 // is a structural property rather than something each page has to remember.
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { deskApi, type KillSwitchState } from '@/api/desk'
 
-/** The event a live stream can fire to beat the poll. */
-export const KILL_SWITCH_EVENT = 'desk:kill-switch'
+/**
+ * The query key every control that halts or resumes trading must invalidate.
+ *
+ * This replaces an exported `KILL_SWITCH_EVENT = 'desk:kill-switch'` that
+ * nothing in `frontend/src` dispatched and nothing listened for — a constant
+ * with the shape of a mechanism and none of one, which the next caller reaches
+ * for and believes. The comment beside it claimed "a live event refetches
+ * immediately, so 'within one event' holds wherever the stream is connected",
+ * and that was false twice over: there was no event, and there is no stream —
+ * nothing on the platform pushes kill-switch state to a browser at all.
+ *
+ * What is real is react-query's cache, which `Operations.tsx` was already using
+ * and `DeskHome.tsx` was not. So the key is exported instead of an event name,
+ * because it is the thing that actually makes the banner move.
+ */
+export const KILL_SWITCH_QUERY_KEY = ['desk', 'kill-switch'] as const
 
 export function killSwitchTripped(s: KillSwitchState | null | undefined): boolean {
   if (!s) return false
@@ -60,11 +80,24 @@ export function killSwitchView(q: {
 
 export function KillSwitchBanner() {
   const q = useQuery({
-    queryKey: ['desk', 'kill-switch'],
+    queryKey: KILL_SWITCH_QUERY_KEY,
     queryFn: () => deskApi.killSwitch(),
-    // Three seconds is the poll floor; a live event refetches immediately, so
-    // "within one event" holds wherever the stream is connected and degrades to
-    // "within three seconds" where it is not. Said plainly rather than claimed.
+    // **Three seconds. That is the guarantee, and it is the only one.**
+    //
+    // §19.6 asks for the banner within one event of the trip, and this comment
+    // used to claim it: "a live event refetches immediately, so 'within one
+    // event' holds wherever the stream is connected". Nothing streams
+    // kill-switch state to a browser — `useDeskStream` is per-run and there is
+    // no global channel — and the event the sentence referred to was dispatched
+    // by nobody. A trip from the risk engine or from another operator reaches
+    // this banner by poll and by nothing else, so it can be up to three seconds
+    // late, and the comment that said otherwise was the only thing standing
+    // between that fact and the acceptance criterion it fails.
+    //
+    // The one case that *is* immediate is a halt made from this client, because
+    // the control invalidates `KILL_SWITCH_QUERY_KEY` — which is a property of
+    // those two call sites, not of this banner, and is worth exactly what it
+    // says and no more.
     refetchInterval: 3_000,
     refetchOnWindowFocus: true,
   })

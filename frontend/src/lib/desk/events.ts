@@ -78,6 +78,12 @@ function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+/** A counter whose zero cannot be a measurement — see `costCalls`. */
+function nonZero(v: unknown): number | null {
+  const n = num(v)
+  return n === null || n === 0 ? null : n
+}
+
 /** Ids the desk knows how to resolve, matched wherever they appear. */
 const ID_PATTERN = /\b(?:exp|study|gate|f|run|bt|ds|job|tkt|sweep)[_-][A-Za-z0-9]{3,}\b/g
 
@@ -306,15 +312,41 @@ export function costCalls(events: WireEvent[]): CallCost[] {
   for (const e of events) {
     if (e.kind !== 'usage') continue
     const c = e.content
-    const prompt = num(c.prompt_tokens)
+    // A prompt of zero tokens is not a measurement, it is a provider that
+    // reported no usage.
+    //
+    // `Usage::prompt_tokens()` sums three counters that all default to `0` when
+    // the provider omits them, so a local backend that sends no usage block
+    // yields `prompt_tokens: 0` — and `0 ?? input_tokens` is `0`, not the
+    // fallback, because `??` only fires on null. The table then printed a
+    // measured-looking **0** in the provider column and the cumulative summed
+    // those zeros, over calls whose `input_tokens` on this platform's own rows
+    // run to eleven and a half thousand. No model call has an empty prompt;
+    // every one of them has a system block. So zero here means unreported.
+    //
+    // Deliberately not applied to `output_tokens`: a call that returned nothing
+    // is a real thing (a refusal, an immediate stop), so a zero there is a
+    // number somebody could have measured and this must not erase it.
+    // What the provider itself called the prompt: `input + cache_read +
+    // cache_creation`. This and this alone can be the denominator of a cache
+    // share.
+    const providerPrompt = nonZero(c.prompt_tokens)
+    const prompt = providerPrompt ?? nonZero(c.input_tokens)
     const cacheRead = num(c.cache_read_tokens)
     out.push({
       step: num(c.step) ?? 0,
       // Never `{0,0,0,0}`: the note has no layer split at all.
       layers: null,
+      // Deliberately `providerPrompt`, not `prompt`. `input_tokens` is the
+      // prompt *minus* the cached part, so dividing the cache read by it
+      // overstates the hit — 200/800 reads as 25% where the provider's own
+      // total makes it 20%. A fallback that is good enough to print in a column
+      // labelled "provider prompt" is not good enough to be the bottom of a
+      // fraction, and a cache rate nobody can check is exactly the number that
+      // gets quoted.
       cache_hit_pct:
-        prompt !== null && prompt > 0 && cacheRead !== null ? (cacheRead / prompt) * 100 : null,
-      provider_prompt_tokens: prompt ?? num(c.input_tokens),
+        providerPrompt !== null && cacheRead !== null ? (cacheRead / providerPrompt) * 100 : null,
+      provider_prompt_tokens: prompt,
       estimated_prompt_tokens: num(c.est_prompt_tokens),
       output_tokens: num(c.output_tokens),
       cache_read_tokens: cacheRead,
@@ -389,7 +421,19 @@ export interface ToolSearch {
 
 // `format!("{query:?} -> {}", …)` and `format!("no tool matches {query:?}")` in
 // `drive.rs`. `{:?}` on a `&str` is a quoted, backslash-escaped string.
-const SEARCH_HIT = /^"((?:[^"\\]|\\.)*)"\s*->\s*(.*)$/
+//
+// **Three arrows, not one.** The note is a rendered string rather than a struct,
+// so its spelling is whatever the harness build that wrote the row used — and
+// this platform's `agent_messages` holds both. Two of the six `search_tools`
+// notes stored on it are written with `→` (U+2192) by an older build and four
+// with the ASCII `->` the current `drive.rs` emits. A parser that knows only
+// today's spelling reports a third of the recorded searches as
+// **"a search this panel could not read"** — which is a statement about the desk
+// dressed as a statement about the run, on the one section that explains a model
+// going round in circles. Old rows do not get rewritten, so the reader has to
+// accept every spelling that was ever written.
+const ARROW = String.raw`(?:->|=>|→|⟶|⇒)`
+const SEARCH_HIT = new RegExp(String.raw`^"((?:[^"\\]|\\.)*)"\s*${ARROW}\s*(.*)$`)
 const SEARCH_MISS = /^no tool matches "((?:[^"\\]|\\.)*)"$/
 
 function unquote(s: string): string {

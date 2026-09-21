@@ -33,6 +33,7 @@ import {
   ToolsTab,
   pendingApprovals,
   type PanelTab,
+  type StateAbsence,
 } from './RightPanel'
 import { DigestCards } from './DigestCard'
 import { DayBudgetBar, StageStrip, TierBadge, tierTiles, type IdResolver } from './Shared'
@@ -240,7 +241,19 @@ export function Conversation({
     [onOpenRun, onOpenPath],
   )
 
-  const workingState = state.data ?? null
+  const workingState = state.data?.served ? state.data.data : null
+  // Why there is no working state, which the panel has to say and could not.
+  //
+  // Three cases collapsed into one `null` before: no run at all, a route that
+  // answered, and a route that is not mounted. `/api/agent/runs/{id}/state` is
+  // the third — an AGENT-012 §17 ✗ row — so the State and Evidence tabs printed
+  // "no working state yet" and "this run has produced no ids yet" over every
+  // conversation on this platform, both of which read as facts about the run.
+  const stateAbsence: StateAbsence | undefined = !runId
+    ? 'no_run'
+    : state.data && !state.data.served
+      ? 'not_served'
+      : undefined
   const resolve = useMemo(() => makeResolver(workingState, cards), [workingState, cards])
   const approvals = useMemo(() => pendingApprovals(cards), [cards])
 
@@ -470,6 +483,7 @@ export function Conversation({
           {tab === 'state' && (
             <StateTab
               state={workingState}
+              absence={stateAbsence}
               resolve={resolve}
               paused={paused}
               pendingApproval={approvals.length > 0}
@@ -479,6 +493,7 @@ export function Conversation({
           {tab === 'evidence' && (
             <EvidenceTab
               resolve={resolve}
+              absence={stateAbsence}
               entries={(workingState?.evidence ?? []).map((e) => ({
                 id: e.id,
                 type: e.id.split('_')[0] ?? 'id',

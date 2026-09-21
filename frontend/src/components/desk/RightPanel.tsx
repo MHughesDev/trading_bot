@@ -63,8 +63,42 @@ export function waitingOn(state: WorkingState, opts: { jobPct?: number | null; p
   return 'waiting on the model'
 }
 
+/**
+ * Why a panel that reads the working state has none.
+ *
+ * `not_served` is the case this platform is actually in and the one the old copy
+ * could not express: `/api/agent/runs/{id}/state` is an AGENT-012 §17 ✗ row that
+ * nothing mounts, so the snapshot is not late — it is not coming. `no_run` is a
+ * conversation that has not started one. `undefined` is a caller that did not
+ * say, and it gets the vaguest sentence, which is the correct one to give when
+ * the reason is unknown.
+ */
+export type StateAbsence = 'not_served' | 'no_run'
+
+/** The sentence to print when there is no snapshot, given what we know about why. */
+export function absenceCopy(absence?: StateAbsence): { message: string; detail: string } {
+  if (absence === 'not_served') {
+    return {
+      message: 'Nothing on this platform reports a working state',
+      detail:
+        'The State tab renders the harness’s own state snapshot, and the route that would serve it — /api/agent/runs/{id}/state — is not mounted. So this is not a snapshot that has yet to arrive: no step will produce one, and the panel will not rebuild it by replaying the cards beside it, because a state reconstructed from the stream is a second answer that can disagree with the agent’s.',
+    }
+  }
+  if (absence === 'no_run') {
+    return {
+      message: 'This conversation has no run',
+      detail: 'The working state belongs to a run. Send a turn and this fills in — if the state route is serving.',
+    }
+  }
+  return {
+    message: 'No working state yet',
+    detail: 'The State tab renders the harness’s latest state snapshot. Nothing here says why there is none.',
+  }
+}
+
 export function StateTab({
   state,
+  absence,
   resolve,
   onOpenId,
   jobPct,
@@ -72,6 +106,8 @@ export function StateTab({
   paused,
 }: {
   state: WorkingState | null
+  /** Why there is no state, when the caller knows. */
+  absence?: StateAbsence
   resolve?: IdResolver
   onOpenId?: (id: string) => void
   jobPct?: number | null
@@ -79,12 +115,8 @@ export function StateTab({
   paused?: boolean
 }) {
   if (!state) {
-    return (
-      <EmptyState
-        message="No working state yet"
-        detail="The State tab renders the harness's latest state snapshot. It appears as soon as the run's first step lands."
-      />
-    )
+    const { message, detail } = absenceCopy(absence)
+    return <EmptyState message={message} detail={detail} />
   }
   const activeIndex = state.plan.findIndex((s) => s.status.status === 'active')
   return (
@@ -240,10 +272,21 @@ export interface EvidenceEntry {
 
 export function EvidenceTab({
   entries,
+  absence,
   resolve,
   onOpenId,
 }: {
   entries: EvidenceEntry[]
+  /**
+   * Why the list is empty, when the caller knows.
+   *
+   * This tab reads the working state's `evidence`, so it inherits the State
+   * tab's missing route exactly (`StateAbsence`). An empty list then said **"This
+   * run has produced no ids yet"** — a claim about the run, made by a panel that
+   * had no way to find out. On this platform it is the only sentence the tab can
+   * ever print, over runs that called eighty-nine tools.
+   */
+  absence?: StateAbsence
   resolve?: IdResolver
   onOpenId?: (id: string) => void
 }) {
@@ -259,7 +302,28 @@ export function EvidenceTab({
   }, [entries])
 
   if (entries.length === 0) {
-    return <EmptyState message="This run has produced no ids yet" detail="Every id a tool returns appears here, grouped by what it is." />
+    if (absence === 'not_served') {
+      return (
+        <EmptyState
+          message="Nothing reports what this run produced"
+          detail="This tab lists the ids on the run's working state, and the route that would serve it — /api/agent/runs/{id}/state — is not mounted. An empty list here is this panel having no source, not the run having produced nothing; the tool results on the stream beside it do not carry their ids either."
+        />
+      )
+    }
+    if (absence === 'no_run') {
+      return (
+        <EmptyState
+          message="This conversation has no run"
+          detail="Ids belong to a run. Send a turn and the ones its tools return appear here, grouped by what they are."
+        />
+      )
+    }
+    return (
+      <EmptyState
+        message="This run has produced no ids yet"
+        detail="Every id a tool returns appears here, grouped by what it is."
+      />
+    )
   }
 
   return (
@@ -323,6 +387,21 @@ export function MemoryTab({
             entries retrieval put into this run's prompt, why each was chosen, and whether the run
             cited it. That is a per-run record nothing writes, so the desk cannot say, and it will
             not show the store here and let it read as the brief.
+            {/* The nearest thing that exists, and why it is not near enough —
+                written down so the next reader does not have to rediscover it.
+                `Note::Selected` carries a per-record clause and the elided set,
+                which is exactly "why retrieved". Two things stop it: it is
+                emitted only under a retrieval context policy and
+                `expose_pinned` documents `retrieval: false` as the shipped
+                default, so this platform's `agent_messages` holds **zero** rows
+                of kind `selection` against 2,111 of every other kind; and its
+                lines are bare record ids (`r007`) with no kind on them, so even
+                under retrieval nothing would separate the `Memory` records from
+                the tool results beside them. */}{' '}
+            The harness's `selection` note comes closest — it records a reason per record — but it
+            is written only under a retrieval policy, which is not the shipped default, and its
+            lines carry record ids without saying which are memory. Neither half of this tab can
+            be answered from it.
           </>
         }
       />
@@ -366,6 +445,24 @@ export function MemoryTab({
  * This is the desk's own ring door (see `lib/desk/rings.ts`): a Chat turn must
  * not be able to surface a trial-spending tool from here, and a tool that is
  * hidden says why rather than vanishing without explanation.
+ *
+ * # There is no pin, so there is no pin button
+ *
+ * §3.5 asks for "**pin a tool** for this run (sends a `search_tools`-equivalent)"
+ * and every tool card carried a **Pin for this run** button. It was passed no
+ * handler at the only call site, and had one been passed there was nothing for
+ * it to call: no route on the platform records a per-run pin, and the harness
+ * does not read one. `Driver::route` builds `pinned` from exactly three sources —
+ * `self.discovered_tools` (what the model's own `search_tools` returned), the
+ * active plan step's named tool, and a three-hit search over that step's goal
+ * text. A human message is none of those. The spec's parenthetical describes a
+ * mechanism that does not exist: `search_tools` is a tool the *model* calls and
+ * the harness answers, with no user-initiated equivalent anywhere.
+ *
+ * So the button is gone and the panel says what does work instead. A control
+ * that cannot reach the thing it names is worse than its absence — it passes
+ * every test, and the person who clicks it believes the model can now see the
+ * tool.
  */
 export function ToolsTab({
   mode,
@@ -374,7 +471,6 @@ export function ToolsTab({
   catalogueLoading = false,
   searchedFor,
   exposure,
-  onPin,
 }: {
   mode: Mode
   /** What the harness's `Note::Exposure` says this step actually saw. */
@@ -397,7 +493,6 @@ export function ToolsTab({
    * the list.
    */
   exposure?: ExposureNote | null
-  onPin?: (name: string) => void
 }) {
   const [q, setQ] = useState('')
   const all = catalogue ?? []
@@ -510,11 +605,6 @@ export function ToolsTab({
                   {t.spends_trial && <Badge tone="warn">spends a trial</Badge>}
                 </div>
                 {t.notes && <p className="sub">{t.notes}</p>}
-                <div className="desk-actions">
-                  <Button size="xs" variant="ghost" onClick={() => onPin?.(t.name)}>
-                    Pin for this run
-                  </Button>
-                </div>
               </div>
             ))}
             {filtered.length === 0 && q.length > 0 && (
@@ -529,6 +619,29 @@ export function ToolsTab({
           </>
         )}
       </section>
+
+      {/* Where "Pin for this run" was. See the section comment above: the button
+          existed, took a handler nobody passed, and had no route behind it if
+          anyone had. What it claimed — that a person can put a tool in front of
+          the model — is true, but not through this panel, and naming the lever
+          that does work is worth more than a control that does not.
+
+          Only under a catalogue that was read. "You cannot pin from here" is a
+          sentence about a list of tools; printed under "the tools are unknown"
+          it answers a question nobody had got as far as asking. */}
+      {catalogue !== null && catalogue.length > 0 && (
+      <section>
+        <span className="lbl">putting a tool in front of the model</span>
+        <p className="sub" data-testid="no-pin-control">
+          Not from here. Three things decide the next step's exposure and none of them is a
+          control on this panel: the plan step's named tool, a three-hit search over that step's
+          goal text, and the tools the model itself found with <span className="mono">search_tools</span>.
+          A human reaches all three the same way — steer the run, and name the tool in the steer
+          so the re-plan puts it in a step. Nothing on the platform records a per-run pin, so a
+          button here would have been a click that changed nothing.
+        </p>
+      </section>
+      )}
     </div>
   )
 }
@@ -611,10 +724,24 @@ export function CostTab({
       </section>
       <section>
         <span className="lbl">bytes per token</span>
-        <p className="sub">
-          calibrated {bytesPerTokenCalibrated ?? 'unmeasured'} · harness estimate{' '}
-          {bytesPerTokenEstimate ?? 'unmeasured'}
-        </p>
+        {/* "unmeasured" twice read as a calibration that was attempted and came
+            back empty. It was never attempted: nothing on the platform records
+            a bytes-per-token ratio at all — the estimator's four-bytes-per-token
+            is a constant inside `drive.rs`, not a figure anything publishes, and
+            no route serves one. The panel says which of the two it is, because a
+            reader who thinks the measurement was taken stops asking for it. */}
+        {bytesPerTokenCalibrated === null && bytesPerTokenEstimate === null ? (
+          <p className="sub" data-testid="bytes-per-token-unrecorded">
+            not recorded — no route publishes a bytes-per-token ratio, calibrated or estimated, so
+            there is nothing to compare. The drift the spec asks for is in the table below instead,
+            where the harness's own prompt estimate sits beside the provider's count per call.
+          </p>
+        ) : (
+          <p className="sub">
+            calibrated {bytesPerTokenCalibrated ?? 'not recorded'} · harness estimate{' '}
+            {bytesPerTokenEstimate ?? 'not recorded'}
+          </p>
+        )}
       </section>
       <section>
         <span className="lbl">cache hit, per call</span>

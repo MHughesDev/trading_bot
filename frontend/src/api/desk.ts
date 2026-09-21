@@ -1149,6 +1149,33 @@ async function optional<T>(p: Promise<{ data: T }>): Promise<T | null> {
 }
 
 /**
+ * What a read of an unbuilt endpoint answered — the same rule as `optional`,
+ * keeping the two apart.
+ *
+ * `optional` folds "the route is not mounted" and "the route answered with
+ * nothing" into one `null`, and for most panels that is the same sentence. For
+ * the State tab it is two opposite ones. `/api/agent/runs/{id}/state` is **not
+ * mounted on this platform** — it is one of AGENT-012 §17's ✗ rows and
+ * `crates/api/src/routes/mod.rs` registers `/api/agent/runs/{id}`,
+ * `…/messages` and `…/cancel` and no `…/state`; an unauthenticated GET answers
+ * 404 where every mounted route answers 401. So every conversation's default tab
+ * rendered *"No working state yet — it appears as soon as the run's first step
+ * lands"*, which is a promise about a step, on a platform where no step will
+ * ever make it appear.
+ */
+export type ServedRead<T> = { served: true; data: T } | { served: false }
+
+async function served<T>(p: Promise<{ data: T }>): Promise<ServedRead<T>> {
+  try {
+    return { served: true, data: (await p).data }
+  } catch (e) {
+    const status = (e as { response?: { status?: number } }).response?.status
+    if (status === 404 || status === 501 || status === 405) return { served: false }
+    throw e
+  }
+}
+
+/**
  * The wire shape `/api/trading/status` actually answers with today. COMP-007
  * (Set S phase 7) adds scope, who tripped it and why; until then the desk shows
  * the two fields that exist rather than inventing the other three.
@@ -1310,8 +1337,15 @@ export const deskApi = {
   monitorKillSwitch: () => optional<MonitorKillSwitch>(client.get('/api/monitor/kill-switch')),
 
   // — AGENT-012 §17's ✗ rows. Present so the desk is wired the day they land. —
+  /**
+   * The working state, and whether anything answered for it.
+   *
+   * `ServedRead` rather than `WorkingState | null`: the difference between a run
+   * with no snapshot and a platform with no endpoint is the difference between
+   * "wait" and "stop waiting", and the tab has to say which.
+   */
   state: (runId: string, step?: number) =>
-    optional<WorkingState>(client.get(`/api/agent/runs/${runId}/state`, { params: { step } })),
+    served<WorkingState>(client.get(`/api/agent/runs/${runId}/state`, { params: { step } })),
   trajectory: (runId: string) =>
     optional<{ steps: TrajectoryStep[] }>(client.get(`/api/agent/runs/${runId}/trajectory`)),
   lifecycle: (runId: string) =>
