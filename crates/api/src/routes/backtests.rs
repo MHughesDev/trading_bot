@@ -258,7 +258,23 @@ pub async fn delete_backtest(
 ///
 /// Powers the create-backtest guardrail: the UI fetches this once and warns
 /// when the user types an instrument with no stored history.
-pub async fn coverage(State(state): State<AppState>) -> impl IntoResponse {
+///
+/// # Why the token is here, though this handler does not read it
+///
+/// It did not take one until 2026-09-21, and it answered **200 with the
+/// platform's entire data inventory to an anonymous caller** — every
+/// instrument, timeframe, bar count and first/last timestamp held. Auth in this
+/// crate is per-handler through the [`BearerToken`] extractor rather than
+/// middleware, so omitting the argument is all it takes to publish a route, and
+/// nothing about the signature looks wrong. Every neighbouring route answers
+/// 401; this one answered everybody.
+///
+/// The body is not user-scoped, so the token is extracted and unused. That is
+/// deliberate: the inventory is a platform fact rather than a tenant's, and the
+/// requirement is *authenticated*, not *filtered*. Naming it `_token` would be
+/// the same mistake one step quieter.
+pub async fn coverage(State(state): State<AppState>, token: BearerToken) -> impl IntoResponse {
+    let _ = &token;
     match state.backtest.available_instruments().await {
         Ok(entries) => {
             let items: Vec<serde_json::Value> = entries

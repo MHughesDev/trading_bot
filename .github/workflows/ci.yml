@@ -43,6 +43,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run unit tests
         run: cargo test --workspace --lib
+      # Authentication in crates/api is a BearerToken argument on each handler
+      # signature — there is no middleware, so a route is public by omission and
+      # the router line for a published route looks identical to a gated one.
+      # One handler out of 268 was missing it and answered anonymous callers
+      # with the platform's entire data inventory. A source scan is the only
+      # reliable reader of 268 signatures; --lib does not run it.
+      - name: Every mounted route refuses an anonymous caller
+        run: cargo test -p api --test every_mounted_route_refuses_an_anonymous_caller
+      # The other half of the same question: a path the desk calls and nothing
+      # serves renders as an empty panel, which looks exactly like success.
+      - name: Every endpoint the desk calls is served or declared unbuilt
+        run: cargo test -p api --test the_desk_calls_routes_that_exist
 
   platform-invariants:
     name: Platform invariants (static, build-blocking)

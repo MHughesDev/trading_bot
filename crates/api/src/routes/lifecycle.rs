@@ -272,7 +272,7 @@ async fn store(
 }
 
 /// `GET /api/lifecycle/metrics` — what a falsifier may name.
-pub async fn metrics() -> impl IntoResponse {
+pub async fn metrics(_token: BearerToken) -> impl IntoResponse {
     Json(json!({ "metrics": METRIC_VOCABULARY }))
 }
 

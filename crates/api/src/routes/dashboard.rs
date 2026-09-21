@@ -13,6 +13,7 @@ use axum::{
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::auth::BearerToken;
 use crate::rollup::{compute_rollup, MarkPrice, RollupResponse};
 use crate::state::AppState;
 use storage::ledger::AccountMode;
@@ -35,6 +36,7 @@ fn default_mode() -> String {
 /// Live mode aggregates venue-backed ledger data.
 pub async fn get_rollup(
     State(state): State<AppState>,
+    _token: BearerToken,
     Query(params): Query<RollupQuery>,
 ) -> impl IntoResponse {
     let account_mode = match params.mode.to_uppercase().as_str() {
