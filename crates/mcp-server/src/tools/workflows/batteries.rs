@@ -817,16 +817,33 @@ pub static ALL: &[Workflow] = &[
         ],
         subject: "experiment_id",
         stages: &[
+            // **Adjacent tool, different question.** `fit_process` fits an
+            // Ornstein-Uhlenbeck among five processes and an OU fit does carry a
+            // mean-reversion speed — but it is fitted to the *instrument's*
+            // series, and this step asks about the **signal's**. Wiring it would
+            // answer how fast the price mean-reverts and label the answer as how
+            // fast the signal decays, which is a mislabelling no reader could
+            // catch. Recorded so the next person does not have to rediscover
+            // either half.
             Stage::Owed {
                 label: "half-life",
-                needs: "a `signal_half_life` tool over the signal series",
+                needs: "a `signal_half_life` tool over the signal series (not `fit_process`, \
+                        which fits the instrument's)",
                 why: "a signal whose half-life is shorter than the holding period is not the \
                       signal the backtest traded",
                 when: When::Always,
             },
+            // **Adjacent tool, different question.** `alpha_health_check` asks
+            // whether a candidate is a re-skin of *its siblings in one sweep*.
+            // This asks whether it is spanned by the platform's **known
+            // factors** — a strategy can be uncorrelated with every sibling in
+            // its own family and still be momentum. Answering the first and
+            // labelling it the second is how a programme pays for momentum
+            // twice.
             Stage::Owed {
                 label: "spanning",
-                needs: "a `spanning_regression` tool against the platform's factor set",
+                needs: "a `spanning_regression` tool against the platform's factor set \
+                        (`alpha_health_check` compares against siblings, not factors)",
                 why: "a signal spanned by momentum is momentum, and paying for it twice is \
                       the most expensive thing a research programme can do",
                 when: When::Always,
@@ -844,9 +861,14 @@ pub static ALL: &[Workflow] = &[
                       signal presented as one when it is the other is sized wrongly",
                 when: When::Always,
             },
+            // **Adjacent tool, different question.** `alpha_health_check` reads
+            // sign instability between halves and return concentration *within
+            // the sample*. This asks whether the signal has decayed **since**
+            // it — a question about live data, which that tool never sees.
             Stage::Owed {
                 label: "health check",
-                needs: "a decay/turnover health tool over the live signal",
+                needs: "a decay/turnover health tool over the **live** signal \
+                        (`alpha_health_check` measures stability inside the sample)",
                 why: "a signal that has decayed since the sample is a signal that is no longer \
                       there",
                 when: When::Always,
@@ -872,17 +894,29 @@ pub static ALL: &[Workflow] = &[
         arguments: &[
             ("experiment_id", "the experiment being readied", true),
             ("venue", "the venue it would trade on", true),
+            ("instrument_id", "the instrument, for the capacity estimate", true),
+            ("timeframe", "bar timeframe for the capacity estimate", true),
+            ("start", "window start", true),
+            ("end", "window end", true),
+            ("notional_usd", "the size to price the impact curve at", false),
         ],
         subject: "experiment_id",
         stages: &[
-            Stage::Owed {
+            // Declared owed and **answerable today**. `estimate_liquidity_cost`
+            // fits a square-root impact curve and, in its own words, exists "to
+            // find the turnover at which a strategy's edge is eaten by its own
+            // costs" — which is the capacity question. It gets there from bars
+            // rather than from the trade list, which is the better input
+            // anyway: bars are always there, and a backtest that assumed
+            // infinite depth has a trade list that cannot show the limit.
+            Stage::Call(Step {
+                tool: "estimate_liquidity_cost",
                 label: "capacity",
-                needs: "a capacity estimate from the trade list and the instrument's depth",
-                why: "a strategy that works at a size nobody would trade is not ready for \
-                      anything, and the number is not derivable from a backtest that assumed \
-                      infinite depth",
+                forward: &["instrument_id", "timeframe", "start", "end", "notional_usd"],
+                rename: &[],
+                pinned: &[],
                 when: When::Always,
-            },
+            }),
             Stage::Call(Step {
                 tool: "get_venue_constraints",
                 label: "venue constraints",
@@ -1536,11 +1570,11 @@ mod tests {
                 ("leakage_audit", 2),
                 ("precapital_battery", 1),
                 ("signal_identity", 6),
-                ("go_live_readiness", 4),
+                ("go_live_readiness", 3),
             ],
             "the owed list changed; update phase-8-integration.md and COMPLACENCY_LOG.md"
         );
-        assert_eq!(owed.len(), 13);
+        assert_eq!(owed.len(), 12);
         // Two runnable, not one. `leakage_audit` joined when its bar-boundary
         // step turned out to be **built** — `bar_boundary_check` has been a
         // templated tool since S-3.11 — and its other two owed stages turned out

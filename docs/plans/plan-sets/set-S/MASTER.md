@@ -215,7 +215,7 @@ absorbs parts of four reserved sets. Recorded so the roadmap stays honest:
 | 5 | [The language](phase-5-strategy-language.md) | 15 | SA-01…SA-16 | 3, 4, 6, 7 | NOT STARTED |
 | 6 | [The Research Desk](phase-6-research-desk.md) | 24 | DK-01…DK-24 | 2, 3, 4, 5, 7 | NOT STARTED |
 | 7 | [The monitor](phase-7-monitor.md) | 13 | MS-01…MS-14 | everything | NOT STARTED |
-| 8 | [Integration and honesty](phase-8-integration.md) | 9 | TC-35…TC-40, RP-05…RP-08, EC-12 | — (needs 2,3,4) | **6 / 9 (S-8.2, S-8.3, S-8.9 partial)** — see the phase file |
+| 8 | [Integration and honesty](phase-8-integration.md) | 9 | TC-35…TC-40, RP-05…RP-08, EC-12 | — (needs 2,3,4) | **7 / 9 (S-8.3, S-8.9 partial)** — see the phase file |
 | 9 | [Context as retrieval](phase-9-context-as-retrieval.md) | 20 | CX2-01…CX2-20 | 8 | NOT STARTED |
 | 10 | [Modes and the lifecycle](phase-10-lifecycle.md) | 16 | LC-01…LC-16 | 9 | NOT STARTED |
 | 11 | [Continuous research](phase-11-continuous-research.md) | 14 | PG-01…PG-14 | 9 | NOT STARTED |

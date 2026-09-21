@@ -1,6 +1,6 @@
 # Phase 8 — Integration and honesty
 
-**Completion: 67% (6 / 9 tasks; S-8.2, S-8.3 and S-8.9 partial)**
+**Completion: 78% (7 / 9 tasks; S-8.3 and S-8.9 partial)**
 
 **Migration range:** the header below says 0085–0088; the set reached 0136 first. This
 phase wrote `0134` (the trial family), `0135` (a battery's verdict) and `0136`
