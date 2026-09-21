@@ -245,6 +245,54 @@ obvious rule, in the safe direction.
 
 **api lib: 351 → 370.**
 
+### The fields got readers, 2026-09-21 — and the live database moved the null branches into the middle of the page
+
+The three fields the previous track served now have callers, `/api/desk/running`
+has one too, and the drag contract two tracks had broken between them is closed.
+**361 frontend tests in 39 files** (floor was 331 in 36), `tsc -b` clean.
+
+**The drag gap is the shape to remember.** Track A5 found that `reorder` marked
+every id in the body `user`, which bypasses scoring; H1 fixed the route to
+subtract the longest run already in board order. But the *client* had been
+written against the old rule and sent only the ids it believed had moved — so
+after the fix, one drag on a four-card board posted one id and the route
+answered **400**. Neither track was wrong on its own. **A rule removed in one
+place and left in two** is this session's second defect shape, behind
+built-but-unreached, and it only shows up when someone runs both sides against
+each other.
+
+`prioritisedBy` is **deleted**, not left unused. An exported filter is one the
+next caller reaches for, and the next caller would have re-opened the same hole.
+
+**What the running platform said that the plan did not expect.** The track
+probed unauthenticated (401 = mounted, 404 = not) and ran read-only SELECTs:
+
+- **54 of 55 `agent_runs` rows have `prompt_tokens`, `cache_read_tokens` and
+  `trials_spent` all NULL**; 23 have no `tier`; **30 of 55 have no
+  `conversation_id`**. The null branches are not the edge case — they are the
+  common case. A `?? 0` would have invented a number on nearly every row, and
+  the run→conversation join §2.2 describes **misses for more than half of
+  them**, which is why the no-link/no-Stop branch exists rather than a dead link.
+- **No run is in an active state** (failed 23, fenced 14, completed 12, refused
+  6), so `/api/desk/running` answers `runs: []` on this box.
+- **`orders` is empty and `monitor.strategy_state` is empty**, so `environment`
+  is `null` for every strategy — "no orders — environment unknown" is what would
+  actually render, not `paper`.
+- `session_digests`, `research_sessions` and `charter_amended` are all at zero
+  rows. The digest card, the agenda board and the amendment list have no live
+  data at all on this machine.
+
+**Three in-code claims were stale against the running server** and were
+corrected: that the digest route does not select `spend_unit` (it does), that no
+route reads amendments back (one does now), and that `list_strategies` sends
+three columns and nothing else.
+
+One trap was left in place and labelled rather than removed: the unused
+`RunningRow` interface in `api/desk.ts` is §2.2's *sketch* and carries
+`usd_tenth_cents`, `cache_hit_pct` and `step` — three numbers this platform
+cannot produce. It now says so in its own doc comment, so the next reader does
+not wire a panel to it.
+
 ### One trap worth passing on
 
 `the_desk_calls_routes_that_exist` counts **any** `/api/…` string literal in
