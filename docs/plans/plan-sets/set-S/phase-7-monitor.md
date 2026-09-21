@@ -33,6 +33,121 @@ check and returns its scopes, and `BearerToken::permits` gates on them. (The
 
 ---
 
+### Five of eleven fail-closed tests had never met a database, 2026-09-21
+
+**190 lib + 6 + 14 + 4 tests**, clippy `-D warnings` clean. But the counts are
+not the finding.
+
+**COMP-007 §8.1, §8.2, §8.3, §8.5, §8.6 and §8.7 all name
+`tests/fail_closed_drill.rs` as "Verified by".** Those tests return early
+without `MONITOR_TEST_DATABASE_URL`. Run against live Postgres for the first
+time, **five of the eleven failed.** Two causes, both now fixed:
+
+- The harness's `ctx()` passed `None` for the mark price, so `RiskGate::check`
+  refused with `MarketDataUnavailable` **before reaching the kill switch at
+  all**. Every `is_ok()` assertion was false and every `Err(..)` assertion was
+  true for the wrong reason — including *"the other venues keep trading"* and
+  *"a live lease opens the gate"*. Six safety sections were resting on it.
+- `a_second_reset_within_five_minutes_is_refused_by_the_store` re-tripped with
+  the **same** `MonitorEvent`, so the second insert died on `events_pkey` rather
+  than on the five-minute rule. A second incident is a second event.
+
+**A test that skips silently is not a test, and a spec section that cites one is
+not verified.** That is the reusable part.
+
+### Three phase notes claimed built what was not
+
+**S-7.13 said windows and their platform-only suppression were "built, tested
+and wired into CI".** `MaintenanceWindow::suppresses` and `suppressing_window`
+had **no caller outside `window.rs`'s own tests**; `MonitorEvent::suppressed_by`
+had **no caller at all**, though migration `0075` gave `monitor.events` a
+`suppressed_by_window` column to hold the answer; and no platform-health trip
+existed for a window to suppress. **A window suppressed nothing, so every deploy
+still halted trading** — the exact failure §4.3 was written to prevent.
+
+**Same task: "drill mode ... built".** `DrillOutcome::record` took its three
+latencies **as arguments**, and its only caller was `POST /api/monitor/drill`,
+which read them from the request body. *"A drill whose propagation exceeds one
+cadence fails the deploy"* was arithmetic over numbers the caller typed.
+`rehearsal.rs` now measures detection at trip commit, propagation through the
+watched process's own `replace_halted` → `is_active_scope` path, and
+notification as the record becoming readable on `monitor.events` — the only
+channel that exists — recorded in `notes` so the number cannot be misread as the
+desk-banner latency nobody built. *"Refused nothing real"* is **measured** by
+diffing the halted set, not assumed; a rehearsal that cannot observe propagation
+returns an error rather than a recorded verdict.
+
+**S-7.6 said the resume block was "built and drilled", naming
+`an_injected_mismatch_halts_one_venue_and_blocks_resume_until_clean`.** That
+test never attempts to resume the halted venue — it asserts only that a
+**global** reset is refused. `ResetRequest::validate` applies
+`all_venues_reconciled` to `Scope::Global` alone, so **a venue halted because it
+and our book disagree about what is owned can be resumed today** with a typed
+string, a reason and five minutes' patience, with no proof the mismatch cleared.
+§8.3 is not enforced. Closing it needs a migration and an API change, both
+outside that track's territory.
+
+**S-7.5 was over-claimed in its reason, and the narrower truth is the useful
+one.** The note says last-bar age "lives in ClickHouse and `crates/monitor` has
+no client for it and must not grow one". There **is** a Postgres table with
+exactly the right shape — `dataplane.data_coverage_census`. It is unusable for a
+different reason: **0 rows**, its only writer `take_census` has no caller
+anywhere outside its own module, and it is an append-only *census series* keyed
+on `as_of`, not a live gauge — so `now() - last_bar` over-states staleness
+whenever bars arrived after the snapshot, **which is the false-halt direction**.
+Same for `dataplane.instrument.last_seen`: migration `0046` grants
+`UPDATE (last_seen)` to `app_role`, no Rust anywhere writes it, and all ten rows
+are NULL.
+
+### What the live database said that the plan did not expect
+
+- **`monitor.heartbeat` grows one row per monitor boot, for ever.** Keyed
+  `(component, instance)` with `instance` a per-boot id, and nothing evicts.
+  **26 stale `tbot-monitor` rows were found.** Under a row-wise reading of §4's
+  *"missed 3 heartbeats → global halt"*, that is **26 standing reasons to halt
+  the entire book**, armed by ordinary restarts. `platform::assess` therefore
+  judges a component lost only when *every* instance of it is stale, and never
+  judges the monitor's own component — both held by tests, not comments. The
+  eviction itself needs a migration and is not done.
+- **No `tbot-monitor` container is running** — `docker ps` shows postgres, nats,
+  redis and clickhouse only, and the platform runs as a native binary. With
+  `monitor.lease` at 0 rows the API's order gate is refusing every order with
+  `monitor_unavailable` **right now**. Fail-closed working as designed, and
+  **nothing in this file says the default local stack has no monitor in it**.
+- **The drill suite leaks rows when a test panics**, and a leaked `venue:*` halt
+  has a real consequence: `routes/monitor.rs` derives
+  `all_venues_reconciled = !halted.iter().any(Venue)`, so **one abandoned test
+  row refuses every global reset**. The track cleaned up everything its runs
+  left (7 switch rows, 11 events, 26 heartbeats, 1 lease) and verified the
+  database was back to empty with `trading_enabled = t`. Cleanup that survives a
+  panic across all six tests is not done.
+- **That derivation is a proxy, not the fact.** A venue halted for a connection
+  loss reads as "not reconciled"; a venue that failed reconciliation and was
+  never halted reads as "clean". The real per-venue verdict has nowhere to live.
+- `monitor.drill.notes` existed and `record_drill` never wrote it.
+  `mlops.divergence_halt` is `FORCE ROW LEVEL SECURITY` per-tenant and holds
+  per-strategy Set-T halts — it is **not** the S-7.6 record.
+- **A hazard found and fixed mid-build:** a rehearsal runs on the loop that
+  renews the lease, so an unbounded one would lapse the lease and **halt the
+  platform for real while rehearsing how the platform halts**.
+  `Rehearsal::within` is bounded to half the renewal interval, asserted across
+  four cadences.
+
+### Problems in the spec, neither reading implemented
+
+§4.2 lists three latencies and the schema makes all three `NOT NULL`, but the
+notification channel it describes — *"the desk banner appears marked DRILL"* —
+does not exist. A zero there reads as *"the notification landed instantly"*,
+which is the dangerous direction, and `Measurement` has no `Default` precisely
+so this cannot happen elsewhere. The channel that exists was measured and the
+drill says which one it was, rather than a reading being picked.
+
+§4's *"platform heartbeat loss → global halt"* **has no subject**: nothing in the
+spec says which components must beat, and today only `tbot-monitor` does — into
+a table that never forgets. Left open; the code judges only components that
+beat, and never the monitor itself.
+
+
 ## Tasks
 
 ### S-7.1 `crates/monitor` — a separate process — M
