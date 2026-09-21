@@ -255,8 +255,8 @@ fn reason_for(ev: &Evaluation) -> String {
 
 /// The acting evaluation that should drive the transition.
 ///
-/// P&L first, because a P&L breach halts and everything else scales, and a cadence
-/// in which both happened must halt. Within a rank, the reading furthest outside
+/// Halting families first, because a cadence in which one family halted and
+/// another only scaled must halt. Within a rank, the reading furthest outside
 /// its limit wins, so the event names the worst number rather than the first one
 /// the collector happened to emit.
 fn worst(acting: &[Evaluation]) -> Option<Evaluation> {
@@ -272,7 +272,12 @@ fn worst(acting: &[Evaluation]) -> Option<Evaluation> {
 
 fn rank(ev: &Evaluation) -> u8 {
     match ev.outcome {
-        Outcome::Act(Severity::Breach(Family::Pnl)) => 2,
+        // Which families halt is `Family::breach_halts`, not a second list here.
+        // A rank that named its own families would keep choosing the scaling
+        // reading as "worst" in a cadence where a halting family also breached —
+        // the event would say scaled_down and the state machine would halt, and
+        // the operator would be reading a record of a different incident.
+        Outcome::Act(Severity::Breach(f)) if f.breach_halts() => 2,
         Outcome::Act(Severity::Breach(_)) => 1,
         _ => 0,
     }

@@ -177,10 +177,11 @@ pub fn on_sustained(from: StrategyState, severity: Severity, policy: HaltPolicy)
                 actions: vec![Action::Record],
             }
         }
-        // P&L breaches halt. CUSUM and a drawdown past the backtest's Monte Carlo
-        // p95 are not "this is noisy today" — they are the distribution having
-        // changed, which is the case size reduction does not fix.
-        Severity::Breach(Family::Pnl) => Transition {
+        // Some families halt. Which ones is `Family::breach_halts` and is not
+        // restated here: a list written twice is how §3 came to say `halt` for a
+        // hard-stale feed while §4's table said `scale down`, and the code
+        // followed the table. Scaling to a quarter still trades on a stale price.
+        Severity::Breach(family) if family.breach_halts() => Transition {
             from,
             to: StrategyState::Halted,
             actions: vec![Action::Record, Action::Halt(policy)],
@@ -248,6 +249,62 @@ mod tests {
     }
 
     #[test]
+    fn a_data_breach_halts_rather_than_trading_a_quarter_size_on_a_dead_feed() {
+        // ADR-D-11. §3 said halt, §4's table said scale down, and the code
+        // followed the table. §3 wins: every other response in that table
+        // reduces exposure to a risk being *measured*, and a feed past the hard
+        // multiple is an absent measurement.
+        let t = on_sustained(
+            StrategyState::Nominal,
+            Severity::Breach(Family::Data),
+            HaltPolicy::Flatten,
+        );
+        assert_eq!(t.to, StrategyState::Halted);
+        assert_eq!(
+            t.actions,
+            vec![Action::Record, Action::Halt(HaltPolicy::Flatten)]
+        );
+        assert!(
+            !t.actions
+                .iter()
+                .any(|a| matches!(a, Action::ScaleTo(_))),
+            "a quarter-size position priced off a dead feed is the same error at 25% of the size"
+        );
+    }
+
+    #[test]
+    fn every_family_moves_the_way_breach_halts_says_it_does() {
+        // The anti-drift assertion, and the reason `Family::breach_halts` exists
+        // rather than a second list here or in a test name. This iterates the
+        // whole enum and takes its expectation from the same function the code
+        // branches on, so a family whose answer changes cannot leave a test
+        // asserting the old behaviour — and a family added later is covered the
+        // day it is added.
+        for family in Family::all() {
+            let t = on_sustained(
+                StrategyState::Nominal,
+                Severity::Breach(family),
+                HaltPolicy::Flatten,
+            );
+            if family.breach_halts() {
+                assert_eq!(t.to, StrategyState::Halted, "{family}");
+                assert_eq!(
+                    t.actions,
+                    vec![Action::Record, Action::Halt(HaltPolicy::Flatten)],
+                    "{family}"
+                );
+            } else {
+                assert_eq!(t.to, StrategyState::ScaledDown, "{family}");
+                assert_eq!(
+                    t.actions,
+                    vec![Action::Record, Action::ScaleTo(crate::SCALE_DOWN_PCT)],
+                    "{family}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_record_always_comes_before_the_halt() {
         // COMP-007 §8.5: "the trip record is present before the first refused
         // order". Asserted on the ordering of the plan rather than on a comment,
@@ -304,16 +361,19 @@ mod tests {
     }
 
     #[test]
-    fn a_pnl_breach_still_halts_a_strategy_that_is_already_scaled_down() {
+    fn a_halting_family_still_halts_a_strategy_that_is_already_scaled_down() {
         // Scaling down is not a lesser halt; a strategy whose returns have broken
-        // must stop trading even though an earlier execution breach already cut
-        // its size.
-        let t = on_sustained(
-            StrategyState::ScaledDown,
-            Severity::Breach(Family::Pnl),
-            HaltPolicy::Reduce,
-        );
-        assert_eq!(t.to, StrategyState::Halted);
+        // — or whose prices have stopped arriving — must stop trading even though
+        // an earlier execution breach already cut its size. Driven off
+        // `breach_halts` so it covers both halting families and any later one.
+        for family in Family::all().into_iter().filter(|f| f.breach_halts()) {
+            let t = on_sustained(
+                StrategyState::ScaledDown,
+                Severity::Breach(family),
+                HaltPolicy::Reduce,
+            );
+            assert_eq!(t.to, StrategyState::Halted, "{family}");
+        }
     }
 
     #[test]

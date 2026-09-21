@@ -23,6 +23,14 @@ pub const WARN_STALENESS_MULTIPLE: i64 = 3;
 /// Staleness past this multiple halts the strategy, without dwell (§3, §4.1).
 pub const HARD_STALENESS_MULTIPLE: i64 = 10;
 
+/// The soft band has to be reachable before the hard one, or there is no warning
+/// band at all — every stale feed would jump straight to a halt and the graded
+/// response of §3's Data row would exist only on paper.
+///
+/// A compile error rather than a test, because the two numbers are constants: the
+/// mistake is made while editing this file and should be caught there.
+const _: () = assert!(WARN_STALENESS_MULTIPLE < HARD_STALENESS_MULTIPLE);
+
 /// One number, measured this cadence.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MetricReading {
@@ -111,7 +119,9 @@ pub enum Staleness {
         instrument: String,
         age_secs: i64,
     },
-    /// Past `10 ×`. A fact: acts immediately.
+    /// Past `10 ×`. A fact: skips dwell, and halts every strategy that depends
+    /// on the instrument (COMP-007 §3, §4.1; ADR-D-11). Not a scale-down —
+    /// scaling to a quarter still trades on a stale price.
     Hard(Fact),
 }
 
@@ -328,15 +338,99 @@ mod tests {
 
     #[test]
     fn a_hard_stale_feed_halts_without_waiting_three_cadences() {
-        // COMP-007 §4.1's exemption. Three cadences of a ten-minutes-stale
-        // one-minute feed is three more minutes of trading on prices that are not
-        // current, and dwell exists to filter noise, not facts.
+        // COMP-007 §4.1's exemption, and §3's Data row (ADR-D-11). Three cadences
+        // of a ten-minutes-stale one-minute feed is three more minutes of trading
+        // on prices that are not current, and dwell exists to filter noise, not
+        // facts.
+        //
+        // This test previously carried this name and asserted `ScaledDown`, which
+        // is worse than a plain contradiction: a reader who greps for the
+        // behaviour finds the name and stops. The assertion now reads
+        // `Family::breach_halts` alongside the literal, so the name, the
+        // assertion and the policy move together or not at all.
         let Staleness::Hard(fact) = staleness("BTC-USD", 700, 60) else {
             panic!("700s on a 60s bar is past the hard multiple");
         };
+        assert!(fact.family().breach_halts(), "COMP-007 §3: a hard-stale feed halts");
         let t = Evaluator::on_fact(&fact, StrategyState::Nominal, crate::state::HaltPolicy::Hold);
-        assert_eq!(t.to, StrategyState::ScaledDown, "a data fact scales rather than halts the book");
+        assert_eq!(
+            t.to,
+            StrategyState::Halted,
+            "scaling to a quarter still trades on a stale price"
+        );
+        assert!(t
+            .actions
+            .contains(&crate::state::Action::Halt(crate::state::HaltPolicy::Hold)));
         assert!(t.changed());
+    }
+
+    #[test]
+    fn the_soft_band_still_only_warns() {
+        // The other half of §3's Data row, and the reason the hard band is worth
+        // separating: a feed three cadences late is late, not absent, and halting
+        // the book on it is the alarm fatigue §4.1 exists to prevent. Asserted so
+        // that widening the halt to the whole Data family — which ADR-D-11 did —
+        // cannot quietly swallow the warning band with it.
+        let Staleness::Warning { instrument, age_secs } = staleness("BTC-USD", 240, 60) else {
+            panic!("240s on a 60s bar is past the warn multiple and short of the hard one");
+        };
+        assert_eq!(instrument, "BTC-USD");
+        assert_eq!(age_secs, 240);
+        assert!(
+            !matches!(staleness("BTC-USD", 240, 60), Staleness::Hard(_)),
+            "the soft band raises no fact, so nothing skips dwell and nothing halts"
+        );
+    }
+
+    #[test]
+    fn both_staleness_bands_come_from_the_two_constants_and_nowhere_else() {
+        // The multiples are declared once, and this drives every boundary off
+        // those declarations rather than off `240` and `700` typed into a test.
+        // A test carrying its own copy of a threshold is the same defect shape as
+        // a policy carrying its own copy of a family list: change the constant,
+        // and the test goes on asserting the band that no longer exists.
+        let tf = 60;
+        let warn_edge = tf * WARN_STALENESS_MULTIPLE;
+        let hard_edge = tf * HARD_STALENESS_MULTIPLE;
+        // `past the multiple`, not `at` it: a bar exactly 3× old is on time for a
+        // feed that publishes on the boundary.
+        assert_eq!(staleness("BTC-USD", warn_edge, tf), Staleness::Fresh);
+        assert!(matches!(
+            staleness("BTC-USD", warn_edge + 1, tf),
+            Staleness::Warning { .. }
+        ));
+        assert!(matches!(
+            staleness("BTC-USD", hard_edge, tf),
+            Staleness::Warning { .. }
+        ));
+        assert!(matches!(
+            staleness("BTC-USD", hard_edge + 1, tf),
+            Staleness::Hard(_)
+        ));
+    }
+
+    #[test]
+    fn a_nonpositive_timeframe_reports_fresh_and_that_is_a_gap_not_a_result() {
+        // Named for what it asserts, not for what one would want it to assert.
+        // A `timeframe_secs` of zero is not a timeframe: there is no multiple to
+        // measure an age against, and `staleness` answers `Fresh` — an absent
+        // measurement reported as a healthy one, which is the shape this crate
+        // exists to refuse.
+        //
+        // It is not wrong *today* only because nothing calls `staleness`:
+        // `FactKind::HardDataStaleness` is `Wiring::Unwired` and the producer it
+        // names does not exist yet. The day that producer is written, it must
+        // either guarantee a positive timeframe per instrument or this arm must
+        // become a halt — and this assertion is what makes that a decision
+        // somebody has to take rather than a default they inherit.
+        assert_eq!(staleness("BTC-USD", 999_999, 0), Staleness::Fresh);
+        assert_eq!(staleness("BTC-USD", 999_999, -60), Staleness::Fresh);
+        assert!(
+            !crate::family::FactKind::HardDataStaleness
+                .wiring()
+                .is_raised_in_production(),
+            "a producer now exists, so the zero-timeframe arm must be decided rather than inherited"
+        );
     }
 
     #[test]

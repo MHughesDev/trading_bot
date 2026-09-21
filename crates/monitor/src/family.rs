@@ -72,6 +72,42 @@ impl Family {
     pub fn suppressible_by_maintenance_window(self) -> bool {
         matches!(self, Self::Platform)
     }
+
+    /// Whether a sustained breach in this family **halts** the strategy rather
+    /// than scaling it to [`SCALE_DOWN_PCT`](crate::SCALE_DOWN_PCT) (COMP-007
+    /// §3, §4; ADR-D-11).
+    ///
+    /// The single authority for the question. [`state::on_sustained`][s]
+    /// branches on it, [`service`][sv]'s cadence ranks a mixed cadence by it,
+    /// and the tests read it instead of restating a list — because a second
+    /// list is exactly how COMP-007 came to say *halt* in §3's Data row and
+    /// *scale down* in §4's response table at the same time, and how a test
+    /// named `a_hard_stale_feed_halts_...` came to assert `ScaledDown`.
+    ///
+    /// Two families answer yes, and it is one reason said twice.
+    ///
+    /// **P&L**: a CUSUM trip, or a drawdown past the backtest's Monte Carlo
+    /// p95, is not "this is noisy today" — it is the distribution having
+    /// changed, which is the case size reduction does not fix.
+    ///
+    /// **Data**: scaling to a quarter *still trades on a stale price*. Every
+    /// other response in §4's table reduces exposure to a risk that is being
+    /// **measured**; a feed more than
+    /// [`HARD_STALENESS_MULTIPLE`](crate::evaluate::HARD_STALENESS_MULTIPLE)
+    /// times its timeframe stale is an **absent measurement**, and a
+    /// quarter-size position priced off a dead feed is the same error at 25% of
+    /// the size.
+    ///
+    /// There is no configuration here, and that is the decision, not an
+    /// omission: a flag reading "data staleness does not halt" is the failure
+    /// ADR-D-11 closes.
+    ///
+    /// [s]: crate::state::on_sustained
+    /// [sv]: crate::service
+    #[must_use]
+    pub fn breach_halts(self) -> bool {
+        matches!(self, Self::Pnl | Self::Data)
+    }
 }
 
 impl std::fmt::Display for Family {
@@ -103,7 +139,10 @@ pub enum Fact {
     ReconciliationMismatch { venue: String },
     /// The monitor lost, or never had, its lease.
     LeaseLost,
-    /// A feed is stale past the hard multiple (default 10× the timeframe).
+    /// A feed is stale past the hard multiple — ten times its own timeframe,
+    /// from [`HARD_STALENESS_MULTIPLE`](crate::evaluate::HARD_STALENESS_MULTIPLE).
+    /// Not a default and not configurable: a switch that let this stop halting
+    /// is the failure ADR-D-11 closes.
     HardDataStaleness {
         instrument: String,
         age_secs: i64,
@@ -294,6 +333,39 @@ mod tests {
     }
 
     #[test]
+    fn exactly_the_pnl_and_data_families_halt_on_a_breach() {
+        // ADR-D-11, and the one place the answer is written down. Asserted over
+        // the whole enum rather than family by family, so a family added later
+        // has to answer the question here instead of silently inheriting
+        // "scales down" — and so `state::on_sustained` and `service`'s ranking,
+        // which both read `breach_halts`, cannot drift apart from it or from
+        // each other.
+        let halting: Vec<Family> = Family::all()
+            .into_iter()
+            .filter(|f| f.breach_halts())
+            .collect();
+        assert_eq!(halting, vec![Family::Pnl, Family::Data]);
+    }
+
+    #[test]
+    fn the_family_of_a_hard_stale_feed_is_a_family_that_halts() {
+        // The join between the two halves of ADR-D-11: §3's Data row says a
+        // feed past the hard multiple halts, and it can only do that if the
+        // family the fact reports under is one that halts. Stated as a link
+        // between two functions rather than as `Family::Data`, so renaming the
+        // family does not quietly break the rule.
+        let fact = Fact::HardDataStaleness {
+            instrument: "BTC-USD".into(),
+            age_secs: 700,
+            timeframe_secs: 60,
+        };
+        assert!(
+            fact.family().breach_halts(),
+            "a quarter-size position priced off a dead feed is the same error at 25% of the size"
+        );
+    }
+
+    #[test]
     fn a_fact_names_the_family_that_owns_it() {
         assert_eq!(Fact::LeaseLost.family(), Family::Lease);
         assert_eq!(
@@ -358,5 +430,12 @@ mod tests {
         .reason();
         assert!(r.contains("BTC-USD"), "{r}");
         assert!(r.contains("700"), "{r}");
+        // And it names the multiple from the constant, not from a literal typed
+        // into the sentence: a message that says "10x" after the constant moved
+        // tells the operator a number that is not the one that fired.
+        assert!(
+            r.contains(&format!("{}x", crate::evaluate::HARD_STALENESS_MULTIPLE)),
+            "{r}"
+        );
     }
 }

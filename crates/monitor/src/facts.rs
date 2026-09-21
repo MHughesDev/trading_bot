@@ -179,9 +179,11 @@ impl FactAction {
 /// The per-strategy policy is taken from [`Evaluator::on_fact`] rather than
 /// restated here, so there is one authority for what a data fact does and not
 /// two that can drift apart. A strategy the transition does not move — one
-/// already scaled down, or already halted — produces no action, so a fact raised
-/// every cadence while the condition persists does not write a second trip
-/// record for one incident.
+/// already halted — produces no action, so a fact raised every cadence while the
+/// condition persists does not write a second trip record for one incident. A
+/// strategy already *scaled down* is not in that set: since ADR-D-11 a data
+/// breach halts, and a quarter-size position priced off a dead feed is the same
+/// error at 25% of the size, so the fact escalates it.
 ///
 /// An empty result is a real answer and is not the same as "nothing was wrong":
 /// a stale feed that reaches no strategy reaches none because nothing depends on
@@ -297,11 +299,12 @@ mod tests {
     }
 
     #[test]
-    fn a_strategy_already_scaled_down_is_not_scaled_a_second_time() {
-        // A fact raised every cadence while the feed stays stale must not put a
-        // second trip record in the timeline for one incident — an operator
-        // reading it under pressure would have to work out that they were the
-        // same event.
+    fn a_strategy_already_scaled_down_is_escalated_to_a_halt_by_a_stale_feed() {
+        // Scaling down is not a lesser halt (ADR-D-11). A strategy an earlier
+        // execution breach had already cut to a quarter is still trading, and a
+        // quarter-size position priced off a dead feed is the same error at 25%
+        // of the size — so the fact escalates it rather than finding nothing
+        // left to do.
         let states = vec![(
             "s-btc".to_owned(),
             StrategyState::ScaledDown,
@@ -310,13 +313,24 @@ mod tests {
         let actions = decide(&stale("BTC-USD"), &deps(), &states);
         assert_eq!(
             actions,
-            vec![FactAction::Scale {
-                strategy_id: "s-both".to_owned(),
-                from: StrategyState::Nominal,
-                state: StrategyState::ScaledDown,
-                scale_pct: crate::SCALE_DOWN_PCT,
-            }]
+            vec![
+                FactAction::Halt(Scope::strategy("s-btc")),
+                FactAction::Halt(Scope::strategy("s-both")),
+            ]
         );
+    }
+
+    #[test]
+    fn a_halt_from_a_stale_feed_reaches_the_gate_through_the_kill_switch() {
+        // The rule of this module applied to the behaviour ADR-D-11 changed. The
+        // scale-down this used to produce travelled through
+        // `monitor.strategy_state`; a halt travels through
+        // `monitor.kill_switch`, and a decision written anywhere else does not
+        // reach the order gate at all.
+        for action in decide(&stale("BTC-USD"), &deps(), &[]) {
+            assert_eq!(action.gate_table(), GateTable::KillSwitch, "{action:?}");
+            assert_eq!(action.actor(), MONITOR_ACTOR, "{action:?}");
+        }
     }
 
     #[test]
@@ -330,19 +344,30 @@ mod tests {
     }
 
     #[test]
-    fn a_data_fact_scales_rather_than_halts_the_book() {
-        // The §3-versus-§4 contradiction is open as Q-S7-01 and nothing here
-        // resolves it. This asserts only that `decide` agrees with
-        // `Evaluator::on_fact`, so the two cannot drift apart while the question
-        // stays open — which is the failure that would hurt, because the drill
-        // would then rehearse one reading and production would run the other.
-        let actions = decide(&stale("BTC-USD"), &deps(), &[]);
-        let from_evaluator =
-            Evaluator::on_fact(&stale("BTC-USD"), StrategyState::Nominal, HaltPolicy::Hold);
+    fn a_data_fact_halts_the_strategies_that_depend_on_the_feed() {
+        // Q-S7-01 is closed by ADR-D-11: §3 wins and a hard-stale feed halts.
+        // This asserts both halves — that a data fact halts at all, and that
+        // `decide` says the same thing `Evaluator::on_fact` does. The second is
+        // the one that would hurt if it drifted: the drill would rehearse one
+        // reading and production would run the other.
+        //
+        // The expectation is taken from `Family::breach_halts` rather than
+        // written out, so this test cannot be the place that still claims a
+        // scale-down after the policy moves.
+        let fact = stale("BTC-USD");
+        assert!(fact.family().breach_halts());
+        let from_evaluator = Evaluator::on_fact(&fact, StrategyState::Nominal, HaltPolicy::Hold);
+        assert_eq!(from_evaluator.to, StrategyState::Halted);
+
+        let actions = decide(&fact, &deps(), &[]);
+        assert!(!actions.is_empty(), "two strategies depend on BTC-USD");
         for action in &actions {
             match action {
-                FactAction::Scale { state, .. } => assert_eq!(*state, from_evaluator.to),
-                other => panic!("expected a scale, got {other:?}"),
+                FactAction::Halt(scope) => assert!(
+                    matches!(scope, Scope::Strategy(_)),
+                    "a stale instrument halts the strategies that use it, not the book: {scope:?}"
+                ),
+                other => panic!("expected a halt, got {other:?}"),
             }
         }
     }

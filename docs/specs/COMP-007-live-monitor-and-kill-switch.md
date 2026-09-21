@@ -53,7 +53,10 @@ Per strategy: `nominal → warning → breach → scaled_down → halted`, plus 
 | Event | Automatic action | Human action available |
 |---|---|---|
 | warning | record; notify (AGENT-012 §13) | acknowledge; open diagnosis conversation (`attribute_divergence`) |
-| breach (behaviour/execution/data) | **scale down** to 25% size for that strategy; record; notify | resume at full; halt |
+| breach (behaviour/execution) | **scale down** to 25% size for that strategy; record; notify | resume at full; halt |
+| breach (data) | **halt** that strategy; record; notify | resume when the feed is fresh |
+
+> **Amended 2026-09-21 (ADR-D-11).** This row read `breach (behaviour/execution/data) → scale down`, which contradicted §3's Data row (`> 10 × timeframe → strategy halt`). §3 wins, and the deciding reason is not that it is the more specific rule: **scaling to 25% still trades on a stale price.** Every other response in this table reduces exposure to a risk that is being *measured*; a feed more than ten times its timeframe stale is an **absent measurement**, and a quarter-size position priced off a dead feed is the same error at 25% of the size. Enforced by `Family::breach_halts` — one authority, read by the state machine, by `facts::decide` and by `service::rank`, and pinned over the whole enum by `exactly_the_pnl_and_data_families_halt_on_a_breach`. There is deliberately no flag to switch it off.
 | breach (P&L CUSUM or MC-drawdown) | **halt strategy** (no new orders); existing positions handled by the strategy's halt policy (`monitor::state::HaltPolicy`: hold / flatten / reduce — see the correction below) | resume (typed confirmation), flatten now |
 | venue reconciliation mismatch or connection loss | **halt venue** order flow; positions held | resume after reconciliation passes |
 | platform heartbeat loss, monitor lag > 2 cadences, DB unreachable | **global halt**: the runtime's order gate refuses all new orders | reset (typed confirmation, reason required) |
