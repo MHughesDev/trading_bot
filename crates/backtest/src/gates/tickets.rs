@@ -98,9 +98,21 @@ pub const REQUIREMENTS: &[Requirement] = &[
         checkpoint: Checkpoint::Funnel(Gate::Robustness),
         workflow: "leakage_audit",
         accept: &["clean"],
-        // Owed three steps: the static scan, the bar-boundary check and the
-        // contamination probe. See `mcp_server::tools::workflows::batteries`.
-        enforced: false,
+        // **Enforced 2026-09-21.** It was declared owed three steps and was one
+        // correction and one rule away from runnable.
+        //
+        // The bar-boundary step was *built* and mis-declared: `bar_boundary_check`
+        // has been a templated tool since S-3.11. The other two are deferred **by
+        // design** and are *conditional* - the static scan has nothing
+        // expressible to find under today's frozen grammar, and the
+        // contamination probe is a stated non-goal until a text feature exists
+        // (AGENT-006 §11).
+        //
+        // A battery is withheld for a gap that applies to every call, not for one
+        // that applies to inputs a given call does not have. `leakage_audit`
+        // refuses those inputs by name instead, so gate 2 can demand it for
+        // every strategy this platform can currently represent.
+        enforced: true,
         fix: "run `leakage_audit` over this experiment and pass the family id it returns. A \
               robustness verdict over a leaking result measures the leak",
     },
@@ -294,6 +306,28 @@ pub fn refusal(checkpoint: Checkpoint, missing: &[Missing]) -> String {
 mod tests {
     use super::*;
 
+    /// The refusal for one named battery.
+    ///
+    /// By name rather than by position: gate 2 demands two batteries and
+    /// `err[0]` was whichever one happened to be declared first, so these tests
+    /// were reading a list order as a fact about the battery they were about.
+    fn about<'a>(missing: &'a [Missing], workflow: &str) -> &'a Missing {
+        missing
+            .iter()
+            .find(|m| m.workflow() == workflow)
+            .unwrap_or_else(|| panic!("nothing refused about `{workflow}`: {missing:?}"))
+    }
+
+    /// Every ticket gate 2 demands, so a test about *one* of them does not have
+    /// to restate the others.
+    fn all_but(workflow: &str) -> Vec<Ticket> {
+        required_at(Checkpoint::Funnel(Gate::Robustness))
+            .iter()
+            .filter(|r| r.workflow != workflow)
+            .map(|r| ticket(r.workflow, r.accept[0]))
+            .collect()
+    }
+
     fn ticket(workflow: &str, verdict: &str) -> Ticket {
         Ticket {
             family_id: format!("wf_{workflow}_1"),
@@ -335,7 +369,9 @@ mod tests {
         // cannot write to; see `api::routes::experiments`. What this test pins is
         // that there is nowhere else to put a claim: the input is a list of
         // rows, and there is no free-text field on it at all.
-        assert!(check(Checkpoint::Funnel(Gate::Robustness), &claimed).is_ok());
+        let mut tickets = all_but("selection_bias_verdict");
+        tickets.extend(claimed);
+        assert!(check(Checkpoint::Funnel(Gate::Robustness), &tickets).is_ok());
         assert_eq!(
             std::mem::size_of::<Ticket>(),
             std::mem::size_of::<String>() * 3,
@@ -347,17 +383,18 @@ mod tests {
     /// "Did not run it" and "ran it and it failed" are different refusals.
     #[test]
     fn a_failing_battery_is_not_a_missing_one() {
-        let err = check(
-            Checkpoint::Funnel(Gate::Robustness),
-            &[ticket("selection_bias_verdict", "fails")],
-        )
-        .expect_err("the battery failed");
-        assert!(matches!(err[0], Missing::WrongVerdict { .. }));
-        assert!(err[0].message().contains("answered `fails`"), "{:?}", err[0]);
+        let mut tickets = all_but("selection_bias_verdict");
+        tickets.push(ticket("selection_bias_verdict", "fails"));
+        let err = check(Checkpoint::Funnel(Gate::Robustness), &tickets)
+            .expect_err("the battery failed");
+        let m = about(&err, "selection_bias_verdict");
+        assert!(matches!(m, Missing::WrongVerdict { .. }));
+        assert!(m.message().contains("answered `fails`"), "{m:?}");
 
         let err = check(Checkpoint::Funnel(Gate::Robustness), &[]).expect_err("nothing ran");
-        assert!(matches!(err[0], Missing::NoTicket { .. }));
-        assert!(err[0].message().contains("has not been run"));
+        let m = about(&err, "selection_bias_verdict");
+        assert!(matches!(m, Missing::NoTicket { .. }));
+        assert!(m.message().contains("has not been run"));
     }
 
     /// `inconclusive` is not a pass. The most likely way a battery comes back
@@ -365,22 +402,18 @@ mod tests {
     /// through.
     #[test]
     fn inconclusive_does_not_advance_a_gate() {
-        assert!(check(
-            Checkpoint::Funnel(Gate::Robustness),
-            &[ticket("selection_bias_verdict", "inconclusive")]
-        )
-        .is_err());
+        let mut tickets = all_but("selection_bias_verdict");
+        tickets.push(ticket("selection_bias_verdict", "inconclusive"));
+        assert!(check(Checkpoint::Funnel(Gate::Robustness), &tickets).is_err());
     }
 
     /// The accepted set is enumerated rather than the refused set, so a battery
     /// that grows a verdict defaults to refusing.
     #[test]
     fn a_verdict_nobody_declared_is_refused() {
-        assert!(check(
-            Checkpoint::Funnel(Gate::Robustness),
-            &[ticket("selection_bias_verdict", "probably_fine")]
-        )
-        .is_err());
+        let mut tickets = all_but("selection_bias_verdict");
+        tickets.push(ticket("selection_bias_verdict", "probably_fine"));
+        assert!(check(Checkpoint::Funnel(Gate::Robustness), &tickets).is_err());
     }
 
     /// Every unmet requirement is reported at once. A caller told one at a time
@@ -395,6 +428,9 @@ mod tests {
             .filter(|r| r.checkpoint == Checkpoint::Funnel(Gate::Robustness))
             .collect();
         assert_eq!(reqs.len(), 2, "gate 2 declares two batteries");
+        // And both are enforced now, so this is the live case rather than a
+        // simulated one.
+        assert_eq!(required_at(Checkpoint::Funnel(Gate::Robustness)).len(), 2);
         let missing: Vec<Missing> = reqs
             .iter()
             .map(|r| Missing::NoTicket {
@@ -411,16 +447,14 @@ mod tests {
     /// failing run and a passing one and have the passing one taken.
     #[test]
     fn the_newest_ticket_wins_and_not_the_best_one() {
-        let passed_then_failed = vec![
-            ticket("selection_bias_verdict", "passes"),
-            ticket("selection_bias_verdict", "fails"),
-        ];
+        let mut passed_then_failed = all_but("selection_bias_verdict");
+        passed_then_failed.push(ticket("selection_bias_verdict", "passes"));
+        passed_then_failed.push(ticket("selection_bias_verdict", "fails"));
         assert!(check(Checkpoint::Funnel(Gate::Robustness), &passed_then_failed).is_err());
 
-        let failed_then_passed = vec![
-            ticket("selection_bias_verdict", "fails"),
-            ticket("selection_bias_verdict", "passes"),
-        ];
+        let mut failed_then_passed = all_but("selection_bias_verdict");
+        failed_then_passed.push(ticket("selection_bias_verdict", "fails"));
+        failed_then_passed.push(ticket("selection_bias_verdict", "passes"));
         assert!(check(Checkpoint::Funnel(Gate::Robustness), &failed_then_passed).is_ok());
     }
 
@@ -436,7 +470,8 @@ mod tests {
             .collect();
         assert_eq!(
             enforced,
-            vec!["selection_bias_verdict"],
+            // Declaration order: `leakage_audit` is gate 2's first requirement.
+            vec!["leakage_audit", "selection_bias_verdict"],
             "the enforced set changed; `crates/invariants` holds it equal to which batteries \
              are runnable, and phase-8-integration.md records why"
         );

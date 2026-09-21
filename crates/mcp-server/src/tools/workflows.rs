@@ -141,6 +141,19 @@ pub enum Stage {
         needs: &'static str,
         /// Why the verdict cannot honestly be emitted without it.
         why: &'static str,
+        /// When this step would have applied.
+        ///
+        /// [`When::Always`] makes the whole battery unrunnable, which is the
+        /// common case. A **conditional** owed stage does not: a step that only
+        /// applies to text features is not a gap for a feature set that has
+        /// none, and treating it as one would withhold a battery that could
+        /// have run for every input it actually covers.
+        ///
+        /// The refusal moves rather than disappearing — [`run`] refuses when the
+        /// condition *holds* for the arguments it was given, naming the step.
+        /// So a leakage audit over a text feature set is still refused, and one
+        /// over a price feature set runs.
+        when: When,
     },
 }
 
@@ -150,6 +163,15 @@ impl Stage {
         match self {
             Self::Call(s) => s.label,
             Self::Owed { label, .. } => label,
+        }
+    }
+
+    /// When this stage applies.
+    #[must_use]
+    pub fn when(&self) -> When {
+        match self {
+            Self::Call(s) => s.when,
+            Self::Owed { when, .. } => *when,
         }
     }
 }
@@ -213,6 +235,27 @@ impl Workflow {
             .collect()
     }
 
+    /// The owed stages that apply to **every** call of this battery.
+    ///
+    /// The ones that make it unrunnable. A conditional owed stage is not here:
+    /// it is a refusal waiting for an input that triggers it, not a gap in the
+    /// battery.
+    #[must_use]
+    pub fn owed_unconditionally(&self) -> Vec<(&'static str, &'static str)> {
+        self.stages
+            .iter()
+            .filter_map(|s| match s {
+                Stage::Owed {
+                    label,
+                    needs,
+                    when: When::Always,
+                    ..
+                } => Some((*label, *needs)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Whether every stage the spec names has a tool behind it.
     ///
     /// **Pure: it does not consult the catalogue.** That is not a style
@@ -228,7 +271,7 @@ impl Workflow {
     /// catalogue build.
     #[must_use]
     pub fn is_declared_complete(&self) -> bool {
-        self.owed().is_empty()
+        self.owed_unconditionally().is_empty()
     }
 
     /// Whether this battery can actually be run: every stage declared **and**
@@ -598,6 +641,45 @@ pub async fn run(ctx: &crate::McpContext, wf: &'static Workflow, params: &Value)
         .to_value();
     }
 
+    // A conditional owed stage that *applies to these arguments* is a refusal,
+    // not a skip. The battery is offered because the step does not apply to most
+    // inputs; for the inputs it does apply to, the verdict would be missing the
+    // one check that was supposed to cover them.
+    for stage in wf.stages {
+        let Stage::Owed {
+            label, needs, why, when,
+        } = stage
+        else {
+            continue;
+        };
+        if *when == When::Always {
+            continue;
+        }
+        // `should_run` answers "does this step apply", over a `Step`; the same
+        // question for an owed stage, with no earlier steps to read.
+        let applies = match when {
+            When::Always => true,
+            When::IfArgument(flag) => {
+                params.get(*flag).and_then(Value::as_bool).unwrap_or(false)
+            }
+            // An owed stage cannot depend on an earlier step's finding: there is
+            // no step to have found it. Declaring one would be a stage that can
+            // never apply, which is a stage that is never refused.
+            When::IfEarlier { .. } => false,
+        };
+        if applies {
+            return ToolError::new(
+                "workflow_step_owed",
+                format!(
+                    "`{}` applies to these arguments and nothing performs it: {label}",
+                    wf.name
+                ),
+                format!("{why}. It would need {needs}."),
+            )
+            .to_value();
+        }
+    }
+
     for (name, _, required) in wf.arguments {
         if *required && params.get(*name).is_none() {
             return ToolError::new(
@@ -883,22 +965,50 @@ mod tests {
         assert!(body.contains("is_declared_complete"));
     }
 
-    /// A battery with a step nobody built is not in the catalogue at all. The
-    /// direction matters: absent is a tool the model cannot call, and a short
-    /// battery is a verdict nothing downstream can distinguish from a real one.
+    /// A battery with a step nobody built **that applies to every call** is not
+    /// in the catalogue at all. The direction matters: absent is a tool the
+    /// model cannot call, and a short battery is a verdict nothing downstream
+    /// can distinguish from a real one.
+    ///
+    /// A *conditional* owed stage does not withhold the battery. It moves the
+    /// refusal to `run`, for the arguments the step would have applied to — see
+    /// `a_battery_is_refused_for_the_inputs_its_owed_step_covers`.
     #[test]
-    fn a_battery_with_an_owed_step_is_not_offered() {
+    fn a_battery_with_an_unconditionally_owed_step_is_not_offered() {
         let offered: Vec<&str> = specs().iter().map(|s| s.name).collect();
         for w in all() {
-            if w.owed().is_empty() {
+            if w.owed_unconditionally().is_empty() {
                 continue;
             }
             assert!(
                 !offered.contains(&w.name),
                 "`{}` is offered and is owed {:?}",
                 w.name,
-                w.owed()
+                w.owed_unconditionally()
             );
+        }
+    }
+
+    /// And a battery whose only gaps are conditional **is** offered — for the
+    /// inputs those gaps do not cover.
+    ///
+    /// Withholding it entirely would be withholding a battery that covers every
+    /// strategy this platform can currently represent, because of a step that
+    /// applies to none of them.
+    #[test]
+    fn a_battery_owed_only_conditional_steps_is_still_offered() {
+        let offered: Vec<&str> = specs().iter().map(|s| s.name).collect();
+        let conditional: Vec<&str> = all()
+            .iter()
+            .filter(|w| !w.owed().is_empty() && w.owed_unconditionally().is_empty())
+            .map(|w| w.name)
+            .collect();
+        assert!(
+            !conditional.is_empty(),
+            "no battery exercises the conditional-owed rule"
+        );
+        for name in conditional {
+            assert!(offered.contains(&name), "`{name}` is owed only conditionally and is hidden");
         }
     }
 
@@ -908,7 +1018,7 @@ mod tests {
     fn every_owed_stage_names_what_it_needs() {
         for w in all() {
             for stage in w.stages {
-                if let Stage::Owed { label, needs, why } = stage {
+                if let Stage::Owed { label, needs, why, .. } = stage {
                     assert!(!needs.trim().is_empty(), "`{}`/{label} needs nothing?", w.name);
                     assert!(!why.trim().is_empty(), "`{}`/{label} gives no reason", w.name);
                 }

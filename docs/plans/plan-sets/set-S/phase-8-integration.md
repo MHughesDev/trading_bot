@@ -8,8 +8,8 @@ phase wrote `0134` (the trial family), `0135` (a battery's verdict) and `0136`
 
 > **What "6 of 9" means, and what it does not.** S-8.1, S-8.4, S-8.5, S-8.6, S-8.7 and
 > S-8.8 are built and reached by a caller. S-8.2 and S-8.3 declare all six batteries
-> with every step the spec names, and **one of the six can run** — the other five are
-> each owed at least one tool that does not exist, and a battery with an owed step is
+> with every step the spec names, and **two of the six can run** (2026-09-21) — the other four are
+> each owed at least one tool that applies to every call, and such a battery is
 > absent from the catalogue rather than offered short (ADR-S8-01). That is recorded as
 > partial rather than done, because a battery nobody can call is not a workflow
 > anybody has.

@@ -414,34 +414,27 @@ pub static ALL: &[Workflow] = &[
     Workflow {
         name: "leakage_audit",
         namespace: "audit",
-        description: "One call: the full leakage battery over a result — provenance, static \
-                      scan, bar-boundary alignment, label shuffle, perturbation and, where \
-                      text features exist, contamination. Answers clean, suspect or leaking. \
-                      `clean` is not `has an edge`.",
+        description: "One call: provenance, bar-boundary alignment, label shuffle and \
+                      perturbation. Answers clean, suspect or leaking — `clean` is not `has \
+                      an edge`. Refused for text features or SLv2 expressions.",
         arguments: &[
             ("experiment_id", "the experiment the result belongs to", true),
             ("instrument_id", "the instrument whose bars are probed", true),
-            ("metric", "the metric the shuffle and perturbation are scored on", true),
+            ("metric", "the metric the studies are scored on", true),
+            ("base_params", "the configuration under test", true),
+
+            ("timeframe", "the fast bar timeframe, e.g. 1m", false),
+            ("higher_timeframe", "the aggregate the strategy also reads, e.g. 1h", true),
             (
-                "base_params",
-                "the configuration under test, which both Studies are centred on",
-                true,
-            ),
-            ("timeframe", "bar timeframe for the provenance probe", false),
-            ("start", "window start for the provenance probe", false),
-            ("end", "window end for the provenance probe", false),
-            ("null_seeds", "`vary` for the label shuffle: {\"vary\":\"seeds\",\"n\":N}", true),
-            (
-                "perturbation",
-                "`vary` for the perturbation: {\"vary\":\"neighborhood\",...}",
-                true,
-            ),
-            (
-                "text_features",
-                "true when the feature set contains text, which is the only case the \
-                 contamination check applies to",
+                "rich_expressions",
+                "true when the strategy uses SLv2 expressions",
                 false,
             ),
+            ("start", "window start", false),
+            ("end", "window end", false),
+            ("null_seeds", "`vary` for the label shuffle (seeds)", true),
+            ("perturbation", "`vary` for the perturbation (neighborhood)", true),
+            ("text_features", "true when the feature set contains text", false),
         ],
         subject: "experiment_id",
         stages: &[
@@ -453,21 +446,45 @@ pub static ALL: &[Workflow] = &[
                 pinned: &[],
                 when: When::Always,
             }),
+            // **Deferred by design, not unbuilt** (S-3.11). The frozen expression
+            // grammar admits exactly two calls — `feature(name)` and
+            // `bar(open|high|low|close|volume)` — and the feature vocabulary a
+            // backtest can evaluate is causal. A scan for full-window
+            // statistics, future correlation and disguised label transforms has
+            // nothing expressible to find, so building it now would produce a
+            // pass that returns clean on every strategy the platform can
+            // represent. **A leakage scan that has never found anything reads as
+            // evidence there is nothing to find**, which is worse than not
+            // having one.
+            //
+            // Conditional on `rich_expressions`, which is what SLv2 (phase 5)
+            // introduces: expressions rich enough to hide a leak. A caller that
+            // says its strategy uses them is refused, naming this step.
             Stage::Owed {
                 label: "static scan",
-                needs: "a `scan_strategy_for_lookahead` tool over the strategy graph",
+                needs: "a `feature_leakage_scan` pass over SLv2 expressions \
+                        (`crates/strategy-validator`, phase 5)",
                 why: "the cheapest leak to find and the only one findable without running \
-                      anything: a node reading a bar it could not have had. Without it the \
-                      battery pays for five runs to find what a graph walk would have found \
-                      for nothing",
+                      anything. Deferred rather than missing: today's grammar cannot express \
+                      the constructs it looks for, so it would return clean on everything",
+                when: When::IfArgument("rich_expressions"),
             },
-            Stage::Owed {
+            // This was declared owed and **is built** (S-3.11):
+            // `bar_boundary_check` is a templated tool and has been since
+            // phase 3. It answers the question from the other end than the one
+            // this battery first asked for — it proves whether a
+            // higher-timeframe bar could have been read before it closed, by
+            // checking every aggregate against only the constituents that had
+            // completed, which catches the defect for every strategy at once
+            // rather than one run's fills at a time.
+            Stage::Call(Step {
+                tool: "bar_boundary_check",
                 label: "bar boundary",
-                needs: "a `check_bar_boundary_alignment` tool over the run's fills",
-                why: "a fill stamped at the open of the bar that produced the signal is the \
-                      most common leak in this platform's own simulator, and `probe_data_quality` \
-                      scans bars rather than fills — it cannot see it",
-            },
+                forward: &["instrument_id", "timeframe", "higher_timeframe", "start", "end"],
+                rename: &[],
+                pinned: &[],
+                when: When::Always,
+            }),
             study!(
                 "label shuffle",
                 "permutation_null",
@@ -480,12 +497,19 @@ pub static ALL: &[Workflow] = &[
                 "perturbation",
                 "does the edge survive perturbing the parameters it was found at?"
             ),
+            // **A stated non-goal**, not an oversight: AGENT-006 §11 defers
+            // `llm_contamination_check` "until a text feature exists". So this
+            // is conditional on the caller saying its feature set contains text
+            // — for a price feature set the step does not apply and the battery
+            // runs; for a text one the battery refuses and names this.
             Stage::Owed {
                 label: "contamination",
-                needs: "an `llm_contamination_probe` tool over the text feature corpus",
+                needs: "an `llm_contamination_probe` tool over the text feature corpus \
+                        (AGENT-006 §11 defers it until a text feature exists)",
                 why: "a language model that saw the evaluation window during pre-training \
                       produces a feature that knows the future, and no amount of bar forensics \
                       finds it",
+                when: When::IfArgument("text_features"),
             },
         ],
         verdicts: &["clean", "suspect", "leaking"],
@@ -591,6 +615,7 @@ pub static ALL: &[Workflow] = &[
                 why: "`hypothesise` writes the registry and nothing reads it by content, so \
                       the same hypothesis can be registered twice under two ids and both \
                       counted as independent looks",
+                when: When::Always,
             },
             Stage::Owed {
                 label: "negative results",
@@ -600,6 +625,7 @@ pub static ALL: &[Workflow] = &[
                       with a cited capability delta. Nothing stores the deltas, so the rule \
                       cannot be applied and a run can re-ask a question the platform has \
                       already answered no to",
+                when: When::Always,
             },
         ],
         verdicts: &["proceed", "duplicate", "blocked"],
@@ -657,6 +683,7 @@ pub static ALL: &[Workflow] = &[
                 why: "a strategy whose edge disappears under a one-bar fill delay has no edge \
                       that survives a real venue. `VarySpec` has no jitter dimension, so this \
                       cannot be a `run_study` kind — the simulator has to gain the knob first",
+                when: When::Always,
             },
             study!(
                 "regime conditioning",
@@ -699,29 +726,34 @@ pub static ALL: &[Workflow] = &[
                 needs: "a `signal_half_life` tool over the signal series",
                 why: "a signal whose half-life is shorter than the holding period is not the \
                       signal the backtest traded",
+                when: When::Always,
             },
             Stage::Owed {
                 label: "spanning",
                 needs: "a `spanning_regression` tool against the platform's factor set",
                 why: "a signal spanned by momentum is momentum, and paying for it twice is \
                       the most expensive thing a research programme can do",
+                when: When::Always,
             },
             Stage::Owed {
                 label: "style",
                 needs: "a style-attribution tool",
                 why: "without it, `signal_identity` cannot say what kind of thing it found",
+                when: When::Always,
             },
             Stage::Owed {
                 label: "cross-section vs time series",
                 needs: "a tool that re-scores the signal cross-sectionally and as a time series",
                 why: "the two have different capacity and different failure modes, and a \
                       signal presented as one when it is the other is sized wrongly",
+                when: When::Always,
             },
             Stage::Owed {
                 label: "health check",
                 needs: "a decay/turnover health tool over the live signal",
                 why: "a signal that has decayed since the sample is a signal that is no longer \
                       there",
+                when: When::Always,
             },
             Stage::Owed {
                 label: "crowding",
@@ -729,6 +761,7 @@ pub static ALL: &[Workflow] = &[
                         hold",
                 why: "free-only data (BS-007) has no positioning feed, so this may be owed for \
                       a long time — which is worth stating rather than quietly dropping",
+                when: When::Always,
             },
         ],
         verdicts: &["identified", "ambiguous", "unidentified"],
@@ -752,6 +785,7 @@ pub static ALL: &[Workflow] = &[
                 why: "a strategy that works at a size nobody would trade is not ready for \
                       anything, and the number is not derivable from a backtest that assumed \
                       infinite depth",
+                when: When::Always,
             },
             Stage::Call(Step {
                 tool: "get_venue_constraints",
@@ -766,12 +800,14 @@ pub static ALL: &[Workflow] = &[
                 needs: "a funding-and-borrow cost read for the instrument",
                 why: "a perpetual's funding can exceed the edge, and the backtest's cost model \
                       does not carry it",
+                when: When::Always,
             },
             Stage::Owed {
                 label: "divergence",
                 needs: "a paper-versus-backtest divergence read over the paper session",
                 why: "the one check that compares what the platform predicted to what the \
                       platform did. Without it, going live is the first time anyone finds out",
+                when: When::Always,
             },
             Stage::Owed {
                 label: "shadow session",
@@ -779,6 +815,7 @@ pub static ALL: &[Workflow] = &[
                         placing orders",
                 why: "the last rehearsal before capital, and the only one that exercises the \
                       live path end to end",
+                when: When::Always,
             },
         ],
         verdicts: &["go", "conditional", "no_go"],
@@ -1293,7 +1330,7 @@ mod tests {
         assert_eq!(
             by_workflow,
             vec![
-                ("leakage_audit", 3),
+                ("leakage_audit", 2),
                 ("hypothesis_precheck", 2),
                 ("precapital_battery", 1),
                 ("signal_identity", 6),
@@ -1301,12 +1338,21 @@ mod tests {
             ],
             "the owed list changed; update phase-8-integration.md and COMPLACENCY_LOG.md"
         );
-        assert_eq!(owed.len(), 16);
+        assert_eq!(owed.len(), 15);
+        // Two runnable, not one. `leakage_audit` joined when its bar-boundary
+        // step turned out to be **built** — `bar_boundary_check` has been a
+        // templated tool since S-3.11 — and its other two owed stages turned out
+        // to be *deferred by design* and conditional: the static scan has
+        // nothing expressible to find under today's grammar, and the
+        // contamination probe is a stated non-goal until a text feature exists.
+        // A battery is withheld for a gap that applies to every call, not for
+        // one that applies to inputs this call does not have.
         assert_eq!(
             ALL.iter().filter(|w| w.is_runnable()).count(),
-            1,
+            2,
             "the runnable count changed"
         );
         assert!(wf("selection_bias_verdict").is_runnable());
+        assert!(wf("leakage_audit").is_runnable());
     }
 }
