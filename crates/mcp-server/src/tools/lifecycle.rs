@@ -388,6 +388,57 @@ pub async fn open_question(api: &crate::ApiClient, params: &Value) -> Value {
     post(api, "/api/lifecycle/questions", params.clone()).await
 }
 
+/// `find_prior_hypothesis` — has this question been registered before?
+///
+/// `hypothesise` writes the registry and, until this existed, nothing read it by
+/// content. So the same hypothesis could be registered twice under two ids and
+/// counted as two independent looks — which is a multiple comparison the
+/// correction does not know about, in the direction that flatters.
+pub async fn find_prior_hypothesis(api: &crate::ApiClient, params: &Value) -> Value {
+    let Some(statement) = text(params, "statement") else {
+        return missing(
+            "statement",
+            "the hypothesis you are about to register, as you would register it",
+        );
+    };
+    match api
+        .post(
+            "/api/lifecycle/hypotheses/similar",
+            json!({ "statement": statement }),
+        )
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => e.to_tool_error(),
+    }
+}
+
+/// `prior_negative_results` — what has already been answered no, and under what
+/// condition it may be asked again.
+///
+/// The retry condition is **not** the caller's to state. It is derived from the
+/// failure class at the moment the platform wrote the negative result, and
+/// `None` is the important half: a weak effect has no retry condition, so an
+/// idea that died of one does not get to come back when a venue changes.
+pub async fn prior_negative_results(api: &crate::ApiClient, params: &Value) -> Value {
+    let Some(subject) = text(params, "subject") else {
+        return missing(
+            "subject",
+            "the instrument, hypothesis family, strategy or component you are about to work on",
+        );
+    };
+    match api
+        .get(&format!(
+            "/api/memory/negative?subject={}",
+            crate::tools::market::urlencode(&subject)
+        ))
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => e.to_tool_error(),
+    }
+}
+
 /// The catalogue entries for this namespace.
 #[must_use]
 pub fn specs() -> Vec<ToolSpec> {
@@ -527,6 +578,46 @@ pub fn specs() -> Vec<ToolSpec> {
         .internal()
         .evidence(&["proposal_id"])
         .notes("propose"),
+        ToolSpec::new(
+            "find_prior_hypothesis",
+            "lifecycle",
+            Risk::Read,
+            "Has this hypothesis already been registered? Call it before `hypothesise`: the \
+             same question registered twice is two looks the multiple-comparison correction \
+             does not know about. Exact match on the normalised statement, so an empty result \
+             is not proof the question is new.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "statement": {
+                        "type": "string",
+                        "description": "The hypothesis, as you would register it."
+                    }
+                },
+                "required": ["statement"]
+            }),
+        )
+        .internal(),
+        ToolSpec::new(
+            "prior_negative_results",
+            "memory",
+            Risk::Read,
+            "What this subject has already been answered no about, and the condition under \
+             which each may be asked again. The condition is the platform's, derived from the \
+             failure class — and no condition is the common answer: an idea that died of a \
+             weak effect does not come back because a venue changed.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "subject": {
+                        "type": "string",
+                        "description": "An instrument, a hypothesis family, a strategy or a component."
+                    }
+                },
+                "required": ["subject"]
+            }),
+        )
+        .internal(),
         ToolSpec::new(
             "open_question",
             "lifecycle",
@@ -689,16 +780,29 @@ mod tests {
         }
     }
 
-    /// Both are ring 1: they write platform artifacts and reach no further.
+    /// None of them reaches past ring 1.
+    ///
+    /// An **upper bound**, not an equality. It was an equality when every tool
+    /// here wrote something; the precheck reads (S-8.2) are `Risk::Read` and
+    /// therefore ring 0, which is not a weakening — a read reaches nothing, and
+    /// asserting it reaches ring 1 would have forced a read to be declared as a
+    /// write to satisfy a test. The property the name states is the ceiling.
     #[test]
     fn the_lifecycle_tools_reach_no_further_than_the_platform() {
         for spec in specs() {
-            assert_eq!(
-                spec.ring(),
-                crate::spec::RING_PLATFORM_ARTIFACTS,
-                "`{}`",
-                spec.name
+            assert!(
+                matches!(
+                    spec.ring(),
+                    crate::spec::RING_RESEARCH | crate::spec::RING_PLATFORM_ARTIFACTS
+                ),
+                "`{}` reaches {}",
+                spec.name,
+                spec.ring()
             );
+            // And a read is ring 0 rather than being quietly promoted.
+            if spec.risk == crate::taxonomy::Risk::Read {
+                assert_eq!(spec.ring(), crate::spec::RING_RESEARCH, "`{}`", spec.name);
+            }
         }
     }
 

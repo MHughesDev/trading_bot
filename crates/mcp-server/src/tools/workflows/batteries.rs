@@ -23,6 +23,8 @@
 //! distinguished by which checks *fired*, which is why the verdict function
 //! reads the steps rather than a single number.
 
+use serde_json::Value;
+
 use super::{Arg, Battery, Stage, Step, Verdict, When, Workflow};
 
 // ── Helpers the verdict functions share ──────────────────────────────────────
@@ -221,19 +223,103 @@ fn selection_bias(b: &Battery) -> Verdict {
 }
 
 /// `hypothesis_precheck` — has this been asked, and has it been answered?
+///
+/// # Three questions, and `blocked` is not `duplicate`
+///
+/// A duplicate is "somebody already did this; go and read it" — the run should
+/// stop and look rather than spend. **Blocked** is "the platform answered no and
+/// nothing can reopen it", which is a different instruction: there is nothing to
+/// read that will change the answer.
+///
+/// The difference lives in `FailureClass::retry_condition`, which the platform
+/// derives from the class at the moment it writes the negative result. `None` is
+/// the important half and it is why the class cannot be agent-declared: a weak
+/// effect has no retry condition, so an idea that died of one does not come back
+/// because a venue changed. That is AGENT-006 §6's "capability delta", already
+/// built and under another name — what was missing was a read.
 fn precheck(b: &Battery) -> Verdict {
     if let Some(v) = cannot_say(b, "blocked") {
         return v;
     }
+
+    // A closed door first. It is the strongest answer and the one a run most
+    // needs before it starts planning.
+    let negatives = b
+        .step("negative results")
+        .and_then(|s| s.field("rows"))
+        .and_then(Value::as_array)
+        .map(Clone::clone)
+        .unwrap_or_default();
+    let mut closed: Vec<String> = Vec::new();
+    let mut reopenable: Vec<String> = Vec::new();
+    for row in &negatives {
+        let class = row
+            .get("extra")
+            .and_then(|e| e.get("failure_class"))
+            .and_then(Value::as_str)
+            .unwrap_or("unclassified");
+        match row
+            .get("extra")
+            .and_then(|e| e.get("retry_condition"))
+            .and_then(Value::as_str)
+        {
+            Some(condition) if !condition.trim().is_empty() => {
+                reopenable.push(format!("{class}: {condition}"));
+            }
+            // Absent or null. Not "we have not looked" — the platform derived
+            // this class and that class has no retry condition.
+            _ => closed.push(class.to_string()),
+        }
+    }
+    if !closed.is_empty() {
+        return because(
+            "blocked",
+            format!(
+                "this subject has {} negative result(s) with no retry condition ({}). The \
+                 platform derived those classes; nothing you can cite reopens them, and a \
+                 rerun would spend the budget to learn what is already written down",
+                closed.len(),
+                closed.join(", ")
+            ),
+        );
+    }
+
+    // Then the two ways of having asked before.
+    let registered = b
+        .step("registry lookup")
+        .and_then(|s| s.field("matches"))
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
     let repeats = b
         .step("duplicate search")
         .and_then(|s| s.field("trials"))
         .and_then(|t| t.as_array().map(Vec::len))
         .unwrap_or(0);
-    if repeats > 0 {
+    if registered > 0 || repeats > 0 {
+        let mut why: Vec<String> = Vec::new();
+        if registered > 0 {
+            why.push(format!(
+                "{registered} hypothesis/es with this exact statement are already registered"
+            ));
+        }
+        if repeats > 0 {
+            why.push(format!("{repeats} trial(s) already ran this configuration"));
+        }
         return because(
             "duplicate",
-            format!("{repeats} trial(s) already ran this configuration; read them first"),
+            format!("{}; read them before spending", why.join(" and ")),
+        );
+    }
+
+    if !reopenable.is_empty() {
+        return because(
+            "proceed",
+            format!(
+                "nothing has asked this yet. {} earlier negative result(s) on this subject may \
+                 be reopened, and only on their own terms — {}",
+                reopenable.len(),
+                reopenable.join("; ")
+            ),
         );
     }
     because("proceed", "nothing in the ledger has asked this yet")
@@ -598,6 +684,11 @@ pub static ALL: &[Workflow] = &[
             ("experiment_id", "the line of work this belongs to", true),
             ("config_hash", "the configuration about to be tried", false),
             ("statement", "the hypothesis, for the registry lookup", true),
+            (
+                "subject",
+                "the instrument, family or component the negatives are about",
+                true,
+            ),
         ],
         subject: "experiment_id",
         stages: &[
@@ -609,24 +700,29 @@ pub static ALL: &[Workflow] = &[
                 pinned: &[],
                 when: When::Always,
             }),
-            Stage::Owed {
+            Stage::Call(Step {
+                tool: "find_prior_hypothesis",
                 label: "registry lookup",
-                needs: "a read tool over the hypothesis registry, by statement rather than by id",
-                why: "`hypothesise` writes the registry and nothing reads it by content, so \
-                      the same hypothesis can be registered twice under two ids and both \
-                      counted as independent looks",
+                forward: &["statement"],
+                rename: &[],
+                pinned: &[],
                 when: When::Always,
-            },
-            Stage::Owed {
+            }),
+            // The capability-delta rule turned out to be **built**, under
+            // another name. `FailureClass::retry_condition` is derived by the
+            // platform from the class at the moment the negative result is
+            // written, and `None` is the important half — a weak effect has no
+            // retry condition, so an idea that died of one does not come back
+            // when a venue changes. The rule the spec asks for is that
+            // condition; what was missing was a read.
+            Stage::Call(Step {
+                tool: "prior_negative_results",
                 label: "negative results",
-                needs: "a read over prior `execution_infeasible` and refuted verdicts, and the \
-                        capability-delta rule that lets one be retried",
-                why: "AGENT-006 §6 allows a prior `execution_infeasible` to be retried only \
-                      with a cited capability delta. Nothing stores the deltas, so the rule \
-                      cannot be applied and a run can re-ask a question the platform has \
-                      already answered no to",
+                forward: &[],
+                rename: &[("subject", "subject")],
+                pinned: &[],
                 when: When::Always,
-            },
+            }),
         ],
         verdicts: &["proceed", "duplicate", "blocked"],
         verdict: precheck,
@@ -973,6 +1069,113 @@ mod tests {
         let v = leakage(&b);
         assert_eq!(v.value, "suspect");
         assert!(v.because.contains("isolated spike"), "{}", v.because);
+    }
+
+    // ── hypothesis_precheck ─────────────────────────────────────────────────
+
+    /// One negative result, as `/api/memory/negative` serves it.
+    fn negative(class: &str, retry: Option<&str>) -> serde_json::Value {
+        json!({
+            "id": format!("neg_{class}"),
+            "subject": "BTC-USD",
+            "extra": { "failure_class": class, "retry_condition": retry },
+        })
+    }
+
+    fn precheck_battery(
+        matches: usize,
+        trials: usize,
+        negatives: Vec<serde_json::Value>,
+    ) -> Battery {
+        battery(
+            "hypothesis_precheck",
+            vec![
+                step("duplicate search", json!({ "trials": vec![json!({}); trials] })),
+                step("registry lookup", json!({ "matches": vec![json!({}); matches] })),
+                step("negative results", json!({ "rows": negatives })),
+            ],
+        )
+    }
+
+    /// Nothing has asked this: proceed.
+    #[test]
+    fn a_new_question_proceeds() {
+        let v = precheck(&precheck_battery(0, 0, vec![]));
+        assert_eq!(v.value, "proceed");
+    }
+
+    /// **`blocked` is not `duplicate`.** A duplicate says "go and read it"; a
+    /// block says "the platform answered no and nothing reopens it". Those are
+    /// different instructions to a run, and collapsing them would send it
+    /// reading for an answer that will not change.
+    #[test]
+    fn a_closed_door_blocks_and_a_repeat_only_duplicates() {
+        // A weak effect has no retry condition. `FailureClass::retry_condition`
+        // returns `None` for it, and that is why the class cannot be
+        // agent-declared.
+        let blocked = precheck(&precheck_battery(0, 0, vec![negative("weak_effect", None)]));
+        assert_eq!(blocked.value, "blocked");
+        assert!(blocked.because.contains("weak_effect"), "{}", blocked.because);
+
+        let dup = precheck(&precheck_battery(1, 0, vec![]));
+        assert_eq!(dup.value, "duplicate");
+    }
+
+    /// A negative result with a retry condition does **not** block. It is a
+    /// door with a key, and the verdict names the key.
+    #[test]
+    fn a_reopenable_negative_proceeds_and_states_its_terms() {
+        let v = precheck(&precheck_battery(
+            0,
+            0,
+            vec![negative(
+                "capacity_insufficient",
+                Some("retry if AUM target <= collapse_aum (2000000)"),
+            )],
+        ));
+        assert_eq!(v.value, "proceed");
+        assert!(v.because.contains("collapse_aum"), "{}", v.because);
+        assert!(v.because.contains("their own terms"), "{}", v.because);
+    }
+
+    /// One closed door among reopenable ones still closes it.
+    #[test]
+    fn one_closed_door_is_enough() {
+        let v = precheck(&precheck_battery(
+            0,
+            0,
+            vec![
+                negative("capacity_insufficient", Some("retry if AUM target <= x")),
+                negative("no_better_than_null", None),
+            ],
+        ));
+        assert_eq!(v.value, "blocked");
+        assert!(v.because.contains("no_better_than_null"), "{}", v.because);
+    }
+
+    /// An empty or missing `retry_condition` is a closed door, not an unknown
+    /// one. The platform derived the class; an absent condition means that class
+    /// has none.
+    #[test]
+    fn an_absent_retry_condition_is_a_closed_door() {
+        for absent in [json!(null), json!(""), json!("   ")] {
+            let row = json!({
+                "id": "neg_1",
+                "extra": { "failure_class": "replication_failed", "retry_condition": absent },
+            });
+            let v = precheck(&precheck_battery(0, 0, vec![row]));
+            assert_eq!(v.value, "blocked", "{absent}");
+        }
+    }
+
+    /// Both ways of having asked before are reported together. A run told one at
+    /// a time reruns the precheck to learn the other.
+    #[test]
+    fn a_registered_statement_and_a_repeated_config_are_both_named() {
+        let v = precheck(&precheck_battery(2, 3, vec![]));
+        assert_eq!(v.value, "duplicate");
+        assert!(v.because.contains("2 hypothesis"), "{}", v.because);
+        assert!(v.because.contains("3 trial(s)"), "{}", v.because);
     }
 
     fn clean_selection() -> Vec<Ran> {
@@ -1331,14 +1534,13 @@ mod tests {
             by_workflow,
             vec![
                 ("leakage_audit", 2),
-                ("hypothesis_precheck", 2),
                 ("precapital_battery", 1),
                 ("signal_identity", 6),
                 ("go_live_readiness", 4),
             ],
             "the owed list changed; update phase-8-integration.md and COMPLACENCY_LOG.md"
         );
-        assert_eq!(owed.len(), 15);
+        assert_eq!(owed.len(), 13);
         // Two runnable, not one. `leakage_audit` joined when its bar-boundary
         // step turned out to be **built** — `bar_boundary_check` has been a
         // templated tool since S-3.11 — and its other two owed stages turned out
@@ -1349,10 +1551,14 @@ mod tests {
         // one that applies to inputs this call does not have.
         assert_eq!(
             ALL.iter().filter(|w| w.is_runnable()).count(),
-            2,
+            3,
             "the runnable count changed"
         );
         assert!(wf("selection_bias_verdict").is_runnable());
         assert!(wf("leakage_audit").is_runnable());
+        // `hypothesis_precheck` joined when its two owed steps turned out to be
+        // reads over tables that already existed - and the "capability delta"
+        // rule turned out to be `FailureClass::retry_condition`, already built.
+        assert!(wf("hypothesis_precheck").is_runnable());
     }
 }

@@ -983,6 +983,10 @@ async fn dispatch_untraced(
         "family_wise_test" => tools::audit::family_wise_test(&ctx.api, params).await,
         "metric_integrity" => tools::audit::metric_integrity(&ctx.api, params).await,
 
+        // ── The precheck reads (S-8.2) ─────────────────────────────────────────
+        "find_prior_hypothesis" => tools::lifecycle::find_prior_hypothesis(&ctx.api, params).await,
+        "prior_negative_results" => tools::lifecycle::prior_negative_results(&ctx.api, params).await,
+
         // ── Code (S-8.8) ───────────────────────────────────────────────────────
         "run_python" => tools::code::run_python(ctx, params).await,
 

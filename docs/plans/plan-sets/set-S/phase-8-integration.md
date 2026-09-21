@@ -90,7 +90,7 @@ apply" are different facts (ADR-S8-08).
 spelling of `admit`).
 
 ### S-8.2 The verdict workflows — L
-`PARTIAL` — all three declared; `selection_bias_verdict` runs, the other two are owed tools
+`DONE` 2026-09-21 — all three run
 
 `leakage_audit` (provenance → static scan → bar boundary → label shuffle → perturbation →
 LLM contamination if text features exist; verdict `clean | suspect | leaking`, and **"no
@@ -108,11 +108,50 @@ into the trial ticket; the leakage audit's bundle is permanent, not transient.
 (ADR-S8-04). Verdicts `passes | fails | inconclusive`; a statistic that did not come
 back is `inconclusive`, never a pass.
 
-**What is owed.** `leakage_audit` needs `scan_strategy_for_lookahead`,
-`check_bar_boundary_alignment` and `llm_contamination_probe`; `hypothesis_precheck`
-needs a hypothesis-registry read *by content* and a negative-results read carrying the
-capability-delta rule. The steps that exist are declared and wired, so each battery is
-one tool from running.
+**What was owed, and what it turned out to be (2026-09-21).** Both remaining batteries
+were declared owed five tools between them. **None of the five needed building.**
+
+`leakage_audit` was one mistake and one rule away:
+
+* **The bar-boundary step was already built.** `bar_boundary_check` has been a templated
+  tool since S-3.11 — it proves whether a higher-timeframe bar could have been read
+  before it closed, by checking every aggregate against only the constituents that had
+  completed. I declared an owed `check_bar_boundary_alignment` without looking for the
+  tool that already answered the question. That is this repository's dominant defect
+  shape aimed at its own bookkeeping: **a gap written down that was not there.**
+* **The other two are deferred by design and are conditional.** The static scan has
+  nothing expressible to find under the frozen grammar (S-3.11 argues it properly), and
+  the contamination probe is a stated non-goal in AGENT-006 §11. Neither applies to any
+  strategy this platform can currently represent.
+
+So `Stage::Owed` gained a `when` (ADR-S8-09): **a battery is withheld for a gap that
+applies to every call, not for one that applies to inputs a given call does not have.**
+The refusal moves rather than disappearing — a caller that says `text_features` or
+`rich_expressions` is refused by name.
+
+`hypothesis_precheck` was two reads over tables that already existed:
+
+* **The registry read.** `hypothesise` has written `agent_lifecycle.hypothesis` since
+  S-10.4 and nothing read it *by content*, so one statement could be registered twice
+  under two ids and counted as two independent looks. `find_prior_hypothesis` is an
+  exact match on the normalised statement and says so: **an empty list is not proof the
+  question is new.** A near-duplicate check needs embeddings and a threshold, and a
+  threshold is a number somebody picks.
+* **The capability-delta rule is `FailureClass::retry_condition`**, already built and
+  already persisted. The platform derives it from the class when it writes the negative
+  result, and `None` is the load-bearing half — which is exactly why the class cannot be
+  agent-declared. What was missing was a read: `GET /api/memory/negative` could list by
+  kind or by nothing, but not by subject.
+
+**`blocked` is not `duplicate`.** A duplicate says "somebody already did this, go and
+read it"; a block says "the platform answered no and nothing reopens it". Different
+instructions, and collapsing them would send a run reading for an answer that cannot
+change.
+
+**Gate 2 now demands `leakage_audit = clean`** — and that was not a second decision.
+`a_requirement_is_enforced_exactly_when_its_battery_can_run` failed the moment the
+battery became runnable and named the file and the flag. The mechanism S-8.4 built for
+exactly this fired on its first real occasion, without anybody remembering it existed.
 
 **Bundle permanence** is `mlops.workflow_verdict` (`0135`): every step, its status and
 its ids, written by the engine from steps it dispatched — not by a tool the model

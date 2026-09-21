@@ -29,7 +29,7 @@
 //! somebody could.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -118,20 +118,54 @@ fn unknown_bucket(bucket: &str) -> axum::response::Response {
         .into_response()
 }
 
-/// GET /api/memory/{bucket}
+/// What a listing may be narrowed by.
+#[derive(Debug, serde::Deserialize)]
+pub struct ListQuery {
+    /// One instrument, hypothesis family, strategy or platform component.
+    ///
+    /// The question `hypothesis_precheck` asks is "has this subject already
+    /// produced a negative result", which is a *subject* question over one kind
+    /// — and the route could answer neither half together. Added here rather
+    /// than as a second endpoint: two routes over one table is two places for
+    /// the archived-and-superseded filter to be forgotten, and that filter is
+    /// what stops a retracted entry being read as live.
+    #[serde(default)]
+    pub subject: Option<String>,
+}
+
+/// GET /api/memory/{bucket}?subject=…
 pub async fn list(
     State(state): State<AppState>,
     token: BearerToken,
     Path(bucket): Path<String>,
+    Query(q): Query<ListQuery>,
 ) -> impl IntoResponse {
     let Some(kind) = kind_for(&bucket) else {
         return unknown_bucket(&bucket);
     };
     let store = MemoryStore::new(state.pg.clone());
-    match store.by_kind(token.user_id(), kind, 200).await {
+    let fetched = match q.subject.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        // Narrowed by subject, then by kind. The store's subject query is the
+        // one that already carries the archived/superseded filter; filtering the
+        // kind afterwards costs a few rows and keeps one query.
+        Some(subject) => store
+            .for_subject(token.user_id(), subject, 200)
+            .await
+            .map(|entries| entries.into_iter().filter(|e| e.kind == kind).collect()),
+        None => store.by_kind(token.user_id(), kind, 200).await,
+    };
+    match fetched {
         Ok(entries) => {
             let rows: Vec<Value> = entries.iter().map(row).collect();
-            Json(json!({ "rows": rows, "bucket": bucket, "kind": kind.as_str() })).into_response()
+            Json(json!({
+                "rows": rows,
+                "bucket": bucket,
+                "kind": kind.as_str(),
+                // Echoed, so a caller that mistyped a subject reads an empty
+                // list as "nothing for *that*" rather than as "nothing at all".
+                "subject": q.subject,
+            }))
+            .into_response()
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

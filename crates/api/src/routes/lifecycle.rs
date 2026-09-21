@@ -544,6 +544,103 @@ async fn head_registration(
     }
 }
 
+/// What a hypothesis registry lookup asks.
+#[derive(Debug, Deserialize)]
+pub struct SimilarHypothesisBody {
+    /// The hypothesis, as it would be registered.
+    pub statement: String,
+}
+
+/// Normalise a hypothesis statement for comparison.
+///
+/// Lowercase, collapse runs of whitespace, drop trailing punctuation. Nothing
+/// cleverer, and the limit is stated rather than implied: **two statements that
+/// say the same thing in different words do not match.** This catches the
+/// literal repeat — the same question asked again by a later run, or by the same
+/// run after a restart — and that is the case AGENT-006 §6 names, because
+/// `hypothesise` writes the registry and nothing read it by content, so one
+/// hypothesis could be registered twice under two ids and counted as two
+/// independent looks.
+///
+/// A near-duplicate check would need embeddings and a threshold, and a threshold
+/// is a number somebody picks. This returns exact matches, which nobody has to
+/// argue with, and the battery treats the result as a *check* rather than a
+/// block.
+#[must_use]
+pub fn normalise_statement(s: &str) -> String {
+    let lowered = s.trim().to_lowercase();
+    let collapsed: String = lowered.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed
+        .trim_end_matches(|c: char| c == '.' || c == '?' || c == '!')
+        .to_string()
+}
+
+/// `POST /api/lifecycle/hypotheses/similar` — has this been asked before?
+///
+/// Scoped to the caller's own runs. A hypothesis another tenant registered is
+/// not a repeat of this one, and reading it would leak the question.
+pub async fn similar_hypotheses(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(body): Json<SimilarHypothesisBody>,
+) -> impl IntoResponse {
+    let needle = normalise_statement(&body.statement);
+    if needle.is_empty() {
+        return bad_request(
+            "empty_statement",
+            "a registry lookup needs the statement it is looking for".to_string(),
+            "send the hypothesis you are about to register",
+        )
+        .into_response();
+    }
+
+    type Row = (uuid::Uuid, String, String, String, Option<String>);
+    let rows: Result<Vec<Row>, sqlx::Error> = sqlx::query_as::<_, Row>(
+        "SELECT h.hypothesis_id, h.statement, h.falsifier, h.status, h.inconclusive_why
+           FROM agent_lifecycle.hypothesis h
+           JOIN agent_runs r ON r.run_id = h.run_id
+          WHERE r.user_id = $1
+          ORDER BY h.created_at DESC
+          LIMIT 500",
+    )
+    .bind(token.user_id())
+    .fetch_all(&state.pg)
+    .await;
+
+    match rows {
+        Ok(rows) => {
+            let matches: Vec<Value> = rows
+                .into_iter()
+                .filter(|(_, statement, ..)| normalise_statement(statement) == needle)
+                .map(|(id, statement, falsifier, status, why)| {
+                    json!({
+                        "hypothesis_id": id,
+                        "statement": statement,
+                        "falsifier": falsifier,
+                        "status": status,
+                        "inconclusive_why": why,
+                    })
+                })
+                .collect();
+            Json(json!({
+                "statement": body.statement,
+                "matches": matches,
+                // Said rather than left to the reader: an empty list here means
+                // "no *identical* statement", not "nobody has asked this".
+                "note": "exact match on the normalised statement. Two statements that say the \
+                         same thing in different words do not match, so an empty list is not \
+                         proof the question is new.",
+            }))
+            .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "registry_unreadable", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ProposalBody {
     kind: String,
