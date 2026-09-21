@@ -243,9 +243,33 @@ export function MemoryRowCard({ row, onRetry }: { row: MemoryRow; onRetry?: (r: 
   )
 }
 
+/** A `?bucket=` a digest line put in the URL, or `null` if it named none this page has. */
+export function bucketFromParam(raw: string | null): Bucket | null {
+  return BUCKETS.some((b) => b.value === raw) ? (raw as Bucket) : null
+}
+
+/** The query string, or an empty one where there is no browser to ask. */
+function deepLink(): URLSearchParams {
+  try {
+    return new URLSearchParams(window.location.search)
+  } catch {
+    return new URLSearchParams()
+  }
+}
+
 export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (seed: string) => void }) {
-  const [bucket, setBucket] = useState<Bucket>('findings')
-  const [q, setQ] = useState('')
+  // `?bucket=findings&find=f_31a` — how a digest line opens the record it names
+  // (AGENT-014 §2.4). Read once as the initial state rather than held in the
+  // URL, so the tabs and the search box still belong to the person once they
+  // have arrived.
+  //
+  // Straight off `location.search` rather than through `useSearchParams`: this
+  // browser is rendered on its own in three tests with no router around it, and
+  // a hook that throws outside a `<Router>` would make a deep link cost four
+  // passing tests their setup.
+  const params = deepLink()
+  const [bucket, setBucket] = useState<Bucket>(() => bucketFromParam(params.get('bucket')) ?? 'findings')
+  const [q, setQ] = useState(() => params.get('find') ?? '')
   const [conflictsOnly, setConflictsOnly] = useState(false)
   // Closed questions are hidden by default and counted in the button, never
   // dropped from the response: a question nobody can find again is one the
@@ -263,7 +287,10 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
     [rows],
   )
   const filtered = rows
-    .filter((r) => `${r.claim} ${r.subject}`.toLowerCase().includes(q.toLowerCase()))
+    // The id is searched as well as the prose. Every other surface quotes a
+    // record by its id — a digest line, an evidence chip, a dossier's funnel —
+    // and pasting one of those into this box used to find nothing at all.
+    .filter((r) => `${r.id} ${r.claim} ${r.subject}`.toLowerCase().includes(q.toLowerCase()))
     // Open first, and blocking ahead of the rest — the same order the brief
     // uses (`questions::brief_order`), so what a run is shown first and what a
     // person is shown first are the same thing.

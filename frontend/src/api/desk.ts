@@ -610,6 +610,245 @@ export function charterView(s: SessionDetail | null | undefined): CharterView | 
   }
 }
 
+// ── The digest, which renders as a card in the journal (AGENT-014 §2.4) ──────
+//
+// `GET …/{id}/digests` answers rows whose `body` is `research_session::digest::
+// Digest` verbatim. Two things about that body decide how it is decoded here.
+//
+// **Every line carries a reference and the card has to open it.** §2.4's "each
+// line opens the thing it names" and §12.11's "every line resolves on click"
+// are the acceptance, and a line whose reference has an empty id cannot meet
+// it. `Digest::unresolvable` is the Rust reader for exactly that hole; this is
+// its counterpart, so the card can say a line opens nothing rather than render
+// a control that does nothing.
+//
+// **The spend has a unit and the unit is not dollars.** Migration 0139 adds
+// `session_digests.spend_unit`, NOT NULL and CHECKed to ('trials','usd'),
+// because the number this platform can measure per run is trials —
+// `agent_runs.trials_spent` — and there is no per-run USD anywhere. The digest
+// body's own budget sentence reads "3.00 spent over 2 runs" with **no unit in
+// it**, and that sentence lands on a card beside a charter that says $25/day.
+// So the unit is read here, optionally, and the card refuses a currency symbol
+// without one. A number that looks like dollars and is not is worse than a
+// number with no unit, because only the second one makes the reader check.
+
+/** The units a digest's spend can be counted in (migration 0139's CHECK). */
+export type SpendUnit = 'trials' | 'usd'
+
+/** What a digest line opens. `kind` mirrors `digest::RefKind`. */
+export interface SessionDigestRef {
+  kind: string
+  id: string
+}
+
+export interface SessionDigestLine {
+  at: SessionDigestRef
+  text: string
+}
+
+export interface SessionDigestSection {
+  heading: string
+  lines: SessionDigestLine[]
+}
+
+export interface SessionDigestPeriod {
+  from: string
+  to: string
+  from_seq: number
+  to_seq: number
+}
+
+export interface SessionDigestBudget {
+  runs_finished: number
+  spent: number
+  knowledge_units: number
+  /** `null` for a barren period: no knowledge means no cost *per* unit. */
+  cost_per_knowledge_unit: number | null
+}
+
+/** `digest::Digest`, as the route sends it inside `body`. */
+export interface SessionDigestBody {
+  session?: string
+  period?: SessionDigestPeriod
+  budget?: SessionDigestBudget
+  sections?: SessionDigestSection[]
+  /**
+   * Optional, and read as well as the row's column: the driver writes the unit
+   * onto the `digest_written` event too, so a writer that folded it into the
+   * body would be honest rather than wrong. Neither place is assumed.
+   */
+  spend_unit?: string | null
+}
+
+/** One row of `GET …/{id}/digests`. */
+export interface SessionDigestRow {
+  digest_id: string
+  from_seq: number
+  to_seq: number
+  body: SessionDigestBody | null
+  created_at: string
+  /**
+   * `session_digests.spend_unit` (migration 0139). **Optional on purpose:** the
+   * route does not select it today, and the moment it does this starts
+   * rendering. Absent is not `usd`.
+   */
+  spend_unit?: string | null
+}
+
+/** A digest decoded for the card, with the unit settled one way or the other. */
+export interface SessionDigestView {
+  digest_id: string
+  created_at: string
+  from_seq: number
+  to_seq: number
+  period: SessionDigestPeriod | null
+  budget: SessionDigestBudget | null
+  /** In `SESSION_DIGEST_HEADINGS` order; a heading this build does not know goes last. */
+  sections: SessionDigestSection[]
+  /** `null` when nothing said. Never defaulted to `usd`. */
+  spend_unit: SpendUnit | null
+  /** Lines whose reference opens nothing — the §12.11 hole, counted. */
+  unresolvable: number
+}
+
+/** `digest::Heading::ALL`, in §2.4's order, with `Heading::title`'s words. */
+export const SESSION_DIGEST_HEADINGS: Array<{ key: string; title: string }> = [
+  { key: 'runs_finished', title: 'Runs finished' },
+  { key: 'findings', title: 'Findings' },
+  { key: 'negatives', title: 'Negative results' },
+  { key: 'questions', title: 'Questions' },
+  { key: 'contradictions', title: 'Contradictions' },
+  { key: 'proposals_awaiting', title: 'Awaiting you' },
+  { key: 'budget', title: 'Budget' },
+  { key: 'next_up', title: 'Next up' },
+  { key: 'paused', title: 'Stopped or paused' },
+]
+
+export function sessionDigestHeading(key: string): string {
+  return SESSION_DIGEST_HEADINGS.find((h) => h.key === key)?.title ?? key
+}
+
+function readSpendUnit(raw: unknown): SpendUnit | null {
+  return raw === 'trials' || raw === 'usd' ? raw : null
+}
+
+/** Whether a reference names something the card can open at all. */
+export function sessionDigestRefResolves(r: SessionDigestRef | null | undefined): boolean {
+  return !!r && typeof r.id === 'string' && r.id.trim() !== ''
+}
+
+export function sessionDigestView(row: SessionDigestRow | null | undefined): SessionDigestView | null {
+  if (!row) return null
+  const body = row.body ?? {}
+  const known = new Map(SESSION_DIGEST_HEADINGS.map((h, i) => [h.key, i]))
+  const sections = [...(body.sections ?? [])]
+    .filter((s) => !!s && Array.isArray(s.lines))
+    // An unrecognised heading sorts last rather than being dropped: a section
+    // whose name this build does not know still holds lines the session wrote.
+    .sort((a, b) => (known.get(a.heading) ?? 99) - (known.get(b.heading) ?? 99))
+  return {
+    digest_id: row.digest_id,
+    created_at: row.created_at,
+    from_seq: row.from_seq,
+    to_seq: row.to_seq,
+    period: body.period ?? null,
+    budget: body.budget ?? null,
+    sections,
+    // The row first, because that is where 0139's column is; the body second,
+    // because the driver also writes the unit onto its event payload.
+    spend_unit: readSpendUnit(row.spend_unit) ?? readSpendUnit(body.spend_unit),
+    unresolvable: sections.flatMap((s) => s.lines).filter((l) => !sessionDigestRefResolves(l?.at)).length,
+  }
+}
+
+/**
+ * Where a digest line goes when it is clicked (§2.4's "each line opens the
+ * thing it names"; §12.11's "every line resolves on click").
+ *
+ * A function rather than a `switch` inside the card, because the interesting
+ * half is the `none` arm: nine `RefKind`s exist and the desk does not have a
+ * surface for all of them. The ones it cannot open have to say so on the card
+ * rather than render as a control that swallows the click, and the reason has
+ * to be specific enough to act on — which is also what makes the gap countable
+ * from a test instead of discovered by clicking.
+ */
+export type SessionDigestTarget =
+  | { kind: 'run'; runId: string }
+  /** A tab of the session's own right panel. */
+  | { kind: 'panel'; tab: 'agenda' | 'charter' }
+  | { kind: 'route'; to: string }
+  | { kind: 'none'; why: string }
+
+export function sessionDigestTarget(ref: SessionDigestRef | null | undefined): SessionDigestTarget {
+  if (!sessionDigestRefResolves(ref)) {
+    return { kind: 'none', why: 'this line carries no id, so there is nothing to open' }
+  }
+  const id = encodeURIComponent((ref as SessionDigestRef).id)
+  switch ((ref as SessionDigestRef).kind) {
+    case 'run':
+      return { kind: 'run', runId: (ref as SessionDigestRef).id }
+    case 'item':
+      return { kind: 'panel', tab: 'agenda' }
+    case 'session':
+      return { kind: 'panel', tab: 'charter' }
+    case 'proposal':
+      // No `?find=`: the queue has no filter to honour one, and a query
+      // parameter nothing reads is a claim the surface does not keep. Every
+      // proposal a digest lists is one still awaiting a decision, which is
+      // exactly the list this page shows.
+      return { kind: 'route', to: '/desk/proposals' }
+    case 'finding':
+    case 'contradiction':
+      // A contradiction is a pair of findings, and the memory browser's
+      // conflict view is where a pair is read.
+      return { kind: 'route', to: `/desk/memory?bucket=findings&find=${id}` }
+    case 'negative':
+      return { kind: 'route', to: `/desk/memory?bucket=negative&find=${id}` }
+    case 'question':
+      return { kind: 'route', to: `/desk/memory?bucket=questions&find=${id}` }
+    case 'event':
+      // Honest, and a gap worth naming: `session_events` is served as SSE and
+      // as nothing a person can read a row of. The line keeps its id so it
+      // starts opening the moment a log view exists.
+      return {
+        kind: 'none',
+        why: 'nothing in the desk renders a row of the session log yet, so this event cannot be opened from here',
+      }
+    default:
+      return { kind: 'none', why: `the desk has no surface for a ${(ref as SessionDigestRef).kind}` }
+  }
+}
+
+/**
+ * The budget sentence, written here rather than taken from the server's line.
+ *
+ * The server's own text is "3.00 spent over 2 runs — 1.50 per knowledge unit"
+ * with **no unit in it**, and that writer is outside this surface. Rendered
+ * verbatim beside a charter that says $25/day, it is a trial count a reader
+ * will read as money. So the card builds the sentence from the numbers and the
+ * unit, and where there is no unit it says so rather than choosing one.
+ */
+export function sessionDigestBudgetLine(view: Pick<SessionDigestView, 'budget' | 'spend_unit'>): string {
+  const b = view.budget
+  if (!b) return 'This digest carries no budget summary, so nothing here says what the period cost.'
+  const runs = `${b.runs_finished} run${b.runs_finished === 1 ? '' : 's'}`
+  const amount =
+    view.spend_unit === 'usd'
+      ? `$${b.spent.toFixed(2)}`
+      : view.spend_unit === 'trials'
+        ? `${b.spent.toFixed(2)} trials`
+        : `${b.spent.toFixed(2)}, in a unit nothing recorded — not dollars`
+  const per =
+    b.cost_per_knowledge_unit === null
+      ? ' and no knowledge units, so there is no cost per unit to report'
+      : view.spend_unit === 'usd'
+        ? ` — $${b.cost_per_knowledge_unit.toFixed(2)} per knowledge unit`
+        : view.spend_unit === 'trials'
+          ? ` — ${b.cost_per_knowledge_unit.toFixed(2)} trials per knowledge unit`
+          : ` — ${b.cost_per_knowledge_unit.toFixed(2)} per knowledge unit, in that same unrecorded unit`
+  return `${amount} spent over ${runs}${per}`
+}
+
 // ── Desk home ────────────────────────────────────────────────────────────────
 
 export interface NeedsYouRow {
@@ -987,8 +1226,42 @@ export const deskApi = {
     optional<{ items: AgendaItem[] }>(client.get(`/api/research/sessions/${sessionId}/agenda`)),
   vetoAgendaItem: (sessionId: string, itemId: string) =>
     optional<{ ok: boolean }>(client.post(`/api/research/sessions/${sessionId}/agenda/${itemId}/veto`)),
+  /**
+   * The other half of the pair the board already drew a button for.
+   *
+   * `AgendaTab` has rendered **Approve** beside **Veto** since it was written
+   * and `Conversation` passed no `onApprove`, so under `supervised` — the
+   * autonomy in which every item waits for a human before it starts — the one
+   * control that releases an item reached nothing. The route has been served
+   * since S-11.14.
+   */
+  approveAgendaItem: (sessionId: string, itemId: string) =>
+    optional<{ ok: boolean }>(
+      client.post(`/api/research/sessions/${sessionId}/agenda/${itemId}/approve`),
+    ),
+  /**
+   * A drag on the board (AGENT-014 §9).
+   *
+   * **`order` is the items the human moved up, not the board.** The route marks
+   * every id it is sent with the `user` source, and a `user` item bypasses
+   * scoring entirely (§4.2) — so posting the whole board would tell the session
+   * that every question on it is a priority, which is the same as telling it
+   * none is. `prioritisedBy` computes the short list.
+   */
   reorderAgenda: (sessionId: string, order: string[]) =>
-    optional<{ ok: boolean }>(client.post(`/api/research/sessions/${sessionId}/agenda/order`, { order })),
+    optional<{ ok: boolean; prioritised?: number }>(
+      client.post(`/api/research/sessions/${sessionId}/agenda/order`, { order }),
+    ),
+  /**
+   * The session's digests, newest first (AGENT-014 §2.4).
+   *
+   * Served since S-11.14 and called by nothing until the journal had a card to
+   * put one on.
+   */
+  digests: (sessionId: string) =>
+    optional<{ digests: SessionDigestRow[] }>(
+      client.get(`/api/research/sessions/${sessionId}/digests`),
+    ),
 
   /**
    * Scale, halt or resume one strategy under the monitor (COMP-007 §6).

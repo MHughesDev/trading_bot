@@ -73,20 +73,56 @@ pub const COST_DRIFT_WINDOWS_OF_HISTORY: usize = 2;
 /// carry it. Modelling it here would invite a branch for a state that cannot
 /// exist, and a reader would reasonably conclude that the platform sometimes
 /// runs known duplicates.
+///
+/// # The common case is [`Precheck::NotRecorded`]
+///
+/// §7.1's three words are a vocabulary **nothing on this platform writes**.
+/// `hypothesis_precheck` files `blocked | duplicate | new`, and most runs have
+/// no `mlops.workflow_verdict` row for that workflow at all. So the absence of
+/// a verdict is not the edge case here, it is the ordinary one, and before this
+/// variant existed a caller joining for the verdict had to read `NULL` as one
+/// of the two words — which meant either inventing a `proceed_new` nobody
+/// recorded or manufacturing the `proceed_as_variant` that `circling` counts.
+/// Neither is a reading the log supports, so there is a third word for having
+/// no word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Precheck {
     ProceedNew,
     ProceedAsVariant,
+    /// No precheck verdict was recorded for this run. **Not a third opinion:**
+    /// it is the absence of one, and no rule may read it as evidence. It
+    /// cannot group under [`Rule::Circling`], which needs runs the precheck
+    /// positively called variants.
+    NotRecorded,
 }
 
 impl Precheck {
+    /// Every word, absence last.
+    pub const ALL: &'static [Precheck] = &[
+        Precheck::ProceedNew,
+        Precheck::ProceedAsVariant,
+        Precheck::NotRecorded,
+    ];
+
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Precheck::ProceedNew => "proceed_new",
             Precheck::ProceedAsVariant => "proceed_as_variant",
+            Precheck::NotRecorded => "not_recorded",
         }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|p| p.as_str() == s)
+    }
+
+    /// Whether a verdict was recorded at all.
+    #[must_use]
+    pub fn is_recorded(self) -> bool {
+        !matches!(self, Precheck::NotRecorded)
     }
 }
 
@@ -99,8 +135,18 @@ impl Precheck {
 pub struct FinishedRun {
     pub item: Uuid,
     pub run: Uuid,
-    /// The hypothesis family the run tested. Two of the four rules group on it.
-    pub family: String,
+    /// The hypothesis family the run tested, when one was recorded. Two of the
+    /// four rules group on it.
+    ///
+    /// **`None` is not a family.** An `AgendaItem` carries no family, so it
+    /// comes from the run's own hypothesis row and that row may not have one.
+    /// A caller that filled the hole with a per-run name — `unrecorded:run:…` —
+    /// was doing the right thing by accident: a name unique to one run cannot
+    /// reach [`CIRCLING_REPEATS`] and cannot be the `sole_value` of a window.
+    /// This says it instead of arranging it, so that a rule cannot come to
+    /// depend on the arrangement, and so that no amendment can ever suggest
+    /// excluding a family that has no name.
+    pub family: Option<String>,
     /// The workflow that ran, so cost drift can name what got expensive.
     pub workflow: String,
     /// Every source that wanted the item — a list, because
@@ -140,21 +186,48 @@ impl FinishedRun {
     /// The neutral case is the *barren* one rather than a productive one,
     /// because a fixture that has to opt into failure is a fixture where the
     /// interesting state is the one nobody wrote by accident.
+    /// A blank family is no family: see [`Self::family`]. The precheck starts
+    /// at [`Precheck::NotRecorded`] because that is what most runs on this
+    /// platform actually have, and a fixture whose neutral state is a verdict
+    /// nobody filed is a fixture that flatters the rules.
     #[must_use]
     pub fn new(item: Uuid, run: Uuid, family: &str) -> Self {
+        Self::without_family(item, run).with_family(Some(family))
+    }
+
+    /// A run whose hypothesis recorded no family.
+    ///
+    /// The other constructor in terms of this one, rather than the reverse,
+    /// because absence is the state that must be reachable without opting in.
+    #[must_use]
+    pub fn without_family(item: Uuid, run: Uuid) -> Self {
         Self {
             item,
             run,
-            family: family.to_string(),
+            family: None,
             workflow: "investigate".to_string(),
             sources: vec![Source::CharterSeed],
-            precheck: Precheck::ProceedNew,
+            precheck: Precheck::NotRecorded,
             knowledge_units: 0,
             findings_established: 0,
             failure_class: None,
             new_failure_class: false,
             cost: 1.0,
         }
+    }
+
+    /// The family, if one was recorded — the shape a `LEFT JOIN` hands back.
+    ///
+    /// A blank name is read as no family, because a family called `""` groups
+    /// every unnamed run together and that is the invented evidence
+    /// [`Self::family`] exists to refuse.
+    #[must_use]
+    pub fn with_family(mut self, family: Option<&str>) -> Self {
+        self.family = family
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+            .map(ToString::to_string);
+        self
     }
 
     /// Knowledge units, and how many of them were established findings.
@@ -569,8 +642,15 @@ fn circling(window: &[FinishedRun]) -> Option<Tripped> {
         let Some(class) = r.failure_class.clone() else {
             continue;
         };
+        // Nor is a run with no family. "Variants of one family" is the other
+        // half of that evidence, and a `None` key would collect every unnamed
+        // run into one group and call it a family — the exact fabrication the
+        // caller's per-run sentinel name was avoiding by hand.
+        let Some(family) = r.family.clone() else {
+            continue;
+        };
         groups
-            .entry((r.family.clone(), class))
+            .entry((family, class))
             .or_default()
             .push(r.item);
     }
@@ -678,9 +758,17 @@ fn dearest_workflow(window: &[FinishedRun]) -> Option<String> {
 }
 
 /// The one value they all share, or `None` if they do not all share one.
-fn sole_value<I: Iterator<Item = String>>(mut values: I) -> Option<String> {
-    let first = values.next()?;
-    values.all(|v| v == first).then_some(first)
+///
+/// **One that was not recorded is not shared.** A single `None` in the window
+/// sinks the whole answer, which is what keeps an `ExcludeFamily` amendment off
+/// a window where some run's family is simply unknown: suggesting a human
+/// exclude the family the *recorded* runs happen to agree on would be
+/// suggesting it on evidence the window does not have.
+fn sole_value<I: Iterator<Item = Option<String>>>(mut values: I) -> Option<String> {
+    let first = values.next()??;
+    values
+        .all(|v| v.as_deref() == Some(first.as_str()))
+        .then_some(first)
 }
 
 /// The median of a set of costs, or `None` when the set is empty.
@@ -1036,6 +1124,132 @@ mod tests {
             productive(3, "carry"),
         ];
         assert_eq!(detect_checked(&classless), None);
+    }
+
+    #[test]
+    fn a_run_with_no_family_recorded_never_groups_with_another() {
+        // The caller used to fill this hole with a name unique to the run, so
+        // that two of them could not meet in a group. `None` has to do the same
+        // thing without the arrangement: two variants that failed the same way
+        // are circling *only* if the platform said which family they were.
+        let unfamilied = |n: u8| {
+            FinishedRun::without_family(
+                Uuid::from_u128(u128::from(n)),
+                Uuid::from_u128(u128::from(n) + 1000),
+            )
+            .producing(2, 1)
+            .as_variant()
+            .failing("costs_eat_the_edge", false)
+        };
+        let mut runs: Vec<FinishedRun> = (0..4).map(|n| productive(n, "carry")).collect();
+        runs.push(unfamilied(4));
+        runs.push(unfamilied(5));
+        for r in &runs[4..] {
+            assert_eq!(r.family, None, "the fixture recorded a family after all");
+        }
+        assert_eq!(
+            detect_checked(&runs),
+            None,
+            "two runs of no family are not two runs of one family"
+        );
+
+        // And the same pair, with the family recorded, is the stall — so the
+        // test above is about the absence and not about the fixture.
+        let mut named = runs.clone();
+        for r in &mut named[4..] {
+            *r = r.clone().with_family(Some("momentum"));
+        }
+        let d = detect_checked(&named).expect("recorded families circle");
+        assert_eq!(d.headline(), "circling");
+    }
+
+    #[test]
+    fn an_unrecorded_family_is_never_suggested_as_an_exclusion() {
+        // `sole_value` is what an `ExcludeFamily` amendment is built from, and
+        // a window a human is told to exclude by name has to have a name.
+        let barren_unfamilied: Vec<FinishedRun> = (0_u8..6)
+            .map(|n| {
+                FinishedRun::without_family(
+                    Uuid::from_u128(u128::from(n)),
+                    Uuid::from_u128(u128::from(n) + 1000),
+                )
+            })
+            .collect();
+        let d = detect_checked(&barren_unfamilied).expect("six barren runs are still a stall");
+        assert_eq!(d.headline(), "barren_streak", "the rule still reads them");
+        assert!(
+            !d.amendments()
+                .iter()
+                .any(|a| matches!(a, Amendment::ExcludeFamily { .. })),
+            "a family with no name was suggested for exclusion: {:?}",
+            d.amendments()
+        );
+        assert!(
+            !d.amendments().is_empty(),
+            "the stall still has something to suggest"
+        );
+
+        // One recorded family among five unrecorded is not the window's family
+        // either.
+        let mut mixed = barren_unfamilied;
+        mixed[0] = mixed[0].clone().with_family(Some("momentum"));
+        let d = detect_checked(&mixed).expect("still a barren streak");
+        assert!(
+            !d.amendments()
+                .iter()
+                .any(|a| matches!(a, Amendment::ExcludeFamily { .. })),
+            "one named run named the window: {:?}",
+            d.amendments()
+        );
+    }
+
+    #[test]
+    fn a_blank_family_is_no_family_rather_than_a_family_called_nothing() {
+        assert_eq!(run(0, "").family, None);
+        assert_eq!(run(0, "   ").family, None);
+        assert_eq!(run(0, "momentum").family, Some("momentum".to_string()));
+        assert_eq!(
+            run(0, "momentum").with_family(None).family,
+            None,
+            "a recorded family can be taken back off"
+        );
+    }
+
+    #[test]
+    fn a_run_with_no_precheck_verdict_says_so_and_cannot_be_circling() {
+        // The common case, not the edge: `hypothesis_precheck` files
+        // `blocked | duplicate | new` and most runs have no row at all, so a
+        // fresh record must start at the absence rather than at a verdict.
+        let fresh = run(0, "momentum");
+        assert_eq!(fresh.precheck, Precheck::NotRecorded);
+        assert!(!fresh.precheck.is_recorded());
+        assert!(fresh.clone().as_variant().precheck.is_recorded());
+
+        let mut runs: Vec<FinishedRun> = (0..4).map(|n| productive(n, "carry")).collect();
+        runs.push(productive(4, "momentum").failing("costs_eat_the_edge", false));
+        runs.push(productive(5, "momentum").failing("costs_eat_the_edge", false));
+        for r in &runs[4..] {
+            assert_eq!(r.precheck, Precheck::NotRecorded);
+        }
+        assert_eq!(
+            detect_checked(&runs),
+            None,
+            "no verdict is not the `proceed_as_variant` the circling rule counts"
+        );
+    }
+
+    #[test]
+    fn every_precheck_word_round_trips_and_only_one_of_them_is_an_absence() {
+        let mut recorded = 0;
+        for p in Precheck::ALL {
+            assert_eq!(Precheck::parse(p.as_str()), Some(*p));
+            if p.is_recorded() {
+                recorded += 1;
+            }
+        }
+        assert_eq!(Precheck::ALL.len(), 3);
+        assert_eq!(recorded, 2, "exactly one variant means `no verdict`");
+        assert_eq!(Precheck::parse("reject_duplicate"), None);
     }
 
     #[test]

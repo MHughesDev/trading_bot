@@ -25,6 +25,7 @@ import type {
   WorkingState,
 } from '@/api/desk'
 import type { CallCost, ExposureNote, ToolSearch } from '@/lib/desk/events'
+import { applyOrder, dropOnto, moveInColumn, prioritisedBy, reconcileOrder } from '@/lib/desk/agenda'
 import { toolsVisibleInMode, whyHidden } from '@/lib/desk/rings'
 import {
   BudgetMeter,
@@ -703,12 +704,16 @@ export function CostTab({
 
 // ── §2b Agenda and Charter, tabs inside the session's own conversation ───────
 
+/** The columns a human may reorder: the ones holding items nothing has claimed. */
+const REORDERABLE: AgendaItem['state'][] = ['proposed', 'queued']
+
 export function AgendaTab({
   items,
   onVeto,
   onApprove,
   onAdd,
   onOpenChild,
+  onPrioritise,
   loading = false,
 }: {
   items: AgendaItem[] | null
@@ -716,8 +721,35 @@ export function AgendaTab({
   onApprove?: (id: string) => void
   onAdd?: () => void
   onOpenChild?: (conversationId: string) => void
+  /**
+   * The items the human moved **up**, in their new order (AGENT-014 §9).
+   *
+   * Not the board. `POST …/agenda/order` puts the `user` source on every id it
+   * is sent and a `user` item bypasses scoring, so sending the whole board
+   * would say every question is a priority — which says nothing. See
+   * `prioritisedBy`.
+   */
+  onPrioritise?: (itemIds: string[]) => void
   loading?: boolean
 }) {
+  // The order the human dragged into. It lives here and nowhere else: §9's drag
+  // is a *priority event*, and there is no rank column on `agenda_items` for a
+  // position to be saved in. So the board holds the arrangement while the tab is
+  // open, the moved cards come back carrying the `user` source, and the note
+  // under the button says both things rather than letting a reload look like a
+  // bug.
+  const [moved, setMoved] = useState<string[] | null>(null)
+  const [dragging, setDragging] = useState<string | null>(null)
+
+  const order = reconcileOrder(moved, (items ?? []).map((i) => i.item_id))
+
+  function rearrange(next: string[]) {
+    const up = prioritisedBy(order, next)
+    if (up.length === 0) return
+    setMoved(next)
+    onPrioritise?.(up)
+  }
+
   if (loading) {
     return <EmptyState message="Reading the agenda…" />
   }
@@ -739,15 +771,43 @@ export function AgendaTab({
       <Button size="xs" variant="secondary" onClick={onAdd}>
         Add a question
       </Button>
+      {/* Said before the first drag rather than discovered after one: the board
+          keeps no rank of its own, so what a move does is mark the card yours. */}
+      <p className="sub" data-testid="reorder-note">
+        Drag a card, or use its move controls, to put a question first. Moving one marks it yours
+        and the session claims your questions next; the board itself keeps no ranking, so this
+        arrangement lasts while the tab is open.
+      </p>
       {columns.map((col) => {
-        const list = items.filter((i) => i.state === col)
+        const list = applyOrder(
+          items.filter((i) => i.state === col),
+          (i) => i.item_id,
+          order,
+        )
+        const columnIds = list.map((i) => i.item_id)
+        const reorderable = REORDERABLE.includes(col) && list.length > 1
         return (
           <section key={col} style={{ marginTop: 'var(--s-3)' }}>
             <span className="lbl">
               {col} · {list.length}
             </span>
-            {list.map((i) => (
-              <div key={i.item_id} className="desk-card">
+            {list.map((i, at) => (
+              <div
+                key={i.item_id}
+                className="desk-card"
+                draggable={reorderable}
+                onDragStart={() => reorderable && setDragging(i.item_id)}
+                onDragOver={(e) => {
+                  if (reorderable && dragging) e.preventDefault()
+                }}
+                onDrop={(e) => {
+                  if (!reorderable || !dragging) return
+                  e.preventDefault()
+                  rearrange(dropOnto(order, columnIds, dragging, i.item_id))
+                  setDragging(null)
+                }}
+                onDragEnd={() => setDragging(null)}
+              >
                 <div className="desk-card-hd">
                   <Badge tone="outline">{i.workflow}</Badge>
                   {/* The true status, which the column alone does not say: `expired`
@@ -789,6 +849,32 @@ export function AgendaTab({
                     <Button size="xs" variant="ghost" onClick={() => onVeto?.(i.item_id)}>
                       Veto
                     </Button>
+                    {reorderable && (
+                      // The keyboard path, beside the drag. A board that can
+                      // only be rearranged with a pointer cannot be rearranged
+                      // from a keyboard at all, and telling the session what
+                      // matters is not an optional part of this panel.
+                      <>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          disabled={at === 0}
+                          aria-label={`Move up: ${i.question}`}
+                          onClick={() => rearrange(moveInColumn(order, columnIds, i.item_id, -1))}
+                        >
+                          Move up
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          disabled={at === list.length - 1}
+                          aria-label={`Move down: ${i.question}`}
+                          onClick={() => rearrange(moveInColumn(order, columnIds, i.item_id, 1))}
+                        >
+                          Move down
+                        </Button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

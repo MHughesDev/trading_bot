@@ -8,8 +8,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
 import { StaleBadge } from '@/components/primitives/States'
-import type { DeskCard, ProvenanceMark, WorkingState } from '@/api/desk'
-import { charterView, deskApi, sessionForConversation } from '@/api/desk'
+import type { DeskCard, SessionDigestRef, ProvenanceMark, WorkingState } from '@/api/desk'
+import { charterView, deskApi, sessionDigestTarget, sessionForConversation } from '@/api/desk'
 import { conversationsApi } from '@/api/agent'
 import { costCalls, latestExposure, mergeCards, toCards, toolSearches, type WireEvent } from '@/lib/desk/events'
 import { useDeskStream } from '@/hooks/useDeskStream'
@@ -28,7 +28,8 @@ import {
   pendingApprovals,
   type PanelTab,
 } from './RightPanel'
-import { StageStrip, TierBadge, tierTiles, type IdResolver } from './Shared'
+import { DigestCards } from './DigestCard'
+import { DayBudgetBar, StageStrip, TierBadge, tierTiles, type IdResolver } from './Shared'
 
 /**
  * The set of ids the platform can actually open.
@@ -88,12 +89,19 @@ export function Conversation({
   onOpenRun,
   onOpenDossier,
   onOpenConversation,
+  onOpenPath,
 }: {
   conversationId: string
   onOpenRun: (runId: string) => void
   onOpenDossier: (ticket: string) => void
   /** A child conversation of a continuous session's agenda item (§2b). */
   onOpenConversation?: (conversationId: string) => void
+  /**
+   * A desk path a digest line names — the memory browser for a finding, the
+   * proposals queue for a proposal (§2.4). Passed in rather than taken from
+   * `useNavigate` so this screen still renders outside a router in a test.
+   */
+  onOpenPath?: (to: string) => void
 }) {
   const [cards, setCards] = useState<DeskCard[]>([])
   const [events, setEvents] = useState<WireEvent[]>([])
@@ -203,6 +211,28 @@ export function Conversation({
     enabled: !!sessionId && continuous,
     refetchInterval: running ? 5_000 : false,
   })
+  // The digests, which are what makes coming back to a week-old session cheap
+  // (AGENT-014 §2.4). They render as cards in the journal — this conversation —
+  // and only here: a child conversation has its own dossier, not the session's
+  // review.
+  const digests = useQuery({
+    queryKey: ['desk', 'digests', sessionId],
+    queryFn: () => deskApi.digests(sessionId as string),
+    enabled: !!sessionId && continuous,
+    refetchInterval: running ? 30_000 : false,
+  })
+
+  const openDigestRef = useCallback(
+    (ref: SessionDigestRef) => {
+      const target = sessionDigestTarget(ref)
+      if (target.kind === 'run') onOpenRun(target.runId)
+      else if (target.kind === 'panel') setTab(target.tab)
+      else if (target.kind === 'route') onOpenPath?.(target.to)
+      // `none` never reaches here: the card renders those lines as text with
+      // the reason, rather than as a control that eats the click.
+    },
+    [onOpenRun, onOpenPath],
+  )
 
   const workingState = state.data ?? null
   const resolve = useMemo(() => makeResolver(workingState, cards), [workingState, cards])
@@ -334,6 +364,12 @@ export function Conversation({
                 ? '(unknown)'
                 : sessionRow.agenda_open}
             </span>
+            {/* §9's day budget bar, drawn only when there is a spend to draw.
+                Nothing served counts dollars against a day, so `spentUsd` is
+                `null` from here and the header says the budget and that the
+                spend is not recorded. An empty track would say nothing was
+                spent today, which nobody measured. */}
+            <DayBudgetBar usdPerDay={session.data?.budget?.usd_per_day ?? null} spentUsd={null} />
           </>
         )}
         {stream.state === 'stale' &&
@@ -358,6 +394,18 @@ export function Conversation({
       <div className="desk-body">
         <div className="desk-center">
       <div className="desk-scroll">
+        {/* The journal (§2b): the digests the platform wrote about this session,
+            above the turns, newest first. A bounded conversation has none and
+            asks for none. */}
+        {continuous && (
+          <section aria-label="Digests">
+            <DigestCards
+              digests={digests.data?.digests ?? null}
+              loading={digests.isPending}
+              onOpen={openDigestRef}
+            />
+          </section>
+        )}
         <CardStream
           conversationId={conversationId}
           cards={cards}
@@ -453,6 +501,20 @@ export function Conversation({
               onVeto={(id) => {
                 if (!sessionId) return
                 void deskApi.vetoAgendaItem(sessionId, id).then(() => void agenda.refetch())
+              }}
+              // The board has drawn this button since it was written and
+              // nothing was passed to it, so under `supervised` — where every
+              // item waits for a human — the control that releases one reached
+              // nothing.
+              onApprove={(id) => {
+                if (!sessionId) return
+                void deskApi.approveAgendaItem(sessionId, id).then(() => void agenda.refetch())
+              }}
+              // A drag is a `user` priority event, and the ids are the ones the
+              // human moved up — never the whole board.
+              onPrioritise={(ids) => {
+                if (!sessionId) return
+                void deskApi.reorderAgenda(sessionId, ids).then(() => void agenda.refetch())
               }}
               onOpenChild={(cid) => onOpenConversation?.(cid)}
             />

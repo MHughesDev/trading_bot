@@ -364,10 +364,20 @@ impl Harvest {
         })
     }
 
-    /// The items layer one merged onto, with the source each gained.
-    pub fn merged(&self) -> impl Iterator<Item = (Uuid, Source)> + '_ {
+    /// The items layer one merged onto, with the source each gained **and the
+    /// refs the merge added**.
+    ///
+    /// The refs travel because the caller appends them to the row: without them
+    /// a harvested question merges onto an item whose card can no longer open
+    /// the memory entry that wanted it. Only what was *added* — the caller
+    /// appends with `||`, so a ref the item already held would be duplicated.
+    pub fn merged(&self) -> impl Iterator<Item = (Uuid, Source, &[String])> + '_ {
         self.inserted.iter().filter_map(|i| match i {
-            Insert::Merged { into, source } => Some((*into, *source)),
+            Insert::Merged {
+                into,
+                source,
+                source_refs,
+            } => Some((*into, *source, source_refs.as_slice())),
             Insert::Added(_) => None,
         })
     }
@@ -761,7 +771,8 @@ mod tests {
             "the two wordings have to actually key the same for this to be testing layer one"
         );
         assert_eq!(h.added().count(), 0);
-        let merged: Vec<(Uuid, Source)> = h.merged().collect();
+        let merged: Vec<(Uuid, Source)> =
+            h.merged().map(|(i, src, _)| (i, src)).collect();
         assert_eq!(merged, vec![(wanted.id, Source::OpenQuestion)]);
         assert_eq!(agenda.len(), 2, "no second row");
         assert_eq!(
@@ -813,7 +824,7 @@ mod tests {
         );
         assert_eq!(h.added().count(), 0);
         assert_eq!(
-            h.merged().collect::<Vec<_>>(),
+            h.merged().map(|(i, src, _)| (i, src)).collect::<Vec<_>>(),
             vec![(item.id, Source::RefinementFollowup)]
         );
         assert_eq!(agenda.len(), 1);

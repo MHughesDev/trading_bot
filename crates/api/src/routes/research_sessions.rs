@@ -437,6 +437,21 @@ pub async fn get(
         Ok(f) => f,
         Err(e) => return db(e),
     };
+    // The amendments, newest first. `charter_version` on its own reports that
+    // decisions were taken without letting anyone read them, which is what the
+    // Charter tab had to say in as many words.
+    let amendments: Vec<(i64, Value, DateTime<Utc>)> = match sqlx::query_as(
+        "SELECT seq, payload_json, created_at FROM session_events
+          WHERE session_id = $1 AND kind = $2 ORDER BY seq DESC LIMIT 100",
+    )
+    .bind(id)
+    .bind(EventKind::CharterAmended.as_str())
+    .fetch_all(&state.pg)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db(e),
+    };
     (
         StatusCode::OK,
         Json(json!({
@@ -456,6 +471,10 @@ pub async fn get(
             "event_seq": folded.event_seq,
             "runs_started": folded.runs_started,
             "charter_version": folded.charter_version,
+            "amendments": amendments
+                .iter()
+                .map(|(seq, payload, at)| amendment_json(*seq, payload, *at))
+                .collect::<Vec<_>>(),
             // Reported rather than hidden: a log that does not replay cleanly is
             // why the driver stopped, and the operator is the one who can act on
             // it.
@@ -765,6 +784,23 @@ pub struct OrderBody {
 ///
 /// Recorded as one event per item rather than one event for the list, because
 /// the digest shows what was prioritised and a list is not a sentence.
+///
+/// # Why "moved above its old position" is enforced here and not in the client
+///
+/// A `user` source is not a nudge, it is a **bypass**:
+/// `AgendaItem::bypasses_scoring` is true for it and `select::select` returns
+/// such an item immediately with propensity 1.0, without scoring the slate. So
+/// marking every id in the body would mean one drag of one card switching the
+/// selection policy off for the whole session — no scores, no exploration draw,
+/// no candidate set in `mlops.decision` — and AGENT-014 P2 ("the agenda is
+/// scored, not vibed") and the INV-21 exploration floor would both stop applying
+/// without anything on screen saying so.
+///
+/// A drag-and-drop client naturally posts the **whole board**, so the common
+/// case is the dangerous one. [`moved_earlier`] is the difference between the
+/// two, and it lives in the route because a client that posts only the moved
+/// cards is a discipline, and the next caller — a script, a replay, a second
+/// client — does not inherit it.
 pub async fn reorder(
     State(state): State<AppState>,
     token: BearerToken,
@@ -797,7 +833,38 @@ pub async fn reorder(
             "reload the board; something finished while it was open",
         );
     }
-    for item in &movable {
+    // An order is a statement about what comes before what, and a list of one
+    // makes no such statement — there is nothing in the body for it to have
+    // moved past. Refused rather than answered with `prioritised: 0`, because a
+    // client that posts only the card it dragged would otherwise get a 200 for a
+    // request that did nothing, which is the shape of failure that survives
+    // longest. The single-card intent has its own route.
+    if movable.len() < 2 {
+        return bad(
+            "an order of one item does not say what it comes before",
+            "post the board's whole order, or use the item's own prioritise action to say this \
+             one matters",
+        );
+    }
+    // A card cannot be in two places at once, and an order that says it is has
+    // two answers for where it moved. Refused rather than deduplicated: guessing
+    // which of the two positions was meant is how a card gets the `user` bypass
+    // on the strength of a client bug.
+    if movable
+        .iter()
+        .enumerate()
+        .any(|(i, id)| movable[..i].contains(id))
+    {
+        return bad(
+            "that order lists the same item twice",
+            "post each item once, in the order the board shows them",
+        );
+    }
+    // `sessions::agenda` reads `ORDER BY created_at, item_id`, so the vector's
+    // own order **is** the board order the human dragged against.
+    let current: Vec<Uuid> = items.iter().map(|i| i.id).collect();
+    let promoted = moved_earlier(&current, &movable);
+    for item in &promoted {
         if let Err(e) = sqlx::query(
             "UPDATE agenda_items
                 SET sources = CASE WHEN sources @> '[\"user\"]'::jsonb
@@ -822,9 +889,90 @@ pub async fn reorder(
     }
     (
         StatusCode::OK,
-        Json(json!({ "ok": true, "prioritised": movable.len() })),
+        Json(json!({
+            "ok": true,
+            "prioritised": promoted.len(),
+            // What the body asked about, so a client that posted nine cards and
+            // moved none can tell that from a body the route threw away.
+            "considered": movable.len(),
+        })),
     )
         .into_response()
+}
+
+/// The submitted ids the human actually dragged **up**, in submitted order.
+///
+/// Both ranks are taken over the same set — the submitted ids in the board's
+/// current order, against the body's order — so posting a subset compares like
+/// with like instead of reading "nine of eleven" as "everything moved up two".
+///
+/// An id the board does not hold has no old position and so cannot have moved;
+/// it is dropped rather than treated as new, which is what makes posting an
+/// unchanged board mark nothing.
+///
+/// # Displacement is not a decision
+///
+/// Ranking alone is not enough. Dragging the top card to the bottom moves every
+/// other card up one place, and marking those would mean a single
+/// *de*-prioritising drag handing the `user` bypass to the rest of the board —
+/// the same failure as marking the whole body, arrived at from the other
+/// direction. So the cards that are already in board order relative to each
+/// other are subtracted first ([`already_in_order`]): what is left is the
+/// smallest set of moves that explains the submitted order, and of those only
+/// the ones that ended up earlier are a priority.
+///
+/// The result is always a subset of "everything that ranks earlier", never a
+/// superset, so this can only ever hand out fewer bypasses.
+fn moved_earlier(current: &[Uuid], submitted: &[Uuid]) -> Vec<Uuid> {
+    let baseline: Vec<Uuid> = current
+        .iter()
+        .copied()
+        .filter(|id| submitted.contains(id))
+        .collect();
+    let ranks: Vec<Option<usize>> = submitted
+        .iter()
+        .map(|id| baseline.iter().position(|b| b == id))
+        .collect();
+    let stayed = already_in_order(&ranks);
+    submitted
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(now, _)| !stayed.contains(now))
+        .filter(|(now, _)| ranks[*now].is_some_and(|before| *now < before))
+        .map(|(_, id)| id)
+        .collect()
+}
+
+/// The longest run of submitted positions that is already in board order.
+///
+/// A longest strictly-increasing subsequence of the positions, by patience
+/// sorting with predecessor links. These are the cards that did not have to move
+/// for the body to read the way it does; every other card is one somebody
+/// dragged. `None` — an id the board does not hold — is never part of the run,
+/// because a card that was nowhere cannot have stayed where it was.
+fn already_in_order(ranks: &[Option<usize>]) -> std::collections::BTreeSet<usize> {
+    let mut tails: Vec<usize> = Vec::new();
+    let mut prev: Vec<Option<usize>> = vec![None; ranks.len()];
+    for (i, rank) in ranks.iter().enumerate() {
+        let Some(rank) = *rank else { continue };
+        let at = tails.partition_point(|&t| {
+            ranks[t].expect("only ranked positions are ever pushed") < rank
+        });
+        prev[i] = at.checked_sub(1).map(|p| tails[p]);
+        if at == tails.len() {
+            tails.push(i);
+        } else {
+            tails[at] = i;
+        }
+    }
+    let mut run = std::collections::BTreeSet::new();
+    let mut cursor = tails.last().copied();
+    while let Some(i) = cursor {
+        run.insert(i);
+        cursor = prev[i];
+    }
+    run
 }
 
 /// `POST …/{id}/agenda/{item}/approve`
@@ -962,6 +1110,58 @@ async fn item_action(
 
 // ── the charter ─────────────────────────────────────────────────────────────
 
+/// What one amendment changed, field by field.
+///
+/// The charter column is overwritten in place, so before this the only record an
+/// amendment left was its version number — and a Charter tab that can report
+/// "version 4" and nothing else is telling the operator that three decisions were
+/// taken and none of them can be read. The diff is computed here, where both
+/// documents are in hand, and written into the append-only event payload; the
+/// column stays the one copy of the *current* charter, and this is the history,
+/// which lived nowhere.
+///
+/// Top-level fields only. A charter's fields are the things a human amends —
+/// the mandate, the constraints, the exploration share — and a recursive diff
+/// would report a path rather than a decision.
+///
+/// An amendment that changed nothing returns an empty object, which is not the
+/// same as the `null` an amendment recorded before this existed serves: one says
+/// "nothing moved", the other says "nobody wrote down what moved".
+fn charter_changes(previous: Option<&Charter>, next: &Charter) -> Value {
+    let before = previous.map_or_else(|| json!({}), |c| json!(c));
+    let after = json!(next);
+    let mut changed = serde_json::Map::new();
+    let (Some(before), Some(after)) = (before.as_object(), after.as_object()) else {
+        return Value::Object(changed);
+    };
+    for key in before.keys().chain(after.keys()) {
+        if changed.contains_key(key.as_str()) {
+            continue;
+        }
+        let from = before.get(key).unwrap_or(&Value::Null);
+        let to = after.get(key).unwrap_or(&Value::Null);
+        if from != to {
+            changed.insert(key.clone(), json!({ "from": from, "to": to }));
+        }
+    }
+    Value::Object(changed)
+}
+
+/// One `charter_amended` event, as the Charter tab reads it.
+///
+/// `by` and `changed` are `null` for an amendment appended before either was
+/// recorded. Serving `{}` for `changed` there would say the amendment changed
+/// nothing, which is a claim about a decision nobody wrote down.
+fn amendment_json(seq: i64, payload: &Value, at: DateTime<Utc>) -> Value {
+    json!({
+        "seq": seq,
+        "version": payload.get("version").and_then(Value::as_i64),
+        "by": payload.get("by").and_then(Value::as_str),
+        "changed": payload.get("changed").filter(|c| c.is_object()),
+        "at": at,
+    })
+}
+
 /// `PUT …/{id}/charter` — an amendment, which appends rather than replaces.
 pub async fn amend_charter(
     State(state): State<AppState>,
@@ -989,6 +1189,10 @@ pub async fn amend_charter(
     let mut next = charter;
     next.version = folded.charter_version + 1;
 
+    // Computed against the charter this call is about to overwrite, and before
+    // the overwrite: afterwards there is nothing left to compare against.
+    let changed = charter_changes(session.charter.as_ref(), &next);
+
     if let Err(e) = sqlx::query("UPDATE research_sessions SET charter = $2 WHERE session_id = $1")
         .bind(id)
         .bind(json!(next))
@@ -1001,7 +1205,7 @@ pub async fn amend_charter(
         &state.pg,
         id,
         EventKind::CharterAmended,
-        json!({ "version": next.version }),
+        json!({ "version": next.version, "by": token.user_id(), "changed": changed }),
     )
     .await;
     (
@@ -1013,6 +1217,42 @@ pub async fn amend_charter(
 
 // ── digests ─────────────────────────────────────────────────────────────────
 
+/// `(digest_id, from_seq, to_seq, body, spend_unit, created_at)`.
+///
+/// Named because the column order and [`digest_json`]'s argument order have to
+/// agree, and two `i64`s and two strings next to each other is a swap that
+/// compiles.
+type DigestRow = (Uuid, i64, i64, Value, String, DateTime<Utc>);
+
+/// One digest, as the desk reads it.
+///
+/// `spend_unit` is a field on the wire rather than a convention because
+/// `body->budget->spent` is a bare number rendered beside a day budget
+/// denominated in **dollars** (`charter::SessionBudget.usd_per_day`), while the
+/// only per-run cost this platform records is **trials**. `0139` made the column
+/// NOT NULL with no default and CHECKed it to the two units that exist, so every
+/// row already knows which it counted; the read dropped it, and a card that
+/// prints "3.00 spent" without it is telling the reader a number nobody measured.
+///
+/// It is never `null`: the column is NOT NULL, so a digest that exists has a unit.
+fn digest_json(
+    digest_id: Uuid,
+    from_seq: i64,
+    to_seq: i64,
+    body: Value,
+    spend_unit: String,
+    created_at: DateTime<Utc>,
+) -> Value {
+    json!({
+        "digest_id": digest_id,
+        "from_seq": from_seq,
+        "to_seq": to_seq,
+        "body": body,
+        "spend_unit": spend_unit,
+        "created_at": created_at,
+    })
+}
+
 /// `GET …/{id}/digests`
 pub async fn digests(
     State(state): State<AppState>,
@@ -1022,8 +1262,8 @@ pub async fn digests(
     if let Err(r) = owned(&state, token.user_id(), id).await {
         return r;
     }
-    let rows: Result<Vec<(Uuid, i64, i64, Value, DateTime<Utc>)>, _> = sqlx::query_as(
-        "SELECT digest_id, from_seq, to_seq, body, created_at FROM session_digests
+    let rows: Result<Vec<DigestRow>, _> = sqlx::query_as(
+        "SELECT digest_id, from_seq, to_seq, body, spend_unit, created_at FROM session_digests
           WHERE session_id = $1 ORDER BY created_at DESC LIMIT 50",
     )
     .bind(id)
@@ -1033,9 +1273,10 @@ pub async fn digests(
         Ok(rows) => (
             StatusCode::OK,
             Json(json!({
-                "digests": rows.into_iter().map(|(d, f, t, body, at)| json!({
-                    "digest_id": d, "from_seq": f, "to_seq": t, "body": body, "created_at": at,
-                })).collect::<Vec<_>>()
+                "digests": rows
+                    .into_iter()
+                    .map(|(d, f, t, body, unit, at)| digest_json(d, f, t, body, unit, at))
+                    .collect::<Vec<_>>()
             })),
         )
             .into_response(),
@@ -1172,6 +1413,274 @@ mod tests {
             let t = src.split_once("async fn item_action(").unwrap().1;
             t[..t.find("\n}\n").unwrap_or(t.len())].contains("permits(HUMAN_SCOPE)")
         });
+    }
+
+    /// Four distinct ids, stable within a test.
+    fn ids(n: usize) -> Vec<Uuid> {
+        (1..=n)
+            .map(|i| {
+                let mut b = [0u8; 16];
+                b[15] = u8::try_from(i).expect("small");
+                Uuid::from_bytes(b)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn posting_the_board_unchanged_prioritises_nothing() {
+        // The case a drag-and-drop client produces most often, and the one the
+        // route got exactly backwards: it marked every id in the body `user`,
+        // and a `user` item bypasses scoring outright. One drag of one card
+        // therefore switched the scorer off for the whole session — silently,
+        // permanently, and with the exploration floor going with it.
+        let board = ids(4);
+        assert_eq!(
+            moved_earlier(&board, &board),
+            Vec::<Uuid>::new(),
+            "an unchanged board disabled the selection policy for the session"
+        );
+    }
+
+    #[test]
+    fn only_the_card_that_went_up_is_marked() {
+        let board = ids(4);
+        // The human drags the fourth card to the front. Everything else shifts
+        // down by one — and a card that shifted down did not get prioritised.
+        let dragged = vec![board[3], board[0], board[1], board[2]];
+        assert_eq!(moved_earlier(&board, &dragged), vec![board[3]]);
+    }
+
+    #[test]
+    fn a_card_dragged_down_prioritises_nothing_at_all() {
+        let board = ids(4);
+        // First card to the back. Three cards rank one place earlier than they
+        // did — and nobody dragged any of them. Handing those three the `user`
+        // bypass is the same failure as marking the whole body, reached from the
+        // other direction: one de-prioritising drag, three-quarters of the board
+        // out of the scorer's hands.
+        let dragged = vec![board[1], board[2], board[3], board[0]];
+        assert_eq!(
+            moved_earlier(&board, &dragged),
+            Vec::<Uuid>::new(),
+            "displacement was read as a decision about the cards that were displaced"
+        );
+    }
+
+    #[test]
+    fn one_card_lifted_past_one_other_is_the_only_one_marked() {
+        let board = ids(4);
+        let dragged = vec![board[1], board[0], board[2], board[3]];
+        assert_eq!(moved_earlier(&board, &dragged), vec![board[1]]);
+    }
+
+    #[test]
+    fn the_run_that_did_not_move_is_the_longest_one() {
+        // The subtraction the marking rests on. `[1, 2, 3, 0]` is three cards in
+        // board order with one dropped behind them, not three cards that moved.
+        let ranks = [Some(1), Some(2), Some(3), Some(0)];
+        assert_eq!(
+            already_in_order(&ranks),
+            [0, 1, 2].into_iter().collect::<std::collections::BTreeSet<_>>()
+        );
+        // An id the board does not hold was never in place, so it is never in
+        // the run — and a run computed over nothing would be silently empty.
+        let unknown = [None, Some(0)];
+        assert_eq!(
+            already_in_order(&unknown),
+            [1].into_iter().collect::<std::collections::BTreeSet<_>>()
+        );
+    }
+
+    #[test]
+    fn a_partial_board_is_ranked_against_itself() {
+        // A client that posts only some cards must not have them read as though
+        // they had jumped over the ones it left out.
+        let board = ids(4);
+        let posted = vec![board[1], board[2]];
+        assert_eq!(
+            moved_earlier(&board, &posted),
+            Vec::<Uuid>::new(),
+            "a subset in its existing relative order was read as a promotion"
+        );
+        assert_eq!(moved_earlier(&board, &[board[2], board[1]]), vec![board[2]]);
+    }
+
+    #[test]
+    fn a_body_of_one_is_refused_rather_than_answered_with_nothing() {
+        // A single id asserts no order, so no rank rule can find a move in it —
+        // and a client that posts only the card it dragged would get a 200 for a
+        // request that changed nothing. The route refuses it and names the two
+        // ways to say what was meant.
+        let src = include_str!("research_sessions.rs");
+        let body = src
+            .split_once("pub async fn reorder(")
+            .expect("reorder is gone; this test is stale")
+            .1;
+        let body = &body[..body.find("\nfn moved_earlier").unwrap_or(body.len())];
+        assert!(
+            body.contains("movable.len() < 2"),
+            "a one-item order is accepted again; it can only ever prioritise nothing"
+        );
+        let refusal = body
+            .split_once("movable.len() < 2")
+            .expect("checked above")
+            .1;
+        let refusal = &refusal[..refusal.find("\n    }").unwrap_or(refusal.len())];
+        assert!(
+            refusal.contains("prioritise"),
+            "the refusal does not name the route that does what the caller meant"
+        );
+    }
+
+    #[test]
+    fn an_id_the_board_does_not_hold_cannot_have_moved() {
+        let board = ids(3);
+        let stranger = ids(9)[8];
+        assert_eq!(moved_earlier(&board, &[stranger]), Vec::<Uuid>::new());
+    }
+
+    #[test]
+    fn the_route_marks_what_moved_and_not_what_was_posted() {
+        // The property, where it is enforced: `reorder` writes the `user` source
+        // for `moved_earlier`'s answer, never for the body.
+        let src = include_str!("research_sessions.rs");
+        let body = src
+            .split_once("pub async fn reorder(")
+            .expect("reorder is gone; this test is stale")
+            .1;
+        let body = &body[..body.find("\nfn moved_earlier").unwrap_or(body.len())];
+        assert!(
+            body.contains("moved_earlier(&current, &movable)"),
+            "reorder stopped comparing the submitted order against the board's"
+        );
+        let loop_start = body
+            .find("for item in &")
+            .expect("the write loop is gone; this test is stale");
+        assert!(
+            body[loop_start..].starts_with("for item in &promoted"),
+            "reorder writes the `user` source over the whole submitted body again; one drag of \
+             one card turns the scorer off for the session"
+        );
+    }
+
+    #[test]
+    fn a_digest_says_which_unit_it_counted_in() {
+        // `body->budget->spent` is a bare number rendered beside a dollar day
+        // budget, and the only per-run cost this platform records is trials.
+        // Migration 0139 made the column NOT NULL with no default precisely so
+        // the unit could not be left to the reader; dropping it on the way out
+        // puts it back.
+        let row = digest_json(
+            Uuid::nil(),
+            0,
+            7,
+            json!({ "budget": { "spent": 3.0 } }),
+            "trials".into(),
+            Utc::now(),
+        );
+        assert_eq!(row.get("spend_unit").and_then(Value::as_str), Some("trials"));
+        // And the column is actually asked for: a JSON key built from a SELECT
+        // that does not name it would not compile, but a SELECT that names it
+        // and a key that does not is exactly the shape of the original bug.
+        let src = include_str!("research_sessions.rs");
+        let q = src
+            .split_once("FROM session_digests")
+            .expect("the digests query is gone; this test is stale")
+            .0;
+        let select = &q[q.rfind("SELECT").expect("no SELECT before the FROM")..];
+        assert!(
+            select.contains("spend_unit"),
+            "the digests query stopped selecting the unit, so the card is back to rendering \
+             trials where the reader expects dollars"
+        );
+    }
+
+    fn a_charter(exclusions: Vec<String>) -> Charter {
+        Charter {
+            scope: research_session::charter::Scope::default(),
+            objective: research_session::charter::Objective::BuildKnowledge { about: vec![] },
+            seeds: vec![],
+            permitted_workflows: vec![],
+            exclusions,
+            standing_constraints: vec![],
+            exploration_share: research_session::charter::ExplorationShare::default(),
+            stop_when: vec![],
+            delta_practical_default: None,
+            version: 1,
+        }
+    }
+
+    #[test]
+    fn an_amendment_records_which_fields_moved() {
+        let before = a_charter(vec![]);
+        let mut after = a_charter(vec!["optimise".into()]);
+        after.version = 2;
+
+        let changed = charter_changes(Some(&before), &after);
+        let obj = changed.as_object().expect("a diff is an object");
+        // Two fields moved and no others: the exclusion the human added, and the
+        // version the route bumps. A diff that reported every field would be a
+        // second copy of the charter wearing a diff's name.
+        assert!(obj.contains_key("exclusions"), "the change itself is missing");
+        assert!(obj.contains_key("version"));
+        assert_eq!(obj.len(), 2, "unchanged fields were reported as changes: {obj:?}");
+        assert_eq!(
+            obj["exclusions"]["from"],
+            json!([]),
+            "the diff does not say what it was, so nobody can read what changed"
+        );
+        assert_eq!(obj["exclusions"]["to"], json!(["optimise"]));
+    }
+
+    #[test]
+    fn an_amendment_that_changed_nothing_is_not_an_amendment_nobody_recorded() {
+        // The two have to be distinguishable. `{}` is "nothing moved"; `null` is
+        // "this was appended before anyone wrote down what moved", which is
+        // every amendment already in the log.
+        let same = charter_changes(Some(&a_charter(vec![])), &a_charter(vec![]));
+        assert_eq!(same, json!({}));
+
+        let old = amendment_json(4, &json!({ "version": 3 }), Utc::now());
+        assert_eq!(old["changed"], Value::Null, "an unrecorded diff read as an empty one");
+        assert_eq!(old["by"], Value::Null);
+        assert_eq!(old["version"], json!(3));
+
+        let new = amendment_json(
+            5,
+            &json!({ "version": 4, "by": "u", "changed": { "version": { "from": 3, "to": 4 } } }),
+            Utc::now(),
+        );
+        assert_eq!(new["changed"]["version"]["to"], json!(4));
+        assert_eq!(new["by"], json!("u"));
+    }
+
+    #[test]
+    fn a_session_with_no_previous_charter_still_reports_what_was_set() {
+        // A bounded session has no charter, so the first amendment's `from` side
+        // is genuinely absent. Reporting no changes there would say the charter
+        // arrived from nowhere.
+        let changed = charter_changes(None, &a_charter(vec!["optimise".into()]));
+        let obj = changed.as_object().expect("a diff is an object");
+        assert!(!obj.is_empty(), "the first charter registered as no change at all");
+        assert_eq!(obj["exclusions"]["from"], Value::Null);
+        assert_eq!(obj["exclusions"]["to"], json!(["optimise"]));
+    }
+
+    #[test]
+    fn the_amendments_are_read_back_by_the_route_that_reports_the_version() {
+        // The defect: `PUT …/charter` appended amendments and nothing read them,
+        // so the Charter tab could report "version 4" and not what the other
+        // three were.
+        let src = include_str!("research_sessions.rs");
+        let get = src
+            .split_once("pub async fn get(")
+            .expect("the session read is gone; this test is stale")
+            .1;
+        let get = &get[..get.find("\npub ").unwrap_or(get.len())];
+        assert!(
+            get.contains("\"amendments\"") && get.contains("CharterAmended"),
+            "the session read reports charter_version without the amendments behind it"
+        );
     }
 
     #[test]

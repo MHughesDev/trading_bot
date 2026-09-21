@@ -14,11 +14,12 @@
 //!   id in [`child_conversation_id`], is AT-59's guarantee for a child that is a
 //!   conversation rather than a job.
 
+use chrono::{DateTime, Utc};
 use research_session::{
     agenda::{AgendaItem, Insert, ItemStatus, Score, Source},
     charter::{Autonomy, ReviewEvery, Schedule, SessionBudget},
     fold::{EventKind, SessionEvent},
-    Charter, Folded, ResearchSession,
+    Charter, Digest, Folded, ResearchSession,
 };
 use serde_json::{json, Value};
 use sqlx::PgPool;
@@ -230,6 +231,50 @@ pub async fn append(
     Ok(())
 }
 
+/// One event of the log, with the clock beside it.
+///
+/// [`research_session::SessionEvent`] deliberately carries no timestamp — the
+/// fold is over `seq` and a time would be a second ordering to disagree with
+/// it. The **digest** needs one anyway, because §2.4's period is shown to a
+/// human as a stretch of their day as well as a stretch of the log. So the
+/// clock rides beside the event rather than inside it, and nothing that folds
+/// can see it.
+#[derive(Debug, Clone)]
+pub struct LoggedEvent {
+    pub event: SessionEvent,
+    pub at: DateTime<Utc>,
+}
+
+/// The log, in `seq` order.
+///
+/// A row whose `kind` this build does not know is **skipped**, which leaves a
+/// hole in the `seq` run that [`research_session::fold`] reports as an anomaly.
+/// That is the intended behaviour and it is why the skip happens here rather
+/// than in SQL: a driver must stop on a log it only partly understood, and a
+/// `WHERE kind IN (…)` would have hidden the hole instead of making one.
+///
+/// # Errors
+///
+/// Propagates database errors.
+pub async fn log(pg: &PgPool, session_id: Uuid) -> Result<Vec<LoggedEvent>, SessionStoreError> {
+    let rows: Vec<(i64, String, Value, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT seq, kind, payload_json, created_at FROM session_events
+          WHERE session_id = $1 ORDER BY seq",
+    )
+    .bind(session_id)
+    .fetch_all(pg)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(seq, kind, payload, at)| {
+            EventKind::parse(&kind).map(|k| LoggedEvent {
+                event: SessionEvent::new(session_id, seq, k, payload),
+                at,
+            })
+        })
+        .collect())
+}
+
 /// Read the log and fold it.
 ///
 /// # Errors
@@ -239,20 +284,61 @@ pub async fn append(
 /// stops the driver claiming rather than letting it act on a log it only
 /// partly understood.
 pub async fn state(pg: &PgPool, session_id: Uuid) -> Result<Folded, SessionStoreError> {
-    let rows: Vec<(i64, String, Value)> = sqlx::query_as(
-        "SELECT seq, kind, payload_json FROM session_events
-          WHERE session_id = $1 ORDER BY seq",
-    )
-    .bind(session_id)
-    .fetch_all(pg)
-    .await?;
-    let events: Vec<SessionEvent> = rows
+    let events: Vec<SessionEvent> = log(pg, session_id)
+        .await?
         .into_iter()
-        .filter_map(|(seq, kind, payload)| {
-            EventKind::parse(&kind).map(|k| SessionEvent::new(session_id, seq, k, payload))
-        })
+        .map(|e| e.event)
         .collect();
     Ok(research_session::fold(&events))
+}
+
+// ── the digest ──────────────────────────────────────────────────────────────
+
+/// The digest row for a period, derived rather than minted.
+///
+/// A driver killed between writing the digest and appending `digest_written`
+/// re-derives the same period — `Folded::last_digest_seq` is the only input —
+/// and therefore has to re-derive the same id, or the retry would leave the
+/// human two digests of one stretch with no way to tell which they were told
+/// about. Same argument and same namespace as [`child_conversation_id`].
+#[must_use]
+pub fn digest_id(session_id: Uuid, to_seq: i64) -> Uuid {
+    let mut name = Vec::with_capacity(24);
+    name.extend_from_slice(session_id.as_bytes());
+    name.extend_from_slice(&to_seq.to_be_bytes());
+    Uuid::new_v5(&SESSION_NS, &name)
+}
+
+/// Store a digest, once per period.
+///
+/// `spend_unit` is not optional and is not guessed: `0139`'s column is NOT NULL
+/// with no default, because `budget.spent` is read beside a dollar day budget
+/// and the only per-run cost this platform records is trials. Returns whether
+/// this call is the one that wrote it — `false` means the period already had a
+/// digest, which is the ordinary answer for a driver that restarted.
+///
+/// # Errors
+///
+/// Propagates database errors.
+pub async fn write_digest(
+    pg: &PgPool,
+    digest: &Digest,
+    spend_unit: &str,
+) -> Result<bool, SessionStoreError> {
+    let done = sqlx::query(
+        "INSERT INTO session_digests (digest_id, session_id, from_seq, to_seq, body, spend_unit)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (session_id, to_seq) DO NOTHING",
+    )
+    .bind(digest_id(digest.session, digest.period.to_seq))
+    .bind(digest.session)
+    .bind(digest.period.from_seq)
+    .bind(digest.period.to_seq)
+    .bind(json!(digest))
+    .bind(spend_unit)
+    .execute(pg)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }
 
 // ── the agenda ──────────────────────────────────────────────────────────────
@@ -294,7 +380,7 @@ pub async fn insert_item(
     .await?;
     let mut live: Vec<AgendaItem> = rows.into_iter().map(Into::into).collect();
 
-    if let Insert::Merged { into, source } =
+    if let Insert::Merged { into, source, .. } =
         research_session::agenda::offer(&mut live, item.clone())
     {
         // The key matched. Extend what wanted it and drop the score, which was
@@ -339,6 +425,46 @@ pub async fn insert_item(
     .await?;
     tx.commit().await?;
     Ok(Some(item.id))
+}
+
+/// Record that one more source wanted an item that was already there.
+///
+/// The merge half of [`insert_item`], for a caller that has already had
+/// [`research_session::agenda::offer`] answer `Merged` — the harvest, which
+/// decides against the agenda it is building so that two dossier entries asking
+/// the same question are one item.
+///
+/// The score is dropped for the same reason it is there: §5.4 recomputes when a
+/// source changes, and a score computed for a shorter source list is a score for
+/// a different item.
+///
+/// `source_refs` takes only what the merge **added**. `Insert::Merged` returns
+/// exactly that rather than everything the candidate carried, because this
+/// appends with `source_refs || $3` — re-sending a ref the item already holds
+/// would duplicate it in the row, and the card would show the same link twice.
+///
+/// # Errors
+///
+/// Propagates database errors.
+pub async fn merge_source(
+    pg: &PgPool,
+    item_id: Uuid,
+    source: Source,
+    source_refs: &[String],
+) -> Result<(), SessionStoreError> {
+    sqlx::query(
+        "UPDATE agenda_items
+            SET sources = CASE WHEN sources @> $2::jsonb THEN sources ELSE sources || $2::jsonb END,
+                source_refs = source_refs || $3::jsonb,
+                score = NULL
+          WHERE item_id = $1",
+    )
+    .bind(item_id)
+    .bind(json!([source.as_str()]))
+    .bind(json!(source_refs))
+    .execute(pg)
+    .await?;
+    Ok(())
 }
 
 /// The agenda, oldest first — which is also §5.4's tie-break order.
@@ -632,6 +758,22 @@ mod tests {
         // Not symmetric: swapping the two must not collide, which a naive XOR or
         // a sorted concatenation would.
         assert_ne!(child_conversation_id(s, i), child_conversation_id(i, s));
+    }
+
+    #[test]
+    fn a_digest_id_is_the_same_one_after_a_restart() {
+        // The whole of `ON CONFLICT DO NOTHING` resting on it: a driver that
+        // recomputes the period recomputes the id, so a retry collides with the
+        // row it already wrote rather than adding a second digest of one
+        // stretch.
+        let s = Uuid::new_v4();
+        assert_eq!(digest_id(s, 42), digest_id(s, 42));
+        assert_ne!(digest_id(s, 42), digest_id(s, 43));
+        assert_ne!(digest_id(s, 42), digest_id(Uuid::new_v4(), 42));
+        // And a negative seq is not the same as its magnitude: `to_be_bytes`
+        // over an i64 keeps the sign, which a decimal-string key would too but
+        // which a `u64 as` cast would silently lose.
+        assert_ne!(digest_id(s, -1), digest_id(s, 1));
     }
 
     #[test]

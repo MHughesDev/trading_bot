@@ -143,14 +143,72 @@ pub async fn list_events(
     })))
 }
 
+/// Which environment each strategy's orders were executed in.
+///
+/// AGENT-012 §2.4 and §11 both want live-versus-paper on the monitor row, and
+/// the desk left the column out rather than infer it from the strategy's name —
+/// a naming convention read as an environment is how a paper strategy comes to
+/// be read as live.
+///
+/// # Where the fact actually lives
+///
+/// `orders.execution_mode`, joined on `orders.strategy_id`, which is the same id
+/// `monitor.strategy_state` keys on (`OrderIntent.strategy_id`). It is a
+/// recorded fact per order, written by `execution::journal`, not a guess.
+///
+/// The three places that *look* like better homes are all empty:
+/// `mlops.paper_deployment.venue` is the declared home and has no writer
+/// anywhere in the repository; `strategy_instances` is written only by a ledger
+/// test; and `accounts.account_type` is unreachable from a monitored strategy
+/// because migration 0121 made `orders.account_id` nullable precisely so the
+/// paper engine could record an order without one.
+///
+/// # What it can return today, and why that is not a lie
+///
+/// `paper` or absent, because `orders_execution_mode_paper_only` (0121) CHECKs
+/// the column to `'paper'` — enabling a live venue is a migration and a security
+/// review, which is the point. Reading the recorded column rather than hard-coding
+/// the word means the day that CHECK widens this route reports `live` without a
+/// code change.
+///
+/// A strategy that has placed no order is **absent from the map**, and the route
+/// serves `null` for it: unknown, not paper. `mixed` is served if one strategy
+/// ever has orders in more than one mode, because collapsing that to a single
+/// word would pick one of two true answers.
+async fn order_environments(
+    state: &AppState,
+) -> Result<std::collections::HashMap<String, String>, Response> {
+    let rows: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT strategy_id, COUNT(DISTINCT execution_mode), MIN(execution_mode)
+           FROM orders
+          WHERE strategy_id IS NOT NULL
+          GROUP BY strategy_id",
+    )
+    .fetch_all(&state.pg)
+    .await
+    .map_err(server_error)?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, distinct, mode)| {
+            let word = if distinct == 1 { mode } else { "mixed".into() };
+            (id, word)
+        })
+        .collect())
+}
+
 /// `GET /api/monitor/strategies`
 pub async fn list_strategies(
     _token: BearerToken,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, Response> {
     let rows = store(&state).strategy_states().await.map_err(server_error)?;
+    let env = order_environments(&state).await?;
     Ok(Json(json!({
         "strategies": rows.into_iter().map(|(id, state, scale_pct)| json!({
+            // `null` where nothing was recorded. A strategy the platform has
+            // never traded has no environment, and `paper` there would be the
+            // route answering a question nobody asked the database.
+            "environment": env.get(&id),
             "strategy_id": id, "state": state, "scale_pct": scale_pct,
         })).collect::<Vec<_>>(),
     })))
@@ -584,4 +642,60 @@ pub async fn label_breach(
         .await
         .map_err(server_error)?;
     Ok(Json(json!({ "event_id": event_id, "label": label.as_str() })))
+}
+
+#[cfg(test)]
+mod tests {
+    /// The environment comes from a recorded column, not from the strategy's name.
+    ///
+    /// The desk left this column out rather than infer it from a naming
+    /// convention, which is how a paper strategy comes to be read as live. The
+    /// scan below fails if the query ever reaches for the id instead of the fact.
+    #[test]
+    fn the_environment_is_read_and_not_guessed() {
+        let src = include_str!("monitor.rs");
+        let start = src
+            .find("SELECT strategy_id, COUNT(DISTINCT execution_mode)")
+            .expect("the environment query is gone; this test is stale");
+        let query = &src[start..];
+        let query = &query[..query.find("\")").unwrap_or(query.len())];
+
+        assert!(
+            query.contains("FROM orders"),
+            "the environment stopped coming from the order journal"
+        );
+        assert!(
+            query.contains("execution_mode"),
+            "the environment is no longer read from the column that records it"
+        );
+        // The failure this exists for: deciding live-versus-paper from the id.
+        for tell in ["LIKE", "ILIKE", "similar to", "position("] {
+            assert!(
+                !query.contains(tell),
+                "the environment query pattern-matches ({tell}); an environment inferred from a \
+                 strategy id is a naming convention, and a paper strategy named like a live one \
+                 would read as live"
+            );
+        }
+    }
+
+    /// A strategy nobody has traded has no environment, and the row says so.
+    #[test]
+    fn an_untraded_strategy_is_absent_rather_than_paper() {
+        let env: std::collections::HashMap<String, String> =
+            [("traded".to_string(), "paper".to_string())]
+                .into_iter()
+                .collect();
+        // This is exactly the expression the handler builds the field from.
+        assert_eq!(
+            serde_json::json!(env.get("traded")),
+            serde_json::json!("paper")
+        );
+        assert_eq!(
+            serde_json::json!(env.get("never-traded")),
+            serde_json::Value::Null,
+            "an untraded strategy rendered as paper, which is the route answering a question \
+             nobody asked the database"
+        );
+    }
 }

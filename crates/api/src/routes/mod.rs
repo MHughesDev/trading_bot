@@ -9,6 +9,7 @@ pub mod agent_cost;
 pub mod agent_preview;
 pub mod desk_catalogue;
 pub mod desk_digest;
+pub mod desk_running;
 pub mod memory;
 pub mod agent_templates;
 pub mod asset_lifecycle;
@@ -227,6 +228,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/catalogue", get(desk_catalogue::catalogue))
         .route("/api/catalogue/exposure", get(desk_catalogue::exposure))
         .route("/api/desk/digest", get(desk_digest::digest))
+        // §2.2 Running now: per-run tier, stage, tokens and cache. The
+        // conversation list answers a different question and cannot carry them.
+        .route("/api/desk/running", get(desk_running::running))
         .route("/api/memory/preferences", post(memory::record_preference))
         // S-8.2: has this hypothesis already been registered?
         .route(

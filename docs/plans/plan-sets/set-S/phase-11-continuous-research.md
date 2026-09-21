@@ -2,6 +2,47 @@
 
 **Completion: 0% (0 / 14 tasks), plus 6 `PARTIAL`** — S-11.1 (the object, the fold, the driver), S-11.3 (the scored agenda) and S-11.14 (the API and the three read tools) landed 2026-09-21; each names what it does not cover.
 
+> **The four pure modules have a caller, 2026-09-21 — and wiring them found a
+> live bug in the driver that every test had passed over.**
+>
+> `iterate` tested `ended == "succeeded"`, and `agent_runs.status` **never takes
+> that value**: the run drivers write `completed | failed | fenced | refused |
+> suspended | cancelled | offered`. So **every child this driver has ever
+> finished took the failure branch**, re-queued, and expired at two attempts. No
+> test caught it because none exercised the driver against a real run status.
+> `verdict_of` is now the one mapping between that vocabulary and
+> `harvest::FAILURE_VERDICTS`.
+>
+> `schedule` gates the loop **before** the agenda is read — an item scored outside
+> a window is work the driver was not allowed to plan. `harvest` offers before it
+> settles. `stall` gets its `FinishedRun`s from a five-way join, because
+> `Folded::finished` is only `item → verdict`. `digest` counts its cadence **over
+> the period, not over the session**: `Folded::runs_started` is a session total
+> and cannot answer "three runs, two since the last digest".
+>
+> **api lib: 329 → 351 tests**, and each new one proves *the call happens* rather
+> than that the module works — the modules' own 108 tests already prove the second.
+>
+> **The trials-versus-dollars trap was made loud rather than quiet.** `0139` adds
+> `session_digests.spend_unit`, **NOT NULL with no default**, CHECKed to
+> `('trials','usd')`, so no writer can leave the question open; the unit is on the
+> `digest_written` event too. It is **not finished**: the digest's own sentence
+> still reads `"{:.2} spent over 2 runs"` with no unit in it, and that line is in
+> `research-session`, outside the track's territory. Until the route selects
+> `spend_unit` and the card renders it, a reader sees trials where they expect
+> dollars.
+>
+> Two spec problems, neither implemented. **§4.8's "marked worth pursuing" is a
+> mark nothing records** — `next_moves` is not a field of `mlops.dossier.body`
+> and `worth_pursuing` appears in no table, so source 4.8 is wired and **inert**;
+> unmarked hypotheses land in `Harvest::skipped` and reach the log with the
+> reason. And **§7.1's `proceed_as_variant` is a vocabulary nothing writes** —
+> `hypothesis_precheck` files `blocked | duplicate | new`, so read literally the
+> circling rule can never fire. `duplicate` is read as the variant (§7.1's own
+> gloss is *"the dedupe did its job and the policy overrode it"*), and the count
+> of runs with **no** precheck verdict rides on `session_stalled.not_measured` so
+> the rule's reach is visible rather than assumed.
+
 **Requirement IDs:** PG-01…PG-14.
 **Spec:** [AGENT-014](../../../specs/AGENT-014-continuous-research.md);
 [ADR-0037](../../../adr/0037-two-modes-continuous-toggle.md).

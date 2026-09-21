@@ -35,6 +35,16 @@
 //! digest of forty runs listing forty questions is a digest nobody reads, and
 //! the question is one click away behind the id. The reader wants to know that
 //! six were refuted before they want to know what six things were asked.
+//!
+//! # The budget line names its unit
+//!
+//! The one number on this card that a reader can misread is the spend, because
+//! it renders beside a day budget in dollars and this platform meters trials.
+//! So [`SpendUnit`] is not optional on [`BudgetSummary`], [`write_in`] takes it
+//! as an argument rather than assuming it, and it reaches the **sentence** and
+//! not only the struct: `12.00 trials spent over 3 runs` is a fact, `12.00
+//! spent over 3 runs` under a dollar bar is a wrong one. Migration `0139` makes
+//! the stored column NOT NULL with no default for the same reason.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -275,11 +285,72 @@ pub struct Period {
     pub to_seq: i64,
 }
 
+/// What `spent` is counted in.
+///
+/// **A number beside a dollar bar with no unit on it is the defect this
+/// closes.** The digest's budget line renders next to the session's day budget,
+/// which is denominated in dollars, while everything this platform can actually
+/// meter a run with is trials: [`crate::select`] scores cost in trials because
+/// `llm_usage.cost_usd` keys on the auth session rather than on the run. A
+/// reader who sees `12.00` beside a dollar bar reads dollars, and they are
+/// wrong by whatever the trial price is.
+///
+/// The two words are migration `0139`'s, which makes `session_digests
+/// .spend_unit` **NOT NULL with no default** and CHECKs it to these two
+/// exactly, so a writer cannot leave the question open in the database either.
+/// An enum rather than a free-form string because a unit that can be spelt two
+/// ways is a unit that will be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpendUnit {
+    /// What a run's lease is actually metered in on this platform today.
+    Trials,
+    /// What the day budget is denominated in, and what nothing yet meters a run
+    /// in. Here because `0139` allows it and a digest written the day that
+    /// changes must be able to say so.
+    Usd,
+}
+
+impl SpendUnit {
+    /// Both words, in `0139`'s order. Every one of them is a word the CHECK
+    /// accepts.
+    pub const ALL: &'static [SpendUnit] = &[SpendUnit::Trials, SpendUnit::Usd];
+
+    /// The stored word — what goes in `session_digests.spend_unit` and on the
+    /// `digest_written` event.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpendUnit::Trials => "trials",
+            SpendUnit::Usd => "usd",
+        }
+    }
+
+    /// What the rendered sentence calls it. Not [`Self::as_str`], because
+    /// `usd` reads as a column name and `USD` reads as money.
+    #[must_use]
+    pub fn in_prose(self) -> &'static str {
+        match self {
+            SpendUnit::Trials => "trials",
+            SpendUnit::Usd => "USD",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|u| u.as_str() == s)
+    }
+}
+
 /// What the period cost and what it bought (§2.4).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BudgetSummary {
     pub runs_finished: usize,
     pub spent: f64,
+    /// What [`Self::spent`] and [`Self::cost_per_knowledge_unit`] are counted
+    /// in. Not optional: see [`SpendUnit`]. Every number in this struct is in
+    /// this unit, which is why there is one of these rather than one per field.
+    pub unit: SpendUnit,
     pub knowledge_units: u32,
     /// `None` when the period produced no knowledge, for the reason
     /// `Yield::cost_per_knowledge_unit` gives: a barren period has no cost *per
@@ -384,7 +455,16 @@ pub struct Upcoming {
     /// `None` before the scorer has seen it. Rendered as "not scored yet"
     /// rather than as zero, which would read as *worthless*.
     pub score: Option<Score>,
-    /// The `rationale` off the item's `decision` row (§5.3) — one sentence.
+    /// Why this item is next — one sentence, from what the agenda row itself
+    /// holds: the sources that wanted the question, and the score's own terms
+    /// when it has been scored.
+    ///
+    /// **Not the `rationale` off a `decision` row (§5.3), and it cannot be.** A
+    /// `decision` row is written when an item is *chosen*, and every item here
+    /// is one that has not been: an unchosen item appears only in the
+    /// `candidate_set` of some other item's decision. So no item in the next
+    /// [`NEXT_UP`] has a decision row of its own, and a field documented as
+    /// carrying one would have been a field no caller could ever fill.
     pub why: String,
 }
 
@@ -492,14 +572,19 @@ impl Digest {
     }
 }
 
-/// Write the digest for a period (§2.4).
+/// Write the digest for a period, in the unit the caller meters runs in (§2.4).
 ///
 /// Pure and total: the same input gives the same digest, and there is no input
 /// it refuses. A digest of a quiet period is a digest saying the session spent
 /// nothing, which is a fact the human wants; refusing to write one would leave
 /// them wondering whether the job was even running.
+///
+/// `spend_unit` is a parameter and not a default because the budget line
+/// renders beside a dollar bar and this platform meters trials — see
+/// [`SpendUnit`]. It reaches the rendered sentence, not only
+/// [`BudgetSummary::unit`], because the sentence is the thing a human reads.
 #[must_use]
-pub fn write(input: &DigestInput) -> Digest {
+pub fn write_in(input: &DigestInput, spend_unit: SpendUnit) -> Digest {
     let mut sections: Vec<Section> = Vec::new();
 
     let mut runs = Vec::new();
@@ -582,7 +667,11 @@ pub fn write(input: &DigestInput) -> Digest {
     push(&mut sections, Heading::Contradictions, contradictions);
     push(&mut sections, Heading::ProposalsAwaiting, proposals);
 
-    let budget = summarise(&input.runs);
+    let budget = summarise(&input.runs, spend_unit);
+    // The unit is in the sentence and not only in the struct. The card shows
+    // this line beside a day budget in dollars, so a bare `12.00` is read as
+    // money whatever `BudgetSummary::unit` says.
+    let unit = spend_unit.in_prose();
     push(
         &mut sections,
         Heading::Budget,
@@ -590,15 +679,15 @@ pub fn write(input: &DigestInput) -> Digest {
             Ref::session(input.session),
             match budget.cost_per_knowledge_unit {
                 Some(per) => format!(
-                    "{:.2} spent over {} run{}, {} — {per:.2} per knowledge unit",
+                    "{:.2} {unit} spent over {} run{}, {} — {per:.2} {unit} per knowledge unit",
                     budget.spent,
                     budget.runs_finished,
                     plural(budget.runs_finished),
                     units(budget.knowledge_units),
                 ),
                 None => format!(
-                    "{:.2} spent over {} run{} and no knowledge units, so there is no cost per \
-                     unit to report",
+                    "{:.2} {unit} spent over {} run{} and no knowledge units, so there is no cost \
+                     per unit to report",
                     budget.spent,
                     budget.runs_finished,
                     plural(budget.runs_finished),
@@ -638,13 +727,40 @@ pub fn write(input: &DigestInput) -> Digest {
     }
 }
 
-/// The period's spend and what it bought.
-fn summarise(runs: &[RunRecord]) -> BudgetSummary {
+/// [`write_in`] in [`PLATFORM_SPEND_UNIT`] — what every caller on this platform
+/// meters a run in today.
+///
+/// **This is a bridge, not the interface.** It exists so that a caller written
+/// before the unit was a parameter keeps compiling and keeps rendering the
+/// truth, because the unit it was silently using was trials and this names it.
+/// It is the one place in this crate where the unit is assumed rather than
+/// stated, so a second unit must not arrive through it: a caller that meters
+/// anything else calls [`write_in`], and `the_bridge_renders_the_platforms_own_
+/// unit` is what holds this to trials if somebody changes
+/// [`PLATFORM_SPEND_UNIT`] without thinking about the callers of this function.
+#[must_use]
+pub fn write(input: &DigestInput) -> Digest {
+    write_in(input, PLATFORM_SPEND_UNIT)
+}
+
+/// The unit a run's lease is metered in on this platform (`api`'s `SPEND_UNIT`).
+///
+/// Here rather than only in the driver because [`write`] needs a word and a
+/// word invented at the render site is the thing `0139` was written to stop.
+pub const PLATFORM_SPEND_UNIT: SpendUnit = SpendUnit::Trials;
+
+/// The period's spend and what it bought, in the caller's unit.
+///
+/// The unit is carried rather than derived: every `RunRecord.spent` in one
+/// digest is metered the same way, and a summary that could not say which way
+/// is the summary that started this.
+fn summarise(runs: &[RunRecord], unit: SpendUnit) -> BudgetSummary {
     let spent: f64 = runs.iter().map(|r| r.spent).sum();
     let knowledge_units: u32 = runs.iter().map(|r| r.knowledge_units).sum();
     BudgetSummary {
         runs_finished: runs.len(),
         spent,
+        unit,
         knowledge_units,
         cost_per_knowledge_unit: (knowledge_units > 0).then(|| spent / f64::from(knowledge_units)),
     }
@@ -863,11 +979,82 @@ mod tests {
         assert_eq!(d.budget.cost_per_knowledge_unit, Some(2.0));
         let line = &d.section(Heading::Budget).expect("a budget line").lines[0];
         assert!(
-            line.text.contains("2.00 per knowledge unit"),
+            line.text.contains("2.00 trials per knowledge unit"),
             "{}",
             line.text
         );
         assert_eq!(line.at, Ref::session(d.session));
+    }
+
+    #[test]
+    fn the_budget_sentence_names_its_unit_and_never_renders_a_bare_number() {
+        // The whole point: this line renders beside a day budget in dollars.
+        // Both branches of it — with a cost per unit and without — have to say
+        // what the number is counted in, so neither can be read as money.
+        let busy = a_busy_week();
+        let mut barren = a_busy_week();
+        for r in &mut barren.runs {
+            r.knowledge_units = 0;
+        }
+
+        let mut checked = 0;
+        for input in [&busy, &barren] {
+            for unit in SpendUnit::ALL {
+                let d = write_in(input, *unit);
+                assert_eq!(d.budget.unit, *unit);
+                let line = &d.section(Heading::Budget).expect("a budget line").lines[0];
+                let spent = format!("{:.2}", d.budget.spent);
+                assert!(
+                    line.text.contains(&format!("{spent} {}", unit.in_prose())),
+                    "the spend is not named in {}: {}",
+                    unit.as_str(),
+                    line.text
+                );
+                assert!(
+                    !line.text.contains(&format!("{spent} spent")),
+                    "a bare number beside a dollar bar: {}",
+                    line.text
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 4, "both branches, both units");
+    }
+
+    #[test]
+    fn the_bridge_renders_the_platforms_own_unit() {
+        // `write` assumes a unit; this is the assertion that it assumes the one
+        // the platform actually meters, and that the assumption reaches the
+        // sentence rather than stopping at the struct.
+        assert_eq!(PLATFORM_SPEND_UNIT, SpendUnit::Trials);
+        let d = write(&a_busy_week());
+        assert_eq!(d.budget.unit, PLATFORM_SPEND_UNIT);
+        assert_eq!(d, write_in(&a_busy_week(), PLATFORM_SPEND_UNIT));
+        let line = &d.section(Heading::Budget).expect("a budget line").lines[0];
+        assert!(
+            line.text.contains(PLATFORM_SPEND_UNIT.in_prose()),
+            "{}",
+            line.text
+        );
+    }
+
+    #[test]
+    fn every_spend_unit_word_round_trips_and_is_one_0139_accepts() {
+        // `0139` CHECKs `spend_unit IN ('trials', 'usd')` NOT NULL with no
+        // default. A word here that the CHECK refuses is a digest that cannot
+        // be stored, which is a failure at write time rather than at review.
+        const CHECKED: [&str; 2] = ["trials", "usd"];
+        assert_eq!(SpendUnit::ALL.len(), CHECKED.len());
+        for unit in SpendUnit::ALL {
+            assert_eq!(SpendUnit::parse(unit.as_str()), Some(*unit));
+            assert!(
+                CHECKED.contains(&unit.as_str()),
+                "{} is not a word 0139 accepts",
+                unit.as_str()
+            );
+            assert!(!unit.in_prose().trim().is_empty());
+        }
+        assert_eq!(SpendUnit::parse("dollars"), None);
     }
 
     #[test]

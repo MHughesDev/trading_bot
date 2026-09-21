@@ -46,7 +46,9 @@ pub use charter::{
     Autonomy, Charter, CharterError, ExplorationShare, Objective, ReviewEvery, Schedule, Scope,
     Seed, SessionBudget, StopWhen, Window, EXPLORATION_FLOOR,
 };
-pub use digest::{Digest, DigestInput, Heading, Line, Period, Ref, RefKind, Section};
+pub use digest::{
+    Digest, DigestInput, Heading, Line, Period, Ref, RefKind, Section, SpendUnit,
+};
 pub use fold::{fold, Anomaly, EventKind, Folded, SessionEvent, SessionState};
 pub use select::{Inputs, Provenance, Scored, Selection, Signal};
 pub use stall::{detect, Amendment, Diagnosis, FinishedRun, Precheck, Rule, Tripped};

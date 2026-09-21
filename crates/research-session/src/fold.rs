@@ -120,13 +120,34 @@ pub enum EventKind {
     AgendaItemVetoed,
     AgendaItemSuperseded,
     AgendaItemExpired,
+    /// An **agenda item** is waiting for a human before it may run (§6.3).
     AwaitingApproval,
+    /// A **proposal a run made** is waiting for a human to decide it
+    /// (AGENT-014 P6, rings 1 and 2).
+    ///
+    /// Distinct from [`Self::AwaitingApproval`], which is about an item on the
+    /// agenda, because the two open different things and a reader of the log
+    /// cannot tell them apart from a payload. Appending this **records that a
+    /// human is owed a decision and nothing else**: there is no kind here that
+    /// clears one, no `decided` payload the fold reads, and
+    /// [`crate::harvest::AwaitingHuman`] has no decision field for one to reach
+    /// — a session that could log its own approval would be a session that
+    /// approves its own proposals.
+    ProposalAwaiting,
     Selected,
     RunStarted,
     RunFinished,
     WindowClosed,
     DayBudgetExhausted,
     DigestWritten,
+    /// Something the driver wants on the log with no state behind it — a
+    /// skipped offer and why, an exclusion the stall detector could not see.
+    ///
+    /// Exists so that a note is not filed as an event that means something
+    /// else. Before it, the driver reached for [`Self::AgendaItemMerged`] for
+    /// prose, and a log where a merge might not be a merge is a log the fold
+    /// cannot be trusted to read.
+    Note,
 }
 
 impl EventKind {
@@ -146,12 +167,14 @@ impl EventKind {
         EventKind::AgendaItemSuperseded,
         EventKind::AgendaItemExpired,
         EventKind::AwaitingApproval,
+        EventKind::ProposalAwaiting,
         EventKind::Selected,
         EventKind::RunStarted,
         EventKind::RunFinished,
         EventKind::WindowClosed,
         EventKind::DayBudgetExhausted,
         EventKind::DigestWritten,
+        EventKind::Note,
     ];
 
     #[must_use]
@@ -172,12 +195,14 @@ impl EventKind {
             EventKind::AgendaItemSuperseded => "agenda_item_superseded",
             EventKind::AgendaItemExpired => "agenda_item_expired",
             EventKind::AwaitingApproval => "awaiting_approval",
+            EventKind::ProposalAwaiting => "proposal_awaiting",
             EventKind::Selected => "selected",
             EventKind::RunStarted => "run_started",
             EventKind::RunFinished => "run_finished",
             EventKind::WindowClosed => "window_closed",
             EventKind::DayBudgetExhausted => "day_budget_exhausted",
             EventKind::DigestWritten => "digest_written",
+            EventKind::Note => "note",
         }
     }
 
@@ -425,9 +450,15 @@ pub fn fold(events: &[SessionEvent]) -> Folded {
             EventKind::DigestWritten => f.last_digest_seq = Some(e.seq),
             EventKind::AgendaItemMerged
             | EventKind::AwaitingApproval
+            // Neither changes the fold. `ProposalAwaiting` deliberately so:
+            // the queue of proposals a human owes a decision on is theirs to
+            // read, not a number this fold carries, and a fold that tracked it
+            // would be one step from a fold that cleared it.
+            | EventKind::ProposalAwaiting
             | EventKind::Selected
             | EventKind::WindowClosed
-            | EventKind::DayBudgetExhausted => {}
+            | EventKind::DayBudgetExhausted
+            | EventKind::Note => {}
             // Every transition kind returned above.
             EventKind::SessionCreated
             | EventKind::SessionStarted
@@ -617,6 +648,88 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_proposal_awaiting_and_a_note_are_their_own_kinds_and_change_nothing() {
+        // The driver had neither, so it filed both as kinds that mean something
+        // else: a proposal waiting for a human as `awaiting_approval` (which is
+        // about an agenda item) and a plain note as `agenda_item_merged` (which
+        // is about a merge that did not happen). Both now have a word.
+        let item = Uuid::new_v4();
+        let quiet = {
+            let mut log = opened();
+            log.push(ev(2, EventKind::AgendaItemAdded, json!({"item": item})));
+            log
+        };
+        let noisy = {
+            let mut log = quiet.clone();
+            log.push(ev(3, EventKind::ProposalAwaiting, json!({"proposal": "p_1"})));
+            log.push(ev(4, EventKind::Note, json!({"what": "an offer was skipped"})));
+            log
+        };
+
+        let mut checked = 0;
+        for kind in [EventKind::ProposalAwaiting, EventKind::Note] {
+            assert!(EventKind::ALL.contains(&kind), "{kind:?} is not in ALL");
+            assert_eq!(EventKind::parse(kind.as_str()), Some(kind));
+            assert_eq!(
+                kind.moves_to(),
+                None,
+                "{} is not a transition and must carry NULL state",
+                kind.as_str()
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 2);
+
+        assert_eq!(EventKind::parse("proposal_awaiting"), Some(EventKind::ProposalAwaiting));
+        assert_eq!(EventKind::parse("note"), Some(EventKind::Note));
+
+        // Neither reaches the fold. In particular nothing about the proposal
+        // enters `Folded`, so there is no field a session could later clear:
+        // the human's queue stays the human's. `event_seq` is the position the
+        // log has reached and of course moves; everything else must not.
+        let quiet_folded = fold(&quiet);
+        let mut noisy_folded = fold(&noisy);
+        assert_eq!(
+            noisy_folded.event_seq,
+            quiet_folded.event_seq + 2,
+            "both events were read"
+        );
+        assert_eq!(quiet_folded.items, vec![item], "the fixture folded nothing");
+        noisy_folded.event_seq = quiet_folded.event_seq;
+        assert_eq!(noisy_folded, quiet_folded);
+        assert!(
+            noisy_folded.anomalies.is_empty(),
+            "{:?}",
+            noisy_folded.anomalies
+        );
+
+        // P6, held here as well as in `harvest`: `proposal_awaiting` is the
+        // **only** kind in this vocabulary that names a proposal, so there is
+        // no word a session could append to decide one. The anchor is that it
+        // found exactly one; a scan finding none would be a scan of nothing.
+        let about_proposals: Vec<&str> = EventKind::ALL
+            .iter()
+            .map(|k| k.as_str())
+            .filter(|w| w.contains("proposal"))
+            .collect();
+        assert_eq!(
+            about_proposals,
+            vec!["proposal_awaiting"],
+            "a kind that decides a proposal is a session that approves its own"
+        );
+    }
+
+    #[test]
+    fn no_two_event_kinds_share_a_word() {
+        let mut words: Vec<&str> = EventKind::ALL.iter().map(|k| k.as_str()).collect();
+        assert!(!words.is_empty());
+        let before = words.len();
+        words.sort_unstable();
+        words.dedup();
+        assert_eq!(before, words.len(), "two kinds parse to one: {words:?}");
     }
 
     #[test]

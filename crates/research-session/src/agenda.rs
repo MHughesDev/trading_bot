@@ -414,7 +414,18 @@ pub enum Insert {
     /// A new item.
     Added(Box<AgendaItem>),
     /// The key matched; the existing item now carries one more source.
-    Merged { into: Uuid, source: Source },
+    ///
+    /// `source_refs` is what this offer actually **added** — not everything it
+    /// carried. The caller appends with `source_refs || $3::jsonb`, so returning
+    /// refs the item already held would duplicate them; and returning none at
+    /// all lost them entirely, which is how a harvested question came to merge
+    /// onto an item whose card could no longer open the memory row that wanted
+    /// it.
+    Merged {
+        into: Uuid,
+        source: Source,
+        source_refs: Vec<String>,
+    },
 }
 
 /// Layer one: offer an item to an agenda.
@@ -432,9 +443,11 @@ pub fn offer(agenda: &mut [AgendaItem], item: AgendaItem) -> Insert {
         if !existing.sources.contains(&source) {
             existing.sources.push(source);
         }
+        let mut added = Vec::new();
         for r in item.source_refs {
             if !existing.source_refs.contains(&r) {
-                existing.source_refs.push(r);
+                existing.source_refs.push(r.clone());
+                added.push(r);
             }
         }
         // The score depended on the source list, so it is no longer the score of
@@ -445,6 +458,7 @@ pub fn offer(agenda: &mut [AgendaItem], item: AgendaItem) -> Insert {
         return Insert::Merged {
             into: existing.id,
             source,
+            source_refs: added,
         };
     }
     Insert::Added(Box::new(item))
@@ -492,9 +506,15 @@ mod tests {
         .with_source_ref("f_31a/f_47c");
 
         match offer(&mut agenda, again) {
-            Insert::Merged { into, source } => {
+            Insert::Merged {
+                into,
+                source,
+                source_refs,
+            } => {
                 assert_eq!(into, agenda[0].id);
                 assert_eq!(source, Source::Contradiction);
+                // What the merge added, so the caller can append exactly it.
+                assert_eq!(source_refs, vec!["f_31a/f_47c".to_string()]);
             }
             Insert::Added(_) => panic!("the key matched and the item was inserted anyway"),
         }
@@ -502,6 +522,22 @@ mod tests {
         assert_eq!(agenda[0].source_refs, vec!["f_31a/f_47c".to_string()]);
         // Two sources wanted it, so it now carries the higher weight.
         assert!((agenda[0].source_weight() - 1.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_merge_returns_only_the_refs_it_added() {
+        // The caller appends with `source_refs || $3`, so returning a ref the
+        // item already holds duplicates it in the row.
+        let mut agenda = vec![AgendaItem::new(session(), "q", "s", Source::CharterSeed)
+            .with_source_ref("f_31a")];
+        let again = AgendaItem::new(session(), "q", "s", Source::Contradiction)
+            .with_source_ref("f_31a")
+            .with_source_ref("f_99z");
+        let Insert::Merged { source_refs, .. } = offer(&mut agenda, again) else {
+            panic!("the key matched and the item was inserted anyway");
+        };
+        assert_eq!(source_refs, vec!["f_99z".to_string()], "`f_31a` was already there");
+        assert_eq!(agenda[0].source_refs, vec!["f_31a".to_string(), "f_99z".to_string()]);
     }
 
     #[test]

@@ -253,6 +253,71 @@ export function BudgetMeter({ budget, caps }: { budget: BudgetView; caps?: Parti
   )
 }
 
+/**
+ * The continuous session's day budget, in the journal header (AGENT-014 §9).
+ *
+ * §9 asks for "a **continuous** badge and the day budget bar". The badge is
+ * real; the bar is only half-possible, and this component is where that is said
+ * out loud rather than drawn over.
+ *
+ * **There is no spend-to-date on any served route.** `GET /api/research/
+ * sessions/{id}` answers `budget.usd_per_day` and nothing that counts against
+ * it, and `agent_runs` records `trials_spent`, not dollars. An empty track over
+ * a `$25/day` label reads as *nothing spent today*, which is a measurement
+ * nobody made — the same defect as the tokens bar that printed "0 / 40,000" for
+ * a run that had spent half a million. So the bar is drawn only when a spend
+ * arrives, and until then the header states the budget and says the spend is
+ * not recorded.
+ *
+ * `spentUsd` is therefore `number | null` rather than `number`, and `null` is
+ * not zero.
+ */
+export function DayBudgetBar({
+  usdPerDay,
+  spentUsd,
+}: {
+  usdPerDay: number | null
+  /** Dollars spent today. `null` — the only value anything can pass today. */
+  spentUsd?: number | null
+}) {
+  if (usdPerDay === null || !Number.isFinite(usdPerDay)) {
+    return (
+      <span className="sub" data-testid="day-budget-unknown">
+        day budget not recorded
+      </span>
+    )
+  }
+  const budget = `$${usdPerDay.toFixed(2)}/day`
+  if (spentUsd === null || spentUsd === undefined || !Number.isFinite(spentUsd)) {
+    return (
+      <span className="sub" data-testid="day-budget-no-spend">
+        {budget} · spend today is not recorded
+      </span>
+    )
+  }
+  const p = pct(spentUsd, usdPerDay)
+  const t = tone(p)
+  return (
+    <span className="budget-row" data-testid="day-budget-bar">
+      <span className="lbl-t">day</span>
+      <span
+        className="budget-track"
+        role="meter"
+        aria-label="day budget used"
+        aria-valuenow={Math.round(p)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <i className={t} style={{ width: `${p}%` }} />
+        <b style={{ left: '90%' }} aria-hidden />
+      </span>
+      <span className="val">
+        ${spentUsd.toFixed(2)} / {budget}
+      </span>
+    </span>
+  )
+}
+
 // ── §6.3a's vocabulary, declared here because the chip below uses it ─────────
 
 const CLASS_WORDS: Record<EvidenceClass, string> = {

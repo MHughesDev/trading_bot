@@ -150,6 +150,19 @@ export interface Conversation {
   /** Whether an agent is working in this conversation right now. */
   running: boolean
   turns: number
+  /**
+   * The journal a continuous session's child conversation hangs under
+   * (AGENT-012 §2b).
+   *
+   * `agent_conversations.parent_conversation_id` holds it and
+   * `api::session_driver` writes it when it opens a child — but
+   * `conversations::list` does not select it, so **this is absent from every
+   * response today**. Optional rather than required for exactly that reason:
+   * the rail groups from the agenda's `child_conversation_id` instead, and the
+   * day this column reaches the wire the grouping starts using it with no other
+   * change.
+   */
+  parent_conversation_id?: string | null
 }
 
 export interface Turn {

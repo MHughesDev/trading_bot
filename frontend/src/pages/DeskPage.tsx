@@ -10,9 +10,11 @@
 // line instead of eleven.
 import { useState } from 'react'
 import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/primitives/Button'
 import { conversationsApi } from '@/api/agent'
+import { deskApi } from '@/api/desk'
+import { childrenFromAgendas, railGroups } from '@/lib/desk/rail'
 import { ApprovalsInbox } from '@/components/desk/ApprovalsInbox'
 import { Catalogue } from '@/components/desk/Catalogue'
 import { Conversation } from '@/components/desk/Conversation'
@@ -32,6 +34,36 @@ function Rail({ onNew, hidden }: { onNew: () => void; hidden?: boolean }) {
     queryFn: () => conversationsApi.list().then((r) => r.data),
     refetchInterval: 15_000,
   })
+  // §2b: a continuous session's children are grouped under its journal and
+  // carry a chip back to the agenda card that started them. The edge comes from
+  // the agenda — `child_conversation_id` — because the conversations route does
+  // not send `parent_conversation_id`, which `railGroups` explains at length.
+  const sessions = useQuery({
+    queryKey: ['desk', 'sessions'],
+    queryFn: () => deskApi.sessions(),
+    staleTime: 30_000,
+  })
+  const continuous = (sessions.data?.sessions ?? []).filter((s) => s.continuous)
+  const agendas = useQueries({
+    queries: continuous.map((s) => ({
+      queryKey: ['desk', 'agenda', s.session_id],
+      queryFn: () => deskApi.agenda(s.session_id),
+      staleTime: 30_000,
+    })),
+  })
+  const chips = childrenFromAgendas(
+    continuous.map((s, i) => ({
+      session_id: s.session_id,
+      conversation_id: s.conversation_id,
+      items: agendas[i]?.data?.items ?? [],
+    })),
+  )
+  const groups = railGroups(list.data?.conversations ?? [], sessions.data?.sessions, chips)
+
+  function label(c: { conversation_id: string; title: string | null }) {
+    return c.title ?? c.conversation_id.slice(0, 8)
+  }
+
   return (
     <nav className="desk-rail" hidden={hidden} aria-label="Conversations and desk sections">
       <div className="desk-rail-hd">
@@ -41,15 +73,43 @@ function Rail({ onNew, hidden }: { onNew: () => void; hidden?: boolean }) {
         </Button>
       </div>
       <ul>
-        {(list.data?.conversations ?? []).map((c) => (
-          <li key={c.conversation_id}>
+        {groups.map((g) => (
+          <li key={g.conversation.conversation_id}>
             <button
               type="button"
-              aria-current={c.conversation_id === conversationId}
-              onClick={() => navigate(`/desk/c/${c.conversation_id}`)}
+              aria-current={g.conversation.conversation_id === conversationId}
+              onClick={() => navigate(`/desk/c/${g.conversation.conversation_id}`)}
             >
-              {c.title ?? c.conversation_id.slice(0, 8)}
+              {g.journal ? `${label(g.conversation)} · journal` : label(g.conversation)}
             </button>
+            {g.children.length > 0 && (
+              <ul aria-label={`Runs under ${label(g.conversation)}`}>
+                {g.children.map((child) => (
+                  <li key={child.conversation.conversation_id}>
+                    <button
+                      type="button"
+                      aria-current={child.conversation.conversation_id === conversationId}
+                      onClick={() => navigate(`/desk/c/${child.conversation.conversation_id}`)}
+                    >
+                      {label(child.conversation)}
+                    </button>
+                    {child.chip && (
+                      // The chip back to the agenda card. It opens the journal,
+                      // which is where the board is — there is no route to a
+                      // single item, and the board is what the card is on.
+                      <button
+                        type="button"
+                        className="badge outline"
+                        title={child.chip.question}
+                        onClick={() => navigate(`/desk/c/${child.chip?.conversation_id}`)}
+                      >
+                        agenda: {child.chip.question}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>
@@ -96,6 +156,9 @@ function ConversationRoute() {
       // ran it (§2b), which is a sibling route rather than one nested under this
       // conversation.
       onOpenConversation={(id) => navigate(`/desk/c/${id}`)}
+      // Where a digest line goes when it names something that lives on another
+      // desk page — a finding in memory, a proposal in the queue.
+      onOpenPath={(to) => navigate(to)}
     />
   )
 }
