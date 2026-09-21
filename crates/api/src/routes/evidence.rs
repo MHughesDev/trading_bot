@@ -36,46 +36,149 @@ pub async fn trades(
     token: BearerToken,
     Json(body): Json<TradesBody>,
 ) -> impl IntoResponse {
+    // The run store this reads is `backtest_jobs`. `0026_backtest_runs.sql`
+    // renamed the job tracker created by `0011` to that name and gave the freed
+    // name to the Set-J content-addressed store, which has `run_id TEXT` /
+    // `result_json` and no `user_id` — and which nothing in this workspace
+    // writes to (`backtest::run::store` is in-memory only). So the table with
+    // run results in it is `backtest_jobs`, and it is the one `BacktestManager`
+    // persists to and `list_backtests` reads back.
+    let Some(run_uuid) = body.run_id.parse::<uuid::Uuid>().ok() else {
+        // Not "no such run". A caller holding a Set-J `sha256:…` id or a typo
+        // gets told which id space this route reads, rather than being told the
+        // run does not exist — which would be a claim about the database that
+        // this route never made.
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "run_id_not_a_uuid",
+                "run_id": body.run_id,
+                "why": "this route reads the backtest job store, whose ids are UUIDs. A \
+                        `sha256:…` id addresses the Set-J content-addressed run store, which \
+                        holds no rows on this deployment and which this route does not read.",
+                "fix": "list_backtests shows the ids this route accepts",
+            })),
+        )
+            .into_response();
+    };
+
     let tenant = token.user_id().to_string();
     let Ok(mut tx) = ledger::pg::tenant_tx(&state.pg, &tenant).await else {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "no_tx" })))
             .into_response();
     };
 
-    // `backtest_runs` is scoped by `user_id` rather than by the mlops RLS
+    // `backtest_jobs` is scoped by `user_id` rather than by the mlops RLS
     // policy, so the ownership check is in the WHERE clause. Leaving it out
     // would let any caller read any run's trade list by guessing a UUID.
-    let run_uuid = body.run_id.parse::<uuid::Uuid>().ok();
-    let row = match run_uuid {
-        Some(id) => {
-            sqlx::query("SELECT result FROM backtest_runs WHERE id = $1 AND user_id = $2")
-                .bind(id)
-                .bind(token.user_id())
-                .fetch_optional(&mut *tx)
-                .await
-        }
-        None => Ok(None),
-    };
+    let row = sqlx::query(
+        "SELECT result, status, error FROM backtest_jobs WHERE id = $1 AND user_id = $2",
+    )
+    .bind(run_uuid)
+    .bind(token.user_id())
+    .fetch_optional(&mut *tx)
+    .await;
     let _ = tx.commit().await;
 
-    let Ok(Some(row)) = row else {
+    // Three outcomes, not two. The previous `let Ok(Some(row)) = row else …`
+    // collapsed a query that could not execute into "no such run", which is how
+    // a route reading a table renamed out from under it reported a clean 404
+    // for every id for as long as it was wrong.
+    let row = match row {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "no_such_run",
+                    "run_id": body.run_id,
+                    "fix": "list_backtests shows what exists",
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({
+                    "error": "run_lookup_failed",
+                    "run_id": body.run_id,
+                    "table": "backtest_jobs",
+                    "message": e.to_string(),
+                    "why": "the trade list could not be read, so nothing is known about this \
+                            run's trades. This is not `no_such_run` and not an empty list — \
+                            Postgres names the relation or column it could not resolve in \
+                            `message`.",
+                })),
+            )
+                .into_response()
+        }
+    };
+
+    let status: String = row.try_get("status").unwrap_or_default();
+    let run_error: Option<String> = row.try_get("error").unwrap_or_default();
+
+    // `result` is nullable: a run that failed before producing one stores no
+    // document at all. An empty trade list would say it traded nothing, which is
+    // a statement about a run that never got far enough to trade.
+    let Ok(Some(result)) = row.try_get::<Option<serde_json::Value>, _>("result") else {
         return (
-            StatusCode::NOT_FOUND,
+            StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({
-                "error": "no_such_run",
+                "error": "no_result_document",
                 "run_id": body.run_id,
-                "fix": "list_backtests shows what exists",
+                "status": status,
+                "run_error": run_error,
+                "why": "this run stored no result document, so its trade list is unknown — not \
+                        empty. A run with no result did not trade zero times; it did not report.",
             })),
         )
             .into_response();
     };
 
-    let result: serde_json::Value = row.try_get("result").unwrap_or_else(|_| json!({}));
-    let raw = result
-        .get("trades")
-        .and_then(|t| t.as_array())
-        .cloned()
-        .unwrap_or_default();
+    // A missing key and a recorded empty list are different facts, and only one
+    // of them licenses "this run did not trade". The engine that wrote the rows
+    // on this deployment stores `total_orders` / `total_positions` / `summary`
+    // and no `trades` key at all, so the fallback-to-`[]` this replaced would
+    // have reported "no trades" for a run that placed 58 orders.
+    let raw = match result.get("trades") {
+        Some(serde_json::Value::Array(a)) => a.clone(),
+        Some(other) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "trades_not_an_array",
+                    "run_id": body.run_id,
+                    "got_type": json_type(other),
+                    "why": "the result document has a `trades` key that is not a list, so the \
+                            trade list cannot be read and is not empty.",
+                })),
+            )
+                .into_response()
+        }
+        None => {
+            let orders = result.get("total_orders").cloned();
+            let positions = result.get("total_positions").cloned();
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "trades_not_recorded",
+                    "run_id": body.run_id,
+                    "status": status,
+                    "result_keys": result.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()),
+                    "orders_recorded": orders,
+                    "positions_recorded": positions,
+                    "why": "this run's result document has no `trades` key. That is a recording \
+                            gap in the engine that produced it, not a run that took no trades — \
+                            `orders_recorded` says how many orders it placed. Nothing here \
+                            supports a statement about concentration, path risk or costs.",
+                    "fix": "re-run this configuration on an engine that records per-trade rows, \
+                            or read the per-trade series directly if the run wrote one.",
+                })),
+            )
+                .into_response()
+        }
+    };
 
     let slices: Vec<TradeSlice> = raw
         .iter()
@@ -103,8 +206,17 @@ pub async fn trades(
                 "gross_gain": c.gross_gain,
                 "net_without_top_n": c.net_without_top(body.top_n),
             })),
+            // The list was present in the result document, so an empty one here
+            // is a run that recorded zero trades — the one case in which
+            // "it did not trade" is a thing this route may say.
+            "trades_recorded": true,
             "note": conc.as_ref().map_or(
-                "No winning trades, so there is no concentration to measure.",
+                if raw.is_empty() {
+                    "This run recorded a trade list and it is empty: it took no trades. That is \
+                     a measured zero, not a missing measurement."
+                } else {
+                    "No winning trades, so there is no concentration to measure."
+                },
                 |c| if c.net_without_top(body.top_n) < 0.0 {
                     "Removing the top trades turns this result negative. A strategy whose edge \
                      disappears without its best few bars did not have an edge; it had those \
@@ -123,6 +235,19 @@ pub async fn trades(
 fn as_number(v: &serde_json::Value) -> Option<f64> {
     v.as_f64()
         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+}
+
+/// Names the JSON type a field actually holds, so a refusal can say what was
+/// there instead of only what was expected.
+const fn json_type(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,16 +294,83 @@ pub async fn data_quality(
     let start = body.start.unwrap_or(end - chrono::Duration::days(7));
     let store = backtest::store::BarStore::connect(&state.clickhouse_url).as_of(end);
 
+    // Resolve first, through the same point-in-time store, so the three ways
+    // this can yield no bars stay three different answers: the backend could not
+    // be read, the symbol maps to no instrument, or the instrument has no bars
+    // in the window. Only the third is a fact about data; the first two are the
+    // absence of a measurement, and reporting any of them as "no defects found"
+    // is a clean bill of health nobody took.
+    match store.resolve_instrument(&body.instrument_id).await {
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({
+                    "error": "instrument_lookup_failed",
+                    "instrument_id": body.instrument_id,
+                    "message": e.to_string(),
+                    "why": "the symbol could not be resolved, so no bars were scanned and \
+                            nothing is known about this instrument's data quality. ClickHouse \
+                            names the table it could not read in `message`.",
+                })),
+            )
+                .into_response()
+        }
+        Ok(None) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "instrument_not_resolved",
+                    "instrument_id": body.instrument_id,
+                    "as_of": end,
+                    "why": "this symbol maps to no instrument/venue as of the window's end, so \
+                            there were no bars to scan. Zero bars scanned is not zero defects.",
+                    "fix": "list the instruments the platform has bars for and pass one of those",
+                })),
+            )
+                .into_response()
+        }
+        Ok(Some(_)) => {}
+    }
+
     let bars = match store.load_bars(&body.instrument_id, tf, start, end).await {
         Ok(b) => b,
         Err(e) => {
             return (
                 StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": "bar_load_failed", "message": e.to_string() })),
+                Json(json!({
+                    "error": "bar_load_failed",
+                    "instrument_id": body.instrument_id,
+                    "timeframe": body.timeframe,
+                    "start": start,
+                    "end": end,
+                    "message": e.to_string(),
+                    "why": "the scan did not run, so this window has no defect count — neither \
+                            zero nor any other number. ClickHouse names the relation or column \
+                            it could not resolve in `message`.",
+                })),
             )
                 .into_response()
         }
     };
+
+    if bars.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "no_bars_in_window",
+                "instrument_id": body.instrument_id,
+                "timeframe": body.timeframe,
+                "start": start,
+                "end": end,
+                "why": "the instrument resolves but has no bars whose close falls in this \
+                        window as of its end, so nothing was scanned. A scan of nothing is not \
+                        a clean scan.",
+                "fix": "widen the window, or pick a timeframe the platform has stored for this \
+                        instrument",
+            })),
+        )
+            .into_response();
+    }
 
     let slices: Vec<BarSlice> = bars
         .iter()
@@ -367,6 +559,38 @@ mod tests {
         assert!((default_wick() - 3.0).abs() < f64::EPSILON);
         assert!((default_sigma() - 8.0).abs() < f64::EPSILON);
         assert_eq!(default_top_n(), 6);
+    }
+
+    #[test]
+    fn a_missing_trade_list_and_an_empty_one_are_different_documents() {
+        // The route branches on exactly this, and the branch is the whole
+        // point: `path_risk` prints "An empty trade list is not a result with
+        // zero risk; it is a run that did not trade", which is true of the
+        // second document and false of the first. Every result document this
+        // deployment has stored is the first kind — `total_orders`, `summary`,
+        // and no `trades` key — including one whose run placed 58 orders.
+        let absent = json!({ "total_orders": 58, "summary": { "orders.total": "58" } });
+        let empty = json!({ "trades": [] });
+        assert!(absent.get("trades").is_none());
+        assert_eq!(empty.get("trades"), Some(&json!([])));
+        // The fallback this replaced collapsed them into one answer.
+        let collapse = |v: &serde_json::Value| {
+            v.get("trades")
+                .and_then(|t| t.as_array())
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(collapse(&absent), collapse(&empty));
+    }
+
+    #[test]
+    fn a_refusal_can_name_the_type_it_actually_found() {
+        assert_eq!(json_type(&json!(null)), "null");
+        assert_eq!(json_type(&json!([])), "array");
+        assert_eq!(json_type(&json!({})), "object");
+        assert_eq!(json_type(&json!("x")), "string");
+        assert_eq!(json_type(&json!(1)), "number");
+        assert_eq!(json_type(&json!(true)), "bool");
     }
 
     #[test]

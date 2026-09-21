@@ -92,6 +92,13 @@ jobs:
         run: cargo test -p ledger -- --ignored --test-threads=1
       - name: Schema invariants
         run: cargo test -p invariants --test db_invariants -- --ignored --test-threads=1
+      # A route's SQL is not checked against the schema by the type system: the
+      # query is a runtime string. /api/evidence/trades selected columns that
+      # migration 0026 renamed away, the error was swallowed into a 404, and the
+      # route answered "no such run" to every caller for as long as it existed.
+      # This PREPAREs every evidence query against the full migration chain.
+      - name: Evidence routes query the schema that exists
+        run: cargo test -p invariants --test the_evidence_routes_query_the_schema_that_exists -- --ignored --test-threads=1
       # AT-29: a gate threshold cannot be edited in place, a superseding version
       # can be created, and a comparison spanning two profiles is non-comparable.
       - name: Gate profiles are immutable and versioned

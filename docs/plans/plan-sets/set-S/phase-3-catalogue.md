@@ -109,12 +109,25 @@ measurement reported as a zero, in the file written to forbid exactly that.
 names the exact symbol that must exist first, in its own entry. The short
 version:
 
-- **Two ClickHouse schema files were never applied on this deployment.**
-  `07_canonical_market.sql` (`market_bar`, `instrument_symbol_dim`, `venue_dim`,
-  `restatement_index` — all four absent, which is what `BarStore` reads) and
-  `08_forward_series.sql` (`funding_rates`, `open_interest`,
-  `option_chain_snapshots` — all absent). `probe_pit_provenance`,
-  `get_funding_history` and `probe_data_quality` are dead for that one reason.
+- ~~**Two ClickHouse schema files were never applied on this deployment.**~~
+  **This was wrong, and it was checked against the wrong database.** Both files
+  are applied. Queried directly on 2026-09-21 against
+  `trading_bot-clickhouse-1`, database `trading`: **`market_bar` holds 170,594
+  rows**, `instrument_symbol_dim` 10, `venue_dim` 11, `restatement_index` 0,
+  and `funding_rates`, `open_interest` and `option_chain_snapshots` all exist at
+  0 rows. The earlier track looked in the `default` database, where they are
+  genuinely absent — and this box has fourteen ClickHouse databases, most of
+  them test fixtures. **Two tracks agreeing is not the same as two tracks being
+  right**; a third checked and disagreed, which is why its report opens by
+  saying which claims it refuted.
+
+  What is actually missing is narrower and more useful: `get_funding_history`
+  needs a **reader** (`storage::clickhouse::forward` exposes `write_funding`,
+  `write_open_interest`, `write_chain_snapshot`, `beat` and no reader at all)
+  and a route, plus rows in a table that has none. `probe_pit_provenance` needs
+  a route over `BarStore::as_of` returning the as-of/latest diff — and it has
+  170,594 real bars to run against, so it is **not** blocked on deployment
+  state.
 - **Nothing in the workspace mentions `shift_bars`, `shift_column`,
   `mask_column`, `jitter_bars`, `fill_delay_ms` or `perturbation_pct`.** The
   runtime mode §5.4 assumes does not exist.
@@ -707,17 +720,23 @@ attribution names a dominant component with its evidence.
 **Traces:** AGENT-006 §5.6; research brief Theme 5.
 
 ### S-3.15 Data provenance, survivorship, funding history — M
-`BLOCKED:UPSTREAM` — **two ClickHouse schema files were never applied on this
-deployment.** `07_canonical_market.sql` (`market_bar`, `instrument_symbol_dim`,
-`venue_dim`, `restatement_index` — all four absent, and all four are what
-`BarStore` reads) blocks `probe_pit_provenance`; `08_forward_series.sql`
-(`funding_rates`, `open_interest`, `option_chain_snapshots` — all absent) blocks
-`get_funding_history`, which additionally needs a `read_funding` in
-`storage::clickhouse::forward` (it exposes writers only) and a route.
-`audit_survivorship` has nothing to audit: **no membership calendar exists anywhere**
-in the workspace, `instruments` has four rows all `active = true` with no
-`delisted_at`, and `DataSlice.universe_ref` is documented as pinned by a calendar
-version that was never built.
+`NOT STARTED` — **corrected 2026-09-21: this was marked `BLOCKED:UPSTREAM` on a
+claim that turned out to be false.** Both ClickHouse schema files **are** applied in database `trading`:
+`market_bar` holds **170,594 rows**, `instrument_symbol_dim` 10, `venue_dim` 11,
+and `funding_rates` / `open_interest` / `option_chain_snapshots` exist at 0
+rows. So `probe_pit_provenance` is buildable today against real bars — it needs
+a route over `BarStore::as_of` that returns the as-of/latest **diff** rather
+than only bars. `get_funding_history` needs a `read_funding` in
+`storage::clickhouse::forward` (which exposes writers and no reader at all), a
+route, and rows in a table that has none — collection is wired
+(`KrakenFuturesClient::funding_history` → `write_funding`) and has never run
+here.
+
+`audit_survivorship` **is** genuinely blocked: **no membership calendar exists
+anywhere** in the workspace, `instruments` has four rows all `active = true`
+with no `delisted_at`, and `DataSlice.universe_ref` is documented as pinned by a
+calendar version that was never built. One of three sub-tools blocked is not a
+blocked task, which is why this marker came back.
 
 `probe_pit_provenance`, `audit_survivorship`, `get_funding_history`.
 **Acceptance:** the provenance check executes a representative as-of query and diffs it
