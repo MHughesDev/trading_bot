@@ -17,7 +17,7 @@ docs/
 ├─ QUEUE_ARCHIVE.MD             # 🔄 Archived queue items (historical)
 ├─ QUEUE_STACK.csv              # 🔄 Current queue stack (data file)
 │
-├─ adr/                         # 🏛️ Architecture Decision Records (ADR-0001 through 0013)
+├─ adr/                         # 🏛️ Architecture Decision Records (ADR-0001 through 0038)
 │   ├─ 0001-rust-modular-monolith-with-satellite-collectors.md
 │   ├─ 0002-decimal-money-newtypes-no-f64.md
 │   ├─ ... (through 0011)
@@ -187,7 +187,7 @@ docs/
 | Need | Location |
 |------|----------|
 | System overview | `artifact.md` + `architecture.md` |
-| Architecture decisions | `adr/` (0001-0013) |
+| Architecture decisions | `adr/` (0001-0038) |
 | System specs | `specs/` (detailed) + `Specs/` README (overview) |
 | Implementation plans | `docs/plans/plan-sets/` (set-A through set-G) |
 | How-to procedures | `procedures/` + `skills/` |

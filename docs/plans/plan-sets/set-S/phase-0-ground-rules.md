@@ -316,7 +316,7 @@ wording unchanged. No criterion is added, removed or softened in the conversion.
 **Traces:** `docs/procedures/execute-plan.md` §3c, `add-spec.md` §6.
 
 ### S-0.5 Update every index that now points at nothing — S
-`NOT STARTED` — and it needs one more file than it lists.
+`PARTIAL` 2026-09-21 - the stale indexes are fixed and the link acceptance is met; the duplicate `README` is blocked twice over
 
 `docs/specs/README.MD` **and** `docs/specs/README.md` are both tracked and both point at the
 same blob; on this Windows checkout they are one file on disk. That is not in this task's file
@@ -331,6 +331,29 @@ appended — verify), `docs/FOLDER_MAP.md` (it still shows `adr/` ending at 0013
 **Acceptance:** `cargo test -p api --test auditor_suite` green; every link in Set S MASTER
 resolves from a case-sensitive checkout; no index row points at a missing file.
 **Traces:** `add-plan.md` step 6, `add-adr.md`.
+
+**Checked rather than assumed (2026-09-21), and most of this task's premise was
+already false.**
+
+* **"No index row points at a missing file" already held.** A link scan over
+  `set-S/MASTER.md`, `docs/plans/README.md`, `docs/adr/README.md` and
+  `docs/FOLDER_MAP.md` resolves **84 of 84** relative links. The acceptance was met
+  before anybody worked the task; saying so is worth more than re-deriving it.
+* **`docs/adr/README.md` was already correct** - rows for 0034 through 0038, which the
+  task asked to "verify". Verified.
+* **Two things were genuinely stale and are fixed.** `FOLDER_MAP.md` described the ADR
+  directory as "0001 through 0013" in two places, twenty-five ADRs behind;
+  `docs/plans/README.md`'s Set S row named ADR-0034…0037 and there is an 0038.
+* `cargo test -p api --test auditor_suite` is green (3).
+
+**Blocked, and blocked twice over: the duplicate `README`.** `docs/specs/README.MD`
+and `docs/specs/README.md` are both tracked and are one file on this Windows checkout,
+so `git rm --cached` on the loser has to be run from a case-sensitive checkout - and
+that file is separately under a standing instruction in this repository not to be
+modified or staged. The `Plan set` column update and the supersession marks the task
+also asks for live in the same file. The supersessions themselves **did** land, on each
+spec's own header (S-8.9, 2026-09-17), which is where a reader looks first anyway.
+
 
 ### S-0.6 Correct the governance register, and reserve the migration ranges — S
 `NOT STARTED` — not reached by track 1.

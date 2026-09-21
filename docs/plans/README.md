@@ -53,7 +53,7 @@ backfill. Set L also absorbs the two unshipped legs of Set K.
 |------|------|--------|--------------|
 | [ROADMAP.md](./ROADMAP.md) | Formal | **Current — read first** | artifact.md North Star; supersedes BS-007 17_BUILD_ORDER §2–§3 |
 | [EXECUTION-BOARD.md](./EXECUTION-BOARD.md) | Formal | Current | ROADMAP.md; the live parallel-track assignments |
-| [plan-sets/set-S/MASTER.md](./plan-sets/set-S/MASTER.md) | Formal | Current | AGENT-005…014, COMP-007, ADR-0034…0037 |
+| [plan-sets/set-S/MASTER.md](./plan-sets/set-S/MASTER.md) | Formal | Current | AGENT-005…014, COMP-007, ADR-0034…0038 |
 | [plan-sets/set-P/MASTER.md](./plan-sets/set-P/MASTER.md) | Formal | Current | DATA-005 §7/§8/§11/§12, 06_DATA §6, ADR-0027 |
 | [plan-sets/set-T/MASTER.md](./plan-sets/set-T/MASTER.md) | Formal | Current | SPEC §12.3, ADR-P2-14/27, COMP-002, COMP-007 |
 | [rust-rewrite-master-plan.md](./reference/rust-rewrite-master-plan.md) | Formal | Current | SYS-001, all ADRs |
