@@ -47,6 +47,12 @@ const KIND_MAP: Record<string, CardKind> = {
   steer: 'steer',
   halt: 'halt',
   report: 'report',
+  // The run's compiled dossier (S-8.7). Without this line the event fell to
+  // `raw` and was folded away, so a dossier the platform had compiled and
+  // stored had no way to be opened from the conversation that produced it —
+  // and the Report card's "Open dossier" button, which reads `detail.ticket`,
+  // could never appear.
+  dossier: 'report',
 }
 
 /** Kinds folded behind the details disclosure (§3.2), off by default. */
@@ -160,6 +166,12 @@ function headlineFor(kind: CardKind, e: WireEvent): string {
     case 'halt':
       return str(c.message) ?? str(c.error) ?? str(c.reason) ?? 'halted'
     case 'report':
+      // A dossier event has two shapes and they must not collapse: a ticket
+      // means one was compiled, and `not_compiled` means the run produced a
+      // report whose claims its evidence did not support. The second is a
+      // finding about the run, not a missing button, so it gets said.
+      if (str(c.not_compiled)) return `no dossier: ${str(c.not_compiled) as string}`
+      if (str(c.ticket) && !str(c.summary)) return 'the dossier for this run is ready'
       return str(c.summary) ?? str(c.assessment) ?? 'report'
     case 'stage':
       return str(c.stage) ?? 'stage'

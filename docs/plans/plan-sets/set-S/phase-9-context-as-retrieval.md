@@ -3,6 +3,13 @@
 **Completion: 85% (17 / 20 tasks), plus 3 `PARTIAL` — S-9.5's fixture, S-9.10's
 corpus and S-9.12's promotion are built and have nothing live to run against.**
 
+> Updated 2026-09-21. S-9.19 closed: the counterfactual ablation, the `indeterminate`
+> verdict and the per-record clause in the prompt were all built, and the clause was
+> being **discarded at the timeline boundary** - so the one question the scrubber
+> exists to answer was unanswerable about precisely the records it is asked about.
+> The remaining three are one block, not three: **gate H-2**. Each is built and has no
+> live corpus to run against, and no amount of code closes that.
+
 > Status 2026-09-16. The phase is built and the control is intact: `ContextPolicy::v1`
 > is Part I exactly — `SelectionMode::Chronological`, `DegradationMode::PartOne`, the
 > profile's own window, no manifest, no pull tools, no spill — so every existing run is
@@ -364,7 +371,7 @@ truncates.
 **Traces:** AGENT-005 §27.1–27.3; §30.16.
 
 ### S-9.19 What would have helped, and why you are seeing this — L
-`NOT STARTED`
+`DONE` 2026-09-21
 
 **Counterfactual ablation.** §19 measures what the model *used*, which is not what it
 *needed* — a record can be used because it was there and a better one was not. Over recorded
@@ -388,6 +395,47 @@ strange and one no version of this system could previously answer.
 ranking that differs from the citation ranking; every rendered record carries a reason; the
 report is in every trajectory and drives the scrubber.
 **Traces:** AGENT-005 §28.1–28.4; §30.18, §30.19.
+
+
+**What was already here, and what was not.** Three of the four halves were built:
+`context::ablation` runs the counterfactual with no provider call,
+`Utility::Indeterminate` keeps "unused" and "checked and dismissed" apart where the
+evidence cannot, and `context::render` puts each selected record's clause in the
+prompt.
+
+**The missing hop was the last one, and it removed exactly the half the feature is
+for.** `Note::Selected` carried `selected` and `elided` as two lists of opaque ids and
+dropped `SelectionReport::scores` - where the clause lives. So the trajectory could say
+*what* was in the prompt and not *why this record was not*, which is the question
+28.3 names as the one the scrubber exists to answer. The desk compounded it:
+`'selection'` was a declared card kind with no case in `Cards.tsx`, so the note
+rendered through the fallback.
+
+Both closed. `Note::Selected` now carries `reasons: Vec<SelectionLine>` - id, whether
+it reached the prompt, the clause, and the score the decision was actually made on -
+**elided first**, because that is the half a reader is looking for and a cap that kept
+the winners would cut the half being asked about. Within each half, worst-scoring
+first, so the near-misses meet at the boundary: the last record that lost sits beside
+the weakest one that beat it, and the desk draws a rule between them.
+
+`MAX_SELECTION_LINES` is 20 with `lines_omitted` beside it, because the note is
+written on **every** step and a long run's store holds hundreds of records - and
+because a truncated list that does not say it is truncated reads as a complete one,
+which would have a reader conclude the record they are hunting for was never a
+candidate.
+
+**Still waiting on gate H-2, and only this:** "ablation runs over a *corpus*". The
+sweep, the ranking and the difference from the citation ranking are asserted on a
+fixture; the corpus is S-9.10's and does not exist. That is the same block, recorded
+once.
+
+**Evidence:** `harness::drive::tests::{the_records_that_lost_are_the_ones_the_note_leads_with,
+the_near_misses_end_up_adjacent, every_line_says_why, a_capped_list_says_how_many_it_left_out,
+a_nan_score_does_not_take_the_run_down, an_assembly_with_no_candidates_still_reports}`;
+`context::ablation::tests::{the_sweep_makes_no_model_call,
+the_load_bearing_ranking_differs_from_the_citation_ranking}`;
+`frontend .../selection-note.test.tsx` (8 tests, including that a line with no clause is
+dropped rather than rendered as a line with an empty one).
 
 ### S-9.20 Sub-run context is a projection, not a second pipeline — M
 `DONE` 2026-09-16 — `context/projection.rs`; the critic's exclusion is by construction and the projection is recorded.

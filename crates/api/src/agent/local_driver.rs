@@ -898,21 +898,64 @@ impl Recorder {
                 text: evidence.to_string(),
             }],
             cost_usd: self.yielded.cost_usd,
-            trials: self.yielded.trials_spent,
+            // `self.trials_spent`, **not** `self.yielded.trials_spent`. The
+            // yield's copy is assigned thirty lines below this call, so reading
+            // it here recorded `0` on every dossier ever compiled — for the one
+            // number the platform exists to count. Reading the counter removes
+            // the ordering rather than reordering the statements, because an
+            // ordering that has to be maintained is one that drifts back.
+            trials: u32::try_from(self.trials_spent).unwrap_or(0),
             harness_version: HARNESS_VERSION,
             profile: &profile,
             window: "the run's registered window",
             seeds: "as recorded on each trial",
         };
-        match crate::dossier::compile_and_store(&self.pg, self.user_id, produced).await {
-            Ok(_) => {
-                self.append("dossier", json!({ "ticket": run })).await;
-            }
-            Err(e) => {
-                self.append("dossier", json!({ "not_compiled": e.to_string() }))
-                    .await;
-            }
+        // The yield rides on this event, because this is the card a reader
+        // opens at the end of a run and the counts were reaching nothing: they
+        // are columns on `agent_runs`, and the desk's Report card had a
+        // headline and a button. Every count is final by now — the
+        // `hypotheses_*` three were set by `decide_hypotheses` just above, and
+        // the rest accumulate as the run goes.
+        let (key, value) = match crate::dossier::compile_and_store(&self.pg, self.user_id, produced).await {
+            Ok(_) => ("ticket", json!(run)),
+            // Named, not silent. A dossier refuses to compile when a claim is
+            // not supported by its evidence or when no critic ran, and both are
+            // findings about the run rather than a missing button.
+            Err(e) => ("not_compiled", json!(e.to_string())),
+        };
+        self.append("dossier", self.yield_payload(key, value)).await;
+    }
+
+    /// What this run produced, flat, for the Report card (AGENT-013 §10).
+    ///
+    /// Flat rather than nested under `yield`: the card reads counts by name and
+    /// a nested object would make the reader of the card and the writer of the
+    /// row disagree about where a number lives.
+    ///
+    /// `trials_spent` comes from the counter for the same reason the dossier's
+    /// does. Absent counts are not emitted as zero anywhere else, but these are
+    /// always known at this point, so a zero here means zero.
+    fn yield_payload(&self, key: &str, value: Value) -> Value {
+        let y = &self.yielded;
+        let mut out = json!({
+            "findings_established": y.findings_established,
+            "findings_suggestive": y.findings_suggestive,
+            "findings_refuted": y.findings_refuted,
+            "negatives": y.negatives,
+            "negatives_new_class": y.negatives_new_class,
+            "questions_opened": y.questions_opened,
+            "questions_closed": y.questions_closed,
+            "contradictions_surfaced": y.contradictions_surfaced,
+            "proposals": y.proposals,
+            "hypotheses_tested": y.hypotheses_tested,
+            "hypotheses_refuted": y.hypotheses_refuted,
+            "hypotheses_supported": y.hypotheses_supported,
+            "trials_spent": u32::try_from(self.trials_spent).unwrap_or(0),
+        });
+        if let Some(obj) = out.as_object_mut() {
+            obj.insert(key.to_string(), value);
         }
+        out
     }
 
     /// Decide this run's open hypotheses and count the verdicts.
@@ -2151,6 +2194,92 @@ mod tests {
             .get("qwen3.6-35b-a3b")
             .expect("the reference profile is shipped")
             .clone()
+    }
+
+    /// The dossier's trial count came from a field assigned thirty lines after
+    /// the call that read it, so **every dossier ever compiled recorded zero
+    /// trials** — for the one number this platform exists to count.
+    ///
+    /// Asserted structurally rather than behaviourally, because the behaviour
+    /// needs a database, a run and a finished outcome, and the property is about
+    /// *which of two copies of one number* a line reads. There are two by
+    /// design: `Recorder::trials_spent` is the counter and `Yield::trials_spent`
+    /// is the copy the run record carries, and the yield's own doc comment says
+    /// it "reads the same number rather than keeping its own". The rule is that
+    /// anything running before `finish` writes the row must read the counter.
+    ///
+    /// This does not re-order the statements. An ordering that has to be
+    /// maintained is one that drifts back the first time somebody moves a call.
+    #[test]
+    fn the_dossier_reads_the_trial_counter_and_not_the_copy_of_it() {
+        const SRC: &str = include_str!("local_driver.rs");
+        let body = SRC
+            .split_once("async fn compile_dossier")
+            .expect("compile_dossier exists")
+            .1
+            .split_once("\n    }")
+            .expect("it ends")
+            .0;
+        // Comment lines are excluded: the line that reads the counter explains
+        // why it does not read the copy, and *names the copy* to do it. A scan
+        // that read its own explanation would fail on the fix it is checking
+        // for - which is what happened the first time this ran.
+        let code: String = body
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !code.contains("yielded.trials_spent"),
+            "`compile_dossier` reads `yielded.trials_spent`, which `finish` assigns after \
+             calling it — so the dossier records zero trials for every run"
+        );
+        assert!(
+            code.contains("self.trials_spent"),
+            "`compile_dossier` reads neither the counter nor the copy; it has stopped \
+             recording a trial count at all"
+        );
+    }
+
+    /// The yield reaches the card that reports it.
+    ///
+    /// The counts have been columns on `agent_runs` since S-10.13 and the desk's
+    /// Report card had a headline and a button — so "what did this run produce"
+    /// was answerable from the database and not from the conversation that
+    /// produced it. The event is the hop that was missing.
+    #[test]
+    fn the_dossier_event_carries_what_the_run_produced() {
+        const SRC: &str = include_str!("local_driver.rs");
+        let body = SRC
+            .split_once("fn yield_payload")
+            .expect("yield_payload exists")
+            .1
+            .split_once("\n    }")
+            .expect("it ends")
+            .0;
+        // Every count the row carries, so the card and the row cannot disagree
+        // about what a run produced.
+        for field in [
+            "findings_established",
+            "findings_suggestive",
+            "findings_refuted",
+            "negatives",
+            "negatives_new_class",
+            "questions_opened",
+            "questions_closed",
+            "contradictions_surfaced",
+            "proposals",
+            "hypotheses_tested",
+            "hypotheses_refuted",
+            "hypotheses_supported",
+            "trials_spent",
+        ] {
+            assert!(
+                body.contains(field),
+                "the yield payload omits `{field}`, so the Report card and `agent_runs` \
+                 disagree about what the run produced"
+            );
+        }
     }
 
     #[test]

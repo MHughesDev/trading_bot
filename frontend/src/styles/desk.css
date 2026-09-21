@@ -229,3 +229,21 @@
   border-bottom: 1px solid var(--line-hairline); padding: var(--s-1) var(--s-2);
 }
 .settings-token-table td { padding: var(--s-1) var(--s-2); border-bottom: 1px solid var(--line-hairline); }
+
+/* The selection note's per-record table (AGENT-005 §28.3; S-9.19).
+ *
+ * The records that did NOT reach the prompt are the half a reader is asking
+ * about, so they are the ones that carry weight here — the opposite of the usual
+ * convention, where the selected rows would be emphasised. A card answering
+ * "why did the model not know that?" that made the known things loudest would be
+ * answering the other question. */
+.selection-lines { margin: var(--s-2) 0; }
+.selection-lines td, .selection-lines th { vertical-align: top; }
+.selection-lines tr[data-selected='no'] td { color: var(--fg-primary); }
+.selection-lines tr[data-selected='no'] td:first-child { font-weight: 600; }
+.selection-lines tr[data-selected='yes'] td { color: var(--fg-tertiary); }
+/* The boundary between the two halves is where the near-misses meet, which is
+ * the pair worth looking at. */
+.selection-lines tr[data-selected='no'] + tr[data-selected='yes'] td {
+  border-top: 1px solid var(--line-strong, var(--line-hairline));
+}

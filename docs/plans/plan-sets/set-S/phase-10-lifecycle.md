@@ -1068,6 +1068,39 @@ the pre-registration hash and the hypothesis with its falsifier (`RightPanel.tsx
 `Cards.tsx`), the proposals queue (`ProposalsQueue.tsx` at `/desk/proposals`,
 S-10.9) and the yield's barren half on `/desk/usage` (S-10.13).
 
+> **2026-09-21 — two of the listed gaps closed, and two defects found doing it.**
+>
+> **The yield now reaches the Report card.** The counts have been columns on
+> `agent_runs` since S-10.13 and the card had a headline and a button, so "what did
+> this run produce" was answerable from the database and not from the conversation
+> that produced it. The `dossier` event carries them now, and `yieldLine` names each
+> count rather than scoring them — a weighted total would let a run with nine
+> questions and no findings read as productive. Absent is not zero: a run recorded
+> before these columns existed renders no yield rather than `0 findings`, which would
+> state a measurement nobody made.
+>
+> **A compiled dossier was unreachable from the desk.** `dossier` had no entry in
+> `KIND_MAP`, so the event fell to `raw`, was folded behind the disclosure, and the
+> Report card's "Open dossier" button — which reads `detail.ticket` — could never
+> appear. S-8.7 built the route, the store and the reader and the last hop was
+> missing. The two shapes are kept apart: a ticket means one was compiled, and
+> `not_compiled` means the run produced a report whose claims its evidence did not
+> support, which is a finding about the run rather than an absent button.
+>
+> **And the dossier's trial count was always zero.** `compile_dossier` read
+> `self.yielded.trials_spent`, which `finish` assigns thirty lines *after* calling it
+> — so every dossier ever compiled recorded no trials, for the one number this
+> platform exists to count. Repaired by reading the counter rather than by reordering
+> the statements, because an ordering that has to be maintained is one that drifts
+> back; `the_dossier_reads_the_trial_counter_and_not_the_copy_of_it` holds it. That
+> test failed on its first run against the fix, because the comment explaining which
+> copy to read *names the other one* — so the scan now excludes comment lines.
+>
+> Still open on this task: the pre-registration card's steer-opens-an-amendment, the
+> hypothesis verdict's numbers (S-10.4, gate H-2), and the ten stages being
+> keyboard-navigable in the replay scrubber — which needs a stage per step, and the
+> scrubber currently has only steps.
+
 **Not done:** the composer's mode control with workflow chips and the Continuous
 toggle; the pre-registration *card* with steer-opens-an-amendment; the Research
 offer card (S-10.2); the hypothesis verdict with the numbers that decided it

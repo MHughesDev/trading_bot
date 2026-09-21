@@ -430,6 +430,65 @@ fn repeat_key(name: &str, arguments: &Map<String, Value>) -> String {
 /// is not recovery, it is a loop. The run measured on the degraded tier had eleven.
 const MAX_BARREN_STEPS: u32 = 3;
 
+/// How many per-record clauses a selection note carries.
+///
+/// A note is written on **every step**, and a long run's store holds hundreds of
+/// records, so the whole score table would make the trajectory mostly scoring
+/// arithmetic. Twenty is enough to answer the question a reader actually asks —
+/// which few records lost, and why — and the count of what was left out is
+/// carried beside it so the list never passes for the whole.
+pub const MAX_SELECTION_LINES: usize = 20;
+
+/// The per-record clauses a selection note carries, and how many were left out.
+///
+/// **Elided first.** The scrubber's question is "why did the model not know
+/// that?", so the records that *lost* are the ones a reader is looking for, and
+/// a cap that kept the winners would cut exactly the half being asked about.
+///
+/// Within each half, worst-scoring first. That is the surprising order and it is
+/// deliberate: a reader scanning for an omission that should not have happened
+/// wants the near-misses, and those sit at the boundary between the two halves —
+/// the last elided record and the first selected one, which end up adjacent.
+#[must_use]
+pub fn selection_lines(
+    report: &crate::context::select::SelectionReport,
+) -> (Vec<SelectionLine>, usize) {
+    let mut lines: Vec<SelectionLine> = report
+        .scores
+        .iter()
+        .map(|l| SelectionLine {
+            id: l.id.to_string(),
+            selected: l.selected,
+            reason: l.reason.clone(),
+            score: l.final_score,
+        })
+        .collect();
+    lines.sort_by(|a, b| {
+        a.selected.cmp(&b.selected).then(
+            a.score
+                .partial_cmp(&b.score)
+                .unwrap_or(std::cmp::Ordering::Equal),
+        )
+    });
+    let omitted = lines.len().saturating_sub(MAX_SELECTION_LINES);
+    lines.truncate(MAX_SELECTION_LINES);
+    (lines, omitted)
+}
+
+/// Why one record is, or is not, in a step's prompt (§28.3).
+#[derive(Debug, Clone, Serialize)]
+pub struct SelectionLine {
+    pub id: String,
+    /// Whether it reached the prompt.
+    pub selected: bool,
+    /// The clause. Written by selection, rendered into the prompt for the
+    /// records that made it, and carried here for the ones that did not.
+    pub reason: String,
+    /// The score after the redundancy penalty and any must-include promotion —
+    /// the number the decision was actually made on.
+    pub score: f32,
+}
+
 /// A timeline entry. Typed rather than a string, so the UI and the auditor read the
 /// same record.
 #[derive(Debug, Clone, Serialize)]
@@ -492,6 +551,22 @@ pub enum Note {
         elided: Vec<String>,
         /// Constraints that actually bound this assembly, named.
         bound_by: Vec<String>,
+        /// Why each record is where it is — one clause per record (§28.3,
+        /// §28.4).
+        ///
+        /// Without these the note is two lists of opaque ids, which answers
+        /// "what was in the prompt" and not the question the scrubber exists
+        /// for: **why did the model not know that?** The clause is computed
+        /// during selection and was already rendered into the prompt for the
+        /// records that made it; this is the half that reaches a reader of the
+        /// timeline, including for the records that did not.
+        ///
+        /// Elided first, because that is the half people ask about.
+        reasons: Vec<SelectionLine>,
+        /// Records whose clause did not fit [`MAX_SELECTION_LINES`]. Stated,
+        /// because a truncated list that does not say it is truncated reads as
+        /// a complete one.
+        lines_omitted: usize,
     },
     /// A capability was lost. Always paired with the fence when it is a constraint
     /// violation; on its own when it is merely a downgrade.
@@ -1375,6 +1450,8 @@ impl Loop {
         let manifest = context::manifest::render(&self.store, &shown, manifest_budget);
         let blocks =
             context::render::blocks(&self.store, &selection, &self.context_policy, &manifest.text);
+        let (lines, lines_omitted) = selection_lines(&selection.report);
+
         self.last_selection = Some(Note::Selected {
             step: self.step,
             policy_version: selection.report.policy_version.clone(),
@@ -1382,6 +1459,8 @@ impl Loop {
             selected: selection.report.selected.iter().map(ToString::to_string).collect(),
             elided: selection.report.dropped.iter().map(ToString::to_string).collect(),
             bound_by: selection.report.bound_by.clone(),
+            reasons: lines,
+            lines_omitted,
         });
         // What this call rendered, for §24.5's stickiness on the next one. Kept
         // here rather than recomputed later: a second `select` to find out what
@@ -4131,6 +4210,128 @@ pub fn renders_flat(p: &Profile) -> bool {
 
 #[cfg(test)]
 mod tests {
+    // ── S-9.19: the clause reaches the timeline ──────────────────────────────
+    //
+    // The mechanism was built end to end except the last hop: selection wrote a
+    // clause for every candidate, `render` put it in the prompt for the records
+    // that made it, and the timeline note carried two lists of opaque ids. So
+    // the one question the scrubber exists for — *why did the model not know
+    // that?* — was unanswerable about exactly the records it is asked about.
+
+    use crate::context::select::{ScoreLine, SelectionReport, Signals};
+    use crate::context::store::RecordId;
+
+    fn line(id: u32, selected: bool, score: f32, reason: &str) -> ScoreLine {
+        ScoreLine {
+            id: RecordId(id),
+            signals: Signals::default(),
+            score,
+            final_score: score,
+            selected,
+            reason: reason.to_string(),
+        }
+    }
+
+    fn report(scores: Vec<ScoreLine>) -> SelectionReport {
+        SelectionReport {
+            policy_version: "v2".into(),
+            candidates: scores.len(),
+            selected: scores.iter().filter(|l| l.selected).map(|l| l.id).collect(),
+            dropped: scores.iter().filter(|l| !l.selected).map(|l| l.id).collect(),
+            scores,
+            bound_by: vec!["body budget".into()],
+        }
+    }
+
+    /// The half a reader asks about comes first.
+    #[test]
+    fn the_records_that_lost_are_the_ones_the_note_leads_with() {
+        let (lines, omitted) = selection_lines(&report(vec![
+            line(1, true, 0.9, "names the id this step uses"),
+            line(2, false, 0.1, "superseded by record 4"),
+            line(3, true, 0.8, "the correction this step is recovering from"),
+            line(4, false, 0.2, "same subject, lower score than record 1"),
+        ]));
+        assert_eq!(omitted, 0);
+        assert!(
+            !lines[0].selected && !lines[1].selected,
+            "the elided records are not first: {:?}",
+            lines.iter().map(|l| (&l.id, l.selected)).collect::<Vec<_>>()
+        );
+        assert!(lines[2].selected && lines[3].selected);
+    }
+
+    /// Worst-scoring first within each half, so the near-misses meet at the
+    /// boundary — the last elided record beside the first selected one.
+    #[test]
+    fn the_near_misses_end_up_adjacent() {
+        let (lines, _) = selection_lines(&report(vec![
+            line(1, true, 0.95, "a"),
+            line(2, false, 0.05, "b"),
+            line(3, true, 0.51, "c"),
+            line(4, false, 0.49, "d"),
+        ]));
+        // `RecordId` renders as `r003`, which is what a reader of the timeline
+        // sees and therefore what this asserts — not a number this test invented.
+        let ids: Vec<&str> = lines.iter().map(|l| l.id.as_str()).collect();
+        assert_eq!(ids, vec!["r002", "r004", "r003", "r001"]);
+        // The boundary pair is the near-miss and the weakest thing that beat it.
+        assert!(!lines[1].selected && lines[2].selected);
+        assert!((lines[2].score - lines[1].score).abs() < 0.1);
+    }
+
+    /// Every line carries its clause. Two lists of ids answer "what was in the
+    /// prompt"; only the clause answers "why was this one not".
+    #[test]
+    fn every_line_says_why() {
+        let (lines, _) = selection_lines(&report(vec![
+            line(1, true, 0.9, "names the id this step uses"),
+            line(2, false, 0.1, "superseded by record 4"),
+        ]));
+        for l in &lines {
+            assert!(!l.reason.trim().is_empty(), "{:?} has no clause", l.id);
+        }
+        let elided = lines.iter().find(|l| !l.selected).expect("one lost");
+        assert_eq!(elided.reason, "superseded by record 4");
+    }
+
+    /// A capped list says it was capped. A truncated list that does not say so
+    /// reads as the whole, which is worse than not showing it — a reader would
+    /// conclude the record they are looking for was never a candidate.
+    #[test]
+    fn a_capped_list_says_how_many_it_left_out() {
+        let scores: Vec<ScoreLine> = (0..MAX_SELECTION_LINES as u32 + 7)
+            .map(|i| line(i, i % 2 == 0, f32::from(i as u16) / 100.0, "because"))
+            .collect();
+        let (lines, omitted) = selection_lines(&report(scores));
+        assert_eq!(lines.len(), MAX_SELECTION_LINES);
+        assert_eq!(omitted, 7);
+    }
+
+    /// A NaN score does not panic the sort. `final_score` is arithmetic over
+    /// signal weights, and a fitted weight set that produced one would take the
+    /// whole loop down on a timeline note — the least important thing in the
+    /// step.
+    #[test]
+    fn a_nan_score_does_not_take_the_run_down() {
+        let (lines, _) = selection_lines(&report(vec![
+            line(1, true, f32::NAN, "a"),
+            line(2, false, 0.5, "b"),
+            line(3, false, f32::NAN, "c"),
+        ]));
+        assert_eq!(lines.len(), 3);
+        assert!(!lines[0].selected);
+    }
+
+    /// An empty report is a note with no lines, not a panic and not an absent
+    /// note: "nothing was a candidate" is a real answer and a loud one.
+    #[test]
+    fn an_assembly_with_no_candidates_still_reports() {
+        let (lines, omitted) = selection_lines(&report(vec![]));
+        assert!(lines.is_empty());
+        assert_eq!(omitted, 0);
+    }
+
     use super::*;
     use crate::profile::{frontier_fixture, Archetype, Routing, Tier};
     use crate::registry::ToolDef;
