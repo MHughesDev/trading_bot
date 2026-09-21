@@ -646,8 +646,84 @@ pub async fn answer_approval(
 
 // ── Usage and budget (UI-07) ─────────────────────────────────────────────────
 
-/// `(input, output, cache_read, cache_write, cost_usd)`.
-type UsageTotals = (i64, i64, i64, i64, f64);
+/// What `llm_usage` recorded for a scope.
+///
+/// `calls` is the field that makes the other five readable. Four zero counters with
+/// `calls = 0` is a table holding no row for this caller; four zero counters with
+/// `calls = 12` is twelve calls that really did move no tokens. The response used to
+/// carry the counters without the count, so the two printed identically — and on this
+/// deployment it is always the first, because `llm_usage` has no rows at all.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct PricedUsage {
+    pub calls: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read: i64,
+    pub cache_write: i64,
+    /// `None` when no row was summed. `SUM` over no rows is not zero dollars, and the
+    /// `COALESCE(SUM(cost_usd),0)` this replaces reported an empty table as free.
+    pub cost_usd: Option<f64>,
+}
+
+/// What `agent_runs` recorded for a scope: per-run totals, never priced.
+///
+/// A separate type from [`PricedUsage`] because they are separate measurements with
+/// separate coverage, and a reader who cannot tell them apart is reading a number
+/// whose denominator they do not know.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RunTokenVolume {
+    /// Runs in scope, whatever they recorded.
+    pub runs: i64,
+    /// Runs that recorded a token count. The denominator of the two sums below.
+    pub runs_with_tokens: i64,
+    /// Summed over `runs_with_tokens` only. `None` when that set is empty — an
+    /// absence, not a zero.
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+}
+
+impl RunTokenVolume {
+    /// Runs in scope that recorded nothing. Not runs that spent nothing.
+    pub fn runs_without_tokens(self) -> i64 {
+        self.runs - self.runs_with_tokens
+    }
+}
+
+/// Why no dollar figure appears, stated in the response rather than in a comment.
+///
+/// A reader who sees a missing field and no reason will assume the field broke.
+pub const COST_NOT_RECORDED: &str = "not recorded. The only priced table is llm_usage, \
+    whose cost_usd is written per LLM call by the API LLM proxy and keys on an auth \
+    session, not on a run — so it cannot price an agent run even when it has rows. \
+    agent_runs records token counts and no price at all, and this platform has no price \
+    table to multiply them by. Absent, not zero, and deliberately not estimated.";
+
+/// What the four `llm_usage` counters are measuring, and what they systematically miss.
+pub const PRICED_SOURCE: &str = "llm_usage — one row per LLM call, priced. Its only \
+    writer is the API LLM proxy, and the agent driver does not call through the proxy, \
+    so runs driven by it are absent here rather than recorded as zero.";
+
+/// What the run counters are measuring.
+pub const RUN_SOURCE: &str = "agent_runs — one row per agent run, tokens_in/tokens_out \
+    summed over the runs that recorded a count. Unpriced. Coverage is runs_with_tokens \
+    of runs_total; the rest recorded nothing and are excluded from the sums rather than \
+    summed in as zeros.";
+
+/// Why a run whose counters are both zero is read as unmeasured.
+///
+/// `agent_runs.tokens_in` and `tokens_out` are `BIGINT NOT NULL DEFAULT 0` (migration
+/// 0035), so the column cannot distinguish a run measured at zero from a run nothing
+/// ever wrote to. That ambiguity is in the schema, not in this read, and the response
+/// says so rather than resolving it silently.
+pub const RUN_ZERO_IS_AMBIGUOUS: &str = "agent_runs.tokens_in and tokens_out are NOT \
+    NULL DEFAULT 0, so a run holding 0/0 may have been measured at zero or never \
+    written to. Such runs are counted in runs_without_tokens and excluded from the \
+    sums. Telling the two apart needs a nullable column, not a different query.";
+
+/// Why the run counters are withheld when a project is asked for.
+pub const RUN_TOKENS_NOT_PROJECT_SCOPED: &str = "withheld. agent_runs has no project_id \
+    column, so it cannot be narrowed to one project. Returning the unscoped totals here \
+    would attribute every run on the deployment to the project that was asked for.";
 
 #[derive(Debug, Deserialize)]
 pub struct UsageQuery {
@@ -657,24 +733,124 @@ pub struct UsageQuery {
     pub session_id: Option<Uuid>,
 }
 
-/// GET /api/agent/usage — dollars, tokens, cache hit rate, dollars per verdict.
+/// The response body, built from the two sources without merging them.
 ///
-/// Cache hit rate is `cache_read / (cache_read + input)`, which is the fraction of
-/// prompt tokens that were not re-billed at full price. It is on the budget pane
-/// because it is the number that tells a reader whether the cost is the work or the
-/// overhead — and because D-03 says capability is never traded for tokens, so the
-/// only honest way to spend less is to waste less.
+/// Split out from the handler so the shaping can be tested without a database: every
+/// rule worth defending here is about which fields are absent, and an absence is the
+/// one thing an integration test against a populated database cannot show you.
+pub fn usage_body(priced: PricedUsage, runs: Option<RunTokenVolume>, verdicts: i64) -> Value {
+    let billable_prompt = priced.input_tokens + priced.cache_read;
+    let mut body = json!({
+        // llm_usage: per call, priced.
+        "input_tokens": priced.input_tokens,
+        "output_tokens": priced.output_tokens,
+        "cache_read": priced.cache_read,
+        "cache_write": priced.cache_write,
+        "llm_usage_calls": priced.calls,
+        "llm_usage_source": PRICED_SOURCE,
+        "cost_usd": priced.cost_usd,
+        "cost_usd_note": COST_NOT_RECORDED,
+        // A rate over nothing billable is not a rate of zero. It was 0.0, which is a
+        // measurement, and the only cache hit rate this deployment can honestly
+        // report is that nobody has one.
+        "cache_hit_rate": if billable_prompt > 0 {
+            Some(priced.cache_read as f64 / billable_prompt as f64)
+        } else {
+            None
+        },
+        "verdicts": verdicts,
+        // Arithmetic over two recorded figures, or nothing. Never a default.
+        "dollars_per_verdict": match priced.cost_usd {
+            Some(c) if verdicts > 0 => Some(c / verdicts as f64),
+            _ => None,
+        },
+    });
+
+    let obj = body.as_object_mut().expect("json! built an object");
+    match runs {
+        Some(r) => {
+            obj.insert("runs_total".into(), json!(r.runs));
+            obj.insert("runs_with_tokens".into(), json!(r.runs_with_tokens));
+            obj.insert("runs_without_tokens".into(), json!(r.runs_without_tokens()));
+            obj.insert("run_input_tokens".into(), json!(r.input_tokens));
+            obj.insert("run_output_tokens".into(), json!(r.output_tokens));
+            obj.insert("run_tokens_source".into(), json!(RUN_SOURCE));
+            obj.insert("run_zero_note".into(), json!(RUN_ZERO_IS_AMBIGUOUS));
+            // Unpriced is a property of the source, not of this scope, so it is said
+            // whenever the run block is present.
+            obj.insert("run_cost_usd".into(), Value::Null);
+        }
+        None => {
+            obj.insert("run_tokens_source".into(), json!(RUN_SOURCE));
+            obj.insert(
+                "run_tokens_scope_note".into(),
+                json!(RUN_TOKENS_NOT_PROJECT_SCOPED),
+            );
+        }
+    }
+    body
+}
+
+/// Reads `agent_runs` for one user, optionally narrowed to one session.
+///
+/// The `> 0` filter is the whole point: `SUM` over every row folds runs that recorded
+/// nothing into the total as zeros, which is how an average over this table becomes a
+/// number nobody measured.
+pub async fn run_token_volume(
+    pg: &sqlx::PgPool,
+    user_id: Uuid,
+    session_id: Option<Uuid>,
+) -> Result<RunTokenVolume, sqlx::Error> {
+    let (runs, runs_with_tokens, input_tokens, output_tokens): (
+        i64,
+        i64,
+        Option<i64>,
+        Option<i64>,
+    ) = sqlx::query_as(
+        "SELECT count(*)::bigint, \
+                (count(*) FILTER (WHERE tokens_in > 0 OR tokens_out > 0))::bigint, \
+                (SUM(tokens_in)  FILTER (WHERE tokens_in > 0 OR tokens_out > 0))::bigint, \
+                (SUM(tokens_out) FILTER (WHERE tokens_in > 0 OR tokens_out > 0))::bigint \
+           FROM agent_runs \
+          WHERE user_id = $1 \
+            AND ($2::uuid IS NULL OR session_id = $2)",
+    )
+    .bind(user_id)
+    .bind(session_id)
+    .fetch_one(pg)
+    .await?;
+    Ok(RunTokenVolume {
+        runs,
+        runs_with_tokens,
+        input_tokens,
+        output_tokens,
+    })
+}
+
+/// Token volume, and what is known about its price, from both tables that hold any.
+///
+/// Cache hit rate is `cache_read / (cache_read + input)`, the fraction of prompt
+/// tokens not re-billed at full price. It is on the budget pane because it is the
+/// number that tells a reader whether the cost is the work or the overhead — and
+/// because D-03 says capability is never traded for tokens, so the only honest way to
+/// spend less is to waste less.
+///
+/// **Two sources, reported separately.** `llm_usage` is per-call and priced but only
+/// the LLM proxy writes it; `agent_runs` is per-run and unpriced but is what the agent
+/// driver actually fills. Summing them would produce one total whose coverage nobody
+/// could state, so the response keeps them apart and names each.
 pub async fn get_usage(
     State(state): State<AppState>,
     token: BearerToken,
     Query(q): Query<UsageQuery>,
 ) -> impl IntoResponse {
-    let row: Result<Option<UsageTotals>, _> = sqlx::query_as(
-        "SELECT COALESCE(SUM(input_tokens),0)::bigint, \
+    let priced: Result<(i64, i64, i64, i64, i64, Option<f64>), _> = sqlx::query_as(
+        "SELECT count(*)::bigint, \
+                COALESCE(SUM(input_tokens),0)::bigint, \
                 COALESCE(SUM(output_tokens),0)::bigint, \
                 COALESCE(SUM(cache_read),0)::bigint, \
                 COALESCE(SUM(cache_write),0)::bigint, \
-                COALESCE(SUM(cost_usd),0)::float8 \
+                SUM(cost_usd)::float8 \
            FROM llm_usage \
           WHERE user_id = $1 \
             AND ($2::uuid IS NULL OR project_id = $2) \
@@ -683,13 +859,30 @@ pub async fn get_usage(
     .bind(token.user_id())
     .bind(q.project_id)
     .bind(q.session_id)
-    .fetch_optional(&state.pg)
+    .fetch_one(&state.pg)
     .await;
 
-    let (input, output, cache_read, cache_write, cost) = match row {
-        Ok(Some(v)) => v,
-        Ok(None) => (0, 0, 0, 0, 0.0),
+    let priced = match priced {
+        Ok((calls, input_tokens, output_tokens, cache_read, cache_write, cost_usd)) => PricedUsage {
+            calls,
+            input_tokens,
+            output_tokens,
+            cache_read,
+            cache_write,
+            cost_usd,
+        },
         Err(e) => return internal(e),
+    };
+
+    // Withheld rather than answered wrong when a project was asked for: `agent_runs`
+    // has no `project_id`, and `session_id` is a column it does have.
+    let runs = if q.project_id.is_some() {
+        None
+    } else {
+        match run_token_volume(&state.pg, token.user_id(), q.session_id).await {
+            Ok(v) => Some(v),
+            Err(e) => return internal(e),
+        }
     };
 
     // Verdicts: sessions that filed a report. Dollars per verdict is the number that
@@ -705,23 +898,7 @@ pub async fn get_usage(
     .await
     .unwrap_or(0);
 
-    let billable_prompt = input + cache_read;
-    (
-        StatusCode::OK,
-        Json(json!({
-            "input_tokens": input,
-            "output_tokens": output,
-            "cache_read": cache_read,
-            "cache_write": cache_write,
-            "cost_usd": cost,
-            "cache_hit_rate": if billable_prompt > 0 {
-                cache_read as f64 / billable_prompt as f64
-            } else { 0.0 },
-            "verdicts": verdicts,
-            "dollars_per_verdict": if verdicts > 0 { Some(cost / verdicts as f64) } else { None },
-        })),
-    )
-        .into_response()
+    (StatusCode::OK, Json(usage_body(priced, runs, verdicts))).into_response()
 }
 
 // ── Notebook pane (UI-04, COMP-006 §3) ───────────────────────────────────────
