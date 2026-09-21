@@ -1,6 +1,10 @@
 # AGENT-012: The Research Desk — the product spec for working with the agent
 
-**Status:** Proposed (product + implementation spec; ready to build)
+> **Status:** **Partially implemented** — Set S phase 6. Re-checked 2026-09-21.
+>
+> The desk is built and most of its surfaces render; 22 of 24 tasks are `PARTIAL`, which means finishing rather than starting.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-6-research-desk.md`](../plans/plan-sets/set-S/phase-6-research-desk.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14
 **Author:** Claude (Fable 5.1), as product designer
 **Supersedes:** COMP-006 (research workspace UI) §2–§6; the current `/agent` page (`frontend/src/pages/AgentPage.tsx`, `components/agent/{ChatView,ConversationSidebar,AgentActivity}.tsx`)

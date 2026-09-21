@@ -1,6 +1,10 @@
 # COMP-007: Live Strategy Monitor and Kill Switch — an independent service that watches the book and can stop it
 
-**Status:** Proposed (implementation spec; ready to build)
+> **Status:** **Partially implemented** — Set S phase 7. Re-checked 2026-09-21.
+>
+> The kill switch, the control limits and the monitor's read surface are built and the scope that arms them is refused to every agent token. Running it in production is Set T phase 2.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-7-monitor.md`](../plans/plan-sets/set-S/phase-7-monitor.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14
 **Author:** Claude (Fable 5.1)
 **Extends:** COMP-002 (execution and risk gate) §3; `crates/risk/src/kill_switch.rs`

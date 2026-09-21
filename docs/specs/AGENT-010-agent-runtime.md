@@ -1,6 +1,10 @@
 # AGENT-010: The Agent Runtime — one loop, every model, every tier
 
-**Status:** Proposed (implementation spec; ready to build)
+> **Status:** **Partially implemented** — Set S phase 2. Re-checked 2026-09-21.
+>
+> The sans-IO loop, its effect log and the local driver run every turn the platform takes. **Two loops still exist**: `crates/api/src/agent/driver.rs` has not been deleted (S-2.10), which is the task that makes "one runtime" true.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-2-one-runtime.md`](../plans/plan-sets/set-S/phase-2-one-runtime.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14
 **Author:** Claude (Fable 5.1), from `crates/harness`, `crates/api/src/agent/{manager,driver,local_driver,bridge,orchestrator}.rs`, `crates/api/src/llm_proxy.rs`, `crates/llm`, `crates/jobs`, ADR-0022/0024/0031/0032/0033
 **Replaces:** AGENT-001 (agent runtime). Its §5 storage, §6 tokens/scopes, §10 workspace contract, §21 security checklist are carried forward with amendments; its SDK-container architecture (§4, §7–§9, §12–§13) is retired as the research agent's runtime

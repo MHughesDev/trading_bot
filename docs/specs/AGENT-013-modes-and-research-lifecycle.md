@@ -1,6 +1,10 @@
 # AGENT-013: Modes and the Research Lifecycle — what the user can ask the agent to be, and what every research run must pass through
 
-**Status:** Proposed (product + implementation spec; ready to build)
+> **Status:** **Partially implemented** — Set S phase 10. Re-checked 2026-09-21.
+>
+> Pre-registration, hypotheses, designs, proposals, open questions and the yield accounting are built. The two-mode front door still starts every turn as `research` (S-10.2's other half).
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-10-lifecycle.md`](../plans/plan-sets/set-S/phase-10-lifecycle.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14
 **Author:** Claude (Fable 5.1), as architect and product designer
 **New:** no prior spec defines user-facing modes or the end-to-end research lifecycle. AGENT-008 defines a *step*; AGENT-006 §6 defines *workflows as composed tools*; SPEC §10 defines a *campaign*; nothing defines the unit the user actually chooses or the stages a research question passes through from intake to knowledge

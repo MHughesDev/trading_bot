@@ -207,25 +207,30 @@ absorbs parts of four reserved sets. Recorded so the roadmap stays honest:
 
 | Phase | Title | Tasks | Requirement IDs | Parallel with | State |
 |---|---|---|---|---|---|
-| 0 | [Ground rules](phase-0-ground-rules.md) | 6 | GR-01…GR-06 | — (blocks all) | NOT STARTED |
-| 1 | [Contracts](phase-1-contracts.md) | 20 | TC-01…TC-10, CA-01…CA-09, RP-01…RP-07 | three internal tracks | NOT STARTED |
-| 2 | [One runtime](phase-2-one-runtime.md) | 16 | AR-01…AR-16 | 6, 7 | NOT STARTED |
-| 3 | [The catalogue](phase-3-catalogue.md) | 19 | TC-11…TC-37 | 4, 5, 6, 7 | NOT STARTED |
-| 4 | [Memory and evaluation](phase-4-memory-and-evaluation.md) | 17 | RM-01…RM-15, EC-01…EC-13 | 3, 5, 6, 7 | NOT STARTED |
-| 5 | [The language](phase-5-strategy-language.md) | 15 | SA-01…SA-16 | 3, 4, 6, 7 | NOT STARTED |
-| 6 | [The Research Desk](phase-6-research-desk.md) | 24 | DK-01…DK-24 | 2, 3, 4, 5, 7 | NOT STARTED |
-| 7 | [The monitor](phase-7-monitor.md) | 13 | MS-01…MS-14 | everything | NOT STARTED |
-| 8 | [Integration and honesty](phase-8-integration.md) | 9 | TC-35…TC-40, RP-05…RP-08, EC-12 | — (needs 2,3,4) | **7 / 9 (S-8.3, S-8.9 partial)** — see the phase file |
-| 9 | [Context as retrieval](phase-9-context-as-retrieval.md) | 20 | CX2-01…CX2-20 | 8 | NOT STARTED |
-| 10 | [Modes and the lifecycle](phase-10-lifecycle.md) | 16 | LC-01…LC-16 | 9 | NOT STARTED |
-| 11 | [Continuous research](phase-11-continuous-research.md) | 14 | PG-01…PG-14 | 9 | **2 / 14 partial (S-11.1, S-11.14)** — see the phase file |
+| 0 | [Ground rules](phase-0-ground-rules.md) | 6 | GR-01…GR-06 | — (blocks all) | **1 / 6 done · 3 partial** |
+| 1 | [Contracts](phase-1-contracts.md) | 20 | TC-01…TC-10, CA-01…CA-09, RP-01…RP-07 | three internal tracks | **17 / 20 done · 3 partial** |
+| 2 | [One runtime](phase-2-one-runtime.md) | 16 | AR-01…AR-16 | 6, 7 | **5 / 16 done · 9 partial** |
+| 3 | [The catalogue](phase-3-catalogue.md) | 19 | TC-11…TC-37 | 4, 5, 6, 7 | **7 / 19 done · 7 partial** |
+| 4 | [Memory and evaluation](phase-4-memory-and-evaluation.md) | 17 | RM-01…RM-15, EC-01…EC-13 | 3, 5, 6, 7 | **3 / 17 done · 13 partial** |
+| 5 | [The language](phase-5-strategy-language.md) | 15 | SA-01…SA-16 | 3, 4, 6, 7 | **2 / 15 done · 3 partial** |
+| 6 | [The Research Desk](phase-6-research-desk.md) | 24 | DK-01…DK-24 | 2, 3, 4, 5, 7 | **2 / 24 done · 22 partial** |
+| 7 | [The monitor](phase-7-monitor.md) | 13 | MS-01…MS-14 | everything | **5 / 13 done · 7 partial** |
+| 8 | [Integration and honesty](phase-8-integration.md) | 9 | TC-35…TC-40, RP-05…RP-08, EC-12 | — (needs 2,3,4) | **7 / 9 done · 2 partial** |
+| 9 | [Context as retrieval](phase-9-context-as-retrieval.md) | 20 | CX2-01…CX2-20 | 8 | **17 / 20 done · 3 partial** |
+| 10 | [Modes and the lifecycle](phase-10-lifecycle.md) | 16 | LC-01…LC-16 | 9 | **6 / 16 done · 10 partial** |
+| 11 | [Continuous research](phase-11-continuous-research.md) | 14 | PG-01…PG-14 | 9 | **0 / 14 done · 3 partial** |
 
-> **The Status column is stale for every row but 8**, and saying so is more useful
-> than leaving it to be discovered. Phases 4, 5, 6, 9 and 10 are substantially built
-> while recorded here as `NOT STARTED` — found on 2026-09-16 by going to implement a
-> task and discovering its adversarial test already passing. Each phase file carries
-> its own count, and those are the ones that have been checked against the code.
-> Only row 8 was updated here because only row 8 was verified in this pass.
+> **Every row re-derived 2026-09-21 from the phase files' own task markers.** This
+> column used to be stale for every row but 8 — phases 4, 5, 6, 9 and 10 read
+> `NOT STARTED` while substantially built, found on 2026-09-16 by going to implement
+> a task and discovering its adversarial test already passing.
+>
+> It is a hand-copied table, so it will drift again. What stops it mattering is that
+> the counts are now held by
+> `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs`: each phase file's
+> own headline must match its own tasks, and `docs/plans/PLAN.md` must match the sum.
+> If this table disagrees with those, they are right and this is stale — check there
+> first, and prefer [PLAN.md](../../PLAN.md) over any hand-written count anywhere.
 
 ### Dependency graph
 

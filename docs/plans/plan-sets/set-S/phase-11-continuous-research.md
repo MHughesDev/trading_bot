@@ -1,6 +1,6 @@
 # Phase 11 — Continuous research: Research with the toggle on
 
-**Completion: 14% (0 done / 2 partial of 14 tasks)** — S-11.1 (the object, the fold, the driver) and S-11.14 (the API and the three read tools) landed 2026-09-21; each names what it does not cover.
+**Completion: 0% (0 / 14 tasks), plus 3 `PARTIAL`** — S-11.1 (the object, the fold, the driver), S-11.3 (the scored agenda) and S-11.14 (the API and the three read tools) landed 2026-09-21; each names what it does not cover.
 
 **Requirement IDs:** PG-01…PG-14.
 **Spec:** [AGENT-014](../../../specs/AGENT-014-continuous-research.md);
@@ -132,7 +132,7 @@ one iteration; a contradiction pair inserts a `diagnose` item; a stale finding i
 **Traces:** AGENT-014 §4.3–4.6, §4.8; §12.8 (memory half).
 
 ### S-11.3 Scoring, exploration, and the decision row — M
-`NOT STARTED`
+`PARTIAL`
 
 `total = value × novelty × feasibility / cost` over percentile-normalised signals
 (AGENT-014 §5.1); the weights are a versioned `SelectionPolicy` with a conformance reader per
@@ -149,6 +149,96 @@ selection has a decision row whose candidate set contains every scored item; a `
 the next claim regardless of score; the agenda shown in a digest is the agenda that ran (no
 recompute without a source change, asserted).
 **Traces:** AGENT-014 P2, §5; §12.3, §12.12 (bypass half). SPEC §4.4, INV-21.
+
+**Built 2026-09-21. `PARTIAL`, and the partial part is which signals have a
+source.**
+
+`crates/research-session/src/select.rs` is the scorer: `Signal`, `Provenance`,
+`Inputs`, `score`, `select`, `seed_for`, `candidate_set`, `novelty_from_prior`.
+The driver measures, scores, draws and logs; `SessionWorker::choose` and
+`log_selection` are the two halves.
+
+**What each signal actually reads, because three of the four have a source and
+one is named rather than guessed:**
+
+| signal | source | provenance |
+|---|---|---|
+| `value` | the objective's weight for the item's subject × the strongest source weight on it (§5.1's own table) | `declared` |
+| `novelty` | prior hypotheses stating the same question, through the *same* `normalise_statement` `find_prior_hypothesis` uses | `measured{n}` |
+| `feasibility` | charter permits the workflow ∧ `Profile::may_run` | `declared`, `{0, 1}` |
+| `cost` | median `trials_spent` of finished runs of this workflow on this tier | `measured{n}`, or `not_estimated` below three runs |
+
+**`cost` is in trials, not dollars, and that is a fact about this platform rather
+than a shortcut.** `llm_usage.cost_usd` keys on the *auth* session, not the run,
+so there is no per-run USD to take a median of. A trial is the budget dimension
+the ledger actually counts (INV-1). A dollar figure derived from a list price and
+a token count would be a number nobody measured, sitting in the one log every
+later analysis reads — which is exactly what `Provenance` exists to prevent.
+`feasibility`'s `0.5` rung is not emitted either: it needs the coverage reader
+(S-11.10) and the tool breaker (S-11.7).
+
+**The thing that makes this honest is that the row says so.** `Signal` is a
+number *and* a `Provenance`, inseparably, and `Scored::not_estimated()` names
+which signals contributed nothing. Both ride on the `mlops.decision` row and in
+the `selected` event. A reader a year from now can tell a ranking that divided by
+a measured cost from one that did not — which a scorer substituting 1.0 silently
+would not have allowed.
+
+**Two readings of the spec, both argued rather than assumed.**
+
+*Not everything is percentile-normalised.* §5.1 says every signal is, citing
+AGENT-005 §24.3 — but that argument is about **unbounded** signals eating bounded
+ones, and it is `value` and `cost` that are unbounded. Normalising `feasibility`
+would be actively wrong: a percentile rank turns the lowest value in a slate into
+something greater than zero, and feasibility's whole job is that **0 means
+impossible**. Same for `novelty`, whose zero means already answered. So the two
+unbounded signals are ranked within the agenda and the two bounded ones multiply
+as measured. `Scored` carries both scores so the difference is visible, and
+`normalisation_cannot_make_an_impossible_item_possible` fails the build if it
+changes.
+
+*`k = 1`.* §5.2 says the exploration draw is "uniform over … items outside the
+top-k" and then glosses it in plain English as "the item the scorer would not
+have picked". Any `k > 1` is a number nobody chose; the gloss is `k = 1`, which
+is what is built.
+
+**The draw is replayable, so the propensity is a fact.** `seed_for(session,
+event_seq)` and a SplitMix64 written out rather than depended on — a generator
+that changed between crate versions would make old decision rows unreproducible.
+Greedy gets `1 - share`; each detour gets `share / |detours|`; a `user` item is
+not drawn at all and carries propensity 1.0, because attaching a drawn
+probability to something that was asked for would be a fabricated number.
+
+**One judgement call in the ledger, recorded as ADR-P11-02.**
+`DispatchContext::agent` requires a `delta_practical` and `legacy` records the
+absence of one *as a defect of the calling path*. An agenda selection is neither:
+it has a propensity (the draw is the platform's and the probability is a fact)
+and it has no effect size, because "which question to ask" is not a hypothesis
+about a magnitude — §2.2 makes the charter's `delta_practical` a suggestion for
+the runs that follow. Forcing it through `legacy` would label a complete
+declaration defective and make the flag that marks unaccountable decisions stop
+meaning anything. So `DispatchContext::policy_without_effect_size` is the third
+case.
+
+**Verified.** `select.rs` carries 13 tests including §12.3's own interval — over
+40 selections at 0.15, between 3 and 9 are exploration picks — asserted against
+the spec's numbers rather than against whatever this implementation produces.
+`crates/invariants/tests/a_selection_is_logged_with_what_it_rejected.rs` holds
+the four things nothing else would catch: that `choose` writes a decision row and
+not only an event, that the candidate set is built from the slate that was
+scored, that the share is read from the session rather than being a constant that
+would satisfy every unit test, and that a `user` item is not logged as a draw.
+
+**What is still `PARTIAL`.** §5.4 is implemented as "recompute the whole slate
+when any claimable item's score was cleared, reuse the stored ones otherwise" —
+which gives stability when nothing changed and consistency when something did,
+and is *not* the per-item invalidation the spec's sentence could also be read as.
+The `hypothesis_precheck` factor in `novelty` (`proceed_new` 1.0 /
+`proceed_as_variant` 0.6) belongs to S-11.4's intake layer and is not applied.
+`SelectionPolicy` is a name and a version constant rather than a versioned object
+with a conformance reader per field; the weights it would hold are `Source::weight`
+and `Objective::weight_for`, both already single-definition and tested, so the
+object would today be a second place to write the same four numbers.
 
 ### S-11.4 Duplicate work is refused three times — S
 `NOT STARTED`

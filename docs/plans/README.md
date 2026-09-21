@@ -2,8 +2,11 @@
 
 Formal plans for the Python → Rust trading platform refactor. Each plan file is a self-contained, executable document with a stable task-ID structure, acceptance criteria, and phase exit criteria.
 
-> **Start at [`ROADMAP.md`](./ROADMAP.md).** It is the one map from today's code to the North Star
-> in [`../artifact.md`](../artifact.md), and it is the authority on which set runs when.
+> **Start at [`PLAN.md`](./PLAN.md).** It is where the programme is, what is left and in what
+> order, and its counts are re-derived from the plan files rather than restated by hand.
+> [`ROADMAP.md`](./ROADMAP.md) is the reasoning behind that order — the stages, what "done"
+> means, and the gates that need a human — and it remains the authority on which set runs when
+> and why; it maps today's code to the North Star in [`../artifact.md`](../artifact.md).
 > [`EXECUTION-BOARD.md`](./EXECUTION-BOARD.md) is the live track assignment for agents working now.
 >
 > The A→B→…→7 phase ordering below applies to **Sets A and B only** (the Python → Rust rewrite),
@@ -51,7 +54,8 @@ backfill. Set L also absorbs the two unshipped legs of Set K.
 
 | Plan | Type | Status | Derived From |
 |------|------|--------|--------------|
-| [ROADMAP.md](./ROADMAP.md) | Formal | **Current — read first** | artifact.md North Star; supersedes BS-007 17_BUILD_ORDER §2–§3 |
+| [PLAN.md](./PLAN.md) | Formal | **Current — read first.** Where the programme is, what is left, and in what order. Its counts are derived from the plan files and held there by `the_plan_counts_what_the_plans_say` | ROADMAP.md; the plan sets themselves |
+| [ROADMAP.md](./ROADMAP.md) | Formal | Current — the *reasoning*: stages, what "done" means, the human gates. Its §2 snapshot is superseded by PLAN.md §1 | artifact.md North Star; supersedes BS-007 17_BUILD_ORDER §2–§3 |
 | [EXECUTION-BOARD.md](./EXECUTION-BOARD.md) | Formal | Current | ROADMAP.md; the live parallel-track assignments |
 | [plan-sets/set-S/MASTER.md](./plan-sets/set-S/MASTER.md) | Formal | Current | AGENT-005…014, COMP-007, ADR-0034…0038 |
 | [plan-sets/set-P/MASTER.md](./plan-sets/set-P/MASTER.md) | Formal | Current | DATA-005 §7/§8/§11/§12, 06_DATA §6, ADR-0027 |

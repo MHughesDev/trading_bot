@@ -1,6 +1,10 @@
 # AGENT-007: Research Memory — what the agent knows, how it learns, and how knowledge enters context
 
-**Status:** Proposed (implementation spec; ready to build)
+> **Status:** **Partially implemented** — Set S phase 4. Re-checked 2026-09-21.
+>
+> The seven entry kinds, their provenance columns and the brief are built, with the refusals asserted against a live Postgres. The retrieval and decay halves are open.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-4-memory-and-evaluation.md`](../plans/plan-sets/set-S/phase-4-memory-and-evaluation.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14
 **Author:** Claude (Fable 5.1)
 **Revises:** AGENT-003 (knowledge, memory, skills) — §2 layers, §5 findings, §6 skills, §7 profiles are replaced by this document; §3 storage and §4 embeddings are amended

@@ -1,6 +1,10 @@
 # AGENT-009: Evaluation and Calibration — how we know a harness change made the agent better, per tier, before it ships
 
-**Status:** Proposed (implementation spec; ready to build)
+> **Status:** **Partially implemented** — Set S phase 4. Re-checked 2026-09-21.
+>
+> The scorecard and the tier measurement exist. The `judgement` suite of §3 — planted edges the agent must find, planted nulls it must reject — is the open half, and DONE-4 rests on it.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-4-memory-and-evaluation.md`](../plans/plan-sets/set-S/phase-4-memory-and-evaluation.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14
 **Author:** Claude (Fable 5.1)
 **Revises:** AGENT-004 (agent evaluation suite) — §2 architecture, §3 suites, §6 scorecard, §7 gate are replaced; §4 auditor suite stands

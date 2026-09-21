@@ -1,6 +1,10 @@
 # AGENT-011: Strategy Authoring for Models — the surface a model writes strategies through, and the feedback that teaches it
 
-**Status:** Proposed (implementation spec; ready to build)
+> **Status:** **Partially implemented** — Set S phase 5. Re-checked 2026-09-21.
+>
+> `crates/features` computes ~50 families and the simulator resolves them; `list_features` and `preview_signals` are live. **`crates/strategy-lang` does not exist**, so the language itself — SLv2 text, the parser, the validator — is not built. This is the platform's capability ceiling.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-5-strategy-language.md`](../plans/plan-sets/set-S/phase-5-strategy-language.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14
 **Author:** Claude (Fable 5.1), from `crates/mcp-server/docs/authoring_guide.md`, `crates/strategy-validator`, `crates/features`, `crates/domain/src/strategy_def`, DATA-004, DATA-006, FEAT-004, ADR-0010, ADR-0029
 **Revises:** FEAT-004 §3 (SLv2 becomes the model-facing language, with the amendments in §3), DATA-006 §5 (the operator catalogue is phased by what strategies need, §2), the authoring guide (§6)

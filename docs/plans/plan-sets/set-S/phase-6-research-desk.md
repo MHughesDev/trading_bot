@@ -1,6 +1,6 @@
 # Phase 6 — The Research Desk
 
-**Completion: 4% (1 / 24 tasks), plus 23 `PARTIAL` — the desk is built and three of its endpoints do not exist.**
+**Completion: 8% (2 / 24 tasks), plus 22 `PARTIAL` — the desk is built and three of its endpoints do not exist.**
 
 > **This file was wrong.** Until 2026-09-16 it recorded all 24 tasks as `NOT STARTED`. The
 > Research Desk is in fact built and shipping: `pages/DeskPage.tsx` under 13 routes, 18

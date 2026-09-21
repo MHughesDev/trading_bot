@@ -138,6 +138,50 @@ impl DispatchContext {
         }
     }
 
+    /// An automated actor deciding under a named policy about something that has
+    /// **no effect size** (Set S task S-11.3).
+    ///
+    /// The third case, and it is genuinely distinct from the two above.
+    ///
+    /// [`Self::agent`] requires a `delta_practical` because an agent acting for a
+    /// campaign is acting under that campaign's declared effect size, and a
+    /// campaign cannot be defined without one. [`Self::legacy`] records the
+    /// absence of *both* a propensity and an effect size as a defect of the
+    /// calling path.
+    ///
+    /// A research session choosing its next question is neither. The choice has a
+    /// propensity — the draw is made by the platform under a declared mixture and
+    /// the probability is a fact, not a claim — and it has no effect size,
+    /// because "which question to ask" is not a hypothesis about a magnitude.
+    /// AGENT-014 §2.2 makes the charter's `delta_practical` a *suggestion* for
+    /// the runs that follow, and explicitly leaves each run to seal its own.
+    ///
+    /// Forcing such a decision through `legacy` would label a complete
+    /// declaration as a defective one, and the flag that marks unaccountable
+    /// decisions would stop meaning anything — the argument `agent`'s own
+    /// documentation makes for existing at all.
+    #[must_use]
+    pub fn policy_without_effect_size(
+        tenant_id: impl Into<String>,
+        actor_id: impl Into<String>,
+        policy_id: impl Into<String>,
+        policy_version: i32,
+    ) -> Self {
+        Self {
+            tenant_id: tenant_id.into(),
+            campaign_id: None,
+            experiment_id: None,
+            actor_kind: ActorKind::Agent,
+            actor_id: actor_id.into(),
+            on_behalf_of: None,
+            policy_id: policy_id.into(),
+            policy_version,
+            // Absent, not zero. Zero is "every effect matters", which is a
+            // claim; absent is the truth.
+            delta_practical: None,
+        }
+    }
+
     /// The only way to register without a propensity or declared effect size. The
     /// missing declaration is a defect of the calling path; this records it.
     #[must_use]

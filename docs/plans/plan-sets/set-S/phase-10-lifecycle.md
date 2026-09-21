@@ -1,6 +1,6 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 31% (5 / 16 tasks), plus 11 `PARTIAL`. Nothing untouched.**
+**Completion: 38% (6 / 16 tasks), plus 10 `PARTIAL`. Nothing untouched.**
 
 > A correction to this line, made 2026-09-17: it briefly read 7/16, counting
 > S-10.4 and S-10.12 as done. Both have acceptance criteria that need a live run

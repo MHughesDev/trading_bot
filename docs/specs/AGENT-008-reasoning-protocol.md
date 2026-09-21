@@ -1,6 +1,10 @@
 # AGENT-008: The Reasoning Protocol — how the agent plans, acts, verifies and stops, at every tier
 
-**Status:** Proposed (implementation spec; ready to build)
+> **Status:** **Partially implemented** — Set S phases 1, 2, 8 and 10. Re-checked 2026-09-21.
+>
+> §2 and §3.1–3.2 are built into the loop; the failure-class and breaker halves of §3.7 are partial.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-2-one-runtime.md`](../plans/plan-sets/set-S/phase-2-one-runtime.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14
 **Author:** Claude (Fable 5.1), from `crates/harness/src/{drive,validation,canary,policy}.rs`, `docs/LOCAL_TIER_FINDINGS.md`, ADR-0032, and the research brief Theme 9
 **New:** no prior spec covers the loop's cognitive structure; ADR-0032 and HARNESS_CONFORMANCE items 4, 9, 12–13 describe pieces of it

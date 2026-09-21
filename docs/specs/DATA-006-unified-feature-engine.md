@@ -1,6 +1,10 @@
 # DATA-006: Unified Feature Engine
 
-**Status:** Proposed (Phase 0 contract; not implemented)
+> **Status:** **Implemented** — Set S phase 5 extends it. Re-checked 2026-09-21.
+>
+> `crates/features` is one windowed implementation with no Python duplicate, ~5,100 lines over 101 passing tests, and `crates/backtest/src/sim.rs` resolves strategy features through it. The open item is the reconciliation against phase 3's Python volatility templates (S-5.14) — two implementations with nothing comparing them.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-5-strategy-language.md`](../plans/plan-sets/set-S/phase-5-strategy-language.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Version:** 0.1
 **ADR(s):** ADR-0029 (single engine, PyO3, fail-closed); builds on ADR-0008 (same
 builders live and replay), ADR-0002 (money never f64; features are f64 statistics)

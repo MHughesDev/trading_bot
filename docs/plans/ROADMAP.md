@@ -7,6 +7,13 @@ Derived From: docs/artifact.md (North Star, SC-8…SC-13, FM-7…FM-11), BS-007 
   AGENT-005…014, COMP-007, DATA-005, ADR-0027, ADR-0034…0037, ADR-P2-14
 ---
 
+> **Current state lives in [PLAN.md](PLAN.md), not here.** This file is the
+> *reasoning*: why the stages are ordered by the evidence clock, what "done"
+> means, which gates need a human. Its §2 snapshot and §12 "what to do next" are
+> point-in-time and go stale between updates — PLAN.md is the one that is kept
+> current, carries the counts, and is re-derived from the plan files rather than
+> written by hand. Read PLAN.md first; come here for why.
+
 # The Programme Roadmap
 
 **One map, from where the code actually is today to the North Star in
@@ -81,16 +88,23 @@ every study that ever uses that series.
 
 ---
 
-## 2. Where we actually are (2026-09-15)
+## 2. Where we actually are (2026-09-15, **partially superseded 2026-09-21**)
 
 Verified against the repository, not against the plan files' own claims.
+
+> **Six days of drift, corrected in place below.** The rows marked ✎ were wrong
+> on 2026-09-21 and have been rewritten; everything unmarked was re-checked and
+> still holds. The counts now live in [PLAN.md](PLAN.md), which derives them
+> from the plan files instead of restating them by hand — restating them by hand
+> is how this section came to claim Set S was untouched six days after it
+> started.
 
 ### Built and load-bearing
 
 | Area | State | Evidence |
 |---|---|---|
-| Rust platform | 43 crates, serves on 7080, Postgres + ClickHouse + NATS + Redis | `crates/`, `config/local.toml` |
-| Migrations | **at 0060**, developer database at 59 | `migrations/`, HANDOFF §5b |
+| Rust platform | ✎ **33 crates + 17 apps**, serves on 7080, Postgres + ClickHouse + NATS + Redis. Workspace suite green at **211 suites / 3720 tests** | `crates/`, `config/local.toml` |
+| Migrations | ✎ **at 0138** (was 0060 on 2026-09-15) | `migrations/` |
 | Trial ledger | `crates/ledger` over `mlops`: append-only chained events, sealed `TrialTicket`, typed `N_eff`, return-series CHECK | ADR-P0-12, migrations 0043–0059 |
 | INV-16 (no unregistered compute) | **enforced across every dispatch path**, including the legacy UI route under an explicit `legacy_unlogged` marker | OQ-06, OQ-08 |
 | Gate funnel | 16 gates, two profiles (`strict_v1`, `paper_v1`); **11 of 16 judge on real numbers** | ADR-P2-14, HANDOFF §4 |
@@ -104,7 +118,7 @@ Verified against the repository, not against the plan files' own claims.
 | Gap | Why it matters | Where it is tracked |
 |---|---|---|
 | **No live agent session has ever run** | needs a provider credential; two Set S acceptance criteria are `BLOCKED:HUMAN` behind it | Set L §4, Set S §7, task S-4.14 |
-| **Campaign child workers missing** (`Study`, `EvalTask`, `ResearchRun`) | a campaign fails at its first dispatching phase with `no_worker`; nothing consumes `Comparison` | HANDOFF §5.2 — **Set S Phase 10 supplies `ResearchRun`** |
+| ✎ **Campaign child workers: `ResearchRun` now exists** (S-10.11, registered in `apps/platform`); `Study` and `EvalTask` are still unregistered, so a campaign reaching EXPERIMENT or COMPARE still fails with `no_worker` | a campaign fails at its first unserved dispatching phase; nothing consumes `Comparison` | HANDOFF §5.2 |
 | **5 of 16 gates have no evidence source** (3, 4, 10, 12, 15) | the funnel cannot render a complete verdict | HANDOFF §5.3 |
 | ~~Gate 15 has no input~~ | **built 2026-09-15 (track 5).** Reconciliation is wired, the verdict leads with its observation count and window, and a backfilled row planted inside the window provably does not enter the count. It has never rendered a real verdict because **nothing has produced a fill** — blocked on track 16 and on gate H-7 | Set T Phase 0 |
 | **AT-61 unwritten** | no framework can claim `bit_identical` resume, so every resume restarts under the same trial | HANDOFF §5.1 |
@@ -124,7 +138,7 @@ Verified against the repository, not against the plan files' own claims.
 | B | Full end-state platform | **Complete** | closed |
 | C | Latency optimisation (68 issues) | **54 shipped / 13 open / 1 obsolete** — audited 2026-09-15 with file:line evidence | **CLOSED.** Only 2 open items are worth doing (#14+#15, the `ws/live.rs` per-subscriber clone) plus one nobody filed: `hot_path.rs` builds a `serde_json::json!` per trade tick inside the allocation-free pipeline |
 | D | Backtest decoupling/hardening | 31/33 (94%), 2 deferred | closed, deferred items recorded |
-| E | Production readiness / tech debt | **6/30 (20%), 7 partial, 17 open** — audited 2026-09-15; barely moved in three months | **10 items block unattended paper trading, and 4 of them block a paper fill at all — those are Stage 0, not Stage 3.** Dispatched as track 16 |
+| E | Production readiness / tech debt | ✎ **7/30 (23%), 6 partial, 16 open** — its own MASTER, re-read 2026-09-21 | **10 items block unattended paper trading, and 4 of them block a paper fill at all — those are Stage 0, not Stage 3.** Dispatched as track 16 |
 | F | MCP platform expansion | **9/11 shipped, 2 deliberately reversed** — the `0/11` was a bookkeeping failure; `INTG-001` has read `Implemented · v2.0 (Set F)` since September | **CLOSED.** The 2 remaining were reversed on purpose: a second `BacktestManager` is the defect ADR-0022 §1 removed, and `create_backtest` was deleted under INV-16 |
 | G | Documentation restructuring | **11/13** — executed the day it was written (commit `5febac2`); the task count itself was wrong | **CLOSED**, 4 hygiene items re-cut (including `docs/archive/README.md`'s 24 dead links and the `README.MD`/`README.md` case-fold collision) |
 | H | AI Model Studio | 47/64 (73%), Phases 4–5 pending | folded into Set N |
@@ -132,9 +146,9 @@ Verified against the repository, not against the plan files' own claims.
 | J | Honest-evaluation core | **59/59 Complete** | closed |
 | K | Make backtest real | superseded | closed by L |
 | L | Agent foundation | Phases 0,1,2,5,6 core complete; 3–4 built, never run live | closed; Set S rebuilds on its evidence |
-| **S** | **The Agent Platform** | **0/189 — NOT STARTED, ready** | **Stage 1** |
-| **P** | **Data reach** | **new, written 2026-09-15** | **Stage 0 — starts immediately** |
-| **T** | **Forward evidence** | **new, written 2026-09-15** | **Stage 0/2 — starts immediately** |
+| **S** | **The Agent Platform** | ✎ **72 done · 85 partial · 29 not started · 3 blocked** of 189 (2026-09-21). Phases 1, 8 and 9 are effectively closed; 11 opened | **Stage 1 — in progress** |
+| **P** | **Data reach** | ✎ **5/30**, ~84% of its weight remaining | **Stage 0 — barely started, and it gates the evidence clock** |
+| **T** | **Forward evidence** | ✎ **3/17**, ~82% remaining; T-0.4 is `BLOCKED:HUMAN` | **Stage 0/2 — blocked at the ops step that starts the clock** |
 | M, N, O, Q, R-b | reserved | residual scope re-cut in §5 | Stage 4–5 |
 | ML platform pack | Phases 0–5 | 78 done, 19 partial, 5 deferred (all of Phase 6) | remainder folded into Stages 2–3 |
 

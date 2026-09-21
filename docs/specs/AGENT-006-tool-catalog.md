@@ -1,6 +1,10 @@
 # AGENT-006: The Tool Catalogue — what the research agent can call, how a tool is defined, and how the catalogue grows without growing the prompt
 
-**Status:** Proposed (implementation spec; ready to build)
+> **Status:** **Partially implemented** — Set S phases 1, 3 and 8. Re-checked 2026-09-21.
+>
+> The catalogue, the namespaces, the exposure budget and the workflow batteries are built and enforced by CI tests. §2.4b `estimate_cost` is not, and the batteries are three of six runnable.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-3-catalogue.md`](../plans/plan-sets/set-S/phase-3-catalogue.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14
 **Author:** Claude (Fable 5.1), from the code in `crates/mcp-server`, `crates/harness/src/registry.rs`, `crates/api/src/agent/bridge.rs`, `crates/ledger/src/audit.rs`, and the research brief `docs/research/quant-agent-toolbox-uncommon-tools.md`
 **Depends on:** AGENT-005 (context assembly: exposure budgets, description weight budget, `run_python`)

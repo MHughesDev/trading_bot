@@ -1,6 +1,10 @@
 # COMP-005: Job Service and Artifact Store
 
-**Status:** Proposed (Phase 0 contract; not implemented)
+> **Status:** **Implemented** — Set L, and extended by Set S. Re-checked 2026-09-21.
+>
+> `crates/jobs` runs: leased jobs, heartbeats, `submit_child_once`, the artifact registry, and worker pools registered in `apps/platform`. Two child kinds (`Study`, `EvalTask`) still have no registered worker, so a campaign reaching those phases fails with `no_worker`.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-2-one-runtime.md`](../plans/plan-sets/set-S/phase-2-one-runtime.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Version:** 0.1
 **ADR(s):** ADR-0030 (durable jobs, content-addressed artifacts), ADR-0025 (counting at
 submission)

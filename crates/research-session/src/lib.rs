@@ -16,7 +16,9 @@
 //! * [`agenda`] — the items, their sources, and layer one of the three-layer
 //!   duplicate refusal;
 //! * [`fold`] — the append-only log and the replay that is the session's only
-//!   state.
+//!   state;
+//! * [`select`] — the score, the forced exploration share, and the candidate set
+//!   a decision row records.
 //!
 //! The driver that turns a fold into work lives in `api::session_driver`,
 //! because it needs the job service and the conversation front door. What it may
@@ -25,6 +27,7 @@
 pub mod agenda;
 pub mod charter;
 pub mod fold;
+pub mod select;
 
 pub use agenda::{AgendaItem, DedupeLayer, Insert, ItemStatus, Score, Source};
 pub use charter::{
@@ -32,6 +35,7 @@ pub use charter::{
     Seed, SessionBudget, StopWhen, Window, EXPLORATION_FLOOR,
 };
 pub use fold::{fold, Anomaly, EventKind, Folded, SessionEvent, SessionState};
+pub use select::{Inputs, Provenance, Scored, Selection, Signal};
 
 use uuid::Uuid;
 

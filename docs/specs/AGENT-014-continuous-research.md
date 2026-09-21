@@ -1,6 +1,10 @@
 # AGENT-014: Continuous Research — Research with the continuous toggle on: a charter, an agenda, and an agent that chooses its own next question
 
-**Status:** Proposed (product + implementation spec; ready to build)
+> **Status:** **Partially implemented** — Set S phase 11. Re-checked 2026-09-21.
+>
+> §2, §3, §5 and §10 are built: the session object, the append-only fold, the scored agenda with its forced exploration share, the API and three read tools. Leases, the harvest, the stall detector, schedule windows, the digest and sources 4.3–4.9 are not.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-11-continuous-research.md`](../plans/plan-sets/set-S/phase-11-continuous-research.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14 (revised 2026-09-15: continuous research is a toggle on the Research mode, not a third mode — user decision, ADR-0037 §2)
 **Author:** Claude (Fable 5.1), as architect and product designer
 **New:** the "campaigns, regime engine, autonomy" remainder of reserved Set R-b (`17_BUILD_ORDER §2`, Set S MASTER §2) — specified here as **continuous research sessions**, distinct from and built beside the platform's `mlops.campaign`

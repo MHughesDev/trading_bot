@@ -36,12 +36,36 @@
 //!
 //! # The scope this build covers, named rather than implied
 //!
-//! AGENT-014 §11's phase 1: charter seeds and user items (sources 4.1, 4.2),
-//! `replenish = false`. Selection is **not** scored — S-11.3 is the scorer —
-//! so the next item is the oldest claimable one, which is §5.4's tie-break
-//! applied to an unscored agenda and is the honest thing to do before the
-//! signals exist. `user` items still go first, because that is not a scoring
-//! rule (§4.2 makes it a bypass).
+//! AGENT-014 §11's phases 1 and 2's selection half: charter seeds and user
+//! items (sources 4.1, 4.2), `replenish = false`, and the scored agenda of §5
+//! with its forced exploration share and its decision row (S-11.3).
+//!
+//! # What the scorer can measure here, and what it cannot
+//!
+//! Of §5.1's four signals, this build measures three and says so about the
+//! fourth on every decision row:
+//!
+//! * **value** — the objective's weight for the item's subject × the source
+//!   weight from §5.1's own table. Declared, both halves.
+//! * **novelty** — from the count of prior hypotheses stating the same question
+//!   (`agent_lifecycle.hypothesis`, the registry `find_prior_hypothesis`
+//!   already reads). The spec names the family's *trial* count; a trial is not
+//!   joinable to an agenda item's subject today, and
+//!   `select::NOVELTY_HALFLIFE` documents which way that errs.
+//! * **feasibility** — `{0, 1}`: whether the charter permits the workflow and
+//!   whether the profile may run it. The `0.5` rung §5.1 reserves for partial
+//!   capability needs the coverage and breaker readers of S-11.10 and S-11.7,
+//!   so it is not emitted rather than guessed at.
+//! * **cost** — the median `trials_spent` of finished runs of this workflow on
+//!   this profile, in **trials, not dollars**: this platform records no per-run
+//!   USD (`llm_usage` keys on the auth session, not the run). Below
+//!   [`MIN_RUNS_FOR_COST`] it is `not_estimated`, which leaves the product alone
+//!   and is named on the row.
+//!
+//! That last point is the reason [`Signal`] carries a [`Provenance`] at all. A
+//! ranking that silently substituted 1.0 for what it could not measure would
+//! look exactly like a measured one in the decision log — the log every
+//! off-policy estimate later reads.
 //!
 //! Not here, and not pretended to be: budget leases (§6.3), the harvest of
 //! open questions and proposals (§6.5), the stall detector (§7.1), schedule
@@ -61,6 +85,7 @@ use jobs::{JobContext, JobError, JobKind, JobOutput, Progress, Worker};
 use research_session::{
     agenda::{AgendaItem, ItemStatus, Source},
     fold::EventKind,
+    select::{self, Inputs, Scored, Signal},
     Folded, ResearchSession,
 };
 use serde_json::{json, Value};
@@ -73,6 +98,14 @@ use crate::sessions;
 
 /// How often the driver looks at the child it started.
 const CHILD_POLL: Duration = Duration::from_secs(5);
+
+/// How many finished runs of a workflow a cost estimate needs.
+///
+/// Three, and the number is a floor on saying anything at all rather than a
+/// tuned threshold: a median of one is that run, and a median of two is a coin
+/// toss between them. Below it the signal reports `not_estimated` and the
+/// decision row says which items that applied to.
+const MIN_RUNS_FOR_COST: i64 = 3;
 
 /// The run id a claim carries before its child exists.
 ///
@@ -93,12 +126,25 @@ pub struct SessionWorker {
     pg: PgPool,
     agent: Arc<AgentManager>,
     creds: LlmCredentialStore,
+    /// The loaded profiles, for the `feasibility` signal: a workflow the tier
+    /// may not run is not feasible, and §5.1 says so in those words.
+    profiles: Arc<harness::ProfileSet>,
 }
 
 impl SessionWorker {
     #[must_use]
-    pub fn new(pg: PgPool, agent: Arc<AgentManager>, creds: LlmCredentialStore) -> Self {
-        Self { pg, agent, creds }
+    pub fn new(
+        pg: PgPool,
+        agent: Arc<AgentManager>,
+        creds: LlmCredentialStore,
+        profiles: Arc<harness::ProfileSet>,
+    ) -> Self {
+        Self {
+            pg,
+            agent,
+            creds,
+            profiles,
+        }
     }
 
     fn infra(what: &str, e: impl std::fmt::Display) -> JobError {
@@ -240,24 +286,318 @@ impl SessionWorker {
         Ok(released)
     }
 
-    /// The next item to claim, under phase 1's unscored selection.
+    /// The items the driver may claim, oldest first.
     ///
-    /// `user` first (§4.2's bypass), then oldest-first, which is §5.4's tie-break
-    /// with nothing above it to break. Vetoed items are excluded by the fold
-    /// rather than by the status alone, because a veto is permanent and the log
-    /// is where permanence lives.
-    fn next_item(agenda: &[AgendaItem], folded: &Folded) -> Option<AgendaItem> {
-        let claimable = |i: &&AgendaItem| {
-            i.status.is_claimable()
-                && !folded.vetoed.contains(&i.id)
-                && !folded.already_started(i.id)
-        };
+    /// Three conditions, and two of them read the **log** rather than the row: a
+    /// veto is permanent and a started item is started, whatever the status
+    /// column says. The row is a projection; the log is the fact.
+    ///
+    /// The order is the caller's — `created_at, item_id` — which is §5.4's
+    /// tie-break, so the scorer does not need a second rule for ties.
+    fn claimable(agenda: &[AgendaItem], folded: &Folded) -> Vec<AgendaItem> {
         agenda
             .iter()
-            .filter(claimable)
-            .find(|i| i.bypasses_scoring())
-            .or_else(|| agenda.iter().find(claimable))
+            .filter(|i| {
+                i.status.is_claimable()
+                    && !folded.vetoed.contains(&i.id)
+                    && !folded.already_started(i.id)
+            })
             .cloned()
+            .collect()
+    }
+
+    /// How many prior hypotheses state this question.
+    ///
+    /// Read through the same normalisation `lifecycle::similar_hypotheses` uses,
+    /// so "has this been asked" has one answer whether a run asks it through
+    /// `find_prior_hypothesis` or the scorer asks it here. Two normalisers would
+    /// be two different questions wearing one name.
+    async fn prior_statements(&self, user_id: Uuid, question: &str) -> Result<i64, JobError> {
+        let needle = crate::routes::lifecycle::normalise_statement(question);
+        if needle.is_empty() {
+            return Ok(0);
+        }
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT h.statement
+               FROM agent_lifecycle.hypothesis h
+               JOIN agent_runs r ON r.run_id = h.run_id
+              WHERE r.user_id = $1
+              LIMIT 2000",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pg)
+        .await
+        .map_err(|e| Self::infra("counting prior hypotheses", e))?;
+        Ok(rows
+            .into_iter()
+            .filter(|(st,)| crate::routes::lifecycle::normalise_statement(st) == needle)
+            .count()
+            .try_into()
+            .unwrap_or(i64::MAX))
+    }
+
+    /// The median trials a finished run of this workflow has spent on this tier.
+    ///
+    /// **Trials, not dollars.** `llm_usage.cost_usd` keys on the auth session
+    /// rather than the run, so there is no per-run USD to take a median of. A
+    /// trial is the budget dimension the ledger actually counts (INV-1), and a
+    /// median of measured trials is a real number; a dollar figure derived from
+    /// a list price and a token count would be a number nobody measured sitting
+    /// in the one log every later analysis reads.
+    async fn cost_signal(&self, user_id: Uuid, workflow: &str, tier: &str) -> Signal {
+        let rows: Result<Vec<(i32,)>, _> = sqlx::query_as(
+            "SELECT trials_spent FROM agent_runs
+              WHERE user_id = $1 AND workflow = $2 AND profile_name = $3
+                AND trials_spent IS NOT NULL AND outcome IS NOT NULL
+              ORDER BY created_at DESC LIMIT 200",
+        )
+        .bind(user_id)
+        .bind(workflow)
+        .bind(tier)
+        .fetch_all(&self.pg)
+        .await;
+        let Ok(rows) = rows else {
+            return Signal::not_estimated();
+        };
+        let n = i64::try_from(rows.len()).unwrap_or(i64::MAX);
+        if n < MIN_RUNS_FOR_COST {
+            return Signal::not_estimated();
+        }
+        let mut spent: Vec<f64> = rows.into_iter().map(|(t,)| f64::from(t)).collect();
+        spent.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mid = spent.len() / 2;
+        let median = if spent.len() % 2 == 0 {
+            (spent[mid - 1] + spent[mid]) / 2.0
+        } else {
+            spent[mid]
+        };
+        Signal::measured(median, n)
+    }
+
+    /// The four signals for one item (§5.1).
+    async fn measure(
+        &self,
+        session: &ResearchSession,
+        item: &AgendaItem,
+        user_id: Uuid,
+    ) -> Result<Inputs, JobError> {
+        // value — both halves declared: the objective's weight for the subject,
+        // and the source weight from §5.1's table. `max` over the sources, so a
+        // question three sources want carries the strongest of them.
+        let objective_weight = session
+            .charter
+            .as_ref()
+            .map_or(1.0, |c| c.objective.weight_for(&item.subject));
+        let value = Signal::declared(objective_weight * item.source_weight());
+
+        // novelty — measured from the hypothesis registry.
+        let novelty = select::novelty_from_prior(self.prior_statements(user_id, &item.question).await?);
+
+        // feasibility — {0, 1}. The 0.5 rung needs readers that do not exist
+        // (coverage, the tool breaker), so it is not emitted.
+        let permitted = session
+            .charter
+            .as_ref()
+            .is_none_or(|c| c.permits(&item.workflow));
+        let tier_allows = harness::state::Workflow::parse(&item.workflow)
+            .zip(self.profiles.get(&session.tier))
+            .is_none_or(|(w, p)| p.may_run(w));
+        let feasibility = Signal::declared(if permitted && tier_allows { 1.0 } else { 0.0 });
+
+        let cost = self.cost_signal(user_id, &item.workflow, &session.tier).await;
+
+        Ok(Inputs {
+            value,
+            novelty,
+            feasibility,
+            cost,
+        })
+    }
+
+    /// Score the agenda and choose, recording both.
+    ///
+    /// # §5.4, and what "recompute only when a source changes" means here
+    ///
+    /// The scores are stored on the rows. `insert_item` clears an item's score
+    /// when a source is added to it, so a cleared score is the signal that
+    /// something changed. When **every** claimable item still carries a stored
+    /// score, those are reused and nothing is recomputed — the agenda the human
+    /// saw in the digest is the agenda that runs.
+    ///
+    /// When any of them is cleared the **whole slate** is rescored, not just the
+    /// cleared one, because the two unbounded signals are ranked *within the
+    /// agenda*: a percentile computed against a slate and a percentile computed
+    /// against one item are not comparable, and mixing them would rank by which
+    /// items happened to be recomputed.
+    async fn choose(
+        &self,
+        session: &ResearchSession,
+        agenda: &[AgendaItem],
+        folded: &Folded,
+        user_id: Uuid,
+    ) -> Result<Option<AgendaItem>, JobError> {
+        let claimable = Self::claimable(agenda, folded);
+        if claimable.is_empty() {
+            return Ok(None);
+        }
+
+        // §4.2's bypass happens before any of this. A `user` item is not scored
+        // and not drawn; it was asked for.
+        if let Some(asked) = claimable.iter().find(|i| i.bypasses_scoring()) {
+            sessions::append(
+                &self.pg,
+                session.id,
+                EventKind::Selected,
+                json!({
+                    "item": asked.id,
+                    "question": asked.question,
+                    "workflow": asked.workflow,
+                    "bypassed_scoring": true,
+                    "why": "you asked for this one, so it goes next whatever the ranking says",
+                }),
+            )
+            .await
+            .map_err(|e| Self::infra("recording the selection", e))?;
+            return Ok(Some(asked.clone()));
+        }
+
+        let stale = claimable.iter().any(|i| i.score.is_none());
+        let mut measured: Vec<(AgendaItem, Inputs)> = Vec::with_capacity(claimable.len());
+        for item in &claimable {
+            measured.push((item.clone(), self.measure(session, item, user_id).await?));
+        }
+        let scored = select::score(&measured);
+
+        if stale {
+            // Persist, so the digest and the board show the agenda that ran.
+            for s in &scored {
+                if let Err(e) = sqlx::query("UPDATE agenda_items SET score = $2 WHERE item_id = $1")
+                    .bind(s.item)
+                    .bind(json!(s.normalised))
+                    .execute(&self.pg)
+                    .await
+                {
+                    return Err(Self::infra("storing a score", e));
+                }
+            }
+        }
+
+        let share = session.exploration_share();
+        let seed = select::seed_for(session.id, folded.event_seq);
+        let Some(selection) = select::select(&scored, share, seed) else {
+            // Every claimable item is infeasible or already answered. Not an
+            // error and not a completion: the agenda has items and none of them
+            // can run, which is a thing a human has to look at.
+            sessions::append(
+                &self.pg,
+                session.id,
+                EventKind::AwaitingApproval,
+                json!({
+                    "why": "every claimable item is infeasible or already answered",
+                    "items": claimable.iter().map(|i| i.id).collect::<Vec<_>>(),
+                }),
+            )
+            .await
+            .map_err(|e| Self::infra("recording the stall", e))?;
+            return Ok(None);
+        };
+
+        let chosen = claimable
+            .iter()
+            .find(|i| i.id == selection.chosen)
+            .cloned()
+            .ok_or_else(|| {
+                Self::logic(
+                    "selection_off_slate",
+                    "the scorer returned an item that is not on the agenda it was given",
+                )
+            })?;
+
+        self.log_selection(session, &scored, &selection, &chosen, share, seed)
+            .await?;
+
+        sessions::append(
+            &self.pg,
+            session.id,
+            EventKind::Selected,
+            json!({
+                "item": chosen.id,
+                "question": chosen.question,
+                "workflow": chosen.workflow,
+                "exploration": selection.exploration,
+                "propensity": selection.propensity,
+                "rationale": selection.rationale,
+                "candidate_set": select::candidate_set(&scored),
+                "policy": { "id": select::POLICY, "version": select::POLICY_VERSION },
+                "recomputed": stale,
+            }),
+        )
+        .await
+        .map_err(|e| Self::infra("recording the selection", e))?;
+
+        Ok(Some(chosen))
+    }
+
+    /// Write the `select` decision (§5.3, SPEC §4.4).
+    ///
+    /// The session's log already says which item was chosen. The **decision** log
+    /// is the one that says what it was chosen *from*, and it is what makes the
+    /// selection policy a learning-to-rank dataset later rather than a trace.
+    ///
+    /// `experiment_id` is the session, because a decision has to belong to
+    /// something the ledger can group by and the session is what these choices
+    /// were made under.
+    async fn log_selection(
+        &self,
+        session: &ResearchSession,
+        scored: &[Scored],
+        selection: &research_session::Selection,
+        chosen: &AgendaItem,
+        share: f64,
+        seed: u64,
+    ) -> Result<(), JobError> {
+        let tenant = session.conversation_id.to_string();
+        let decision = ledger::Decision {
+            kind: ledger::DecisionKind::Select,
+            // The agenda is the context. Its identity is the session and the
+            // position in its log, which is the same pair the seed is derived
+            // from — so the draw can be replayed from the row.
+            context_hash: format!("session:{}:seed:{seed:x}", session.id),
+            context_uri: Some(format!("session:{}", session.id)),
+            candidate_set: select::candidate_set(scored),
+            chosen: json!({
+                "item": chosen.id,
+                "question": chosen.question,
+                "workflow": chosen.workflow,
+            }),
+            propensity: Some(selection.propensity),
+            exploration_flag: selection.exploration,
+            // A declared mixture over declared signals, with no fitted model in
+            // it. `rule` is what that records as.
+            decision_tier: ledger::DecisionTier::Rule,
+            rationale: Some(selection.rationale.clone()),
+        };
+        // No effect size: "which question to ask next" is not a hypothesis about
+        // a magnitude, and the charter's `delta_practical` is a suggestion for
+        // the runs that follow rather than a property of this choice (§2.2).
+        let ctx = ledger::DispatchContext::policy_without_effect_size(
+            &tenant,
+            format!("session:{}", session.id),
+            select::POLICY,
+            select::POLICY_VERSION,
+        )
+        .with_experiment(format!("session:{}", session.id));
+
+        ledger::pg::PgTrialLedger::new(self.pg.clone())
+            .log_decision_async(&ctx, &decision)
+            .await
+            .map_err(|e| {
+                Self::infra(
+                    &format!("logging the select decision (share {share:.2})"),
+                    e,
+                )
+            })?;
+        Ok(())
     }
 
     /// Start the child run for an item, or find the one a previous attempt
@@ -432,7 +772,10 @@ impl SessionWorker {
                 .await
                 .map_err(|e| Self::infra("re-reading the agenda", e))?;
         }
-        let Some(item) = Self::next_item(&agenda, &folded) else {
+        let Some(item) = self
+            .choose(&session, &agenda, &folded, user_id)
+            .await?
+        else {
             let waiting = agenda.iter().any(|i| !i.status.is_terminal());
             if waiting {
                 return Ok(Step::Idle(
@@ -471,22 +814,6 @@ impl SessionWorker {
             )));
         }
 
-        sessions::append(
-            &self.pg,
-            session_id,
-            EventKind::Selected,
-            json!({
-                "item": item.id,
-                "question": item.question,
-                "workflow": item.workflow,
-                // There is no candidate set here because there was no scoring.
-                // Saying so is better than writing an empty one that a later
-                // reader would take for "it considered nothing".
-                "selection": "unscored: oldest claimable item, user items first (S-11.3 is the scorer)",
-            }),
-        )
-        .await
-        .map_err(|e| Self::infra("recording the selection", e))?;
 
         // Claimed **before** the child is started, and the order matters.
         //
@@ -686,27 +1013,38 @@ mod tests {
     }
 
     #[test]
-    fn a_user_item_is_the_next_claim_whatever_is_in_front_of_it() {
+    fn a_user_item_bypasses_the_scorer_and_goes_next() {
+        // The bypass is `choose`'s first branch and `select`'s too, so this
+        // asserts the agenda reaches the scorer with the `user` item on it and
+        // that the scorer takes it — the two halves that have to agree.
         let s = Uuid::new_v4();
         let agenda = vec![
             item(s, "seeded first", Source::CharterSeed, ItemStatus::Queued),
             item(s, "seeded second", Source::CharterSeed, ItemStatus::Queued),
             item(s, "asked just now", Source::User, ItemStatus::Queued),
         ];
-        let next = SessionWorker::next_item(&agenda, &running_fold()).expect("something claimable");
-        assert_eq!(next.question, "asked just now");
+        let live = SessionWorker::claimable(&agenda, &running_fold());
+        assert_eq!(live.len(), 3);
+        let asked = live
+            .iter()
+            .find(|i| i.bypasses_scoring())
+            .expect("the user item is claimable");
+        assert_eq!(asked.question, "asked just now");
     }
 
     #[test]
-    fn without_a_user_item_the_oldest_claimable_one_goes_first() {
+    fn an_item_that_has_not_been_approved_is_not_claimable() {
         let s = Uuid::new_v4();
         let agenda = vec![
             item(s, "not yet approved", Source::CharterSeed, ItemStatus::Proposed),
             item(s, "oldest queued", Source::CharterSeed, ItemStatus::Queued),
             item(s, "newer", Source::CharterSeed, ItemStatus::Queued),
         ];
-        let next = SessionWorker::next_item(&agenda, &running_fold()).expect("something claimable");
-        assert_eq!(next.question, "oldest queued");
+        let live = SessionWorker::claimable(&agenda, &running_fold());
+        assert_eq!(live.len(), 2);
+        // The caller's order is kept, which is §5.4's tie-break.
+        assert_eq!(live[0].question, "oldest queued");
+        assert_eq!(live[1].question, "newer");
     }
 
     #[test]
@@ -723,7 +1061,7 @@ mod tests {
                 json!({ "item": agenda[0].id }),
             ),
         ];
-        assert!(SessionWorker::next_item(&agenda, &research_session::fold(&log)).is_none());
+        assert!(SessionWorker::claimable(&agenda, &research_session::fold(&log)).is_empty());
 
         // And a second, un-vetoed item is still claimable — the veto is about
         // one item, not about the session.
@@ -734,9 +1072,9 @@ mod tests {
             EventKind::AgendaItemAdded,
             json!({ "item": agenda[1].id }),
         ));
-        let next =
-            SessionWorker::next_item(&agenda, &research_session::fold(&log)).expect("the other one");
-        assert_eq!(next.question, "fine");
+        let live = SessionWorker::claimable(&agenda, &research_session::fold(&log));
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].question, "fine");
     }
 
     #[test]
@@ -753,7 +1091,7 @@ mod tests {
                 json!({ "item": agenda[0].id, "run_id": Uuid::new_v4() }),
             ),
         ];
-        assert!(SessionWorker::next_item(&agenda, &research_session::fold(&log)).is_none());
+        assert!(SessionWorker::claimable(&agenda, &research_session::fold(&log)).is_empty());
     }
 
     #[test]
@@ -765,10 +1103,12 @@ mod tests {
             why: "kill_switch".into(),
         });
         assert!(!folded.can_claim());
-        // `next_item` is about the agenda; the loop's guard is `can_claim`, and
+        // `claimable` is about the agenda; the loop's guard is `can_claim`, and
         // the two are checked in that order by `iterate`. Asserted here so the
-        // guard is not quietly moved into `next_item` and then dropped.
-        assert!(SessionWorker::next_item(&agenda, &folded).is_some());
+        // guard is not quietly moved into `claimable` and then dropped — a
+        // paused session with a queued item must stop at the guard, not at an
+        // empty agenda.
+        assert!(!SessionWorker::claimable(&agenda, &folded).is_empty());
     }
 
     #[test]

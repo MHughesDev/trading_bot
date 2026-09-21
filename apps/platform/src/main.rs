@@ -467,6 +467,7 @@ async fn main() -> anyhow::Result<()> {
                             app_state.pg.clone(),
                             app_state.cred_crypto.clone(),
                         ),
+                        app_state.profiles.clone(),
                     ),
                 ));
             }

@@ -1,6 +1,10 @@
 # AGENT-005: Context Assembly — one budgeted pipeline for every model tier
 
-**Status:** Proposed (implementation spec; ready to build)
+> **Status:** **Largely implemented** — Set S phases 1 and 9. Re-checked 2026-09-21.
+>
+> Part II (§13–§30) is built: the store, the retrieval path, the prefix ledger and the budget arithmetic all run. What is open is named in the phase file, task by task.
+>
+> **The live count is in [`docs/plans/plan-sets/set-S/phase-9-context-as-retrieval.md`](../plans/plan-sets/set-S/phase-9-context-as-retrieval.md), and the programme total is in [`docs/plans/PLAN.md`](../plans/PLAN.md).** It is deliberately not restated here: a number written into a spec is a number nobody recomputes, which is how this line came to say "ready to build" about code that was already serving traffic. `crates/invariants/tests/the_plan_counts_what_the_plans_say.rs` holds those two files honest; nothing holds a hand-copied number here.
 **Date:** 2026-09-14
 **Author:** Claude (Fable 5.1), from a code audit of `crates/harness`, `crates/api/src/agent`, `crates/llm`, `crates/mcp-server`
 **Supersedes, for the harness path:** AGENT-002 §2 P2/P10 ("no tool schemas in context", "nothing loads mid-session") and BS-007 04 §3 ("the tool list never changes within a session"). See ADR-0034.
