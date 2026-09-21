@@ -206,6 +206,52 @@ source. Per-row Pause is in `UNBUILT`.
 Until those exist, phase 6's remaining `PARTIAL`s cannot close from this side.
 
 
+### The fields arrived, 2026-09-21 — and three of them had no home at all
+
+The fourth desk track's conclusion was that this phase is short of **server
+fields**, not frontend effort. A track went after them. What it found is worth
+more than what it served.
+
+**A strategy's live/paper environment has no declared home with a writer.**
+Three places look like one and all three are empty: `mlops.paper_deployment`
+(migration `0105`) is the *designed* home and **nothing in the repository ever
+inserts into it**; `strategy_instances` is written only by a test; `accounts` is
+unreachable because `0121` made `orders.account_id` nullable precisely so the
+paper engine could work without a row. What *is* recorded is
+`orders.execution_mode`, and `environment` is served from there — a recorded
+column rather than a naming convention. It can only return `paper` or `null`
+today, because a CHECK confines it.
+
+**Charter amendments recorded *which version*, never *what changed*.** The
+charter column is overwritten in place and the `charter_amended` event carried
+only `{version}`. Serving a list of version numbers would have closed the ticket
+without answering the question, so `amend_charter` now computes the field-level
+diff **before** the overwrite. Amendments already in the log serve
+`changed: null` — not `{}`, which would claim they changed nothing.
+
+**`GET /api/desk/running` is new and had no caller** the moment it was written,
+which is this repository's dominant shape; the track said so itself. It carries
+a **`not_recorded: [{field, why}]`** array — the route naming what it cannot
+know, so a reader is told rather than shown a zero.
+
+**And it fixed a bug that would have switched the scorer off.** `reorder` marked
+**every** id in the body with the `user` source, and a `user` item bypasses
+scoring entirely — so one drag from a client that posts the whole board (which is
+what a drag-and-drop client does) disabled the selection policy for the session:
+no scores, no exploration draw, no decision rows, silently. The fix subtracts the
+longest run **already in board order** before asking what moved earlier, so
+dragging a card *down* prioritises nothing either — strictly narrower than the
+obvious rule, in the safe direction.
+
+**api lib: 351 → 370.**
+
+### One trap worth passing on
+
+`the_desk_calls_routes_that_exist` counts **any** `/api/…` string literal in
+`crates/api/src`, doc comments included. Writing `/api/agent/runs/{id}/state` in
+prose *to explain that it is unbuilt* made it read as built and failed the suite.
+
+
 ---
 
 ## Four desk tracks, 2026-09-21 — and what they found

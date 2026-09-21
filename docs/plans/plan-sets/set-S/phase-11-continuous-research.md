@@ -43,6 +43,49 @@
 > of runs with **no** precheck verdict rides on `session_stalled.not_measured` so
 > the rule's reach is visible rather than assumed.
 
+> **The modules' six gaps, 2026-09-21 — four closed, two landed separately
+> because they crossed a crate boundary mid-flight.**
+>
+> Wiring the four pure modules exposed six places they could not say what their
+> caller needed, and every one was the same rule: **an absent measurement is
+> never a zero.**
+>
+> `digest::SpendUnit { Trials, Usd }` puts the unit **in the sentence** —
+> `12.00 trials spent over 3 runs` — with `as_str` matching `0139`'s CHECK word
+> for word and a test pinning the two together. `EventKind` gained
+> `ProposalAwaiting` and `Note`, so a proposal awaiting a human is no longer
+> filed as an agenda approval and a plain note is no longer filed as a merge;
+> the P6 guard is held by a test that nothing about a proposal enters `Folded`
+> and that `proposal_awaiting` is the **only** word in the vocabulary naming one.
+> `stall::FinishedRun.family` became `Option`, and the rules moved with it:
+> `circling` skips an unfamilied run rather than grouping on `None`, and
+> `sole_value` returns nothing if *any* run in the window lacks a family — so an
+> `ExcludeFamily` amendment can never name a family the window did not record.
+> `Precheck::NotRecorded` exists and is now the **default**, because with
+> `hypothesis_precheck` filing `blocked | duplicate | new`, absence is the common
+> case and a fixture whose neutral state is a verdict nobody filed flatters the
+> rules.
+>
+> **Two were refused and reported instead**, because another agent was compiling
+> against this crate at the time: changing a struct variant breaks every
+> exhaustive pattern, and changing a field's type breaks the caller mid-task.
+> Both landed afterwards with both sides moving together — `Insert::Merged` now
+> carries **the refs the merge added** (not everything offered: the caller
+> appends with `||`, so a ref the item already held would duplicate), which is
+> what stops a harvested question merging onto a card that can no longer open the
+> memory row that wanted it.
+>
+> **One finding about the spec, and it is the root of the units trap.** §5.2
+> gives the scoring cost term in **USD floored at $0.10** and §6 sizes the lease
+> in USD, but `llm_usage.cost_usd` keys on the auth session rather than the run,
+> so **nothing on this platform can price a single run** — which is why `select`
+> scores trials. A floor of `$0.10` applied to a number counted in trials is not
+> a constraint anyone can evaluate, and §2.4's "budget spent and cost per
+> knowledge unit" then names no unit at all, which is how a trials figure came to
+> render beside a dollar bar. `SpendUnit` makes the question answerable without
+> answering it; `Usd` exists precisely so a digest written the day a run can be
+> priced can say so.
+
 **Requirement IDs:** PG-01…PG-14.
 **Spec:** [AGENT-014](../../../specs/AGENT-014-continuous-research.md);
 [ADR-0037](../../../adr/0037-two-modes-continuous-toggle.md).
