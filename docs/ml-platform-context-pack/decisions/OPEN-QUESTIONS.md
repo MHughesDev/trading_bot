@@ -137,7 +137,13 @@ Write here instead of guessing. One entry per question. Keep working on unrelate
 
 **Decision:** **B for now**, taken because a mirror that disagrees with its original is worse than either version of the original, and because A's blast radius is every stored manifest. Recorded rather than closed: C is the right answer if a number ever does arrive both ways, and the test that asserts the deviation is what will say so.
 
-**Status:** open — decision B in force, revisit if a duplicate key is ever observed.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-01). **B stands, and C is
+pre-authorised on the trigger.** The mirror is the thing that must not disagree with
+its original, so B is right today; and C is not a decision anybody should have to
+re-make under pressure, so it is taken now: **the first time a number is observed
+arriving both ways, `jobs` gains a canonicalisation version and the verifier gains
+its branch.** `canonical_number`'s deviation test is the trigger, and it is wired to
+say so in its failure message. Nothing to revisit — the condition is the decision.
 
 ### OQ-15 · The EDGE spread estimator is specified by AGENT-006 §5.2 and is not implemented — implement it from the paper, or drop it?
 **Context:** found 2026-09-16 while building `analysis.estimate_liquidity_cost` (S-3.4). The spec names five cost estimators and EDGE (Ardia, Guidotti & Kroencke, 2024) is one of them. The first implementation here was written from memory of the method rather than from the paper, and it returned a *negative* spread variance against a reference series whose spread is known exactly (60 bps, set by `apps/skill-runner/reference_dataset.py`). A negative variance is not a hard-data refusal; it means the moment conditions were wrong.
@@ -151,7 +157,13 @@ Write here instead of guessing. One entry per question. Keep working on unrelate
 
 **Decision:** **A, deferred.** The tool ships with three verified estimators and its description says three; the docstring names EDGE and says why it is absent. Nothing is blocked on it — the consensus is a median of estimators that agree — and the calibration test means whoever implements it will know immediately whether they got it right, which is not true of the version that was nearly committed.
 
-**Status:** open — `estimate_liquidity_cost` is correct and incomplete, and says so in its own description.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-02). **A: implement EDGE from
+the paper.** Not deferred any longer. The reason it was deferred — nothing is blocked,
+the consensus is a median of three — is exactly why it is cheap to do properly now, and
+the calibration fixture (`the_cost_estimators_recover_the_fixtures_known_spread`, a
+known 60 bps) means a wrong implementation announces itself on the first run rather
+than biasing every strategy's costs invisibly. Option C stays refused: a caveat in
+prose does not travel with the number into a cost model.
 
 ### OQ-16 · `max_usd_per_task` and `ask_above_usd` are declared in every profile and there is no price table anywhere in the platform. What are the prices, and who owns them?
 **Context:** found 2026-09-16 building `estimate_cost` (S-3.19). `harness::profile::Budgets` carries `max_usd_per_task` (0.5 on the local profile, 25.0 on the frontier one) and `ask_above_usd`; `policy::decide` has a cost axis that fires when an estimate exceeds the threshold. The axis is correct and has never fired, because `drive.rs` passes `estimated_usd: None` — and it says so in a comment, honestly: *"No estimator yet (S-3.19) … `None` is 'not estimated', never 'free'."*
@@ -167,7 +179,24 @@ S-3.19's `estimate_cost` is supposed to supply that number. It cannot supply the
 
 **Decision:** none yet — this is a pricing question the platform owner should answer, not one to guess. Until then `estimate_cost` returns `est_seconds`, `est_rows` and `trials` for real, and `est_usd: null` beside a stated reason, so the tool is correct and incomplete rather than confident and wrong. `ask_above_usd` stays unfired and `policy.cost_above_threshold` stays unreachable, which is recorded here so it is not reported as enforced.
 
-**Status:** open — needs a decision on where prices come from.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-03). **A: a static price table
+in config**, per provider model (input/output per million tokens) and per hardware
+class (per second), each row carrying `source_url` and `verified_at`, with the same
+90-day staleness bound the venue table already uses.
+
+**And the part that was actually blocking: an unverified price is still better than no
+gate, for this gate only.** `ask_above_usd` *pauses for a human*. Its failure modes are
+asymmetric — pausing too often costs annoyance, never pausing costs unbounded spend —
+so `policy.cost_above_threshold` fires on an unverified row and says in the pause which
+row it used and when that row was last checked. This is the one place in the platform
+where an approximate number beats an absence, and it is bounded: it cannot spend, it can
+only stop.
+
+**Everywhere else the refusal stands.** `estimate_cost` returns `est_usd: null` for any
+model not in the table, and a stale row (> 90 days) is treated as absent for reporting
+while still arming the pause. No price is ever inferred from another model's price, and
+`max_usd_per_task` is enforced only against a fresh row — a budget cap that cannot be
+computed must not silently pass.
 
 ### OQ-17 · `get_venue_constraints` carries the venues' qualitative rules and none of their numeric limits. Who verifies the numbers?
 **Context:** found 2026-09-16 building S-3.14. The platform's own research brief records, as verified on 2026-09-14, that Coinbase matches price-time with four self-trade-prevention modes, that Kraken's order rate limit *decays* and cancelling a younger order costs more, and that Alpaca's 2026 margin framework replaced the PDT rule with a minimum equity of 2,000 USD rather than 25,000. Those are in the table.
@@ -183,7 +212,21 @@ What is not in the brief, and not anywhere else in this repository, is a **numbe
 
 **Decision:** none yet. The table ships with the mechanism (versioned facts, a 90-day staleness bound that reports itself in the summary) and every numeric field flagged `verified: false`, asserted by `no_numeric_limit_claims_to_be_verified` so a later edit cannot quietly promote a guess. A is the right answer and it needs someone to read three sets of exchange docs, which is not a thing to infer.
 
-**Status:** open — `get_venue_constraints` is correct, useful and incomplete, and says so in its own output.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-04). **B where the venue exposes
+it, A everywhere else, and §5.6's acceptance is gated rather than dropped.**
+
+Kraken returns rate-limit headers, so that venue's counter maximum and decay are read
+from the venue and re-verified on every call that sees a header — self-updating, with
+`verified_at` set by the observation rather than by a human. The rest are filled from
+the venues' current documentation with `source_url` and `verified_at` per fact.
+
+**§5.6's numeric criterion is kept and made conditional**, which is the part worth
+deciding: *"a requote rate exceeding Kraken's limit is refused before paper testing"*
+becomes "refused when the limit is verified and fresh; **reported as uncheckable when it
+is not**". A refusal that cannot be computed must not be reported as a pass — that is
+the same rule as everywhere else, and it means C's "drop the criterion" is wrong:
+dropping it would silently convert an uncheckable refusal into an approval.
+`no_numeric_limit_claims_to_be_verified` keeps holding the door.
 
 ### OQ-18 · A verified finding has no data window, and `data_window` is mandatory. Where does it come from?
 **Context:** found 2026-09-16 wiring `record_finding` to the store built for S-4.3. The loop already does the hard half: `memory::verify_finding` checks every cited id against what tools actually returned and labels the claim `established` or `suggestive` (S-4.2, tested and passing). That verdict then lives for exactly one run — `WorkingState` carries it, the turn ends, and the platform forgets what it checked.
@@ -280,9 +323,24 @@ point of the field would be that somebody can set it.
 before any trial-spending tool is admitted, and a read that fails is treated as
 `Missing` rather than `NotRequired` so an outage cannot open the gate.
 
-**Status:** open. `max_prereg_amendments` — the other profile value S-10.3 names
-— has no such tension and is built, because a cap on amendments has a
-conservative direction and this does not.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-05). **A, with C built beside
+it. There is no `preregistration_required` boolean, and there will not be one.**
+
+The requirement is the **task demand**, which is what `sealed_registration` already
+implements: a `SingleLookup` needs none, everything else needs one, at every tier.
+§11's per-tier table then supplies the *authoring mode* —
+`preregistration: free | skeleton_grammar | skeleton_confirm` — which is the field
+§11 actually implies and which S-10.14 is building anyway.
+
+**B is refused on the asymmetry.** A boolean defaulting to `true` that nobody ever sets
+is a field that does nothing; the first configuration that sets it `false` gets a tier
+spending trials against a hypothesis that can only be confirmed — the exact failure
+§7.2 exists to close — and INV-16 would not catch it, because a per-Experiment
+`prereg_hash` satisfies the constraint while carrying no falsifier. A field whose only
+purpose is to be set to the unsafe value should not exist.
+
+S-10.3's sentence is a description of the demand check and should be reworded to say so.
+`max_prereg_amendments` is unaffected and stays.
 
 ### OQ-20 · The trial gate registers at the tool call; `mlops.trial` describes compute. The route between them was never built, and every trial-spending tool is refused.
 
@@ -428,7 +486,15 @@ appends `run_started` for the run that exists — asserted by
 `restarting_between_start_and_record_re_derives_the_same_state` and by
 `a_child_conversation_id_is_the_same_one_after_a_restart`.
 
-**Status:** open (spec wording); the build is not blocked.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-06). **§3 is amended to state the
+property; §10's mechanism is the one that exists.** A conversation turn is not a job:
+it is started by `AgentManager::send_message`, its identity is a row in `agent_runs`,
+and `submit_child_once` has nothing to hand back for one. The exactly-once requirement
+is real and is what §3 was reaching for, so §3 should read *"each child is created
+exactly once per `(session_id, agenda_item_id)`"* and stop naming the mechanism.
+Rewriting the child path as a job would mean building a worker that does not exist in
+order to satisfy a sentence, and would break the desk, the rail and the steer controls,
+all of which read the conversation path today.
 
 ---
 
@@ -464,7 +530,13 @@ which rather than leaving the next reader to re-derive it.
 and self-gate, so a stalling session is still caught by barren streak,
 degenerating or circling — cost drift is the only one this affects.
 
-**Status:** open (spec wording); the build is not blocked.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-07). **The baseline is the history
+*before* the window, which is what was built.** The literal reading is not ambiguous,
+it is **provably inert** — `d > 3·(c+d)/2` has no solution for positive costs, at any
+ratio, which the kept test demonstrates over three orders of magnitude. A rule that
+cannot fire at the moment its own gate opens is not a stricter reading of the spec; it
+is a sentence with an arithmetic error in it. §7.1 should read *"exceeds 3× the median
+of the runs preceding the window"*.
 
 ---
 
@@ -497,7 +569,20 @@ trials — they exist in the profile's `Budgets` — or §6.2 stops promising fo
 capped bars and a projection. Inventing a cap from a remainder is the one answer
 that is not available, because it renders a number that is not a measurement.
 
-**Status:** open (spec wording, or a harness field); the build is not blocked.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-08). **The harness sends the caps
+it has; §6.2 keeps four bars and stops promising four *capped* ones.**
+
+Three of the four caps exist in the profile's `Budgets` (`steps`, tokens, trials) and
+are simply not on the wire — that is a missing field, not a spec problem, and it should
+be added. The fourth is dollars, which **cannot** be capped until OQ-16's price table
+exists and has a fresh row for the model in question, so the dollar bar renders
+`no cap recorded` until then and says why.
+
+The projection is refused outright, in both readings: there is no burn series, and a
+projected end drawn from a single remainder is a forecast with one data point. §6.2's
+"projected end at current burn" needs a burn *series* on the wire before it means
+anything, and inventing a cap from a remainder stays the one answer that is not
+available.
 
 ---
 
@@ -523,7 +608,23 @@ S-5.5's acceptance is met literally; the compiler refuses `atr` and `sigma` with
 gets a true sentence about why, rather than a silent conversion into a fraction
 that would mean something else.
 
-**Status:** open. The decision is whether `ExitRule` gains a unit.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-09). **`ExitRule` gains a unit, at
+a new schema version.**
+
+ADR-0010 protects the canonical *storage form* from being rewritten; it does not forbid
+the schema from versioning forward, which is exactly what 1.0 → 1.2 → 1.3 already does.
+So `ExitRule` gains `unit: fraction_of_entry | atr | sigma`, defaulting to
+`fraction_of_entry` so every stored document keeps its current meaning byte for byte,
+and the ATR/sigma variants carry the lookback as a typed parameter rather than a string.
+
+The alternative — dropping two of three units from the language — was rejected on what
+it costs: an ATR-scaled stop is the most common risk rule in the domain, and a language
+that cannot express it will be worked around with a hand-computed fraction that is
+**wrong on the next bar** and looks identical in storage. `unit_not_representable` stays
+until the field lands, because refusing is still better than converting.
+
+This decision is coupled to ADR-D-19: the validator must accept the new version, and it
+currently refuses even 1.3.
 
 ---
 
@@ -551,8 +652,16 @@ level comparison that does compile (`macd(close, 7, 21) > 0`) and at FEAT-004
 §3.3. Approximating a cross with a level test would compile the example and mean
 something else, which is worse than refusing it.
 
-**Status:** open. Either the runtime gains a previous-value register and an op,
-or §3 stops listing cross detection as compiler-provided.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-10). **The runtime gains a
+previous-value register and a `CrossedAbove` op.** FEAT-004 §3.3 already lists it as the
+intended extension, so this is scheduled work rather than a new want.
+
+The alternative — strike cross detection from §3 — was rejected because a crossing is
+not an exotic construct: it is in AGENT-011's own headline example, it is how the
+majority of published technical rules are stated, and a language that cannot express it
+pushes authors toward the level test that *looks* equivalent and is not. The refusal
+(`needs_history`, pointing at the level comparison that does compile) stays correct in
+the meantime and must **not** be relaxed into an approximation.
 
 ---
 
@@ -586,11 +695,22 @@ one, and then the test renamed to match whichever it is.
 without the three cadences a sustained breach needs. It is the weaker of the two
 readings, on the family whose facts are not estimates.
 
-**Status:** open.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-11). **§3 wins: a hard-stale feed
+halts. The code and the test name both change to say so.**
 
----
+Two reasons, and the second is the one that decides it. First, §3 is *specific* — it
+names the family, the multiple and the response — while §4's table is a generic row
+covering three families at once; a specific rule beats a general one where they meet.
 
-## Q-S3-01 — the spec and the plan disagree about whether `regime_failure_search` spends a trial
+Second, and structurally: **scaling to 25% still trades on a stale price.** Every other
+response in the table reduces exposure to a risk that is being *measured*. A feed more
+than ten times its timeframe stale is not a measured risk — it is an absent measurement,
+and the platform's own rule is that an absent measurement is never a small one. A
+quarter-size position priced off a dead feed is the same error at 25% of the size.
+
+So `on_sustained` halts on a hard-stale `Family::Data` fact, and
+`a_hard_stale_feed_halts_without_waiting_three_cadences` is made to assert what its name
+has claimed all along. The soft band (> 3×) keeps warning. — the spec and the plan disagree about whether `regime_failure_search` spends a trial
 
 **Raised 2026-09-21 building S-3.12. Neither implemented.**
 
@@ -607,11 +727,21 @@ selection-adjusted statistic on this platform divides by that count.
 The tool was not built. Whoever builds S-3.13 must settle this **at the
 declaration**, not in the handler.
 
-**Status:** open.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-12). **The disagreement dissolves
+by construction, and the declaration follows the construction.**
 
----
+A `regime_failure_search` that **re-reads a completed run's** per-period returns and
+partitions them spends nothing: it dispatches no compute and looks at no new data, so
+§5.5's `none` is correct for it. A variant that **dispatches per-regime re-runs** is a
+different tool with a different signature, and it declares `Falsification`, which is
+what the phase plan's sentence describes.
 
-## Q-S3-02 — §5.5 assigns a tier that cannot serve the tools it assigns it to
+**The re-read form is the one to build**, because it is the one whose inputs can exist
+(the returns are recorded) and because a searching-by-re-running tool multiplies trials
+against a hypothesis chosen after seeing the data — which is the thing Gate 9 exists to
+punish. If the dispatching variant is ever built it gets its own name and its own
+`spends_trial: Falsification` **at the declaration**, never a runtime branch: a tool
+whose trial cost depends on its arguments cannot be audited from the catalogue. — §5.5 assigns a tier that cannot serve the tools it assigns it to
 
 **Raised 2026-09-21 building S-3.12. Built typed instead, and the reason is
 recorded here rather than only in the code.**
@@ -626,7 +756,13 @@ Both were built typed. P6 makes the tier invisible to the model, so the contract
 is unchanged — but the spec names a tier that cannot implement the tool it names,
 and the next person following §5.5 literally will lose a day to it.
 
-**Status:** open (spec wording).
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-13). **§5.5 and §9's build-order
+table are amended to tier `T` for `trade_reshuffle_bootstrap` and `cost_shock_curve`.**
+A templated tool receives rows only as `SeriesKind::Ohlcv` or `SeriesKind::TrialReturns`,
+and neither carries per-trade `pnl` or `costs_paid`, which both tools require and which
+§5.5's own signatures imply. The tier as written is unimplementable, not merely
+inconvenient. P6 keeps the tier invisible to the model, so nothing about the contract
+changes — this is a correction to stop the next reader losing a day to it.
 
 ---
 
@@ -648,8 +784,19 @@ limit for `pct_rank(rv(close, 20), 200)`.
 from the caller as a `Predicate` checked against the catalogue at construction,
 or withholds the move naming what is missing.
 
-**Status:** open. Either the grammar gains nested features, or §4's example
-changes.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-14). **Both, in that order: §4's
+example changes now, and nested features become a scheduled language item.**
+
+The example must change immediately, because a spec illustrating its flagship feature
+with a document the compiler refuses teaches the wrong thing to every reader and to
+every model given the spec as context. It should use a predicate that compiles today.
+
+But `rv(20) pct_rank < 0.8` is not a badly chosen example — **a percentile rank of a
+derived feature is the natural way to state a regime gate**, and `skeleton.rs`'s
+`VOL_TARGET_NOTES` independently recorded the same limit for `pct_rank(rv(close,20),200)`.
+Two places wanting the same missing construct is a language gap, so the grammar gains
+nested feature expressions as its own task, and `suggest_moves` keeps taking a
+catalogue-checked `Predicate` from its caller until then — never inventing one.
 
 ---
 
@@ -670,7 +817,12 @@ The field is `bars_sole_blocker`, named so nobody can read it as the other.
 Phase 5's S-5.15 body text carries the same double wording and needs the same
 fix.
 
-**Status:** open (spec wording).
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-15). **`bars_sole_blocker` is the
+definition; the "last clause to fail" wording is struck from §4 and from S-5.15's
+body.** It is not a second candidate reading — it has **no referent on this platform**:
+the compiled condition is `(A * B)`, both operands evaluate, and there is no failure
+order for "last" to index. Keeping the phrase would leave a reader looking for an
+evaluation order that the compiler is specifically designed not to have.
 
 ---
 
@@ -695,8 +847,18 @@ the table's format.
 Flagged because a future agent reading §3 top-down will build `evals/judgement/**`
 with `expected.json` files and undo it.
 
-**Status:** open. The table's format needs amending, or the `judgement` row needs
-an exemption from it.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-16). **§3's table is amended: a
+suite may declare a *generated* corpus, and `judgement` does.** The exemption reading is
+the wrong shape — this is not a special case, it is a second legitimate corpus kind, and
+any future suite whose cases carry planted ground truth will need exactly the same
+thing.
+
+The reasoning is not stylistic. `expected.json` **is** the answer key, on a filesystem
+the agent reaches with `code_execution` and a workspace; a file saying "this one is a
+null" is one `cat` away from turning every number on the scorecard into a number about
+file reading. A corpus generated from a seed keeps the key in the memory of the process
+that generated it, which is the only place it cannot be read from. §3's fixture format
+stays correct for suites whose cases are inputs rather than answers.
 
 ---
 
@@ -715,7 +877,13 @@ No replay path was built for this suite. `SuiteKind::Replay` for `judgement`
 would produce a number that looks like a measurement and is not one, which is the
 failure this whole suite exists to detect one level down.
 
-**Status:** open.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-17). **Strike `replay` from the
+`judgement` row; it runs live-only.** A replayed tape returns the same reply every time,
+so a miss rate measured over it has no sampling error and measures the tape rather than
+the tier. It would be a number that looks like a measurement and is not one — which is
+the exact failure this suite exists to detect one level down, reproduced inside the
+detector. `SuiteKind::Replay` stays right for suites that check *determinism*; it is
+wrong for one that estimates a rate.
 
 ---
 
@@ -736,7 +904,16 @@ Whoever builds the nightly promotion has to pick one. Recorded rather than
 decided, because the two defend against different things and the choice is a
 policy about what a sealed score is for.
 
-**Status:** open.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-18). **For a generated corpus the
+holdout is a *distinct seed*, not a hash split of one corpus. §4.2 gains that sentence;
+the hash split stays correct for fixture corpora.**
+
+A hash split over a seeded corpus hides *which* cases are sealed and hides **nothing**
+about their answers — anyone holding the seed holds the key to all of them, sealed and
+unsealed alike. The defence §4.2 is reaching for is against tuning to the holdout, and
+against a regenerable corpus the only thing that actually defends it is material the
+tuner has never seen. `PlantedCorpus::holdout_input()` is already wired for either, so
+this is a policy choice rather than a rebuild.
 
 ---
 
@@ -764,7 +941,16 @@ invariant; nothing anywhere in the workspace mentions `shift_bars`,
 Shipping the truncation test under the name `shift_bars` would claim a
 computation it did not perform, so neither was built.
 
-**Status:** open. §5.4 needs to say which one, or name two tools.
+**Status:** answered 2026-09-21 (decided under Mason's delegation of 2026-09-21 — ADR-D-19). **Two tools.** They detect
+different defects and only one of them is buildable today, so collapsing them loses the
+one we can have.
+
+`future_perturbation_test(strategy_id, timeframe, shift_bars)` stays as specified and
+stays blocked on the runtime's missing perturbation mode. **`lookahead_truncation_test`**
+is new and buildable now: run the strategy over a shorter window and assert the shorter
+run's signals are a **prefix** of the longer run's — the invariant `preview_signals`
+already supports, and Freqtrade's shipped `lookahead-analysis` in substance. §5.4 names
+both and stops citing the truncation precedent under the perturbation signature.
 
 ---
 
@@ -788,3 +974,164 @@ strings.
 
 **Status:** being closed — a live-Postgres invariant that `PREPARE`s every
 evidence query is in flight. Recorded so the mechanism is not lost if it is not.
+
+---
+
+## Q-S5-05 — the validator refuses every document the language can compile
+
+**Raised and answered 2026-09-21.**
+
+`strategy-validator/src/schema.rs` accepts only `"1.0" | "1.2"`. The fix text attached
+to that same error code reads *"1.3 adds the exits block"*. The compiler targets **1.3**,
+because `exits` is the only schema that can hold `exit stop 2 % from entry` and `domain`
+documents it REQUIRED at 1.3. `routes/strategies.rs` validates before it persists. **So
+the SLv2 authoring path is dead at its last step.**
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-20). **The version check becomes a bounded
+range, not a whitelist: `1.0 <= v <= MAX_SUPPORTED`, with `MAX_SUPPORTED = 1.3` today.**
+
+A whitelist is why this happened: 1.1 and 1.3 were never added because nobody was
+looking at that `matches!` when they shipped a version. A range strands nothing additive
+and still refuses a version from the future, which is the property the check is for.
+**There is a live `1.1` row in `strategy_definitions` that the current whitelist
+refuses** — found by querying the registry, not by any test — and a range admits it.
+
+The test pinning this (`the_only_thing_the_validator_holds_against_a_compiled_strategy_is_its_version`)
+is to be **deleted** when the range lands, not widened: its whole purpose was to fail on
+the day the gate opened.
+
+---
+
+## Q-S5-06 — `create_strategy`'s own advice erases the lineage the same task asks it to record
+
+**Raised and answered 2026-09-21.**
+
+`parent_version` exists nowhere in the repository. Lineage is
+`strategy_revision.parent_hash`, derived server-side from the `head_revision` **of the
+same `strategy_id`**. `create_strategy`'s description advises *"mint versioned slugs
+(`my_strat_v2`) when iterating"* — and a new slug has no head, so `parent_hash` is NULL.
+**Measured on the live registry: 40 agent-authored revisions across 34 slugs, 6 with a
+parent. 85% of the agent's authoring history has no lineage at all.**
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-21). **Strike the slug advice. Reusing the slug
+*is* the lineage mechanism, and nothing is lost by it.**
+
+The advice was written as if overwriting `head_revision` discarded the previous
+definition. It does not: `strategy_revision` is append-only and the chain holds every
+version, which is precisely why `parent_hash` is derivable. So the guidance inverts the
+design — it tells the author to do the one thing that breaks the record, to protect
+against a loss that cannot happen.
+
+`create_strategy` additionally gains an **optional explicit `parent_strategy_id`**, for
+the real case the slug rule cannot express: a strategy derived from a *different*
+lineage. Optional rather than required, because a first version genuinely has no parent
+and a required field would be filled with something.
+
+---
+
+## Q-S5-07 — the route records agent-authored revisions as `'human'`
+
+**Raised and answered 2026-09-21.**
+
+`routes/strategies.rs` binds `actor_kind = "human"` unconditionally, while migration
+`0058` says that column *"distinguishes a human author from the research agent, which is
+the difference between a hypothesis and a sample"*. The live table holds 40 `'agent'`
+rows, so a second writer exists and the two paths disagree about who wrote a revision.
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-22). **This is a bug, not a question. Bind the
+actual actor from the authenticated principal**, and make the column's meaning
+enforceable rather than conventional: a service-token principal is `'agent'`, a user
+session is `'human'`, and there is no default — a caller the platform cannot classify is
+refused rather than recorded as either. A misattributed author turns a sample into a
+hypothesis in the multiple-testing accounting, which is the one direction that flatters
+results.
+
+---
+
+## Q-S6-01 — §3.5's "pin a tool for this run" names a mechanism that does not exist
+
+**Raised and answered 2026-09-21.**
+
+`search_tools` is a tool the *model* calls and the harness answers. There is no
+user-initiated equivalent, no route and no column recording a per-run pin, and
+`Driver::route` builds `pinned` from exactly three sources: `discovered_tools`, the
+active plan step's named tool, and a three-hit search over that step's goal text. A
+human message is none of them.
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-23). **Strike the clause from §3.5.** A pin would
+be a fourth source in the router serving a need the three already meet: steering by
+message reaches `discovered_tools` and the plan step, which is the documented way to
+change what the agent can reach. Building a parallel mechanism for it would add a
+second way to influence tool availability — and two paths into the same decision is how
+`reorder` came to switch the scorer off earlier today.
+
+The panel already names the three real levers, which is the honest replacement for a
+button that did nothing.
+
+---
+
+## Q-S6-02 — §19.6's "within one event" has no channel
+
+**Raised and answered 2026-09-21.**
+
+Nothing on this platform pushes kill-switch state to a browser. `useDeskStream` is
+per-run; there is no global channel. A trip from the risk engine or another operator
+reaches the banner by three-second poll and by nothing else. The criterion is a
+phase-7 exit criterion and was being held up by a comment describing a mechanism that
+did not exist.
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-24). **Restate the criterion as a bounded
+interval: the banner reflects a trip within 3 seconds, and immediately for a trip this
+client caused.** No push channel is built for it.
+
+The reasoning is about what the banner *is*. **It is not the control that stops
+trading** — the order gate is, server-side, and it is already fail-closed: with no
+monitor lease every order is refused, today, with no browser involved. The banner is an
+operator *notification*, and a three-second bound on a notification is a real guarantee,
+while "within one event" over a channel that does not exist is not one. Building a
+global push channel to improve 3s to ~0s on a surface that authorises nothing is effort
+spent where the failure is already contained.
+
+If a push channel is built later for other reasons, this criterion tightens for free.
+
+---
+
+## Q-S6-03 — §3.5's "acceptance criteria with ticks" has nothing to tick
+
+**Raised and answered 2026-09-21.**
+
+`WorkingState.acceptance` is `string[]` on both sides of the wire. No per-criterion
+met/unmet flag is emitted by the harness, so a tick would be an invented measurement and
+the panel renders a plain list.
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-25). **The harness emits the status; the field
+becomes `[{text, met: bool | null}]`.** §3.5 is right to ask — an acceptance list with no
+status is a list of things nobody is tracking, which is the failure mode the working
+state exists to prevent.
+
+`null` is a required third state and not a convenience: *"not yet evaluated"* is the
+honest answer for most criteria for most of a run, and collapsing it into `false` would
+report every unstarted criterion as failing. The panel renders three glyphs, never two.
+
+---
+
+## Q-S6-04 — S-6.22's acceptance names a file the aliases were never in
+
+**Raised and answered 2026-09-21.**
+
+The criterion says the grep must return nothing *"outside `compat.css`"*. The same task
+body says the aliases live in *"`tailwind.theme.css` lines 85-94"*, which is where they
+were. `compat.css` contains no alias and never did.
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-26). **Amend the criterion to name
+`tailwind.theme.css`, and keep the stronger form that was actually implemented:** the
+grep must return nothing **anywhere**, because the declarations themselves are now
+deleted. Allow-listing `compat.css` would have been the silent fix and would have left
+the criterion pointing at the wrong file for the next person.
+
+Worth recording beside it, because it is the more general lesson: the criterion was
+**narrower than its own goal**. Five class spellings were clean while 36 usages reached
+the same deprecated colours through other utility prefixes, so the grep would have
+passed with the aliases still in service. A guard narrower than its claim is catchable
+by discipline; a criterion narrower than its goal is not, and only re-reading what the
+rule was *for* finds it.
