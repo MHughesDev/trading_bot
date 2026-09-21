@@ -1,6 +1,6 @@
 # Phase 3 — The catalogue
 
-**Completion: 42% (8 / 19 tasks), plus 7 `PARTIAL`.**
+**Completion: 42% (7 / 19 tasks), plus 8 `PARTIAL` and 4 `BLOCKED:UPSTREAM`.**
 
 > Status 2026-09-16. The **templated tier is real**: a tool is a Python file under
 > `apps/skill-runner/templates/<ns>/<name>.py` whose module docstring carries a fenced JSON
@@ -49,12 +49,14 @@
 > would have been caught by code that compiles. The remainder waits for an environment that
 > can run it.
 
-> **Read `crates/api/src/routes/evidence.rs` before writing a route.**
-> `/api/evidence/trades` already returns the full raw trade array — `pnl`,
-> `costs_paid`, `entry_price`, `exit_price`, `qty`, `mae`, `mfe`,
-> `holding_period_secs` — for any run the caller owns, and nobody had noticed.
-> Three notes in this file describe work as blocked on data that arrives through
-> that route today. Arithmetic over a response is allowed here (`compare_backtests`
+> **This note was wrong, and it was wrong in the most expensive direction.** It
+> said `/api/evidence/trades` *"already returns the full raw trade array … for
+> any run the caller owns, and nobody had noticed"*, and three tools were built
+> on top of it. **The route has never returned a trade to anybody** — its query
+> names columns that migration `0026` took away, and the error is swallowed into
+> a 404. See the note below. The lesson is not about this route: the claim was
+> made by reading the handler and believing it, and it survived because reading a
+> handler cannot tell you whether its SQL matches the deployed schema. Q-S3-04. Arithmetic over a response is allowed here (`compare_backtests`
 > already does it); arithmetic a **gate** also performs is not, for the reason
 > `tools/audit.rs`'s module docs give.
 
@@ -75,6 +77,72 @@ the analysis suite AGENT-002 specified and never built becomes tractable here.
 and namespace-cap tests from S-1.4 are mechanical gates every PR must pass.
 
 ---
+
+### The four that are left are blocked, not unstarted, 2026-09-21 — and the route under three finished ones does not run
+
+A track went after the remaining catalogue tools and **shipped none**. That is
+the right outcome, and what it found instead is worth more than four tools.
+
+**`/api/evidence/trades` has never returned a trade to anybody.** It runs
+`SELECT result FROM backtest_runs WHERE id = $1 AND user_id = $2`. Migration
+`0026` renamed the old job tracker to **`backtest_jobs`** and created a
+different `backtest_runs` — `run_id TEXT PRIMARY KEY, status, config_json,
+result_json, …` with **no `id`, no `user_id`, no `result`**. The query errors;
+`let Ok(Some(row)) = row else { … }` swallows the error into a
+`404 no_such_run`. The failure has always read as *"that run doesn't exist"*.
+
+**It is wrong twice.** Pointed at the right table, the document still has no
+trades: a completed job's `result` is the market_simulator run document
+(`summary`, `stats_pnls`, `stats_returns`, `total_orders`, …) and carries no
+`trades` array at all. The `Trade` struct with the eight fields the phase note
+promised lives in `backtest::run::result::RunResult`, which lands in
+`backtest_runs.result_json` — **the table with zero rows that no route reads.**
+
+And the second failure mode is silent rather than loud: the route emits
+`"trades": []` when the key is absent, so `path_risk::fetch_trades` cannot tell
+*"no trade array in this document"* from *"this run took no trades"* — and would
+print its own sentence, **"An empty trade list is not a result with zero risk;
+it is a run that did not trade"**, about a run that placed 58 orders. An absent
+measurement reported as a zero, in the file written to forbid exactly that.
+
+**So the four remaining tasks are `BLOCKED:UPSTREAM`, not `NOT STARTED`.** Each
+names the exact symbol that must exist first, in its own entry. The short
+version:
+
+- **Two ClickHouse schema files were never applied on this deployment.**
+  `07_canonical_market.sql` (`market_bar`, `instrument_symbol_dim`, `venue_dim`,
+  `restatement_index` — all four absent, which is what `BarStore` reads) and
+  `08_forward_series.sql` (`funding_rates`, `open_interest`,
+  `option_chain_snapshots` — all absent). `probe_pit_provenance`,
+  `get_funding_history` and `probe_data_quality` are dead for that one reason.
+- **Nothing in the workspace mentions `shift_bars`, `shift_column`,
+  `mask_column`, `jitter_bars`, `fill_delay_ms` or `perturbation_pct`.** The
+  runtime mode §5.4 assumes does not exist.
+- **No route returns a run's return series as JSON.**
+  `SuiteManager::recorded_returns` is reachable only as a parquet file through
+  the template materialiser, so `ablation_sweep` and `parameter_fragility_map`
+  have nothing to diff.
+- **No membership calendar exists anywhere** — zero hits across the workspace.
+  `instruments` has four rows, all `active = true`, with a current-state boolean
+  and no `delisted_at`. `DataSlice.universe_ref` is documented as *"pinned by
+  membership-calendar version"* against a calendar nobody built, and
+  `audit_survivorship` has nothing to audit.
+
+**Two more things the live system said that the plan did not expect:**
+
+- **All eleven completed backtest jobs have null metrics.** `stats_returns` is
+  `{Sharpe Ratio: null, Profit Factor: null, Average (Return): null, …}` on
+  every one. A fragility index computed from these would be dividing nulls.
+- **`by_regime` is built, tested, and always empty.**
+  `backtest::stats::diagnostics::by_regime` works and has a passing test; its
+  only non-test caller, `crates/api/src/research/mod.rs:316`, passes `&[]`.
+  **Every `DiagnosticBundle` this platform has ever served had an empty
+  `by_regime`.** Built-but-unreached again, this time one argument wide.
+
+Two questions opened, neither implemented: **Q-S3-03** (§5.4 names column
+perturbation and data truncation as one tool) and **Q-S3-04** (nothing anywhere
+checks a route's SQL against the schema).
+
 
 ## The templated tier
 
@@ -442,7 +510,13 @@ length is derived, not hard-coded.
 ## Leakage
 
 ### S-3.10 `future_perturbation_test` — M
-`NOT STARTED`
+`BLOCKED:UPSTREAM` — the runtime mode does not exist. `shift_bars`, `shift_column`,
+`mask_column`, `jitter_bars`, `fill_delay_ms` and `perturbation_pct` appear **nowhere**
+in the workspace (`.rs`, `.py`, `.sql`). Needed first: a perturbation argument on
+`features::runtime::backfill_column` — the one place a feature column is produced —
+carried through `backtest::preview::preview_signals`, plus a field on
+`POST /api/agent/strategy/preview`. See **Q-S3-03**: §5.4 names column
+perturbation and data truncation as one tool, so neither was built.
 
 Re-run with each signal/indicator shifted or masked and diff against the unperturbed run.
 Mechanical: it reads no strategy code. Needs a "run with column X shifted" mode in the
@@ -506,7 +580,13 @@ timestamp; the static scan flags a full-dataset normalisation.
 ## Falsification — the adversarial battery
 
 ### S-3.12 Reshuffle, bootstrap, cost shock — M
-`DONE`
+`PARTIAL` — **downgraded from `DONE` on 2026-09-21.** All three tools are built and
+35 tests pass over fixtures. **None of them can execute.** They read
+`/api/evidence/trades`, whose query names a table that migration `0026` renamed
+away, and whose document has no trade array even when pointed at the right one
+— see the note at the head of this file. Built, tested, and unreachable. The
+marker said `DONE` because the tools were finished; nobody had asked whether the
+route under them answered.
 
 `trade_reshuffle_bootstrap` runs **two distinct** modes: reshuffle (path risk of a fixed
 outcome set) and bootstrap (estimation uncertainty of the endpoint). Conflating them is a
@@ -557,7 +637,14 @@ templated tier, which cannot carry per-trade rows (Q-S3-02); and the spec and th
 plan disagree about whether `regime_failure_search` spends a trial (Q-S3-01).
 
 ### S-3.13 Ablation, fragility, jitter, regime failure — L
-`NOT STARTED`
+`BLOCKED:UPSTREAM` — **no route returns a run's return series as JSON.**
+`backtest::SuiteManager::recorded_returns` is reachable only as a parquet file
+through the template materialiser (`routes/agent_templates.rs`), so `ablation_sweep`
+and `parameter_fragility_map` have nothing to diff against the null library's CI.
+`timing_jitter_sensitivity` needs S-3.10's missing runtime mode **and** fills, which
+`preview_signals` states it does not produce. `regime_failure_search` is blocked on
+**one line** — `crates/api/src/research/mod.rs:316` passes `&[]` where labelled
+windows belong, so every `by_regime` this platform has served was empty.
 
 `ablation_sweep` (leave-one-rule-out over the JSON strategy def, deltas must clear the null
 library's CI rather than raw point deltas), `parameter_fragility_map` (plateau vs knife-edge,
@@ -620,7 +707,17 @@ attribution names a dominant component with its evidence.
 **Traces:** AGENT-006 §5.6; research brief Theme 5.
 
 ### S-3.15 Data provenance, survivorship, funding history — M
-`NOT STARTED`
+`BLOCKED:UPSTREAM` — **two ClickHouse schema files were never applied on this
+deployment.** `07_canonical_market.sql` (`market_bar`, `instrument_symbol_dim`,
+`venue_dim`, `restatement_index` — all four absent, and all four are what
+`BarStore` reads) blocks `probe_pit_provenance`; `08_forward_series.sql`
+(`funding_rates`, `open_interest`, `option_chain_snapshots` — all absent) blocks
+`get_funding_history`, which additionally needs a `read_funding` in
+`storage::clickhouse::forward` (it exposes writers only) and a route.
+`audit_survivorship` has nothing to audit: **no membership calendar exists anywhere**
+in the workspace, `instruments` has four rows all `active = true` with no
+`delisted_at`, and `DataSlice.universe_ref` is documented as pinned by a calendar
+version that was never built.
 
 `probe_pit_provenance`, `audit_survivorship`, `get_funding_history`.
 **Acceptance:** the provenance check executes a representative as-of query and diffs it
@@ -674,7 +771,12 @@ per report; a recommended rebalance faster than the break-even turnover is flagg
 **Traces:** AGENT-006 §5.3; research brief Theme 4.
 
 ### S-3.17 Model diagnostics — M
-`NOT STARTED`
+`BLOCKED:UPSTREAM` — **there is nothing to score against.** `model_predictions`
+exists, is empty, and carries no realised outcome (`direction`, `magnitude_str`,
+`confidence`, `horizon` only), so a drift detector that reached it would have no
+label. `skills::SeriesKind` has `Ohlcv` and `TrialReturns` and no prediction kind.
+AGENT-006 §5.7 also puts all three tools at tier **P** (templated), so they belong in
+`apps/skill-runner/templates/model/*.py`, not in `crates/mcp-server`.
 
 `detect_drift` (live vs train, PSI/KS/MMD — gates live inference), `conformal_calibrate`
 (adaptive conformal or EnbPI, **never** vanilla split-conformal on market data),

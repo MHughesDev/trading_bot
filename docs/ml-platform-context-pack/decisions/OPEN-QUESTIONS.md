@@ -737,3 +737,54 @@ decided, because the two defend against different things and the choice is a
 policy about what a sealed score is for.
 
 **Status:** open.
+
+---
+
+## Q-S3-03 — AGENT-006 §5.4 names two different tests as one tool
+
+**Raised 2026-09-21 auditing the remaining catalogue tools. Neither implemented.**
+
+§5.4 gives `future_perturbation_test` the signature
+`(strategy_id, timeframe, shift_bars=1)` and describes it as *"rerun-and-diff,
+Freqtrade-style"*, needing *"a shift/mask column X mode in the strategy
+runtime"*.
+
+`shift_bars` is **column perturbation** — move one feature column forward and
+see whether the edge survives. Freqtrade's shipped precedent, which S-3.10's own
+Traces line cites, is `lookahead-analysis`: **data truncation** — run the same
+strategy over a shorter window and check that the shorter run's signals are a
+prefix of the longer run's.
+
+They detect overlapping but distinct defects, and only the truncation reading is
+buildable on this platform today (`preview_signals` already gives the prefix
+invariant; nothing anywhere in the workspace mentions `shift_bars`,
+`shift_column`, `mask_column`, `jitter_bars`, `fill_delay_ms` or
+`perturbation_pct`).
+
+Shipping the truncation test under the name `shift_bars` would claim a
+computation it did not perform, so neither was built.
+
+**Status:** open. §5.4 needs to say which one, or name two tools.
+
+---
+
+## Q-S3-04 — a route's SQL is not checked against the schema anywhere
+
+**Raised 2026-09-21. Not a spec contradiction — a missing enforcement, recorded
+here because it has already produced two dead routes and will produce more.**
+
+`/api/evidence/trades` has never returned a trade. It runs
+`SELECT result FROM backtest_runs WHERE id = $1 AND user_id = $2`; migration
+`0026` renamed that table to `backtest_jobs` and built a **different**
+`backtest_runs` with none of those three columns. The handler's
+`let Ok(Some(row)) = row else { … }` turns the resulting database error into
+`404 no_such_run`, so the failure reads to every caller as *"you asked for a run
+that isn't there"*.
+
+`crates/api/tests/the_desk_calls_routes_that_exist.rs` checks that a **route**
+exists. Nothing checks that a route's **query** matches the deployed schema, and
+a renamed table is invisible to the type system because these are runtime
+strings.
+
+**Status:** being closed — a live-Postgres invariant that `PREPARE`s every
+evidence query is in flight. Recorded so the mechanism is not lost if it is not.
