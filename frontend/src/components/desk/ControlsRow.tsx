@@ -15,22 +15,49 @@ import { Button } from '@/components/primitives/Button'
 import { ConfirmDialog } from '@/components/primitives/Modal'
 import { Tooltip } from '@/components/primitives/Overlay'
 
+/**
+ * **Pause, Resume and Escalate were deleted from this row, not repaired.**
+ *
+ * They were three buttons in front of three routes this platform does not
+ * mount. `POST /api/agent/runs/{id}/pause`, `…/resume` and `…/escalate` all
+ * answer **404** where every mounted route answers 401, and `deskApi` sent all
+ * three through `optional()`, which turns a 404 into `null` — so the click
+ * produced no request that could be seen to fail, no toast, and no console
+ * line.
+ *
+ * Pause was the worst of the three, because it did not merely do nothing. Its
+ * caller set a local `paused` flag first, so the conversation header changed to
+ * **paused** over a run that was still spending trials. That is not a dead
+ * control, it is a false instrument reading, and `space` was bound to it.
+ * "Pause instead" was also offered as the gentler alternative inside the Stop
+ * dialog — the one place a person is talked out of the control that works, into
+ * the one that does not.
+ *
+ * **Stop stays**: `POST /api/agent/conversations/{id}/cancel` is mounted (405
+ * to a GET, 401 to an unauthenticated POST), so `esc` and the dialog reach
+ * something real.
+ *
+ * Asserted by `a_control_the_platform_cannot_serve_is_not_drawn`.
+ */
 export interface DeskControls {
-  paused: boolean
   /** True while the agent is working — never used to disable anything. */
   busy: boolean
   /** The stream is not live; steering and approving cannot land. */
   disconnected: boolean
   /** Whether an approval currently has focus, so `a`/`x` mean something. */
   hasPendingApproval: boolean
+  /**
+   * The waiting approval is one the platform will refuse without a written
+   * reason (an irreversible envelope — `spend_holdout_look` wants twenty
+   * characters of it). The keyboard has nowhere to type one, so `a` must not
+   * fire a request that is going to be rejected in silence.
+   */
+  approvalNeedsReason: boolean
   detailsOpen: boolean
-  onPause: () => void
-  onResume: () => void
   onStop: () => void
   onSteer: () => void
   onApprove: () => void
   onDeny: () => void
-  onEscalate: () => void
   onBudget: () => void
   onToggleDetails: () => void
   onReplay: () => void
@@ -64,13 +91,11 @@ export function useDeskKeymap(c: DeskControls) {
       }
       if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
       switch (e.key) {
-        case ' ':
-          e.preventDefault()
-          if (k.paused) k.onResume()
-          else k.onPause()
-          break
         case 'a':
-          if (k.hasPendingApproval) k.onApprove()
+          // Not `hasPendingApproval` alone: an approval that needs a reason
+          // cannot be given one from the keyboard, and sending it without would
+          // be refused by the platform and swallowed here.
+          if (k.hasPendingApproval && !k.approvalNeedsReason) k.onApprove()
           break
         case 'x':
           if (k.hasPendingApproval) k.onDeny()
@@ -106,15 +131,6 @@ export function ControlsRow(props: DeskControls) {
 
   return (
     <div className="desk-controls" role="toolbar" aria-label="Run controls">
-      {props.paused ? (
-        <Button size="xs" variant="primary" onClick={props.onResume} data-testid="resume">
-          Resume <kbd>space</kbd>
-        </Button>
-      ) : (
-        <Button size="xs" variant="secondary" onClick={props.onPause} data-testid="pause">
-          Pause <kbd>space</kbd>
-        </Button>
-      )}
       <Button size="xs" variant="secondary" onClick={() => setConfirmStop(true)} data-testid="stop">
         Stop <kbd>esc</kbd>
       </Button>
@@ -127,17 +143,30 @@ export function ControlsRow(props: DeskControls) {
       </Tooltip>
       {props.hasPendingApproval && (
         <>
-          <Button size="xs" variant="primary" onClick={props.onApprove} disabled={props.disconnected}>
-            Approve <kbd>a</kbd>
-          </Button>
+          <Tooltip
+            content={
+              props.approvalNeedsReason
+                ? 'This one is recorded permanently and the platform refuses it without a written reason. Approve it on the card, where the reason can be typed.'
+                : (needsStream ?? 'Approve the waiting request')
+            }
+          >
+            <span>
+              <Button
+                size="xs"
+                variant="primary"
+                onClick={props.onApprove}
+                disabled={props.disconnected || props.approvalNeedsReason}
+                data-testid="approve-from-controls"
+              >
+                Approve <kbd>a</kbd>
+              </Button>
+            </span>
+          </Tooltip>
           <Button size="xs" variant="secondary" onClick={props.onDeny} disabled={props.disconnected}>
             Deny <kbd>x</kbd>
           </Button>
         </>
       )}
-      <Button size="xs" variant="ghost" onClick={props.onEscalate}>
-        Escalate…
-      </Button>
       <Button size="xs" variant="ghost" onClick={props.onBudget}>
         Budget
       </Button>
@@ -151,19 +180,8 @@ export function ControlsRow(props: DeskControls) {
         open={confirmStop}
         onCancel={() => setConfirmStop(false)}
         title="Stop this run?"
-        consequence="The working state is kept and the run can be forked from where it stopped. Nothing already spent is refunded."
+        consequence="The working state is kept and the run can be forked from where it stopped. Nothing already spent is refunded. There is no pause on this platform, so this is the only way to make it stop working."
         confirmLabel="Stop"
-        alternative={
-          <Button
-            size="sm"
-            onClick={() => {
-              setConfirmStop(false)
-              props.onPause()
-            }}
-          >
-            Pause instead
-          </Button>
-        }
         onConfirm={() => {
           setConfirmStop(false)
           props.onStop()

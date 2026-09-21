@@ -223,14 +223,32 @@ export function usageRows(raw: Record<string, unknown> | null | undefined): Usag
         }
         return { key, label, value: `$${n.toFixed(4)}` }
       case 'cache_hit_rate':
-        if (n === null) return { key, label, value: 'not reported' }
         // "no prompt has been billed yet" is a claim about billing. With an
         // empty table nobody knows whether a prompt was billed — only that no
-        // row says so.
+        // row says so. This stays ahead of everything else.
         if (unrecorded) return { key, label, value: NOT_RECORDED }
+        // The order of the next two is the fix, and it is the whole fix.
+        //
+        // This read `if (n === null) return 'not reported'` **first**, and the
+        // better sentence below was keyed on `billablePrompt === 0`. That was
+        // written when the server sent `0.0` for an unbilled desk. It does not
+        // any more: `usage_body` in `crates/api/src/routes/agent_sessions.rs`
+        // now sends `cache_hit_rate: null` in exactly the case
+        // `billablePrompt === 0` describes, with its own comment saying "a rate
+        // over nothing billable is not a rate of zero". So the null check
+        // short-circuited the one branch that could explain the null, and
+        // "not measured — no prompt has been billed yet" became unreachable on
+        // every response the platform can now produce.
+        //
+        // `billablePrompt === 0` is still what licenses the sentence — it is
+        // the evidence for it, read off `input_tokens` and `cache_read` in the
+        // same payload — so it is the condition, not the null. A null with
+        // billable tokens behind it is some other absence, and gets the vaguer
+        // word.
         if (billablePrompt === 0) {
           return { key, label, value: 'not measured — no prompt has been billed yet' }
         }
+        if (n === null) return { key, label, value: 'not reported' }
         return { key, label, value: `${(n * 100).toFixed(1)}%` }
       case 'dollars_per_verdict':
         if (n !== null) return { key, label, value: `$${n.toFixed(4)}` }

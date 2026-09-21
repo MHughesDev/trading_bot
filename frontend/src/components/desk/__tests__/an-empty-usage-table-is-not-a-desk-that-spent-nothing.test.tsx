@@ -59,7 +59,15 @@ function usage(over: Record<string, unknown> = {}): Record<string, unknown> {
   }
 }
 
-/** Exactly what the live platform returns for this desk today. */
+/**
+ * Exactly what the live platform returns for this desk today.
+ *
+ * `cache_hit_rate` was `0` here and is now `null`, because the server stopped
+ * sending a zero for a rate nobody measured: `usage_body` sends `None` unless
+ * `billable_prompt > 0`. The fixture claims to be the live shape, so it has to
+ * follow the live shape — a fixture that has drifted is a test asserting
+ * against a response the platform can no longer produce.
+ */
 function emptyTable(over: Record<string, unknown> = {}): Record<string, unknown> {
   return usage({
     input_tokens: 0,
@@ -67,7 +75,7 @@ function emptyTable(over: Record<string, unknown> = {}): Record<string, unknown>
     cache_read: 0,
     cache_write: 0,
     cost_usd: 0,
-    cache_hit_rate: 0,
+    cache_hit_rate: null,
     ...over,
   })
 }

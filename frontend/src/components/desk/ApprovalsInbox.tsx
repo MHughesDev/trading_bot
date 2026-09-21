@@ -77,6 +77,19 @@ export function ApprovalCard({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [armed, setArmed] = useState<string | null>(null)
+  // Why this was answered the way it was.
+  //
+  // `researchApi.answerApproval` has taken a third `note` argument since it was
+  // written and this card called it with two, so the inbox — the surface whose
+  // entire job is deciding these — had no field for the reason and could not
+  // have sent one if it had. On the other side `spend_holdout_look` refuses an
+  // approval without twenty characters of reason, into an append-only log; so
+  // for those kinds this was not a missing nicety, it was a card that could
+  // only ever be refused.
+  //
+  // Offered on the two-step path only, matching `Cards.tsx`: the reversible
+  // answers are the ones you take back rather than explain.
+  const [note, setNote] = useState('')
   const options = optionIds(approval.options)
   const left = timeLeft(approval.timeout_at)
   const evidence = evidenceOf(approval.payload)
@@ -99,7 +112,7 @@ export function ApprovalCard({
     setBusy(true)
     setError(null)
     try {
-      await researchApi.answerApproval(approval.approval_id, option)
+      await researchApi.answerApproval(approval.approval_id, option, note.trim() || undefined)
       onAnswered?.()
     } catch (e) {
       const detail = (e as { response?: { data?: { message?: string } } }).response?.data
@@ -144,6 +157,17 @@ export function ApprovalCard({
       )}
 
       {error && <p className="inline-err">{error}</p>}
+
+      {armed && (
+        <input
+          className="desk-approve-note"
+          data-testid="inbox-note"
+          type="text"
+          value={note}
+          placeholder="why — recorded permanently"
+          onChange={(e) => setNote(e.target.value)}
+        />
+      )}
 
       <div className="desk-actions">
         {(options.length > 0 ? options : ['approve', 'deny']).map((o) => (

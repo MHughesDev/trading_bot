@@ -72,9 +72,17 @@ export function RunDetail({ runId, onBack }: { runId: string; onBack: () => void
           ← Conversation
         </Button>
         <span className="title">Run {runId}</span>
-        <Button size="xs" variant="secondary" onClick={() => window.alert('Trajectory written to evals/ (S-4.8 wires the writer).')}>
-          Save as case
-        </Button>
+        {/* **Save as case was deleted, not wired.** Its whole implementation
+            was `window.alert('Trajectory written to evals/ …')` — a dialog that
+            reported a file had been written by a handler that wrote nothing and
+            called nothing. There is no route to call: `GET /api/evals` and
+            `POST /api/evals/cases` both answer 404, and so does
+            `GET /api/agent/runs/{id}/trajectory`, the read this page is built
+            on, which is why the empty state below is the only thing this screen
+            renders on the live platform. A confirmation of work that did not
+            happen is the one failure worse than a button that does nothing,
+            because the person stops looking for the file.
+            Asserted by `nothing_here_claims_to_have_written_a_file`. */}
       </div>
 
       <div

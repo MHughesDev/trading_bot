@@ -71,8 +71,25 @@ export function defaultWorkflow(question: string): Workflow {
   return 'investigate'
 }
 
-/** Slash commands the composer answers itself (§3.3). */
-export const SLASH_COMMANDS = ['/steer', '/pause', '/pin', '/why', '/model', '/budget', '/tier'] as const
+/**
+ * The slash commands that are actually answered (§3.3).
+ *
+ * This list used to read `['/steer', '/pause', '/pin', '/why', '/model',
+ * '/budget', '/tier']`, it was exported and imported by nothing, and the only
+ * `onSlash` implementation in the tree handles three of those seven. The other
+ * four went through `send()`'s slash branch, which calls `onSlash` and then
+ * **clears the box** — so typing `/pin` deleted what you had written and did
+ * nothing else. `/pause` has now gone from the handler too, because the route
+ * behind it is not mounted.
+ *
+ * So the list is the handled set, and `send()` checks against it. An
+ * unrecognised command is refused in the composer with the text left alone,
+ * which is the difference between "that is not a command" and "your question is
+ * gone".
+ *
+ * Asserted by `a_slash_command_nobody_answers_does_not_eat_the_question`.
+ */
+export const SLASH_COMMANDS = ['/steer', '/why', '/budget'] as const
 
 export interface ComposerHandle {
   focus: () => void
@@ -86,14 +103,18 @@ export interface ComposerProps {
   onModelChange: (id: string) => void
   onSubmit: (s: ComposerSubmission) => void
   onSlash?: (command: string, rest: string) => void
+  /**
+   * Open the strategy author (ADR-0037 §4). **Optional, and the button is drawn
+   * only when it is supplied** — an unpassed handler behind a rendered control
+   * is how "Write strategy" came to be a button that ate the click.
+   */
   onWriteStrategy?: () => void
-  onAttach?: () => void
   /** Rendered when a Chat question looks like it needs a run (stubbed offer). */
   onOffer?: (question: string) => void
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { running, profiles, model, onModelChange, onSubmit, onSlash, onWriteStrategy, onAttach, onOffer },
+  { running, profiles, model, onModelChange, onSubmit, onSlash, onWriteStrategy, onOffer },
   ref,
 ) {
   const [mode, setMode] = useState<Mode>('chat')
@@ -105,6 +126,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [charter, setCharter] = useState<Charter>(() => emptyCharter())
   const [constraints, setConstraints] = useState<Constraints>(EMPTY_CONSTRAINTS)
   const [workflow, setWorkflow] = useState<Workflow | null>(null)
+  /** The unrecognised command last typed, kept so the refusal can name it. */
+  const [slashError, setSlashError] = useState<string | null>(null)
   const area = useRef<HTMLTextAreaElement>(null)
 
   useImperativeHandle(ref, () => ({ focus: () => area.current?.focus() }), [])
@@ -117,9 +140,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   function send() {
     const text = question.trim()
+    setSlashError(null)
     if (!continuous) {
       if (text.startsWith('/')) {
         const [cmd, ...rest] = text.split(' ')
+        if (!(SLASH_COMMANDS as readonly string[]).includes(cmd)) {
+          setSlashError(cmd)
+          return
+        }
         onSlash?.(cmd, rest.join(' '))
         setQuestion('')
         return
@@ -204,6 +232,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         ))}
       </div>
 
+      {slashError && (
+        <p className="sub" role="alert" data-testid="slash-refused">
+          <span className="mono">{slashError}</span> is not a command this desk answers. The ones it
+          does are <span className="mono">{SLASH_COMMANDS.join(' ')}</span>. Nothing was sent and
+          what you typed is still here.
+        </p>
+      )}
+
       {continuousRefused && (
         <p className="sub" role="alert">
           Continuous research runs on frontier profiles only. {continuousRefused} cannot carry a charter.
@@ -233,13 +269,22 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         <Button size="sm" variant="primary" onClick={send} disabled={!!continuousRefused} data-testid="send">
           {running ? 'Steer' : continuous ? 'Start continuous research' : 'Send'}
         </Button>
-        <Button size="sm" variant="ghost" onClick={onAttach}>
-          Attach…
-        </Button>
-        {/* An action, not a mode (ADR-0037 §4). */}
-        <Button size="sm" variant="ghost" onClick={onWriteStrategy}>
-          Write strategy
-        </Button>
+        {/* **Attach… was deleted, not wired.** It called `onAttach`, which its
+            one caller never passed, so the button opened nothing — and there is
+            nothing for it to open: this platform mounts no upload route
+            (`GET /api/attachments`, `GET /api/uploads` and `GET /api/files` all answer 404
+            where every mounted route answers 401), and neither
+            `POST /api/agent/conversations/{id}/messages` nor
+            `POST /api/research/sessions` carries an attachment field. A file
+            picker in front of no store is a promise the desk cannot keep.
+            Asserted by `the_composer_draws_no_control_that_reaches_nothing`. */}
+        {/* An action, not a mode (ADR-0037 §4). Drawn only when a caller can
+            actually open the author, for the reason above. */}
+        {onWriteStrategy && (
+          <Button size="sm" variant="ghost" onClick={onWriteStrategy} data-testid="write-strategy">
+            Write strategy
+          </Button>
+        )}
         {running && <span className="sub">Sending will steer the running turn.</span>}
       </div>
     </div>

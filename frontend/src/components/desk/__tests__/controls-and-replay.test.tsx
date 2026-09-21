@@ -13,13 +13,10 @@ import { diffLines } from '../RunDetail'
 
 function harness(overrides: Partial<DeskControls> = {}) {
   const spies = {
-    onPause: vi.fn(),
-    onResume: vi.fn(),
     onStop: vi.fn(),
     onSteer: vi.fn(),
     onApprove: vi.fn(),
     onDeny: vi.fn(),
-    onEscalate: vi.fn(),
     onBudget: vi.fn(),
     onToggleDetails: vi.fn(),
     onReplay: vi.fn(),
@@ -27,11 +24,11 @@ function harness(overrides: Partial<DeskControls> = {}) {
     onShortcuts: vi.fn(),
   }
   const props: DeskControls = {
-    paused: false,
     // Mid-call. Nothing below may be disabled by this.
     busy: true,
     disconnected: false,
     hasPendingApproval: true,
+    approvalNeedsReason: false,
     detailsOpen: false,
     ...spies,
     ...overrides,
@@ -45,10 +42,8 @@ function harness(overrides: Partial<DeskControls> = {}) {
 }
 
 describe('every control works from the keyboard while the agent is mid-call (§19.3)', () => {
-  it('space pauses, a approves, x denies, s steers, d toggles details, r replays', () => {
+  it('a approves, x denies, s steers, d toggles details, r replays', () => {
     const s = harness()
-    fireEvent.keyDown(document, { key: ' ' })
-    expect(s.onPause).toHaveBeenCalled()
     fireEvent.keyDown(document, { key: 'a' })
     expect(s.onApprove).toHaveBeenCalled()
     fireEvent.keyDown(document, { key: 'x' })
@@ -61,13 +56,6 @@ describe('every control works from the keyboard while the agent is mid-call (§1
     expect(s.onReplay).toHaveBeenCalled()
     fireEvent.keyDown(document, { key: '?' })
     expect(s.onShortcuts).toHaveBeenCalled()
-  })
-
-  it('space resumes when paused', () => {
-    const s = harness({ paused: true })
-    fireEvent.keyDown(document, { key: ' ' })
-    expect(s.onResume).toHaveBeenCalled()
-    expect(s.onPause).not.toHaveBeenCalled()
   })
 
   it('esc stops even from inside a text field', () => {
@@ -90,7 +78,6 @@ describe('every control works from the keyboard while the agent is mid-call (§1
 
   it('no control is disabled by the agent being busy', () => {
     harness()
-    expect((screen.getByTestId('pause') as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByTestId('stop') as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByTestId('steer') as HTMLButtonElement).disabled).toBe(false)
   })
@@ -98,7 +85,7 @@ describe('every control works from the keyboard while the agent is mid-call (§1
   it('steer is disabled only when the stream that would carry it is down', () => {
     harness({ disconnected: true })
     expect((screen.getByTestId('steer') as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByTestId('pause') as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByTestId('stop') as HTMLButtonElement).disabled).toBe(false)
   })
 })
 

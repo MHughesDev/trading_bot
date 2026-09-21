@@ -19,6 +19,7 @@ import {
 import { conversationsApi } from '@/api/agent'
 import { costCalls, latestExposure, mergeCards, toCards, toolSearches, type WireEvent } from '@/lib/desk/events'
 import { useDeskStream } from '@/hooks/useDeskStream'
+import { isIrreversibleEnvelope } from './Cards'
 import { CardStream } from './CardStream'
 import { Composer, type ComposerHandle, type ComposerSubmission } from './Composer'
 import { ControlsRow, useDeskKeymap } from './ControlsRow'
@@ -114,7 +115,6 @@ export function Conversation({
   const [events, setEvents] = useState<WireEvent[]>([])
   const [tab, setTab] = useState<PanelTab>('state')
   const [detailsAll, setDetailsAll] = useState(false)
-  const [paused, setPaused] = useState(false)
   const [sideOpen, setSideOpen] = useState(true)
   const [model, setModel] = useState('')
   const composer = useRef<ComposerHandle>(null)
@@ -276,34 +276,34 @@ export function Conversation({
     [runId],
   )
 
+  // Whether the approval at the front of the queue is one the platform will
+  // refuse without a written reason. The keyboard cannot supply one, so `a` and
+  // the row's Approve must stand down and point at the card instead of firing a
+  // request that comes back 400 into a `void`.
+  const frontApprovalNeedsReason = useMemo(
+    () => isIrreversibleEnvelope((approvals[0]?.detail?.envelope as string) ?? null),
+    [approvals],
+  )
+
   const controls = {
-    paused,
     busy: running,
     disconnected: stream.state === 'stale' || stream.state === 'closed',
     hasPendingApproval: approvals.length > 0,
+    approvalNeedsReason: frontApprovalNeedsReason,
     detailsOpen: detailsAll,
-    onPause: () => {
-      setPaused(true)
-      if (runId) void deskApi.pause(runId)
-    },
-    onResume: () => {
-      setPaused(false)
-      if (runId) void deskApi.resume(runId)
-    },
     onStop: () => void deskApi.cancel(conversationId),
     onSteer: () => composer.current?.focus(),
     onApprove: () => {
       const a = approvals[0]
       const id = (a?.detail?.approval_id as string) ?? null
-      if (id) void deskApi.answerApproval(id, 'approve')
+      // No note from here, by construction: the row only offers this path for
+      // approvals that do not need one.
+      if (id && !frontApprovalNeedsReason) void deskApi.answerApproval(id, 'approve')
     },
     onDeny: () => {
       const a = approvals[0]
       const id = (a?.detail?.approval_id as string) ?? null
       if (id) void deskApi.answerApproval(id, 'deny')
-    },
-    onEscalate: () => {
-      if (runId) void deskApi.escalate(runId, 'frontier')
     },
     onBudget: () => setTab('cost'),
     onToggleDetails: () => setDetailsAll((d) => !d),
@@ -311,7 +311,7 @@ export function Conversation({
     onFocusComposer: () => composer.current?.focus(),
     onShortcuts: () =>
       window.alert(
-        'space pause/resume · esc stop · a approve · x deny · s steer · d details · r replay · / composer · ? this list',
+        'esc stop · a approve · x deny · s steer · d details · r replay · / composer · ? this list',
       ),
   }
   useDeskKeymap(controls)
@@ -367,8 +367,13 @@ export function Conversation({
             <StageStrip stage={workingState.stage} />
           </>
         )}
+        {/* Three readings, not four. `paused` was the fourth, and it was a
+            local flag set by a button whose route is not mounted — so this badge
+            said **paused** over a run that was still working. A status badge
+            that reports the click rather than the platform is worse than no
+            badge. */}
         <Badge tone={running ? 'accent' : convoKnown ? 'neutral' : 'warn'} data-testid="convo-status">
-          {paused ? 'paused' : running ? 'working' : convoKnown ? 'idle' : 'status unknown'}
+          {running ? 'working' : convoKnown ? 'idle' : 'status unknown'}
         </Badge>
         {/* §2b: a session's journal says so in the header, with its agenda
             depth. The depth is the list's `agenda_open`, which is `null` when
@@ -433,7 +438,13 @@ export function Conversation({
           actions={{
             onSteer: steer,
             onOpenDossier,
-            onApprove: (id) => void deskApi.answerApproval(id, 'approve'),
+            // The second argument is the reason the card asked the person to
+            // type. It was declared on `CardActions`, sent by `ApproveControls`
+            // and dropped here, so `spend_holdout_look` — which refuses without
+            // twenty characters of it — saw an approval with no reason at all,
+            // and the person watched their justification vanish between the
+            // field and the wire.
+            onApprove: (id, note) => void deskApi.answerApproval(id, 'approve', note),
             onDeny: (id) => void deskApi.answerApproval(id, 'deny'),
             onAnswer: (_id, text) => runId && void deskApi.steer(runId, { kind: 'answer', text }),
             onStartResearch: (q) => void conversationsApi.send(conversationId, `mode=research\n${q}`),
@@ -451,11 +462,24 @@ export function Conversation({
           model={chosen?.id ?? ''}
           onModelChange={setModel}
           onSubmit={submit}
+          // §3.3: "**Write strategy** is an action beside *attach* (opens the
+          // SLv2 editor, §8)". That editor is `StrategyEditor`, mounted by
+          // `DeskPage` at `/desk/strategy` and already in the desk's own nav —
+          // not `/strategy`, which is the older `StrategyCreationPage`.
+          //
+          // The editor's compile call is itself unbuilt, and the editor says so
+          // in its own copy rather than pretending. That is the difference this
+          // whole change turns on: a page that states what it cannot do is a
+          // destination; a button that states nothing is not.
+          //
+          // Passed only when a navigator was given, because `Composer` draws
+          // the button only when it has somewhere to go.
+          onWriteStrategy={onOpenPath ? () => onOpenPath('/desk/strategy') : undefined}
           onSlash={(cmd, rest) => {
             if (cmd === '/steer') steer(rest)
-            else if (cmd === '/pause') controls.onPause()
             else if (cmd === '/budget') setTab('cost')
             else if (cmd === '/why') steer('why did you do that?')
+            // `/pause` was removed with the button: the route is not mounted.
           }}
           onOffer={(q) => {
             // Until S-10.2 classifies server-side, the offer is rendered locally
@@ -485,7 +509,6 @@ export function Conversation({
               state={workingState}
               absence={stateAbsence}
               resolve={resolve}
-              paused={paused}
               pendingApproval={approvals.length > 0}
               onOpenId={() => setTab('evidence')}
             />
@@ -501,7 +524,7 @@ export function Conversation({
               }))}
             />
           )}
-          {tab === 'memory' && <MemoryTab items={null} />}
+          {tab === 'memory' && <MemoryTab />}
           {tab === 'tools' && (
             <ToolsTab
               mode={workingState?.mode ?? 'chat'}

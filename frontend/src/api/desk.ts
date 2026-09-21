@@ -1537,12 +1537,21 @@ export const deskApi = {
   resumeAll: (body: { confirm_scope: string; reason: string }) =>
     client.post<Record<string, unknown>>('/api/trading/resume', body),
 
-  // — Controls. Pause/resume/escalate are ✗; steer and cancel exist. —
+  // — Controls. Steer and cancel exist; **pause, resume and escalate are gone.**
+  //
+  //   They were three `optional()` posts to `POST /api/agent/runs/{id}/pause`,
+  //   `…/resume` and `…/escalate`, all three of which answer 404 on this
+  //   platform where every mounted route answers 401. `optional()` turns a 404
+  //   into `null`, so each call was a request that failed and reported nothing,
+  //   and `ControlsRow` drew a button for each. Keeping them here as "wired the
+  //   day they land" is what let the buttons stay: the next caller finds a
+  //   method on `deskApi`, and a method on `deskApi` reads as a route.
+  //
+  //   The unbuilt reads above are a different case and stay: `state()` and
+  //   `trajectory()` return data the panel renders an honest absence for.
+  //   A *control* has no honest absence — a click either reaches the platform
+  //   or it does not happen. —
   steer: (sessionId: string, body: { kind: 'steer' | 'interrupt' | 'stop' | 'answer'; text?: string }) =>
     client.post(`/api/agent/sessions/${sessionId}/steer`, body),
-  pause: (runId: string) => optional<{ ok: boolean }>(client.post(`/api/agent/runs/${runId}/pause`)),
-  resume: (runId: string) => optional<{ ok: boolean }>(client.post(`/api/agent/runs/${runId}/resume`)),
-  escalate: (runId: string, tier: string) =>
-    optional<{ ok: boolean }>(client.post(`/api/agent/runs/${runId}/escalate`, { tier })),
   cancel: (conversationId: string) => client.post(`/api/agent/conversations/${conversationId}/cancel`),
 }

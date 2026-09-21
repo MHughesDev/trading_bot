@@ -262,12 +262,24 @@ export function StateTab({
 
 // ── S-6.9 Evidence ───────────────────────────────────────────────────────────
 
+/**
+ * One id on the run's working state.
+ *
+ * **There is deliberately no `view`.** The field was declared here as "rendered
+ * in place when the id is opened", the tab kept an `openId` and toggled it on
+ * every chip click, and the only caller — `Conversation` — never set it on any
+ * entry, so the click opened an empty node: no panel, no error, no console
+ * line. Nothing in the tree ever produced a `view`, and nothing could: a
+ * viewer needs the tool result behind the id, and this platform serves no route
+ * that returns one. `/api/agent/runs/{id}/state` — the source of these entries
+ * — is itself 404, so the list is empty on every run here.
+ *
+ * Asserted by `an_id_that_opens_nothing_does_not_pretend_to_open`.
+ */
 export interface EvidenceEntry {
   id: string
   type: string
   summary: string
-  /** Rendered in place when the id is opened. */
-  view?: React.ReactNode
 }
 
 export function EvidenceTab({
@@ -290,7 +302,6 @@ export function EvidenceTab({
   resolve?: IdResolver
   onOpenId?: (id: string) => void
 }) {
-  const [openId, setOpenId] = useState<string | null>(null)
   const grouped = useMemo(() => {
     const m = new Map<string, EvidenceEntry[]>()
     for (const e of entries) {
@@ -336,17 +347,9 @@ export function EvidenceTab({
           {list.map((e) => (
             <div key={e.id} className="desk-card">
               <div className="desk-card-hd">
-                <EvidenceChip
-                  id={e.id}
-                  resolve={resolve}
-                  onOpen={(id) => {
-                    setOpenId((cur) => (cur === id ? null : id))
-                    onOpenId?.(id)
-                  }}
-                />
+                <EvidenceChip id={e.id} resolve={resolve} onOpen={onOpenId} />
               </div>
               <p className="sub">{e.summary}</p>
-              {openId === e.id && e.view}
             </div>
           ))}
         </section>
@@ -357,83 +360,61 @@ export function EvidenceTab({
 
 // ── S-6.10 Memory ────────────────────────────────────────────────────────────
 
-export interface BriefItem {
-  id: string
-  bucket: string
-  text: string
-  /** Why the retriever chose it; shown on hover, never hidden entirely. */
-  why_retrieved: string
-  cited: boolean
-  mark?: Parameters<typeof ProvenanceBadge>[0]['mark']
-}
-
-export function MemoryTab({
-  items,
-  onForget,
-  onAdd,
-}: {
-  items: BriefItem[] | null
-  onForget?: (id: string) => void
-  onAdd?: () => void
-}) {
-  if (items === null) {
-    return (
-      <EmptyState
-        message="No endpoint reports what this run's brief contained"
-        detail={
-          <>
-            The memory <em>store</em> is served and browsable — `/api/memory/&#123;bucket&#125;`
-            answers, and the Memory page reads it. What has no source is the <em>brief</em>: which
-            entries retrieval put into this run's prompt, why each was chosen, and whether the run
-            cited it. That is a per-run record nothing writes, so the desk cannot say, and it will
-            not show the store here and let it read as the brief.
-            {/* The nearest thing that exists, and why it is not near enough —
-                written down so the next reader does not have to rediscover it.
-                `Note::Selected` carries a per-record clause and the elided set,
-                which is exactly "why retrieved". Two things stop it: it is
-                emitted only under a retrieval context policy and
-                `expose_pinned` documents `retrieval: false` as the shipped
-                default, so this platform's `agent_messages` holds **zero** rows
-                of kind `selection` against 2,111 of every other kind; and its
-                lines are bare record ids (`r007`) with no kind on them, so even
-                under retrieval nothing would separate the `Memory` records from
-                the tool results beside them. */}{' '}
-            The harness's `selection` note comes closest — it records a reason per record — but it
-            is written only under a retrieval policy, which is not the shipped default, and its
-            lines carry record ids without saying which are memory. Neither half of this tab can
-            be answered from it.
-          </>
-        }
-      />
-    )
-  }
-  if (items.length === 0) {
-    return <EmptyState message="The brief was empty" detail="Nothing in memory matched this goal." />
-  }
+/**
+ * What this run's memory brief contained — which is nothing this platform can
+ * answer, so the tab says that and takes no data.
+ *
+ * It used to take `items: BriefItem[] | null`, plus `onForget` and `onAdd`, and
+ * its one caller rendered it as the literal `<MemoryTab items={null} />`. Two
+ * thirds of the component were therefore unreachable, and the reachable third
+ * is the paragraph below.
+ *
+ * The props were deleted rather than fed, because the only thing there is to
+ * feed them with is the wrong data. `/api/memory/{bucket}` is mounted and
+ * serves — the Memory browser reads it, and distinguishes an empty bucket from
+ * an unreadable one — but that is the *store*, and this tab is the *brief*:
+ * which entries retrieval put into this run's prompt, why each was chosen, and
+ * whether the run cited it. Those are per-run facts, and no route carries
+ * them: `GET /api/agent/runs/{id}/brief`, `…/memory` and `…/selection` all
+ * answer 404, as does `GET /api/memory` with no bucket. Handing the tab the store would
+ * have filled the panel with rows that look like the answer and are not.
+ *
+ * `onForget` could not have worked either had anything passed it: it was typed
+ * `(id: string) => void`, and `deskApi.forget` needs the bucket as well —
+ * `DELETE /api/memory/{bucket}/{id}`. The bucket was on `BriefItem` and the
+ * callback dropped it.
+ *
+ * Asserted by `the_memory_tab_does_not_offer_the_store_as_the_brief`.
+ */
+export function MemoryTab() {
   return (
-    <div>
-      {items.map((i) => (
-        <div key={i.id} className="desk-card">
-          <div className="desk-card-hd">
-            <Badge tone="outline">{i.bucket}</Badge>
-            <Badge tone={i.cited ? 'pos' : 'neutral'}>{i.cited ? 'cited' : 'not cited'}</Badge>
-            <ProvenanceBadge mark={i.mark} />
-          </div>
-          <Tooltip content={`why retrieved: ${i.why_retrieved}`}>
-            <p>{i.text}</p>
-          </Tooltip>
-          <p className="sub">why retrieved: {i.why_retrieved}</p>
-          <div className="desk-actions">
-            <Button size="xs" variant="ghost" onClick={() => onForget?.(i.id)}>
-              Forget
-            </Button>
-          </div>
-        </div>
-      ))}
-      <Button size="xs" variant="secondary" onClick={onAdd}>
-        Add to memory
-      </Button>
-    </div>
+  <EmptyState
+      message="No endpoint reports what this run's brief contained"
+      detail={
+        <>
+          The memory <em>store</em> is served and browsable — `/api/memory/&#123;bucket&#125;`
+          answers, and the Memory page reads it. What has no source is the <em>brief</em>: which
+          entries retrieval put into this run's prompt, why each was chosen, and whether the run
+          cited it. That is a per-run record nothing writes, so the desk cannot say, and it will
+          not show the store here and let it read as the brief.
+          {/* The nearest thing that exists, and why it is not near enough —
+              written down so the next reader does not have to rediscover it.
+              `Note::Selected` carries a per-record clause and the elided set,
+              which is exactly "why retrieved". Two things stop it: it is
+              emitted only under a retrieval context policy and
+              `expose_pinned` documents `retrieval: false` as the shipped
+              default, so this platform's `agent_messages` holds **zero** rows
+              of kind `selection` against 2,111 of every other kind; and its
+              lines are bare record ids (`r007`) with no kind on them, so even
+              under retrieval nothing would separate the `Memory` records from
+              the tool results beside them. */}{' '}
+          The harness's `selection` note comes closest — it records a reason per record — but it
+          is written only under a retrieval policy, which is not the shipped default, and its
+          lines carry record ids without saying which are memory. Neither half of this tab can
+          be answered from it.
+        </>
+      }
+    />
   )
 }
 

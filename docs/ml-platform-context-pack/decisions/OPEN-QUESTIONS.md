@@ -1135,3 +1135,70 @@ the same deprecated colours through other utility prefixes, so the grep would ha
 passed with the aliases still in service. A guard narrower than its claim is catchable
 by discipline; a criterion narrower than its goal is not, and only re-reading what the
 rule was *for* finds it.
+
+---
+
+## Q-S6-05 — AGENT-012 requires a pause in two places and marks it unbuilt in a third
+
+**Raised and answered 2026-09-21.**
+
+§3.4: *"`Pause` · `Resume` · `Stop` · `Steer…` … Keyboard: `space` pause/resume"*.
+§19.3 makes it an acceptance criterion: *"Approve, deny, pause, stop and steer work from
+the keyboard while the agent is mid-call"*. §17 of the same document lists
+*"pause/resume, fork, escalate"* as **✗ unbuilt**. The platform agrees with §17: all three
+routes answer 404 while `…/cancel` answers 401.
+
+**And the UI did not merely have a dead button.** `onPause` set a local `paused` flag
+**before** issuing the request that 404s, so the conversation header read **paused** over
+a run that was still spending trials. `space` was bound to it. And the Stop dialog
+offered *"Pause instead"* as the gentler option — **actively talking the operator out of
+the control that works and into the one that does not.**
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-27). **Build pause and resume, bounded. Strike
+`escalate` from §3.4.**
+
+Deleting the button was right and does not close the question, because **the need that
+produced the lie is real**: `Stop` is destructive, an operator watching a run go wrong
+wants to interrupt it without discarding its context, and when the only offered control
+is destruction somebody will build a gentler-looking one that does nothing. That is
+exactly what happened here, twice — once in the button and once in the dialog copy that
+recommended it.
+
+**Bounded is the load-bearing word.** A paused run holds its budget, its lease and its
+place in the queue, so an unbounded pause is a resource leak that looks like an operator
+being careful. `paused` carries a deadline; **on expiry the run stops — it does not
+resume.** Fail-closed: a run that nobody came back to must not quietly start spending
+again, and an operator who has forgotten a paused run is better served by finding it
+stopped than by finding it finished.
+
+**`escalate` is struck** from §3.4's control row and stays in §17 as unbuilt. It is a
+tier change mid-run, which is a different product decision with its own budget
+consequences, and it has no caller and no demand. A control row is not a place to park
+an intention.
+
+---
+
+## Q-S6-06 — §3.3's `attach` names four things and no route of any kind
+
+**Raised and answered 2026-09-21.**
+
+§3.3 line 153: attach *"a strategy version, a dossier, a finding, a file from the
+workspace"*. `/api/attachments`, `/uploads`, `/files` and a bare `/api/memory` are all
+404, and no message or session POST carries an attachment field.
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-28). **Split it. The three platform objects are
+buildable and worth building; the workspace file upload is struck.**
+
+A strategy version, a dossier and a finding are **objects this platform already has ids
+for**. "Attaching" one is inserting a typed reference the agent can resolve with the
+tools it already has — no storage, no upload, no new content to scan or serve, and it
+composes with the provenance fence because a reference to a platform object carries the
+object's own provenance rather than acquiring a new one.
+
+**A file from the workspace is a different thing wearing the same word.** It is a general
+upload endpoint: new storage, new lifecycle, new size and content limits, and a new
+untrusted-content surface feeding the exact channel the provenance fence exists to
+guard. That is a large security surface for a convenience, and the workspace is already
+reachable by the agent's own tools, which is the path that keeps the fence intact.
+
+§3.3's sentence should name the three and drop the fourth.
